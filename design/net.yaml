@@ -776,6 +776,14 @@ packages:
         type: string
         value: "\"KITSUNIUM_NET_DISABLE\""
       - doc: |-
+          LoopsAuto, set as LoopValue.Loops, runs one loop per GOMAXPROCS, read once at
+          Start: a snapshot that a later change of GOMAXPROCS does not move. It is a
+          sentinel, never the zero value, which is one loop (ADR 0187 §D9); State
+          reports the count and "auto" as its source.
+        name: LoopsAuto
+        type: int
+        value: "-1"
+      - doc: |-
           HTTP1MaxFields is how many field lines one request of the restricted
           HTTP/1.1 profile may carry. It sizes HTTP1RequestValue.Fields, so a request is
           framed into a fixed array and never into a slice that grows: one more line is
@@ -3320,6 +3328,12 @@ packages:
               name: Loops
               tag: json:"loops"
               type: int
+            - doc: |-
+                LoopsSource says where Loops came from: "explicit", "auto" — LoopsAuto,
+                GOMAXPROCS read at Start — or "single" when Loops was zero.
+              name: LoopsSource
+              tag: json:"loops_source"
+              type: string
             - doc: Rings is the number of rings per loop.
               name: Rings
               tag: json:"rings"
@@ -3377,9 +3391,9 @@ packages:
               type: LoopBackend
             - doc: |-
                 Loops is the number of loops, each one goroutine locked to its OS thread
-                on a native backend. Zero selects one. The SDK never sets GOMAXPROCS:
-                sizing the process against its loops is the consumer's policy, and State
-                reports both.
+                on a native backend. Zero selects one; LoopsAuto selects GOMAXPROCS, read
+                once at Start. The SDK never sets GOMAXPROCS: sizing the process against
+                its loops is the consumer's policy, and State reports both.
               name: Loops
               tag: json:"loops"
               type: int
@@ -4958,15 +4972,26 @@ packages:
                 KITSUNIUM_NET_DISABLE.
               name: DisabledBy
               type: string
+            - doc: |-
+                LoopsSource is where Value.Loops came from, for State, when server
+                resolved it already: LoopsAuto read as GOMAXPROCS is "auto". Empty lets
+                the group say it itself.
+              name: LoopsSource
+              type: string
       - doc: |-
           Group is a running loop group: its loops, their threads and their rings.
           Start is the one way to get one, so a Group always runs, or ran and was
           stopped by Shutdown or Close.
         methods:
           - doc: |-
-              Shutdown stops accepting and waits for every connection to settle, its
-              output sent, until ctx is done; then it closes the rest. A drain cut short
-              returns DrainTimeout.
+              Shutdown drains the group, until ctx is done; then it closes the rest. The
+              drain stops accepting without resetting a connection the kernel already
+              completed: every loop cancels its pending accepts — serving one that
+              completed as the cancel crossed it —, takes the listen queue until it is
+              empty, and the last loop to do so closes the listener; then each
+              connection closes once it settled, its output sent, a connection that has
+              sent nothing yet once it has or stayed silent for a second. A drain cut
+              short returns DrainTimeout.
             in:
               - name: ctx
                 type: context.Context
@@ -5164,6 +5189,18 @@ packages:
           - name: d
             type: time.Duration
         name: WithDrainTimeout
+        out:
+          - type: Option
+      - doc: |-
+          WithDrainGrace sets how long Shutdown keeps accepting and serving once
+          readiness has turned false, before it closes any listener: the time a load
+          balancer or an orchestrator takes to stop routing to the server. Zero, the
+          default, closes at once. Serve adds it to the drain budget; a caller of
+          Shutdown gives it within its ctx.
+        in:
+          - name: d
+            type: time.Duration
+        name: WithDrainGrace
         out:
           - type: Option
       - doc: |-
@@ -5498,8 +5535,13 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
-              Shutdown stops accepting and waits for in-flight connections to finish,
-              severing what remains once ctx expires.
+              Shutdown drains the server, severing what remains once ctx expires.
+
+              Readiness turns false first, and the server keeps accepting and serving
+              for the grace WithDrainGrace sets, so whoever routes on readiness stops
+              sending before anything closes. Then the listeners close — a loop group
+              takes its listen queue to the end first —, and each connection finishes
+              its work.
             in:
               - name: ctx
                 type: context.Context
@@ -7934,6 +7976,15 @@ packages:
             type: LoopBackend
             typed: true
             value: "3"
+      - const:
+          - doc: |-
+              LoopsAuto, as LoopValue.Loops, runs one loop per GOMAXPROCS, read once at
+              Start.
+            name: LoopsAuto
+            reexport: corenet.LoopsAuto
+            type: int
+            typed: true
+            value: "-1"
       - alias:
           - doc: |-
               LoopHandler serves the connections of a loop group, one callback per event,
@@ -8482,6 +8533,18 @@ packages:
             - name: d
               type: time.Duration
           name: WithDrainTimeout
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            WithDrainGrace sets how long Shutdown keeps accepting and serving once
+            readiness has turned false, before it closes any listener. Zero closes at
+            once.
+          forward: svcserver.WithDrainGrace
+          in:
+            - name: d
+              type: time.Duration
+          name: WithDrainGrace
           out:
             - type: Option
       - alias:

@@ -42,7 +42,7 @@ func startLoopEngine(group *StreamGroup, lns []stdnet.Listener, plan loopPlan) (
 	g, err := loop.Start(loop.Config{
 		Group: group.name, Value: value, MaxConns: group.limits.MaxConns,
 		IdleTimeout: loopIdle(group), Handler: group.loopChain, Listeners: handoff,
-		Disabled: plan.disabled, DisabledBy: plan.disabledBy,
+		Disabled: plan.disabled, DisabledBy: plan.disabledBy, LoopsSource: group.loopsSource,
 	})
 	//: started natively.
 	if err == nil {

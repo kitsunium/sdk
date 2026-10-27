@@ -2179,7 +2179,7 @@ sequences:
                 - set: stalled
                   value: "true"
       - bind: drainCtx, cancel
-        eval: context.WithTimeout(context.WithoutCancel(ctx), s.drainTimeout)
+        eval: context.WithTimeout(context.WithoutCancel(ctx), s.drainGrace+s.drainTimeout)
         to: context
       - defer: cancel()
       - bind: err
@@ -2211,6 +2211,8 @@ sequences:
         kind: value
       - id: s.stopStallWatch
         kind: internal
+      - id: s.waitGrace
+        kind: internal
       - id: s.closeListeners
         kind: internal
       - id: s.shutdownLoops
@@ -2232,6 +2234,8 @@ sequences:
         to: s.phase.Store
       - eval: s.stopStallWatch()
         to: s.stopStallWatch
+      - eval: s.waitGrace(ctx)
+        to: s.waitGrace
       - eval: s.closeListeners()
         to: s.closeListeners
       - bind: loopErr
@@ -2259,6 +2263,30 @@ sequences:
       - eval: s.phase.Store(uint32(corenet.PhaseStopped))
         to: s.phase.Store
       - return: loopErr
+  - of: (*Server).waitGrace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).waitGrace
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: t.Stop
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.drainGrace <= 0
+      - bind: t
+        eval: time.NewTimer(s.drainGrace)
+        to: time
+      - defer: t.Stop()
+        to: t.Stop
+      - select:
+          cases:
+            - comm: <-t.C
+            - comm: <-ctx.Done()
   - of: (*Server).shutdownHTTP
     participants:
       - id: caller
@@ -2649,6 +2677,19 @@ sequences:
   - of: loopLanes
     steps:
       - return: max(v.Loops, 1)
+  - of: resolveLoops
+    steps:
+      - switch:
+          cases:
+            - case: n == corenet.LoopsAuto
+              do:
+                - return: max(runtime.GOMAXPROCS(0), 1), loopsAuto
+            - case: n > 0
+              do:
+                - return: n, loopsExplicit
+            - default: true
+              do:
+                - return: 1, loopsSingle
   - of: buildLoopChain
     participants:
       - id: caller
@@ -2890,7 +2931,7 @@ sequences:
           loop.Start(loop.Config{
           		Group: group.name, Value: value, MaxConns: group.limits.MaxConns,
           		IdleTimeout: loopIdle(group), Handler: group.loopChain, Listeners: handoff,
-          		Disabled: plan.disabled, DisabledBy: plan.disabledBy,
+          		Disabled: plan.disabled, DisabledBy: plan.disabledBy, LoopsSource: group.loopsSource,
           	})
         to: loop
       - opt:
@@ -3159,6 +3200,8 @@ sequences:
         kind: package
       - id: s.operator.plan
         kind: internal
+      - id: resolveLoops
+        kind: internal
       - id: st.OnStart
         kind: value
       - id: startLoopEngine
@@ -3218,6 +3261,9 @@ sequences:
       - bind: plan
         eval: s.operator.plan(group.loop.Backend, nativeLoopBackends)
         to: s.operator.plan
+      - set: group.loop.Loops, group.loopsSource
+        to: resolveLoops
+        value: resolveLoops(group.loop.Loops)
       - opt:
           do:
             - eval: st.OnStart(loopLanes(group.loop))
@@ -3397,6 +3443,8 @@ sequences:
         kind: actor
       - id: startPortable
         kind: self
+      - id: resolveLoops
+        kind: internal
       - id: g.acceptLoop
         kind: internal
       - id: pl.run
@@ -3404,11 +3452,19 @@ sequences:
     steps:
       - bind: v
         eval: group.loop
+      - bind: src
+        eval: group.loopsSource
+      - opt:
+          do:
+            - set: v.Loops, src
+              to: resolveLoops
+              value: resolveLoops(v.Loops)
+          when: src == ""
       - bind: g
         eval: |-
           &portableGroup{
           		group: group.name, soft: max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),
-          		degraded: degraded, lns: lns,
+          		degraded: degraded, lns: lns, loopsSource: src,
           		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
           		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
           	}
@@ -4506,7 +4562,7 @@ sequences:
           corenet.LoopStateValue{
           		Group: g.group, Backend: corenet.LoopBackendPortable, ProbeStage: "portable",
           		Degraded: g.degraded != "", DegradedReason: g.degraded,
-          		Loops: len(g.lanes), Rings: 1, RingsSource: "single", GOMAXPROCS: runtime.GOMAXPROCS(0),
+          		Loops: len(g.lanes), LoopsSource: g.loopsSource, Rings: 1, RingsSource: "single", GOMAXPROCS: runtime.GOMAXPROCS(0),
           		Capabilities: slices.Clone(g.caps),
           		RingStates:   rings,
           	}
@@ -4895,6 +4951,14 @@ sequences:
             params: s *Server
             steps:
               - set: s.drainTimeout
+                value: d
+  - of: WithDrainGrace
+    steps:
+      - return:
+          closure:
+            params: s *Server
+            steps:
+              - set: s.drainGrace
                 value: d
   - of: Loop
     steps:

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-26T12:00:00Z -->
+<!-- updated: 2026-10-27T12:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -20,14 +20,15 @@ Public façade: `pkg/v1/net/server`.
 | `platform.go`, `platform_{linux,bsd,windows,other}.go` | `readPlatform` and `kernelRelease` per GOOS: uname on Linux, `kern.osrelease` on darwin and the BSDs, `GetVersion` on Windows, empty on illumos and Solaris |
 | `operator_internal_test.go` | `TestCapabilityRegistry_matchesTheDesign` (reads `design/net.yaml`, the go_test's `data`), `TestReadOperator`, `TestOperatorPlan` (every code × engine × disable combination: never above the code nor the ceiling, never a ruled-out backend, the highest left), and a loop group started under each switch — `ProbeStage` `epoll` where io_uring is ruled out |
 | `stall_internal_test.go` | a fake loop engine walked from healthy to one drained ring to a stall: faults, readiness, liveness at the grace to the nanosecond on a manual clock, no stall during a drain, `Serve` returning `LoopGroupStalled`, `RegisterHealth`, the platform and the fallbacks |
-| `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
+| `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain: readiness false, `waitGrace` (`WithDrainGrace`, ADR 0192 §D2), then the listeners |
+| `drain_internal_test.go` | plan P6 (ADR 0192): the drain under continuous arrivals on every backend, `LoopsAuto` on — clients that stop dialling 150 ms after readiness turned false under a 400 ms grace, none cut short, the grace serving what came after readiness turned false, kept connections ending cleanly —, `LoopsAuto`'s snapshot in `State`, and the grace ended by the caller's ctx; `laneEchoH`, a handler that keeps nothing per connection, since a `LoopConnRef` names a connection within its lane only |
 | `loop_group.go` | loop groups: `HandleLoop` (ADR 0186 §D9 step 11), `loopRefusal` — TLS, `Use` and every kind of the group's set neither the engine (`loopHonours`: IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine, UseLoop) nor the chain (`chainHonours`: a layer or the handler) honours, after `buildLoopChain`; `OnStart(lanes)` on the chain before the engine starts, `Use` whatever the handler claims — the listeners bound or adopted and registered like any group's, the engines in `Shutdown`, `Close` and `State` |
 | `option_set.go` | `optionSet` — the kinds a group was given, one bit per `corenet.OptionKind` (ADR 0187 §D2); every `GroupOption`, `Use` and `PreHandshake` add theirs, a zero value included |
 | `engine_option.go` | `reconcileName` (Name against the declared name, `GroupNameConflict`) and `engineRefusal` — `PlaintextWithTLS`, and an `Engine` the handler's type or `Loop` contradicts (`EngineUnsupported`), judged at `Start`, never folded back (ADR 0187 §D4) |
 | `option_set_internal_test.go` | `TestGroupOption_recordsItsKind` — walks every function returning a `GroupOption` in `pkg/v1/net/server/gen_facade.go` and this package (exempt: `Listen`, `Loop`), each given its zero value records exactly its kind; the set's order and width |
 | `engine_option_external_test.go` | `TestEngine`, `TestName` — `Engine`, `Plaintext` and `Name` served, refused and what wins, on both natures |
 | `loop_engine_linux.go`, `loop_engine_other.go` | the backend, handed `loopPlan.disabled` (ADR 0189); on Linux `nativeEngine` merges server's `tcp-nodelay` row, read back from each listener (`probeNoDelay`), into the leaf's report: on Linux the leaf `loop` on duplicated descriptors (`F_DUPFD_CLOEXEC`, non-blocking), auto falling back to portable with the reason in `State`; elsewhere the portable backend, an explicit native one refused with `UnsupportedPlatform` |
-| `loop_chain.go` | loop middlewares (ADR 0191 §D2): `loopLanes` (`Loops`, zero one), `buildLoopChain` — the layers applied outermost first, each a `LoopLayered` whose `Next` is what it wrapped (`sameHandler`, which takes two values of an uncomparable type as the same rather than panic), then the same middlewares over `loopProbe` and every callback sent through by `sendProbe` with `probeIO` — `LoopMiddlewareInvalid` naming the callback; `chainHonours` |
+| `loop_chain.go` | loop middlewares (ADR 0191 §D2): `loopLanes` and `resolveLoops` (`Loops`, zero one, `LoopsAuto` GOMAXPROCS, with its source — ADR 0192 §D1), `buildLoopChain` — the layers applied outermost first, each a `LoopLayered` whose `Next` is what it wrapped (`sameHandler`, which takes two values of an uncomparable type as the same rather than panic), then the same middlewares over `loopProbe` and every callback sent through by `sendProbe` with `probeIO` — `LoopMiddlewareInvalid` naming the callback; `chainHonours` |
 | `loop_chain_internal_test.go` | the chain served on every backend (order, OnStart before any callback, the lane count), every broken layer refused by name, the honours merged, `UseLoop` refused on a goroutine group and recording its kind |
 | `loop_chain_conformance_internal_test.go` | P2's conformance: N connections × N tokens through `http1.Routes` and `http1.Bearer` behind `http1.HandleLoop`, two lanes, every backend present, `markRecycled` on — each answer its own subject, a 401 in between, every kept `Auth` still its token's after the buffers were reused |
 | `loop_portable.go` | the portable loop backend, `Loops` lanes (`portableGroup`, its acceptors handing connections to the lanes in turn, the group's `live` the lanes' sum, each `portableLoop` its own handler goroutine, connections, post queue and `Loop` index; `markRecycled`, a test's switch that fills each released buffer with 0xAA — ADR 0191), its report every row `unprobed` (`loop.Unprobed`) and `tcp-nodelay` the netpoller's default, cleared per connection when switched off: a reader and a writer goroutine per connection on the netpoller, every callback on one handler goroutine, the reader's buffer held until the batch ends |
@@ -37,7 +38,7 @@ Public façade: `pkg/v1/net/server`.
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
 | `pool.go` | per-connection recycling + the live-socket registry |
-| `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes`, `Loop`, refused by every group no loop handler serves, and `Plaintext`, `Name` and `Engine` (ADR 0187); each records its kind |
+| `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes`, `Loop`, refused by every group no loop handler serves, and `Plaintext`, `Name` and `Engine` (ADR 0187); each records its kind; `WithDrainGrace` (ADR 0192) |
 | `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
 | `packet.go` | the pooled `corenet.Packet` implementation |
 | `packet_listen.go` | datagram socket construction; family validation; ceilings |
@@ -64,7 +65,7 @@ Public façade: `pkg/v1/net/server`.
 | `adopt.go` | adoption of listeners inherited from a supervisor |
 | `handshake.go` | the bounded TLS handshake — `handshakeHandler`, and `defaultHandshakeTimeout` (10 s) for a group that sets none |
 | `swallow.go` | `swallowErr` — the recorded discard of a non-actionable cleanup error |
-| `load_gate_linux_test.go` | the network merge gate's L1 and L2 (plan P8, `tools/netgate`): paired (ADR 0190): `BenchmarkLoadL1/pair=goroutine:loop` (P6) and `pair=loop:loop` (the calibration), `BenchmarkLoadL2/pair=handwritten:chain` (P2: the same auth and routing through `http1.Routes` and `http1.Bearer`, `chainL2`) and `pair=handwritten:handwritten` (its calibration) — one child (`TestLoadChild`, this binary re-run, `KITSUNIUM_NETGATE_CHILD=L2:a,b`) serves both engines side by side, 1000 kept-alive connections each, a 1 KiB body, and a round sends `b.N` requests in 2×`pairedWindows` windows, A, B, B, A, …; the metric is ITS CPU (getrusage at each window's ends), reported as `a:cpu-ns/req`, `b:cpu-ns/req` and `ratio:cpu-ns/req`, one paired sample a round; `TestLoadL1L2_wired` serves each engine for three requests, `TestLoadPaired_wired` two side by side |
+| `load_gate_linux_test.go` | the network merge gate's L1 and L2 (plan P8, `tools/netgate`): paired (ADR 0190): `BenchmarkLoadL1/pair=goroutine:loop` (P6, active: L1's loop engine on `LoopsAuto`, ADR 0192 §D5) and `pair=loop:loop` (the calibration), `BenchmarkLoadL2/pair=handwritten:chain` (P2: the same auth and routing through `http1.Routes` and `http1.Bearer`, `chainL2`) and `pair=handwritten:handwritten` (its calibration) — one child (`TestLoadChild`, this binary re-run, `KITSUNIUM_NETGATE_CHILD=L2:a,b`) serves both engines side by side, 1000 kept-alive connections each, a 1 KiB body, and a round sends `b.N` requests in 2×`pairedWindows` windows, A, B, B, A, …; the metric is ITS CPU (getrusage at each window's ends), reported as `a:cpu-ns/req`, `b:cpu-ns/req` and `ratio:cpu-ns/req`, one paired sample a round; `TestLoadL1L2_wired` serves each engine for three requests, `TestLoadPaired_wired` two side by side |
 | `load_l3_linux_internal_test.go` | L3, paired like L1 and L2: `BenchmarkLoadL3/pair=recvmmsg:recvmmsg` (P4a's calibration; `l3Sources` is the table its engine B joins), one receiver reading both engines' sockets, each through its own source, windows A, B, B, A, … (`l3Windows`), `a:`, `b:` and `ratio:` of each metric over the veth pair of `scripts/ci/net-veth.sh`, 1200-byte datagrams from 4 GSO flows (`UDP_SEGMENT`, 54 segments a send) at 200 000 a second, the receiver re-run on `TestLoadL3Child` in the namespace; `cpu-ns/datagram`, `datagrams/syscall` (datagrams per `readBatch`) and `lost/op`; skipped without `KITSUNIUM_NETGATE_L3_PEER`; `TestLoadL3_wired` sends one GSO burst on loopback to each socket of a pair and counts its 54 datagrams there and none on the other |
 | `{batch,conn,linux}_compliance.go` | compile-time interface assertions (`KTN-IFACE-ASSERT-PLACEMENT`) |
 
@@ -153,6 +154,17 @@ Public façade: `pkg/v1/net/server`.
   the count the chain was told. Its lanes share the listeners, the group's
   counters and its capability report; `MaxConns` and soft pressure read the
   lanes' summed `live`.
+- **`LoopsAuto` is read once** (ADR 0192 §D1). `bindLoopGroup` resolves
+  `group.loop.Loops` before `OnStart` and keeps the snapshot, with its source,
+  for every backend and `State`: since Go 1.25 `GOMAXPROCS` follows the CPU
+  limit, and two reads could size the chain and the engine apart.
+- **Readiness turns false a grace before anything closes** (ADR 0192 §D2).
+  `Shutdown` stores `PhaseDraining`, which `readinessOf` refuses, then
+  `waitGrace` keeps every listener accepting and every connection served for
+  `WithDrainGrace`, or until ctx ends; `Serve` adds the grace to its drain
+  budget. A loop group then takes its listen queue before its listener closes
+  (the leaf's drain); the portable backend and the goroutine engine close
+  their listener with the server's, after the grace.
 - **The operator's switches only restrict, and are read before any probe**
   (ADR 0188, R5). `New` reads `KITSUNIUM_NET_ENGINE` and
   `KITSUNIUM_NET_DISABLE` once, through `lookup` (`os.LookupEnv` unless a test

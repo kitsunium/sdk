@@ -1,5 +1,11 @@
 package net
 
+// LoopsAuto, set as LoopValue.Loops, runs one loop per GOMAXPROCS, read once at
+// Start: a snapshot that a later change of GOMAXPROCS does not move. It is a
+// sentinel, never the zero value, which is one loop (ADR 0187 §D9); State
+// reports the count and "auto" as its source.
+const LoopsAuto int = -1
+
 // LoopBackend names the mechanic a loop group runs on (ADR 0186 §D5). The zero
 // value is LoopBackendAuto.
 type LoopBackend uint8
@@ -57,9 +63,9 @@ type LoopValue struct {
 	// backend the platform cannot run is refused at Start.
 	Backend LoopBackend `json:"backend"`
 	// Loops is the number of loops, each one goroutine locked to its OS thread
-	// on a native backend. Zero selects one. The SDK never sets GOMAXPROCS:
-	// sizing the process against its loops is the consumer's policy, and State
-	// reports both.
+	// on a native backend. Zero selects one; LoopsAuto selects GOMAXPROCS, read
+	// once at Start. The SDK never sets GOMAXPROCS: sizing the process against
+	// its loops is the consumer's policy, and State reports both.
 	Loops int `json:"loops"`
 	// Rings is the number of descriptor shards inside one loop, each with its
 	// own table of at most min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES) entries:

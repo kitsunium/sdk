@@ -54,6 +54,9 @@ type LoopStateValue struct {
 	DegradedReason string `json:"degraded_reason,omitempty"`
 	// Loops is the number of loops running.
 	Loops int `json:"loops"`
+	// LoopsSource says where Loops came from: "explicit", "auto" — LoopsAuto,
+	// GOMAXPROCS read at Start — or "single" when Loops was zero.
+	LoopsSource string `json:"loops_source"`
 	// Rings is the number of rings per loop.
 	Rings int `json:"rings"`
 	// RingsSource says where Rings came from: "explicit", "derived" from the

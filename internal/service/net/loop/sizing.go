@@ -1,6 +1,8 @@
 package loop
 
 import (
+	"runtime"
+
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -26,13 +28,21 @@ const (
 	// ringsSingle is one ring: no bound to size against, or one table holds
 	// the target.
 	ringsSingle string = "single"
+	// loopsExplicit is a positive LoopValue.Loops; the three loopsX values
+	// are where Loops came from, as State reports it.
+	loopsExplicit string = "explicit"
+	// loopsAuto is LoopsAuto: GOMAXPROCS read at Start.
+	loopsAuto string = "auto"
+	// loopsSingle is a zero LoopValue.Loops: one loop (R8).
+	loopsSingle string = "single"
 )
 
 // sizing is a loop group's resolved configuration: every zero of the
 // LoopValue replaced by its default, the ring count derived once.
 type sizing struct {
-	// loops is the number of loops.
-	loops int
+	// loops is the number of loops; loopsSource where it came from.
+	loops       int
+	loopsSource string
 	// rings is the number of rings per loop.
 	rings int
 	// ringsSource is where rings came from.
@@ -65,7 +75,6 @@ func resolve(v corenet.LoopValue, maxConns int, rlimit uint64) (sizing, error) {
 	}
 	table := min(rlimit, ioringMaxFixedFiles)
 	sz := sizing{
-		loops:     max(v.Loops, 1),
 		cqBatch:   orDefault(v.CQBatch, defaultCQBatch),
 		spillCap:  orDefault(v.SpillCap, defaultSpillCap),
 		outputCap: orDefault(v.OutputCap, defaultOutputCap),
@@ -74,6 +83,7 @@ func resolve(v corenet.LoopValue, maxConns int, rlimit uint64) (sizing, error) {
 		rlimit:    rlimit,
 		tableSize: int(table),
 	}
+	sz.loops, sz.loopsSource = loopCount(v.Loops)
 	sz.rings, sz.ringsSource = ringCount(v.Rings, max(sz.maxConns, sz.softConns), table)
 	//: resolved.
 	return sz, nil
@@ -100,6 +110,26 @@ func ringCount(explicit, target int, table uint64) (int, string) {
 	}
 	//: as many tables as the target needs.
 	return int(n), ringsDerived
+}
+
+// loopCount resolves LoopValue.Loops: LoopsAuto is GOMAXPROCS read now, a
+// positive count its own, anything else one.
+func loopCount(n int) (int, string) {
+	//: by value.
+	switch {
+	//: one loop a P, read once.
+	case n == corenet.LoopsAuto:
+		//: the snapshot.
+		return max(runtime.GOMAXPROCS(0), 1), loopsAuto
+	//: the consumer's count.
+	case n > 0:
+		//: as asked.
+		return n, loopsExplicit
+	//: zero is one (R8).
+	default:
+		//: one.
+		return 1, loopsSingle
+	}
 }
 
 // orDefault returns v, or def when v is zero or less.

@@ -58,6 +58,9 @@ type Server struct {
 	states []corenet.ListenerStateValue
 	// drainTimeout bounds Shutdown.
 	drainTimeout time.Duration
+	// drainGrace is how long Shutdown keeps serving, readiness false, before
+	// it closes a listener.
+	drainGrace time.Duration
 
 	// phase is the lifecycle phase, read without the mutex by State.
 	phase atomic.Uint32

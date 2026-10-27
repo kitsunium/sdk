@@ -2,6 +2,7 @@ package server
 
 import (
 	"reflect"
+	"runtime"
 	"slices"
 	"time"
 
@@ -23,6 +24,17 @@ const (
 	probeCallbacks
 )
 
+// Where a loop group's lane count came from, as LoopStateValue.LoopsSource
+// spells it.
+const (
+	// loopsExplicit is a positive LoopValue.Loops.
+	loopsExplicit string = "explicit"
+	// loopsAuto is LoopsAuto, GOMAXPROCS read at Start.
+	loopsAuto string = "auto"
+	// loopsSingle is a zero LoopValue.Loops: one lane (R8).
+	loopsSingle string = "single"
+)
+
 // probeNames names each callback in LoopMiddlewareInvalid's "callback" field.
 var probeNames = [probeCallbacks]string{
 	probeStart: "OnStart", probeOpen: "OnOpen", probeData: "OnData", probeTimeout: "OnTimeout",
@@ -30,10 +42,32 @@ var probeNames = [probeCallbacks]string{
 }
 
 // loopLanes is how many lanes a loop group runs on every backend: Loops,
-// zero meaning one (R8).
+// zero meaning one (R8). bindLoopGroup has resolved LoopsAuto by then.
 func loopLanes(v corenet.LoopValue) int {
 	//: zero is one.
 	return max(v.Loops, 1)
+}
+
+// resolveLoops resolves LoopValue.Loops and says where the count came from:
+// LoopsAuto is GOMAXPROCS read now — bindLoopGroup calls it once, at Start,
+// and keeps the snapshot —, a positive count is its own, anything else is
+// one.
+func resolveLoops(n int) (int, string) {
+	//: by value.
+	switch {
+	//: one lane a P, read once.
+	case n == corenet.LoopsAuto:
+		//: the snapshot.
+		return max(runtime.GOMAXPROCS(0), 1), loopsAuto
+	//: the consumer's count.
+	case n > 0:
+		//: as asked.
+		return n, loopsExplicit
+	//: zero is one (R8).
+	default:
+		//: one.
+		return 1, loopsSingle
+	}
 }
 
 // buildLoopChain wraps h in mws, outermost first, once at Start, and checks

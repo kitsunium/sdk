@@ -137,6 +137,9 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 		return err
 	}
 	plan := s.operator.plan(group.loop.Backend, nativeLoopBackends)
+	//: LoopsAuto is read once, here: every backend, the chain's OnStart and
+	//: State see the same snapshot, whatever GOMAXPROCS does next.
+	group.loop.Loops, group.loopsSource = resolveLoops(group.loop.Loops)
 	//: the lane count is the same on every backend, a fallback included, so
 	//: the chain learns it once, before any callback.
 	if st, ok := group.loopChain.(corenet.LoopStarter); ok {

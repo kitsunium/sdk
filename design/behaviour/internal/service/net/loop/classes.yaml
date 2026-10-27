@@ -91,6 +91,10 @@ constants:
           fSending is output the backend holds: EPOLLOUT armed, or a send in
           flight.
         name: fSending
+      - doc: |-
+          fHeard is a peer that sent at least one byte: the drain closes a
+          connection that has not only once it stayed silent for drainQuiet.
+        name: fHeard
     name: fPressure
   - doc: |-
       The reasons a connection is closed, mapped to the preallocated error
@@ -137,6 +141,28 @@ constants:
       - name: loopDebug
         value: "false"
     name: loopDebug
+  - grouped: true
+    items:
+      - doc: |-
+          drainQuiet is how long the drain leaves open a connection that has sent
+          nothing yet. One accepted as the drain began has its request on the way:
+          closed before it is read, the request would meet a closed socket and the
+          peer a reset. One that stays silent that long is closed like any other.
+        name: drainQuiet
+        type: time.Duration
+        value: time.Second
+      - doc: drainQuietTicks is drainQuiet in ticks.
+        name: drainQuietTicks
+        type: int64
+        value: int64(drainQuiet / tickEvery)
+      - doc: |-
+          queueTakeMax bounds how many connections epoll's drain takes from one
+          listener's queue: past it the arrivals outpace the drain, and what is
+          left in the queue meets the close.
+        name: queueTakeMax
+        type: int
+        value: 1 << 16
+    name: drainQuiet
   - grouped: true
     items:
       - doc: |-
@@ -298,6 +324,20 @@ constants:
           ringsSingle is one ring: no bound to size against, or one table holds
           the target.
         name: ringsSingle
+        type: string
+        value: "\"single\""
+      - doc: |-
+          loopsExplicit is a positive LoopValue.Loops; the three loopsX values
+          are where Loops came from, as State reports it.
+        name: loopsExplicit
+        type: string
+        value: "\"explicit\""
+      - doc: "loopsAuto is LoopsAuto: GOMAXPROCS read at Start."
+        name: loopsAuto
+        type: string
+        value: "\"auto\""
+      - doc: "loopsSingle is a zero LoopValue.Loops: one loop (R8)."
+        name: loopsSingle
         type: string
         value: "\"single\""
     name: ioringMaxFixedFiles
@@ -821,6 +861,15 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - drainQuiet
+      - listenerSet
+      - newListenerSet
+      - (*listenerSet).handBack
+      - (*listenerSet).closeRest
+      - (*listenerSet).close
+      - (*ring).drainable
+    name: drain_linux.go
+  - decls:
       - epollAcceptBurst
       - epollRunner
       - epollLoop
@@ -856,6 +905,8 @@ files:
       - (*epollLoop).shutdown
       - (*epollLoop).unread
       - (*epollLoop).control
+      - (*epollLoop).takeQueues
+      - (*epollLoop).takeQueue
       - (*epollLoop).closeAll
       - (*epollLoop).teardown
       - errnoOf
@@ -901,6 +952,7 @@ files:
       - sizing
       - resolve
       - ringCount
+      - loopCount
       - orDefault
     name: sizing.go
   - decls:
@@ -997,6 +1049,10 @@ files:
       - (*uRing).acceptsNothing
       - (*uRing).acceptRoom
       - (*uRing).cancelAccepts
+      - (*uRing).cancelAccept
+      - (*uRing).takeQueues
+      - (*uRing).armTake
+      - (*uLoop).queuesTaken
       - (*uRing).used
       - (*uRing).pace
       - (*uLoop).serve
@@ -1163,12 +1219,17 @@ functions:
     name: threadCheck
     params: _ int
     results: func() bool
+  - doc: newListenerSet shares fds among takers takers.
+    name: newListenerSet
+    params: fds []int, takers int
+    results: "*listenerSet"
   - doc: |-
       startEpoll starts g's loops on epoll.
 
       Goroutine lifecycle: it launches one goroutine per loop, locked to its
       thread, which returns once the loop stopped or drained, and one reaper that
-      waits for them all, closes the listeners and closes fin, then returns.
+      waits for them all, closes the listeners the drain did not and closes fin,
+      then returns.
     name: startEpoll
     params: g *Group, cfg *Config
     results: error
@@ -1252,6 +1313,12 @@ functions:
       ⌈target / table⌉, and one when no bound was set.
     name: ringCount
     params: explicit, target int, table uint64
+    results: int, string
+  - doc: |-
+      loopCount resolves LoopValue.Loops: LoopsAuto is GOMAXPROCS read now, a
+      positive count its own, anything else one.
+    name: loopCount
+    params: n int
     results: int, string
   - doc: orDefault returns v, or def when v is zero or less.
     name: orDefault
@@ -1341,7 +1408,7 @@ functions:
       Goroutine lifecycle: it launches one goroutine per loop, locked to its
       thread, which returns once the loop stopped or drained; one reaper that
       waits for them all and closes fin; and, once the group runs, one goroutine
-      that waits on fin, closes the listeners and returns.
+      that waits on fin, closes the listeners the drain did not and returns.
     name: startIOURing
     params: g *Group, cfg *Config, hooks loopHooks
     results: error
@@ -1837,6 +1904,14 @@ types:
       - doc: compactAll compacts every open slot's spill.
         name: compactAll
         recv: r *ring
+      - doc: |-
+          drainable reports whether the drain closes the open connection c now: no
+          partial input, and either it has sent something — its request was read —
+          or it stayed silent for drainQuiet.
+        name: drainable
+        params: c *connCtl
+        recv: r *ring
+        results: bool
       - doc: publish copies the ring's counters to its atomics.
         name: publish
         recv: r *ring
@@ -2005,6 +2080,42 @@ types:
         recv: lp *loop
         results: int
     name: loop
+  - doc: |-
+      listenerSet is a group's listeners as its loops share them through the
+      drain (plan P6). Each taker — a loop on epoll, a ring on io_uring — takes
+      its share of a listener's queue once its own accepts are over, then hands
+      the listener back; the last one closes it, so the listener closes before
+      the established connections drain, and never while a taker may still
+      accept on it. Whatever no taker closed — a group stopped, not drained —
+      closes once every loop returned.
+    fields:
+      - doc: fds are the listeners, in the order of Config.Listeners.
+        name: fds
+        type: "[]int"
+      - doc: left is how many takers have still to hand each listener back.
+        name: left
+        type: "[]atomic.Int32"
+      - doc: |-
+          closed is set once a listener is closed, by its last taker or by
+          closeRest.
+        name: closed
+        type: "[]atomic.Bool"
+    kind: struct
+    methods:
+      - doc: |-
+          handBack hands listener i back: its taker will accept on it no more. The
+          last taker closes it.
+        name: handBack
+        params: i int
+        recv: ls *listenerSet
+      - doc: closeRest closes every listener no taker closed.
+        name: closeRest
+        recv: ls *listenerSet
+      - doc: close closes listener i once.
+        name: close
+        params: i int
+        recv: ls *listenerSet
+    name: listenerSet
   - doc: epollRunner runs one epoll loop per thread.
     fields:
       - name: loops
@@ -2013,9 +2124,13 @@ types:
         type: sync.WaitGroup
       - name: fin
         type: chan struct{}
-      - doc: lfds are the group's listeners, closed once every loop returned.
+      - doc: |-
+          lfds are the group's listeners; set shares them through the drain,
+          and closes what the drain did not once every loop returned.
         name: lfds
         type: "[]int"
+      - name: set
+        type: "*listenerSet"
     kind: struct
     methods:
       - doc: drain implements runner.
@@ -2042,9 +2157,13 @@ types:
         type: int
       - name: evfd
         type: int
-      - doc: lfds are the listeners, shared with the group's other loops.
+      - doc: |-
+          lfds are the listeners, shared with the group's other loops; set is
+          the group's hold on them through the drain.
         name: lfds
         type: "[]int"
+      - name: set
+        type: "*listenerSet"
       - doc: |-
           armed reports whether the listeners are in the epoll set; rearmAt is
           the tick an EMFILE backoff ends at, backoff its current length.
@@ -2137,8 +2256,9 @@ types:
         recv: el *epollLoop
         results: bool
       - doc: |-
-          admit registers the accepted descriptor nfd on the ring, or closes it: a
-          draining loop takes no more connections, MaxConns and a full table refuse.
+          admit registers the accepted descriptor nfd on the ring, or closes it:
+          MaxConns and a full table refuse. A draining loop admits too: what it takes
+          from the queue is served, never closed unread.
         name: admit
         params: nfd int
         recv: el *epollLoop
@@ -2213,6 +2333,17 @@ types:
       - doc: control applies the group's drain and stop requests.
         name: control
         recv: el *epollLoop
+      - doc: |-
+          takeQueues takes every listener's queue to EAGAIN once the listeners left
+          the loop's set, admitting each connection, and hands each listener back to
+          the group's set, whose last loop closes it: a connection the kernel
+          completed before the close is served, not reset by it (plan P6).
+        name: takeQueues
+        recv: el *epollLoop
+      - doc: takeQueue accepts from lfd until its queue is empty, queueTakeMax at most.
+        name: takeQueue
+        params: lfd int
+        recv: el *epollLoop
       - doc: closeAll closes every connection still open, as the loop stops.
         name: closeAll
         recv: el *epollLoop
@@ -2261,6 +2392,12 @@ types:
           DisabledBy says how they were switched off in State; empty is
           KITSUNIUM_NET_DISABLE.
         name: DisabledBy
+        type: string
+      - doc: |-
+          LoopsSource is where Value.Loops came from, for State, when server
+          resolved it already: LoopsAuto read as GOMAXPROCS is "auto". Empty lets
+          the group say it itself.
+        name: LoopsSource
         type: string
       - doc: |-
           tableCap, when positive, caps every ring's table below the descriptor
@@ -2430,9 +2567,11 @@ types:
       sizing is a loop group's resolved configuration: every zero of the
       LoopValue replaced by its default, the ring count derived once.
     fields:
-      - doc: loops is the number of loops.
+      - doc: loops is the number of loops; loopsSource where it came from.
         name: loops
         type: int
+      - name: loopsSource
+        type: string
       - doc: rings is the number of rings per loop.
         name: rings
         type: int
@@ -2791,6 +2930,21 @@ types:
       - name: paused
         type: bool
       - doc: |-
+          queueDone is, per listener, that the ring took its share of the
+          listener's queue as the group drains and handed it back (plan P6);
+          queueCancel that a cancel of its accepts is in flight. queueSkip is a
+          ring the watchdog drained before the group did: it takes nothing.
+          queueStop is an accept that failed during the take: the ring takes no
+          more.
+        name: queueDone
+        type: "[]bool"
+      - name: queueCancel
+        type: "[]bool"
+      - name: queueSkip
+        type: bool
+      - name: queueStop
+        type: bool
+      - doc: |-
           starved are slots whose recv ran out of buffers, re-armed as buffers
           come back; recycle the buffers the batch handed out.
         name: starved
@@ -2881,6 +3035,28 @@ types:
         name: cancelAccepts
         recv: rr *uRing
       - doc: |-
+          cancelAccept cancels every accept in flight on listener i, and reports
+          whether the SQ had room for the cancel.
+        name: cancelAccept
+        params: i int
+        recv: rr *uRing
+        results: bool
+      - doc: |-
+          takeQueues takes the ring's share of every listener's queue as the group
+          drains (plan P6). Once the cancels of its accepts came back — an accept
+          that completed as its cancel crossed it is served like any other —, it
+          arms as many single-shot accepts as the queue holds (TCP_INFO), within the
+          room above the reserve, and hands the listener back to the group's set
+          once the queue is empty and none is in flight; the last ring closes it. An
+          accept left waiting on an empty queue, because another ring took the
+          connection, is cancelled again.
+        name: takeQueues
+        recv: rr *uRing
+      - doc: armTake arms n single-shot accepts on listener i, fd, for the drain's take.
+        name: armTake
+        params: i, fd, n int
+        recv: rr *uRing
+      - doc: |-
           used is how many direct-descriptor entries the ring holds, draining slots
           included: an index stays the kernel's until its close completes.
         name: used
@@ -2917,8 +3093,10 @@ types:
         recv: rr *uRing
       - doc: |-
           refuses reports whether a connection accepted on index is closed at once:
-          the loop or the ring drains, MaxConns is reached, or the index is past the
-          table.
+          the watchdog drained the ring while the group serves, MaxConns is reached,
+          or the index is past the table. The group's drain refuses none: an accept
+          that completed as its cancel crossed it, or one the drain's take armed, is
+          served.
         name: refuses
         params: index uint32
         recv: rr *uRing
@@ -3113,6 +3291,9 @@ types:
         type: "[]*uRing"
       - name: lfds
         type: "[]int"
+      - doc: set is the group's hold on the listeners through the drain.
+        name: set
+        type: "*listenerSet"
       - name: hooks
         type: loopHooks
       - doc: |-
@@ -3300,6 +3481,12 @@ types:
         name: onFD
         params: s *sqe
         recv: ul *uLoop
+      - doc: |-
+          queuesTaken reports whether every ring of the loop handed every listener
+          back.
+        name: queuesTaken
+        recv: ul *uLoop
+        results: bool
       - doc: "serve is the loop: one wait on the primary, every ring reaped, one batch."
         name: serve
         recv: ul *uLoop
@@ -3363,6 +3550,11 @@ types:
         type: chan struct{}
       - name: lfds
         type: "[]int"
+      - doc: |-
+          set shares the listeners through the drain and closes, once every loop
+          returned, what the drain did not.
+        name: set
+        type: "*listenerSet"
     kind: struct
     methods:
       - doc: drain implements runner.

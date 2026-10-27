@@ -2136,6 +2136,20 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopsAuto",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopsAuto",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "-1",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.LoopsAuto",
+      "doc": "LoopsAuto, as LoopValue.Loops, runs one loop per GOMAXPROCS, read once at\nStart.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.MaxConns",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -2843,6 +2857,18 @@
         "public": "The network type is not supported"
       },
       "doc": "UnsupportedNetwork reports a socket family the domain does not serve.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.WithDrainGrace",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "WithDrainGrace",
+      "spelled": "func(d time.Duration) Option",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/pkg/v1/net/server.Option",
+      "doc": "WithDrainGrace sets how long Shutdown keeps accepting and serving once\nreadiness has turned false, before it closes any listener. Zero closes at\nonce.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

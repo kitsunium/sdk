@@ -212,6 +212,7 @@ func (r *ring) deliver(slot int32, data []byte) {
 		return
 	}
 	c.lastIO = r.lp.tick
+	c.flags |= fHeard
 	r.lruTouch(slot)
 	lp := r.lp
 	//: no spill: the handler reads the received bytes in place.
@@ -336,6 +337,7 @@ func (r *ring) deliverSpill(slot int32, n int) {
 	c := &r.conns[slot]
 	c.spill.len += int32(n)
 	c.lastIO = r.lp.tick
+	c.flags |= fHeard
 	r.lruTouch(slot)
 	lp := r.lp
 	buf := lp.slab.data(c.spill)

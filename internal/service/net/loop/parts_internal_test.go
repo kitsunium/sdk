@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"math/rand/v2"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,6 +65,31 @@ func TestResolve(t *testing.T) {
 				t.Fatalf("defaults not applied: %+v", sz)
 			}
 		})
+	}
+}
+
+// TestResolve_loops pins LoopValue.Loops (plan P6, R8): zero is one, a
+// positive count its own, LoopsAuto — a sentinel, never the zero value —
+// GOMAXPROCS read at resolve, and each says where it came from.
+func TestResolve_loops(t *testing.T) {
+	t.Parallel()
+	procs := runtime.GOMAXPROCS(0)
+	for _, c := range []struct {
+		loops, want int
+		source      string
+	}{
+		{0, 1, loopsSingle},
+		{-7, 1, loopsSingle},
+		{3, 3, loopsExplicit},
+		{corenet.LoopsAuto, procs, loopsAuto},
+	} {
+		sz, err := resolve(corenet.LoopValue{Loops: c.loops}, 0, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sz.loops != c.want || sz.loopsSource != c.source {
+			t.Fatalf("Loops %d = %d (%s), want %d (%s)", c.loops, sz.loops, sz.loopsSource, c.want, c.source)
+		}
 	}
 }
 

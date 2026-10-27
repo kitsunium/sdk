@@ -62,6 +62,24 @@ constants:
       - name: probeHonours
       - name: probeCallbacks
     name: probeStart
+  - doc: |-
+      Where a loop group's lane count came from, as LoopStateValue.LoopsSource
+      spells it.
+    grouped: true
+    items:
+      - doc: loopsExplicit is a positive LoopValue.Loops.
+        name: loopsExplicit
+        type: string
+        value: "\"explicit\""
+      - doc: loopsAuto is LoopsAuto, GOMAXPROCS read at Start.
+        name: loopsAuto
+        type: string
+        value: "\"auto\""
+      - doc: "loopsSingle is a zero LoopValue.Loops: one lane (R8)."
+        name: loopsSingle
+        type: string
+        value: "\"single\""
+    name: loopsExplicit
   - doc: nativeLoopBackends is true where the leaf's io_uring and epoll exist.
     items:
       - name: nativeLoopBackends
@@ -459,6 +477,7 @@ files:
       - recoverHandler
       - (*Server).Serve
       - (*Server).Shutdown
+      - (*Server).waitGrace
       - (*Server).shutdownHTTP
       - (*Server).closeHTTP
       - (*Server).waitIdle
@@ -487,8 +506,10 @@ files:
     name: listen_tracked.go
   - decls:
       - probeStart
+      - loopsExplicit
       - probeNames
       - loopLanes
+      - resolveLoops
       - buildLoopChain
       - wrapLoop
       - sameHandler
@@ -625,6 +646,7 @@ files:
       - Option
       - GroupOption
       - WithDrainTimeout
+      - WithDrainGrace
       - Loop
       - Listen
       - TLS
@@ -1054,10 +1076,18 @@ functions:
     results: stdnet.Listener
   - doc: |-
       loopLanes is how many lanes a loop group runs on every backend: Loops,
-      zero meaning one (R8).
+      zero meaning one (R8). bindLoopGroup has resolved LoopsAuto by then.
     name: loopLanes
     params: v corenet.LoopValue
     results: int
+  - doc: |-
+      resolveLoops resolves LoopValue.Loops and says where the count came from:
+      LoopsAuto is GOMAXPROCS read now — bindLoopGroup calls it once, at Start,
+      and keeps the snapshot —, a positive count is its own, anything else is
+      one.
+    name: resolveLoops
+    params: n int
+    results: int, string
   - doc: |-
       buildLoopChain wraps h in mws, outermost first, once at Start, and checks
       the chain twice: every layer is a corenet.LoopLayered whose Next is the
@@ -1189,6 +1219,9 @@ functions:
     params: token string
     results: capabilityEntry, bool
   - name: WithDrainTimeout
+    params: d time.Duration
+    results: Option
+  - name: WithDrainGrace
     params: d time.Duration
     results: Option
   - name: Loop
@@ -2233,6 +2266,9 @@ types:
         type: int
       - name: degraded
         type: string
+      - doc: loopsSource is where the lane count came from, for State.
+        name: loopsSource
+        type: string
       - doc: |-
           caps is the group's capability report: every row unprobed, or
           disabled; noDelayOff is tcp-nodelay switched off, so each accepted
@@ -2899,6 +2935,11 @@ types:
       - doc: drainTimeout bounds Shutdown.
         name: drainTimeout
         type: time.Duration
+      - doc: |-
+          drainGrace is how long Shutdown keeps serving, readiness false, before
+          it closes a listener.
+        name: drainGrace
+        type: time.Duration
       - doc: phase is the lifecycle phase, read without the mutex by State.
         name: phase
         type: atomic.Uint32
@@ -3145,6 +3186,12 @@ types:
         params: ctx context.Context
         recv: s *Server
         results: error
+      - doc: |-
+          waitGrace keeps the server serving for its drain grace, or until ctx is
+          done, whichever comes first.
+        name: waitGrace
+        params: ctx context.Context
+        recv: s *Server
       - doc: shutdownHTTP stops every group's embedded http.Server, if it has one.
         name: shutdownHTTP
         params: ctx context.Context
@@ -3424,6 +3471,9 @@ types:
         type: corenet.LoopValue
       - name: loopSet
         type: bool
+      - doc: loopsSource is where loop.Loops came from, resolved at Start.
+        name: loopsSource
+        type: string
       - doc: |-
           loopHandler is the group's loop handler, set by HandleLoop; a group
           with one is served by the loop engine (ADR 0186 §D1).

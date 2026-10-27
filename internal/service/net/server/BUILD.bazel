@@ -106,6 +106,7 @@ go_test(
         "conn_internal_test.go",
         "conn_tracked_internal_test.go",
         "datagram_source_linux_internal_test.go",
+        "drain_internal_test.go",
         "engine_option_external_test.go",
         "family_windows_internal_test.go",
         "gen_api_test.go",

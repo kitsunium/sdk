@@ -539,8 +539,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		stalled = true
 	}
 	//: the drain budget is independent of the cancelled ctx, or shutdown would
-	//: have no time left to run at the very moment it is needed.
-	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.drainTimeout)
+	//: have no time left to run at the very moment it is needed; the grace
+	//: comes on top of it, so a grace never eats the drain.
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.drainGrace+s.drainTimeout)
 	defer cancel()
 	err := s.Shutdown(drainCtx)
 	//: the caller's end: whether the drain completed.
@@ -559,8 +560,13 @@ func (s *Server) Serve(ctx context.Context) error {
 	return stallError(group)
 }
 
-// Shutdown stops accepting and waits for in-flight connections to finish,
-// severing what remains once ctx expires.
+// Shutdown drains the server, severing what remains once ctx expires.
+//
+// Readiness turns false first, and the server keeps accepting and serving
+// for the grace WithDrainGrace sets, so whoever routes on readiness stops
+// sending before anything closes. Then the listeners close — a loop group
+// takes its listen queue to the end first —, and each connection finishes
+// its work.
 func (s *Server) Shutdown(ctx context.Context) error {
 	//: shutting down a server that never started is a no-op, not an error.
 	if corenet.Phase(s.phase.Load()) == corenet.PhaseNew {
@@ -570,6 +576,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.phase.Store(uint32(corenet.PhaseDraining))
 	//: a drain stops every ring on purpose: no stall is watched from here.
 	s.stopStallWatch()
+	//: readiness is false from here on; whoever routes on it gets the grace
+	//: to stop sending while every listener still accepts and serves.
+	s.waitGrace(ctx)
 	//: closing the listeners is what ends the accept loops.
 	s.closeListeners()
 	//: loop groups drain on their own threads within the same budget.
@@ -597,6 +606,25 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.phase.Store(uint32(corenet.PhaseStopped))
 	//: a loop group's overrun is the drain's too.
 	return loopErr
+}
+
+// waitGrace keeps the server serving for its drain grace, or until ctx is
+// done, whichever comes first.
+func (s *Server) waitGrace(ctx context.Context) {
+	//: no grace: the drain closes at once.
+	if s.drainGrace <= 0 {
+		//: nothing to wait for.
+		return
+	}
+	t := time.NewTimer(s.drainGrace)
+	defer t.Stop()
+	//: the grace, or the budget's end.
+	select {
+	//: the grace ran out.
+	case <-t.C:
+	//: the caller's budget ran out first: the drain goes on with what is left.
+	case <-ctx.Done():
+	}
 }
 
 // shutdownHTTP stops every group's embedded http.Server, if it has one.
