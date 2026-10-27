@@ -36,7 +36,7 @@ func (*portableLineH) OnClose(corenet.LoopIO, corenet.LoopConnRef, error) {}
 // goroutine behind them, idle for less than its idle bound.
 func newOpenPortable(h corenet.LoopHandler, open int) *portableLoop {
 	pl := &portableLoop{
-		h: h, spillCap: portableSpillCap, outCap: portableOutputCap, idle: time.Hour,
+		g: &portableGroup{}, h: h, spillCap: portableSpillCap, outCap: portableOutputCap, idle: time.Hour,
 		events: make(chan portableEvent, portableEvents), wake: make(chan struct{}, 1),
 		postOps: make([]corenet.PostFunc, 1), postArgs: make([]uintptr, 1),
 	}

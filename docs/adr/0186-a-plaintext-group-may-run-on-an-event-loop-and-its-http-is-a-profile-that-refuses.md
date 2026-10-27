@@ -16,7 +16,9 @@
   zero value included), D2 and D3 (an `http1` handler served behind
   `crypto/tls` on the portable backend); [ADR 0189](0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md) — D5 (the staged
   probe descends flag by flag, and `DEFER_TASKRUN` is an opt-in, no longer a
-  test hook)
+  test hook); [ADR 0191](0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md) — D3 (the portable
+  backend runs `Loops` lanes) and D6 (one canonical target, three more target
+  refusals)
 - **Amends**: [ADR 0029](0029-sdk-net-domain.md) D1 (the tree), D2 (one
   goroutine per connection, now the default rather than the only engine), D3
   (do not reimplement HTTP, now with one restricted exception) and D4 (pooling

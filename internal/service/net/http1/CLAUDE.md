@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T00:00:00Z -->
+<!-- updated: 2026-10-26T12:00:00Z -->
 # internal/service/net/http1/
 
 ## Purpose
@@ -25,7 +25,7 @@ Published by `pkg/v1/net/http1` (ADR 0186 §D9 step 12).
 | `parse.go` | `Parser` (`NewParser`, `Limits`, `Parse`), `Continue`, `Pending`; the request line, field and Content-Length rules |
 | `refusal.go` | `Refusal` and its 23 values; `Status`, `Err` (the core sentinel), `String` |
 | `write.go` | `AppendStatusLine`, `AppendField`, `AppendResponse`, `AppendRefusal`; the precomputed status lines |
-| `loop.go` | `HandleLoop`, `LoopHandler`: the loop adapter — per-loop state (`loopState`: the request value, the batch's answers in `out`, the pooled response values, a flag per connection by ring and slot), deferred answers completed in request order (`complete`), one `Write` per connection run (`flush`) |
+| `loop.go` | `HandleLoop`, `LoopHandler`: the loop adapter — per-lane state built at `OnStart` (`loopState`: the request value, the batch's answers in `out`, the pooled response values, a flag per connection by ring and slot), deferred answers completed in request order (`complete`), one `Write` per connection run (`flush`) |
 | `loop_fixtures_test.go` | the adapter's batch fixture (`perfLoop`, `perfH`) and the request bytes, untagged so the benchmarks reach them under race too |
 | `loop_external_test.go` | the adapter on a fake `LoopIO`: order of immediate and deferred answers, every way a connection closes, HEAD, slot reuse, several loops |
 | `corpus_external_test.go` | every vector of the C reference (`bench/cref/src/parse_test.c`), the profile's own refusals, the smuggling vectors, limits, prefixes, framing, early answers, pipelining |
@@ -101,10 +101,11 @@ negative one or one past its maximum is `HTTP1Misconfigured` at `NewParser`.
   refusal on the hot path costs no allocation (ADR 0186 §D4). `NewParser`
   wraps with the field it refused, since it runs once.
 
-- **The adapter's state is per loop, found by `LoopIO.Loop`.** A table of
-  `*loopState` behind an `atomic.Pointer`, replaced under a mutex the first
-  time a loop calls; the data path reads it without a lock. A loop touches
-  only its own entry, so nothing else is shared between loop threads.
+- **The adapter's state is per lane, found by `LoopIO.Loop`.** A table of
+  `*loopState` behind an `atomic.Pointer`, built for every lane at `OnStart`
+  (ADR 0191 §D1); a lane past the count, or an adapter driven without
+  `OnStart`, still builds its own under a mutex the first time it calls. The
+  data path reads it without a lock. A lane touches only its own entry.
 - **Answers leave at the batch's end, in request order.** An immediate answer
   is written into the loop's `out` when `ServeHTTP1` returns, so the handler's
   bytes need live no longer; a deferred one (`Defer`) keeps its pooled

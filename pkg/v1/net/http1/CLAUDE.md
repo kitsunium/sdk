@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T12:00:00Z -->
+<!-- updated: 2026-10-26T12:00:00Z -->
 # pkg/v1/net/http1/
 
 ## Purpose
@@ -19,8 +19,8 @@ the job is discussed.
 |---|---|
 | `HandleLoop(h, p)` → `*LoopHandler` | the `server.LoopHandler` of a loop group serving `h`; `p` sets the limits, the zero `Parser` the defaults |
 | `Handler`, `HandlerFunc` | what a consumer writes: `ServeHTTP1(*Request, *Response)` |
-| `Batcher` | optional: `EndBatch(loop)` once per batch, before its answers leave — where a handler runs the work it batched and completes what it deferred |
-| `Request`, `Response`, `Field`, `Limits` | the values; `Request.Loop` names the loop, `Response.Defer` answers at the batch's end |
+| `Batcher` | optional: `EndBatch(lane)` once per batch, before its answers leave — where a handler runs the work it batched and completes what it deferred |
+| `Request`, `Response`, `Field`, `Limits` | the values; `Request.Lane` names the lane, `Response.Defer` answers at the batch's end |
 | `Parser`, `NewParser`, `Continue`, `Pending`, `Refusal`, `RefusalNone` | the codec's framing, usable without the loop |
 | `AppendStatusLine`, `AppendField`, `AppendResponse`, `AppendRefusal` | the codec's writer |
 | `MaxFields`, `DefaultHead`, `MaxHead`, `DefaultTarget`, `DefaultBody`, `MaxBody` | the bounds |

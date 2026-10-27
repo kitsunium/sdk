@@ -57,6 +57,11 @@ type StreamGroup struct {
 	// loopHandler is the group's loop handler, set by HandleLoop; a group
 	// with one is served by the loop engine (ADR 0186 §D1).
 	loopHandler corenet.LoopHandler
+	// loopMiddlewares decorate the loop handler, outermost first (UseLoop).
+	loopMiddlewares []corenet.Middleware[corenet.LoopHandler]
+	// loopChain is loopHandler wrapped in loopMiddlewares, built and checked
+	// once at Start; the loop engine serves it.
+	loopChain corenet.LoopHandler
 	// kinds is the set of option kinds the group was given, a zero value
 	// included, so a refusal reads what was posed rather than guessing from a
 	// non-zero field (ADR 0187).
@@ -160,6 +165,22 @@ func (g *StreamGroup) Use(middlewares ...corenet.Middleware[corenet.ConnHandler]
 	g.middlewares = append(g.middlewares, middlewares...)
 	//: posed, even with no middleware: a loop group refuses the call itself.
 	g.kinds.add(corenet.OptionMiddleware)
+	//: returned for chaining.
+	return g
+}
+
+// UseLoop appends loop middlewares, outermost first, and records the
+// OptionLoopMiddleware kind on every call, even with none. A loop group
+// wraps its handler in them at Start, after checking that each layer is a
+// corenet.LoopLayered whose Next is what it was given and that every one of
+// the eight callbacks, sent through a probe chain, reaches the probe: a layer
+// that fails either check fails Start with LoopMiddlewareInvalid. The chain
+// honours an option when one of its layers or the handler does. A group no
+// loop handler serves refuses UseLoop with LoopOptionUnsupported.
+func (g *StreamGroup) UseLoop(middlewares ...corenet.Middleware[corenet.LoopHandler]) *StreamGroup {
+	g.loopMiddlewares = append(g.loopMiddlewares, middlewares...)
+	//: posed, even with no middleware: a goroutine group refuses the call itself.
+	g.kinds.add(corenet.OptionLoopMiddleware)
 	//: returned for chaining.
 	return g
 }
