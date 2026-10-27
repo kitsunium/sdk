@@ -103,6 +103,7 @@ go_test(
         "disk_cluster_internal_test.go",
         "diskfull_internal_test.go",
         "durable_term_internal_test.go",
+        "durablecut_internal_test.go",
         "election_internal_test.go",
         "failclosed_internal_test.go",
         "failclosed_unix_internal_test.go",

@@ -5146,6 +5146,55 @@ try, and #681's test failed `NOT_LEADER` on NetBSD
 - The rule is the node's alone: no frame changes, no raft mutation is
   added, and a mixed cluster needs nothing.
 
+## Amendment — a durable machine's applied index is committed at the start, and a cut waits for the commit (2026-10-27, #707)
+
+A Ready that only moves the commit is written lazily and rides the next
+sync (#558); on the leader, every commit advance is such a Ready. A node
+with a `DurableStateMachine` that crashed after its machine applied
+entries whose commit record had not reached the disk restarted with the
+machine past the persisted commit. The node resumed at the machine's
+applied index, while the step function resumed from the persisted commit
+and replayed the engine effects through it alone. A snapshot cut at the
+applied index — `requestCut` for a peer that needs one, a coalesced
+trigger, `SnapshotEvery`, `SaveSnapshot` — took its engine state from
+`EngineAt`, which knew no engine entry past that commit: it recorded the
+cluster version, timing contract and `NO_SPACE` alarm from before an entry
+it covers. Restarted from it, the node never replayed that entry, and the
+next raise never matched its precondition: it ran the old version or
+contract for good, and so did every peer that installed the snapshot
+([#707](https://github.com/kitsunium/sdk/issues/707)).
+
+- **The start takes the machine's applied index as committed while the
+  log holds it** (`startCommit`). Apply is handed committed, durable
+  entries only, so every entry through the index the machine applied is
+  committed: the step function starts at that commit, replays the engine
+  effects through it, and hands apply nothing the machine holds. An index
+  past the log's end raises nothing: no entry then proves what the machine
+  applied — a log truncated below it by `TruncateAndStaySilent`, or a log
+  an install's restore ran past before it was reset, which may hold
+  entries that were never committed.
+- **Only the machine's term proves the log holds the entry it applied**
+  (`stepApplied`). Two entries at one index and term carry the same prefix,
+  and a start whose log holds another term at the machine's position is
+  already refused (#544). A machine that reports no term is held at the
+  persisted commit: one that restored an install before its log was reset,
+  the start then falling back below that snapshot, stands past entries that
+  were never committed, whose engine effects, taken as committed, were
+  applied, and which the leader's appends could never truncate.
+- **A cut past the step function's commit waits for it** (`metaAt`). It is
+  refused `OVERLOADED`: an automatic cut is tried again after `cutFailed`'s
+  wait, and `SaveSnapshot` answers it to its caller. The nodes the start
+  does not raise — a log truncated below the machine, a machine that
+  reports no term — cut once the commit reaches the applied index, with the
+  engine state committed there.
+- **What it costs.** The persisted commit is not rewritten at the start:
+  the raised one reaches the disk with the next hard state or commit record
+  the node writes, and a crash before that restarts from the machine's
+  index again. While a node stands
+  past its commit, its cuts wait, and its log is compacted no further.
+- No frame, payload or record format changes, and no raft mutation is
+  added.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5167,6 +5216,7 @@ try, and #681's test failed `NOT_LEADER` on NetBSD
 | #696 | Raft hunt loop, 2026-10-26 | the trailing window is kept only while the log is under half its headroom and the disk is not short, and Config refuses a log quota whose headroom over the reserve is two segments or less; no format change (amendment of 2026-10-26, #696) |
 | #700 | Raft hunt loop, 2026-10-26 | `Recover` reads the log a batch of 1 MiB and 4 096 entries at a time, the configuration and the cluster version once, past the newest snapshot when the log continues it; no format change (amendment of 2026-10-26, #700) |
 | #701 | Raft hunt loop, 2026-10-27 | a removal of the leader submitted on it is submitted again on `NOT_LEADER` as on `MEMBERSHIP_CHANGE_PENDING`, within the hand-off's window, until the node hears of the leader its hand-off elected; no format change (amendment of 2026-10-27, #701) |
+| #707 | Raft hunt loop, 2026-10-27 | a `DurableStateMachine`'s applied index the log holds at the machine's term is taken as committed at the start, and a cut past the step function's commit waits for it; no format change (amendment of 2026-10-27, #707) |
 
 ## raft-sql-poc (owner's prior Raft)
 

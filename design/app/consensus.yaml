@@ -4011,7 +4011,11 @@ packages:
                 entry keeps its own. Only a committed entry may be loaded so (#663).
               name: Evicted
               type: uint64
-            - doc: Applied is where the state machine resumes, at least the snapshot.
+            - doc: |-
+                Applied is where the state machine resumes, at least the snapshot.
+                Above HardState.Commit, NewRaft takes it as committed while the log
+                holds it (#707): the caller passes such an index only when the log
+                holds there the entry the machine applied, or does not hold it.
               name: Applied
               type: uint64
             - doc: "Now is the start instant: the restart vote-refusal window opens here."

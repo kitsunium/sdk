@@ -748,6 +748,20 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   installed it (#544, `TestADurableRestartResumesWithTheAppliedTerm`,
   `TestASnapshotPublishedAtTermZeroIsSetAside`,
   `TestAPeerInstallsTheSnapshotOfADurableLeaderRestarted`).
+- Start the step function at the persisted commit under a durable machine
+  applied past it, or cut past the step function's commit: a commit-only
+  Ready is written lazily (#558), a crash left the machine past the commit
+  raft restarted from, and a cut at the applied index recorded, from
+  `EngineAt`, the cluster version, contract and alarm of that commit, which
+  the node restarted from it ran for good (#707). `NewRaft` takes the
+  applied index the log holds as committed (`startCommit`); `stepApplied`
+  holds a machine that reports no term at the persisted commit, since only
+  the term proves the log holds the entry it applied; and `metaAt` refuses
+  a cut past the commit OVERLOADED until the commit reaches it
+  (`TestADurableRestartPastItsPersistedCommitCutsTheContractItApplied`,
+  `TestADurableRestartPastItsPersistedCommitCutsTheVersionItApplied`,
+  `TestACutPastTheCommitTheNodeKnowsWaitsForIt`,
+  `TestATermlessDurableMachinePastTheCommitLeavesTheStaleTailUncommitted`).
 - Trust a version 1 `.meta` whose id does not name its position, or take
   an acknowledgement past the leader's last index as match: version 1
   carries no checksum, and one bit of `Position.Index` erased the log,

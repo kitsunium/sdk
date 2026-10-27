@@ -596,7 +596,28 @@ func (n *Node) load() (raft.StartState, error) {
 	if err != nil {
 		return raft.StartState{}, err
 	}
+	applied = stepApplied(applied, snapIdx, hs.Commit, dur)
 	return raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Evicted: evicted, Applied: applied, Now: n.clk.Now()}, nil
+}
+
+// stepApplied is the applied index the step function starts from: the one
+// the machine resumes at, held at the persisted commit when the machine
+// reported no term for it. NewRaft takes an applied index its log holds as
+// committed (#707), which is sound only when the log holds there the entry
+// the machine applied: the term proves it, two entries at one index and
+// term carrying the same prefix, and durableTerm refused a start whose log
+// holds another term there. A machine that reports none may stand on an
+// install it restored before its log was reset, the start then falling back
+// below that snapshot, over a log whose entries at those indexes were never
+// committed: taken as committed, their engine effects were applied and the
+// leader's appends could never truncate them. Held at the persisted commit,
+// the index is the one NewRaft started from before, and a cut at the
+// machine's waits for the commit (metaAt).
+func stepApplied(applied, snapIdx, commit uint64, dur coreconsensus.PositionValue) uint64 {
+	if dur.Term != 0 || applied <= commit {
+		return applied
+	}
+	return max(commit, snapIdx)
 }
 
 // termless reports whether m names an index above 0 at term 0, which no

@@ -53284,7 +53284,7 @@
         {
           "name": "Applied",
           "type": "uint64",
-          "doc": "Applied is where the state machine resumes, at least the snapshot.\n"
+          "doc": "Applied is where the state machine resumes, at least the snapshot.\nAbove HardState.Commit, NewRaft takes it as committed while the log\nholds it (#707): the caller passes such an index only when the log\nholds there the entry the machine applied, or does not hold it.\n"
         },
         {
           "name": "Now",
