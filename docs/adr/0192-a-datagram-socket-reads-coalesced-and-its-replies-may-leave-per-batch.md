@@ -168,11 +168,13 @@ cost cancel to a ratio of 1, and a scripted B at 60 % of A giving 0.6.
 - *Overlap and resolution depend on the kernel's accounting.* Under
   `CONFIG_IRQ_TIME_ACCOUNTING` the kernel measures irq and softirq time at
   every entry and exit and charges it to no task, so the three parts add
-  without overlap. Without it, `/proc/stat`'s irq fields are tick-sampled —
-  a whole tick charged to softirq when the tick lands in one — and the
-  softirq time the tick missed stays in the rusage of the task it
-  interrupted: the sum still counts that work once, but the split between
-  the parts is coarse. The bench job records which the runner has
+  without overlap. Without it, both are tick-sampled: a tick that lands in
+  softirq is charged to `/proc/stat`'s softirq field *and* to the system
+  time of the task it interrupted (`account_system_index_time`), so when
+  that task is the receiver or the sender the sum counts the tick twice.
+  The overlap is softirq work, which B does less of, so it inflates A more
+  than B and can only overstate GRO's saving, by at most the softirq time
+  charged inside the two processes. The bench job records which the runner has
   (`accounting:` lines in `bench.txt`), read from the runner, never assumed;
   a run on a kernel without it is still judged, and the record says so.
 - *`USER_HZ` ticks.* `/proc/stat` counts in ticks of 10 ms, 100 a second on

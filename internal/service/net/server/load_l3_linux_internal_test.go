@@ -302,8 +302,10 @@ type l3CPU struct {
 	receiver, sender uint64
 	// irq is the irq and softirq time of every CPU in /proc/stat. With
 	// CONFIG_IRQ_TIME_ACCOUNTING the kernel charges it to no task, so it adds
-	// to the two rusages without overlap; without it, it is sampled at the
-	// tick and part of it is in them already (the bench job records which).
+	// to the two rusages without overlap; without it, a tick that lands in
+	// softirq is charged here and to the task it interrupted, so that time
+	// counts twice when the task is the receiver or the sender (the bench
+	// job records which accounting the runner has; ADR 0192 §D6).
 	irq uint64
 }
 
