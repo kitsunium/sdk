@@ -791,6 +791,7 @@ files:
       - (*portableGroup).closeOwned
       - (*portableLoop).run
       - (*portableLoop).finished
+      - (*portableLoop).batch
       - (*portableLoop).collect
       - (*portableLoop).handle
       - (*portableLoop).handleData
@@ -807,12 +808,13 @@ files:
       - (*portableLoop).markDirty
       - (*portableLoop).finish
       - (*portableLoop).timers
+      - (*portableLoop).timer
       - (*portableLoop).control
       - (*portableLoop).closeSettled
       - (*portableLoop).drainable
       - (*portableLoop).endBatch
       - (*portableLoop).settle
-      - (*portableLoop).compactSpills
+      - (*portableLoop).compactListed
       - (*portableLoop).closeAll
       - (*portableLoop).drainPosts
       - (*portableLoop).Write
@@ -3097,6 +3099,9 @@ types:
         type: error
       - name: reasonSet
         type: bool
+      - doc: compact lists the connection on its loop's compaction list.
+        name: compact
+        type: bool
     kind: struct
     name: portableConn
   - doc: |-
@@ -3266,6 +3271,14 @@ types:
         type: "[]chan struct{}"
       - name: dirty
         type: "[]int32"
+      - doc: compact lists the slots whose spill's head was consumed in the batch.
+        name: compact
+        type: "[]int32"
+      - doc: |-
+          timersAt is when the next scan of the timers is due: a tick after the
+          last, or the earliest deadline set since, whichever comes first.
+        name: timersAt
+        type: time.Time
     kind: struct
     methods:
       - doc: |-
@@ -3284,6 +3297,13 @@ types:
         name: finished
         recv: pl *portableLoop
         results: bool
+      - doc: |-
+          batch serves the events queued behind the first one, the posts, the timers
+          when they are due and the drain, then ends the batch. A batch costs what it
+          touches: the timers' scan of every connection runs once a tick, not once a
+          batch.
+        name: batch
+        recv: pl *portableLoop
       - doc: collect takes the events already queued, up to a batch.
         name: collect
         recv: pl *portableLoop
@@ -3354,8 +3374,19 @@ types:
         name: finish
         params: slot int32, pc *portableConn, err error
         recv: pl *portableLoop
-      - doc: timers fires deadlines and closes idle connections.
+      - doc: |-
+          timers fires deadlines and closes idle connections, and sets the next scan
+          a tick later, or at the earliest deadline still to come when it is sooner:
+          a deadline OnTimeout sets on any connection lowers it as SetDeadline does.
         name: timers
+        params: now time.Time
+        recv: pl *portableLoop
+      - doc: |-
+          timer closes pc when it is idle past the bound with nothing to send, fires
+          its deadline when it came, and brings the next scan forward to a deadline
+          still to come before it.
+        name: timer
+        params: slot int32, pc *portableConn, now time.Time
         recv: pl *portableLoop
       - doc: control applies the drain.
         name: control
@@ -3385,9 +3416,11 @@ types:
         params: slot int32
         recv: pl *portableLoop
       - doc: |-
-          compactSpills moves every spill's consumed head out, now that no
-          handed-out buffer survives.
-        name: compactSpills
+          compactListed moves the consumed head of every spill listed in the batch
+          out, now that no handed-out buffer survives, so the batch's end costs the
+          connections it touched, not the open ones. A slot taken again since its
+          listing holds a new connection, compacted harmlessly.
+        name: compactListed
         recv: pl *portableLoop
       - doc: |-
           closeAll closes every connection as the backend stops.

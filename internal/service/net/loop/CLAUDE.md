@@ -19,7 +19,7 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | `group.go` | `Listener` (the one hand-off: a duplicated descriptor), `Config`, `Group` (`Shutdown`, `Close`, `State`, `Rejected`, `Live`) and `Start`, which resolves the sizing, starts the backend and writes the one start line |
 | `sizing.go` | `resolve`: the defaults, `ResolveLoops` (`LoopsAuto` read as GOMAXPROCS, which server calls once per group, zero one, the source State reports — ADR 0196 §D1), the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
 | `conn.go` | `connCtl`, one slot's pointer-free control state; its states, flags and close reasons |
-| `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty list, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build — its lane, ADR 0191: `server` calls the chain's `LoopStarter.OnStart(Loops)` before `Start`, so nothing here does), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
+| `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty and compaction lists, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build — its lane, ADR 0191: `server` calls the chain's `LoopStarter.OnStart(Loops)` before `Start`, so nothing here does), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
 | `slab.go` | the mmap'd slab: power-of-two size classes from 2 KiB, arenas mapped lazily, a global budget that sheds load by name |
 | `wheel.go` | the hashed timer wheel, index-linked, one timer per slot, 10 ms ticks |
 | `caps.go` | the kernel capabilities a group reports (ADR 0189): `loopCaps` and their classes, `CheckCapabilities` (an engine, a class B capability or an unknown opt-in is `LoopCapabilityRefused`), `capSwitches` (the operator's `Disabled`, the code's opt-ins: the operator wins), `capReport` (one row each, `disabled` never overwritten, an absent opt-in `missing`), `Unprobed` (the portable backend's report) |
@@ -79,6 +79,16 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   have their request on the way. The window between a taker's last empty read
   and its close is the kernel's: the server's grace empties the queue first,
   and a partial drain in an `SO_REUSEPORT` group is `tcp_migrate_req=1`'s.
+- **A batch costs the slots it touched, never the open ones.** Nothing at a
+  batch's end walks the LRU: the dirty list names the slots to flush, and the
+  compaction list (`ring.compact`, deduplicated by `fCompact`) the slots whose
+  spill's head was consumed. The compaction list is a slice, not a link in
+  `connCtl`: a slot released inside the batch is reset whole by `emptyConn`,
+  which would cut a linked list there. At a few hundred requests a second a
+  batch holds one or two requests, so a walk of ten thousand idle keep-alive
+  connections per batch was paid per request.
+  `TestCore_batchCostIndependentOfOpen` pins it, `BenchmarkCore_batch`
+  measures it.
 - **The close is never re-entrant.** `Close` marks the slot and the batch's end
   settles it once its output has left, so `OnClose` never runs inside another
   callback. `finish` calls `OnClose`, then the backend's `shutdown`. The slot
@@ -293,6 +303,7 @@ bazel test //internal/service/net/loop:all
   backend.
 - Compact, reallocate or recycle a buffer handed to `OnData` before
   `OnBatchEnd` returns.
+- Walk every open slot at each batch: list what the batch touched instead.
 - Call `OnClose` from inside another callback.
 - Call `setrlimit` or `GOMAXPROCS`: `State` reports both, and the consumer
   decides.

@@ -146,6 +146,7 @@ go_test(
         "loop_option_external_test.go",
         "loop_outbound_alloc_internal_test.go",
         "loop_outbound_internal_test.go",
+        "loop_portable_cost_internal_test.go",
         "multireader_gro_linux_internal_test.go",
         "multireader_linux_internal_test.go",
         "multiwriter_linux_internal_test.go",

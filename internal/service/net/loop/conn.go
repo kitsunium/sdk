@@ -32,6 +32,8 @@ const (
 	// fHeard is a peer that sent at least one byte: the drain closes a
 	// connection that has not only once it stayed silent for drainQuiet.
 	fHeard
+	// fCompact puts the slot on its ring's compaction list.
+	fCompact
 )
 
 // The reasons a connection is closed, mapped to the preallocated error
