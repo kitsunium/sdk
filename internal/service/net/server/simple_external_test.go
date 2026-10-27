@@ -1,4 +1,4 @@
-// Package server_test — the simple API (ADR 0187 §D6, ADR 0195): HTTP, TCP
+// Package server_test — the simple API (ADR 0187 §D6, ADR 0197): HTTP, TCP
 // and UDP choose the engine by the handler's type, name the group after its
 // address, require Plaintext of an HTTP group without TLS, and refuse every
 // handler they cannot place with a typed error.
@@ -109,7 +109,7 @@ func TestSimpleHTTP(t *testing.T) {
 }
 
 // TestSimpleHTTP_tls pins an HTTP1Handler given TLS through HTTP: served by
-// the codec on the portable backend, HTTP/1.1 negotiated (ADR 0196).
+// the codec on the portable backend, HTTP/1.1 negotiated (ADR 0198).
 func TestSimpleHTTP_tls(t *testing.T) {
 	t.Parallel()
 	srv := server.New()

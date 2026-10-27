@@ -26339,7 +26339,7 @@
       "code": {
         "value": "0.2.11.35"
       },
-      "doc": "CodeLoopTLSUnsupported identifies a loop group given TLS it cannot take: a\nraw loop handler, the loop engine speaking plaintext only (ADR 0186 §D2), or\na contradiction of the http1 codec's TLS path (ADR 0196).\n",
+      "doc": "CodeLoopTLSUnsupported identifies a loop group given TLS it cannot take: a\nraw loop handler, the loop engine speaking plaintext only (ADR 0186 §D2), or\na contradiction of the http1 codec's TLS path (ADR 0198).\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -28029,7 +28029,7 @@
         "reason": "HANDLER_AMBIGUOUS",
         "public": "The handler could run on two engines; choose one with Engine"
       },
-      "doc": "HandlerAmbiguous is returned by Start for a simple-API group whose handler\nimplements both interfaces of its entry — http.Handler and HTTP1Handler for\nHTTP, ConnHandler and LoopHandler for TCP — with no Engine to choose\n(ADR 0195). The \"entry\" and \"type\" fields name them.\n",
+      "doc": "HandlerAmbiguous is returned by Start for a simple-API group whose handler\nimplements both interfaces of its entry — http.Handler and HTTP1Handler for\nHTTP, ConnHandler and LoopHandler for TCP — with no Engine to choose\n(ADR 0197). The \"entry\" and \"type\" fields name them.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -28080,7 +28080,7 @@
         "reason": "HANDLER_UNSUPPORTED",
         "public": "The handler cannot be served by this entry point"
       },
-      "doc": "HandlerUnsupported is returned by Start for a simple-API group whose handler\nno engine of its entry serves: a PacketHandler given to HTTP, a LoopHandler\ngiven to UDP, an HTTP handler given to TCP (its \"serve\" field names HTTP),\nany other type (ADR 0195). The \"entry\" and \"type\" fields name them.\n",
+      "doc": "HandlerUnsupported is returned by Start for a simple-API group whose handler\nno engine of its entry serves: a PacketHandler given to HTTP, a LoopHandler\ngiven to UDP, an HTTP handler given to TCP (its \"serve\" field names HTTP),\nany other type (ADR 0197). The \"entry\" and \"type\" fields name them.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -29291,7 +29291,7 @@
         "reason": "LOOP_TLS_UNSUPPORTED",
         "public": "The loop engine does not serve TLS"
       },
-      "doc": "LoopTLSUnsupported is returned by Start for a loop group given TLS that\ncannot take it: a raw loop handler — the loop engine is plaintext only (ADR\n0186 §D2) — or, for the http1 codec, which takes TLS on the portable backend\n(ADR 0196), a zero identity, an explicit native backend or a loop\nmiddleware; the \"option\" field names it.\n",
+      "doc": "LoopTLSUnsupported is returned by Start for a loop group given TLS that\ncannot take it: a raw loop handler — the loop engine is plaintext only (ADR\n0186 §D2) — or, for the http1 codec, which takes TLS on the portable backend\n(ADR 0198), a zero identity, an explicit native backend or a loop\nmiddleware; the \"option\" field names it.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -29908,7 +29908,7 @@
         "reason": "PACKET_OPTION_UNSUPPORTED",
         "public": "The datagram group cannot honour one of its options"
       },
-      "doc": "PacketOptionUnsupported is returned by Start for a datagram group given an\noption the datagram engine does not apply — anything but MaxPacketSize,\nBatchSize, Adopt, Name, Engine and Plaintext — refused rather than dropped\n(ADR 0187 §D4, ADR 0195). The \"option\" field names it.\n",
+      "doc": "PacketOptionUnsupported is returned by Start for a datagram group given an\noption the datagram engine does not apply — anything but MaxPacketSize,\nBatchSize, Adopt, Name, Engine and Plaintext — refused rather than dropped\n(ADR 0187 §D4, ADR 0197). The \"option\" field names it.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -30032,7 +30032,7 @@
         "reason": "PLAINTEXT_REQUIRED",
         "public": "The HTTP group needs TLS or Plaintext"
       },
-      "doc": "PlaintextRequired is returned by Start for a group that serves HTTP —\nnet/http's or the http1 codec — given neither TLS nor Plaintext: a group\nwithout TLS says so (ADR 0187 §D7, ADR 0195). The \"group\" field names it.\n",
+      "doc": "PlaintextRequired is returned by Start for a group that serves HTTP —\nnet/http's or the http1 codec — given neither TLS nor Plaintext: a group\nwithout TLS says so (ADR 0187 §D7, ADR 0197). The \"group\" field names it.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -65128,7 +65128,7 @@
       "name": "Plaintext",
       "spelled": "func() GroupOption",
       "canonical": "func() github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "Plaintext declares that the group serves no TLS (ADR 0187). Every engine\nhonours it. A group given both Plaintext and TLS, in either order, fails\nStart with PlaintextWithTLS. An HTTP group without TLS must give it, or\nfails Start with PlaintextRequired (ADR 0195).\n",
+      "doc": "Plaintext declares that the group serves no TLS (ADR 0187). Every engine\nhonours it. A group given both Plaintext and TLS, in either order, fails\nStart with PlaintextWithTLS. An HTTP group without TLS must give it, or\nfails Start with PlaintextRequired (ADR 0197).\n",
       "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"
@@ -65227,7 +65227,7 @@
       "recv": "Server",
       "spelled": "func(addr string, h any, opts ...GroupOption) *StreamGroup",
       "canonical": "func(addr string, h any, opts ...github.com/kitsunium/sdk/internal/service/net/server.GroupOption) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
-      "doc": "HTTP declares a group serving h over HTTP on addr, a TCP address — the\nsimple API (ADR 0187 §D6, ADR 0195). h is an http.Handler, served by\nnet/http on the goroutine engine, or an HTTP1Handler, served by the http1\nprofile's codec on the loop engine; a handler that is both needs Engine to\nchoose. The group is named \"tcp+\" + addr unless Name says otherwise, and\nopts apply as they do to Group. Without TLS, Plaintext is required (ADR\n0187 §D7); with TLS, an HTTP1Handler runs on the portable backend, crypto/tls\nnegotiating HTTP/1.1 first (ADR 0196). Every refusal is reported by Start: a nil or typed nil handler\n(HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an\nEngine the handler cannot run on (EngineUnsupported), a type no engine of\nHTTP serves (HandlerUnsupported), Plaintext with TLS (PlaintextWithTLS),\nneither (PlaintextRequired).\n",
+      "doc": "HTTP declares a group serving h over HTTP on addr, a TCP address — the\nsimple API (ADR 0187 §D6, ADR 0197). h is an http.Handler, served by\nnet/http on the goroutine engine, or an HTTP1Handler, served by the http1\nprofile's codec on the loop engine; a handler that is both needs Engine to\nchoose. The group is named \"tcp+\" + addr unless Name says otherwise, and\nopts apply as they do to Group. Without TLS, Plaintext is required (ADR\n0187 §D7); with TLS, an HTTP1Handler runs on the portable backend, crypto/tls\nnegotiating HTTP/1.1 first (ADR 0198). Every refusal is reported by Start: a nil or typed nil handler\n(HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an\nEngine the handler cannot run on (EngineUnsupported), a type no engine of\nHTTP serves (HandlerUnsupported), Plaintext with TLS (PlaintextWithTLS),\nneither (PlaintextRequired).\n",
       "file": "service/net/server/simple.go",
       "layer": "service",
       "family": "net"
@@ -65407,7 +65407,7 @@
       "recv": "StreamGroup",
       "spelled": "func(h corenet.LoopHandler) *StreamGroup",
       "canonical": "func(h github.com/kitsunium/sdk/internal/core/net.LoopHandler) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
-      "doc": "HandleLoop serves the group on the loop engine (ADR 0186): h is called on\nthe loop's own thread for every connection of the group, with the bytes\neach one receives, instead of a goroutine per connection. It is opt-in, and\nplaintext, but for the http1 codec (http1.HandleLoop), which takes TLS:\ncrypto/tls negotiates each connection on its own goroutine, bounded by\nHandshakeTimeout, offering HTTP/1.1 alone, and the cleartext reaches the\ncodec on the portable backend's lanes (ADR 0196).\n\nThe group keeps the server's lifecycle — the bind, the adoption of\ninherited sockets, MaxConns, the drain, State — and Loop(v) sizes and\nplaces the engine: io_uring after a probe of the running kernel, then epoll,\non Linux, and the portable backend, the default engine's accept path\nserialised onto one handler goroutine, everywhere else. Start refuses a loop\ngroup given TLS it cannot take with LoopTLSUnsupported, one given Use or an option neither\nthe engine (IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor h,\nthrough LoopOptionHonourer, honours with LoopOptionUnsupported — an option\ngiven counts, its zero value included —, and an explicit backend the\nplatform or the kernel cannot run with UnsupportedPlatform or\nLoopBackendUnavailable.\n\nA callback of h runs on the loop's thread and must not block it: a blocking\ncall stalls every connection of its loop. h is declared once, like every\nhandler: a second declaration of any kind makes Start return\nHandlerAlreadySet.\n",
+      "doc": "HandleLoop serves the group on the loop engine (ADR 0186): h is called on\nthe loop's own thread for every connection of the group, with the bytes\neach one receives, instead of a goroutine per connection. It is opt-in, and\nplaintext, but for the http1 codec (http1.HandleLoop), which takes TLS:\ncrypto/tls negotiates each connection on its own goroutine, bounded by\nHandshakeTimeout, offering HTTP/1.1 alone, and the cleartext reaches the\ncodec on the portable backend's lanes (ADR 0198).\n\nThe group keeps the server's lifecycle — the bind, the adoption of\ninherited sockets, MaxConns, the drain, State — and Loop(v) sizes and\nplaces the engine: io_uring after a probe of the running kernel, then epoll,\non Linux, and the portable backend, the default engine's accept path\nserialised onto one handler goroutine, everywhere else. Start refuses a loop\ngroup given TLS it cannot take with LoopTLSUnsupported, one given Use or an option neither\nthe engine (IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor h,\nthrough LoopOptionHonourer, honours with LoopOptionUnsupported — an option\ngiven counts, its zero value included —, and an explicit backend the\nplatform or the kernel cannot run with UnsupportedPlatform or\nLoopBackendUnavailable.\n\nA callback of h runs on the loop's thread and must not block it: a blocking\ncall stalls every connection of its loop. h is declared once, like every\nhandler: a second declaration of any kind makes Start return\nHandlerAlreadySet.\n",
       "file": "service/net/server/loop_group.go",
       "layer": "service",
       "family": "net"

@@ -27,7 +27,7 @@ type loopEngine interface {
 // plaintext, but for the http1 codec (http1.HandleLoop), which takes TLS:
 // crypto/tls negotiates each connection on its own goroutine, bounded by
 // HandshakeTimeout, offering HTTP/1.1 alone, and the cleartext reaches the
-// codec on the portable backend's lanes (ADR 0196).
+// codec on the portable backend's lanes (ADR 0198).
 //
 // The group keeps the server's lifecycle — the bind, the adoption of
 // inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and
@@ -63,7 +63,7 @@ func (g *StreamGroup) HandleLoop(h corenet.LoopHandler) *StreamGroup {
 // It reads the set of kinds the group was given, never a guess from non-zero
 // fields (ADR 0187).
 func (g *StreamGroup) loopRefusal() error {
-	//: TLS only for the http1 codec, on the portable backend (ADR 0196); a
+	//: TLS only for the http1 codec, on the portable backend (ADR 0198); a
 	//: raw loop handler stays plaintext (ADR 0186 §D2).
 	if g.kinds.has(corenet.OptionTLS) {
 		//: a raw loop handler, or a contradiction of the TLS path.

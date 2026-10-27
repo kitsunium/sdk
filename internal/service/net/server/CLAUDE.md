@@ -34,9 +34,9 @@ Public façade: `pkg/v1/net/server`.
 | `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal — a zero-valued option included; `TestLoopGroup_middlewareRefused`, `Use` refused on every backend whatever the handler claims |
 | `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`, `UseLoop` (kind `OptionLoopMiddleware`, every call); `claimHandler`, the one-handler rule every declaration takes |
-| `simple.go` | the simple API (ADR 0195): `Server.HTTP`/`TCP`/`UDP` — `simpleGroup` (listen + `defaultName` `network+"+"+addr`, which `Name` replaces), `mountHTTPEntry`/`mountTCPEntry` (`pickEngine` by the handler's interfaces and `Engine`, `pickRefusal`: `HandlerAmbiguous`, `EngineUnsupported`, `HandlerUnsupported`), `isNil` (typed nil), `servesHTTP` + `plaintextRefusal` (`PlaintextRequired` for every HTTP group without TLS); `packetHonours` (in `server.go`) refuses a datagram group's other options with `PacketOptionUnsupported` |
+| `simple.go` | the simple API (ADR 0197): `Server.HTTP`/`TCP`/`UDP` — `simpleGroup` (listen + `defaultName` `network+"+"+addr`, which `Name` replaces), `mountHTTPEntry`/`mountTCPEntry` (`pickEngine` by the handler's interfaces and `Engine`, `pickRefusal`: `HandlerAmbiguous`, `EngineUnsupported`, `HandlerUnsupported`), `isNil` (typed nil), `servesHTTP` + `plaintextRefusal` (`PlaintextRequired` for every HTTP group without TLS); `packetHonours` (in `server.go`) refuses a datagram group's other options with `PacketOptionUnsupported` |
 | `simple_external_test.go` | each entry's engine choice and default name, `Name` replacing it, a datagram served, and every refusal: nil, typed nil, both interfaces, wrong `Engine`, wrong type, HTTP on TCP, no `Plaintext`, `Plaintext` with TLS, datagram options |
-| `loop_tls.go` | ADR 0196: the http1 codec with TLS — `tlsCodec` (the handler `Unwrap`s to an `HTTP1Handler`, TLS given), `loopTLSRefusal`/`tlsCodecRefusal` (`LoopTLSUnsupported`: a raw loop handler, a zero identity, a native backend, `UseLoop`), `tlsCodecHonours` (TLS, `HandshakeTimeout`), `loopLayers` (listeners in TLS, ALPN `http/1.1` alone), `loopBackend` (portable), `handshake` — the portable acceptor's `negotiate` runs it on a goroutine per connection before the lane sees it |
+| `loop_tls.go` | ADR 0198: the http1 codec with TLS — `tlsCodec` (the handler `Unwrap`s to an `HTTP1Handler`, TLS given), `loopTLSRefusal`/`tlsCodecRefusal` (`LoopTLSUnsupported`: a raw loop handler, a zero identity, a native backend, `UseLoop`), `tlsCodecHonours` (TLS, `HandshakeTimeout`), `loopLayers` (listeners in TLS, ALPN `http/1.1` alone), `loopBackend` (portable), `handshake` — the portable acceptor's `negotiate` runs it on a goroutine per connection before the lane sees it |
 | `loop_tls_internal_test.go` | the codec over TLS on two portable lanes, ALPN `http/1.1` alone, a silent peer closed at `HandshakeTimeout` and never counted, P2's N×N-token conformance over portable+TLS, each refusal |
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
@@ -127,7 +127,7 @@ Public façade: `pkg/v1/net/server`.
   `Group` and `PacketGroup` apply their options before the duplicate check,
   so `Name` may name a group declared with `""`; an empty `Name`, or one that
   differs from a declared name, records `GroupNameConflict`. Every HTTP group
-  without TLS must give `Plaintext` (`PlaintextRequired`, ADR 0195), and a
+  without TLS must give `Plaintext` (`PlaintextRequired`, ADR 0197), and a
   datagram group refuses every option it does not honour
   (`PacketOptionUnsupported`). `MaxConns(0)` keeps "no ceiling": zero means the default for
   options added from ADR 0187 on only.

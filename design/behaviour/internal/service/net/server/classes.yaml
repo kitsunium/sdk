@@ -2355,7 +2355,7 @@ types:
         type: "[]stdnet.Listener"
       - doc: |-
           handshake bounds a TLS connection's negotiation, which runs before the
-          lane sees it; zero for a plaintext group (ADR 0196).
+          lane sees it; zero for a plaintext group (ADR 0198).
         name: handshake
         type: time.Duration
       - doc: turn is the lane the next accepted connection goes to, modulo the count.
@@ -3683,7 +3683,7 @@ types:
         results: bool
       - doc: |-
           tlsCodec reports whether the group is the http1 codec given TLS (ADR 0187
-          §D5, ADR 0196): crypto/tls handshakes on its own goroutine, then the
+          §D5, ADR 0198): crypto/tls handshakes on its own goroutine, then the
           cleartext goes through the codec on the portable backend's lanes.
         name: tlsCodec
         recv: g *StreamGroup

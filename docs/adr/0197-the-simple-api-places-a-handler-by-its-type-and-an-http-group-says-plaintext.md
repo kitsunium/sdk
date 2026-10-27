@@ -1,4 +1,4 @@
-# ADR 0195 — the simple API places a handler by its type, and an HTTP group says Plaintext
+# ADR 0197 — the simple API places a handler by its type, and an HTTP group says Plaintext
 
 - **Status**: Accepted
 - **Date**: 2026-10-27

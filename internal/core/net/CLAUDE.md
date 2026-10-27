@@ -342,9 +342,9 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
   `OptionLoopMiddleware`, `LoopMiddlewareInvalid` (`0.2.11.61`);
   `HTTP1AuthValue`, `HTTP1AccessValue`, the two chain ports and the request's
   `Lane`, `Path`, `Query`, `Route`, `Auth`, `Authenticated` — `docs/adr/0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md`
-- ADR 0195 — `HandlerAmbiguous`, `HandlerUnsupported`, `PlaintextRequired`,
+- ADR 0197 — `HandlerAmbiguous`, `HandlerUnsupported`, `PlaintextRequired`,
   `PacketOptionUnsupported` (`0.2.11.64` – `0.2.11.67`) —
-  `docs/adr/0195-the-simple-api-places-a-handler-by-its-type-and-an-http-group-says-plaintext.md`
+  `docs/adr/0197-the-simple-api-places-a-handler-by-its-type-and-an-http-group-says-plaintext.md`
 - ADR 0188 — `Capability`, `EnvEngine`, `EnvDisable`, `OverrideValue`,
   `FaultValue`, `FallbacksValue`, `PlatformValue`, the four `StateValue`
   fields and `LoopGroupStalled` (`0.2.11.59`) —

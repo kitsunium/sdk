@@ -467,7 +467,7 @@ rules:
       - "**/internal/service/data/codec/**"
       - "internal/service/data/codec/**"
       # internal/service/net/server/simple.go — the simple API's entries take
-      # `h any` because the owner's decision D-N7 (ADR 0187 §D6, ADR 0195) is
+      # `h any` because the owner's decision D-N7 (ADR 0187 §D6, ADR 0197) is
       # that the handler's TYPE chooses the engine: HTTP takes an http.Handler
       # or an HTTP1Handler, TCP a ConnHandler or a LoopHandler, and a type no
       # engine serves must reach the entry to be refused by name
@@ -2287,7 +2287,7 @@ rules:
       - "**/internal/service/data/sql/withheld.go"
       - "internal/service/data/sql/withheld.go"
       # TEMPORARY — the same kodflow/ktn-linter#693, on http1.LoopHandler.Unwrap,
-      # the name the owner's D-N6 gives the method (ADR 0187 §D5, ADR 0196):
+      # the name the owner's D-N6 gives the method (ADR 0187 §D5, ADR 0198):
       # it is the protocol a loop group asks of its handler to learn it speaks
       # the codec, not a getter of field h. Scoped to the one file; retire
       # with #693.

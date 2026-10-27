@@ -23,7 +23,7 @@ type codecUnwrapper interface {
 }
 
 // tlsCodec reports whether the group is the http1 codec given TLS (ADR 0187
-// §D5, ADR 0196): crypto/tls handshakes on its own goroutine, then the
+// §D5, ADR 0198): crypto/tls handshakes on its own goroutine, then the
 // cleartext goes through the codec on the portable backend's lanes.
 func (g *StreamGroup) tlsCodec() bool {
 	_, codec := g.loopHandler.(codecUnwrapper)

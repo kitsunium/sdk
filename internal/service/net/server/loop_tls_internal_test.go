@@ -1,4 +1,4 @@
-// Package server — the http1 codec with TLS (ADR 0187 §D5, ADR 0196):
+// Package server — the http1 codec with TLS (ADR 0187 §D5, ADR 0198):
 // crypto/tls on its own goroutine, bounded, HTTP/1.1 alone by ALPN, then the
 // codec on the portable backend's lanes; the N connections × N tokens
 // conformance over TLS; and every combination Start refuses.

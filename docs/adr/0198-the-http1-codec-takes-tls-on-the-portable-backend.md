@@ -1,4 +1,4 @@
-# ADR 0196 — the http1 codec takes TLS on the portable backend
+# ADR 0198 — the http1 codec takes TLS on the portable backend
 
 - **Status**: Accepted
 - **Date**: 2026-10-27
@@ -51,7 +51,7 @@ an `HTTP1Handler` with TLS. The environment's switches still only restrict
 A raw `LoopHandler` given TLS is refused with `LoopTLSUnsupported`, as ADR
 0186 §D2 decided: only the codec has a cleartext it can be handed.
 
-### D3 — R6 on this path (lead's reading)
+### D3 — R6 on this path (the lead's reading, taken while the owner was away)
 
 R6 refuses a loop-only option combined with TLS. On this path,
 `LoopTLSUnsupported` with the option named refuses:

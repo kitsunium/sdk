@@ -107,7 +107,7 @@ type portableGroup struct {
 	lanes      []*portableLoop
 	lns        []stdnet.Listener
 	// handshake bounds a TLS connection's negotiation, which runs before the
-	// lane sees it; zero for a plaintext group (ADR 0196).
+	// lane sees it; zero for a plaintext group (ADR 0198).
 	handshake time.Duration
 	// turn is the lane the next accepted connection goes to, modulo the count.
 	turn     atomic.Uint64
