@@ -18,6 +18,8 @@
   carries that TLS path, and the codec runs behind it)
 - **Amended by**: [ADR 0188](0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md) §D8 (the
   switches made concrete) and §Consequences (`StateValue` gains four fields);
+  [ADR 0190](0190-a-merge-gate-judges-the-ratio-of-two-engines-measured-side-by-side.md)
+  §D10 (a ratio gate measured with both engines side by side);
   [ADR 0191](0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md) §Deferred (the loop
   middlewares, their own record);
   [ADR 0190](0190-a-merge-gate-judges-the-ratio-of-two-engines-measured-side-by-side.md)
