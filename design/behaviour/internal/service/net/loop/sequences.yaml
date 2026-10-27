@@ -1258,18 +1258,18 @@ sequences:
         kind: internal
       - id: newLoop
         kind: internal
-      - id: er.wg.Add
+      - id: runner.wg.Add
         kind: value
       - id: el.run
         kind: internal
-      - id: er.stop
+      - id: runner.stop
         kind: internal
-      - id: er.wait
+      - id: runner.wait
         kind: internal
     steps:
       - bind: fin
         eval: make(chan struct{})
-      - bind: er
+      - bind: runner
         eval: "&epollRunner{fin: fin}"
       - bind: sw
         eval: newSwitches(cfg)
@@ -1284,14 +1284,14 @@ sequences:
           do:
             - eval: noDelay(l.FD, sw)
               to: noDelay
-            - set: er.lfds
-              value: append(er.lfds, l.FD)
+            - set: runner.lfds
+              value: append(runner.lfds, l.FD)
           key: _
           range: cfg.Listeners
           value: l
-      - set: er.set
+      - set: runner.set
         to: newListenerSet
-        value: newListenerSet(er.lfds, g.sz.loops)
+        value: newListenerSet(runner.lfds, g.sz.loops)
       - bind: ready
         eval: make(chan error, g.sz.loops)
       - loop:
@@ -1300,14 +1300,14 @@ sequences:
               eval: newLoop(g, *cfg, i, mmapAnon)
               to: newLoop
             - bind: el
-              eval: "&epollLoop{lp: lp, lfds: er.lfds, set: er.set, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl}"
-            - set: er.loops
-              value: append(er.loops, el)
+              eval: "&epollLoop{lp: lp, lfds: runner.lfds, set: runner.set, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl}"
+            - set: runner.loops
+              value: append(runner.loops, el)
             - set: g.loops
               value: append(g.loops, lp)
-            - eval: er.wg.Add(1)
-              to: er.wg.Add
-            - go: el.run(&er.wg, ready)
+            - eval: runner.wg.Add(1)
+              to: runner.wg.Add
+            - go: el.run(&runner.wg, ready)
               to: el.run
           key: i
           range: g.sz.loops
@@ -1326,19 +1326,19 @@ sequences:
                 when: err != nil && first == nil
           range: g.sz.loops
       - set: g.ctl
-        value: er
+        value: runner
       - go: |-
           func() {
-          		er.wg.Wait()
-          		er.set.closeRest()
+          		runner.wg.Wait()
+          		runner.set.closeRest()
           		close(fin)
           	}()
       - opt:
           do:
-            - eval: er.stop()
-              to: er.stop
-            - eval: er.wait()
-              to: er.wait
+            - eval: runner.stop()
+              to: runner.stop
+            - eval: runner.wait()
+              to: runner.wait
             - return: first
           when: first != nil
       - set: g.backend
@@ -4374,6 +4374,25 @@ sequences:
         kind: actor
       - id: (*uRing).takeQueues
         kind: self
+      - id: rr.takeQueue
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: rr.takeQueue(i, fd)
+                    to: rr.takeQueue
+                when: "!rr.queueDone[i]"
+          key: i
+          range: rr.ul.lfds
+          value: fd
+  - of: (*uRing).takeQueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).takeQueue
+        kind: self
       - id: rr.cancelAccept
         kind: internal
       - id: rr.ul.set.handBack
@@ -4381,46 +4400,37 @@ sequences:
       - id: rr.armTake
         kind: internal
     steps:
-      - loop:
+      - bind: q
+        eval: "0"
+      - opt:
+          do:
+            - set: q
+              value: int(listenerQueue(fd))
+          when: rr.take == takeOn
+      - opt:
           do:
             - opt:
                 do:
-                  - continue: true
-                when: rr.queueDone[i]
-            - bind: q
-              eval: "0"
-            - opt:
-                do:
-                  - set: q
-                    value: int(listenerQueue(fd))
-                when: "!rr.queueSkip && !rr.queueStop"
-            - opt:
-                do:
-                  - opt:
-                      do:
-                        - set: rr.queueCancel[i]
-                          to: rr.cancelAccept
-                          value: rr.cancelAccept(i)
-                      when: q == 0 && !rr.queueCancel[i]
-                  - continue: true
-                when: rr.armed[i] > 0
-            - set: rr.queueCancel[i]
-              value: "false"
-            - bind: "n"
-              eval: min(q, acceptDepth, rr.acceptRoom())
-            - opt:
-                do:
-                  - set: rr.queueDone[i]
-                    value: "true"
-                  - eval: rr.ul.set.handBack(i)
-                    to: rr.ul.set.handBack
-                  - continue: true
-                when: n == 0
-            - eval: rr.armTake(i, fd, n)
-              to: rr.armTake
-          key: i
-          range: rr.ul.lfds
-          value: fd
+                  - set: rr.queueCancel[i]
+                    to: rr.cancelAccept
+                    value: rr.cancelAccept(i)
+                when: q == 0 && !rr.queueCancel[i]
+            - return: ""
+          when: rr.armed[i] > 0
+      - set: rr.queueCancel[i]
+        value: "false"
+      - bind: "n"
+        eval: min(q, acceptDepth, rr.acceptRoom())
+      - opt:
+          do:
+            - set: rr.queueDone[i]
+              value: "true"
+            - eval: rr.ul.set.handBack(i)
+              to: rr.ul.set.handBack
+            - return: ""
+          when: n == 0
+      - eval: rr.armTake(i, fd, n)
+        to: rr.armTake
   - of: (*uRing).armTake
     participants:
       - id: caller
@@ -4808,8 +4818,8 @@ sequences:
     steps:
       - opt:
           do:
-            - set: rr.queueStop
-              value: "true"
+            - set: rr.take
+              value: takeOff
           when: rr.ul.lp.draining && res != -int32(syscall.ECANCELED) && res != -int32(syscall.ECONNABORTED)
       - opt:
           do:
@@ -5659,7 +5669,7 @@ sequences:
         kind: actor
       - id: (*uLoop).control
         kind: self
-      - id: rr.cancelAccept
+      - id: ul.startDrain
         kind: internal
       - id: rr.takeQueues
         kind: internal
@@ -5670,28 +5680,8 @@ sequences:
         eval: ul.lp
       - opt:
           do:
-            - set: lp.draining
-              value: "true"
-            - loop:
-                do:
-                  - set: rr.queueSkip
-                    value: rr.r.draining
-                  - set: rr.r.draining
-                    value: "true"
-                  - loop:
-                      do:
-                        - opt:
-                            do:
-                              - set: rr.queueCancel[i]
-                                to: rr.cancelAccept
-                                value: rr.cancelAccept(i)
-                            when: n > 0
-                      key: i
-                      range: rr.armed
-                      value: "n"
-                key: _
-                range: ul.rings
-                value: rr
+            - eval: ul.startDrain()
+              to: ul.startDrain
           when: ul.drainReq.Load() && !lp.draining
       - opt:
           do:
@@ -5720,6 +5710,40 @@ sequences:
                   - set: s
                     value: nxt
                 init: s := r.lruHead
+          key: _
+          range: ul.rings
+          value: rr
+  - of: (*uLoop).startDrain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).startDrain
+        kind: self
+      - id: rr.cancelAccept
+        kind: internal
+    steps:
+      - set: ul.lp.draining
+        value: "true"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: rr.take
+                    value: takeOff
+                when: rr.r.draining
+            - set: rr.r.draining
+              value: "true"
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: rr.queueCancel[i]
+                          to: rr.cancelAccept
+                          value: rr.cancelAccept(i)
+                      when: n > 0
+                key: i
+                range: rr.armed
+                value: "n"
           key: _
           range: ul.rings
           value: rr

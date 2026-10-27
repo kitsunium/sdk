@@ -104,7 +104,7 @@ type epollLoop struct {
 // then returns.
 func startEpoll(g *Group, cfg *Config) error {
 	fin := make(chan struct{})
-	er := &epollRunner{fin: fin}
+	runner := &epollRunner{fin: fin}
 	sw := newSwitches(cfg)
 	g.caps = newReport(sw, "epoll")
 	excl := probeExclusive(sw, &g.caps)
@@ -112,20 +112,20 @@ func startEpoll(g *Group, cfg *Config) error {
 	//: socket inherits it; a socket that refuses it still serves.
 	for _, l := range cfg.Listeners {
 		noDelay(l.FD, sw)
-		er.lfds = append(er.lfds, l.FD)
+		runner.lfds = append(runner.lfds, l.FD)
 	}
 	//: each loop takes each listener's queue once, as the group drains.
-	er.set = newListenerSet(er.lfds, g.sz.loops)
+	runner.set = newListenerSet(runner.lfds, g.sz.loops)
 	ready := make(chan error, g.sz.loops)
 	//: one thread per loop, each building its own epoll instance after it
 	//: locked itself to its thread.
 	for i := range g.sz.loops {
 		lp := newLoop(g, *cfg, i, mmapAnon)
-		el := &epollLoop{lp: lp, lfds: er.lfds, set: er.set, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl}
-		er.loops = append(er.loops, el)
+		el := &epollLoop{lp: lp, lfds: runner.lfds, set: runner.set, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl}
+		runner.loops = append(runner.loops, el)
 		g.loops = append(g.loops, lp)
-		er.wg.Add(1)
-		go el.run(&er.wg, ready)
+		runner.wg.Add(1)
+		go el.run(&runner.wg, ready)
 	}
 	var first error
 	//: every loop says whether it came up.
@@ -135,18 +135,18 @@ func startEpoll(g *Group, cfg *Config) error {
 			first = err
 		}
 	}
-	g.ctl = er
+	g.ctl = runner
 	//: the reaper owns fin: it is the one goroutine that closes it, once,
 	//: after the last loop returned.
 	go func() {
-		er.wg.Wait()
-		er.set.closeRest()
+		runner.wg.Wait()
+		runner.set.closeRest()
 		close(fin)
 	}()
 	//: a loop that could not start stops the others.
 	if first != nil {
-		er.stop()
-		er.wait()
+		runner.stop()
+		runner.wait()
 		//: refused.
 		return first
 	}

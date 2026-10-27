@@ -60,7 +60,9 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   `queueTakeMax`), each connection admitted — a draining loop admits. io_uring:
   the accepts in flight are cancelled, and one that completed as its cancel
   crossed it is served (`refuses` refuses only on a ring the watchdog drained
-  while the group serves); once they came back, `takeQueues` arms single-shot
+  while the group serves; a ring the watchdog drained before the group, or
+  whose accept failed during the take, takes nothing — `take`); once they
+  came back, `takeQueues` arms single-shot
   accepts as many as `TCP_INFO` says are queued, within the room above the
   reserve, cancels one left waiting on an empty queue, and hands the listener
   back once the queue is empty with none in flight. The listener closes when

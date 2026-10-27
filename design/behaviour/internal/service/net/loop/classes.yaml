@@ -661,6 +661,16 @@ constants:
         name: acceptReserve
         type: int
         value: "16"
+      - doc: |-
+          takeOn is uRing.take for a ring that takes its share of the
+          listeners' queues as the group drains.
+        name: takeOn
+        type: uint8
+        value: "0"
+      - doc: takeOff is uRing.take for a ring that takes nothing more.
+        name: takeOff
+        type: uint8
+        value: "1"
       - doc: starvedCap bounds the connections waiting for a provided buffer.
         name: starvedCap
         type: int
@@ -1051,6 +1061,7 @@ files:
       - (*uRing).cancelAccepts
       - (*uRing).cancelAccept
       - (*uRing).takeQueues
+      - (*uRing).takeQueue
       - (*uRing).armTake
       - (*uLoop).queuesTaken
       - (*uRing).used
@@ -1095,6 +1106,7 @@ files:
       - (*uRing).watchdog
       - listenerQueue
       - (*uLoop).control
+      - (*uLoop).startDrain
       - (*uLoop).closeAll
       - (*uLoop).teardown
     name: uring_loop_linux.go
@@ -2932,18 +2944,15 @@ types:
       - doc: |-
           queueDone is, per listener, that the ring took its share of the
           listener's queue as the group drains and handed it back (plan P6);
-          queueCancel that a cancel of its accepts is in flight. queueSkip is a
-          ring the watchdog drained before the group did: it takes nothing.
-          queueStop is an accept that failed during the take: the ring takes no
-          more.
+          queueCancel that a cancel of its accepts is in flight. take is
+          takeOff for a ring that takes nothing more: the watchdog drained it
+          before the group did, or an accept failed during the take.
         name: queueDone
         type: "[]bool"
       - name: queueCancel
         type: "[]bool"
-      - name: queueSkip
-        type: bool
-      - name: queueStop
-        type: bool
+      - name: take
+        type: uint8
       - doc: |-
           starved are slots whose recv ran out of buffers, re-armed as buffers
           come back; recycle the buffers the batch handed out.
@@ -3051,6 +3060,10 @@ types:
           accept left waiting on an empty queue, because another ring took the
           connection, is cancelled again.
         name: takeQueues
+        recv: rr *uRing
+      - doc: takeQueue is takeQueues' step on listener i, fd.
+        name: takeQueue
+        params: i, fd int
         recv: rr *uRing
       - doc: armTake arms n single-shot accepts on listener i, fd, for the drain's take.
         name: armTake
@@ -3502,6 +3515,11 @@ types:
         results: int
       - doc: control applies the group's drain.
         name: control
+        recv: ul *uLoop
+      - doc: |-
+          startDrain begins the group's drain on every ring: its accepts in flight
+          cancelled, a ring the watchdog drained already set to take nothing.
+        name: startDrain
         recv: ul *uLoop
       - doc: |-
           closeAll fails every open connection as the loop stops, and lets the

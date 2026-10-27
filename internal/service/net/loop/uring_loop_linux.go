@@ -37,6 +37,11 @@ const (
 	// acceptReserve is the free direct-descriptor entries a ring keeps: under
 	// it the ring stops accepting, and it resumes at twice as many.
 	acceptReserve int = 16
+	// takeOn is uRing.take for a ring that takes its share of the
+	// listeners' queues as the group drains.
+	takeOn uint8 = 0
+	// takeOff is uRing.take for a ring that takes nothing more.
+	takeOff uint8 = 1
 	// starvedCap bounds the connections waiting for a provided buffer.
 	starvedCap int = 65536
 	// reapRounds bounds the CQ batches one ring reaps per iteration, so one
@@ -104,14 +109,12 @@ type uRing struct {
 	paused bool
 	// queueDone is, per listener, that the ring took its share of the
 	// listener's queue as the group drains and handed it back (plan P6);
-	// queueCancel that a cancel of its accepts is in flight. queueSkip is a
-	// ring the watchdog drained before the group did: it takes nothing.
-	// queueStop is an accept that failed during the take: the ring takes no
-	// more.
+	// queueCancel that a cancel of its accepts is in flight. take is
+	// takeOff for a ring that takes nothing more: the watchdog drained it
+	// before the group did, or an accept failed during the take.
 	queueDone   []bool
 	queueCancel []bool
-	queueSkip   bool
-	queueStop   bool
+	take        uint8
 	// starved are slots whose recv ran out of buffers, re-armed as buffers
 	// come back; recycle the buffers the batch handed out.
 	starved []int32
@@ -634,33 +637,39 @@ func (rr *uRing) cancelAccept(i int) bool {
 func (rr *uRing) takeQueues() {
 	//: each listener not handed back yet.
 	for i, fd := range rr.ul.lfds {
-		//: handed back.
-		if rr.queueDone[i] {
-			continue
+		//: handed back already.
+		if !rr.queueDone[i] {
+			rr.takeQueue(i, fd)
 		}
-		q := 0
-		//: a ring the watchdog drained, or whose accept failed, takes nothing.
-		if !rr.queueSkip && !rr.queueStop {
-			q = int(listenerQueue(fd))
-		}
-		//: accepts in flight: the drain's cancels, or this take's own.
-		if rr.armed[i] > 0 {
-			//: one waits on an empty queue: cancelled, once.
-			if q == 0 && !rr.queueCancel[i] {
-				rr.queueCancel[i] = rr.cancelAccept(i)
-			}
-			continue
-		}
-		rr.queueCancel[i] = false
-		n := min(q, acceptDepth, rr.acceptRoom())
-		//: empty, or no room left: handed back.
-		if n == 0 {
-			rr.queueDone[i] = true
-			rr.ul.set.handBack(i)
-			continue
-		}
-		rr.armTake(i, fd, n)
 	}
+}
+
+// takeQueue is takeQueues' step on listener i, fd.
+func (rr *uRing) takeQueue(i, fd int) {
+	q := 0
+	//: a ring the watchdog drained, or whose accept failed, takes nothing.
+	if rr.take == takeOn {
+		q = int(listenerQueue(fd))
+	}
+	//: accepts in flight: the drain's cancels, or this take's own.
+	if rr.armed[i] > 0 {
+		//: one waits on an empty queue: cancelled, once.
+		if q == 0 && !rr.queueCancel[i] {
+			rr.queueCancel[i] = rr.cancelAccept(i)
+		}
+		//: their completions come first.
+		return
+	}
+	rr.queueCancel[i] = false
+	n := min(q, acceptDepth, rr.acceptRoom())
+	//: empty, or no room left: handed back.
+	if n == 0 {
+		rr.queueDone[i] = true
+		rr.ul.set.handBack(i)
+		//: taken.
+		return
+	}
+	rr.armTake(i, fd, n)
 }
 
 // armTake arms n single-shot accepts on listener i, fd, for the drain's take.
@@ -897,7 +906,7 @@ func (rr *uRing) acceptFailed(res int32) {
 	//: during the drain's take, a failure other than its own cancel or a
 	//: connection the peer abandoned ends the ring's take.
 	if rr.ul.lp.draining && res != -int32(syscall.ECANCELED) && res != -int32(syscall.ECONNABORTED) {
-		rr.queueStop = true
+		rr.take = takeOff
 	}
 	//: out of entries: pause until closes make room.
 	if res == -int32(syscall.ENFILE) || res == -int32(syscall.EMFILE) {
@@ -1511,19 +1520,7 @@ func (ul *uLoop) control() {
 	//: the drain: the accepts in flight are cancelled, the listeners'
 	//: queues taken, then handed back; settled connections close.
 	if ul.drainReq.Load() && !lp.draining {
-		lp.draining = true
-		//: every ring; one the watchdog drained already takes nothing.
-		for _, rr := range ul.rings {
-			rr.queueSkip = rr.r.draining
-			rr.r.draining = true
-			//: each listener with accepts in flight.
-			for i, n := range rr.armed {
-				//: cancelled, when the SQ has room; takeQueues retries.
-				if n > 0 {
-					rr.queueCancel[i] = rr.cancelAccept(i)
-				}
-			}
-		}
+		ul.startDrain()
 	}
 	//: while draining, a connection with no partial input closes once its
 	//: output left.
@@ -1544,6 +1541,27 @@ func (ul *uLoop) control() {
 				r.markDirty(s)
 			}
 			s = nxt
+		}
+	}
+}
+
+// startDrain begins the group's drain on every ring: its accepts in flight
+// cancelled, a ring the watchdog drained already set to take nothing.
+func (ul *uLoop) startDrain() {
+	ul.lp.draining = true
+	//: every ring.
+	for _, rr := range ul.rings {
+		//: a ring the watchdog drained takes nothing.
+		if rr.r.draining {
+			rr.take = takeOff
+		}
+		rr.r.draining = true
+		//: each listener with accepts in flight.
+		for i, n := range rr.armed {
+			//: cancelled, when the SQ has room; takeQueues retries.
+			if n > 0 {
+				rr.queueCancel[i] = rr.cancelAccept(i)
+			}
 		}
 	}
 }
