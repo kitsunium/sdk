@@ -1411,17 +1411,7 @@ func (ul *uLoop) control() {
 	}
 	//: every ring, every open connection.
 	for _, rr := range ul.rings {
-		r := rr.r
-		for s := r.lruHead; s != noLink; {
-			c := &r.conns[s]
-			nxt := c.lruNext
-			//: mid-request ones finish first.
-			if c.state == stOpen && c.spill.empty() {
-				c.state, c.reason = stClosing, rDrain
-				r.markDirty(s)
-			}
-			s = nxt
-		}
+		lp.closeSettled(rr.r)
 	}
 }
 

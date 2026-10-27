@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T17:00:00Z -->
+<!-- updated: 2026-10-27T08:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -220,12 +220,19 @@ under coverage before touching `shard_count`.
   `TestALearnerWithAnOldTailPastTheCommitIsSentTheRecord`). Nor send it to
   a log whose last term is the committed entry's at or past its index, or
   a later one at or past it: such a log holds, or may hold, the commit.
-- Leave a learner that hears no leader waiting for nothing, or let its
-  question be a campaign: it never sends the PreVote #542's record answers,
-  and a learner down while a member was made leader was never fed by it
-  (#639, `askForLeader`, `mutLearnerNeverAsks`, `checkStrandedLearnerAsks`).
-  The question is a PreVote it never counts, keeping its role and its term
-  (`mutAskCampaigns`, `checkLearnerAskBindsNothing`).
+- Leave a node that may not campaign and hears no leader waiting for
+  nothing, or let its question be a campaign: a learner, a silent voter or
+  one with no table never sends the PreVote #542's record answers. A
+  learner down while a member was made leader was never fed by it (#639);
+  a silent voter whose truncated log does not list that leader was never
+  rewritten and never voted again while it led, and a voter with no table
+  was never installed (#718). Every follower or learner `promotable`
+  excludes asks (`askForLeader`, `mutLearnerNeverAsks`,
+  `checkStrandedLearnerAsks`, `checkStrandedVoterAsks`,
+  `TestASilentVoterRejoinsALeaderItsLogDoesNotList`). The question is a
+  PreVote it never counts, keeping its role and its term, and a campaign
+  never asks (`mutAskCampaigns`, `checkLearnerAskBindsNothing`,
+  `checkSilentNodeNeverCampaigns`).
 - Start the commit at the persisted one alone under a state machine
   applied past it: a commit-only Ready is written lazily, a
   `DurableStateMachine` crashed past the persisted commit, and `EngineAt`

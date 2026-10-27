@@ -256,10 +256,11 @@ type ReadyValue struct {
 	// SilenceEnded is set once the silence condition held: the driver
 	// removes it durably.
 	SilenceEnded bool
-	// LeaderUnheard is set when this learner, which never campaigns, heard
-	// no leader for askElectionTimeouts maximum election timeouts and asked
-	// its members for the leader's record: the driver of a joining node
-	// sends its JOIN again (#632, #639).
+	// LeaderUnheard is set when this node, which may not campaign (a
+	// learner, a silent voter, one with no table), heard no leader for
+	// askElectionTimeouts maximum election timeouts and asked its members
+	// for the leader's record: the driver of a joining node sends its JOIN
+	// again (#632, #639, #718).
 	LeaderUnheard bool
 	// Fetch asks the driver to read entries the step function no longer
 	// holds, off the event loop, and hand them back with Fetched.
@@ -365,8 +366,8 @@ type Raft struct {
 	// Its ID is 0 when there is none.
 	hint      core.MemberValue
 	hintUntil time.Time
-	// askedAt is when this learner last asked its members for the record
-	// of the leader they follow (#639).
+	// askedAt is when this node, which may not campaign, last asked its
+	// members for the record of the leader they follow (#639, #718).
 	askedAt time.Time
 
 	prs   map[core.NodeID]*progress
@@ -818,8 +819,8 @@ func (rd *ReadyValue) hasNotices() bool {
 }
 
 // hasStateNotice reports whether the Ready tells the driver of a state: the
-// end of the silence, an entry this version cannot apply, or a learner that
-// hears no leader.
+// end of the silence, an entry this version cannot apply, or a node that may
+// not campaign and hears no leader.
 func (rd *ReadyValue) hasStateNotice() bool {
 	return rd.SilenceEnded || rd.Unsupported.Index != 0 || rd.LeaderUnheard
 }

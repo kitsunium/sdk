@@ -223,6 +223,19 @@ type HTTP1ResponseValue struct {
 	// deferred when EndBatch returns is answered 500 and its connection
 	// closed. Only the loop adapter reads it; AppendResponse does not.
 	Defer bool
+	// Pending, set by the handler, hands the answer to the lane's worker
+	// (HTTP1Worker, R3): the loop adapter sends Job to it and writes the
+	// answer the worker fills, from the loop's thread, once it comes back.
+	// Answers after it on the same connection wait for it, in order. A queue
+	// to the worker that is full answers 503 with Retry-After at once, the
+	// connection kept; a connection that closes first drops the answer. Pending
+	// with Defer, or with no worker, is answered 500 and the connection closed.
+	// Only the loop adapter reads it.
+	Pending bool
+	// Job is the integer a pending answer's worker is given: the handler's own
+	// index of what the work needs, which it copied out of the request, since
+	// the request's bytes do not outlive the batch.
+	Job uint64
 }
 
 // HTTP1HandlerFunc adapts a plain function to HTTP1Handler.

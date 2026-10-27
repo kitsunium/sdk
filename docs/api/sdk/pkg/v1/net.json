@@ -1083,6 +1083,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Worker",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "Worker",
+      "spelled": "corenet.HTTP1Worker",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.HTTP1Worker",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1Worker",
+      "doc": "Worker is the optional capability of a Handler served on a loop group that\nanswers off the loop's thread: a Response marked Pending is filled by\nWorkHTTP1 on the lane's worker goroutine, which may block, and written once\nit returns.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Adopt",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -1931,6 +1944,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopJobValue",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopJobValue",
+      "spelled": "corenet.LoopJobValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopJobValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.LoopJobValue",
+      "doc": "LoopJobValue is one job a lane sends its worker.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopLayer",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -2006,6 +2032,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopOffloader",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopOffloader",
+      "spelled": "corenet.LoopOffloader",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopOffloader",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.LoopOffloader",
+      "doc": "LoopOffloader is the optional capability of a LoopHandler that offloads\nblocking work to one worker goroutine per lane (R3).\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopOptionHonourer",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -2032,6 +2071,50 @@
         "public": "The group option is not supported by its engine"
       },
       "doc": "LoopOptionUnsupported reports a group option a loop group cannot honour.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopOutbound",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopOutbound",
+      "spelled": "corenet.LoopOutbound",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopOutbound",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.LoopOutbound",
+      "doc": "LoopOutbound is one lane's preallocated queue to its worker; Send never\nblocks.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopOutboundFull",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopOutboundFull",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.LoopOutboundFull",
+      "code": {
+        "value": "0.2.11.63",
+        "reason": "LOOP_OUTBOUND_FULL",
+        "public": "The server cannot take more offloaded work now"
+      },
+      "doc": "LoopOutboundFull reports a job refused by a lane's full queue to its worker.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopOutboundValue",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopOutboundValue",
+      "spelled": "corenet.LoopOutboundValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopOutboundValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.LoopOutboundValue",
+      "doc": "LoopOutboundValue is what an offloader is given at Start: the lanes'\noutbounds and the output ceiling of one connection.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -2174,6 +2257,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/net.LoopValue",
       "doc": "LoopValue configures a group's loop engine, passed by Loop. Every field is\noptional: zero selects the domain default.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopWorker",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopWorker",
+      "spelled": "corenet.LoopWorker",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopWorker",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.LoopWorker",
+      "doc": "LoopWorker runs a lane's offloaded jobs, off the loop's thread; it may block.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

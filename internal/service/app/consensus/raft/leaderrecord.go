@@ -13,9 +13,10 @@ import (
 // configuration of this node listing it.
 const hintElectionTimeouts time.Duration = 4
 
-// askElectionTimeouts is how many maximum election timeouts a learner goes
-// without hearing a leader before it asks its members for the record of the
-// one they follow, and then between two questions (#639).
+// askElectionTimeouts is how many maximum election timeouts a node that may
+// not campaign goes without hearing a leader before it asks its members for
+// the record of the one they follow, and then between two questions (#639,
+// #718).
 const askElectionTimeouts time.Duration = 2
 
 // stepLeaderRecord runs the admission of a stale voter (ADR 0152 D4, #542)
@@ -122,27 +123,32 @@ func (r *Raft) mayRecordTo(m core.MessageValue) bool {
 }
 
 // askForLeader asks every other member of this node's configuration for
-// the record of the leader it follows, when this node is a learner that
+// the record of the leader it follows, when this node may not campaign and
 // heard no leader for askElectionTimeouts maximum election timeouts, at most
-// once in that time (#639). The record answers a PreVote (#542), and a
-// learner never campaigns: one down while a member was admitted and made
-// leader came back with a configuration that does not list that leader, its
-// transport refused the leader's key, and nothing vouched for it, so it was
-// never fed while that leader led and kept every raise of the cluster
-// version refused (#638).
+// once in that time. The record answers a PreVote (#542), and such a node
+// never sends one as a candidate: a learner (#639), a voter left silent by
+// TruncateAndStaySilent (#524), one with no table (D7). One down while a
+// member was admitted and made leader came back with a configuration that
+// does not list that leader, its transport refused the leader's key, and
+// nothing vouched for it. A learner was never fed while that leader led and
+// kept every raise of the cluster version refused (#638); a silent voter was
+// never rewritten, so it never ended its silence and never voted again, and
+// one more failure left the cluster with no leader (#718).
 //
 // The question is a PreVote, the kind a follower answers with the record,
-// asked and never campaigned: the learner does not become a candidate,
-// counts no answer and moves no term of its own, and a PreVote binds no
-// receiver, which raises no term on it and records nothing (R2-03). A
-// follower of a live leader drops it, a leader that hears a majority does
-// too, and a grant reaches a learner, which drops it. The Ready's
+// asked and never campaigned: the node does not become a candidate, counts
+// no answer and moves no term of its own, and a PreVote binds no receiver,
+// which raises no term on it and records nothing (R2-03). A follower of a
+// live leader drops it, a leader that hears a majority does too, and a
+// grant reaches a node that is no candidate, which drops it
+// (mayAskForLeader). Asking binds nothing the silence forbids: a silent
+// node still grants no vote and acknowledges nothing. The Ready's
 // LeaderUnheard tells the driver, which sends a joining node's JOIN again
 // (#632).
 func (r *Raft) askForLeader(now time.Time) {
 	wait := askElectionTimeouts * r.timing.ElectionTimeoutMax
-	if r.role != core.RoleLearner || r.speaks() < Protocol2 || r.mutated(mutLearnerNeverAsks) ||
-		now.Sub(r.lastLeaderContact) < wait || (!r.askedAt.IsZero() && now.Sub(r.askedAt) < wait) {
+	if !r.mayAskForLeader() || now.Sub(r.lastLeaderContact) < wait ||
+		(!r.askedAt.IsZero() && now.Sub(r.askedAt) < wait) {
 		return
 	}
 	r.askedAt = now
@@ -159,6 +165,16 @@ func (r *Raft) askForLeader(now time.Time) {
 			})
 		}
 	}
+}
+
+// mayAskForLeader reports whether this node asks for the leader's record
+// once it hears no leader: a follower or a learner that promotable
+// excludes, speaking protocol 2. Never a campaign, even one that an
+// install left outside the voters: it keeps its role until the campaign
+// ends (confChanged), and would count the grants to the question.
+func (r *Raft) mayAskForLeader() bool {
+	return (r.role == core.RoleFollower || r.role == core.RoleLearner) && !r.promotable() &&
+		r.speaks() >= Protocol2 && !r.mutated(mutLearnerNeverAsks)
 }
 
 // takeLeaderRecord admits the leader a member vouched for, provisionally:
