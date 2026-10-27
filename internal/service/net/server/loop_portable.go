@@ -644,13 +644,19 @@ func (pl *portableLoop) lookup(ref corenet.LoopConnRef) (int32, *portableConn) {
 	return int32(ref.Slot), pc
 }
 
+// heard records bytes received at now; the first ones mark the connection
+// heard, so the drain may close it once settled (ADR 0196).
+func (pc *portableConn) heard(now time.Time) {
+	pc.lastIO = now
+	//: the first byte.
+	if pc.heardAt.IsZero() {
+		pc.heardAt = now
+	}
+}
+
 // deliver hands data to the handler behind any spill.
 func (pl *portableLoop) deliver(slot int32, pc *portableConn, data []byte) {
-	pc.lastIO = time.Now()
-	//: the first byte: the drain may close it once settled.
-	if pc.heardAt.IsZero() {
-		pc.heardAt = pc.lastIO
-	}
+	pc.heard(time.Now())
 	ref := corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}
 	buf := data
 	//: behind a spill the bytes join it; appending never touches the bytes

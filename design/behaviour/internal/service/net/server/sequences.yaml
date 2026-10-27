@@ -5067,27 +5067,30 @@ sequences:
             - return: 0, nil
           when: ref.Ring != 0 || pc == nil || !pc.open || pc.reasonSet
       - return: int32(ref.Slot), pc
+  - of: (*portableConn).heard
+    steps:
+      - set: pc.lastIO
+        value: now
+      - opt:
+          do:
+            - set: pc.heardAt
+              value: now
+          when: pc.heardAt.IsZero()
   - of: (*portableLoop).deliver
     participants:
       - id: caller
         kind: actor
       - id: (*portableLoop).deliver
         kind: self
-      - id: time
-        kind: stdlib
+      - id: pc.heard
+        kind: internal
       - id: pl.finish
         kind: internal
       - id: clampUsed
         kind: internal
     steps:
-      - set: pc.lastIO
-        to: time
-        value: time.Now()
-      - opt:
-          do:
-            - set: pc.heardAt
-              value: pc.lastIO
-          when: pc.heardAt.IsZero()
+      - eval: pc.heard(time.Now())
+        to: pc.heard
       - bind: ref
         eval: "corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}"
       - bind: buf

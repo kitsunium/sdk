@@ -802,6 +802,7 @@ files:
       - (*portableLoop).writer
       - (*portableLoop).lookupSlot
       - (*portableLoop).lookup
+      - (*portableConn).heard
       - (*portableLoop).deliver
       - clampUsed
       - (*portableLoop).pending
@@ -3103,6 +3104,13 @@ types:
         name: compact
         type: bool
     kind: struct
+    methods:
+      - doc: |-
+          heard records bytes received at now; the first ones mark the connection
+          heard, so the drain may close it once settled (ADR 0196).
+        name: heard
+        params: now time.Time
+        recv: pc *portableConn
     name: portableConn
   - doc: |-
       portableGroup is the portable backend (ADR 0186 §D3, §D7): the default
