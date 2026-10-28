@@ -41,7 +41,7 @@ adapter.
 
 | File | Surface |
 |---|---|
-| `gen_codes.go` | the 61 `Code` constants, `0.2.11.1` – `0.2.11.61`; the matching `*errs.Error` sentinels — written by kit gen from `design/net.yaml` (ADR 0164) |
+| `gen_codes.go` | the 65 `Code` constants, `0.2.11.1` – `0.2.11.61` and `0.2.11.64` – `0.2.11.67`; the matching `*errs.Error` sentinels — written by kit gen from `design/net.yaml` (ADR 0164) |
 | `wrap.go` | `wrapAs(sentinel, cause, fields...)` — origin-wins sentinel wrapping |
 | `identity.go` | `IdentityValue` — the opaque, redacting TLS identity + `NewIdentityValue` |
 | `identity_params.go` | `IdentityParams` — in-memory TLS material |
@@ -274,8 +274,14 @@ SSE terminator scan — moved with the code that pays them, to
 | 0.2.11.59 | `LoopGroupStalled` | 69 |
 | 0.2.11.60 | `LoopCapabilityRefused` | 78 |
 | 0.2.11.61 | `LoopMiddlewareInvalid` | 78 |
+| 0.2.11.62 | `ProtocolsRefused` | 78 |
+| 0.2.11.63 | `LoopOutboundFull` | 75 |
+| 0.2.11.64 | `HandlerAmbiguous` | 64 |
+| 0.2.11.65 | `HandlerUnsupported` | 64 |
+| 0.2.11.66 | `PlaintextRequired` | 78 |
+| 0.2.11.67 | `PacketOptionUnsupported` | 78 |
 
-`0.2.11.62` – `0.2.11.255` reserved. The `HTTP1*` refusals carry their
+`0.2.11.68` – `0.2.11.255` reserved. The `HTTP1*` refusals carry their
 answer's status in `http:` (400, 413, 414, 417, 431, 501).
 
 ## Imports allowed
@@ -353,6 +359,9 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
   `HTTP1ResponseValue.Pending`/`Job` — `docs/adr/0194-a-loop-lane-offloads-to-its-own-worker-and-an-http1-answer-may-be-pending.md`
 - ADR 0195 — `OptionProtocols`, `ProtocolsRefused` (`0.2.11.62`) —
   `docs/adr/0195-an-http-groups-protocols-are-computed-once-and-its-alpn-follows-them.md`
+- ADR 0197 — `HandlerAmbiguous`, `HandlerUnsupported`, `PlaintextRequired`,
+  `PacketOptionUnsupported` (`0.2.11.64` – `0.2.11.67`) —
+  `docs/adr/0197-the-simple-api-places-a-handler-by-its-type-and-an-http-group-says-plaintext.md`
 - ADR 0188 — `Capability`, `EnvEngine`, `EnvDisable`, `OverrideValue`,
   `FaultValue`, `FallbacksValue`, `PlatformValue`, the four `StateValue`
   fields and `LoopGroupStalled` (`0.2.11.59`) —

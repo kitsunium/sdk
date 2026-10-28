@@ -41,7 +41,7 @@
 //	routes, _ := http1.Routes(http1.Route{ID: routeItem, Method: "GET", Path: "/items/", Prefix: true},
 //		http1.Route{ID: routeHealth, Path: "/health"})
 //	bearer, _ := http1.Bearer(verifier, routeHealth) // /health needs no token
-//	srv.Group("api", server.Listen("tcp", ":8080"), server.Loop(server.LoopValue{Loops: 2})).
+//	srv.Group("api", server.Listen("tcp", ":8080"), server.Loop(server.LoopValue{Loops: 2}), server.Plaintext()).
 //		HandleLoop(http1.HandleLoop(http1.Chain(a, routes, bearer), http1.Parser{}))
 //
 // A handler runs on its lane's thread and must not block it. Every callback

@@ -44,6 +44,8 @@ Public façade: `pkg/v1/net/server`.
 | `exclusive.go`, `exclusive_{windows,other}.go` | ADR 0193: `listenControl` — `SO_REUSEPORT` when sharded, `SO_EXCLUSIVEADDRUSE` on Windows for unicast TCP/UDP (`exclusiveApplies`, multicast and AF_UNIX excluded) before bind; `exclusiveOf` reads it back from an adopted socket, never fatal; `bindRetrying` — Windows rebinds a `WSAEADDRINUSE` TCP address eight times at most, 25 ms doubling to 1 s, the wait in `BindWait` (UDP, other platforms and a port the server already holds — `Server.rebindAttempts`/`holdsPort` — one attempt); `closeConn` — Windows' graceful close, `CloseWrite` then a read to zero bounded by 500 ms and 64 KiB |
 | `exclusive_internal_test.go`, `exclusive_windows_internal_test.go` | the retry and the applicability rule everywhere; on Windows both sockets exclusive, a second bind refused, a plain socket read as not exclusive, a restart on the same address after three echoed connections |
 | `conn.go` | the pooled `corenet.Conn` implementation, the `hijacked` hand-over flag, `refused` (the ceiling turned it away: closed at once), and `closeGracefully`, the engine's own close (ADR 0193) |
+| `simple.go` | the simple API (ADR 0197): `Server.HTTP`/`TCP`/`UDP` — `simpleGroup` (listen + `defaultName` `network+"+"+addr`, which `Name` replaces), `mountHTTPEntry`/`mountTCPEntry` (`pickEngine` by the handler's interfaces and `Engine`, `pickRefusal`: `HandlerAmbiguous`, `EngineUnsupported`, `HandlerUnsupported`), `isNil` (typed nil), `servesHTTP` + `plaintextRefusal` (`PlaintextRequired` for every HTTP group without TLS); `packetHonours` (in `server.go`) refuses a datagram group's other options with `PacketOptionUnsupported` |
+| `simple_external_test.go` | each entry's engine choice and default name, `Name` replacing it, a datagram served, and every refusal: nil, typed nil, both interfaces, wrong `Engine`, wrong type, HTTP on TCP, no `Plaintext`, `Plaintext` with TLS, datagram options |
 | `pool.go` | per-connection recycling + the live-socket registry |
 | `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes`, `Loop`, refused by every group no loop handler serves, and `Plaintext`, `Name` and `Engine` (ADR 0187); each records its kind; `WithDrainGrace` (ADR 0196) |
 | `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
@@ -139,9 +141,10 @@ Public façade: `pkg/v1/net/server`.
   shim is judged the same way at declaration (`judgePacketOptions`).
   `Group` and `PacketGroup` apply their options before the duplicate check,
   so `Name` may name a group declared with `""`; an empty `Name`, or one that
-  differs from a declared name, records `GroupNameConflict`. `Plaintext` is
-  not yet required of a plaintext HTTP group: that lands with the simple API
-  (ADR 0187 §D7). `MaxConns(0)` keeps "no ceiling": zero means the default for
+  differs from a declared name, records `GroupNameConflict`. Every HTTP group
+  without TLS must give `Plaintext` (`PlaintextRequired`, ADR 0197), and a
+  datagram group refuses every option it does not honour
+  (`PacketOptionUnsupported`). `MaxConns(0)` keeps "no ceiling": zero means the default for
   options added from ADR 0187 on only.
 - **A loop group is a group like the others, served by another engine** (ADR
   0186 §D1, §D3). It binds and adopts through the same `listen` and

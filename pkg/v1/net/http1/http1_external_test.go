@@ -116,7 +116,7 @@ func servesHTTP(t *testing.T, b server.LoopBackend) {
 	srv := server.New()
 	t.Cleanup(func() { _ = srv.Close() })
 	srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.IdleTimeout(time.Minute),
-		server.Loop(server.LoopValue{Backend: b})).HandleLoop(http1.HandleLoop(h, http1.Parser{}))
+		server.Loop(server.LoopValue{Backend: b}), server.Plaintext()).HandleLoop(http1.HandleLoop(h, http1.Parser{}))
 	//: served on the platform's best loop backend.
 	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("Start: %v", err)

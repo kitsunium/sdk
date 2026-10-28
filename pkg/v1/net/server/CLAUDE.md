@@ -50,6 +50,7 @@ in the dimension that motivated the domain, whatever else it gained.
 | `LoopHandler`, `LoopIO`, `LoopOptionHonourer`, `LoopConnRef`, `PostFunc`, `OptionKind`, `Option*` | the loop ports and values (§D9 step 6); `LoopIO.Loop` names the loop a callback runs on, so a handler keeps per-loop state in a slice; `TestLoopPortsArePublic` writes one with this package alone |
 | `LoopState`, `LoopRingState` | `State.Loops`, empty while no loop group exists |
 | `Plaintext`, `Name`, `Engine`, `EngineValue`, `EngineAuto`, `EngineGoroutine`, `EngineLoop` | ADR 0187: a group declared plaintext, named, or pinned to an engine family; honoured by every engine, a contradiction refused at `Start` with `EngineUnsupported`, `PlaintextWithTLS` or `GroupNameConflict` |
+| `Server.HTTP`, `Server.TCP`, `Server.UDP`, `HandlerAmbiguous`, `HandlerUnsupported`, `PlaintextRequired`, `PacketOptionUnsupported` | the simple API (ADR 0197): the handler's type chooses the engine, the group is `network+addr` unless `Name`; every HTTP group without TLS says `Plaintext()`; a datagram group refuses options it cannot honour |
 | `EngineUnsupported`, `PlaintextWithTLS`, `GroupNameConflict` | ADR 0187's sentinels |
 | `HandlerAlreadySet`, `LoopTLSUnsupported` … `LoopWrongThread` | the loop's sentinels, and a second handler on one group |
 

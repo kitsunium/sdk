@@ -209,12 +209,15 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [type Server](<#Server>)
   - [func \(\*Server\) Close\(\) error](<#Server.Close>)
   - [func \(\*Server\) Group\(name string, opts ...GroupOption\) \*StreamGroup](<#Server.Group>)
+  - [func \(\*Server\) HTTP\(addr string, h any, opts ...GroupOption\) \*StreamGroup](<#Server.HTTP>)
   - [func \(\*Server\) PacketGroup\(name string, opts ...GroupOption\) \*PacketGroup](<#Server.PacketGroup>)
   - [func \(\*Server\) RegisterHealth\(h corehealth.Health\) error](<#Server.RegisterHealth>)
   - [func \(\*Server\) Serve\(ctx context.Context\) error](<#Server.Serve>)
   - [func \(\*Server\) Shutdown\(ctx context.Context\) error](<#Server.Shutdown>)
   - [func \(\*Server\) Start\(ctx context.Context\) error](<#Server.Start>)
   - [func \(\*Server\) State\(\) corenet.StateValue](<#Server.State>)
+  - [func \(\*Server\) TCP\(addr string, h any, opts ...GroupOption\) \*StreamGroup](<#Server.TCP>)
+  - [func \(\*Server\) UDP\(addr string, h any, opts ...GroupOption\) \*PacketGroup](<#Server.UDP>)
 - [type State](<#State>)
   - [func \(State\) Degraded\(\) bool](<#State.Degraded>)
 
@@ -704,6 +707,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.HandlerAlreadySet`.
 
 Code `0.2.11.44` · reason `HANDLER_ALREADY_SET` · public "The listener group already has a handler"
 
+<a name="HandlerAmbiguous"></a>
+```go
+var HandlerAmbiguous *errs.Error
+```
+
+HandlerAmbiguous reports a simple-API handler that could run on two engines and no Engine chooses.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.HandlerAmbiguous`.
+
+Code `0.2.11.64` · reason `HANDLER_AMBIGUOUS` · public "The handler could run on two engines; choose one with Engine"
+
 <a name="HandlerMissing"></a>
 ```go
 var HandlerMissing *errs.Error
@@ -714,6 +728,17 @@ HandlerMissing reports a group declared without a handler.
 Initialised with `github.com/kitsunium/sdk/internal/core/net.HandlerMissing`.
 
 Code `0.2.11.7` · reason `HANDLER_MISSING` · public "The listener group has no handler"
+
+<a name="HandlerUnsupported"></a>
+```go
+var HandlerUnsupported *errs.Error
+```
+
+HandlerUnsupported reports a handler no engine of its simple-API entry serves.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.HandlerUnsupported`.
+
+Code `0.2.11.65` · reason `HANDLER_UNSUPPORTED` · public "The handler cannot be served by this entry point"
 
 <a name="InvalidAddress"></a>
 ```go
@@ -879,6 +904,28 @@ LoopWrongThread reports, under loopdebug, a loop operation off the loop's thread
 Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopWrongThread`.
 
 Code `0.2.11.43` · reason `LOOP_WRONG_THREAD` · public "The operation was called outside its loop"
+
+<a name="PacketOptionUnsupported"></a>
+```go
+var PacketOptionUnsupported *errs.Error
+```
+
+PacketOptionUnsupported reports an option a datagram group cannot honour.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.PacketOptionUnsupported`.
+
+Code `0.2.11.67` · reason `PACKET_OPTION_UNSUPPORTED` · public "The datagram group cannot honour one of its options"
+
+<a name="PlaintextRequired"></a>
+```go
+var PlaintextRequired *errs.Error
+```
+
+PlaintextRequired reports an HTTP group given neither TLS nor Plaintext.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.PlaintextRequired`.
+
+Code `0.2.11.66` · reason `PLAINTEXT_REQUIRED` · public "The HTTP group needs TLS or Plaintext"
 
 <a name="PlaintextWithTLS"></a>
 ```go
@@ -1095,7 +1142,7 @@ NewLoopLayer returns the LoopLayer a loop middleware's layer embeds over next, f
 func Plaintext() GroupOption
 ```
 
-Plaintext declares that the group serves no TLS. Every engine honours it. A group given both Plaintext and TLS, in either order, fails Start with PlaintextWithTLS. It is not yet required of a plaintext group: the simple API will require it of every HTTP group without TLS.
+Plaintext declares that the group serves no TLS. Every engine honours it. A group given both Plaintext and TLS, in either order, fails Start with PlaintextWithTLS. An HTTP group without TLS must give it, or fails Start with PlaintextRequired.
 
 <a name="Protocols"></a>
 ## func [Protocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -2734,6 +2781,15 @@ Group declares a listener group and returns it for handler attachment.
 
 It returns the group rather than (group, error) on purpose: a declaration error is recorded and surfaced by Start, so the common path stays a single chained expression instead of an error check per line.
 
+<a name="Server.HTTP"></a>
+### func \(Server\) [HTTP](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/simple.go>)
+
+```go
+func (*Server) HTTP(addr string, h any, opts ...GroupOption) *StreamGroup
+```
+
+HTTP declares a group serving h over HTTP on addr, a TCP address — the simple API (ADR 0187 §D6, ADR 0197). h is an http.Handler, served by net/http on the goroutine engine, or an HTTP1Handler, served by the http1 profile's codec on the loop engine; a handler that is both needs Engine to choose. The group is named "tcp+" + addr unless Name says otherwise, and opts apply as they do to Group. Without TLS, Plaintext is required (ADR 0187 §D7). Every refusal is reported by Start: a nil or typed nil handler (HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an Engine the handler cannot run on (EngineUnsupported), a type no engine of HTTP serves (HandlerUnsupported), Plaintext with TLS (PlaintextWithTLS), neither (PlaintextRequired).
+
 <a name="Server.PacketGroup"></a>
 ### func \(Server\) [PacketGroup](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/server.go>)
 
@@ -2793,6 +2849,24 @@ func (*Server) State() corenet.StateValue
 ```
 
 State returns a snapshot of the server's lifecycle and listeners.
+
+<a name="Server.TCP"></a>
+### func \(Server\) [TCP](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/simple.go>)
+
+```go
+func (*Server) TCP(addr string, h any, opts ...GroupOption) *StreamGroup
+```
+
+TCP declares a group serving h on addr, a TCP address — the simple API. h is a ConnHandler, one goroutine per connection, or a LoopHandler, on the loop engine; a handler that is both needs Engine to choose. An HTTP handler is refused with HandlerUnsupported: HTTP serves it. The group is named "tcp+" + addr unless Name says otherwise. Start also refuses a nil or typed nil handler (HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an Engine the handler cannot run on (EngineUnsupported), any other type (HandlerUnsupported) and Plaintext with TLS (PlaintextWithTLS); a TCP group serves no HTTP, so it needs neither TLS nor Plaintext.
+
+<a name="Server.UDP"></a>
+### func \(Server\) [UDP](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/simple.go>)
+
+```go
+func (*Server) UDP(addr string, h any, opts ...GroupOption) *PacketGroup
+```
+
+UDP declares a datagram group serving h on addr, a UDP address — the simple API. h is a PacketHandler; anything else, a LoopHandler included, is refused with HandlerUnsupported, and a nil or typed nil handler with HandlerMissing. The group is named "udp+" + addr unless Name says otherwise; every option the datagram engine does not honour is refused, as on any datagram group.
 
 <a name="State"></a>
 ## type [State](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)

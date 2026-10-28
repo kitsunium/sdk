@@ -89,7 +89,7 @@ sequences:
           		server.Listen("tcp", cfg.Addr), server.Shards(cfg.Shards),
           		server.ReadHeaderTimeout(cfg.ReadHeader), server.ReadTimeout(cfg.Read),
           		server.WriteTimeout(cfg.Write), server.IdleTimeout(cfg.Idle),
-          		server.MaxHeaderBytes(cfg.MaxHeaderBytes),
+          		server.MaxHeaderBytes(cfg.MaxHeaderBytes), server.Plaintext(),
           	).HandleHTTP
         kind: value
     steps:
@@ -101,14 +101,14 @@ sequences:
           		server.Listen("tcp", cfg.Addr), server.Shards(cfg.Shards),
           		server.ReadHeaderTimeout(cfg.ReadHeader), server.ReadTimeout(cfg.Read),
           		server.WriteTimeout(cfg.Write), server.IdleTimeout(cfg.Idle),
-          		server.MaxHeaderBytes(cfg.MaxHeaderBytes),
+          		server.MaxHeaderBytes(cfg.MaxHeaderBytes), server.Plaintext(),
           	).HandleHTTP(cfg.Handler)
         to: |-
           srv.Group("http",
           		server.Listen("tcp", cfg.Addr), server.Shards(cfg.Shards),
           		server.ReadHeaderTimeout(cfg.ReadHeader), server.ReadTimeout(cfg.Read),
           		server.WriteTimeout(cfg.Write), server.IdleTimeout(cfg.Idle),
-          		server.MaxHeaderBytes(cfg.MaxHeaderBytes),
+          		server.MaxHeaderBytes(cfg.MaxHeaderBytes), server.Plaintext(),
           	).HandleHTTP
       - return: "httpServer{srv: srv}"
   - of: newStaticFiles

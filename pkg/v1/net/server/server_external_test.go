@@ -1055,10 +1055,14 @@ func echo(t *testing.T, network, addr, line string) string {
 	return reply
 }
 
-// startHTTP mounts a handler on our engine and returns its base URL.
+// startHTTP mounts a handler on our engine and returns its base URL. A group
+// given no option is plaintext, and says so; one given TLS passes it.
 func startHTTP(t *testing.T, h http.Handler, opts ...server.GroupOption) (srv *server.Server, base string) {
 	t.Helper()
 	srv = server.New()
+	if len(opts) == 0 {
+		opts = []server.GroupOption{server.Plaintext()}
+	}
 	all := append([]server.GroupOption{server.Listen("tcp", "127.0.0.1:0")}, opts...)
 	srv.Group("api", all...).HandleHTTP(h)
 	if err := srv.Start(t.Context()); err != nil {

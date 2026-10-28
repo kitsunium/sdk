@@ -51,6 +51,9 @@ type StreamGroup struct {
 	// §D1). The group records it because a handler is declared on the group,
 	// after Group has returned and released the server's lock.
 	declErr error
+	// defaultName is the simple API's default name, which a Name option
+	// replaces; empty for a group declared by Group.
+	defaultName string
 	// declared records that a handler was declared, even a nil one, so a
 	// second declaration is caught whatever the first one passed.
 	declared bool

@@ -86,7 +86,7 @@ func TestLoopChain_tokensStayTheirs(t *testing.T) {
 				res.Body = append([]byte(nil), req.Auth.Subject()...)
 			})
 			h := http1.HandleLoop(corenet.Chain[corenet.HTTP1Handler](app, routes, bearer), http1.Parser{})
-			_, addr := startLoopServer(t, b, h, Loop(corenet.LoopValue{Backend: b, Loops: 2}))
+			_, addr := startLoopServer(t, b, h, Loop(corenet.LoopValue{Backend: b, Loops: 2}), Plaintext())
 			var wg sync.WaitGroup
 			errc := make(chan error, conns)
 			for i := range conns {

@@ -16,7 +16,7 @@ func (g *StreamGroup) reconcileName() {
 		return
 	}
 	//: a Name that names something, and contradicts nothing.
-	if g.optName != "" && (g.name == "" || g.name == g.optName) {
+	if g.optName != "" && (g.name == "" || g.name == g.defaultName || g.name == g.optName) {
 		g.name = g.optName
 		//: the group is named.
 		return
