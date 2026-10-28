@@ -1608,7 +1608,9 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
 ### D7 — Snapshots and compaction ship in v1
 
 - **Trigger:** after `SnapshotEvery` applied entries (default 16 384) or
-  `SnapshotEveryBytes` of log (default 64 MiB), whichever comes first. **Snapshots follow the core model (R5-01):**
+  `SnapshotEveryBytes` of log (default 64 MiB), whichever comes first; the
+  bytes count what a durable machine's start resumes past and what a cut
+  that published nothing took (amendment of 2026-10-28, #744). **Snapshots follow the core model (R5-01):**
   - every cut is checksummed: a SHA-256 per chunk of the file, and one over
     the decoded stream;
   - a node STARTS from its latest snapshot whose checksums pass, plus the log
@@ -5560,6 +5562,39 @@ one more at each restart.
   `TestALogIsCompactedWithoutARestart`, and in `raft/`
   `TestACompactionAtOrBelowTheBaseStillReachesTheStore`.
 
+## Amendment — the byte trigger counts what a start resumes past, and what a failed cut took (2026-10-28, #744)
+
+The byte trigger (#515) counted, in the running process, the payload
+applied since the last cut started, from 0 at every start. A volatile
+machine replays the log from the base at its start, and the replay counts
+those bytes again. A `DurableStateMachine` resumes past what it already
+holds, and those entries are never handed to apply again. A durable node
+restarted before each `SnapshotEveryBytes` of payload never cut on bytes:
+only the count trigger was left, `SnapshotEvery` entries, 512 MiB of log at
+32 KiB an entry, and with entries of about 24 KiB or more the log reached
+the no-space alarm first, which refused every command of the cluster
+([#744](https://github.com/kitsunium/sdk/issues/744)). A cut also zeroed
+the count as it started: one that published nothing — a full disk under
+the spool, a commit it waits for (#707) — left the byte trigger a whole
+interval to wait after #520's backoff.
+
+- **A start counts the payload it resumes past.** The start sums, as it
+  reads the tail and before any payload is dropped from memory (#663), the
+  payload of the entries between the base, the last cut, and the index the
+  step function resumes applying past, and the trigger starts from that
+  sum. A volatile machine resumes at the base and counts nothing there. A
+  machine past the log's end may have an entry counted twice, which brings
+  its next cut forward, never back.
+- **A cut that publishes nothing gives back what it took.** The count a cut
+  started from is added back when its capture or its write fails, so the
+  retry after the wait comes on the payload already applied.
+- No frame, payload or record format changes, nothing new is persisted,
+  and no raft mutation. forgejo runs a volatile machine and was not
+  exposed. `TestADurableNodeRestartedBeforeEachByteCutStillCuts`,
+  `TestOneDurableVoterRestartedOnThatRhythmKeepsTheClusterWriting` (three
+  durable voters, the one restarted every 48 KiB cuts as the others do) and
+  `TestACutThatPublishesNothingGivesBackTheBytesItTook` hold it.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5589,6 +5624,7 @@ one more at each restart.
 | #724 | Raft hunt loop, 2026-10-28 | a follower or a learner that hears its leader but whose transport cannot reach it asks its members for the leader's record, and dials that leader at the committed address the record gives, under the key it already pins, until its own configuration catches up; no format change, no raft mutation (amendment of 2026-10-28, #724) |
 | #723 | Raft hunt loop, 2026-10-28 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when neither a snapshot nor a configuration entry before the damage would remain; `WipeAndRejoin` is the exit; no format change (amendment of 2026-10-28, #723) |
 | #741 | Raft hunt loop, 2026-10-28 | a cut compacts the store through the older snapshot less the trailing window even at or below the base a restart started the step function on; no format change, no raft mutation (amendment of 2026-10-28, #741) |
+| #744 | Raft hunt loop, 2026-10-28 | the byte trigger counts the payload a durable machine's start resumes past, and a cut that published nothing gives back the count it took; no format change, nothing persisted (amendment of 2026-10-28, #744) |
 
 ## raft-sql-poc (owner's prior Raft)
 

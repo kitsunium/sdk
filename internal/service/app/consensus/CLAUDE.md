@@ -585,6 +585,16 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   the term read from its own entry; another store's `CompactPrefix` is not
   asked below its first index (`compactLog`,
   `TestANodeRestartedBetweenItsCutsStillCompactsItsLog`).
+- Start the byte trigger from 0, or zero it for a cut that published
+  nothing: a `DurableStateMachine` resumes past entries the start never
+  hands to apply, and one restarted before each `SnapshotEveryBytes` never
+  cut on bytes, its log grown to the alarm; a failed cut left the trigger
+  a whole interval to wait. `readTail` sums the payload of the entries the
+  start resumes past into `sinceBytes`, before any is dropped, and a cut
+  that publishes nothing gives back what it took (`giveSinceBytes`, #744,
+  `TestADurableNodeRestartedBeforeEachByteCutStillCuts`,
+  `TestOneDurableVoterRestartedOnThatRhythmKeepsTheClusterWriting`,
+  `TestACutThatPublishesNothingGivesBackTheBytesItTook`).
 - Hand raft a caller's buffer: `Propose` copies its payload. The leader
   keeps the entry and resends it while a peer lags, and a caller that
   reused its buffer changed it under its body sum: every follower refused

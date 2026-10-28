@@ -9078,11 +9078,11 @@ sequences:
         kind: internal
       - id: n.unpublishNewer
         kind: internal
+      - id: stepApplied
+        kind: internal
       - id: n.readTail
         kind: internal
       - id: n.startApplied
-        kind: internal
-      - id: stepApplied
         kind: internal
     steps:
       - bind: metas, err
@@ -9151,13 +9151,18 @@ sequences:
             eval: n.unpublishNewer(failed)
             to: n.unpublishNewer
           when: err != nil
-      - bind: ents, evicted, err
-        eval: n.readTail(first, last, snapIdx, hs.Commit)
+      - bind: resumed
+        eval: stepApplied(max(snapIdx, durIdx), snapIdx, hs.Commit, dur)
+        to: stepApplied
+      - bind: ents, evicted, resumedBytes, err
+        eval: n.readTail(first, last, snapIdx, hs.Commit, resumed)
         to: n.readTail
       - opt:
           do:
             - return: raft.StartState{}, err
           when: err != nil
+      - set: n.snapState.sinceBytes
+        value: resumedBytes
       - opt:
           do:
             - return: |-
@@ -9424,7 +9429,7 @@ sequences:
         eval: max(first, snapIdx+1)
       - opt:
           do:
-            - return: nil, 0, nil
+            - return: nil, 0, 0, nil
           when: last < lo
       - bind: count
         eval: int(last - lo + 1)
@@ -9432,7 +9437,7 @@ sequences:
         eval: |-
           tailLoad{
           		ents: make([]coreconsensus.EntryValue, 0, count+count/4),
-          		lo:   lo, commit: min(commit, last), dropped: lo - 1, keep: n.cfg.RecentEntriesBytes,
+          		lo:   lo, commit: min(commit, last), dropped: lo - 1, keep: n.cfg.RecentEntriesBytes, resumed: resumed,
           	}
       - loop:
           cond: next <= last
@@ -9442,17 +9447,17 @@ sequences:
               to: n.cfg.Log.Entries
             - opt:
                 do:
-                  - return: nil, 0, err
+                  - return: nil, 0, 0, err
                 when: err != nil
             - opt:
                 do:
-                  - return: nil, 0, storageFailed("entries", errImpossible)
+                  - return: nil, 0, 0, storageFailed("entries", errImpossible)
                 when: "!contiguousFrom(batch, next)"
             - eval: t.add(batch)
               to: t.add
           init: next := lo
           post: next = lo + uint64(len(t.ents))
-      - return: t.ents, t.evicted(), nil
+      - return: t.ents, t.evicted(), t.resumedBytes, nil
   - of: (*tailLoad).add
     participants:
       - id: caller
@@ -9470,6 +9475,12 @@ sequences:
             - op: +=
               set: t.held
               value: int64(len(batch[i].Data))
+            - opt:
+                do:
+                  - op: +=
+                    set: t.resumedBytes
+                    value: int64(len(batch[i].Data))
+                when: batch[i].Position.Index <= t.resumed
           key: i
           range: batch
       - set: t.ents
@@ -18780,13 +18791,13 @@ sequences:
         kind: self
       - id: origin
         kind: internal
-      - id: n.snapState.mu.Lock
-        kind: value
-      - id: n.snapState.mu.Unlock
-        kind: value
+      - id: n.takeSinceBytes
+        kind: internal
       - id: n.cuttingSince.Store
         kind: value
       - id: n.metaAt
+        kind: internal
+      - id: n.giveSinceBytes
         kind: internal
       - id: n.cfg.Machine.Snapshot
         kind: value
@@ -18800,12 +18811,9 @@ sequences:
             - return: origin(coreconsensus.SnapshotCorrupt, errs.String("why", "a cut at term 0"), errs.String("index", u64s(idx)))
               to: origin
           when: idx > 0 && term == 0
-      - eval: n.snapState.mu.Lock()
-        to: n.snapState.mu.Lock
-      - set: n.snapState.sinceBytes
-        value: "0"
-      - eval: n.snapState.mu.Unlock()
-        to: n.snapState.mu.Unlock
+      - bind: taken
+        eval: n.takeSinceBytes()
+        to: n.takeSinceBytes
       - eval: n.cuttingSince.Store(n.clk.Now().UnixNano())
         to: n.cuttingSince.Store
       - defer: n.cuttingSince.Store(0)
@@ -18815,6 +18823,8 @@ sequences:
         to: n.metaAt
       - opt:
           do:
+            - eval: n.giveSinceBytes(taken)
+              to: n.giveSinceBytes
             - return: err
           when: err != nil
       - bind: snap, err
@@ -18822,12 +18832,23 @@ sequences:
         to: n.cfg.Machine.Snapshot
       - opt:
           do:
+            - eval: n.giveSinceBytes(taken)
+              to: n.giveSinceBytes
             - return: err
           when: err != nil
       - opt:
           do:
-            - return: n.writeSnapshot(snap, meta)
-              to: n.writeSnapshot
+            - opt:
+                do:
+                  - eval: n.giveSinceBytes(taken)
+                    to: n.giveSinceBytes
+                  - return: err
+                init:
+                  bind: err
+                  eval: n.writeSnapshot(snap, meta)
+                  to: n.writeSnapshot
+                when: err != nil
+            - return: nil
           when: n.cfg.SnapshotPausesApply || wait
       - eval: n.wg.Add(1)
         to: n.wg.Add
@@ -18835,12 +18856,40 @@ sequences:
           func() {
           		defer n.wg.Done()
           		if err := n.writeSnapshot(snap, meta); err != nil {
+          			n.giveSinceBytes(taken)
           			n.cutFailed(err)
           			return
           		}
           		n.cutPending()
           	}()
       - return: nil
+  - of: (*Node).takeSinceBytes
+    steps:
+      - lock:
+          mutex: n.snapState.mu
+      - bind: taken
+        eval: n.snapState.sinceBytes
+      - set: n.snapState.sinceBytes
+        value: "0"
+      - return: taken
+  - of: (*Node).giveSinceBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).giveSinceBytes
+        kind: self
+      - id: n.snapState.mu.Lock
+        kind: value
+      - id: n.snapState.mu.Unlock
+        kind: value
+    steps:
+      - eval: n.snapState.mu.Lock()
+        to: n.snapState.mu.Lock
+      - op: +=
+        set: n.snapState.sinceBytes
+        value: taken
+      - eval: n.snapState.mu.Unlock()
+        to: n.snapState.mu.Unlock
   - of: (*Node).cutPending
     participants:
       - id: caller

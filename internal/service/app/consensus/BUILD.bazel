@@ -104,6 +104,7 @@ go_test(
         "disk_cluster_internal_test.go",
         "diskfull_internal_test.go",
         "durable_term_internal_test.go",
+        "durablebytes_internal_test.go",
         "durablecut_internal_test.go",
         "election_internal_test.go",
         "emptysilence_internal_test.go",
