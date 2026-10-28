@@ -4349,7 +4349,7 @@ packages:
             recv: pointer
           - doc: |-
               Compact forgets the entries through index, which a durable snapshot
-              covers.
+              covers, and asks the store to drop them, even at or below the base.
             in:
               - name: index
                 type: uint64

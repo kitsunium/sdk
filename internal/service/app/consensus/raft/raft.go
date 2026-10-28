@@ -696,16 +696,25 @@ func (r *Raft) SnapshotDone(to core.NodeID, index uint64, ok bool) {
 }
 
 // Compact forgets the entries through index, which a durable snapshot
-// covers.
+// covers, and asks the store to drop them, even at or below the base.
 func (r *Raft) Compact(index uint64) {
-	if index <= r.log.snapIndex || index > r.log.applied {
+	if index == 0 || index > r.log.applied {
+		return
+	}
+	// The store may hold the log below the base: a restart starts the step
+	// function at the newest snapshot that restored, the store still back to
+	// the older one less the trailing window (R6-02), and the first cut after
+	// it compacts through a point at or below that base. Answered with
+	// nothing, a node restarted between every two of its cuts never compacted
+	// its log, which grew to the no-space alarm (#741).
+	r.rd.Compact = max(r.rd.Compact, index)
+	if index <= r.log.snapIndex {
 		return
 	}
 	t, _ := r.log.term(index)
 	c := r.log.chain(index)
 	m := r.confAt(index)
 	r.log.compactTo(index, t, c)
-	r.rd.Compact = max(r.rd.Compact, index)
 	r.base = m.Clone()
 	r.base.Index = index
 	r.compactEngines(index)

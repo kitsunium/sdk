@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-28T12:00:00Z -->
+<!-- updated: 2026-10-28T18:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -255,6 +255,14 @@ under coverage before touching `shard_count`.
   mutation, the type is full). Nor test the role again in
   `ReportUnreachable`: only a leader tracks progress, and the test took the
   function past its inlining budget.
+- Answer a compaction at or below the base with nothing: the store may
+  hold the log below it, back to the older retained snapshot less the
+  trailing window (R6-02), once a restart started the step function at the
+  newest one. `Compact` forgets nothing there and still names the point in
+  `Ready.Compact`: a node restarted between every two of its cuts never
+  compacted its log, and the alarm refused every write (#741,
+  `TestACompactionAtOrBelowTheBaseStillReachesTheStore`; no mutation, the
+  type is full).
 - Start the commit at the persisted one alone under a state machine
   applied past it: a commit-only Ready is written lazily, a
   `DurableStateMachine` crashed past the persisted commit, and `EngineAt`

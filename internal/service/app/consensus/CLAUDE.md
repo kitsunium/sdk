@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-28T12:00:00Z -->
+<!-- updated: 2026-10-28T18:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -575,6 +575,16 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestTheRepairOfAShortLogCompactsPastTheTrailingWindow`). A headroom
   under twice `SnapshotEveryBytes` and two segments may still reach the
   alarm under steady large entries; it is repaired online.
+- Compact only what the step function still holds: after a restart its
+  base is the newest snapshot, the log still back to the older one less the
+  trailing window (R6-02), and the first cut compacts through a point at or
+  below that base. Raft answered it with nothing, and a node restarted
+  between every two of its cuts grew its log to the alarm, which refused
+  every write of the cluster (#741). Raft names the point in
+  `ReadyValue.Compact` and the storage actor compacts the store through it,
+  the term read from its own entry; another store's `CompactPrefix` is not
+  asked below its first index (`compactLog`,
+  `TestANodeRestartedBetweenItsCutsStillCompactsItsLog`).
 - Hand raft a caller's buffer: `Propose` copies its payload. The leader
   keeps the entry and resends it while a peer lags, and a caller that
   reused its buffer changed it under its body sum: every follower refused

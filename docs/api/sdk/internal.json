@@ -53171,7 +53171,7 @@
       "recv": "Raft",
       "spelled": "func(index uint64)",
       "canonical": "func(index uint64)",
-      "doc": "Compact forgets the entries through index, which a durable snapshot\ncovers.\n",
+      "doc": "Compact forgets the entries through index, which a durable snapshot\ncovers, and asks the store to drop them, even at or below the base.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"

@@ -290,12 +290,17 @@ type storeReq struct {
 // unknown), by the store's compactPrefixAt when it has one: a store that
 // takes the term of the compaction point from its caller, which an install
 // past the end of the log needs. Both shipped stores do; another store
-// compacts by CompactPrefix alone.
+// compacts by CompactPrefix alone, and is not asked for a point below its
+// first entry, which it compacted already: a cut compacts at or below the
+// step function's base (#741), past which an install compacted the store.
 func compactLog(log coreconsensus.LogStore, through, term uint64) error {
 	if c, ok := log.(interface {
 		compactPrefixAt(through, term uint64) error
 	}); ok {
 		return c.compactPrefixAt(through, term)
+	}
+	if first, _ := log.Bounds(); through < first {
+		return nil
 	}
 	return log.CompactPrefix(through)
 }
@@ -1474,7 +1479,9 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 		q := storeReq{rd: *rd}
 		if rd.Compact != 0 {
 			// The step function is compacted to rd.Compact already: its base
-			// holds the term, the store may not (#415).
+			// holds the term, the store may not (#415). Below that base it
+			// knows none, and the store, which holds the entry there, reads
+			// its own (#741).
 			q.compactTerm, _ = n.r.TermAt(rd.Compact)
 		}
 		n.sq.push(q)

@@ -8592,6 +8592,8 @@ sequences:
         kind: self
       - id: c.compactPrefixAt
         kind: internal
+      - id: log.Bounds
+        kind: value
       - id: log.CompactPrefix
         kind: value
     steps:
@@ -8606,6 +8608,14 @@ sequences:
               		compactPrefixAt(through, term uint64) error
               	})
           when: ok
+      - opt:
+          do:
+            - return: nil
+          init:
+            bind: first, _
+            eval: log.Bounds()
+            to: log.Bounds
+          when: through < first
       - return: log.CompactPrefix(through)
         to: log.CompactPrefix
   - of: newSubEpoch

@@ -1616,7 +1616,8 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
   - **the latest TWO complete snapshots are retained (R6-02).** A snapshot
     whose checksum fails is not used, and the node falls back to the older
     one, which is now always retained (R6-13). The log is kept back to the
-    older snapshot;
+    older snapshot, and compacted to it after a restart too (amendment of
+    2026-10-28, #741);
   - **a node whose two snapshots both fail** starts with no table. It keeps
     its term, vote and commit index, votes and stores the log (R6-13), and
     applies nothing until an install. **It asks for one (R7-18):** it answers
@@ -5523,6 +5524,42 @@ of 0, and one more failure left no leader until an operator wiped it
   founding entry and rejoined only because the memory double admitted
   every sender (`silenceByDamage`); they now damage the record after it.
 
+## Amendment — a restarted node compacts below the base it restarted on (2026-10-28, #741)
+
+A node starts its step function at the newest snapshot that restores,
+while its log is kept back to the older one less `SnapshotTrailing`
+(R6-02, #696). The first cut after a start compacts through the snapshot
+that has become the older one, less the trailing window: a point at or
+below the base the step function started on. Raft's `Compact` returned on
+such a point without asking the store for anything, and that cut compacted
+nothing. A node restarted between every two of its cuts — a rolling
+upgrade, a nightly reboot, a crash loop, under forgejo's one cut per
+interval (`SnapshotPausesApply`) — never compacted its log again: the log
+grew by a cut interval at each restart to `MaxLogBytes` less
+`LogReserveBytes`, and the no-space alarm, once committed, refused every
+command of the cluster. A `SaveSnapshot` right after a restart freed
+nothing either, and D17's repair needed two with no restart between them
+([#741](https://github.com/kitsunium/sdk/issues/741)). Just before a cut
+the log no longer held the two cut intervals #696's sizing counts on, but
+one more at each restart.
+
+- **A compaction at or below the base reaches the store.** `Compact`
+  forgets nothing in the step function for such a point and still names it
+  in the Ready (`ReadyValue.Compact`): the storage actor compacts the store
+  through it, the term there read from the store's own entry, which it
+  holds. A point below the store's first index is compacted already: the
+  shipped stores ignore it, and the driver asks nothing of another store's
+  `CompactPrefix` there. The log stays back to the older retained snapshot,
+  less the trailing window, across restarts, so a node whose newest
+  snapshot fails its checksums still starts from the older one.
+- No frame, payload or record format changes, nothing new is persisted,
+  and no raft mutation is added (the type is full):
+  `TestANodeRestartedBetweenItsCutsStillCompactsItsLog` (one voter on a
+  data directory, restarted after each cut, its log never more than
+  `SnapshotTrailing` entries before the older snapshot),
+  `TestALogIsCompactedWithoutARestart`, and in `raft/`
+  `TestACompactionAtOrBelowTheBaseStillReachesTheStore`.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5551,6 +5588,7 @@ of 0, and one more failure left no leader until an operator wiped it
 | #722 | Raft hunt loop, 2026-10-27 | `Promote` waits for the learner's acknowledgement of the configuration that admitted it, so a joiner whose stamp still refuses every vote is never made a voter, and a probing peer behind the log is probed again at its heartbeat answer with nothing to append, so a quiet cluster feeds the learner whose probe was lost; #695's claim that it could not be promoted corrected; no format change, no raft mutation (amendment of 2026-10-27, #722) |
 | #724 | Raft hunt loop, 2026-10-28 | a follower or a learner that hears its leader but whose transport cannot reach it asks its members for the leader's record, and dials that leader at the committed address the record gives, under the key it already pins, until its own configuration catches up; no format change, no raft mutation (amendment of 2026-10-28, #724) |
 | #723 | Raft hunt loop, 2026-10-28 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when neither a snapshot nor a configuration entry before the damage would remain; `WipeAndRejoin` is the exit; no format change (amendment of 2026-10-28, #723) |
+| #741 | Raft hunt loop, 2026-10-28 | a cut compacts the store through the older snapshot less the trailing window even at or below the base a restart started the step function on; no format change, no raft mutation (amendment of 2026-10-28, #741) |
 
 ## raft-sql-poc (owner's prior Raft)
 

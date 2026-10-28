@@ -2459,7 +2459,9 @@ functions:
       unknown), by the store's compactPrefixAt when it has one: a store that
       takes the term of the compaction point from its caller, which an install
       past the end of the log needs. Both shipped stores do; another store
-      compacts by CompactPrefix alone.
+      compacts by CompactPrefix alone, and is not asked for a point below its
+      first entry, which it compacted already: a cut compacts at or below the
+      step function's base (#741), past which an install compacted the store.
     name: compactLog
     params: log coreconsensus.LogStore, through, term uint64
     results: error

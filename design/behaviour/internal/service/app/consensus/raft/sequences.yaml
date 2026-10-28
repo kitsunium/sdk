@@ -3525,7 +3525,13 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: index <= r.log.snapIndex || index > r.log.applied
+          when: index == 0 || index > r.log.applied
+      - set: r.rd.Compact
+        value: max(r.rd.Compact, index)
+      - opt:
+          do:
+            - return: ""
+          when: index <= r.log.snapIndex
       - bind: t, _
         eval: r.log.term(index)
         to: r.log.term
@@ -3537,8 +3543,6 @@ sequences:
         to: r.confAt
       - eval: r.log.compactTo(index, t, c)
         to: r.log.compactTo
-      - set: r.rd.Compact
-        value: max(r.rd.Compact, index)
       - set: r.base
         to: m.Clone
         value: m.Clone()
