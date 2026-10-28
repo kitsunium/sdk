@@ -4134,6 +4134,14 @@ packages:
               name: LeaderHint
               type: core.MemberValue
             - doc: |-
+                LeaderAddress is the leader this node follows and could not reach,
+                listed in its configuration under the key a member's MsgLeaderRecord
+                names: dialled at the address that record gives, the committed one,
+                in Membership until this node's configuration catches up, for the
+                driver to log (#724).
+              name: LeaderAddress
+              type: core.MemberValue
+            - doc: |-
                 Unsupported names an entry whose kind this version does not know:
                 the driver stops the node with VERSION_UNSUPPORTED.
               name: Unsupported
@@ -4318,7 +4326,10 @@ packages:
                 type: uint64
             name: StorageDone
             recv: pointer
-          - doc: ReportUnreachable moves a peer the transport could not reach to probe.
+          - doc: |-
+              ReportUnreachable tells the step function that the transport could not
+              reach a peer: a leader moves it to probe, and a node that follows it as
+              its leader asks its members for that leader's record (#724).
             in:
               - name: id
                 type: core.NodeID

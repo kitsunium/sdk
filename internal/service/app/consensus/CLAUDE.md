@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-27T14:00:00Z -->
+<!-- updated: 2026-10-28T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -852,6 +852,17 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   configuration for the leader's record with a PreVote it never counts
   (#639, `TestALearnerDownWhileANewLeaderWasAdmittedIsFed`, raft's
   `checkStrandedLearnerAsks`).
+- Leave a member that hears its leader but cannot reach it at the address
+  its configuration names with no way to learn the committed one: the TCP
+  transport answers on the node's own outbound link, and a voter down
+  while `UpdateAddress` moved the leader answered its old address for as
+  long as it led, out of the quorum. Raft asks the members for the
+  leader's record once the transport reports that leader unreachable, and
+  the admission set names the record's address under the same key until
+  the configuration catches up; the driver logs it
+  (`ReadyValue.LeaderAddress`, #724,
+  `TestTheVoterThatMissedTheLeadersNewAddressCatchesUp`,
+  `TestTheStaleVoterCatchesUpAfterARollingRestartHandsOffToTheMovedNode`).
 - Trust a predecessor's token by its index above the identity's
   AdoptedFrom once its term can no longer be read: that part of the kept
   range is the suffix Recover adopted past the persisted commit (#509,

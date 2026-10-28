@@ -10430,6 +10430,33 @@ sequences:
               to: n.cfg.Transport.Send
           key: i
           range: ms
+  - of: (*Node).logLeaderRecords
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).logLeaderRecords
+        kind: self
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: "n.obs.warn(\"consensus: leader admitted on a member's record\", lattr(\"leader\", uint64(h.ID)), lstr(\"slot\", h.Slot))"
+              to: n.obs.warn
+          init:
+            bind: h
+            eval: rd.LeaderHint
+          when: h.ID != 0
+      - opt:
+          do:
+            - eval: |-
+                n.obs.warn("consensus: leader dialled at the address of a member's record", lattr("leader", uint64(h.ID)),
+                			lstr("slot", h.Slot), lstr("address", h.Address))
+              to: n.obs.warn
+          init:
+            bind: h
+            eval: rd.LeaderAddress
+          when: h.ID != 0
   - of: (*Node).handleOne
     participants:
       - id: caller
@@ -10438,7 +10465,7 @@ sequences:
         kind: self
       - id: n.sendMessages
         kind: internal
-      - id: n.obs.warn
+      - id: n.logLeaderRecords
         kind: internal
       - id: n.cfg.Transport.SetMembership
         kind: value
@@ -10467,14 +10494,8 @@ sequences:
     steps:
       - eval: n.sendMessages(rd.Messages)
         to: n.sendMessages
-      - opt:
-          do:
-            - eval: "n.obs.warn(\"consensus: leader admitted on a member's record\", lattr(\"leader\", uint64(h.ID)), lstr(\"slot\", h.Slot))"
-              to: n.obs.warn
-          init:
-            bind: h
-            eval: rd.LeaderHint
-          when: h.ID != 0
+      - eval: n.logLeaderRecords(rd)
+        to: n.logLeaderRecords
       - opt:
           do:
             - eval: n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
