@@ -1441,16 +1441,29 @@ func (n *Node) sendMessages(ms []coreconsensus.MessageValue) {
 	}
 }
 
-// handleOne carries out one Ready: messages sent, membership and silence
-// applied, writes and entries queued to the storage actor and the apply
-// goroutine, fetches and snapshot sends started, waiters answered.
-func (n *Node) handleOne(rd *raft.ReadyValue) {
-	n.sendMessages(rd.Messages)
+// logLeaderRecords warns of the leader records the Ready took.
+func (n *Node) logLeaderRecords(rd *raft.ReadyValue) {
 	if h := rd.LeaderHint; h.ID != 0 {
 		// A member vouched for a leader this node's configuration does not
 		// list: admitted for its appends and heartbeats only (D4, #542).
 		n.obs.warn("consensus: leader admitted on a member's record", lattr("leader", uint64(h.ID)), lstr("slot", h.Slot))
 	}
+	if h := rd.LeaderAddress; h.ID != 0 {
+		// The leader this node follows could not be reached at the address
+		// its configuration names: a member's record gave the committed
+		// one, dialled under the same key until the configuration catches
+		// up (#724).
+		n.obs.warn("consensus: leader dialled at the address of a member's record", lattr("leader", uint64(h.ID)),
+			lstr("slot", h.Slot), lstr("address", h.Address))
+	}
+}
+
+// handleOne carries out one Ready: messages sent, membership and silence
+// applied, writes and entries queued to the storage actor and the apply
+// goroutine, fetches and snapshot sends started, waiters answered.
+func (n *Node) handleOne(rd *raft.ReadyValue) {
+	n.sendMessages(rd.Messages)
+	n.logLeaderRecords(rd)
 	if len(rd.Membership) > 0 {
 		n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
 		n.obs.info("consensus: admitted members changed", lattr("members", uint64(len(rd.Membership))))

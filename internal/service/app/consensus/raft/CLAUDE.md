@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-27T14:00:00Z -->
+<!-- updated: 2026-10-28T12:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -237,6 +237,24 @@ under coverage before touching `shard_count`.
   PreVote it never counts, keeping its role and its term, and a campaign
   never asks (`mutAskCampaigns`, `checkLearnerAskBindsNothing`,
   `checkSilentNodeNeverCampaigns`).
+- Leave a follower or a learner that hears its leader but cannot reach it
+  with no way to learn where that leader listens: the TCP transport answers
+  on the node's own outbound link, dialled to the address its
+  configuration names, and a member down while `UpdateAddress` moved the
+  leader answered the old address for as long as it led (#724). A report
+  of that leader unreachable (`ReportUnreachable`, read at the next tick by
+  `noteUnreached`) makes the node ask its members but the leader
+  (`askForLeaderAddress`), and a record of the leader it follows, under the
+  key its configuration pins, from a member, read at a commit past its own
+  commit and latest configuration, gives the address its admission set
+  names (`takeLeaderAddress`, `dialLeaderAddress`) until its configuration
+  catches up (`endLeaderAddress`). Never an admission, another key, or a
+  member that does not lead
+  (`TestTheLeaderAddressIsTakenOnlyForTheUnreachedLeaderUnderItsKey`,
+  `TestTheMemberBehindAMovedLeaderDialsItAtTheCommittedAddress`; no
+  mutation, the type is full). Nor test the role again in
+  `ReportUnreachable`: only a leader tracks progress, and the test took the
+  function past its inlining budget.
 - Start the commit at the persisted one alone under a state machine
   applied past it: a commit-only Ready is written lazily, a
   `DurableStateMachine` crashed past the persisted commit, and `EngineAt`

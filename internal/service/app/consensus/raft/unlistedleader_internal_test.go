@@ -33,6 +33,9 @@ type unlistedNet struct {
 	now   time.Time
 	// installs are the nodes a leader asked the driver to send a snapshot.
 	installs map[core.NodeID]bool
+	// reach, when set, also decides whether a frame admitted by its
+	// receiver reaches it: the sender's dial (#724).
+	reach func(m core.MessageValue) bool
 }
 
 func newUnlistedNet(t *testing.T, nodes ...*Raft) *unlistedNet {
@@ -101,7 +104,7 @@ func (n *unlistedNet) drain() {
 			m := n.queue[0]
 			n.queue = n.queue[1:]
 			moved = true
-			if n.down[m.To] || n.down[m.From] || !n.admits(m.To, m.From) {
+			if n.down[m.To] || n.down[m.From] || !n.admits(m.To, m.From) || (n.reach != nil && !n.reach(m)) {
 				continue
 			}
 			n.nodes[m.To].Step(n.now, m)

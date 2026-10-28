@@ -181,13 +181,20 @@ func (r *Raft) mayAskForLeader() bool {
 // only while this node knows no live leader, from a member of its own
 // configuration, at a term at least its own, for a key that is pinned and
 // an ID this node neither knows as a member nor retired. The transport
-// still checks at the handshake that the key is the cluster CA's.
+// still checks at the handshake that the key is the cluster CA's. A record
+// of a member the latest configuration lists admits nothing: it may only
+// give the address of the leader this node cannot reach
+// (takeLeaderAddress, #724).
 func (r *Raft) takeLeaderRecord(now time.Time, m core.MessageValue) {
-	if !r.mayTakeRecord(now, m) {
+	rec, ok := recordOf(&m)
+	if !ok {
 		return
 	}
-	rec, ok := recordOf(&m)
-	if !ok || rec.ID == r.id || r.knows(rec.ID) {
+	if cur, listed := r.conf().Member(rec.ID); listed {
+		r.takeLeaderAddress(now, m, rec, cur)
+		return
+	}
+	if !r.mayTakeRecord(now, m) || rec.ID == r.id || r.knows(rec.ID) {
 		return
 	}
 	r.hint, r.hintUntil = rec, now.Add(hintElectionTimeouts*r.timing.ElectionTimeoutMax)
@@ -277,5 +284,152 @@ func (r *Raft) endHintOnTimeout(now time.Time) {
 	if r.hint.ID != 0 && !now.Before(r.hintUntil) {
 		r.hint = core.MemberValue{}
 		r.publishAdmitted()
+	}
+}
+
+// ---- the address of a leader this node cannot reach (#724) ----
+//
+// The TCP transport is one-way per connection: a node hears its leader on
+// the connection the leader dials, and answers on its own outbound link,
+// dialled to the address its own configuration names. A voter down while
+// UpdateAddress moved another member came back with that member's old
+// address. Once the moved member led, the voter heard it and so never
+// campaigned nor asked, and every answer it sent went to the old address:
+// the leader's probe was never answered, the leader never backed off nor
+// sent the entry that carries its new address, and the voter stayed out of
+// the quorum for as long as that leader led. One more failure left two live
+// voters of three with no leader.
+//
+// Such a node now asks the members of its configuration for the record of
+// the leader they follow, with the question askForLeader sends, and dials
+// its leader at the address a record gives: the address committed at that
+// member, under the key this node's configuration already pins for that
+// ID. The record admits nobody (the admission set is by key, and the key is
+// the one this node holds), and the transport still pins that key at every
+// dial: a wrong address only fails the dial, as the stale one did.
+
+// noteUnreached reads, at a tick, the peer the transport reported
+// unreachable since the last one (ReportUnreachable), and records the
+// report when that peer is the leader this node follows.
+func (r *Raft) noteUnreached(now time.Time) {
+	if r.unreached != 0 && r.unreached == r.lead && r.role != core.RoleLeader {
+		r.leadUnreached, r.leadUnreachedAt = r.lead, now
+	}
+	r.unreached = 0
+}
+
+// leaderUnreached reports whether the transport reported the leader this
+// node follows unreachable within askElectionTimeouts maximum election
+// timeouts.
+func (r *Raft) leaderUnreached(now time.Time) bool {
+	return r.lead != 0 && r.leadUnreached == r.lead && now.Sub(r.leadUnreachedAt) < askElectionTimeouts*r.timing.ElectionTimeoutMax
+}
+
+// askForLeaderAddress asks every other member of this node's configuration
+// but its leader for the record of the leader they follow, when this node
+// follows a leader it hears but its transport cannot reach, at most once in
+// askElectionTimeouts maximum election timeouts. The question is
+// askForLeader's: a PreVote it never counts, keeping its role and its term,
+// which binds no receiver. A follower of a live leader drops it and answers
+// a node behind its commit with that leader's record (sendLeaderRecord);
+// the leader, which this node cannot reach, is not asked. Asking binds
+// nothing the silence forbids, and LeaderUnheard stays unset: the leader is
+// heard.
+func (r *Raft) askForLeaderAddress(now time.Time) {
+	wait := askElectionTimeouts * r.timing.ElectionTimeoutMax
+	if !r.mayAskForLeaderAddress(now) || (!r.askedAt.IsZero() && now.Sub(r.askedAt) < wait) {
+		return
+	}
+	r.askedAt = now
+	for _, m := range r.conf().Members {
+		if m.ID != r.id && m.ID != r.lead {
+			r.send(core.MessageValue{
+				Kind: core.MsgPreVote, To: m.ID, Term: r.term + 1,
+				LogTerm: r.log.lastTerm(), Index: r.log.lastIndex(),
+			})
+		}
+	}
+}
+
+// mayAskForLeaderAddress reports whether this node asks for the record of
+// the leader it follows: a follower or a learner speaking protocol 2, which
+// hears that leader and whose transport reported it unreachable lately.
+func (r *Raft) mayAskForLeaderAddress(now time.Time) bool {
+	return (r.role == core.RoleFollower || r.role == core.RoleLearner) && r.speaks() >= Protocol2 &&
+		r.hearsLeader(now) && r.leaderUnreached(now)
+}
+
+// takeLeaderAddress dials the leader this node follows at the address the
+// record m carries for it, cur being that leader as this node's latest
+// configuration lists it. Only for the leader the transport reported
+// unreachable lately, from a member of this node's configuration at a term
+// at least its own, under the very key cur pins, for an address that is not
+// the one this node dials, and from a commit past both this node's commit
+// and its latest configuration: the record is the configuration committed
+// at that member, newer than any this node holds. The record ends once
+// this node's configuration catches up (endLeaderAddress).
+func (r *Raft) takeLeaderAddress(now time.Time, m core.MessageValue, rec, cur core.MemberValue) {
+	if !r.mayTakeLeaderAddress(now, m, rec, cur) {
+		return
+	}
+	r.leadAddr, r.leadAddrAt = core.MemberValue{ID: rec.ID, SPKI: rec.SPKI, Address: rec.Address}, m.Index
+	r.rd.LeaderAddress = rec
+	r.publishAdmitted()
+}
+
+// mayTakeLeaderAddress reports whether takeLeaderAddress takes the record.
+func (r *Raft) mayTakeLeaderAddress(now time.Time, m core.MessageValue, rec, cur core.MemberValue) bool {
+	return r.recordOfUnreachedLeader(now, m, rec) && r.recordMovesLeader(m, rec, cur)
+}
+
+// recordOfUnreachedLeader reports whether rec, the record m carries, is of
+// the leader this node follows while it does not lead, and that its
+// transport reported unreachable lately; sent by another member of its
+// configuration at a term at least its own.
+func (r *Raft) recordOfUnreachedLeader(now time.Time, m core.MessageValue, rec core.MemberValue) bool {
+	if r.role == core.RoleLeader || rec.ID != r.lead || m.Term < r.term || m.From == r.id || !r.leaderUnreached(now) {
+		return false
+	}
+	_, member := r.conf().Member(m.From)
+	return member
+}
+
+// recordMovesLeader reports whether the record rec gives the leader cur, as
+// the latest configuration lists it, an address under the very key cur
+// pins, other than the one this node dials, read at a commit past both this
+// node's commit and its latest configuration.
+func (r *Raft) recordMovesLeader(m core.MessageValue, rec, cur core.MemberValue) bool {
+	dialled := cur.Address
+	if r.leadAddr.ID == rec.ID {
+		dialled = r.leadAddr.Address
+	}
+	return cur.SPKI == rec.SPKI && rec.Address != "" && rec.Address != dialled &&
+		m.Index > r.log.committed && m.Index > r.conf().Index
+}
+
+// dialLeaderAddress gives the leader of a record taken by
+// takeLeaderAddress, in the admission set out, the record's address, while
+// out lists it under the record's key.
+func (r *Raft) dialLeaderAddress(out []core.MemberValue) {
+	if r.leadAddr.ID == 0 {
+		return
+	}
+	if k := slices.IndexFunc(out, func(x core.MemberValue) bool { return x.ID == r.leadAddr.ID }); k >= 0 && out[k].SPKI == r.leadAddr.SPKI {
+		out[k].Address = r.leadAddr.Address
+	}
+}
+
+// endLeaderAddress ends a record taken by takeLeaderAddress once this
+// node's commit or its latest configuration reaches the commit the record
+// was read at, its own configuration being then at least as new, or once
+// that configuration no longer lists the leader under the record's key.
+// The caller republishes the admission set.
+func (r *Raft) endLeaderAddress() {
+	if r.leadAddr.ID == 0 {
+		return
+	}
+	cur, ok := r.conf().Member(r.leadAddr.ID)
+	if !ok || cur.SPKI != r.leadAddr.SPKI || r.log.committed >= r.leadAddrAt || r.conf().Index >= r.leadAddrAt {
+		r.leadAddr, r.leadAddrAt = core.MemberValue{}, 0
 	}
 }

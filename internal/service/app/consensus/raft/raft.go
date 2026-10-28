@@ -270,6 +270,12 @@ type ReadyValue struct {
 	// LeaderHint is the leader a member vouched for in a MsgLeaderRecord,
 	// admitted provisionally in Membership, for the driver to log (#542).
 	LeaderHint core.MemberValue
+	// LeaderAddress is the leader this node follows and could not reach,
+	// listed in its configuration under the key a member's MsgLeaderRecord
+	// names: dialled at the address that record gives, the committed one,
+	// in Membership until this node's configuration catches up, for the
+	// driver to log (#724).
+	LeaderAddress core.MemberValue
 	// Unsupported names an entry whose kind this version does not know:
 	// the driver stops the node with VERSION_UNSUPPORTED.
 	Unsupported UnsupportedEntryValue
@@ -367,8 +373,25 @@ type Raft struct {
 	hint      core.MemberValue
 	hintUntil time.Time
 	// askedAt is when this node, which may not campaign, last asked its
-	// members for the record of the leader they follow (#639, #718).
+	// members for the record of the leader they follow (#639, #718), or
+	// when it last asked for the record of the leader it follows and cannot
+	// reach (#724).
 	askedAt time.Time
+	// unreached is the peer the transport last reported unreachable since
+	// the last tick, 0 for none; that tick reads it (noteUnreached).
+	// leadUnreached is the leader this node followed when a tick read such
+	// a report of it, at leadUnreachedAt (#724).
+	unreached       core.NodeID
+	leadUnreached   core.NodeID
+	leadUnreachedAt time.Time
+	// leadAddr is the leader this node follows, listed in its configuration
+	// under the same key, at the address a member's record gave while the
+	// transport could not reach it at the configuration's: dialled there
+	// until this node's commit or latest configuration reaches leadAddrAt,
+	// the commit the record was read at, or its configuration no longer
+	// lists that key (#724). Its ID is 0 when there is none.
+	leadAddr   core.MemberValue
+	leadAddrAt uint64
 
 	prs   map[core.NodeID]*progress
 	votes map[core.NodeID]bool
@@ -577,11 +600,13 @@ func (r *Raft) raiseSilenceOverSnapshot() {
 func (r *Raft) Tick(now time.Time) {
 	r.now = now
 	r.endHintOnTimeout(now)
+	r.noteUnreached(now)
 	if r.role == core.RoleLeader {
 		r.tickLeader(now)
 		return
 	}
 	r.askForLeader(now)
+	r.askForLeaderAddress(now)
 	if !now.Before(r.electionDeadline) {
 		r.resetElection(now)
 		if r.promotable() && r.outsideVoteWindow(now) {
@@ -635,9 +660,17 @@ func (r *Raft) noteSelfVote(seq uint64) {
 	}
 }
 
-// ReportUnreachable moves a peer the transport could not reach to probe.
+// ReportUnreachable tells the step function that the transport could not
+// reach a peer: a leader moves it to probe, and a node that follows it as
+// its leader asks its members for that leader's record (#724).
 func (r *Raft) ReportUnreachable(id core.NodeID) {
-	if pr := r.prs[id]; r.role == core.RoleLeader && pr != nil && pr.state == stateReplicate {
+	// The next tick reads the report (noteUnreached). Only a leader tracks
+	// progress: becomeLeader and trackMembers fill prs for a leader alone,
+	// and abortLeadership empties it, so a peer moves to probe on a
+	// leader only. The role is not tested again, which kept the function
+	// within the inlining budget it had (ADR 0169).
+	r.unreached = id
+	if pr := r.prs[id]; pr != nil && pr.state == stateReplicate {
 		pr.becomeProbe()
 	}
 }
@@ -1020,6 +1053,7 @@ func (r *Raft) admitted() []core.MemberValue {
 	if r.hint.ID != 0 && !slices.ContainsFunc(out, func(x core.MemberValue) bool { return x.ID == r.hint.ID }) {
 		out = append(out, r.hint)
 	}
+	r.dialLeaderAddress(out)
 	return out
 }
 
@@ -1096,6 +1130,7 @@ func (r *Raft) noteAppended(e *core.EntryValue) {
 // follower or learner takes the role the new configuration gives it.
 func (r *Raft) confChanged() {
 	r.endHintOnConf()
+	r.endLeaderAddress()
 	r.publishAdmitted()
 	switch r.role {
 	case core.RoleLeader:
@@ -1400,6 +1435,7 @@ func (r *Raft) commitTo(i uint64) {
 		old := r.log.committed
 		r.log.committed = i
 		r.applyCommitEffects(old+1, i)
+		r.endLeaderAddress()
 		r.publishAdmitted()
 	}
 }
