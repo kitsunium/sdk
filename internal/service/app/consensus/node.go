@@ -1486,7 +1486,7 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 	n.sendMessages(rd.Messages)
 	n.logLeaderRecords(rd)
 	if len(rd.Membership) > 0 {
-		n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
+		n.setMembership(rd)
 		n.obs.info("consensus: admitted members changed", lattr("members", uint64(len(rd.Membership))))
 	}
 	n.reportNotices(rd)
@@ -1620,6 +1620,16 @@ func (n *Node) checkAdmission() {
 			j.releaseJoinAnswer()
 		}
 	}
+}
+
+// setMembership hands the transport the admission set a Ready carries, with
+// the index it is as of when the transport ranks its groups by it (#742).
+func (n *Node) setMembership(rd *raft.ReadyValue) {
+	if r, ok := n.cfg.Transport.(admissionRanker); ok {
+		r.setMembershipAt(n.cfg.Group, rd.Membership, rd.MembershipAt)
+		return
+	}
+	n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
 }
 
 // joinReleaser is a transport that keeps a JOIN answer's members admitted

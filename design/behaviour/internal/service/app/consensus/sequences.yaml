@@ -8280,8 +8280,21 @@ sequences:
         kind: actor
       - id: (*MemoryTransport).SetMembership
         kind: self
+      - id: t.setMembershipAt
+        kind: internal
+    steps:
+      - eval: t.setMembershipAt(group, admitted, 0)
+        to: t.setMembershipAt
+  - of: (*MemoryTransport).setMembershipAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).setMembershipAt
+        kind: self
       - id: slices
         kind: stdlib
+      - id: admittedUnion
+        kind: internal
     steps:
       - lock:
           mutex: t.mu
@@ -8289,25 +8302,24 @@ sequences:
           do:
             - set: t.groups
               value: map[coreconsensus.GroupID][]coreconsensus.MemberValue{}
+            - set: t.groupsAt
+              value: map[coreconsensus.GroupID]uint64{}
           when: t.groups == nil
       - alt:
           - do:
               - eval: delete(t.groups, group)
+              - eval: delete(t.groupsAt, group)
             when: len(admitted) == 0
           - do:
               - set: t.groups[group]
                 to: slices
                 value: slices.Clone(admitted)
+              - set: t.groupsAt[group]
+                value: at
             else: true
       - set: t.members
-        value: t.members[:0]
-      - loop:
-          do:
-            - set: t.members
-              value: append(t.members, t.groups[g]...)
-          key: _
-          range: slices.Sorted(maps.Keys(t.groups))
-          value: g
+        to: admittedUnion
+        value: admittedUnion(t.groups, t.groupsAt)
   - of: (*MemoryTransport).bindWarn
     participants:
       - id: caller
@@ -8512,7 +8524,7 @@ sequences:
                     to: slices
                   - eval: x.mu.Unlock()
                     to: x.mu.Unlock
-                  - eval: t.hold.install(gen, func() { t.SetMembership(joinGroup, answer) })
+                  - eval: t.hold.install(gen, func() { t.setMembershipAt(joinGroup, answer, pos.Index) })
                     to: t.hold.install
                   - return: pos, nil
                 when: code == 0
@@ -10488,8 +10500,8 @@ sequences:
         kind: internal
       - id: n.logLeaderRecords
         kind: internal
-      - id: n.cfg.Transport.SetMembership
-        kind: value
+      - id: n.setMembership
+        kind: internal
       - id: n.obs.info
         kind: internal
       - id: n.reportNotices
@@ -10519,8 +10531,8 @@ sequences:
         to: n.logLeaderRecords
       - opt:
           do:
-            - eval: n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
-              to: n.cfg.Transport.SetMembership
+            - eval: n.setMembership(rd)
+              to: n.setMembership
             - eval: "n.obs.info(\"consensus: admitted members changed\", lattr(\"members\", uint64(len(rd.Membership))))"
               to: n.obs.info
           when: len(rd.Membership) > 0
@@ -10794,6 +10806,28 @@ sequences:
             eval: conf.Member(n.stamp.ID)
             to: conf.Member
           when: ok && m.Incarnation == n.stamp.Incarnation
+  - of: (*Node).setMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).setMembership
+        kind: self
+      - id: r.setMembershipAt
+        kind: internal
+      - id: n.cfg.Transport.SetMembership
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: r.setMembershipAt(n.cfg.Group, rd.Membership, rd.MembershipAt)
+              to: r.setMembershipAt
+            - return: ""
+          init:
+            bind: r, ok
+            eval: n.cfg.Transport.(admissionRanker)
+          when: ok
+      - eval: n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
+        to: n.cfg.Transport.SetMembership
   - of: (*Node).leadershipChanged
     participants:
       - id: caller
@@ -21853,6 +21887,17 @@ sequences:
         kind: actor
       - id: (*TCPTransport).SetMembership
         kind: self
+      - id: t.setMembershipAt
+        kind: internal
+    steps:
+      - eval: t.setMembershipAt(group, admitted, 0)
+        to: t.setMembershipAt
+  - of: (*TCPTransport).setMembershipAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).setMembershipAt
+        kind: self
       - id: slices
         kind: stdlib
       - id: indexMembers
@@ -21869,8 +21914,15 @@ sequences:
       - set: t.members[group]
         to: slices
         value: slices.Clone(admitted)
+      - opt:
+          do:
+            - set: t.membersAt
+              value: map[coreconsensus.GroupID]uint64{}
+          when: t.membersAt == nil
+      - set: t.membersAt[group]
+        value: at
       - bind: byID, bySPKI
-        eval: indexMembers(t.members)
+        eval: indexMembers(admittedUnion(t.members, t.membersAt))
         to: indexMembers
       - set: t.byID, t.bySPKI
         value: byID, bySPKI
@@ -21914,49 +21966,68 @@ sequences:
           key: k
           range: t.out
           value: pc
-  - of: indexMembers
+  - of: admittedUnion
+    participants:
+      - id: caller
+        kind: actor
+      - id: admittedUnion
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: newestGroups
+        kind: internal
     steps:
-      - var:
-          name: noPin
-          type: "[32]byte"
-      - bind: byID
-        eval: map[coreconsensus.NodeID]coreconsensus.MemberValue{}
-      - bind: bySPKI
-        eval: map[[32]byte]coreconsensus.MemberValue{}
-      - bind: shared
-        eval: map[[32]byte]bool{}
+      - bind: order
+        eval: slices.Sorted(maps.Keys(groups))
+        to: slices
+      - bind: from
+        eval: newestGroups(groups, order, at)
+        to: newestGroups
+      - bind: out
+        eval: make([]coreconsensus.MemberValue, 0, len(from))
       - loop:
           do:
             - loop:
                 do:
-                  - set: byID[m.ID]
-                    value: m
                   - opt:
                       do:
-                        - continue: true
-                      when: m.SPKI == noPin
-                  - opt:
-                      do:
-                        - set: shared[m.SPKI]
-                          value: "true"
+                        - set: out
+                          value: append(out, m)
+                        - eval: delete(from, m.ID)
                       init:
-                        bind: o, ok
-                        eval: bySPKI[m.SPKI]
-                      when: ok && o.ID != m.ID
-                  - set: bySPKI[m.SPKI]
-                    value: m
+                        bind: k, ok
+                        eval: from[m.ID]
+                      when: ok && k == g
                 key: _
-                range: ms
+                range: groups[g]
                 value: m
           key: _
-          range: groups
-          value: ms
+          range: order
+          value: g
+      - return: out
+  - of: newestGroups
+    steps:
+      - bind: from
+        eval: map[coreconsensus.NodeID]coreconsensus.GroupID{}
       - loop:
           do:
-            - eval: delete(bySPKI, k)
-          key: k
-          range: shared
-      - return: byID, bySPKI
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: from[m.ID]
+                          value: g
+                      init:
+                        bind: k, ok
+                        eval: from[m.ID]
+                      when: "!ok || at[g] > at[k]"
+                key: _
+                range: groups[g]
+                value: m
+          key: _
+          range: order
+          value: g
+      - return: from
   - of: (*TCPTransport).reserveAddresses
     participants:
       - id: caller
@@ -23161,9 +23232,11 @@ sequences:
           do:
             - return: coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
           when: "!joinAnswerListsPeer(m, spki)"
-      - eval: t.hold.install(gen, func() { t.SetMembership(joinGroup, m.Members) })
+      - set: pos
+        value: "coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}"
+      - eval: t.hold.install(gen, func() { t.setMembershipAt(joinGroup, m.Members, pos.Index) })
         to: t.hold.install
-      - return: "coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil"
+      - return: pos, false, nil
   - of: (*TCPTransport).releaseJoinAnswer
     participants:
       - id: caller
@@ -23182,6 +23255,7 @@ sequences:
           			t.SetMembership(joinGroup, nil)
           			t.mu.Lock()
           			delete(t.members, joinGroup)
+          			delete(t.membersAt, joinGroup)
           			t.mu.Unlock()
           		}
           	})

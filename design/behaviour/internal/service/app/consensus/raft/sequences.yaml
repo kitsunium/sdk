@@ -3266,8 +3266,8 @@ sequences:
       - set: node.admittedPub
         to: node.admitted
         value: node.admitted()
-      - set: node.rd.Membership
-        value: node.admittedPub
+      - set: node.rd.Membership, node.rd.MembershipAt
+        value: node.admittedPub, node.admissionAt()
       - return: node
   - of: startCommit
     steps:
@@ -4506,8 +4506,18 @@ sequences:
           when: slices.Equal(a, r.admittedPub) && !r.mutated(mutMembershipEveryCommit)
       - set: r.admittedPub
         value: a
-      - set: r.rd.Membership
-        value: a
+      - set: r.rd.Membership, r.rd.MembershipAt
+        value: a, r.admissionAt()
+  - of: (*Raft).admissionAt
+    steps:
+      - bind: at
+        eval: r.conf().Index
+      - opt:
+          do:
+            - set: at
+              value: max(at, r.leadAddrAt)
+          when: r.leadAddr.ID != 0
+      - return: at
   - of: (*Raft).PeerStats
     steps:
       - opt:

@@ -706,6 +706,7 @@ files:
       - (*Raft).speaks
       - (*Raft).commitTo
       - (*Raft).publishAdmitted
+      - (*Raft).admissionAt
       - (*Raft).PeerStats
       - (*Raft).FailureTolerance
       - (*Raft).QuorumActive
@@ -1393,6 +1394,13 @@ types:
       - doc: Membership is set when the admitted set changed.
         name: Membership
         type: "[]core.MemberValue"
+      - doc: |-
+          MembershipAt is the index Membership is as of: the latest
+          configuration's, or the commit a member's record was read at while
+          that record gives the leader's address (#724). A joining node's
+          transport ranks it against its JOIN answer's position (#742).
+        name: MembershipAt
+        type: uint64
       - doc: |-
           LeaderHint is the leader a member vouched for in a MsgLeaderRecord,
           admitted provisionally in Membership, for the driver to log (#542).
@@ -2934,6 +2942,15 @@ types:
           per committed entry, though nothing had changed (#531).
         name: publishAdmitted
         recv: r *Raft
+      - doc: |-
+          admissionAt is the index the admission set is as of: the latest
+          configuration's, or the commit the record of a leader address taken by
+          takeLeaderAddress was read at, which is past it (#724). A joining node's
+          transport keeps, of a member its JOIN answer lists too, the record of
+          the newer set (#742).
+        name: admissionAt
+        recv: r *Raft
+        results: uint64
       - name: PeerStats
         recv: r *Raft
         results: "[]PeerStatValue"

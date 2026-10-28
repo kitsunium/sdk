@@ -1303,6 +1303,8 @@ open ONE control connection to any member.
   again with the configuration of the last one answered, and the fresh
   answer replaces the held one. A member answers a node it already lists
   without proposing anything or counting it against the slot's rate (#533).
+  A member the answer and the configuration the joiner replays both list is
+  taken from the newer of the two (amendment of 2026-10-28, #742).
   A JOIN sent again that is answered after the node's admission released the
   answer installs nothing; only an explicit `Join` installs one again. Each
   explicit `Join` opens a new generation of the hold, and an answer installs
@@ -5595,6 +5597,41 @@ interval to wait after #520's backoff.
   durable voters, the one restarted every 48 KiB cuts as the others do) and
   `TestACutThatPublishesNothingGivesBackTheBytesItTook` hold it.
 
+## Amendment — a joiner keeps the newer record of a member its two admission groups list (2026-10-28, #742)
+
+A joining node's transport admits the union of two groups: its JOIN
+answer, held until its committed configuration lists it (#552), and the
+configuration its engine replays. For a member both name, the union kept
+the record of whichever group the map's iteration visited last. A joiner
+replaying from index 1, or from a snapshot cut before an `UpdateAddress`,
+dialled a moved member at the address of its stale configuration about
+seven times in eight, although its answer named the right one, and once
+that member led during the catch-up the joiner's answers went to the old
+address until #724's record repaired it
+([#742](https://github.com/kitsunium/sdk/issues/742)). The same draw could
+keep admitted a key a later `DenyPin` had withdrawn.
+
+- **The newer record wins.** Each group's set carries the index it is as
+  of: the answer, the position of the `AddLearner` it answers, committed
+  before it was sent; the engine's, its latest configuration, or the commit
+  a member's record was read at while that record gives the leader's
+  address (`ReadyValue.MembershipAt`, #724). A member both name is taken
+  from the newer set, the answer on a tie, by id and by key alike; a member
+  one group alone names stays admitted from it (#552, #632). The memory
+  double ranks its groups the same way.
+- **What it leaves.** The answer is ranked at its `AddLearner`'s position,
+  a floor of what it knows: once the joiner's log carries a configuration
+  past that position, the engine's records win, though the answer may hold
+  a change the cluster made later still. The joiner's log carries that one
+  soon after, and the answer is released once the joiner's commit reaches
+  the `AddLearner` (#552).
+- No frame, payload or record format changes, and no raft mutation;
+  `ReadyValue.MembershipAt` is a field of the internal step function's
+  Ready. `TestTheUnionOfTwoGroupsKeepsTheNewerRecordOfAMember`,
+  `TestAJoinerDialsAMovedLeaderAtItsJoinAnswersAddress` (over TCP, the
+  joiner dials the moved member at its answer's address and is fed once it
+  leads) and, in `raft/`, `TestTheAdmissionSetSaysWhatItIsAsOf` hold it.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5625,6 +5662,7 @@ interval to wait after #520's backoff.
 | #723 | Raft hunt loop, 2026-10-28 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when neither a snapshot nor a configuration entry before the damage would remain; `WipeAndRejoin` is the exit; no format change (amendment of 2026-10-28, #723) |
 | #741 | Raft hunt loop, 2026-10-28 | a cut compacts the store through the older snapshot less the trailing window even at or below the base a restart started the step function on; no format change, no raft mutation (amendment of 2026-10-28, #741) |
 | #744 | Raft hunt loop, 2026-10-28 | the byte trigger counts the payload a durable machine's start resumes past, and a cut that published nothing gives back the count it took; no format change, nothing persisted (amendment of 2026-10-28, #744) |
+| #742 | Raft hunt loop, 2026-10-28 | a joiner's transport keeps, of a member its JOIN answer and its replayed configuration both list, the record of the newer set, ranked by the answer's `AddLearner` position and `ReadyValue.MembershipAt`; no format change, no raft mutation (amendment of 2026-10-28, #742) |
 
 ## raft-sql-poc (owner's prior Raft)
 

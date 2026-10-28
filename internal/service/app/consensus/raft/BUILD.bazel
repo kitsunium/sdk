@@ -40,6 +40,7 @@ alias(
 go_test(
     name = "raft_test",
     srcs = [
+        "admissionat_internal_test.go",
         "chainrefusal_internal_test.go",
         "checks_internal_test.go",
         "compactbase_internal_test.go",

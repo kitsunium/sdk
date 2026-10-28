@@ -267,6 +267,11 @@ type ReadyValue struct {
 	Fetch []FetchSpec
 	// Membership is set when the admitted set changed.
 	Membership []core.MemberValue
+	// MembershipAt is the index Membership is as of: the latest
+	// configuration's, or the commit a member's record was read at while
+	// that record gives the leader's address (#724). A joining node's
+	// transport ranks it against its JOIN answer's position (#742).
+	MembershipAt uint64
 	// LeaderHint is the leader a member vouched for in a MsgLeaderRecord,
 	// admitted provisionally in Membership, for the driver to log (#542).
 	LeaderHint core.MemberValue
@@ -506,7 +511,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	}
 	node.resetElection(st.Now)
 	node.admittedPub = node.admitted()
-	node.rd.Membership = node.admittedPub
+	node.rd.Membership, node.rd.MembershipAt = node.admittedPub, node.admissionAt()
 	return node
 }
 
@@ -1459,7 +1464,20 @@ func (r *Raft) publishAdmitted() {
 		return
 	}
 	r.admittedPub = a
-	r.rd.Membership = a
+	r.rd.Membership, r.rd.MembershipAt = a, r.admissionAt()
+}
+
+// admissionAt is the index the admission set is as of: the latest
+// configuration's, or the commit the record of a leader address taken by
+// takeLeaderAddress was read at, which is past it (#724). A joining node's
+// transport keeps, of a member its JOIN answer lists too, the record of
+// the newer set (#742).
+func (r *Raft) admissionAt() uint64 {
+	at := r.conf().Index
+	if r.leadAddr.ID != 0 {
+		at = max(at, r.leadAddrAt)
+	}
+	return at
 }
 
 // PeerStats returns the leader's view of every peer, in configuration

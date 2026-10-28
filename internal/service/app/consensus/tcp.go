@@ -265,8 +265,12 @@ type TCPTransport struct {
 	slot    string
 	ln      net.Listener
 
-	mu        sync.Mutex
-	members   map[coreconsensus.GroupID][]coreconsensus.MemberValue
+	mu      sync.Mutex
+	members map[coreconsensus.GroupID][]coreconsensus.MemberValue
+	// membersAt is the index each group's set is as of, which ranks the
+	// records of a member two groups list; a group absent from it is 0
+	// (#742).
+	membersAt map[coreconsensus.GroupID]uint64
 	byID      map[coreconsensus.NodeID]coreconsensus.MemberValue
 	bySPKI    map[[32]byte]coreconsensus.MemberValue
 	out       map[outKey]*peerConn
@@ -1108,10 +1112,20 @@ func (t *TCPTransport) Bind(_ coreconsensus.GroupID,
 // the groups; a member that left has its connections cut and its
 // handshakes refused from then on (D4).
 func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue) {
+	t.setMembershipAt(group, admitted, 0)
+}
+
+// setMembershipAt is SetMembership for a set as of index at, which ranks
+// its records against another group's (admissionRanker, #742).
+func (t *TCPTransport) setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.members[group] = slices.Clone(admitted)
-	byID, bySPKI := indexMembers(t.members)
+	if t.membersAt == nil {
+		t.membersAt = map[coreconsensus.GroupID]uint64{}
+	}
+	t.membersAt[group] = at
+	byID, bySPKI := indexMembers(admittedUnion(t.members, t.membersAt))
 	t.byID, t.bySPKI = byID, bySPKI
 	t.reserveAddresses(byID)
 	for id := range t.peerExpiry {
@@ -1142,28 +1156,66 @@ func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []cor
 	}
 }
 
-// indexMembers is the union of every group's admitted members, by id and
-// by pinned key; a member without a pin is reachable by id only, so it can
-// be dialled for nothing and admitted on nothing, and a key two members
-// share admits neither.
-func indexMembers(groups map[coreconsensus.GroupID][]coreconsensus.MemberValue) (map[coreconsensus.NodeID]coreconsensus.MemberValue, map[[32]byte]coreconsensus.MemberValue) {
+// admittedUnion is the union of every group's admitted members, one record
+// a member: that of the group whose set is newer by at, the index each
+// set is as of, the lower group on a tie. A joining node's JOIN answer
+// (joinGroup) is as of the AddLearner it answers, and the configuration
+// its engine replays from below it is older: a member both list, moved by
+// an UpdateAddress between them, was dialled at whichever address the map's
+// iteration visited last, the replayed one about 7 times in 8, and a moved
+// leader never fed the joiner (#742). Once the engine's configuration, or
+// a leader's record it took (#724), passes the answer, its records win. A
+// member one group lists is in the union whatever its rank (#552). The
+// records are in group order, then in each group's order.
+func admittedUnion(groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, at map[coreconsensus.GroupID]uint64) []coreconsensus.MemberValue {
+	order := slices.Sorted(maps.Keys(groups))
+	from := newestGroups(groups, order, at)
+	out := make([]coreconsensus.MemberValue, 0, len(from))
+	for _, g := range order {
+		for _, m := range groups[g] {
+			if k, ok := from[m.ID]; ok && k == g {
+				out = append(out, m)
+				delete(from, m.ID)
+			}
+		}
+	}
+	return out
+}
+
+// newestGroups is, for each member the groups list, the group of order
+// whose set is newer by at, the earlier on a tie.
+func newestGroups(groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, order []coreconsensus.GroupID, at map[coreconsensus.GroupID]uint64) map[coreconsensus.NodeID]coreconsensus.GroupID {
+	from := map[coreconsensus.NodeID]coreconsensus.GroupID{}
+	for _, g := range order {
+		for _, m := range groups[g] {
+			if k, ok := from[m.ID]; !ok || at[g] > at[k] {
+				from[m.ID] = g
+			}
+		}
+	}
+	return from
+}
+
+// indexMembers indexes the admitted members, by id and by pinned key; a
+// member without a pin is reachable by id only, so it can be dialled for
+// nothing and admitted on nothing, and a key two members share admits
+// neither.
+func indexMembers(admitted []coreconsensus.MemberValue) (map[coreconsensus.NodeID]coreconsensus.MemberValue, map[[32]byte]coreconsensus.MemberValue) {
 	var noPin [32]byte
 	byID := map[coreconsensus.NodeID]coreconsensus.MemberValue{}
 	bySPKI := map[[32]byte]coreconsensus.MemberValue{}
 	shared := map[[32]byte]bool{}
-	for _, ms := range groups {
-		for _, m := range ms {
-			byID[m.ID] = m
-			if m.SPKI == noPin {
-				continue
-			}
-			if o, ok := bySPKI[m.SPKI]; ok && o.ID != m.ID {
-				// Two members under one key: a connection could speak for
-				// either, so the key admits neither (review M5).
-				shared[m.SPKI] = true
-			}
-			bySPKI[m.SPKI] = m
+	for _, m := range admitted {
+		byID[m.ID] = m
+		if m.SPKI == noPin {
+			continue
 		}
+		if o, ok := bySPKI[m.SPKI]; ok && o.ID != m.ID {
+			// Two members under one key: a connection could speak for
+			// either, so the key admits neither (review M5).
+			shared[m.SPKI] = true
+		}
+		bySPKI[m.SPKI] = m
 	}
 	for k := range shared {
 		delete(bySPKI, k)
@@ -1835,8 +1887,11 @@ func (t *TCPTransport) joinAnswered(b []byte, rerr error, spki [32]byte, gen uin
 	if !joinAnswerListsPeer(m, spki) {
 		return coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
 	}
-	t.hold.install(gen, func() { t.SetMembership(joinGroup, m.Members) })
-	return coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil
+	pos = coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}
+	// The answer is as of the AddLearner it answers, committed before it
+	// was sent: it outranks a configuration replayed from below (#742).
+	t.hold.install(gen, func() { t.setMembershipAt(joinGroup, m.Members, pos.Index) })
+	return pos, false, nil
 }
 
 // releaseJoinAnswer drops the JOIN answer's admission group once the node
@@ -1851,6 +1906,7 @@ func (t *TCPTransport) releaseJoinAnswer() {
 			t.SetMembership(joinGroup, nil)
 			t.mu.Lock()
 			delete(t.members, joinGroup)
+			delete(t.membersAt, joinGroup)
 			t.mu.Unlock()
 		}
 	})

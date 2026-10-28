@@ -917,6 +917,15 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   whose configuration does not list the leader: the joiner's first older
   configuration cut its leader (#552, `joinGroup`,
   `TestAJoinerKeepsALeaderNewerThanTheConfigurationItReplays`).
+- Take a member the JOIN answer and the engine's configuration both list
+  from the map's iteration: a joiner replaying a configuration older than
+  an `UpdateAddress` dialled the moved member at its old address about 7
+  times in 8, and was not fed while that member led. `admittedUnion` keeps
+  the record of the newer set, by id and by key — the answer as of the
+  `AddLearner` it answers, the engine's as of `ReadyValue.MembershipAt`,
+  the answer on a tie — and the memory double ranks alike (`admissionRanker`,
+  #742, `TestTheUnionOfTwoGroupsKeepsTheNewerRecordOfAMember`,
+  `TestAJoinerDialsAMovedLeaderAtItsJoinAnswersAddress`).
 - Keep a joiner on the JOIN answer it got first while it hears no leader:
   a leader admitted after that answer was refused at every connection, and
   the joiner was never fed while it led. Raft's `LeaderUnheard` sends the

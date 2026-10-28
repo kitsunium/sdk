@@ -120,6 +120,7 @@ go_test(
         "heldloop_internal_test.go",
         "inspectterm_internal_test.go",
         "install_internal_test.go",
+        "joinerunion_internal_test.go",
         "joinlimit_internal_test.go",
         "joinsmalllimit_internal_test.go",
         "learnerownlimit_internal_test.go",
@@ -201,6 +202,7 @@ go_test(
         "//internal/service/app/consensus/raft",
         "//internal/service/app/consensus/wire",
         "//internal/service/data/transform",
+        "//internal/service/net/server",
         "//internal/service/observe/metrics",
     ],
 )
