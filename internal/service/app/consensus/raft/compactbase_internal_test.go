@@ -28,17 +28,14 @@ func TestACompactionAtOrBelowTheBaseStillReachesTheStore(t *testing.T) {
 	if r.log.applied != 15 {
 		t.Fatalf("setup: applied %d, want 15", r.log.applied)
 	}
-	for _, x := range []struct {
+	type tc struct {
 		name          string
 		index, want   uint64
 		base, entries uint64
-	}{
-		{"below the base", 6, 6, 10, 6},
-		{"at the base", 10, 10, 10, 6},
-		{"at 0", 0, 0, 10, 6},
-		{"past the applied index", 16, 0, 10, 6},
-		{"past the base", 12, 12, 12, 4},
-	} {
+	}
+	// The cases run in order, on the one step function they compact.
+	runCase := func(t *testing.T, x tc) {
+		t.Helper()
 		r.Compact(x.index)
 		rd := r.Ready()
 		if rd.Compact != x.want {
@@ -47,5 +44,14 @@ func TestACompactionAtOrBelowTheBaseStillReachesTheStore(t *testing.T) {
 		if got := r.SnapshotIndex(); got != x.base || uint64(len(r.log.ents)) != x.entries {
 			t.Fatalf("Compact(%d) %s: base %d holding %d entries, want %d holding %d", x.index, x.name, got, len(r.log.ents), x.base, x.entries)
 		}
+	}
+	for _, x := range []tc{
+		{"below the base", 6, 6, 10, 6},
+		{"at the base", 10, 10, 10, 6},
+		{"at 0", 0, 0, 10, 6},
+		{"past the applied index", 16, 0, 10, 6},
+		{"past the base", 12, 12, 12, 4},
+	} {
+		runCase(t, x)
 	}
 }
