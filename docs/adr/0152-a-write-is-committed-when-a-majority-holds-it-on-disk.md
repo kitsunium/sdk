@@ -5611,14 +5611,16 @@ address until #724's record repaired it
 ([#742](https://github.com/kitsunium/sdk/issues/742)). The same draw could
 keep admitted a key a later `DenyPin` had withdrawn.
 
-- **The newer record wins.** Each group's set carries the index it is as
-  of: the answer, the position of the `AddLearner` it answers, committed
-  before it was sent; the engine's, its latest configuration, or the commit
-  a member's record was read at while that record gives the leader's
-  address (`ReadyValue.MembershipAt`, #724). A member both name is taken
-  from the newer set, the answer on a tie, by id and by key alike; a member
-  one group alone names stays admitted from it (#552, #632). The memory
-  double ranks its groups the same way.
+- **The newer record wins.** Each record carries the index it is as of:
+  the answer's, the position of the `AddLearner` it answers, committed
+  before it was sent; the engine's, its latest configuration's, or, for the
+  leader alone, the commit a member's record of its address was read at
+  (`ReadyValue.MembershipAt`, #724). Only the leader's record is raised: a
+  member the answer moved keeps the answer's record while the engine's
+  configuration is older. A member both name is taken from the newer
+  record, the answer's on a tie, by id and by key alike; a member one group
+  alone names stays admitted from it (#552, #632). The memory double ranks
+  its groups the same way.
 - **What it leaves.** The answer is ranked at its `AddLearner`'s position,
   a floor of what it knows: once the joiner's log carries a configuration
   past that position, the engine's records win, though the answer may hold

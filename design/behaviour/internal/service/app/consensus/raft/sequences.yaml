@@ -3267,7 +3267,7 @@ sequences:
         to: node.admitted
         value: node.admitted()
       - set: node.rd.Membership, node.rd.MembershipAt
-        value: node.admittedPub, node.admissionAt()
+        value: node.admittedPub, node.admissionAt(node.admittedPub)
       - return: node
   - of: startCommit
     steps:
@@ -4507,17 +4507,7 @@ sequences:
       - set: r.admittedPub
         value: a
       - set: r.rd.Membership, r.rd.MembershipAt
-        value: a, r.admissionAt()
-  - of: (*Raft).admissionAt
-    steps:
-      - bind: at
-        eval: r.conf().Index
-      - opt:
-          do:
-            - set: at
-              value: max(at, r.leadAddrAt)
-          when: r.leadAddr.ID != 0
-      - return: at
+        value: a, r.admissionAt(a)
   - of: (*Raft).PeerStats
     steps:
       - opt:

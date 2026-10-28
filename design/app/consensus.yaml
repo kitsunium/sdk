@@ -4129,12 +4129,13 @@ packages:
               name: Membership
               type: "[]core.MemberValue"
             - doc: |-
-                MembershipAt is the index Membership is as of: the latest
-                configuration's, or the commit a member's record was read at while
-                that record gives the leader's address (#724). A joining node's
-                transport ranks it against its JOIN answer's position (#742).
+                MembershipAt is the index each record of Membership is as of, in its
+                order: the latest configuration's, or, for the leader whose address a
+                member's record gives (#724), the commit that record was read at. A
+                joining node's transport ranks each against its JOIN answer's position
+                (#742).
               name: MembershipAt
-              type: uint64
+              type: "[]uint64"
             - doc: |-
                 LeaderHint is the leader a member vouched for in a MsgLeaderRecord,
                 admitted provisionally in Membership, for the driver to log (#542).

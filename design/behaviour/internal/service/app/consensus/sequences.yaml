@@ -8283,7 +8283,7 @@ sequences:
       - id: t.setMembershipAt
         kind: internal
     steps:
-      - eval: t.setMembershipAt(group, admitted, 0)
+      - eval: t.setMembershipAt(group, admitted, nil)
         to: t.setMembershipAt
   - of: (*MemoryTransport).setMembershipAt
     participants:
@@ -8303,7 +8303,7 @@ sequences:
             - set: t.groups
               value: map[coreconsensus.GroupID][]coreconsensus.MemberValue{}
             - set: t.groupsAt
-              value: map[coreconsensus.GroupID]uint64{}
+              value: map[coreconsensus.GroupID][]uint64{}
           when: t.groups == nil
       - alt:
           - do:
@@ -8315,7 +8315,8 @@ sequences:
                 to: slices
                 value: slices.Clone(admitted)
               - set: t.groupsAt[group]
-                value: at
+                to: slices
+                value: slices.Clone(at)
             else: true
       - set: t.members
         to: admittedUnion
@@ -8524,7 +8525,7 @@ sequences:
                     to: slices
                   - eval: x.mu.Unlock()
                     to: x.mu.Unlock
-                  - eval: t.hold.install(gen, func() { t.setMembershipAt(joinGroup, answer, pos.Index) })
+                  - eval: t.hold.install(gen, func() { t.setMembershipAt(joinGroup, answer, rankedAt(len(answer), pos.Index)) })
                     to: t.hold.install
                   - return: pos, nil
                 when: code == 0
@@ -21890,7 +21891,7 @@ sequences:
       - id: t.setMembershipAt
         kind: internal
     steps:
-      - eval: t.setMembershipAt(group, admitted, 0)
+      - eval: t.setMembershipAt(group, admitted, nil)
         to: t.setMembershipAt
   - of: (*TCPTransport).setMembershipAt
     participants:
@@ -21917,10 +21918,11 @@ sequences:
       - opt:
           do:
             - set: t.membersAt
-              value: map[coreconsensus.GroupID]uint64{}
+              value: map[coreconsensus.GroupID][]uint64{}
           when: t.membersAt == nil
       - set: t.membersAt[group]
-        value: at
+        to: slices
+        value: slices.Clone(at)
       - bind: byID, bySPKI
         eval: indexMembers(admittedUnion(t.members, t.membersAt))
         to: indexMembers
@@ -21974,15 +21976,15 @@ sequences:
         kind: self
       - id: slices
         kind: stdlib
-      - id: newestGroups
+      - id: newestRecords
         kind: internal
     steps:
       - bind: order
         eval: slices.Sorted(maps.Keys(groups))
         to: slices
       - bind: from
-        eval: newestGroups(groups, order, at)
-        to: newestGroups
+        eval: newestRecords(groups, order, at)
+        to: newestRecords
       - bind: out
         eval: make([]coreconsensus.MemberValue, 0, len(from))
       - loop:
@@ -21993,35 +21995,50 @@ sequences:
                       do:
                         - set: out
                           value: append(out, m)
-                        - eval: delete(from, m.ID)
                       init:
                         bind: k, ok
                         eval: from[m.ID]
-                      when: ok && k == g
-                key: _
+                      when: ok && k == (recordAt{g, i})
+                key: i
                 range: groups[g]
                 value: m
           key: _
           range: order
           value: g
       - return: out
-  - of: newestGroups
+  - of: newestRecords
     steps:
+      - bind: rank
+        eval:
+          closure:
+            params: r recordAt
+            results: uint64
+            steps:
+              - opt:
+                  do:
+                    - return: a[r.i]
+                  init:
+                    bind: a
+                    eval: at[r.group]
+                  when: r.i < len(a)
+              - return: "0"
       - bind: from
-        eval: map[coreconsensus.NodeID]coreconsensus.GroupID{}
+        eval: map[coreconsensus.NodeID]recordAt{}
       - loop:
           do:
             - loop:
                 do:
+                  - bind: r
+                    eval: recordAt{g, i}
                   - opt:
                       do:
                         - set: from[m.ID]
-                          value: g
+                          value: r
                       init:
                         bind: k, ok
                         eval: from[m.ID]
-                      when: "!ok || at[g] > at[k]"
-                key: _
+                      when: "!ok || rank(r) > rank(k)"
+                key: i
                 range: groups[g]
                 value: m
           key: _
@@ -23234,9 +23251,20 @@ sequences:
           when: "!joinAnswerListsPeer(m, spki)"
       - set: pos
         value: "coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}"
-      - eval: t.hold.install(gen, func() { t.setMembershipAt(joinGroup, m.Members, pos.Index) })
+      - eval: t.hold.install(gen, func() { t.setMembershipAt(joinGroup, m.Members, rankedAt(len(m.Members), pos.Index)) })
         to: t.hold.install
       - return: pos, false, nil
+  - of: rankedAt
+    steps:
+      - bind: r
+        eval: make([]uint64, n)
+      - loop:
+          do:
+            - set: r[i]
+              value: at
+          key: i
+          range: r
+      - return: r
   - of: (*TCPTransport).releaseJoinAnswer
     participants:
       - id: caller

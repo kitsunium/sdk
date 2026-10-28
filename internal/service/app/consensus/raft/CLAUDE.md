@@ -266,10 +266,11 @@ under coverage before touching `shard_count`.
 - Hand the admission set without the index it is as of: a joining node's
   transport ranks it against its JOIN answer, as of the `AddLearner` it
   answers, and keeps the newer record of a member both list.
-  `Ready.MembershipAt` is the latest configuration's index, or the commit
-  a leader's record was read at while it gives the leader's address
-  (`admissionAt`, #742, #724, `TestTheAdmissionSetSaysWhatItIsAsOf`; no
-  mutation).
+  `Ready.MembershipAt` ranks each record: the latest configuration's
+  index, or, for the leader alone, the commit a record of its address was
+  read at; raising every record by it let stale ones of other members win
+  over a newer answer (`admissionAt`, #742, #724,
+  `TestTheAdmissionSetSaysWhatItIsAsOf`; no mutation).
 - Start the commit at the persisted one alone under a state machine
   applied past it: a commit-only Ready is written lazily, a
   `DurableStateMachine` crashed past the persisted commit, and `EngineAt`

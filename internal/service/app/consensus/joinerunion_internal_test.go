@@ -105,11 +105,11 @@ func TestTheUnionOfTwoGroupsKeepsTheNewerRecordOfAMember(t *testing.T) {
 	answer.Address, replayed.Address = "10.0.0.1:7001", "10.0.0.1:7000"
 	tr := newUnionTransport()
 	defer tr.wg.Wait()
-	tr.setMembershipAt(joinGroup, []coreconsensus.MemberValue{answer}, 40)
+	tr.setMembershipAt(joinGroup, []coreconsensus.MemberValue{answer}, rankedAt(1, 40))
 	for i := range 200 {
 		// The engine's group is published again, as at every change of its
 		// admitted set, from a configuration below the answer's position.
-		tr.setMembershipAt(1, []coreconsensus.MemberValue{replayed}, uint64(1+i%39))
+		tr.setMembershipAt(1, []coreconsensus.MemberValue{replayed}, rankedAt(1, uint64(1+i%39)))
 		if addr, _, _ := tr.address(a.ID); addr != answer.Address {
 			t.Fatalf("publication %d: dialled at %s, want the JOIN answer's %s", i, addr, answer.Address)
 		}
@@ -119,7 +119,7 @@ func TestTheUnionOfTwoGroupsKeepsTheNewerRecordOfAMember(t *testing.T) {
 	moved := a
 	moved.Address = "10.0.0.1:7002"
 	for i := range 200 {
-		tr.setMembershipAt(1, []coreconsensus.MemberValue{moved}, uint64(41+i))
+		tr.setMembershipAt(1, []coreconsensus.MemberValue{moved}, rankedAt(1, uint64(41+i)))
 		if addr, _, _ := tr.address(a.ID); addr != moved.Address {
 			t.Fatalf("publication %d: dialled at %s, want the newer configuration's %s", i, addr, moved.Address)
 		}
@@ -128,7 +128,7 @@ func TestTheUnionOfTwoGroupsKeepsTheNewerRecordOfAMember(t *testing.T) {
 	// record's does.
 	rekeyed := moved
 	rekeyed.SPKI = [32]byte{2}
-	tr.setMembershipAt(1, []coreconsensus.MemberValue{rekeyed}, 60)
+	tr.setMembershipAt(1, []coreconsensus.MemberValue{rekeyed}, rankedAt(1, 60))
 	tr.mu.Lock()
 	_, oldKey := tr.bySPKI[a.SPKI]
 	_, newKey := tr.bySPKI[rekeyed.SPKI]
@@ -138,9 +138,23 @@ func TestTheUnionOfTwoGroupsKeepsTheNewerRecordOfAMember(t *testing.T) {
 	}
 	// A member one group alone lists stays admitted from it (#552).
 	only := coreconsensus.MemberValue{ID: 9, Slot: "site-l", SPKI: [32]byte{3}, Address: "10.0.0.9:7000", Voter: true}
-	tr.setMembershipAt(joinGroup, []coreconsensus.MemberValue{answer, only}, 40)
+	tr.setMembershipAt(joinGroup, []coreconsensus.MemberValue{answer, only}, rankedAt(2, 40))
 	if addr, _, _ := tr.address(only.ID); addr != only.Address {
 		t.Fatalf("a member only the answer lists is dialled at %q, want %s", addr, only.Address)
+	}
+	// Each record is ranked on its own: the leader's, raised to the commit
+	// a member's record of its address was read at (#724), wins over the
+	// answer, and another member's, as of the replayed configuration, still
+	// loses to the answer that moved it.
+	tr.setMembershipAt(joinGroup, []coreconsensus.MemberValue{answer, only}, rankedAt(2, 40))
+	stale := only
+	stale.Address = "10.0.0.9:6999"
+	tr.setMembershipAt(1, []coreconsensus.MemberValue{moved, stale}, []uint64{50, 5})
+	if addr, _, _ := tr.address(a.ID); addr != moved.Address {
+		t.Fatalf("the leader's raised record is dialled at %s, want %s", addr, moved.Address)
+	}
+	if addr, _, _ := tr.address(only.ID); addr != only.Address {
+		t.Fatalf("a member the answer moved is dialled at %s from the replayed configuration, want the answer's %s", addr, only.Address)
 	}
 }
 

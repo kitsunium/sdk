@@ -921,9 +921,10 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   from the map's iteration: a joiner replaying a configuration older than
   an `UpdateAddress` dialled the moved member at its old address about 7
   times in 8, and was not fed while that member led. `admittedUnion` keeps
-  the record of the newer set, by id and by key — the answer as of the
-  `AddLearner` it answers, the engine's as of `ReadyValue.MembershipAt`,
-  the answer on a tie — and the memory double ranks alike (`membershipSetter`,
+  the newer record, by id and by key — the answer's as of the `AddLearner`
+  it answers, each of the engine's as of `ReadyValue.MembershipAt`, which
+  raises the leader's record alone (#724), the answer's on a tie — and the
+  memory double ranks alike (`membershipSetter`,
   #742, `TestTheUnionOfTwoGroupsKeepsTheNewerRecordOfAMember`,
   `TestAJoinerDialsAMovedLeaderAtItsJoinAnswersAddress`).
 - Keep a joiner on the JOIN answer it got first while it hears no leader:

@@ -178,6 +178,22 @@ workflows:
                 when: r.applyCommitEffect(i, r.log.at(i))
           init: i := max(lo, r.log.snapIndex+1)
           post: i++
+  - of: (*Raft).admissionAt
+    steps:
+      - bind: at
+        eval: make([]uint64, len(out))
+      - loop:
+          do:
+            - set: at[i]
+              value: r.conf().Index
+            - opt:
+                do:
+                  - set: at[i]
+                    value: max(at[i], r.leadAddrAt)
+                when: r.leadAddr.ID != 0 && out[i].ID == r.leadAddr.ID && out[i].SPKI == r.leadAddr.SPKI
+          key: i
+          range: out
+      - return: at
   - of: (*Raft).FailureTolerance
     steps:
       - opt:

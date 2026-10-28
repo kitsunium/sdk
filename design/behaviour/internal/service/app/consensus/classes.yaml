@@ -1686,7 +1686,8 @@ files:
       - (*TCPTransport).SetMembership
       - (*TCPTransport).setMembershipAt
       - admittedUnion
-      - newestGroups
+      - recordAt
+      - newestRecords
       - indexMembers
       - (*TCPTransport).reserveAddresses
       - (*TCPTransport).Close
@@ -1722,6 +1723,7 @@ files:
       - (*TCPTransport).joinOnLane
       - endedUnanswered
       - (*TCPTransport).joinAnswered
+      - rankedAt
       - (*TCPTransport).releaseJoinAnswer
       - joinAnswerListsPeer
       - joinAnswerReason
@@ -3271,25 +3273,25 @@ functions:
     params: wg *sync.WaitGroup, c connNetter
   - doc: |-
       admittedUnion is the union of every group's admitted members, one record
-      a member: that of the group whose set is newer by at, the index each
-      set is as of, the lower group on a tie. A joining node's JOIN answer
-      (joinGroup) is as of the AddLearner it answers, and the configuration
-      its engine replays from below it is older: a member both list, moved by
-      an UpdateAddress between them, was dialled at whichever address the map's
-      iteration visited last, the replayed one about 7 times in 8, and a moved
-      leader never fed the joiner (#742). Once the engine's configuration, or
-      a leader's record it took (#724), passes the answer, its records win. A
+      a member: the newest by at, the index each record is as of, the earlier
+      group's on a tie. A joining node's JOIN answer (joinGroup) is as of the
+      AddLearner it answers, and the configuration its engine replays from
+      below it is older: a member both list, moved by an UpdateAddress between
+      them, was dialled at whichever address the map's iteration visited last,
+      the replayed one about 7 times in 8, and a moved leader did not feed the
+      joiner (#742). A record of the engine's wins once its configuration, or
+      for the leader a record of its address (#724), passes the answer. A
       member one group lists is in the union whatever its rank (#552). The
       records are in group order, then in each group's order.
     name: admittedUnion
-    params: groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, at map[coreconsensus.GroupID]uint64
+    params: groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, at map[coreconsensus.GroupID][]uint64
     results: "[]coreconsensus.MemberValue"
   - doc: |-
-      newestGroups is, for each member the groups list, the group of order
-      whose set is newer by at, the earlier on a tie.
-    name: newestGroups
-    params: groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, order []coreconsensus.GroupID, at map[coreconsensus.GroupID]uint64
-    results: map[coreconsensus.NodeID]coreconsensus.GroupID
+      newestRecords is, for each member the groups list, its record the newest
+      by at, the earlier in order on a tie.
+    name: newestRecords
+    params: groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, order []coreconsensus.GroupID, at map[coreconsensus.GroupID][]uint64
+    results: map[coreconsensus.NodeID]recordAt
   - doc: |-
       indexMembers indexes the admitted members, by id and by pinned key; a
       member without a pin is reachable by id only, so it can be dialled for
@@ -3406,6 +3408,10 @@ functions:
     name: endedUnanswered
     params: err error
     results: bool
+  - doc: rankedAt is n records' ranks, each at.
+    name: rankedAt
+    params: n int, at uint64
+    results: "[]uint64"
   - doc: |-
       joinAnswerListsPeer reports whether a JOIN answer's membership lists the
       peer that sent it under the key it presented: an answer that does not is
@@ -5432,14 +5438,14 @@ types:
     name: joinHold
   - doc: |-
       membershipSetter is a transport that keeps, of a member two of its
-      admission groups list, the record of the group whose set is newer: a
-      joining node's JOIN answer, as of the AddLearner it answers, against the
-      configuration its engine replays (#742).
+      admission groups list, the newer record, at being the index each record
+      of admitted is as of: a joining node's JOIN answer, as of the AddLearner
+      it answers, against the configuration its engine replays (#742).
     kind: named
     name: membershipSetter
     underlying: |-
       interface {
-      	setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64)
+      	setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at []uint64)
       }
   - doc: |-
       refreshJoiner is a transport that sends its JOIN again with the
@@ -5692,11 +5698,11 @@ types:
         type: "*memRun"
       - doc: |-
           groups are the admitted members per group, groupsAt the index each
-          set is as of, members their union (admittedUnion, #742).
+          of their records is as of, members their union (admittedUnion, #742).
         name: groups
         type: map[coreconsensus.GroupID][]coreconsensus.MemberValue
       - name: groupsAt
-        type: map[coreconsensus.GroupID]uint64
+        type: map[coreconsensus.GroupID][]uint64
       - name: members
         type: "[]coreconsensus.MemberValue"
       - doc: hold keeps the JOIN answer's configuration and release (#632).
@@ -5753,10 +5759,10 @@ types:
         params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue
         recv: t *MemoryTransport
       - doc: |-
-          setMembershipAt is SetMembership for a set as of index at, ranked as the
-          TCP transport ranks it (membershipSetter, #742).
+          setMembershipAt is SetMembership with the index each record is as of,
+          ranked as the TCP transport ranks it (membershipSetter, #742).
         name: setMembershipAt
-        params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64
+        params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at []uint64
         recv: t *MemoryTransport
       - doc: bindWarn implements bindWarner.
         name: bindWarn
@@ -6859,7 +6865,8 @@ types:
         recv: n *Node
       - doc: |-
           setMembership hands the transport the admission set a Ready carries, with
-          the index it is as of when the transport ranks its groups by it (#742).
+          the index each record is as of when the transport ranks its groups'
+          records by it (#742).
         name: setMembership
         params: rd *raft.ReadyValue
         recv: n *Node
@@ -8890,11 +8897,11 @@ types:
       - name: members
         type: map[coreconsensus.GroupID][]coreconsensus.MemberValue
       - doc: |-
-          membersAt is the index each group's set is as of, which ranks the
-          records of a member two groups list; a group absent from it is 0
-          (#742).
+          membersAt is, per group, the index each record of its set is as of,
+          in its order, which ranks the records of a member two groups list; a
+          record with none is 0 (#742).
         name: membersAt
-        type: map[coreconsensus.GroupID]uint64
+        type: map[coreconsensus.GroupID][]uint64
       - name: byID
         type: map[coreconsensus.NodeID]coreconsensus.MemberValue
       - name: bySPKI
@@ -9183,10 +9190,11 @@ types:
         params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue
         recv: t *TCPTransport
       - doc: |-
-          setMembershipAt is SetMembership for a set as of index at, which ranks
-          its records against another group's (membershipSetter, #742).
+          setMembershipAt is SetMembership with at, the index each record of
+          admitted is as of, which ranks it against another group's
+          (membershipSetter, #742).
         name: setMembershipAt
-        params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64
+        params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at []uint64
         recv: t *TCPTransport
       - doc: |-
           reserveAddresses gives the members' addresses their reserved admission
@@ -9370,6 +9378,16 @@ types:
       	io.Reader
       	NetConn() net.Conn
       }
+  - doc: |-
+      recordAt is a record of the admission groups: its group, and its place in
+      that group's set.
+    fields:
+      - name: group
+        type: coreconsensus.GroupID
+      - name: i
+        type: int
+    kind: struct
+    name: recordAt
   - doc: |-
       closeWriter is the end of a snapshot stream the sender writes and then
       half-closes, so the receiver sees the stream end and can still answer.

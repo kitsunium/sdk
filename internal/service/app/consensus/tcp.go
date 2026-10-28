@@ -267,10 +267,10 @@ type TCPTransport struct {
 
 	mu      sync.Mutex
 	members map[coreconsensus.GroupID][]coreconsensus.MemberValue
-	// membersAt is the index each group's set is as of, which ranks the
-	// records of a member two groups list; a group absent from it is 0
-	// (#742).
-	membersAt map[coreconsensus.GroupID]uint64
+	// membersAt is, per group, the index each record of its set is as of,
+	// in its order, which ranks the records of a member two groups list; a
+	// record with none is 0 (#742).
+	membersAt map[coreconsensus.GroupID][]uint64
 	byID      map[coreconsensus.NodeID]coreconsensus.MemberValue
 	bySPKI    map[[32]byte]coreconsensus.MemberValue
 	out       map[outKey]*peerConn
@@ -1112,19 +1112,20 @@ func (t *TCPTransport) Bind(_ coreconsensus.GroupID,
 // the groups; a member that left has its connections cut and its
 // handshakes refused from then on (D4).
 func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue) {
-	t.setMembershipAt(group, admitted, 0)
+	t.setMembershipAt(group, admitted, nil)
 }
 
-// setMembershipAt is SetMembership for a set as of index at, which ranks
-// its records against another group's (membershipSetter, #742).
-func (t *TCPTransport) setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64) {
+// setMembershipAt is SetMembership with at, the index each record of
+// admitted is as of, which ranks it against another group's
+// (membershipSetter, #742).
+func (t *TCPTransport) setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at []uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.members[group] = slices.Clone(admitted)
 	if t.membersAt == nil {
-		t.membersAt = map[coreconsensus.GroupID]uint64{}
+		t.membersAt = map[coreconsensus.GroupID][]uint64{}
 	}
-	t.membersAt[group] = at
+	t.membersAt[group] = slices.Clone(at)
 	byID, bySPKI := indexMembers(admittedUnion(t.members, t.membersAt))
 	t.byID, t.bySPKI = byID, bySPKI
 	t.reserveAddresses(byID)
@@ -1157,39 +1158,52 @@ func (t *TCPTransport) setMembershipAt(group coreconsensus.GroupID, admitted []c
 }
 
 // admittedUnion is the union of every group's admitted members, one record
-// a member: that of the group whose set is newer by at, the index each
-// set is as of, the lower group on a tie. A joining node's JOIN answer
-// (joinGroup) is as of the AddLearner it answers, and the configuration
-// its engine replays from below it is older: a member both list, moved by
-// an UpdateAddress between them, was dialled at whichever address the map's
-// iteration visited last, the replayed one about 7 times in 8, and a moved
-// leader never fed the joiner (#742). Once the engine's configuration, or
-// a leader's record it took (#724), passes the answer, its records win. A
+// a member: the newest by at, the index each record is as of, the earlier
+// group's on a tie. A joining node's JOIN answer (joinGroup) is as of the
+// AddLearner it answers, and the configuration its engine replays from
+// below it is older: a member both list, moved by an UpdateAddress between
+// them, was dialled at whichever address the map's iteration visited last,
+// the replayed one about 7 times in 8, and a moved leader did not feed the
+// joiner (#742). A record of the engine's wins once its configuration, or
+// for the leader a record of its address (#724), passes the answer. A
 // member one group lists is in the union whatever its rank (#552). The
 // records are in group order, then in each group's order.
-func admittedUnion(groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, at map[coreconsensus.GroupID]uint64) []coreconsensus.MemberValue {
+func admittedUnion(groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, at map[coreconsensus.GroupID][]uint64) []coreconsensus.MemberValue {
 	order := slices.Sorted(maps.Keys(groups))
-	from := newestGroups(groups, order, at)
+	from := newestRecords(groups, order, at)
 	out := make([]coreconsensus.MemberValue, 0, len(from))
 	for _, g := range order {
-		for _, m := range groups[g] {
-			if k, ok := from[m.ID]; ok && k == g {
+		for i, m := range groups[g] {
+			if k, ok := from[m.ID]; ok && k == (recordAt{g, i}) {
 				out = append(out, m)
-				delete(from, m.ID)
 			}
 		}
 	}
 	return out
 }
 
-// newestGroups is, for each member the groups list, the group of order
-// whose set is newer by at, the earlier on a tie.
-func newestGroups(groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, order []coreconsensus.GroupID, at map[coreconsensus.GroupID]uint64) map[coreconsensus.NodeID]coreconsensus.GroupID {
-	from := map[coreconsensus.NodeID]coreconsensus.GroupID{}
+// recordAt is a record of the admission groups: its group, and its place in
+// that group's set.
+type recordAt struct {
+	group coreconsensus.GroupID
+	i     int
+}
+
+// newestRecords is, for each member the groups list, its record the newest
+// by at, the earlier in order on a tie.
+func newestRecords(groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, order []coreconsensus.GroupID, at map[coreconsensus.GroupID][]uint64) map[coreconsensus.NodeID]recordAt {
+	rank := func(r recordAt) uint64 {
+		if a := at[r.group]; r.i < len(a) {
+			return a[r.i]
+		}
+		return 0
+	}
+	from := map[coreconsensus.NodeID]recordAt{}
 	for _, g := range order {
-		for _, m := range groups[g] {
-			if k, ok := from[m.ID]; !ok || at[g] > at[k] {
-				from[m.ID] = g
+		for i, m := range groups[g] {
+			r := recordAt{g, i}
+			if k, ok := from[m.ID]; !ok || rank(r) > rank(k) {
+				from[m.ID] = r
 			}
 		}
 	}
@@ -1890,8 +1904,17 @@ func (t *TCPTransport) joinAnswered(b []byte, rerr error, spki [32]byte, gen uin
 	pos = coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}
 	// The answer is as of the AddLearner it answers, committed before it
 	// was sent: it outranks a configuration replayed from below (#742).
-	t.hold.install(gen, func() { t.setMembershipAt(joinGroup, m.Members, pos.Index) })
+	t.hold.install(gen, func() { t.setMembershipAt(joinGroup, m.Members, rankedAt(len(m.Members), pos.Index)) })
 	return pos, false, nil
+}
+
+// rankedAt is n records' ranks, each at.
+func rankedAt(n int, at uint64) []uint64 {
+	r := make([]uint64, n)
+	for i := range r {
+		r[i] = at
+	}
+	return r
 }
 
 // releaseJoinAnswer drops the JOIN answer's admission group once the node
