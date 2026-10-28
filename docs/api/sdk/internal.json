@@ -29588,8 +29588,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "LoopValue",
-      "spelled": "struct{Backend LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []Capability \"json:\\\"capabilities,omitempty\\\"\"; Outbound int \"json:\\\"outbound\\\"\"}",
-      "canonical": "struct{Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []github.com/kitsunium/sdk/internal/core/net.Capability \"json:\\\"capabilities,omitempty\\\"\"; Outbound int \"json:\\\"outbound\\\"\"}",
+      "spelled": "struct{Backend LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []Capability \"json:\\\"capabilities,omitempty\\\"\"; Outbound int \"json:\\\"outbound\\\"\"; BatchWait DurationValue \"json:\\\"batch_wait\\\"\"; BatchWaitMin int \"json:\\\"batch_wait_min\\\"\"}",
+      "canonical": "struct{Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []github.com/kitsunium/sdk/internal/core/net.Capability \"json:\\\"capabilities,omitempty\\\"\"; Outbound int \"json:\\\"outbound\\\"\"; BatchWait github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"batch_wait\\\"\"; BatchWaitMin int \"json:\\\"batch_wait_min\\\"\"}",
       "fields": [
         {
           "name": "Backend",
@@ -29601,7 +29601,7 @@
           "name": "Loops",
           "type": "int",
           "tag": "json:\"loops\"",
-          "doc": "Loops is the number of loops, each one goroutine locked to its OS thread\non a native backend. Zero selects one; LoopsAuto selects GOMAXPROCS, read\nonce at Start. The SDK never sets GOMAXPROCS: sizing the process against\nits loops is the consumer's policy, and State reports both.\n"
+          "doc": "Loops is the number of loops, each one goroutine locked to its OS thread\non a native backend. Zero selects one; LoopsAuto selects GOMAXPROCS less\none, at least one, read once at Start. The SDK never sets GOMAXPROCS:\nsizing the process against its loops is the consumer's policy, and State\nreports both. A native loop yields to the Go scheduler every 5 ms of\nserving while GOMAXPROCS exceeds the group's loops (ADR 0199).\n"
         },
         {
           "name": "Rings",
@@ -29650,6 +29650,18 @@
           "type": "int",
           "tag": "json:\"outbound\"",
           "doc": "Outbound is how many jobs one lane's queue to its worker holds (R3),\nwhen the group's handler offloads (LoopOffloader). A Send past it is\nrefused with LoopOutboundFull and counted in LoopStateValue. Zero\nselects 256.\n"
+        },
+        {
+          "name": "BatchWait",
+          "type": "DurationValue",
+          "tag": "json:\"batch_wait\"",
+          "doc": "BatchWait bounds how long an io_uring loop holds its wait for\nBatchWaitMin completions once its previous batch reaped at least four,\nso a loaded loop serves larger batches for fewer wakeups (ADR 0199): the\nlatency it adds to a request is at most BatchWait. Zero selects 250 µs,\na negative value turns the grouped wait off, and anything past the 10 ms\ntick is the tick. epoll and the portable backend ignore it.\n"
+        },
+        {
+          "name": "BatchWaitMin",
+          "type": "int",
+          "tag": "json:\"batch_wait_min\"",
+          "doc": "BatchWaitMin is how many completions the grouped wait waits for before\nBatchWait runs out. Zero selects 32; past CQBatch it is CQBatch.\n"
         }
       ],
       "doc": "LoopValue configures a loop group's engine (ADR 0186 §D5). It is a value of\nits own, passed by the Loop group option, so LimitsValue and TimeoutsValue\nkeep the meanings they publish for every engine. Every field is optional:\nzero selects the domain default, never \"unbounded\".\n",
@@ -29707,7 +29719,7 @@
       "spelled": "int",
       "canonical": "int",
       "value": "-1",
-      "doc": "LoopsAuto, set as LoopValue.Loops, runs one loop per GOMAXPROCS, read once at\nStart: a snapshot that a later change of GOMAXPROCS does not move. It is a\nsentinel, never the zero value, which is one loop (ADR 0187 §D9); State\nreports the count and \"auto\" as its source.\n",
+      "doc": "LoopsAuto, set as LoopValue.Loops, runs one loop per GOMAXPROCS but one, at\nleast one, read once at Start: a snapshot that a later change of GOMAXPROCS\ndoes not move. The P left over runs the rest of the process (ADR 0199). It\nis a sentinel, never the zero value, which is one loop (ADR 0187 §D9); State\nreports the count and \"auto\" as its source.\n",
       "file": "core/net/loop_value.go",
       "layer": "core",
       "family": "net"
@@ -65237,7 +65249,7 @@
       "name": "ResolveLoops",
       "spelled": "func(n int) (int, string)",
       "canonical": "func(n int) (int, string)",
-      "doc": "ResolveLoops resolves LoopValue.Loops n and says where the count came from,\nas LoopStateValue.LoopsSource spells it: LoopsAuto is GOMAXPROCS read now,\n\"auto\"; a positive count is its own, \"explicit\"; anything else is one,\n\"single\" (R8). server calls it once per group, at Start, and keeps the\nsnapshot for every backend.\n",
+      "doc": "ResolveLoops resolves LoopValue.Loops n and says where the count came from,\nas LoopStateValue.LoopsSource spells it: LoopsAuto is GOMAXPROCS less one\nread now, at least one, \"auto\" — the P left over runs the rest of the\nprocess (ADR 0199); a positive count is its own, \"explicit\"; anything else is one,\n\"single\" (R8). server calls it once per group, at Start, and keeps the\nsnapshot for every backend.\n",
       "file": "service/net/loop/sizing.go",
       "layer": "service",
       "family": "net"

@@ -33,7 +33,7 @@ Stdlib-only, no `go.sum`, outside `go.work` (the `tools/` convention, and an
 |---|---|---|---|---|
 | P2 | L2 | handwritten → chain | `cpu-ns/req` ratio ≤ 1.05 (upper); 0 allocations as a kit budget, not a bench metric | **active** (ADR 0191): `chainL2` is `http1.Routes` then `http1.Bearer` |
 | P4a | L3 | recvmmsg → gro | `datagrams/syscall` ratio ≥ 4 (lower), **reported, not gated** (ADR 0192 §D7); `cpu-ns/datagram` — the receiver's and the sender's rusage plus /proc/stat's irq and softirq time over the window (ADR 0192 §D6) — ratio ≤ 0.75 (upper) | **active** |
-| P6 | L1 | goroutine → loop | `cpu-ns/req` ratio ≤ 0.70 (upper) | **active** (ADR 0196 §D5): L1's loop engine runs `LoopsAuto`, one loop a P |
+| P6 | L1 | goroutine → loop | `cpu-ns/req` ratio ≤ 0.70 (upper) | **active** (ADR 0196 §D5): L1's loop engine runs `LoopsAuto`, one loop a P but one (ADR 0199) |
 | P5 | L1 | published → loop | `cpu-ns/req` ratio ≤ 1.0 (upper) | inactive: the published http1's samples are not stored |
 | cal-L1 | L1 | loop → loop | `cpu-ns/req` ratio within 5 % of 1, both bounds | **active**: the runner can be judged at P2's 5 % |
 | cal-L2 | L2 | handwritten → handwritten | the same | **active** |

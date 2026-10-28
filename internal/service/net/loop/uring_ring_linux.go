@@ -386,13 +386,17 @@ func (u *uring) submit() {
 	}
 }
 
-// wait submits what is pending and blocks until one completion or the
-// timeout, in one io_uring_enter with EXT_ARG. ETIME is the tick.
-func (u *uring) wait(ts *kernelTimespec) {
+// wait submits what is pending and blocks until want completions or the
+// timeout, in one io_uring_enter with EXT_ARG. ETIME is the tick, or the
+// grouped wait's bound (ADR 0199). The kernel wakes the thread once the CQ
+// holds want entries past its head, or when ts runs out, and an ETIME with
+// completions in the CQ returns zero (io_cqring_wait, io_uring/io_uring.c,
+// 6.8 to 7.0); either way the caller reaps what came.
+func (u *uring) wait(ts *kernelTimespec, want uint32) {
 	u.publish()
 	arg := getEventsArg{ts: uint64(uintptr(unsafe.Pointer(ts)))}
+	minComplete := max(want, 1)
 	//: a completion already there makes the wait a submit.
-	minComplete := uint32(1)
 	if u.ready() > 0 {
 		minComplete = 0
 	}

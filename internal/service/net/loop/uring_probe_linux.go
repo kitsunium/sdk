@@ -294,7 +294,7 @@ func (st *selfTestRun) pump(done func() bool) {
 	tick := kernelTimespec{nsec: int64(tickEvery)}
 	//: until done, or out of time.
 	for !done() && time.Now().Before(deadline) {
-		st.u.wait(&tick)
+		st.u.wait(&tick, 1)
 		st.u.reap(64, st.onCQE)
 	}
 }
@@ -306,7 +306,7 @@ func (st *selfTestRun) exchange() {
 	tick := kernelTimespec{nsec: int64(tickEvery)}
 	//: until the payload came back whole, or the second is up.
 	for !bytes.Equal(st.got, selfTestPayload) && time.Now().Before(deadline) {
-		st.u.wait(&tick)
+		st.u.wait(&tick, 1)
 		st.u.reap(64, st.onCQE)
 	}
 }

@@ -2301,7 +2301,7 @@
       "canonical": "int",
       "value": "-1",
       "init": "go:github.com/kitsunium/sdk/internal/core/net.LoopsAuto",
-      "doc": "LoopsAuto, as LoopValue.Loops, runs one loop per GOMAXPROCS, read once at\nStart.\n",
+      "doc": "LoopsAuto, as LoopValue.Loops, runs one loop per GOMAXPROCS but one, at\nleast one, read once at Start.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

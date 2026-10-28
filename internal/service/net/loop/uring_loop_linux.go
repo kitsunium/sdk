@@ -198,6 +198,9 @@ type uLoop struct {
 	// rings are registered with the thread.
 	uses       ringUses
 	registered int
+	// reaped is how many completions the last batch reaped, every ring
+	// together: what decides whether the next wait is grouped.
+	reaped uint64
 }
 
 // ringUses is what a loop's rings use beyond their setup flags.
@@ -763,10 +766,11 @@ func (rr *uRing) pace() {
 func (ul *uLoop) serve() {
 	lp := ul.lp
 	tick := kernelTimespec{nsec: int64(tickEvery)}
+	grouped := kernelTimespec{nsec: int64(lp.sz.batchWait)}
 	//: until stopped, or drained to the last connection, the listeners'
 	//: queues taken first.
 	for {
-		ul.batch(&tick)
+		ul.batch(ul.waitArgs(&tick, &grouped))
 		//: finished.
 		if ul.stopReq.Load() || (lp.draining && ul.live() == 0 && ul.queuesTaken()) {
 			//: out.
@@ -776,20 +780,38 @@ func (ul *uLoop) serve() {
 	ul.closeAll()
 }
 
+// waitArgs is the next wait's timeout and completions: the tick and one, or,
+// once the last batch reaped batchWaitFrom completions or more, the grouped
+// wait — sz.batchWaitMin completions or sz.batchWait, whichever comes first
+// (ADR 0199). A loop draining waits plainly: the drain is paced by the tick.
+func (ul *uLoop) waitArgs(tick, grouped *kernelTimespec) (*kernelTimespec, uint32) {
+	lp := ul.lp
+	//: off, idle, or draining: the plain wait.
+	if lp.sz.batchWait <= 0 || ul.reaped < batchWaitFrom || lp.draining {
+		//: one completion, or the tick.
+		return tick, 1
+	}
+	//: loaded: a larger batch, bounded in time.
+	return grouped, uint32(lp.sz.batchWaitMin)
+}
+
 // batch is one iteration: the wait on the primary, every ring reaped, the
-// drain, the timers, OnBatchEnd, and the buffers returned.
-func (ul *uLoop) batch(tick *kernelTimespec) {
+// drain, the timers, OnBatchEnd, the buffers returned and the yield.
+func (ul *uLoop) batch(ts *kernelTimespec, want uint32) {
 	lp := ul.lp
 	//: secondaries submit without waiting; the primary submits and waits.
 	for _, rr := range ul.rings[1:] {
 		rr.u.submit()
 	}
-	ul.rings[0].u.wait(tick)
+	ul.rings[0].u.wait(ts, want)
 	started := time.Now()
 	lp.tick = lp.now()
+	ul.reaped = 0
 	//: every ring, whoever woke the loop.
 	for _, rr := range ul.rings {
+		before := rr.r.st.completions
 		rr.reapAll()
+		ul.reaped += rr.r.st.completions - before
 	}
 	ul.control()
 	//: timers, pacing and the watchdog, ring by ring.
@@ -806,6 +828,7 @@ func (ul *uLoop) batch(tick *kernelTimespec) {
 		rr.returnBuffers()
 		rr.r.st.retries = rr.u.retries
 	}
+	lp.yield()
 }
 
 // live is the loop's open connections and slots still held by the kernel.
@@ -1663,7 +1686,7 @@ func (ul *uLoop) closeAll() {
 	tick := kernelTimespec{nsec: int64(tickEvery)}
 	//: until every slot is released or the second is up.
 	for ul.live() > 0 && time.Now().Before(deadline) {
-		ul.rings[0].u.wait(&tick)
+		ul.rings[0].u.wait(&tick, 1)
 		//: each ring.
 		for _, rr := range ul.rings {
 			rr.u.submit()

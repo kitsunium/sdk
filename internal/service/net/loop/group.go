@@ -172,6 +172,7 @@ func Start(cfg Config) (*Group, error) {
 		sz.tableSize = cfg.tableCap
 	}
 	g := &Group{name: cfg.Group, sz: sz, grp: &shared{}, procs: runtime.GOMAXPROCS(0)}
+	g.sz.yield = yieldFor(g.procs, sz.loops)
 	//: the platform's native backends, or a refusal.
 	if err := startNative(g, &cfg); err != nil {
 		closeListeners(cfg.Listeners)
@@ -183,8 +184,8 @@ func Start(cfg Config) (*Group, error) {
 	if w == nil {
 		w = os.Stderr
 	}
-	_, werr := fmt.Fprintf(w, "net/loop: group=%q backend=%s probe=%s reason=%q loops=%d loops_source=%s rings=%d rings_source=%s table=%d cq_batch=%d spill_cap=%d output_cap=%d rlimit_nofile=%d gomaxprocs=%d\n",
-		g.name, g.backend, g.stage, g.reason, sz.loops, sz.loopsSource, sz.rings, sz.ringsSource, sz.tableSize, sz.cqBatch, sz.spillCap, sz.outputCap, sz.rlimit, g.procs)
+	_, werr := fmt.Fprintf(w, "net/loop: group=%q backend=%s probe=%s reason=%q loops=%d loops_source=%s rings=%d rings_source=%s table=%d cq_batch=%d spill_cap=%d output_cap=%d rlimit_nofile=%d gomaxprocs=%d batch_wait=%s batch_wait_min=%d yield=%s\n",
+		g.name, g.backend, g.stage, g.reason, g.sz.loops, g.sz.loopsSource, g.sz.rings, g.sz.ringsSource, g.sz.tableSize, g.sz.cqBatch, g.sz.spillCap, g.sz.outputCap, g.sz.rlimit, g.procs, g.sz.batchWait, g.sz.batchWaitMin, g.sz.yield)
 	//: a log writer that fails changes nothing: the group serves either way.
 	swallowErr(werr)
 	//: serving.

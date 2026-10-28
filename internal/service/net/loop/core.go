@@ -2,6 +2,7 @@ package loop
 
 import (
 	"os"
+	"runtime"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -134,6 +135,10 @@ type loop struct {
 	hard bool
 	// lowWater is the output mark under which OnWritable fires.
 	lowWater int
+	// ended is when the last batch ended; yielded when the loop last
+	// yielded to the scheduler (sz.yield).
+	ended   time.Time
+	yielded time.Time
 }
 
 // newRing builds ring i of lp over drv.
@@ -694,7 +699,25 @@ func (lp *loop) endBatch(started time.Time) {
 		r.st.batches++
 		r.publish()
 	}
-	lp.grp.observe(time.Since(started))
+	lp.ended = time.Now()
+	lp.grp.observe(lp.ended.Sub(started))
+}
+
+// yield hands the loop's thread back to the Go scheduler once sz.yield has
+// passed since the last time, at the very end of a batch (ADR 0199). A loop
+// locked to its thread never goes through the scheduler on its own: its P's
+// schedtick never moves, so sysmon preempts it every 10 ms and retakes its P
+// in the middle of a wait. It reports whether it yielded.
+func (lp *loop) yield() bool {
+	//: off, or not due.
+	if lp.sz.yield <= 0 || lp.ended.Sub(lp.yielded) < lp.sz.yield {
+		//: serving on.
+		return false
+	}
+	lp.yielded = lp.ended
+	runtime.Gosched()
+	//: yielded.
+	return true
 }
 
 // compactListed compacts the spill of every slot listed in the batch, so the

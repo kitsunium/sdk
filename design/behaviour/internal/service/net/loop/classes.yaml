@@ -355,7 +355,7 @@ constants:
         name: loopsExplicit
         type: string
         value: "\"explicit\""
-      - doc: "loopsAuto is LoopsAuto: GOMAXPROCS read at Start."
+      - doc: "loopsAuto is LoopsAuto: GOMAXPROCS less one read at Start."
         name: loopsAuto
         type: string
         value: "\"auto\""
@@ -363,6 +363,30 @@ constants:
         name: loopsSingle
         type: string
         value: "\"single\""
+      - doc: |-
+          defaultBatchWait is LoopValue.BatchWait's default: the most the
+          grouped io_uring wait adds to a request's latency (ADR 0199).
+        name: defaultBatchWait
+        type: time.Duration
+        value: 250 * time.Microsecond
+      - doc: defaultBatchWaitMin is LoopValue.BatchWaitMin's default.
+        name: defaultBatchWaitMin
+        type: int
+        value: "32"
+      - doc: |-
+          batchWaitFrom is the fewest completions a batch must have reaped for
+          the next wait to be grouped: below it the loop is not loaded, and
+          waiting would only add latency.
+        name: batchWaitFrom
+        type: uint64
+        value: "4"
+      - doc: |-
+          yieldEvery is the most serving time between two yields of a native
+          loop to the Go scheduler, when GOMAXPROCS leaves it a spare P (ADR
+          0199). Measured: 2 ms and 5 ms cost the same.
+        name: yieldEvery
+        type: time.Duration
+        value: 5 * time.Millisecond
     name: ioringMaxFixedFiles
   - grouped: true
     items:
@@ -883,6 +907,7 @@ files:
       - (*ring).lruTouch
       - (*ring).evict
       - (*loop).endBatch
+      - (*loop).yield
       - (*ring).compactListed
       - (*loop).now
       - (*loop).lookup
@@ -997,6 +1022,8 @@ files:
       - sizing
       - resolve
       - ringCount
+      - batchWaitOf
+      - yieldFor
       - ResolveLoops
       - orDefault
     name: sizing.go
@@ -1103,6 +1130,7 @@ files:
       - (*uRing).used
       - (*uRing).pace
       - (*uLoop).serve
+      - (*uLoop).waitArgs
       - (*uLoop).batch
       - (*uLoop).live
       - (*uRing).reapAll
@@ -1372,6 +1400,20 @@ functions:
     name: ringCount
     params: explicit, target int, table uint64
     results: int, string
+  - doc: |-
+      batchWaitOf resolves the grouped wait: BatchWait's default, off when
+      negative, never past the tick; BatchWaitMin's default, never past cqBatch,
+      since one batch reaps no more.
+    name: batchWaitOf
+    params: v corenet.LoopValue, cqBatch int
+    results: time.Duration, int
+  - doc: |-
+      yieldFor is the yield interval of a group of loops in a process of procs
+      Ps: yieldEvery while a P is left over, none otherwise — with every P
+      running a loop, a yield only hands the loop's own P around (ADR 0199).
+    name: yieldFor
+    params: procs, loops int
+    results: time.Duration
   - name: ResolveLoops
     params: n int
     results: int, string
@@ -2125,6 +2167,13 @@ types:
       - doc: lowWater is the output mark under which OnWritable fires.
         name: lowWater
         type: int
+      - doc: |-
+          ended is when the last batch ended; yielded when the loop last
+          yielded to the scheduler (sz.yield).
+        name: ended
+        type: time.Time
+      - name: yielded
+        type: time.Time
     kind: struct
     methods:
       - doc: |-
@@ -2145,6 +2194,15 @@ types:
         name: endBatch
         params: started time.Time
         recv: lp *loop
+      - doc: |-
+          yield hands the loop's thread back to the Go scheduler once sz.yield has
+          passed since the last time, at the very end of a batch (ADR 0199). A loop
+          locked to its thread never goes through the scheduler on its own: its P's
+          schedtick never moves, so sysmon preempts it every 10 ms and retakes its P
+          in the middle of a wait. It reports whether it yielded.
+        name: yield
+        recv: lp *loop
+        results: bool
       - doc: now converts the wall clock into the loop's ticks.
         name: now
         recv: lp *loop
@@ -2747,6 +2805,18 @@ types:
       - doc: rlimit is the effective RLIMIT_NOFILE soft limit.
         name: rlimit
         type: uint64
+      - doc: |-
+          batchWait bounds io_uring's grouped wait, zero when it is off;
+          batchWaitMin is the completions it waits for.
+        name: batchWait
+        type: time.Duration
+      - name: batchWaitMin
+        type: int
+      - doc: |-
+          yield is the most serving time between two yields to the scheduler,
+          zero for none: Start sets it (yieldFor), once GOMAXPROCS is read.
+        name: yield
+        type: time.Duration
     kind: struct
     name: sizing
   - doc: |-
@@ -3524,6 +3594,11 @@ types:
         type: ringUses
       - name: registered
         type: int
+      - doc: |-
+          reaped is how many completions the last batch reaped, every ring
+          together: what decides whether the next wait is grouped.
+        name: reaped
+        type: uint64
     kind: struct
     methods:
       - doc: |-
@@ -3583,7 +3658,9 @@ types:
         recv: ul *uLoop
       - doc: |-
           reportMinTimeout is class B's MIN_TIMEOUT row: what the features say,
-          never turned on (minWaitUsec stays zero).
+          never turned on (minWaitUsec stays zero). The grouped wait bounds its
+          timeout instead (ADR 0199 §D3): what min_wait_usec does once its window
+          passed empty differs across the kernels that advertise it.
         name: reportMinTimeout
         params: features uint32
         recv: ul *uLoop
@@ -3667,10 +3744,19 @@ types:
         name: serve
         recv: ul *uLoop
       - doc: |-
+          waitArgs is the next wait's timeout and completions: the tick and one, or,
+          once the last batch reaped batchWaitFrom completions or more, the grouped
+          wait — sz.batchWaitMin completions or sz.batchWait, whichever comes first
+          (ADR 0199). A loop draining waits plainly: the drain is paced by the tick.
+        name: waitArgs
+        params: tick, grouped *kernelTimespec
+        recv: ul *uLoop
+        results: "*kernelTimespec, uint32"
+      - doc: |-
           batch is one iteration: the wait on the primary, every ring reaped, the
-          drain, the timers, OnBatchEnd, and the buffers returned.
+          drain, the timers, OnBatchEnd, the buffers returned and the yield.
         name: batch
-        params: tick *kernelTimespec
+        params: ts *kernelTimespec, want uint32
         recv: ul *uLoop
       - doc: live is the loop's open connections and slots still held by the kernel.
         name: live
@@ -4045,10 +4131,14 @@ types:
         name: submit
         recv: u *uring
       - doc: |-
-          wait submits what is pending and blocks until one completion or the
-          timeout, in one io_uring_enter with EXT_ARG. ETIME is the tick.
+          wait submits what is pending and blocks until want completions or the
+          timeout, in one io_uring_enter with EXT_ARG. ETIME is the tick, or the
+          grouped wait's bound (ADR 0199). The kernel wakes the thread once the CQ
+          holds want entries past its head, or when ts runs out, and an ETIME with
+          completions in the CQ returns zero (io_cqring_wait, io_uring/io_uring.c,
+          6.8 to 7.0); either way the caller reaps what came.
         name: wait
-        params: ts *kernelTimespec
+        params: ts *kernelTimespec, want uint32
         recv: u *uring
       - doc: ready is how many completions wait in the CQ.
         name: ready

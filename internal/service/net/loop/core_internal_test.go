@@ -325,3 +325,48 @@ func TestCore_allocs(t *testing.T) {
 		t.Fatalf("a refused Write allocates %.1f", n)
 	}
 }
+
+// TestCore_yieldBound pins the yield's bound (ADR 0199): a loop yields at the
+// first batch end, then once sz.yield has passed since its last yield and
+// never sooner, whatever the batches in between; with no spare P it never
+// does.
+func TestCore_yieldBound(t *testing.T) {
+	t.Parallel()
+	lp, _, _ := newTestLoop(&scriptH{}, corenet.LoopValue{}, 0)
+	lp.sz.yield = yieldEvery
+	t0 := time.Now()
+	for _, c := range []struct {
+		at   time.Duration
+		want bool
+	}{
+		{0, true},
+		{time.Millisecond, false},
+		{yieldEvery - time.Nanosecond, false},
+		{yieldEvery, true},
+		{yieldEvery + yieldEvery/2, false},
+		{2*yieldEvery - time.Nanosecond, false},
+		{3 * yieldEvery, true},
+	} {
+		lp.ended = t0.Add(c.at)
+		if got := lp.yield(); got != c.want {
+			t.Fatalf("yield at %v = %v, want %v", c.at, got, c.want)
+		}
+	}
+	lp.sz.yield = 0
+	lp.ended = t0.Add(time.Hour)
+	if lp.yield() {
+		t.Fatal("a loop with no spare P yielded")
+	}
+}
+
+// TestCore_endBatchStampsEnd pins that the yield measures from the batch's
+// end: endBatch records it, so a long batch counts toward the interval.
+func TestCore_endBatchStampsEnd(t *testing.T) {
+	t.Parallel()
+	lp, _, _ := newTestLoop(&scriptH{}, corenet.LoopValue{}, 0)
+	before := time.Now()
+	lp.endBatch(before)
+	if lp.ended.Before(before) {
+		t.Fatalf("ended %v before the batch started %v", lp.ended, before)
+	}
+}

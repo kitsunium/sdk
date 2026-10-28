@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-27T18:00:00Z -->
+<!-- updated: 2026-10-28T12:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -17,7 +17,7 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | File | What |
 |---|---|
 | `group.go` | `Listener` (the one hand-off: a duplicated descriptor), `Config`, `Group` (`Shutdown`, `Close`, `State`, `Rejected`, `Live`) and `Start`, which resolves the sizing, starts the backend and writes the one start line |
-| `sizing.go` | `resolve`: the defaults, `ResolveLoops` (`LoopsAuto` read as GOMAXPROCS, which server calls once per group, zero one, the source State reports — ADR 0196 §D1), the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
+| `sizing.go` | `resolve`: the defaults, `ResolveLoops` (`LoopsAuto` read as GOMAXPROCS less one, at least one, which server calls once per group, zero one, the source State reports — ADR 0196 §D1, ADR 0199), `batchWaitOf` (the grouped wait's bound and count) and `yieldFor` (the yield on only while GOMAXPROCS exceeds the loops), the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
 | `conn.go` | `connCtl`, one slot's pointer-free control state; its states, flags and close reasons |
 | `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty and compaction lists, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build — its lane, ADR 0191: `server` calls the chain's `LoopStarter.OnStart(Loops)` before `Start`, so nothing here does), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
 | `slab.go` | the mmap'd slab: power-of-two size classes from 2 KiB, arenas mapped lazily, a global budget that sheds load by name |
@@ -30,7 +30,7 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | `epoll_linux.go` | the epoll backend: one thread, one epoll instance, one ring per loop; `EPOLLEXCLUSIVE` listeners; a 2 MiB mmap'd read arena per loop |
 | `uring_abi_linux.go` | the io_uring uapi in-tree (no `x/sys`, ADR 0018): syscall numbers 425–427, flags, opcodes, `sqe`/`cqe`/`uringBuf`/`uringParams`/… layouts, `fixedFd` (0-based) and `targetIndex` (index + 1), `FILE_INDEX_ALLOC` raw `0xFFFFFFFF`; one `Syscall6` per waiting enter, `RawSyscall6` to submit only |
 | `uring_ring_linux.go` | one io_uring: `SETUP_CLAMP`+`CQSIZE` with the granted sizes read back, the single mapping, the SQ/CQ views, the bounded submit (EINTR again; EBUSY/EAGAIN counted and left to the next batch), the provided-buffer ring and its tail published by one 32-bit store of entry 0's bid and the tail, the sparse table, `REGISTER_PROBE`, the SQE encoders |
-| `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the unlinked cancel → count → `close_direct`; ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the accept watchdog |
+| `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME; grouped by `waitArgs` once a batch reaped four, ADR 0199), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the unlinked cancel → count → `close_direct`; ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the accept watchdog |
 | `uring_probe_linux.go` | the last probe stage: a loopback multishot accept into a direct descriptor and a multishot recv through the buffer ring, on a ring of its own, then the release check (shutdown→cancel→close must show the peer the end; cancel→close alone tells whether puts are deferred) |
 | `uring_none_linux.go` | the Linux architectures outside io_uring's wave 1: `LoopBackendUnavailable`, epoll serves |
 | `group_linux.go`, `group_other.go` | backend choice, `RLIMIT_NOFILE`, `mmap`; elsewhere, `UnsupportedPlatform` |
@@ -92,6 +92,24 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   connections per batch was paid per request.
   `TestCore_batchCostIndependentOfOpen` pins it, `BenchmarkCore_batch`
   measures it.
+- **A loaded io_uring loop groups its wait (ADR 0199).** Once a batch
+  reaped `batchWaitFrom` (4) completions, every ring together, the primary's
+  next wait asks for `batchWaitMin` (32, at most `CQBatch`) within
+  `batchWait` (250 µs, at most the tick): one `io_uring_enter`, `EXT_ARG`,
+  relative timeout. The kernel wakes on that many CQEs past the head or at
+  the bound, and an `ETIME` with CQEs returns zero (`io_cqring_wait`).
+  Idle, draining or `BatchWait < 0`: one completion or the tick, as before.
+  `min_wait_usec` (`IORING_FEAT_MIN_TIMEOUT`) is not used: mainline 6.12 to
+  6.18 keep waiting for `min_complete` once its window passed empty, the
+  stable fixes (e15cb2200b93, 29fe1bd01b99) are not visible in the feature
+  bit. `TestURingWait` pins the semantics on a coop and a deferred ring.
+- **A native loop yields to a spare P (ADR 0199).** A locked loop never moves
+  its P's `schedtick`, so sysmon preempts it every 10 ms and retakes its P
+  in its waits (10.9 % of the samples at one vCPU). `loop.yield` calls
+  `runtime.Gosched` at the very end of a batch at most every `yieldEvery`
+  (5 ms), from `endBatch`'s stamp, only when `Start` found GOMAXPROCS above
+  the group's loops: with no spare P it was measured as a loss.
+  `TestCore_yieldBound` pins the bound.
 - **The close is never re-entrant.** `Close` marks the slot and the batch's end
   settles it once its output has left, so `OnClose` never runs inside another
   callback. `finish` calls `OnClose`, then the backend's `shutdown`. The slot
@@ -309,4 +327,4 @@ bazel test //internal/service/net/loop:all
 - Walk every open slot at each batch: list what the batch touched instead.
 - Call `OnClose` from inside another callback.
 - Call `setrlimit` or `GOMAXPROCS`: `State` reports both, and the consumer
-  decides.
+  decides. `LoopsAuto` leaves a P over; it never adds one.

@@ -927,6 +927,8 @@ sequences:
         kind: internal
       - id: r.publish
         kind: internal
+      - id: time
+        kind: stdlib
       - id: lp.grp.observe
         kind: internal
     steps:
@@ -957,8 +959,29 @@ sequences:
           key: _
           range: lp.rings
           value: r
-      - eval: lp.grp.observe(time.Since(started))
+      - set: lp.ended
+        to: time
+        value: time.Now()
+      - eval: lp.grp.observe(lp.ended.Sub(started))
         to: lp.grp.observe
+  - of: (*loop).yield
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).yield
+        kind: self
+      - id: runtime
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: lp.sz.yield <= 0 || lp.ended.Sub(lp.yielded) < lp.sz.yield
+      - set: lp.yielded
+        value: lp.ended
+      - eval: runtime.Gosched()
+        to: runtime
+      - return: "true"
   - of: (*ring).compactListed
     participants:
       - id: caller
@@ -1707,6 +1730,8 @@ sequences:
         kind: value
       - id: lp.endBatch
         kind: internal
+      - id: lp.yield
+        kind: internal
       - id: el.closeAll
         kind: internal
     steps:
@@ -1763,6 +1788,8 @@ sequences:
               to: lp.endBatch
             - set: el.off
               value: "0"
+            - eval: lp.yield()
+              to: lp.yield
             - opt:
                 do:
                   - break: true
@@ -2541,6 +2568,8 @@ sequences:
         kind: internal
       - id: CheckCapabilities
         kind: internal
+      - id: yieldFor
+        kind: internal
       - id: startNative
         kind: internal
       - id: fmt
@@ -2588,6 +2617,9 @@ sequences:
           when: cfg.tableCap > 0
       - bind: g
         eval: "&Group{name: cfg.Group, sz: sz, grp: &shared{}, procs: runtime.GOMAXPROCS(0)}"
+      - set: g.sz.yield
+        to: yieldFor
+        value: yieldFor(g.procs, sz.loops)
       - opt:
           do:
             - eval: closeListeners(cfg.Listeners)
@@ -2607,8 +2639,8 @@ sequences:
           when: w == nil
       - bind: _, werr
         eval: |-
-          fmt.Fprintf(w, "net/loop: group=%q backend=%s probe=%s reason=%q loops=%d loops_source=%s rings=%d rings_source=%s table=%d cq_batch=%d spill_cap=%d output_cap=%d rlimit_nofile=%d gomaxprocs=%d\n",
-          		g.name, g.backend, g.stage, g.reason, sz.loops, sz.loopsSource, sz.rings, sz.ringsSource, sz.tableSize, sz.cqBatch, sz.spillCap, sz.outputCap, sz.rlimit, g.procs)
+          fmt.Fprintf(w, "net/loop: group=%q backend=%s probe=%s reason=%q loops=%d loops_source=%s rings=%d rings_source=%s table=%d cq_batch=%d spill_cap=%d output_cap=%d rlimit_nofile=%d gomaxprocs=%d batch_wait=%s batch_wait_min=%d yield=%s\n",
+          		g.name, g.backend, g.stage, g.reason, g.sz.loops, g.sz.loopsSource, g.sz.rings, g.sz.ringsSource, g.sz.tableSize, g.sz.cqBatch, g.sz.spillCap, g.sz.outputCap, g.sz.rlimit, g.procs, g.sz.batchWait, g.sz.batchWaitMin, g.sz.yield)
         to: fmt
       - eval: swallowErr(werr)
         to: swallowErr
@@ -3020,6 +3052,8 @@ sequences:
         kind: actor
       - id: resolve
         kind: self
+      - id: batchWaitOf
+        kind: internal
       - id: ResolveLoops
         kind: internal
       - id: ringCount
@@ -3042,6 +3076,9 @@ sequences:
           		rlimit:    rlimit,
           		tableSize: int(table),
           	}
+      - set: sz.batchWait, sz.batchWaitMin
+        to: batchWaitOf
+        value: batchWaitOf(v, sz.cqBatch)
       - set: sz.loops, sz.loopsSource
         to: ResolveLoops
         value: ResolveLoops(v.Loops)
@@ -3066,19 +3103,46 @@ sequences:
             - return: 1, ringsSingle
           when: n <= 1
       - return: int(n), ringsDerived
+  - of: batchWaitOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: batchWaitOf
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: d
+        eval: time.Duration(v.BatchWait)
+        to: time
+      - opt:
+          do:
+            - return: 0, 0
+          when: d < 0
+      - opt:
+          do:
+            - set: d
+              value: defaultBatchWait
+          when: d == 0
+      - return: min(d, tickEvery), min(orDefault(v.BatchWaitMin, defaultBatchWaitMin), cqBatch)
+  - of: yieldFor
+    steps:
+      - opt:
+          do:
+            - return: yieldEvery
+          when: procs > loops
+      - return: "0"
   - of: ResolveLoops
     steps:
-      - switch:
-          cases:
-            - case: n == corenet.LoopsAuto
-              do:
-                - return: max(runtime.GOMAXPROCS(0), 1), loopsAuto
-            - case: n > 0
-              do:
-                - return: n, loopsExplicit
-            - default: true
-              do:
-                - return: 1, loopsSingle
+      - opt:
+          do:
+            - return: n, loopsExplicit
+          when: n > 0
+      - opt:
+          do:
+            - return: 1, loopsSingle
+          when: n != corenet.LoopsAuto
+      - return: max(runtime.GOMAXPROCS(0)-1, 1), loopsAuto
   - of: orDefault
     steps:
       - opt:
@@ -3655,7 +3719,7 @@ sequences:
       - loop:
           cond: len(seen) < 2 && time.Now().Before(deadline)
           do:
-            - eval: probed.wait(&tick)
+            - eval: probed.wait(&tick, 1)
               to: probed.wait
             - eval: probed.reap(8, func(c *cqe) { seen = append(seen, c.userData) })
               to: probed.reap
@@ -4614,9 +4678,11 @@ sequences:
         eval: ul.lp
       - bind: tick
         eval: "kernelTimespec{nsec: int64(tickEvery)}"
+      - bind: grouped
+        eval: "kernelTimespec{nsec: int64(lp.sz.batchWait)}"
       - loop:
           do:
-            - eval: ul.batch(&tick)
+            - eval: ul.batch(ul.waitArgs(&tick, &grouped))
               to: ul.batch
             - opt:
                 do:
@@ -4625,6 +4691,15 @@ sequences:
           forever: true
       - eval: ul.closeAll()
         to: ul.closeAll
+  - of: (*uLoop).waitArgs
+    steps:
+      - bind: lp
+        eval: ul.lp
+      - opt:
+          do:
+            - return: tick, 1
+          when: lp.sz.batchWait <= 0 || ul.reaped < batchWaitFrom || lp.draining
+      - return: grouped, uint32(lp.sz.batchWaitMin)
   - of: (*uLoop).batch
     participants:
       - id: caller
@@ -4657,6 +4732,8 @@ sequences:
         kind: internal
       - id: rr.returnBuffers
         kind: internal
+      - id: lp.yield
+        kind: internal
     steps:
       - bind: lp
         eval: ul.lp
@@ -4667,7 +4744,7 @@ sequences:
           key: _
           range: ul.rings[1:]
           value: rr
-      - eval: ul.rings[0].u.wait(tick)
+      - eval: ul.rings[0].u.wait(ts, want)
         to: ul.rings[0].u.wait
       - bind: started
         eval: time.Now()
@@ -4675,10 +4752,17 @@ sequences:
       - set: lp.tick
         to: lp.now
         value: lp.now()
+      - set: ul.reaped
+        value: "0"
       - loop:
           do:
+            - bind: before
+              eval: rr.r.st.completions
             - eval: rr.reapAll()
               to: rr.reapAll
+            - op: +=
+              set: ul.reaped
+              value: rr.r.st.completions - before
           key: _
           range: ul.rings
           value: rr
@@ -4710,6 +4794,8 @@ sequences:
           key: _
           range: ul.rings
           value: rr
+      - eval: lp.yield()
+        to: lp.yield
   - of: (*uLoop).live
     participants:
       - id: caller
@@ -5934,7 +6020,7 @@ sequences:
       - loop:
           cond: ul.live() > 0 && time.Now().Before(deadline)
           do:
-            - eval: ul.rings[0].u.wait(&tick)
+            - eval: ul.rings[0].u.wait(&tick, 1)
               to: ul.rings[0].u.wait
             - loop:
                 do:
@@ -6395,7 +6481,7 @@ sequences:
       - loop:
           cond: "!done() && time.Now().Before(deadline)"
           do:
-            - eval: st.u.wait(&tick)
+            - eval: st.u.wait(&tick, 1)
               to: st.u.wait
             - eval: st.u.reap(64, st.onCQE)
               to: st.u.reap
@@ -6420,7 +6506,7 @@ sequences:
       - loop:
           cond: "!bytes.Equal(st.got, selfTestPayload) && time.Now().Before(deadline)"
           do:
-            - eval: st.u.wait(&tick)
+            - eval: st.u.wait(&tick, 1)
               to: st.u.wait
             - eval: st.u.reap(64, st.onCQE)
               to: st.u.reap
@@ -7013,7 +7099,7 @@ sequences:
       - bind: arg
         eval: "getEventsArg{ts: uint64(uintptr(unsafe.Pointer(ts)))}"
       - bind: minComplete
-        eval: uint32(1)
+        eval: max(want, 1)
       - opt:
           do:
             - set: minComplete

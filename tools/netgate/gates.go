@@ -118,7 +118,7 @@ var (
 	// gates only (the lanes), so they have no row here. P2 is active: its
 	// chain (internal/service/net/http1's links) is engine B; so is P4a: GRO in
 	// datagramSource (ADR 0192). P6 is active: engine B is the loop engine on
-	// LoopsAuto, one loop a P. Every other step's row waits on its step,
+	// LoopsAuto, one loop a P but one. Every other step's row waits on its step,
 	// inactive: reported, never failing.
 	// The calibration rows are active: a runner on which one engine does not
 	// match itself fails the run rather than lets a step pass or fail on it.
