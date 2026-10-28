@@ -108,6 +108,9 @@ type portableGroup struct {
 	noDelayOff bool
 	lanes      []*portableLoop
 	lns        []stdnet.Listener
+	// handshake bounds a TLS connection's negotiation, which runs before the
+	// lane sees it; zero for a plaintext group (ADR 0198).
+	handshake time.Duration
 	// turn is the lane the next accepted connection goes to, modulo the count.
 	turn     atomic.Uint64
 	drainReq atomic.Bool
@@ -153,6 +156,9 @@ type portableLoop struct {
 	conns []*portableConn
 	free  []int32
 	live  atomic.Int64
+	// negotiating counts the TLS handshakes still running for the lane: the
+	// drainer closeAll starts outlives them, so none hands over unseen.
+	negotiating atomic.Int64
 
 	draining bool
 	done     chan struct{}
@@ -185,6 +191,10 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 		degraded: degraded, lns: lns,
 		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
 		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
+	}
+	//: a TLS codec group negotiates each connection first.
+	if group.tlsCodec() {
+		g.handshake = group.handshakeBound()
 	}
 	//: the lanes, built before any acceptor can hand one a connection.
 	for i := range loopLanes(v) {
@@ -258,9 +268,48 @@ func (g *portableGroup) acceptLoop(ln stdnet.Listener) {
 			swallowErr(c.Close())
 			continue
 		}
-		pl := g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
-		pl.live.Add(1)
-		pl.events <- portableEvent{kind: pevOpen, conn: c}
+		g.dispatch(c)
+	}
+}
+
+// dispatch hands c to the next lane, in turn; a TLS connection is negotiated
+// first, off the acceptor, so the lane sees it only once it is cleartext.
+//
+// Goroutine lifecycle: for a TLS group, one negotiate goroutine per
+// connection, which returns once the handshake ends and the connection is
+// handed to its lane or closed.
+func (g *portableGroup) dispatch(c stdnet.Conn) {
+	pl := g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
+	pl.live.Add(1)
+	//: TLS: negotiated off the acceptor, before the lane sees it.
+	if g.handshake > 0 {
+		pl.negotiating.Add(1)
+		go pl.negotiate(c, g.handshake)
+		//: handed over.
+		return
+	}
+	pl.events <- portableEvent{kind: pevOpen, conn: c}
+}
+
+// negotiate completes c's TLS handshake within d, then hands c to the lane;
+// a failed or stalled one closes it, and the lane never sees it.
+//
+// Goroutine lifecycle: one per accepted TLS connection, started by
+// acceptLoop; it returns once the handshake ends and the connection is handed
+// over, or the lane has stopped, which closes the connection instead.
+func (pl *portableLoop) negotiate(c stdnet.Conn, d time.Duration) {
+	defer pl.negotiating.Add(-1)
+	//: given up: the lane never counted it.
+	if !handshake(c, d) {
+		pl.live.Add(-1)
+		//: closed.
+		return
+	}
+	select {
+	case pl.events <- portableEvent{kind: pevOpen, conn: c}:
+	case <-pl.done:
+		pl.live.Add(-1)
+		swallowErr(c.Close())
 	}
 }
 
@@ -732,7 +781,9 @@ func (pl *portableLoop) compactListed() {
 // closeAll closes every connection as the backend stops.
 //
 // Goroutine lifecycle: it launches one drainer that takes the last events a
-// reader may still send, and returns after one second with none.
+// reader or a handshake may still send — closing the connections they hand
+// over, which no lane will open — and returns after one second with none and
+// no handshake still running, the buffer emptied.
 func (pl *portableLoop) closeAll() {
 	//: each open one.
 	for slot, pc := range pl.conns {
@@ -754,16 +805,50 @@ func (pl *portableLoop) closeAll() {
 		quiet := time.NewTimer(time.Second)
 		defer quiet.Stop()
 		//: a reader still sending its last event finds nobody; drained here,
-		//: until a second passes with none.
+		//: until a second passes with none and no handshake still running —
+		//: one that completes hands its connection over to this loop alone.
 		for {
 			select {
-			case <-pl.events:
+			case ev := <-pl.events:
+				pl.discard(&ev)
 				quiet.Reset(time.Second)
 			case <-quiet.C:
+				//: a handshake still running may yet hand one over.
+				if pl.negotiating.Load() > 0 {
+					quiet.Reset(time.Second)
+					continue
+				}
+				//: nobody left to send: what the last ones left, then out.
+				pl.discardBuffered()
 				return
 			}
 		}
 	}()
+}
+
+// discard drops an event that reached a stopped lane: a connection handed
+// over and never opened is closed, and uncounted, as negotiate's own stopped
+// branch does; any other event is about a connection closeAll finished.
+func (pl *portableLoop) discard(ev *portableEvent) {
+	//: never registered: closeAll could not have closed it.
+	if ev.kind == pevOpen {
+		pl.live.Add(-1)
+		swallowErr(ev.conn.Close())
+	}
+}
+
+// discardBuffered discards, without waiting, the events still buffered.
+func (pl *portableLoop) discardBuffered() {
+	//: until the buffer is empty.
+	for {
+		select {
+		case ev := <-pl.events:
+			pl.discard(&ev)
+		default:
+			//: empty.
+			return
+		}
+	}
 }
 
 // drainPosts runs the posted operations.

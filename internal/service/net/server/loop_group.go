@@ -24,14 +24,19 @@ type loopEngine interface {
 // HandleLoop serves the group on the loop engine (ADR 0186): h is called on
 // the loop's own thread for every connection of the group, with the bytes
 // each one receives, instead of a goroutine per connection. It is opt-in, and
-// plaintext only.
+// plaintext, but for the http1 codec (http1.HandleLoop), which takes TLS:
+// crypto/tls negotiates each connection on its own goroutine, bounded by
+// HandshakeTimeout, never below TLS 1.2, offering HTTP/1.1 alone —
+// Protocols("http/1.1") is honoured, a list naming anything else refused
+// with ProtocolsRefused — and the cleartext reaches the codec on the portable
+// backend's lanes (ADR 0198).
 //
 // The group keeps the server's lifecycle — the bind, the adoption of
 // inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and
 // places the engine: io_uring after a probe of the running kernel, then epoll,
 // on Linux, and the portable backend, the default engine's accept path
 // serialised onto one handler goroutine, everywhere else. Start refuses a loop
-// group given TLS with LoopTLSUnsupported, one given Use or an option neither
+// group given TLS it cannot take with LoopTLSUnsupported, one given Use or an option neither
 // the engine (IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor h,
 // through LoopOptionHonourer, honours with LoopOptionUnsupported — an option
 // given counts, its zero value included —, and an explicit backend the
@@ -60,10 +65,14 @@ func (g *StreamGroup) HandleLoop(h corenet.LoopHandler) *StreamGroup {
 // It reads the set of kinds the group was given, never a guess from non-zero
 // fields (ADR 0187).
 func (g *StreamGroup) loopRefusal() error {
-	//: plaintext only (ADR 0186 §D2), whatever identity TLS was given.
+	//: TLS only for the http1 codec, on the portable backend (ADR 0198); a
+	//: raw loop handler stays plaintext (ADR 0186 §D2).
 	if g.kinds.has(corenet.OptionTLS) {
-		//: refused by name.
-		return errs.Wrap(corenet.LoopTLSUnsupported, errs.WrapParams{}, errs.String("group", g.name))
+		//: a raw loop handler, or a contradiction of the TLS path.
+		if err := g.loopTLSRefusal(); err != nil {
+			//: refused by name.
+			return err
+		}
 	}
 	chain, err := buildLoopChain(g.name, g.loopHandler, g.loopMiddlewares)
 	//: a layer that does not forward every callback.
@@ -75,7 +84,7 @@ func (g *StreamGroup) loopRefusal() error {
 	//: every option the group was given, in the constant block's order.
 	for _, k := range g.kinds.list() {
 		//: the engine's own, or the chain's; Use never, whatever it claims.
-		if loopHonours(k) || (k != corenet.OptionMiddleware && chainHonours(chain, k)) {
+		if g.loopHonoursKind(chain, k) {
 			continue
 		}
 		//: the first option nobody honours.
@@ -84,6 +93,14 @@ func (g *StreamGroup) loopRefusal() error {
 	}
 	//: every option is honoured.
 	return nil
+}
+
+// loopHonoursKind reports whether the loop group applies the option of kind
+// k: the engine, the TLS codec's path, or the chain — Use never, whatever it
+// claims.
+func (g *StreamGroup) loopHonoursKind(chain corenet.LoopHandler, k corenet.OptionKind) bool {
+	//: by who applies it.
+	return loopHonours(k) || (g.tlsCodec() && tlsCodecHonours(k)) || (k != corenet.OptionMiddleware && chainHonours(chain, k))
 }
 
 // loopHonours reports the options the loop engine honours itself (ADR 0186
@@ -117,8 +134,10 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 			//: the error names the socket.
 			return err
 		}
-		lns = append(lns, adopted...)
+		//: registered raw, so State reads the socket's own options; served
+		//: through TLS when the codec takes it.
 		s.registerLoopListeners(group, adopted, nil)
+		lns = append(lns, group.loopLayers(adopted)...)
 	}
 	//: then every address, one listener each: the loop shards inside.
 	for _, addr := range group.addrs {
@@ -128,15 +147,15 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 			//: Start unwinds what is bound.
 			return err
 		}
-		lns = append(lns, ln)
 		s.registerLoopListeners(group, []stdnet.Listener{ln}, &rep)
+		lns = append(lns, group.loopLayers([]stdnet.Listener{ln})...)
 	}
 	//: an opt-in no backend may honour is refused before any engine starts.
 	if err := loop.CheckCapabilities(group.name, group.loop); err != nil {
 		//: Start unwinds the listeners.
 		return err
 	}
-	plan := s.operator.plan(group.loop.Backend, nativeLoopBackends)
+	plan := s.operator.plan(group.loopBackend(), nativeLoopBackends)
 	//: the lane count is the same on every backend, a fallback included, so
 	//: the chain learns it once, before any callback.
 	if st, ok := group.loopChain.(corenet.LoopStarter); ok {

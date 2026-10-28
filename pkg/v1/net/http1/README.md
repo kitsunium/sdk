@@ -105,6 +105,7 @@ Parser.Parse, AppendResponse and AppendRefusal frame and write without the loop,
   - [func \(\*LoopHandler\) OnTimeout\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnTimeout>)
   - [func \(\*LoopHandler\) OnWritable\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnWritable>)
   - [func \(\*LoopHandler\) Pending\(lane int, ref corenet.LoopConnRef\) bool](<#LoopHandler.Pending>)
+  - [func \(\*LoopHandler\) Unwrap\(\) corenet.HTTP1Handler](<#LoopHandler.Unwrap>)
   - [func \(\*LoopHandler\) Worker\(\) corenet.LoopWorker](<#LoopHandler.Worker>)
 - [type Middleware](<#Middleware>)
 - [type Parser](<#Parser>)
@@ -925,6 +926,15 @@ func (*LoopHandler) Pending(lane int, ref corenet.LoopConnRef) bool
 ```
 
 Pending implements corenet.LoopOffloader: a connection holding answers behind a pending one is still being answered, so a draining loop keeps it.
+
+<a name="LoopHandler.Unwrap"></a>
+### func \(LoopHandler\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
+
+```go
+func (*LoopHandler) Unwrap() corenet.HTTP1Handler
+```
+
+Unwrap returns the HTTP1Handler the adapter serves: what tells a loop group that its handler speaks the codec, so it may take TLS on the portable backend (ADR 0187 §D5).
 
 <a name="LoopHandler.Worker"></a>
 ### func \(LoopHandler\) [Worker](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop_pending.go>)
