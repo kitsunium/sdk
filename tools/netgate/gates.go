@@ -117,7 +117,8 @@ var (
 	// gates is the plan's table (P8 §Gates). P0, P1 and P3 have functional
 	// gates only (the lanes), so they have no row here. P2 is active: its
 	// chain (internal/service/net/http1's links) is engine B; so is P4a: GRO in
-	// datagramSource (ADR 0192). Every other step's row waits on its step,
+	// datagramSource (ADR 0192). P6 is active: engine B is the loop engine on
+	// LoopsAuto, one loop a P. Every other step's row waits on its step,
 	// inactive: reported, never failing.
 	// The calibration rows are active: a runner on which one engine does not
 	// match itself fails the run rather than lets a step pass or fail on it.
@@ -129,10 +130,7 @@ var (
 		{
 			Step: "P4a", Load: loadL3, A: "recvmmsg", B: "gro", Criteria: p4aCriteria, Active: true,
 		},
-		{
-			Step: "P6", Load: loadL1, A: "goroutine", B: "loop", Criteria: p6Criteria,
-			Pending: "LoopsAuto and the drain (P6) set engine B's loop count",
-		},
+		{Step: "P6", Load: loadL1, A: "goroutine", B: "loop", Criteria: p6Criteria, Active: true},
 		{
 			Step: "P5", Load: loadL1, A: "published", B: "loop", Criteria: p5Criteria,
 			Pending: "the published http1's L1 samples (engine A) are not stored yet; P5 widens the profile",

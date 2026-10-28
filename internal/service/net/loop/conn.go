@@ -29,6 +29,9 @@ const (
 	// fSending is output the backend holds: EPOLLOUT armed, or a send in
 	// flight.
 	fSending
+	// fHeard is a peer that sent at least one byte: the drain closes a
+	// connection that has not only once it stayed silent for drainQuiet.
+	fHeard
 	// fCompact puts the slot on its ring's compaction list.
 	fCompact
 )

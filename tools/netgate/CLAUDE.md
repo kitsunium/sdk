@@ -25,7 +25,7 @@ Stdlib-only, no `go.sum`, outside `go.work` (the `tools/` convention, and an
 | `parse.go` | `BenchmarkLoad<load>/pair=<A>:<B>[-procs]` lines read into samples by load, pair and unit — `a:<metric>`, `b:<metric>`, `ratio:<metric>`; every other line skipped, the former `engine=` shape included |
 | `eval.go` | the types, and `evaluate`: a ratio criterion holds the bound of the interval of the rounds' `ratio:` samples (`hi` for `<=`, `lo` for `>=`), A's and B's own values summarised beside it, never deciding; a criterion of B alone reads `b:`; a missing or short pair is `missing`, a ratio at or below zero too; a `Reported` criterion is judged and written, never settling its gate; an active gate that does not pass fails the report; an inactive one reports what it measured and never fails |
 | `main.go` | the CLI: `-in`, `-sha` (required: no report without its commit), `-out`, `-list`; exit 0, 1 (an active gate failed), 2 (usage, unreadable input) |
-| `main_test.go` | the interval against benchstat's own output on a fixed set (100.5 ± 9 %), k for n = 10 and 20, the parser, each gate turned on and held to its threshold on its ratios — passing, failing on the bound with the median on the threshold, a noisy pair, nine rounds, a missing pair —, `TestEvaluate_pairedCancelsTheRunner` (engines moving 25 % together, their ratio within 1 %, pass 5 %), the shipped table — calibration and P4a active, a run without P4a's rounds failing, every other step inactive —, and the CLI |
+| `main_test.go` | the interval against benchstat's own output on a fixed set (100.5 ± 9 %), k for n = 10 and 20, the parser, each gate turned on and held to its threshold on its ratios — passing, failing on the bound with the median on the threshold, a noisy pair, nine rounds, a missing pair —, `TestEvaluate_pairedCancelsTheRunner` (engines moving 25 % together, their ratio within 1 %, pass 5 %), the shipped table — calibration, P2, P4a and P6 active, P6 failing at −25 %, a run without P4a's rounds failing, every other step inactive —, and the CLI |
 
 ## The table
 
@@ -33,7 +33,7 @@ Stdlib-only, no `go.sum`, outside `go.work` (the `tools/` convention, and an
 |---|---|---|---|---|
 | P2 | L2 | handwritten → chain | `cpu-ns/req` ratio ≤ 1.05 (upper); 0 allocations as a kit budget, not a bench metric | **active** (ADR 0191): `chainL2` is `http1.Routes` then `http1.Bearer` |
 | P4a | L3 | recvmmsg → gro | `datagrams/syscall` ratio ≥ 4 (lower), **reported, not gated** (ADR 0192 §D7); `cpu-ns/datagram` — the receiver's and the sender's rusage plus /proc/stat's irq and softirq time over the window (ADR 0192 §D6) — ratio ≤ 0.75 (upper) | **active** |
-| P6 | L1 | goroutine → loop | `cpu-ns/req` ratio ≤ 0.70 (upper) | inactive until P6 |
+| P6 | L1 | goroutine → loop | `cpu-ns/req` ratio ≤ 0.70 (upper) | **active** (ADR 0196 §D5): L1's loop engine runs `LoopsAuto`, one loop a P |
 | P5 | L1 | published → loop | `cpu-ns/req` ratio ≤ 1.0 (upper) | inactive: the published http1's samples are not stored |
 | cal-L1 | L1 | loop → loop | `cpu-ns/req` ratio within 5 % of 1, both bounds | **active**: the runner can be judged at P2's 5 % |
 | cal-L2 | L2 | handwritten → handwritten | the same | **active** |

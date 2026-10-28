@@ -4,6 +4,7 @@ package loop
 
 import (
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -54,8 +55,10 @@ type epollRunner struct {
 	loops []*epollLoop
 	wg    sync.WaitGroup
 	fin   chan struct{}
-	// lfds are the group's listeners, closed once every loop returned.
+	// lfds are the group's listeners; set shares them through the drain,
+	// and closes what the drain did not once every loop returned.
 	lfds []int
+	set  *listenerSet
 }
 
 // epollLoop is one loop on epoll: one ring, one epoll instance, one thread.
@@ -64,8 +67,14 @@ type epollLoop struct {
 	r    *ring
 	epfd int
 	evfd int
-	// lfds are the listeners, shared with the group's other loops.
+	// lfds are the listeners, shared with the group's other loops; set is
+	// the group's hold on them through the drain.
 	lfds []int
+	set  *listenerSet
+	// queueDone is, per listener, that the loop took its queue as the group
+	// drains and handed it back; taken how many connections it took from it.
+	queueDone []bool
+	taken     []int
 	// armed reports whether the listeners are in the epoll set; rearmAt is
 	// the tick an EMFILE backoff ends at, backoff its current length.
 	armed   bool
@@ -96,10 +105,11 @@ type epollLoop struct {
 //
 // Goroutine lifecycle: it launches one goroutine per loop, locked to its
 // thread, which returns once the loop stopped or drained, and one reaper that
-// waits for them all, closes the listeners and closes fin, then returns.
+// waits for them all, closes the listeners the drain did not and closes fin,
+// then returns.
 func startEpoll(g *Group, cfg *Config) error {
 	fin := make(chan struct{})
-	er := &epollRunner{fin: fin}
+	runner := &epollRunner{fin: fin}
 	sw := newSwitches(cfg)
 	g.caps = newReport(sw, "epoll")
 	excl := probeExclusive(sw, &g.caps)
@@ -107,18 +117,24 @@ func startEpoll(g *Group, cfg *Config) error {
 	//: socket inherits it; a socket that refuses it still serves.
 	for _, l := range cfg.Listeners {
 		noDelay(l.FD, sw)
-		er.lfds = append(er.lfds, l.FD)
+		runner.lfds = append(runner.lfds, l.FD)
 	}
+	//: each loop takes each listener's queue once, as the group drains.
+	runner.set = newListenerSet(runner.lfds, g.sz.loops)
 	ready := make(chan error, g.sz.loops)
 	//: one thread per loop, each building its own epoll instance after it
 	//: locked itself to its thread.
 	for i := range g.sz.loops {
 		lp := newLoop(g, *cfg, i, mmapAnon)
-		el := &epollLoop{lp: lp, lfds: er.lfds, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl}
-		er.loops = append(er.loops, el)
+		el := &epollLoop{
+			lp: lp, lfds: runner.lfds, set: runner.set,
+			queueDone: make([]bool, len(runner.lfds)), taken: make([]int, len(runner.lfds)),
+			epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl,
+		}
+		runner.loops = append(runner.loops, el)
 		g.loops = append(g.loops, lp)
-		er.wg.Add(1)
-		go el.run(&er.wg, ready)
+		runner.wg.Add(1)
+		go el.run(&runner.wg, ready)
 	}
 	var first error
 	//: every loop says whether it came up.
@@ -128,18 +144,18 @@ func startEpoll(g *Group, cfg *Config) error {
 			first = err
 		}
 	}
-	g.ctl = er
+	g.ctl = runner
 	//: the reaper owns fin: it is the one goroutine that closes it, once,
 	//: after the last loop returned.
 	go func() {
-		er.wg.Wait()
-		closeFDs(er.lfds)
+		runner.wg.Wait()
+		runner.set.closeRest()
 		close(fin)
 	}()
 	//: a loop that could not start stops the others.
 	if first != nil {
-		er.stop()
-		er.wait()
+		runner.stop()
+		runner.wait()
 		//: refused.
 		return first
 	}
@@ -332,7 +348,7 @@ func (el *epollLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 		lp.endBatch(started)
 		el.off = 0
 		//: finished: stopped, or drained to the last connection.
-		if el.stopReq.Load() || (lp.draining && el.r.live == 0) {
+		if el.stopReq.Load() || (lp.draining && el.r.live == 0 && el.queuesTaken()) {
 			//: out of the loop.
 			break
 		}
@@ -437,16 +453,11 @@ func (el *epollLoop) acceptFailed(err error) bool {
 	}
 }
 
-// admit registers the accepted descriptor nfd on the ring, or closes it: a
-// draining loop takes no more connections, MaxConns and a full table refuse.
+// admit registers the accepted descriptor nfd on the ring, or closes it:
+// MaxConns and a full table refuse. A draining loop admits too: what it takes
+// from the queue is served, never closed unread.
 func (el *epollLoop) admit(nfd int) {
 	lp, rg := el.lp, el.r
-	//: a draining loop takes no more connections.
-	if lp.draining {
-		swallowErr(syscall.Close(nfd))
-		//: closed.
-		return
-	}
 	//: past MaxConns: accepted and closed, a refusal the peer can see.
 	if m := lp.sz.maxConns; m > 0 && lp.grp.live.Load() >= int64(m) {
 		el.reject(nfd)
@@ -706,17 +717,82 @@ func (el *epollLoop) unread(r *ring, slot int32) bool {
 // control applies the group's drain and stop requests.
 func (el *epollLoop) control() {
 	lp, r := el.lp, el.r
-	//: the drain: no more accepts; every settled connection closes.
+	//: the drain: the listeners leave the set (CTL_DEL), their queues are
+	//: taken to EAGAIN, then handed back for the last loop to close; every
+	//: settled connection closes.
 	if el.drainReq.Load() && !lp.draining {
 		lp.draining = true
 		r.draining = true
 		el.disarmListeners()
 	}
-	//: while draining, a connection with no partial input closes once its
-	//: output left.
+	//: while draining, the queues are taken, batch after batch, and a
+	//: connection with no partial input closes once its output left.
 	if lp.draining {
+		el.takeQueues()
 		lp.closeSettled(r)
 	}
+}
+
+// takeQueues takes every listener's queue to EAGAIN once the listeners left
+// the loop's set, admitting each connection, and hands each listener back to
+// the group's set, whose last loop closes it: a connection the kernel
+// completed before the close is served, not reset by it (plan P6).
+//
+// It runs at every batch of the drain until each listener is handed back: a
+// take that waits for descriptors goes on once the drain's closes free some.
+func (el *epollLoop) takeQueues() {
+	//: each listener not handed back yet.
+	for i, fd := range el.lfds {
+		//: over: handed back.
+		if !el.queueDone[i] && el.takeQueue(i, fd) {
+			el.queueDone[i] = true
+			el.set.handBack(i)
+		}
+	}
+}
+
+// queuesTaken reports whether the loop handed every listener back.
+func (el *epollLoop) queuesTaken() bool {
+	//: one left, or none.
+	return !slices.Contains(el.queueDone, false)
+}
+
+// takeQueue accepts from listener i, lfd, queueTakeBatch at most this batch,
+// and reports whether its take is over: the queue empty, the listener failed,
+// or queueTakeMax taken. Out of descriptors, or with the ring's table full,
+// it waits for the drain's closes; out of descriptors with no connection of
+// the group left to close, its take is over.
+func (el *epollLoop) takeQueue(i, lfd int) bool {
+	//: bounded per batch, so the loop serves between two takes.
+	for range queueTakeBatch {
+		//: past the budget, or no slot until a close.
+		if el.taken[i] >= queueTakeMax || el.r.full() {
+			//: over, or next batch.
+			return el.taken[i] >= queueTakeMax
+		}
+		nfd, _, err := syscall.Accept4(lfd, syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC)
+		//: a failure ends the take, waits, or skips one connection.
+		if err != nil {
+			//: by what it says of the queue.
+			switch takeAfter(err, el.lp.grp.live.Load()) {
+			//: empty, the listener failed, or no descriptor will come.
+			case takeOver:
+				//: over.
+				return true
+			//: no descriptor until a close.
+			case takeLater:
+				//: next batch.
+				return false
+			//: the next one.
+			case takeNext:
+				continue
+			}
+		}
+		el.taken[i]++
+		el.admit(nfd)
+	}
+	//: more next batch.
+	return false
 }
 
 // closeAll closes every connection still open, as the loop stops.

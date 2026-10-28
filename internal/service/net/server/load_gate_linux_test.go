@@ -74,7 +74,7 @@ func TestLoadChild(t *testing.T) {
 	load, engines, _ := strings.Cut(spec, ":")
 	srv := server.New()
 	for i, engine := range strings.Split(engines, ",") {
-		g := srv.Group("netgate-"+strconv.Itoa(i), server.Listen("tcp", "127.0.0.1:0"), loadGroupOption(engine), server.Plaintext())
+		g := srv.Group("netgate-"+strconv.Itoa(i), server.Listen("tcp", "127.0.0.1:0"), loadGroupOption(load, engine), server.Plaintext())
 		serveLoad(t, g, load, engine)
 	}
 	if err := srv.Start(t.Context()); err != nil {
@@ -113,12 +113,19 @@ func serveLoad(t *testing.T, g *server.StreamGroup, load, engine string) {
 }
 
 // loadGroupOption is the engine's group option: a loop on the platform's best
-// backend, or none for the goroutine engine.
-func loadGroupOption(engine string) server.GroupOption {
+// backend, or none for the goroutine engine. L1's loop engine runs LoopsAuto,
+// one loop a P as the goroutine engine has every P (plan P6): its gate judges
+// the engine as a program sizes it, not one loop against the whole runtime.
+// L2 keeps one loop, both of P2's engines on it.
+func loadGroupOption(load, engine string) server.GroupOption {
 	if engine == "goroutine" {
 		return server.Plaintext()
 	}
-	return server.Loop(corenet.LoopValue{Backend: corenet.LoopBackendAuto})
+	v := corenet.LoopValue{Backend: corenet.LoopBackendAuto}
+	if load == "L1" {
+		v.Loops = corenet.LoopsAuto
+	}
+	return server.Loop(v)
 }
 
 // loadItemsRoute and loadUsersRoute are L2's routes besides /health.

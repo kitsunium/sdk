@@ -125,6 +125,13 @@ constants:
         name: portableTick
         type: time.Duration
         value: 10 * time.Millisecond
+      - doc: |-
+          portableQuiet is how long the drain leaves open a connection that has
+          sent nothing yet, as the native backends' drainQuiet: its request may be
+          on the way, and a close before it is read resets the peer.
+        name: portableQuiet
+        type: time.Duration
+        value: time.Second
       - doc: portableEvents bounds the events one batch takes.
         name: portableEvents
         type: int
@@ -162,6 +169,14 @@ constants:
       - name: pevEnd
       - name: pevSent
     name: pevOpen
+  - doc: |-
+      portableTakeMax bounds how many connections the portable drain takes from
+      one listener's queue: past it the arrivals outpace the drain.
+    items:
+      - name: portableTakeMax
+        type: int
+        value: 1 << 16
+    name: portableTakeMax
   - grouped: true
     items:
       - doc: |-
@@ -707,6 +722,7 @@ files:
       - recoverHandler
       - (*Server).Serve
       - (*Server).Shutdown
+      - (*Server).waitGrace
       - (*Server).shutdownHTTP
       - (*Server).closeHTTP
       - (*Server).waitIdle
@@ -778,6 +794,7 @@ files:
       - (*StreamGroup).loopHonoursKind
       - loopHonours
       - (*Server).bindLoopGroup
+      - startLanes
       - (*Server).registerLoopListeners
       - (*Server).loopStates
       - (*Server).shutdownLoops
@@ -826,9 +843,15 @@ files:
       - portableNoDelay
       - orDefaultInt
       - (*portableGroup).acceptLoop
+      - (*portableGroup).admit
+      - (*portableGroup).takeQueues
+      - (*portableGroup).takeRound
+      - (*portableGroup).giveUp
+      - (*portableGroup).closeOwned
       - (*portableGroup).dispatch
       - (*portableLoop).negotiate
       - (*portableLoop).run
+      - (*portableLoop).finished
       - (*portableLoop).batch
       - (*portableLoop).collect
       - (*portableLoop).handle
@@ -840,6 +863,7 @@ files:
       - (*portableLoop).writer
       - (*portableLoop).lookupSlot
       - (*portableLoop).lookup
+      - (*portableConn).heard
       - (*portableLoop).deliver
       - clampUsed
       - (*portableLoop).pending
@@ -849,6 +873,7 @@ files:
       - (*portableLoop).timer
       - (*portableLoop).control
       - (*portableLoop).closeSettled
+      - (*portableLoop).drainable
       - (*portableLoop).endBatch
       - (*portableLoop).settle
       - (*portableLoop).compactListed
@@ -869,6 +894,21 @@ files:
       - portableEngine.State
       - fillMark
     name: loop_portable.go
+  - decls:
+      - acceptCloexec
+    name: loop_portable_accept_linux.go
+  - decls:
+      - portableTakeMax
+      - filer
+      - ownListeners
+      - dupListener
+      - portableTake
+      - takeQueue
+      - wrapHeld
+      - closeRaw
+      - acceptRetries
+      - acceptRaw
+    name: loop_portable_take_unix.go
   - decls:
       - alpnHTTP1
       - codecUnwrapper
@@ -966,6 +1006,7 @@ files:
       - Option
       - GroupOption
       - WithDrainTimeout
+      - WithDrainGrace
       - Loop
       - Listen
       - TLS
@@ -1536,7 +1577,7 @@ functions:
     results: stdnet.Listener
   - doc: |-
       loopLanes is how many lanes a loop group runs on every backend: Loops,
-      zero meaning one (R8).
+      zero meaning one (R8). bindLoopGroup has resolved LoopsAuto by then.
     name: loopLanes
     params: v corenet.LoopValue
     results: int
@@ -1621,6 +1662,14 @@ functions:
     name: loopHonours
     params: k corenet.OptionKind
     results: bool
+  - doc: |-
+      startLanes reads LoopsAuto once — every backend, the chain's OnStart and
+      State see the same snapshot, whatever GOMAXPROCS does next; a group
+      resolved already keeps its snapshot and its source — and tells the chain
+      the lane count, the same on every backend, a fallback included, once,
+      before any callback.
+    name: startLanes
+    params: group *StreamGroup
   - doc: loopIdle is the group's IdleTimeout as the loop takes it.
     name: loopIdle
     params: group *StreamGroup
@@ -1698,6 +1747,53 @@ functions:
     name: fillMark
     params: b []byte
   - doc: |-
+      acceptCloexec accepts on fd with the close-on-exec flag set by the same
+      call, so a fork in between never inherits the connection.
+    name: acceptCloexec
+    params: fd int
+    results: int, error
+  - doc: |-
+      ownListeners duplicates each listener server bound, so the portable
+      backend closes its own copy once its drain took the queue, and server's
+      close after the grace leaves the socket listening until then. A listener
+      that cannot be duplicated stays server's, closed with the others.
+    name: ownListeners
+    params: lns []stdnet.Listener
+    results: all, owned []stdnet.Listener
+  - doc: dupListener is a listener of its own over a duplicate of ln's descriptor.
+    name: dupListener
+    params: ln stdnet.Listener
+    results: stdnet.Listener, error
+  - doc: |-
+      takeQueue accepts from ln, non-blocking, until its queue is empty, and
+      hands each connection to admit: the acceptor may take some too, and both
+      admit. It reports whether the take waits for descriptors: an accept, or
+      the duplicate a connection's wrapping needs, out of them. A connection
+      accepted but not wrapped stays in take.held, open, for the next round.
+    name: takeQueue
+    params: ln stdnet.Listener, admit func(stdnet.Conn), take *portableTake
+    results: bool
+  - doc: |-
+      wrapHeld wraps every held connection in a net.Conn on the netpoller and
+      admits it, and reports whether one is still held for want of a descriptor.
+    name: wrapHeld
+    params: take *portableTake, admit func(stdnet.Conn)
+    results: bool
+  - doc: closeRaw closes the connections a take could never wrap.
+    name: closeRaw
+    params: held []*os.File
+  - doc: |-
+      acceptRetries reports whether an accept's failure lost one connection and
+      left the queue: the peer abandoned it, a signal, or one of the network
+      errors accept(2) says to retry on.
+    name: acceptRetries
+    params: err error
+    results: bool
+  - doc: acceptRaw accepts once on rc's non-blocking descriptor, close-on-exec.
+    name: acceptRaw
+    params: rc syscall.RawConn
+    results: int, error
+  - doc: |-
       tlsCodecHonours reports the kinds a TLS codec group honours beyond the
       loop's own: TLS, its handshake bound, and Protocols, which tlsCodecRefusal
       keeps to HTTP/1.1 alone.
@@ -1767,6 +1863,9 @@ functions:
     params: token string
     results: capabilityEntry, bool
   - name: WithDrainTimeout
+    params: d time.Duration
+    results: Option
+  - name: WithDrainGrace
     params: d time.Duration
     results: Option
   - name: Loop
@@ -3199,6 +3298,11 @@ types:
         type: time.Time
       - name: deadline
         type: time.Time
+      - doc: |-
+          heardAt is when the peer's first byte came, zero until then: the drain
+          leaves a connection that has sent nothing open for portableQuiet.
+        name: heardAt
+        type: time.Time
       - name: pressure
         type: bool
       - name: wantWrite
@@ -3213,6 +3317,13 @@ types:
         name: compact
         type: bool
     kind: struct
+    methods:
+      - doc: |-
+          heard records bytes received at now; the first ones mark the connection
+          heard, so the drain may close it once settled (ADR 0196).
+        name: heard
+        params: now time.Time
+        recv: pc *portableConn
     name: portableConn
   - doc: |-
       portableGroup is the portable backend (ADR 0186 §D3, §D7): the default
@@ -3231,6 +3342,13 @@ types:
       - name: degraded
         type: string
       - doc: |-
+          loopsSource is where the lane count came from, for State; procs is
+          GOMAXPROCS read at Start.
+        name: loopsSource
+        type: string
+      - name: procs
+        type: int
+      - doc: |-
           caps is the group's capability report: every row unprobed, or
           disabled; noDelayOff is tcp-nodelay switched off, so each accepted
           connection has the netpoller's TCP_NODELAY cleared (ADR 0189).
@@ -3242,6 +3360,17 @@ types:
         type: "[]*portableLoop"
       - name: lns
         type: "[]stdnet.Listener"
+      - doc: |-
+          owned are the listeners the group duplicated from server's and closes
+          itself, once its drain took their queue (takeQueues); one it could not
+          duplicate is server's, closed with the others after the grace.
+        name: owned
+        type: "[]stdnet.Listener"
+      - doc: |-
+          accepting counts the acceptors still running: a lane stops only once
+          none can hand it a connection.
+        name: accepting
+        type: atomic.Int32
       - doc: |-
           handshake bounds a TLS connection's negotiation, which runs before the
           lane sees it; zero for a plaintext group (ADR 0198).
@@ -3269,12 +3398,47 @@ types:
         params: ln stdnet.Listener
         recv: g *portableGroup
       - doc: |-
+          admit hands c to a lane, in turn, or closes it past MaxConns, a refusal
+          the peer sees — while draining too, as the native backends' admit does: the
+          ceiling holds whatever the phase. A draining group admits otherwise: what
+          waited in the queue with its request is served, never closed unread. A
+          lane that stopped closes it.
+        name: admit
+        params: c stdnet.Conn
+        recv: g *portableGroup
+      - doc: |-
+          takeQueues takes every owned listener's queue to its end, then closes the
+          listener (ADR 0196 §D3): what the kernel completed before the close is
+          served, not reset by it. Out of descriptors, it tries again each tick
+          while a lane still has connections to close — closes free descriptors —
+          and ctx lives; past either, what waits meets the close.
+        name: takeQueues
+        params: ctx context.Context
+        recv: g *portableGroup
+      - doc: |-
+          takeRound takes once from every owned listener not closed yet, closes
+          each one whose queue is empty, and reports whether one waits for
+          descriptors.
+        name: takeRound
+        params: takes []portableTake
+        recv: g *portableGroup
+        results: bool
+      - doc: |-
+          giveUp closes every owned listener not closed yet, and every descriptor
+          accepted but never wrapped.
+        name: giveUp
+        params: takes []portableTake
+        recv: g *portableGroup
+      - doc: closeOwned closes every listener the group owns.
+        name: closeOwned
+        recv: g *portableGroup
+      - doc: |-
           dispatch hands c to the next lane, in turn; a TLS connection is negotiated
           first, off the acceptor, so the lane sees it only once it is cleartext.
 
           Goroutine lifecycle: for a TLS group, one negotiate goroutine per
           connection, which returns once the handshake ends and the connection is
-          handed to its lane or closed.
+          handed to its lane or closed. A lane that stopped closes it.
         name: dispatch
         params: c stdnet.Conn
         recv: g *portableGroup
@@ -3363,7 +3527,7 @@ types:
           a failed or stalled one closes it, and the lane never sees it.
 
           Goroutine lifecycle: one per accepted TLS connection, started by
-          acceptLoop; it returns once the handshake ends and the connection is handed
+          dispatch; it returns once the handshake ends and the connection is handed
           over, or the lane has stopped, which closes the connection instead.
         name: negotiate
         params: c stdnet.Conn, d time.Duration
@@ -3374,6 +3538,16 @@ types:
         name: run
         params: done chan<- struct{}
         recv: pl *portableLoop
+      - doc: |-
+          finished reports whether the lane stops: the backend stopped, or the lane
+          drained to its last connection with no acceptor left to hand it another.
+
+          accepting is read before live: an acceptor counts its connection in live
+          before it stops counting itself, so no acceptor and no connection read in
+          that order means none can come.
+        name: finished
+        recv: pl *portableLoop
+        results: bool
       - doc: |-
           batch serves the events queued behind the first one, the posts, the timers
           when they are due and the drain, then ends the batch. A batch costs what it
@@ -3469,10 +3643,18 @@ types:
         name: control
         recv: pl *portableLoop
       - doc: |-
-          closeSettled marks for closing every open connection with nothing
-          unconsumed and no answer out with a worker (R3).
+          closeSettled marks for closing, as the drain does, every open connection
+          the drain may close now (drainable).
         name: closeSettled
         recv: pl *portableLoop
+      - doc: |-
+          drainable reports whether the drain closes pc, at slot, now: open with
+          nothing unconsumed, no answer out with a worker (R3), and either it has
+          sent something or it stayed silent for portableQuiet.
+        name: drainable
+        params: slot int32, pc *portableConn, now time.Time
+        recv: pl *portableLoop
+        results: bool
       - doc: |-
           endBatch flushes the dirty connections, settles the closes, releases the
           batch's buffers and compacts the spills.
@@ -3566,6 +3748,25 @@ types:
         recv: e portableEngine
         results: corenet.LoopStateValue
     name: portableEngine
+  - doc: filer is a listener whose descriptor can be duplicated.
+    kind: named
+    name: filer
+    underlying: |-
+      interface {
+      	// File returns a duplicate of the listener's descriptor.
+      	File() (*os.File, error)
+      }
+  - doc: |-
+      portableTake is one owned listener's take, across the rounds of the
+      drain: done once the listener is closed; held the connections accepted but
+      not yet wrapped for want of a descriptor, kept open for the next round.
+    fields:
+      - name: done
+        type: bool
+      - name: held
+        type: "[]*os.File"
+    kind: struct
+    name: portableTake
   - doc: |-
       codecUnwrapper is what the http1 adapter exposes (http1.LoopHandler.Unwrap):
       the HTTP1Handler it serves, so a loop group knows its handler speaks the
@@ -4473,6 +4674,11 @@ types:
       - doc: drainTimeout bounds Shutdown.
         name: drainTimeout
         type: time.Duration
+      - doc: |-
+          drainGrace is how long Shutdown keeps serving, readiness false, before
+          it closes a listener.
+        name: drainGrace
+        type: time.Duration
       - doc: phase is the lifecycle phase, read without the mutex by State.
         name: phase
         type: atomic.Uint32
@@ -4747,6 +4953,12 @@ types:
         params: ctx context.Context
         recv: s *Server
         results: error
+      - doc: |-
+          waitGrace keeps the server serving for its drain grace, or until ctx is
+          done, whichever comes first.
+        name: waitGrace
+        params: ctx context.Context
+        recv: s *Server
       - doc: shutdownHTTP stops every group's embedded http.Server, if it has one.
         name: shutdownHTTP
         params: ctx context.Context
@@ -5106,6 +5318,9 @@ types:
         type: corenet.LoopValue
       - name: loopSet
         type: bool
+      - doc: loopsSource is where loop.Loops came from, resolved at Start.
+        name: loopsSource
+        type: string
       - doc: |-
           loopHandler is the group's loop handler, set by HandleLoop; a group
           with one is served by the loop engine (ADR 0186 §D1).

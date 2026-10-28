@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-26T12:00:00Z -->
+<!-- updated: 2026-10-27T18:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -17,13 +17,14 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | File | What |
 |---|---|
 | `group.go` | `Listener` (the one hand-off: a duplicated descriptor), `Config`, `Group` (`Shutdown`, `Close`, `State`, `Rejected`, `Live`) and `Start`, which resolves the sizing, starts the backend and writes the one start line |
-| `sizing.go` | `resolve`: the defaults, the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
+| `sizing.go` | `resolve`: the defaults, `ResolveLoops` (`LoopsAuto` read as GOMAXPROCS, which server calls once per group, zero one, the source State reports — ADR 0196 §D1), the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
 | `conn.go` | `connCtl`, one slot's pointer-free control state; its states, flags and close reasons |
 | `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty and compaction lists, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build — its lane, ADR 0191: `server` calls the chain's `LoopStarter.OnStart(Loops)` before `Start`, so nothing here does), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
 | `slab.go` | the mmap'd slab: power-of-two size classes from 2 KiB, arenas mapped lazily, a global budget that sheds load by name |
 | `wheel.go` | the hashed timer wheel, index-linked, one timer per slot, 10 ms ticks |
 | `caps.go` | the kernel capabilities a group reports (ADR 0189): `loopCaps` and their classes, `CheckCapabilities` (an engine, a class B capability or an unknown opt-in is `LoopCapabilityRefused`), `capSwitches` (the operator's `Disabled`, the code's opt-ins: the operator wins), `capReport` (one row each, `disabled` never overwritten, an absent opt-in `missing`), `Unprobed` (the portable backend's report) |
 | `uring_caps_linux.go` | the probe's stages 1 to 3 (ADR 0189 §D3): `openDescending` (every flag the switches allow, then on `EINVAL` `SQ_REWIND`, `NO_SQARRAY`, `DEFER_TASKRUN`, `SINGLE_ISSUER` given up in that order), `probeRingFDs` (register, unregister before close), `rewindSelfTest` (the partial submit), `settle` (the primary's and the secondaries' flags: `DEFER_TASKRUN` on ring 0 only), `reportSelfTest`, `registerRing` (16 a thread), `probeReason` (`EEXIST` is a probe defect) |
+| `drain_linux.go` | the drain's shared parts (ADR 0196 §D3): `listenerSet` (each taker — a loop on epoll, a ring on io_uring — hands each listener back once it took its queue; the last closes it, `closeRest` the others once every loop returned), `drainable` (no partial input, and heard, or silent for `drainQuiet`), `queueTakeMax` |
 | `postq.go` | the `Post` queue: preallocated, mutex, `pending` CAS false→true wakes once per drain |
 | `stats.go` | the per-ring counters (plain on the loop, atomic for `State`, published at the end of each batch) and the batch-duration histogram behind `BatchP99` |
 | `epoll_linux.go` | the epoll backend: one thread, one epoll instance, one ring per loop; `EPOLLEXCLUSIVE` listeners; a 2 MiB mmap'd read arena per loop |
@@ -54,6 +55,33 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   read: in the arena, or behind the spill. A spill that grows moves to a new
   chunk and the old one waits on `deferred`. Compaction runs only after
   `OnBatchEnd`. `TestCore_spillHandedOutStaysPut` pins this.
+- **The drain takes the listen queue, then closes the listener** (ADR 0196
+  §D3). epoll: `CTL_DEL`, then at each batch `accept4` to `EAGAIN`
+  (`takeQueues`, `queueTakeBatch` a batch, `queueTakeMax` in all), each
+  connection admitted — a draining loop admits; `EMFILE`, `ENFILE` or a full
+  table wait for the drain's closes (`takeAfter`, `ring.full`), except
+  `EMFILE`/`ENFILE` with no connection left in the group, which end the take
+  as the portable backend's `giveUp` does; `control`
+  calls it at every batch while draining. io_uring:
+  the accepts in flight are cancelled, and one that completed as its cancel
+  crossed it is served (`refuses` refuses only on a ring the watchdog drained
+  while the group serves; a ring the watchdog drained before the group, or
+  whose accept failed during the take, takes nothing — `take`); once they
+  came back, `takeQueues` arms single-shot accepts as many as `queued` says
+  wait — `TCP_INFO` on TCP, a zero-timeout
+  `ppoll` on a Unix socket —, within the room above the reserve (none left,
+  or a process-descriptor backoff, waits: never read as empty), `queueTakeMax`
+  in all, an accept's failure stopping the take only when `takeWaits` says the
+  listener failed or no descriptor will come (`EMFILE`/`ENFILE`, the group
+  holding no connection), cancels one left waiting on an empty queue, and hands the
+  listener back once the queue is empty with none in flight. The listener closes when
+  its last taker hands it back (`listenerSet`), before the established
+  connections drain; a loop stops once its connections are gone and its
+  listeners handed back. A connection that has sent nothing (`fHeard` unset)
+  closes only once heard or after `drainQuiet` (1 s): the take's connections
+  have their request on the way. The window between a taker's last empty read
+  and its close is the kernel's: the server's grace empties the queue first,
+  and a partial drain in an `SO_REUSEPORT` group is `tcp_migrate_req=1`'s.
 - **A batch costs the slots it touched, never the open ones.** Nothing at a
   batch's end walks the LRU: the dirty list names the slots to flush, and the
   compaction list (`ring.compact`, deduplicated by `fCompact`) the slots whose
@@ -224,7 +252,14 @@ leaked, GOGC=1 with forced GC at the high-water mark, EMFILE at RLIMIT 64 and
 300 connections past RLIMIT 128 on 3 derived rings (re-executed children),
 the foreign-thread `Write` under `loopdebug`, a 2-entry buffer ring of 64-byte
 buffers shuffled and 0xAA-filled (thousands of ENOBUFS), every probe stage
-failed, `DEFER_TASKRUN`, and 10 000 idle connections with zero watchdog fires.
+failed, `DEFER_TASKRUN`, 10 000 idle connections with zero watchdog fires,
+and the drain (`conformance_drain_linux_test.go`, ADR 0196, on a TCP and on a
+Unix listener): the loop held at
+its batch end, 384 connections queued with their request — more than one
+epoll burst and than io_uring's accepts in flight —, then the drain, every one
+reading its echo and a clean end, the listener refusing after; 1 280 queued
+past epoll's batch; and `TestConformance_drainOutOfDescriptors`, a child
+under RLIMIT 64 whose take waits for the drain's closes.
 `conformance_caps_linux_test.go` and `conformance_caps_uring_linux_test.go`
 hold the capabilities (ADR 0189): the report (one row each, no probe defect,
 no class B or unasked class A-code on), each class A-kernel switch serving the

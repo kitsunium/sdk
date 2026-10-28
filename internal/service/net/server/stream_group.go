@@ -63,6 +63,8 @@ type StreamGroup struct {
 	// handler is not a loop handler (ADR 0186 §D1).
 	loop    corenet.LoopValue
 	loopSet bool
+	// loopsSource is where loop.Loops came from, resolved at Start.
+	loopsSource string
 	// loopHandler is the group's loop handler, set by HandleLoop; a group
 	// with one is served by the loop engine (ADR 0186 §D1).
 	loopHandler corenet.LoopHandler

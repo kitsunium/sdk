@@ -57,6 +57,33 @@ workflows:
                 when: r.rows[i].Name == c && r.rows[i].Status != statusDisabled
           key: i
           range: r.rows
+  - of: (*uRing).cancelAccepts
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: n == 0
+            - opt:
+                do:
+                  - return: ""
+                when: "!rr.cancelAccept(i)"
+          key: i
+          range: rr.armed
+          value: "n"
+  - of: (*uLoop).queuesTaken
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: slices.Contains(rr.queueDone, false)
+          key: _
+          range: ul.rings
+          value: rr
+      - return: "true"
   - of: (*uRing).sweep
     steps:
       - bind: lp

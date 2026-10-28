@@ -63,6 +63,10 @@ type Config struct {
 	// DisabledBy says how they were switched off in State; empty is
 	// KITSUNIUM_NET_DISABLE.
 	DisabledBy string
+	// LoopsSource is where Value.Loops came from, for State, when server
+	// resolved it already: LoopsAuto read as GOMAXPROCS is "auto". Empty lets
+	// the group say it itself.
+	LoopsSource string
 	// tableCap, when positive, caps every ring's table below the descriptor
 	// limit: the conformance suite's tiny slot table.
 	tableCap int
@@ -159,6 +163,10 @@ func Start(cfg Config) (*Group, error) {
 		//: refused before any thread starts.
 		return nil, err
 	}
+	//: server resolved LoopsAuto already and says so.
+	if cfg.LoopsSource != "" {
+		sz.loopsSource = cfg.LoopsSource
+	}
 	//: a test's tiny table.
 	if cfg.tableCap > 0 {
 		sz.tableSize = cfg.tableCap
@@ -175,16 +183,24 @@ func Start(cfg Config) (*Group, error) {
 	if w == nil {
 		w = os.Stderr
 	}
-	_, werr := fmt.Fprintf(w, "net/loop: group=%q backend=%s probe=%s reason=%q loops=%d rings=%d rings_source=%s table=%d cq_batch=%d spill_cap=%d output_cap=%d rlimit_nofile=%d gomaxprocs=%d\n",
-		g.name, g.backend, g.stage, g.reason, sz.loops, sz.rings, sz.ringsSource, sz.tableSize, sz.cqBatch, sz.spillCap, sz.outputCap, sz.rlimit, g.procs)
+	_, werr := fmt.Fprintf(w, "net/loop: group=%q backend=%s probe=%s reason=%q loops=%d loops_source=%s rings=%d rings_source=%s table=%d cq_batch=%d spill_cap=%d output_cap=%d rlimit_nofile=%d gomaxprocs=%d\n",
+		g.name, g.backend, g.stage, g.reason, sz.loops, sz.loopsSource, sz.rings, sz.ringsSource, sz.tableSize, sz.cqBatch, sz.spillCap, sz.outputCap, sz.rlimit, g.procs)
 	//: a log writer that fails changes nothing: the group serves either way.
 	swallowErr(werr)
 	//: serving.
 	return g, nil
 }
 
-// Shutdown stops accepting and waits for every connection to settle, its
-// output sent, until ctx is done; then it closes the rest. A drain cut short
+// Shutdown drains the group, until ctx is done; then it closes the rest. The
+// drain stops accepting without resetting a connection the kernel already
+// completed: every loop cancels its pending accepts — serving one that
+// completed as the cancel crossed it —, takes the listen queue until it is
+// empty, until 65536 connections came from one listener — arrivals outpacing
+// the drain —, or until descriptors run out with no connection of the group
+// left whose close would free one, the rest of the queue reset by the close
+// then; the last loop to take closes the listener. Then each connection
+// closes once it settled, its output sent, a connection that has sent
+// nothing yet once it has or stayed silent for a second. A drain cut short
 // returns DrainTimeout.
 func (g *Group) Shutdown(ctx context.Context) error {
 	g.ctl.drain()
@@ -218,7 +234,7 @@ func (g *Group) State() corenet.LoopStateValue {
 	st := corenet.LoopStateValue{
 		Group: g.name, Backend: g.backend, ProbeStage: g.stage,
 		Degraded: g.reason != "", DegradedReason: g.reason,
-		Loops: g.sz.loops, Rings: g.sz.rings, RingsSource: g.sz.ringsSource,
+		Loops: g.sz.loops, LoopsSource: g.sz.loopsSource, Rings: g.sz.rings, RingsSource: g.sz.ringsSource,
 		RLimitNoFile: g.sz.rlimit, GOMAXPROCS: g.procs,
 		BatchP99:     corenet.DurationValue(g.grp.batchP99()),
 		Capabilities: slices.Clone(g.caps.rows),

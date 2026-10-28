@@ -104,6 +104,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func ReadTimeout\(d time.Duration\) GroupOption](<#ReadTimeout>)
 - [func Shards\(n int\) GroupOption](<#Shards>)
 - [func TLS\(id tlsid.Identity\) GroupOption](<#TLS>)
+- [func WithDrainGrace\(d time.Duration\) Option](<#WithDrainGrace>)
 - [func WithDrainTimeout\(d time.Duration\) Option](<#WithDrainTimeout>)
 - [func WriteTimeout\(d time.Duration\) GroupOption](<#WriteTimeout>)
 - [type Capability](<#Capability>)
@@ -374,6 +375,15 @@ const LoopBackendPortable LoopBackend = 3
 LoopBackendPortable is the default engine's accept path, serialised onto one handler goroutine.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendPortable`.
+
+<a name="LoopsAuto"></a>
+```go
+const LoopsAuto int = -1
+```
+
+LoopsAuto, as LoopValue.Loops, runs one loop per GOMAXPROCS, read once at Start.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopsAuto`.
 
 <a name="OptionAdopt"></a>
 ```go
@@ -1195,6 +1205,15 @@ func TLS(id tlsid.Identity) GroupOption
 ```
 
 TLS turns the group's listeners into TLS listeners, or mutual-TLS ones when the identity requires a client certificate.
+
+<a name="WithDrainGrace"></a>
+## func [WithDrainGrace](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func WithDrainGrace(d time.Duration) Option
+```
+
+WithDrainGrace sets how long Shutdown keeps accepting and serving once readiness has turned false, before it closes any listener. Zero starts closing at once: a loop group still takes its listen queue before its listener closes, where it owns that listener — not on the portable backend outside Unix, as on Windows, nor behind TLS, whose queue meets the close. Serve adds the grace to the drain budget; a caller of Shutdown gives it within its ctx, which bounds the grace and the drain together: a grace that uses up ctx leaves the drain none.
 
 <a name="WithDrainTimeout"></a>
 ## func [WithDrainTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -2258,6 +2277,9 @@ type LoopState struct {
 	DegradedReason  string               `json:"degraded_reason,omitempty"`
 	// Loops is the number of loops running.
 	Loops           int                  `json:"loops"`
+	// LoopsSource says where Loops came from: "explicit", "auto" — LoopsAuto,
+	// GOMAXPROCS read at Start — or "single" when Loops was zero.
+	LoopsSource     string               `json:"loops_source"`
 	// Rings is the number of rings per loop.
 	Rings           int                  `json:"rings"`
 	// RingsSource says where Rings came from: "explicit", "derived" from the
@@ -2304,9 +2326,9 @@ type LoopValue struct {
 	// backend the platform cannot run is refused at Start.
 	Backend      LoopBackend   `json:"backend"`
 	// Loops is the number of loops, each one goroutine locked to its OS thread
-	// on a native backend. Zero selects one. The SDK never sets GOMAXPROCS:
-	// sizing the process against its loops is the consumer's policy, and State
-	// reports both.
+	// on a native backend. Zero selects one; LoopsAuto selects GOMAXPROCS, read
+	// once at Start. The SDK never sets GOMAXPROCS: sizing the process against
+	// its loops is the consumer's policy, and State reports both.
 	Loops        int           `json:"loops"`
 	// Rings is the number of descriptor shards inside one loop, each with its
 	// own table of at most min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES) entries:
@@ -2804,7 +2826,9 @@ It is the one-call entry point: a caller that has nothing else to do on the main
 func (*Server) Shutdown(ctx context.Context) error
 ```
 
-Shutdown stops accepting and waits for in-flight connections to finish, severing what remains once ctx expires.
+Shutdown drains the server, severing what remains once ctx expires.
+
+Readiness turns false first, and the server keeps accepting and serving for the grace WithDrainGrace sets, so whoever routes on readiness stops sending before anything closes; a server already stopped waits no grace. Then the listeners close — a loop group takes its listen queue first, to the end unless arrivals outpace it or descriptors run out with no connection left to close, where it owns the listener: not on the portable backend outside Unix, as on Windows, nor behind TLS —, and each connection finishes its work. ctx bounds the grace and the drain together.
 
 <a name="Server.Start"></a>
 ### func \(Server\) [Start](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/lifecycle.go>)

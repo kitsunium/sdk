@@ -23,6 +23,10 @@ const (
 	portableReadSize int = 16 << 10
 	// portableTick is the portable backend's timer resolution.
 	portableTick time.Duration = 10 * time.Millisecond
+	// portableQuiet is how long the drain leaves open a connection that has
+	// sent nothing yet, as the native backends' drainQuiet: its request may be
+	// on the way, and a close before it is read resets the peer.
+	portableQuiet time.Duration = time.Second
 	// portableEvents bounds the events one batch takes.
 	portableEvents int = 512
 	// portablePostCap is the portable backend's post queue.
@@ -76,11 +80,14 @@ type portableConn struct {
 	flight  int
 	closing bool
 	// The handler goroutine's own state.
-	open      bool
-	spill     []byte
-	spillOff  int
-	lastIO    time.Time
-	deadline  time.Time
+	open     bool
+	spill    []byte
+	spillOff int
+	lastIO   time.Time
+	deadline time.Time
+	// heardAt is when the peer's first byte came, zero until then: the drain
+	// leaves a connection that has sent nothing open for portableQuiet.
+	heardAt   time.Time
 	pressure  bool
 	wantWrite bool
 	peerDone  bool
@@ -101,6 +108,10 @@ type portableGroup struct {
 	soft     int
 	maxConns int
 	degraded string
+	// loopsSource is where the lane count came from, for State; procs is
+	// GOMAXPROCS read at Start.
+	loopsSource string
+	procs       int
 	// caps is the group's capability report: every row unprobed, or
 	// disabled; noDelayOff is tcp-nodelay switched off, so each accepted
 	// connection has the netpoller's TCP_NODELAY cleared (ADR 0189).
@@ -108,6 +119,13 @@ type portableGroup struct {
 	noDelayOff bool
 	lanes      []*portableLoop
 	lns        []stdnet.Listener
+	// owned are the listeners the group duplicated from server's and closes
+	// itself, once its drain took their queue (takeQueues); one it could not
+	// duplicate is server's, closed with the others after the grace.
+	owned []stdnet.Listener
+	// accepting counts the acceptors still running: a lane stops only once
+	// none can hand it a connection.
+	accepting atomic.Int32
 	// handshake bounds a TLS connection's negotiation, which runs before the
 	// lane sees it; zero for a plaintext group (ADR 0198).
 	handshake time.Duration
@@ -186,9 +204,14 @@ type portableLoop struct {
 // drained to its last connection, closing the lane's done as it does.
 func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, plan loopPlan) portableEngine {
 	v := group.loop
+	src := group.loopsSource
+	//: started without bindLoopGroup's resolution: resolved here.
+	if src == "" {
+		v.Loops, src = loop.ResolveLoops(v.Loops)
+	}
 	g := &portableGroup{
 		group: group.name, soft: max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),
-		degraded: degraded, lns: lns,
+		degraded: degraded, loopsSource: src, procs: runtime.GOMAXPROCS(0),
 		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
 		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
 	}
@@ -208,8 +231,10 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 			wake: make(chan struct{}, 1), done: make(chan struct{}),
 		})
 	}
-	//: one acceptor per listener; it ends when server closes the listener.
-	for _, ln := range lns {
+	g.lns, g.owned = ownListeners(lns)
+	//: one acceptor per listener; it ends when its listener closes.
+	for _, ln := range g.lns {
+		g.accepting.Add(1)
 		go g.acceptLoop(ln)
 	}
 	//: one handler goroutine per lane.
@@ -246,8 +271,9 @@ func orDefaultInt(v, def int) int {
 
 // acceptLoop hands each accepted connection to a lane, in turn.
 func (g *portableGroup) acceptLoop(ln stdnet.Listener) {
+	defer g.accepting.Add(-1)
 	failures := 0
-	//: until server closes the listener.
+	//: until its listener closes.
 	for {
 		c, err := ln.Accept()
 		//: closed, or a failure to back off from.
@@ -262,13 +288,98 @@ func (g *portableGroup) acceptLoop(ln stdnet.Listener) {
 			continue
 		}
 		failures = 0
-		//: MaxConns: accepted and closed, a refusal the peer sees.
-		if g.maxConns > 0 && g.live() >= int64(g.maxConns) || g.drainReq.Load() {
-			g.rejected.Add(1)
-			swallowErr(c.Close())
+		g.admit(c)
+	}
+}
+
+// admit hands c to a lane, in turn, or closes it past MaxConns, a refusal
+// the peer sees — while draining too, as the native backends' admit does: the
+// ceiling holds whatever the phase. A draining group admits otherwise: what
+// waited in the queue with its request is served, never closed unread. A
+// lane that stopped closes it.
+func (g *portableGroup) admit(c stdnet.Conn) {
+	//: MaxConns: accepted and closed.
+	if g.maxConns > 0 && g.live() >= int64(g.maxConns) {
+		g.rejected.Add(1)
+		swallowErr(c.Close())
+		//: refused.
+		return
+	}
+	g.dispatch(c)
+}
+
+// takeQueues takes every owned listener's queue to its end, then closes the
+// listener (ADR 0196 §D3): what the kernel completed before the close is
+// served, not reset by it. Out of descriptors, it tries again each tick
+// while a lane still has connections to close — closes free descriptors —
+// and ctx lives; past either, what waits meets the close.
+func (g *portableGroup) takeQueues(ctx context.Context) {
+	takes := make([]portableTake, len(g.owned))
+	tick := time.NewTicker(portableTick)
+	defer tick.Stop()
+	//: until every listener is closed.
+	for {
+		blocked := g.takeRound(takes)
+		//: every one closed.
+		if !blocked {
+			//: taken.
+			return
+		}
+		//: nothing will free a descriptor, or no budget is left.
+		if g.live() == 0 || ctx.Err() != nil {
+			g.giveUp(takes)
+			//: what waits meets the close.
+			return
+		}
+		select {
+		case <-ctx.Done():
+		case <-tick.C:
+		}
+	}
+}
+
+// takeRound takes once from every owned listener not closed yet, closes
+// each one whose queue is empty, and reports whether one waits for
+// descriptors.
+func (g *portableGroup) takeRound(takes []portableTake) bool {
+	blocked := false
+	//: each listener the group owns.
+	for i, ln := range g.owned {
+		//: closed already.
+		if takes[i].done {
 			continue
 		}
-		g.dispatch(c)
+		//: out of descriptors: next round.
+		if takeQueue(ln, g.admit, &takes[i]) {
+			blocked = true
+			continue
+		}
+		takes[i].done = true
+		swallowErr(ln.Close())
+	}
+	//: whether one waits.
+	return blocked
+}
+
+// giveUp closes every owned listener not closed yet, and every descriptor
+// accepted but never wrapped.
+func (g *portableGroup) giveUp(takes []portableTake) {
+	//: each one left.
+	for i, ln := range g.owned {
+		closeRaw(takes[i].held)
+		takes[i].held = nil
+		//: closed already.
+		if !takes[i].done {
+			swallowErr(ln.Close())
+		}
+	}
+}
+
+// closeOwned closes every listener the group owns.
+func (g *portableGroup) closeOwned() {
+	//: each one; a second close is harmless.
+	for _, ln := range g.owned {
+		swallowErr(ln.Close())
 	}
 }
 
@@ -277,7 +388,7 @@ func (g *portableGroup) acceptLoop(ln stdnet.Listener) {
 //
 // Goroutine lifecycle: for a TLS group, one negotiate goroutine per
 // connection, which returns once the handshake ends and the connection is
-// handed to its lane or closed.
+// handed to its lane or closed. A lane that stopped closes it.
 func (g *portableGroup) dispatch(c stdnet.Conn) {
 	pl := g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
 	pl.live.Add(1)
@@ -288,14 +399,20 @@ func (g *portableGroup) dispatch(c stdnet.Conn) {
 		//: handed over.
 		return
 	}
-	pl.events <- portableEvent{kind: pevOpen, conn: c}
+	//: to the lane, unless it stopped: its queue is drained by nobody then.
+	select {
+	case pl.events <- portableEvent{kind: pevOpen, conn: c}:
+	case <-pl.done:
+		pl.live.Add(-1)
+		swallowErr(c.Close())
+	}
 }
 
 // negotiate completes c's TLS handshake within d, then hands c to the lane;
 // a failed or stalled one closes it, and the lane never sees it.
 //
 // Goroutine lifecycle: one per accepted TLS connection, started by
-// acceptLoop; it returns once the handshake ends and the connection is handed
+// dispatch; it returns once the handshake ends and the connection is handed
 // over, or the lane has stopped, which closes the connection instead.
 func (pl *portableLoop) negotiate(c stdnet.Conn, d time.Duration) {
 	defer pl.negotiating.Add(-1)
@@ -330,12 +447,28 @@ func (pl *portableLoop) run(done chan<- struct{}) {
 		}
 		pl.batch()
 		//: finished.
-		if pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0) {
+		if pl.finished() {
 			pl.closeAll()
 			//: out.
 			return
 		}
 	}
+}
+
+// finished reports whether the lane stops: the backend stopped, or the lane
+// drained to its last connection with no acceptor left to hand it another.
+//
+// accepting is read before live: an acceptor counts its connection in live
+// before it stops counting itself, so no acceptor and no connection read in
+// that order means none can come.
+func (pl *portableLoop) finished() bool {
+	//: stopped.
+	if pl.g.stopReq.Load() {
+		//: out.
+		return true
+	}
+	//: no acceptor first, then no connection.
+	return pl.draining && pl.g.accepting.Load() == 0 && pl.live.Load() == 0
 }
 
 // batch serves the events queued behind the first one, the posts, the timers
@@ -560,9 +693,19 @@ func (pl *portableLoop) lookup(ref corenet.LoopConnRef) (int32, *portableConn) {
 	return int32(ref.Slot), pc
 }
 
+// heard records bytes received at now; the first ones mark the connection
+// heard, so the drain may close it once settled (ADR 0196).
+func (pc *portableConn) heard(now time.Time) {
+	pc.lastIO = now
+	//: the first byte.
+	if pc.heardAt.IsZero() {
+		pc.heardAt = now
+	}
+}
+
 // deliver hands data to the handler behind any spill.
 func (pl *portableLoop) deliver(slot int32, pc *portableConn, data []byte) {
-	pc.lastIO = time.Now()
+	pc.heard(time.Now())
 	ref := corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}
 	buf := data
 	//: behind a spill the bytes join it; appending never touches the bytes
@@ -700,18 +843,29 @@ func (pl *portableLoop) control() {
 	pl.closeSettled()
 }
 
-// closeSettled marks for closing every open connection with nothing
-// unconsumed and no answer out with a worker (R3).
+// closeSettled marks for closing, as the drain does, every open connection
+// the drain may close now (drainable).
 func (pl *portableLoop) closeSettled() {
-	//: each open one with nothing unconsumed.
+	now := time.Now()
+	//: each open one the drain may close.
 	for slot, pc := range pl.conns {
-		//: mid-request ones, and ones waiting on a worker, finish first.
-		if pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff &&
-			(pl.busy == nil || !pl.busy(pl.lane, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen})) {
+		//: mid-request ones, ones waiting on a worker, fresh ones not yet
+		//: heard nor quiet: they finish first.
+		if pl.drainable(int32(slot), pc, now) {
 			pc.reasonSet, pc.closeErr = true, corenet.ServerClosed
 			pl.markDirty(int32(slot))
 		}
 	}
+}
+
+// drainable reports whether the drain closes pc, at slot, now: open with
+// nothing unconsumed, no answer out with a worker (R3), and either it has
+// sent something or it stayed silent for portableQuiet.
+func (pl *portableLoop) drainable(slot int32, pc *portableConn, now time.Time) bool {
+	//: settled, heard or quiet, and waiting on nobody.
+	return pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff &&
+		(!pc.heardAt.IsZero() || now.Sub(pc.lastIO) >= portableQuiet) &&
+		(pl.busy == nil || !pl.busy(pl.lane, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}))
 }
 
 // endBatch flushes the dirty connections, settles the closes, releases the
@@ -997,6 +1151,7 @@ func (e portableEngine) Shutdown(ctx context.Context) error {
 	g := e.g
 	g.drainReq.Store(true)
 	g.wakeAll()
+	g.takeQueues(ctx)
 	//: every lane drained, or out of budget.
 	for _, pl := range g.lanes {
 		select {
@@ -1016,6 +1171,7 @@ func (e portableEngine) Close() error {
 	g := e.g
 	g.once.Do(func() {
 		g.stopReq.Store(true)
+		g.closeOwned()
 		g.wakeAll()
 		//: every lane's goroutine returned.
 		for _, pl := range g.lanes {
@@ -1041,7 +1197,7 @@ func (e portableEngine) State() corenet.LoopStateValue {
 	return corenet.LoopStateValue{
 		Group: g.group, Backend: corenet.LoopBackendPortable, ProbeStage: "portable",
 		Degraded: g.degraded != "", DegradedReason: g.degraded,
-		Loops: len(g.lanes), Rings: 1, RingsSource: "single", GOMAXPROCS: runtime.GOMAXPROCS(0),
+		Loops: len(g.lanes), LoopsSource: g.loopsSource, Rings: 1, RingsSource: "single", GOMAXPROCS: g.procs,
 		Capabilities: slices.Clone(g.caps),
 		RingStates:   rings,
 	}

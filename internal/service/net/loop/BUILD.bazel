@@ -11,6 +11,7 @@ go_library(
         "debug_off_linux.go",
         "debug_on_linux.go",  # keep: compiled under the loopdebug tag the tests set
         "doc.go",
+        "drain_linux.go",
         "epoll_linux.go",
         "group.go",
         "group_linux.go",
@@ -104,9 +105,12 @@ go_test(
         "batch_cost_internal_test.go",
         "conformance_caps_linux_test.go",
         "conformance_caps_uring_linux_test.go",
+        "conformance_drain_linux_test.go",
         "conformance_linux_test.go",
         "conformance_uring_linux_test.go",
         "core_internal_test.go",
+        "drain_take_linux_test.go",
+        "drain_take_uring_linux_test.go",
         "gen_api_test.go",
         "memory_linux_test.go",
         "parts_internal_test.go",
@@ -127,11 +131,13 @@ go_test(
 
 # The idle-connection memory budget (memory_linux_test.go, //go:build !race),
 # its own target so the race-off lane (tools/alloc-lane-targets.txt) runs it
-# by name; under race it compiles to nothing it runs.
+# by name; under race it compiles to nothing it runs. The drain file comes
+# with the conformance suite, whose child dispatch names its child.
 # keep
 go_test(
     name = "loop_memory_test",
     srcs = [
+        "conformance_drain_linux_test.go",
         "conformance_linux_test.go",
         "memory_linux_test.go",
     ],

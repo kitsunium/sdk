@@ -832,6 +832,9 @@ func runChild(c string) int {
 	if name == "serve" {
 		return childServe(spec)
 	}
+	if name == "drain" {
+		return childDrain(spec)
+	}
 	fmt.Println("unknown child case", c)
 	return 2
 }

@@ -201,23 +201,6 @@ func (r *ring) abandon(slot int32) {
 	r.free = append(r.free, slot)
 }
 
-// closeSettled starts the drain's close of every connection of r that is
-// open with no partial input and no answer out with a worker: each closes
-// once its output has left; mid-request ones finish first.
-func (lp *loop) closeSettled(r *ring) {
-	//: every open connection is looked at.
-	for s := r.lruHead; s != noLink; {
-		c := &r.conns[s]
-		nxt := c.lruNext
-		//: settled, and waiting on nobody.
-		if c.state == stOpen && c.spill.empty() && !lp.waits(r, s) {
-			c.state, c.reason = stClosing, rDrain
-			r.markDirty(s)
-		}
-		s = nxt
-	}
-}
-
 // evictable reports whether slot of r may be evicted: open, with nothing
 // unconsumed, unsent or unread, and no answer out with a worker.
 func (lp *loop) evictable(r *ring, slot int32) bool {
@@ -249,6 +232,7 @@ func (r *ring) deliver(slot int32, data []byte) {
 		return
 	}
 	c.lastIO = r.lp.tick
+	c.flags |= fHeard
 	r.lruTouch(slot)
 	lp := r.lp
 	//: no spill: the handler reads the received bytes in place.
@@ -367,6 +351,7 @@ func (r *ring) deliverSpill(slot int32, n int) {
 	c := &r.conns[slot]
 	c.spill.len += int32(n)
 	c.lastIO = r.lp.tick
+	c.flags |= fHeard
 	r.lruTouch(slot)
 	lp := r.lp
 	buf := lp.slab.data(c.spill)

@@ -68,6 +68,7 @@ func pairLines(load, a, b, unit string, ratios []float64) string {
 // calibrated is every calibration row's rounds within 1 % of 1: a runner a
 // step's row may be judged on.
 var calibrated = pairLines("L2", "handwritten", "chain", "cpu-ns/req", tightRatios) +
+	pairLines("L1", "goroutine", "loop", "cpu-ns/req", scaled(tightRatios, 0.4)) +
 	pairLines("L1", "loop", "loop", "cpu-ns/req", tightRatios) +
 	pairLines("L2", "handwritten", "handwritten", "cpu-ns/req", tightRatios) +
 	pairLines("L3", "recvmmsg", "recvmmsg", "cpu-ns/datagram", tightRatios) +
@@ -205,34 +206,41 @@ func TestEvaluate_pairedCancelsTheRunner(t *testing.T) {
 	}
 }
 
-// TestEvaluate_shippedTable pins the table as it ships: P2, P4a and the
+// TestEvaluate_shippedTable pins the table as it ships: P2, P4a, P6 and the
 // calibration rows are active, so a run without them, with P2's chain 5 %
-// dearer, or with one engine unlike itself, fails; every other step's row is
-// inactive, and samples that would fail it fail nothing while it still
-// reports what it measured.
+// dearer, with P6's loop engine at only −25 %, or with one engine unlike
+// itself, fails; every other step's row is inactive, and samples that would
+// fail it fail nothing while it still reports what it measured.
 func TestEvaluate_shippedTable(t *testing.T) {
-	failing := pairLines("L1", "goroutine", "loop", "cpu-ns/req", scaled(tightRatios, 2))
+	failing := pairLines("L1", "published", "loop", "cpu-ns/req", scaled(tightRatios, 2))
 	rep := evaluate(gates, mustParse(t, calibrated+p4aPassing()+failing), "abc")
 	if !rep.Passed {
 		t.Fatalf("calibrated run failed: %+v", rep)
 	}
 	for _, g := range rep.Gates {
-		active := strings.HasPrefix(g.Step, "cal-") || g.Step == "P2" || g.Step == "P4a"
+		active := strings.HasPrefix(g.Step, "cal-") || g.Step == "P2" || g.Step == "P4a" || g.Step == "P6"
 		if active != g.Active || (!active && (g.Verdict != verdictInactive || g.Pending == "")) || (active && g.Verdict != verdictPass) {
 			t.Errorf("%s: active=%t verdict=%s pending=%q", g.Step, g.Active, g.Verdict, g.Pending)
 		}
 	}
-	if g := gateNamed(t, rep, "P6"); g.Measured[0].Verdict != verdictFail {
+	if g := gateNamed(t, rep, "P5"); g.Measured[0].Verdict != verdictFail {
 		t.Fatalf("an inactive gate still reports what it measured: %+v", g.Measured)
 	}
 	dearer := strings.Replace(calibrated, pairLines("L2", "handwritten", "chain", "cpu-ns/req", tightRatios),
 		pairLines("L2", "handwritten", "chain", "cpu-ns/req", scaled(tightRatios, 1.05)), 1)
+	slower := strings.Replace(calibrated, pairLines("L1", "goroutine", "loop", "cpu-ns/req", scaled(tightRatios, 0.4)),
+		pairLines("L1", "goroutine", "loop", "cpu-ns/req", scaled(tightRatios, 0.75)), 1)
 	drifted := pairLines("L2", "handwritten", "chain", "cpu-ns/req", tightRatios) +
+		pairLines("L1", "goroutine", "loop", "cpu-ns/req", scaled(tightRatios, 0.4)) +
 		pairLines("L1", "loop", "loop", "cpu-ns/req", tightRatios) +
 		pairLines("L2", "handwritten", "handwritten", "cpu-ns/req", scaled(tightRatios, 1.08)) +
 		pairLines("L3", "recvmmsg", "recvmmsg", "cpu-ns/datagram", tightRatios) +
 		pairLines("L3", "recvmmsg", "recvmmsg", "datagrams/syscall", tightRatios)
-	for _, in := range []string{"", failing, drifted, dearer} {
+	//: P6's own verdict: every other active gate passes, P6 fails at −25 %.
+	if r := evaluate(gates, mustParse(t, slower+p4aPassing()), "abc"); r.Passed || gateNamed(t, r, "P6").Verdict != verdictFail {
+		t.Fatalf("P6 at -25 %%: passed=%t P6=%s", r.Passed, gateNamed(t, r, "P6").Verdict)
+	}
+	for _, in := range []string{"", failing, drifted, dearer, slower} {
 		if evaluate(gates, mustParse(t, in), "abc").Passed {
 			t.Fatalf("a run without its calibration, or with one engine 8 %% off itself, passed: %q", in)
 		}
@@ -337,7 +345,7 @@ func TestRun(t *testing.T) {
 	if code := run([]string{"-sha", "abc123", "-in", in, "-out", report}, &out, &errb); code != 0 {
 		t.Fatalf("calibrated run: %d %s", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "commit abc123") || !strings.Contains(out.String(), "P6   inactive") {
+	if !strings.Contains(out.String(), "commit abc123") || !strings.Contains(out.String(), "P5   inactive") {
 		t.Fatalf("summary:\n%s", out.String())
 	}
 	b, err := os.ReadFile(report)

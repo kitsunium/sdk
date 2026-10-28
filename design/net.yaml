@@ -833,6 +833,14 @@ packages:
         type: string
         value: "\"KITSUNIUM_NET_DISABLE\""
       - doc: |-
+          LoopsAuto, set as LoopValue.Loops, runs one loop per GOMAXPROCS, read once at
+          Start: a snapshot that a later change of GOMAXPROCS does not move. It is a
+          sentinel, never the zero value, which is one loop (ADR 0187 §D9); State
+          reports the count and "auto" as its source.
+        name: LoopsAuto
+        type: int
+        value: "-1"
+      - doc: |-
           HTTP1MaxFields is how many field lines one request of the restricted
           HTTP/1.1 profile may carry. It sizes HTTP1RequestValue.Fields, so a request is
           framed into a fixed array and never into a slice that grows: one more line is
@@ -3606,6 +3614,12 @@ packages:
               name: Loops
               tag: json:"loops"
               type: int
+            - doc: |-
+                LoopsSource says where Loops came from: "explicit", "auto" — LoopsAuto,
+                GOMAXPROCS read at Start — or "single" when Loops was zero.
+              name: LoopsSource
+              tag: json:"loops_source"
+              type: string
             - doc: Rings is the number of rings per loop.
               name: Rings
               tag: json:"rings"
@@ -3670,9 +3684,9 @@ packages:
               type: LoopBackend
             - doc: |-
                 Loops is the number of loops, each one goroutine locked to its OS thread
-                on a native backend. Zero selects one. The SDK never sets GOMAXPROCS:
-                sizing the process against its loops is the consumer's policy, and State
-                reports both.
+                on a native backend. Zero selects one; LoopsAuto selects GOMAXPROCS, read
+                once at Start. The SDK never sets GOMAXPROCS: sizing the process against
+                its loops is the consumer's policy, and State reports both.
               name: Loops
               tag: json:"loops"
               type: int
@@ -5283,6 +5297,19 @@ packages:
           - type: "*Group"
           - type: error
       - doc: |-
+          ResolveLoops resolves LoopValue.Loops n and says where the count came from,
+          as LoopStateValue.LoopsSource spells it: LoopsAuto is GOMAXPROCS read now,
+          "auto"; a positive count is its own, "explicit"; anything else is one,
+          "single" (R8). server calls it once per group, at Start, and keeps the
+          snapshot for every backend.
+        in:
+          - name: "n"
+            type: int
+        name: ResolveLoops
+        out:
+          - type: int
+          - type: string
+      - doc: |-
           CheckCapabilities refuses a LoopValue.Capabilities entry the group cannot opt
           into: an engine, a class B capability or an unknown token, with
           LoopCapabilityRefused naming it (ADR 0189). A class A-kernel entry needs no
@@ -5362,14 +5389,28 @@ packages:
                 KITSUNIUM_NET_DISABLE.
               name: DisabledBy
               type: string
+            - doc: |-
+                LoopsSource is where Value.Loops came from, for State, when server
+                resolved it already: LoopsAuto read as GOMAXPROCS is "auto". Empty lets
+                the group say it itself.
+              name: LoopsSource
+              type: string
       - doc: |-
           Group is a running loop group: its loops, their threads and their rings.
           Start is the one way to get one, so a Group always runs, or ran and was
           stopped by Shutdown or Close.
         methods:
           - doc: |-
-              Shutdown stops accepting and waits for every connection to settle, its
-              output sent, until ctx is done; then it closes the rest. A drain cut short
+              Shutdown drains the group, until ctx is done; then it closes the rest. The
+              drain stops accepting without resetting a connection the kernel already
+              completed: every loop cancels its pending accepts — serving one that
+              completed as the cancel crossed it —, takes the listen queue until it is
+              empty, until 65536 connections came from one listener — arrivals outpacing
+              the drain —, or until descriptors run out with no connection of the group
+              left whose close would free one, the rest of the queue reset by the close
+              then; the last loop to take closes the listener. Then each connection
+              closes once it settled, its output sent, a connection that has sent
+              nothing yet once it has or stayed silent for a second. A drain cut short
               returns DrainTimeout.
             in:
               - name: ctx
@@ -5596,6 +5637,22 @@ packages:
           - name: d
             type: time.Duration
         name: WithDrainTimeout
+        out:
+          - type: Option
+      - doc: |-
+          WithDrainGrace sets how long Shutdown keeps accepting and serving once
+          readiness has turned false, before it closes any listener: the time a load
+          balancer or an orchestrator takes to stop routing to the server. Zero, the
+          default, starts closing at once: a loop group still takes its listen queue
+          before its listener closes, where it owns that listener — not on the
+          portable backend outside Unix, as on Windows, nor behind TLS, whose queue
+          meets the close. Serve adds the grace to the drain budget; a caller of
+          Shutdown gives it within its ctx, which bounds the grace and the drain
+          together: a grace that uses up ctx leaves the drain none.
+        in:
+          - name: d
+            type: time.Duration
+        name: WithDrainGrace
         out:
           - type: Option
       - doc: |-
@@ -5954,8 +6011,16 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
-              Shutdown stops accepting and waits for in-flight connections to finish,
-              severing what remains once ctx expires.
+              Shutdown drains the server, severing what remains once ctx expires.
+
+              Readiness turns false first, and the server keeps accepting and serving
+              for the grace WithDrainGrace sets, so whoever routes on readiness stops
+              sending before anything closes; a server already stopped waits no grace.
+              Then the listeners close — a loop group takes its listen queue first, to
+              the end unless arrivals outpace it or descriptors run out with no
+              connection left to close, where it owns the listener: not on the portable
+              backend outside Unix, as on Windows, nor behind TLS —, and each connection
+              finishes its work. ctx bounds the grace and the drain together.
             in:
               - name: ctx
                 type: context.Context
@@ -8478,6 +8543,15 @@ packages:
             type: LoopBackend
             typed: true
             value: "3"
+      - const:
+          - doc: |-
+              LoopsAuto, as LoopValue.Loops, runs one loop per GOMAXPROCS, read once at
+              Start.
+            name: LoopsAuto
+            reexport: corenet.LoopsAuto
+            type: int
+            typed: true
+            value: "-1"
       - alias:
           - doc: |-
               LoopHandler serves the connections of a loop group, one callback per event,
@@ -9089,6 +9163,23 @@ packages:
             - name: d
               type: time.Duration
           name: WithDrainTimeout
+          out:
+            - type: Option
+      - func:
+          doc: |-
+            WithDrainGrace sets how long Shutdown keeps accepting and serving once
+            readiness has turned false, before it closes any listener. Zero starts
+            closing at once: a loop group still takes its listen queue before its
+            listener closes, where it owns that listener — not on the portable
+            backend outside Unix, as on Windows, nor behind TLS, whose queue meets
+            the close. Serve adds the grace to the drain budget; a caller of
+            Shutdown gives it within its ctx, which bounds the grace and the drain
+            together: a grace that uses up ctx leaves the drain none.
+          forward: svcserver.WithDrainGrace
+          in:
+            - name: d
+              type: time.Duration
+          name: WithDrainGrace
           out:
             - type: Option
       - alias:

@@ -21,6 +21,22 @@ func WithDrainTimeout(d time.Duration) Option {
 	}
 }
 
+// WithDrainGrace sets how long Shutdown keeps accepting and serving once
+// readiness has turned false, before it closes any listener: the time a load
+// balancer or an orchestrator takes to stop routing to the server. Zero, the
+// default, starts closing at once: a loop group still takes its listen queue
+// before its listener closes, where it owns that listener — not on the
+// portable backend outside Unix, as on Windows, nor behind TLS, whose queue
+// meets the close. Serve adds the grace to the drain budget; a caller of
+// Shutdown gives it within its ctx, which bounds the grace and the drain
+// together: a grace that uses up ctx leaves the drain none.
+func WithDrainGrace(d time.Duration) Option {
+	//: the option is applied by the constructor, in declaration order.
+	return func(s *Server) {
+		s.drainGrace = d
+	}
+}
+
 // Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops
 // and rings, and its per-connection and pressure bounds. It is judged at Start,
 // once the group's handler is known: a group served by HandleLoop runs on it,

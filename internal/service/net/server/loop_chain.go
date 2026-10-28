@@ -30,7 +30,7 @@ var probeNames = [probeCallbacks]string{
 }
 
 // loopLanes is how many lanes a loop group runs on every backend: Loops,
-// zero meaning one (R8).
+// zero meaning one (R8). bindLoopGroup has resolved LoopsAuto by then.
 func loopLanes(v corenet.LoopValue) int {
 	//: zero is one.
 	return max(v.Loops, 1)
