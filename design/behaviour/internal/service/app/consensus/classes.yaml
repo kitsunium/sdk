@@ -1116,7 +1116,7 @@ files:
       - (*joinHold).install
       - (*joinHold).release
       - sameAnswer
-      - admissionRanker
+      - membershipSetter
       - refreshJoiner
       - (*Node).refreshJoin
       - (*Node).runJoinRefresh
@@ -5431,12 +5431,12 @@ types:
         recv: h *joinHold
     name: joinHold
   - doc: |-
-      admissionRanker is a transport that keeps, of a member two of its
+      membershipSetter is a transport that keeps, of a member two of its
       admission groups list, the record of the group whose set is newer: a
       joining node's JOIN answer, as of the AddLearner it answers, against the
       configuration its engine replays (#742).
     kind: named
-    name: admissionRanker
+    name: membershipSetter
     underlying: |-
       interface {
       	setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64)
@@ -5754,7 +5754,7 @@ types:
         recv: t *MemoryTransport
       - doc: |-
           setMembershipAt is SetMembership for a set as of index at, ranked as the
-          TCP transport ranks it (admissionRanker, #742).
+          TCP transport ranks it (membershipSetter, #742).
         name: setMembershipAt
         params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64
         recv: t *MemoryTransport
@@ -9184,7 +9184,7 @@ types:
         recv: t *TCPTransport
       - doc: |-
           setMembershipAt is SetMembership for a set as of index at, which ranks
-          its records against another group's (admissionRanker, #742).
+          its records against another group's (membershipSetter, #742).
         name: setMembershipAt
         params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64
         recv: t *TCPTransport
@@ -9513,10 +9513,10 @@ vars:
         type: refreshJoiner
         value: (*MemoryTransport)(nil)
       - name: _
-        type: admissionRanker
+        type: membershipSetter
         value: (*TCPTransport)(nil)
       - name: _
-        type: admissionRanker
+        type: membershipSetter
         value: (*MemoryTransport)(nil)
       - name: _
         type: bindWarner

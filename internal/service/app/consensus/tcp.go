@@ -1116,7 +1116,7 @@ func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []cor
 }
 
 // setMembershipAt is SetMembership for a set as of index at, which ranks
-// its records against another group's (admissionRanker, #742).
+// its records against another group's (membershipSetter, #742).
 func (t *TCPTransport) setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

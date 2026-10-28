@@ -10824,7 +10824,7 @@ sequences:
             - return: ""
           init:
             bind: r, ok
-            eval: n.cfg.Transport.(admissionRanker)
+            eval: n.cfg.Transport.(membershipSetter)
           when: ok
       - eval: n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
         to: n.cfg.Transport.SetMembership

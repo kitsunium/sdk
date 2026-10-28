@@ -1625,7 +1625,7 @@ func (n *Node) checkAdmission() {
 // setMembership hands the transport the admission set a Ready carries, with
 // the index it is as of when the transport ranks its groups by it (#742).
 func (n *Node) setMembership(rd *raft.ReadyValue) {
-	if r, ok := n.cfg.Transport.(admissionRanker); ok {
+	if r, ok := n.cfg.Transport.(membershipSetter); ok {
 		r.setMembershipAt(n.cfg.Group, rd.Membership, rd.MembershipAt)
 		return
 	}

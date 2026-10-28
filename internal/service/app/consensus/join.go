@@ -252,11 +252,11 @@ func sameAnswer(a, b []coreconsensus.MemberValue) bool {
 		func(x, y coreconsensus.MemberValue) bool { return x.ID == y.ID && x.SPKI == y.SPKI })
 }
 
-// admissionRanker is a transport that keeps, of a member two of its
+// membershipSetter is a transport that keeps, of a member two of its
 // admission groups list, the record of the group whose set is newer: a
 // joining node's JOIN answer, as of the AddLearner it answers, against the
 // configuration its engine replays (#742).
-type admissionRanker interface {
+type membershipSetter interface {
 	setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64)
 }
 

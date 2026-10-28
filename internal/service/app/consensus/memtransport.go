@@ -278,7 +278,7 @@ func (t *MemoryTransport) SetMembership(group coreconsensus.GroupID, admitted []
 }
 
 // setMembershipAt is SetMembership for a set as of index at, ranked as the
-// TCP transport ranks it (admissionRanker, #742).
+// TCP transport ranks it (membershipSetter, #742).
 func (t *MemoryTransport) setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

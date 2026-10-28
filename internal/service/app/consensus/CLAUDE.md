@@ -923,7 +923,7 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   times in 8, and was not fed while that member led. `admittedUnion` keeps
   the record of the newer set, by id and by key — the answer as of the
   `AddLearner` it answers, the engine's as of `ReadyValue.MembershipAt`,
-  the answer on a tie — and the memory double ranks alike (`admissionRanker`,
+  the answer on a tie — and the memory double ranks alike (`membershipSetter`,
   #742, `TestTheUnionOfTwoGroupsKeepsTheNewerRecordOfAMember`,
   `TestAJoinerDialsAMovedLeaderAtItsJoinAnswersAddress`).
 - Keep a joiner on the JOIN answer it got first while it hears no leader:
