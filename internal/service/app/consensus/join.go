@@ -252,6 +252,14 @@ func sameAnswer(a, b []coreconsensus.MemberValue) bool {
 		func(x, y coreconsensus.MemberValue) bool { return x.ID == y.ID && x.SPKI == y.SPKI })
 }
 
+// membershipSetter is a transport that keeps, of a member two of its
+// admission groups list, the newer record, at being the index each record
+// of admitted is as of: a joining node's JOIN answer, as of the AddLearner
+// it answers, against the configuration its engine replays (#742).
+type membershipSetter interface {
+	setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at []uint64)
+}
+
 // refreshJoiner is a transport that sends its JOIN again with the
 // configuration it last joined with, replacing a held answer, and reports
 // whether the answer changed (#632).

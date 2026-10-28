@@ -3266,8 +3266,8 @@ sequences:
       - set: node.admittedPub
         to: node.admitted
         value: node.admitted()
-      - set: node.rd.Membership
-        value: node.admittedPub
+      - set: node.rd.Membership, node.rd.MembershipAt
+        value: node.admittedPub, node.admissionAt(node.admittedPub)
       - return: node
   - of: startCommit
     steps:
@@ -3525,7 +3525,13 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: index <= r.log.snapIndex || index > r.log.applied
+          when: index == 0 || index > r.log.applied
+      - set: r.rd.Compact
+        value: max(r.rd.Compact, index)
+      - opt:
+          do:
+            - return: ""
+          when: index <= r.log.snapIndex
       - bind: t, _
         eval: r.log.term(index)
         to: r.log.term
@@ -3537,8 +3543,6 @@ sequences:
         to: r.confAt
       - eval: r.log.compactTo(index, t, c)
         to: r.log.compactTo
-      - set: r.rd.Compact
-        value: max(r.rd.Compact, index)
       - set: r.base
         to: m.Clone
         value: m.Clone()
@@ -4502,8 +4506,8 @@ sequences:
           when: slices.Equal(a, r.admittedPub) && !r.mutated(mutMembershipEveryCommit)
       - set: r.admittedPub
         value: a
-      - set: r.rd.Membership
-        value: a
+      - set: r.rd.Membership, r.rd.MembershipAt
+        value: a, r.admissionAt(a)
   - of: (*Raft).PeerStats
     steps:
       - opt:

@@ -265,34 +265,60 @@ func (n *Node) cut(idx, term uint64, wait bool) error {
 		// (#544).
 		return origin(coreconsensus.SnapshotCorrupt, errs.String("why", "a cut at term 0"), errs.String("index", u64s(idx)))
 	}
-	n.snapState.mu.Lock()
-	n.snapState.sinceBytes = 0
-	n.snapState.mu.Unlock()
+	taken := n.takeSinceBytes()
 	// The capture, and the write when it pauses apply, hold the apply
 	// goroutine: watchProgress does not take that for a stuck apply (#593).
 	n.cuttingSince.Store(n.clk.Now().UnixNano())
 	defer n.cuttingSince.Store(0)
 	meta, err := n.metaAt(idx, term)
 	if err != nil {
+		n.giveSinceBytes(taken)
 		return err
 	}
 	snap, err := n.cfg.Machine.Snapshot()
 	if err != nil {
+		n.giveSinceBytes(taken)
 		return err
 	}
 	if n.cfg.SnapshotPausesApply || wait {
-		return n.writeSnapshot(snap, meta)
+		if err := n.writeSnapshot(snap, meta); err != nil {
+			n.giveSinceBytes(taken)
+			return err
+		}
+		return nil
 	}
 	n.wg.Add(1)
 	go func() {
 		defer n.wg.Done()
 		if err := n.writeSnapshot(snap, meta); err != nil {
+			n.giveSinceBytes(taken)
 			n.cutFailed(err)
 			return
 		}
 		n.cutPending()
 	}()
 	return nil
+}
+
+// takeSinceBytes starts a cut's count of the payload applied: what it
+// covers is taken, and what is applied while it is written counts towards
+// the next one (D7).
+func (n *Node) takeSinceBytes() int64 {
+	n.snapState.mu.Lock()
+	defer n.snapState.mu.Unlock()
+	taken := n.snapState.sinceBytes
+	n.snapState.sinceBytes = 0
+	return taken
+}
+
+// giveSinceBytes gives a cut that published nothing back the payload it had
+// taken: still applied since the last cut, it counts towards the retry. A
+// failed cut, a commit the cut waits for among them (metaAt), spent a whole
+// SnapshotEveryBytes before the byte trigger fired again (#744).
+func (n *Node) giveSinceBytes(taken int64) {
+	n.snapState.mu.Lock()
+	n.snapState.sinceBytes += taken
+	n.snapState.mu.Unlock()
 }
 
 // cutPending asks the apply goroutine for the cut a trigger coalesced while

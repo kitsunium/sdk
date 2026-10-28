@@ -53190,7 +53190,7 @@
       "recv": "Raft",
       "spelled": "func(index uint64)",
       "canonical": "func(index uint64)",
-      "doc": "Compact forgets the entries through index, which a durable snapshot\ncovers.\n",
+      "doc": "Compact forgets the entries through index, which a durable snapshot\ncovers, and asks the store to drop them, even at or below the base.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -53638,8 +53638,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "ReadyValue",
-      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.EntryValue; Messages []core.MessageValue; AfterSync []core.MessageValue; Apply []core.EntryValue; ApplyRead ReadBackSpec; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.MessageValue; Transfers []TransferResult; Compact uint64; SilenceEnded bool; LeaderUnheard bool; Fetch []FetchSpec; Membership []core.MemberValue; LeaderHint core.MemberValue; LeaderAddress core.MemberValue; Unsupported UnsupportedEntryValue; ChainRefusedBy []core.NodeID}",
-      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; ApplyRead github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadBackSpec; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; LeaderUnheard bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; LeaderHint github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; LeaderAddress github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntryValue; ChainRefusedBy []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
+      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.EntryValue; Messages []core.MessageValue; AfterSync []core.MessageValue; Apply []core.EntryValue; ApplyRead ReadBackSpec; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.MessageValue; Transfers []TransferResult; Compact uint64; SilenceEnded bool; LeaderUnheard bool; Fetch []FetchSpec; Membership []core.MemberValue; MembershipAt []uint64; LeaderHint core.MemberValue; LeaderAddress core.MemberValue; Unsupported UnsupportedEntryValue; ChainRefusedBy []core.NodeID}",
+      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; ApplyRead github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadBackSpec; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; LeaderUnheard bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; MembershipAt []uint64; LeaderHint github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; LeaderAddress github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntryValue; ChainRefusedBy []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
       "fields": [
         {
           "name": "Seq",
@@ -53730,6 +53730,11 @@
           "name": "Membership",
           "type": "[]core.MemberValue",
           "doc": "Membership is set when the admitted set changed.\n"
+        },
+        {
+          "name": "MembershipAt",
+          "type": "[]uint64",
+          "doc": "MembershipAt is the index each record of Membership is as of, in its\norder: the latest configuration's, or, for the leader whose address a\nmember's record gives (#724), the commit that record was read at. A\njoining node's transport ranks each against its JOIN answer's position\n(#742).\n"
         },
         {
           "name": "LeaderHint",

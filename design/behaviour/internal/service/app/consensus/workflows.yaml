@@ -364,3 +364,41 @@ workflows:
           key: i
           range: stats
       - return: "false"
+  - of: indexMembers
+    steps:
+      - var:
+          name: noPin
+          type: "[32]byte"
+      - bind: byID
+        eval: map[coreconsensus.NodeID]coreconsensus.MemberValue{}
+      - bind: bySPKI
+        eval: map[[32]byte]coreconsensus.MemberValue{}
+      - bind: shared
+        eval: map[[32]byte]bool{}
+      - loop:
+          do:
+            - set: byID[m.ID]
+              value: m
+            - opt:
+                do:
+                  - continue: true
+                when: m.SPKI == noPin
+            - opt:
+                do:
+                  - set: shared[m.SPKI]
+                    value: "true"
+                init:
+                  bind: o, ok
+                  eval: bySPKI[m.SPKI]
+                when: ok && o.ID != m.ID
+            - set: bySPKI[m.SPKI]
+              value: m
+          key: _
+          range: admitted
+          value: m
+      - loop:
+          do:
+            - eval: delete(bySPKI, k)
+          key: k
+          range: shared
+      - return: byID, bySPKI

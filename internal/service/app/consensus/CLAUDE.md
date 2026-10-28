@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-28T12:00:00Z -->
+<!-- updated: 2026-10-28T18:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -575,6 +575,26 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestTheRepairOfAShortLogCompactsPastTheTrailingWindow`). A headroom
   under twice `SnapshotEveryBytes` and two segments may still reach the
   alarm under steady large entries; it is repaired online.
+- Compact only what the step function still holds: after a restart its
+  base is the newest snapshot, the log still back to the older one less the
+  trailing window (R6-02), and the first cut compacts through a point at or
+  below that base. Raft answered it with nothing, and a node restarted
+  between every two of its cuts grew its log to the alarm, which refused
+  every write of the cluster (#741). Raft names the point in
+  `ReadyValue.Compact` and the storage actor compacts the store through it,
+  the term read from its own entry; another store's `CompactPrefix` is not
+  asked below its first index (`compactLog`,
+  `TestANodeRestartedBetweenItsCutsStillCompactsItsLog`).
+- Start the byte trigger from 0, or zero it for a cut that published
+  nothing: a `DurableStateMachine` resumes past entries the start never
+  hands to apply, and one restarted before each `SnapshotEveryBytes` never
+  cut on bytes, its log grown to the alarm; a failed cut left the trigger
+  a whole interval to wait. `readTail` sums the payload of the entries the
+  start resumes past into `sinceBytes`, before any is dropped, and a cut
+  that publishes nothing gives back what it took (`giveSinceBytes`, #744,
+  `TestADurableNodeRestartedBeforeEachByteCutStillCuts`,
+  `TestOneDurableVoterRestartedOnThatRhythmKeepsTheClusterWriting`,
+  `TestACutThatPublishesNothingGivesBackTheBytesItTook`).
 - Hand raft a caller's buffer: `Propose` copies its payload. The leader
   keeps the entry and resends it while a peer lags, and a caller that
   reused its buffer changed it under its body sum: every follower refused
@@ -897,6 +917,16 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   whose configuration does not list the leader: the joiner's first older
   configuration cut its leader (#552, `joinGroup`,
   `TestAJoinerKeepsALeaderNewerThanTheConfigurationItReplays`).
+- Take a member the JOIN answer and the engine's configuration both list
+  from the map's iteration: a joiner replaying a configuration older than
+  an `UpdateAddress` dialled the moved member at its old address about 7
+  times in 8, and was not fed while that member led. `admittedUnion` keeps
+  the newer record, by id and by key — the answer's as of the `AddLearner`
+  it answers, each of the engine's as of `ReadyValue.MembershipAt`, which
+  raises the leader's record alone (#724), the answer's on a tie — and the
+  memory double ranks alike (`membershipSetter`,
+  #742, `TestTheUnionOfTwoGroupsKeepsTheNewerRecordOfAMember`,
+  `TestAJoinerDialsAMovedLeaderAtItsJoinAnswersAddress`).
 - Keep a joiner on the JOIN answer it got first while it hears no leader:
   a leader admitted after that answer was refused at every connection, and
   the joiner was never fed while it led. Raft's `LeaderUnheard` sends the

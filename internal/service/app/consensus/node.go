@@ -223,7 +223,9 @@ type snapState struct {
 	backoff time.Duration
 	retryAt time.Time
 	// sinceBytes is the payload applied since the last cut started, which
-	// SnapshotEveryBytes bounds (D7, #515).
+	// SnapshotEveryBytes bounds (D7, #515): a start counts the entries a
+	// durable machine resumes past, and a cut that publishes nothing gives
+	// back what it took (#744).
 	sinceBytes int64
 	// newestBytes is the newest snapshot's size, the larger of its encoded
 	// and decoded sizes, which Health compares with the limit (R2-30, #556).
@@ -290,12 +292,17 @@ type storeReq struct {
 // unknown), by the store's compactPrefixAt when it has one: a store that
 // takes the term of the compaction point from its caller, which an install
 // past the end of the log needs. Both shipped stores do; another store
-// compacts by CompactPrefix alone.
+// compacts by CompactPrefix alone, and is not asked for a point below its
+// first entry, which it compacted already: a cut compacts at or below the
+// step function's base (#741), past which an install compacted the store.
 func compactLog(log coreconsensus.LogStore, through, term uint64) error {
 	if c, ok := log.(interface {
 		compactPrefixAt(through, term uint64) error
 	}); ok {
 		return c.compactPrefixAt(through, term)
+	}
+	if first, _ := log.Bounds(); through < first {
+		return nil
 	}
 	return log.CompactPrefix(through)
 }
@@ -580,10 +587,14 @@ func (n *Node) load() (raft.StartState, error) {
 	if err := n.unpublishNewer(failed); err != nil {
 		return raft.StartState{}, err
 	}
-	ents, evicted, err := n.readTail(first, last, snapIdx, hs.Commit)
+	// The entries a durable machine resumes past count towards the byte
+	// trigger, though apply is never handed them (#744).
+	resumed := stepApplied(max(snapIdx, durIdx), snapIdx, hs.Commit, dur)
+	ents, evicted, resumedBytes, err := n.readTail(first, last, snapIdx, hs.Commit, resumed)
 	if err != nil {
 		return raft.StartState{}, err
 	}
+	n.snapState.sinceBytes = resumedBytes
 	if n.noTable && len(base.Membership.Members) == 0 && !slices.ContainsFunc(ents, isMembershipEntry) {
 		// Nothing names the members: no snapshot is left, and the log
 		// begins past a compaction with no configuration entry after it.
@@ -802,11 +813,16 @@ func (n *Node) finishInstall(base *coreconsensus.SnapshotMetaValue, first, last 
 // at start. It read the whole tail with its payloads, with no bound, and
 // the first Ready handed it all to apply: a node whose log grew near
 // MaxLogBytes needed several times its log in heap to start (#663). evicted
-// is the last index whose payload was dropped, 0 for none.
-func (n *Node) readTail(first, last, snapIdx, commit uint64) (ents []coreconsensus.EntryValue, evicted uint64, err error) {
+// is the last index whose payload was dropped, 0 for none. resumedBytes is
+// the payload of the entries through resumed, counted before any is
+// dropped: a durable machine resumes past them, apply is never handed them,
+// and they were applied since the base, the last cut. Uncounted, a node
+// restarted before each SnapshotEveryBytes never cut on bytes, and its log
+// grew to the no-space alarm (#744).
+func (n *Node) readTail(first, last, snapIdx, commit, resumed uint64) (ents []coreconsensus.EntryValue, evicted uint64, resumedBytes int64, err error) {
 	lo := max(first, snapIdx+1)
 	if last < lo {
-		return nil, 0, nil
+		return nil, 0, 0, nil
 	}
 	// Raft keeps the slice as its log: the quarter of room past it is what
 	// append would have left, and spares the first appends a copy of the
@@ -814,36 +830,41 @@ func (n *Node) readTail(first, last, snapIdx, commit uint64) (ents []coreconsens
 	count := int(last - lo + 1)
 	t := tailLoad{
 		ents: make([]coreconsensus.EntryValue, 0, count+count/4),
-		lo:   lo, commit: min(commit, last), dropped: lo - 1, keep: n.cfg.RecentEntriesBytes,
+		lo:   lo, commit: min(commit, last), dropped: lo - 1, keep: n.cfg.RecentEntriesBytes, resumed: resumed,
 	}
 	for next := lo; next <= last; next = lo + uint64(len(t.ents)) {
 		batch, err := n.cfg.Log.Entries(next, last+1, n.cfg.MaxBatchBytes, nil)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 		if !contiguousFrom(batch, next) {
-			return nil, 0, storageFailed("entries", errImpossible)
+			return nil, 0, 0, storageFailed("entries", errImpossible)
 		}
 		t.add(batch)
 	}
-	return t.ents, t.evicted(), nil
+	return t.ents, t.evicted(), t.resumedBytes, nil
 }
 
 // tailLoad is the tail readTail loads: the entries read from lo on, the
 // payload bytes they hold past the last index whose payload was dropped,
-// and the commit index no drop passes.
+// the commit index no drop passes, and the payload of the entries through
+// resumed, which apply never sees again.
 type tailLoad struct {
-	ents                []coreconsensus.EntryValue
-	lo, commit, dropped uint64
-	held, keep          int64
+	ents                         []coreconsensus.EntryValue
+	lo, commit, dropped, resumed uint64
+	held, keep, resumedBytes     int64
 }
 
-// add appends batch, each payload copied, then drops the payloads of the
-// oldest committed commands while more than keep bytes are held.
+// add appends batch, each payload copied and counted, then drops the
+// payloads of the oldest committed commands while more than keep bytes are
+// held.
 func (t *tailLoad) add(batch []coreconsensus.EntryValue) {
 	for i := range batch {
 		batch[i].Data = bytes.Clone(batch[i].Data)
 		t.held += int64(len(batch[i].Data))
+		if batch[i].Position.Index <= t.resumed {
+			t.resumedBytes += int64(len(batch[i].Data))
+		}
 	}
 	t.ents = append(t.ents, batch...)
 	for t.held > t.keep && t.dropped < t.commit && t.dropped < t.lo+uint64(len(t.ents))-1 {
@@ -1465,7 +1486,7 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 	n.sendMessages(rd.Messages)
 	n.logLeaderRecords(rd)
 	if len(rd.Membership) > 0 {
-		n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
+		n.setMembership(rd)
 		n.obs.info("consensus: admitted members changed", lattr("members", uint64(len(rd.Membership))))
 	}
 	n.reportNotices(rd)
@@ -1474,7 +1495,9 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 		q := storeReq{rd: *rd}
 		if rd.Compact != 0 {
 			// The step function is compacted to rd.Compact already: its base
-			// holds the term, the store may not (#415).
+			// holds the term, the store may not (#415). Below that base it
+			// knows none, and the store, which holds the entry there, reads
+			// its own (#741).
 			q.compactTerm, _ = n.r.TermAt(rd.Compact)
 		}
 		n.sq.push(q)
@@ -1597,6 +1620,17 @@ func (n *Node) checkAdmission() {
 			j.releaseJoinAnswer()
 		}
 	}
+}
+
+// setMembership hands the transport the admission set a Ready carries, with
+// the index each record is as of when the transport ranks its groups'
+// records by it (#742).
+func (n *Node) setMembership(rd *raft.ReadyValue) {
+	if r, ok := n.cfg.Transport.(membershipSetter); ok {
+		r.setMembershipAt(n.cfg.Group, rd.Membership, rd.MembershipAt)
+		return
+	}
+	n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
 }
 
 // joinReleaser is a transport that keeps a JOIN answer's members admitted

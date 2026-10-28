@@ -112,9 +112,11 @@ type MemoryTransport struct {
 	ctrl    chan memFrame
 	data    chan memFrame
 	cur     *memRun
-	// groups are the admitted members per group, members their union.
-	groups  map[coreconsensus.GroupID][]coreconsensus.MemberValue
-	members []coreconsensus.MemberValue
+	// groups are the admitted members per group, groupsAt the index each
+	// of their records is as of, members their union (admittedUnion, #742).
+	groups   map[coreconsensus.GroupID][]coreconsensus.MemberValue
+	groupsAt map[coreconsensus.GroupID][]uint64
+	members  []coreconsensus.MemberValue
 	// hold keeps the JOIN answer's configuration and release (#632).
 	hold joinHold
 	// maxOffer bounds the snapshot offer this end accepts, encoded as the
@@ -272,20 +274,26 @@ func (t *MemoryTransport) BindJoinReason(_ coreconsensus.GroupID, join func(cont
 // SetMembership implements Transport: the admitted members are the union
 // over the groups, as the TCP transport computes them.
 func (t *MemoryTransport) SetMembership(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue) {
+	t.setMembershipAt(group, admitted, nil)
+}
+
+// setMembershipAt is SetMembership with the index each record is as of,
+// ranked as the TCP transport ranks it (membershipSetter, #742).
+func (t *MemoryTransport) setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at []uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.groups == nil {
 		t.groups = map[coreconsensus.GroupID][]coreconsensus.MemberValue{}
+		t.groupsAt = map[coreconsensus.GroupID][]uint64{}
 	}
 	if len(admitted) == 0 {
 		delete(t.groups, group)
+		delete(t.groupsAt, group)
 	} else {
 		t.groups[group] = slices.Clone(admitted)
+		t.groupsAt[group] = slices.Clone(at)
 	}
-	t.members = t.members[:0]
-	for _, g := range slices.Sorted(maps.Keys(t.groups)) {
-		t.members = append(t.members, t.groups[g]...)
-	}
+	t.members = admittedUnion(t.groups, t.groupsAt)
 }
 
 // bindWarn implements bindWarner.
@@ -373,11 +381,12 @@ func (t *MemoryTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinCo
 		if code == 0 {
 			// The JOIN answer carries the members the target admits, the
 			// target included, and the joiner admits them apart from its
-			// engine's configuration until it is admitted itself (#552).
+			// engine's configuration until it is admitted itself (#552),
+			// as of the AddLearner it answers (#742).
 			x.mu.Lock()
 			answer := slices.Clone(x.members)
 			x.mu.Unlock()
-			t.hold.install(gen, func() { t.SetMembership(joinGroup, answer) })
+			t.hold.install(gen, func() { t.setMembershipAt(joinGroup, answer, rankedAt(len(answer), pos.Index)) })
 			return pos, nil
 		}
 		last = joinRefused(code, reason)

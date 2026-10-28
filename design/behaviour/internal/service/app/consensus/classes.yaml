@@ -1116,6 +1116,7 @@ files:
       - (*joinHold).install
       - (*joinHold).release
       - sameAnswer
+      - membershipSetter
       - refreshJoiner
       - (*Node).refreshJoin
       - (*Node).runJoinRefresh
@@ -1173,6 +1174,7 @@ files:
       - (*MemoryTransport).deliverFrame
       - (*MemoryTransport).BindJoinReason
       - (*MemoryTransport).SetMembership
+      - (*MemoryTransport).setMembershipAt
       - (*MemoryTransport).bindWarn
       - (*MemoryTransport).releaseJoinAnswer
       - (*MemoryNetwork).admitted
@@ -1265,6 +1267,7 @@ files:
       - (*Node).queueApply
       - (*Node).answerReady
       - (*Node).checkAdmission
+      - (*Node).setMembership
       - joinReleaser
       - (*Node).leadershipChanged
       - (*Node).startGrace
@@ -1562,6 +1565,8 @@ files:
       - (*Node).metaAt
       - snapshotID
       - (*Node).cut
+      - (*Node).takeSinceBytes
+      - (*Node).giveSinceBytes
       - (*Node).cutPending
       - (*Node).writeSnapshot
       - (*Node).publishSnapshot
@@ -1679,6 +1684,10 @@ files:
       - (*TCPTransport).Unreachable
       - (*TCPTransport).Bind
       - (*TCPTransport).SetMembership
+      - (*TCPTransport).setMembershipAt
+      - admittedUnion
+      - recordAt
+      - newestRecords
       - indexMembers
       - (*TCPTransport).reserveAddresses
       - (*TCPTransport).Close
@@ -1714,6 +1723,7 @@ files:
       - (*TCPTransport).joinOnLane
       - endedUnanswered
       - (*TCPTransport).joinAnswered
+      - rankedAt
       - (*TCPTransport).releaseJoinAnswer
       - joinAnswerListsPeer
       - joinAnswerReason
@@ -2459,7 +2469,9 @@ functions:
       unknown), by the store's compactPrefixAt when it has one: a store that
       takes the term of the compaction point from its caller, which an install
       past the end of the log needs. Both shipped stores do; another store
-      compacts by CompactPrefix alone.
+      compacts by CompactPrefix alone, and is not asked for a point below its
+      first entry, which it compacted already: a cut compacts at or below the
+      step function's base (#741), past which an install compacted the store.
     name: compactLog
     params: log coreconsensus.LogStore, through, term uint64
     results: error
@@ -3260,12 +3272,33 @@ functions:
     name: watchLink
     params: wg *sync.WaitGroup, c connNetter
   - doc: |-
-      indexMembers is the union of every group's admitted members, by id and
-      by pinned key; a member without a pin is reachable by id only, so it can
-      be dialled for nothing and admitted on nothing, and a key two members
-      share admits neither.
+      admittedUnion is the union of every group's admitted members, one record
+      a member: the newest by at, the index each record is as of, the earlier
+      group's on a tie. A joining node's JOIN answer (joinGroup) is as of the
+      AddLearner it answers, and the configuration its engine replays from
+      below it is older: a member both list, moved by an UpdateAddress between
+      them, was dialled at whichever address the map's iteration visited last,
+      the replayed one about 7 times in 8, and a moved leader did not feed the
+      joiner (#742). A record of the engine's wins once its configuration, or
+      for the leader a record of its address (#724), passes the answer. A
+      member one group lists is in the union whatever its rank (#552). The
+      records are in group order, then in each group's order.
+    name: admittedUnion
+    params: groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, at map[coreconsensus.GroupID][]uint64
+    results: "[]coreconsensus.MemberValue"
+  - doc: |-
+      newestRecords is, for each member the groups list, its record the newest
+      by at, the earlier in order on a tie.
+    name: newestRecords
+    params: groups map[coreconsensus.GroupID][]coreconsensus.MemberValue, order []coreconsensus.GroupID, at map[coreconsensus.GroupID][]uint64
+    results: map[coreconsensus.NodeID]recordAt
+  - doc: |-
+      indexMembers indexes the admitted members, by id and by pinned key; a
+      member without a pin is reachable by id only, so it can be dialled for
+      nothing and admitted on nothing, and a key two members share admits
+      neither.
     name: indexMembers
-    params: groups map[coreconsensus.GroupID][]coreconsensus.MemberValue
+    params: admitted []coreconsensus.MemberValue
     results: map[coreconsensus.NodeID]coreconsensus.MemberValue, map[[32]byte]coreconsensus.MemberValue
   - doc: |-
       writeChunk writes one length-prefixed chunk of the snapshot and JOIN
@@ -3375,6 +3408,10 @@ functions:
     name: endedUnanswered
     params: err error
     results: bool
+  - doc: rankedAt is n records' ranks, each at.
+    name: rankedAt
+    params: n int, at uint64
+    results: "[]uint64"
   - doc: |-
       joinAnswerListsPeer reports whether a JOIN answer's membership lists the
       peer that sent it under the key it presented: an answer that does not is
@@ -5400,6 +5437,17 @@ types:
         recv: h *joinHold
     name: joinHold
   - doc: |-
+      membershipSetter is a transport that keeps, of a member two of its
+      admission groups list, the newer record, at being the index each record
+      of admitted is as of: a joining node's JOIN answer, as of the AddLearner
+      it answers, against the configuration its engine replays (#742).
+    kind: named
+    name: membershipSetter
+    underlying: |-
+      interface {
+      	setMembershipAt(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at []uint64)
+      }
+  - doc: |-
       refreshJoiner is a transport that sends its JOIN again with the
       configuration it last joined with, replacing a held answer, and reports
       whether the answer changed (#632).
@@ -5648,9 +5696,13 @@ types:
         type: chan memFrame
       - name: cur
         type: "*memRun"
-      - doc: groups are the admitted members per group, members their union.
+      - doc: |-
+          groups are the admitted members per group, groupsAt the index each
+          of their records is as of, members their union (admittedUnion, #742).
         name: groups
         type: map[coreconsensus.GroupID][]coreconsensus.MemberValue
+      - name: groupsAt
+        type: map[coreconsensus.GroupID][]uint64
       - name: members
         type: "[]coreconsensus.MemberValue"
       - doc: hold keeps the JOIN answer's configuration and release (#632).
@@ -5705,6 +5757,12 @@ types:
         recv: t *MemoryTransport
       - name: SetMembership
         params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue
+        recv: t *MemoryTransport
+      - doc: |-
+          setMembershipAt is SetMembership with the index each record is as of,
+          ranked as the TCP transport ranks it (membershipSetter, #742).
+        name: setMembershipAt
+        params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at []uint64
         recv: t *MemoryTransport
       - doc: bindWarn implements bindWarner.
         name: bindWarn
@@ -6510,11 +6568,16 @@ types:
           at start. It read the whole tail with its payloads, with no bound, and
           the first Ready handed it all to apply: a node whose log grew near
           MaxLogBytes needed several times its log in heap to start (#663). evicted
-          is the last index whose payload was dropped, 0 for none.
+          is the last index whose payload was dropped, 0 for none. resumedBytes is
+          the payload of the entries through resumed, counted before any is
+          dropped: a durable machine resumes past them, apply is never handed them,
+          and they were applied since the base, the last cut. Uncounted, a node
+          restarted before each SnapshotEveryBytes never cut on bytes, and its log
+          grew to the no-space alarm (#744).
         name: readTail
-        params: first, last, snapIdx, commit uint64
+        params: first, last, snapIdx, commit, resumed uint64
         recv: n *Node
-        results: ents []coreconsensus.EntryValue, evicted uint64, err error
+        results: ents []coreconsensus.EntryValue, evicted uint64, resumedBytes int64, err error
       - doc: |-
           startApplied sets where apply resumes: past the base, or past what a
           durable machine already holds, with the term of that position. It returns
@@ -6799,6 +6862,13 @@ types:
           through that bound are never truncated, so a member stamp always has its
           admission on disk.
         name: checkAdmission
+        recv: n *Node
+      - doc: |-
+          setMembership hands the transport the admission set a Ready carries, with
+          the index each record is as of when the transport ranks its groups'
+          records by it (#742).
+        name: setMembership
+        params: rd *raft.ReadyValue
         recv: n *Node
       - doc: leadershipChanged answers what a change of leader or term made unknown.
         name: leadershipChanged
@@ -7627,6 +7697,21 @@ types:
         recv: n *Node
         results: error
       - doc: |-
+          takeSinceBytes starts a cut's count of the payload applied: what it
+          covers is taken, and what is applied while it is written counts towards
+          the next one (D7).
+        name: takeSinceBytes
+        recv: n *Node
+        results: int64
+      - doc: |-
+          giveSinceBytes gives a cut that published nothing back the payload it had
+          taken: still applied since the last cut, it counts towards the retry. A
+          failed cut, a commit the cut waits for among them (metaAt), spent a whole
+          SnapshotEveryBytes before the byte trigger fired again (#744).
+        name: giveSinceBytes
+        params: taken int64
+        recv: n *Node
+      - doc: |-
           cutPending asks the apply goroutine for the cut a trigger coalesced while
           the one just written was in flight (D7). A failed cut asks for none: the
           next trigger tries again, as cutFailed says.
@@ -7889,7 +7974,9 @@ types:
         type: time.Time
       - doc: |-
           sinceBytes is the payload applied since the last cut started, which
-          SnapshotEveryBytes bounds (D7, #515).
+          SnapshotEveryBytes bounds (D7, #515): a start counts the entries a
+          durable machine resumes past, and a cut that publishes nothing gives
+          back what it took (#744).
         name: sinceBytes
         type: int64
       - doc: |-
@@ -8014,7 +8101,8 @@ types:
   - doc: |-
       tailLoad is the tail readTail loads: the entries read from lo on, the
       payload bytes they hold past the last index whose payload was dropped,
-      and the commit index no drop passes.
+      the commit index no drop passes, and the payload of the entries through
+      resumed, which apply never sees again.
     fields:
       - name: ents
         type: "[]coreconsensus.EntryValue"
@@ -8024,15 +8112,20 @@ types:
         type: uint64
       - name: dropped
         type: uint64
+      - name: resumed
+        type: uint64
       - name: held
         type: int64
       - name: keep
         type: int64
+      - name: resumedBytes
+        type: int64
     kind: struct
     methods:
       - doc: |-
-          add appends batch, each payload copied, then drops the payloads of the
-          oldest committed commands while more than keep bytes are held.
+          add appends batch, each payload copied and counted, then drops the
+          payloads of the oldest committed commands while more than keep bytes are
+          held.
         name: add
         params: batch []coreconsensus.EntryValue
         recv: t *tailLoad
@@ -8803,6 +8896,12 @@ types:
         type: sync.Mutex
       - name: members
         type: map[coreconsensus.GroupID][]coreconsensus.MemberValue
+      - doc: |-
+          membersAt is, per group, the index each record of its set is as of,
+          in its order, which ranks the records of a member two groups list; a
+          record with none is 0 (#742).
+        name: membersAt
+        type: map[coreconsensus.GroupID][]uint64
       - name: byID
         type: map[coreconsensus.NodeID]coreconsensus.MemberValue
       - name: bySPKI
@@ -9091,6 +9190,13 @@ types:
         params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue
         recv: t *TCPTransport
       - doc: |-
+          setMembershipAt is SetMembership with at, the index each record of
+          admitted is as of, which ranks it against another group's
+          (membershipSetter, #742).
+        name: setMembershipAt
+        params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at []uint64
+        recv: t *TCPTransport
+      - doc: |-
           reserveAddresses gives the members' addresses their reserved admission
           budget; one that does not resolve gets none (ADR 0174 D2). Resolving may
           block, and SetMembership runs on the engine's event loop, so it runs on a
@@ -9273,6 +9379,16 @@ types:
       	NetConn() net.Conn
       }
   - doc: |-
+      recordAt is a record of the admission groups: its group, and its place in
+      that group's set.
+    fields:
+      - name: group
+        type: coreconsensus.GroupID
+      - name: i
+        type: int
+    kind: struct
+    name: recordAt
+  - doc: |-
       closeWriter is the end of a snapshot stream the sender writes and then
       half-closes, so the receiver sees the stream end and can still answer.
     kind: named
@@ -9413,6 +9529,12 @@ vars:
         value: (*TCPTransport)(nil)
       - name: _
         type: refreshJoiner
+        value: (*MemoryTransport)(nil)
+      - name: _
+        type: membershipSetter
+        value: (*TCPTransport)(nil)
+      - name: _
+        type: membershipSetter
         value: (*MemoryTransport)(nil)
       - name: _
         type: bindWarner

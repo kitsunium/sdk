@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-28T12:00:00Z -->
+<!-- updated: 2026-10-28T18:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -255,6 +255,22 @@ under coverage before touching `shard_count`.
   mutation, the type is full). Nor test the role again in
   `ReportUnreachable`: only a leader tracks progress, and the test took the
   function past its inlining budget.
+- Answer a compaction at or below the base with nothing: the store may
+  hold the log below it, back to the older retained snapshot less the
+  trailing window (R6-02), once a restart started the step function at the
+  newest one. `Compact` forgets nothing there and still names the point in
+  `Ready.Compact`: a node restarted between every two of its cuts never
+  compacted its log, and the alarm refused every write (#741,
+  `TestACompactionAtOrBelowTheBaseStillReachesTheStore`; no mutation, the
+  type is full).
+- Hand the admission set without the index it is as of: a joining node's
+  transport ranks it against its JOIN answer, as of the `AddLearner` it
+  answers, and keeps the newer record of a member both list.
+  `Ready.MembershipAt` ranks each record: the latest configuration's
+  index, or, for the leader alone, the commit a record of its address was
+  read at; raising every record by it let stale ones of other members win
+  over a newer answer (`admissionAt`, #742, #724,
+  `TestTheAdmissionSetSaysWhatItIsAsOf`; no mutation).
 - Start the commit at the persisted one alone under a state machine
   applied past it: a commit-only Ready is written lazily, a
   `DurableStateMachine` crashed past the persisted commit, and `EngineAt`

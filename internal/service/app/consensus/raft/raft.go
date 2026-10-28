@@ -267,6 +267,12 @@ type ReadyValue struct {
 	Fetch []FetchSpec
 	// Membership is set when the admitted set changed.
 	Membership []core.MemberValue
+	// MembershipAt is the index each record of Membership is as of, in its
+	// order: the latest configuration's, or, for the leader whose address a
+	// member's record gives (#724), the commit that record was read at. A
+	// joining node's transport ranks each against its JOIN answer's position
+	// (#742).
+	MembershipAt []uint64
 	// LeaderHint is the leader a member vouched for in a MsgLeaderRecord,
 	// admitted provisionally in Membership, for the driver to log (#542).
 	LeaderHint core.MemberValue
@@ -506,7 +512,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	}
 	node.resetElection(st.Now)
 	node.admittedPub = node.admitted()
-	node.rd.Membership = node.admittedPub
+	node.rd.Membership, node.rd.MembershipAt = node.admittedPub, node.admissionAt(node.admittedPub)
 	return node
 }
 
@@ -696,16 +702,25 @@ func (r *Raft) SnapshotDone(to core.NodeID, index uint64, ok bool) {
 }
 
 // Compact forgets the entries through index, which a durable snapshot
-// covers.
+// covers, and asks the store to drop them, even at or below the base.
 func (r *Raft) Compact(index uint64) {
-	if index <= r.log.snapIndex || index > r.log.applied {
+	if index == 0 || index > r.log.applied {
+		return
+	}
+	// The store may hold the log below the base: a restart starts the step
+	// function at the newest snapshot that restored, the store still back to
+	// the older one less the trailing window (R6-02), and the first cut after
+	// it compacts through a point at or below that base. Answered with
+	// nothing, a node restarted between every two of its cuts never compacted
+	// its log, which grew to the no-space alarm (#741).
+	r.rd.Compact = max(r.rd.Compact, index)
+	if index <= r.log.snapIndex {
 		return
 	}
 	t, _ := r.log.term(index)
 	c := r.log.chain(index)
 	m := r.confAt(index)
 	r.log.compactTo(index, t, c)
-	r.rd.Compact = max(r.rd.Compact, index)
 	r.base = m.Clone()
 	r.base.Index = index
 	r.compactEngines(index)
@@ -1450,7 +1465,25 @@ func (r *Raft) publishAdmitted() {
 		return
 	}
 	r.admittedPub = a
-	r.rd.Membership = a
+	r.rd.Membership, r.rd.MembershipAt = a, r.admissionAt(a)
+}
+
+// admissionAt is the index each record of the admission set out is as of:
+// the latest configuration's, or, for the leader whose address a record
+// taken by takeLeaderAddress gives (dialLeaderAddress), the commit that
+// record was read at, which is past it (#724). Only that record is raised:
+// the others are the configuration's, and a joining node's transport keeps
+// the record of its JOIN answer, newer, for a member that answer moved
+// (#742).
+func (r *Raft) admissionAt(out []core.MemberValue) []uint64 {
+	at := make([]uint64, len(out))
+	for i := range out {
+		at[i] = r.conf().Index
+		if r.leadAddr.ID != 0 && out[i].ID == r.leadAddr.ID && out[i].SPKI == r.leadAddr.SPKI {
+			at[i] = max(at[i], r.leadAddrAt)
+		}
+	}
+	return at
 }
 
 // PeerStats returns the leader's view of every peer, in configuration
