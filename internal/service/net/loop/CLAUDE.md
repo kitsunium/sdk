@@ -59,7 +59,9 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   §D3). epoll: `CTL_DEL`, then at each batch `accept4` to `EAGAIN`
   (`takeQueues`, `queueTakeBatch` a batch, `queueTakeMax` in all), each
   connection admitted — a draining loop admits; `EMFILE`, `ENFILE` or a full
-  table wait for the drain's closes (`takeAfter`, `ring.full`); `control`
+  table wait for the drain's closes (`takeAfter`, `ring.full`), except
+  `EMFILE`/`ENFILE` with no connection left in the group, which end the take
+  as the portable backend's `giveUp` does; `control`
   calls it at every batch while draining. io_uring:
   the accepts in flight are cancelled, and one that completed as its cancel
   crossed it is served (`refuses` refuses only on a ring the watchdog drained
@@ -70,7 +72,8 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   `ppoll` on a Unix socket —, within the room above the reserve (none left,
   or a process-descriptor backoff, waits: never read as empty), `queueTakeMax`
   in all, an accept's failure stopping the take only when `takeWaits` says the
-  listener failed, cancels one left waiting on an empty queue, and hands the
+  listener failed or no descriptor will come (`EMFILE`/`ENFILE`, the group
+  holding no connection), cancels one left waiting on an empty queue, and hands the
   listener back once the queue is empty with none in flight. The listener closes when
   its last taker hands it back (`listenerSet`), before the established
   connections drain; a loop stops once its connections are gone and its

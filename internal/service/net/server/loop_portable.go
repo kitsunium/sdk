@@ -913,8 +913,10 @@ func (pl *portableLoop) closeAll() {
 			select {
 			case ev := <-pl.events:
 				//: a connection handed over as the lane stopped is closed,
-				//: never left open.
+				//: never left open; admit counted it, and neither open nor
+				//: finish ran to uncount it.
 				if ev.kind == pevOpen {
+					pl.live.Add(-1)
 					swallowErr(ev.conn.Close())
 				}
 				quiet.Reset(time.Second)

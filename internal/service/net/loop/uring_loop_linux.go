@@ -944,11 +944,12 @@ func (rr *uRing) acceptFailed(res int32) {
 }
 
 // takeFailed ends the ring's take on an accept failure that says the
-// listener is broken; its own cancel, a connection the peer abandoned, an
-// empty queue and a lack of descriptors only wait.
+// listener is broken, or on a lack of descriptors with no connection of the
+// group left to free one; its own cancel, a connection the peer abandoned,
+// an empty queue and any other lack of descriptors only wait.
 func (rr *uRing) takeFailed(res int32) {
-	//: broken.
-	if !takeWaits(res) {
+	//: broken, or out of descriptors with none to free.
+	if !takeWaits(res, rr.ul.lp.grp.live.Load()) {
 		rr.take = takeOff
 	}
 }
@@ -956,12 +957,17 @@ func (rr *uRing) takeFailed(res int32) {
 // takeWaits reports whether an accept's failure leaves the drain's take
 // going: its own cancel, a connection the peer abandoned, a signal, an empty
 // queue (EAGAIN, should a kernel honour the listener's O_NONBLOCK), or no
-// descriptor until a close frees one.
-func takeWaits(res int32) bool {
+// descriptor until a close frees one — live, the connections the group
+// still holds, says one will.
+func takeWaits(res int32, live int64) bool {
 	//: by errno.
 	switch syscall.Errno(-res) {
+	//: out of descriptors: a close frees one only if a connection is left.
+	case syscall.ENFILE, syscall.EMFILE:
+		//: waits while one is.
+		return live > 0
 	//: each of them waits for the next batch.
-	case syscall.ECANCELED, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN, syscall.ENFILE, syscall.EMFILE,
+	case syscall.ECANCELED, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN,
 		syscall.EPROTO, syscall.ENOPROTOOPT, syscall.EHOSTDOWN, syscall.ENONET, syscall.EHOSTUNREACH,
 		syscall.EOPNOTSUPP, syscall.ENETUNREACH, syscall.ENETDOWN:
 		//: waits.

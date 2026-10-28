@@ -179,7 +179,9 @@ constants:
         name: takeOver
         type: uint8
         value: iota
-      - doc: "takeLater waits for the next batch: no descriptor until a close."
+      - doc: |-
+          takeLater waits for the next batch: no descriptor until a close, with
+          a connection of the group left whose close frees one.
         name: takeLater
       - doc: "takeNext skips one connection: the peer abandoned it, or a signal."
         name: takeNext
@@ -1273,9 +1275,11 @@ functions:
     name: newListenerSet
     params: fds []int, takers int
     results: "*listenerSet"
-  - doc: takeAfter says what an accept4 failure means for the drain's take.
+  - doc: |-
+      takeAfter says what an accept4 failure means for the drain's take, live
+      the connections the group still holds.
     name: takeAfter
-    params: err error
+    params: err error, live int64
     results: uint8
   - doc: |-
       startEpoll starts g's loops on epoll.
@@ -1475,9 +1479,10 @@ functions:
       takeWaits reports whether an accept's failure leaves the drain's take
       going: its own cancel, a connection the peer abandoned, a signal, an empty
       queue (EAGAIN, should a kernel honour the listener's O_NONBLOCK), or no
-      descriptor until a close frees one.
+      descriptor until a close frees one — live, the connections the group
+      still holds, says one will.
     name: takeWaits
-    params: res int32
+    params: res int32, live int64
     results: bool
   - doc: fillStale overwrites b with staleFill.
     name: fillStale
@@ -2476,7 +2481,8 @@ types:
           takeQueue accepts from listener i, lfd, queueTakeBatch at most this batch,
           and reports whether its take is over: the queue empty, the listener failed,
           or queueTakeMax taken. Out of descriptors, or with the ring's table full,
-          it waits for the drain's closes.
+          it waits for the drain's closes; out of descriptors with no connection of
+          the group left to close, its take is over.
         name: takeQueue
         params: i, lfd int
         recv: el *epollLoop
@@ -3255,8 +3261,9 @@ types:
         recv: rr *uRing
       - doc: |-
           takeFailed ends the ring's take on an accept failure that says the
-          listener is broken; its own cancel, a connection the peer abandoned, an
-          empty queue and a lack of descriptors only wait.
+          listener is broken, or on a lack of descriptors with no connection of the
+          group left to free one; its own cancel, a connection the peer abandoned,
+          an empty queue and any other lack of descriptors only wait.
         name: takeFailed
         params: res int32
         recv: rr *uRing

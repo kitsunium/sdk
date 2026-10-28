@@ -1262,6 +1262,10 @@ sequences:
           cases:
             - case: syscall.EMFILE, syscall.ENFILE
               do:
+                - opt:
+                    do:
+                      - return: takeOver
+                    when: live == 0
                 - return: takeLater
             - case: syscall.ECONNABORTED, syscall.EINTR, syscall.EPROTO, syscall.ENOPROTOOPT, syscall.EHOSTDOWN, syscall.ENONET, syscall.EHOSTUNREACH, syscall.EOPNOTSUPP, syscall.ENETUNREACH, syscall.ENETDOWN
               do:
@@ -2435,7 +2439,7 @@ sequences:
                         - case: takeNext
                           do:
                             - continue: true
-                      "on": takeAfter(err)
+                      "on": takeAfter(err, el.lp.grp.live.Load())
                 when: err != nil
             - op: ++
               set: el.taken[i]
@@ -4934,12 +4938,15 @@ sequences:
           do:
             - set: rr.take
               value: takeOff
-          when: "!takeWaits(res)"
+          when: "!takeWaits(res, rr.ul.lp.grp.live.Load())"
   - of: takeWaits
     steps:
       - switch:
           cases:
-            - case: syscall.ECANCELED, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN, syscall.ENFILE, syscall.EMFILE, syscall.EPROTO, syscall.ENOPROTOOPT, syscall.EHOSTDOWN, syscall.ENONET, syscall.EHOSTUNREACH, syscall.EOPNOTSUPP, syscall.ENETUNREACH, syscall.ENETDOWN
+            - case: syscall.ENFILE, syscall.EMFILE
+              do:
+                - return: live > 0
+            - case: syscall.ECANCELED, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN, syscall.EPROTO, syscall.ENOPROTOOPT, syscall.EHOSTDOWN, syscall.ENONET, syscall.EHOSTUNREACH, syscall.EOPNOTSUPP, syscall.ENETUNREACH, syscall.ENETDOWN
               do:
                 - return: "true"
             - default: true

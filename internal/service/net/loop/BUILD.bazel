@@ -109,6 +109,7 @@ go_test(
         "conformance_linux_test.go",
         "conformance_uring_linux_test.go",
         "core_internal_test.go",
+        "drain_take_linux_test.go",
         "gen_api_test.go",
         "memory_linux_test.go",
         "parts_internal_test.go",

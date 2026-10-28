@@ -760,7 +760,8 @@ func (el *epollLoop) queuesTaken() bool {
 // takeQueue accepts from listener i, lfd, queueTakeBatch at most this batch,
 // and reports whether its take is over: the queue empty, the listener failed,
 // or queueTakeMax taken. Out of descriptors, or with the ring's table full,
-// it waits for the drain's closes.
+// it waits for the drain's closes; out of descriptors with no connection of
+// the group left to close, its take is over.
 func (el *epollLoop) takeQueue(i, lfd int) bool {
 	//: bounded per batch, so the loop serves between two takes.
 	for range queueTakeBatch {
@@ -773,8 +774,8 @@ func (el *epollLoop) takeQueue(i, lfd int) bool {
 		//: a failure ends the take, waits, or skips one connection.
 		if err != nil {
 			//: by what it says of the queue.
-			switch takeAfter(err) {
-			//: empty, or the listener failed.
+			switch takeAfter(err, el.lp.grp.live.Load()) {
+			//: empty, the listener failed, or no descriptor will come.
 			case takeOver:
 				//: over.
 				return true

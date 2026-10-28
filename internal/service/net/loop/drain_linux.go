@@ -30,7 +30,8 @@ const (
 const (
 	// takeOver ends the take: the queue is empty, or the listener failed.
 	takeOver uint8 = iota
-	// takeLater waits for the next batch: no descriptor until a close.
+	// takeLater waits for the next batch: no descriptor until a close, with
+	// a connection of the group left whose close frees one.
 	takeLater
 	// takeNext skips one connection: the peer abandoned it, or a signal.
 	takeNext
@@ -93,12 +94,19 @@ func (ls *listenerSet) close(i int) {
 	swallowErr(syscall.Close(ls.fds[i]))
 }
 
-// takeAfter says what an accept4 failure means for the drain's take.
-func takeAfter(err error) uint8 {
+// takeAfter says what an accept4 failure means for the drain's take, live
+// the connections the group still holds.
+func takeAfter(err error, live int64) uint8 {
 	//: by errno.
 	switch err {
-	//: out of descriptors: the drain's closes make room.
+	//: out of descriptors: the drain's closes make room, unless the group has
+	//: no connection left to close — nothing would ever free one.
 	case syscall.EMFILE, syscall.ENFILE:
+		//: none to close: over, as the portable backend gives up.
+		if live == 0 {
+			//: over.
+			return takeOver
+		}
 		//: next batch.
 		return takeLater
 	//: one connection lost, the queue still there: the peer abandoned it, a
