@@ -556,6 +556,16 @@ files:
       - (*Raft).endHintOnConf
       - (*Raft).extendHint
       - (*Raft).endHintOnTimeout
+      - (*Raft).noteUnreached
+      - (*Raft).leaderUnreached
+      - (*Raft).askForLeaderAddress
+      - (*Raft).mayAskForLeaderAddress
+      - (*Raft).takeLeaderAddress
+      - (*Raft).mayTakeLeaderAddress
+      - (*Raft).recordOfUnreachedLeader
+      - (*Raft).recordMovesLeader
+      - (*Raft).dialLeaderAddress
+      - (*Raft).endLeaderAddress
     name: leaderrecord.go
   - decls:
       - memLog
@@ -1389,6 +1399,14 @@ types:
         name: LeaderHint
         type: core.MemberValue
       - doc: |-
+          LeaderAddress is the leader this node follows and could not reach,
+          listed in its configuration under the key a member's MsgLeaderRecord
+          names: dialled at the address that record gives, the committed one,
+          in Membership until this node's configuration catches up, for the
+          driver to log (#724).
+        name: LeaderAddress
+        type: core.MemberValue
+      - doc: |-
           Unsupported names an entry whose kind this version does not know:
           the driver stops the node with VERSION_UNSUPPORTED.
         name: Unsupported
@@ -1536,9 +1554,33 @@ types:
         type: time.Time
       - doc: |-
           askedAt is when this node, which may not campaign, last asked its
-          members for the record of the leader they follow (#639, #718).
+          members for the record of the leader they follow (#639, #718), or
+          when it last asked for the record of the leader it follows and cannot
+          reach (#724).
         name: askedAt
         type: time.Time
+      - doc: |-
+          unreached is the peer the transport last reported unreachable since
+          the last tick, 0 for none; that tick reads it (noteUnreached).
+          leadUnreached is the leader this node followed when a tick read such
+          a report of it, at leadUnreachedAt (#724).
+        name: unreached
+        type: core.NodeID
+      - name: leadUnreached
+        type: core.NodeID
+      - name: leadUnreachedAt
+        type: time.Time
+      - doc: |-
+          leadAddr is the leader this node follows, listed in its configuration
+          under the same key, at the address a member's record gave while the
+          transport could not reach it at the configuration's: dialled there
+          until this node's commit or latest configuration reaches leadAddrAt,
+          the commit the record was read at, or its configuration no longer
+          lists that key (#724). Its ID is 0 when there is none.
+        name: leadAddr
+        type: core.MemberValue
+      - name: leadAddrAt
+        type: uint64
       - name: prs
         type: map[core.NodeID]*progress
       - name: votes
@@ -2362,7 +2404,10 @@ types:
           only while this node knows no live leader, from a member of its own
           configuration, at a term at least its own, for a key that is pinned and
           an ID this node neither knows as a member nor retired. The transport
-          still checks at the handshake that the key is the cluster CA's.
+          still checks at the handshake that the key is the cluster CA's. A record
+          of a member the latest configuration lists admits nothing: it may only
+          give the address of the leader this node cannot reach
+          (takeLeaderAddress, #724).
         name: takeLeaderRecord
         params: now time.Time, m core.MessageValue
         recv: r *Raft
@@ -2420,6 +2465,94 @@ types:
           this node listing the leader.
         name: endHintOnTimeout
         params: now time.Time
+        recv: r *Raft
+      - doc: |-
+          noteUnreached reads, at a tick, the peer the transport reported
+          unreachable since the last one (ReportUnreachable), and records the
+          report when that peer is the leader this node follows.
+        name: noteUnreached
+        params: now time.Time
+        recv: r *Raft
+      - doc: |-
+          leaderUnreached reports whether the transport reported the leader this
+          node follows unreachable within askElectionTimeouts maximum election
+          timeouts.
+        name: leaderUnreached
+        params: now time.Time
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          askForLeaderAddress asks every other member of this node's configuration
+          but its leader for the record of the leader they follow, when this node
+          follows a leader it hears but its transport cannot reach, at most once in
+          askElectionTimeouts maximum election timeouts. The question is
+          askForLeader's: a PreVote it never counts, keeping its role and its term,
+          which binds no receiver. A follower of a live leader drops it and answers
+          a node behind its commit with that leader's record (sendLeaderRecord);
+          the leader, which this node cannot reach, is not asked. Asking binds
+          nothing the silence forbids, and LeaderUnheard stays unset: the leader is
+          heard.
+        name: askForLeaderAddress
+        params: now time.Time
+        recv: r *Raft
+      - doc: |-
+          mayAskForLeaderAddress reports whether this node asks for the record of
+          the leader it follows: a follower or a learner speaking protocol 2, which
+          hears that leader and whose transport reported it unreachable lately.
+        name: mayAskForLeaderAddress
+        params: now time.Time
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          takeLeaderAddress dials the leader this node follows at the address the
+          record m carries for it, cur being that leader as this node's latest
+          configuration lists it. Only for the leader the transport reported
+          unreachable lately, from a member of this node's configuration at a term
+          at least its own, under the very key cur pins, for an address that is not
+          the one this node dials, and from a commit past both this node's commit
+          and its latest configuration: the record is the configuration committed
+          at that member, newer than any this node holds. The record ends once
+          this node's configuration catches up (endLeaderAddress).
+        name: takeLeaderAddress
+        params: now time.Time, m core.MessageValue, rec, cur core.MemberValue
+        recv: r *Raft
+      - doc: mayTakeLeaderAddress reports whether takeLeaderAddress takes the record.
+        name: mayTakeLeaderAddress
+        params: now time.Time, m core.MessageValue, rec, cur core.MemberValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          recordOfUnreachedLeader reports whether rec, the record m carries, is of
+          the leader this node follows while it does not lead, and that its
+          transport reported unreachable lately; sent by another member of its
+          configuration at a term at least its own.
+        name: recordOfUnreachedLeader
+        params: now time.Time, m core.MessageValue, rec core.MemberValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          recordMovesLeader reports whether the record rec gives the leader cur, as
+          the latest configuration lists it, an address under the very key cur
+          pins, other than the one this node dials, read at a commit past both this
+          node's commit and its latest configuration.
+        name: recordMovesLeader
+        params: m core.MessageValue, rec, cur core.MemberValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          dialLeaderAddress gives the leader of a record taken by
+          takeLeaderAddress, in the admission set out, the record's address, while
+          out lists it under the record's key.
+        name: dialLeaderAddress
+        params: out []core.MemberValue
+        recv: r *Raft
+      - doc: |-
+          endLeaderAddress ends a record taken by takeLeaderAddress once this
+          node's commit or its latest configuration reaches the commit the record
+          was read at, its own configuration being then at least as new, or once
+          that configuration no longer lists the leader under the record's key.
+          The caller republishes the admission set.
+        name: endLeaderAddress
         recv: r *Raft
       - doc: |-
           mutated reports whether a test switched mutation m on; it is false in every

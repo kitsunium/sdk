@@ -1884,7 +1884,10 @@ implemented in v1:
   configuration and the latest committed one, pushed by the engine (D4).
 - An **address change** is its own operation, `UpdateAddress`, a membership
   entry that changes no vote. Addresses come from the committed membership.
-  The static address map of the configuration is a seed only.
+  The static address map of the configuration is a seed only. A member
+  down during the change that cannot reach the moved leader it hears dials
+  it at the committed address a member's record gives (amendment of
+  2026-10-28, #724).
 
 **Learners (R1-16).**
 - `AddLearner` adds a non-voting member that receives the log and snapshots
@@ -5414,6 +5417,112 @@ most 1 024, so every early `JOIN` opened the window
   joiner is admitted under the transport's admission model, promote it
   only through the probe sent again.
 
+## Amendment — a member that cannot reach the leader it hears asks for its committed address (2026-10-28, #724)
+
+The TCP transport is one-way per connection (D4): a node reads the
+connection a peer dials, and every frame it sends, an answer included,
+leaves on its own outbound link, dialled to the address its own
+configuration names. A voter down while `UpdateAddress` moved another
+voter (D8) came back with that voter's old address. Once the moved member
+led — an election, `PreferredLeaders`, the hand-off of a rolling restart's
+graceful `Close`, an operator's transfer — the voter heard its appends and
+heartbeats, so it neither campaigned nor asked for a record, and every
+answer went to the old address. The leader's progress of it starts past
+its log at `becomeLeader`, its one probe was refused and the refusal never
+arrived, so the leader never backed off and never sent the entry that
+carries its new address. A live voter stayed out of the quorum for as long
+as that leader led, and one more failure left two live voters of three
+with no leader. D20's runbook, an `UpdateAddress` per node that needs an
+answering majority only, opened it at every migration with a member down
+([#724](https://github.com/kitsunium/sdk/issues/724)). A learner that
+missed the move was never fed either.
+
+- **A node that cannot reach the leader it hears asks.** `ReportUnreachable`
+  on a node that does not lead is read at the next tick: a follower or a
+  learner speaking protocol 2 whose transport reported the leader it
+  follows unreachable, while it hears that leader, asks every other member
+  of its configuration but that leader for the record of the leader they
+  follow, with #639's question: a PreVote it never counts, keeping its role
+  and its term, at most once in two maximum election timeouts. A follower
+  of the live leader drops it, binds nothing, and answers a node behind its
+  commit with the leader's committed record under D4's rules (#542, #675).
+- **The record gives an address, never an admission.** For a member its
+  latest configuration lists, the node takes from the record only the
+  address, and only for the leader it follows and reported unreachable,
+  under the very key its configuration pins for that ID, from a member of
+  its configuration at a term at least its own, read at a commit past both
+  its own commit and its latest configuration. Its admission set names
+  that address (`dialLeaderAddress`) until its commit or its latest
+  configuration reaches the record's commit, its own configuration being
+  then at least as new, or until that configuration no longer lists the
+  key. The admission is by key, and the key is the one the node already
+  holds: the transport still pins it at every dial, so a wrong address only
+  fails the dial, as the stale one did. A record of an ID the configuration
+  does not list is #542's, unchanged. The driver logs the address taken
+  (`ReadyValue.LeaderAddress`).
+- **Compatibility.** No frame, payload or record format changes, and no
+  protocol raise: the question is protocol 1's PreVote, the record is sent
+  only to one carrying `FlagProtocol2`, and a node that speaks protocol 1
+  asks nothing. A node of an older release ignores a record of a member it
+  lists, and a member of an older release answers the question as before:
+  the node stays behind, as before, and the leadership does not move.
+- **What it leaves.** The address comes from a third member that follows
+  the leader. With only the moved leader and the stale member alive — the
+  third failed before the stale member returned — nobody vouches for the
+  address, and the cluster waits for the third, as before. Closing that
+  needs the leader to name its own address in its frames, a change under
+  the `ProtocolMax`, `FlagProtocol2`, `checkAnnounced` rule, or an answer
+  on the inbound connection; both are left to a decision. Nor does it
+  cover a move made in the reverse order, the member restarted at its new
+  address before the `UpdateAddress` commits.
+- **What it costs.** A node whose leader is unreachable sends one PreVote
+  per member every two maximum election timeouts. `ReportUnreachable` no
+  longer tests the role before it moves a peer to probe: only a leader
+  tracks progress, and the role test would have taken the function past
+  its inlining budget (ADR 0169). No raft mutation is added (the type is
+  full): `TestTheLeaderAddressIsTakenOnlyForTheUnreachedLeaderUnderItsKey`
+  holds the step function to every bound, and
+  `TestTheMemberBehindAMovedLeaderDialsItAtTheCommittedAddress`, over a
+  network that delivers a frame only at the address its receiver listens
+  at, and `TestTheVoterThatMissedTheLeadersNewAddressCatchesUp`, over TCP,
+  to the scenario.
+
+## Amendment — a truncation that leaves no configuration is refused (2026-10-28, #723)
+
+#718's question goes to the members of the node's configuration. A founder
+whose log is damaged at its founding entry before any snapshot was cut —
+the first bytes of the first segment, in the youth of a quiet cluster,
+since the first cut comes after 16 384 entries or 64 MiB by default — took
+`TruncateAndStaySilent`, and the truncation dropped every entry. It
+started silent with no configuration at all: a learner of nothing, whose
+question went to no member and whose admission set was empty, so its
+transport refused the leader that still lists it as a voter. It never
+ended its silence nor voted again, the leader reported a failure tolerance
+of 0, and one more failure left no leader until an operator wiped it
+([#723](https://github.com/kitsunium/sdk/issues/723)).
+
+- **The exit is refused while the operator is at the console.**
+  `TruncateAndStaySilent` on a member's directory is refused
+  `RECOVER_REFUSED` before anything is written, the directory still
+  quarantined, when neither a snapshot nor a configuration entry before the
+  damage names the members, and the reason names `WipeAndRejoin`, the exit
+  that stays open. A truncation that keeps the founding entry, or runs over
+  a snapshot, is taken as before. A directory that is not yet a member's
+  needs no configuration: a joining one joins again (#632).
+- **What it leaves.** A directory that an earlier release already
+  truncated this way starts as before: silent with no member, and stranded
+  over TCP. Refusing that start, as #526 refuses a node with no table and
+  nothing naming its members, is a refusal the product sees, and is left
+  to a decision.
+- No frame, payload or record format changes, and no raft mutation.
+  `TestTheTruncationThatLeavesNoConfigurationIsRefused` holds the refusal
+  and the unchanged directory, and
+  `TestTheTruncationOverASnapshotKeepsItsConfiguration` and
+  `TestTheSilentFounderWithItsConfigurationRejoins` the exits still taken.
+  Two suites whose victim's log fitted one segment truncated at the
+  founding entry and rejoined only because the memory double admitted
+  every sender (`silenceByDamage`); they now damage the record after it.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5440,6 +5549,8 @@ most 1 024, so every early `JOIN` opened the window
 | #718 | Raft hunt loop, 2026-10-27 | a silent voter and a voter with no table, which never campaign, ask their members for the leader's record once they hear no leader, as a learner does (#639); no format change, no protocol raise (amendment of 2026-10-27, #718) |
 | #720 | Raft hunt loop, 2026-10-27 | a node with no table evicts no payload past its base until its install, whatever its applied index, so the install of a snapshot below a `DurableStateMachine`'s still replays the engine entries past it; no format change, no raft mutation (amendment of 2026-10-27, #720) |
 | #722 | Raft hunt loop, 2026-10-27 | `Promote` waits for the learner's acknowledgement of the configuration that admitted it, so a joiner whose stamp still refuses every vote is never made a voter, and a probing peer behind the log is probed again at its heartbeat answer with nothing to append, so a quiet cluster feeds the learner whose probe was lost; #695's claim that it could not be promoted corrected; no format change, no raft mutation (amendment of 2026-10-27, #722) |
+| #724 | Raft hunt loop, 2026-10-28 | a follower or a learner that hears its leader but whose transport cannot reach it asks its members for the leader's record, and dials that leader at the committed address the record gives, under the key it already pins, until its own configuration catches up; no format change, no raft mutation (amendment of 2026-10-28, #724) |
+| #723 | Raft hunt loop, 2026-10-28 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when neither a snapshot nor a configuration entry before the damage would remain; `WipeAndRejoin` is the exit; no format change (amendment of 2026-10-28, #723) |
 
 ## raft-sql-poc (owner's prior Raft)
 

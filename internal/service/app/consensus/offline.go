@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1514,12 +1515,25 @@ func (l *fileLog) resetTo(index, term uint64) error {
 // persisted: a rerun after a crash past the truncation reads a log whose
 // dropped records no longer name their term, and a lower term would let the
 // node vote again in the term of a vote the truncation dropped (#418).
+//
+// A member's truncation that would leave no configuration is refused before
+// anything is written, the directory still quarantined (#723): with neither
+// a snapshot nor a configuration entry before the damage, the node would
+// start a learner of nothing, admit no peer, ask no member and stay silent
+// for good under a leader that still lists it. WipeAndRejoin is its exit.
 func (d DataDir) truncateAndStaySilent() error {
 	segN, off, err := d.quarantinePoint()
 	if err != nil {
 		return err
 	}
 	logDir := filepath.Join(d.d.dir, "log")
+	keeps, err := d.truncationKeepsMembers(logDir, segN, off)
+	if err != nil {
+		return err
+	}
+	if !keeps {
+		return recoverRefused("the truncation leaves no configuration: the node would admit and ask no member; clear the quarantine with WipeAndRejoin")
+	}
 	maxTerm, err := logMaxTerm(logDir)
 	if err != nil {
 		return err
@@ -1619,6 +1633,63 @@ func logMaxTerm(logDir string) (uint64, error) {
 		maxTerm = max(maxTerm, maxRecordTerm(b))
 	}
 	return maxTerm, nil
+}
+
+// truncationKeepsMembers reports whether a member's directory still names
+// its members once its log is truncated at (segN, off): a snapshot lists
+// them, or a configuration entry lies before the damage. A directory that
+// is not yet a member's needs none: a joining one joins again (#632). It
+// changes nothing.
+func (d DataDir) truncationKeepsMembers(logDir string, segN uint64, off int64) (bool, error) {
+	if d.d.log.stamp.State != coreconsensus.StampMember {
+		return true, nil
+	}
+	metas, err := d.d.snaps.List()
+	if err != nil {
+		return false, err
+	}
+	if slices.ContainsFunc(metas, func(m coreconsensus.SnapshotMetaValue) bool { return len(m.Membership.Members) > 0 }) {
+		return true, nil
+	}
+	segs, err := logSegments(logDir)
+	if err != nil {
+		return false, err
+	}
+	// The lowest segment first: it holds the founding entry, or the first
+	// one a snapshot did not compact.
+	for _, n := range slices.Sorted(maps.Keys(segs)) {
+		if n > segN || (n == segN && off <= 0) {
+			break
+		}
+		b, err := os.ReadFile(segs[n])
+		if err != nil {
+			return false, storageFailed("read segment", err)
+		}
+		if n == segN {
+			b = b[:min(int64(len(b)), off)]
+		}
+		if holdsConfiguration(b) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// holdsConfiguration reports whether the segment bytes b hold a readable
+// configuration entry, scanning every record boundary as maxRecordTerm
+// does.
+func holdsConfiguration(b []byte) bool {
+	for o := 0; o+recHeader+recFixed <= len(b); o += recAlign {
+		r, ok := parseRecord(b[o:])
+		if !ok {
+			continue
+		}
+		if r.kind == recEntry && r.ekind == uint8(coreconsensus.EntryMembership) {
+			return true
+		}
+		o += r.length - recAlign
+	}
+	return false
 }
 
 // truncateAtDamage deletes every segment after segment segN, and segN too

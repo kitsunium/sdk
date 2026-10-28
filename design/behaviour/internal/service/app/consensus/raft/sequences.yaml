@@ -2437,20 +2437,34 @@ sequences:
         kind: self
       - id: recordOf
         kind: internal
+      - id: r.conf().Member
+        kind: value
+      - id: r.takeLeaderAddress
+        kind: internal
       - id: r.publishAdmitted
         kind: internal
     steps:
-      - opt:
-          do:
-            - return: ""
-          when: "!r.mayTakeRecord(now, m)"
       - bind: rec, ok
         eval: recordOf(&m)
         to: recordOf
       - opt:
           do:
             - return: ""
-          when: "!ok || rec.ID == r.id || r.knows(rec.ID)"
+          when: "!ok"
+      - opt:
+          do:
+            - eval: r.takeLeaderAddress(now, m, rec, cur)
+              to: r.takeLeaderAddress
+            - return: ""
+          init:
+            bind: cur, listed
+            eval: r.conf().Member(rec.ID)
+            to: r.conf().Member
+          when: listed
+      - opt:
+          do:
+            - return: ""
+          when: "!r.mayTakeRecord(now, m) || rec.ID == r.id || r.knows(rec.ID)"
       - set: r.hint, r.hintUntil
         value: rec, now.Add(hintElectionTimeouts*r.timing.ElectionTimeoutMax)
       - set: r.rd.LeaderHint
@@ -2567,6 +2581,148 @@ sequences:
             - eval: r.publishAdmitted()
               to: r.publishAdmitted
           when: r.hint.ID != 0 && !now.Before(r.hintUntil)
+  - of: (*Raft).noteUnreached
+    steps:
+      - opt:
+          do:
+            - set: r.leadUnreached, r.leadUnreachedAt
+              value: r.lead, now
+          when: r.unreached != 0 && r.unreached == r.lead && r.role != core.RoleLeader
+      - set: r.unreached
+        value: "0"
+  - of: (*Raft).leaderUnreached
+    steps:
+      - return: r.lead != 0 && r.leadUnreached == r.lead && now.Sub(r.leadUnreachedAt) < askElectionTimeouts*r.timing.ElectionTimeoutMax
+  - of: (*Raft).askForLeaderAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).askForLeaderAddress
+        kind: self
+      - id: r.send
+        kind: internal
+    steps:
+      - bind: wait
+        eval: askElectionTimeouts * r.timing.ElectionTimeoutMax
+      - opt:
+          do:
+            - return: ""
+          when: "!r.mayAskForLeaderAddress(now) || (!r.askedAt.IsZero() && now.Sub(r.askedAt) < wait)"
+      - set: r.askedAt
+        value: now
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: |-
+                      r.send(core.MessageValue{
+                      				Kind: core.MsgPreVote, To: m.ID, Term: r.term + 1,
+                      				LogTerm: r.log.lastTerm(), Index: r.log.lastIndex(),
+                      			})
+                    to: r.send
+                when: m.ID != r.id && m.ID != r.lead
+          key: _
+          range: r.conf().Members
+          value: m
+  - of: (*Raft).mayAskForLeaderAddress
+    steps:
+      - return: |-
+          (r.role == core.RoleFollower || r.role == core.RoleLearner) && r.speaks() >= Protocol2 &&
+          		r.hearsLeader(now) && r.leaderUnreached(now)
+  - of: (*Raft).takeLeaderAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).takeLeaderAddress
+        kind: self
+      - id: r.publishAdmitted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!r.mayTakeLeaderAddress(now, m, rec, cur)"
+      - set: r.leadAddr, r.leadAddrAt
+        value: "core.MemberValue{ID: rec.ID, SPKI: rec.SPKI, Address: rec.Address}, m.Index"
+      - set: r.rd.LeaderAddress
+        value: rec
+      - eval: r.publishAdmitted()
+        to: r.publishAdmitted
+  - of: (*Raft).mayTakeLeaderAddress
+    steps:
+      - return: r.recordOfUnreachedLeader(now, m, rec) && r.recordMovesLeader(m, rec, cur)
+  - of: (*Raft).recordOfUnreachedLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).recordOfUnreachedLeader
+        kind: self
+      - id: r.conf().Member
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: r.role == core.RoleLeader || rec.ID != r.lead || m.Term < r.term || m.From == r.id || !r.leaderUnreached(now)
+      - bind: _, member
+        eval: r.conf().Member(m.From)
+        to: r.conf().Member
+      - return: member
+  - of: (*Raft).recordMovesLeader
+    steps:
+      - bind: dialled
+        eval: cur.Address
+      - opt:
+          do:
+            - set: dialled
+              value: r.leadAddr.Address
+          when: r.leadAddr.ID == rec.ID
+      - return: |-
+          cur.SPKI == rec.SPKI && rec.Address != "" && rec.Address != dialled &&
+          		m.Index > r.log.committed && m.Index > r.conf().Index
+  - of: (*Raft).dialLeaderAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).dialLeaderAddress
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.leadAddr.ID == 0
+      - opt:
+          do:
+            - set: out[k].Address
+              value: r.leadAddr.Address
+          init:
+            bind: k
+            eval: slices.IndexFunc(out, func(x core.MemberValue) bool { return x.ID == r.leadAddr.ID })
+            to: slices
+          when: k >= 0 && out[k].SPKI == r.leadAddr.SPKI
+  - of: (*Raft).endLeaderAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).endLeaderAddress
+        kind: self
+      - id: r.conf().Member
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.leadAddr.ID == 0
+      - bind: cur, ok
+        eval: r.conf().Member(r.leadAddr.ID)
+        to: r.conf().Member
+      - opt:
+          do:
+            - set: r.leadAddr, r.leadAddrAt
+              value: core.MemberValue{}, 0
+          when: "!ok || cur.SPKI != r.leadAddr.SPKI || r.log.committed >= r.leadAddrAt || r.conf().Index >= r.leadAddrAt"
   - of: (*memLog).lastIndex
     steps:
       - return: l.snapIndex + uint64(len(l.ents))
@@ -3191,9 +3347,13 @@ sequences:
         kind: self
       - id: r.endHintOnTimeout
         kind: internal
+      - id: r.noteUnreached
+        kind: internal
       - id: r.tickLeader
         kind: internal
       - id: r.askForLeader
+        kind: internal
+      - id: r.askForLeaderAddress
         kind: internal
       - id: r.resetElection
         kind: internal
@@ -3204,6 +3364,8 @@ sequences:
         value: now
       - eval: r.endHintOnTimeout(now)
         to: r.endHintOnTimeout
+      - eval: r.noteUnreached(now)
+        to: r.noteUnreached
       - opt:
           do:
             - eval: r.tickLeader(now)
@@ -3212,6 +3374,8 @@ sequences:
           when: r.role == core.RoleLeader
       - eval: r.askForLeader(now)
         to: r.askForLeader
+      - eval: r.askForLeaderAddress(now)
+        to: r.askForLeaderAddress
       - opt:
           do:
             - eval: r.resetElection(now)
@@ -3300,6 +3464,8 @@ sequences:
       - id: pr.becomeProbe
         kind: internal
     steps:
+      - set: r.unreached
+        value: id
       - opt:
           do:
             - eval: pr.becomeProbe()
@@ -3307,7 +3473,7 @@ sequences:
           init:
             bind: pr
             eval: r.prs[id]
-          when: r.role == core.RoleLeader && pr != nil && pr.state == stateReplicate
+          when: pr != nil && pr.state == stateReplicate
   - of: (*Raft).SnapshotDone
     participants:
       - id: caller
@@ -3750,6 +3916,8 @@ sequences:
         kind: self
       - id: slices
         kind: stdlib
+      - id: r.dialLeaderAddress
+        kind: internal
     steps:
       - bind: out
         eval: slices.Clone(r.conf().Members)
@@ -3780,6 +3948,8 @@ sequences:
             - set: out
               value: append(out, r.hint)
           when: r.hint.ID != 0 && !slices.ContainsFunc(out, func(x core.MemberValue) bool { return x.ID == r.hint.ID })
+      - eval: r.dialLeaderAddress(out)
+        to: r.dialLeaderAddress
       - return: out
   - of: (*Raft).send
     participants:
@@ -3902,6 +4072,8 @@ sequences:
         kind: self
       - id: r.endHintOnConf
         kind: internal
+      - id: r.endLeaderAddress
+        kind: internal
       - id: r.publishAdmitted
         kind: internal
       - id: r.trackMembers
@@ -3909,6 +4081,8 @@ sequences:
     steps:
       - eval: r.endHintOnConf()
         to: r.endHintOnConf
+      - eval: r.endLeaderAddress()
+        to: r.endLeaderAddress
       - eval: r.publishAdmitted()
         to: r.publishAdmitted
       - switch:
@@ -4292,6 +4466,8 @@ sequences:
         kind: self
       - id: r.applyCommitEffects
         kind: internal
+      - id: r.endLeaderAddress
+        kind: internal
       - id: r.publishAdmitted
         kind: internal
     steps:
@@ -4303,6 +4479,8 @@ sequences:
               value: i
             - eval: r.applyCommitEffects(old+1, i)
               to: r.applyCommitEffects
+            - eval: r.endLeaderAddress()
+              to: r.endLeaderAddress
             - eval: r.publishAdmitted()
               to: r.publishAdmitted
           when: i > r.log.committed
