@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-27T08:00:00Z -->
+<!-- updated: 2026-10-27T14:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -48,7 +48,11 @@ under coverage before touching `shard_count`.
   `checkHeldPayloadsEvicted`) — but on a node with no table, whose install
   replays the engine effects of what it holds committed from their
   payloads (#416, `mutNoTableEvictsCommitted`,
-  `checkNoTableKeepsCommittedPayloads`). A start's `Evicted` loads
+  `checkNoTableKeepsCommittedPayloads`). Such a node evicts nothing past
+  its base, whatever its applied index: a `DurableStateMachine`'s, which
+  #707 takes as committed, let the first Ready drop the payloads an
+  install below it replays, and the engine state of those entries was
+  forgotten for good (#720, `evictable`). A start's `Evicted` loads
   commands only without their payloads; every other entry keeps its own,
   whose effects `NewRaft` applies (#663,
   `TestAStartWithEvictedPayloadsHandsThemByIndex`).
@@ -242,3 +246,19 @@ under coverage before touching `shard_count`.
   never past the log's end (`startCommit`), and the driver passes such an
   index only when the log holds there the entry the machine applied
   (`TestAStartPastThePersistedCommitTakesTheAppliedIndexAsCommitted`).
+- Promote a learner whose acknowledged match is below the configuration
+  that admitted it (`admittedAt`: the first appended one that lists it, or
+  the base when the base does): `PromoteLag` alone let a learner heard at
+  match 0 pass while the commit was young, its joining stamp refused every
+  vote, and once the leader failed the voters left elected no one (#722,
+  `TestPromoteWaitsForTheLearnerToHoldItsAdmission`,
+  `TestPromoteWaitsForTheLearnerToHoldTheBase`; no mutation, the type is
+  full).
+- Resend a probing peer's probe only with entries: the probe a learner is
+  sent as its admission commits reaches a joiner whose transport does not
+  admit the leader yet, and is dropped. With nothing written after it, the
+  learner was never fed, and its promotion, which waits for it to hold its
+  admission, was refused for as long as the cluster stayed quiet. A
+  heartbeat answer from a probing peer behind the log probes it again,
+  empty if need be (#722, `handleHeartbeatResp`,
+  `TestALostProbeOfALearnerIsSentAgainInAQuietLog`).

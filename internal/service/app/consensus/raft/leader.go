@@ -347,6 +347,14 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 // handleHeartbeatResp acknowledges every round up to the one answered,
 // recording the contract generation the peer applied, follows a silent
 // peer's report, and refills a window that a lost append left stalled.
+//
+// A probing peer behind the log is probed again even when the leader has
+// nothing past its next to append: the probe of a learner sent as its
+// admission committed reaches a joiner whose transport does not admit the
+// leader yet, and is dropped. Resent only with entries, it waited for the
+// next write, and in a quiet cluster the learner was never fed, so its
+// promotion, which waits for it to hold its admission, was refused for as
+// long as nothing was written (#722).
 func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	r.ackRounds(m.From, m.Context, m.Contract)
 	r.confirmRounds()
@@ -363,7 +371,7 @@ func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	}
 	pr.hbMatch = pr.match
 	if pr.match < r.log.lastIndex() {
-		r.sendAppend(m.From, false)
+		r.sendAppend(m.From, pr.state == stateProbe)
 	}
 }
 
@@ -828,8 +836,9 @@ func (r *Raft) addLearner(cur *core.MembershipValue, admin *wire.AdminValue) err
 	return 0
 }
 
-// promote makes the learner at idx a voter, only once it caught up and was
-// heard recently, and only if the new voter set still answers by a majority.
+// promote makes the learner at idx a voter, only once it caught up, holds
+// the configuration that admitted it and was heard recently, and only if
+// the new voter set still answers by a majority.
 func (r *Raft) promote(cur *core.MembershipValue, target core.NodeID, idx int) errs.Code {
 	if cur.IsRetired(target) {
 		return codeRetired
@@ -839,9 +848,16 @@ func (r *Raft) promote(cur *core.MembershipValue, target core.NodeID, idx int) e
 	}
 	pr := r.prs[target]
 	// Recent DURABLE progress within PromoteLag of the commit, heard
-	// within the last election timeout (D8).
+	// within the last election timeout (D8). The progress reaches the
+	// entry that admitted the learner as well: a joiner's stamp turns a
+	// member's only once its log holds that entry (#695), and until then
+	// it refuses every vote. Within PromoteLag of a young commit, a
+	// learner heard at match 0 was promoted, and once the leader failed
+	// the voters left could elect no one (#722). An acknowledgement
+	// leaves after the sync that covers it (D5b), so the learner holds
+	// its admission on disk.
 	if pr == nil || pr.facts&peerHeard == 0 || pr.match+r.cfg.PromoteLag < r.log.committed ||
-		r.now.Sub(pr.lastHeard) >= r.timing.ElectionTimeoutMax {
+		pr.match < r.admittedAt(target) || r.now.Sub(pr.lastHeard) >= r.timing.ElectionTimeoutMax {
 		return codeMembershipInvalid
 	}
 	cur.Members[idx].Voter = true
@@ -850,6 +866,24 @@ func (r *Raft) promote(cur *core.MembershipValue, target core.NodeID, idx int) e
 		return codeMembershipInvalid
 	}
 	return 0
+}
+
+// admittedAt is the index of the configuration that admitted id, as this
+// leader knows it: the first appended one that lists it, or the snapshot
+// base's when the base already does, the admission compacted at or below
+// it. An ID is never reused, so the first configuration that lists it is
+// its admission. The latest one, which the caller found id in, is the
+// last resort.
+func (r *Raft) admittedAt(id core.NodeID) uint64 {
+	if _, ok := r.base.Member(id); ok {
+		return r.base.Index
+	}
+	for k := range r.confs {
+		if _, ok := r.confs[k].m.Member(id); ok {
+			return r.confs[k].index
+		}
+	}
+	return r.conf().Index
 }
 
 // removeMember removes the member at idx, never this leader, and retires

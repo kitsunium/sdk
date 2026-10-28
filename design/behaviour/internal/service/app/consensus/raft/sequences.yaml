@@ -588,7 +588,7 @@ sequences:
         value: pr.match
       - opt:
           do:
-            - eval: r.sendAppend(m.From, false)
+            - eval: r.sendAppend(m.From, pr.state == stateProbe)
               to: r.sendAppend
           when: pr.match < r.log.lastIndex()
   - of: (*Raft).followSilentReport
@@ -1211,7 +1211,7 @@ sequences:
             - return: codeMembershipInvalid
           when: |-
             pr == nil || pr.facts&peerHeard == 0 || pr.match+r.cfg.PromoteLag < r.log.committed ||
-            		r.now.Sub(pr.lastHeard) >= r.timing.ElectionTimeoutMax
+            		pr.match < r.admittedAt(target) || r.now.Sub(pr.lastHeard) >= r.timing.ElectionTimeoutMax
       - set: cur.Members[idx].Voter
         value: "true"
       - set: cur.Members[idx].Joining
@@ -1221,6 +1221,38 @@ sequences:
             - return: codeMembershipInvalid
           when: "!r.activeMajority(*cur)"
       - return: "0"
+  - of: (*Raft).admittedAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).admittedAt
+        kind: self
+      - id: r.base.Member
+        kind: value
+      - id: r.confs[k].m.Member
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: r.base.Index
+          init:
+            bind: _, ok
+            eval: r.base.Member(id)
+            to: r.base.Member
+          when: ok
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: r.confs[k].index
+                init:
+                  bind: _, ok
+                  eval: r.confs[k].m.Member(id)
+                  to: r.confs[k].m.Member
+                when: ok
+          key: k
+          range: r.confs
+      - return: r.conf().Index
   - of: (*Raft).removeMember
     participants:
       - id: caller
@@ -3613,10 +3645,14 @@ sequences:
         value: held
   - of: (*Raft).evictable
     steps:
-      - opt:
-          do:
-            - return: min(r.log.applied, r.log.stable)
-          when: r.mutated(mutEvictAppliedOnly) || (r.cfg.NoTable && !r.mutated(mutNoTableEvictsCommitted))
+      - switch:
+          cases:
+            - case: r.cfg.NoTable && !r.mutated(mutNoTableEvictsCommitted)
+              do:
+                - return: r.log.snapIndex
+            - case: r.mutated(mutEvictAppliedOnly)
+              do:
+                - return: min(r.log.applied, r.log.stable)
       - return: min(r.log.committed, r.log.stable)
   - of: (*Raft).numberWrite
     steps:
