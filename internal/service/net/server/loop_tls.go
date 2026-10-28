@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	stdnet "net"
+	"slices"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -46,9 +47,10 @@ func (g *StreamGroup) loopTLSRefusal() error {
 // tlsCodecRefusal judges a TLS codec group (R6): an identity that names
 // nothing, an explicit native backend — TLS runs on the portable backend
 // alone — and a loop middleware are refused with LoopTLSUnsupported, the
-// option named; nothing is served without TLS or elsewhere instead. An
-// identity whose NextProtos names h2, or nothing the codec serves, is
-// refused with ProtocolsRefused, as an HTTP group's would be (ADR 0195).
+// option named; nothing is served without TLS or elsewhere instead. A
+// Protocols list that is not HTTP/1.1 alone, and an identity whose
+// NextProtos names h2 or nothing the codec serves, are refused with
+// ProtocolsRefused, as an HTTP group's would be (ADR 0195).
 func (g *StreamGroup) tlsCodecRefusal() error {
 	//: by the first contradiction.
 	switch {
@@ -62,7 +64,13 @@ func (g *StreamGroup) tlsCodecRefusal() error {
 		//: a loop-only option with TLS.
 		return g.tlsErr(corenet.OptionLoopMiddleware.String())
 	default:
-		//: the identity's ALPN against the one version the codec serves.
+		//: a Protocols list the codec cannot serve.
+		if reason := g.codecProtocols(); reason != "" {
+			//: refused, the reason named.
+			return g.protocolsErr(reason)
+		}
+		//: the identity's ALPN against the one version the codec serves —
+		//: the Protocols list's too, which codecProtocols kept to it.
 		alpn, reason := offered(g.identity.ServerConfig().NextProtos, alpnHTTP1)
 		//: a version the codec does not serve, or none it does.
 		if reason != "" {
@@ -76,6 +84,30 @@ func (g *StreamGroup) tlsCodecRefusal() error {
 	}
 }
 
+// codecProtocols returns why the group's Protocols list cannot be served by
+// the codec, or "" when it is unset or names HTTP/1.1 alone: the list is
+// judged as an HTTP group's with TLS (checkProtocols), then h2, which the
+// codec does not serve, is refused rather than dropped from it.
+func (g *StreamGroup) codecProtocols() string {
+	//: unset: HTTP/1.1, the codec's one version.
+	if !g.kinds.has(corenet.OptionProtocols) {
+		//: nothing to judge.
+		return ""
+	}
+	//: the list itself: empty, repeated or unknown identifiers.
+	if reason := checkProtocols(g.protos, true); reason != "" {
+		//: refused by what is wrong with it.
+		return reason
+	}
+	//: h2 named, alone or beside HTTP/1.1: the codec serves HTTP/1.1 alone.
+	if slices.Contains(g.protos, protoH2) {
+		//: refused, the identifier named.
+		return protoH2
+	}
+	//: HTTP/1.1 alone.
+	return ""
+}
+
 // tlsErr is LoopTLSUnsupported naming the group and option.
 func (g *StreamGroup) tlsErr(option string) error {
 	//: by name.
@@ -84,7 +116,8 @@ func (g *StreamGroup) tlsErr(option string) error {
 }
 
 // loopLayers wraps a TLS codec group's listeners in TLS, offering HTTP/1.1
-// alone; any other loop group's are returned as they are.
+// alone, never below TLS 1.2 (tlsFloor); any other loop group's are returned
+// as they are.
 func (g *StreamGroup) loopLayers(lns []stdnet.Listener) []stdnet.Listener {
 	//: plaintext.
 	if !g.tlsCodec() {
@@ -94,7 +127,7 @@ func (g *StreamGroup) loopLayers(lns []stdnet.Listener) []stdnet.Listener {
 	out := make([]stdnet.Listener, len(lns))
 	//: each one.
 	for i, ln := range lns {
-		out[i] = tls.NewListener(ln, g.codecTLS())
+		out[i] = tls.NewListener(ln, tlsFloor(g.codecTLS()))
 	}
 	//: wrapped.
 	return out
@@ -113,19 +146,35 @@ func (g *StreamGroup) loopBackend() corenet.LoopBackend {
 }
 
 // tlsCodecHonours reports the kinds a TLS codec group honours beyond the
-// loop's own: TLS and its handshake bound.
+// loop's own: TLS, its handshake bound, and Protocols, which tlsCodecRefusal
+// keeps to HTTP/1.1 alone.
 func tlsCodecHonours(k corenet.OptionKind) bool {
-	//: the TLS path's two.
-	return k == corenet.OptionTLS || k == corenet.OptionHandshakeTimeout
+	//: the TLS path's three.
+	return k == corenet.OptionTLS || k == corenet.OptionHandshakeTimeout || k == corenet.OptionProtocols
 }
 
 // codecTLS is the configuration of a TLS codec group's listeners: the
-// identity's, offering HTTP/1.1 alone — the identity's NextProtos kept to it
-// at Start by tlsCodecRefusal — a fresh value each call.
+// identity's, offering HTTP/1.1 alone — the identity's NextProtos and the
+// Protocols list kept to it at Start by tlsCodecRefusal — a fresh value each
+// call; loopLayers floors it (tlsFloor).
 func (g *StreamGroup) codecTLS() *tls.Config {
 	cfg := g.identity.ServerConfig()
 	cfg.NextProtos = g.httpProtos.alpn
 	//: the listener's own.
+	return cfg
+}
+
+// tlsFloor raises cfg's MinVersion to TLS 1.2 when it is lower, zero — the
+// standard library's default — included, and returns cfg: no listener of the
+// server negotiates a version RFC 8996 deprecates, whatever configuration it
+// was built from. The identity already refuses such a floor at construction;
+// this keeps the listener's own guarantee from resting on it.
+func tlsFloor(cfg *tls.Config) *tls.Config {
+	//: below TLS 1.2, or left to the library.
+	if cfg.MinVersion < tls.VersionTLS12 {
+		cfg.MinVersion = tls.VersionTLS12
+	}
+	//: at the floor or above.
 	return cfg
 }
 

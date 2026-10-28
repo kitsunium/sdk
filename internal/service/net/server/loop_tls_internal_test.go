@@ -236,3 +236,43 @@ func hasField(err error, key, want string) bool {
 	}
 	return false
 }
+
+// Test_tlsFloor pins the floor every server listener is built at: a
+// MinVersion below TLS 1.2, zero included, is raised to it, one above is
+// kept; and a configuration that asked for TLS 1.0 — which the identity
+// refuses at construction, so only a direct one can — no longer completes a
+// handshake with a client capped at TLS 1.1, which it does unfloored.
+func Test_tlsFloor(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ in, want uint16 }{
+		{0, tls.VersionTLS12},
+		{tls.VersionTLS10, tls.VersionTLS12},
+		{tls.VersionTLS11, tls.VersionTLS12},
+		{tls.VersionTLS12, tls.VersionTLS12},
+		{tls.VersionTLS13, tls.VersionTLS13},
+	} {
+		if got := tlsFloor(&tls.Config{MinVersion: c.in}).MinVersion; got != c.want {
+			t.Errorf("tlsFloor(%#x) = %#x, want %#x", c.in, got, c.want)
+		}
+	}
+	certs := testIdentity(t).ServerConfig().Certificates
+	//: the control first: unfloored, the TLS 1.1 client gets through.
+	if err := tls11Handshake(t, &tls.Config{Certificates: certs, MinVersion: tls.VersionTLS10}); err != nil {
+		t.Fatalf("unfloored TLS 1.0 server refused a TLS 1.1 client: %v", err)
+	}
+	if err := tls11Handshake(t, tlsFloor(&tls.Config{Certificates: certs, MinVersion: tls.VersionTLS10})); err == nil {
+		t.Fatal("a floored server completed a TLS 1.1 handshake")
+	}
+}
+
+// tls11Handshake handshakes server over a pipe with a client capped at TLS
+// 1.1 and returns the client's error.
+func tls11Handshake(t *testing.T, server *tls.Config) error {
+	t.Helper()
+	a, b := stdnet.Pipe()
+	t.Cleanup(func() { swallowErr(a.Close()); swallowErr(b.Close()) })
+	srv := tls.Server(a, server)
+	go func() { swallowErr(srv.HandshakeContext(t.Context())); swallowErr(a.Close()) }()
+	client := tls.Client(b, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS11}) //nolint:gosec // the floor is what is under test
+	return client.HandshakeContext(t.Context())
+}

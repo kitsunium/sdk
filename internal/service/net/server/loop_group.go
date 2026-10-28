@@ -26,8 +26,10 @@ type loopEngine interface {
 // each one receives, instead of a goroutine per connection. It is opt-in, and
 // plaintext, but for the http1 codec (http1.HandleLoop), which takes TLS:
 // crypto/tls negotiates each connection on its own goroutine, bounded by
-// HandshakeTimeout, offering HTTP/1.1 alone, and the cleartext reaches the
-// codec on the portable backend's lanes (ADR 0198).
+// HandshakeTimeout, never below TLS 1.2, offering HTTP/1.1 alone —
+// Protocols("http/1.1") is honoured, a list naming anything else refused
+// with ProtocolsRefused — and the cleartext reaches the codec on the portable
+// backend's lanes (ADR 0198).
 //
 // The group keeps the server's lifecycle — the bind, the adoption of
 // inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and

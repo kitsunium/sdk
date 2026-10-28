@@ -873,11 +873,13 @@ files:
       - (*StreamGroup).tlsCodec
       - (*StreamGroup).loopTLSRefusal
       - (*StreamGroup).tlsCodecRefusal
+      - (*StreamGroup).codecProtocols
       - (*StreamGroup).tlsErr
       - (*StreamGroup).loopLayers
       - (*StreamGroup).loopBackend
       - tlsCodecHonours
       - (*StreamGroup).codecTLS
+      - tlsFloor
       - (*StreamGroup).handshakeBound
       - handshake
     name: loop_tls.go
@@ -1695,10 +1697,20 @@ functions:
     params: b []byte
   - doc: |-
       tlsCodecHonours reports the kinds a TLS codec group honours beyond the
-      loop's own: TLS and its handshake bound.
+      loop's own: TLS, its handshake bound, and Protocols, which tlsCodecRefusal
+      keeps to HTTP/1.1 alone.
     name: tlsCodecHonours
     params: k corenet.OptionKind
     results: bool
+  - doc: |-
+      tlsFloor raises cfg's MinVersion to TLS 1.2 when it is lower, zero — the
+      standard library's default — included, and returns cfg: no listener of the
+      server negotiates a version RFC 8996 deprecates, whatever configuration it
+      was built from. The identity already refuses such a floor at construction;
+      this keeps the listener's own guarantee from resting on it.
+    name: tlsFloor
+    params: cfg *tls.Config
+    results: "*tls.Config"
   - doc: |-
       handshake negotiates c, a TLS connection, within d, and reports whether it
       completed: a failed or stalled negotiation closes c.
@@ -5175,12 +5187,21 @@ types:
           tlsCodecRefusal judges a TLS codec group (R6): an identity that names
           nothing, an explicit native backend — TLS runs on the portable backend
           alone — and a loop middleware are refused with LoopTLSUnsupported, the
-          option named; nothing is served without TLS or elsewhere instead. An
-          identity whose NextProtos names h2, or nothing the codec serves, is
-          refused with ProtocolsRefused, as an HTTP group's would be (ADR 0195).
+          option named; nothing is served without TLS or elsewhere instead. A
+          Protocols list that is not HTTP/1.1 alone, and an identity whose
+          NextProtos names h2 or nothing the codec serves, are refused with
+          ProtocolsRefused, as an HTTP group's would be (ADR 0195).
         name: tlsCodecRefusal
         recv: g *StreamGroup
         results: error
+      - doc: |-
+          codecProtocols returns why the group's Protocols list cannot be served by
+          the codec, or "" when it is unset or names HTTP/1.1 alone: the list is
+          judged as an HTTP group's with TLS (checkProtocols), then h2, which the
+          codec does not serve, is refused rather than dropped from it.
+        name: codecProtocols
+        recv: g *StreamGroup
+        results: string
       - doc: tlsErr is LoopTLSUnsupported naming the group and option.
         name: tlsErr
         params: option string
@@ -5188,7 +5209,8 @@ types:
         results: error
       - doc: |-
           loopLayers wraps a TLS codec group's listeners in TLS, offering HTTP/1.1
-          alone; any other loop group's are returned as they are.
+          alone, never below TLS 1.2 (tlsFloor); any other loop group's are returned
+          as they are.
         name: loopLayers
         params: lns []stdnet.Listener
         recv: g *StreamGroup
@@ -5201,8 +5223,9 @@ types:
         results: corenet.LoopBackend
       - doc: |-
           codecTLS is the configuration of a TLS codec group's listeners: the
-          identity's, offering HTTP/1.1 alone — the identity's NextProtos kept to it
-          at Start by tlsCodecRefusal — a fresh value each call.
+          identity's, offering HTTP/1.1 alone — the identity's NextProtos and the
+          Protocols list kept to it at Start by tlsCodecRefusal — a fresh value each
+          call; loopLayers floors it (tlsFloor).
         name: codecTLS
         recv: g *StreamGroup
         results: "*tls.Config"
@@ -5326,7 +5349,8 @@ types:
       - doc: |-
           serverTLS returns the TLS configuration of one of the group's listeners,
           nil without an identity: the identity's, offering the group's ALPN list
-          when it serves HTTP. A fresh value each call, so no listener shares one.
+          when it serves HTTP, never below TLS 1.2 (tlsFloor). A fresh value each
+          call, so no listener shares one.
         name: serverTLS
         recv: g *StreamGroup
         results: "*tls.Config"

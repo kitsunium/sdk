@@ -52,7 +52,10 @@ type httpProtocols struct {
 // "h2" without TLS (cleartext HTTP/2 is not served), an identity
 // whose NextProtos names a version the list excludes or none it includes, and
 // any group that does not serve an http.Handler are refused with
-// ProtocolsRefused; a loop group refuses it with LoopOptionUnsupported.
+// ProtocolsRefused. A loop group refuses it with LoopOptionUnsupported, but
+// for the http1 codec given TLS, which serves HTTP/1.1 alone: there it is
+// honoured when it names "http/1.1" alone, and any other list is refused
+// with ProtocolsRefused (ADR 0198).
 //
 // A request that arrived over HTTP/2 has no http.Hijacker: a handler that
 // hijacks its connection — a WebSocket upgrade written by hand, say — serves
@@ -187,7 +190,8 @@ func (g *StreamGroup) protocolsErr(reason string) error {
 
 // serverTLS returns the TLS configuration of one of the group's listeners,
 // nil without an identity: the identity's, offering the group's ALPN list
-// when it serves HTTP. A fresh value each call, so no listener shares one.
+// when it serves HTTP, never below TLS 1.2 (tlsFloor). A fresh value each
+// call, so no listener shares one.
 func (g *StreamGroup) serverTLS() *tls.Config {
 	//: plaintext.
 	if g.identity.IsZero() {
@@ -199,8 +203,8 @@ func (g *StreamGroup) serverTLS() *tls.Config {
 	if g.httpAdapter != nil {
 		cfg.NextProtos = slices.Clone(g.httpProtos.alpn)
 	}
-	//: the listener's own.
-	return cfg
+	//: the listener's own, at the floor.
+	return tlsFloor(cfg)
 }
 
 // http2Config is the HTTP/2 bounds every HTTP group serves with: set, never

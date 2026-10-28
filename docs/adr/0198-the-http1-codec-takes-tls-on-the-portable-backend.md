@@ -70,6 +70,29 @@ R6 refuses a loop-only option combined with TLS. On this path,
 puts this path on "the portable backend split into `Loops` lanes"; reading R6
 literally would have fixed it at one lane. `HandshakeTimeout` is honoured.
 
+### D4 — `Protocols` on this path (the owner's decision of 2026-10-27)
+
+`Protocols(...)` is honoured on a TLS codec group when its list reduces to
+`http/1.1`, the one version the codec serves; it was refused with
+`LoopOptionUnsupported` before. The list is judged as an HTTP group's with TLS
+(ADR 0195): empty, repeated or unknown identifiers are refused with
+`ProtocolsRefused`, and so is any list naming `h2`, alone or beside
+`http/1.1` — `reason` = `h2` — rather than `h2` being dropped from it in
+silence. The identity's `NextProtos` is then combined with it exactly as an
+HTTP group's `protocolsRefusal` does (`offered`), and the result is the ALPN
+the listeners offer. A codec group without TLS keeps refusing `Protocols`
+with `LoopOptionUnsupported`: it negotiates nothing.
+
+### D5 — A TLS 1.2 floor (the owner's decision of 2026-10-27)
+
+A TLS codec group's listener configuration has its `MinVersion` raised to TLS
+1.2 when the identity's is lower, zero — the standard library's default —
+included. The identity already refuses a floor below TLS 1.2 at construction
+and defaults to TLS 1.3; the listener's guarantee no longer rests on that
+alone. The floor is one shared helper (`tlsFloor`), so the goroutine engine's
+TLS listeners (`serverTLS`) are floored the same way: no listener of the
+server negotiates a version RFC 8996 deprecates.
+
 ## Consequences
 
 - `http1.LoopHandler.Unwrap`; `LoopTLSUnsupported` now carries an `option`
@@ -80,6 +103,10 @@ literally would have fixed it at one lane. `HandshakeTimeout` is honoured.
   conformance — N connections × N tokens through `Routes` and `Bearer`,
   released buffers marked — over portable+TLS under `-race`; each refusal;
   the simple API's HTTP entry with an `HTTP1Handler` and TLS.
+- `Protocols("http/1.1")` on a TLS codec group starts and serves; a list
+  naming `h2` is `ProtocolsRefused`; a client capped at TLS 1.1 fails the
+  handshake, and a configuration asking TLS 1.0, floored, refuses the TLS 1.1
+  client it otherwise accepts.
 
 ## Alternatives considered
 

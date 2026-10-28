@@ -84,9 +84,10 @@ const (
 	// OptionBatchReplies is BatchReplies. A datagram group honours it; a stream
 	// group, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).
 	OptionBatchReplies
-	// OptionProtocols is Protocols. Only an HTTP group served by net/http
-	// honours it; a loop group refuses it with LoopOptionUnsupported, and any
-	// other group with ProtocolsRefused.
+	// OptionProtocols is Protocols. An HTTP group served by net/http honours
+	// it, and so does the http1 codec given TLS when it names "http/1.1"
+	// alone; any other loop group refuses it with LoopOptionUnsupported, and
+	// any other group with ProtocolsRefused.
 	OptionProtocols
 )
 

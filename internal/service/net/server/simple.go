@@ -26,7 +26,9 @@ const (
 // choose. The group is named "tcp+" + addr unless Name says otherwise, and
 // opts apply as they do to Group. Without TLS, Plaintext is required (ADR
 // 0187 §D7); with TLS, an HTTP1Handler runs on the portable backend, crypto/tls
-// negotiating HTTP/1.1 first (ADR 0198). Every refusal is reported by Start: a nil or typed nil handler
+// negotiating HTTP/1.1, the one version it serves, at TLS 1.2 or above, and
+// Protocols may name "http/1.1" alone (ADR 0198). Every refusal is reported
+// by Start: a nil or typed nil handler
 // (HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an
 // Engine the handler cannot run on (EngineUnsupported), a type no engine of
 // HTTP serves (HandlerUnsupported), Plaintext with TLS (PlaintextWithTLS),

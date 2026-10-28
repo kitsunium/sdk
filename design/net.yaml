@@ -643,9 +643,10 @@ packages:
         value: "20"
       - blockDoc: The group options a loop group judges at Start, by kind.
         doc: |-
-          OptionProtocols is Protocols. Only an HTTP group served by net/http
-          honours it; a loop group refuses it with LoopOptionUnsupported, and any
-          other group with ProtocolsRefused.
+          OptionProtocols is Protocols. An HTTP group served by net/http honours
+          it, and so does the http1 codec given TLS when it names "http/1.1"
+          alone; any other loop group refuses it with LoopOptionUnsupported, and
+          any other group with ProtocolsRefused.
         name: OptionProtocols
         type: OptionKind
         value: "21"
@@ -5541,7 +5542,10 @@ packages:
           "h2" without TLS (cleartext HTTP/2 is not served), an identity
           whose NextProtos names a version the list excludes or none it includes, and
           any group that does not serve an http.Handler are refused with
-          ProtocolsRefused; a loop group refuses it with LoopOptionUnsupported.
+          ProtocolsRefused. A loop group refuses it with LoopOptionUnsupported, but
+          for the http1 codec given TLS, which serves HTTP/1.1 alone: there it is
+          honoured when it names "http/1.1" alone, and any other list is refused
+          with ProtocolsRefused (ADR 0198).
 
           A request that arrived over HTTP/2 has no http.Hijacker: a handler that
           hijacks its connection — a WebSocket upgrade written by hand, say — serves
@@ -6001,7 +6005,9 @@ packages:
               choose. The group is named "tcp+" + addr unless Name says otherwise, and
               opts apply as they do to Group. Without TLS, Plaintext is required (ADR
               0187 §D7); with TLS, an HTTP1Handler runs on the portable backend, crypto/tls
-              negotiating HTTP/1.1 first (ADR 0198). Every refusal is reported by Start: a nil or typed nil handler
+              negotiating HTTP/1.1, the one version it serves, at TLS 1.2 or above, and
+              Protocols may name "http/1.1" alone (ADR 0198). Every refusal is reported
+              by Start: a nil or typed nil handler
               (HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an
               Engine the handler cannot run on (EngineUnsupported), a type no engine of
               HTTP serves (HandlerUnsupported), Plaintext with TLS (PlaintextWithTLS),
@@ -6135,8 +6141,10 @@ packages:
               each one receives, instead of a goroutine per connection. It is opt-in, and
               plaintext, but for the http1 codec (http1.HandleLoop), which takes TLS:
               crypto/tls negotiates each connection on its own goroutine, bounded by
-              HandshakeTimeout, offering HTTP/1.1 alone, and the cleartext reaches the
-              codec on the portable backend's lanes (ADR 0198).
+              HandshakeTimeout, never below TLS 1.2, offering HTTP/1.1 alone —
+              Protocols("http/1.1") is honoured, a list naming anything else refused
+              with ProtocolsRefused — and the cleartext reaches the codec on the portable
+              backend's lanes (ADR 0198).
 
               The group keeps the server's lifecycle — the bind, the adoption of
               inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and
@@ -9239,7 +9247,9 @@ packages:
             HTTP/1.1. Start refuses with ProtocolsRefused an empty list, an empty,
             repeated or unknown identifier, h2 without TLS, an identity whose NextProtos names a version the
             list excludes or none it includes, and a group that serves no http.Handler;
-            a loop group refuses it with LoopOptionUnsupported.
+            a loop group refuses it with LoopOptionUnsupported, but for the http1 codec
+            given TLS, which honours "http/1.1" alone and refuses any other list with
+            ProtocolsRefused (ADR 0198).
 
             A request that arrived over HTTP/2 has no http.Hijacker: a handler that
             hijacks its connection serves HTTP/1.1 clients only, and a TLS group that

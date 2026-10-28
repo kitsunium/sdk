@@ -5614,9 +5614,11 @@ sequences:
         kind: self
       - id: g.tlsErr
         kind: internal
-      - id: offered
+      - id: g.codecProtocols
         kind: internal
       - id: g.protocolsErr
+        kind: internal
+      - id: offered
         kind: internal
     steps:
       - switch:
@@ -5635,6 +5637,15 @@ sequences:
                   to: g.tlsErr
             - default: true
               do:
+                - opt:
+                    do:
+                      - return: g.protocolsErr(reason)
+                        to: g.protocolsErr
+                    init:
+                      bind: reason
+                      eval: g.codecProtocols()
+                      to: g.codecProtocols
+                    when: reason != ""
                 - bind: alpn, reason
                   eval: offered(g.identity.ServerConfig().NextProtos, alpnHTTP1)
                   to: offered
@@ -5646,6 +5657,32 @@ sequences:
                 - set: g.httpProtos.alpn
                   value: alpn
                 - return: nil
+  - of: (*StreamGroup).codecProtocols
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).codecProtocols
+        kind: self
+      - id: checkProtocols
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: "!g.kinds.has(corenet.OptionProtocols)"
+      - opt:
+          do:
+            - return: reason
+          init:
+            bind: reason
+            eval: checkProtocols(g.protos, true)
+            to: checkProtocols
+          when: reason != ""
+      - opt:
+          do:
+            - return: protoH2
+          when: slices.Contains(g.protos, protoH2)
+      - return: "\"\""
   - of: (*StreamGroup).tlsErr
     participants:
       - id: caller
@@ -5678,7 +5715,7 @@ sequences:
           do:
             - set: out[i]
               to: tls
-              value: tls.NewListener(ln, g.codecTLS())
+              value: tls.NewListener(ln, tlsFloor(g.codecTLS()))
           key: i
           range: lns
           value: ln
@@ -5692,7 +5729,7 @@ sequences:
       - return: g.loop.Backend
   - of: tlsCodecHonours
     steps:
-      - return: k == corenet.OptionTLS || k == corenet.OptionHandshakeTimeout
+      - return: k == corenet.OptionTLS || k == corenet.OptionHandshakeTimeout || k == corenet.OptionProtocols
   - of: (*StreamGroup).codecTLS
     participants:
       - id: caller
@@ -5707,6 +5744,14 @@ sequences:
         to: g.identity.ServerConfig
       - set: cfg.NextProtos
         value: g.httpProtos.alpn
+      - return: cfg
+  - of: tlsFloor
+    steps:
+      - opt:
+          do:
+            - set: cfg.MinVersion
+              value: tls.VersionTLS12
+          when: cfg.MinVersion < tls.VersionTLS12
       - return: cfg
   - of: (*StreamGroup).handshakeBound
     participants:
@@ -9439,6 +9484,8 @@ sequences:
         kind: value
       - id: slices
         kind: stdlib
+      - id: tlsFloor
+        kind: internal
     steps:
       - opt:
           do:
@@ -9453,7 +9500,8 @@ sequences:
               to: slices
               value: slices.Clone(g.httpProtos.alpn)
           when: g.httpAdapter != nil
-      - return: cfg
+      - return: tlsFloor(cfg)
+        to: tlsFloor
   - of: http2Config
     steps:
       - return: |-
