@@ -791,6 +791,7 @@ files:
       - loopEngine
       - (*StreamGroup).HandleLoop
       - (*StreamGroup).loopRefusal
+      - (*StreamGroup).loopHonoursKind
       - loopHonours
       - (*Server).bindLoopGroup
       - startLanes
@@ -847,6 +848,8 @@ files:
       - (*portableGroup).takeRound
       - (*portableGroup).giveUp
       - (*portableGroup).closeOwned
+      - (*portableGroup).dispatch
+      - (*portableLoop).negotiate
       - (*portableLoop).run
       - (*portableLoop).finished
       - (*portableLoop).batch
@@ -875,6 +878,8 @@ files:
       - (*portableLoop).settle
       - (*portableLoop).compactListed
       - (*portableLoop).closeAll
+      - (*portableLoop).discard
+      - (*portableLoop).discardBuffered
       - (*portableLoop).drainPosts
       - (*portableLoop).Write
       - (*portableLoop).Close
@@ -904,6 +909,22 @@ files:
       - acceptRetries
       - acceptRaw
     name: loop_portable_take_unix.go
+  - decls:
+      - alpnHTTP1
+      - codecUnwrapper
+      - (*StreamGroup).tlsCodec
+      - (*StreamGroup).loopTLSRefusal
+      - (*StreamGroup).tlsCodecRefusal
+      - (*StreamGroup).codecProtocols
+      - (*StreamGroup).tlsErr
+      - (*StreamGroup).loopLayers
+      - (*StreamGroup).loopBackend
+      - tlsCodecHonours
+      - (*StreamGroup).codecTLS
+      - tlsFloor
+      - (*StreamGroup).handshakeBound
+      - handshake
+    name: loop_tls.go
   - decls:
       - udpGRO
       - multiReader
@@ -1772,6 +1793,28 @@ functions:
     name: acceptRaw
     params: rc syscall.RawConn
     results: int, error
+  - doc: |-
+      tlsCodecHonours reports the kinds a TLS codec group honours beyond the
+      loop's own: TLS, its handshake bound, and Protocols, which tlsCodecRefusal
+      keeps to HTTP/1.1 alone.
+    name: tlsCodecHonours
+    params: k corenet.OptionKind
+    results: bool
+  - doc: |-
+      tlsFloor raises cfg's MinVersion to TLS 1.2 when it is lower, zero — the
+      standard library's default — included, and returns cfg: no listener of the
+      server negotiates a version RFC 8996 deprecates, whatever configuration it
+      was built from. The identity already refuses such a floor at construction;
+      this keeps the listener's own guarantee from resting on it.
+    name: tlsFloor
+    params: cfg *tls.Config
+    results: "*tls.Config"
+  - doc: |-
+      handshake negotiates c, a TLS connection, within d, and reports whether it
+      completed: a failed or stalled negotiation closes c.
+    name: handshake
+    params: c stdnet.Conn, d time.Duration
+    results: bool
   - doc: newMultiReader builds a batched reader over pc.
     name: newMultiReader
     params: pc stdnet.PacketConn, sc rawConnProvider
@@ -3328,6 +3371,11 @@ types:
           none can hand it a connection.
         name: accepting
         type: atomic.Int32
+      - doc: |-
+          handshake bounds a TLS connection's negotiation, which runs before the
+          lane sees it; zero for a plaintext group (ADR 0198).
+        name: handshake
+        type: time.Duration
       - doc: turn is the lane the next accepted connection goes to, modulo the count.
         name: turn
         type: atomic.Uint64
@@ -3384,6 +3432,16 @@ types:
       - doc: closeOwned closes every listener the group owns.
         name: closeOwned
         recv: g *portableGroup
+      - doc: |-
+          dispatch hands c to the next lane, in turn; a TLS connection is negotiated
+          first, off the acceptor, so the lane sees it only once it is cleartext.
+
+          Goroutine lifecycle: for a TLS group, one negotiate goroutine per
+          connection, which returns once the handshake ends and the connection is
+          handed to its lane or closed. A lane that stopped closes it.
+        name: dispatch
+        params: c stdnet.Conn
+        recv: g *portableGroup
       - doc: wakeAll rouses every lane's handler goroutine.
         name: wakeAll
         recv: g *portableGroup
@@ -3432,6 +3490,11 @@ types:
         type: "[]int32"
       - name: live
         type: atomic.Int64
+      - doc: |-
+          negotiating counts the TLS handshakes still running for the lane: the
+          drainer closeAll starts outlives them, so none hands over unseen.
+        name: negotiating
+        type: atomic.Int64
       - name: draining
         type: bool
       - name: done
@@ -3459,6 +3522,16 @@ types:
         type: time.Time
     kind: struct
     methods:
+      - doc: |-
+          negotiate completes c's TLS handshake within d, then hands c to the lane;
+          a failed or stalled one closes it, and the lane never sees it.
+
+          Goroutine lifecycle: one per accepted TLS connection, started by
+          dispatch; it returns once the handshake ends and the connection is handed
+          over, or the lane has stopped, which closes the connection instead.
+        name: negotiate
+        params: c stdnet.Conn, d time.Duration
+        recv: pl *portableLoop
       - doc: |-
           run is the handler goroutine: one batch per iteration. It is the one
           goroutine that closes done, as it returns.
@@ -3604,8 +3677,20 @@ types:
           closeAll closes every connection as the backend stops.
 
           Goroutine lifecycle: it launches one drainer that takes the last events a
-          reader may still send, and returns after one second with none.
+          reader or a handshake may still send — closing the connections they hand
+          over, which no lane will open — and returns after one second with none and
+          no handshake still running, the buffer emptied.
         name: closeAll
+        recv: pl *portableLoop
+      - doc: |-
+          discard drops an event that reached a stopped lane: a connection handed
+          over and never opened is closed, and uncounted, as negotiate's own stopped
+          branch does; any other event is about a connection closeAll finished.
+        name: discard
+        params: ev *portableEvent
+        recv: pl *portableLoop
+      - doc: discardBuffered discards, without waiting, the events still buffered.
+        name: discardBuffered
         recv: pl *portableLoop
       - doc: drainPosts runs the posted operations.
         name: drainPosts
@@ -3682,6 +3767,17 @@ types:
         type: "[]*os.File"
     kind: struct
     name: portableTake
+  - doc: |-
+      codecUnwrapper is what the http1 adapter exposes (http1.LoopHandler.Unwrap):
+      the HTTP1Handler it serves, so a loop group knows its handler speaks the
+      codec and may take TLS on the portable backend.
+    kind: named
+    name: codecUnwrapper
+    underlying: |-
+      interface {
+      	// Unwrap returns the HTTP1Handler the adapter serves.
+      	Unwrap() corenet.HTTP1Handler
+      }
   - doc: |-
       multiReader reads several datagrams per syscall using recvmmsg(2).
 
@@ -5182,7 +5278,8 @@ types:
         type: "[]string"
       - doc: |-
           httpProtos is what the group serves, computed at Start from protos and
-          the identity (protocolsRefusal).
+          the identity (protocolsRefusal; a TLS codec group's ALPN alone,
+          tlsCodecRefusal).
         name: httpProtos
         type: httpProtocols
       - doc: limiter caps concurrent connections; nil when the group has no ceiling.
@@ -5299,6 +5396,77 @@ types:
         name: loopRefusal
         recv: g *StreamGroup
         results: error
+      - doc: |-
+          loopHonoursKind reports whether the loop group applies the option of kind
+          k: the engine, the TLS codec's path, or the chain — Use never, whatever it
+          claims.
+        name: loopHonoursKind
+        params: chain corenet.LoopHandler, k corenet.OptionKind
+        recv: g *StreamGroup
+        results: bool
+      - doc: |-
+          tlsCodec reports whether the group is the http1 codec given TLS (ADR 0187
+          §D5, ADR 0198): crypto/tls handshakes on its own goroutine, then the
+          cleartext goes through the codec on the portable backend's lanes.
+        name: tlsCodec
+        recv: g *StreamGroup
+        results: bool
+      - doc: |-
+          loopTLSRefusal judges a loop group given TLS: a raw loop handler is
+          refused with LoopTLSUnsupported, as ever; the codec, by tlsCodecRefusal.
+        name: loopTLSRefusal
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          tlsCodecRefusal judges a TLS codec group (R6): an identity that names
+          nothing, an explicit native backend — TLS runs on the portable backend
+          alone — and a loop middleware are refused with LoopTLSUnsupported, the
+          option named; nothing is served without TLS or elsewhere instead. A
+          Protocols list that is not HTTP/1.1 alone, and an identity whose
+          NextProtos names h2 or nothing the codec serves, are refused with
+          ProtocolsRefused, as an HTTP group's would be (ADR 0195).
+        name: tlsCodecRefusal
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          codecProtocols returns why the group's Protocols list cannot be served by
+          the codec, or "" when it is unset or names HTTP/1.1 alone: the list is
+          judged as an HTTP group's with TLS (checkProtocols), then h2, which the
+          codec does not serve, is refused rather than dropped from it.
+        name: codecProtocols
+        recv: g *StreamGroup
+        results: string
+      - doc: tlsErr is LoopTLSUnsupported naming the group and option.
+        name: tlsErr
+        params: option string
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          loopLayers wraps a TLS codec group's listeners in TLS, offering HTTP/1.1
+          alone, never below TLS 1.2 (tlsFloor); any other loop group's are returned
+          as they are.
+        name: loopLayers
+        params: lns []stdnet.Listener
+        recv: g *StreamGroup
+        results: "[]stdnet.Listener"
+      - doc: |-
+          loopBackend is the backend the group's code asks for: the portable one for
+          a TLS codec group, the only one with TLS; the Loop option's otherwise.
+        name: loopBackend
+        recv: g *StreamGroup
+        results: corenet.LoopBackend
+      - doc: |-
+          codecTLS is the configuration of a TLS codec group's listeners: the
+          identity's, offering HTTP/1.1 alone — the identity's NextProtos and the
+          Protocols list kept to it at Start by tlsCodecRefusal — a fresh value each
+          call; loopLayers floors it (tlsFloor).
+        name: codecTLS
+        recv: g *StreamGroup
+        results: "*tls.Config"
+      - doc: handshakeBound is the group's HandshakeTimeout, or the domain's default.
+        name: handshakeBound
+        recv: g *StreamGroup
+        results: time.Duration
       - doc: recordErr records err as the group's declaration error, the first kept.
         name: recordErr
         params: err error
@@ -5415,7 +5583,8 @@ types:
       - doc: |-
           serverTLS returns the TLS configuration of one of the group's listeners,
           nil without an identity: the identity's, offering the group's ALPN list
-          when it serves HTTP. A fresh value each call, so no listener shares one.
+          when it serves HTTP, never below TLS 1.2 (tlsFloor). A fresh value each
+          call, so no listener shares one.
         name: serverTLS
         recv: g *StreamGroup
         results: "*tls.Config"
@@ -5556,6 +5725,13 @@ vars:
       - name: markRecycled
         type: atomic.Bool
     name: markRecycled
+  - doc: |-
+      alpnHTTP1 is the one protocol the http1 codec's TLS path offers: the
+      profile is HTTP/1.1 only (ADR 0187 §D5).
+    items:
+      - name: alpnHTTP1
+        value: "[]string{\"http/1.1\"}"
+    name: alpnHTTP1
   - doc: |-
       capabilityRegistry is design/net.yaml's registry, top first.
       TestCapabilityRegistry_matchesTheDesign holds it to the design's two blocks.

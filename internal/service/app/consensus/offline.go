@@ -910,7 +910,9 @@ func checkRecover(stamp *coreconsensus.StampValue, newCluster coreconsensus.Clus
 // checkRecoverMembers refuses new members that are not all pinned, among
 // which this node, at its incarnation, is not a voter, which name another
 // voter, or two members under one ID. The others enter as learners and are promoted through
-// Promote, never as empty voters (R3-02, R4-04): a member Init only
+// Promote, never as empty voters (R3-02, R4-04): Promote waits for a
+// learner's acknowledgement of the configuration that admitted it, which
+// it judged against the commit alone before #722, and a member Init only
 // prepared cannot vote before a leader admits it, so a forced configuration
 // that needed its vote never elected one, and two survivors naming each
 // other recovered two histories into one identity (#642). Named learners,

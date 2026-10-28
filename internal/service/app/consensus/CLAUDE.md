@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-27T08:00:00Z -->
+<!-- updated: 2026-10-27T14:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -205,7 +205,12 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   the engine state of the entries committed past the snapshot is rolled
   back and carried by the next cut — a node with a table evicts the
   payloads it committed, so they cannot be replayed (#416,
-  `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`).
+  `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`). A node with no
+  table installs below its commit and replays them: it evicts no payload
+  past its base until then, even under a `DurableStateMachine` the start
+  resumed past it, whose install of the leader's older snapshot ran the
+  cluster version from before a raise it had applied (#720,
+  `TestANoTableDurableFollowerKeepsTheRaiseThroughAnOlderInstall`).
 - Sync once per queued Ready: every request the storage actor takes is
   staged, then synced ONCE, then completed in order, so no `AfterSync`
   leaves before the sync that covers it; a group of commit-only Readys is
@@ -409,6 +414,18 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   listed. The admission is judged at the commit bounded by `Stable`, at
   each Ready and each storage completion (#695,
   `TestAJoinerBecomesAMemberOnDiskOnlyOnceTheEntriesThatAdmitItAreDurable`).
+- Promote a joiner before it holds its admission: raft's `promote` judged
+  the learner's acknowledged progress against the commit alone, and a
+  joiner heard once at match 0 was made a voter while its stamp, still
+  joining, refused every vote; the leader's failure left three voters of
+  four with no leader. `promote` now waits for the learner's
+  acknowledgement of the configuration that admitted it, which leaves
+  after the sync that covers it, and a heartbeat answer probes again a
+  learner whose first probe its transport dropped before the `JOIN` answer
+  admitted the leader, so a quiet cluster still feeds it (#722,
+  `TestAPromotionWaitsForTheJoinerToHoldItsAdmission`,
+  `TestAPromotionRetriedFromTheJoinWaitsForTheAdmission`,
+  `TestAStaleVoterIsNotLeftWithNoKnownPeer`).
 - Leave a silent voter that hears no leader with no way to reach one: it
   never campaigns, so it never sent the PreVote a leader record answers. A
   founder down while a member was admitted and made leader, then truncated

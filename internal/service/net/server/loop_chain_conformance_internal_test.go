@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	stdnet "net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -90,7 +91,7 @@ func TestLoopChain_tokensStayTheirs(t *testing.T) {
 			var wg sync.WaitGroup
 			errc := make(chan error, conns)
 			for i := range conns {
-				wg.Go(func() { errc <- tokenRounds(t, addr, i, rounds) })
+				wg.Go(func() { errc <- tokenRounds(t, loopDial, addr, i, rounds) })
 			}
 			wg.Wait()
 			close(errc)
@@ -127,8 +128,8 @@ func TestLoopChain_tokensStayTheirs(t *testing.T) {
 // tokenRounds runs rounds requests on one connection with token i, each
 // followed by an unauthenticated one that must be refused, and checks every
 // answer.
-func tokenRounds(t *testing.T, addr string, i, rounds int) error {
-	c := loopDial(t, addr)
+func tokenRounds(t *testing.T, dial func(*testing.T, string) stdnet.Conn, addr string, i, rounds int) error {
+	c := dial(t, addr)
 	r := bufio.NewReader(c)
 	want := "user-" + strconv.Itoa(i)
 	authed := []byte("GET /whoami HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer tok-" + strconv.Itoa(i) + "\r\n\r\n")

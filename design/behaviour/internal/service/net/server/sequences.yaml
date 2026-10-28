@@ -3553,15 +3553,23 @@ sequences:
         kind: actor
       - id: (*StreamGroup).loopRefusal
         kind: self
-      - id: errs
-        kind: package
+      - id: g.loopTLSRefusal
+        kind: internal
       - id: buildLoopChain
         kind: internal
+      - id: errs
+        kind: package
     steps:
       - opt:
           do:
-            - return: errs.Wrap(corenet.LoopTLSUnsupported, errs.WrapParams{}, errs.String("group", g.name))
-              to: errs
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: g.loopTLSRefusal()
+                  to: g.loopTLSRefusal
+                when: err != nil
           when: g.kinds.has(corenet.OptionTLS)
       - bind: chain, err
         eval: buildLoopChain(g.name, g.loopHandler, g.loopMiddlewares)
@@ -3577,7 +3585,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: loopHonours(k) || (k != corenet.OptionMiddleware && chainHonours(chain, k))
+                when: g.loopHonoursKind(chain, k)
             - return: |-
                 errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
                 			errs.String("group", g.name), errs.String("option", k.String()))
@@ -3586,6 +3594,9 @@ sequences:
           range: g.kinds.list()
           value: k
       - return: nil
+  - of: (*StreamGroup).loopHonoursKind
+    steps:
+      - return: loopHonours(k) || (g.tlsCodec() && tlsCodecHonours(k)) || (k != corenet.OptionMiddleware && chainHonours(chain, k))
   - of: loopHonours
     steps:
       - switch:
@@ -3638,10 +3649,10 @@ sequences:
                 do:
                   - return: err
                 when: err != nil
-            - set: lns
-              value: append(lns, adopted...)
             - eval: s.registerLoopListeners(group, adopted, nil)
               to: s.registerLoopListeners
+            - set: lns
+              value: append(lns, group.loopLayers(adopted)...)
           key: _
           range: group.adopt
           value: name
@@ -3654,10 +3665,10 @@ sequences:
                 do:
                   - return: err
                 when: err != nil
-            - set: lns
-              value: append(lns, ln)
             - eval: s.registerLoopListeners(group, []stdnet.Listener{ln}, &rep)
               to: s.registerLoopListeners
+            - set: lns
+              value: append(lns, group.loopLayers([]stdnet.Listener{ln})...)
           key: _
           range: group.addrs
           value: addr
@@ -3670,7 +3681,7 @@ sequences:
             to: loop
           when: err != nil
       - bind: plan
-        eval: s.operator.plan(group.loop.Backend, nativeLoopBackends)
+        eval: s.operator.plan(group.loopBackend(), nativeLoopBackends)
         to: s.operator.plan
       - eval: startLanes(group)
         to: startLanes
@@ -4392,6 +4403,8 @@ sequences:
         kind: self
       - id: loop
         kind: package
+      - id: group.handshakeBound
+        kind: internal
       - id: ownListeners
         kind: internal
       - id: g.accepting.Add
@@ -4419,6 +4432,12 @@ sequences:
           		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
           		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
           	}
+      - opt:
+          do:
+            - set: g.handshake
+              to: group.handshakeBound
+              value: group.handshakeBound()
+          when: group.tlsCodec()
       - loop:
           do:
             - set: g.lanes
@@ -4522,8 +4541,8 @@ sequences:
         kind: value
       - id: swallowErr
         kind: internal
-      - id: pl.live.Add
-        kind: value
+      - id: g.dispatch
+        kind: internal
     steps:
       - opt:
           do:
@@ -4533,19 +4552,8 @@ sequences:
               to: swallowErr
             - return: ""
           when: g.maxConns > 0 && g.live() >= int64(g.maxConns)
-      - bind: pl
-        eval: g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
-      - eval: pl.live.Add(1)
-        to: pl.live.Add
-      - select:
-          cases:
-            - comm: "pl.events <- portableEvent{kind: pevOpen, conn: c}"
-            - comm: <-pl.done
-              do:
-                - eval: pl.live.Add(-1)
-                  to: pl.live.Add
-                - eval: swallowErr(c.Close())
-                  to: swallowErr
+      - eval: g.dispatch(c)
+        to: g.dispatch
   - of: (*portableGroup).takeQueues
     participants:
       - id: caller
@@ -4660,6 +4668,72 @@ sequences:
           key: _
           range: g.owned
           value: ln
+  - of: (*portableGroup).dispatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableGroup).dispatch
+        kind: self
+      - id: pl.live.Add
+        kind: value
+      - id: pl.negotiating.Add
+        kind: value
+      - id: pl.negotiate
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: pl
+        eval: g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
+      - eval: pl.live.Add(1)
+        to: pl.live.Add
+      - opt:
+          do:
+            - eval: pl.negotiating.Add(1)
+              to: pl.negotiating.Add
+            - go: pl.negotiate(c, g.handshake)
+              to: pl.negotiate
+            - return: ""
+          when: g.handshake > 0
+      - select:
+          cases:
+            - comm: "pl.events <- portableEvent{kind: pevOpen, conn: c}"
+            - comm: <-pl.done
+              do:
+                - eval: pl.live.Add(-1)
+                  to: pl.live.Add
+                - eval: swallowErr(c.Close())
+                  to: swallowErr
+  - of: (*portableLoop).negotiate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableLoop).negotiate
+        kind: self
+      - id: pl.negotiating.Add
+        kind: value
+      - id: pl.live.Add
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - defer: pl.negotiating.Add(-1)
+        to: pl.negotiating.Add
+      - opt:
+          do:
+            - eval: pl.live.Add(-1)
+              to: pl.live.Add
+            - return: ""
+          when: "!handshake(c, d)"
+      - select:
+          cases:
+            - comm: "pl.events <- portableEvent{kind: pevOpen, conn: c}"
+            - comm: <-pl.done
+              do:
+                - eval: pl.live.Add(-1)
+                  to: pl.live.Add
+                - eval: swallowErr(c.Close())
+                  to: swallowErr
   - of: (*portableLoop).run
     participants:
       - id: caller
@@ -5447,23 +5521,64 @@ sequences:
           		quiet := time.NewTimer(time.Second)
           		defer quiet.Stop()
           		//: a reader still sending its last event finds nobody; drained here,
-          		//: until a second passes with none.
+          		//: until a second passes with none and no handshake still running —
+          		//: one that completes hands its connection over to this loop alone.
           		for {
           			select {
           			case ev := <-pl.events:
-          				//: a connection handed over as the lane stopped is closed,
-          				//: never left open; admit counted it, and neither open nor
-          				//: finish ran to uncount it.
-          				if ev.kind == pevOpen {
-          					pl.live.Add(-1)
-          					swallowErr(ev.conn.Close())
-          				}
+          				pl.discard(&ev)
           				quiet.Reset(time.Second)
           			case <-quiet.C:
+          				//: a handshake still running may yet hand one over.
+          				if pl.negotiating.Load() > 0 {
+          					quiet.Reset(time.Second)
+          					continue
+          				}
+          				//: nobody left to send: what the last ones left, then out.
+          				pl.discardBuffered()
           				return
           			}
           		}
           	}()
+  - of: (*portableLoop).discard
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableLoop).discard
+        kind: self
+      - id: pl.live.Add
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: pl.live.Add(-1)
+              to: pl.live.Add
+            - eval: swallowErr(ev.conn.Close())
+              to: swallowErr
+          when: ev.kind == pevOpen
+  - of: (*portableLoop).discardBuffered
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableLoop).discardBuffered
+        kind: self
+      - id: pl.discard
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: ev := <-pl.events
+                    do:
+                      - eval: pl.discard(&ev)
+                        to: pl.discard
+                  - default: true
+                    do:
+                      - return: ""
+          forever: true
   - of: (*portableLoop).drainPosts
     participants:
       - id: caller
@@ -5963,6 +6078,228 @@ sequences:
             - return: "-1, cerr"
           when: cerr != nil
       - return: nfd, aerr
+  - of: (*StreamGroup).tlsCodec
+    steps:
+      - bind: _, codec
+        eval: g.loopHandler.(codecUnwrapper)
+      - return: codec && g.kinds.has(corenet.OptionTLS)
+  - of: (*StreamGroup).loopTLSRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).loopTLSRefusal
+        kind: self
+      - id: errs
+        kind: package
+      - id: g.tlsCodecRefusal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(corenet.LoopTLSUnsupported, errs.WrapParams{}, errs.String("group", g.name))
+              to: errs
+          when: "!g.tlsCodec()"
+      - return: g.tlsCodecRefusal()
+        to: g.tlsCodecRefusal
+  - of: (*StreamGroup).tlsCodecRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).tlsCodecRefusal
+        kind: self
+      - id: g.tlsErr
+        kind: internal
+      - id: g.codecProtocols
+        kind: internal
+      - id: g.protocolsErr
+        kind: internal
+      - id: offered
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: g.identity.IsZero()
+              do:
+                - return: g.tlsErr("TLS")
+                  to: g.tlsErr
+            - case: g.loopSet && g.loop.Backend != corenet.LoopBackendAuto && g.loop.Backend != corenet.LoopBackendPortable
+              do:
+                - return: g.tlsErr("Loop")
+                  to: g.tlsErr
+            - case: g.kinds.has(corenet.OptionLoopMiddleware)
+              do:
+                - return: g.tlsErr(corenet.OptionLoopMiddleware.String())
+                  to: g.tlsErr
+            - default: true
+              do:
+                - opt:
+                    do:
+                      - return: g.protocolsErr(reason)
+                        to: g.protocolsErr
+                    init:
+                      bind: reason
+                      eval: g.codecProtocols()
+                      to: g.codecProtocols
+                    when: reason != ""
+                - bind: alpn, reason
+                  eval: offered(g.identity.ServerConfig().NextProtos, alpnHTTP1)
+                  to: offered
+                - opt:
+                    do:
+                      - return: g.protocolsErr(reason)
+                        to: g.protocolsErr
+                    when: reason != ""
+                - set: g.httpProtos.alpn
+                  value: alpn
+                - return: nil
+  - of: (*StreamGroup).codecProtocols
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).codecProtocols
+        kind: self
+      - id: checkProtocols
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: "!g.kinds.has(corenet.OptionProtocols)"
+      - opt:
+          do:
+            - return: reason
+          init:
+            bind: reason
+            eval: checkProtocols(g.protos, true)
+            to: checkProtocols
+          when: reason != ""
+      - opt:
+          do:
+            - return: protoH2
+          when: slices.Contains(g.protos, protoH2)
+      - return: "\"\""
+  - of: (*StreamGroup).tlsErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).tlsErr
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corenet.LoopTLSUnsupported, errs.WrapParams{},
+          		errs.String("group", g.name), errs.String("option", option))
+        to: errs
+  - of: (*StreamGroup).loopLayers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).loopLayers
+        kind: self
+      - id: tls
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: lns
+          when: "!g.tlsCodec()"
+      - bind: out
+        eval: make([]stdnet.Listener, len(lns))
+      - loop:
+          do:
+            - set: out[i]
+              to: tls
+              value: tls.NewListener(ln, tlsFloor(g.codecTLS()))
+          key: i
+          range: lns
+          value: ln
+      - return: out
+  - of: (*StreamGroup).loopBackend
+    steps:
+      - opt:
+          do:
+            - return: corenet.LoopBackendPortable
+          when: g.tlsCodec()
+      - return: g.loop.Backend
+  - of: tlsCodecHonours
+    steps:
+      - return: k == corenet.OptionTLS || k == corenet.OptionHandshakeTimeout || k == corenet.OptionProtocols
+  - of: (*StreamGroup).codecTLS
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).codecTLS
+        kind: self
+      - id: g.identity.ServerConfig
+        kind: value
+    steps:
+      - bind: cfg
+        eval: g.identity.ServerConfig()
+        to: g.identity.ServerConfig
+      - set: cfg.NextProtos
+        value: g.httpProtos.alpn
+      - return: cfg
+  - of: tlsFloor
+    steps:
+      - opt:
+          do:
+            - set: cfg.MinVersion
+              value: tls.VersionTLS12
+          when: cfg.MinVersion < tls.VersionTLS12
+      - return: cfg
+  - of: (*StreamGroup).handshakeBound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).handshakeBound
+        kind: self
+      - id: g.timeouts.Handshake.Duration
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: d
+          init:
+            bind: d
+            eval: g.timeouts.Handshake.Duration()
+            to: g.timeouts.Handshake.Duration
+          when: d > 0
+      - return: defaultHandshakeTimeout
+  - of: handshake
+    participants:
+      - id: caller
+        kind: actor
+      - id: handshake
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: tc.HandshakeContext
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: tc, ok
+        eval: c.(*tls.Conn)
+      - opt:
+          do:
+            - return: "true"
+          when: "!ok"
+      - bind: ctx, cancel
+        eval: context.WithTimeout(context.Background(), d)
+        to: context
+      - defer: cancel()
+      - opt:
+          do:
+            - eval: swallowErr(c.Close())
+              to: swallowErr
+            - return: "false"
+          init:
+            bind: err
+            eval: tc.HandshakeContext(ctx)
+            to: tc.HandshakeContext
+          when: err != nil
+      - return: "true"
   - of: newMultiReader
     participants:
       - id: caller
@@ -9650,6 +9987,8 @@ sequences:
         kind: value
       - id: slices
         kind: stdlib
+      - id: tlsFloor
+        kind: internal
     steps:
       - opt:
           do:
@@ -9664,7 +10003,8 @@ sequences:
               to: slices
               value: slices.Clone(g.httpProtos.alpn)
           when: g.httpAdapter != nil
-      - return: cfg
+      - return: tlsFloor(cfg)
+        to: tlsFloor
   - of: http2Config
     steps:
       - return: |-

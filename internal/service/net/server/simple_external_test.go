@@ -7,6 +7,7 @@ package server_test
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"io"
 	stdnet "net"
 	"net/http"
@@ -110,6 +111,31 @@ func TestSimpleHTTP(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// TestSimpleHTTP_tls pins an HTTP1Handler given TLS through HTTP: served by
+// the codec on the portable backend, HTTP/1.1 negotiated (ADR 0198).
+func TestSimpleHTTP_tls(t *testing.T) {
+	t.Parallel()
+	srv := server.New()
+	srv.HTTP("127.0.0.1:0", corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+		res.Body = []byte("h1-tls")
+	}), server.TLS(selfSignedIdentity(t)))
+	addr := startSimple(t, srv)
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"h2", "http/1.1"}}} //nolint:gosec // a self-signed test server
+	t.Cleanup(tr.CloseIdleConnections)
+	resp, err := (&http.Client{Transport: tr, Timeout: 5 * time.Second}).Get("https://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "h1-tls" || resp.TLS.NegotiatedProtocol != "http/1.1" {
+		t.Fatalf("%q over %q", body, resp.TLS.NegotiatedProtocol)
+	}
+	if st := srv.State(); len(st.Loops) != 1 || st.Loops[0].Backend != corenet.LoopBackendPortable {
+		t.Fatalf("loops %+v", st.Loops)
 	}
 }
 

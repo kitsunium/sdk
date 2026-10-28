@@ -37,7 +37,8 @@ type StreamGroup struct {
 	// protos is the Protocols option's list, as given.
 	protos []string
 	// httpProtos is what the group serves, computed at Start from protos and
-	// the identity (protocolsRefusal).
+	// the identity (protocolsRefusal; a TLS codec group's ALPN alone,
+	// tlsCodecRefusal).
 	httpProtos httpProtocols
 	// limiter caps concurrent connections; nil when the group has no ceiling.
 	limiter *connLimiter

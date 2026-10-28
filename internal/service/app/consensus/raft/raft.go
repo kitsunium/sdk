@@ -909,11 +909,19 @@ func (r *Raft) handApply(rd *ReadyValue, hi uint64) {
 
 // evictable is the last entry whose payload Ready may drop: a durable one,
 // committed for a node with a table, whose engine effects are applied and
-// which apply reads back from the store once it reaches it; applied for a
-// node with none, whose install replays the effects of the entries it holds
-// committed past the snapshot from their payloads (#416).
+// which apply reads back from the store once it reaches it; none past the
+// base for a node with none, whose install, at the base or past it,
+// replays the effects of the entries it holds committed past the snapshot
+// from their payloads (#416). Its applied index bounds nothing: the start
+// takes a DurableStateMachine's, past the persisted commit since #707, and
+// the first Ready dropped the payloads through it, which the install of
+// the leader's older snapshot then found gone, the engine state of those
+// entries forgotten for good (#720).
 func (r *Raft) evictable() uint64 {
-	if r.mutated(mutEvictAppliedOnly) || (r.cfg.NoTable && !r.mutated(mutNoTableEvictsCommitted)) {
+	switch {
+	case r.cfg.NoTable && !r.mutated(mutNoTableEvictsCommitted):
+		return r.log.snapIndex
+	case r.mutated(mutEvictAppliedOnly):
 		return min(r.log.applied, r.log.stable)
 	}
 	return min(r.log.committed, r.log.stable)

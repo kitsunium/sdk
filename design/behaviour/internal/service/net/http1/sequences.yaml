@@ -647,6 +647,9 @@ sequences:
         to: st.flushReady
       - set: st.items, st.out, st.served
         value: st.items[:0], st.out[:0], 0
+  - of: (*LoopHandler).Unwrap
+    steps:
+      - return: a.h
   - of: (*LoopHandler).OnStart
     participants:
       - id: caller

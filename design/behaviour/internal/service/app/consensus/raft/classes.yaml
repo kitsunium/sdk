@@ -490,6 +490,7 @@ files:
       - (*Raft).nextConf
       - (*Raft).addLearner
       - (*Raft).promote
+      - (*Raft).admittedAt
       - (*Raft).removeMember
       - (*Raft).removalStrands
       - (*Raft).neverVoter
@@ -1728,6 +1729,14 @@ types:
           handleHeartbeatResp acknowledges every round up to the one answered,
           recording the contract generation the peer applied, follows a silent
           peer's report, and refills a window that a lost append left stalled.
+
+          A probing peer behind the log is probed again even when the leader has
+          nothing past its next to append: the probe of a learner sent as its
+          admission committed reaches a joiner whose transport does not admit the
+          leader yet, and is dropped. Resent only with entries, it waited for the
+          next write, and in a quiet cluster the learner was never fed, so its
+          promotion, which waits for it to hold its admission, was refused for as
+          long as nothing was written (#722).
         name: handleHeartbeatResp
         params: pr *progress, m core.MessageValue
         recv: r *Raft
@@ -1918,12 +1927,24 @@ types:
         recv: r *Raft
         results: errs.Code
       - doc: |-
-          promote makes the learner at idx a voter, only once it caught up and was
-          heard recently, and only if the new voter set still answers by a majority.
+          promote makes the learner at idx a voter, only once it caught up, holds
+          the configuration that admitted it and was heard recently, and only if
+          the new voter set still answers by a majority.
         name: promote
         params: cur *core.MembershipValue, target core.NodeID, idx int
         recv: r *Raft
         results: errs.Code
+      - doc: |-
+          admittedAt is the index of the configuration that admitted id, as this
+          leader knows it: the first appended one that lists it, or the snapshot
+          base's when the base already does, the admission compacted at or below
+          it. An ID is never reused, so the first configuration that lists it is
+          its admission. The latest one, which the caller found id in, is the
+          last resort.
+        name: admittedAt
+        params: id core.NodeID
+        recv: r *Raft
+        results: uint64
       - doc: |-
           removeMember removes the member at idx, never this leader, and retires
           its id, and from protocol 3 its key; a voter's removal may not cross
@@ -2565,9 +2586,14 @@ types:
       - doc: |-
           evictable is the last entry whose payload Ready may drop: a durable one,
           committed for a node with a table, whose engine effects are applied and
-          which apply reads back from the store once it reaches it; applied for a
-          node with none, whose install replays the effects of the entries it holds
-          committed past the snapshot from their payloads (#416).
+          which apply reads back from the store once it reaches it; none past the
+          base for a node with none, whose install, at the base or past it,
+          replays the effects of the entries it holds committed past the snapshot
+          from their payloads (#416). Its applied index bounds nothing: the start
+          takes a DurableStateMachine's, past the persisted commit since #707, and
+          the first Ready dropped the payloads through it, which the install of
+          the leader's older snapshot then found gone, the engine state of those
+          entries forgotten for good (#720).
         name: evictable
         recv: r *Raft
         results: uint64
