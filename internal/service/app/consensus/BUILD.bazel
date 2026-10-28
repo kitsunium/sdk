@@ -106,6 +106,7 @@ go_test(
         "durable_term_internal_test.go",
         "durablecut_internal_test.go",
         "election_internal_test.go",
+        "emptysilence_internal_test.go",
         "failclosed_internal_test.go",
         "failclosed_unix_internal_test.go",
         "fetchframe_internal_test.go",

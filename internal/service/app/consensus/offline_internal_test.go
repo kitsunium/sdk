@@ -663,15 +663,25 @@ func silenceByDamage(t *testing.T, c *cluster, victim *diskNode) {
 		t.Fatal(err)
 	}
 	// Flip a payload byte of the second record: synced data, a complete
-	// batch, valid records after it.
+	// batch, valid records after it. In a log that fits one segment that
+	// record is the founding entry, whose loss leaves no configuration, an
+	// exit refused since #723: the record after it is damaged instead.
 	r0, ok := parseRecord(b)
 	if !ok {
 		t.Fatal("setup: the segment's first record does not parse")
 	}
-	if _, ok := parseRecord(b[r0.length:]); !ok {
+	at := r0.length
+	r1, ok := parseRecord(b[at:])
+	if !ok {
 		t.Fatal("setup: no complete second record to damage")
 	}
-	b[r0.length+recHeader+recFixed] ^= 0xff
+	if r1.kind == recEntry && r1.index == 1 {
+		at += r1.length
+		if r2, ok := parseRecord(b[at:]); !ok || len(r2.data) == 0 {
+			t.Fatal("setup: no complete record after the founding entry to damage")
+		}
+	}
+	b[at+recHeader+recFixed] ^= 0xff
 	if err := os.WriteFile(last, b, 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -5487,6 +5487,42 @@ missed the move was never fed either.
   at, and `TestTheVoterThatMissedTheLeadersNewAddressCatchesUp`, over TCP,
   to the scenario.
 
+## Amendment — a truncation that leaves no configuration is refused (2026-10-28, #723)
+
+#718's question goes to the members of the node's configuration. A founder
+whose log is damaged at its founding entry before any snapshot was cut —
+the first bytes of the first segment, in the youth of a quiet cluster,
+since the first cut comes after 16 384 entries or 64 MiB by default — took
+`TruncateAndStaySilent`, and the truncation dropped every entry. It
+started silent with no configuration at all: a learner of nothing, whose
+question went to no member and whose admission set was empty, so its
+transport refused the leader that still lists it as a voter. It never
+ended its silence nor voted again, the leader reported a failure tolerance
+of 0, and one more failure left no leader until an operator wiped it
+([#723](https://github.com/kitsunium/sdk/issues/723)).
+
+- **The exit is refused while the operator is at the console.**
+  `TruncateAndStaySilent` on a member's directory is refused
+  `RECOVER_REFUSED` before anything is written, the directory still
+  quarantined, when neither a snapshot nor a configuration entry before the
+  damage names the members, and the reason names `WipeAndRejoin`, the exit
+  that stays open. A truncation that keeps the founding entry, or runs over
+  a snapshot, is taken as before. A directory that is not yet a member's
+  needs no configuration: a joining one joins again (#632).
+- **What it leaves.** A directory that an earlier release already
+  truncated this way starts as before: silent with no member, and stranded
+  over TCP. Refusing that start, as #526 refuses a node with no table and
+  nothing naming its members, is a refusal the product sees, and is left
+  to a decision.
+- No frame, payload or record format changes, and no raft mutation.
+  `TestTheTruncationThatLeavesNoConfigurationIsRefused` holds the refusal
+  and the unchanged directory, and
+  `TestTheTruncationOverASnapshotKeepsItsConfiguration` and
+  `TestTheSilentFounderWithItsConfigurationRejoins` the exits still taken.
+  Two suites whose victim's log fitted one segment truncated at the
+  founding entry and rejoined only because the memory double admitted
+  every sender (`silenceByDamage`); they now damage the record after it.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5514,6 +5550,7 @@ missed the move was never fed either.
 | #720 | Raft hunt loop, 2026-10-27 | a node with no table evicts no payload past its base until its install, whatever its applied index, so the install of a snapshot below a `DurableStateMachine`'s still replays the engine entries past it; no format change, no raft mutation (amendment of 2026-10-27, #720) |
 | #722 | Raft hunt loop, 2026-10-27 | `Promote` waits for the learner's acknowledgement of the configuration that admitted it, so a joiner whose stamp still refuses every vote is never made a voter, and a probing peer behind the log is probed again at its heartbeat answer with nothing to append, so a quiet cluster feeds the learner whose probe was lost; #695's claim that it could not be promoted corrected; no format change, no raft mutation (amendment of 2026-10-27, #722) |
 | #724 | Raft hunt loop, 2026-10-28 | a follower or a learner that hears its leader but whose transport cannot reach it asks its members for the leader's record, and dials that leader at the committed address the record gives, under the key it already pins, until its own configuration catches up; no format change, no raft mutation (amendment of 2026-10-28, #724) |
+| #723 | Raft hunt loop, 2026-10-28 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when neither a snapshot nor a configuration entry before the damage would remain; `WipeAndRejoin` is the exit; no format change (amendment of 2026-10-28, #723) |
 
 ## raft-sql-poc (owner's prior Raft)
 

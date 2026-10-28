@@ -434,6 +434,16 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   silence while that leader led. Raft's question of #639 is asked by every
   node `promotable` excludes (#718,
   `TestTheSilentFounderRejoinsALeaderAdmittedWhileItWasDown`).
+- Take `TruncateAndStaySilent` on a member's directory when the truncated
+  log and the snapshots would name no member: a founder damaged at its
+  founding entry before any cut started silent over an empty
+  configuration, asked no member, admitted none, and stayed silent for
+  good under a leader that still lists it. `truncateAndStaySilent` refuses
+  it `RECOVER_REFUSED` naming `WipeAndRejoin` before anything is written
+  (`truncationKeepsMembers`, #723,
+  `TestTheTruncationThatLeavesNoConfigurationIsRefused`). Nor damage the
+  founding entry to silence a victim in a test: the memory double admits
+  every sender, and such a victim rejoined only there (`silenceByDamage`).
 - Refuse a JOIN on a held slot when the member holding it is the requester
   itself — id, incarnation, slot and key all equal: a joiner restarted
   before anything reached its log admits the members only from a JOIN

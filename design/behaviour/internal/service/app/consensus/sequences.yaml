@@ -16040,6 +16040,10 @@ sequences:
         kind: internal
       - id: filepath
         kind: stdlib
+      - id: d.truncationKeepsMembers
+        kind: internal
+      - id: recoverRefused
+        kind: internal
       - id: logMaxTerm
         kind: internal
       - id: persistedSilenceTerm
@@ -16067,6 +16071,18 @@ sequences:
       - bind: logDir
         eval: filepath.Join(d.d.dir, "log")
         to: filepath
+      - bind: keeps, err
+        eval: d.truncationKeepsMembers(logDir, segN, off)
+        to: d.truncationKeepsMembers
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: "recoverRefused(\"the truncation leaves no configuration: the node would admit and ask no member; clear the quarantine with WipeAndRejoin\")"
+              to: recoverRefused
+          when: "!keeps"
       - bind: maxTerm, err
         eval: logMaxTerm(logDir)
         to: logMaxTerm
@@ -16268,6 +16284,96 @@ sequences:
           range: segs
           value: path
       - return: maxTerm, nil
+  - of: DataDir.truncationKeepsMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.truncationKeepsMembers
+        kind: self
+      - id: d.d.snaps.List
+        kind: internal
+      - id: logSegments
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: true, nil
+          when: d.d.log.stamp.State != coreconsensus.StampMember
+      - bind: metas, err
+        eval: d.d.snaps.List()
+        to: d.d.snaps.List
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - opt:
+          do:
+            - return: true, nil
+          when: slices.ContainsFunc(metas, func(m coreconsensus.SnapshotMetaValue) bool { return len(m.Membership.Members) > 0 })
+      - bind: segs, err
+        eval: logSegments(logDir)
+        to: logSegments
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: n > segN || (n == segN && off <= 0)
+            - bind: b, err
+              eval: os.ReadFile(segs[n])
+              to: os
+            - opt:
+                do:
+                  - return: false, storageFailed("read segment", err)
+                when: err != nil
+            - opt:
+                do:
+                  - set: b
+                    value: b[:min(int64(len(b)), off)]
+                when: n == segN
+            - opt:
+                do:
+                  - return: true, nil
+                when: holdsConfiguration(b)
+          key: _
+          range: slices.Sorted(maps.Keys(segs))
+          value: "n"
+      - return: false, nil
+  - of: holdsConfiguration
+    participants:
+      - id: caller
+        kind: actor
+      - id: holdsConfiguration
+        kind: self
+      - id: parseRecord
+        kind: internal
+    steps:
+      - loop:
+          cond: o+recHeader+recFixed <= len(b)
+          do:
+            - bind: r, ok
+              eval: parseRecord(b[o:])
+              to: parseRecord
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - return: "true"
+                when: r.kind == recEntry && r.ekind == uint8(coreconsensus.EntryMembership)
+            - op: +=
+              set: o
+              value: r.length - recAlign
+          init: o := 0
+          post: o += recAlign
+      - return: "false"
   - of: truncateAtDamage
     participants:
       - id: caller
