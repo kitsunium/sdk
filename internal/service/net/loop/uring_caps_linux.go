@@ -188,7 +188,7 @@ func (ul *uLoop) rewindSelfTest(probed *uring) bool {
 	tick := kernelTimespec{nsec: int64(tickEvery)}
 	//: until both came back, or out of time.
 	for len(seen) < 2 && time.Now().Before(deadline) {
-		probed.wait(&tick)
+		probed.wait(&tick, 1)
 		probed.reap(8, func(c *cqe) { seen = append(seen, c.userData) })
 	}
 	//: in order, each once.
@@ -246,7 +246,9 @@ func layoutFlags(sw capSwitches, found uint32, rewind bool) uint32 {
 }
 
 // reportMinTimeout is class B's MIN_TIMEOUT row: what the features say,
-// never turned on (minWaitUsec stays zero).
+// never turned on (minWaitUsec stays zero). The grouped wait bounds its
+// timeout instead (ADR 0199 §D3): what min_wait_usec does once its window
+// passed empty differs across the kernels that advertise it.
 func (ul *uLoop) reportMinTimeout(features uint32) {
 	status, reason := statusAbsent, "IORING_FEAT_MIN_TIMEOUT not advertised; "+reasonClassB
 	//: advertised.

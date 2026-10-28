@@ -70,7 +70,8 @@ func TestResolve(t *testing.T) {
 
 // TestResolve_loops pins LoopValue.Loops (plan P6, R8): zero is one, a
 // positive count its own, LoopsAuto — a sentinel, never the zero value —
-// GOMAXPROCS read at resolve, and each says where it came from.
+// GOMAXPROCS less one read at resolve, at least one (ADR 0199), and each says
+// where it came from.
 func TestResolve_loops(t *testing.T) {
 	t.Parallel()
 	procs := runtime.GOMAXPROCS(0)
@@ -81,7 +82,7 @@ func TestResolve_loops(t *testing.T) {
 		{0, 1, loopsSingle},
 		{-7, 1, loopsSingle},
 		{3, 3, loopsExplicit},
-		{corenet.LoopsAuto, procs, loopsAuto},
+		{corenet.LoopsAuto, max(procs-1, 1), loopsAuto},
 	} {
 		sz, err := resolve(corenet.LoopValue{Loops: c.loops}, 0, 64)
 		if err != nil {
@@ -89,6 +90,57 @@ func TestResolve_loops(t *testing.T) {
 		}
 		if sz.loops != c.want || sz.loopsSource != c.source {
 			t.Fatalf("Loops %d = %d (%s), want %d (%s)", c.loops, sz.loops, sz.loopsSource, c.want, c.source)
+		}
+	}
+}
+
+// TestResolve_batchWait pins the grouped wait's resolution (ADR 0199): zero
+// is 250 µs and 32 completions, a negative bound turns it off, the bound
+// never passes the tick and the count never passes CQBatch.
+func TestResolve_batchWait(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name    string
+		v       corenet.LoopValue
+		wait    time.Duration
+		waitMin int
+	}{
+		{"defaults", corenet.LoopValue{}, defaultBatchWait, defaultBatchWaitMin},
+		{"explicit", corenet.LoopValue{BatchWait: corenet.DurationValue(time.Millisecond), BatchWaitMin: 64}, time.Millisecond, 64},
+		{"off", corenet.LoopValue{BatchWait: -1}, 0, 0},
+		{"past the tick", corenet.LoopValue{BatchWait: corenet.DurationValue(time.Second)}, tickEvery, defaultBatchWaitMin},
+		{"past CQBatch", corenet.LoopValue{CQBatch: 16, BatchWaitMin: 100}, defaultBatchWait, 16},
+		{"negative count", corenet.LoopValue{BatchWaitMin: -3}, defaultBatchWait, defaultBatchWaitMin},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			sz, err := resolve(c.v, 0, 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sz.batchWait != c.wait || sz.batchWaitMin != c.waitMin {
+				t.Fatalf("batch wait %v / %d, want %v / %d", sz.batchWait, sz.batchWaitMin, c.wait, c.waitMin)
+			}
+		})
+	}
+}
+
+// TestYieldFor pins when a loop yields (ADR 0199): only while GOMAXPROCS
+// leaves a P over the group's loops, every yieldEvery at most.
+func TestYieldFor(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		procs, loops int
+		want         time.Duration
+	}{
+		{1, 1, 0},
+		{2, 2, 0},
+		{2, 3, 0},
+		{2, 1, yieldEvery},
+		{8, 7, yieldEvery},
+	} {
+		if got := yieldFor(c.procs, c.loops); got != c.want {
+			t.Fatalf("yieldFor(%d, %d) = %v, want %v", c.procs, c.loops, got, c.want)
 		}
 	}
 }

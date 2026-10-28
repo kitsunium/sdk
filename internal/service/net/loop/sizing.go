@@ -2,6 +2,7 @@ package loop
 
 import (
 	"runtime"
+	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -31,10 +32,23 @@ const (
 	// loopsExplicit is a positive LoopValue.Loops; the three loopsX values
 	// are where Loops came from, as State reports it.
 	loopsExplicit string = "explicit"
-	// loopsAuto is LoopsAuto: GOMAXPROCS read at Start.
+	// loopsAuto is LoopsAuto: GOMAXPROCS less one read at Start.
 	loopsAuto string = "auto"
 	// loopsSingle is a zero LoopValue.Loops: one loop (R8).
 	loopsSingle string = "single"
+	// defaultBatchWait is LoopValue.BatchWait's default: the most the
+	// grouped io_uring wait adds to a request's latency (ADR 0199).
+	defaultBatchWait time.Duration = 250 * time.Microsecond
+	// defaultBatchWaitMin is LoopValue.BatchWaitMin's default.
+	defaultBatchWaitMin int = 32
+	// batchWaitFrom is the fewest completions a batch must have reaped for
+	// the next wait to be grouped: below it the loop is not loaded, and
+	// waiting would only add latency.
+	batchWaitFrom uint64 = 4
+	// yieldEvery is the most serving time between two yields of a native
+	// loop to the Go scheduler, when GOMAXPROCS leaves it a spare P (ADR
+	// 0199). Measured: 2 ms and 5 ms cost the same.
+	yieldEvery time.Duration = 5 * time.Millisecond
 )
 
 // sizing is a loop group's resolved configuration: every zero of the
@@ -60,6 +74,13 @@ type sizing struct {
 	maxConns int
 	// rlimit is the effective RLIMIT_NOFILE soft limit.
 	rlimit uint64
+	// batchWait bounds io_uring's grouped wait, zero when it is off;
+	// batchWaitMin is the completions it waits for.
+	batchWait    time.Duration
+	batchWaitMin int
+	// yield is the most serving time between two yields to the scheduler,
+	// zero for none: Start sets it (yieldFor), once GOMAXPROCS is read.
+	yield time.Duration
 }
 
 // resolve applies the defaults and the one ring formula of ADR 0186 §D5 to v,
@@ -83,6 +104,7 @@ func resolve(v corenet.LoopValue, maxConns int, rlimit uint64) (sizing, error) {
 		rlimit:    rlimit,
 		tableSize: int(table),
 	}
+	sz.batchWait, sz.batchWaitMin = batchWaitOf(v, sz.cqBatch)
 	sz.loops, sz.loopsSource = ResolveLoops(v.Loops)
 	sz.rings, sz.ringsSource = ringCount(v.Rings, max(sz.maxConns, sz.softConns), table)
 	//: resolved.
@@ -112,27 +134,57 @@ func ringCount(explicit, target int, table uint64) (int, string) {
 	return int(n), ringsDerived
 }
 
+// batchWaitOf resolves the grouped wait: BatchWait's default, off when
+// negative, never past the tick; BatchWaitMin's default, never past cqBatch,
+// since one batch reaps no more.
+func batchWaitOf(v corenet.LoopValue, cqBatch int) (time.Duration, int) {
+	d := time.Duration(v.BatchWait)
+	//: switched off.
+	if d < 0 {
+		//: the plain wait.
+		return 0, 0
+	}
+	//: the default.
+	if d == 0 {
+		d = defaultBatchWait
+	}
+	//: no longer than the tick, no more than one batch reaps.
+	return min(d, tickEvery), min(orDefault(v.BatchWaitMin, defaultBatchWaitMin), cqBatch)
+}
+
+// yieldFor is the yield interval of a group of loops in a process of procs
+// Ps: yieldEvery while a P is left over, none otherwise — with every P
+// running a loop, a yield only hands the loop's own P around (ADR 0199).
+func yieldFor(procs, loops int) time.Duration {
+	//: a spare P for what the yield lets run.
+	if procs > loops {
+		//: bounded.
+		return yieldEvery
+	}
+	//: no yield.
+	return 0
+}
+
 // ResolveLoops resolves LoopValue.Loops n and says where the count came from,
-// as LoopStateValue.LoopsSource spells it: LoopsAuto is GOMAXPROCS read now,
-// "auto"; a positive count is its own, "explicit"; anything else is one,
+// as LoopStateValue.LoopsSource spells it: LoopsAuto is GOMAXPROCS less one
+// read now, at least one, "auto" — the P left over runs the rest of the
+// process (ADR 0199); a positive count is its own, "explicit"; anything else is one,
 // "single" (R8). server calls it once per group, at Start, and keeps the
 // snapshot for every backend.
 func ResolveLoops(n int) (int, string) {
-	//: by value.
-	switch {
-	//: one loop a P, read once.
-	case n == corenet.LoopsAuto:
-		//: the snapshot.
-		return max(runtime.GOMAXPROCS(0), 1), loopsAuto
-	//: the consumer's count.
-	case n > 0:
+	//: the consumer's count. The order of the tests keeps the function
+	//: under the inlining budget.
+	if n > 0 {
 		//: as asked.
 		return n, loopsExplicit
-	//: zero is one (R8).
-	default:
+	}
+	//: zero, or anything but the sentinel, is one (R8).
+	if n != corenet.LoopsAuto {
 		//: one.
 		return 1, loopsSingle
 	}
+	//: one loop a P but one, read once.
+	return max(runtime.GOMAXPROCS(0)-1, 1), loopsAuto
 }
 
 // orDefault returns v, or def when v is zero or less.

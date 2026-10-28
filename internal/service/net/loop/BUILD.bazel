@@ -115,6 +115,7 @@ go_test(
         "memory_linux_test.go",
         "parts_internal_test.go",
         "uring_abi_linux_internal_test.go",
+        "uring_wait_linux_test.go",
     ],
     embed = [":loop"],
     gotags = ["loopdebug"],  # keep

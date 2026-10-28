@@ -347,6 +347,7 @@ func (el *epollLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 		lp.h.OnBatchEnd(lp)
 		lp.endBatch(started)
 		el.off = 0
+		lp.yield()
 		//: finished: stopped, or drained to the last connection.
 		if el.stopReq.Load() || (lp.draining && el.r.live == 0 && el.queuesTaken()) {
 			//: out of the loop.
