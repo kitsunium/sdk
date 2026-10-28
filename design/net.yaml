@@ -5392,7 +5392,9 @@ packages:
               drain stops accepting without resetting a connection the kernel already
               completed: every loop cancels its pending accepts — serving one that
               completed as the cancel crossed it —, takes the listen queue until it is
-              empty, and the last loop to do so closes the listener; then each
+              empty or 65536 connections came from one listener — arrivals outpacing the
+              drain, whose rest the close resets —, and the last loop to do so closes
+              the listener; then each
               connection closes once it settled, its output sent, a connection that has
               sent nothing yet once it has or stayed silent for a second. A drain cut
               short returns DrainTimeout.
@@ -5623,7 +5625,8 @@ packages:
           WithDrainGrace sets how long Shutdown keeps accepting and serving once
           readiness has turned false, before it closes any listener: the time a load
           balancer or an orchestrator takes to stop routing to the server. Zero, the
-          default, closes at once. Serve adds it to the drain budget; a caller of
+          default, starts closing at once: a loop group still takes its listen queue
+          before its listener closes. Serve adds it to the drain budget; a caller of
           Shutdown gives it within its ctx.
         in:
           - name: d
@@ -5991,9 +5994,10 @@ packages:
 
               Readiness turns false first, and the server keeps accepting and serving
               for the grace WithDrainGrace sets, so whoever routes on readiness stops
-              sending before anything closes. Then the listeners close — a loop group
-              takes its listen queue to the end first —, and each connection finishes
-              its work.
+              sending before anything closes; a server already stopped waits no grace.
+              Then the listeners close — a loop group takes its listen queue first, to
+              the end unless arrivals outpace it —, and each connection finishes its
+              work.
             in:
               - name: ctx
                 type: context.Context
@@ -9133,8 +9137,9 @@ packages:
       - func:
           doc: |-
             WithDrainGrace sets how long Shutdown keeps accepting and serving once
-            readiness has turned false, before it closes any listener. Zero closes at
-            once.
+            readiness has turned false, before it closes any listener. Zero starts
+            closing at once: a loop group still takes its listen queue before its
+            listener closes.
           forward: svcserver.WithDrainGrace
           in:
             - name: d

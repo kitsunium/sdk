@@ -24,7 +24,8 @@ func WithDrainTimeout(d time.Duration) Option {
 // WithDrainGrace sets how long Shutdown keeps accepting and serving once
 // readiness has turned false, before it closes any listener: the time a load
 // balancer or an orchestrator takes to stop routing to the server. Zero, the
-// default, closes at once. Serve adds it to the drain budget; a caller of
+// default, starts closing at once: a loop group still takes its listen queue
+// before its listener closes. Serve adds it to the drain budget; a caller of
 // Shutdown gives it within its ctx.
 func WithDrainGrace(d time.Duration) Option {
 	//: the option is applied by the constructor, in declaration order.

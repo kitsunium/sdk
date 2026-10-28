@@ -583,21 +583,27 @@ func (s *Server) Serve(ctx context.Context) error {
 //
 // Readiness turns false first, and the server keeps accepting and serving
 // for the grace WithDrainGrace sets, so whoever routes on readiness stops
-// sending before anything closes. Then the listeners close — a loop group
-// takes its listen queue to the end first —, and each connection finishes
-// its work.
+// sending before anything closes; a server already stopped waits no grace.
+// Then the listeners close — a loop group takes its listen queue first, to
+// the end unless arrivals outpace it —, and each connection finishes its
+// work.
 func (s *Server) Shutdown(ctx context.Context) error {
 	//: shutting down a server that never started is a no-op, not an error.
 	if corenet.Phase(s.phase.Load()) == corenet.PhaseNew {
 		//: never started, so there is nothing to drain.
 		return nil
 	}
+	//: a server already stopped serves nothing: a second Shutdown owes no
+	//: grace to whoever routes on its readiness.
+	stopped := corenet.Phase(s.phase.Load()) == corenet.PhaseStopped
 	s.phase.Store(uint32(corenet.PhaseDraining))
 	//: a drain stops every ring on purpose: no stall is watched from here.
 	s.stopStallWatch()
 	//: readiness is false from here on; whoever routes on it gets the grace
 	//: to stop sending while every listener still accepts and serves.
-	s.waitGrace(ctx)
+	if !stopped {
+		s.waitGrace(ctx)
+	}
 	//: closing the stream listeners is what ends the accept loops; first, so
 	//: the datagram handover below never keeps them accepting.
 	s.closeStreamListeners()

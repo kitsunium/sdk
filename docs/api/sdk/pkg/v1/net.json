@@ -3119,7 +3119,7 @@
       "name": "WithDrainGrace",
       "spelled": "func(d time.Duration) Option",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/pkg/v1/net/server.Option",
-      "doc": "WithDrainGrace sets how long Shutdown keeps accepting and serving once\nreadiness has turned false, before it closes any listener. Zero closes at\nonce.\n",
+      "doc": "WithDrainGrace sets how long Shutdown keeps accepting and serving once\nreadiness has turned false, before it closes any listener. Zero starts\nclosing at once: a loop group still takes its listen queue before its\nlistener closes.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

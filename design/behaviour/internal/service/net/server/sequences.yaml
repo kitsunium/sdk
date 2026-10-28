@@ -2616,12 +2616,17 @@ sequences:
           do:
             - return: nil
           when: corenet.Phase(s.phase.Load()) == corenet.PhaseNew
+      - bind: stopped
+        eval: corenet.Phase(s.phase.Load()) == corenet.PhaseStopped
       - eval: s.phase.Store(uint32(corenet.PhaseDraining))
         to: s.phase.Store
       - eval: s.stopStallWatch()
         to: s.stopStallWatch
-      - eval: s.waitGrace(ctx)
-        to: s.waitGrace
+      - opt:
+          do:
+            - eval: s.waitGrace(ctx)
+              to: s.waitGrace
+          when: "!stopped"
       - eval: s.closeStreamListeners()
         to: s.closeStreamListeners
       - eval: s.handoverPackets(ctx)

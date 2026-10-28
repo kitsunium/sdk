@@ -195,7 +195,9 @@ func Start(cfg Config) (*Group, error) {
 // drain stops accepting without resetting a connection the kernel already
 // completed: every loop cancels its pending accepts — serving one that
 // completed as the cancel crossed it —, takes the listen queue until it is
-// empty, and the last loop to do so closes the listener; then each
+// empty or 65536 connections came from one listener — arrivals outpacing the
+// drain, whose rest the close resets —, and the last loop to do so closes
+// the listener; then each
 // connection closes once it settled, its output sent, a connection that has
 // sent nothing yet once it has or stayed silent for a second. A drain cut
 // short returns DrainTimeout.

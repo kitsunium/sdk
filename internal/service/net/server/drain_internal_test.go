@@ -244,6 +244,29 @@ func TestDrain_graceBoundedByCtx(t *testing.T) {
 	}
 }
 
+// TestDrain_stoppedOwesNoGrace pins that a second Shutdown, the server
+// already stopped, returns without waiting the grace: nothing serves any more.
+func TestDrain_stoppedOwesNoGrace(t *testing.T) {
+	srv := New(WithDrainGrace(50 * time.Millisecond))
+	t.Cleanup(func() { swallowErr(srv.Close()) })
+	srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Loop(corenet.LoopValue{Backend: corenet.LoopBackendPortable})).HandleLoop(&laneEchoH{})
+	if err := srv.Start(t.Context()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := srv.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	began := time.Now()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("second Shutdown: %v", err)
+	}
+	if took := time.Since(began); took >= 50*time.Millisecond {
+		t.Fatalf("second Shutdown took %v: it waited the grace", took)
+	}
+}
+
 // laneEchoH echoes each newline-terminated line at once. It keeps nothing per
 // connection: a LoopConnRef names a connection within its lane only, and
 // LoopsAuto runs several, so a map keyed by references across lanes — as
