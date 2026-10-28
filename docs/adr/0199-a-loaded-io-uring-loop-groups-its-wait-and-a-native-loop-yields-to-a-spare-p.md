@@ -51,8 +51,10 @@ completions in the CQ returns zero (`io_cqring_wait`, io_uring/io_uring.c,
 A batch that reaped fewer than four, a draining loop and `BatchWait < 0` wait
 as before: one completion or the tick.
 
-The default bound is the latency a request may gain, and stays well under the
-benchmark's p99 (0.8–1.0 ms); 32 completions is a batch the loop serves in
+The bound is what one grouped wait may add, not a request's latency: a
+request whose bytes arrive over several batches, or a send that completes in
+a later one, may meet a grouped wait at each, so it gains a multiple of the
+bound. The default stays well under the benchmark's p99 (0.8–1.0 ms); 32 completions is a batch the loop serves in
 less than that at the measured cost. The C server's 4 ms bound would gather
 more, and cost more latency than a default should. Nothing is probed for it:
 `EXT_ARG` is a stage of the probe already, so an io_uring loop always has it,
@@ -97,7 +99,8 @@ stays class B, reported `available` and never on.
 ## Consequences
 
 - A loaded io_uring loop wakes once per up to 32 completions instead of once
-  per one or two, for at most 250 µs more latency per request.
+  per one or two; each grouped wait adds at most 250 µs, and a request that
+  spans several batches may meet one at each.
 - A group on `LoopsAuto` runs one loop fewer on a machine of two Ps or more.
   On a box where the loops were the whole workload this lowers the loop
   count; the spare P was measured as the cheaper process at one vCPU, and

@@ -2375,8 +2375,9 @@ type LoopValue struct {
 	Outbound     int           `json:"outbound"`
 	// BatchWait bounds how long an io_uring loop holds its wait for
 	// BatchWaitMin completions once its previous batch reaped at least four,
-	// so a loaded loop serves larger batches for fewer wakeups (ADR 0199): the
-	// latency it adds to a request is at most BatchWait. Zero selects 250 µs,
+	// so a loaded loop serves larger batches for fewer wakeups (ADR 0199). It
+	// bounds each grouped wait, not a request's latency: a request read over
+	// several batches may meet one at each. Zero selects 250 µs,
 	// a negative value turns the grouped wait off, and anything past the 10 ms
 	// tick is the tick. epoll and the portable backend ignore it.
 	BatchWait    DurationValue `json:"batch_wait"`
