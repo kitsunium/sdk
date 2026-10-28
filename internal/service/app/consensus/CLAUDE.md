@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-28T18:00:00Z -->
+<!-- updated: 2026-10-28T20:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -311,7 +311,14 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 - Leave the term of the last entry out of `Inspect`: the survivor of a
   `Recover` is the highest `(LastTerm, Last)`, and a longer log or a higher
   vote term chose one whose tail no majority held (#534,
-  `TestInspectReportsTheTermOfTheLastEntry`).
+  `TestInspectReportsTheTermOfTheLastEntry`). Nor report the log's tail
+  when an interrupted install's snapshot lies inside the log under another
+  term: the start and `Recover` drop that tail, and the rule chose a
+  survivor whose stale tail was as long. `keptLast` reports the snapshot
+  `interruptedInstall` finishes, read only when the newest one lies where
+  an interrupted install leaves it (`unfinishedInstall`): forgejo
+  inspects at every start (#746,
+  `TestInspectRanksAnInterruptedInstallInsideTheLogByItsSnapshot`).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit
   lags the cluster's, and the entries past it may be writes the old cluster
   acknowledged. `adoptedEnd` keeps every entry whose `BodySum` and

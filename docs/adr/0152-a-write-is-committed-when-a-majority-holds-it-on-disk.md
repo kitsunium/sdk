@@ -5667,6 +5667,49 @@ configuration, #723's outcome
   because the memory double admits every sender. It damages the first
   record past that batch.
 
+## Amendment — `Inspect` ranks an interrupted install inside the log by its snapshot (2026-10-28, #746)
+
+#506 and #534 had `Inspect` report the snapshot an interrupted install
+published when it lies past the log's end, or at the log's last index under
+another term. The start (`finishInstall`) and `Recover`
+(`interruptedInstall`) apply a wider rule: a published snapshot at or past
+the log's first index that the log does not continue, past its end or
+under another term than the log's at its index, is an install a crash
+interrupted, and the whole log is replaced by its base. A survivor whose
+install was cut that way inside its log — an uncommitted tail of an older
+term past the snapshot's index, the power cut during `Restore` — was
+reported by that tail: an index it no longer holds once started, and the
+term of entries no majority held. The runbook's rule, the highest
+`(LastTerm, Last)`, then chose another survivor whose stale tail was as
+long or longer, and `Recover` there lost the acknowledged writes this one
+held ([#746](https://github.com/kitsunium/sdk/issues/746)).
+
+- **`Last` and `LastTerm` are what the start and `Recover` keep.** When the
+  newest snapshot lies where only an interrupted install leaves one
+  (`unfinishedInstall`, the rule `interruptedInstall` now shares),
+  `Inspect` asks `interruptedInstall` for the snapshot `Recover` finishes,
+  the newest that verifies, and reports its index and term; otherwise the
+  log's last index and its term. A newest snapshot past the log that fails
+  its checksums, which `Recover` skips, no longer counts either. One of a
+  version this build does not read, at that place, refuses the report
+  `VERSION_UNSUPPORTED`, as it refuses `Recover` and the start (#640). A
+  newest snapshot below the log, or that the log continues, is not read:
+  forgejo inspects its directory at every start.
+- **What it leaves.** `First` stays the log's first index on disk, so
+  `First..Last` is not the log's range for such a directory. The start may
+  still fall back past a snapshot that verifies but does not restore into
+  the machine; `Inspect` restores nothing, and reports what `Recover` keeps,
+  the operation the key chooses a survivor for. A start after an install a
+  crash interrupted reads that snapshot once more at each `Inspect` a
+  consumer runs first, as forgejo's start does.
+- No frame, payload or record format changes, nothing is written, and no
+  raft mutation.
+  `TestInspectRanksAnInterruptedInstallInsideTheLogByItsSnapshot` (three
+  voters on disk, a real install interrupted after its publication, the
+  survivor the rule picks recovered with every acknowledged write the
+  snapshot holds) and the cases of `TestInspectReportsTheTermOfASnapshotAtLast`,
+  which now publish snapshots that verify, hold it.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5699,6 +5742,7 @@ configuration, #723's outcome
 | #744 | Raft hunt loop, 2026-10-28 | the byte trigger counts the payload a durable machine's start resumes past, and a cut that published nothing gives back the count it took; no format change, nothing persisted (amendment of 2026-10-28, #744) |
 | #742 | Raft hunt loop, 2026-10-28 | a joiner's transport keeps, of a member its JOIN answer and its replayed configuration both list, the record of the newer set, ranked by the answer's `AddLearner` position and `ReadyValue.MembershipAt`; no format change, no raft mutation (amendment of 2026-10-28, #742) |
 | #745 | Raft hunt loop, 2026-10-28 | `TruncateAndStaySilent`'s refusal judges the truncated log batch by batch, as the reopen keeps it: a configuration entry in the batch the damage tears no longer lets the exit through; no format change, no raft mutation (amendment of 2026-10-28, #745) |
+| #746 | Raft hunt loop, 2026-10-28 | `Inspect` reports as `Last` and `LastTerm` the snapshot of an install interrupted inside the log under another term, the one the start and `Recover` keep, and counts only one that verifies; no format change, nothing written, no raft mutation (amendment of 2026-10-28, #746) |
 
 ## raft-sql-poc (owner's prior Raft)
 

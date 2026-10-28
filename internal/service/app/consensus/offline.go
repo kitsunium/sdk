@@ -176,9 +176,11 @@ type ReportValue struct {
 	Stamp     coreconsensus.StampValue
 	HardState coreconsensus.HardState
 	First     uint64
-	// Last is the last index the directory holds: the log's, or the
-	// newest snapshot's when an install a crash interrupted published it
-	// past the log's end.
+	// Last is the last index the directory holds once started or
+	// recovered: the log's, or the snapshot's of an install a crash
+	// interrupted, which the start and Recover move the log onto, whether
+	// it lies past the log's end or inside the log under another term (the
+	// log's entries past it are then dropped).
 	Last uint64
 	// LastTerm is the term of the entry at Last, or of the snapshot that
 	// holds Last. With Last it is the key a Recover's survivor is chosen
@@ -216,14 +218,10 @@ func Inspect(d DataDir) (ReportValue, error) {
 	if r.Snapshots, err = d.d.snaps.List(); err != nil {
 		return ReportValue{}, err
 	}
-	if l.refuse == nil && len(r.Snapshots) > 0 {
-		// An install a crash interrupted published its snapshot past the
-		// log's end: the directory holds the state through that index, and
-		// an operator comparing survivors must see it (#506).
-		r.Last = max(r.Last, r.Snapshots[0].Position.Index)
-	}
 	if l.refuse == nil {
-		r.LastTerm = lastTermOf(l, &r)
+		if r.Last, r.LastTerm, err = d.keptLast(r.Snapshots); err != nil {
+			return ReportValue{}, err
+		}
 	}
 	if r.Markers, err = stopMarkers(d.d.dir); err != nil {
 		return ReportValue{}, err
@@ -231,23 +229,44 @@ func Inspect(d DataDir) (ReportValue, error) {
 	return r, nil
 }
 
-// lastTermOf is the term of the entry at r.Last: the newest snapshot's when
-// it ends at r.Last, else the log's. It is the half of the survivor's key
-// Inspect did not report: two survivors may show the same Last and the same
+// keptLast is the survivor's key of the directory, its last index and the
+// term there, as the start (finishInstall) and Recover (interruptedInstall)
+// keep them. The term is the half of the key Inspect did not report at
+// first: two survivors may show the same last index and the same
 // HardState.Term, the term of a vote, and only the term of their last
 // entries tells which one holds the writes a majority committed (D17,
-// #534). A snapshot at r.Last wins over the log's entry there: an install a
-// crash interrupted published it past the log, or at the log's last index
-// under another term, and the start, or Recover, moves the log onto it
-// (#506). A log with no entry and no snapshot reports 0.
-func lastTermOf(l *fileLog, r *ReportValue) uint64 {
-	if len(r.Snapshots) > 0 && r.Snapshots[0].Position.Index == r.Last {
-		return r.Snapshots[0].Position.Term
+// #534).
+//
+// An install a crash interrupted after its snapshot was published holds
+// the state through that snapshot, and the start and Recover move the log
+// onto it: past the log's end (#506), or inside the log under another
+// term, the log's entries past it dropped. Reported by the log's tail, such
+// a survivor ranked by entries it no longer holds once started, the rule
+// chose another survivor whose stale tail was as long, and Recover there
+// lost the acknowledged writes this one held (#746). The snapshot is the
+// one Recover finishes, the newest that verifies: a newest one that fails
+// its checksums counts no more than it does there, and one of a version
+// this build does not read refuses the report, as it refuses Recover and
+// the start (#640). A newest snapshot below the log's first index, or that
+// matches the log's term at its index, is no interrupted install's whatever
+// its checksums, and is not read: forgejo inspects its directory at every
+// start. A log with no entry and no snapshot reports 0.
+func (d DataDir) keptLast(metas []coreconsensus.SnapshotMetaValue) (last, term uint64, err error) {
+	l := d.d.log
+	if len(metas) > 0 && unfinishedInstall(l, &metas[0]) {
+		m, interrupted, ierr := d.interruptedInstall()
+		switch {
+		case ierr != nil:
+			return 0, 0, ierr
+		case interrupted:
+			return m.Position.Index, m.Position.Term, nil
+		}
 	}
-	if t, err := l.Term(r.Last); err == nil {
-		return t
+	_, last = l.Bounds()
+	if t, terr := l.Term(last); terr == nil {
+		term = t
 	}
-	return 0
+	return last, term, nil
 }
 
 // readQuarantineMarker is the quarantine marker of dir, trimmed, or "" when
@@ -554,7 +573,6 @@ func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, er
 	if err != nil {
 		return coreconsensus.SnapshotMetaValue{}, false, err
 	}
-	flog := d.d.log
 	for _, m := range metas {
 		if verr := d.verifySnapshotFile(m); verr != nil {
 			if errs.HasCode(verr, coreconsensus.CodeVersionUnsupported) {
@@ -562,19 +580,27 @@ func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, er
 			}
 			continue // a start falls back past it too (D7)
 		}
-		first, last := flog.Bounds()
-		idx := m.Position.Index
-		if idx < first {
-			return m, false, nil
-		}
-		if idx <= last {
-			if t, terr := flog.Term(idx); terr == nil && t == m.Position.Term {
-				return m, false, nil
-			}
-		}
-		return m, true, nil
+		return m, unfinishedInstall(d.d.log, &m), nil
 	}
 	return coreconsensus.SnapshotMetaValue{}, false, nil
+}
+
+// unfinishedInstall reports whether the published snapshot m is one an
+// install a crash interrupted left over l, the rule finishInstall applies
+// at a start: it lies at or past the log's first index, and past the log's
+// end or under another term than the log's at its index. It reads no
+// snapshot.
+func unfinishedInstall(l *fileLog, m *coreconsensus.SnapshotMetaValue) bool {
+	first, last := l.Bounds()
+	idx := m.Position.Index
+	switch {
+	case idx < first:
+		return false
+	case idx <= last:
+		t, err := l.Term(idx)
+		return err != nil || t != m.Position.Term
+	}
+	return true
 }
 
 // finishInterruptedInstall moves the log onto the snapshot of an

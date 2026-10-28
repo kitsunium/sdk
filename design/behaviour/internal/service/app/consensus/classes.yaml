@@ -1398,7 +1398,7 @@ files:
       - Redraw
       - ReportValue
       - Inspect
-      - lastTermOf
+      - DataDir.keptLast
       - readQuarantineMarker
       - stopMarkers
       - QuarantineExit
@@ -1416,6 +1416,7 @@ files:
       - ReceiptMessage
       - Recover
       - DataDir.interruptedInstall
+      - unfinishedInstall
       - DataDir.finishInterruptedInstall
       - DataDir.verifySnapshotFile
       - recoverIntent
@@ -2687,19 +2688,6 @@ functions:
     params: d DataDir
     results: ReportValue, error
   - doc: |-
-      lastTermOf is the term of the entry at r.Last: the newest snapshot's when
-      it ends at r.Last, else the log's. It is the half of the survivor's key
-      Inspect did not report: two survivors may show the same Last and the same
-      HardState.Term, the term of a vote, and only the term of their last
-      entries tells which one holds the writes a majority committed (D17,
-      #534). A snapshot at r.Last wins over the log's entry there: an install a
-      crash interrupted published it past the log, or at the log's last index
-      under another term, and the start, or Recover, moves the log onto it
-      (#506). A log with no entry and no snapshot reports 0.
-    name: lastTermOf
-    params: l *fileLog, r *ReportValue
-    results: uint64
-  - doc: |-
       readQuarantineMarker is the quarantine marker of dir, trimmed, or "" when
       there is none. A marker that could not be read is a STORAGE_FAILED: a
       report must not read as a directory with no quarantine.
@@ -2735,6 +2723,15 @@ functions:
   - name: Recover
     params: d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions
     results: error
+  - doc: |-
+      unfinishedInstall reports whether the published snapshot m is one an
+      install a crash interrupted left over l, the rule finishInstall applies
+      at a start: it lies at or past the log's first index, and past the log's
+      end or under another term than the log's at its index. It reads no
+      snapshot.
+    name: unfinishedInstall
+    params: l *fileLog, m *coreconsensus.SnapshotMetaValue
+    results: bool
   - doc: |-
       recoverAuditLine is Recover's audit line: the index kept, the persisted
       commit, and how many entries past that commit the new history adopts. A
@@ -3782,6 +3779,33 @@ types:
         params: op coreconsensus.Operator, what string
         recv: d DataDir
         results: err error
+      - doc: |-
+          keptLast is the survivor's key of the directory, its last index and the
+          term there, as the start (finishInstall) and Recover (interruptedInstall)
+          keep them. The term is the half of the key Inspect did not report at
+          first: two survivors may show the same last index and the same
+          HardState.Term, the term of a vote, and only the term of their last
+          entries tells which one holds the writes a majority committed (D17,
+          #534).
+
+          An install a crash interrupted after its snapshot was published holds
+          the state through that snapshot, and the start and Recover move the log
+          onto it: past the log's end (#506), or inside the log under another
+          term, the log's entries past it dropped. Reported by the log's tail, such
+          a survivor ranked by entries it no longer holds once started, the rule
+          chose another survivor whose stale tail was as long, and Recover there
+          lost the acknowledged writes this one held (#746). The snapshot is the
+          one Recover finishes, the newest that verifies: a newest one that fails
+          its checksums counts no more than it does there, and one of a version
+          this build does not read refuses the report, as it refuses Recover and
+          the start (#640). A newest snapshot below the log's first index, or that
+          matches the log's term at its index, is no interrupted install's whatever
+          its checksums, and is not read: forgejo inspects its directory at every
+          start. A log with no entry and no snapshot reports 0.
+        name: keptLast
+        params: metas []coreconsensus.SnapshotMetaValue
+        recv: d DataDir
+        results: last, term uint64, err error
       - doc: |-
           wipeAndRejoin is the WipeAndRejoin exit, in an order a crash at any step
           leaves safe (#690): audited first; then STOP-WIPE, durable before
@@ -8506,9 +8530,11 @@ types:
       - name: First
         type: uint64
       - doc: |-
-          Last is the last index the directory holds: the log's, or the
-          newest snapshot's when an install a crash interrupted published it
-          past the log's end.
+          Last is the last index the directory holds once started or
+          recovered: the log's, or the snapshot's of an install a crash
+          interrupted, which the start and Recover move the log onto, whether
+          it lies past the log's end or inside the log under another term (the
+          log's entries past it are then dropped).
         name: Last
         type: uint64
       - doc: |-

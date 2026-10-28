@@ -3459,9 +3459,11 @@ packages:
             - name: First
               type: uint64
             - doc: |-
-                Last is the last index the directory holds: the log's, or the
-                newest snapshot's when an install a crash interrupted published it
-                past the log's end.
+                Last is the last index the directory holds once started or
+                recovered: the log's, or the snapshot's of an install a crash
+                interrupted, which the start and Recover move the log onto, whether
+                it lies past the log's end or inside the log under another term (the
+                log's entries past it are then dropped).
               name: Last
               type: uint64
             - doc: |-
