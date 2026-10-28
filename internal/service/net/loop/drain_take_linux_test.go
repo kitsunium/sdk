@@ -9,21 +9,39 @@ import (
 
 // TestTakeAfter_outOfDescriptors pins epoll's rule: EMFILE or ENFILE waits for
 // the next batch while the group holds a connection, and ends the take once
-// it holds none — no close would ever free a descriptor.
+// it holds none — no close would ever free a descriptor. The other outcomes
+// do not depend on the group's connections.
 func TestTakeAfter_outOfDescriptors(t *testing.T) {
-	for _, errno := range []syscall.Errno{syscall.EMFILE, syscall.ENFILE} {
-		if got := takeAfter(errno, 1); got != takeLater {
-			t.Errorf("takeAfter(%v, 1) = %d, want takeLater", errno, got)
-		}
-		if got := takeAfter(errno, 0); got != takeOver {
-			t.Errorf("takeAfter(%v, 0) = %d, want takeOver", errno, got)
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// err is accept4's failure.
+		err syscall.Errno
+		// live is the connections the group still holds.
+		live int64
+		// want is the take's outcome.
+		want uint8
+	}
+	tests := []tc{
+		{name: "EMFILE with a connection left waits", err: syscall.EMFILE, live: 1, want: takeLater},
+		{name: "EMFILE with none left ends the take", err: syscall.EMFILE, live: 0, want: takeOver},
+		{name: "ENFILE with a connection left waits", err: syscall.ENFILE, live: 1, want: takeLater},
+		{name: "ENFILE with none left ends the take", err: syscall.ENFILE, live: 0, want: takeOver},
+		{name: "EAGAIN ends the take", err: syscall.EAGAIN, live: 0, want: takeOver},
+		{name: "ECONNABORTED skips one", err: syscall.ECONNABORTED, live: 0, want: takeNext},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: the outcome for this failure and this count.
+		if got := takeAfter(c.err, c.live); got != c.want {
+			t.Errorf("takeAfter(%v, %d) = %d, want %d", c.err, c.live, got, c.want)
 		}
 	}
-	//: the other outcomes do not depend on the group's connections.
-	if got := takeAfter(syscall.EAGAIN, 0); got != takeOver {
-		t.Errorf("takeAfter(EAGAIN, 0) = %d, want takeOver", got)
-	}
-	if got := takeAfter(syscall.ECONNABORTED, 0); got != takeNext {
-		t.Errorf("takeAfter(ECONNABORTED, 0) = %d, want takeNext", got)
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

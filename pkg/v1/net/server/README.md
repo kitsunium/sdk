@@ -1213,7 +1213,7 @@ TLS turns the group's listeners into TLS listeners, or mutual-TLS ones when the 
 func WithDrainGrace(d time.Duration) Option
 ```
 
-WithDrainGrace sets how long Shutdown keeps accepting and serving once readiness has turned false, before it closes any listener. Zero starts closing at once: a loop group still takes its listen queue before its listener closes.
+WithDrainGrace sets how long Shutdown keeps accepting and serving once readiness has turned false, before it closes any listener. Zero starts closing at once: a loop group still takes its listen queue before its listener closes, where it owns that listener — not on the portable backend outside Unix, as on Windows, nor behind TLS, whose queue meets the close. Serve adds the grace to the drain budget; a caller of Shutdown gives it within its ctx, which bounds the grace and the drain together: a grace that uses up ctx leaves the drain none.
 
 <a name="WithDrainTimeout"></a>
 ## func [WithDrainTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)

@@ -11,21 +11,38 @@ import (
 
 // TestTakeWaits_outOfDescriptors pins io_uring's rule, the same as epoll's: a
 // lack of descriptors keeps the take going only while the group holds a
-// connection.
+// connection. The other outcomes do not depend on the group's connections.
 func TestTakeWaits_outOfDescriptors(t *testing.T) {
-	for _, errno := range []syscall.Errno{syscall.EMFILE, syscall.ENFILE} {
-		if !takeWaits(-int32(errno), 1) {
-			t.Errorf("takeWaits(-%v, 1) = false, want true", errno)
-		}
-		if takeWaits(-int32(errno), 0) {
-			t.Errorf("takeWaits(-%v, 0) = true, want false", errno)
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// errno is the accept's failure, its completion's result negated.
+		errno syscall.Errno
+		// live is the connections the group still holds.
+		live int64
+		// want is whether the take goes on.
+		want bool
+	}
+	tests := []tc{
+		{name: "EMFILE with a connection left waits", errno: syscall.EMFILE, live: 1, want: true},
+		{name: "EMFILE with none left ends the take", errno: syscall.EMFILE, live: 0, want: false},
+		{name: "ENFILE with a connection left waits", errno: syscall.ENFILE, live: 1, want: true},
+		{name: "ENFILE with none left ends the take", errno: syscall.ENFILE, live: 0, want: false},
+		{name: "its own cancel waits", errno: syscall.ECANCELED, live: 0, want: true},
+		{name: "a broken listener ends the take", errno: syscall.EBADF, live: 1, want: false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: whether the take goes on after this failure.
+		if got := takeWaits(-int32(c.errno), c.live); got != c.want {
+			t.Errorf("takeWaits(-%v, %d) = %v, want %v", c.errno, c.live, got, c.want)
 		}
 	}
-	//: the other outcomes do not depend on the group's connections.
-	if !takeWaits(-int32(syscall.ECANCELED), 0) {
-		t.Error("takeWaits(-ECANCELED, 0) = false, want true")
-	}
-	if takeWaits(-int32(syscall.EBADF), 1) {
-		t.Error("takeWaits(-EBADF, 1) = true, want false")
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

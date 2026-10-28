@@ -9164,7 +9164,11 @@ packages:
             WithDrainGrace sets how long Shutdown keeps accepting and serving once
             readiness has turned false, before it closes any listener. Zero starts
             closing at once: a loop group still takes its listen queue before its
-            listener closes.
+            listener closes, where it owns that listener — not on the portable
+            backend outside Unix, as on Windows, nor behind TLS, whose queue meets
+            the close. Serve adds the grace to the drain budget; a caller of
+            Shutdown gives it within its ctx, which bounds the grace and the drain
+            together: a grace that uses up ctx leaves the drain none.
           forward: svcserver.WithDrainGrace
           in:
             - name: d
