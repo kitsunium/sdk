@@ -156,6 +156,9 @@ type portableLoop struct {
 	conns []*portableConn
 	free  []int32
 	live  atomic.Int64
+	// negotiating counts the TLS handshakes still running for the lane: the
+	// drainer closeAll starts outlives them, so none hands over unseen.
+	negotiating atomic.Int64
 
 	draining bool
 	done     chan struct{}
@@ -280,6 +283,7 @@ func (g *portableGroup) dispatch(c stdnet.Conn) {
 	pl.live.Add(1)
 	//: TLS: negotiated off the acceptor, before the lane sees it.
 	if g.handshake > 0 {
+		pl.negotiating.Add(1)
 		go pl.negotiate(c, g.handshake)
 		//: handed over.
 		return
@@ -294,6 +298,7 @@ func (g *portableGroup) dispatch(c stdnet.Conn) {
 // acceptLoop; it returns once the handshake ends and the connection is handed
 // over, or the lane has stopped, which closes the connection instead.
 func (pl *portableLoop) negotiate(c stdnet.Conn, d time.Duration) {
+	defer pl.negotiating.Add(-1)
 	//: given up: the lane never counted it.
 	if !handshake(c, d) {
 		pl.live.Add(-1)
@@ -776,7 +781,9 @@ func (pl *portableLoop) compactListed() {
 // closeAll closes every connection as the backend stops.
 //
 // Goroutine lifecycle: it launches one drainer that takes the last events a
-// reader may still send, and returns after one second with none.
+// reader or a handshake may still send — closing the connections they hand
+// over, which no lane will open — and returns after one second with none and
+// no handshake still running, the buffer emptied.
 func (pl *portableLoop) closeAll() {
 	//: each open one.
 	for slot, pc := range pl.conns {
@@ -798,16 +805,50 @@ func (pl *portableLoop) closeAll() {
 		quiet := time.NewTimer(time.Second)
 		defer quiet.Stop()
 		//: a reader still sending its last event finds nobody; drained here,
-		//: until a second passes with none.
+		//: until a second passes with none and no handshake still running —
+		//: one that completes hands its connection over to this loop alone.
 		for {
 			select {
-			case <-pl.events:
+			case ev := <-pl.events:
+				pl.discard(&ev)
 				quiet.Reset(time.Second)
 			case <-quiet.C:
+				//: a handshake still running may yet hand one over.
+				if pl.negotiating.Load() > 0 {
+					quiet.Reset(time.Second)
+					continue
+				}
+				//: nobody left to send: what the last ones left, then out.
+				pl.discardBuffered()
 				return
 			}
 		}
 	}()
+}
+
+// discard drops an event that reached a stopped lane: a connection handed
+// over and never opened is closed, and uncounted, as negotiate's own stopped
+// branch does; any other event is about a connection closeAll finished.
+func (pl *portableLoop) discard(ev *portableEvent) {
+	//: never registered: closeAll could not have closed it.
+	if ev.kind == pevOpen {
+		pl.live.Add(-1)
+		swallowErr(ev.conn.Close())
+	}
+}
+
+// discardBuffered discards, without waiting, the events still buffered.
+func (pl *portableLoop) discardBuffered() {
+	//: until the buffer is empty.
+	for {
+		select {
+		case ev := <-pl.events:
+			pl.discard(&ev)
+		default:
+			//: empty.
+			return
+		}
+	}
 }
 
 // drainPosts runs the posted operations.

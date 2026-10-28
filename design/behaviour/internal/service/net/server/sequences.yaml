@@ -4476,6 +4476,8 @@ sequences:
         kind: self
       - id: pl.live.Add
         kind: value
+      - id: pl.negotiating.Add
+        kind: value
       - id: pl.negotiate
         kind: internal
     steps:
@@ -4485,6 +4487,8 @@ sequences:
         to: pl.live.Add
       - opt:
           do:
+            - eval: pl.negotiating.Add(1)
+              to: pl.negotiating.Add
             - go: pl.negotiate(c, g.handshake)
               to: pl.negotiate
             - return: ""
@@ -4498,11 +4502,15 @@ sequences:
         kind: actor
       - id: (*portableLoop).negotiate
         kind: self
+      - id: pl.negotiating.Add
+        kind: value
       - id: pl.live.Add
         kind: value
       - id: swallowErr
         kind: internal
     steps:
+      - defer: pl.negotiating.Add(-1)
+        to: pl.negotiating.Add
       - opt:
           do:
             - eval: pl.live.Add(-1)
@@ -5281,16 +5289,64 @@ sequences:
           		quiet := time.NewTimer(time.Second)
           		defer quiet.Stop()
           		//: a reader still sending its last event finds nobody; drained here,
-          		//: until a second passes with none.
+          		//: until a second passes with none and no handshake still running —
+          		//: one that completes hands its connection over to this loop alone.
           		for {
           			select {
-          			case <-pl.events:
+          			case ev := <-pl.events:
+          				pl.discard(&ev)
           				quiet.Reset(time.Second)
           			case <-quiet.C:
+          				//: a handshake still running may yet hand one over.
+          				if pl.negotiating.Load() > 0 {
+          					quiet.Reset(time.Second)
+          					continue
+          				}
+          				//: nobody left to send: what the last ones left, then out.
+          				pl.discardBuffered()
           				return
           			}
           		}
           	}()
+  - of: (*portableLoop).discard
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableLoop).discard
+        kind: self
+      - id: pl.live.Add
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: pl.live.Add(-1)
+              to: pl.live.Add
+            - eval: swallowErr(ev.conn.Close())
+              to: swallowErr
+          when: ev.kind == pevOpen
+  - of: (*portableLoop).discardBuffered
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableLoop).discardBuffered
+        kind: self
+      - id: pl.discard
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: ev := <-pl.events
+                    do:
+                      - eval: pl.discard(&ev)
+                        to: pl.discard
+                  - default: true
+                    do:
+                      - return: ""
+          forever: true
   - of: (*portableLoop).drainPosts
     participants:
       - id: caller
