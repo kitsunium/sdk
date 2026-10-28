@@ -3,14 +3,18 @@ package consensus
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/fs/flock"
 )
 
 // The byte trigger of D7 (#515) counts the payload applied since the last
@@ -67,6 +71,14 @@ func (s *dbNode) config() Config {
 func (s *dbNode) openDir(t *testing.T) {
 	t.Helper()
 	d, err := NewDataDirWith(s.dir, DataDirOptions{SegmentBytes: dbSeg, RuntimeDir: s.run})
+	//: no flock(2), no data directory (illumos, Solaris): the refusal is
+	//: asserted, then the case skips, as openDir's do.
+	if !flock.Native {
+		if !errors.Is(err, coreproc.UnsupportedPlatform) {
+			t.Fatalf("NewDataDirWith on %s = %v, want UNSUPPORTED_PLATFORM", runtime.GOOS, err)
+		}
+		t.Skipf("%s has no flock(2), so a data directory is refused there (ADR 0144)", runtime.GOOS)
+	}
 	if err != nil {
 		t.Fatalf("open %s: %v", s.dir, err)
 	}

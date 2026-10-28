@@ -3,12 +3,16 @@ package consensus
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/fs/flock"
 )
 
 // After a restart the step function's base is the newest snapshot that
@@ -55,6 +59,14 @@ func (s *rcNode) config() Config {
 func (s *rcNode) openDir(t *testing.T) {
 	t.Helper()
 	d, err := NewDataDirWith(s.dn.dir, DataDirOptions{SegmentBytes: rcSeg, RuntimeDir: s.run})
+	//: no flock(2), no data directory (illumos, Solaris): the refusal is
+	//: asserted, then the case skips, as openDir's do.
+	if !flock.Native {
+		if !errors.Is(err, coreproc.UnsupportedPlatform) {
+			t.Fatalf("NewDataDirWith on %s = %v, want UNSUPPORTED_PLATFORM", runtime.GOOS, err)
+		}
+		t.Skipf("%s has no flock(2), so a data directory is refused there (ADR 0144)", runtime.GOOS)
+	}
 	if err != nil {
 		t.Fatalf("open %s: %v", s.dn.dir, err)
 	}
