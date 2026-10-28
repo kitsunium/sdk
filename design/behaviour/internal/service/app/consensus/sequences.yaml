@@ -16388,19 +16388,94 @@ sequences:
                 do:
                   - return: false, storageFailed("read segment", err)
                 when: err != nil
+            - bind: end
+              eval: int64(len(b))
             - opt:
                 do:
-                  - set: b
-                    value: b[:min(int64(len(b)), off)]
+                  - set: end
+                    value: "off"
                 when: n == segN
             - opt:
                 do:
                   - return: true, nil
-                when: holdsConfiguration(b)
+                when: holdsConfiguration(b[:reopenKeeps(b, end)])
           key: _
           range: slices.Sorted(maps.Keys(segs))
           value: "n"
       - return: false, nil
+  - of: reopenKeeps
+    participants:
+      - id: caller
+        kind: actor
+      - id: reopenKeeps
+        kind: self
+      - id: parseRecord
+        kind: internal
+      - id: scanRecOf
+        kind: internal
+      - id: classifyTail
+        kind: internal
+    steps:
+      - set: b
+        value: b[:min(int64(len(b)), max(end, 0))]
+      - var:
+          name: head
+          type: scanRec
+      - var:
+          name: batch
+          type: "[]scanRec"
+      - var:
+          name: "off"
+          type: int64
+      - loop:
+          cond: off < int64(len(b))
+          do:
+            - bind: r, ok
+              eval: parseRecord(b[off:])
+              to: parseRecord
+            - opt:
+                do:
+                  - break: true
+                when: "!ok"
+            - bind: s
+              eval: scanRecOf(&r, off)
+              to: scanRecOf
+            - switch:
+                cases:
+                  - case: read == 0
+                    do:
+                      - set: head
+                        value: s
+                  - case: batch[0].batch != s.batch
+                    do:
+                      - set: batch
+                        value: batch[:0]
+            - set: batch
+              value: append(batch, s)
+            - op: +=
+              set: "off"
+              value: int64(r.length)
+            - opt:
+                do:
+                  - return: "off"
+                when: r.kind == recSeal
+          init: read := 0
+          post: read++
+      - opt:
+          do:
+            - return: "0"
+          when: len(batch) == 0
+      - bind: recs
+        eval: batch
+      - opt:
+          do:
+            - set: recs
+              value: append([]scanRec{head}, batch...)
+          when: batch[0].off != head.off
+      - bind: trim, _
+        eval: classifyTail(b, recs, off)
+        to: classifyTail
+      - return: max(trim, 0)
   - of: holdsConfiguration
     participants:
       - id: caller

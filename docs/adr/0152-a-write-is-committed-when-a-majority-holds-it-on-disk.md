@@ -5634,6 +5634,39 @@ keep admitted a key a later `DenyPin` had withdrawn.
   joiner dials the moved member at its answer's address and is fed once it
   leads) and, in `raft/`, `TestTheAdmissionSetSaysWhatItIsAsOf` hold it.
 
+## Amendment — a truncation is judged batch by batch, as the reopen keeps it (2026-10-28, #745)
+
+#723's refusal judged the bytes before the damage record by record: a
+configuration entry anywhere before the damage let `TruncateAndStaySilent`
+through. The reopen after the truncation judges a batch whole (R8-02,
+R9-01): the batch the zeroed tail tears never completed, and it is dropped
+with its records before the damage (`classifyTail`, `tornBatchStart`). The
+founding entry shares its batch with the hard state written with it, and a
+joiner that replays the log from index 1 receives the founding
+configuration and the entries after it in one synced batch, up to
+`MaxBatchBytes`. A damage in that batch, anywhere in roughly the first
+megabyte of a joiner's log, kept the configuration entry in the guard's
+eyes; the reopen dropped it, and the node started silent with no
+configuration, #723's outcome
+([#745](https://github.com/kitsunium/sdk/issues/745)).
+
+- **The guard judges what the reopen keeps.** `truncationKeepsMembers`
+  looks for a configuration entry only in what the reopen will keep of each
+  segment: a segment before the damaged one through its seal, a batch
+  never spanning two segments (R8-04); the damaged one up to the damage,
+  less the batch the damage tears; nothing of a tail the reopen would
+  quarantine again. A truncation that keeps a whole batch holding a
+  configuration entry, or runs over a snapshot, is taken as before.
+- No frame, payload or record format changes, nothing new is persisted,
+  and no raft mutation. `TestATruncationThatTearsTheFoundingBatchIsRefused`
+  and `TestATruncationThatTearsAJoinersFirstBatchIsRefused` hold the
+  refusal and the unchanged directory. `silenceByDamage` silenced the
+  victims of `TestTruncateAndStaySilentRejoins` and
+  `TestRecoverEndsTheSilence` by damaging the founding batch's hard state:
+  those victims too restarted with no configuration, and rejoined only
+  because the memory double admits every sender. It damages the first
+  record past that batch.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5665,6 +5698,7 @@ keep admitted a key a later `DenyPin` had withdrawn.
 | #741 | Raft hunt loop, 2026-10-28 | a cut compacts the store through the older snapshot less the trailing window even at or below the base a restart started the step function on; no format change, no raft mutation (amendment of 2026-10-28, #741) |
 | #744 | Raft hunt loop, 2026-10-28 | the byte trigger counts the payload a durable machine's start resumes past, and a cut that published nothing gives back the count it took; no format change, nothing persisted (amendment of 2026-10-28, #744) |
 | #742 | Raft hunt loop, 2026-10-28 | a joiner's transport keeps, of a member its JOIN answer and its replayed configuration both list, the record of the newer set, ranked by the answer's `AddLearner` position and `ReadyValue.MembershipAt`; no format change, no raft mutation (amendment of 2026-10-28, #742) |
+| #745 | Raft hunt loop, 2026-10-28 | `TruncateAndStaySilent`'s refusal judges the truncated log batch by batch, as the reopen keeps it: a configuration entry in the batch the damage tears no longer lets the exit through; no format change, no raft mutation (amendment of 2026-10-28, #745) |
 
 ## raft-sql-poc (owner's prior Raft)
 

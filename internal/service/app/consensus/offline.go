@@ -1637,9 +1637,17 @@ func logMaxTerm(logDir string) (uint64, error) {
 
 // truncationKeepsMembers reports whether a member's directory still names
 // its members once its log is truncated at (segN, off): a snapshot lists
-// them, or a configuration entry lies before the damage. A directory that
-// is not yet a member's needs none: a joining one joins again (#632). It
-// changes nothing.
+// them, or a configuration entry lies in what the reopen after the
+// truncation keeps. A directory that is not yet a member's needs none: a
+// joining one joins again (#632). It changes nothing.
+//
+// What the reopen keeps is judged as the reopen judges it, batch by batch
+// (reopenKeeps): a configuration entry before the damage, in the batch the
+// damage tears, is dropped with that batch. Judged record by record, the
+// founding entry, which shares its batch with its hard state, and a
+// joiner's first entries, which share the batch of the log it replayed,
+// passed the guard and were dropped anyway, and the node started silent
+// with no configuration (#745).
 func (d DataDir) truncationKeepsMembers(logDir string, segN uint64, off int64) (bool, error) {
 	if d.d.log.stamp.State != coreconsensus.StampMember {
 		return true, nil
@@ -1665,14 +1673,63 @@ func (d DataDir) truncationKeepsMembers(logDir string, segN uint64, off int64) (
 		if err != nil {
 			return false, storageFailed("read segment", err)
 		}
+		end := int64(len(b))
 		if n == segN {
-			b = b[:min(int64(len(b)), off)]
+			end = off
 		}
-		if holdsConfiguration(b) {
+		if holdsConfiguration(b[:reopenKeeps(b, end)]) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// reopenKeeps is how many bytes of segment b the reopen keeps once the
+// truncation zeroed it from end: the records it reads in order, through
+// the seal or up to the first hole, less the batch that hole tears, which
+// never completed and is dropped whole, the records before the damage with
+// it (recover, trimTornTail: classifyTail, tornBatchStart). A batch never
+// spans two segments, a rotation falls between batches (R8-04), so the
+// segments before the damaged one are kept through their seal. It is 0
+// when the reopen keeps none: no record, or a tail the reopen would
+// quarantine again.
+//
+// Of the records read it keeps the segment's first, which tornBatchStart
+// compares with the torn batch's start, and those of the batch the last
+// one belongs to, the only ones classifyTail walks back over: a whole
+// segment's records would hold as much again as the segment's bytes.
+func reopenKeeps(b []byte, end int64) int64 {
+	b = b[:min(int64(len(b)), max(end, 0))]
+	var head scanRec
+	var batch []scanRec
+	var off int64
+	for read := 0; off < int64(len(b)); read++ {
+		r, ok := parseRecord(b[off:])
+		if !ok {
+			break
+		}
+		s := scanRecOf(&r, off)
+		switch {
+		case read == 0:
+			head = s
+		case batch[0].batch != s.batch:
+			batch = batch[:0]
+		}
+		batch = append(batch, s)
+		off += int64(r.length)
+		if r.kind == recSeal {
+			return off
+		}
+	}
+	if len(batch) == 0 {
+		return 0
+	}
+	recs := batch
+	if batch[0].off != head.off {
+		recs = append([]scanRec{head}, batch...)
+	}
+	trim, _ := classifyTail(b, recs, off)
+	return max(trim, 0)
 }
 
 // holdsConfiguration reports whether the segment bytes b hold a readable
