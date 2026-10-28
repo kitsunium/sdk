@@ -25,8 +25,11 @@ func WithDrainTimeout(d time.Duration) Option {
 // readiness has turned false, before it closes any listener: the time a load
 // balancer or an orchestrator takes to stop routing to the server. Zero, the
 // default, starts closing at once: a loop group still takes its listen queue
-// before its listener closes. Serve adds it to the drain budget; a caller of
-// Shutdown gives it within its ctx.
+// before its listener closes, where it owns that listener — not on the
+// portable backend outside Unix, as on Windows, nor behind TLS, whose queue
+// meets the close. Serve adds the grace to the drain budget; a caller of
+// Shutdown gives it within its ctx, which bounds the grace and the drain
+// together: a grace that uses up ctx leaves the drain none.
 func WithDrainGrace(d time.Duration) Option {
 	//: the option is applied by the constructor, in declaration order.
 	return func(s *Server) {

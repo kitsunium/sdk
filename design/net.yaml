@@ -5405,12 +5405,13 @@ packages:
               drain stops accepting without resetting a connection the kernel already
               completed: every loop cancels its pending accepts — serving one that
               completed as the cancel crossed it —, takes the listen queue until it is
-              empty or 65536 connections came from one listener — arrivals outpacing the
-              drain, whose rest the close resets —, and the last loop to do so closes
-              the listener; then each
-              connection closes once it settled, its output sent, a connection that has
-              sent nothing yet once it has or stayed silent for a second. A drain cut
-              short returns DrainTimeout.
+              empty, until 65536 connections came from one listener — arrivals outpacing
+              the drain —, or until descriptors run out with no connection of the group
+              left whose close would free one, the rest of the queue reset by the close
+              then; the last loop to take closes the listener. Then each connection
+              closes once it settled, its output sent, a connection that has sent
+              nothing yet once it has or stayed silent for a second. A drain cut short
+              returns DrainTimeout.
             in:
               - name: ctx
                 type: context.Context
@@ -5643,8 +5644,11 @@ packages:
           readiness has turned false, before it closes any listener: the time a load
           balancer or an orchestrator takes to stop routing to the server. Zero, the
           default, starts closing at once: a loop group still takes its listen queue
-          before its listener closes. Serve adds it to the drain budget; a caller of
-          Shutdown gives it within its ctx.
+          before its listener closes, where it owns that listener — not on the
+          portable backend outside Unix, as on Windows, nor behind TLS, whose queue
+          meets the close. Serve adds the grace to the drain budget; a caller of
+          Shutdown gives it within its ctx, which bounds the grace and the drain
+          together: a grace that uses up ctx leaves the drain none.
         in:
           - name: d
             type: time.Duration
@@ -6013,8 +6017,10 @@ packages:
               for the grace WithDrainGrace sets, so whoever routes on readiness stops
               sending before anything closes; a server already stopped waits no grace.
               Then the listeners close — a loop group takes its listen queue first, to
-              the end unless arrivals outpace it —, and each connection finishes its
-              work.
+              the end unless arrivals outpace it or descriptors run out with no
+              connection left to close, where it owns the listener: not on the portable
+              backend outside Unix, as on Windows, nor behind TLS —, and each connection
+              finishes its work. ctx bounds the grace and the drain together.
             in:
               - name: ctx
                 type: context.Context

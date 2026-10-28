@@ -585,8 +585,10 @@ func (s *Server) Serve(ctx context.Context) error {
 // for the grace WithDrainGrace sets, so whoever routes on readiness stops
 // sending before anything closes; a server already stopped waits no grace.
 // Then the listeners close — a loop group takes its listen queue first, to
-// the end unless arrivals outpace it —, and each connection finishes its
-// work.
+// the end unless arrivals outpace it or descriptors run out with no
+// connection left to close, where it owns the listener: not on the portable
+// backend outside Unix, as on Windows, nor behind TLS —, and each connection
+// finishes its work. ctx bounds the grace and the drain together.
 func (s *Server) Shutdown(ctx context.Context) error {
 	//: shutting down a server that never started is a no-op, not an error.
 	if corenet.Phase(s.phase.Load()) == corenet.PhaseNew {

@@ -65188,7 +65188,7 @@
       "recv": "Group",
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
-      "doc": "Shutdown drains the group, until ctx is done; then it closes the rest. The\ndrain stops accepting without resetting a connection the kernel already\ncompleted: every loop cancels its pending accepts — serving one that\ncompleted as the cancel crossed it —, takes the listen queue until it is\nempty or 65536 connections came from one listener — arrivals outpacing the\ndrain, whose rest the close resets —, and the last loop to do so closes\nthe listener; then each\nconnection closes once it settled, its output sent, a connection that has\nsent nothing yet once it has or stayed silent for a second. A drain cut\nshort returns DrainTimeout.\n",
+      "doc": "Shutdown drains the group, until ctx is done; then it closes the rest. The\ndrain stops accepting without resetting a connection the kernel already\ncompleted: every loop cancels its pending accepts — serving one that\ncompleted as the cancel crossed it —, takes the listen queue until it is\nempty, until 65536 connections came from one listener — arrivals outpacing\nthe drain —, or until descriptors run out with no connection of the group\nleft whose close would free one, the rest of the queue reset by the close\nthen; the last loop to take closes the listener. Then each connection\ncloses once it settled, its output sent, a connection that has sent\nnothing yet once it has or stayed silent for a second. A drain cut short\nreturns DrainTimeout.\n",
       "file": "service/net/loop/group.go",
       "layer": "service",
       "family": "net"
@@ -65762,7 +65762,7 @@
       "recv": "Server",
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
-      "doc": "Shutdown drains the server, severing what remains once ctx expires.\n\nReadiness turns false first, and the server keeps accepting and serving\nfor the grace WithDrainGrace sets, so whoever routes on readiness stops\nsending before anything closes; a server already stopped waits no grace.\nThen the listeners close — a loop group takes its listen queue first, to\nthe end unless arrivals outpace it —, and each connection finishes its\nwork.\n",
+      "doc": "Shutdown drains the server, severing what remains once ctx expires.\n\nReadiness turns false first, and the server keeps accepting and serving\nfor the grace WithDrainGrace sets, so whoever routes on readiness stops\nsending before anything closes; a server already stopped waits no grace.\nThen the listeners close — a loop group takes its listen queue first, to\nthe end unless arrivals outpace it or descriptors run out with no\nconnection left to close, where it owns the listener: not on the portable\nbackend outside Unix, as on Windows, nor behind TLS —, and each connection\nfinishes its work. ctx bounds the grace and the drain together.\n",
       "file": "service/net/server/lifecycle.go",
       "layer": "service",
       "family": "net"
@@ -65953,7 +65953,7 @@
       "name": "WithDrainGrace",
       "spelled": "func(d time.Duration) Option",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/internal/service/net/server.Option",
-      "doc": "WithDrainGrace sets how long Shutdown keeps accepting and serving once\nreadiness has turned false, before it closes any listener: the time a load\nbalancer or an orchestrator takes to stop routing to the server. Zero, the\ndefault, starts closing at once: a loop group still takes its listen queue\nbefore its listener closes. Serve adds it to the drain budget; a caller of\nShutdown gives it within its ctx.\n",
+      "doc": "WithDrainGrace sets how long Shutdown keeps accepting and serving once\nreadiness has turned false, before it closes any listener: the time a load\nbalancer or an orchestrator takes to stop routing to the server. Zero, the\ndefault, starts closing at once: a loop group still takes its listen queue\nbefore its listener closes, where it owns that listener — not on the\nportable backend outside Unix, as on Windows, nor behind TLS, whose queue\nmeets the close. Serve adds the grace to the drain budget; a caller of\nShutdown gives it within its ctx, which bounds the grace and the drain\ntogether: a grace that uses up ctx leaves the drain none.\n",
       "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"

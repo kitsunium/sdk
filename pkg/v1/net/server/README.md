@@ -2828,7 +2828,7 @@ func (*Server) Shutdown(ctx context.Context) error
 
 Shutdown drains the server, severing what remains once ctx expires.
 
-Readiness turns false first, and the server keeps accepting and serving for the grace WithDrainGrace sets, so whoever routes on readiness stops sending before anything closes; a server already stopped waits no grace. Then the listeners close — a loop group takes its listen queue first, to the end unless arrivals outpace it —, and each connection finishes its work.
+Readiness turns false first, and the server keeps accepting and serving for the grace WithDrainGrace sets, so whoever routes on readiness stops sending before anything closes; a server already stopped waits no grace. Then the listeners close — a loop group takes its listen queue first, to the end unless arrivals outpace it or descriptors run out with no connection left to close, where it owns the listener: not on the portable backend outside Unix, as on Windows, nor behind TLS —, and each connection finishes its work. ctx bounds the grace and the drain together.
 
 <a name="Server.Start"></a>
 ### func \(Server\) [Start](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/lifecycle.go>)
