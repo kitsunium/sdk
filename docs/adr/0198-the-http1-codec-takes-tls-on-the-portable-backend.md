@@ -88,8 +88,9 @@ with `LoopOptionUnsupported`: it negotiates nothing.
 A TLS codec group's listener configuration has its `MinVersion` raised to TLS
 1.2 when the identity's is lower, zero — the standard library's default —
 included. The identity already refuses a floor below TLS 1.2 at construction
-and defaults to TLS 1.3; the listener's guarantee no longer rests on that
-alone. The floor is one shared helper (`tlsFloor`), so the goroutine engine's
+and defaults to TLS 1.3, so the floor is defence in depth: it refuses no
+configuration a supported identity could produce, and the listener's
+guarantee no longer rests on the identity alone. The floor is one shared helper (`tlsFloor`), so the goroutine engine's
 TLS listeners (`serverTLS`) are floored the same way: no listener of the
 server negotiates a version RFC 8996 deprecates.
 
@@ -108,9 +109,29 @@ server negotiates a version RFC 8996 deprecates.
   handshake, and a configuration asking TLS 1.0, floored, refuses the TLS 1.1
   client it otherwise accepts.
 
+## Breaking changes
+
+None. D4 accepts a configuration that was refused (`Protocols("http/1.1")` on
+a TLS codec group); every list it refuses was already refused, with
+`LoopOptionUnsupported` before and `ProtocolsRefused` now — a change of code
+the v0 licence covers ([ADR 0040](0040-changing-a-published-shape-while-v0.md)).
+D5 refuses nothing a supported identity can carry: identity construction
+already rejects a `MinVersion` below TLS 1.2.
+
 ## Alternatives considered
 
 - **TLS on a native loop through kTLS.** Excluded by the owner (D-N3).
 - **Serve an `HTTP1Handler` with TLS through net/http.** Rejected: two parsers
   would judge the same request, which is what the canonical target exists to
   prevent.
+
+## Deferred
+
+None.
+
+## References
+
+- [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
+- [ADR 0187](0187-the-handler-type-chooses-the-engine.md)
+- [ADR 0195](0195-an-http-groups-protocols-are-computed-once-and-its-alpn-follows-them.md)
+- [RFC 8996](https://www.rfc-editor.org/rfc/rfc8996) — deprecating TLS 1.0 and TLS 1.1

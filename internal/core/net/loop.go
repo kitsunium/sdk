@@ -86,8 +86,10 @@ const (
 	OptionBatchReplies
 	// OptionProtocols is Protocols. An HTTP group served by net/http honours
 	// it, and so does the http1 codec given TLS when it names "http/1.1"
-	// alone; any other loop group refuses it with LoopOptionUnsupported, and
-	// any other group with ProtocolsRefused.
+	// alone; any other list for that codec is refused with ProtocolsRefused.
+	// Any other loop group — the http1 codec without TLS included — refuses
+	// it with LoopOptionUnsupported unless its handler or a layer honours it
+	// (LoopOptionHonourer), and any other group with ProtocolsRefused.
 	OptionProtocols
 )
 

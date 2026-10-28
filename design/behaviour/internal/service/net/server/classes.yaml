@@ -1976,7 +1976,27 @@ functions:
       the engine closes it at once rather than gracefully.
     name: markRefused
     params: c corenet.Conn
-  - name: Protocols
+  - doc: |-
+      Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —
+      "http/1.1" and "h2" — in the order its TLS listeners prefer them, unless the
+      group's identity names NextProtos: the listeners then offer the identity's
+      entries the list holds, in the identity's order (ADR 0195). Unset, a group
+      with TLS serves both, h2 first, and a group without serves HTTP/1.1. It is
+      judged at Start: an empty list, an empty, repeated or unknown identifier,
+      "h2" without TLS (cleartext HTTP/2 is not served), an identity
+      whose NextProtos names a version the list excludes or none it includes, and
+      any group that does not serve an http.Handler are refused with
+      ProtocolsRefused. A loop group refuses it with LoopOptionUnsupported, but
+      for the http1 codec given TLS, which serves HTTP/1.1 alone: there it is
+      honoured when it names "http/1.1" alone, and any other list is refused
+      with ProtocolsRefused (ADR 0198).
+
+      A request that arrived over HTTP/2 has no http.Hijacker: a handler that
+      hijacks its connection — a WebSocket upgrade written by hand, say — serves
+      HTTP/1.1 clients only, and a TLS group that relies on it for every client
+      says Protocols("http/1.1"), the behaviour it had before HTTP/2 was
+      negotiated by default.
+    name: Protocols
     params: protos ...string
     results: GroupOption
   - doc: checkProtocols returns why protos cannot be served, or "" when it can.
