@@ -137,6 +137,17 @@ func emptySilenceQuarantined(t *testing.T, x *emptySilenceCase) {
 	x.victim.crash(t, c)
 	emptySilenceDamage(t, x.victim, x.damaged)
 	x.victim.dd = silenceOpen(t, x.victim.dir, x.run)
+	// Registered after the victim's TempDir, so it runs before the
+	// directory is removed, which Windows refuses while its LOCK is held: a
+	// victim never started again keeps its directory open, and one started
+	// is crashed by the cleanup above, which closes it.
+	t.Cleanup(func() {
+		if x.victim.node == nil {
+			if err := x.victim.dd.Close(); err != nil {
+				t.Errorf("close the victim's data directory: %v", err)
+			}
+		}
+	})
 	x.victim.sm = newKV()
 	if _, err := NewNode(diskConfig(c, x.victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("damaged log: %v", err)
