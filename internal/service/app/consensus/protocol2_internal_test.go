@@ -159,8 +159,13 @@ func TestAVersion2MetaThatRottedIsNotRestored(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range listed {
-		if m.ID == metas[0].ID {
-			t.Fatalf("the rotted meta %s is listed with chain tip %d", m.ID, m.ChainTip)
+		// Restarted on the snapshot before it, the follower replays its
+		// log to the same commit and may cut again at the same index and
+		// term, under the same id: a fresh meta written from its own state,
+		// over the rotted one (#753). Listed under that id, only the
+		// original's content may stand, never the rotted chain tip.
+		if m.ID == metas[0].ID && m.ChainTip != metas[0].ChainTip {
+			t.Fatalf("the rotted meta %s is listed with chain tip %d (original %d, rotted %d)", m.ID, m.ChainTip, metas[0].ChainTip, rotted.ChainTip)
 		}
 	}
 	if _, last := f.log.Bounds(); last < lastBefore {

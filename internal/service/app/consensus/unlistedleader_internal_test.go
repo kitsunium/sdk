@@ -107,8 +107,13 @@ func TestTheSilentFounderRejoinsALeaderAdmittedWhileItWasDown(t *testing.T) {
 	defer cancel()
 	retryAdmin(t, "promote D", func() error { return leader().Promote(ctx, "op:test", d.id) })
 	retryAdmin(t, "transfer to D", func() error { return leader().TransferLeadership(ctx, "op:test", d.id) })
-	if st := d.node.Status(); st.Role != coreconsensus.RoleLeader {
-		t.Fatalf("setup: D does not lead: %+v", st)
+	// The transfer returns once its caller sees D lead. D sends its first
+	// appends before it publishes its own role at the end of its turn, and
+	// a loaded runner read D a candidate still (#751): D's own view decides.
+	for deadline := time.Now().Add(10 * time.Second); d.node.Status().Role != coreconsensus.RoleLeader; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("setup: D does not lead: %+v", d.node.Status())
+		}
 	}
 
 	// The victim's log is found damaged at its restart: the record before
