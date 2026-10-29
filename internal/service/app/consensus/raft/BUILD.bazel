@@ -69,6 +69,7 @@ go_test(
         "uniquekey_internal_test.go",
         "unlistedleader_internal_test.go",
         "unreachedleader_internal_test.go",
+        "unreachedtail_internal_test.go",
         "updatelimit_internal_test.go",
         "upgrade_internal_test.go",
         "votewindowraise_internal_test.go",

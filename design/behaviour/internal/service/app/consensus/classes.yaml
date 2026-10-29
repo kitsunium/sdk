@@ -729,6 +729,12 @@ constants:
         type: int
         value: 64 << 10
       - doc: |-
+          backReadBytes sizes the buffered reader of an outbound link, which
+          carries frames only from a peer that cannot dial this node (#748).
+        name: backReadBytes
+        type: int
+        value: 4 << 10
+      - doc: |-
           boundedWriteBytes is the most one deadline of a boundedWriter covers:
           a source that writes itself out in one call (io.WriterTo) is still
           cut into writes that each move or fail (#594).
@@ -1642,6 +1648,7 @@ files:
       - (*peerConn).halt
       - (*peerConn).track
       - TCPTransport
+      - backLink
       - outKey
       - (*TransportConfig).validate
       - clampDuration
@@ -1662,6 +1669,13 @@ files:
       - readFrame
       - (*TCPTransport).refusedOversized
       - (*TCPTransport).deliverTo
+      - (*TCPTransport).laneBound
+      - (*TCPTransport).holdBack
+      - (*TCPTransport).dropBack
+      - (*TCPTransport).sendBack
+      - (*backLink).write
+      - (*TCPTransport).notedSentBack
+      - (*TCPTransport).linkPeer
       - (*TCPTransport).dial
       - (*TCPTransport).dialAny
       - (*TCPTransport).dialVerified
@@ -1677,8 +1691,8 @@ files:
       - (*TCPTransport).retire
       - (*TCPTransport).writeBatch
       - (*TCPTransport).redial
-      - connNetter
-      - watchLink
+      - linkConn
+      - (*TCPTransport).watchLink
       - (*TCPTransport).stillAdmitted
       - (*TCPTransport).reportUnreachable
       - (*TCPTransport).Unreachable
@@ -3259,18 +3273,6 @@ functions:
     name: queuedFrame
     params: pc *peerConn
     results: "[]byte, bool"
-  - doc: |-
-      watchLink reads an outbound connection until it ends, then closes its
-      socket. The receiver writes nothing on a member's lane, so a read only
-      returns once the peer closed its end or the sender closed the link: a
-      write into a link the peer closed cleanly (a FIN) succeeded and its
-      batch was lost to the peer's reset, while a closed socket fails the next
-      write, which sendBatch dials again and resends (#553). It is the
-      background goroutine redial launches per connection, counted in wg, and
-      ends when the connection does; TLS's post-handshake messages are read
-      and discarded on the way.
-    name: watchLink
-    params: wg *sync.WaitGroup, c connNetter
   - doc: |-
       admittedUnion is the union of every group's admitted members, one record
       a member: the newest by at, the index each record is as of, the earlier
@@ -8910,6 +8912,12 @@ types:
         type: map[outKey]*peerConn
       - name: in
         type: map[net.Conn][32]byte
+      - doc: |-
+          back is, per member and lane, the newest connection that member
+          dialled to this node on that lane, which carries this node's frames
+          to it when its own link cannot (sendBack, #748).
+        name: back
+        type: map[outKey]*backLink
       - name: raw
         type: map[net.Conn]struct{}
       - name: admission
@@ -8971,8 +8979,15 @@ types:
         type: atomic.Int64
       - doc: |-
           refused counts the frames a member announced above the bound its lane
-          is read under, each of which ended the connection (#683).
+          is read under, each of which ended the connection, or the reading of
+          a link this node dialled (#683, #748).
         name: refused
+        type: atomic.Int64
+      - doc: |-
+          sentBack counts the batches written back on a connection a member
+          dialled, this node's own link to that member having carried none
+          (#748).
+        name: sentBack
         type: atomic.Int64
     kind: struct
     methods:
@@ -9039,17 +9054,19 @@ types:
         recv: t *TCPTransport
       - doc: |-
           serveMember serves a member's lane until its certificate expires, its
-          connection reaches MaxConnectionAge, or it leaves the membership.
+          connection reaches MaxConnectionAge, or it leaves the membership. While
+          it reads a control or a data lane, the connection is that member's back
+          link on the lane (holdBack).
         name: serveMember
         params: conn *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, leaf *x509.Certificate, lane byte
         recv: t *TCPTransport
       - doc: |-
-          readFrames delivers a member's length-prefixed frames, each bound by
-          limit before anything is allocated, and stops at the first malformed
-          frame, read error, or once the peer is no longer a member. One buffer is
-          reused for the connection's life: deliver copies what it keeps.
+          readFrames delivers a member's length-prefixed frames read from r, each
+          bound by limit before anything is allocated, and stops at the first
+          malformed frame, read error, or once the peer is no longer a member. One
+          buffer is reused for the connection's life: deliver copies what it keeps.
         name: readFrames
-        params: c net.Conn, peer coreconsensus.AuthenticatedPeerValue, limit int
+        params: r *bufio.Reader, peer coreconsensus.AuthenticatedPeerValue, limit int
         recv: t *TCPTransport
       - doc: |-
           refusedOversized counts a frame a member announced, at ln bytes after its
@@ -9068,6 +9085,54 @@ types:
         params: spki [32]byte
         recv: t *TCPTransport
         results: func(coreconsensus.AuthenticatedPeerValue, []byte), bool
+      - doc: |-
+          laneBound is the bound a member's frames on lane are read under, on the
+          connection it dialled as on the one this node dialled to it.
+        name: laneBound
+        params: lane byte
+        recv: t *TCPTransport
+        results: int
+      - doc: |-
+          holdBack records c, which the member of key spki dialled on k's lane, as
+          that member's back link on it, the newest one replacing an older one.
+        name: holdBack
+        params: k outKey, c *tls.Conn, spki [32]byte
+        recv: t *TCPTransport
+        results: "*backLink"
+      - doc: |-
+          dropBack forgets bl, its reader having stopped, unless a newer back link
+          replaced it.
+        name: dropBack
+        params: k outKey, bl *backLink
+        recv: t *TCPTransport
+      - doc: |-
+          sendBack writes the batch on the back link of k's peer and lane, if
+          there is one, only while that peer is a member pinned to the very key it
+          authenticated the connection under. A write that fails or misses its
+          deadline closes the connection, whose reader then stops: the member
+          dials again.
+        name: sendBack
+        params: k outKey, batch [][]byte
+        recv: t *TCPTransport
+      - doc: |-
+          notedSentBack counts a batch written back on a member's connection, and
+          logs it at the first and at each power of two after it: this node names
+          that member at an address it cannot dial, until its configuration catches
+          up, and the batches would otherwise log at every heartbeat.
+        name: notedSentBack
+        params: k outKey
+        recv: t *TCPTransport
+      - doc: |-
+          linkPeer is the member a link dialled to to under pin, whose handshake
+          state is cs, speaks for, as serveAuthenticated serves the member's own
+          connection: the key its certificate presented is the pin, the membership
+          lists that key under to, and the certificate names the slot it is listed
+          with (R8-07). ok is false otherwise, and the link's frames are then read
+          and discarded.
+        name: linkPeer
+        params: cs tls.ConnectionState, to coreconsensus.NodeID, pin [32]byte
+        recv: t *TCPTransport
+        results: coreconsensus.AuthenticatedPeerValue, bool
       - doc: |-
           dial opens an outbound connection of one lane: the handshake verifies
           the chain and, when pin is set, the member's key, then the lane byte is
@@ -9121,12 +9186,15 @@ types:
         recv: t *TCPTransport
       - doc: |-
           sendBatch writes one batch on the link, dialling first when there is no
-          connection; a batch with no connection to go to is dropped, and Raft
-          retransmits what matters. A connection that was already open and fails
-          the write is dialled again once and the batch written on the new one: it
-          died while the link was quiet — its peer reset it, or the kernel aborted
-          it under the user timeout (boundUnacknowledged) — and the batch, an
-          election's vote among others, would otherwise wait for Raft's next round.
+          connection; a batch the link cannot carry goes back on the connection the
+          peer dialled to this node on the lane, when there is one (sendBack, #748),
+          and is dropped otherwise: Raft retransmits what matters. A connection
+          that was already open and fails the write is dialled again once and the
+          batch written on the new one: it died while the link was quiet — its peer
+          reset it, or the kernel aborted it under the user timeout
+          (boundUnacknowledged) — and the batch, an election's vote among others,
+          would otherwise wait for Raft's next round. A failed dial or write is
+          reported as before, whether the back link carried the batch or not.
         name: sendBatch
         params: k outKey, link *senderLink, batch [][]byte
         recv: t *TCPTransport
@@ -9158,6 +9226,24 @@ types:
         params: k outKey, link *senderLink
         recv: t *TCPTransport
         results: bool
+      - doc: |-
+          watchLink reads an outbound connection, dialled to k's peer under pin,
+          until it ends, then closes its socket. A read returns once the peer
+          closed its end or the sender closed the link: a write into a link the
+          peer closed cleanly (a FIN) succeeded and its batch was lost to the
+          peer's reset, while a closed socket fails the next write, which
+          sendBatch dials again and resends (#553). What the peer writes on it are
+          its own frames, sent back when its link to this node cannot carry them
+          (sendBack, #748): they are delivered as the frames of the member
+          linkPeer names, under the lane's bound, until the first malformed one or
+          the member's key leaving the admission, and whatever follows them is
+          read and discarded, as everything is when linkPeer names nobody. It is
+          the background goroutine redial launches per connection, counted in
+          t.wg, and ends when the connection does; TLS's post-handshake messages
+          are read on the way.
+        name: watchLink
+        params: c linkConn, k outKey, pin [32]byte
+        recv: t *TCPTransport
       - doc: |-
           stillAdmitted reports whether a link may still carry frames: its peer is
           a member pinned to the key the link was dialled to, and the certificate
@@ -9333,6 +9419,37 @@ types:
         recv: t *TCPTransport
         results: int
     name: TCPTransport
+  - doc: |-
+      backLink is a member's lane as this node reads it, on the connection the
+      member dialled, which carries this node's frames to it when this node's
+      own link to that member cannot (#748).
+    fields:
+      - name: conn
+        type: "*tls.Conn"
+      - doc: spki is the key the member authenticated the connection under.
+        name: spki
+        type: "[32]byte"
+      - doc: |-
+          mu serialises the writes and guards w, set at the first one: a
+          sender halted while a new one starts for the same peer and lane may
+          both hold the link.
+        name: mu
+        type: sync.Mutex
+      - name: w
+        type: "*bufio.Writer"
+    kind: struct
+    methods:
+      - doc: |-
+          write writes the batch on the back link and flushes it, under one write
+          deadline. Bytes left unacknowledged on it for timeout abort it from its
+          first write on, as on an outbound link (boundUnacknowledged): a member
+          that vanished does not leave the link accepting writes into a stream the
+          kernel only retransmits.
+        name: write
+        params: batch [][]byte, timeout time.Duration
+        recv: b *backLink
+        results: error
+    name: backLink
   - fields:
       - name: to
         type: coreconsensus.NodeID
@@ -9369,13 +9486,14 @@ types:
         recv: l *senderLink
     name: senderLink
   - doc: |-
-      connNetter is what watchLink needs of a link's connection: to read it,
-      and its socket to close.
+      linkConn is what watchLink needs of a link's connection: to read it, the
+      state of its handshake, and its socket to close.
     kind: named
-    name: connNetter
+    name: linkConn
     underlying: |-
       interface {
       	io.Reader
+      	ConnectionState() tls.ConnectionState
       	NetConn() net.Conn
       }
   - doc: |-

@@ -1248,7 +1248,9 @@ elections never settled (`01-shared-log-single-writer.md` §7.1). IWFS
 answered by backing elections off up to 30 s. This ADR removes the cause
 instead. Data writes are bounded by a write deadline and a per-peer byte cap.
 A write that misses its deadline closes the data connection and reports the
-peer through `UnreachableReporter` (R2-06).
+peer through `UnreachableReporter` (R2-06). A batch a node's own connection
+to a peer cannot carry, its dial having failed, goes back on the connection
+that peer dialled on the lane (amendment of 2026-10-29, #748).
 The event loop never waits on storage or on a socket (D5b). A test measures
 heartbeat latency while the data pipe is saturated and the disk is slow
 (D15).
@@ -1892,7 +1894,8 @@ implemented in v1:
   The static address map of the configuration is a seed only. A member
   down during the change that cannot reach the moved leader it hears dials
   it at the committed address a member's record gives (amendment of
-  2026-10-28, #724).
+  2026-10-28, #724), and answers any member it cannot dial on the
+  connection that member dialled (amendment of 2026-10-29, #748).
 
 **Learners (R1-16).**
 - `AddLearner` adds a non-voting member that receives the log and snapshots
@@ -5634,6 +5637,104 @@ keep admitted a key a later `DenyPin` had withdrawn.
   joiner dials the moved member at its answer's address and is fed once it
   leads) and, in `raft/`, `TestTheAdmissionSetSaysWhatItIsAsOf` hold it.
 
+## Amendment — a member that cannot dial a peer answers it on the connection the peer dialled (2026-10-29, #748)
+
+#724's remedy needs a third member reachable at the address the stale
+node holds. A voter down while `UpdateAddress` moved every other member —
+D20's migration, one `UpdateAddress` per node, run over the members that
+are up — came back with all their old addresses. It heard the leader on
+the connection the leader dialled, but every frame it sent, its answers
+and #724's question alike, went to a dead address: no record ever came
+back, the leader's probe was never answered, and the voter stayed a live
+voter out of the quorum for as long as the cluster ran, whoever led. One
+more failure left two live voters of three with no leader, and the failed
+voter's return repaired nothing
+([#748](https://github.com/kitsunium/sdk/issues/748)). #724's own case
+with the third failed before the stale member returned was the same:
+nobody could vouch for the address.
+
+- **The connection a peer dialled carries the answer.** A connection
+  carried frames one way, from the node that dialled it (D4). A batch a
+  node's own link to a member cannot carry — its dial failed, or is
+  backing off after one, or the write failed — now goes back on the
+  newest connection that member dialled to the node on that lane, while
+  the member is pinned to the very key it authenticated that connection
+  under. The member reads its outbound links for frames and delivers
+  them as the frames of the member its own configuration lists under the
+  pinned key and the certificate's slot, under the lane's bound, as it
+  reads an inbound connection's (R8-07, #683); a link that names nobody
+  is read and discarded, as before. The stale voter's answers reach the
+  leader, which backs off, sends the entries that carry the new addresses,
+  and the voter's own links dial them once its configuration catches up.
+  A deposed moved leader's PreVote and vote reach the stale voter the same
+  way, and their grants come back: two live voters elect a leader with
+  the third down.
+- **Nothing is learned from it.** No address, no key and no admission:
+  the connection is mutually authenticated under the keys both
+  configurations pin, the dial is still tried first under its pin, and its
+  failure is still reported (`UnreachableReporter`), so a leader still
+  moves an unreachable follower to probe. A back link written to takes the
+  bound on unacknowledged bytes an outbound link has, and a write that
+  fails or misses its deadline closes it. The transport logs the first
+  batch sent back, and each power of two after it.
+- **Compatibility.** No frame, payload or record format changes, and no
+  protocol raise: the frames are those the node would have sent on its own
+  link. A dialer of an earlier release reads its links and discards what
+  they carry (#553): the stale node stays behind there, as before. A node
+  of an earlier release never writes back. A release older than #553,
+  which read nothing on its links, would leave a stale node's answers in
+  its receive buffer until that connection is closed and dialled again.
+- **What it leaves.** A back link exists on a lane only once the member
+  dialled it: a leader dials every member it replicates to on both lanes,
+  and a candidate on the control lane, but a follower sends another
+  follower nothing but #724's question, which still goes to the address the
+  node holds, and #724's record path stays as it was. A move made in the
+  reverse order, the member restarted at its new address before the
+  `UpdateAddress` commits, is not covered: the leader's appends to it wait
+  for a data-lane frame from it. No raft mutation is added (the type is
+  full):
+  `TestTheVoterDownWhileEveryOtherVoterMovedCatchesUp` and
+  `TestTheMovedVoterAndTheStaleVoterElectALeaderWhileTheThirdIsDown`, over
+  TCP, hold the scenarios, and `TestTCPBackLinkCarriesTheAnswerTheDialCannot`,
+  `TestTCPBackLinkSpeaksOnlyForThePinnedMember` and
+  `TestTCPBackLinkIsTheNewestConnection` the transport's bounds.
+
+## Amendment — a divergent tail's configuration does not outrank the leader's record (2026-10-29, #755)
+
+#724's record gives an address only when it was read at a commit past
+the node's latest configuration, appended or committed. A voter back with
+an uncommitted tail of an older term that ended in a configuration entry
+past the cluster's commit — a node that led an older term and appended a
+membership change, an automatic `ChangeSnapshotLimit` among them, before
+it was cut off — refused every record its members sent: the record, read
+at the cluster's commit, was below that entry. It kept dialling its moved
+leader's old address, heard the leader so never campaigned, and on a
+quiet cluster stayed out of the quorum until the cluster committed past
+the entry; one more failure left two live voters of three with no leader
+([#755](https://github.com/kitsunium/sdk/issues/755)).
+
+- **The configuration a record must pass.** The latest configuration
+  still outranks a record when it is committed or was appended at the
+  node's own term, by the leader of that term. An uncommitted one of an
+  older term ends a tail that leader never wrote and, past its commit,
+  never commits: #675's argument, which `behindCommit` makes on the
+  sender's side. Terms never decrease along a log, so every uncommitted
+  configuration before it is of an older term as well, and the record is
+  ranked against the committed configuration instead (`heldConfIndex`).
+  The record ends on the same rank, once the commit or that configuration
+  reaches the commit it was read at, or once the latest configuration no
+  longer lists the leader under its key.
+- **Unchanged.** The address only, for the leader the node follows and
+  reported unreachable, under the very key its latest configuration pins,
+  from a member at a term at least its own, read past its commit; the
+  transport pins that key at every dial. No frame, payload or record
+  format change, no protocol raise, no raft mutation:
+  `TestTheMemberBehindAMovedLeaderTakesItsAddressOverAnOlderTermsTail`
+  (the issue's scenario, a tail of commands alone as the control) and
+  `TestTheTailOfTheLeadersTermStillOutranksTheRecord` hold it. Over TCP, the
+  answer on the connection the leader dialled (amendment of 2026-10-29,
+  #748) reaches the leader as well, which then repairs the tail.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5665,6 +5766,8 @@ keep admitted a key a later `DenyPin` had withdrawn.
 | #741 | Raft hunt loop, 2026-10-28 | a cut compacts the store through the older snapshot less the trailing window even at or below the base a restart started the step function on; no format change, no raft mutation (amendment of 2026-10-28, #741) |
 | #744 | Raft hunt loop, 2026-10-28 | the byte trigger counts the payload a durable machine's start resumes past, and a cut that published nothing gives back the count it took; no format change, nothing persisted (amendment of 2026-10-28, #744) |
 | #742 | Raft hunt loop, 2026-10-28 | a joiner's transport keeps, of a member its JOIN answer and its replayed configuration both list, the record of the newer set, ranked by the answer's `AddLearner` position and `ReadyValue.MembershipAt`; no format change, no raft mutation (amendment of 2026-10-28, #742) |
+| #748 | Raft hunt loop, 2026-10-29 | a batch a node's own link to a member cannot carry goes back on the connection that member dialled on the lane, and a node delivers the frames its outbound links carry as the member it pinned there; the dial and its report are unchanged; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #748) |
+| #755 | Raft hunt loop, 2026-10-29 | a leader record is ranked against the latest configuration only when it is committed or of the node's term, the committed one otherwise, so a divergent tail's configuration of an older term no longer refuses it; no format change, no raft mutation (amendment of 2026-10-29, #755) |
 
 ## raft-sql-poc (owner's prior Raft)
 
