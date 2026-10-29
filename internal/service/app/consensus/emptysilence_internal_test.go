@@ -68,11 +68,13 @@ func emptySilenceDamage(t *testing.T, victim *diskNode, index uint64) {
 }
 
 // emptySilenceCase is a founder of three crashed after writes commands,
-// its log damaged at entry damaged and quarantined, with what restarts it.
+// its log damaged at entry damaged, or by damage when it is set, and
+// quarantined, with what restarts it.
 type emptySilenceCase struct {
 	c         *cluster
 	a, b      *diskNode
 	victim    *diskNode
+	damage    func(t *testing.T, dir string)
 	run       string
 	writes    int
 	damaged   uint64
@@ -80,8 +82,9 @@ type emptySilenceCase struct {
 }
 
 // emptySilenceQuarantined runs three founders, writes x.writes commands,
-// crashes the victim, damages its entry x.damaged and reopens its directory
-// quarantined. With x.snapshots the victim must hold a snapshot by then.
+// crashes the victim, damages its entry x.damaged, or runs x.damage, and
+// reopens its directory quarantined. With x.snapshots the victim must hold
+// a snapshot by then.
 func emptySilenceQuarantined(t *testing.T, x *emptySilenceCase) {
 	t.Helper()
 	net := NewMemoryNetwork()
@@ -135,7 +138,11 @@ func emptySilenceQuarantined(t *testing.T, x *emptySilenceCase) {
 		t.Fatalf("setup: the victim holds snapshot files %v, want some: %v", snaps, x.snapshots)
 	}
 	x.victim.crash(t, c)
-	emptySilenceDamage(t, x.victim, x.damaged)
+	if x.damage != nil {
+		x.damage(t, x.victim.dir)
+	} else {
+		emptySilenceDamage(t, x.victim, x.damaged)
+	}
 	x.victim.dd = silenceOpen(t, x.victim.dir, x.run)
 	// Registered after the victim's TempDir, so it runs before the
 	// directory is removed, which Windows refuses while its LOCK is held: a
@@ -206,18 +213,27 @@ func segmentDigests(t *testing.T, dir string) map[string][32]byte {
 func TestTheTruncationThatLeavesNoConfigurationIsRefused(t *testing.T) {
 	x := &emptySilenceCase{writes: 8, damaged: 1}
 	emptySilenceQuarantined(t, x)
-	before := segmentDigests(t, x.victim.dir)
-	err := ClearQuarantine(x.victim.dd, TruncateAndStaySilent, "op:silent")
+	silenceRefused(t, x.victim.dd, x.victim.dir)
+}
+
+// silenceRefused asserts that TruncateAndStaySilent on the quarantined
+// directory d at dir is refused RECOVER_REFUSED naming WipeAndRejoin, with
+// the log, the quarantine marker and the absent silence condition as they
+// were, and that WipeAndRejoin, the exit the refusal names, still runs.
+func silenceRefused(t *testing.T, d DataDir, dir string) {
+	t.Helper()
+	before := segmentDigests(t, dir)
+	err := ClearQuarantine(d, TruncateAndStaySilent, "op:silent")
 	if !errors.Is(err, coreconsensus.RecoverRefused) || !strings.Contains(fieldOf(err, "why"), "WipeAndRejoin") {
 		t.Fatalf("TruncateAndStaySilent over a truncation that leaves no configuration: %v (why %q), want RECOVER_REFUSED naming WipeAndRejoin", err, fieldOf(err, "why"))
 	}
-	if x.silent() {
+	if _, err := os.Stat(filepath.Join(dir, fileSilent)); err == nil {
 		t.Fatal("the refused exit persisted a silence condition")
 	}
-	if _, err := os.Stat(filepath.Join(x.victim.dir, markerQuarantine)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, markerQuarantine)); err != nil {
 		t.Fatalf("the refused exit removed the quarantine marker: %v", err)
 	}
-	after := segmentDigests(t, x.victim.dir)
+	after := segmentDigests(t, dir)
 	if len(after) != len(before) {
 		t.Fatalf("the refused exit changed the log's files: %d, was %d", len(after), len(before))
 	}
@@ -226,7 +242,7 @@ func TestTheTruncationThatLeavesNoConfigurationIsRefused(t *testing.T) {
 			t.Fatalf("the refused exit changed %s", name)
 		}
 	}
-	if err := ClearQuarantine(x.victim.dd, WipeAndRejoin, "op:wipe"); err != nil {
+	if err := ClearQuarantine(d, WipeAndRejoin, "op:wipe"); err != nil {
 		t.Fatalf("WipeAndRejoin after the refusal: %v", err)
 	}
 }

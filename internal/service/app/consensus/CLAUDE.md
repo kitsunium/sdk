@@ -311,7 +311,18 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 - Leave the term of the last entry out of `Inspect`: the survivor of a
   `Recover` is the highest `(LastTerm, Last)`, and a longer log or a higher
   vote term chose one whose tail no majority held (#534,
-  `TestInspectReportsTheTermOfTheLastEntry`).
+  `TestInspectReportsTheTermOfTheLastEntry`). Nor report the log's tail
+  when an interrupted install's snapshot lies inside the log under another
+  term: the start and `Recover` drop that tail, and the rule chose a
+  survivor whose stale tail was as long. `keptLast` reports the snapshot
+  `interruptedInstall` finishes, read only when the newest one lies where
+  an interrupted install leaves it (`unfinishedInstall`): forgejo
+  inspects at every start (#746,
+  `TestInspectRanksAnInterruptedInstallInsideTheLogByItsSnapshot`). Nor
+  take a snapshot at term 0, a cut's before #544, for an interrupted
+  install: the start sets it aside, and `Recover` dropped the log for a
+  position with no term; `interruptedInstall` skips it (`termless`,
+  `TestATermZeroSnapshotInsideTheLogIsSetAsideByInspectAndRecover`).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit
   lags the cluster's, and the entries past it may be writes the old cluster
   acknowledged. `adoptedEnd` keeps every entry whose `BodySum` and
@@ -441,9 +452,16 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   good under a leader that still lists it. `truncateAndStaySilent` refuses
   it `RECOVER_REFUSED` naming `WipeAndRejoin` before anything is written
   (`truncationKeepsMembers`, #723,
-  `TestTheTruncationThatLeavesNoConfigurationIsRefused`). Nor damage the
-  founding entry to silence a victim in a test: the memory double admits
-  every sender, and such a victim rejoined only there (`silenceByDamage`).
+  `TestTheTruncationThatLeavesNoConfigurationIsRefused`). Nor judge what
+  the truncation keeps record by record: the reopen drops the whole batch
+  the damage tears, and a founder's founding entry shares its batch with
+  its hard state, a joiner's with the log it replayed from index 1;
+  `reopenKeeps` cuts each segment as the reopen does (#745,
+  `TestATruncationThatTearsTheFoundingBatchIsRefused`,
+  `TestATruncationThatTearsAJoinersFirstBatchIsRefused`). Nor damage the
+  founding entry, or its batch, to silence a victim in a test: the memory
+  double admits every sender, and such a victim rejoined only there
+  (`silenceByDamage`).
 - Refuse a JOIN on a held slot when the member holding it is the requester
   itself — id, incarnation, slot and key all equal: a joiner restarted
   before anything reached its log admits the members only from a JOIN

@@ -52409,7 +52409,7 @@
         {
           "name": "Last",
           "type": "uint64",
-          "doc": "Last is the last index the directory holds: the log's, or the\nnewest snapshot's when an install a crash interrupted published it\npast the log's end.\n"
+          "doc": "Last is the last index the directory holds as the start and Recover\nkeep it, the half of the survivor's key LastTerm completes: the log's\nlast index, or the index of the snapshot an install a crash interrupted\npublished, which they move the log onto, whether it lies past the log's\nend or inside the log under another term (the log's entries past it\nare then dropped). It is not the log's bound after a Recover, which\nmay still drop a suffix that does not verify, and appends its forced\nentry after the index it keeps.\n"
         },
         {
           "name": "LastTerm",

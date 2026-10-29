@@ -176,9 +176,14 @@ type ReportValue struct {
 	Stamp     coreconsensus.StampValue
 	HardState coreconsensus.HardState
 	First     uint64
-	// Last is the last index the directory holds: the log's, or the
-	// newest snapshot's when an install a crash interrupted published it
-	// past the log's end.
+	// Last is the last index the directory holds as the start and Recover
+	// keep it, the half of the survivor's key LastTerm completes: the log's
+	// last index, or the index of the snapshot an install a crash interrupted
+	// published, which they move the log onto, whether it lies past the log's
+	// end or inside the log under another term (the log's entries past it
+	// are then dropped). It is not the log's bound after a Recover, which
+	// may still drop a suffix that does not verify, and appends its forced
+	// entry after the index it keeps.
 	Last uint64
 	// LastTerm is the term of the entry at Last, or of the snapshot that
 	// holds Last. With Last it is the key a Recover's survivor is chosen
@@ -216,14 +221,10 @@ func Inspect(d DataDir) (ReportValue, error) {
 	if r.Snapshots, err = d.d.snaps.List(); err != nil {
 		return ReportValue{}, err
 	}
-	if l.refuse == nil && len(r.Snapshots) > 0 {
-		// An install a crash interrupted published its snapshot past the
-		// log's end: the directory holds the state through that index, and
-		// an operator comparing survivors must see it (#506).
-		r.Last = max(r.Last, r.Snapshots[0].Position.Index)
-	}
 	if l.refuse == nil {
-		r.LastTerm = lastTermOf(l, &r)
+		if r.Last, r.LastTerm, err = d.keptLast(r.Snapshots); err != nil {
+			return ReportValue{}, err
+		}
 	}
 	if r.Markers, err = stopMarkers(d.d.dir); err != nil {
 		return ReportValue{}, err
@@ -231,23 +232,44 @@ func Inspect(d DataDir) (ReportValue, error) {
 	return r, nil
 }
 
-// lastTermOf is the term of the entry at r.Last: the newest snapshot's when
-// it ends at r.Last, else the log's. It is the half of the survivor's key
-// Inspect did not report: two survivors may show the same Last and the same
+// keptLast is the survivor's key of the directory, its last index and the
+// term there, as the start (finishInstall) and Recover (interruptedInstall)
+// keep them. The term is the half of the key Inspect did not report at
+// first: two survivors may show the same last index and the same
 // HardState.Term, the term of a vote, and only the term of their last
 // entries tells which one holds the writes a majority committed (D17,
-// #534). A snapshot at r.Last wins over the log's entry there: an install a
-// crash interrupted published it past the log, or at the log's last index
-// under another term, and the start, or Recover, moves the log onto it
-// (#506). A log with no entry and no snapshot reports 0.
-func lastTermOf(l *fileLog, r *ReportValue) uint64 {
-	if len(r.Snapshots) > 0 && r.Snapshots[0].Position.Index == r.Last {
-		return r.Snapshots[0].Position.Term
+// #534).
+//
+// An install a crash interrupted after its snapshot was published holds
+// the state through that snapshot, and the start and Recover move the log
+// onto it: past the log's end (#506), or inside the log under another
+// term, the log's entries past it dropped. Reported by the log's tail, such
+// a survivor ranked by entries it no longer holds once started, the rule
+// chose another survivor whose stale tail was as long, and Recover there
+// lost the acknowledged writes this one held (#746). The snapshot is the
+// one Recover finishes, the newest that verifies: a newest one that fails
+// its checksums counts no more than it does there, and one of a version
+// this build does not read refuses the report, as it refuses Recover and
+// the start (#640). A newest snapshot below the log's first index, or that
+// matches the log's term at its index, is no interrupted install's whatever
+// its checksums, and is not read: forgejo inspects its directory at every
+// start. A log with no entry and no snapshot reports 0.
+func (d DataDir) keptLast(metas []coreconsensus.SnapshotMetaValue) (last, term uint64, err error) {
+	l := d.d.log
+	if len(metas) > 0 && unfinishedInstall(l, &metas[0]) {
+		m, interrupted, ierr := d.interruptedInstall()
+		switch {
+		case ierr != nil:
+			return 0, 0, ierr
+		case interrupted:
+			return m.Position.Index, m.Position.Term, nil
+		}
 	}
-	if t, err := l.Term(r.Last); err == nil {
-		return t
+	_, last = l.Bounds()
+	if t, terr := l.Term(last); terr == nil {
+		term = t
 	}
-	return 0
+	return last, term, nil
 }
 
 // readQuarantineMarker is the quarantine marker of dir, trimmed, or "" when
@@ -547,34 +569,47 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 // VERSION_UNSUPPORTED, as it refuses a start: unknown means stop, never
 // skip (D18). Skipped as one that fails its checksums, a snapshot above
 // ProtocolMax let Recover plan from the older log below it and write a new
-// history from a state older than the one the directory holds (#640). It
-// reads and writes nothing else.
+// history from a state older than the one the directory holds (#640). One
+// a cut before #544 published at term 0 is set aside unread, as the start
+// sets it aside (restoreLatest): taken for an install, it dropped the log
+// for a position with no term, which the compaction then refused, and
+// Inspect ranked the survivor at term 0. It reads and writes nothing else.
 func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, error) {
 	metas, err := d.d.snaps.List()
 	if err != nil {
 		return coreconsensus.SnapshotMetaValue{}, false, err
 	}
-	flog := d.d.log
 	for _, m := range metas {
+		if termless(&m) {
+			continue // the start sets it aside too (#544)
+		}
 		if verr := d.verifySnapshotFile(m); verr != nil {
 			if errs.HasCode(verr, coreconsensus.CodeVersionUnsupported) {
 				return coreconsensus.SnapshotMetaValue{}, false, verr
 			}
 			continue // a start falls back past it too (D7)
 		}
-		first, last := flog.Bounds()
-		idx := m.Position.Index
-		if idx < first {
-			return m, false, nil
-		}
-		if idx <= last {
-			if t, terr := flog.Term(idx); terr == nil && t == m.Position.Term {
-				return m, false, nil
-			}
-		}
-		return m, true, nil
+		return m, unfinishedInstall(d.d.log, &m), nil
 	}
 	return coreconsensus.SnapshotMetaValue{}, false, nil
+}
+
+// unfinishedInstall reports whether the published snapshot m is one an
+// install a crash interrupted left over l, the rule finishInstall applies
+// at a start: it lies at or past the log's first index, and past the log's
+// end or under another term than the log's at its index. It reads no
+// snapshot.
+func unfinishedInstall(l *fileLog, m *coreconsensus.SnapshotMetaValue) bool {
+	first, last := l.Bounds()
+	idx := m.Position.Index
+	switch {
+	case idx < first:
+		return false
+	case idx <= last:
+		t, err := l.Term(idx)
+		return err != nil || t != m.Position.Term
+	}
+	return true
 }
 
 // finishInterruptedInstall moves the log onto the snapshot of an
@@ -1637,9 +1672,17 @@ func logMaxTerm(logDir string) (uint64, error) {
 
 // truncationKeepsMembers reports whether a member's directory still names
 // its members once its log is truncated at (segN, off): a snapshot lists
-// them, or a configuration entry lies before the damage. A directory that
-// is not yet a member's needs none: a joining one joins again (#632). It
-// changes nothing.
+// them, or a configuration entry lies in what the reopen after the
+// truncation keeps. A directory that is not yet a member's needs none: a
+// joining one joins again (#632). It changes nothing.
+//
+// What the reopen keeps is judged as the reopen judges it, batch by batch
+// (reopenKeeps): a configuration entry before the damage, in the batch the
+// damage tears, is dropped with that batch. Judged record by record, the
+// founding entry, which shares its batch with its hard state, and a
+// joiner's first entries, which share the batch of the log it replayed,
+// passed the guard and were dropped anyway, and the node started silent
+// with no configuration (#745).
 func (d DataDir) truncationKeepsMembers(logDir string, segN uint64, off int64) (bool, error) {
 	if d.d.log.stamp.State != coreconsensus.StampMember {
 		return true, nil
@@ -1665,14 +1708,63 @@ func (d DataDir) truncationKeepsMembers(logDir string, segN uint64, off int64) (
 		if err != nil {
 			return false, storageFailed("read segment", err)
 		}
+		end := int64(len(b))
 		if n == segN {
-			b = b[:min(int64(len(b)), off)]
+			end = off
 		}
-		if holdsConfiguration(b) {
+		if holdsConfiguration(b[:reopenKeeps(b, end)]) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// reopenKeeps is how many bytes of segment b the reopen keeps once the
+// truncation zeroed it from end: the records it reads in order, through
+// the seal or up to the first hole, less the batch that hole tears, which
+// never completed and is dropped whole, the records before the damage with
+// it (recover, trimTornTail: classifyTail, tornBatchStart). A batch never
+// spans two segments, a rotation falls between batches (R8-04), so the
+// segments before the damaged one are kept through their seal. It is 0
+// when the reopen keeps none: no record, or a tail the reopen would
+// quarantine again.
+//
+// Of the records read it keeps the segment's first, which tornBatchStart
+// compares with the torn batch's start, and those of the batch the last
+// one belongs to, the only ones classifyTail walks back over: a whole
+// segment's records would hold as much again as the segment's bytes.
+func reopenKeeps(b []byte, end int64) int64 {
+	b = b[:min(int64(len(b)), max(end, 0))]
+	var head scanRec
+	var batch []scanRec
+	var off int64
+	for read := 0; off < int64(len(b)); read++ {
+		r, ok := parseRecord(b[off:])
+		if !ok {
+			break
+		}
+		s := scanRecOf(&r, off)
+		switch {
+		case read == 0:
+			head = s
+		case batch[0].batch != s.batch:
+			batch = batch[:0]
+		}
+		batch = append(batch, s)
+		off += int64(r.length)
+		if r.kind == recSeal {
+			return off
+		}
+	}
+	if len(batch) == 0 {
+		return 0
+	}
+	recs := batch
+	if batch[0].off != head.off {
+		recs = append([]scanRec{head}, batch...)
+	}
+	trim, _ := classifyTail(b, recs, off)
+	return max(trim, 0)
 }
 
 // holdsConfiguration reports whether the segment bytes b hold a readable
