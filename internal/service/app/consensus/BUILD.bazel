@@ -151,6 +151,7 @@ go_test(
         "recoverlearners_internal_test.go",
         "recovermem_internal_test.go",
         "recovervoters_internal_test.go",
+        "removedwhiledown_internal_test.go",
         "removeleader_internal_test.go",
         "replacedsilence_internal_test.go",
         "restartcompact_internal_test.go",

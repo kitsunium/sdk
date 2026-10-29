@@ -64,6 +64,7 @@ go_test(
         "transferissuer_internal_test.go",
         "truncatedsilence_internal_test.go",
         "unadmittedpromote_internal_test.go",
+        "unansweredvoter_internal_test.go",
         "unapplied_internal_test.go",
         "unappliedstart_internal_test.go",
         "uniquekey_internal_test.go",

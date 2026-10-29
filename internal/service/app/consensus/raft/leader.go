@@ -969,15 +969,20 @@ func (r *Raft) strands(next *core.MembershipValue) bool {
 
 // reachedBy reports whether voter v, whatever configuration of its past it
 // holds, still knows in next this leader or a voter that would vouch for
-// it. A voter this leader heard at a match its log still resolves holds
-// that configuration or a later one: every member of next it lists there
-// it lists in every later one, since an id is never added back once
-// removed. For any other voter every retained configuration that lists it
-// is a candidate, and when it was a member before the log's start the
-// oldest it may hold is unknown: only this leader listed before it, so
-// added before it, is then known to it for sure.
+// it. A voter that answers, heard at a match this leader's log still
+// resolves, holds that configuration or a later one: every member of next
+// it lists there it lists in every later one, since an id is never added
+// back once removed. A voter that no longer answers may come back over a
+// truncated log (TruncateAndStaySilent), whose offline refusal reads only
+// its own log and sees no change committed while it was down: a founder
+// heard at {B, V, D, E}, B removed while it was down, came back silent
+// over {A, B, V} and refused D and E for good (#763). For it, as for any
+// other voter, every retained configuration that lists it is a candidate,
+// and when it was a member before the log's start the oldest it may hold
+// is unknown: only this leader listed before it, so added before it, is
+// then known to it for sure.
 func (r *Raft) reachedBy(next *core.MembershipValue, v core.NodeID) bool {
-	if pr := r.prs[v]; pr != nil && pr.facts&peerHeard != 0 && pr.match >= r.log.snapIndex {
+	if pr := r.prs[v]; pr != nil && r.answering(v) && pr.match >= r.log.snapIndex {
 		return vouched(next, r.confAt(pr.match), v, r.id)
 	}
 	if !r.vouchedInRetained(next, v) {

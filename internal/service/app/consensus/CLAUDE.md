@@ -1079,6 +1079,14 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `moveStrands`, `TestTheLastMemberAStaleVoterKnowsMovesOnlyOnceItIsBack`,
   `TestTheMoveOfTheLastMemberAStaleVoterReachesIsRefused`). The leader's
   own move is not judged: it dials every voter that lists it.
+- Judge a voter that no longer answers on the configuration the leader
+  last heard it at: it may come back over a truncated log, and #758's
+  offline refusal reads only that log, which holds no change committed
+  while it was down; B removed then, V came back silent over {A, B, V} for
+  good (#763, `reachedBy`, `TestARemovalWhileAHeardVoterIsDownWaitsForIt`,
+  `TestARemovalIsJudgedOnAVotersConfigurationOnlyWhileItAnswers`). At
+  best: a voter that failed less than a vote window before the change, or
+  before the change reached it, is still judged as heard.
 - Cancel a snapshot stream because the log is tight: its pin's hold on
   compaction is lifted, for good, and the stream goes on; only a stream
   that is due is cancelled (`streamDue`). Cancelled with it, no stream

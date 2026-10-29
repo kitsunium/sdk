@@ -1185,18 +1185,25 @@ one, and the cluster lost a vote for good. No admission is widened for
 this: the leader refuses `MEMBERSHIP_INVALID` the removal, or the move by
 `UpdateAddress`, of a member that answers when a voter of the new
 configuration might then list neither the leader, at any address, nor any
-voter that stays at the address it lists it at. A voter the leader heard at
-an index its log resolves holds that configuration or a later one; for any
-other voter every retained configuration that lists it is a candidate, and
-when its configuration may predate the log's start only the leader listed
-before it, so added before it, is known to it for sure. A member that does
-not answer is never refused on this ground: it vouches for no one, and a
-dead voter stays removable, and movable. The operator brings the stale
-voter back, or removes it, first.
-The premise holds only while no voter's log moves back: a truncation that
-would take a voter back to a configuration whose other members have all
-left since is refused offline instead (amendment of 2026-10-29,
-[#758](https://github.com/kitsunium/sdk/issues/758)).
+voter that stays at the address it lists it at. A voter that answers the
+leader, heard at an index its log resolves, holds that configuration or a
+later one; for any other voter, one that no longer answers included
+(amendment of 2026-10-29, #763), every retained configuration that lists it
+is a candidate, and when its configuration may predate the log's start only
+the leader listed before it, so added before it, is known to it for sure. A
+member that does not answer is never refused on this ground: it vouches for
+no one, and a dead voter stays removable, and movable. The operator brings
+the stale voter back, or removes it, first.
+The premise holds only while no voter's log moves back. A truncation that
+would take a voter back to a configuration whose other members all left
+while it ran is refused offline (amendment of 2026-10-29,
+[#758](https://github.com/kitsunium/sdk/issues/758)); that refusal reads
+the voter's own log only, and sees no change committed while the voter was
+down. Such a change is the leader's to refuse, which judges a voter that no
+longer answers as one it never heard (amendment of 2026-10-29,
+[#763](https://github.com/kitsunium/sdk/issues/763)), at best: a voter that
+failed less than a vote window before the change, or before the change
+reached it, is still judged on the configuration the leader heard it at.
 
 **Limits TLS does not set (R1-24, from raft-sql-poc).**
 - A frame's announced length is checked against `MaxFrameBytes` before
@@ -5870,7 +5877,9 @@ operator ([#758](https://github.com/kitsunium/sdk/issues/758)).
   part, nothing is known, and the exit is taken as before. The newest
   configuration is judged as the node last ran it, committed or not: an
   uncommitted removal that a later leader dropped may refuse an exit the
-  node would have survived, and `WipeAndRejoin` stays open.
+  node would have survived, and `WipeAndRejoin` stays open. A change
+  committed while the node was down is not in its log at all: the leader
+  refuses it instead, at best (amendment of 2026-10-29, #763).
 - **The way out the reason names.** `WipeAndRejoin` alone is not enough:
   the JOIN of the wiped directory is refused while the old ID holds the
   slot (R8-11), and the removal of the old ID is refused below `MinVoters`
@@ -5946,6 +5955,51 @@ two live voters of three, had no leader
   `TestAMoveIsJudgedOnlyForAnAnsweringMemberThatMayVouch` and
   `TestVouchedNeedsTheVoterAtTheAddressTheStaleVoterKnows` hold the rule.
 
+## Amendment — a voter that no longer answers is judged as one never heard (2026-10-29, #763)
+
+#758's refusal reads the node's own log, and a change committed while the
+node was down is not there. A founder V of {A, B, V} saw D and E join and
+be promoted, D lead and A be removed: its log ended on {B, V, D, E}, and D
+heard it there. V crashed, its log damaged before D's admission. While V
+was down, B was removed on D: #603's guard trusted the configuration D
+last heard V at, which lists D. V's `TruncateAndStaySilent` kept
+{A, B, V}, and its newest readable configuration, {B, V, D, E}, still
+listed B, so the exit was taken: V restarted silent over {A, B, V}, asked
+A and B, both gone, refused D and E, and never ended its silence; once E
+failed, D and V, two live voters of three, committed nothing
+([#763](https://github.com/kitsunium/sdk/issues/763)).
+
+- **The configuration a voter was heard at counts only while it answers.**
+  `reachedBy` takes the configuration at the index the leader heard a
+  voter at only while that voter answers, heard within the vote window
+  (`answering`). A voter that no longer answers may come back over a
+  truncated log, and is judged as one never heard: every retained
+  configuration that lists it is a candidate, and when its configuration
+  may predate the log's start only the leader listed before it is known to
+  it for sure. While it is down, the removal, or the move (#761), of its
+  last possible voucher is refused `MEMBERSHIP_INVALID`.
+- **The way out.** The operator brings the voter back — a voter whose log
+  is intact rejoins and answers, and the change goes through — or removes
+  it, which stays admitted since it does not answer. A dead voucher stays
+  removable, and movable, since it does not answer either. Here V, back
+  silent over {A, B, V}, asks B, which still follows D, for D's record and
+  rejoins; B is then removed.
+- **At best.** The leader cannot foresee a failure: a voter that failed
+  less than a vote window before the change is still judged on the
+  configuration the leader heard it at, and so is one that fails after the
+  change is judged and before the change reaches its log. In both a removal
+  committed while it is down can still leave it, truncated, over members
+  all gone. Closing that window takes the silent node a way back of its
+  own, or the operator's word on the current configuration at the
+  truncation; neither is taken here.
+- No frame, payload or record format changes, nothing new is persisted,
+  and no raft mutation (the type is full).
+  `TestARemovalWhileAHeardVoterIsDownWaitsForIt` holds the issue's
+  scenario once D no longer hears V (B's removal refused while V is down,
+  V's truncation taken, V back through B, B removed, D and V commit once E
+  fails), and `TestARemovalIsJudgedOnAVotersConfigurationOnlyWhileItAnswers`
+  the rule in raft.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5983,6 +6037,7 @@ two live voters of three, had no leader
 | #755 | Raft hunt loop, 2026-10-29 | a leader record is ranked against the latest configuration only when it is committed or of the node's term, the committed one otherwise, so a divergent tail's configuration of an older term no longer refuses it; no format change, no raft mutation (amendment of 2026-10-29, #755) |
 | #758 | Raft hunt loop, 2026-10-29 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when the configuration it would keep has no other member that the newest configuration still readable in the dropped part lists under the same key; the reason names `WipeAndRejoin`, the promotion `MinVoters` may ask for and the removal of the old ID; a refusal at best; no format change, no raft mutation (amendment of 2026-10-29, #758) |
 | #761 | Raft hunt loop, 2026-10-29 | a voter that stays vouches for a stale voter only at the address the stale voter's configuration names, and `UpdateAddress` of an answering member that may vouch, the leader's own excepted, is refused `MEMBERSHIP_INVALID` when it may strand a voter, as a removal is; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #761) |
+| #763 | Raft hunt loop, 2026-10-29 | #603's guard takes the configuration a voter was heard at only while that voter answers; a voter that no longer answers, which may come back over a truncated log #758's offline refusal cannot judge, is judged as one never heard; at best, a voter that failed less than a vote window before the change, or before the change reached it, still judged on the configuration it was heard at; no format change, nothing persisted, no raft mutation (amendment of 2026-10-29, #763) |
 
 ## raft-sql-poc (owner's prior Raft)
 

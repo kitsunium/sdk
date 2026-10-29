@@ -1363,7 +1363,7 @@ sequences:
           init:
             bind: pr
             eval: r.prs[v]
-          when: pr != nil && pr.facts&peerHeard != 0 && pr.match >= r.log.snapIndex
+          when: pr != nil && r.answering(v) && pr.match >= r.log.snapIndex
       - opt:
           do:
             - return: "false"
