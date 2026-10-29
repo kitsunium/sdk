@@ -462,6 +462,18 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   founding entry, or its batch, to silence a victim in a test: the memory
   double admits every sender, and such a victim rejoined only there
   (`silenceByDamage`).
+- Take `TruncateAndStaySilent` back to a configuration whose other members
+  have all left since: a founder that acknowledged the replacement of every
+  other founder, which #603's guard therefore let through, restarted silent
+  over the founding configuration, asked and admitted only removed members
+  and never voted again. `truncationStrands` reads the configuration
+  entries still readable past the cut, as `logMaxTerm` reads the terms,
+  follows the log as the replay applies it (`truncationConfs`), and refuses
+  `RECOVER_REFUSED` naming `WipeAndRejoin`, `Promote` and `Remove` when the
+  newest configuration lists none of the kept one's other members under
+  the key it pins; at best: what the damage took is not known, and is not
+  refused (#758, `TestATruncationBackToMembersAllRemovedSinceIsRefused`,
+  `TestTheStrandingTruncationIsJudgedOnTheLogsNewestConfiguration`).
 - Refuse a JOIN on a held slot when the member holding it is the requester
   itself — id, incarnation, slot and key all equal: a joiner restarted
   before anything reached its log admits the members only from a JOIN

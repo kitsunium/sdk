@@ -6,6 +6,7 @@ import (
 	"hash/crc32"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -61,12 +62,20 @@ func TestASnapshotMetaOfVersion2IsRestored(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Listed before the start: the started node may cut again as soon as
+	// its election's entry reaches the next cut, and a listing right after
+	// the start, on a slow runner, saw that fresh cut as the newest, the
+	// oldest pruned (#759). Once started, the newest stays listed as it was
+	// written.
+	if got := must(snaps.List())(t); len(got) != len(metas) || got[0].ID != metas[0].ID {
+		t.Fatalf("listed %d snapshots, newest %v; want %d, newest %s", len(got), got, len(metas), metas[0].ID)
+	}
 	c.start(tn)
 	if holdsNoTable(t, tn) {
 		t.Fatal("a node of this release skipped every version 2 metadata and started with no table")
 	}
-	if got := must(snaps.List())(t); len(got) != len(metas) || got[0].ID != metas[0].ID {
-		t.Fatalf("listed %d snapshots, newest %v; want %d, newest %s", len(got), got, len(metas), metas[0].ID)
+	if !listedAs(must(snaps.List())(t), &metas[0]) {
+		t.Fatalf("the newest version 2 metadata %s is no longer listed once the node started", metas[0].ID)
 	}
 	if v, _ := tn.sm.get("k5"); v != "v" {
 		t.Fatalf("the state was not restored: k5=%q", v)
@@ -99,8 +108,14 @@ func TestASnapshotMetaOfVersion2IsRestored(t *testing.T) {
 	_, lastBefore := tn.log.Bounds()
 	c.start(tn)
 	for _, m := range must(snaps.List())(t) {
-		if m.ID == newest.ID {
-			t.Fatalf("a version 2 metadata whose sum fails is listed: chain tip %d", m.ChainTip)
+		// Restarted on the snapshot before it, the node replays its log to
+		// the same commit and may cut again at the same index and term,
+		// under the same id: a fresh meta written from its own state over
+		// the rotted one, which #757 already allowed its sibling for
+		// (#753, #759). Listed under that id, only the original's content
+		// may stand, never the rotted chain tip.
+		if m.ID == newest.ID && m.ChainTip != newest.ChainTip {
+			t.Fatalf("a version 2 metadata whose sum fails is listed: chain tip %d (original %d, rotted %d)", m.ChainTip, newest.ChainTip, rotted.ChainTip)
 		}
 	}
 	if _, last := tn.log.Bounds(); last < lastBefore {
@@ -108,5 +123,89 @@ func TestASnapshotMetaOfVersion2IsRestored(t *testing.T) {
 	}
 	if st := tn.node.Status(); st.Applied > lastBefore+1 || st.Commit > lastBefore+1 {
 		t.Fatalf("the node reports past its log: %+v (log ends at %d)", st, lastBefore)
+	}
+}
+
+// listedAs reports whether metas list m's id with m's chain tip: m as it
+// was written, or a cut of the same index and term from the same log.
+func listedAs(metas []coreconsensus.SnapshotMetaValue, m *coreconsensus.SnapshotMetaValue) bool {
+	return slices.ContainsFunc(metas, func(x coreconsensus.SnapshotMetaValue) bool { return x.ID == m.ID && x.ChainTip == m.ChainTip })
+}
+
+// TestTheRestartedNodeCutsItsRottedNewestAgainFromItsOwnLog is the
+// interleaving a slow runner gave TestASnapshotMetaOfVersion2IsRestored
+// (#759, the sibling of #753): the newest snapshot sits at the log's last
+// index, twenty entries past the one before it. Its version 2 metadata
+// rots, and the restarted node, back on the snapshot before it, replays its
+// log to the same commit and cuts again at the same index and term: a
+// fresh metadata, under the rotted one's id, with the original's chain tip.
+// A check of the id alone took it for the rotted metadata, which is never
+// listed. Everything is in t.TempDir().
+func TestTheRestartedNodeCutsItsRottedNewestAgainFromItsOwnLog(t *testing.T) {
+	dir := t.TempDir()
+	snaps, err := newFileSnapshots(dir, storageFailed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &cluster{
+		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{7, 5, 9}, size: 1, every: 20,
+		configure: func(_ *testNode, cfg *Config) { cfg.Snapshots = snaps },
+	}
+	newClusterWith(t, c)
+	tn := c.nodes[0]
+	c.leader(5 * time.Second)
+	// Thirty writes, then one at a time, each applied and its cut written
+	// before the next: the next cut lands on the last index, twenty past
+	// the one before.
+	var metas []coreconsensus.SnapshotMetaValue
+	for i := 0; ; i++ {
+		if i == 90 {
+			t.Fatalf("setup: the newest snapshot never sat at the last index, twenty past the one before: %v", metas)
+		}
+		tok := propose(t, tn.node, "k"+u64s(uint64(i))+"=v")
+		if i < 30 {
+			continue
+		}
+		c.waitApplied(tok.Index, 5*time.Second)
+		cutsSettled(t, tn)
+		metas = must(snaps.List())(t)
+		if _, last := tn.log.Bounds(); len(metas) > 1 && metas[0].Position.Index == last && last == metas[1].Position.Index+20 {
+			break
+		}
+	}
+	c.kill(tn)
+	newest := metas[0]
+	rotted := newest
+	rotted.ChainTip ^= 1 << 30
+	for i := range metas {
+		enc := metaV2(&metas[i])
+		if i == 0 {
+			// The chain tip rots under the sum, which then fails.
+			bad := metaV2(&rotted)
+			at := -1
+			for j := range len(enc) - 4 {
+				if enc[j] != bad[j] {
+					at = j
+					break
+				}
+			}
+			if at < 0 {
+				t.Fatal("setup: the chain tip is not in the encoding")
+			}
+			enc[at] ^= enc[at] ^ bad[at]
+		}
+		if err := os.WriteFile(filepath.Join(dir, metas[i].ID+".meta"), enc, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, lastBefore := tn.log.Bounds()
+	c.start(tn)
+	waitFor(t, "the cut of the restarted node under the rotted id", func() bool { return listedAs(must(snaps.List())(t), &newest) })
+	cutsSettled(t, tn)
+	if !listedAs(must(snaps.List())(t), &newest) {
+		t.Fatalf("listed %v: want %s with the chain tip %d", must(snaps.List())(t), newest.ID, newest.ChainTip)
+	}
+	if _, last := tn.log.Bounds(); last < lastBefore {
+		t.Fatalf("the log was cut to %d (held %d)", last, lastBefore)
 	}
 }

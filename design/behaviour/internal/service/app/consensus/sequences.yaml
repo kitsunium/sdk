@@ -16127,6 +16127,8 @@ sequences:
         kind: internal
       - id: recoverRefused
         kind: internal
+      - id: d.truncationStrands
+        kind: internal
       - id: logMaxTerm
         kind: internal
       - id: persistedSilenceTerm
@@ -16166,6 +16168,22 @@ sequences:
             - return: "recoverRefused(\"the truncation leaves no configuration: the node would admit and ask no member; clear the quarantine with WipeAndRejoin\")"
               to: recoverRefused
           when: "!keeps"
+      - bind: strands, err
+        eval: d.truncationStrands(logDir, segN, off)
+        to: d.truncationStrands
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                recoverRefused("the truncation keeps a configuration none of whose other members the log's newest configuration still lists: " +
+                			"the node would ask and admit only removed members and stay silent for good; clear the quarantine with WipeAndRejoin, " +
+                			"then Remove this node's ID on the cluster, after a Promote of one more voter when MinVoters refuses the removal, " +
+                			"so that its slot takes a JOIN again (R8-11)")
+              to: recoverRefused
+          when: strands
       - bind: maxTerm, err
         eval: logMaxTerm(logDir)
         to: logMaxTerm
@@ -16532,6 +16550,261 @@ sequences:
           init: o := 0
           post: o += recAlign
       - return: "false"
+  - of: DataDir.truncationStrands
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.truncationStrands
+        kind: self
+      - id: d.d.snaps.List
+        kind: internal
+      - id: logSegments
+        kind: internal
+      - id: newTruncationConfs
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: seen.read
+        kind: internal
+      - id: reopenKeeps
+        kind: internal
+      - id: seen.cut
+        kind: internal
+      - id: seen.strands
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: false, nil
+          when: d.d.log.stamp.State != coreconsensus.StampMember
+      - bind: metas, err
+        eval: d.d.snaps.List()
+        to: d.d.snaps.List
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - bind: segs, err
+        eval: logSegments(logDir)
+        to: logSegments
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - bind: seen
+        eval: newTruncationConfs(d.d.log.stamp.ID, metas)
+        to: newTruncationConfs
+      - loop:
+          do:
+            - bind: b, err
+              eval: os.ReadFile(segs[n])
+              to: os
+            - opt:
+                do:
+                  - return: false, storageFailed("read segment", err)
+                when: err != nil
+            - switch:
+                cases:
+                  - case: n < segN
+                    do:
+                      - eval: seen.read(b[:reopenKeeps(b, int64(len(b)))])
+                        to: seen.read
+                  - case: n == segN && off > 0
+                    do:
+                      - bind: keep
+                        eval: reopenKeeps(b, off)
+                        to: reopenKeeps
+                      - eval: seen.read(b[:keep])
+                        to: seen.read
+                      - eval: seen.cut()
+                        to: seen.cut
+                      - eval: seen.read(b[keep:])
+                        to: seen.read
+                  - default: true
+                    do:
+                      - eval: seen.cut()
+                        to: seen.cut
+                      - eval: seen.read(b)
+                        to: seen.read
+          key: _
+          range: slices.Sorted(maps.Keys(segs))
+          value: "n"
+      - return: seen.strands(), nil
+        to: seen.strands
+  - of: newTruncationConfs
+    participants:
+      - id: caller
+        kind: actor
+      - id: newTruncationConfs
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: c
+        eval: "&truncationConfs{self: self}"
+      - opt:
+          do:
+            - set: c.snap, c.snapAt
+              value: "&metas[i].Membership, metas[i].Position.Index"
+          init:
+            bind: i
+            eval: slices.IndexFunc(metas, func(m coreconsensus.SnapshotMetaValue) bool { return len(m.Membership.Members) > 0 })
+            to: slices
+          when: i >= 0
+      - return: c
+  - of: (*truncationConfs).read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*truncationConfs).read
+        kind: self
+      - id: parseRecord
+        kind: internal
+      - id: c.apply
+        kind: internal
+    steps:
+      - loop:
+          cond: o+recHeader+recFixed <= len(b)
+          do:
+            - bind: r, ok
+              eval: parseRecord(b[o:])
+              to: parseRecord
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - eval: c.apply(&r)
+              to: c.apply
+            - op: +=
+              set: o
+              value: r.length - recAlign
+          init: o := 0
+          post: o += recAlign
+  - of: (*truncationConfs).apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*truncationConfs).apply
+        kind: self
+      - id: c.drop
+        kind: internal
+      - id: wire
+        kind: package
+    steps:
+      - switch:
+          cases:
+            - case: recEntry
+              do:
+                - eval: c.drop(r.index)
+                  to: c.drop
+                - opt:
+                    do:
+                      - return: ""
+                    when: r.ekind != uint8(coreconsensus.EntryMembership)
+                - bind: a, err
+                  eval: wire.ParseAdminAt(r.ever, r.data)
+                  to: wire
+                - opt:
+                    do:
+                      - return: ""
+                    when: err != nil
+                - op: ++
+                  set: c.seq
+                - set: c.logged
+                  value: "append(c.logged, loggedConf{m: a.Membership, index: r.index, seq: c.seq})"
+            - case: recTruncate
+              do:
+                - eval: c.drop(r.index)
+                  to: c.drop
+          "on": r.kind
+  - of: (*truncationConfs).drop
+    steps:
+      - bind: k
+        eval: len(c.logged)
+      - loop:
+          cond: k > 0 && c.logged[k-1].index >= index
+          do:
+            - op: "--"
+              set: k
+      - set: c.logged
+        value: c.logged[:k]
+  - of: (*truncationConfs).inForce
+    steps:
+      - opt:
+          do:
+            - return: "&c.logged[n-1].m, c.logged[n-1].seq, true"
+          init:
+            bind: "n"
+            eval: len(c.logged)
+          when: n > 0 && c.logged[n-1].index > c.snapAt
+      - return: c.snap, 0, c.snap != nil
+  - of: (*truncationConfs).cut
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*truncationConfs).cut
+        kind: self
+      - id: c.inForce
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.isCut
+      - set: c.isCut
+        value: "true"
+      - opt:
+          do:
+            - set: c.kept, c.keptAs, c.keeps
+              value: "*m, as, true"
+          init:
+            bind: m, as, ok
+            eval: c.inForce()
+            to: c.inForce
+          when: ok
+  - of: (*truncationConfs).strands
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*truncationConfs).strands
+        kind: self
+      - id: c.cut
+        kind: internal
+      - id: c.inForce
+        kind: internal
+      - id: stranded
+        kind: internal
+    steps:
+      - eval: c.cut()
+        to: c.cut
+      - bind: newest, as, ok
+        eval: c.inForce()
+        to: c.inForce
+      - opt:
+          do:
+            - return: "false"
+          when: "!c.keeps || !ok || as == c.keptAs"
+      - return: stranded(c.self, &c.kept, newest)
+        to: stranded
+  - of: stranded
+    participants:
+      - id: caller
+        kind: actor
+      - id: stranded
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!slices.ContainsFunc(newest.Members, func(m coreconsensus.MemberValue) bool { return m.ID != self })"
+      - return: |-
+          !slices.ContainsFunc(kept.Members, func(m coreconsensus.MemberValue) bool {
+          		x, listed := newest.Member(m.ID)
+          		return m.ID != self && listed && !isZeroDigest(m.SPKI) && x.SPKI == m.SPKI
+          	})
+        to: slices
   - of: truncateAtDamage
     participants:
       - id: caller

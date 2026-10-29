@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -217,15 +218,17 @@ func TestTheTruncationThatLeavesNoConfigurationIsRefused(t *testing.T) {
 }
 
 // silenceRefused asserts that TruncateAndStaySilent on the quarantined
-// directory d at dir is refused RECOVER_REFUSED naming WipeAndRejoin, with
-// the log, the quarantine marker and the absent silence condition as they
-// were, and that WipeAndRejoin, the exit the refusal names, still runs.
-func silenceRefused(t *testing.T, d DataDir, dir string) {
+// directory d at dir is refused RECOVER_REFUSED naming WipeAndRejoin, and
+// every one of names, with the log, the quarantine marker and the absent
+// silence condition as they were, and that WipeAndRejoin, the exit the
+// refusal names, still runs.
+func silenceRefused(t *testing.T, d DataDir, dir string, names ...string) {
 	t.Helper()
 	before := segmentDigests(t, dir)
 	err := ClearQuarantine(d, TruncateAndStaySilent, "op:silent")
-	if !errors.Is(err, coreconsensus.RecoverRefused) || !strings.Contains(fieldOf(err, "why"), "WipeAndRejoin") {
-		t.Fatalf("TruncateAndStaySilent over a truncation that leaves no configuration: %v (why %q), want RECOVER_REFUSED naming WipeAndRejoin", err, fieldOf(err, "why"))
+	names = append([]string{"WipeAndRejoin"}, names...)
+	if !errors.Is(err, coreconsensus.RecoverRefused) || slices.ContainsFunc(names, func(n string) bool { return !strings.Contains(fieldOf(err, "why"), n) }) {
+		t.Fatalf("TruncateAndStaySilent: %v (why %q), want RECOVER_REFUSED naming %q", err, fieldOf(err, "why"), names)
 	}
 	if _, err := os.Stat(filepath.Join(dir, fileSilent)); err == nil {
 		t.Fatal("the refused exit persisted a silence condition")
