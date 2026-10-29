@@ -20691,7 +20691,7 @@ sequences:
           &TCPTransport{
           		cfg: *cfg, id: id, cluster: cid, slot: slot,
           		members: map[coreconsensus.GroupID][]coreconsensus.MemberValue{}, byID: map[coreconsensus.NodeID]coreconsensus.MemberValue{},
-          		bySPKI: map[[32]byte]coreconsensus.MemberValue{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
+          		bySPKI: map[[32]byte]coreconsensus.MemberValue{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, back: map[outKey]*backLink{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
           		done: make(chan struct{}),
           	}
       - bind: ln, err
@@ -21056,7 +21056,11 @@ sequences:
         kind: value
       - id: conn.SetReadDeadline
         kind: value
+      - id: t.holdBack
+        kind: internal
       - id: t.readFrames
+        kind: internal
+      - id: t.dropBack
         kind: internal
       - id: t.serveSnapshot
         kind: internal
@@ -21087,15 +21091,15 @@ sequences:
           cases:
             - case: laneControl, laneData
               do:
-                - bind: limit
-                  eval: t.cfg.MaxFrameBytes
-                - opt:
-                    do:
-                      - set: limit
-                        value: t.cfg.MaxControlFrameBytes
-                    when: lane == laneControl
-                - eval: t.readFrames(conn, peer, limit)
+                - bind: k
+                  eval: outKey{peer.ID, lane}
+                - bind: bl
+                  eval: t.holdBack(k, conn, peer.SPKI)
+                  to: t.holdBack
+                - eval: t.readFrames(bufio.NewReaderSize(conn, connBufferBytes), peer, t.laneBound(lane))
                   to: t.readFrames
+                - eval: t.dropBack(k, bl)
+                  to: t.dropBack
             - case: laneSnapshot
               do:
                 - eval: t.serveSnapshot(conn, peer)
@@ -21108,8 +21112,6 @@ sequences:
         kind: actor
       - id: (*TCPTransport).readFrames
         kind: self
-      - id: bufio
-        kind: stdlib
       - id: readFrame
         kind: internal
       - id: t.refusedOversized
@@ -21117,9 +21119,6 @@ sequences:
       - id: t.deliverTo
         kind: internal
     steps:
-      - bind: r
-        eval: bufio.NewReaderSize(c, connBufferBytes)
-        to: bufio
       - var:
           name: buf
           type: "[]byte"
@@ -21242,6 +21241,221 @@ sequences:
       - bind: _, still
         eval: t.bySPKI[spki]
       - return: t.deliver, still
+  - of: (*TCPTransport).laneBound
+    steps:
+      - opt:
+          do:
+            - return: t.cfg.MaxControlFrameBytes
+          when: lane == laneControl
+      - return: t.cfg.MaxFrameBytes
+  - of: (*TCPTransport).holdBack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).holdBack
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - bind: bl
+        eval: "&backLink{conn: c, spki: spki}"
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - set: t.back[k]
+        value: bl
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - return: bl
+  - of: (*TCPTransport).dropBack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).dropBack
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - opt:
+          do:
+            - eval: delete(t.back, k)
+          when: t.back[k] == bl
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+  - of: (*TCPTransport).sendBack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).sendBack
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+      - id: bl.write
+        kind: internal
+      - id: abandon
+        kind: internal
+      - id: t.notedSentBack
+        kind: internal
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: bl
+        eval: t.back[k]
+      - bind: m, member
+        eval: t.byID[k.to]
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: bl == nil || !member || m.SPKI != bl.spki
+      - opt:
+          do:
+            - eval: abandon(bl.conn.Close())
+              to: abandon
+            - return: ""
+          init:
+            bind: err
+            eval: bl.write(batch, t.cfg.WriteTimeout)
+            to: bl.write
+          when: err != nil
+      - eval: t.notedSentBack(k)
+        to: t.notedSentBack
+  - of: (*backLink).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*backLink).write
+        kind: self
+      - id: boundUnacknowledged
+        kind: internal
+      - id: bufio
+        kind: stdlib
+      - id: b.conn.SetWriteDeadline
+        kind: value
+      - id: b.w.Write
+        kind: value
+      - id: b.w.Flush
+        kind: value
+    steps:
+      - lock:
+          mutex: b.mu
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: boundUnacknowledged(b.conn.NetConn(), timeout)
+                  to: boundUnacknowledged
+                when: err != nil
+            - set: b.w
+              to: bufio
+              value: bufio.NewWriterSize(b.conn, connBufferBytes)
+          when: b.w == nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: b.conn.SetWriteDeadline(time.Now().Add(timeout))
+            to: b.conn.SetWriteDeadline
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: _, err
+                  eval: b.w.Write(f)
+                  to: b.w.Write
+                when: err != nil
+          key: _
+          range: batch
+          value: f
+      - return: b.w.Flush()
+        to: b.w.Flush
+  - of: (*TCPTransport).notedSentBack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).notedSentBack
+        kind: self
+      - id: t.sentBack.Add
+        kind: value
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - bind: "n"
+        eval: t.sentBack.Add(1)
+        to: t.sentBack.Add
+      - opt:
+          do:
+            - return: ""
+          when: n&(n-1) != 0
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: warn
+        eval: t.warn
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - eval: |-
+                warn("consensus: frames went back on the connection a member dialled, its address could not be dialled",
+                			lattr("to", uint64(k.to)), lattr("lane", uint64(k.lane)), lattr("sent_back", uint64(n)))
+          when: warn != nil
+  - of: (*TCPTransport).linkPeer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).linkPeer
+        kind: self
+      - id: tlsid
+        kind: package
+      - id: parseSAN
+        kind: internal
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - bind: pid, ok
+        eval: tlsid.PeerOf(cs)
+        to: tlsid
+      - opt:
+          do:
+            - return: coreconsensus.AuthenticatedPeerValue{}, false
+          when: "!ok || pid.SPKI != pin"
+      - bind: _, slot, err
+        eval: parseSAN(pid.Leaf)
+        to: parseSAN
+      - opt:
+          do:
+            - return: coreconsensus.AuthenticatedPeerValue{}, false
+          when: err != nil
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: m, member
+        eval: t.bySPKI[pin]
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - return: coreconsensus.AuthenticatedPeerValue{}, false
+          when: "!member || m.ID != to || m.Slot != slot"
+      - return: "coreconsensus.AuthenticatedPeerValue{ID: m.ID, Incarnation: m.Incarnation, Slot: slot, SPKI: pin}, true"
   - of: (*TCPTransport).dial
     participants:
       - id: caller
@@ -21631,6 +21845,8 @@ sequences:
         kind: self
       - id: t.retire
         kind: internal
+      - id: t.sendBack
+        kind: internal
       - id: t.writeBatch
         kind: internal
       - id: link.close
@@ -21644,6 +21860,8 @@ sequences:
         eval: link.conn != nil
       - opt:
           do:
+            - eval: t.sendBack(k, batch)
+              to: t.sendBack
             - return: ""
           when: "!reused && !t.redial(k, link)"
       - bind: err
@@ -21655,6 +21873,8 @@ sequences:
               to: link.close
             - opt:
                 do:
+                  - eval: t.sendBack(k, batch)
+                    to: t.sendBack
                   - return: ""
                 when: "!t.redial(k, link)"
             - set: err
@@ -21667,6 +21887,8 @@ sequences:
               to: link.close
             - eval: t.reportUnreachable(k.to)
               to: t.reportUnreachable
+            - eval: t.sendBack(k, batch)
+              to: t.sendBack
           when: err != nil
   - of: (*TCPTransport).retire
     participants:
@@ -21742,7 +21964,7 @@ sequences:
         kind: internal
       - id: t.wg.Add
         kind: value
-      - id: watchLink
+      - id: t.watchLink
         kind: internal
     steps:
       - opt:
@@ -21799,24 +22021,37 @@ sequences:
           when: len(certs) > 0
       - eval: t.wg.Add(1)
         to: t.wg.Add
-      - go: watchLink(&t.wg, c)
-        to: watchLink
+      - go: t.watchLink(c, k, pin)
+        to: t.watchLink
       - return: "true"
-  - of: watchLink
+  - of: (*TCPTransport).watchLink
     participants:
       - id: caller
         kind: actor
-      - id: watchLink
+      - id: (*TCPTransport).watchLink
         kind: self
-      - id: wg.Done
+      - id: t.wg.Done
         kind: value
+      - id: t.linkPeer
+        kind: internal
+      - id: t.readFrames
+        kind: internal
       - id: io
         kind: stdlib
       - id: abandon
         kind: internal
     steps:
-      - defer: wg.Done()
-        to: wg.Done
+      - defer: t.wg.Done()
+        to: t.wg.Done
+      - opt:
+          do:
+            - eval: t.readFrames(bufio.NewReaderSize(c, backReadBytes), peer, t.laneBound(k.lane))
+              to: t.readFrames
+          init:
+            bind: peer, ok
+            eval: t.linkPeer(c.ConnectionState(), k.to, pin)
+            to: t.linkPeer
+          when: ok
       - bind: _, err
         eval: io.Copy(io.Discard, c)
         to: io
