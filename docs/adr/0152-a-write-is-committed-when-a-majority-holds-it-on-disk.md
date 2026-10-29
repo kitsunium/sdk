@@ -1190,6 +1190,10 @@ predate the log's start only the leader listed before it, so added before
 it, is known to it for sure. A member that does not answer is never
 refused on this ground: it vouches for no one, and a dead voter stays
 removable. The operator brings the stale voter back, or removes it, first.
+The premise holds only while no voter's log moves back: a truncation that
+would take a voter back to a configuration whose other members have all
+left since is refused offline instead (amendment of 2026-10-29,
+[#758](https://github.com/kitsunium/sdk/issues/758)).
 
 **Limits TLS does not set (R1-24, from raft-sql-poc).**
 - A frame's announced length is checked against `MaxFrameBytes` before
@@ -5821,6 +5825,69 @@ the entry; one more failure left two live voters of three with no leader
   answer on the connection the leader dialled (amendment of 2026-10-29,
   #748) reaches the leader as well, which then repairs the tail.
 
+## Amendment — a truncation back to members all removed since is refused (2026-10-29, #758)
+
+#603's guard rests on a premise: a voter the leader heard at an index its
+log resolves holds that configuration or a later one, so the members of the
+next configuration it lists there, it lists in every later one.
+`TruncateAndStaySilent` breaks the premise after the leader judged it: it
+moves the voter back to an older configuration. A founder V of
+{A, B, V} stayed up while D and E joined and were promoted and A and B
+failed and were removed; it acknowledged every change, and the leader
+rightly judged it to hold {V, D, E}. V's log was then found damaged at a
+record before D's admission, and the truncation, which #723's guard let
+through since the founding entry survives, brought V back over {A, B, V}.
+Its question (#718) went to A and B, which no longer follow any leader of
+the cluster, its transport refused D and E, and it never ended its
+silence: the cluster ran with no failure tolerance, and one more failure
+left two live voters of three that never commit, with nothing telling the
+operator ([#758](https://github.com/kitsunium/sdk/issues/758)).
+
+- **The exit is refused while the operator is at the console.** Before
+  anything is written, `TruncateAndStaySilent` on a member's directory also
+  reads the configuration entries still readable in the part the truncation
+  drops, at every record boundary past the damage as `logMaxTerm` reads the
+  terms, and follows the whole log as the replay and raft apply it: an
+  entry overwrites what was logged at or past its index, a truncate record
+  drops it, an entry raft cannot parse changes nothing, and the newest
+  snapshot that names members is in force through its index
+  (`truncationStrands`). When the configuration the whole log leaves in
+  force is another than the one the node would restart with, lists a
+  member other than the node, and lists none of the kept configuration's
+  other members under the key it pins for them, the exit is refused
+  `RECOVER_REFUSED`, the directory unchanged and still quarantined.
+- **What counts.** A learner and a joining member count: either answers the
+  question while it follows a leader. A key `DenyPin` withdrew, the zero
+  pin, admits nobody and counts for none. A newest configuration that lists
+  the node alone takes no peer from it, so a lone node is not refused here.
+  A kept configuration that does not list the node, a joiner's from before
+  its own admission, is judged the same way.
+- **At best.** A configuration entry the damage itself took cannot be read:
+  when nothing newer than the kept configuration can be read in the dropped
+  part, nothing is known, and the exit is taken as before. The newest
+  configuration is judged as the node last ran it, committed or not: an
+  uncommitted removal that a later leader dropped may refuse an exit the
+  node would have survived, and `WipeAndRejoin` stays open.
+- **The way out the reason names.** `WipeAndRejoin` alone is not enough:
+  the JOIN of the wiped directory is refused while the old ID holds the
+  slot (R8-11), and the removal of the old ID is refused below `MinVoters`
+  when the cluster holds just that many voters. The operator wipes the
+  directory, joins and promotes one more voter where `MinVoters` asks for
+  it, removes the old ID, and the slot takes a JOIN again, under a new ID
+  and a new key (#648).
+- **What it leaves.** A directory an earlier release already truncated this
+  way starts as before, silent over the old configuration. Letting a silent
+  node admit, for replication only, the members of the newest configuration
+  its log still names, as #542's record admits a leader, is not taken: it
+  widens an admission.
+- No frame, payload or record format changes, nothing new is persisted,
+  and no raft mutation. `TestATruncationBackToMembersAllRemovedSinceIsRefused`
+  (the issue's scenario, the directory unchanged, the way out run to the
+  JOIN of V's slot), `TestATruncationThatKeepsTheNewestConfigurationRejoins`
+  and `TestATruncationBackToAMemberStillListedRejoins` (the exits still
+  taken), and `TestTheStrandingTruncationIsJudgedOnTheLogsNewestConfiguration`
+  (the judgment's edges, on records written in place) hold it.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5856,6 +5923,7 @@ the entry; one more failure left two live voters of three with no leader
 | #746 | Raft hunt loop, 2026-10-28 | `Inspect` reports as `Last` and `LastTerm` the snapshot of an install interrupted inside the log under another term, the one the start and `Recover` keep, and counts only one that verifies and none at term 0, which `Recover` now sets aside as the start does; no format change, nothing written, no raft mutation (amendment of 2026-10-28, #746) |
 | #748 | Raft hunt loop, 2026-10-29 | a batch a node's own link to a member cannot carry goes back on the connection that member dialled on the lane, and a node delivers the frames its outbound links carry as the member it pinned there; the dial and its report are unchanged; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #748) |
 | #755 | Raft hunt loop, 2026-10-29 | a leader record is ranked against the latest configuration only when it is committed or of the node's term, the committed one otherwise, so a divergent tail's configuration of an older term no longer refuses it; no format change, no raft mutation (amendment of 2026-10-29, #755) |
+| #758 | Raft hunt loop, 2026-10-29 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when the configuration it would keep has no other member that the newest configuration still readable in the dropped part lists under the same key; the reason names `WipeAndRejoin`, the promotion `MinVoters` may ask for and the removal of the old ID; a refusal at best; no format change, no raft mutation (amendment of 2026-10-29, #758) |
 
 ## raft-sql-poc (owner's prior Raft)
 

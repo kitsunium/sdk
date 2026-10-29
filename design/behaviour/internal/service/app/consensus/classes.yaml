@@ -1479,6 +1479,17 @@ files:
       - DataDir.truncationKeepsMembers
       - reopenKeeps
       - holdsConfiguration
+      - DataDir.truncationStrands
+      - truncationConfs
+      - loggedConf
+      - newTruncationConfs
+      - (*truncationConfs).read
+      - (*truncationConfs).apply
+      - (*truncationConfs).drop
+      - (*truncationConfs).inForce
+      - (*truncationConfs).cut
+      - (*truncationConfs).strands
+      - stranded
       - truncateAtDamage
       - maxRecordTerm
       - recordTerm
@@ -2958,6 +2969,21 @@ functions:
     params: b []byte
     results: bool
   - doc: |-
+      newTruncationConfs follows the configurations of node self's log over
+      metas, its snapshots newest first, as snaps.List gives them.
+    name: newTruncationConfs
+    params: self coreconsensus.NodeID, metas []coreconsensus.SnapshotMetaValue
+    results: "*truncationConfs"
+  - doc: |-
+      stranded reports whether newest, which lists a member other than self,
+      lists none of kept's other members under the non-zero key kept pins for
+      it: every member self would ask and admit over kept is gone from the
+      configuration it last ran with. A newest that lists self alone takes no
+      peer from it. A key DenyPin withdrew, the zero pin, admits nobody.
+    name: stranded
+    params: self coreconsensus.NodeID, kept, newest *coreconsensus.MembershipValue
+    results: bool
+  - doc: |-
       truncateAtDamage deletes every segment after segment segN, and segN too
       when the damage is at its start, and zeroes segN from off otherwise.
     name: truncateAtDamage
@@ -4094,6 +4120,17 @@ types:
           a snapshot nor a configuration entry before the damage, the node would
           start a learner of nothing, admit no peer, ask no member and stay silent
           for good under a leader that still lists it. WipeAndRejoin is its exit.
+
+          So is one that would take the node back to a configuration whose other
+          members have all left since, as far as the dropped part of the log still
+          names a newer configuration (truncationStrands, #758): a voter that
+          acknowledged every replacement of its peers, and that #603's guard
+          therefore judged to hold the newest configuration, would restart over
+          the old one, ask and admit only removed members and never end its
+          silence. Its way out is WipeAndRejoin, then the removal of its old ID on
+          the cluster, after one more voter is promoted when MinVoters refuses the
+          removal: until then the old ID holds the slot, and the JOIN is refused
+          (R8-11).
         name: truncateAndStaySilent
         recv: d DataDir
         results: error
@@ -4119,6 +4156,28 @@ types:
           passed the guard and were dropped anyway, and the node started silent
           with no configuration (#745).
         name: truncationKeepsMembers
+        params: logDir string, segN uint64, off int64
+        recv: d DataDir
+        results: bool, error
+      - doc: |-
+          truncationStrands reports whether a member's truncation at (segN, off)
+          takes it back to a configuration whose other members have all left since:
+          none of them is listed, under the key the kept configuration pins for it,
+          in the configuration the whole log leaves in force (truncationConfs). The
+          node would restart silent over the kept one, ask only members that no
+          longer follow a leader of this cluster for the leader's record (#718),
+          refuse at its transport every member it last ran with, and never end its
+          silence: the cluster would run with one voter less for good (#758). A
+          directory that is not yet a member's needs no configuration, a joining
+          one joins again (#632). It changes nothing.
+
+          It refuses at best. The part the truncation drops is read as logMaxTerm
+          reads it, at every record boundary past the damage, but a configuration
+          entry the damage itself took cannot be read: when no configuration entry
+          past the kept one can be read there, nothing is known, and the truncation
+          is taken. What the reopen keeps is cut as truncationKeepsMembers cuts it
+          (reopenKeeps, #745).
+        name: truncationStrands
         params: logDir string, segN uint64, off int64
         recv: d DataDir
         results: bool, error
@@ -8666,6 +8725,93 @@ types:
         type: coretransform.BoundedDecompressor
     kind: struct
     name: RestoreOptions
+  - doc: |-
+      truncationConfs follows a member's configurations through its log, in
+      log order, as the replay and raft apply them: an entry drops every
+      configuration entry logged at or past its index, which it overwrote, a
+      truncate record those at or past its own (applyEntry, applyTruncate),
+      and a configuration entry raft parses takes effect once appended (D8,
+      noteAppended). The newest snapshot that names members is in force
+      through its index: a configuration logged at or below it is the history
+      the snapshot was cut from (raft's base).
+
+      cut marks the truncation point. What is read before it is what the reopen
+      keeps, and the configuration in force there is the one the node restarts
+      with; what is read after it, the dropped part, leaves in force the
+      configuration the node last ran with before the damage, as far as it can
+      still be read.
+    fields:
+      - name: snap
+        type: "*coreconsensus.MembershipValue"
+      - name: kept
+        type: coreconsensus.MembershipValue
+      - name: logged
+        type: "[]loggedConf"
+      - name: self
+        type: coreconsensus.NodeID
+      - name: snapAt
+        type: uint64
+      - name: seq
+        type: uint64
+      - name: keptAs
+        type: uint64
+      - name: keeps
+        type: bool
+      - name: isCut
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          read applies every readable record of the segment bytes b in order,
+          scanning every record boundary as maxRecordTerm does: a hole skips the
+          bytes it covers, never the records after it.
+        name: read
+        params: b []byte
+        recv: c *truncationConfs
+      - doc: |-
+          apply applies record r: an entry overwrites what was logged at or past
+          its index, and is pushed when it is a configuration raft parses; a
+          truncate record drops what was logged at or past its index. No other
+          record changes the configurations.
+        name: apply
+        params: r *record
+        recv: c *truncationConfs
+      - doc: drop forgets the configurations logged at or past index.
+        name: drop
+        params: index uint64
+        recv: c *truncationConfs
+      - doc: |-
+          inForce is the configuration in force at what was read so far, and which
+          one it is: the newest logged past the snapshot's index, else the
+          snapshot's, as 0; ok is false when there is none.
+        name: inForce
+        recv: c *truncationConfs
+        results: m *coreconsensus.MembershipValue, as uint64, ok bool
+      - doc: |-
+          cut marks the truncation point, once: the configuration in force there
+          is the one the node restarts with.
+        name: cut
+        recv: c *truncationConfs
+      - doc: |-
+          strands reports whether the configuration in force past everything read,
+          when it is another than the one the node restarts with, strands it there
+          (stranded). With no configuration kept, #723's refusal applies instead.
+        name: strands
+        recv: c *truncationConfs
+        results: bool
+    name: truncationConfs
+  - doc: |-
+      loggedConf is the configuration of the entry at index, seq telling an
+      entry from the one that overwrote it at the same index.
+    fields:
+      - name: m
+        type: coreconsensus.MembershipValue
+      - name: index
+        type: uint64
+      - name: seq
+        type: uint64
+    kind: struct
+    name: loggedConf
   - fields:
       - name: CertFile
         type: string

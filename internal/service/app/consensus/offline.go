@@ -1556,6 +1556,17 @@ func (l *fileLog) resetTo(index, term uint64) error {
 // a snapshot nor a configuration entry before the damage, the node would
 // start a learner of nothing, admit no peer, ask no member and stay silent
 // for good under a leader that still lists it. WipeAndRejoin is its exit.
+//
+// So is one that would take the node back to a configuration whose other
+// members have all left since, as far as the dropped part of the log still
+// names a newer configuration (truncationStrands, #758): a voter that
+// acknowledged every replacement of its peers, and that #603's guard
+// therefore judged to hold the newest configuration, would restart over
+// the old one, ask and admit only removed members and never end its
+// silence. Its way out is WipeAndRejoin, then the removal of its old ID on
+// the cluster, after one more voter is promoted when MinVoters refuses the
+// removal: until then the old ID holds the slot, and the JOIN is refused
+// (R8-11).
 func (d DataDir) truncateAndStaySilent() error {
 	segN, off, err := d.quarantinePoint()
 	if err != nil {
@@ -1568,6 +1579,16 @@ func (d DataDir) truncateAndStaySilent() error {
 	}
 	if !keeps {
 		return recoverRefused("the truncation leaves no configuration: the node would admit and ask no member; clear the quarantine with WipeAndRejoin")
+	}
+	strands, err := d.truncationStrands(logDir, segN, off)
+	if err != nil {
+		return err
+	}
+	if strands {
+		return recoverRefused("the truncation keeps a configuration none of whose other members the log's newest configuration still lists: " +
+			"the node would ask and admit only removed members and stay silent for good; clear the quarantine with WipeAndRejoin, " +
+			"then Remove this node's ID on the cluster, after a Promote of one more voter when MinVoters refuses the removal, " +
+			"so that its slot takes a JOIN again (R8-11)")
 	}
 	maxTerm, err := logMaxTerm(logDir)
 	if err != nil {
@@ -1782,6 +1803,197 @@ func holdsConfiguration(b []byte) bool {
 		o += r.length - recAlign
 	}
 	return false
+}
+
+// truncationStrands reports whether a member's truncation at (segN, off)
+// takes it back to a configuration whose other members have all left since:
+// none of them is listed, under the key the kept configuration pins for it,
+// in the configuration the whole log leaves in force (truncationConfs). The
+// node would restart silent over the kept one, ask only members that no
+// longer follow a leader of this cluster for the leader's record (#718),
+// refuse at its transport every member it last ran with, and never end its
+// silence: the cluster would run with one voter less for good (#758). A
+// directory that is not yet a member's needs no configuration, a joining
+// one joins again (#632). It changes nothing.
+//
+// It refuses at best. The part the truncation drops is read as logMaxTerm
+// reads it, at every record boundary past the damage, but a configuration
+// entry the damage itself took cannot be read: when no configuration entry
+// past the kept one can be read there, nothing is known, and the truncation
+// is taken. What the reopen keeps is cut as truncationKeepsMembers cuts it
+// (reopenKeeps, #745).
+func (d DataDir) truncationStrands(logDir string, segN uint64, off int64) (bool, error) {
+	if d.d.log.stamp.State != coreconsensus.StampMember {
+		return false, nil
+	}
+	metas, err := d.d.snaps.List()
+	if err != nil {
+		return false, err
+	}
+	segs, err := logSegments(logDir)
+	if err != nil {
+		return false, err
+	}
+	seen := newTruncationConfs(d.d.log.stamp.ID, metas)
+	for _, n := range slices.Sorted(maps.Keys(segs)) {
+		b, err := os.ReadFile(segs[n])
+		if err != nil {
+			return false, storageFailed("read segment", err)
+		}
+		switch {
+		case n < segN:
+			seen.read(b[:reopenKeeps(b, int64(len(b)))])
+		case n == segN && off > 0:
+			keep := reopenKeeps(b, off)
+			seen.read(b[:keep])
+			seen.cut()
+			seen.read(b[keep:])
+		default:
+			seen.cut()
+			seen.read(b)
+		}
+	}
+	return seen.strands(), nil
+}
+
+// truncationConfs follows a member's configurations through its log, in
+// log order, as the replay and raft apply them: an entry drops every
+// configuration entry logged at or past its index, which it overwrote, a
+// truncate record those at or past its own (applyEntry, applyTruncate),
+// and a configuration entry raft parses takes effect once appended (D8,
+// noteAppended). The newest snapshot that names members is in force
+// through its index: a configuration logged at or below it is the history
+// the snapshot was cut from (raft's base).
+//
+// cut marks the truncation point. What is read before it is what the reopen
+// keeps, and the configuration in force there is the one the node restarts
+// with; what is read after it, the dropped part, leaves in force the
+// configuration the node last ran with before the damage, as far as it can
+// still be read.
+type truncationConfs struct {
+	snap   *coreconsensus.MembershipValue
+	kept   coreconsensus.MembershipValue
+	logged []loggedConf
+	self   coreconsensus.NodeID
+	snapAt uint64
+	seq    uint64
+	keptAs uint64
+	keeps  bool
+	isCut  bool
+}
+
+// loggedConf is the configuration of the entry at index, seq telling an
+// entry from the one that overwrote it at the same index.
+type loggedConf struct {
+	m     coreconsensus.MembershipValue
+	index uint64
+	seq   uint64
+}
+
+// newTruncationConfs follows the configurations of node self's log over
+// metas, its snapshots newest first, as snaps.List gives them.
+func newTruncationConfs(self coreconsensus.NodeID, metas []coreconsensus.SnapshotMetaValue) *truncationConfs {
+	c := &truncationConfs{self: self}
+	if i := slices.IndexFunc(metas, func(m coreconsensus.SnapshotMetaValue) bool { return len(m.Membership.Members) > 0 }); i >= 0 {
+		c.snap, c.snapAt = &metas[i].Membership, metas[i].Position.Index
+	}
+	return c
+}
+
+// read applies every readable record of the segment bytes b in order,
+// scanning every record boundary as maxRecordTerm does: a hole skips the
+// bytes it covers, never the records after it.
+func (c *truncationConfs) read(b []byte) {
+	for o := 0; o+recHeader+recFixed <= len(b); o += recAlign {
+		r, ok := parseRecord(b[o:])
+		if !ok {
+			continue
+		}
+		c.apply(&r)
+		o += r.length - recAlign
+	}
+}
+
+// apply applies record r: an entry overwrites what was logged at or past
+// its index, and is pushed when it is a configuration raft parses; a
+// truncate record drops what was logged at or past its index. No other
+// record changes the configurations.
+func (c *truncationConfs) apply(r *record) {
+	switch r.kind {
+	case recEntry:
+		c.drop(r.index)
+		if r.ekind != uint8(coreconsensus.EntryMembership) {
+			return
+		}
+		a, err := wire.ParseAdminAt(r.ever, r.data)
+		if err != nil {
+			// raft ignores it at append and keeps the configuration
+			// before it in force (noteAppended).
+			return
+		}
+		c.seq++
+		c.logged = append(c.logged, loggedConf{m: a.Membership, index: r.index, seq: c.seq})
+	case recTruncate:
+		c.drop(r.index)
+	}
+}
+
+// drop forgets the configurations logged at or past index.
+func (c *truncationConfs) drop(index uint64) {
+	k := len(c.logged)
+	for k > 0 && c.logged[k-1].index >= index {
+		k--
+	}
+	c.logged = c.logged[:k]
+}
+
+// inForce is the configuration in force at what was read so far, and which
+// one it is: the newest logged past the snapshot's index, else the
+// snapshot's, as 0; ok is false when there is none.
+func (c *truncationConfs) inForce() (m *coreconsensus.MembershipValue, as uint64, ok bool) {
+	if n := len(c.logged); n > 0 && c.logged[n-1].index > c.snapAt {
+		return &c.logged[n-1].m, c.logged[n-1].seq, true
+	}
+	return c.snap, 0, c.snap != nil
+}
+
+// cut marks the truncation point, once: the configuration in force there
+// is the one the node restarts with.
+func (c *truncationConfs) cut() {
+	if c.isCut {
+		return
+	}
+	c.isCut = true
+	if m, as, ok := c.inForce(); ok {
+		c.kept, c.keptAs, c.keeps = *m, as, true
+	}
+}
+
+// strands reports whether the configuration in force past everything read,
+// when it is another than the one the node restarts with, strands it there
+// (stranded). With no configuration kept, #723's refusal applies instead.
+func (c *truncationConfs) strands() bool {
+	c.cut()
+	newest, as, ok := c.inForce()
+	if !c.keeps || !ok || as == c.keptAs {
+		return false
+	}
+	return stranded(c.self, &c.kept, newest)
+}
+
+// stranded reports whether newest, which lists a member other than self,
+// lists none of kept's other members under the non-zero key kept pins for
+// it: every member self would ask and admit over kept is gone from the
+// configuration it last ran with. A newest that lists self alone takes no
+// peer from it. A key DenyPin withdrew, the zero pin, admits nobody.
+func stranded(self coreconsensus.NodeID, kept, newest *coreconsensus.MembershipValue) bool {
+	if !slices.ContainsFunc(newest.Members, func(m coreconsensus.MemberValue) bool { return m.ID != self }) {
+		return false
+	}
+	return !slices.ContainsFunc(kept.Members, func(m coreconsensus.MemberValue) bool {
+		x, listed := newest.Member(m.ID)
+		return m.ID != self && listed && !isZeroDigest(m.SPKI) && x.SPKI == m.SPKI
+	})
 }
 
 // truncateAtDamage deletes every segment after segment segN, and segN too
