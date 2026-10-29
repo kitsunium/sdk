@@ -953,10 +953,11 @@ func (r *Raft) answering(id core.NodeID) bool {
 // {A, D, E} that heard nobody, and after one more failure A and D, two
 // running voters of three, never committed again (#603).
 //
-// The guard admits no one: it only refuses a removal, of a member that
-// answers, which would take away the last voter such a voter knows. A
-// member that does not answer cannot vouch for anyone now, and its removal
-// is never refused here, so a dead voter can always be removed.
+// The guard admits no one: it only refuses a removal, or a move (#761), of
+// a member that answers, which would take away the last voter such a voter
+// knows at the address it serves. A member that does not answer cannot
+// vouch for anyone now, and its removal or move is never refused here, so
+// a dead voter can always be removed, or moved.
 func (r *Raft) strands(next *core.MembershipValue) bool {
 	for _, m := range next.Members {
 		if m.Voter && m.ID != r.id && !r.reachedBy(next, m.ID) {
@@ -1021,7 +1022,10 @@ func listedBefore(next *core.MembershipValue, first, then core.NodeID) bool {
 // vouched reports whether a voter v holding known still finds in next the
 // leader, as any member, or another voter of known, which answers its
 // PreVote with the leader's record (#542). A known that does not list v is
-// not one v holds, and is passed.
+// not one v holds, and is passed. v sends its PreVote to the address known
+// names: a voter next lists at another address no longer hears it, and
+// vouches for no one, while the leader dials v and is admitted at any
+// address it serves (#761).
 func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
 	if _, listed := known.Member(v); !listed {
 		return true
@@ -1030,7 +1034,7 @@ func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
 		if k.ID == v {
 			continue
 		}
-		if _, stays := next.Member(k.ID); stays && (k.ID == leader || k.Voter) {
+		if m, stays := next.Member(k.ID); stays && (k.ID == leader || (k.Voter && m.Address == k.Address)) {
 			return true
 		}
 	}
@@ -1038,13 +1042,31 @@ func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
 }
 
 // updateAddress changes the address of the member at idx to the one admin
-// carries, while a majority answers.
+// carries, while a majority answers, unless the move may strand a voter.
 func (r *Raft) updateAddress(cur *core.MembershipValue, admin *wire.AdminValue, idx int) errs.Code {
 	if idx < 0 || len(admin.Membership.Members) != 1 || !r.activeMajority(*cur) {
 		return codeMembershipInvalid
 	}
 	cur.Members[idx].Address = admin.Membership.Members[0].Address
+	if r.moveStrands(cur, cur.Members[idx].ID) {
+		return codeMembershipInvalid
+	}
 	return 0
+}
+
+// moveStrands reports whether moving target, at the address next records,
+// may strand a voter, as removalStrands does for a removal: a voter that
+// lists target at its old address sends it a PreVote nothing answers, and
+// a voter down while the leader was admitted, C removed and then its last
+// voucher B moved, came back hearing no one, refused by the leader's key,
+// for as long as that leader led (#761). Only the move of a member that
+// answers and may vouch is judged — a voter, or a member that ever was
+// one — and never the leader's own, which vouched admits at any address.
+func (r *Raft) moveStrands(next *core.MembershipValue, target core.NodeID) bool {
+	if target == r.id || !r.answering(target) || r.neverVoter(target) {
+		return false
+	}
+	return r.strands(next)
 }
 
 // updateSnapshotLimit records, for the member at idx, the MaxSnapshotBytes

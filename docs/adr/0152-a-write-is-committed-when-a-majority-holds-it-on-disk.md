@@ -1176,20 +1176,23 @@ followers and sent it nothing. From protocol 2:
   ask the same question (amendment of 2026-10-27,
   [#718](https://github.com/kitsunium/sdk/issues/718)).
 
-**A removal never leaves a voter with no known member to vouch for the
-leader (amendment of 2026-10-23, #603).** The record above needs a member of
-the stale voter's own configuration. A voter down while every member it
-knew was replaced came back hearing no one, and the cluster lost a vote for
-good. No admission is widened for this: the leader refuses
-`MEMBERSHIP_INVALID` the removal of a member that answers when a voter of
-the new configuration might then list neither the leader nor any voter that
-stays. A voter the leader heard at an index its log resolves holds that
-configuration or a later one; for any other voter every retained
-configuration that lists it is a candidate, and when its configuration may
-predate the log's start only the leader listed before it, so added before
-it, is known to it for sure. A member that does not answer is never
-refused on this ground: it vouches for no one, and a dead voter stays
-removable. The operator brings the stale voter back, or removes it, first.
+**Neither a removal nor a move leaves a voter with no known member to vouch
+for the leader (amendments of 2026-10-23, #603, and of 2026-10-29, #761).**
+The record above needs a member of the stale voter's own configuration,
+which the stale voter reaches at the address that configuration names. A
+voter down while every member it knew was replaced came back hearing no
+one, and the cluster lost a vote for good. No admission is widened for
+this: the leader refuses `MEMBERSHIP_INVALID` the removal, or the move by
+`UpdateAddress`, of a member that answers when a voter of the new
+configuration might then list neither the leader, at any address, nor any
+voter that stays at the address it lists it at. A voter the leader heard at
+an index its log resolves holds that configuration or a later one; for any
+other voter every retained configuration that lists it is a candidate, and
+when its configuration may predate the log's start only the leader listed
+before it, so added before it, is known to it for sure. A member that does
+not answer is never refused on this ground: it vouches for no one, and a
+dead voter stays removable, and movable. The operator brings the stale
+voter back, or removes it, first.
 The premise holds only while no voter's log moves back: a truncation that
 would take a voter back to a configuration whose other members have all
 left since is refused offline instead (amendment of 2026-10-29,
@@ -5888,6 +5891,61 @@ operator ([#758](https://github.com/kitsunium/sdk/issues/758)).
   taken), and `TestTheStrandingTruncationIsJudgedOnTheLogsNewestConfiguration`
   (the judgment's edges, on records written in place) hold it.
 
+## Amendment — a move is judged as a removal is (2026-10-29, #761)
+
+#603's guard counted a voter of a stale voter's configuration as its
+voucher as long as the new configuration listed it, at whatever address,
+and `UpdateAddress` was never judged. The stale voter sends its PreVote,
+the question #542's record answers, to the address its own configuration
+names. A voter A of {A, B, C} down while D was admitted and promoted, C
+removed — the guard let it through, B staying — and the leadership handed
+to D, came back after `UpdateAddress` moved B: its PreVote went to B's old
+address, where nothing listened, B, a follower, never dials A, so #748's
+back link never existed, and A's transport refused D's key. A was a live
+voter out of the quorum for as long as D led, and once B failed, A and D,
+two live voters of three, had no leader
+([#761](https://github.com/kitsunium/sdk/issues/761)).
+
+- **A voucher counts at the address the stale voter knows.** A voter of
+  the configuration the stale voter may hold vouches for it only when the
+  new configuration lists it at the address that configuration names
+  (`vouched`). The leader still vouches at any address: it dials the stale
+  voter, which admits it by key and answers on the connection the leader
+  dialled (amendment of 2026-10-29, #748). The removal is judged the same
+  way: once a member moved, the removal of the last voter that stays at an
+  address the stale voter knows is refused.
+- **The move is judged.** `UpdateAddress` of a member that answers and may
+  vouch — a voter, or a member that ever was one — other than the leader
+  itself is refused `MEMBERSHIP_INVALID` when the configuration it leaves
+  may strand a voter, the removal's rule (`moveStrands`, `strands`). A
+  member that does not answer vouches for no one now and stays movable, a
+  learner that never voted vouches for no one, and the leader's own
+  address is not one a voter dials to hear it.
+- **The way out.** The operator brings the stale voter back — it asks the
+  unmoved voucher for the leader's record and catches up, and the leader
+  then hears it at a configuration that lists the leader — or removes it;
+  the move then goes through. A move while every voter is heard at a
+  configuration that lists the leader, D20's migration with every member
+  up, is never refused on this ground; one submitted before a new leader
+  heard a voter is judged on the configurations it retains, as a removal
+  is.
+- **What it leaves.** The guard reasons about the leader that judges the
+  change, as #603's does. A founder listed before the leader and silent
+  over a compacted log holds a configuration the leader cannot know: every
+  move of an answering voter is refused until it answers or is removed, as
+  every removal is (#614). #758's offline refusal compares keys, not
+  addresses: a truncation back to a configuration whose other members have
+  all moved since is not refused there.
+- No frame, payload or record format changes, no protocol raise, and no
+  raft mutation (the type is full). Over TCP,
+  `TestTheLastMemberAStaleVoterKnowsMovesOnlyOnceItIsBack` holds the
+  issue's scenario: B's move refused while A is down, admitted once A is
+  back, and A and D elect a leader once B fails. In raft,
+  `TestTheMoveOfTheLastMemberAStaleVoterReachesIsRefused` (a network that
+  delivers only at the address a member listens at),
+  `TestAMoveIsJudgedOnlyForAnAnsweringMemberThatMayVouch` and
+  `TestVouchedNeedsTheVoterAtTheAddressTheStaleVoterKnows` hold the rule.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5924,6 +5982,7 @@ operator ([#758](https://github.com/kitsunium/sdk/issues/758)).
 | #748 | Raft hunt loop, 2026-10-29 | a batch a node's own link to a member cannot carry goes back on the connection that member dialled on the lane, and a node delivers the frames its outbound links carry as the member it pinned there; the dial and its report are unchanged; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #748) |
 | #755 | Raft hunt loop, 2026-10-29 | a leader record is ranked against the latest configuration only when it is committed or of the node's term, the committed one otherwise, so a divergent tail's configuration of an older term no longer refuses it; no format change, no raft mutation (amendment of 2026-10-29, #755) |
 | #758 | Raft hunt loop, 2026-10-29 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when the configuration it would keep has no other member that the newest configuration still readable in the dropped part lists under the same key; the reason names `WipeAndRejoin`, the promotion `MinVoters` may ask for and the removal of the old ID; a refusal at best; no format change, no raft mutation (amendment of 2026-10-29, #758) |
+| #761 | Raft hunt loop, 2026-10-29 | a voter that stays vouches for a stale voter only at the address the stale voter's configuration names, and `UpdateAddress` of an answering member that may vouch, the leader's own excepted, is refused `MEMBERSHIP_INVALID` when it may strand a voter, as a removal is; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #761) |
 
 ## raft-sql-poc (owner's prior Raft)
 

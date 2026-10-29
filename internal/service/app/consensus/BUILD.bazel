@@ -132,6 +132,7 @@ go_test(
         "metav2_internal_test.go",
         "movedall_internal_test.go",
         "movedleader_internal_test.go",
+        "movedvoucher_internal_test.go",
         "newerlog_internal_test.go",
         "notableinstall_internal_test.go",
         "observe_internal_test.go",

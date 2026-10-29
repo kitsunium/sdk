@@ -1070,6 +1070,15 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   Nor refuse the removal of a learner that never voted: it vouches for no
   one (#614, `neverVoter`,
   `TestAnAnsweringLearnerIsRemovedWhileAVoterIsAlreadyStranded`).
+- Move an answering member that may be the last voter a stale voter
+  knows, or count a voter that stays as its voucher at an address the
+  stale voter does not know: it sends its PreVote to the address its own
+  configuration names, and a voter down while the leader was admitted, C
+  removed and then B moved came back hearing no one, refused by the
+  leader's key, until one more failure left no leader (#761, `vouched`,
+  `moveStrands`, `TestTheLastMemberAStaleVoterKnowsMovesOnlyOnceItIsBack`,
+  `TestTheMoveOfTheLastMemberAStaleVoterReachesIsRefused`). The leader's
+  own move is not judged: it dials every voter that lists it.
 - Cancel a snapshot stream because the log is tight: its pin's hold on
   compaction is lifted, for good, and the stream goes on; only a stream
   that is due is cancelled (`streamDue`). Cancelled with it, no stream
