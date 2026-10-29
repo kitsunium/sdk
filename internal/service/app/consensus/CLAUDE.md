@@ -1117,3 +1117,13 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   snapshot's encoded size: the sender refuses to open there, and every
   later offer resumed at the same offset (#643, `openSpool`,
   `TestAResumeIsNeverAcceptedPastTheSnapshotsEnd`).
+- Judge whether a bench's writes on disk still run under the leader they
+  are bound to by its published role and term alone: a leader whose
+  fdatasync stalls hands its leadership over (#554), and from the moment
+  the hand-off starts raft refuses every proposal `NOT_LEADER` while
+  `Status` still says leader at the same term. The bench failed instead of
+  skipping, main red on Windows (#762). `leadershipMoved` also reads the
+  transfer in flight on the loop and takes `NOT_LEADER` for a change
+  (`silenceUnderItsLeaderOnDisk`,
+  `TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt`,
+  `TestTheSilenceBenchSkipsOnAHandOffInFlight`).
