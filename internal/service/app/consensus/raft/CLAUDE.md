@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-28T18:00:00Z -->
+<!-- updated: 2026-10-29T12:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -255,6 +255,16 @@ under coverage before touching `shard_count`.
   mutation, the type is full). Nor test the role again in
   `ReportUnreachable`: only a leader tracks progress, and the test took the
   function past its inlining budget.
+- Rank a record of the leader's address below a latest configuration that
+  is uncommitted and of a term older than the node's, or end the record on
+  one: such a configuration ends a divergent tail the leader of the node's
+  term never wrote and never commits (#675), and a node back with one past
+  the cluster's commit refused every record and dialled its moved leader's
+  old address for as long as the cluster stayed quiet (#755).
+  `heldConfIndex` is the latest configuration's index when it is committed
+  or of the node's term, the committed one's otherwise
+  (`TestTheMemberBehindAMovedLeaderTakesItsAddressOverAnOlderTermsTail`,
+  `TestTheTailOfTheLeadersTermStillOutranksTheRecord`; no mutation).
 - Answer a compaction at or below the base with nothing: the store may
   hold the log below it, back to the older retained snapshot less the
   trailing window (R6-02), once a restart started the step function at the

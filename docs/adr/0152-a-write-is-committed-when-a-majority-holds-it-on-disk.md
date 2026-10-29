@@ -5699,6 +5699,42 @@ nobody could vouch for the address.
   `TestTCPBackLinkSpeaksOnlyForThePinnedMember` and
   `TestTCPBackLinkIsTheNewestConnection` the transport's bounds.
 
+## Amendment — a divergent tail's configuration does not outrank the leader's record (2026-10-29, #755)
+
+#724's record gives an address only when it was read at a commit past
+the node's latest configuration, appended or committed. A voter back with
+an uncommitted tail of an older term that ended in a configuration entry
+past the cluster's commit — a node that led an older term and appended a
+membership change, an automatic `ChangeSnapshotLimit` among them, before
+it was cut off — refused every record its members sent: the record, read
+at the cluster's commit, was below that entry. It kept dialling its moved
+leader's old address, heard the leader so never campaigned, and on a
+quiet cluster stayed out of the quorum until the cluster committed past
+the entry; one more failure left two live voters of three with no leader
+([#755](https://github.com/kitsunium/sdk/issues/755)).
+
+- **The configuration a record must pass.** The latest configuration
+  still outranks a record when it is committed or was appended at the
+  node's own term, by the leader of that term. An uncommitted one of an
+  older term ends a tail that leader never wrote and, past its commit,
+  never commits: #675's argument, which `behindCommit` makes on the
+  sender's side. Terms never decrease along a log, so every uncommitted
+  configuration before it is of an older term as well, and the record is
+  ranked against the committed configuration instead (`heldConfIndex`).
+  The record ends on the same rank, once the commit or that configuration
+  reaches the commit it was read at, or once the latest configuration no
+  longer lists the leader under its key.
+- **Unchanged.** The address only, for the leader the node follows and
+  reported unreachable, under the very key its latest configuration pins,
+  from a member at a term at least its own, read past its commit; the
+  transport pins that key at every dial. No frame, payload or record
+  format change, no protocol raise, no raft mutation:
+  `TestTheMemberBehindAMovedLeaderTakesItsAddressOverAnOlderTermsTail`
+  (the issue's scenario, a tail of commands alone as the control) and
+  `TestTheTailOfTheLeadersTermStillOutranksTheRecord` hold it. Over TCP, the
+  answer on the connection the leader dialled (amendment of 2026-10-29,
+  #748) reaches the leader as well, which then repairs the tail.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5731,6 +5767,7 @@ nobody could vouch for the address.
 | #744 | Raft hunt loop, 2026-10-28 | the byte trigger counts the payload a durable machine's start resumes past, and a cut that published nothing gives back the count it took; no format change, nothing persisted (amendment of 2026-10-28, #744) |
 | #742 | Raft hunt loop, 2026-10-28 | a joiner's transport keeps, of a member its JOIN answer and its replayed configuration both list, the record of the newer set, ranked by the answer's `AddLearner` position and `ReadyValue.MembershipAt`; no format change, no raft mutation (amendment of 2026-10-28, #742) |
 | #748 | Raft hunt loop, 2026-10-29 | a batch a node's own link to a member cannot carry goes back on the connection that member dialled on the lane, and a node delivers the frames its outbound links carry as the member it pinned there; the dial and its report are unchanged; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #748) |
+| #755 | Raft hunt loop, 2026-10-29 | a leader record is ranked against the latest configuration only when it is committed or of the node's term, the committed one otherwise, so a divergent tail's configuration of an older term no longer refuses it; no format change, no raft mutation (amendment of 2026-10-29, #755) |
 
 ## raft-sql-poc (owner's prior Raft)
 

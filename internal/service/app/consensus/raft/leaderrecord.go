@@ -365,9 +365,10 @@ func (r *Raft) mayAskForLeaderAddress(now time.Time) bool {
 // unreachable lately, from a member of this node's configuration at a term
 // at least its own, under the very key cur pins, for an address that is not
 // the one this node dials, and from a commit past both this node's commit
-// and its latest configuration: the record is the configuration committed
-// at that member, newer than any this node holds. The record ends once
-// this node's configuration catches up (endLeaderAddress).
+// and the configuration it holds against a record (heldConfIndex): the
+// record is the configuration committed at that member, newer than any
+// this node holds. The record ends once this node's configuration catches
+// up (endLeaderAddress).
 func (r *Raft) takeLeaderAddress(now time.Time, m core.MessageValue, rec, cur core.MemberValue) {
 	if !r.mayTakeLeaderAddress(now, m, rec, cur) {
 		return
@@ -397,14 +398,37 @@ func (r *Raft) recordOfUnreachedLeader(now time.Time, m core.MessageValue, rec c
 // recordMovesLeader reports whether the record rec gives the leader cur, as
 // the latest configuration lists it, an address under the very key cur
 // pins, other than the one this node dials, read at a commit past both this
-// node's commit and its latest configuration.
+// node's commit and the configuration it holds against a record.
 func (r *Raft) recordMovesLeader(m core.MessageValue, rec, cur core.MemberValue) bool {
 	dialled := cur.Address
 	if r.leadAddr.ID == rec.ID {
 		dialled = r.leadAddr.Address
 	}
 	return cur.SPKI == rec.SPKI && rec.Address != "" && rec.Address != dialled &&
-		m.Index > r.log.committed && m.Index > r.conf().Index
+		m.Index > r.log.committed && m.Index > r.heldConfIndex()
+}
+
+// heldConfIndex is the index of the configuration a leader record must be
+// read past: the latest one, committed or appended at this node's term,
+// else the committed one. A latest configuration uncommitted and of an
+// older term ends a tail the leader of this node's term never wrote: past
+// that leader's commit, it is never committed (#675's argument, judged on
+// the sender's side by behindCommit), and terms never decrease along a
+// log, so every uncommitted configuration before it is of an older term
+// too. Ranked above the record, it refused every record a member sent a
+// node back with such a tail, which kept dialling its moved leader's old
+// address on a quiet cluster, out of the quorum, until the cluster
+// committed past it (#755). A configuration of this node's term, or a
+// committed one, is newer than the record and still outranks it (#724).
+func (r *Raft) heldConfIndex() uint64 {
+	c := r.conf()
+	if c.Index <= r.log.committed {
+		return c.Index
+	}
+	if t, ok := r.log.term(c.Index); ok && t >= r.term {
+		return c.Index
+	}
+	return r.confAt(r.log.committed).Index
 }
 
 // dialLeaderAddress gives the leader of a record taken by
@@ -420,16 +444,18 @@ func (r *Raft) dialLeaderAddress(out []core.MemberValue) {
 }
 
 // endLeaderAddress ends a record taken by takeLeaderAddress once this
-// node's commit or its latest configuration reaches the commit the record
-// was read at, its own configuration being then at least as new, or once
-// that configuration no longer lists the leader under the record's key.
+// node's commit or the configuration it holds against a record
+// (heldConfIndex) reaches the commit the record was read at, its own
+// configuration being then at least as new, or once its latest
+// configuration no longer lists the leader under the record's key. A
+// divergent tail's configuration past the record ended it at once (#755).
 // The caller republishes the admission set.
 func (r *Raft) endLeaderAddress() {
 	if r.leadAddr.ID == 0 {
 		return
 	}
 	cur, ok := r.conf().Member(r.leadAddr.ID)
-	if !ok || cur.SPKI != r.leadAddr.SPKI || r.log.committed >= r.leadAddrAt || r.conf().Index >= r.leadAddrAt {
+	if !ok || cur.SPKI != r.leadAddr.SPKI || r.log.committed >= r.leadAddrAt || r.heldConfIndex() >= r.leadAddrAt {
 		r.leadAddr, r.leadAddrAt = core.MemberValue{}, 0
 	}
 }
