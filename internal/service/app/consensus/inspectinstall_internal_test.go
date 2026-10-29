@@ -288,3 +288,50 @@ func TestInspectRanksAnInterruptedInstallInsideTheLogByItsSnapshot(t *testing.T)
 		t.Fatalf("Recover kept %d, Inspect reported Last %d", kept, ra.Last)
 	}
 }
+
+// TestATermZeroSnapshotInsideTheLogIsSetAsideByInspectAndRecover: a
+// snapshot a cut before #544 published at term 0 lies inside the log,
+// where the log holds another term. The start sets it aside as unreadable
+// and keeps the log (restoreLatest). Taken by Inspect and Recover for an
+// interrupted install, it ranked the survivor at term 0 by its index, and
+// Recover dropped the log to move it onto a position with no term. Both
+// now set it aside as the start does: Inspect reports the log's tail, and
+// Recover keeps the log and every acknowledged write in it.
+func TestATermZeroSnapshotInsideTheLogIsSetAsideByInspectAndRecover(t *testing.T) {
+	c, nodes := threeOnDisk(t, 20)
+	for _, dn := range nodes {
+		dn.crash(t, c)
+	}
+	keep := nodes[0]
+	keep.dd = openDir(t, keep.dir, 16<<10)
+	first, last := keep.dd.Log().Bounds()
+	lastTerm := must(keep.dd.Log().Term(last))(t)
+	if first != 1 || last < 12 {
+		t.Fatalf("setup: the log is [%d, %d], want it to start at 1 and hold more than 12 entries", first, last)
+	}
+	publishAt(t, keep.dd, coreconsensus.PositionValue{Term: 0, Index: 10}, false)
+	r := must(Inspect(keep.dd))(t)
+	if r.Last != last || r.LastTerm != lastTerm {
+		t.Errorf("Inspect reports (LastTerm %d, Last %d) over a term-0 snapshot at 10, want the log's tail (%d, %d)", r.LastTerm, r.Last, lastTerm, last)
+	}
+	next := coreconsensus.ClusterID{7, 5, 7}
+	members, opt := recoverArgs(t, c, nodes, keep, next)
+	if err := Recover(keep.dd, next, members, opt); err != nil {
+		t.Fatalf("Recover over a term-0 snapshot inside the log: %v %v", err, errs.FieldsOf(err))
+	}
+	if kept := must(keep.dd.Log().Stamp())(t).Log.KeptIndex; kept != last {
+		t.Fatalf("Recover kept %d, want the log's last index %d", kept, last)
+	}
+	c.cid = next
+	keep.sm = newKV()
+	cfg := diskConfig(c, keep)
+	cfg.MinVoters = 1
+	keep.node = must(NewNode(cfg))(t)
+	defer keep.crash(t, c)
+	propose(t, keep.node, "after=recover")
+	for i := range 20 {
+		if v, _ := keep.sm.get(fmt.Sprintf("k%d", i)); v != fmt.Sprintf("v%d", i) {
+			t.Fatalf("the recovered state lost k%d: %q", i, v)
+		}
+	}
+}

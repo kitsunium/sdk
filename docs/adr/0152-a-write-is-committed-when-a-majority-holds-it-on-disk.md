@@ -5695,6 +5695,15 @@ held ([#746](https://github.com/kitsunium/sdk/issues/746)).
   `VERSION_UNSUPPORTED`, as it refuses `Recover` and the start (#640). A
   newest snapshot below the log, or that the log continues, is not read:
   forgejo inspects its directory at every start.
+- **A snapshot at term 0 is set aside, as the start sets it aside.** A cut
+  before #544 could publish a snapshot at an index above 0 and term 0,
+  which the start never restores (`restoreLatest`). Taken by
+  `interruptedInstall` for an install, it lies past the log or under
+  another term than the log's at its index: `Inspect` ranked the survivor
+  at term 0 by that index, and `Recover` dropped the log to move it onto a
+  position with no term, which the compaction refused `STORAGE_FAILED`.
+  `interruptedInstall` skips it unread, as the start does, so both report
+  and keep the log (review of #754).
 - **What it leaves.** `First` stays the log's first index on disk, so
   `First..Last` is not the log's range for such a directory. The start may
   still fall back past a snapshot that verifies but does not restore into
@@ -5707,8 +5716,9 @@ held ([#746](https://github.com/kitsunium/sdk/issues/746)).
   `TestInspectRanksAnInterruptedInstallInsideTheLogByItsSnapshot` (three
   voters on disk, a real install interrupted after its publication, the
   survivor the rule picks recovered with every acknowledged write the
-  snapshot holds) and the cases of `TestInspectReportsTheTermOfASnapshotAtLast`,
-  which now publish snapshots that verify, hold it.
+  snapshot holds), the cases of `TestInspectReportsTheTermOfASnapshotAtLast`,
+  which now publish snapshots that verify, and
+  `TestATermZeroSnapshotInsideTheLogIsSetAsideByInspectAndRecover` hold it.
 
 ## Revision history
 
@@ -5742,7 +5752,7 @@ held ([#746](https://github.com/kitsunium/sdk/issues/746)).
 | #744 | Raft hunt loop, 2026-10-28 | the byte trigger counts the payload a durable machine's start resumes past, and a cut that published nothing gives back the count it took; no format change, nothing persisted (amendment of 2026-10-28, #744) |
 | #742 | Raft hunt loop, 2026-10-28 | a joiner's transport keeps, of a member its JOIN answer and its replayed configuration both list, the record of the newer set, ranked by the answer's `AddLearner` position and `ReadyValue.MembershipAt`; no format change, no raft mutation (amendment of 2026-10-28, #742) |
 | #745 | Raft hunt loop, 2026-10-28 | `TruncateAndStaySilent`'s refusal judges the truncated log batch by batch, as the reopen keeps it: a configuration entry in the batch the damage tears no longer lets the exit through; no format change, no raft mutation (amendment of 2026-10-28, #745) |
-| #746 | Raft hunt loop, 2026-10-28 | `Inspect` reports as `Last` and `LastTerm` the snapshot of an install interrupted inside the log under another term, the one the start and `Recover` keep, and counts only one that verifies; no format change, nothing written, no raft mutation (amendment of 2026-10-28, #746) |
+| #746 | Raft hunt loop, 2026-10-28 | `Inspect` reports as `Last` and `LastTerm` the snapshot of an install interrupted inside the log under another term, the one the start and `Recover` keep, and counts only one that verifies and none at term 0, which `Recover` now sets aside as the start does; no format change, nothing written, no raft mutation (amendment of 2026-10-28, #746) |
 
 ## raft-sql-poc (owner's prior Raft)
 

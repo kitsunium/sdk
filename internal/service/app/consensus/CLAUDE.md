@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-28T20:00:00Z -->
+<!-- updated: 2026-10-29T03:30:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -318,7 +318,11 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `interruptedInstall` finishes, read only when the newest one lies where
   an interrupted install leaves it (`unfinishedInstall`): forgejo
   inspects at every start (#746,
-  `TestInspectRanksAnInterruptedInstallInsideTheLogByItsSnapshot`).
+  `TestInspectRanksAnInterruptedInstallInsideTheLogByItsSnapshot`). Nor
+  take a snapshot at term 0, a cut's before #544, for an interrupted
+  install: the start sets it aside, and `Recover` dropped the log for a
+  position with no term; `interruptedInstall` skips it (`termless`,
+  `TestATermZeroSnapshotInsideTheLogIsSetAsideByInspectAndRecover`).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit
   lags the cluster's, and the entries past it may be writes the old cluster
   acknowledged. `adoptedEnd` keeps every entry whose `BodySum` and

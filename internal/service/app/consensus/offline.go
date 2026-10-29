@@ -176,11 +176,14 @@ type ReportValue struct {
 	Stamp     coreconsensus.StampValue
 	HardState coreconsensus.HardState
 	First     uint64
-	// Last is the last index the directory holds once started or
-	// recovered: the log's, or the snapshot's of an install a crash
-	// interrupted, which the start and Recover move the log onto, whether
-	// it lies past the log's end or inside the log under another term (the
-	// log's entries past it are then dropped).
+	// Last is the last index the directory holds as the start and Recover
+	// keep it, the half of the survivor's key LastTerm completes: the log's
+	// last index, or the index of the snapshot an install a crash interrupted
+	// published, which they move the log onto, whether it lies past the log's
+	// end or inside the log under another term (the log's entries past it
+	// are then dropped). It is not the log's bound after a Recover, which
+	// may still drop a suffix that does not verify, and appends its forced
+	// entry after the index it keeps.
 	Last uint64
 	// LastTerm is the term of the entry at Last, or of the snapshot that
 	// holds Last. With Last it is the key a Recover's survivor is chosen
@@ -566,14 +569,20 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 // VERSION_UNSUPPORTED, as it refuses a start: unknown means stop, never
 // skip (D18). Skipped as one that fails its checksums, a snapshot above
 // ProtocolMax let Recover plan from the older log below it and write a new
-// history from a state older than the one the directory holds (#640). It
-// reads and writes nothing else.
+// history from a state older than the one the directory holds (#640). One
+// a cut before #544 published at term 0 is set aside unread, as the start
+// sets it aside (restoreLatest): taken for an install, it dropped the log
+// for a position with no term, which the compaction then refused, and
+// Inspect ranked the survivor at term 0. It reads and writes nothing else.
 func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, error) {
 	metas, err := d.d.snaps.List()
 	if err != nil {
 		return coreconsensus.SnapshotMetaValue{}, false, err
 	}
 	for _, m := range metas {
+		if termless(&m) {
+			continue // the start sets it aside too (#544)
+		}
 		if verr := d.verifySnapshotFile(m); verr != nil {
 			if errs.HasCode(verr, coreconsensus.CodeVersionUnsupported) {
 				return coreconsensus.SnapshotMetaValue{}, false, verr

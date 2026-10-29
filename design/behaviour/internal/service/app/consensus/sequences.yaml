@@ -14519,6 +14519,10 @@ sequences:
           do:
             - opt:
                 do:
+                  - continue: true
+                when: termless(&m)
+            - opt:
+                do:
                   - opt:
                       do:
                         - return: coreconsensus.SnapshotMetaValue{}, false, verr

@@ -3519,11 +3519,14 @@ type ReportValue struct {
 	Stamp      coreconsensus.StampValue
 	HardState  coreconsensus.HardState
 	First      uint64
-	// Last is the last index the directory holds once started or
-	// recovered: the log's, or the snapshot's of an install a crash
-	// interrupted, which the start and Recover move the log onto, whether
-	// it lies past the log's end or inside the log under another term (the
-	// log's entries past it are then dropped).
+	// Last is the last index the directory holds as the start and Recover
+	// keep it, the half of the survivor's key LastTerm completes: the log's
+	// last index, or the index of the snapshot an install a crash interrupted
+	// published, which they move the log onto, whether it lies past the log's
+	// end or inside the log under another term (the log's entries past it
+	// are then dropped). It is not the log's bound after a Recover, which
+	// may still drop a suffix that does not verify, and appends its forced
+	// entry after the index it keeps.
 	Last       uint64
 	// LastTerm is the term of the entry at Last, or of the snapshot that
 	// holds Last. With Last it is the key a Recover's survivor is chosen

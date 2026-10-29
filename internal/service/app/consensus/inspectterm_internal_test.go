@@ -58,7 +58,8 @@ func TestInspectReportsTheTermOfTheLastEntry(t *testing.T) {
 // and its term the last term, the ones a start or Recover keeps (#506,
 // #534, #746). One inside the log under the log's own term, or behind the
 // log, is a cut's: the log's tail is kept. Only one that verifies counts,
-// as only one that verifies is finished by Recover.
+// as only one that verifies is finished by Recover, and none a cut before
+// #544 published at term 0, which the start and Recover set aside.
 func TestInspectReportsTheTermOfASnapshotAtLast(t *testing.T) {
 	type tc struct {
 		name    string
@@ -74,6 +75,8 @@ func TestInspectReportsTheTermOfASnapshotAtLast(t *testing.T) {
 		{"inside the log, the log's term", 12, coreconsensus.PositionValue{Term: 1, Index: 10}, false, coreconsensus.PositionValue{Term: 1, Index: 12}},
 		{"past the log, failing its checksums", 5, coreconsensus.PositionValue{Term: 4, Index: 10}, true, coreconsensus.PositionValue{Term: 1, Index: 5}},
 		{"inside the log, another term, failing its checksums", 12, coreconsensus.PositionValue{Term: 4, Index: 10}, true, coreconsensus.PositionValue{Term: 1, Index: 12}},
+		{"past the log at term 0, a cut before #544", 5, coreconsensus.PositionValue{Term: 0, Index: 10}, false, coreconsensus.PositionValue{Term: 1, Index: 5}},
+		{"inside the log at term 0, a cut before #544", 12, coreconsensus.PositionValue{Term: 0, Index: 10}, false, coreconsensus.PositionValue{Term: 1, Index: 12}},
 	}
 	runCase := func(t *testing.T, c tc) {
 		d := openDir(t, t.TempDir(), 1<<16)
