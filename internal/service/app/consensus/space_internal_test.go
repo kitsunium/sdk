@@ -111,6 +111,12 @@ func TestACommittedNoSpaceAlarmRefusesWritesUntilCleared(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "the alarm on the follower", func() bool { return f.node.Status().NoSpace != 0 })
+	// The clear is judged against the alarm the leader's step function
+	// holds. The leader publishes it in its Status only at the end of the
+	// turn that committed it, after the commit went out: a follower showed
+	// it while the leader's Status still showed none, and the clear proposed
+	// with 0 was refused ADMIN_PRECONDITION_FAILED (#752).
+	waitFor(t, "the alarm in the leader's status", func() bool { return l.node.Status().NoSpace != 0 })
 	alarm := l.node.Status().NoSpace
 	if _, _, err := l.node.Propose(ctx, []byte("a=1")); !errors.Is(err, coreconsensus.NoSpace) {
 		t.Fatalf("a write on the leader under the alarm: %v", err)

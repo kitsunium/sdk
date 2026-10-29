@@ -79,16 +79,19 @@ func (k *stuckSyncSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 
 // hungCreate is a snapshot store whose Create waits for release once
 // armed: the receiver's loop stands still in its judgment of an offer,
-// whatever holds it there, and the offer is never answered.
+// whatever holds it there, and the offer is never answered. offered is the
+// index of the first snapshot it held so, recorded before waiting counts it.
 type hungCreate struct {
 	*MemorySnapshots
 	armed   atomic.Bool
 	release chan struct{}
 	waiting atomic.Int32
+	offered atomic.Uint64
 }
 
 func (s *hungCreate) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
 	if s.armed.Load() {
+		s.offered.CompareAndSwap(0, meta.Position.Index)
 		s.waiting.Add(1)
 		<-s.release
 	}
@@ -169,7 +172,8 @@ func TestAnOfferOfTheSnapshotBeingCommittedIsRefused(t *testing.T) {
 // waited for the Commit still in its fsync, the offer was never answered,
 // and the new stream's pin, no byte read, held the leader's compaction for
 // as long as it led: its log grew to the NO_SPACE alarm. F refuses that
-// offer OVERLOADED now, and the leader compacts again.
+// offer OVERLOADED now, and the leader compacts again, past that snapshot
+// and down to what R6-02 keeps (compactedPastPin).
 func TestAReofferToAFollowerStuckInItsCommitDoesNotPinCompaction(t *testing.T) {
 	tweak := func(c *Config) {
 		c.SnapshotEvery, c.SnapshotTrailing = 20, 4
@@ -208,10 +212,11 @@ func TestAReofferToAFollowerStuckInItsCommitDoesNotPinCompaction(t *testing.T) {
 
 	waitFor(t, "the follower's install stuck in its spool's fsync", func() bool { return stuck.commits.Load() > 0 })
 	var first *atomic.Int64
+	var pinned uint64
 	waitFor(t, "the leader's stream read the last byte", func() bool {
 		l.node.exec(func() {
 			if pin, ok := l.node.sending[f.id]; ok && pin.until.IsZero() && pin.sent != nil && pin.sent.Load() != 0 {
-				first = pin.sent
+				first, pinned = pin.sent, pin.index
 			}
 		})
 		return first != nil
@@ -231,8 +236,8 @@ func TestAReofferToAFollowerStuckInItsCommitDoesNotPinCompaction(t *testing.T) {
 	bound := time.Duration(pinAfterStream) * testTimingFast().ElectionTimeoutMax
 	wait := 3 * max(bound, 2*time.Second)
 	for deadline := time.Now().Add(wait); ; time.Sleep(10 * time.Millisecond) {
-		first, last := l.log.Bounds()
-		if last-first <= 100 {
+		first, last, floor, ok := compactedPastPin(l, pinned)
+		if ok {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -242,8 +247,8 @@ func TestAReofferToAFollowerStuckInItsCommitDoesNotPinCompaction(t *testing.T) {
 			}
 			var pin sendPin
 			l.node.exec(func() { pin = l.node.sending[f.id] })
-			t.Fatalf("%v after 300 more writes, the leader's log is [%d,%d]: its pin for the follower stuck in its Commit holds index %d, its offer unanswered; Create waited %d times",
-				wait, first, last, pin.index, stuck.waited.Load())
+			t.Fatalf("%v after 300 more writes, the leader's log is [%d,%d], not compacted to %d past the snapshot %d it streamed (R6-02): its pin for the follower stuck in its Commit holds index %d, its offer unanswered; Create waited %d times",
+				wait, first, last, floor, pinned, pin.index, stuck.waited.Load())
 		}
 	}
 	if n := stuck.waited.Load(); n != 0 {
@@ -256,7 +261,8 @@ func TestAReofferToAFollowerStuckInItsCommitDoesNotPinCompaction(t *testing.T) {
 // compaction with no bound: the #602 bound ran from the last byte only, and
 // a stream that had read none had none (#623). The stream is cancelled once
 // it has not moved for its peer's pinBound, from its offer on, and the
-// leader compacts again. Over TCP, the transport's own deadline on the
+// leader compacts again, past the snapshot offered and down to what R6-02
+// keeps (compactedPastPin). Over TCP, the transport's own deadline on the
 // accept (JoinTimeout, 10 s here) is not what ends it.
 func TestAnOfferNeverAcceptedDoesNotPinCompaction(t *testing.T) {
 	tweak := func(c *Config) {
@@ -293,6 +299,7 @@ func TestAnOfferNeverAcceptedDoesNotPinCompaction(t *testing.T) {
 	f.listen(t, ca)
 	f.start(t, cid)
 	waitFor(t, "the follower's loop held in its judgment of the offer", func() bool { return hung.waiting.Load() > 0 })
+	pinned := hung.offered.Load()
 	st := l.node.Status()
 	for i := range 300 {
 		propose(t, l.node, fmt.Sprintf("b%03d=v", i))
@@ -300,8 +307,8 @@ func TestAnOfferNeverAcceptedDoesNotPinCompaction(t *testing.T) {
 	bound := time.Duration(pinAfterStream) * testTimingFast().ElectionTimeoutMax
 	wait := 3 * max(bound, 2*time.Second)
 	for deadline := time.Now().Add(wait); ; time.Sleep(10 * time.Millisecond) {
-		first, last := l.log.Bounds()
-		if last-first <= 100 {
+		first, last, floor, ok := compactedPastPin(l, pinned)
+		if ok {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -315,10 +322,34 @@ func TestAnOfferNeverAcceptedDoesNotPinCompaction(t *testing.T) {
 			if pin.sent != nil {
 				sent = pin.sent.Load()
 			}
-			t.Fatalf("%v after 300 more writes (3x the %v bound), the leader's log is [%d,%d]: its pin for the follower holds index %d, no byte read (sent %d), the offer unanswered",
-				wait, bound, first, last, pin.index, sent)
+			t.Fatalf("%v after 300 more writes (3x the %v bound), the leader's log is [%d,%d], not compacted to %d past the snapshot %d it offered (R6-02): its pin for the follower holds index %d, no byte read (sent %d), the offer unanswered",
+				wait, bound, first, last, floor, pinned, pin.index, sent)
 		}
 	}
+}
+
+// compactedPastPin reports whether l's log is compacted down to the floor
+// R6-02 leaves it at once no pin holds it, a floor past what a pin at
+// pinned allows, with the log's bounds and that floor. The floor is the
+// older of the two snapshots l retains, less SnapshotTrailing, plus one
+// (afterCut); a pin at pinned keeps the first index at pinned+1 at most,
+// pinned less the trailing entries kept (none once the log is short of
+// room) plus one. So a pin still holding never passes, whatever a cut
+// between the two reads changes. A bound on the log's length is no such
+// check: a trigger that falls while a slow cut is in flight is coalesced
+// into one cut at the last applied index once that cut is written (D7,
+// cutPending), the two snapshots retained are then the slow cut and the
+// last index, and the log keeps back to the slow cut, no pin holding it,
+// until a write comes (#750).
+func compactedPastPin(l *tcpNode, pinned uint64) (first, last, floor uint64, ok bool) {
+	metas, err := l.snaps.List()
+	first, last = l.log.Bounds()
+	if err != nil || len(metas) < 2 {
+		return first, last, 0, false
+	}
+	older := metas[1].Position.Index
+	floor = older - min(older, l.node.cfg.SnapshotTrailing) + 1
+	return first, last, floor, floor > pinned+1 && first >= floor
 }
 
 // A peer removed while a snapshot streamed to it kept the stream and its

@@ -83,6 +83,9 @@ const (
 	redialBackoff time.Duration = 100 * time.Millisecond
 	// connBufferBytes sizes the buffered reader and writer of a connection.
 	connBufferBytes int = 64 << 10
+	// backReadBytes sizes the buffered reader of an outbound link, which
+	// carries frames only from a peer that cannot dial this node (#748).
+	backReadBytes int = 4 << 10
 	// boundedWriteBytes is the most one deadline of a boundedWriter covers:
 	// a source that writes itself out in one call (io.WriterTo) is still
 	// cut into writes that each move or fail (#594).
@@ -275,6 +278,10 @@ type TCPTransport struct {
 	bySPKI    map[[32]byte]coreconsensus.MemberValue
 	out       map[outKey]*peerConn
 	in        map[net.Conn][32]byte
+	// back is, per member and lane, the newest connection that member
+	// dialled to this node on that lane, which carries this node's frames
+	// to it when its own link cannot (sendBack, #748).
+	back      map[outKey]*backLink
 	raw       map[net.Conn]struct{}
 	admission *server.Admission
 	resvMu    sync.Mutex
@@ -309,8 +316,27 @@ type TCPTransport struct {
 	// whole peer queue (#669).
 	oversized atomic.Int64
 	// refused counts the frames a member announced above the bound its lane
-	// is read under, each of which ended the connection (#683).
+	// is read under, each of which ended the connection, or the reading of
+	// a link this node dialled (#683, #748).
 	refused atomic.Int64
+	// sentBack counts the batches written back on a connection a member
+	// dialled, this node's own link to that member having carried none
+	// (#748).
+	sentBack atomic.Int64
+}
+
+// backLink is a member's lane as this node reads it, on the connection the
+// member dialled, which carries this node's frames to it when this node's
+// own link to that member cannot (#748).
+type backLink struct {
+	conn *tls.Conn
+	// spki is the key the member authenticated the connection under.
+	spki [32]byte
+	// mu serialises the writes and guards w, set at the first one: a
+	// sender halted while a new one starts for the same peer and lane may
+	// both hold the link.
+	mu sync.Mutex
+	w  *bufio.Writer
 }
 
 type outKey struct {
@@ -398,7 +424,7 @@ func newTCPTransport(cfg *TransportConfig, id *tlsid.Identity) (*TCPTransport, e
 	t := &TCPTransport{
 		cfg: *cfg, id: id, cluster: cid, slot: slot,
 		members: map[coreconsensus.GroupID][]coreconsensus.MemberValue{}, byID: map[coreconsensus.NodeID]coreconsensus.MemberValue{},
-		bySPKI: map[[32]byte]coreconsensus.MemberValue{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
+		bySPKI: map[[32]byte]coreconsensus.MemberValue{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, back: map[outKey]*backLink{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
 		done: make(chan struct{}),
 	}
 	ln, err := listenTCP("tcp", cfg.ListenAddress)
@@ -601,7 +627,9 @@ func (t *TCPTransport) serveAuthenticated(conn *tls.Conn, pid *tlsid.PeerIdentit
 }
 
 // serveMember serves a member's lane until its certificate expires, its
-// connection reaches MaxConnectionAge, or it leaves the membership.
+// connection reaches MaxConnectionAge, or it leaves the membership. While
+// it reads a control or a data lane, the connection is that member's back
+// link on the lane (holdBack).
 func (t *TCPTransport) serveMember(conn *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, leaf *x509.Certificate, lane byte) {
 	t.mu.Lock()
 	t.peerExpiry[peer.ID] = leaf.NotAfter
@@ -617,11 +645,10 @@ func (t *TCPTransport) serveMember(conn *tls.Conn, peer coreconsensus.Authentica
 	}
 	switch lane {
 	case laneControl, laneData:
-		limit := t.cfg.MaxFrameBytes
-		if lane == laneControl {
-			limit = t.cfg.MaxControlFrameBytes
-		}
-		t.readFrames(conn, peer, limit)
+		k := outKey{peer.ID, lane}
+		bl := t.holdBack(k, conn, peer.SPKI)
+		t.readFrames(bufio.NewReaderSize(conn, connBufferBytes), peer, t.laneBound(lane))
+		t.dropBack(k, bl)
 	case laneSnapshot:
 		t.serveSnapshot(conn, peer)
 	default:
@@ -630,12 +657,11 @@ func (t *TCPTransport) serveMember(conn *tls.Conn, peer coreconsensus.Authentica
 	}
 }
 
-// readFrames delivers a member's length-prefixed frames, each bound by
-// limit before anything is allocated, and stops at the first malformed
-// frame, read error, or once the peer is no longer a member. One buffer is
-// reused for the connection's life: deliver copies what it keeps.
-func (t *TCPTransport) readFrames(c net.Conn, peer coreconsensus.AuthenticatedPeerValue, limit int) {
-	r := bufio.NewReaderSize(c, connBufferBytes)
+// readFrames delivers a member's length-prefixed frames read from r, each
+// bound by limit before anything is allocated, and stops at the first
+// malformed frame, read error, or once the peer is no longer a member. One
+// buffer is reused for the connection's life: deliver copies what it keeps.
+func (t *TCPTransport) readFrames(r *bufio.Reader, peer coreconsensus.AuthenticatedPeerValue, limit int) {
 	var buf []byte
 	for {
 		frame, over, ok := readFrame(r, buf, limit)
@@ -714,6 +740,146 @@ func (t *TCPTransport) deliverTo(spki [32]byte) (func(coreconsensus.Authenticate
 	defer t.mu.Unlock()
 	_, still := t.bySPKI[spki]
 	return t.deliver, still
+}
+
+// laneBound is the bound a member's frames on lane are read under, on the
+// connection it dialled as on the one this node dialled to it.
+func (t *TCPTransport) laneBound(lane byte) int {
+	if lane == laneControl {
+		return t.cfg.MaxControlFrameBytes
+	}
+	return t.cfg.MaxFrameBytes
+}
+
+// ---- back links (#748) ----
+//
+// A connection carries frames one way, from the node that dialled it: a
+// node reads the connection a member dials, and sends that member its own
+// frames, answers included, on its own outbound link, dialled to the
+// address its configuration names. A voter down while UpdateAddress moved
+// every other member came back with their old addresses: it heard the
+// leader on the connection the leader dialled, but every answer it sent
+// went to a dead address, as did #724's question for the leader's address,
+// so nothing ever vouched for it. It stayed a live voter out of the quorum
+// for as long as the cluster ran, and one more failure left two live
+// voters of three with no leader.
+//
+// A batch this node's own link cannot carry — the dial failed, or is
+// backing off after one — now goes back on the connection the member
+// dialled to this node on that lane, and the member reads its outbound
+// links for frames (watchLink). Nothing is learned from it: no address, no
+// key. The connection is authenticated in both directions under the keys
+// the two configurations pin, and each side delivers the other's frames
+// only as the member its own configuration lists under that key and slot.
+// The dial is still tried first, under its pin, and its failure is still
+// reported: the back link carries frames, and decides nothing.
+
+// holdBack records c, which the member of key spki dialled on k's lane, as
+// that member's back link on it, the newest one replacing an older one.
+func (t *TCPTransport) holdBack(k outKey, c *tls.Conn, spki [32]byte) *backLink {
+	bl := &backLink{conn: c, spki: spki}
+	t.mu.Lock()
+	t.back[k] = bl
+	t.mu.Unlock()
+	return bl
+}
+
+// dropBack forgets bl, its reader having stopped, unless a newer back link
+// replaced it.
+func (t *TCPTransport) dropBack(k outKey, bl *backLink) {
+	t.mu.Lock()
+	if t.back[k] == bl {
+		delete(t.back, k)
+	}
+	t.mu.Unlock()
+}
+
+// sendBack writes the batch on the back link of k's peer and lane, if
+// there is one, only while that peer is a member pinned to the very key it
+// authenticated the connection under. A write that fails or misses its
+// deadline closes the connection, whose reader then stops: the member
+// dials again.
+func (t *TCPTransport) sendBack(k outKey, batch [][]byte) {
+	t.mu.Lock()
+	bl := t.back[k]
+	m, member := t.byID[k.to]
+	t.mu.Unlock()
+	if bl == nil || !member || m.SPKI != bl.spki {
+		return
+	}
+	if err := bl.write(batch, t.cfg.WriteTimeout); err != nil {
+		// The connection is beyond use: its reader ends on the close.
+		abandon(bl.conn.Close())
+		return
+	}
+	t.notedSentBack(k)
+}
+
+// write writes the batch on the back link and flushes it, under one write
+// deadline. Bytes left unacknowledged on it for timeout abort it from its
+// first write on, as on an outbound link (boundUnacknowledged): a member
+// that vanished does not leave the link accepting writes into a stream the
+// kernel only retransmits.
+func (b *backLink) write(batch [][]byte, timeout time.Duration) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.w == nil {
+		if err := boundUnacknowledged(b.conn.NetConn(), timeout); err != nil {
+			return err
+		}
+		b.w = bufio.NewWriterSize(b.conn, connBufferBytes)
+	}
+	if err := b.conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return err
+	}
+	for _, f := range batch {
+		if _, err := b.w.Write(f); err != nil {
+			return err
+		}
+	}
+	return b.w.Flush()
+}
+
+// notedSentBack counts a batch written back on a member's connection, and
+// logs it at the first and at each power of two after it: this node names
+// that member at an address it cannot dial, until its configuration catches
+// up, and the batches would otherwise log at every heartbeat.
+func (t *TCPTransport) notedSentBack(k outKey) {
+	n := t.sentBack.Add(1)
+	if n&(n-1) != 0 {
+		return
+	}
+	t.mu.Lock()
+	warn := t.warn
+	t.mu.Unlock()
+	if warn != nil {
+		warn("consensus: frames went back on the connection a member dialled, its address could not be dialled",
+			lattr("to", uint64(k.to)), lattr("lane", uint64(k.lane)), lattr("sent_back", uint64(n)))
+	}
+}
+
+// linkPeer is the member a link dialled to to under pin, whose handshake
+// state is cs, speaks for, as serveAuthenticated serves the member's own
+// connection: the key its certificate presented is the pin, the membership
+// lists that key under to, and the certificate names the slot it is listed
+// with (R8-07). ok is false otherwise, and the link's frames are then read
+// and discarded.
+func (t *TCPTransport) linkPeer(cs tls.ConnectionState, to coreconsensus.NodeID, pin [32]byte) (coreconsensus.AuthenticatedPeerValue, bool) {
+	pid, ok := tlsid.PeerOf(cs)
+	if !ok || pid.SPKI != pin {
+		return coreconsensus.AuthenticatedPeerValue{}, false
+	}
+	_, slot, err := parseSAN(pid.Leaf)
+	if err != nil {
+		return coreconsensus.AuthenticatedPeerValue{}, false
+	}
+	t.mu.Lock()
+	m, member := t.bySPKI[pin]
+	t.mu.Unlock()
+	if !member || m.ID != to || m.Slot != slot {
+		return coreconsensus.AuthenticatedPeerValue{}, false
+	}
+	return coreconsensus.AuthenticatedPeerValue{ID: m.ID, Incarnation: m.Incarnation, Slot: slot, SPKI: pin}, true
 }
 
 // ---- outbound ----
@@ -943,22 +1109,27 @@ func queuedFrame(pc *peerConn) ([]byte, bool) {
 }
 
 // sendBatch writes one batch on the link, dialling first when there is no
-// connection; a batch with no connection to go to is dropped, and Raft
-// retransmits what matters. A connection that was already open and fails
-// the write is dialled again once and the batch written on the new one: it
-// died while the link was quiet — its peer reset it, or the kernel aborted
-// it under the user timeout (boundUnacknowledged) — and the batch, an
-// election's vote among others, would otherwise wait for Raft's next round.
+// connection; a batch the link cannot carry goes back on the connection the
+// peer dialled to this node on the lane, when there is one (sendBack, #748),
+// and is dropped otherwise: Raft retransmits what matters. A connection
+// that was already open and fails the write is dialled again once and the
+// batch written on the new one: it died while the link was quiet — its peer
+// reset it, or the kernel aborted it under the user timeout
+// (boundUnacknowledged) — and the batch, an election's vote among others,
+// would otherwise wait for Raft's next round. A failed dial or write is
+// reported as before, whether the back link carried the batch or not.
 func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch [][]byte) {
 	t.retire(k, link)
 	reused := link.conn != nil
 	if !reused && !t.redial(k, link) {
+		t.sendBack(k, batch)
 		return
 	}
 	err := t.writeBatch(link, batch)
 	if err != nil && reused {
 		link.close()
 		if !t.redial(k, link) {
+			t.sendBack(k, batch)
 			return
 		}
 		err = t.writeBatch(link, batch)
@@ -968,6 +1139,7 @@ func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch [][]byte) {
 		// itself is beyond use.
 		link.close()
 		t.reportUnreachable(k.to)
+		t.sendBack(k, batch)
 	}
 }
 
@@ -1038,29 +1210,41 @@ func (t *TCPTransport) redial(k outKey, link *senderLink) bool {
 		link.notAfter = certs[0].NotAfter
 	}
 	t.wg.Add(1)
-	go watchLink(&t.wg, c)
+	go t.watchLink(c, k, pin)
 	return true
 }
 
-// connNetter is what watchLink needs of a link's connection: to read it,
-// and its socket to close.
-type connNetter interface {
+// linkConn is what watchLink needs of a link's connection: to read it, the
+// state of its handshake, and its socket to close.
+type linkConn interface {
 	io.Reader
+	ConnectionState() tls.ConnectionState
 	NetConn() net.Conn
 }
 
-// watchLink reads an outbound connection until it ends, then closes its
-// socket. The receiver writes nothing on a member's lane, so a read only
-// returns once the peer closed its end or the sender closed the link: a
-// write into a link the peer closed cleanly (a FIN) succeeded and its
-// batch was lost to the peer's reset, while a closed socket fails the next
-// write, which sendBatch dials again and resends (#553). It is the
-// background goroutine redial launches per connection, counted in wg, and
-// ends when the connection does; TLS's post-handshake messages are read
-// and discarded on the way.
-func watchLink(wg *sync.WaitGroup, c connNetter) {
-	defer wg.Done()
-	// Whatever the read returned, the link is over: nothing reads this
+// watchLink reads an outbound connection, dialled to k's peer under pin,
+// until it ends, then closes its socket. A read returns once the peer
+// closed its end or the sender closed the link: a write into a link the
+// peer closed cleanly (a FIN) succeeded and its batch was lost to the
+// peer's reset, while a closed socket fails the next write, which
+// sendBatch dials again and resends (#553). What the peer writes on it are
+// its own frames, sent back when its link to this node cannot carry them
+// (sendBack, #748): they are delivered as the frames of the member
+// linkPeer names, under the lane's bound, until the first malformed one or
+// the member's key leaving the admission, and whatever follows them is
+// read and discarded, as everything is when linkPeer names nobody. It is
+// the background goroutine redial launches per connection, counted in
+// t.wg, and ends when the connection does; TLS's post-handshake messages
+// are read on the way.
+func (t *TCPTransport) watchLink(c linkConn, k outKey, pin [32]byte) {
+	defer t.wg.Done()
+	if peer, ok := t.linkPeer(c.ConnectionState(), k.to, pin); ok {
+		// The peer writes on the link only while it cannot dial this
+		// node, so the read-ahead stays small: a larger frame is read
+		// past it.
+		t.readFrames(bufio.NewReaderSize(c, backReadBytes), peer, t.laneBound(k.lane))
+	}
+	// Whatever the reads returned, the link is over: nothing reads this
 	// result, and the socket is closed so that no write lands in it.
 	_, err := io.Copy(io.Discard, c)
 	abandon(err)

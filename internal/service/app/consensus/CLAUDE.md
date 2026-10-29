@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-29T03:30:00Z -->
+<!-- updated: 2026-10-29T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -911,6 +911,19 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   (`ReadyValue.LeaderAddress`, #724,
   `TestTheVoterThatMissedTheLeadersNewAddressCatchesUp`,
   `TestTheStaleVoterCatchesUpAfterARollingRestartHandsOffToTheMovedNode`).
+- Drop a batch the node's own link to a member cannot carry while that
+  member's own connection to the node is open: a voter down while
+  `UpdateAddress` moved every other member asked nobody and answered
+  nobody, out of the quorum for good (#748). `sendBack` writes it on the
+  newest connection the member dialled on the lane (`holdBack`), only
+  under the key the member authenticated it with, and `watchLink` delivers
+  what a link carries as the member `linkPeer` names under the pin and
+  the certificate's slot, under the lane's bound. Never skip the dial or
+  its report for it: a leader moves an unreachable follower to probe on
+  the report (`TestTheVoterDownWhileEveryOtherVoterMovedCatchesUp`,
+  `TestTheMovedVoterAndTheStaleVoterElectALeaderWhileTheThirdIsDown`,
+  `TestTCPBackLinkCarriesTheAnswerTheDialCannot`,
+  `TestTCPBackLinkSpeaksOnlyForThePinnedMember`).
 - Trust a predecessor's token by its index above the identity's
   AdoptedFrom once its term can no longer be read: that part of the kept
   range is the suffix Recover adopted past the persisted commit (#509,
@@ -927,7 +940,8 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestAStorageStopRefusesTheSameBootRestart`).
 - Write on an outbound lane without a reader on it, or after its key left
   the admission: a write into a link the peer closed cleanly succeeds and
-  is lost to the peer's reset (#553, `watchLink`), and a fenced key kept
+  is lost to the peer's reset (#553, `watchLink`, which since #748 also
+  delivers the frames the peer sends back on it), and a fenced key kept
   receiving entries on lanes dialled before `DenyPin` (#551,
   `stillAdmitted`; `TestTCPFrameAfterACleanCloseByTheReceiverIsDelivered`,
   `TestTCPNothingIsSentOnAnOldLaneToAKeyNoLongerAdmitted`).

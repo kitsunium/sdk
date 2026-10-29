@@ -2679,7 +2679,34 @@ sequences:
           when: r.leadAddr.ID == rec.ID
       - return: |-
           cur.SPKI == rec.SPKI && rec.Address != "" && rec.Address != dialled &&
-          		m.Index > r.log.committed && m.Index > r.conf().Index
+          		m.Index > r.log.committed && m.Index > r.heldConfIndex()
+  - of: (*Raft).heldConfIndex
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).heldConfIndex
+        kind: self
+      - id: r.conf
+        kind: internal
+      - id: r.log.term
+        kind: internal
+    steps:
+      - bind: c
+        eval: r.conf()
+        to: r.conf
+      - opt:
+          do:
+            - return: c.Index
+          when: c.Index <= r.log.committed
+      - opt:
+          do:
+            - return: c.Index
+          init:
+            bind: t, ok
+            eval: r.log.term(c.Index)
+            to: r.log.term
+          when: ok && t >= r.term
+      - return: r.confAt(r.log.committed).Index
   - of: (*Raft).dialLeaderAddress
     participants:
       - id: caller
@@ -2722,7 +2749,7 @@ sequences:
           do:
             - set: r.leadAddr, r.leadAddrAt
               value: core.MemberValue{}, 0
-          when: "!ok || cur.SPKI != r.leadAddr.SPKI || r.log.committed >= r.leadAddrAt || r.conf().Index >= r.leadAddrAt"
+          when: "!ok || cur.SPKI != r.leadAddr.SPKI || r.log.committed >= r.leadAddrAt || r.heldConfIndex() >= r.leadAddrAt"
   - of: (*memLog).lastIndex
     steps:
       - return: l.snapIndex + uint64(len(l.ents))

@@ -393,9 +393,10 @@ type Raft struct {
 	// leadAddr is the leader this node follows, listed in its configuration
 	// under the same key, at the address a member's record gave while the
 	// transport could not reach it at the configuration's: dialled there
-	// until this node's commit or latest configuration reaches leadAddrAt,
-	// the commit the record was read at, or its configuration no longer
-	// lists that key (#724). Its ID is 0 when there is none.
+	// until this node's commit or the configuration it holds against a
+	// record (heldConfIndex, #755) reaches leadAddrAt, the commit the record
+	// was read at, or its configuration no longer lists that key (#724).
+	// Its ID is 0 when there is none.
 	leadAddr   core.MemberValue
 	leadAddrAt uint64
 
