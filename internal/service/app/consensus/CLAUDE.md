@@ -414,7 +414,12 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   That commit is fixed once the rest of the condition holds: chasing the
   commit each append carries, the node gained one batch per heartbeat
   answer and stayed silent for as long as writes outran it (#766,
-  `TestASilentNodeRejoinsUnderItsLeaderDuringSustainedWrites`).
+  `TestASilentNodeRejoinsUnderItsLeaderDuringSustainedWrites`). Nor
+  leave it in replicate at a leader that held it there before it went
+  down: its window, full, was sent only empty appends, and with no
+  unreachable report reaching the leader, as over the memory transport,
+  it stayed silent for as long as that leader led (#774, raft's
+  `followSilentReport`).
 - End a silence on disk before the entries that meet its condition are: raft
   judged it on the append's entries, in memory, and said so in the same
   Ready, and `endSilence` removed SILENT on the loop before the storage

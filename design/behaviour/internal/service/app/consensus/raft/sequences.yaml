@@ -659,13 +659,17 @@ sequences:
           do:
             - return: ""
           when: pr.state == stateSnapshot
-      - opt:
-          do:
-            - set: pr.match
-              value: m.RejectHint
-            - eval: pr.becomeProbe()
-              to: pr.becomeProbe
-          when: m.RejectHint < pr.match
+      - alt:
+          - do:
+              - set: pr.match
+                value: m.RejectHint
+              - eval: pr.becomeProbe()
+                to: pr.becomeProbe
+            when: m.RejectHint < pr.match
+          - do:
+              - eval: pr.becomeProbe()
+                to: pr.becomeProbe
+            when: pr.state == stateReplicate
       - opt:
           do:
             - set: pr.next

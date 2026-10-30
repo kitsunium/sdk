@@ -55,6 +55,7 @@ go_test(
         "protocol2_internal_test.go",
         "readresp_internal_test.go",
         "removestrands_internal_test.go",
+        "silentreplicate_internal_test.go",
         "sim_internal_test.go",
         "sim_scenarios_internal_test.go",
         "slowack_internal_test.go",

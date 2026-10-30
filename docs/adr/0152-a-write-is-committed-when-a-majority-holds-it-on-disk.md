@@ -6226,6 +6226,53 @@ rotted `.meta`
   - then a republication, fresh publications and removals run beside
     listings and reads, with no side failing `STORAGE_FAILED`.
 
+## Amendment — a silent peer is probed, never left in replicate (2026-10-30, #774)
+
+#767 had a heartbeat answer that reports less than the oldest append in
+flight probe the peer behind its window, with an empty append after its
+next less one, instead of moving it to probe. A silent peer reports 0,
+unless its last entry is of the leader's term, and acknowledges nothing.
+One that the leader still held in replicate, its window full, was sent
+that empty append at every answer: it accepted it in silence, the window
+never moved, and a full window sends no entry. It never received an entry
+of the leader's term and stayed silent for as long as that leader led and
+did not compact past its window: one voter short, no failure tolerance
+left on three. Before #767 the same answer moved it to probe, and #636's
+path fed it from the commit it reports. Only the transport's report of a
+failure to reach it (`ReportUnreachable`) still did, and nothing ensures
+one reaches the leader: the loop drops it when saturated, the memory
+transport makes none, and a peer back before its sender saw the failure
+leaves none. The state needs a peer the leader held in replicate before
+it went down: a leader elected during the silence starts it in probe, and
+only an acknowledgement moves it to replicate
+([#774](https://github.com/kitsunium/sdk/issues/774)).
+
+- **A silent report probes a replicating peer.** `followSilentReport`,
+  which already moved to probe a peer whose report lowers its match, now
+  moves one still replicating to probe, its match kept: no acknowledgement
+  will move its window again. The probe resumes past the commit the
+  report carries, where #636's path resumes, so the window the peer holds
+  is not sent again, then one batch at each heartbeat answer as before.
+  `probeBehind` and #560's delay now meet only peers that are not silent.
+- **What #767 and #766 keep.** A peer that is not silent is judged as
+  #767 judges it: probed behind, never sent again. A silent probing peer
+  was already sent the batch at its next on each report, which #767 left
+  unchanged. The match is not raised, so #766's argument for the commit a
+  silence waits for is untouched: the appends are still sent past the
+  match, which only an acknowledgement raised.
+- **No format change.** No frame, field, flag or record changes, nothing
+  persisted, no protocol raise, and no raft mutation: the type is full,
+  and a test holds it.
+- **Tests.** `TestASilentPeerLeftInReplicateWithAFullWindowEndsItsSilence`
+  (raft, the issue's scenario on the step functions, no progress forced:
+  a window of two appends, filled with entries the peer writes before its
+  acknowledgements are lost; on main the peer is sent 200 empty appends
+  and no entry over 10 s and stays silent at 9 while the leader's term
+  starts at 31; fixed, it ends its silence, and no entry is sent to it
+  twice nor any it held; the same scenario with the unreachable report,
+  which already recovered, stays green). #560's, #636's, #766's and
+  #767's tests stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6268,6 +6315,7 @@ rotted `.meta`
 | #766 | Raft hunt loop, 2026-10-30 | under the leader of its own `SilentTerm`, the commit a silent node must hold is fixed once the rest of the silence condition holds, the highest its accepted appends carried up to then, no longer the commit each append carries, which writes faster than one batch per heartbeat kept out of reach; #636's residual starts at that append; no format change, nothing persisted, no raft mutation (amendment of 2026-10-30, #766) |
 | #767 | Raft hunt loop, 2026-10-30 | a heartbeat answer that reports less than the oldest append in flight, and a probing peer's answer, send an empty append behind what is in flight instead of the window or the probe again, whose refusal finds a lost append and whose acknowledgement at the match ends the probe; no format change, no raft mutation (amendment of 2026-10-30, #767) |
 | #768 | Raft hunt loop, 2026-10-30 | the snapshot store holds its lock over the files a listing, an `Open`, a publication's renames and a removal touch, and a handle closes its file before its pin drops, so Windows never refuses a cut's publication or retention's removal beside the loop's listing; no sync under the lock; no format change, no raft mutation (amendment of 2026-10-30, #768) |
+| #774 | Raft hunt loop, 2026-10-30 | a silent peer's heartbeat answer moves a peer the leader still holds in replicate to probe, its match kept, so a full window no longer leaves it sent only empty appends and silent for as long as that leader leads; the probe resumes past the commit it reports; no format change, no raft mutation (amendment of 2026-10-30, #774) |
 
 ## raft-sql-poc (owner's prior Raft)
 

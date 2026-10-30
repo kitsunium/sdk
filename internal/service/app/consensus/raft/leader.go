@@ -361,7 +361,8 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 // heartbeat interval, and the copy queued behind it at every answer took
 // the link from what the peer lacked (#767). A silent peer answers no
 // append, so its report alone tells whether the probe reached it, and it
-// is sent the batch at its next as before.
+// is sent the batch at its next as before: followSilentReport holds it in
+// probe, never in replicate, where its full window was sent nothing (#774).
 func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	r.ackRounds(m.From, m.Context, m.Contract)
 	r.confirmRounds()
@@ -429,12 +430,24 @@ func (r *Raft) probeBehind(pr *progress, to core.NodeID) bool {
 // silent, so nothing else moves its probe, and it needs this leader's
 // commit to vote again: resent the same batch at every heartbeat, it stayed
 // silent for as long as this leader led. Neither field ever raises match.
+//
+// A peer still replicating is probed too, its match kept: no
+// acknowledgement will move its window again. Held in replicate with that
+// window full, it was sent only the empty append probeBehind sends after
+// the window's end, which it accepted in silence, and never an entry of
+// this leader's term, so it stayed silent for as long as this leader led
+// (#774). Only the transport's report of a failure to reach it moved it to
+// probe, and nothing ensures one reaches the leader. The probe resumes past
+// the commit the answer reports, so the window it already holds is not
+// sent again.
 func (r *Raft) followSilentReport(pr *progress, m core.MessageValue) {
 	if pr.state == stateSnapshot {
 		return
 	}
 	if m.RejectHint < pr.match {
 		pr.match = m.RejectHint
+		pr.becomeProbe()
+	} else if pr.state == stateReplicate {
 		pr.becomeProbe()
 	}
 	if pr.state == stateProbe && m.Commit >= pr.next && m.Commit <= r.log.lastIndex() {

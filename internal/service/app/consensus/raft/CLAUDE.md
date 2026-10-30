@@ -327,3 +327,12 @@ under coverage before touching `shard_count`.
   `TestAFollowerCatchesUpOverALinkNarrowerThanABatchPerHeartbeat`,
   `TestALostAppendIsStillProbedOnHeartbeats`; no mutation, the type is
   full).
+- Leave a silent peer in replicate on its FlagTruncated heartbeat answer:
+  it acknowledges nothing, so its window never moves again, and with that
+  window full it was sent only `probeBehind`'s empty append, never an
+  entry of the leader's term, and stayed silent for as long as that leader
+  led. Only an unreachable report, which nothing ensures reaches the
+  leader, moved it to probe. `followSilentReport` probes it, its match
+  kept, past the commit it reports (#774,
+  `TestASilentPeerLeftInReplicateWithAFullWindowEndsItsSilence`; no
+  mutation, the type is full).
