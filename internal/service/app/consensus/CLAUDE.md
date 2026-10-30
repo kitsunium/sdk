@@ -223,6 +223,10 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 - Probe a replicating peer whose heartbeat answer reports holding the
   oldest append in flight: its acknowledgement is only late, and the probe
   resent a window it held (#560, `TestASlowAcknowledgementIsNotALostAppend`).
+  Nor one that reports holding less, on that answer alone: on a link
+  narrower than one batch per heartbeat interval the append is still
+  crossing, and the copies took the link (#767). Raft probes behind the
+  window with an empty append, whose refusal finds a lost one.
 - Hold `mu` across a batch's write and fdatasync: writers serialise on
   `wmu`, readers must not wait for the disk (review L6).
 - Write a batch's end record before the rest of the batch is durable: a

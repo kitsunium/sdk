@@ -313,3 +313,17 @@ under coverage before touching `shard_count`.
   heartbeat answer from a probing peer behind the log probes it again,
   empty if need be (#722, `handleHeartbeatResp`,
   `TestALostProbeOfALearnerIsSentAgainInAQuietLog`).
+- Send a probe again, or move a replicating peer to probe, on a heartbeat
+  answer that reports less than the oldest append in flight: on a link
+  narrower than one batch per heartbeat interval the answer overtakes an
+  append still crossing the data lane, and the copies, from match+1 at
+  every answer, took some 95 % of the link and the follower never caught
+  up (#767). `probeBehind` sends an empty append after next-1 instead,
+  behind what is in flight: its refusal finds a lost append, its
+  acknowledgement at the match moves a probing peer to replicate. A silent
+  peer, which answers no append, is still sent the batch at its next
+  (`TestAnAppendStillCrossingANarrowLinkIsNotSentAgain`,
+  `TestAProbeStillCrossingANarrowLinkIsNotSentAgain`,
+  `TestAFollowerCatchesUpOverALinkNarrowerThanABatchPerHeartbeat`,
+  `TestALostAppendIsStillProbedOnHeartbeats`; no mutation, the type is
+  full).

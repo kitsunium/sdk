@@ -5964,6 +5964,54 @@ leader. Only a change of leader or the end of the writes released it
   is at 2028; fixed, it ends its silence about 0.3 s in, holding every write
   it acknowledged). #636's, #684's and #418's tests stay green.
 
+## Amendment — an append still crossing a narrow link is probed behind, never sent again (2026-10-30, #767)
+
+#560 told an acknowledgement a slow fdatasync delays from a lost append by
+the index a heartbeat answer reports: a follower that holds the oldest
+append in flight has `ElectionTimeoutMax` to acknowledge it, and one that
+holds less was taken to have lost it. On a link narrower than one batch
+per heartbeat interval, that is a batch still crossing: the answer takes
+the control lane while the batch is on the data lane. The peer was moved
+to probe, its next back to its match plus one and its window forgotten,
+and the leader sent again from there, behind what the lane still carried;
+probing, every heartbeat answer sent the probe of `MaxBatchBytes` again.
+The copies filled the transport's queue up to `PeerQueueBytes`, past which
+`Send` drops, some 95 % of the link carried copies, and a lagging follower
+never caught up under load, below about 10 MiB/s at the defaults: what was
+in flight was no longer bounded by `MaxInflightBytes`, against D6's
+bounded pipeline ([#767](https://github.com/kitsunium/sdk/issues/767)).
+
+- **Probed behind, never sent again.** Where such an answer moved the peer
+  to probe, and where a probing peer's answer sent its probe again, the
+  leader now sends an empty append after its next less one
+  (`probeBehind`). Appends share the data lane in order, so it reaches the
+  follower only once everything sent before it has. Accepted, its
+  acknowledgement covers the window, or, at the match, answers the probe,
+  which was lost, and moves the peer to replicate. Refused, an append
+  before it was lost, and the refusal backs the peer off from its hint as
+  any refusal does. It carries no entry.
+- **What #560 and R1-11 keep.** A lost append is still found from the
+  heartbeat answer: the follower that lost it refuses the empty append,
+  one round trip later and behind whatever was queued before it, where a
+  resend would have waited as well. A follower that holds the oldest
+  append still has `ElectionTimeoutMax` before it is probed; a failure the
+  transport reports (`ReportUnreachable`) still moves the peer to probe at
+  once; #722's learner whose probe its transport dropped is probed the
+  same way; a silent peer, which answers no append, is still sent the
+  batch at its next on each report (#636).
+  `TestALostAppendIsStillProbedOnHeartbeats` now answers the empty append
+  with the refusal of a follower that lost the window, and the entries go
+  out once more, as they did.
+- **No format change.** An empty append is a frame every release sends
+  and answers (R2-07): no field, flag or protocol change, no raft mutation.
+- **Tests.** `TestAnAppendStillCrossingANarrowLinkIsNotSentAgain` and
+  `TestAProbeStillCrossingANarrowLinkIsNotSentAgain` (on main each entry is
+  sent three times over three answers), and
+  `TestAFollowerCatchesUpOverALinkNarrowerThanABatchPerHeartbeat` (the
+  simulator, the issue's lane at 1/16 of the defaults: on main the follower
+  is 604 entries behind after 8 s and 4 737 of the 5 407 KiB the lane
+  carried were copies; fixed, it is caught up and nothing was sent twice).
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6001,6 +6049,7 @@ leader. Only a change of leader or the end of the writes released it
 | #755 | Raft hunt loop, 2026-10-29 | a leader record is ranked against the latest configuration only when it is committed or of the node's term, the committed one otherwise, so a divergent tail's configuration of an older term no longer refuses it; no format change, no raft mutation (amendment of 2026-10-29, #755) |
 | #758 | Raft hunt loop, 2026-10-29 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when the configuration it would keep has no other member that the newest configuration still readable in the dropped part lists under the same key; the reason names `WipeAndRejoin`, the promotion `MinVoters` may ask for and the removal of the old ID; a refusal at best; no format change, no raft mutation (amendment of 2026-10-29, #758) |
 | #766 | Raft hunt loop, 2026-10-30 | under the leader of its own `SilentTerm`, the commit a silent node must hold is fixed once the rest of the silence condition holds, the highest its accepted appends carried up to then, no longer the commit each append carries, which writes faster than one batch per heartbeat kept out of reach; #636's residual starts at that append; no format change, nothing persisted, no raft mutation (amendment of 2026-10-30, #766) |
+| #767 | Raft hunt loop, 2026-10-30 | a heartbeat answer that reports less than the oldest append in flight, and a probing peer's answer, send an empty append behind what is in flight instead of the window or the probe again, whose refusal finds a lost append and whose acknowledgement at the match ends the probe; no format change, no raft mutation (amendment of 2026-10-30, #767) |
 
 ## raft-sql-poc (owner's prior Raft)
 

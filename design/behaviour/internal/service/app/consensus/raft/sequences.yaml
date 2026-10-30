@@ -555,29 +555,46 @@ sequences:
         kind: internal
       - id: r.followSilentReport
         kind: internal
-      - id: r.probeIfLost
+      - id: r.watchWindow
         kind: internal
-      - id: r.sendAppend
+      - id: r.refeed
         kind: internal
     steps:
       - eval: r.ackRounds(m.From, m.Context, m.Contract)
         to: r.ackRounds
       - eval: r.confirmRounds()
         to: r.confirmRounds
+      - bind: silent
+        eval: m.Flags&core.FlagTruncated != 0 && !r.mutated(mutSilentReportIgnored)
       - opt:
           do:
             - eval: r.followSilentReport(pr, m)
               to: r.followSilentReport
-          when: m.Flags&core.FlagTruncated != 0 && !r.mutated(mutSilentReportIgnored)
+          when: silent
+      - bind: probing
+        eval: pr.state == stateProbe && pr.facts&peerProbeSent != 0 && !silent
       - opt:
           do:
             - op: "&^="
               set: pr.facts
               value: peerProbeSent
           when: pr.state == stateProbe
+      - eval: r.watchWindow(pr, m.From, m.Index)
+        to: r.watchWindow
+      - eval: r.refeed(pr, m.From, probing)
+        to: r.refeed
+  - of: (*Raft).watchWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).watchWindow
+        kind: self
+      - id: r.probeIfLost
+        kind: internal
+    steps:
       - alt:
           - do:
-              - eval: r.probeIfLost(pr, m.Index)
+              - eval: r.probeIfLost(pr, to, held)
                 to: r.probeIfLost
             when: pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch
           - do:
@@ -586,11 +603,49 @@ sequences:
             else: true
       - set: pr.hbMatch
         value: pr.match
+  - of: (*Raft).refeed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).refeed
+        kind: self
+      - id: r.sendAppend
+        kind: internal
+    steps:
       - opt:
           do:
-            - eval: r.sendAppend(m.From, pr.state == stateProbe)
-              to: r.sendAppend
-          when: pr.match < r.log.lastIndex()
+            - return: ""
+          when: pr.match >= r.log.lastIndex()
+      - opt:
+          do:
+            - op: "|="
+              set: pr.facts
+              value: peerProbeSent
+            - return: ""
+          when: probing && r.probeBehind(pr, to)
+      - eval: r.sendAppend(to, pr.state == stateProbe)
+        to: r.sendAppend
+  - of: (*Raft).probeBehind
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).probeBehind
+        kind: self
+      - id: r.log.term
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - bind: t, ok
+        eval: r.log.term(pr.next - 1)
+        to: r.log.term
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - eval: "r.send(core.MessageValue{Kind: core.MsgApp, To: to, Index: pr.next - 1, LogTerm: t, Commit: r.log.committed})"
+        to: r.send
+      - return: "true"
   - of: (*Raft).followSilentReport
     participants:
       - id: caller
@@ -625,18 +680,23 @@ sequences:
       - id: pr.becomeProbe
         kind: internal
     steps:
-      - opt:
-          do:
-            - opt:
-                do:
-                  - set: pr.heldSince
-                    value: r.now
-                when: pr.heldSince.IsZero()
-            - opt:
-                do:
-                  - return: ""
-                when: r.now.Sub(pr.heldSince) <= r.timing.ElectionTimeoutMax
-          when: held >= pr.inflight[0]
+      - alt:
+          - do:
+              - opt:
+                  do:
+                    - set: pr.heldSince
+                      value: r.now
+                  when: pr.heldSince.IsZero()
+              - opt:
+                  do:
+                    - return: ""
+                  when: r.now.Sub(pr.heldSince) <= r.timing.ElectionTimeoutMax
+            when: held >= pr.inflight[0]
+          - do:
+              - set: pr.heldSince
+                value: time.Time{}
+              - return: ""
+            when: r.probeBehind(pr, to)
       - set: pr.heldSince
         value: time.Time{}
       - eval: pr.becomeProbe()
@@ -650,6 +710,8 @@ sequences:
       - id: r.handleAppReject
         kind: internal
       - id: r.ackMoved
+        kind: internal
+      - id: pr.becomeReplicate
         kind: internal
       - id: pr.freeTo
         kind: internal
@@ -666,15 +728,20 @@ sequences:
           do:
             - return: ""
           when: m.Index > r.log.lastIndex() && !r.mutated(mutMatchPastLastIndex)
-      - alt:
-          - do:
-              - eval: r.ackMoved(pr, m.Index)
-                to: r.ackMoved
-            when: pr.maybeUpdate(m.Index)
-          - do:
-              - eval: pr.freeTo(m.Index)
-                to: pr.freeTo
-            else: true
+      - switch:
+          cases:
+            - case: pr.maybeUpdate(m.Index)
+              do:
+                - eval: r.ackMoved(pr, m.Index)
+                  to: r.ackMoved
+            - case: pr.state == stateProbe && m.Index == pr.match && m.Index+1 >= pr.next
+              do:
+                - eval: pr.becomeReplicate()
+                  to: pr.becomeReplicate
+            - default: true
+              do:
+                - eval: pr.freeTo(m.Index)
+                  to: pr.freeTo
       - opt:
           do:
             - eval: r.sendAppend(m.From, false)
