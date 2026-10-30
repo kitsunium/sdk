@@ -1016,10 +1016,11 @@ func (r *Raft) answering(id core.NodeID) bool {
 // {A, D, E} that heard nobody, and after one more failure A and D, two
 // running voters of three, never committed again (#603).
 //
-// The guard admits no one: it only refuses a removal, of a member that
-// answers, which would take away the last voter such a voter knows. A
-// member that does not answer cannot vouch for anyone now, and its removal
-// is never refused here, so a dead voter can always be removed.
+// The guard admits no one: it only refuses a removal, or a move (#761), of
+// a member that answers, which would take away the last voter such a voter
+// knows at the address it serves. A member that does not answer cannot
+// vouch for anyone now, and its removal or move is never refused here, so
+// a dead voter can always be removed, or moved.
 func (r *Raft) strands(next *core.MembershipValue) bool {
 	for _, m := range next.Members {
 		if m.Voter && m.ID != r.id && !r.reachedBy(next, m.ID) {
@@ -1031,15 +1032,20 @@ func (r *Raft) strands(next *core.MembershipValue) bool {
 
 // reachedBy reports whether voter v, whatever configuration of its past it
 // holds, still knows in next this leader or a voter that would vouch for
-// it. A voter this leader heard at a match its log still resolves holds
-// that configuration or a later one: every member of next it lists there
-// it lists in every later one, since an id is never added back once
-// removed. For any other voter every retained configuration that lists it
-// is a candidate, and when it was a member before the log's start the
-// oldest it may hold is unknown: only this leader listed before it, so
-// added before it, is then known to it for sure.
+// it. A voter that answers, heard at a match this leader's log still
+// resolves, holds that configuration or a later one: every member of next
+// it lists there it lists in every later one, since an id is never added
+// back once removed. A voter that no longer answers may come back over a
+// truncated log (TruncateAndStaySilent), whose offline refusal reads only
+// its own log and sees no change committed while it was down: a founder
+// heard at {B, V, D, E}, B removed while it was down, came back silent
+// over {A, B, V} and refused D and E for good (#763). For it, as for any
+// other voter, every retained configuration that lists it is a candidate,
+// and when it was a member before the log's start the oldest it may hold
+// is unknown: only this leader listed before it, so added before it, is
+// then known to it for sure.
 func (r *Raft) reachedBy(next *core.MembershipValue, v core.NodeID) bool {
-	if pr := r.prs[v]; pr != nil && pr.facts&peerHeard != 0 && pr.match >= r.log.snapIndex {
+	if pr := r.prs[v]; pr != nil && r.answering(v) && pr.match >= r.log.snapIndex {
 		return vouched(next, r.confAt(pr.match), v, r.id)
 	}
 	if !r.vouchedInRetained(next, v) {
@@ -1081,19 +1087,26 @@ func listedBefore(next *core.MembershipValue, first, then core.NodeID) bool {
 	return false
 }
 
-// vouched reports whether a voter v holding known still finds in next the
-// leader, as any member, or another voter of known, which answers its
-// PreVote with the leader's record (#542). A known that does not list v is
-// not one v holds, and is passed.
+// vouched reports whether a voter v holding known still finds in next a
+// voter of known that stays, which answers its PreVote with the record of
+// whichever member leads (#542). A known that does not list v is not one v
+// holds, and is passed. v sends its PreVote to the voters of known alone,
+// at the addresses known names: a voter next lists at another address no
+// longer hears it (#761), and a member known lists as a learner is never
+// asked, the leader included. Counted as a learner, the leader vouched only
+// while it led: once the leadership moved to a member v does not know, v
+// asked no one that follows it, and its transport refused the new leader's
+// key (#765). A leader that is a voter of known is counted at any address:
+// while it leads it dials v, which admits it by key.
 func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
 	if _, listed := known.Member(v); !listed {
 		return true
 	}
 	for _, k := range known.Members {
-		if k.ID == v {
+		if k.ID == v || !k.Voter {
 			continue
 		}
-		if _, stays := next.Member(k.ID); stays && (k.ID == leader || k.Voter) {
+		if m, stays := next.Member(k.ID); stays && (k.ID == leader || m.Address == k.Address) {
 			return true
 		}
 	}
@@ -1101,13 +1114,31 @@ func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
 }
 
 // updateAddress changes the address of the member at idx to the one admin
-// carries, while a majority answers.
+// carries, while a majority answers, unless the move may strand a voter.
 func (r *Raft) updateAddress(cur *core.MembershipValue, admin *wire.AdminValue, idx int) errs.Code {
 	if idx < 0 || len(admin.Membership.Members) != 1 || !r.activeMajority(*cur) {
 		return codeMembershipInvalid
 	}
 	cur.Members[idx].Address = admin.Membership.Members[0].Address
+	if r.moveStrands(cur, cur.Members[idx].ID) {
+		return codeMembershipInvalid
+	}
 	return 0
+}
+
+// moveStrands reports whether moving target, at the address next records,
+// may strand a voter, as removalStrands does for a removal: a voter that
+// lists target at its old address sends it a PreVote nothing answers, and
+// a voter down while the leader was admitted, C removed and then its last
+// voucher B moved, came back hearing no one, refused by the leader's key,
+// for as long as that leader led (#761). Only the move of a member that
+// answers and may vouch is judged — a voter, or a member that ever was
+// one — and never the leader's own, which vouched counts at any address.
+func (r *Raft) moveStrands(next *core.MembershipValue, target core.NodeID) bool {
+	if target == r.id || !r.answering(target) || r.neverVoter(target) {
+		return false
+	}
+	return r.strands(next)
 }
 
 // updateSnapshotLimit records, for the member at idx, the MaxSnapshotBytes

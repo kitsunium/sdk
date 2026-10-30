@@ -892,6 +892,13 @@ type silencedOnDisk struct {
 
 func silenceUnderItsLeaderOnDisk(t *testing.T) *silencedOnDisk {
 	t.Helper()
+	return silenceUnderItsLeaderOnDiskWith(t, nil)
+}
+
+// silenceUnderItsLeaderOnDiskWith is silenceUnderItsLeaderOnDisk with
+// before, when set, run before the write of each ackNN with its number.
+func silenceUnderItsLeaderOnDiskWith(t *testing.T, before func(s *silencedOnDisk, i int)) *silencedOnDisk {
+	t.Helper()
 	s := &silencedOnDisk{c: &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5}}, trs: map[coreconsensus.NodeID]*kindFilter{}, acked: map[string]uint64{}}
 	var members []coreconsensus.MemberValue
 	for i := range 3 {
@@ -936,15 +943,19 @@ func silenceUnderItsLeaderOnDisk(t *testing.T) *silencedOnDisk {
 	term := s.lead.node.Status().Term
 	s.trs[s.lagger.id].setDrop(func(m *coreconsensus.MessageValue) bool { return m.Kind == coreconsensus.MsgApp })
 	moved := func(err error) {
-		if st := s.lead.node.Status(); st.Role != coreconsensus.RoleLeader || st.Term != term {
-			t.Skipf("setup: leadership changed during the writes (%+v): %v", st, err)
+		if why := leadershipMoved(s.lead.node, term, err); why != "" {
+			t.Skipf("setup: leadership changed during the writes (%s): %v", why, err)
 		}
 	}
 	for i := range 30 {
 		key := fmt.Sprintf("ack%02d", i)
+		if before != nil {
+			before(s, i)
+		}
 		// Bound to this leader: one whose fdatasync stalls hands its
 		// leadership over (#554), and its write answers ENTRY_SUPERSEDED or
-		// OUTCOME_UNKNOWN, which the check below the loop never saw (#654).
+		// OUTCOME_UNKNOWN, which the check below the loop never saw (#654),
+		// or NOT_LEADER while the hand-off is in flight (#762).
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		got, _, err := s.lead.node.Propose(ctx, []byte(key+"="+strings.Repeat("v", 1024)))
 		cancel()
@@ -985,6 +996,27 @@ func silenceUnderItsLeaderOnDisk(t *testing.T) *silencedOnDisk {
 	_, s.hint = s.victim.dd.Log().Bounds()
 	t.Logf("leader %d term %d last %d; victim truncated to %d", s.lead.id, term, s.oldLast, s.hint)
 	return s
+}
+
+// leadershipMoved says how the leadership n held at term moved, "" when it
+// did not: another role or term, a hand-off in flight, or err NOT_LEADER.
+// A leader whose fdatasync stalls hands its leadership over (#554), and
+// raft refuses every proposal NOT_LEADER from the moment the hand-off
+// starts, while the node still publishes itself leader at the same term:
+// Status does not show the transfer, which exec reads on the loop (#762).
+func leadershipMoved(n *Node, term uint64, err error) string {
+	st := n.Status()
+	var to coreconsensus.NodeID
+	n.exec(func() { to = n.r.Status().Transfer })
+	switch {
+	case st.Role != coreconsensus.RoleLeader || st.Term != term:
+		return fmt.Sprintf("%v at term %d, was leader at %d", st.Role, st.Term, term)
+	case to != 0:
+		return fmt.Sprintf("a hand-off to %d in flight", to)
+	case errors.Is(err, coreconsensus.NotLeader):
+		return "NOT_LEADER, the role and the term unchanged"
+	}
+	return ""
 }
 
 // config is diskConfig with small batches, no cut, and the node's
@@ -1032,6 +1064,49 @@ func (s *silencedOnDisk) lost(dn *diskNode) []string {
 		}
 	}
 	return out
+}
+
+// #762: the bench's writes with a hand-off of the leadership started
+// before ack10 towards the lagger, whose appends the bench drops, so that
+// it stays in flight, as the stuck-leader watch's does on a slow disk
+// (#554). raft refuses ack10 NOT_LEADER while the leader still publishes
+// itself leader at the same term: the bench failed "propose \"ack10\":
+// NOT_LEADER", main red on Windows (run 40816393169). It skips now, as on
+// any change of leadership during the writes (#654).
+func TestTheSilenceBenchSkipsOnAHandOffInFlight(t *testing.T) {
+	skipped := false
+	t.Run("bench", func(t *testing.T) {
+		t.Cleanup(func() { skipped = t.Skipped() })
+		silenceUnderItsLeaderOnDiskWith(t, func(s *silencedOnDisk, i int) {
+			if i != 10 {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			done := make(chan struct{})
+			lead, to := s.lead.node, s.lagger.id
+			go func() {
+				defer close(done)
+				_ = lead.TransferLeadership(ctx, "op:test", to)
+			}()
+			t.Cleanup(func() {
+				cancel()
+				<-done
+			})
+			for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(time.Millisecond) {
+				var handing coreconsensus.NodeID
+				lead.exec(func() { handing = lead.r.Status().Transfer })
+				if handing != 0 {
+					return
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("setup: the hand-off never started")
+				}
+			}
+		})
+	})
+	if !skipped {
+		t.Fatal("the bench did not skip on a hand-off of its leader in flight")
+	}
 }
 
 // #636: the victim restarts while the leader of its SilentTerm still leads.

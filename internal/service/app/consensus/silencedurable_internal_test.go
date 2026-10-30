@@ -139,12 +139,25 @@ func TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt(t *testing.T) {
 	acked := map[string]uint64{}
 	for i := range 30 {
 		key := fmt.Sprintf("ack%02d", i)
-		tok = propose(t, lead.node, key+"="+strings.Repeat("v", 1024))
+		// Bound to L, as silenceUnderItsLeaderOnDisk's writes are: a leader
+		// whose fdatasync stalls hands its leadership over (#554), and its
+		// write answers NOT_LEADER while the hand-off is in flight,
+		// ENTRY_SUPERSEDED or OUTCOME_UNKNOWN once it is done (#654, #762).
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		got, _, err := lead.node.Propose(ctx, []byte(key+"="+strings.Repeat("v", 1024)))
+		cancel()
+		if err != nil {
+			if why := leadershipMoved(lead.node, term, err); why != "" {
+				t.Skipf("setup: leadership changed during the writes (%s): %v", why, err)
+			}
+			t.Fatalf("propose %q: %v", key, err)
+		}
+		tok = got
 		acked[key] = tok.Index
 	}
 	waitAppliedOnly(t, victim, tok.Index)
-	if st := lead.node.Status(); st.Role != coreconsensus.RoleLeader || st.Term != term {
-		t.Skipf("setup: leadership changed during the writes (%+v)", st)
+	if why := leadershipMoved(lead.node, term, nil); why != "" {
+		t.Skipf("setup: leadership changed during the writes (%s)", why)
 	}
 	_, oldLast := lead.dd.Log().Bounds()
 
