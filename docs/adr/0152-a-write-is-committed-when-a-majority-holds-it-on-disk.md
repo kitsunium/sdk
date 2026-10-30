@@ -887,7 +887,11 @@ directory and cleared it, through `Inspect` and the product's own procedure
    - when that term equals the node's own, the node's commit has reached
      the commit the append carries: it then holds everything that leader
      had committed, and the election restriction refuses any candidate
-     that lacks it;
+     that lacks it. Since the amendment of 2026-10-30
+     ([#766](https://github.com/kitsunium/sdk/issues/766)), that commit is
+     FIXED once the rest of the condition holds: the highest the appends
+     the node accepted from that leader carried up to then, never moved by
+     a later one;
    - a truncation point the node's own snapshot covers at start, which the
      start sets when it moves the truncated log onto a newer snapshot, is
      raised past that snapshot: its commit is a past the node may have
@@ -906,7 +910,8 @@ directory and cleared it, through `Inspect` and the product's own procedure
    before. **Residual, stated:** an acknowledgement the
    node sent before the damage and that reaches the leader only after the
    append that ended the silence counts again for an entry the node may no
-   longer hold. The node keeps no durable bound of what it acknowledged; a
+   longer hold (since #766, after the append on which the rest of the
+   condition first held). The node keeps no durable bound of what it acknowledged; a
    bound persisted with the silence would close it for the records still
    readable.
    **The end of the silence is durable only after the entries that meet
@@ -5888,6 +5893,77 @@ operator ([#758](https://github.com/kitsunium/sdk/issues/758)).
   taken), and `TestTheStrandingTruncationIsJudgedOnTheLogsNewestConfiguration`
   (the judgment's edges, on records written in place) hold it.
 
+## Amendment — under its own term's leader, the commit a silence must reach is fixed once the rest of its condition holds (2026-10-30, #766)
+
+#636 made a node silent by `TruncateAndStaySilent` end its silence, under
+the leader of its own `SilentTerm`, only once its commit reached the commit
+the append it accepted carried. A silent node acknowledges no append, so
+that leader probes it: one batch, then nothing until the node's next
+heartbeat answer, past whose reported commit the probe resumes
+(`followSilentReport`). The node gains at most `MaxBatchBytes` per
+`HeartbeatInterval`, about 10 MiB/s of log at the defaults, 640 KiB/s with
+64 KiB batches. The commit each append carries also counts the writes made
+since, so under writes faster than that no batch ever reached it: the node
+stayed silent for as long as that leader led and the writes lasted, and the
+cluster ran one voter short with no bound, one failure from having no
+leader. Only a change of leader or the end of the writes released it
+([#766](https://github.com/kitsunium/sdk/issues/766)).
+
+- **The commit to reach is fixed.** It is the highest commit the appends
+  the node accepted from the leader of its `SilentTerm` carried, up to the
+  first one on which the rest of the condition held (the truncation point
+  passed, an entry of that leader's term committed past it), then fixed
+  (`silenceTarget`), in memory: a later append never moves it, an older
+  one delivered late never lowers it, a refused one never sets it, and a
+  restart takes it again. Until the rest holds, the node is still crossing
+  fixed indices, its truncation point and that leader's first entry of its
+  term, at one batch per heartbeat answer whatever the writes: the target
+  is fixed in bounded time, and reached in bounded time after. The other
+  conditions are unchanged, the end durable after its entries included
+  (#684). Fixed on the first accepted append alone, an older append below
+  the truncation point delivered late, carrying an older commit, would
+  have set it.
+- **Why that commit is enough.** The leader sent each of those appends
+  past its match for the node, after an index the node held. Either it had lowered
+  that match on one of the node's reports (a `FlagTruncated` refusal or
+  heartbeat answer), and, probing, it sent its whole commit, which holds
+  whatever it had committed counting the node's acknowledgements; or it had
+  not, and that match, which only an acknowledgement raises, counted the
+  node for no entry it lacks. After that append, the leader counts none of
+  the node's acknowledgements: a silent node sends none, and its reports
+  never raise a match. Every commit after it counts writes the node never
+  acknowledged, which the election restriction keeps as it keeps any
+  follower's lag. #636's guarantee holds: the node votes again and counts
+  for a quorum only once it holds, on disk, every entry that leader
+  committed with its acknowledgements. #418's is untouched: the silence
+  condition, its term and the votes are not.
+- **The residual #636 stated starts at that append.** An acknowledgement
+  the node sent before the damage and that reaches the leader after the
+  append that fixed the commit, no longer only after the append that
+  ended the silence, counts again for an entry the node may no longer
+  hold. With no writes the leader's commit does not move between them, and
+  both rules ask the same; under writes faster than the probe the second never came, and the
+  node never voted again. Such an acknowledgement has outlived the node's
+  crash, the offline truncation and its restart. The durable bound #636
+  left for a separate decision would still close it.
+- **No format change.** No frame, field, flag or record changes, nothing
+  new is persisted (`SILENT` keeps its layout and meaning), no protocol
+  raise and no raft mutation: the change is the silent node's own, and a
+  leader of any release feeds it as before. Under a leader that does not
+  follow the reports, the silence still lasts until one batch covers what
+  the condition needs.
+- **Tests.** `TestTheSilenceEndsUnderTheSameTermLeadersSustainedWrites`
+  (raft, the step functions: four writes per heartbeat against two entries
+  per batch; on main the node stays silent through 20 heartbeats, at commit
+  45 while the leader is at 91),
+  `TestTheSilenceTargetIsFixedOnceTheRestOfTheConditionHolds` (raft: the
+  commit is not taken from a refusal, not fixed short of the truncation
+  point, not moved by a later append, not lowered by an older one), and `TestASilentNodeRejoinsUnderItsLeaderDuringSustainedWrites`
+  (on disk, the issue's scenario shortened: four writers; on main the
+  victim stays silent through 5 s of writes, at commit 272 while the leader
+  is at 2028; fixed, it ends its silence about 0.3 s in, holding every write
+  it acknowledged). #636's, #684's and #418's tests stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5924,6 +6000,7 @@ operator ([#758](https://github.com/kitsunium/sdk/issues/758)).
 | #748 | Raft hunt loop, 2026-10-29 | a batch a node's own link to a member cannot carry goes back on the connection that member dialled on the lane, and a node delivers the frames its outbound links carry as the member it pinned there; the dial and its report are unchanged; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #748) |
 | #755 | Raft hunt loop, 2026-10-29 | a leader record is ranked against the latest configuration only when it is committed or of the node's term, the committed one otherwise, so a divergent tail's configuration of an older term no longer refuses it; no format change, no raft mutation (amendment of 2026-10-29, #755) |
 | #758 | Raft hunt loop, 2026-10-29 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when the configuration it would keep has no other member that the newest configuration still readable in the dropped part lists under the same key; the reason names `WipeAndRejoin`, the promotion `MinVoters` may ask for and the removal of the old ID; a refusal at best; no format change, no raft mutation (amendment of 2026-10-29, #758) |
+| #766 | Raft hunt loop, 2026-10-30 | under the leader of its own `SilentTerm`, the commit a silent node must hold is fixed once the rest of the silence condition holds, the highest its accepted appends carried up to then, no longer the commit each append carries, which writes faster than one batch per heartbeat kept out of reach; #636's residual starts at that append; no format change, nothing persisted, no raft mutation (amendment of 2026-10-30, #766) |
 
 ## raft-sql-poc (owner's prior Raft)
 

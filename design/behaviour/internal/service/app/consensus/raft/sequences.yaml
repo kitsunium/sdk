@@ -5552,8 +5552,6 @@ sequences:
         kind: actor
       - id: (*Raft).maybeEndSilence
         kind: self
-      - id: r.log.term
-        kind: internal
       - id: cmp
         kind: stdlib
       - id: r.endSilenceOnceDurable
@@ -5562,24 +5560,49 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: r.cfg.SilentIndex == 0 || m.Term < r.cfg.SilentTerm || r.log.lastIndex() < r.cfg.SilentIndex
+          when: r.cfg.SilentIndex == 0 || m.Term < r.cfg.SilentTerm
+      - bind: own
+        eval: m.Term == r.cfg.SilentTerm
+      - opt:
+          do:
+            - set: r.silenceTarget
+              value: max(r.silenceTarget, m.Commit)
+          when: own && !r.silenceTargetFixed
       - opt:
           do:
             - return: ""
-          init:
-            bind: t, ok
-            eval: r.log.term(r.log.committed)
-            to: r.log.term
-          when: "!ok || t != m.Term || r.log.committed < r.cfg.SilentIndex"
+          when: "!r.rewrittenPastSilence(m.Term)"
       - opt:
           do:
-            - return: ""
-          when: m.Term == r.cfg.SilentTerm && r.log.committed < m.Commit && !r.mutated(mutSilenceEndsBeforeCommit)
+            - set: r.silenceTargetFixed
+              value: "true"
+            - opt:
+                do:
+                  - return: ""
+                when: r.log.committed < r.silenceTarget && !r.mutated(mutSilenceEndsBeforeCommit)
+          when: own
       - set: r.silenceEndAt
         to: cmp
         value: cmp.Or(r.silenceEndAt, r.log.committed)
       - eval: r.endSilenceOnceDurable()
         to: r.endSilenceOnceDurable
+  - of: (*Raft).rewrittenPastSilence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).rewrittenPastSilence
+        kind: self
+      - id: r.log.term
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: r.log.lastIndex() < r.cfg.SilentIndex || r.log.committed < r.cfg.SilentIndex
+      - bind: t, ok
+        eval: r.log.term(r.log.committed)
+        to: r.log.term
+      - return: ok && t == term
   - of: (*Raft).endSilenceOnceDurable
     participants:
       - id: caller
@@ -5593,8 +5616,8 @@ sequences:
           do:
             - return: ""
           when: r.silenceEndAt == 0 || (r.log.stable < r.silenceEndAt && !r.mutated(mutSilenceEndsBeforeDurable))
-      - set: r.silenceEndAt
-        value: "0"
+      - set: r.silenceEndAt, r.silenceTarget, r.silenceTargetFixed
+        value: 0, 0, false
       - set: r.cfg.SilentIndex, r.cfg.SilentTerm
         value: 0, 0
       - set: r.rd.SilenceEnded

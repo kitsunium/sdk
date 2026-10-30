@@ -750,6 +750,7 @@ files:
       - (*Raft).chainRefused
       - (*Raft).refuses
       - (*Raft).maybeEndSilence
+      - (*Raft).rewrittenPastSilence
       - (*Raft).endSilenceOnceDurable
     name: step.go
 functions:
@@ -1692,6 +1693,19 @@ types:
           when none: the silence ends once it is (endSilenceOnceDurable, #684).
         name: silenceEndAt
         type: uint64
+      - doc: |-
+          silenceTarget is the commit a silent node must reach under the
+          leader of its SilentTerm: the highest the appends it accepted from
+          that leader carried, up to the first that met the rest of the
+          silence condition, then fixed (silenceTargetFixed). The commit a
+          later append carries counts the writes made since, which the node
+          never acknowledged: chasing it kept the node silent under writes
+          faster than one batch per heartbeat (#636, #766). Kept in memory: a
+          restart takes it again.
+        name: silenceTarget
+        type: uint64
+      - name: silenceTargetFixed
+        type: bool
     kind: struct
     methods:
       - name: Debug
@@ -3264,7 +3278,8 @@ types:
           accepted, once a leader of a term at least the node's own has rewritten
           its log past the truncation point and committed an entry of its current
           term (R3-09), and, when that term is the node's own SilentTerm, once the
-          node holds that leader's commit (#636).
+          node holds the commit that leader's appends carried when the rest of the
+          condition first held (#636, #766).
 
           A leader of a later term was elected without this node, which granted no
           vote while silent and named no later term before the damage: every entry
@@ -3276,15 +3291,40 @@ types:
           truncation point prove nothing: one batch committed an entry of its term
           while entries the node had acknowledged, and that leader had committed,
           were still missing, the node voted again without them, and one more
-          failure of that leader elected a log that lacked them. Holding m.Commit,
-          the node holds everything that leader had committed when it sent m, and
-          the election restriction then refuses any candidate that lacks it.
+          failure of that leader elected a log that lacked them. Holding the
+          commit an accepted append carried, the node holds everything that leader
+          had committed when it sent it, and the election restriction then refuses
+          any candidate that lacks it.
+
+          That commit is fixed once the rest of the condition holds (silenceTarget):
+          the highest any accepted append of that leader carried up to then. The
+          leader sent each of them past its match for this node, after an index the
+          node held. Either it had lowered that match on one of the node's reports,
+          and, probing, it sent its whole commit, which holds whatever it had
+          committed counting the node's acknowledgements; or it had not, and that
+          match, which only an acknowledgement raises, counted the node for no
+          entry it lacks. It counts none of them after: a silent node acknowledges
+          nothing, and its reports never raise a match, but for an acknowledgement
+          sent before the damage that reaches the leader late (ADR 0152's
+          residual). The commit a later append carries also counts the writes made
+          since, which the node never acknowledged: chasing it, the node gained one
+          batch per heartbeat answer while the leader committed more, and stayed
+          silent for as long as that leader led under writes faster than that
+          (#766).
 
           The condition is met on the log in memory; the silence ends once that
           log is durable through the commit that met it (endSilenceOnceDurable).
         name: maybeEndSilence
         params: m core.MessageValue
         recv: r *Raft
+      - doc: |-
+          rewrittenPastSilence reports R3-09's part of the silence condition: the
+          log reaches past the truncation point, and its commit, past it too, is an
+          entry of term, the term of the leader whose append the node accepted.
+        name: rewrittenPastSilence
+        params: term uint64
+        recv: r *Raft
+        results: bool
       - doc: |-
           endSilenceOnceDurable ends the silence whose condition an accepted append
           met at the commit silenceEndAt, once the log is durable through that

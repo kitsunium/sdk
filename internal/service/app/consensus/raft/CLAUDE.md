@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-29T12:00:00Z -->
+<!-- updated: 2026-10-30T12:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -199,7 +199,14 @@ under coverage before touching `shard_count`.
   the FlagTruncated heartbeat answer of a silent node: it acknowledges no
   append, the probe never moved past its first batch, and the node stayed
   silent for as long as its leader led (`mutSilentReportIgnored`,
-  `TestTheSilenceEndsOnceTheSameTermLeadersCommitIsHeld`).
+  `TestTheSilenceEndsOnceTheSameTermLeadersCommitIsHeld`). Nor move that
+  commit once the rest of the condition holds (`silenceTarget`), nor fix
+  it before, from a refused append or below the highest an accepted one
+  carried: the commit each append carries counts the writes made since,
+  and a node fed one batch per heartbeat answer stayed silent for as long
+  as writes outran it (#766,
+  `TestTheSilenceEndsUnderTheSameTermLeadersSustainedWrites`,
+  `TestTheSilenceTargetIsFixedOnceTheRestOfTheConditionHolds`).
 - End a silence in the Ready whose entries meet its condition, or before
   the log is durable through the commit that met it: the driver removes
   SILENT as soon as a Ready says `SilenceEnded`, before the storage actor

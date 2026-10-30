@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-29T12:00:00Z -->
+<!-- updated: 2026-10-30T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -407,6 +407,10 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestASilentNodeVotesAgainOnlyWithTheWritesItAcknowledged`; the
   liveness half, the silent node caught up across batches it never
   acknowledges, `TestASilentNodeRejoinsUnderItsLeaderWithTheWritesItAcknowledged`).
+  That commit is fixed once the rest of the condition holds: chasing the
+  commit each append carries, the node gained one batch per heartbeat
+  answer and stayed silent for as long as writes outran it (#766,
+  `TestASilentNodeRejoinsUnderItsLeaderDuringSustainedWrites`).
 - End a silence on disk before the entries that meet its condition are: raft
   judged it on the append's entries, in memory, and said so in the same
   Ready, and `endSilence` removed SILENT on the loop before the storage
