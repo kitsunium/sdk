@@ -503,6 +503,7 @@ files:
       - (*Raft).vouchedInRetained
       - listedBefore
       - vouched
+      - vouches
       - (*Raft).updateAddress
       - (*Raft).moveStrands
       - (*Raft).updateSnapshotLimit
@@ -787,8 +788,26 @@ functions:
       asked no one that follows it, and its transport refused the new leader's
       key (#765). A leader that is a voter of known is counted at any address:
       while it leads it dials v, which admits it by key.
+
+      Every voucher, the leader included, is counted only under the key known
+      pins for it, which next still pins: v admits a member by that key alone.
+      A key DenyPin withdrew, the zero pin, admits nobody and counts for none,
+      as the offline check holds (stranded, #758). A member whose pin was
+      withdrawn stays in next at its address, but once the change commits every
+      member refuses it (#551): it hears no leader, answers no PreVote with a
+      record, and counted as a voucher it let through the removal of the last
+      member a voter down at the time knew, which came back hearing no one
+      (#773).
     name: vouched
     params: next, known *core.MembershipValue, v, leader core.NodeID
+    results: bool
+  - doc: |-
+      vouches reports whether k, as a stale voter's configuration lists it,
+      still answers that voter's PreVote in next: a voter of that
+      configuration, pinned there under a non-zero key that next still pins,
+      at the address that configuration names, or at any when it leads.
+    name: vouches
+    params: next *core.MembershipValue, k core.MemberValue, leader core.NodeID
     results: bool
   - doc: |-
       ownCopy returns a copy of b the step function owns, out of a frame the

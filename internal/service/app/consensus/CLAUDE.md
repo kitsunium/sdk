@@ -1117,6 +1117,15 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   not know, nobody answered it with the record (#765, `vouched`,
   `TestTheLeaderAStaleVoterKnowsAsALearnerDoesNotVouchForIt`,
   `TestVouchedNeedsAStayingVoterOrTheLeader`).
+- Count as a stale voter's voucher a member under another key than the
+  non-zero one that voter pins for it, the leader included: a member whose
+  pin `DenyPin` withdrew stays at its address, but every member refuses it
+  once the change commits (#551), and C's removal admitted on B's count
+  left A, down, coming back hearing no one (#773, `vouched`,
+  `TestTheLastVoucherBesideADeniedPinIsRemovedOnlyOnceTheStaleVoterIsBack`,
+  `TestARemovalCountsNoMemberWhosePinWasDeniedAsAVoucher`). A `DenyPin`
+  itself is not judged by the guard: whether the fence of a compromised
+  key may be refused while a voter is down is left to a decision.
 - Cancel a snapshot stream because the log is tight: its pin's hold on
   compaction is lifted, for good, and the stream goes on; only a stream
   that is due is cancelled (`streamDue`). Cancelled with it, no stream

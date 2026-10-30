@@ -1111,19 +1111,39 @@ func listedBefore(next *core.MembershipValue, first, then core.NodeID) bool {
 // asked no one that follows it, and its transport refused the new leader's
 // key (#765). A leader that is a voter of known is counted at any address:
 // while it leads it dials v, which admits it by key.
+//
+// Every voucher, the leader included, is counted only under the key known
+// pins for it, which next still pins: v admits a member by that key alone.
+// A key DenyPin withdrew, the zero pin, admits nobody and counts for none,
+// as the offline check holds (stranded, #758). A member whose pin was
+// withdrawn stays in next at its address, but once the change commits every
+// member refuses it (#551): it hears no leader, answers no PreVote with a
+// record, and counted as a voucher it let through the removal of the last
+// member a voter down at the time knew, which came back hearing no one
+// (#773).
 func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
 	if _, listed := known.Member(v); !listed {
 		return true
 	}
 	for _, k := range known.Members {
-		if k.ID == v || !k.Voter {
-			continue
-		}
-		if m, stays := next.Member(k.ID); stays && (k.ID == leader || m.Address == k.Address) {
+		if k.ID != v && vouches(next, k, leader) {
 			return true
 		}
 	}
 	return false
+}
+
+// vouches reports whether k, as a stale voter's configuration lists it,
+// still answers that voter's PreVote in next: a voter of that
+// configuration, pinned there under a non-zero key that next still pins,
+// at the address that configuration names, or at any when it leads.
+func vouches(next *core.MembershipValue, k core.MemberValue, leader core.NodeID) bool {
+	var unpinned [32]byte
+	if !k.Voter || k.SPKI == unpinned {
+		return false
+	}
+	m, stays := next.Member(k.ID)
+	return stays && m.SPKI == k.SPKI && (k.ID == leader || m.Address == k.Address)
 }
 
 // updateAddress changes the address of the member at idx to the one admin
