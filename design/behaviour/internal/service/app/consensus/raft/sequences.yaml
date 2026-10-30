@@ -1430,7 +1430,7 @@ sequences:
           init:
             bind: pr
             eval: r.prs[v]
-          when: pr != nil && pr.facts&peerHeard != 0 && pr.match >= r.log.snapIndex
+          when: pr != nil && r.answering(v) && pr.match >= r.log.snapIndex
       - opt:
           do:
             - return: "false"
@@ -1469,15 +1469,15 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: k.ID == v
+                when: k.ID == v || !k.Voter
             - opt:
                 do:
                   - return: "true"
                 init:
-                  bind: _, stays
+                  bind: m, stays
                   eval: next.Member(k.ID)
                   to: next.Member
-                when: stays && (k.ID == leader || k.Voter)
+                when: stays && (k.ID == leader || m.Address == k.Address)
           key: _
           range: known.Members
           value: k
@@ -1490,7 +1490,26 @@ sequences:
           when: idx < 0 || len(admin.Membership.Members) != 1 || !r.activeMajority(*cur)
       - set: cur.Members[idx].Address
         value: admin.Membership.Members[0].Address
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: r.moveStrands(cur, cur.Members[idx].ID)
       - return: "0"
+  - of: (*Raft).moveStrands
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).moveStrands
+        kind: self
+      - id: r.strands
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: target == r.id || !r.answering(target) || r.neverVoter(target)
+      - return: r.strands(next)
+        to: r.strands
   - of: (*Raft).updateSnapshotLimit
     steps:
       - opt:

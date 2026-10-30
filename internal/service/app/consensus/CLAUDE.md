@@ -1089,6 +1089,29 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   Nor refuse the removal of a learner that never voted: it vouches for no
   one (#614, `neverVoter`,
   `TestAnAnsweringLearnerIsRemovedWhileAVoterIsAlreadyStranded`).
+- Move an answering member that may be the last voter a stale voter
+  knows, or count a voter that stays as its voucher at an address the
+  stale voter does not know: it sends its PreVote to the address its own
+  configuration names, and a voter down while the leader was admitted, C
+  removed and then B moved came back hearing no one, refused by the
+  leader's key, until one more failure left no leader (#761, `vouched`,
+  `moveStrands`, `TestTheLastMemberAStaleVoterKnowsMovesOnlyOnceItIsBack`,
+  `TestTheMoveOfTheLastMemberAStaleVoterReachesIsRefused`). The leader's
+  own move is not judged: it dials every voter that lists it.
+- Judge a voter that no longer answers on the configuration the leader
+  last heard it at: it may come back over a truncated log, and #758's
+  offline refusal reads only that log, which holds no change committed
+  while it was down; B removed then, V came back silent over {A, B, V} for
+  good (#763, `reachedBy`, `TestARemovalWhileAHeardVoterIsDownWaitsForIt`,
+  `TestARemovalIsJudgedOnAVotersConfigurationOnlyWhileItAnswers`). At
+  best: a voter that failed less than a vote window before the change, or
+  before the change reached it, is still judged as heard.
+- Count the leader as a stale voter's voucher when that voter knows it as
+  a learner only: a voter sends its PreVote to the voters of its
+  configuration alone, and once the leadership moved to a member it did
+  not know, nobody answered it with the record (#765, `vouched`,
+  `TestTheLeaderAStaleVoterKnowsAsALearnerDoesNotVouchForIt`,
+  `TestVouchedNeedsAStayingVoterOrTheLeader`).
 - Cancel a snapshot stream because the log is tight: its pin's hold on
   compaction is lifted, for good, and the stream goes on; only a stream
   that is due is cancelled (`streamDue`). Cancelled with it, no stream
@@ -1127,3 +1150,13 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   snapshot's encoded size: the sender refuses to open there, and every
   later offer resumed at the same offset (#643, `openSpool`,
   `TestAResumeIsNeverAcceptedPastTheSnapshotsEnd`).
+- Judge whether a bench's writes on disk still run under the leader they
+  are bound to by its published role and term alone: a leader whose
+  fdatasync stalls hands its leadership over (#554), and from the moment
+  the hand-off starts raft refuses every proposal `NOT_LEADER` while
+  `Status` still says leader at the same term. The bench failed instead of
+  skipping, main red on Windows (#762). `leadershipMoved` also reads the
+  transfer in flight on the loop and takes `NOT_LEADER` for a change
+  (`silenceUnderItsLeaderOnDisk`,
+  `TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt`,
+  `TestTheSilenceBenchSkipsOnAHandOffInFlight`).
