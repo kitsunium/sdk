@@ -28,7 +28,7 @@ func must[T any](v T, err error) func(testing.TB) T {
 	return func(t testing.TB) T {
 		t.Helper()
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal(err, errs.FieldsOf(err))
 		}
 		return v
 	}

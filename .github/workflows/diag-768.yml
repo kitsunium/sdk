@@ -1,0 +1,140 @@
+name: diag-768 (never merged)
+
+# Diagnostic for kitsunium/sdk#768 on the Windows runner: the full error of a
+# store listing raced by a publication, the per-test durations of the
+# consensus package, whole and split in four, with the temporary directory
+# on C: (the default) and on D: (the runner's temp).
+
+on:
+  push:
+    branches: ['diag/raft-loop-768']
+
+permissions:
+  contents: read
+
+jobs:
+  win:
+    name: windows tmp-${{ matrix.tmp }}
+    runs-on: windows-latest
+    timeout-minutes: 80
+    strategy:
+      fail-fast: false
+      matrix:
+        tmp: [c, d]
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Go cache paths and week
+        id: gocache
+        shell: bash
+        run: |
+          {
+            echo "build=$(go env GOCACHE)"
+            echo "mod=$(go env GOMODCACHE)"
+            echo "week=$(date -u +%G-W%V)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Go build cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.build }}
+            ${{ steps.gocache.outputs.mod }}
+          key: go-native-windows-internal-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
+          restore-keys: |
+            go-native-windows-internal-${{ hashFiles('**/go.sum') }}-
+            go-native-windows-internal-
+
+      - name: Defender and disks
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, AntivirusEnabled | Format-List
+          (Get-MpPreference).ExclusionPath
+          Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize
+          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfLogicalProcessors | Format-List
+
+      - name: Temporary directory
+        shell: bash
+        run: |
+          out="$(cygpath -u "$RUNNER_TEMP")/out"
+          mkdir -p "$out"
+          if [ "${{ matrix.tmp }}" = d ]; then
+            d="$(cygpath -u "$RUNNER_TEMP")/gotmp"
+            mkdir -p "$d"
+            w="$(cygpath -w "$d")"
+            echo "TMP=$w" >> "$GITHUB_ENV"
+            echo "TEMP=$w" >> "$GITHUB_ENV"
+          fi
+
+      - name: File races of the store
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          out="$(cygpath -u "$RUNNER_TEMP")/out"
+          echo "TMP=$TMP TEMP=$TEMP"
+          cd internal
+          go test -count=1 -v -timeout 20m -run 'TestDiag768' ./service/app/consensus/ 2>&1 | tee "$out/diag.txt" | grep -v '^=== ' || true
+
+      - name: The rotted re-cut, forty times
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          out="$(cygpath -u "$RUNNER_TEMP")/out"
+          cd internal
+          go test -count=40 -timeout 20m -run '^(TestTheRestartedNodeCutsItsRottedNewestAgainFromItsOwnLog|TestASnapshotMetaOfVersion2IsRestored)$' ./service/app/consensus/ 2>&1 | tee "$out/recut.txt" | tail -40 || true
+
+      - name: The consensus package whole
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          out="$(cygpath -u "$RUNNER_TEMP")/out"
+          cd internal
+          start=$(date +%s)
+          go test -count=1 -timeout 40m -json ./service/app/consensus/ > "$out/whole.json" 2>&1 || true
+          echo "whole: $(( $(date +%s) - start )) s"
+          grep -E '"Action":"(pass|fail)","Package":"[^"]*","Elapsed"' "$out/whole.json" || true
+          grep -E '"Action":"(pass|fail)"' "$out/whole.json" | grep -E '"Test":"[^"/]*",' | sed -E 's/.*"Action":"([a-z]*)".*"Test":"([^"]*)".*"Elapsed":([0-9.]+).*/\3 \1 \2/' | sort -nr | head -40
+
+      - name: The consensus package in four
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          out="$(cygpath -u "$RUNNER_TEMP")/out"
+          cd internal
+          go test -list '.*' ./service/app/consensus/ | grep -E '^(Test|Example|Fuzz)' > "$out/list.txt"
+          wc -l "$out/list.txt"
+          for s in 0 1 2 3; do
+            re="$(awk -v s="$s" 'NR % 4 == s' "$out/list.txt" | paste -sd'|' -)"
+            start=$(date +%s)
+            go test -count=1 -timeout 40m -json -run "^(${re})\$" ./service/app/consensus/ > "$out/shard$s.json" 2>&1 || true
+            echo "shard $s: $(( $(date +%s) - start )) s"
+            grep -E '"Action":"(pass|fail)","Package":"[^"]*","Elapsed"' "$out/shard$s.json" || true
+          done
+
+      - name: Upload
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: diag-768-${{ matrix.tmp }}
+          path: ${{ runner.temp }}/out
+          retention-days: 7

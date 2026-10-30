@@ -42,7 +42,7 @@ on:
   # ran this lane twice for nothing. `branches` is spelled out because a push
   # trigger that names a tag filter alone runs for no branch at all.
   push:
-    branches: ['**']
+    branches: ['main'] # diag-768 branch: not run here
     tags-ignore: ['pin/**']
   workflow_dispatch:
 
