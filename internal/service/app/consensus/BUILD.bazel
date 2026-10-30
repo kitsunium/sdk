@@ -160,6 +160,7 @@ go_test(
         "runtimedir_unix_internal_test.go",
         "savesnapshotstall_internal_test.go",
         "silencedurable_internal_test.go",
+        "silentload_internal_test.go",
         "snaplimit_internal_test.go",
         "space_internal_test.go",
         "spool_internal_test.go",

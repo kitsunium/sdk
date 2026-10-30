@@ -887,7 +887,11 @@ directory and cleared it, through `Inspect` and the product's own procedure
    - when that term equals the node's own, the node's commit has reached
      the commit the append carries: it then holds everything that leader
      had committed, and the election restriction refuses any candidate
-     that lacks it;
+     that lacks it. Since the amendment of 2026-10-30
+     ([#766](https://github.com/kitsunium/sdk/issues/766)), that commit is
+     FIXED once the rest of the condition holds: the highest the appends
+     the node accepted from that leader carried up to then, never moved by
+     a later one;
    - a truncation point the node's own snapshot covers at start, which the
      start sets when it moves the truncated log onto a newer snapshot, is
      raised past that snapshot: its commit is a past the node may have
@@ -906,7 +910,8 @@ directory and cleared it, through `Inspect` and the product's own procedure
    before. **Residual, stated:** an acknowledgement the
    node sent before the damage and that reaches the leader only after the
    append that ended the silence counts again for an entry the node may no
-   longer hold. The node keeps no durable bound of what it acknowledged; a
+   longer hold (since #766, after the append on which the rest of the
+   condition first held). The node keeps no durable bound of what it acknowledged; a
    bound persisted with the silence would close it for the records still
    readable.
    **The end of the silence is durable only after the entries that meet
@@ -6052,6 +6057,125 @@ three, had no leader
   last founder's removal refused while V is down, V back through that
   founder, the founder removed, and D and V commit once L fails.
 
+## Amendment — under its own term's leader, the commit a silence must reach is fixed once the rest of its condition holds (2026-10-30, #766)
+
+#636 made a node silent by `TruncateAndStaySilent` end its silence, under
+the leader of its own `SilentTerm`, only once its commit reached the commit
+the append it accepted carried. A silent node acknowledges no append, so
+that leader probes it: one batch, then nothing until the node's next
+heartbeat answer, past whose reported commit the probe resumes
+(`followSilentReport`). The node gains at most `MaxBatchBytes` per
+`HeartbeatInterval`, about 10 MiB/s of log at the defaults, 640 KiB/s with
+64 KiB batches. The commit each append carries also counts the writes made
+since, so under writes faster than that no batch ever reached it: the node
+stayed silent for as long as that leader led and the writes lasted, and the
+cluster ran one voter short with no bound, one failure from having no
+leader. Only a change of leader or the end of the writes released it
+([#766](https://github.com/kitsunium/sdk/issues/766)).
+
+- **The commit to reach is fixed.** It is the highest commit the appends
+  the node accepted from the leader of its `SilentTerm` carried, up to the
+  first one on which the rest of the condition held (the truncation point
+  passed, an entry of that leader's term committed past it), then fixed
+  (`silenceTarget`), in memory: a later append never moves it, an older
+  one delivered late never lowers it, a refused one never sets it, and a
+  restart takes it again. Until the rest holds, the node is still crossing
+  fixed indices, its truncation point and that leader's first entry of its
+  term, at one batch per heartbeat answer whatever the writes: the target
+  is fixed in bounded time, and reached in bounded time after. The other
+  conditions are unchanged, the end durable after its entries included
+  (#684). Fixed on the first accepted append alone, an older append below
+  the truncation point delivered late, carrying an older commit, would
+  have set it.
+- **Why that commit is enough.** The leader sent each of those appends
+  past its match for the node, after an index the node held. Either it had lowered
+  that match on one of the node's reports (a `FlagTruncated` refusal or
+  heartbeat answer), and, probing, it sent its whole commit, which holds
+  whatever it had committed counting the node's acknowledgements; or it had
+  not, and that match, which only an acknowledgement raises, counted the
+  node for no entry it lacks. After that append, the leader counts none of
+  the node's acknowledgements: a silent node sends none, and its reports
+  never raise a match. Every commit after it counts writes the node never
+  acknowledged, which the election restriction keeps as it keeps any
+  follower's lag. #636's guarantee holds: the node votes again and counts
+  for a quorum only once it holds, on disk, every entry that leader
+  committed with its acknowledgements. #418's is untouched: the silence
+  condition, its term and the votes are not.
+- **The residual #636 stated starts at that append.** An acknowledgement
+  the node sent before the damage and that reaches the leader after the
+  append that fixed the commit, no longer only after the append that
+  ended the silence, counts again for an entry the node may no longer
+  hold. With no writes the leader's commit does not move between them, and
+  both rules ask the same; under writes faster than the probe the second never came, and the
+  node never voted again. Such an acknowledgement has outlived the node's
+  crash, the offline truncation and its restart. The durable bound #636
+  left for a separate decision would still close it.
+- **No format change.** No frame, field, flag or record changes, nothing
+  new is persisted (`SILENT` keeps its layout and meaning), no protocol
+  raise and no raft mutation: the change is the silent node's own, and a
+  leader of any release feeds it as before. Under a leader that does not
+  follow the reports, the silence still lasts until one batch covers what
+  the condition needs.
+- **Tests.** `TestTheSilenceEndsUnderTheSameTermLeadersSustainedWrites`
+  (raft, the step functions: four writes per heartbeat against two entries
+  per batch; on main the node stays silent through 20 heartbeats, at commit
+  45 while the leader is at 91),
+  `TestTheSilenceTargetIsFixedOnceTheRestOfTheConditionHolds` (raft: the
+  commit is not taken from a refusal, not fixed short of the truncation
+  point, not moved by a later append, not lowered by an older one), and `TestASilentNodeRejoinsUnderItsLeaderDuringSustainedWrites`
+  (on disk, the issue's scenario shortened: four writers; on main the
+  victim stays silent through 5 s of writes, at commit 272 while the leader
+  is at 2028; fixed, it ends its silence about 0.3 s in, holding every write
+  it acknowledged). #636's, #684's and #418's tests stay green.
+
+## Amendment — an append still crossing a narrow link is probed behind, never sent again (2026-10-30, #767)
+
+#560 told an acknowledgement a slow fdatasync delays from a lost append by
+the index a heartbeat answer reports: a follower that holds the oldest
+append in flight has `ElectionTimeoutMax` to acknowledge it, and one that
+holds less was taken to have lost it. On a link narrower than one batch
+per heartbeat interval, that is a batch still crossing: the answer takes
+the control lane while the batch is on the data lane. The peer was moved
+to probe, its next back to its match plus one and its window forgotten,
+and the leader sent again from there, behind what the lane still carried;
+probing, every heartbeat answer sent the probe of `MaxBatchBytes` again.
+The copies filled the transport's queue up to `PeerQueueBytes`, past which
+`Send` drops, some 95 % of the link carried copies, and a lagging follower
+never caught up under load, below about 10 MiB/s at the defaults: what was
+in flight was no longer bounded by `MaxInflightBytes`, against D6's
+bounded pipeline ([#767](https://github.com/kitsunium/sdk/issues/767)).
+
+- **Probed behind, never sent again.** Where such an answer moved the peer
+  to probe, and where a probing peer's answer sent its probe again, the
+  leader now sends an empty append after its next less one
+  (`probeBehind`). Appends share the data lane in order, so it reaches the
+  follower only once everything sent before it has. Accepted, its
+  acknowledgement covers the window, or, at the match, answers the probe,
+  which was lost, and moves the peer to replicate. Refused, an append
+  before it was lost, and the refusal backs the peer off from its hint as
+  any refusal does. It carries no entry.
+- **What #560 and R1-11 keep.** A lost append is still found from the
+  heartbeat answer: the follower that lost it refuses the empty append,
+  one round trip later and behind whatever was queued before it, where a
+  resend would have waited as well. A follower that holds the oldest
+  append still has `ElectionTimeoutMax` before it is probed; a failure the
+  transport reports (`ReportUnreachable`) still moves the peer to probe at
+  once; #722's learner whose probe its transport dropped is probed the
+  same way; a silent peer, which answers no append, is still sent the
+  batch at its next on each report (#636).
+  `TestALostAppendIsStillProbedOnHeartbeats` now answers the empty append
+  with the refusal of a follower that lost the window, and the entries go
+  out once more, as they did.
+- **No format change.** An empty append is a frame every release sends
+  and answers (R2-07): no field, flag or protocol change, no raft mutation.
+- **Tests.** `TestAnAppendStillCrossingANarrowLinkIsNotSentAgain` and
+  `TestAProbeStillCrossingANarrowLinkIsNotSentAgain` (on main each entry is
+  sent three times over three answers), and
+  `TestAFollowerCatchesUpOverALinkNarrowerThanABatchPerHeartbeat` (the
+  simulator, the issue's lane at 1/16 of the defaults: on main the follower
+  is 604 entries behind after 8 s and 4 737 of the 5 407 KiB the lane
+  carried were copies; fixed, it is caught up and nothing was sent twice).
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6091,6 +6215,8 @@ three, had no leader
 | #761 | Raft hunt loop, 2026-10-29 | a voter that stays vouches for a stale voter only at the address the stale voter's configuration names, and `UpdateAddress` of an answering member that may vouch, the leader's own excepted, is refused `MEMBERSHIP_INVALID` when it may strand a voter, as a removal is; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #761) |
 | #763 | Raft hunt loop, 2026-10-29 | #603's guard takes the configuration a voter was heard at only while that voter answers; a voter that no longer answers, which may come back over a truncated log #758's offline refusal cannot judge, is judged as one never heard; at best, a voter that failed less than a vote window before the change, or before the change reached it, still judged on the configuration it was heard at; no format change, nothing persisted, no raft mutation (amendment of 2026-10-29, #763) |
 | #765 | Raft hunt loop, 2026-10-29 | the leader vouches for a stale voter only as a voter of that voter's configuration, at any address: a learner is never sent a PreVote; no transfer guard; the moved leader and the compacted log's bet on the leader's role left to a decision; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #765) |
+| #766 | Raft hunt loop, 2026-10-30 | under the leader of its own `SilentTerm`, the commit a silent node must hold is fixed once the rest of the silence condition holds, the highest its accepted appends carried up to then, no longer the commit each append carries, which writes faster than one batch per heartbeat kept out of reach; #636's residual starts at that append; no format change, nothing persisted, no raft mutation (amendment of 2026-10-30, #766) |
+| #767 | Raft hunt loop, 2026-10-30 | a heartbeat answer that reports less than the oldest append in flight, and a probing peer's answer, send an empty append behind what is in flight instead of the window or the probe again, whose refusal finds a lost append and whose acknowledgement at the match ends the probe; no format change, no raft mutation (amendment of 2026-10-30, #767) |
 
 ## raft-sql-poc (owner's prior Raft)
 

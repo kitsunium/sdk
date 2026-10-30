@@ -669,7 +669,8 @@ func (r *Raft) refuses(from core.NodeID) bool {
 // accepted, once a leader of a term at least the node's own has rewritten
 // its log past the truncation point and committed an entry of its current
 // term (R3-09), and, when that term is the node's own SilentTerm, once the
-// node holds that leader's commit (#636).
+// node holds the commit that leader's appends carried when the rest of the
+// condition first held (#636, #766).
 //
 // A leader of a later term was elected without this node, which granted no
 // vote while silent and named no later term before the damage: every entry
@@ -681,25 +682,60 @@ func (r *Raft) refuses(from core.NodeID) bool {
 // truncation point prove nothing: one batch committed an entry of its term
 // while entries the node had acknowledged, and that leader had committed,
 // were still missing, the node voted again without them, and one more
-// failure of that leader elected a log that lacked them. Holding m.Commit,
-// the node holds everything that leader had committed when it sent m, and
-// the election restriction then refuses any candidate that lacks it.
+// failure of that leader elected a log that lacked them. Holding the
+// commit an accepted append carried, the node holds everything that leader
+// had committed when it sent it, and the election restriction then refuses
+// any candidate that lacks it.
+//
+// That commit is fixed once the rest of the condition holds (silenceTarget):
+// the highest any accepted append of that leader carried up to then. The
+// leader sent each of them past its match for this node, after an index the
+// node held. Either it had lowered that match on one of the node's reports,
+// and, probing, it sent its whole commit, which holds whatever it had
+// committed counting the node's acknowledgements; or it had not, and that
+// match, which only an acknowledgement raises, counted the node for no
+// entry it lacks. It counts none of them after: a silent node acknowledges
+// nothing, and its reports never raise a match, but for an acknowledgement
+// sent before the damage that reaches the leader late (ADR 0152's
+// residual). The commit a later append carries also counts the writes made
+// since, which the node never acknowledged: chasing it, the node gained one
+// batch per heartbeat answer while the leader committed more, and stayed
+// silent for as long as that leader led under writes faster than that
+// (#766).
 //
 // The condition is met on the log in memory; the silence ends once that
 // log is durable through the commit that met it (endSilenceOnceDurable).
 func (r *Raft) maybeEndSilence(m core.MessageValue) {
-	if r.cfg.SilentIndex == 0 || m.Term < r.cfg.SilentTerm || r.log.lastIndex() < r.cfg.SilentIndex {
+	if r.cfg.SilentIndex == 0 || m.Term < r.cfg.SilentTerm {
 		return
 	}
-	if t, ok := r.log.term(r.log.committed); !ok || t != m.Term || r.log.committed < r.cfg.SilentIndex {
+	own := m.Term == r.cfg.SilentTerm
+	if own && !r.silenceTargetFixed {
+		r.silenceTarget = max(r.silenceTarget, m.Commit)
+	}
+	if !r.rewrittenPastSilence(m.Term) {
 		return
 	}
-	if m.Term == r.cfg.SilentTerm && r.log.committed < m.Commit && !r.mutated(mutSilenceEndsBeforeCommit) {
-		return
+	if own {
+		r.silenceTargetFixed = true
+		if r.log.committed < r.silenceTarget && !r.mutated(mutSilenceEndsBeforeCommit) {
+			return
+		}
 	}
 	// The first commit that met the condition is enough: it stays committed.
 	r.silenceEndAt = cmp.Or(r.silenceEndAt, r.log.committed)
 	r.endSilenceOnceDurable()
+}
+
+// rewrittenPastSilence reports R3-09's part of the silence condition: the
+// log reaches past the truncation point, and its commit, past it too, is an
+// entry of term, the term of the leader whose append the node accepted.
+func (r *Raft) rewrittenPastSilence(term uint64) bool {
+	if r.log.lastIndex() < r.cfg.SilentIndex || r.log.committed < r.cfg.SilentIndex {
+		return false
+	}
+	t, ok := r.log.term(r.log.committed)
+	return ok && t == term
 }
 
 // endSilenceOnceDurable ends the silence whose condition an accepted append
@@ -717,7 +753,7 @@ func (r *Raft) endSilenceOnceDurable() {
 	if r.silenceEndAt == 0 || (r.log.stable < r.silenceEndAt && !r.mutated(mutSilenceEndsBeforeDurable)) {
 		return
 	}
-	r.silenceEndAt = 0
+	r.silenceEndAt, r.silenceTarget, r.silenceTargetFixed = 0, 0, false
 	r.cfg.SilentIndex, r.cfg.SilentTerm = 0, 0
 	r.rd.SilenceEnded = true
 	// The committed prefix is verified, and every later leader holds it:

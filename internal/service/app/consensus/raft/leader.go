@@ -355,24 +355,69 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 // next write, and in a quiet cluster the learner was never fed, so its
 // promotion, which waits for it to hold its admission, was refused for as
 // long as nothing was written (#722).
+//
+// A probe still in flight is probed behind, never sent again: an answer
+// on the control lane overtakes it on a link narrower than one batch per
+// heartbeat interval, and the copy queued behind it at every answer took
+// the link from what the peer lacked (#767). A silent peer answers no
+// append, so its report alone tells whether the probe reached it, and it
+// is sent the batch at its next as before.
 func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	r.ackRounds(m.From, m.Context, m.Contract)
 	r.confirmRounds()
-	if m.Flags&core.FlagTruncated != 0 && !r.mutated(mutSilentReportIgnored) {
+	silent := m.Flags&core.FlagTruncated != 0 && !r.mutated(mutSilentReportIgnored)
+	if silent {
 		r.followSilentReport(pr, m)
 	}
+	probing := pr.state == stateProbe && pr.facts&peerProbeSent != 0 && !silent
 	if pr.state == stateProbe {
 		pr.facts &^= peerProbeSent
 	}
+	r.watchWindow(pr, m.From, m.Index)
+	r.refeed(pr, m.From, probing)
+}
+
+// watchWindow probes a replicating peer whose window did not move since its
+// previous heartbeat answer (probeIfLost), held the index this answer
+// reports, and records the match the next answer is judged against.
+func (r *Raft) watchWindow(pr *progress, to core.NodeID, held uint64) {
 	if pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch {
-		r.probeIfLost(pr, m.Index)
+		r.probeIfLost(pr, to, held)
 	} else {
 		pr.heldSince = time.Time{}
 	}
 	pr.hbMatch = pr.match
-	if pr.match < r.log.lastIndex() {
-		r.sendAppend(m.From, pr.state == stateProbe)
+}
+
+// refeed feeds a peer behind the log on its heartbeat answer: behind the
+// probe still in flight to it when probing, the answer having brought no
+// news of it, and what it lacks otherwise.
+func (r *Raft) refeed(pr *progress, to core.NodeID, probing bool) {
+	if pr.match >= r.log.lastIndex() {
+		return
 	}
+	if probing && r.probeBehind(pr, to) {
+		pr.facts |= peerProbeSent
+		return
+	}
+	r.sendAppend(to, pr.state == stateProbe)
+}
+
+// probeBehind sends the peer an empty append after next-1, at the end of
+// what is in flight to it, and reports whether it could. Appends travel on
+// the data lane, in order, so it reaches the peer only once everything sent
+// before it has: accepted, its acknowledgement covers what was in flight;
+// refused, an append before it was lost, and the refusal backs the peer
+// off from its hint (handleAppReject), as a probe did at once before (R1-11,
+// #767). It carries no entry, so a link narrower than one batch per
+// heartbeat interval carries it at almost no cost.
+func (r *Raft) probeBehind(pr *progress, to core.NodeID) bool {
+	t, ok := r.log.term(pr.next - 1)
+	if !ok {
+		return false
+	}
+	r.send(core.MessageValue{Kind: core.MsgApp, To: to, Index: pr.next - 1, LogTerm: t, Commit: r.log.committed})
+	return true
 }
 
 // followSilentReport takes the heartbeat answer of a peer that truncated
@@ -398,14 +443,23 @@ func (r *Raft) followSilentReport(pr *progress, m core.MessageValue) {
 }
 
 // probeIfLost probes a peer whose window did not move across two heartbeat
-// answers: an append in it was lost, the transport may drop, and a window
-// that never refills must not stall (R1-11). A follower that reports
-// holding the oldest append in flight may only acknowledge it late, after
-// its fdatasync: probing it resent, then refilled, a window it held (#560).
-// It has ElectionTimeoutMax for it. Past that, its acknowledgement was lost
-// too, by a dropped frame or a restart after the write, and the window,
-// full, never moved again. held 0 is a follower that reports nothing.
-func (r *Raft) probeIfLost(pr *progress, held uint64) {
+// answers: an append in it may be lost, the transport may drop, and a
+// window that never refills must not stall (R1-11). A follower that
+// reports holding the oldest append in flight may only acknowledge it
+// late, after its fdatasync: probing it resent, then refilled, a window it
+// held (#560). It has ElectionTimeoutMax for it. Past that, its
+// acknowledgement was lost too, by a dropped frame or a restart after the
+// write, and the window, full, never moved again. held 0 is a follower
+// that reports nothing.
+//
+// A follower that reports holding less may still be receiving the window:
+// its answer crossed the control lane while a batch longer than a heartbeat
+// interval to send was crossing the data lane. Moved to probe, it was sent
+// the window again from match+1 behind what the lane still carried, at
+// every answer, and on a link narrower than one batch per heartbeat
+// interval it never caught up (#767). It is probed behind the window
+// instead, whose refusal finds a lost append.
+func (r *Raft) probeIfLost(pr *progress, to core.NodeID, held uint64) {
 	if held >= pr.inflight[0] {
 		if pr.heldSince.IsZero() {
 			pr.heldSince = r.now
@@ -413,6 +467,9 @@ func (r *Raft) probeIfLost(pr *progress, held uint64) {
 		if r.now.Sub(pr.heldSince) <= r.timing.ElectionTimeoutMax {
 			return
 		}
+	} else if r.probeBehind(pr, to) {
+		pr.heldSince = time.Time{}
+		return
 	}
 	pr.heldSince = time.Time{}
 	pr.becomeProbe()
@@ -443,9 +500,15 @@ func (r *Raft) handleAppResp(pr *progress, m core.MessageValue) {
 		// leader's disk alone (#546). Ignored.
 		return
 	}
-	if pr.maybeUpdate(m.Index) {
+	switch {
+	case pr.maybeUpdate(m.Index):
 		r.ackMoved(pr, m.Index)
-	} else {
+	case pr.state == stateProbe && m.Index == pr.match && m.Index+1 >= pr.next:
+		// The empty append probeBehind sent after the match, accepted:
+		// the probe before it was lost, and the peer holds the leader's
+		// log through its match (#767).
+		pr.becomeReplicate()
+	default:
 		pr.freeTo(m.Index)
 	}
 	if pr.match < r.log.lastIndex() {

@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -88,11 +89,21 @@ func TestASlowAcknowledgementIsNotALostAppend(t *testing.T) {
 
 // A heartbeat answer that reports nothing (0, a follower that predates
 // the report) or an index below the oldest append in flight still finds
-// a lost append, as before (R1-11).
+// a lost append (R1-11). The window may as well be still crossing a narrow
+// link (#767): the answer sends an empty append behind it, which the
+// follower that lost the appends refuses, and that refusal probes the peer
+// from its hint, the entries sent once more.
 func TestALostAppendIsStillProbedOnHeartbeats(t *testing.T) {
 	for _, held := range []uint64{0, 1} {
 		l, sent := slowAckLeader(t)
-		heartbeatAnswers(l, 2, held, sent)
+		if empty := answersHolding(l, 2, held, sent); !slices.Contains(empty, 5) {
+			t.Fatalf("report %d: no empty append after 5 behind the window (empty appends after %v)", held, empty)
+		}
+		refusal := msg(core.MsgAppResp, 2, 1, 2)
+		refusal.Index, refusal.Reject, refusal.RejectHint = 5, true, 1
+		l.Step(l.now, refusal)
+		rd := l.Ready()
+		sentTo(&rd, 2, sent)
 		if pr := l.prs[2]; pr.state != stateProbe || pr.next != 2 {
 			t.Fatalf("report %d: peer 2 %+v, want probe from 2", held, *pr)
 		}

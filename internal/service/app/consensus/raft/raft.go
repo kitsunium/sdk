@@ -463,6 +463,16 @@ type Raft struct {
 	// silence condition while the log was not yet durable through it, 0
 	// when none: the silence ends once it is (endSilenceOnceDurable, #684).
 	silenceEndAt uint64
+	// silenceTarget is the commit a silent node must reach under the
+	// leader of its SilentTerm: the highest the appends it accepted from
+	// that leader carried, up to the first that met the rest of the
+	// silence condition, then fixed (silenceTargetFixed). The commit a
+	// later append carries counts the writes made since, which the node
+	// never acknowledged: chasing it kept the node silent under writes
+	// faster than one batch per heartbeat (#636, #766). Kept in memory: a
+	// restart takes it again.
+	silenceTarget      uint64
+	silenceTargetFixed bool
 }
 
 // NewRaft builds the step function over the loaded state.
