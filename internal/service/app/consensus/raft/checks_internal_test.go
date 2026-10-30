@@ -555,11 +555,32 @@ func TestChecksPassUnmutated(t *testing.T) {
 	for name, c := range checks {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			if name == "simulated linearizability" {
+				// Its seeds one after the other took 40 of the 60 s a
+				// Bazel coverage shard has under -race, and timed it out
+				// on the CI runner: the same seeds, in parallel.
+				linearizableSeeds(t)
+				return
+			}
 			if err := c(0); err != nil {
 				t.Errorf("%s: %v", name, err)
 			}
 		})
 	}
+}
+
+// linearizableSeeds runs checkSimLinearizable unmutated, each of its seeds
+// a parallel subtest.
+func linearizableSeeds(t *testing.T) {
+	all := make([]uint64, simLinearizableSeeds)
+	for i := range all {
+		all[i] = uint64(i + 1)
+	}
+	eachSeed(t, all, func(t *testing.T, seed uint64) {
+		if err := linearizableRun(seed, 0); err != nil {
+			t.Errorf("simulated linearizability: %v", err)
+		}
+	})
 }
 
 // TestMutationsAreCaught reintroduces each cited bug and requires the checks

@@ -452,8 +452,13 @@ func linearizableRun(seed uint64, mut mutation) error {
 	return nil
 }
 
+// simLinearizableSeeds is how many seeds, from 1, checkSimLinearizable
+// runs. TestChecksPassUnmutated runs the same seeds, one parallel subtest
+// each.
+const simLinearizableSeeds = 8
+
 func checkSimLinearizable(mut mutation) error {
-	for seed := uint64(1); seed <= 8; seed++ {
+	for seed := uint64(1); seed <= simLinearizableSeeds; seed++ {
 		if err := linearizableRun(seed, mut); err != nil {
 			return err
 		}
