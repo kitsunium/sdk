@@ -245,6 +245,19 @@ jobs:
       # fixed, Unix premises replaced by what Windows actually promises — and
       # the first clean runs. The kernel-sensitive list is a subset of this, so
       # it is not run a second time here. No -short: every suite at full size.
+      #
+      # The consensus package (SPLIT_PKG) has the longest suite of all: 280 s
+      # on macOS, 390 s to 600 s on the Windows runner, against the ten
+      # minutes after which `go test` panics a package's binary, so the
+      # internal shard failed on no defect at all (#768). It runs apart, in
+      # SPLIT_PARTS invocations, each with that whole bound: the tests that
+      # `go test -list` names, dealt round-robin as Bazel's shards deal them,
+      # so each runs in exactly one part and none in two. No test is
+      # shortened or skipped. On Windows its temporary directory is the
+      # runner's temp directory, on D:. On C:, the default, its fsync-heavy
+      # suites ran up to four times slower (TestRecoverFinishesAnInterrupted
+      # Install 29.9 s against 6.4 s), and the whole package took 420 s
+      # against 315 s.
       - name: Unit tests — every package on ${{ matrix.name }}
         if: matrix.name != 'linux'
         # A test that hangs on a kernel it never ran on must not eat the job.
@@ -254,6 +267,8 @@ jobs:
           GOWORK: "off"
           CGO_ENABLED: "0"
           SHARD: ${{ matrix.shard }}
+          SPLIT_PKG: github.com/kitsunium/sdk/internal/service/app/consensus
+          SPLIT_PARTS: "4"
         run: |
           set -uo pipefail
           fail=0
@@ -269,9 +284,35 @@ jobs:
           esac
           for mod in $modules; do
             echo "::group::$mod"
-            (cd "$mod" && go test -count=1 ./...) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
+            if [ "$mod" = internal ]; then
+              # Every package of the module but SPLIT_PKG, which runs below.
+              pkgs="$(cd "$mod" && go list ./...)" || { echo "::error::go list failed in $mod"; exit 1; }
+              # One import path per word, none with a space or a glob.
+              # shellcheck disable=SC2046
+              (cd "$mod" && go test -count=1 $(printf '%s\n' "$pkgs" | grep -vx "$SPLIT_PKG")) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
+            else
+              (cd "$mod" && go test -count=1 ./...) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
+            fi
             echo "::endgroup::"
           done
+          if [ "$SHARD" = internal ]; then
+            # A package that lists no test, or does not build, fails here:
+            # a split never runs nothing in silence.
+            names="$(cd internal && go test -list '.*' "$SPLIT_PKG" | grep -E '^(Test|Example|Fuzz)')" || { echo "::error::$SPLIT_PKG lists no test on ${{ matrix.name }}"; exit 1; }
+            if [ "$RUNNER_OS" = Windows ]; then
+              tmp="$(cygpath -u "$RUNNER_TEMP")/go-test-tmp"
+              mkdir -p "$tmp"
+              TMP="$(cygpath -w "$tmp")"
+              export TMP TEMP="$TMP"
+            fi
+            for ((part = 0; part < SPLIT_PARTS; part++)); do
+              re="$(printf '%s\n' "$names" | awk -v n="$SPLIT_PARTS" -v p="$part" '(NR - 1) % n == p' | paste -sd'|' -)"
+              [ -n "$re" ] || continue
+              echo "::group::$SPLIT_PKG, part $((part + 1)) of $SPLIT_PARTS"
+              (cd internal && go test -count=1 -run "^(${re})\$" "$SPLIT_PKG") || { fail=1; echo "::error::$SPLIT_PKG, part $((part + 1)) of $SPLIT_PARTS, has failing tests on ${{ matrix.name }}"; }
+              echo "::endgroup::"
+            done
+          fi
           exit $fail
 
       - name: E2E conformance — whole public API on ${{ matrix.name }}
