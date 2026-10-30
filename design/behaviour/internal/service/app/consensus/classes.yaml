@@ -1025,6 +1025,7 @@ files:
       - newerMeta
       - newestSpool
       - (*fileSnapshots).sweepSpools
+      - (*fileSnapshots).removeSpools
       - (*fileSnapshots).orphanSpools
       - validID
       - fileSink
@@ -1041,15 +1042,19 @@ files:
       - (*fileSink).closed
       - (*fileSink).Write
       - (*fileSink).Commit
+      - (*fileSnapshots).rename
+      - (*fileSnapshots).writeMeta
       - (*fileSnapshots).published
       - (*fileSink).release
       - (*fileSink).Abort
       - (*fileSnapshots).List
+      - (*fileSnapshots).listed
       - fileHandle
       - (*fileHandle).Meta
       - (*fileHandle).Close
       - (*fileSnapshots).Open
       - (*fileSnapshots).Remove
+      - (*fileSnapshots).removeFiles
     name: filesnap.go
   - decls:
       - fsFree
@@ -5151,11 +5156,20 @@ types:
           offer resumes; once another id is accepted, or the directory reopened, no
           offer of the old id is awaited any more, and its spool — up to one whole
           snapshot — stayed on the data disk for good, one more at every such cut
-          (#527).
+          (#527). The spools go under s.mu, and the directory is synced once it is
+          released: a listing, which the loop makes, never waits for a sync
+          (rename).
         name: sweepSpools
         params: keep string
         recv: s *fileSnapshots
         results: error
+      - doc: |-
+          removeSpools removes, under s.mu, the spools among ents that are neither
+          keep's nor written to by a sink, and reports whether there was any.
+        name: removeSpools
+        params: ents []os.DirEntry, keep string
+        recv: s *fileSnapshots
+        results: bool, error
       - doc: |-
           orphanSpools is the names of the spools among ents that are neither
           keep's nor written to by a sink. The caller holds s.mu.
@@ -5202,6 +5216,29 @@ types:
         params: id string
         recv: s *fileSnapshots
       - doc: |-
+          rename renames the directory's entry from over to, under s.mu. A
+          listing, an Open and a Remove of the store hold s.mu over every file of
+          the directory they touch, so a publication never renames over a .meta
+          or a .snap another goroutine of the node holds open. Windows refuses
+          that rename (Access is denied), and fails the open of a file being
+          renamed over or removed (a sharing violation): a cut that published over
+          a rotted .meta (#759), or retention removing a snapshot while the loop
+          listed the store to send one, stopped the node STORAGE_FAILED there
+          (#768). POSIX lets both through, and the lock costs a rename's length.
+        name: rename
+        params: from, to string
+        recv: s *fileSnapshots
+        results: error
+      - doc: |-
+          writeMeta publishes data as id's .meta as writeFileSync does — written
+          and synced to <id>.meta.tmp, renamed over <id>.meta, the directory synced
+          — with only the rename under s.mu (rename): a listing never waits for a
+          sync.
+        name: writeMeta
+        params: id string, data []byte
+        recv: s *fileSnapshots
+        results: error
+      - doc: |-
           published reads the snapshot a directory entry named name publishes. ok
           is false for anything that is not a complete snapshot: another file, a
           .meta that does not parse, names another id or a position its id does
@@ -5219,7 +5256,17 @@ types:
         name: List
         recv: s *fileSnapshots
         results: "[]coreconsensus.SnapshotMetaValue, error"
-      - doc: "Open implements SnapshotStore: pinned until Close."
+      - doc: |-
+          listed reads the complete snapshots of the directory, in its order,
+          under s.mu: no publication renames over, and no Remove deletes, a .meta
+          it reads or a .snap it stats (rename).
+        name: listed
+        recv: s *fileSnapshots
+        results: "[]coreconsensus.SnapshotMetaValue, error"
+      - doc: |-
+          Open implements SnapshotStore: pinned until Close. The .meta is read, the
+          .snap opened and the pin taken under s.mu, at once: a Remove comes
+          before them or is refused (rename).
         name: Open
         params: id string
         recv: s *fileSnapshots
@@ -5227,7 +5274,16 @@ types:
       - doc: |-
           Remove implements SnapshotStore: refused while a handle is open. The meta
           goes first, so a crash leaves no published snapshot without its bytes.
+          The files go under s.mu (rename); the directory is synced once it is
+          released, so a listing never waits for a sync.
         name: Remove
+        params: id string
+        recv: s *fileSnapshots
+        results: error
+      - doc: |-
+          removeFiles removes id's .meta, then its .snap, under s.mu, unless a
+          handle pins it.
+        name: removeFiles
         params: id string
         recv: s *fileSnapshots
         results: error
@@ -5352,8 +5408,10 @@ types:
         recv: h *fileHandle
         results: coreconsensus.SnapshotMetaValue
       - doc: |-
-          Close unpins the snapshot and closes its file exactly once; a second
-          Close returns nil and releases nothing.
+          Close closes the snapshot's file and unpins it, exactly once; a second
+          Close returns nil and releases nothing. The file is closed before the
+          pin drops, under s.mu: a Remove the unpin lets through never deletes a
+          .snap this handle still holds open, which Windows refuses (rename).
         name: Close
         recv: h *fileHandle
         results: error

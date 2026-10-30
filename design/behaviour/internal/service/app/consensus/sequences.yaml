@@ -5349,7 +5349,7 @@ sequences:
         kind: stdlib
       - id: storageFailed
         kind: internal
-      - id: s.orphanSpools
+      - id: s.removeSpools
         kind: internal
       - id: syncDir
         kind: internal
@@ -5362,30 +5362,13 @@ sequences:
             - return: storageFailed("list snapshots", err)
               to: storageFailed
           when: err != nil
-      - lock:
-          mutex: s.mu
-      - bind: orphans
-        eval: s.orphanSpools(ents, keep)
-        to: s.orphanSpools
-      - loop:
-          do:
-            - opt:
-                do:
-                  - return: storageFailed("remove orphan spool", err)
-                    to: storageFailed
-                init:
-                  bind: err
-                  eval: os.Remove(filepath.Join(s.dir, name))
-                  to: os
-                when: err != nil && !errors.Is(err, os.ErrNotExist)
-            - eval: delete(s.resume, strings.TrimSuffix(name, ".spool"))
-          key: _
-          range: orphans
-          value: name
+      - bind: swept, err
+        eval: s.removeSpools(ents, keep)
+        to: s.removeSpools
       - opt:
           do:
-            - return: nil
-          when: len(orphans) == 0
+            - return: err
+          when: err != nil || !swept
       - opt:
           do:
             - return: storageFailed("remove orphan spool", err)
@@ -5396,6 +5379,37 @@ sequences:
             to: syncDir
           when: err != nil
       - return: nil
+  - of: (*fileSnapshots).removeSpools
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSnapshots).removeSpools
+        kind: self
+      - id: s.orphanSpools
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: s.mu
+      - bind: orphans
+        eval: s.orphanSpools(ents, keep)
+        to: s.orphanSpools
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: true, storageFailed("remove orphan spool", err)
+                init:
+                  bind: err
+                  eval: os.Remove(filepath.Join(s.dir, name))
+                  to: os
+                when: err != nil && !errors.Is(err, os.ErrNotExist)
+            - eval: delete(s.resume, strings.TrimSuffix(name, ".spool"))
+          key: _
+          range: orphans
+          value: name
+      - return: len(orphans) > 0, nil
   - of: (*fileSnapshots).orphanSpools
     participants:
       - id: caller
@@ -5756,9 +5770,9 @@ sequences:
         kind: internal
       - id: k.s.forget
         kind: internal
-      - id: os
-        kind: stdlib
-      - id: writeFileSync
+      - id: k.s.rename
+        kind: internal
+      - id: k.s.writeMeta
         kind: internal
     steps:
       - defer: k.closed()
@@ -5816,8 +5830,8 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: os.Rename(filepath.Join(k.s.dir, k.id+".spool"), filepath.Join(k.s.dir, k.id+".snap"))
-            to: os
+            eval: k.s.rename(k.id+".spool", k.id+".snap")
+            to: k.s.rename
           when: err != nil
       - opt:
           do:
@@ -5825,10 +5839,54 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: writeFileSync(filepath.Join(k.s.dir, k.id+".meta"), wire.AppendSnapshotMeta(nil, &final))
-            to: writeFileSync
+            eval: k.s.writeMeta(k.id, wire.AppendSnapshotMeta(nil, &final))
+            to: k.s.writeMeta
           when: err != nil
       - return: nil
+  - of: (*fileSnapshots).rename
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSnapshots).rename
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: s.mu
+      - return: os.Rename(filepath.Join(s.dir, from), filepath.Join(s.dir, to))
+        to: os
+  - of: (*fileSnapshots).writeMeta
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSnapshots).writeMeta
+        kind: self
+      - id: writeSynced
+        kind: internal
+      - id: s.rename
+        kind: internal
+      - id: syncDir
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: writeSynced(filepath.Join(s.dir, id+".meta.tmp"), data)
+            to: writeSynced
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.rename(id+".meta.tmp", id+".meta")
+            to: s.rename
+          when: err != nil
+      - return: syncDir(s.dir)
+        to: syncDir
   - of: (*fileSnapshots).published
     participants:
       - id: caller
@@ -5975,13 +6033,43 @@ sequences:
         kind: actor
       - id: (*fileSnapshots).List
         kind: self
-      - id: os
-        kind: stdlib
-      - id: s.published
+      - id: s.listed
         kind: internal
       - id: slices
         kind: stdlib
     steps:
+      - bind: out, err
+        eval: s.listed()
+        to: s.listed
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - eval: |-
+          slices.SortFunc(out, func(a, b coreconsensus.SnapshotMetaValue) int {
+          		switch {
+          		case a.Position.Index > b.Position.Index:
+          			return -1
+          		case a.Position.Index < b.Position.Index:
+          			return 1
+          		}
+          		return strings.Compare(b.ID, a.ID)
+          	})
+        to: slices
+      - return: out, nil
+  - of: (*fileSnapshots).listed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSnapshots).listed
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: s.published
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
       - bind: ents, err
         eval: os.ReadDir(s.dir)
         to: os
@@ -6009,17 +6097,6 @@ sequences:
           key: _
           range: ents
           value: e
-      - eval: |-
-          slices.SortFunc(out, func(a, b coreconsensus.SnapshotMetaValue) int {
-          		switch {
-          		case a.Position.Index > b.Position.Index:
-          			return -1
-          		case a.Position.Index < b.Position.Index:
-          			return 1
-          		}
-          		return strings.Compare(b.ID, a.ID)
-          	})
-        to: slices
       - return: out, nil
   - of: (*fileHandle).Meta
     steps:
@@ -6039,11 +6116,11 @@ sequences:
       - eval: |-
           h.once.Do(func() {
           		h.s.mu.Lock()
-          		h.s.pins[h.meta.ID]--
-          		h.s.mu.Unlock()
+          		defer h.s.mu.Unlock()
           		if cerr := h.File.Close(); cerr != nil {
           			err = storageFailed("close snapshot", cerr)
           		}
+          		h.s.pins[h.meta.ID]--
           	})
         to: h.once.Do
       - return: err
@@ -6057,15 +6134,13 @@ sequences:
         kind: stdlib
       - id: wire
         kind: package
-      - id: s.mu.Lock
-        kind: value
-      - id: s.mu.Unlock
-        kind: value
     steps:
       - opt:
           do:
             - return: nil, origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
           when: "!validID(id)"
+      - lock:
+          mutex: s.mu
       - bind: b, err
         eval: os.ReadFile(filepath.Join(s.dir, id+".meta"))
         to: os
@@ -6095,12 +6170,8 @@ sequences:
           when: err != nil
       - set: h.File
         value: f
-      - eval: s.mu.Lock()
-        to: s.mu.Lock
       - op: ++
         set: s.pins[id]
-      - eval: s.mu.Unlock()
-        to: s.mu.Unlock
       - return: h, nil
   - of: (*fileSnapshots).Remove
     participants:
@@ -6110,13 +6181,11 @@ sequences:
         kind: self
       - id: origin
         kind: internal
-      - id: pinnedSnapshot
-        kind: internal
-      - id: os
-        kind: stdlib
-      - id: storageFailed
+      - id: s.removeFiles
         kind: internal
       - id: syncDir
+        kind: internal
+      - id: storageFailed
         kind: internal
     steps:
       - opt:
@@ -6124,6 +6193,37 @@ sequences:
             - return: origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
               to: origin
           when: "!validID(id)"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.removeFiles(id)
+            to: s.removeFiles
+          when: err != nil
+      - opt:
+          do:
+            - return: storageFailed("remove", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: syncDir(s.dir)
+            to: syncDir
+          when: err != nil
+      - return: nil
+  - of: (*fileSnapshots).removeFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSnapshots).removeFiles
+        kind: self
+      - id: pinnedSnapshot
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: storageFailed
+        kind: internal
+    steps:
       - lock:
           mutex: s.mu
       - opt:
@@ -6145,15 +6245,6 @@ sequences:
           key: _
           range: "[]string{\".meta\", \".snap\"}"
           value: ext
-      - opt:
-          do:
-            - return: storageFailed("remove", err)
-              to: storageFailed
-          init:
-            bind: err
-            eval: syncDir(s.dir)
-            to: syncDir
-          when: err != nil
       - return: nil
   - of: fsFree
     participants:

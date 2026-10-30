@@ -6012,6 +6012,56 @@ bounded pipeline ([#767](https://github.com/kitsunium/sdk/issues/767)).
   is 604 entries behind after 8 s and 4 737 of the 5 407 KiB the lane
   carried were copies; fixed, it is caught up and nothing was sent twice).
 
+## Amendment — the snapshot store's file operations are exclusive (2026-10-30, #768)
+
+D4 states each platform's guarantees for the directory. One was missing.
+Windows refuses a rename over, or a removal of, a file that another handle
+holds open, and fails the open of a file being renamed over or removed. The
+node lists and opens its store on the loop (`snapshotToSend`, `judgeOffer`)
+while a cut publishes on another goroutine, and retention removes there
+too. Whichever side lost failed `STORAGE_FAILED`. A failed listing is
+benign, but a refused publication or removal stopped the node.
+
+On the Windows runner, a thousand publications of one id were made beside a
+listing. 154 of them were refused (`rename …: Access is denied`), and 355
+listings failed (`open …: The process cannot access the file because it is
+being used by another process`). Publications and removals beside a listing
+had removals refused the same way. With no listing, or with the two sides
+serialised, nothing failed. The test of #759 met it at every run: it listed
+the store each millisecond while the restarted node published over a
+rotted `.meta`
+([#768](https://github.com/kitsunium/sdk/issues/768)).
+
+- **One lock over the files.** The following hold `fileSnapshots.mu` over
+  the files they touch:
+  - a listing, from its `ReadDir` to its last `.meta` read and `.snap` stat;
+  - an `Open`, which reads the `.meta`, opens the `.snap` and takes the pin
+    as one step;
+  - a publication's two renames, the spool over the `.snap` and the
+    `.meta.tmp` over the `.meta`;
+  - a removal's two unlinks.
+
+  A handle closes its file before its pin drops. Before, a removal let
+  through by the unpin could meet the handle still open. An `Open` now comes
+  wholly before a removal, or the removal is refused.
+- **No sync under it.** The loop lists through this lock, so a sync never
+  holds it. The `.meta.tmp` is written and synced before the rename, and the
+  directory is synced after it, as before. A removal, and `Create`'s sweep
+  of the orphan spools, sync the directory once the lock is released.
+- **What it does not cover.** A rename over a `.snap` that a transfer holds
+  open is still refused on Windows. No cut targets a published id
+  (`publishedAt`, #611). An id whose `.meta` rotted is never listed, so it is
+  never opened either. No process outside the node writes the directory:
+  the data directory's lock keeps them out.
+- **Unchanged.** POSIX lets every interleaving through, and the lock costs
+  a rename's length there. No format changes, nothing new is persisted, and
+  there is no raft mutation.
+- **Tests.** `TestAListingNeverMeetsAPublicationOrARemovalOfTheSameStore`
+  holds it:
+  - each operation waits for the store's lock, on every kernel;
+  - then a republication, fresh publications and removals run beside
+    listings and reads, with no side failing `STORAGE_FAILED`.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6050,6 +6100,7 @@ bounded pipeline ([#767](https://github.com/kitsunium/sdk/issues/767)).
 | #758 | Raft hunt loop, 2026-10-29 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when the configuration it would keep has no other member that the newest configuration still readable in the dropped part lists under the same key; the reason names `WipeAndRejoin`, the promotion `MinVoters` may ask for and the removal of the old ID; a refusal at best; no format change, no raft mutation (amendment of 2026-10-29, #758) |
 | #766 | Raft hunt loop, 2026-10-30 | under the leader of its own `SilentTerm`, the commit a silent node must hold is fixed once the rest of the silence condition holds, the highest its accepted appends carried up to then, no longer the commit each append carries, which writes faster than one batch per heartbeat kept out of reach; #636's residual starts at that append; no format change, nothing persisted, no raft mutation (amendment of 2026-10-30, #766) |
 | #767 | Raft hunt loop, 2026-10-30 | a heartbeat answer that reports less than the oldest append in flight, and a probing peer's answer, send an empty append behind what is in flight instead of the window or the probe again, whose refusal finds a lost append and whose acknowledgement at the match ends the probe; no format change, no raft mutation (amendment of 2026-10-30, #767) |
+| #768 | Raft hunt loop, 2026-10-30 | the snapshot store holds its lock over the files a listing, an `Open`, a publication's renames and a removal touch, and a handle closes its file before its pin drops, so Windows never refuses a cut's publication or retention's removal beside the loop's listing; no sync under the lock; no format change, no raft mutation (amendment of 2026-10-30, #768) |
 
 ## raft-sql-poc (owner's prior Raft)
 
