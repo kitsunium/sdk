@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -213,9 +214,22 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 
 func (c *cluster) start(tn *testNode) {
 	tn.sm = newKV()
-	n, err := NewNode(c.config(tn))
+	cfg := c.config(tn)
+	n, err := NewNode(cfg)
 	if err != nil {
-		c.t.Fatalf("NewNode %d: %v", tn.id, err)
+		var dump []string
+		if fs, ok := cfg.Snapshots.(*fileSnapshots); ok {
+			ents, _ := os.ReadDir(fs.dir)
+			for _, e := range ents {
+				info, _ := e.Info()
+				if info != nil {
+					dump = append(dump, fmt.Sprintf("%s(%d)", e.Name(), info.Size()))
+				}
+			}
+			metas, lerr := fs.List()
+			dump = append(dump, fmt.Sprintf("list=%v err=%v", metas, lerr))
+		}
+		c.t.Fatalf("NewNode %d: %v %v dir=%v", tn.id, err, errs.FieldsOf(err), dump)
 	}
 	tn.node = n
 }
