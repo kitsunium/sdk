@@ -466,6 +466,9 @@ files:
       - (*Raft).maybeCommit
       - (*Raft).stepLeader
       - (*Raft).handleHeartbeatResp
+      - (*Raft).watchWindow
+      - (*Raft).refeed
+      - (*Raft).probeBehind
       - (*Raft).followSilentReport
       - (*Raft).probeIfLost
       - (*Raft).ackRounds
@@ -750,6 +753,7 @@ files:
       - (*Raft).chainRefused
       - (*Raft).refuses
       - (*Raft).maybeEndSilence
+      - (*Raft).rewrittenPastSilence
       - (*Raft).endSilenceOnceDurable
     name: step.go
 functions:
@@ -1692,6 +1696,19 @@ types:
           when none: the silence ends once it is (endSilenceOnceDurable, #684).
         name: silenceEndAt
         type: uint64
+      - doc: |-
+          silenceTarget is the commit a silent node must reach under the
+          leader of its SilentTerm: the highest the appends it accepted from
+          that leader carried, up to the first that met the rest of the
+          silence condition, then fixed (silenceTargetFixed). The commit a
+          later append carries counts the writes made since, which the node
+          never acknowledged: chasing it kept the node silent under writes
+          faster than one batch per heartbeat (#636, #766). Kept in memory: a
+          restart takes it again.
+        name: silenceTarget
+        type: uint64
+      - name: silenceTargetFixed
+        type: bool
     kind: struct
     methods:
       - name: Debug
@@ -1790,9 +1807,43 @@ types:
           next write, and in a quiet cluster the learner was never fed, so its
           promotion, which waits for it to hold its admission, was refused for as
           long as nothing was written (#722).
+
+          A probe still in flight is probed behind, never sent again: an answer
+          on the control lane overtakes it on a link narrower than one batch per
+          heartbeat interval, and the copy queued behind it at every answer took
+          the link from what the peer lacked (#767). A silent peer answers no
+          append, so its report alone tells whether the probe reached it, and it
+          is sent the batch at its next as before.
         name: handleHeartbeatResp
         params: pr *progress, m core.MessageValue
         recv: r *Raft
+      - doc: |-
+          watchWindow probes a replicating peer whose window did not move since its
+          previous heartbeat answer (probeIfLost), held the index this answer
+          reports, and records the match the next answer is judged against.
+        name: watchWindow
+        params: pr *progress, to core.NodeID, held uint64
+        recv: r *Raft
+      - doc: |-
+          refeed feeds a peer behind the log on its heartbeat answer: behind the
+          probe still in flight to it when probing, the answer having brought no
+          news of it, and what it lacks otherwise.
+        name: refeed
+        params: pr *progress, to core.NodeID, probing bool
+        recv: r *Raft
+      - doc: |-
+          probeBehind sends the peer an empty append after next-1, at the end of
+          what is in flight to it, and reports whether it could. Appends travel on
+          the data lane, in order, so it reaches the peer only once everything sent
+          before it has: accepted, its acknowledgement covers what was in flight;
+          refused, an append before it was lost, and the refusal backs the peer
+          off from its hint (handleAppReject), as a probe did at once before (R1-11,
+          #767). It carries no entry, so a link narrower than one batch per
+          heartbeat interval carries it at almost no cost.
+        name: probeBehind
+        params: pr *progress, to core.NodeID
+        recv: r *Raft
+        results: bool
       - doc: |-
           followSilentReport takes the heartbeat answer of a peer that truncated
           acknowledged entries and stays silent (#636). Its match is lowered to the
@@ -1808,15 +1859,24 @@ types:
         recv: r *Raft
       - doc: |-
           probeIfLost probes a peer whose window did not move across two heartbeat
-          answers: an append in it was lost, the transport may drop, and a window
-          that never refills must not stall (R1-11). A follower that reports
-          holding the oldest append in flight may only acknowledge it late, after
-          its fdatasync: probing it resent, then refilled, a window it held (#560).
-          It has ElectionTimeoutMax for it. Past that, its acknowledgement was lost
-          too, by a dropped frame or a restart after the write, and the window,
-          full, never moved again. held 0 is a follower that reports nothing.
+          answers: an append in it may be lost, the transport may drop, and a
+          window that never refills must not stall (R1-11). A follower that
+          reports holding the oldest append in flight may only acknowledge it
+          late, after its fdatasync: probing it resent, then refilled, a window it
+          held (#560). It has ElectionTimeoutMax for it. Past that, its
+          acknowledgement was lost too, by a dropped frame or a restart after the
+          write, and the window, full, never moved again. held 0 is a follower
+          that reports nothing.
+
+          A follower that reports holding less may still be receiving the window:
+          its answer crossed the control lane while a batch longer than a heartbeat
+          interval to send was crossing the data lane. Moved to probe, it was sent
+          the window again from match+1 behind what the lane still carried, at
+          every answer, and on a link narrower than one batch per heartbeat
+          interval it never caught up (#767). It is probed behind the window
+          instead, whose refusal finds a lost append.
         name: probeIfLost
-        params: pr *progress, held uint64
+        params: pr *progress, to core.NodeID, held uint64
         recv: r *Raft
       - doc: |-
           ackRounds records from's answer to every round up to round, with the
@@ -3264,7 +3324,8 @@ types:
           accepted, once a leader of a term at least the node's own has rewritten
           its log past the truncation point and committed an entry of its current
           term (R3-09), and, when that term is the node's own SilentTerm, once the
-          node holds that leader's commit (#636).
+          node holds the commit that leader's appends carried when the rest of the
+          condition first held (#636, #766).
 
           A leader of a later term was elected without this node, which granted no
           vote while silent and named no later term before the damage: every entry
@@ -3276,15 +3337,40 @@ types:
           truncation point prove nothing: one batch committed an entry of its term
           while entries the node had acknowledged, and that leader had committed,
           were still missing, the node voted again without them, and one more
-          failure of that leader elected a log that lacked them. Holding m.Commit,
-          the node holds everything that leader had committed when it sent m, and
-          the election restriction then refuses any candidate that lacks it.
+          failure of that leader elected a log that lacked them. Holding the
+          commit an accepted append carried, the node holds everything that leader
+          had committed when it sent it, and the election restriction then refuses
+          any candidate that lacks it.
+
+          That commit is fixed once the rest of the condition holds (silenceTarget):
+          the highest any accepted append of that leader carried up to then. The
+          leader sent each of them past its match for this node, after an index the
+          node held. Either it had lowered that match on one of the node's reports,
+          and, probing, it sent its whole commit, which holds whatever it had
+          committed counting the node's acknowledgements; or it had not, and that
+          match, which only an acknowledgement raises, counted the node for no
+          entry it lacks. It counts none of them after: a silent node acknowledges
+          nothing, and its reports never raise a match, but for an acknowledgement
+          sent before the damage that reaches the leader late (ADR 0152's
+          residual). The commit a later append carries also counts the writes made
+          since, which the node never acknowledged: chasing it, the node gained one
+          batch per heartbeat answer while the leader committed more, and stayed
+          silent for as long as that leader led under writes faster than that
+          (#766).
 
           The condition is met on the log in memory; the silence ends once that
           log is durable through the commit that met it (endSilenceOnceDurable).
         name: maybeEndSilence
         params: m core.MessageValue
         recv: r *Raft
+      - doc: |-
+          rewrittenPastSilence reports R3-09's part of the silence condition: the
+          log reaches past the truncation point, and its commit, past it too, is an
+          entry of term, the term of the leader whose append the node accepted.
+        name: rewrittenPastSilence
+        params: term uint64
+        recv: r *Raft
+        results: bool
       - doc: |-
           endSilenceOnceDurable ends the silence whose condition an accepted append
           met at the commit silenceEndAt, once the log is durable through that

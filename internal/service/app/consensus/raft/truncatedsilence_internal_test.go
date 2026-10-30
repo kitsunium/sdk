@@ -255,6 +255,87 @@ func TestTheSilenceEndsOnceTheSameTermLeadersCommitIsHeld(t *testing.T) {
 	}
 }
 
+// #766: under the leader of its SilentTerm, a silent node gains one batch
+// per heartbeat answer: it acknowledges no append, and the leader resumes
+// its probe past the commit the answer reports (#636). A silence that ended
+// only on an append carrying the node to the commit that same append
+// carried chased a target every write moved: under writes faster than one
+// batch per heartbeat, the node stayed silent for as long as that leader
+// led, and the cluster ran one voter short. C is reachable again and
+// commits with A four writes a heartbeat, twice what one batch carries; B
+// must end its silence under A, holding every entry A committed with its
+// acknowledgements.
+func TestTheSilenceEndsUnderTheSameTermLeadersSustainedWrites(t *testing.T) {
+	h := silencedUnderItsLeader(t)
+	a, b := h.nodes[1], h.nodes[2]
+	acked := a.log.committed
+	h.drop = nil
+	w, beats := 12, 0
+	for ; beats < 20 && b.cfg.SilentIndex != 0; beats++ {
+		for range 4 {
+			if _, code := a.Propose(h.now, []core.EntryValue{silenceCmd(w)}); code != 0 {
+				t.Fatalf("propose %d: %v", w, code)
+			}
+			w++
+		}
+		h.tick(100 * time.Millisecond)
+	}
+	if a.role != core.RoleLeader || a.term != 2 {
+		t.Fatalf("A no longer leads term 2 (role %v term %d)", a.role, a.term)
+	}
+	if b.cfg.SilentIndex != 0 {
+		t.Fatalf("B stayed silent through %d heartbeats of writes under the leader of its SilentTerm: B last %d commit %d, A commit %d",
+			beats, b.log.lastIndex(), b.log.committed, a.log.committed)
+	}
+	if b.log.committed < acked {
+		t.Fatalf("B ended its silence at commit %d, without the entries through %d it acknowledged before the damage", b.log.committed, acked)
+	}
+	t.Logf("B ended its silence after %d heartbeats at commit %d, A at %d", beats, b.log.committed, a.log.committed)
+}
+
+// #766: the commit a silent node must reach under the leader of its
+// SilentTerm is the highest the appends it accepted from that leader
+// carried, up to the first that met the rest of the condition, then fixed.
+// Moved by every later append, it chased the leader's commit (#766); taken
+// from a refused append, fixed by an append that left the node short of the
+// truncation point, or lowered by an older append delivered late, it would
+// end the silence below what that leader had committed with the node's
+// acknowledgements (#636).
+func TestTheSilenceTargetIsFixedOnceTheRestOfTheConditionHolds(t *testing.T) {
+	ents := chainEntries(0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2)
+	var r *Raft
+	step := func(what string, prev uint64, es []core.EntryValue, commit uint64) {
+		t.Helper()
+		m := msg(core.MsgApp, 1, 2, 2)
+		m.Index, m.LogTerm, m.Entries, m.Commit = prev, ents[prev-1].Position.Term, es, commit
+		r.Step(t0.Add(time.Second), m)
+		if err := stillSilent(r); err != nil {
+			t.Fatalf("%v on %s, at commit %d (last %d)", err, what, r.log.committed, r.log.lastIndex())
+		}
+	}
+	r = silentAt(0, 6, core.PositionValue{}, ents[:5], 3)
+	step("a refused append at the leader's old next, carrying commit 4", 8, ents[8:], 4)
+	step("an accepted append short of the truncation point, carrying commit 4", 4, ents[4:5], 4)
+	step("the append past it, 6..7 at the leader's commit 9", 5, ents[5:7], 9)
+	step("8, short of the commit 9 the condition was fixed at", 7, ents[7:8], 12)
+	m := msg(core.MsgApp, 1, 2, 2)
+	m.Index, m.LogTerm, m.Entries, m.Commit = 8, 2, ents[8:9], 12
+	r.Step(t0.Add(time.Second), m)
+	rd := r.Ready()
+	if rd.SilenceEnded || r.cfg.SilentIndex == 0 {
+		t.Fatal("the silence ended before 9, which reaches the fixed commit, was durable")
+	}
+	r.StorageDone(rd.Seq, 9, 2)
+	if rd = r.Ready(); !rd.SilenceEnded || r.cfg.SilentIndex != 0 || !granted(rd, core.MsgAppResp) {
+		t.Fatalf("the silence held at commit %d, which reaches 9, the commit fixed when the rest of the condition held, while the leader is at 12 (ended %v)",
+			r.log.committed, rd.SilenceEnded)
+	}
+
+	r = silentAt(0, 6, core.PositionValue{}, ents[:5], 3)
+	step("the first append past the truncation point, 6 at the leader's commit 9", 5, ents[5:6], 9)
+	step("an older append delivered late, 6..7 at the leader's commit 7", 5, ents[5:7], 7)
+}
+
 // #636, over a snapshot: the damage is in the entries the log trails behind
 // its newest snapshot (SnapshotTrailing), the truncation drops every entry
 // past it, the start restores the snapshot at 20 and moves the log onto it,
