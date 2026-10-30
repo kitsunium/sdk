@@ -126,6 +126,15 @@ func TestASnapshotMetaOfVersion2IsRestored(t *testing.T) {
 	}
 }
 
+// lastCut is the index of the last snapshot tn cut or started from, read
+// under the lock its cuts write it under.
+func lastCut(tn *testNode) uint64 {
+	ss := &tn.node.snapState
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.last
+}
+
 // listedAs reports whether metas list m's id with m's chain tip: m as it
 // was written, or a cut of the same index and term from the same log.
 func listedAs(metas []coreconsensus.SnapshotMetaValue, m *coreconsensus.SnapshotMetaValue) bool {
@@ -200,7 +209,14 @@ func TestTheRestartedNodeCutsItsRottedNewestAgainFromItsOwnLog(t *testing.T) {
 	}
 	_, lastBefore := tn.log.Bounds()
 	c.start(tn)
-	waitFor(t, "the cut of the restarted node under the rotted id", func() bool { return listedAs(must(snaps.List())(t), &newest) })
+	// The cut is waited for on the node, never by listing the store while
+	// it writes: that cut renames its files over the rotted ones, and
+	// Windows refuses the rename while a listing holds the .meta open, or
+	// fails the listing that opens it mid-rename. Listed every millisecond,
+	// the store had the node stop STORAGE_FAILED or the listing fail at
+	// every run there (#768). It is read once the cut and its retention
+	// are done.
+	waitFor(t, "the cut of the restarted node under the rotted id", func() bool { return lastCut(tn) >= newest.Position.Index })
 	cutsSettled(t, tn)
 	if !listedAs(must(snaps.List())(t), &newest) {
 		t.Fatalf("listed %v: want %s with the chain tip %d", must(snaps.List())(t), newest.ID, newest.ChainTip)
