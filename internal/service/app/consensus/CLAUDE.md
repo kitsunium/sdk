@@ -1068,6 +1068,17 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 - Cut again at an index whose snapshot is published: the commit renamed
   over a file a copy may hold open, which Windows refuses (#611,
   `publishedAt`, `TestASecondSaveOfAnIdleNodeDoesNotRecommitThePublishedSnapshot`).
+- Read, rename or remove a file of the snapshot directory outside the
+  store's lock: a listing, an `Open`, a publication's renames and a removal
+  each hold `fileSnapshots.mu` over the files they touch, and a handle
+  closes its file before its pin drops. Windows refuses a rename over, or a
+  removal of, a file another handle holds open, and fails the open of one
+  being renamed over or removed: the loop's listing beside a cut's
+  publication or retention's removal stopped the node `STORAGE_FAILED`
+  (#768, `rename`, `listed`,
+  `TestAListingNeverMeetsAPublicationOrARemovalOfTheSameStore`). Nor sync
+  under that lock: the loop lists through it (`writeMeta`, `Remove`,
+  `sweepSpools`).
 - Let `SaveSnapshot`'s copy write to `w` once the caller left (#612,
   `ctxReader`, `TestSaveSnapshotStopsWritingOnceTheCallerLeft`).
 - Remove an answering member that may be the last voter a silent voter

@@ -60,9 +60,14 @@ func Test_Server_handoverPackets(t *testing.T) {
 				close(bound.done)
 			}()
 		}
+		//: the clock starts before the budget's deadline is set, so the wait
+		//: is never measured shorter than the budget it ran out: started
+		//: after it, the time between the two readings went missing, and a
+		//: runner that let 0.3 ms pass there measured 49.7 ms for a budget of
+		//: 50 ms (#768).
+		start := time.Now()
 		ctx, cancel := context.WithTimeout(t.Context(), c.budget)
 		defer cancel()
-		start := time.Now()
 
 		srv.handoverPackets(ctx)
 

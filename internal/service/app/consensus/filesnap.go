@@ -157,28 +157,37 @@ func newestSpool(ents []os.DirEntry) string {
 // offer resumes; once another id is accepted, or the directory reopened, no
 // offer of the old id is awaited any more, and its spool — up to one whole
 // snapshot — stayed on the data disk for good, one more at every such cut
-// (#527).
+// (#527). The spools go under s.mu, and the directory is synced once it is
+// released: a listing, which the loop makes, never waits for a sync
+// (rename).
 func (s *fileSnapshots) sweepSpools(keep string) error {
 	ents, err := os.ReadDir(s.dir)
 	if err != nil {
 		return storageFailed("list snapshots", err)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	orphans := s.orphanSpools(ents, keep)
-	for _, name := range orphans {
-		if err := os.Remove(filepath.Join(s.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return storageFailed("remove orphan spool", err)
-		}
-		delete(s.resume, strings.TrimSuffix(name, ".spool"))
-	}
-	if len(orphans) == 0 {
-		return nil
+	swept, err := s.removeSpools(ents, keep)
+	if err != nil || !swept {
+		return err
 	}
 	if err := syncDir(s.dir); err != nil {
 		return storageFailed("remove orphan spool", err)
 	}
 	return nil
+}
+
+// removeSpools removes, under s.mu, the spools among ents that are neither
+// keep's nor written to by a sink, and reports whether there was any.
+func (s *fileSnapshots) removeSpools(ents []os.DirEntry, keep string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	orphans := s.orphanSpools(ents, keep)
+	for _, name := range orphans {
+		if err := os.Remove(filepath.Join(s.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return true, storageFailed("remove orphan spool", err)
+		}
+		delete(s.resume, strings.TrimSuffix(name, ".spool"))
+	}
+	return len(orphans) > 0, nil
 }
 
 // orphanSpools is the names of the spools among ents that are neither
@@ -445,16 +454,45 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 		return storageFailed("close snapshot", err)
 	}
 	k.s.forget(k.id)
-	if err := os.Rename(filepath.Join(k.s.dir, k.id+".spool"), filepath.Join(k.s.dir, k.id+".snap")); err != nil {
+	if err := k.s.rename(k.id+".spool", k.id+".snap"); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return snapshotCorrupt("spool gone before its commit")
 		}
 		return storageFailed("publish snapshot", err)
 	}
-	if err := writeFileSync(filepath.Join(k.s.dir, k.id+".meta"), wire.AppendSnapshotMeta(nil, &final)); err != nil {
+	if err := k.s.writeMeta(k.id, wire.AppendSnapshotMeta(nil, &final)); err != nil {
 		return storageFailed("publish snapshot meta", err)
 	}
 	return nil
+}
+
+// rename renames the directory's entry from over to, under s.mu. A
+// listing, an Open and a Remove of the store hold s.mu over every file of
+// the directory they touch, so a publication never renames over a .meta
+// or a .snap another goroutine of the node holds open. Windows refuses
+// that rename (Access is denied), and fails the open of a file being
+// renamed over or removed (a sharing violation): a cut that published over
+// a rotted .meta (#759), or retention removing a snapshot while the loop
+// listed the store to send one, stopped the node STORAGE_FAILED there
+// (#768). POSIX lets both through, and the lock costs a rename's length.
+func (s *fileSnapshots) rename(from, to string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return os.Rename(filepath.Join(s.dir, from), filepath.Join(s.dir, to))
+}
+
+// writeMeta publishes data as id's .meta as writeFileSync does — written
+// and synced to <id>.meta.tmp, renamed over <id>.meta, the directory synced
+// — with only the rename under s.mu (rename): a listing never waits for a
+// sync.
+func (s *fileSnapshots) writeMeta(id string, data []byte) error {
+	if err := writeSynced(filepath.Join(s.dir, id+".meta.tmp"), data); err != nil {
+		return err
+	}
+	if err := s.rename(id+".meta.tmp", id+".meta"); err != nil {
+		return err
+	}
+	return syncDir(s.dir)
 }
 
 // published reads the snapshot a directory entry named name publishes. ok
@@ -543,6 +581,28 @@ func (k *fileSink) Abort() error {
 
 // List implements SnapshotStore: complete snapshots, newest first.
 func (s *fileSnapshots) List() ([]coreconsensus.SnapshotMetaValue, error) {
+	out, err := s.listed()
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(out, func(a, b coreconsensus.SnapshotMetaValue) int {
+		switch {
+		case a.Position.Index > b.Position.Index:
+			return -1
+		case a.Position.Index < b.Position.Index:
+			return 1
+		}
+		return strings.Compare(b.ID, a.ID)
+	})
+	return out, nil
+}
+
+// listed reads the complete snapshots of the directory, in its order,
+// under s.mu: no publication renames over, and no Remove deletes, a .meta
+// it reads or a .snap it stats (rename).
+func (s *fileSnapshots) listed() ([]coreconsensus.SnapshotMetaValue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ents, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, storageFailed("list snapshots", err)
@@ -557,15 +617,6 @@ func (s *fileSnapshots) List() ([]coreconsensus.SnapshotMetaValue, error) {
 			out = append(out, m)
 		}
 	}
-	slices.SortFunc(out, func(a, b coreconsensus.SnapshotMetaValue) int {
-		switch {
-		case a.Position.Index > b.Position.Index:
-			return -1
-		case a.Position.Index < b.Position.Index:
-			return 1
-		}
-		return strings.Compare(b.ID, a.ID)
-	})
 	return out, nil
 }
 
@@ -579,26 +630,32 @@ type fileHandle struct {
 // Meta returns the metadata read from the snapshot's .meta at Open.
 func (h *fileHandle) Meta() coreconsensus.SnapshotMetaValue { return h.meta }
 
-// Close unpins the snapshot and closes its file exactly once; a second
-// Close returns nil and releases nothing.
+// Close closes the snapshot's file and unpins it, exactly once; a second
+// Close returns nil and releases nothing. The file is closed before the
+// pin drops, under s.mu: a Remove the unpin lets through never deletes a
+// .snap this handle still holds open, which Windows refuses (rename).
 func (h *fileHandle) Close() error {
 	var err error
 	h.once.Do(func() {
 		h.s.mu.Lock()
-		h.s.pins[h.meta.ID]--
-		h.s.mu.Unlock()
+		defer h.s.mu.Unlock()
 		if cerr := h.File.Close(); cerr != nil {
 			err = storageFailed("close snapshot", cerr)
 		}
+		h.s.pins[h.meta.ID]--
 	})
 	return err
 }
 
-// Open implements SnapshotStore: pinned until Close.
+// Open implements SnapshotStore: pinned until Close. The .meta is read, the
+// .snap opened and the pin taken under s.mu, at once: a Remove comes
+// before them or is refused (rename).
 func (s *fileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
 	if !validID(id) {
 		return nil, origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	b, err := os.ReadFile(filepath.Join(s.dir, id+".meta"))
 	if err != nil {
 		return nil, origin(coreconsensus.SnapshotCorrupt, errs.String("id", id), errs.String("why", "no meta"))
@@ -613,18 +670,30 @@ func (s *fileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
 		return nil, storageFailed("open snapshot", err)
 	}
 	h.File = f
-	s.mu.Lock()
 	s.pins[id]++
-	s.mu.Unlock()
 	return h, nil
 }
 
 // Remove implements SnapshotStore: refused while a handle is open. The meta
 // goes first, so a crash leaves no published snapshot without its bytes.
+// The files go under s.mu (rename); the directory is synced once it is
+// released, so a listing never waits for a sync.
 func (s *fileSnapshots) Remove(id string) error {
 	if !validID(id) {
 		return origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}
+	if err := s.removeFiles(id); err != nil {
+		return err
+	}
+	if err := syncDir(s.dir); err != nil {
+		return storageFailed("remove", err)
+	}
+	return nil
+}
+
+// removeFiles removes id's .meta, then its .snap, under s.mu, unless a
+// handle pins it.
+func (s *fileSnapshots) removeFiles(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.pins[id] > 0 {
@@ -634,9 +703,6 @@ func (s *fileSnapshots) Remove(id string) error {
 		if err := os.Remove(filepath.Join(s.dir, id+ext)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return storageFailed("remove", err)
 		}
-	}
-	if err := syncDir(s.dir); err != nil {
-		return storageFailed("remove", err)
 	}
 	return nil
 }
