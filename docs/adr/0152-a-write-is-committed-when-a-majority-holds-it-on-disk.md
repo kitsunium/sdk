@@ -1184,16 +1184,18 @@ voter down while every member it knew was replaced came back hearing no
 one, and the cluster lost a vote for good. No admission is widened for
 this: the leader refuses `MEMBERSHIP_INVALID` the removal, or the move by
 `UpdateAddress`, of a member that answers when a voter of the new
-configuration might then list neither the leader, at any address, nor any
-voter that stays at the address it lists it at. A voter that answers the
-leader, heard at an index its log resolves, holds that configuration or a
-later one; for any other voter, one that no longer answers included
-(amendment of 2026-10-29, #763), every retained configuration that lists it
-is a candidate, and when its configuration may predate the log's start only
-the leader listed before it, so added before it, is known to it for sure. A
-member that does not answer is never refused on this ground: it vouches for
-no one, and a dead voter stays removable, and movable. The operator brings
-the stale voter back, or removes it, first.
+configuration might then list neither the leader as a voter, at any
+address, nor any voter that stays at the address it lists it at: the
+members it sends a PreVote, a learner never among them (amendment of
+2026-10-29, #765). A voter that answers the leader, heard at an index its
+log resolves, holds that configuration or a later one; for any other voter,
+one that no longer answers included (amendment of 2026-10-29, #763), every
+retained configuration that lists it is a candidate, and when its
+configuration may predate the log's start only the leader listed before it,
+so added before it, is known to it for sure, though not surely as a voter.
+A member that does not answer is never refused on this ground: it vouches
+for no one, and a dead voter stays removable, and movable. The operator
+brings the stale voter back, or removes it, first.
 The premise holds only while no voter's log moves back. A truncation that
 would take a voter back to a configuration whose other members all left
 while it ran is refused offline (amendment of 2026-10-29,
@@ -6000,6 +6002,56 @@ failed, D and V, two live voters of three, committed nothing
   fails), and `TestARemovalIsJudgedOnAVotersConfigurationOnlyWhileItAnswers`
   the rule in raft.
 
+## Amendment — the leader vouches only as a voter of the stale voter's configuration (2026-10-29, #765)
+
+#603's guard counted the leader as a stale voter's voucher whenever the
+voter's configuration listed it, as a learner too. A voter sends its
+PreVote to the voters of its configuration alone, and a voter that may
+campaign never asks the wider question of #639 and #718. L joined, then V
+joined and was promoted while L was still a learner; V went down, L was
+promoted, D joined and was promoted, and L, handed the leadership,
+removed the founders: the last removal was let through, every
+configuration that lists V listing L, which stayed and led. Once the
+leadership moved to D, V came back asking the founders alone, both gone,
+L, a follower, never dialled it, and V's transport refused D: a live
+voter out of the quorum, and once L failed, D and V, two live voters of
+three, had no leader
+([#765](https://github.com/kitsunium/sdk/issues/765)).
+
+- **A learner vouches for no one, the leader included.** `vouched`
+  counts only a voter of the configuration the stale voter may hold: one
+  that stays at the address that configuration names, or the leader at any
+  address, which dials the stale voter while it leads, and once it
+  follows answers its PreVote with the record of whichever member leads.
+  #603's commit already spoke of the members the voter would send a
+  PreVote; `TestVouchedNeedsAStayingVoterOrTheLeader` pinned the learner
+  leader the other way, and is corrected. A voter that no longer answers
+  is judged on every retained configuration that lists it (#763): one
+  where the leader was still a learner counts, though the voter may have
+  applied the leader's promotion since.
+- **No transfer guard.** Once a removal or a move is admitted, the stale
+  voter keeps a voter of its configuration that stays, the leader or
+  another, which answers its PreVote whoever leads next: a transfer or an
+  election moves the leadership, not that voucher, whose own removal or
+  move is judged.
+- **What it leaves.** The leader is counted at any address, so that D20's
+  migration still runs over the members that are up while a voter is down
+  (#748): a leader that moved itself while the stale voter was down, and
+  then handed the leadership to a member that voter does not know, leaves
+  it asking the leader's old address. And over a compacted log, a voter
+  whose configuration may predate the log's start is still judged
+  reachable when the leader is listed before it: that leader is known to
+  it for sure, but whether as a voter, the compacted log no longer says.
+  Closing either refuses changes the guard admits today — every move of
+  the last member while a voter is down, or every removal or move of an
+  answering voter while a voter of the snapshot's base is down — and is
+  left to a decision.
+- No frame, payload or record format changes, no protocol raise, and no
+  raft mutation. `TestTheLeaderAStaleVoterKnowsAsALearnerDoesNotVouchForIt`
+  holds the issue's scenario on the memory network's admission model: the
+  last founder's removal refused while V is down, V back through that
+  founder, the founder removed, and D and V commit once L fails.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6038,6 +6090,7 @@ failed, D and V, two live voters of three, committed nothing
 | #758 | Raft hunt loop, 2026-10-29 | `TruncateAndStaySilent` on a member's directory is refused, the directory unchanged, when the configuration it would keep has no other member that the newest configuration still readable in the dropped part lists under the same key; the reason names `WipeAndRejoin`, the promotion `MinVoters` may ask for and the removal of the old ID; a refusal at best; no format change, no raft mutation (amendment of 2026-10-29, #758) |
 | #761 | Raft hunt loop, 2026-10-29 | a voter that stays vouches for a stale voter only at the address the stale voter's configuration names, and `UpdateAddress` of an answering member that may vouch, the leader's own excepted, is refused `MEMBERSHIP_INVALID` when it may strand a voter, as a removal is; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #761) |
 | #763 | Raft hunt loop, 2026-10-29 | #603's guard takes the configuration a voter was heard at only while that voter answers; a voter that no longer answers, which may come back over a truncated log #758's offline refusal cannot judge, is judged as one never heard; at best, a voter that failed less than a vote window before the change, or before the change reached it, still judged on the configuration it was heard at; no format change, nothing persisted, no raft mutation (amendment of 2026-10-29, #763) |
+| #765 | Raft hunt loop, 2026-10-29 | the leader vouches for a stale voter only as a voter of that voter's configuration, at any address: a learner is never sent a PreVote; no transfer guard; the moved leader and the compacted log's bet on the leader's role left to a decision; no format change, no protocol raise, no raft mutation (amendment of 2026-10-29, #765) |
 
 ## raft-sql-poc (owner's prior Raft)
 

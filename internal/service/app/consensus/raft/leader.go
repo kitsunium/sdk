@@ -1024,22 +1024,26 @@ func listedBefore(next *core.MembershipValue, first, then core.NodeID) bool {
 	return false
 }
 
-// vouched reports whether a voter v holding known still finds in next the
-// leader, as any member, or another voter of known, which answers its
-// PreVote with the leader's record (#542). A known that does not list v is
-// not one v holds, and is passed. v sends its PreVote to the address known
-// names: a voter next lists at another address no longer hears it, and
-// vouches for no one, while the leader dials v and is admitted at any
-// address it serves (#761).
+// vouched reports whether a voter v holding known still finds in next a
+// voter of known that stays, which answers its PreVote with the record of
+// whichever member leads (#542). A known that does not list v is not one v
+// holds, and is passed. v sends its PreVote to the voters of known alone,
+// at the addresses known names: a voter next lists at another address no
+// longer hears it (#761), and a member known lists as a learner is never
+// asked, the leader included. Counted as a learner, the leader vouched only
+// while it led: once the leadership moved to a member v does not know, v
+// asked no one that follows it, and its transport refused the new leader's
+// key (#765). A leader that is a voter of known is counted at any address:
+// while it leads it dials v, which admits it by key.
 func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
 	if _, listed := known.Member(v); !listed {
 		return true
 	}
 	for _, k := range known.Members {
-		if k.ID == v {
+		if k.ID == v || !k.Voter {
 			continue
 		}
-		if m, stays := next.Member(k.ID); stays && (k.ID == leader || (k.Voter && m.Address == k.Address)) {
+		if m, stays := next.Member(k.ID); stays && (k.ID == leader || m.Address == k.Address) {
 			return true
 		}
 	}
@@ -1066,7 +1070,7 @@ func (r *Raft) updateAddress(cur *core.MembershipValue, admin *wire.AdminValue, 
 // voucher B moved, came back hearing no one, refused by the leader's key,
 // for as long as that leader led (#761). Only the move of a member that
 // answers and may vouch is judged — a voter, or a member that ever was
-// one — and never the leader's own, which vouched admits at any address.
+// one — and never the leader's own, which vouched counts at any address.
 func (r *Raft) moveStrands(next *core.MembershipValue, target core.NodeID) bool {
 	if target == r.id || !r.answering(target) || r.neverVoter(target) {
 		return false

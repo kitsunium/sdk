@@ -1402,7 +1402,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: k.ID == v
+                when: k.ID == v || !k.Voter
             - opt:
                 do:
                   - return: "true"
@@ -1410,7 +1410,7 @@ sequences:
                   bind: m, stays
                   eval: next.Member(k.ID)
                   to: next.Member
-                when: stays && (k.ID == leader || (k.Voter && m.Address == k.Address))
+                when: stays && (k.ID == leader || m.Address == k.Address)
           key: _
           range: known.Members
           value: k

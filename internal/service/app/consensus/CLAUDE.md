@@ -1087,6 +1087,12 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestARemovalIsJudgedOnAVotersConfigurationOnlyWhileItAnswers`). At
   best: a voter that failed less than a vote window before the change, or
   before the change reached it, is still judged as heard.
+- Count the leader as a stale voter's voucher when that voter knows it as
+  a learner only: a voter sends its PreVote to the voters of its
+  configuration alone, and once the leadership moved to a member it did
+  not know, nobody answered it with the record (#765, `vouched`,
+  `TestTheLeaderAStaleVoterKnowsAsALearnerDoesNotVouchForIt`,
+  `TestVouchedNeedsAStayingVoterOrTheLeader`).
 - Cancel a snapshot stream because the log is tight: its pin's hold on
   compaction is lifted, for good, and the stream goes on; only a stream
   that is due is cancelled (`streamDue`). Cancelled with it, no stream

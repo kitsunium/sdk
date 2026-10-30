@@ -95,11 +95,21 @@ func TestVouchedNeedsAStayingVoterOrTheLeader(t *testing.T) {
 	if vouched(&next, &learner, 1, 4) {
 		t.Error("a voter whose only staying member was a learner to it was taken as reachable: it sends a learner no PreVote")
 	}
+	// A voter sends its PreVote to the voters of its configuration alone
+	// (campaign): the leader it lists as a learner is never asked, and
+	// once the leadership moves to 5, which it does not know, nobody
+	// answers it with the record (#765). #603 counted the leader, even as
+	// a learner, though its commit spoke of the members the voter would
+	// send a PreVote.
 	withLeader := testConf(1, 2, 4)
 	withLeader.Members[2].Voter = false
 	next = testConf(1, 4, 5)
+	if vouched(&next, &withLeader, 1, 4) {
+		t.Error("a voter listing the leader as a learner only was taken as reachable: it sends the leader no PreVote")
+	}
+	withLeader.Members[2].Voter = true
 	if !vouched(&next, &withLeader, 1, 4) {
-		t.Error("a voter listing the leader, even as a learner, was taken as stranded")
+		t.Error("a voter listing the leader as a voter was taken as stranded")
 	}
 }
 
