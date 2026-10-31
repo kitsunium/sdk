@@ -123,12 +123,27 @@ sequences:
           		lruHead: noLink, lruTail: noLink, dirtyHead: noLink,
           		pub: &ringStats{},
           	}
+  - of: slotCap
+    steps:
+      - return: max(min(max(2*cur, 64), cur+slotStep, table), cur+1)
+  - of: growTo
+    steps:
+      - bind: g
+        eval: make([]T, len(s), c)
+      - eval: copy(g, s)
+      - return: g
   - of: (*ring).take
     participants:
       - id: caller
         kind: actor
       - id: (*ring).take
         kind: self
+      - id: slotCap
+        kind: internal
+      - id: growTo
+        kind: internal
+      - id: r.wheel.reserve
+        kind: internal
       - id: r.wheel.grow
         kind: internal
       - id: emptyConn
@@ -154,6 +169,17 @@ sequences:
                   when: len(r.conns) >= r.lp.sz.tableSize
               - set: slot
                 value: int32(len(r.conns))
+              - opt:
+                  do:
+                    - bind: c
+                      eval: slotCap(cap(r.conns), r.lp.sz.tableSize)
+                      to: slotCap
+                    - set: r.conns
+                      to: growTo
+                      value: growTo(r.conns, c)
+                    - eval: r.wheel.reserve(c)
+                      to: r.wheel.reserve
+                  when: len(r.conns) == cap(r.conns)
               - set: r.conns
                 value: append(r.conns, emptyConn(0))
               - eval: r.wheel.grow(len(r.conns))
@@ -4280,7 +4306,7 @@ sequences:
       - set: rr.r
         to: newRing
         value: newRing(lp, i, rr)
-      - bind: bufs, size
+      - bind: bufs, size, first
         eval: ul.bufShape()
         to: ul.bufShape
       - opt:
@@ -4290,7 +4316,7 @@ sequences:
             - return: nil, probeError("buf_ring", orErrno(errno, syscall.EOPNOTSUPP))
           init:
             bind: errno
-            eval: u.setupBuffers(bufs, size)
+            eval: u.setupBuffers(bufs, size, first)
             to: u.setupBuffers
           when: errno != 0 || ul.hooks.failStage == "buf_ring"
       - bind: table
@@ -4306,7 +4332,7 @@ sequences:
             to: ul.registerTable
           when: err != nil
       - set: rr.inRing
-        value: int(bufs)
+        value: int(u.bufProvided)
       - set: rr.slotOf
         to: slices
         value: slices.Repeat([]int32{-1}, ul.slotSpace(table))
@@ -4327,9 +4353,9 @@ sequences:
     steps:
       - opt:
           do:
-            - return: ul.hooks.bufs, max(ul.hooks.bufSize, 64)
+            - return: ul.hooks.bufs, max(ul.hooks.bufSize, 64), ul.hooks.bufs
           when: ul.hooks.bufs > 0
-      - return: defaultBufs, defaultBufSize
+      - return: defaultBufs, defaultBufSize, bufsFirst
   - of: (*uLoop).registerFan
     participants:
       - id: caller
@@ -5545,6 +5571,8 @@ sequences:
         kind: stdlib
       - id: rr.giveBack
         kind: internal
+      - id: rr.provide
+        kind: internal
       - id: rr.rearmStarved
         kind: internal
     steps:
@@ -5555,8 +5583,28 @@ sequences:
           when: rr.ul.hooks.shuffle
       - eval: rr.giveBack()
         to: rr.giveBack
+      - eval: rr.provide()
+        to: rr.provide
       - eval: rr.rearmStarved()
         to: rr.rearmStarved
+  - of: (*uRing).provide
+    steps:
+      - bind: u
+        eval: rr.u
+      - bind: want
+        eval: len(rr.starved) - rr.inRing
+      - opt:
+          do:
+            - set: want
+              value: max(want, int(bufsStep))
+          when: rr.inRing < int(u.bufProvided)/4
+      - opt:
+          do:
+            - return: ""
+          when: want <= 0
+      - op: +=
+        set: rr.inRing
+        value: int(u.growBufs(max(uint32(want), bufsStep)))
   - of: (*uRing).giveBack
     participants:
       - id: caller
@@ -6355,7 +6403,7 @@ sequences:
             - return: nil, probeError("self_test buf_ring", errno)
           init:
             bind: errno
-            eval: rg.setupBuffers(8, 4096)
+            eval: rg.setupBuffers(8, 4096, 8)
             to: rg.setupBuffers
           when: errno != 0
       - opt:
@@ -7168,9 +7216,7 @@ sequences:
         kind: internal
       - id: u.mapBufRing
         kind: internal
-      - id: u.addBuf
-        kind: internal
-      - id: u.publishBufs
+      - id: u.growBufs
         kind: internal
     steps:
       - bind: bm, err
@@ -7191,15 +7237,38 @@ sequences:
             eval: u.mapBufRing(count)
             to: u.mapBufRing
           when: errno != 0
+      - eval: u.growBufs(min(first, count))
+        to: u.growBufs
+      - return: "0"
+  - of: (*uring).growBufs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).growBufs
+        kind: self
+      - id: u.addBuf
+        kind: internal
+      - id: u.publishBufs
+        kind: internal
+    steps:
+      - set: "n"
+        value: min(n, u.bufCount-u.bufProvided)
       - loop:
+          cond: bid < u.bufProvided+n
           do:
             - eval: u.addBuf(uint16(bid))
               to: u.addBuf
-          key: bid
-          range: count
-      - eval: u.publishBufs()
-        to: u.publishBufs
-      - return: "0"
+          init: bid := u.bufProvided
+          post: bid++
+      - op: +=
+        set: u.bufProvided
+        value: "n"
+      - opt:
+          do:
+            - eval: u.publishBufs()
+              to: u.publishBufs
+          when: n > 0
+      - return: "n"
   - of: (*uring).mapBufRing
     participants:
       - id: caller
@@ -7615,6 +7684,14 @@ sequences:
           when: n != noLink
       - set: w.at[slot]
         value: "0"
+  - of: (*wheel).reserve
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: cap(w.at) >= c
+      - set: w.next, w.prev, w.at
+        value: growTo(w.next, c), growTo(w.prev, c), growTo(w.at, c)
   - of: (*wheel).grow
     steps:
       - loop:
