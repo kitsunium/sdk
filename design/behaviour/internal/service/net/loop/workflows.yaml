@@ -84,24 +84,6 @@ workflows:
           range: ul.rings
           value: rr
       - return: "true"
-  - of: (*uRing).closeBackstop
-    steps:
-      - bind: now
-        eval: rr.ul.lp.tick
-      - loop:
-          cond: rr.closingHead < len(rr.closing) && rr.closing[rr.closingHead].at <= now
-          do:
-            - opt:
-                do:
-                  - break: true
-                when: "!rr.backstop(rr.closing[rr.closingHead])"
-            - op: ++
-              set: rr.closingHead
-      - opt:
-          do:
-            - set: rr.closing, rr.closingHead
-              value: rr.closing[:0], 0
-          when: rr.closingHead == len(rr.closing)
   - of: (*uRing).sweep
     steps:
       - bind: lp

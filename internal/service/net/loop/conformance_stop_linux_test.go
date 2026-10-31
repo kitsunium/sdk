@@ -10,7 +10,6 @@ import (
 	"io"
 	stdnet "net"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -123,15 +122,16 @@ func heardConns(t *testing.T, addr string, n int) []stdnet.Conn {
 	return conns
 }
 
-// readEnds checks that every connection reads the end of the stream.
+// readEnds checks that every connection reads a clean end of the stream: a
+// reset would be a drain's defect (ADR 0196).
 func readEnds(t *testing.T, conns []stdnet.Conn) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for i, c := range conns {
 		_ = c.SetReadDeadline(deadline)
 		n, err := c.Read(make([]byte, 1))
-		if n != 0 || (!errors.Is(err, io.EOF) && !errors.Is(err, syscall.ECONNRESET)) {
-			t.Fatalf("connection %d read %d bytes, %v, want the end of the stream", i, n, err)
+		if n != 0 || !errors.Is(err, io.EOF) {
+			t.Fatalf("connection %d read %d bytes, %v, want a clean end of the stream", i, n, err)
 		}
 	}
 }

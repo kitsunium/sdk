@@ -74,6 +74,9 @@ const (
 	// closeBackstopTicks is how long a closed slot may wait on an operation
 	// after its shutdown was issued before closeBackstop cancels it.
 	closeBackstopTicks int64 = 100
+	// closingCompact is the fewest looked-at closes compactClosing moves
+	// out of a queue that never empties.
+	closingCompact int = 1024
 )
 
 // udPack builds a user_data: the operation, 24 bits of generation, the slot.
@@ -1497,9 +1500,25 @@ func (rr *uRing) closeBackstop() {
 		}
 		rr.closingHead++
 	}
+	rr.compactClosing()
+}
+
+// compactClosing drops the closes closeBackstop looked at: all of them once
+// every one was, or, on a ring that closes faster than the backstop's delay
+// and so never empties the queue, the looked-at prefix once it is most of
+// the queue. The queue then holds about a delay's worth of closes, never
+// one entry per close for the ring's life.
+func (rr *uRing) compactClosing() {
 	//: every one looked at: the queue starts over.
 	if rr.closingHead == len(rr.closing) {
 		rr.closing, rr.closingHead = rr.closing[:0], 0
+		//: emptied.
+		return
+	}
+	//: a busy ring: the prefix moved out, in place.
+	if rr.closingHead >= closingCompact && 2*rr.closingHead >= len(rr.closing) {
+		n := copy(rr.closing, rr.closing[rr.closingHead:])
+		rr.closing, rr.closingHead = rr.closing[:n], 0
 	}
 }
 

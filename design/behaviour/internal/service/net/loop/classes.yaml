@@ -781,6 +781,12 @@ constants:
         name: closeBackstopTicks
         type: int64
         value: "100"
+      - doc: |-
+          closingCompact is the fewest looked-at closes compactClosing moves
+          out of a queue that never empties.
+        name: closingCompact
+        type: int
+        value: "1024"
     name: acceptDepth
   - doc: |-
       peerPeekBytes is the release check's read buffer: any read will do, the
@@ -1176,6 +1182,7 @@ files:
       - (*uRing).sendFlight
       - (*uRing).shutdown
       - (*uRing).closeBackstop
+      - (*uRing).compactClosing
       - (*uRing).backstop
       - (*uRing).cancelOp
       - (*uRing).sweep
@@ -3547,6 +3554,14 @@ types:
           a close the kernel would otherwise hold forever. The slots wait in the
           order their shutdowns were issued, so the walk stops at the first not due.
         name: closeBackstop
+        recv: rr *uRing
+      - doc: |-
+          compactClosing drops the closes closeBackstop looked at: all of them once
+          every one was, or, on a ring that closes faster than the backstop's delay
+          and so never empties the queue, the looked-at prefix once it is most of
+          the queue. The queue then holds about a delay's worth of closes, never
+          one entry per close for the ring's life.
+        name: compactClosing
         recv: rr *uRing
       - doc: |-
           backstop cancels the recv, and the send in flight, of w's slot when it is

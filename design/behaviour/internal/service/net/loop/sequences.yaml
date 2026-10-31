@@ -5763,6 +5763,43 @@ sequences:
         to: rr.ul.onFD
       - op: ++
         set: c.ops
+  - of: (*uRing).closeBackstop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).closeBackstop
+        kind: self
+      - id: rr.compactClosing
+        kind: internal
+    steps:
+      - bind: now
+        eval: rr.ul.lp.tick
+      - loop:
+          cond: rr.closingHead < len(rr.closing) && rr.closing[rr.closingHead].at <= now
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: "!rr.backstop(rr.closing[rr.closingHead])"
+            - op: ++
+              set: rr.closingHead
+      - eval: rr.compactClosing()
+        to: rr.compactClosing
+  - of: (*uRing).compactClosing
+    steps:
+      - opt:
+          do:
+            - set: rr.closing, rr.closingHead
+              value: rr.closing[:0], 0
+            - return: ""
+          when: rr.closingHead == len(rr.closing)
+      - opt:
+          do:
+            - bind: "n"
+              eval: copy(rr.closing, rr.closing[rr.closingHead:])
+            - set: rr.closing, rr.closingHead
+              value: rr.closing[:n], 0
+          when: rr.closingHead >= closingCompact && 2*rr.closingHead >= len(rr.closing)
   - of: (*uRing).backstop
     steps:
       - bind: c
