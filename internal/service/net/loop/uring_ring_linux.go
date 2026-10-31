@@ -209,23 +209,6 @@ func (u *uring) get() *sqe {
 	return s
 }
 
-// reserve reports whether n SQEs can be taken in a row without get
-// submitting between them, submitting what is queued to make room. A linked
-// chain needs it: a submit in the middle would end the chain early.
-func (u *uring) reserve(n uint32) bool {
-	//: room, or room made by submitting.
-	for i := 0; !u.room(n); i++ {
-		//: the kernel never drained the SQ.
-		if i >= enterRetries {
-			//: the caller counts the failure.
-			return false
-		}
-		u.submit()
-	}
-	//: n in a row.
-	return true
-}
-
 // noArray is NO_SQARRAY: there is no SQ array to fill.
 func (u *uring) noArray() bool {
 	//: as set up.
@@ -437,11 +420,33 @@ func (u *uring) reap(max int, fn func(c *cqe)) int {
 	return n
 }
 
-// overflowed reports a CQ the kernel had to hold back (NODROP): a submit
-// flushes it.
+// overflowed reports a CQ the kernel had to hold back (NODROP):
+// flushOverflow moves it into the CQ.
 func (u *uring) overflowed() bool {
 	//: the flag the kernel raises.
 	return atomic.LoadUint32(u.sqFlags)&sqCQOverflow != 0
+}
+
+// flushOverflow submits what is pending and enters with GETEVENTS and
+// min_complete zero, which never blocks: the kernel moves the completions it
+// held back into the CQ only on its wait path (io_cqring_wait, 6.8 to 7.0),
+// never on a plain submit. A secondary ring is otherwise entered only to
+// submit, so a CQ that overflowed there stayed held — every close of a
+// drain on that ring waiting on a completion it never saw.
+func (u *uring) flushOverflow() {
+	u.publish()
+	fd, reg := u.enterTarget()
+	got, errno := uringEnterFlags(fd, u.pending(), enterGetEvents|reg)
+	//: by outcome; the caller reaps what came.
+	switch errno {
+	//: submitted, and flushed.
+	case 0:
+		u.consumed(uint32(got))
+	//: interrupted: the next reap tries again.
+	case syscall.EINTR:
+	default:
+		u.retries++
+	}
 }
 
 // setupBuffers maps count buffers of size bytes and registers their ring as
@@ -635,8 +640,9 @@ func prepSend(s *sqe, index uint32, p []byte, ud uint64) {
 }
 
 // prepCancelFixed fills s as a cancel of every operation on direct descriptor
-// index. It is never linked to the close: the close waits for the count. It
-// follows a shutdown, hard-linked, so it cannot cancel the shutdown itself.
+// index. Only the probe's release check uses it, on a ring of a few
+// requests: the kernel finds them by walking every armed request
+// (io_poll_file_find), which a serving ring cannot afford at each close.
 func prepCancelFixed(s *sqe, index uint32, ud uint64) {
 	s.opcode = opAsyncCancel
 	s.fd = fixedFd(index)

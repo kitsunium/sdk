@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-28T12:00:00Z -->
+<!-- updated: 2026-10-31T12:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -24,13 +24,13 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | `wheel.go` | the hashed timer wheel, index-linked, one timer per slot, 10 ms ticks |
 | `caps.go` | the kernel capabilities a group reports (ADR 0189): `loopCaps` and their classes, `CheckCapabilities` (an engine, a class B capability or an unknown opt-in is `LoopCapabilityRefused`), `capSwitches` (the operator's `Disabled`, the code's opt-ins: the operator wins), `capReport` (one row each, `disabled` never overwritten, an absent opt-in `missing`), `Unprobed` (the portable backend's report) |
 | `uring_caps_linux.go` | the probe's stages 1 to 3 (ADR 0189 §D3): `openDescending` (every flag the switches allow, then on `EINVAL` `SQ_REWIND`, `NO_SQARRAY`, `DEFER_TASKRUN`, `SINGLE_ISSUER` given up in that order), `probeRingFDs` (register, unregister before close), `rewindSelfTest` (the partial submit), `settle` (the primary's and the secondaries' flags: `DEFER_TASKRUN` on ring 0 only), `reportSelfTest`, `registerRing` (16 a thread), `probeReason` (`EEXIST` is a probe defect) |
-| `drain_linux.go` | the drain's shared parts (ADR 0196 §D3): `listenerSet` (each taker — a loop on epoll, a ring on io_uring — hands each listener back once it took its queue; the last closes it, `closeRest` the others once every loop returned), `drainable` (no partial input, and heard, or silent for `drainQuiet`), `queueTakeMax` |
+| `drain_linux.go` | the drain's shared parts (ADR 0196 §D3): `listenerSet` (each taker — a loop on epoll, a ring on io_uring — hands each listener back once it took its queue; the last closes it, `closeRest` the others once every loop returned; it also counts each listener's accepts, every ring together, for the watchdog — ADR 0200 §D1), `drainable` (no partial input, and heard, or silent for `drainQuiet`), `queueTakeMax` |
 | `postq.go` | the `Post` queue: preallocated, mutex, `pending` CAS false→true wakes once per drain |
 | `stats.go` | the per-ring counters (plain on the loop, atomic for `State`, published at the end of each batch) and the batch-duration histogram behind `BatchP99` |
 | `epoll_linux.go` | the epoll backend: one thread, one epoll instance, one ring per loop; `EPOLLEXCLUSIVE` listeners; a 2 MiB mmap'd read arena per loop |
 | `uring_abi_linux.go` | the io_uring uapi in-tree (no `x/sys`, ADR 0018): syscall numbers 425–427, flags, opcodes, `sqe`/`cqe`/`uringBuf`/`uringParams`/… layouts, `fixedFd` (0-based) and `targetIndex` (index + 1), `FILE_INDEX_ALLOC` raw `0xFFFFFFFF`; one `Syscall6` per waiting enter, `RawSyscall6` to submit only |
-| `uring_ring_linux.go` | one io_uring: `SETUP_CLAMP`+`CQSIZE` with the granted sizes read back, the single mapping, the SQ/CQ views, the bounded submit (EINTR again; EBUSY/EAGAIN counted and left to the next batch), the provided-buffer ring and its tail published by one 32-bit store of entry 0's bid and the tail, the sparse table, `REGISTER_PROBE`, the SQE encoders |
-| `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME; grouped by `waitArgs` once a batch reaped four, ADR 0199), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the unlinked cancel → count → `close_direct`; ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the accept watchdog |
+| `uring_ring_linux.go` | one io_uring: `SETUP_CLAMP`+`CQSIZE` with the granted sizes read back, the single mapping, the SQ/CQ views, the bounded submit (EINTR again; EBUSY/EAGAIN counted and left to the next batch), `flushOverflow` (an overflowed CQ moves into the ring only on an enter with GETEVENTS), the provided-buffer ring and its tail published by one 32-bit store of entry 0's bid and the tail, the sparse table, `REGISTER_PROBE`, the SQE encoders |
+| `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME; grouped by `waitArgs` once a batch reaped four, ADR 0199), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the close: shutdown → count → `close_direct`, a user_data backstop after 1 s (ADR 0200); ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the accept watchdog, judged per listener |
 | `uring_probe_linux.go` | the last probe stage: a loopback multishot accept into a direct descriptor and a multishot recv through the buffer ring, on a ring of its own, then the release check (shutdown→cancel→close must show the peer the end; cancel→close alone tells whether puts are deferred) |
 | `uring_none_linux.go` | the Linux architectures outside io_uring's wave 1: `LoopBackendUnavailable`, epoll serves |
 | `group_linux.go`, `group_other.go` | backend choice, `RLIMIT_NOFILE`, `mmap`; elsewhere, `UnsupportedPlatform` |
@@ -146,26 +146,42 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   the kernel refuses the flag with a file slot.
 - **io_uring: what is watched, and what is not yet.** The watchdog acts only on
   an observable accept stall: armed, not paused, the listener's queue not
-  empty (`TCP_INFO`), no accept CQE for 100 ticks. It then re-arms, and after
-  3 re-arms the ring drains. A drained ring is never switched to epoll live.
+  empty (`TCP_INFO`), no accept CQE for 100 ticks — on this ring, nor on any
+  ring of the group for that listener (`listenerSet.accepts`, ADR 0200 §D1).
+  With several rings on one listener the kernel hands each connection to one
+  waiter, and a ring that loses the race sees no completion while the queue
+  moves: judged alone, two healthy rings of three were drained at 140 000
+  connections and the third filled its table. A stall re-arms, and after 3
+  re-arms the ring drains. A drained ring is never switched to epoll live.
   The recv stall (`SOCKET_URING_OP_SIOCINQ`) and the "CQ tail moved, head not
   reaped" check are not built: this loop always reaps every ring. An
   io_uring connection is never evicted, because a direct descriptor has no
   process descriptor to ask `SIOCINQ` of, so `unread` answers yes.
-- **A close is a shutdown first, then direct descriptors on 6.8 and 6.12
-  too.** Before 6.13 a file removed from the direct table is put only once
+- **A close is a shutdown alone, on direct descriptors too (ADR 0200 §D2).**
+  Before 6.13 a file removed from the direct table is put only once
   every request issued under the table's older resource nodes has completed
   (`io_rsrc_node_ref_zero` puts nodes in order; 6.13 gave each file its own).
   A multishot recv on an idle connection never completes, so a close alone
   leaves the socket open and its peer never sees the end — Debian's 6.12 and
   Ubuntu's 6.8 both behave this way. `shutdown(SHUT_RDWR)` does not wait for
-  the put: it sends the FIN and ends the connection's own recv on zero. So
-  every close, the peer finishing first included, is `IORING_OP_SHUTDOWN`
-  (34) on the fixed slot, the `FD|FD_FIXED|ALL` cancel hard-linked behind it
-  (unlinked, it could cancel the shutdown, which 6.8 runs in io-wq), and
-  `close_direct` once the count of operations in flight reaches zero. The
-  shutdown is counted and never `CQE_SKIP_SUCCESS`. Without the shutdown on a
-  peer-first close the socket would sit in CLOSE_WAIT, its peer in FIN_WAIT2.
+  the put: it sends the FIN, and `inet_shutdown` wakes every waiter of the
+  socket whatever its state, so the recv ends on zero and a send waiting for
+  room on `EPIPE`. So every close, the peer finishing first included, is
+  `IORING_OP_SHUTDOWN` (34) on the fixed slot, counted and never
+  `CQE_SKIP_SUCCESS`, and `close_direct` once the count of operations in
+  flight reaches zero. No cancel follows it: the `FD|FD_FIXED|ALL` cancel
+  hard-linked behind it before walked every armed request of the ring
+  (`io_poll_file_find`) and the io-wq's pending works at each close, and the
+  shutdown runs in io-wq, so a drain of n connections cost n² — 249 s at
+  60 000, the process unkillable. A slot still waiting on an operation 1 s
+  after its shutdown (`closeBackstop`) has its recv and send cancelled by
+  user_data, one hash bucket. Without the shutdown on a peer-first close the
+  socket would sit in CLOSE_WAIT, its peer in FIN_WAIT2.
+- **A CQ the kernel held back is flushed with GETEVENTS.** A secondary is
+  entered only to submit; the kernel moves an overflowed CQ (`NODROP`) into
+  the ring only on its wait path, so `reapAll` enters with GETEVENTS and
+  `min_complete` zero (`flushOverflow`). A drain's thousands of shutdowns
+  completing at once overflowed a secondary, and its closes waited forever.
 - **The release check decides the mode and the sweep.** On the self-test's
   ring the payload's recv is armed first, as a keep-alive's is. A second
   connection is closed the loop's way and its peer must read the end within
@@ -277,7 +293,12 @@ its batch end, 384 connections queued with their request — more than one
 epoll burst and than io_uring's accepts in flight —, then the drain, every one
 reading its echo and a clean end, the listener refusing after; 1 280 queued
 past epoll's batch; and `TestConformance_drainOutOfDescriptors`, a child
-under RLIMIT 64 whose take waits for the drain's closes.
+under RLIMIT 64 whose take waits for the drain's closes. The stop's cost
+(`conformance_stop_linux_test.go`, ADR 0200): 20 000 idle connections, heard
+once, on three rings, drained and closed each within 2 s, every peer reading
+the end (0.2 s under Docker on 7.0 with the race detector; 5.15 s for the
+drain with the cancel by descriptor). `watchdog_uring_linux_test.go` pins the
+watchdog's per-listener verdict.
 `conformance_caps_linux_test.go` and `conformance_caps_uring_linux_test.go`
 hold the capabilities (ADR 0189): the report (one row each, no probe defect,
 no class B or unasked class A-code on), each class A-kernel switch serving the
