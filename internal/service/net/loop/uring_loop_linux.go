@@ -202,8 +202,14 @@ type uLoop struct {
 	uses       ringUses
 	registered int
 	// reaped is how many completions the last batch reaped, every ring
-	// together: what decides whether the next wait is grouped.
-	reaped uint64
+	// together, arrived how many of them carried a connection's bytes;
+	// spacing is the moving average of the time between two arrivals,
+	// lastArrival when the last batch that had some started: what decides
+	// whether the next wait is grouped (ADR 0202).
+	reaped      uint64
+	arrived     uint64
+	spacing     time.Duration
+	lastArrival time.Duration
 }
 
 // ringUses is what a loop's rings use beyond their setup flags.
@@ -293,7 +299,7 @@ func startIOURing(g *Group, cfg *Config, hooks loopHooks) error {
 	//: one thread per loop, each building its rings after it locked itself.
 	for i := range g.sz.loops {
 		lp := newLoop(g, *cfg, i, mmapAnon)
-		ul := &uLoop{lp: lp, lfds: runner.lfds, set: runner.set, hooks: hooks, wakefd: -1, fanfd: -1, sw: sw, rep: newReport(sw, "iouring")}
+		ul := &uLoop{lp: lp, lfds: runner.lfds, set: runner.set, hooks: hooks, wakefd: -1, fanfd: -1, sw: sw, rep: newReport(sw, "iouring"), spacing: tickEvery}
 		runner.loops = append(runner.loops, ul)
 		g.loops = append(g.loops, lp)
 		runner.wg.Add(1)
@@ -773,7 +779,8 @@ func (ul *uLoop) serve() {
 	//: until stopped, or drained to the last connection, the listeners'
 	//: queues taken first.
 	for {
-		ul.batch(ul.waitArgs(&tick, &grouped))
+		ts, want := ul.waitArgs(&tick, &grouped)
+		ul.batch(ts, want, &tick)
 		//: finished.
 		if ul.stopReq.Load() || (lp.draining && ul.live() == 0 && ul.queuesTaken()) {
 			//: out.
@@ -784,13 +791,14 @@ func (ul *uLoop) serve() {
 }
 
 // waitArgs is the next wait's timeout and completions: the tick and one, or,
-// once the last batch reaped batchWaitFrom completions or more, the grouped
-// wait — sz.batchWaitMin completions or sz.batchWait, whichever comes first
-// (ADR 0199). A loop draining waits plainly: the drain is paced by the tick.
+// while the completions come often enough (busy), the grouped wait —
+// sz.batchWaitMin completions or sz.batchWait, whichever comes first (ADR
+// 0199, ADR 0202). A loop draining waits plainly: the drain is paced by the
+// tick.
 func (ul *uLoop) waitArgs(tick, grouped *kernelTimespec) (*kernelTimespec, uint32) {
 	lp := ul.lp
 	//: off, idle, or draining: the plain wait.
-	if lp.sz.batchWait <= 0 || ul.reaped < batchWaitFrom || lp.draining {
+	if lp.sz.batchWait <= 0 || lp.draining || !ul.busy() {
 		//: one completion, or the tick.
 		return tick, 1
 	}
@@ -798,23 +806,55 @@ func (ul *uLoop) waitArgs(tick, grouped *kernelTimespec) (*kernelTimespec, uint3
 	return grouped, uint32(lp.sz.batchWaitMin)
 }
 
+// busy reports whether a grouped wait would gather more than one arrival:
+// the last batch reaped batchWaitFrom completions or more, or it reaped some
+// and the arrivals come, on average, at least two within the grouped wait's
+// bound. Below that a grouped window is as likely to hold one arrival as
+// none, and wakes the loop as often as the plain wait does.
+func (ul *uLoop) busy() bool {
+	//: by the count, or by the rate.
+	return ul.reaped >= batchWaitFrom || (ul.reaped > 0 && 2*ul.spacing <= ul.lp.sz.batchWait)
+}
+
+// woke folds the batch's arrivals into spacing: the time since the last batch
+// that had some, shared among them. A batch with none — sends completing, the
+// tick — says nothing about how often requests come.
+func (ul *uLoop) woke() {
+	//: nothing arrived.
+	if ul.arrived == 0 {
+		//: the average stands.
+		return
+	}
+	at := ul.lp.started
+	ul.spacing += ((at-ul.lastArrival)/time.Duration(ul.arrived) - ul.spacing) / spacingWeight
+	ul.lastArrival = at
+}
+
 // batch is one iteration: the wait on the primary, every ring reaped, the
 // drain, the timers, OnBatchEnd, the buffers returned and the yield.
-func (ul *uLoop) batch(ts *kernelTimespec, want uint32) {
+func (ul *uLoop) batch(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
 	lp := ul.lp
 	//: secondaries submit without waiting; the primary submits and waits.
 	for _, rr := range ul.rings[1:] {
 		rr.u.submit()
 	}
-	ul.rings[0].u.wait(ts, want)
+	primary := ul.rings[0].u
+	primary.wait(ts, want)
+	//: a grouped wait whose bound passed with nothing: wait on plainly, with
+	//: no batch served for an empty window. The secondaries and Post signal
+	//: through the primary's CQ, so an empty one is an idle loop.
+	if want > 1 && primary.ready() == 0 {
+		primary.wait(tick, 1)
+	}
 	lp.begin()
-	ul.reaped = 0
+	ul.reaped, ul.arrived = 0, 0
 	//: every ring, whoever woke the loop.
 	for _, rr := range ul.rings {
 		before := rr.r.st.completions
 		rr.reapAll()
 		ul.reaped += rr.r.st.completions - before
 	}
+	ul.woke()
 	ul.control()
 	//: timers, pacing and the watchdog, ring by ring.
 	for _, rr := range ul.rings {
@@ -1129,6 +1169,7 @@ func (rr *uRing) recvCancelled(slot int32, more bool) {
 // recvBytes delivers n bytes of buffer bid to an open connection, and
 // re-arms its recv when the multishot ended.
 func (rr *uRing) recvBytes(slot int32, bid uint16, n int32, more bool) {
+	rr.ul.arrived++
 	//: only an open connection reads.
 	if rr.r.conns[slot].state == stOpen {
 		rr.r.deliver(slot, rr.u.buf(bid)[:n])
