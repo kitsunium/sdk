@@ -22,8 +22,10 @@ const (
 	// (a cancel by descriptor walks every armed request, ADR 0200 §D2).
 	stopConns int = 20000
 	// stopBound is how long draining or closing stopConns connections may
-	// take, the race detector on: linear, it takes a fraction of it.
-	stopBound time.Duration = 2 * time.Second
+	// take, the race detector and coverage on, on a loaded runner: linear,
+	// it takes a fraction of it (0.2 s under Docker, 2.3 s under Bazel
+	// coverage); quadratic, 5 s under Docker on eight CPUs.
+	stopBound time.Duration = 4 * time.Second
 	// stopDialers is how many goroutines open the connections.
 	stopDialers int = 64
 )

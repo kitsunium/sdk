@@ -121,6 +121,10 @@ go_test(
     ],
     embed = [":loop"],
     gotags = ["loopdebug"],  # keep
+    # The stop tests open 20,000 connections per backend, twice, and with
+    # them the suite overran .bazelrc's 60 s under coverage on a loaded
+    # runner: four shards, each with its own budget.
+    shard_count = 4,
     # keep
     x_defs = {
         "github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends": "epoll",

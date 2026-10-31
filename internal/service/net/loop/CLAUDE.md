@@ -295,7 +295,7 @@ reading its echo and a clean end, the listener refusing after; 1 280 queued
 past epoll's batch; and `TestConformance_drainOutOfDescriptors`, a child
 under RLIMIT 64 whose take waits for the drain's closes. The stop's cost
 (`conformance_stop_linux_test.go`, ADR 0200): 20 000 idle connections, heard
-once, on three rings, drained and closed each within 2 s, every peer reading
+once, on three rings, drained and closed each within 4 s, every peer reading
 the end (0.2 s under Docker on 7.0 with the race detector; 5.15 s for the
 drain with the cancel by descriptor). `watchdog_uring_linux_test.go` pins the
 watchdog's per-listener verdict.
