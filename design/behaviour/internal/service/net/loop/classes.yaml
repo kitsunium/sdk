@@ -960,6 +960,7 @@ files:
       - (*loop).growOut
       - (*loop).Close
       - (*loop).SetDeadline
+      - deadlineTick
       - (*loop).Pressure
       - (*loop).Post
       - (*loop).Loop
@@ -1366,6 +1367,16 @@ functions:
     name: closeErr
     params: reason uint8, errno int32
     results: error
+  - doc: |-
+      deadlineTick is the first tick whose batch starts at least d after now,
+      both from the loop's epoch: the absolute instant rounded up to a tick
+      boundary, one-based as the tick is, and saturated rather than overflowed.
+      Counted from the call, not from the batch's tick, so a deadline set late
+      in a long batch fires no earlier than asked; no adapter of the request
+      path sets one a request.
+    name: deadlineTick
+    params: now, d time.Duration
+    results: int64
   - doc: threadCheck compiles no check without the loopdebug build tag.
     name: threadCheck
     params: _ int
@@ -1725,6 +1736,7 @@ imports:
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   fmt: fmt
   io: io
+  math: math
   os: os
   runtime: runtime
   slices: slices

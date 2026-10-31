@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"math"
 	"os"
 	"runtime"
 	"sync/atomic"
@@ -895,14 +896,27 @@ func (lp *loop) SetDeadline(ref corenet.LoopConnRef, d time.Duration) error {
 	if d <= 0 {
 		c.deadline = 0
 	} else {
-		//: rounded up from now, not from the batch's tick, so it fires no
-		//: earlier than asked late in a long batch; no adapter of the hot
-		//: path sets one a request.
-		c.deadline = int64(time.Since(lp.epoch)/tickEvery) + 1 + int64((d+tickEvery-1)/tickEvery)
+		c.deadline = deadlineTick(time.Since(lp.epoch), d)
 	}
 	r.armTimer(slot)
 	//: armed.
 	return nil
+}
+
+// deadlineTick is the first tick whose batch starts at least d after now,
+// both from the loop's epoch: the absolute instant rounded up to a tick
+// boundary, one-based as the tick is, and saturated rather than overflowed.
+// Counted from the call, not from the batch's tick, so a deadline set late
+// in a long batch fires no earlier than asked; no adapter of the request
+// path sets one a request.
+func deadlineTick(now, d time.Duration) int64 {
+	//: so far ahead it never fires.
+	if d > math.MaxInt64-now-tickEvery {
+		//: saturated.
+		return math.MaxInt64
+	}
+	//: rounded up, then one-based.
+	return int64((now+d+tickEvery-1)/tickEvery) + 1
 }
 
 // Pressure implements corenet.LoopIO.

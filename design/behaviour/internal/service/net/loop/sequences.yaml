@@ -1191,6 +1191,8 @@ sequences:
         kind: self
       - id: lp.lookup
         kind: internal
+      - id: deadlineTick
+        kind: internal
       - id: r.armTimer
         kind: internal
     steps:
@@ -1214,11 +1216,19 @@ sequences:
             when: d <= 0
           - do:
               - set: c.deadline
-                value: int64(time.Since(lp.epoch)/tickEvery) + 1 + int64((d+tickEvery-1)/tickEvery)
+                to: deadlineTick
+                value: deadlineTick(time.Since(lp.epoch), d)
             else: true
       - eval: r.armTimer(slot)
         to: r.armTimer
       - return: nil
+  - of: deadlineTick
+    steps:
+      - opt:
+          do:
+            - return: math.MaxInt64
+          when: d > math.MaxInt64-now-tickEvery
+      - return: int64((now+d+tickEvery-1)/tickEvery) + 1
   - of: (*loop).Pressure
     participants:
       - id: caller

@@ -5,6 +5,7 @@ package loop
 import (
 	"bytes"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -368,5 +369,28 @@ func TestCore_endBatchStampsEnd(t *testing.T) {
 	lp.endBatch()
 	if lp.ended < lp.started {
 		t.Fatalf("ended %v before the batch started %v", lp.ended, lp.started)
+	}
+}
+
+// TestCore_deadlineTick pins that a deadline never fires before it is due:
+// the first tick it fires on starts at or after the call plus d, whatever the
+// call's offset in its tick, and one past the range saturates.
+func TestCore_deadlineTick(t *testing.T) {
+	t.Parallel()
+	ms := time.Millisecond
+	for _, c := range []struct{ now, d time.Duration }{
+		{0, 0}, {4 * ms, 5 * ms}, {9 * ms, 10 * ms}, {10 * ms, 10 * ms}, {123 * ms, time.Second}, {9*ms + 999*time.Microsecond, time.Nanosecond},
+	} {
+		got := deadlineTick(c.now, c.d)
+		// The batch that sees tick got starts at (got-1) ticks from the epoch.
+		if starts := time.Duration(got-1) * tickEvery; starts < c.now+c.d {
+			t.Fatalf("deadlineTick(%v, %v) = %d, its batch starts at %v, before %v", c.now, c.d, got, starts, c.now+c.d)
+		}
+		if starts := time.Duration(got-2) * tickEvery; starts >= c.now+c.d {
+			t.Fatalf("deadlineTick(%v, %v) = %d: a tick later than needed", c.now, c.d, got)
+		}
+	}
+	if got := deadlineTick(time.Second, time.Duration(math.MaxInt64)); got != math.MaxInt64 {
+		t.Fatalf("an overflowing deadline = %d, want saturated", got)
 	}
 }
