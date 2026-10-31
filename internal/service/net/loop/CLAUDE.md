@@ -112,8 +112,8 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   `TestURingWaitArgs` and `TestURingWoke` the rule.
 - **A batch pays its fixed cost once (ADR 0202).** `begin` reads the
   monotonic clock since the epoch once at a batch's start (the tick),
-  `endBatch` once at its end (the histogram, the yield); `SetDeadline` counts
-  from `lp.tick`. The accept watchdog looks at most once a tick (`judged`):
+  `endBatch` once at its end (the histogram, the yield); `SetDeadline` reads
+  it again, so a deadline set late in a long batch is not brought forward. The accept watchdog looks at most once a tick (`judged`):
   its look is a `getsockopt` a listener. `uring.wait` with a CQE already
   there only submits what is pending (`RawSyscall6`), and makes no system
   call when nothing is. `BenchmarkCore_batchClock`,

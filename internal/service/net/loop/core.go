@@ -895,9 +895,10 @@ func (lp *loop) SetDeadline(ref corenet.LoopConnRef, d time.Duration) error {
 	if d <= 0 {
 		c.deadline = 0
 	} else {
-		//: rounded up from the batch's tick, the clock read once at its
-		//: start, so it fires no earlier than asked of a batch under a tick.
-		c.deadline = lp.tick + int64((d+tickEvery-1)/tickEvery)
+		//: rounded up from now, not from the batch's tick, so it fires no
+		//: earlier than asked late in a long batch; no adapter of the hot
+		//: path sets one a request.
+		c.deadline = int64(time.Since(lp.epoch)/tickEvery) + 1 + int64((d+tickEvery-1)/tickEvery)
 	}
 	r.armTimer(slot)
 	//: armed.

@@ -46,10 +46,10 @@ count to start it, but a window that gathered fewer than four dropped it.
 
 A batch reads the monotonic clock since the loop's epoch once at its start
 (`begin`: the tick derived from it) and once at its end (`endBatch`: the
-batch-duration histogram and the yield's interval). Nothing between reads it:
-`SetDeadline` counts from the batch's tick, so a deadline set in a batch
-longer than a tick fires that much earlier than asked, within the 10 ms the
-wheel rounds to anyway.
+batch-duration histogram and the yield's interval). The batch's own work
+reads it nowhere else. `SetDeadline` still reads it: counted from the
+batch's tick, a deadline set late in a long batch would fire earlier than
+asked, and no adapter on the request path sets one a request.
 
 ### D2 — The accept watchdog looks once a tick
 

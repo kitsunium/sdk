@@ -1214,7 +1214,7 @@ sequences:
             when: d <= 0
           - do:
               - set: c.deadline
-                value: lp.tick + int64((d+tickEvery-1)/tickEvery)
+                value: int64(time.Since(lp.epoch)/tickEvery) + 1 + int64((d+tickEvery-1)/tickEvery)
             else: true
       - eval: r.armTimer(slot)
         to: r.armTimer
