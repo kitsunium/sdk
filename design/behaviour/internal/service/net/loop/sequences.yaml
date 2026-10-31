@@ -939,6 +939,20 @@ sequences:
             - set: s
               value: nxt
       - return: done
+  - of: (*loop).begin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).begin
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - set: lp.started
+        to: time
+        value: time.Since(lp.epoch)
+      - set: lp.tick
+        value: int64(lp.started/tickEvery) + 1
   - of: (*loop).endBatch
     participants:
       - id: caller
@@ -987,8 +1001,8 @@ sequences:
           value: r
       - set: lp.ended
         to: time
-        value: time.Now()
-      - eval: lp.grp.observe(lp.ended.Sub(started))
+        value: time.Since(lp.epoch)
+      - eval: lp.grp.observe(lp.ended - lp.started)
         to: lp.grp.observe
   - of: (*loop).yield
     participants:
@@ -1002,7 +1016,7 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: lp.sz.yield <= 0 || lp.ended.Sub(lp.yielded) < lp.sz.yield
+          when: lp.sz.yield <= 0 || lp.ended-lp.yielded < lp.sz.yield
       - set: lp.yielded
         value: lp.ended
       - eval: runtime.Gosched()
@@ -1203,7 +1217,7 @@ sequences:
             when: d <= 0
           - do:
               - set: c.deadline
-                value: lp.now() + int64((d+tickEvery-1)/tickEvery)
+                value: lp.tick + int64((d+tickEvery-1)/tickEvery)
             else: true
       - eval: r.armTimer(slot)
         to: r.armTimer
@@ -1762,9 +1776,7 @@ sequences:
         kind: internal
       - id: el.wait
         kind: internal
-      - id: time
-        kind: stdlib
-      - id: lp.now
+      - id: lp.begin
         kind: internal
       - id: el.handle
         kind: internal
@@ -1816,12 +1828,8 @@ sequences:
             - bind: "n"
               eval: el.wait()
               to: el.wait
-            - bind: started
-              eval: time.Now()
-              to: time
-            - set: lp.tick
-              to: lp.now
-              value: lp.now()
+            - eval: lp.begin()
+              to: lp.begin
             - eval: el.handle(n)
               to: el.handle
             - eval: el.control()
@@ -1832,7 +1840,7 @@ sequences:
               to: el.pace
             - eval: lp.h.OnBatchEnd(lp)
               to: lp.h.OnBatchEnd
-            - eval: lp.endBatch(started)
+            - eval: lp.endBatch()
               to: lp.endBatch
             - set: el.off
               value: "0"
@@ -2813,6 +2821,9 @@ sequences:
           		index: i, sz: g.sz, h: cfg.Handler, busy: cfg.Busy, grp: g.grp,
           		epoch:    time.Now(),
           		lowWater: g.sz.outputCap / lowWaterDiv,
+          		// the first batch's end is past any interval: the first yield is
+          		// due there.
+          		yielded: -g.sz.yield,
           	}
       - opt:
           do:
@@ -4046,7 +4057,7 @@ sequences:
               eval: newLoop(g, *cfg, i, mmapAnon)
               to: newLoop
             - bind: ul
-              eval: "&uLoop{lp: lp, lfds: runner.lfds, set: runner.set, hooks: hooks, wakefd: -1, fanfd: -1, sw: sw, rep: newReport(sw, \"iouring\")}"
+              eval: "&uLoop{lp: lp, lfds: runner.lfds, set: runner.set, hooks: hooks, wakefd: -1, fanfd: -1, sw: sw, rep: newReport(sw, \"iouring\"), spacing: tickEvery}"
             - set: runner.loops
               value: append(runner.loops, ul)
             - set: g.loops
@@ -4717,6 +4728,8 @@ sequences:
         kind: actor
       - id: (*uLoop).serve
         kind: self
+      - id: ul.waitArgs
+        kind: internal
       - id: ul.batch
         kind: internal
       - id: ul.closeAll
@@ -4730,7 +4743,10 @@ sequences:
         eval: "kernelTimespec{nsec: int64(lp.sz.batchWait)}"
       - loop:
           do:
-            - eval: ul.batch(ul.waitArgs(&tick, &grouped))
+            - bind: ts, want
+              eval: ul.waitArgs(&tick, &grouped)
+              to: ul.waitArgs
+            - eval: ul.batch(ts, want, &tick)
               to: ul.batch
             - opt:
                 do:
@@ -4746,8 +4762,24 @@ sequences:
       - opt:
           do:
             - return: tick, 1
-          when: lp.sz.batchWait <= 0 || ul.reaped < batchWaitFrom || lp.draining
+          when: lp.sz.batchWait <= 0 || lp.draining || !ul.busy()
       - return: grouped, uint32(lp.sz.batchWaitMin)
+  - of: (*uLoop).busy
+    steps:
+      - return: ul.reaped >= batchWaitFrom || (ul.reaped > 0 && 2*ul.spacing <= ul.lp.sz.batchWait)
+  - of: (*uLoop).woke
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: ul.arrived == 0
+      - bind: at
+        eval: ul.lp.started
+      - op: +=
+        set: ul.spacing
+        value: ((at-ul.lastArrival)/time.Duration(ul.arrived) - ul.spacing) / spacingWeight
+      - set: ul.lastArrival
+        value: at
   - of: (*uLoop).batch
     participants:
       - id: caller
@@ -4756,13 +4788,13 @@ sequences:
         kind: self
       - id: rr.u.submit
         kind: internal
-      - id: ul.rings[0].u.wait
+      - id: primary.wait
         kind: internal
-      - id: time
-        kind: stdlib
-      - id: lp.now
+      - id: lp.begin
         kind: internal
       - id: rr.reapAll
+        kind: internal
+      - id: ul.woke
         kind: internal
       - id: ul.control
         kind: internal
@@ -4794,16 +4826,19 @@ sequences:
           key: _
           range: ul.rings[1:]
           value: rr
-      - eval: ul.rings[0].u.wait(ts, want)
-        to: ul.rings[0].u.wait
-      - bind: started
-        eval: time.Now()
-        to: time
-      - set: lp.tick
-        to: lp.now
-        value: lp.now()
-      - set: ul.reaped
-        value: "0"
+      - bind: primary
+        eval: ul.rings[0].u
+      - eval: primary.wait(ts, want)
+        to: primary.wait
+      - opt:
+          do:
+            - eval: primary.wait(tick, 1)
+              to: primary.wait
+          when: want > 1 && primary.ready() == 0
+      - eval: lp.begin()
+        to: lp.begin
+      - set: ul.reaped, ul.arrived
+        value: 0, 0
       - loop:
           do:
             - bind: before
@@ -4816,6 +4851,8 @@ sequences:
           key: _
           range: ul.rings
           value: rr
+      - eval: ul.woke()
+        to: ul.woke
       - eval: ul.control()
         to: ul.control
       - loop:
@@ -4835,7 +4872,7 @@ sequences:
           value: rr
       - eval: lp.h.OnBatchEnd(lp)
         to: lp.h.OnBatchEnd
-      - eval: lp.endBatch(started)
+      - eval: lp.endBatch()
         to: lp.endBatch
       - loop:
           do:
@@ -5295,6 +5332,8 @@ sequences:
       - id: rr.armRecv
         kind: internal
     steps:
+      - op: ++
+        set: rr.ul.arrived
       - opt:
           do:
             - eval: rr.r.deliver(slot, rr.u.buf(bid)[:n])
@@ -5970,7 +6009,9 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: rr.paused || rr.r.draining || lp.draining || lp.tick-rr.lastAccept < watchdogTicks
+          when: rr.paused || rr.r.draining || lp.draining || lp.tick-rr.lastAccept < watchdogTicks || rr.judged == lp.tick
+      - set: rr.judged
+        value: lp.tick
       - loop:
           do:
             - opt:
@@ -7240,6 +7281,8 @@ sequences:
         kind: actor
       - id: (*uring).wait
         kind: self
+      - id: u.submit
+        kind: internal
       - id: u.publish
         kind: internal
       - id: u.enterTarget
@@ -7249,22 +7292,21 @@ sequences:
       - id: u.consumed
         kind: internal
     steps:
+      - opt:
+          do:
+            - eval: u.submit()
+              to: u.submit
+            - return: ""
+          when: u.ready() > 0
       - eval: u.publish()
         to: u.publish
       - bind: arg
         eval: "getEventsArg{ts: uint64(uintptr(unsafe.Pointer(ts)))}"
-      - bind: minComplete
-        eval: max(want, 1)
-      - opt:
-          do:
-            - set: minComplete
-              value: "0"
-          when: u.ready() > 0
       - bind: fd, reg
         eval: u.enterTarget()
         to: u.enterTarget
       - bind: got, errno
-        eval: uringEnterWait(fd, u.pending(), minComplete, enterGetEvents|enterExtArg|reg, unsafe.Pointer(&arg), unsafe.Sizeof(arg))
+        eval: uringEnterWait(fd, u.pending(), max(want, 1), enterGetEvents|enterExtArg|reg, unsafe.Pointer(&arg), unsafe.Sizeof(arg))
         to: uringEnterWait
       - switch:
           cases:

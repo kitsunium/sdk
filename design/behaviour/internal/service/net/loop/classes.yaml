@@ -389,6 +389,13 @@ constants:
         type: uint64
         value: "4"
       - doc: |-
+          spacingWeight is the weight of one batch in the moving average of the
+          time between two arrivals (ADR 0202): an eighth, so a burst of a few
+          batches does not swing it, and a few dozen settle it.
+        name: spacingWeight
+        type: time.Duration
+        value: "8"
+      - doc: |-
           yieldEvery is the most serving time between two yields of a native
           loop to the Go scheduler, when GOMAXPROCS leaves it a spare P (ADR
           0199). Measured: 2 ms and 5 ms cost the same.
@@ -944,6 +951,7 @@ files:
       - (*ring).lruUnlink
       - (*ring).lruTouch
       - (*ring).evict
+      - (*loop).begin
       - (*loop).endBatch
       - (*loop).yield
       - (*ring).compactListed
@@ -1172,6 +1180,8 @@ files:
       - (*uRing).pace
       - (*uLoop).serve
       - (*uLoop).waitArgs
+      - (*uLoop).busy
+      - (*uLoop).woke
       - (*uLoop).batch
       - (*uLoop).live
       - (*uRing).reapAll
@@ -2231,12 +2241,16 @@ types:
         name: lowWater
         type: int
       - doc: |-
-          ended is when the last batch ended; yielded when the loop last
-          yielded to the scheduler (sz.yield).
-        name: ended
-        type: time.Time
+          started is when the running batch started, ended when the last one
+          ended, yielded when the loop last yielded to the scheduler (sz.yield):
+          each on the monotonic clock since epoch, one read a batch's end and one
+          its start (begin).
+        name: started
+        type: time.Duration
+      - name: ended
+        type: time.Duration
       - name: yielded
-        type: time.Time
+        type: time.Duration
     kind: struct
     methods:
       - doc: |-
@@ -2251,11 +2265,13 @@ types:
         params: r *ring, slot int32
         recv: lp *loop
         results: bool
+      - doc: "begin starts a batch: the clock read once, the tick derived from it."
+        name: begin
+        recv: lp *loop
       - doc: |-
           endBatch runs once OnBatchEnd has returned: flushes, releases the chunks the
           batch held, compacts spills, and publishes the counters.
         name: endBatch
-        params: started time.Time
         recv: lp *loop
       - doc: |-
           yield hands the loop's thread back to the Go scheduler once sz.yield has
@@ -3326,6 +3342,11 @@ types:
         type: int
       - name: backstops
         type: int
+      - doc: |-
+          judged is the tick the watchdog last looked at the listeners: once a
+          tick, not once a batch, since a look is a getsockopt each.
+        name: judged
+        type: int64
     kind: struct
     methods:
       - doc: pollFD arms a multishot POLLIN on fd, tagged op.
@@ -3771,9 +3792,18 @@ types:
         type: int
       - doc: |-
           reaped is how many completions the last batch reaped, every ring
-          together: what decides whether the next wait is grouped.
+          together, arrived how many of them carried a connection's bytes;
+          spacing is the moving average of the time between two arrivals,
+          lastArrival when the last batch that had some started: what decides
+          whether the next wait is grouped (ADR 0202).
         name: reaped
         type: uint64
+      - name: arrived
+        type: uint64
+      - name: spacing
+        type: time.Duration
+      - name: lastArrival
+        type: time.Duration
     kind: struct
     methods:
       - doc: |-
@@ -3921,18 +3951,34 @@ types:
         recv: ul *uLoop
       - doc: |-
           waitArgs is the next wait's timeout and completions: the tick and one, or,
-          once the last batch reaped batchWaitFrom completions or more, the grouped
-          wait — sz.batchWaitMin completions or sz.batchWait, whichever comes first
-          (ADR 0199). A loop draining waits plainly: the drain is paced by the tick.
+          while the completions come often enough (busy), the grouped wait —
+          sz.batchWaitMin completions or sz.batchWait, whichever comes first (ADR
+          0199, ADR 0202). A loop draining waits plainly: the drain is paced by the
+          tick.
         name: waitArgs
         params: tick, grouped *kernelTimespec
         recv: ul *uLoop
         results: "*kernelTimespec, uint32"
       - doc: |-
+          busy reports whether a grouped wait would gather more than one arrival:
+          the last batch reaped batchWaitFrom completions or more, or it reaped some
+          and the arrivals come, on average, at least two within the grouped wait's
+          bound. Below that a grouped window is as likely to hold one arrival as
+          none, and wakes the loop as often as the plain wait does.
+        name: busy
+        recv: ul *uLoop
+        results: bool
+      - doc: |-
+          woke folds the batch's arrivals into spacing: the time since the last batch
+          that had some, shared among them. A batch with none — sends completing, the
+          tick — says nothing about how often requests come.
+        name: woke
+        recv: ul *uLoop
+      - doc: |-
           batch is one iteration: the wait on the primary, every ring reaped, the
           drain, the timers, OnBatchEnd, the buffers returned and the yield.
         name: batch
-        params: ts *kernelTimespec, want uint32
+        params: ts *kernelTimespec, want uint32, tick *kernelTimespec
         recv: ul *uLoop
       - doc: live is the loop's open connections and slots still held by the kernel.
         name: live
@@ -4315,7 +4361,9 @@ types:
           grouped wait's bound (ADR 0199). The kernel wakes the thread once the CQ
           holds want entries past its head, or when ts runs out, and an ETIME with
           completions in the CQ returns zero (io_cqring_wait, io_uring/io_uring.c,
-          6.8 to 7.0); either way the caller reaps what came.
+          6.8 to 7.0); either way the caller reaps what came. A completion already in
+          the CQ makes it a submit, with no scheduler round trip, and no system call
+          at all when nothing is pending (ADR 0202).
         name: wait
         params: ts *kernelTimespec, want uint32
         recv: u *uring

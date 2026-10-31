@@ -144,6 +144,7 @@ go_test(
         "listen_tracked_internal_test.go",
         "load_gate_linux_test.go",
         "load_l3_linux_internal_test.go",
+        "load_sparse_linux_test.go",
         "loop_chain_conformance_internal_test.go",
         "loop_chain_internal_test.go",
         "loop_group_internal_test.go",
