@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-28T12:00:00Z -->
+<!-- updated: 2026-10-31T12:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -19,7 +19,7 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | `group.go` | `Listener` (the one hand-off: a duplicated descriptor), `Config`, `Group` (`Shutdown`, `Close`, `State`, `Rejected`, `Live`) and `Start`, which resolves the sizing, starts the backend and writes the one start line |
 | `sizing.go` | `resolve`: the defaults, `ResolveLoops` (`LoopsAuto` read as GOMAXPROCS less one, at least one, which server calls once per group, zero one, the source State reports — ADR 0196 §D1, ADR 0199), `batchWaitOf` (the grouped wait's bound and count) and `yieldFor` (the yield on only while GOMAXPROCS exceeds the loops), the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
 | `conn.go` | `connCtl`, one slot's pointer-free control state; its states, flags and close reasons |
-| `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty and compaction lists, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build — its lane, ADR 0191: `server` calls the chain's `LoopStarter.OnStart(Loops)` before `Start`, so nothing here does), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
+| `core.go` | the backend-neutral core: `ring` (slot table grown by `slotCap`: doubling to 2048 slots, then 2048 at a time up to the table — ADR 0201 §D2, free list, LRU, dirty and compaction lists, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build — its lane, ADR 0191: `server` calls the chain's `LoopStarter.OnStart(Loops)` before `Start`, so nothing here does), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
 | `slab.go` | the mmap'd slab: power-of-two size classes from 2 KiB, arenas mapped lazily, a global budget that sheds load by name |
 | `wheel.go` | the hashed timer wheel, index-linked, one timer per slot, 10 ms ticks |
 | `caps.go` | the kernel capabilities a group reports (ADR 0189): `loopCaps` and their classes, `CheckCapabilities` (an engine, a class B capability or an unknown opt-in is `LoopCapabilityRefused`), `capSwitches` (the operator's `Disabled`, the code's opt-ins: the operator wins), `capReport` (one row each, `disabled` never overwritten, an absent opt-in `missing`), `Unprobed` (the portable backend's report) |
@@ -29,7 +29,7 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | `stats.go` | the per-ring counters (plain on the loop, atomic for `State`, published at the end of each batch) and the batch-duration histogram behind `BatchP99` |
 | `epoll_linux.go` | the epoll backend: one thread, one epoll instance, one ring per loop; `EPOLLEXCLUSIVE` listeners; a 2 MiB mmap'd read arena per loop |
 | `uring_abi_linux.go` | the io_uring uapi in-tree (no `x/sys`, ADR 0018): syscall numbers 425–427, flags, opcodes, `sqe`/`cqe`/`uringBuf`/`uringParams`/… layouts, `fixedFd` (0-based) and `targetIndex` (index + 1), `FILE_INDEX_ALLOC` raw `0xFFFFFFFF`; one `Syscall6` per waiting enter, `RawSyscall6` to submit only |
-| `uring_ring_linux.go` | one io_uring: `SETUP_CLAMP`+`CQSIZE` with the granted sizes read back, the single mapping, the SQ/CQ views, the bounded submit (EINTR again; EBUSY/EAGAIN counted and left to the next batch), the provided-buffer ring and its tail published by one 32-bit store of entry 0's bid and the tail, the sparse table, `REGISTER_PROBE`, the SQE encoders |
+| `uring_ring_linux.go` | one io_uring: `SETUP_CLAMP`+`CQSIZE` with the granted sizes read back, the single mapping, the SQ/CQ views, the bounded submit (EINTR again; EBUSY/EAGAIN counted and left to the next batch), the provided-buffer ring (8192 entries of 2 KiB mapped, 512 handed to the kernel at setup, more by `growBufs` as `uRing.provide` asks — ADR 0201) and its tail published by one 32-bit store of entry 0's bid and the tail, the sparse table, `REGISTER_PROBE`, the SQE encoders |
 | `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME; grouped by `waitArgs` once a batch reaped four, ADR 0199), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the unlinked cancel → count → `close_direct`; ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the accept watchdog |
 | `uring_probe_linux.go` | the last probe stage: a loopback multishot accept into a direct descriptor and a multishot recv through the buffer ring, on a ring of its own, then the release check (shutdown→cancel→close must show the peer the end; cancel→close alone tells whether puts are deferred) |
 | `uring_none_linux.go` | the Linux architectures outside io_uring's wave 1: `LoopBackendUnavailable`, epoll serves |
@@ -133,6 +133,16 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   at count zero: until then the index stays taken in the kernel, so `ALLOC`
   cannot hand it to a new connection while a completion for the old one may
   still come. Slots waiting on their close count against the accept reserve.
+- **io_uring: a ring's buffers follow its bursts, not its table (ADR 0201
+  §D1).** Its 8192 buffers of 2 KiB are mapped private and anonymous at setup,
+  and only the first 512 are handed to the kernel: a buffer it never had is
+  no resident page. After each batch `provide` hands it more, `bufsStep` at
+  least, when recvs wait for more buffers than it holds or it holds under a
+  quarter of those provided; it never takes any back. A ring's resident
+  buffers are the most it had out at once — 1 MiB idle, 16 MiB at most —
+  where 4096 buffers of 4 KiB cost 16 MiB per ring once the kernel had
+  rotated through them. A request larger than a buffer arrives over several
+  completions and the spill joins them, as a split read always did.
 - **io_uring: buffers go back after `OnBatchEnd`, once each.** A CQE's bid is
   queued on `recycle` and returned by `returnBuffers` after the batch. A recv
   that ran out (ENOBUFS, no `F_MORE`) waits on `starved`, a bounded queue,
@@ -301,8 +311,9 @@ connections still live. These are named here so nobody believes them done.
 - An idle connection costs at most **256 B of Go heap** and no mapped byte
   (`TestMemory_idleConnection`, 10 000 connections from a re-executed child,
   race off, its own Bazel target in `tools/alloc-lane-targets.txt`). Measured
-  under Docker on Linux 7.0 arm64: 145.8 B per connection with epoll, the test
-  handler's own map entry included, and 145.8 B with io_uring. The kernel's socket memory is not counted
+  under Docker on Linux 7.0 arm64: 136.4 B per connection with epoll, the test
+  handler's own map entry included, and 137.9 B with io_uring (145.8 B each
+  before the table grew by fixed steps, ADR 0201 §D2). The kernel's socket memory is not counted
   here; the 50k/150k/250k curve on a real host is measured outside CI.
 
 ## Verification

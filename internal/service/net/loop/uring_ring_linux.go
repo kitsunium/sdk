@@ -22,10 +22,20 @@ const (
 	cqFactor uint32 = 4
 	// bufGroup is the provided-buffer group every recv selects from.
 	bufGroup uint16 = 1
-	// defaultBufs is how many provided buffers a ring has.
-	defaultBufs uint32 = 4096
-	// defaultBufSize is the size of one provided buffer, in bytes.
-	defaultBufSize uint32 = 4096
+	// defaultBufs is how many provided buffers a ring may hand the kernel,
+	// its buffer ring's entries. They are mapped at setup and handed out as
+	// the ring needs them (uRing.provide): an untouched buffer is no
+	// resident memory, so a ring's buffers cost the most it ever had out at
+	// once, not this count (ADR 0201 §D1).
+	defaultBufs uint32 = 8192
+	// defaultBufSize is the size of one provided buffer, in bytes: an HTTP
+	// request of a keep-alive connection fits in one; a larger one arrives
+	// over several completions, as a split read always could.
+	defaultBufSize uint32 = 2048
+	// bufsFirst is how many buffers a ring hands the kernel at setup.
+	bufsFirst uint32 = 512
+	// bufsStep is the fewest more it hands each time it runs short.
+	bufsStep uint32 = 512
 	// enterRetries bounds the retries of a busy submit.
 	enterRetries int = 8
 )
@@ -56,12 +66,15 @@ type uring struct {
 	cqLen  uint32
 	cqes   []cqe
 	// bufRing is the provided-buffer ring's mapping; bufs the buffers'.
-	bufRing   []byte
-	bufMem    []byte
-	bufCount  uint32
-	bufSize   uint32
-	bufTail   uint16
-	shadowBid uint16
+	bufRing  []byte
+	bufMem   []byte
+	bufCount uint32
+	bufSize  uint32
+	// bufProvided is how many buffers, bids 0 to bufProvided-1, the kernel
+	// has been given so far; the others were never touched.
+	bufProvided uint32
+	bufTail     uint16
+	shadowBid   uint16
 	// retries counts busy submits retried.
 	retries uint64
 	// setup is the flags the ring was set up with, as asked: what the kernel
@@ -444,9 +457,11 @@ func (u *uring) overflowed() bool {
 	return atomic.LoadUint32(u.sqFlags)&sqCQOverflow != 0
 }
 
-// setupBuffers maps count buffers of size bytes and registers their ring as
-// group bufGroup. count must be a power of two.
-func (u *uring) setupBuffers(count, size uint32) syscall.Errno {
+// setupBuffers maps count buffers of size bytes, registers their ring as
+// group bufGroup, and hands the kernel the first first of them; growBufs
+// hands it the others. count must be a power of two. The mapping is private
+// and anonymous, so a buffer the kernel was never given is no resident page.
+func (u *uring) setupBuffers(count, size, first uint32) syscall.Errno {
 	bm, err := syscall.Mmap(-1, 0, int(count)*int(size), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	//: no buffer memory.
 	if err != nil {
@@ -459,13 +474,27 @@ func (u *uring) setupBuffers(count, size uint32) syscall.Errno {
 		//: refused.
 		return errno
 	}
-	//: every buffer starts in the ring, in order.
-	for bid := range count {
-		u.addBuf(uint16(bid))
-	}
-	u.publishBufs()
+	u.growBufs(min(first, count))
 	//: provided.
 	return 0
+}
+
+// growBufs hands the kernel up to n buffers it never had, in bid order,
+// published once, and says how many. Every bid is in the ring at most once,
+// so the ring never holds more than its count.
+func (u *uring) growBufs(n uint32) uint32 {
+	n = min(n, u.bufCount-u.bufProvided)
+	//: each new bid, at the ring's tail.
+	for bid := u.bufProvided; bid < u.bufProvided+n; bid++ {
+		u.addBuf(uint16(bid))
+	}
+	u.bufProvided += n
+	//: published once.
+	if n > 0 {
+		u.publishBufs()
+	}
+	//: how many.
+	return n
 }
 
 // mapBufRing registers group bufGroup's ring of count entries and maps it.
