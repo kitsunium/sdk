@@ -13,7 +13,7 @@ import (
 )
 
 // costBatchesPerTick is how many batches a tick holds in the sparse load
-// BenchmarkLoadSparse measures: about 1,600 batches a second.
+// BenchmarkSparseKeepAlive measures: about 1,600 batches a second.
 const costBatchesPerTick = 16
 
 // BenchmarkURingWait_ready measures one wait on a ring whose CQ already holds

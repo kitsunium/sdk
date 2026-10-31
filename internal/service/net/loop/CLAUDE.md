@@ -118,7 +118,7 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   there only submits what is pending (`RawSyscall6`), and makes no system
   call when nothing is. `BenchmarkCore_batchClock`,
   `BenchmarkURingWait_ready` and `BenchmarkURingWatchdog_quiet` measure them;
-  `server`'s `BenchmarkLoadSparse` the whole under a sparse keep-alive load.
+  `server`'s `BenchmarkSparseKeepAlive` the whole under a sparse keep-alive load.
 - **A native loop yields to a spare P (ADR 0199).** A locked loop never moves
   its P's `schedtick`, so sysmon preempts it every 10 ms and retakes its P
   in its waits (10.9 % of the samples at one vCPU). `loop.yield` calls

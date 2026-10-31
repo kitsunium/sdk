@@ -61,7 +61,7 @@ var sparseRequest = []byte("GET /api/v1/users/12345 HTTP/1.1\r\nHost: sparse\r\n
 // sparseAnswer is the body every request is answered.
 var sparseAnswer = bytes.Repeat([]byte("s"), sparseBody)
 
-// TestLoadSparseChild is the server half of BenchmarkLoadSparse, and runs only
+// TestLoadSparseChild is the server half of BenchmarkSparseKeepAlive, and runs only
 // in the child it starts: one loop group on the best backend — io_uring where
 // the kernel has it —, GOMAXPROCS two and one loop as a single-vCPU deployment
 // runs it, the http1 chain of L2. It prints its address, then answers each
@@ -70,7 +70,7 @@ var sparseAnswer = bytes.Repeat([]byte("s"), sparseBody)
 func TestLoadSparseChild(t *testing.T) {
 	spec := os.Getenv(sparseChildEnv)
 	if spec == "" {
-		t.Skip("the server half of BenchmarkLoadSparse: run by it, in a child")
+		t.Skip("the server half of BenchmarkSparseKeepAlive: run by it, in a child")
 	}
 	v := corenet.LoopValue{
 		Backend: corenet.LoopBackendAuto, Loops: 1, SoftConns: 2 * sparseConns,
@@ -263,13 +263,16 @@ func (p *sparsePool) put(i int) {
 	p.mu.Unlock()
 }
 
-// BenchmarkLoadSparse sends b.N requests at sparseRate over sparseConns
+// BenchmarkSparseKeepAlive sends b.N requests at sparseRate over sparseConns
 // kept-alive connections, each to a connection chosen at random among those
 // not waiting, and reports the child's CPU, context switches and loop batches
 // a request, the completions a batch, and its loop thread's time on CPU and
 // wakeups a request: with the grouped wait as Start resolves it (250 µs),
 // off, and bounded at 1 ms and 4 ms.
-func BenchmarkLoadSparse(b *testing.B) {
+//
+// Its name keeps it out of the merge gate's BenchmarkLoad pattern: it is a
+// measure, not a paired gate, and takes minutes a variant.
+func BenchmarkSparseKeepAlive(b *testing.B) {
 	for _, spec := range []string{"default", "off", "1ms", "4ms"} {
 		b.Run("wait="+spec, func(b *testing.B) { benchSparse(b, spec) })
 	}

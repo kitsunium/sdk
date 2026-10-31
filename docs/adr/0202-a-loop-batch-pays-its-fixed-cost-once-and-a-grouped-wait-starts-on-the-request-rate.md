@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-31
 - **Accepted**: 2026-10-31, on the profile and the A/B runs of a sparse
-  keep-alive load (`BenchmarkLoadSparse`) and the cost benchmarks of the
+  keep-alive load (`BenchmarkSparseKeepAlive`) and the cost benchmarks of the
   loop's batch. It can be revisited while the SDK is v0
   ([ADR 0040](0040-changing-a-published-shape-while-v0.md)).
 - **Deciders**: SDK maintainers
@@ -22,7 +22,7 @@ server's whole path, and about 6 µs more in softirq and wakeups. At that
 load a batch reaps 1.25 to 1.4 completions: what a batch costs whatever it
 serves is paid about 1.6 times a request.
 
-`BenchmarkLoadSparse` reproduces the load: a child serving the http1 chain
+`BenchmarkSparseKeepAlive` reproduces the load: a child serving the http1 chain
 on one loop at `GOMAXPROCS=2`, 10,000 connections, 1,000 requests a second
 each to a connection chosen at random, the child's CPU, context switches,
 batches and its loop thread's wakeups reported a request. Profiled there,
@@ -98,7 +98,7 @@ post-window rule a kernel has), so the row stays as ADR 0199 left it.
 
 ## Measures
 
-`BenchmarkLoadSparse`, `BenchmarkCore_batchClock`, `BenchmarkURingWait_ready`
+`BenchmarkSparseKeepAlive`, `BenchmarkCore_batchClock`, `BenchmarkURingWait_ready`
 and `BenchmarkURingWatchdog_quiet`, run in Docker (linux/arm64, kernel
 7.0.14, one CPU for the child) on a shared host; main against this ADR's
 code, interleaved run by run, benchstat medians.
@@ -109,13 +109,13 @@ code, interleaved run by run, benchstat medians.
 | `Core_batch/open=10000` | 193.7 ns | 117.5 ns | −39 % (p=0.000, n=10) |
 | `URingWait_ready` | 210.2 ns | 3.1 ns | −98.5 % (p=0.000, n=10) |
 | `URingWatchdog_quiet` (16 batches a tick) | 215.2 ns | 16.2 ns | −92.5 % (p=0.000, n=10) |
-| `LoadSparse/wait=4ms` batches a request | 0.304 | 0.210 | −31 % (p=0.008, n=5) |
-| `LoadSparse/wait=4ms` loop wakeups a request | 0.460 | 0.424 | −7.9 % (p=0.008, n=5) |
-| `LoadSparse/wait=4ms` context switches a request | 0.805 | 0.752 | −6.7 % (p=0.008, n=5) |
-| `LoadSparse/wait=1ms` batches a request | 1.53 | 1.47 | ~ (p=0.222, n=5) |
-| `LoadSparse/wait=1ms` loop wakeups a request | 0.949 | 0.909 | ~ (p=1.000, n=5) |
+| `SparseKeepAlive/wait=4ms` batches a request | 0.304 | 0.210 | −31 % (p=0.008, n=5) |
+| `SparseKeepAlive/wait=4ms` loop wakeups a request | 0.460 | 0.424 | −7.9 % (p=0.008, n=5) |
+| `SparseKeepAlive/wait=4ms` context switches a request | 0.805 | 0.752 | −6.7 % (p=0.008, n=5) |
+| `SparseKeepAlive/wait=1ms` batches a request | 1.53 | 1.47 | ~ (p=0.222, n=5) |
+| `SparseKeepAlive/wait=1ms` loop wakeups a request | 0.949 | 0.909 | ~ (p=1.000, n=5) |
 
-The CPU a request of `LoadSparse` stayed inside the host's spread (±10 to
+The CPU a request of `SparseKeepAlive` stayed inside the host's spread (±10 to
 ±40 % between runs, other workloads sharing the host): the cost benchmarks
 are the per-batch gains, the batch and wakeup counts the grouped wait's.
 At 1 ms the rate does not start the wait (an arrival a millisecond), and the
