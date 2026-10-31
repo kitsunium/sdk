@@ -88,6 +88,17 @@ func (w *wheel) disarm(slot int32) {
 	w.at[slot] = 0
 }
 
+// reserve gives the wheel room for c slots, so grow appends without
+// reallocating: the wheel's arrays follow the ring's table step by step.
+func (w *wheel) reserve(c int) {
+	//: already room.
+	if cap(w.at) >= c {
+		//: nothing.
+		return
+	}
+	w.next, w.prev, w.at = growTo(w.next, c), growTo(w.prev, c), growTo(w.at, c)
+}
+
 // grow extends the wheel to n slots, the new ones unarmed.
 func (w *wheel) grow(n int) {
 	//: only ever grows.

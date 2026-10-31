@@ -103,10 +103,12 @@ go_test(
     name = "loop_test",
     srcs = [
         "batch_cost_internal_test.go",
+        "bufs_uring_linux_test.go",
         "conformance_caps_linux_test.go",
         "conformance_caps_uring_linux_test.go",
         "conformance_drain_linux_test.go",
         "conformance_linux_test.go",
+        "conformance_stop_linux_test.go",
         "conformance_uring_linux_test.go",
         "core_internal_test.go",
         "drain_take_linux_test.go",
@@ -114,11 +116,17 @@ go_test(
         "gen_api_test.go",
         "memory_linux_test.go",
         "parts_internal_test.go",
+        "slots_internal_test.go",
         "uring_abi_linux_internal_test.go",
         "uring_wait_linux_test.go",
+        "watchdog_uring_linux_test.go",
     ],
     embed = [":loop"],
     gotags = ["loopdebug"],  # keep
+    # The stop tests open 20,000 connections per backend, twice, and with
+    # them the suite overran .bazelrc's 60 s under coverage on a loaded
+    # runner: four shards, each with its own budget.
+    shard_count = 4,
     # keep
     x_defs = {
         "github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends": "epoll",

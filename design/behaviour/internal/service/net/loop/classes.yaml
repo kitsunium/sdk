@@ -135,6 +135,14 @@ constants:
         name: evictPerTick
         type: int
         value: "16"
+      - doc: |-
+          slotStep is the most slots a ring's table grows by at once: doubling
+          up to it, then by it. Past a few thousand connections append's growth
+          left up to a quarter of the table unused and briefly held the old array
+          beside the new one, about 100 B a slot each.
+        name: slotStep
+        type: int
+        value: "2048"
     name: lowWaterDiv
   - doc: |-
       loopDebug reports whether the loopdebug build tag compiled the thread
@@ -775,6 +783,18 @@ constants:
         name: noEpoch
         type: uint64
         value: 1<<64 - 1
+      - doc: |-
+          closeBackstopTicks is how long a closed slot may wait on an operation
+          after its shutdown was issued before closeBackstop cancels it.
+        name: closeBackstopTicks
+        type: int64
+        value: "100"
+      - doc: |-
+          closingCompact is the fewest looked-at closes compactClosing moves
+          out of a queue that never empties.
+        name: closingCompact
+        type: int
+        value: "1024"
     name: acceptDepth
   - doc: |-
       peerPeekBytes is the release check's read buffer: any read will do, the
@@ -808,14 +828,30 @@ constants:
         name: bufGroup
         type: uint16
         value: "1"
-      - doc: defaultBufs is how many provided buffers a ring has.
+      - doc: |-
+          defaultBufs is how many provided buffers a ring may hand the kernel,
+          its buffer ring's entries. They are mapped at setup and handed out as
+          the ring needs them (uRing.provide): an untouched buffer is no
+          resident memory, so a ring's buffers cost the most it ever had out at
+          once, not this count (ADR 0201 §D1).
         name: defaultBufs
         type: uint32
-        value: "4096"
-      - doc: defaultBufSize is the size of one provided buffer, in bytes.
+        value: "8192"
+      - doc: |-
+          defaultBufSize is the size of one provided buffer, in bytes: an HTTP
+          request of a keep-alive connection fits in one; a larger one arrives
+          over several completions, as a split read always could.
         name: defaultBufSize
         type: uint32
-        value: "4096"
+        value: "2048"
+      - doc: bufsFirst is how many buffers a ring hands the kernel at setup.
+        name: bufsFirst
+        type: uint32
+        value: "512"
+      - doc: bufsStep is the fewest more it hands each time it runs short.
+        name: bufsStep
+        type: uint32
+        value: "512"
       - doc: enterRetries bounds the retries of a busy submit.
         name: enterRetries
         type: int
@@ -877,6 +913,8 @@ files:
       - ringStats
       - loop
       - newRing
+      - slotCap
+      - growTo
       - (*ring).take
       - (*ring).opened
       - (*ring).abandon
@@ -931,6 +969,8 @@ files:
       - listenerSet
       - newListenerSet
       - (*listenerSet).handBack
+      - (*listenerSet).accepted
+      - (*listenerSet).acceptsOf
       - (*listenerSet).closeRest
       - (*listenerSet).close
       - takeAfter
@@ -1097,6 +1137,7 @@ files:
       - udSlot
       - pollFd
       - uRing
+      - closeWait
       - uLoop
       - ringUses
       - uringRunner
@@ -1137,6 +1178,7 @@ files:
       - (*uRing).handle
       - (*uRing).onConnOp
       - (*uRing).onAccept
+      - (*uRing).countAccept
       - (*uRing).acceptFailed
       - (*uRing).takeFailed
       - takeWaits
@@ -1159,17 +1201,23 @@ files:
       - (*uRing).onWake
       - (*uRing).onFan
       - (*uRing).returnBuffers
+      - (*uRing).provide
       - (*uRing).giveBack
       - fillStale
       - (*uRing).rearmStarved
       - (*uRing).flush
       - (*uRing).sendFlight
       - (*uRing).shutdown
+      - (*uRing).closeBackstop
+      - (*uRing).compactClosing
+      - (*uRing).backstop
+      - (*uRing).cancelOp
       - (*uRing).sweep
       - (*uRing).sweepDue
       - (*uRing).cancelOld
       - (*uRing).unread
       - (*uRing).watchdog
+      - (*uRing).stalledOn
       - queued
       - readable
       - listenerQueue
@@ -1195,6 +1243,7 @@ files:
       - (*selfTestRun).exchange
       - (*selfTestRun).onCQE
       - (*selfTestRun).onRecv
+      - (*selfTestRun).countEnd
       - (*selfTestRun).onAccept
       - (*selfTestRun).verdict
       - loopbackListener
@@ -1208,7 +1257,6 @@ files:
       - errnoOfErr
       - (*uring).close
       - (*uring).get
-      - (*uring).reserve
       - (*uring).noArray
       - (*uring).rewind
       - (*uring).deferred
@@ -1226,7 +1274,9 @@ files:
       - (*uring).ready
       - (*uring).reap
       - (*uring).overflowed
+      - (*uring).flushOverflow
       - (*uring).setupBuffers
+      - (*uring).growBufs
       - (*uring).mapBufRing
       - registerBufRing
       - (*uring).bufEntries
@@ -1252,6 +1302,7 @@ files:
       - newWheel
       - (*wheel).arm
       - (*wheel).disarm
+      - (*wheel).reserve
       - (*wheel).grow
       - (*wheel).armed
       - (*wheel).advance
@@ -1285,6 +1336,17 @@ functions:
     name: newRing
     params: lp *loop, i int, drv driver
     results: "*ring"
+  - doc: |-
+      slotCap is the capacity a ring's table of capacity cur grows to: double,
+      64 at least, up to slotStep slots more, never past table.
+    name: slotCap
+    params: cur, table int
+    results: int
+  - doc: growTo returns s with capacity c, its elements copied.
+    name: growTo
+    params: s []T, c int
+    results: "[]T"
+    typeParams: T any
   - doc: |-
       clampConsumed treats an OnData return outside 0 to n as n, as LoopHandler
       documents.
@@ -1613,8 +1675,9 @@ functions:
     params: s *sqe, index uint32, p []byte, ud uint64
   - doc: |-
       prepCancelFixed fills s as a cancel of every operation on direct descriptor
-      index. It is never linked to the close: the close waits for the count. It
-      follows a shutdown, hard-linked, so it cannot cancel the shutdown itself.
+      index. Only the probe's release check uses it, on a ring of a few
+      requests: the kernel finds them by walking every armed request
+      (io_poll_file_find), which a serving ring cannot afford at each close.
     name: prepCancelFixed
     params: s *sqe, index uint32, ud uint64
   - doc: |-
@@ -2281,6 +2344,12 @@ types:
           closeRest.
         name: closed
         type: "[]atomic.Bool"
+      - doc: |-
+          accepts counts each listener's accepted connections, every taker
+          together: io_uring's watchdog reads in it that a listener's queue
+          moves, whichever ring took the connections (ADR 0200 §D1).
+        name: accepts
+        type: "[]atomic.Uint64"
     kind: struct
     methods:
       - doc: |-
@@ -2289,6 +2358,17 @@ types:
         name: handBack
         params: i int
         recv: ls *listenerSet
+      - doc: accepted counts a connection accepted on listener i.
+        name: accepted
+        params: i int
+        recv: ls *listenerSet
+      - doc: |-
+          acceptsOf is how many connections listener i gave so far, every taker
+          together.
+        name: acceptsOf
+        params: i int
+        recv: ls *listenerSet
+        results: uint64
       - doc: closeRest closes every listener no taker closed.
         name: closeRest
         recv: ls *listenerSet
@@ -3189,12 +3269,16 @@ types:
         name: inRing
         type: int
       - doc: |-
-          lastAccept is the tick of the ring's last accept completion; stalls
-          counts the watchdog's re-arms.
+          lastAccept is the tick of the ring's last accept completion, or of the
+          watchdog's last verdict; stalls counts the watchdog's re-arms. seen is,
+          per listener, the group's accepts on it (listenerSet.accepts) when the
+          watchdog last looked.
         name: lastAccept
         type: int64
       - name: stalls
         type: int
+      - name: seen
+        type: "[]uint64"
       - doc: |-
           resumeAt and backoff pace the accepts of a ring on process descriptors
           after EMFILE or ENFILE, as epoll paces its listeners.
@@ -3231,6 +3315,16 @@ types:
       - name: sweepTick
         type: int64
       - name: sweeps
+        type: int
+      - doc: |-
+          closing are the slots whose shutdown was issued, in that order, each
+          with the tick its backstop is due at; closingHead is the first not yet
+          looked at. backstops counts the slots the backstop had to cancel.
+        name: closing
+        type: "[]closeWait"
+      - name: closingHead
+        type: int
+      - name: backstops
         type: int
     kind: struct
     methods:
@@ -3322,6 +3416,12 @@ types:
       - doc: onAccept takes a new direct descriptor into a slot and arms its recv.
         name: onAccept
         params: li int, c *cqe
+        recv: rr *uRing
+      - doc: |-
+          countAccept counts a connection accepted on listener li in the group's
+          set: the listener's queue moved, whatever becomes of the connection.
+        name: countAccept
+        params: li int
         recv: rr *uRing
       - doc: |-
           acceptFailed pauses the ring when an accept failed for want of entries:
@@ -3437,6 +3537,14 @@ types:
         name: returnBuffers
         recv: rr *uRing
       - doc: |-
+          provide hands the kernel buffers it never had when the ring runs short:
+          recvs wait for more than it holds, or it holds under a quarter of those
+          provided. It grows by bufsStep at least, up to the ring's count, and never
+          gives any back: a ring's buffers follow the most it had out at once, its
+          live connections' bursts, rather than its table (ADR 0201 §D1).
+        name: provide
+        recv: rr *uRing
+      - doc: |-
           giveBack adds each buffer the batch handed out back to the ring, filled
           with staleFill under test, and publishes them once.
         name: giveBack
@@ -3458,8 +3566,7 @@ types:
         recv: rr *uRing
       - doc: |-
           shutdown implements driver. Every close goes the same way, whoever asked
-          for it, the peer included: shutdown(SHUT_RDWR) on the descriptor, a cancel
-          of every operation still on it hard-linked behind the shutdown, and the
+          for it, the peer included: shutdown(SHUT_RDWR) on the descriptor, and the
           close once the count of operations in flight reaches zero (maybeClose).
 
           The shutdown is what tells the peer. Before 6.13 a direct descriptor's
@@ -3467,16 +3574,58 @@ types:
           are put strictly in order: one idle connection whose recv was armed early
           holds the file of every later close, and with it the FIN (io_uring/rsrc.c,
           io_rsrc_node_ref_zero, until 6.13 gave each file a node of its own). The
-          shutdown sends the FIN at once and ends this connection's own recv on zero,
-          whatever the put does later; a peer that closed first is shut down too, or
-          the socket would sit in CLOSE_WAIT and its peer in FIN_WAIT2 until the put.
-          The cancel is linked behind the shutdown so it can never cancel it, which
-          the kernel runs in its worker before 6.13; it only ends the sends still in
-          flight. The shutdown is counted and never skips its completion: the close
-          is due when the count reaches zero, not when the recv ends.
+          shutdown sends the FIN at once, whatever the put does later; a peer that
+          closed first is shut down too, or the socket would sit in CLOSE_WAIT and
+          its peer in FIN_WAIT2 until the put.
+
+          The shutdown also ends every operation still on the socket, so no cancel
+          follows it (ADR 0200 §D2). inet_shutdown sets sk_shutdown and calls
+          sk_state_change whatever the state, TCP_CLOSE included
+          (net/ipv4/af_inet.c, 6.8 to 7.0), which wakes every waiter of the socket:
+          the recv retries and ends on zero, a send waiting for room fails with
+          EPIPE. A cancel by descriptor, which the close hard-linked behind the
+          shutdown before, walks every bucket of the ring's poll table at each step
+          (io_uring/poll.c, io_poll_file_find) and every pending io-wq work: one
+          costs every armed request of the ring, a drain of n connections n², and
+          60 000 idle connections took 249 s to stop. Should an operation outlive
+          the shutdown all the same, closeBackstop cancels it by user_data, which
+          looks one hash bucket up, after closeBackstopTicks. The shutdown is
+          counted and never skips its completion: the close is due when the count
+          reaches zero, not when the recv ends.
         name: shutdown
         params: r *ring, slot int32
         recv: rr *uRing
+      - doc: |-
+          closeBackstop cancels, by user_data, the recv and the send of every slot
+          whose shutdown was issued closeBackstopTicks ago and that still waits on
+          an operation: the shutdown ends them (uRing.shutdown), so this only bounds
+          a close the kernel would otherwise hold forever. The slots wait in the
+          order their shutdowns were issued, so the walk stops at the first not due.
+        name: closeBackstop
+        recv: rr *uRing
+      - doc: |-
+          compactClosing drops the closes closeBackstop looked at: all of them once
+          every one was, or, on a ring that closes faster than the backstop's delay
+          and so never empties the queue, the looked-at prefix once it is most of
+          the queue. The queue then holds about a delay's worth of closes, never
+          one entry per close for the ring's life.
+        name: compactClosing
+        recv: rr *uRing
+      - doc: |-
+          backstop cancels the recv, and the send in flight, of w's slot when it is
+          still the same connection and still waits on an operation. It reports
+          false when the SQ had no room.
+        name: backstop
+        params: w closeWait
+        recv: rr *uRing
+        results: bool
+      - doc: |-
+          cancelOp cancels slot's operation op by its user_data, counted, and
+          reports false when the SQ had no room.
+        name: cancelOp
+        params: slot int32, op uint64
+        recv: rr *uRing
+        results: bool
       - doc: |-
           sweep bounds the files a direct descriptor's close leaves pinned where the
           put is deferred (sweepOn, before 6.13): a closed socket, its inode and its
@@ -3525,10 +3674,36 @@ types:
           watchdog re-arms an accept that looks stalled, and drains a ring whose
           accept stays stalled. It acts on an observable stall only: the accept armed
           and not paused, the listener's queue not empty, and no accept completion
-          for watchdogTicks.
+          for watchdogTicks — on this ring, nor on any other ring of the group for
+          that listener. Several rings arm accepts on one listener and the kernel
+          hands each connection to one of them: a ring whose accepts lose the race
+          for a while sees no completion while the queue moves, and judging it alone
+          drained healthy rings one after the other, the last one left taking every
+          connection until its table filled (ADR 0200 §D1).
         name: watchdog
         recv: rr *uRing
+      - doc: |-
+          stalledOn reports whether listener i, fd, stalls for this ring: an accept
+          armed, connections queued, and no accept on it by any ring of the group
+          since the watchdog last looked. A queue that moved starts the window and
+          the re-arms over.
+        name: stalledOn
+        params: i, fd int
+        recv: rr *uRing
+        results: bool
     name: uRing
+  - doc: |-
+      closeWait is a slot whose close waits on its shutdown: its generation then,
+      and the tick its backstop is due at.
+    fields:
+      - name: slot
+        type: int32
+      - name: gen
+        type: uint32
+      - name: at
+        type: int64
+    kind: struct
+    name: closeWait
   - doc: "uLoop is one loop on io_uring: one thread owns every ring."
     fields:
       - name: lp
@@ -3704,11 +3879,12 @@ types:
         recv: ul *uLoop
         results: "*uRing, error"
       - doc: |-
-          bufShape is a ring's provided buffers: how many, and their size, or a
-          test's tiny buffer ring.
+          bufShape is a ring's provided buffers: how many it may have, their size,
+          and how many it starts with; or a test's tiny buffer ring, all of it from
+          the start.
         name: bufShape
         recv: ul *uLoop
-        results: bufs, size uint32
+        results: bufs, size, first uint32
       - doc: |-
           registerFan registers the secondaries' eventfd as ring i's CQ notifier,
           never the Post eventfd; the primary, ring 0, needs none.
@@ -3855,8 +4031,8 @@ types:
         name: accepted
         type: "[]int32"
       - doc: |-
-          done counts the release check's shutdown and cancel completions;
-          closed is its close's.
+          done counts the release check's shutdown and cancel completions and
+          the ends of its recvs; closed is its close's.
         name: done
         type: int
       - name: closed
@@ -3874,9 +4050,9 @@ types:
           nodes in order), which an idle recv never does.
 
           A second connection is closed the way the loop closes: shutdown(SHUT_RDWR),
-          the cancel hard-linked behind it, then close_direct. Its peer must read the
-          end within 200 ms, whatever the put does: that is direct. A third is closed
-          without the shutdown, cancel then close: its peer reads no end where the
+          which ends its recv, then close_direct. Its peer must read the end within
+          200 ms, whatever the put does: that is direct. A third is closed without
+          the shutdown, its recv cancelled then close: its peer reads no end where the
           put waits for the oldest recv, which is deferred, and the rings sweep. A
           check that cannot run judges the loop unable, which only costs capacity:
           connections live in the process table.
@@ -3924,6 +4100,12 @@ types:
           back; a single-shot recv of the payload that ended with bytes is armed
           again.
         name: onRecv
+        params: c *cqe
+        recv: st *selfTestRun
+      - doc: |-
+          countEnd counts a release check's recv that ended, on the shutdown's end
+          or its cancel: its close may go.
+        name: countEnd
         params: c *cqe
         recv: st *selfTestRun
       - doc: |-
@@ -4006,6 +4188,11 @@ types:
         type: uint32
       - name: bufSize
         type: uint32
+      - doc: |-
+          bufProvided is how many buffers, bids 0 to bufProvided-1, the kernel
+          has been given so far; the others were never touched.
+        name: bufProvided
+        type: uint32
       - name: bufTail
         type: uint16
       - name: shadowBid
@@ -4049,14 +4236,6 @@ types:
         name: get
         recv: u *uring
         results: "*sqe"
-      - doc: |-
-          reserve reports whether n SQEs can be taken in a row without get
-          submitting between them, submitting what is queued to make room. A linked
-          chain needs it: a submit in the middle would end the chain early.
-        name: reserve
-        params: n uint32
-        recv: u *uring
-        results: bool
       - doc: "noArray is NO_SQARRAY: there is no SQ array to fill."
         name: noArray
         recv: u *uring
@@ -4150,18 +4329,37 @@ types:
         recv: u *uring
         results: int
       - doc: |-
-          overflowed reports a CQ the kernel had to hold back (NODROP): a submit
-          flushes it.
+          overflowed reports a CQ the kernel had to hold back (NODROP):
+          flushOverflow moves it into the CQ.
         name: overflowed
         recv: u *uring
         results: bool
       - doc: |-
-          setupBuffers maps count buffers of size bytes and registers their ring as
-          group bufGroup. count must be a power of two.
+          flushOverflow submits what is pending and enters with GETEVENTS and
+          min_complete zero, which never blocks: the kernel moves the completions it
+          held back into the CQ only on its wait path (io_cqring_wait, 6.8 to 7.0),
+          never on a plain submit. A secondary ring is otherwise entered only to
+          submit, so a CQ that overflowed there stayed held — every close of a
+          drain on that ring waiting on a completion it never saw.
+        name: flushOverflow
+        recv: u *uring
+      - doc: |-
+          setupBuffers maps count buffers of size bytes, registers their ring as
+          group bufGroup, and hands the kernel the first first of them; growBufs
+          hands it the others. count must be a power of two. The mapping is private
+          and anonymous, so a buffer the kernel was never given is no resident page.
         name: setupBuffers
-        params: count, size uint32
+        params: count, size, first uint32
         recv: u *uring
         results: syscall.Errno
+      - doc: |-
+          growBufs hands the kernel up to n buffers it never had, in bid order,
+          published once, and says how many. Every bid is in the ring at most once,
+          so the ring never holds more than its count.
+        name: growBufs
+        params: n uint32
+        recv: u *uring
+        results: uint32
       - doc: |-
           mapBufRing registers group bufGroup's ring of count entries and maps it.
           It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a ring in user
@@ -4243,6 +4441,12 @@ types:
       - doc: disarm clears slot's timer; an unarmed slot is left as it is.
         name: disarm
         params: slot int32
+        recv: w *wheel
+      - doc: |-
+          reserve gives the wheel room for c slots, so grow appends without
+          reallocating: the wheel's arrays follow the ring's table step by step.
+        name: reserve
+        params: c int
         recv: w *wheel
       - doc: grow extends the wheel to n slots, the new ones unarmed.
         name: grow

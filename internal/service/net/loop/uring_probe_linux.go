@@ -88,9 +88,9 @@ func (ul *uLoop) selfTest(flags uint32) (direct, deferred bool, err error) {
 // nodes in order), which an idle recv never does.
 //
 // A second connection is closed the way the loop closes: shutdown(SHUT_RDWR),
-// the cancel hard-linked behind it, then close_direct. Its peer must read the
-// end within 200 ms, whatever the put does: that is direct. A third is closed
-// without the shutdown, cancel then close: its peer reads no end where the
+// which ends its recv, then close_direct. Its peer must read the end within
+// 200 ms, whatever the put does: that is direct. A third is closed without
+// the shutdown, its recv cancelled then close: its peer reads no end where the
 // put waits for the oldest recv, which is deferred, and the rings sweep. A
 // check that cannot run judges the loop unable, which only costs capacity:
 // connections live in the process table.
@@ -131,22 +131,15 @@ func (st *selfTestRun) victim(port int, shut bool) (sawEnd, ok bool) {
 		return false, false
 	}
 	index := uint32(st.accepted[want-1])
-	//: the chain's two SQEs in a row, never split by a submit.
-	if !st.u.reserve(2) {
-		//: not judged.
-		return false, false
-	}
 	st.done = 0
-	ops := 1
-	//: the loop's close: a shutdown, the cancel hard-linked behind it.
+	//: the loop's close, a shutdown alone, or the cancel of the recv.
 	if shut {
-		s := st.u.get()
-		prepShutdownFixed(s, index, syscall.SHUT_RDWR, udPack(udShutdown, 0, 0))
-		s.flags |= sqeIOHardlink
-		ops = 2
+		prepShutdownFixed(st.u.get(), index, syscall.SHUT_RDWR, udPack(udShutdown, 0, 0))
+	} else {
+		prepCancelFixed(st.u.get(), index, udPack(udCancel, 0, 0))
 	}
-	prepCancelFixed(st.u.get(), index, udPack(udCancel, 0, 0))
-	st.pump(func() bool { return st.done >= ops })
+	//: the shutdown's or the cancel's completion, and the recv's end.
+	st.pump(func() bool { return st.done >= 2 })
 	st.closed = false
 	prepCloseDirect(st.u.get(), index, udPack(udClose, 0, 0))
 	st.pump(func() bool { return st.closed })
@@ -187,7 +180,7 @@ func selfTestRing(flags uint32, direct bool) (*uring, error) {
 		return nil, probeError("self_test "+step, errno)
 	}
 	//: the buffers and the table, as a serving ring has them.
-	if errno := rg.setupBuffers(8, 4096); errno != 0 {
+	if errno := rg.setupBuffers(8, 4096, 8); errno != 0 {
 		rg.close()
 		//: named.
 		return nil, probeError("self_test buf_ring", errno)
@@ -249,8 +242,8 @@ type selfTestRun struct {
 	got []byte
 	// accepted are the release check's direct descriptors, in order.
 	accepted []int32
-	// done counts the release check's shutdown and cancel completions;
-	// closed is its close's.
+	// done counts the release check's shutdown and cancel completions and
+	// the ends of its recvs; closed is its close's.
 	done   int
 	closed bool
 	// mode is how the self-test runs.
@@ -343,6 +336,16 @@ func (st *selfTestRun) onRecv(c *cqe) {
 	//: single-shot, ended with bytes, the payload's.
 	if !st.mode.multishot && c.res > 0 && c.flags&cqeFMore == 0 && udSlot(c.userData) == 0 {
 		st.armRecv(st.index, 0)
+	}
+	st.countEnd(c)
+}
+
+// countEnd counts a release check's recv that ended, on the shutdown's end
+// or its cancel: its close may go.
+func (st *selfTestRun) countEnd(c *cqe) {
+	//: a victim's, final, and no bytes.
+	if udSlot(c.userData) != 0 && c.flags&cqeFMore == 0 && c.res <= 0 {
+		st.done++
 	}
 }
 

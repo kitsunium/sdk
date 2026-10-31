@@ -18,6 +18,11 @@ const (
 	// evictPerTick paces hard-pressure eviction: at most this many idle
 	// connections closed per ring and tick.
 	evictPerTick int = 16
+	// slotStep is the most slots a ring's table grows by at once: doubling
+	// up to it, then by it. Past a few thousand connections append's growth
+	// left up to a quarter of the table unused and briefly held the old array
+	// beside the new one, about 100 B a slot each.
+	slotStep int = 2048
 )
 
 // driver is what a backend does for the core: send a connection's output and
@@ -155,6 +160,21 @@ func newRing(lp *loop, i int, drv driver) *ring {
 	}
 }
 
+// slotCap is the capacity a ring's table of capacity cur grows to: double,
+// 64 at least, up to slotStep slots more, never past table.
+func slotCap(cur, table int) int {
+	//: doubling while small, then a fixed step, bounded by the table.
+	return max(min(max(2*cur, 64), cur+slotStep, table), cur+1)
+}
+
+// growTo returns s with capacity c, its elements copied.
+func growTo[T any](s []T, c int) []T {
+	g := make([]T, len(s), c)
+	copy(g, s)
+	//: grown.
+	return g
+}
+
 // take reserves a slot for a new connection on descriptor fd. It reports
 // false when the ring's table is full; the caller closes fd. The backend
 // registers the slot, then calls opened.
@@ -171,6 +191,12 @@ func (r *ring) take(fd int32) (int32, bool) {
 			return 0, false
 		}
 		slot = int32(len(r.conns))
+		//: full to its capacity: grown by a step, never doubled.
+		if len(r.conns) == cap(r.conns) {
+			c := slotCap(cap(r.conns), r.lp.sz.tableSize)
+			r.conns = growTo(r.conns, c)
+			r.wheel.reserve(c)
+		}
 		r.conns = append(r.conns, emptyConn(0))
 		r.wheel.grow(len(r.conns))
 	}

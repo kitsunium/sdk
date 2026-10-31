@@ -123,12 +123,27 @@ sequences:
           		lruHead: noLink, lruTail: noLink, dirtyHead: noLink,
           		pub: &ringStats{},
           	}
+  - of: slotCap
+    steps:
+      - return: max(min(max(2*cur, 64), cur+slotStep, table), cur+1)
+  - of: growTo
+    steps:
+      - bind: g
+        eval: make([]T, len(s), c)
+      - eval: copy(g, s)
+      - return: g
   - of: (*ring).take
     participants:
       - id: caller
         kind: actor
       - id: (*ring).take
         kind: self
+      - id: slotCap
+        kind: internal
+      - id: growTo
+        kind: internal
+      - id: r.wheel.reserve
+        kind: internal
       - id: r.wheel.grow
         kind: internal
       - id: emptyConn
@@ -154,6 +169,17 @@ sequences:
                   when: len(r.conns) >= r.lp.sz.tableSize
               - set: slot
                 value: int32(len(r.conns))
+              - opt:
+                  do:
+                    - bind: c
+                      eval: slotCap(cap(r.conns), r.lp.sz.tableSize)
+                      to: slotCap
+                    - set: r.conns
+                      to: growTo
+                      value: growTo(r.conns, c)
+                    - eval: r.wheel.reserve(c)
+                      to: r.wheel.reserve
+                  when: len(r.conns) == cap(r.conns)
               - set: r.conns
                 value: append(r.conns, emptyConn(0))
               - eval: r.wheel.grow(len(r.conns))
@@ -1226,7 +1252,7 @@ sequences:
         kind: value
     steps:
       - bind: ls
-        eval: "&listenerSet{fds: fds, left: make([]atomic.Int32, len(fds)), closed: make([]atomic.Bool, len(fds))}"
+        eval: "&listenerSet{fds: fds, left: make([]atomic.Int32, len(fds)), closed: make([]atomic.Bool, len(fds)), accepts: make([]atomic.Uint64, len(fds))}"
       - loop:
           do:
             - eval: ls.left[i].Store(int32(takers))
@@ -1249,6 +1275,28 @@ sequences:
           when: ls.left[i].Add(-1) != 0
       - eval: ls.close(i)
         to: ls.close
+  - of: (*listenerSet).accepted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listenerSet).accepted
+        kind: self
+      - id: ls.accepts[i].Add
+        kind: value
+    steps:
+      - eval: ls.accepts[i].Add(1)
+        to: ls.accepts[i].Add
+  - of: (*listenerSet).acceptsOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listenerSet).acceptsOf
+        kind: self
+      - id: ls.accepts[i].Load
+        kind: value
+    steps:
+      - return: ls.accepts[i].Load()
+        to: ls.accepts[i].Load
   - of: (*listenerSet).closeRest
     participants:
       - id: caller
@@ -4275,12 +4323,12 @@ sequences:
         eval: |-
           &uRing{
           		ul: ul, u: u, armed: make([]int, len(ul.lfds)),
-          		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
+          		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
           	}
       - set: rr.r
         to: newRing
         value: newRing(lp, i, rr)
-      - bind: bufs, size
+      - bind: bufs, size, first
         eval: ul.bufShape()
         to: ul.bufShape
       - opt:
@@ -4290,7 +4338,7 @@ sequences:
             - return: nil, probeError("buf_ring", orErrno(errno, syscall.EOPNOTSUPP))
           init:
             bind: errno
-            eval: u.setupBuffers(bufs, size)
+            eval: u.setupBuffers(bufs, size, first)
             to: u.setupBuffers
           when: errno != 0 || ul.hooks.failStage == "buf_ring"
       - bind: table
@@ -4306,7 +4354,7 @@ sequences:
             to: ul.registerTable
           when: err != nil
       - set: rr.inRing
-        value: int(bufs)
+        value: int(u.bufProvided)
       - set: rr.slotOf
         to: slices
         value: slices.Repeat([]int32{-1}, ul.slotSpace(table))
@@ -4327,9 +4375,9 @@ sequences:
     steps:
       - opt:
           do:
-            - return: ul.hooks.bufs, max(ul.hooks.bufSize, 64)
+            - return: ul.hooks.bufs, max(ul.hooks.bufSize, 64), ul.hooks.bufs
           when: ul.hooks.bufs > 0
-      - return: defaultBufs, defaultBufSize
+      - return: defaultBufs, defaultBufSize, bufsFirst
   - of: (*uLoop).registerFan
     participants:
       - id: caller
@@ -4726,6 +4774,8 @@ sequences:
         kind: internal
       - id: rr.sweep
         kind: internal
+      - id: rr.closeBackstop
+        kind: internal
       - id: lp.h.OnBatchEnd
         kind: value
       - id: lp.endBatch
@@ -4778,6 +4828,8 @@ sequences:
               to: rr.watchdog
             - eval: rr.sweep()
               to: rr.sweep
+            - eval: rr.closeBackstop()
+              to: rr.closeBackstop
           key: _
           range: ul.rings
           value: rr
@@ -4825,7 +4877,7 @@ sequences:
         kind: self
       - id: rr.u.reap
         kind: internal
-      - id: rr.u.submit
+      - id: rr.u.flushOverflow
         kind: internal
     steps:
       - loop:
@@ -4838,8 +4890,8 @@ sequences:
               value: uint64(n)
             - opt:
                 do:
-                  - eval: rr.u.submit()
-                    to: rr.u.submit
+                  - eval: rr.u.flushOverflow()
+                    to: rr.u.flushOverflow
                   - continue: true
                 when: rr.u.overflowed()
             - opt:
@@ -4936,6 +4988,8 @@ sequences:
         kind: internal
       - id: rr.takeFailed
         kind: internal
+      - id: rr.countAccept
+        kind: internal
       - id: lp.grp.rejected.Add
         kind: value
       - id: rr.orphanClose
@@ -4973,6 +5027,8 @@ sequences:
           when: c.res < 0
       - bind: index
         eval: uint32(c.res)
+      - eval: rr.countAccept(li)
+        to: rr.countAccept
       - opt:
           do:
             - eval: lp.grp.rejected.Add(1)
@@ -5000,6 +5056,20 @@ sequences:
         to: rr.armRecv
       - eval: r.opened(slot)
         to: r.opened
+  - of: (*uRing).countAccept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).countAccept
+        kind: self
+      - id: rr.ul.set.accepted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: rr.ul.set.accepted(li)
+              to: rr.ul.set.accepted
+          when: li < len(rr.ul.lfds)
   - of: (*uRing).acceptFailed
     steps:
       - opt:
@@ -5545,6 +5615,8 @@ sequences:
         kind: stdlib
       - id: rr.giveBack
         kind: internal
+      - id: rr.provide
+        kind: internal
       - id: rr.rearmStarved
         kind: internal
     steps:
@@ -5555,8 +5627,28 @@ sequences:
           when: rr.ul.hooks.shuffle
       - eval: rr.giveBack()
         to: rr.giveBack
+      - eval: rr.provide()
+        to: rr.provide
       - eval: rr.rearmStarved()
         to: rr.rearmStarved
+  - of: (*uRing).provide
+    steps:
+      - bind: u
+        eval: rr.u
+      - bind: want
+        eval: len(rr.starved) - rr.inRing
+      - opt:
+          do:
+            - set: want
+              value: max(want, int(bufsStep))
+          when: rr.inRing < int(u.bufProvided)/4
+      - opt:
+          do:
+            - return: ""
+          when: want <= 0
+      - op: +=
+        set: rr.inRing
+        value: int(u.growBufs(max(uint32(want), bufsStep)))
   - of: (*uRing).giveBack
     participants:
       - id: caller
@@ -5689,19 +5781,22 @@ sequences:
         kind: actor
       - id: (*uRing).shutdown
         kind: self
-      - id: rr.maybeClose
-        kind: internal
       - id: rr.u.get
+        kind: internal
+      - id: rr.maybeClose
         kind: internal
       - id: prepShutdownFixed
         kind: internal
       - id: rr.ul.onFD
         kind: internal
-      - id: prepCancelFixed
-        kind: internal
     steps:
       - bind: c
         eval: "&r.conns[slot]"
+      - set: rr.closing
+        value: "append(rr.closing, closeWait{slot: slot, gen: c.gen, at: rr.ul.lp.tick + closeBackstopTicks})"
+      - bind: s
+        eval: rr.u.get()
+        to: rr.u.get
       - opt:
           do:
             - op: ++
@@ -5709,27 +5804,88 @@ sequences:
             - eval: rr.maybeClose(slot)
               to: rr.maybeClose
             - return: ""
-          when: "!rr.u.reserve(2)"
-      - bind: s
-        eval: rr.u.get()
-        to: rr.u.get
+          when: s == nil
       - eval: prepShutdownFixed(s, uint32(c.fd), syscall.SHUT_RDWR, udPack(udShutdown, c.gen, uint32(slot)))
         to: prepShutdownFixed
       - eval: rr.ul.onFD(s)
         to: rr.ul.onFD
-      - op: "|="
-        set: s.flags
-        value: sqeIOHardlink
-      - set: s
-        to: rr.u.get
-        value: rr.u.get()
-      - eval: prepCancelFixed(s, uint32(c.fd), udPack(udCancel, c.gen, uint32(slot)))
-        to: prepCancelFixed
-      - eval: rr.ul.onFD(s)
-        to: rr.ul.onFD
-      - op: +=
+      - op: ++
         set: c.ops
-        value: "2"
+  - of: (*uRing).closeBackstop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).closeBackstop
+        kind: self
+      - id: rr.compactClosing
+        kind: internal
+    steps:
+      - bind: now
+        eval: rr.ul.lp.tick
+      - loop:
+          cond: rr.closingHead < len(rr.closing) && rr.closing[rr.closingHead].at <= now
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: "!rr.backstop(rr.closing[rr.closingHead])"
+            - op: ++
+              set: rr.closingHead
+      - eval: rr.compactClosing()
+        to: rr.compactClosing
+  - of: (*uRing).compactClosing
+    steps:
+      - opt:
+          do:
+            - set: rr.closing, rr.closingHead
+              value: rr.closing[:0], 0
+            - return: ""
+          when: rr.closingHead == len(rr.closing)
+      - opt:
+          do:
+            - bind: "n"
+              eval: copy(rr.closing, rr.closing[rr.closingHead:])
+            - set: rr.closing, rr.closingHead
+              value: rr.closing[:n], 0
+          when: rr.closingHead >= closingCompact && 2*rr.closingHead >= len(rr.closing)
+  - of: (*uRing).backstop
+    steps:
+      - bind: c
+        eval: "&rr.r.conns[w.slot]"
+      - opt:
+          do:
+            - return: "true"
+          when: c.gen != w.gen || c.state != stDead || c.ops == 0
+      - op: ++
+        set: rr.backstops
+      - return: rr.cancelOp(w.slot, udRecv) && (c.flags&fSending == 0 || rr.cancelOp(w.slot, udSend))
+  - of: (*uRing).cancelOp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).cancelOp
+        kind: self
+      - id: rr.u.get
+        kind: internal
+      - id: prepCancelUserData
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&rr.r.conns[slot]"
+      - bind: s
+        eval: rr.u.get()
+        to: rr.u.get
+      - opt:
+          do:
+            - op: ++
+              set: rr.r.st.retries
+            - return: "false"
+          when: s == nil
+      - eval: prepCancelUserData(s, udPack(op, c.gen, uint32(slot)), udPack(udCancel, c.gen, uint32(slot)))
+        to: prepCancelUserData
+      - op: ++
+        set: c.ops
+      - return: "true"
   - of: (*uRing).sweepDue
     participants:
       - id: caller
@@ -5820,27 +5976,50 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: rr.armed[i] == 0 || listenerQueue(fd) == 0
+                when: "!rr.stalledOn(i, fd)"
             - op: ++
               set: rr.r.st.watchdog
             - op: ++
               set: rr.stalls
-            - set: rr.lastAccept
-              value: lp.tick
+            - eval: rr.cancelAccepts()
+              to: rr.cancelAccepts
             - opt:
                 do:
                   - set: rr.r.draining
                     value: "true"
-                  - eval: rr.cancelAccepts()
-                    to: rr.cancelAccepts
-                  - return: ""
                 when: rr.stalls > watchdogFires
-            - eval: rr.cancelAccepts()
-              to: rr.cancelAccepts
             - return: ""
           key: i
           range: rr.ul.lfds
           value: fd
+  - of: (*uRing).stalledOn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).stalledOn
+        kind: self
+      - id: rr.ul.set.acceptsOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: rr.armed[i] == 0 || listenerQueue(fd) == 0
+      - bind: "n"
+        eval: rr.ul.set.acceptsOf(i)
+        to: rr.ul.set.acceptsOf
+      - bind: moved
+        eval: n != rr.seen[i]
+      - set: rr.seen[i]
+        value: "n"
+      - set: rr.lastAccept
+        value: rr.ul.lp.tick
+      - opt:
+          do:
+            - set: rr.stalls
+              value: "0"
+          when: moved
+      - return: "!moved"
   - of: queued
     participants:
       - id: caller
@@ -6227,8 +6406,6 @@ sequences:
         kind: internal
       - id: st.pump
         kind: internal
-      - id: st.u.get
-        kind: internal
       - id: prepShutdownFixed
         kind: internal
       - id: prepCancelFixed
@@ -6257,30 +6434,18 @@ sequences:
           when: len(st.accepted) < want
       - bind: index
         eval: uint32(st.accepted[want-1])
-      - opt:
-          do:
-            - return: false, false
-          when: "!st.u.reserve(2)"
       - set: st.done
         value: "0"
-      - bind: ops
-        eval: "1"
-      - opt:
-          do:
-            - bind: s
-              eval: st.u.get()
-              to: st.u.get
-            - eval: prepShutdownFixed(s, index, syscall.SHUT_RDWR, udPack(udShutdown, 0, 0))
-              to: prepShutdownFixed
-            - op: "|="
-              set: s.flags
-              value: sqeIOHardlink
-            - set: ops
-              value: "2"
-          when: shut
-      - eval: prepCancelFixed(st.u.get(), index, udPack(udCancel, 0, 0))
-        to: prepCancelFixed
-      - eval: st.pump(func() bool { return st.done >= ops })
+      - alt:
+          - do:
+              - eval: prepShutdownFixed(st.u.get(), index, syscall.SHUT_RDWR, udPack(udShutdown, 0, 0))
+                to: prepShutdownFixed
+            when: shut
+          - do:
+              - eval: prepCancelFixed(st.u.get(), index, udPack(udCancel, 0, 0))
+                to: prepCancelFixed
+            else: true
+      - eval: st.pump(func() bool { return st.done >= 2 })
         to: st.pump
       - set: st.closed
         value: "false"
@@ -6355,7 +6520,7 @@ sequences:
             - return: nil, probeError("self_test buf_ring", errno)
           init:
             bind: errno
-            eval: rg.setupBuffers(8, 4096)
+            eval: rg.setupBuffers(8, 4096, 8)
             to: rg.setupBuffers
           when: errno != 0
       - opt:
@@ -6552,6 +6717,8 @@ sequences:
         kind: internal
       - id: st.armRecv
         kind: internal
+      - id: st.countEnd
+        kind: internal
     steps:
       - opt:
           do:
@@ -6567,6 +6734,15 @@ sequences:
             - eval: st.armRecv(st.index, 0)
               to: st.armRecv
           when: "!st.mode.multishot && c.res > 0 && c.flags&cqeFMore == 0 && udSlot(c.userData) == 0"
+      - eval: st.countEnd(c)
+        to: st.countEnd
+  - of: (*selfTestRun).countEnd
+    steps:
+      - opt:
+          do:
+            - op: ++
+              set: st.done
+          when: udSlot(c.userData) != 0 && c.flags&cqeFMore == 0 && c.res <= 0
   - of: (*selfTestRun).onAccept
     participants:
       - id: caller
@@ -6887,27 +7063,6 @@ sequences:
       - op: ++
         set: u.tail
       - return: s
-  - of: (*uring).reserve
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*uring).reserve
-        kind: self
-      - id: u.submit
-        kind: internal
-    steps:
-      - loop:
-          cond: "!u.room(n)"
-          do:
-            - opt:
-                do:
-                  - return: "false"
-                when: i >= enterRetries
-            - eval: u.submit()
-              to: u.submit
-          init: i := 0
-          post: i++
-      - return: "true"
   - of: (*uring).noArray
     steps:
       - return: u.setup&setupNoSQArray != 0
@@ -7156,6 +7311,41 @@ sequences:
   - of: (*uring).overflowed
     steps:
       - return: atomic.LoadUint32(u.sqFlags)&sqCQOverflow != 0
+  - of: (*uring).flushOverflow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).flushOverflow
+        kind: self
+      - id: u.publish
+        kind: internal
+      - id: u.enterTarget
+        kind: internal
+      - id: uringEnterFlags
+        kind: internal
+      - id: u.consumed
+        kind: internal
+    steps:
+      - eval: u.publish()
+        to: u.publish
+      - bind: fd, reg
+        eval: u.enterTarget()
+        to: u.enterTarget
+      - bind: got, errno
+        eval: uringEnterFlags(fd, u.pending(), enterGetEvents|reg)
+        to: uringEnterFlags
+      - switch:
+          cases:
+            - case: "0"
+              do:
+                - eval: u.consumed(uint32(got))
+                  to: u.consumed
+            - case: syscall.EINTR
+            - default: true
+              do:
+                - op: ++
+                  set: u.retries
+          "on": errno
   - of: (*uring).setupBuffers
     participants:
       - id: caller
@@ -7168,9 +7358,7 @@ sequences:
         kind: internal
       - id: u.mapBufRing
         kind: internal
-      - id: u.addBuf
-        kind: internal
-      - id: u.publishBufs
+      - id: u.growBufs
         kind: internal
     steps:
       - bind: bm, err
@@ -7191,15 +7379,38 @@ sequences:
             eval: u.mapBufRing(count)
             to: u.mapBufRing
           when: errno != 0
+      - eval: u.growBufs(min(first, count))
+        to: u.growBufs
+      - return: "0"
+  - of: (*uring).growBufs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).growBufs
+        kind: self
+      - id: u.addBuf
+        kind: internal
+      - id: u.publishBufs
+        kind: internal
+    steps:
+      - set: "n"
+        value: min(n, u.bufCount-u.bufProvided)
       - loop:
+          cond: bid < u.bufProvided+n
           do:
             - eval: u.addBuf(uint16(bid))
               to: u.addBuf
-          key: bid
-          range: count
-      - eval: u.publishBufs()
-        to: u.publishBufs
-      - return: "0"
+          init: bid := u.bufProvided
+          post: bid++
+      - op: +=
+        set: u.bufProvided
+        value: "n"
+      - opt:
+          do:
+            - eval: u.publishBufs()
+              to: u.publishBufs
+          when: n > 0
+      - return: "n"
   - of: (*uring).mapBufRing
     participants:
       - id: caller
@@ -7615,6 +7826,14 @@ sequences:
           when: n != noLink
       - set: w.at[slot]
         value: "0"
+  - of: (*wheel).reserve
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: cap(w.at) >= c
+      - set: w.next, w.prev, w.at
+        value: growTo(w.next, c), growTo(w.prev, c), growTo(w.at, c)
   - of: (*wheel).grow
     steps:
       - loop:

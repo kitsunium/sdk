@@ -52,11 +52,15 @@ type listenerSet struct {
 	// closed is set once a listener is closed, by its last taker or by
 	// closeRest.
 	closed []atomic.Bool
+	// accepts counts each listener's accepted connections, every taker
+	// together: io_uring's watchdog reads in it that a listener's queue
+	// moves, whichever ring took the connections (ADR 0200 §D1).
+	accepts []atomic.Uint64
 }
 
 // newListenerSet shares fds among takers takers.
 func newListenerSet(fds []int, takers int) *listenerSet {
-	ls := &listenerSet{fds: fds, left: make([]atomic.Int32, len(fds)), closed: make([]atomic.Bool, len(fds))}
+	ls := &listenerSet{fds: fds, left: make([]atomic.Int32, len(fds)), closed: make([]atomic.Bool, len(fds)), accepts: make([]atomic.Uint64, len(fds))}
 	//: every listener waits on every taker.
 	for i := range ls.left {
 		ls.left[i].Store(int32(takers))
@@ -74,6 +78,19 @@ func (ls *listenerSet) handBack(i int) {
 		return
 	}
 	ls.close(i)
+}
+
+// accepted counts a connection accepted on listener i.
+func (ls *listenerSet) accepted(i int) {
+	//: one more, whoever took it.
+	ls.accepts[i].Add(1)
+}
+
+// acceptsOf is how many connections listener i gave so far, every taker
+// together.
+func (ls *listenerSet) acceptsOf(i int) uint64 {
+	//: the shared count.
+	return ls.accepts[i].Load()
 }
 
 // closeRest closes every listener no taker closed.

@@ -71,6 +71,12 @@ const (
 	sweepTicks int = 100
 	// noEpoch marks a slot with no recv armed.
 	noEpoch uint64 = 1<<64 - 1
+	// closeBackstopTicks is how long a closed slot may wait on an operation
+	// after its shutdown was issued before closeBackstop cancels it.
+	closeBackstopTicks int64 = 100
+	// closingCompact is the fewest looked-at closes compactClosing moves
+	// out of a queue that never empties.
+	closingCompact int = 1024
 )
 
 // udPack builds a user_data: the operation, 24 bits of generation, the slot.
@@ -135,10 +141,13 @@ type uRing struct {
 	// is re-armed only while some remain, whether or not this batch
 	// returned any.
 	inRing int
-	// lastAccept is the tick of the ring's last accept completion; stalls
-	// counts the watchdog's re-arms.
+	// lastAccept is the tick of the ring's last accept completion, or of the
+	// watchdog's last verdict; stalls counts the watchdog's re-arms. seen is,
+	// per listener, the group's accepts on it (listenerSet.accepts) when the
+	// watchdog last looked.
 	lastAccept int64
 	stalls     int
+	seen       []uint64
 	// resumeAt and backoff pace the accepts of a ring on process descriptors
 	// after EMFILE or ENFILE, as epoll paces its listeners.
 	resumeAt int64
@@ -161,9 +170,23 @@ type uRing struct {
 	lastSweep   int64
 	sweepTick   int64
 	sweeps      int
+	// closing are the slots whose shutdown was issued, in that order, each
+	// with the tick its backstop is due at; closingHead is the first not yet
+	// looked at. backstops counts the slots the backstop had to cancel.
+	closing     []closeWait
+	closingHead int
+	backstops   int
 	// judged is the tick the watchdog last looked at the listeners: once a
 	// tick, not once a batch, since a look is a getsockopt each.
 	judged int64
+}
+
+// closeWait is a slot whose close waits on its shutdown: its generation then,
+// and the tick its backstop is due at.
+type closeWait struct {
+	slot int32
+	gen  uint32
+	at   int64
 }
 
 // uLoop is one loop on io_uring: one thread owns every ring.
@@ -453,12 +476,12 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 	lp := ul.lp
 	rr := &uRing{
 		ul: ul, u: u, armed: make([]int, len(ul.lfds)),
-		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
+		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
 	}
 	rr.r = newRing(lp, i, rr)
-	bufs, size := ul.bufShape()
+	bufs, size, first := ul.bufShape()
 	//: stage 4: provided buffers and the sparse table.
-	if errno := u.setupBuffers(bufs, size); errno != 0 || ul.hooks.failStage == "buf_ring" {
+	if errno := u.setupBuffers(bufs, size, first); errno != 0 || ul.hooks.failStage == "buf_ring" {
 		u.close()
 		//: named.
 		return nil, probeError("buf_ring", orErrno(errno, syscall.EOPNOTSUPP))
@@ -470,7 +493,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 		//: named.
 		return nil, err
 	}
-	rr.inRing = int(bufs)
+	rr.inRing = int(u.bufProvided)
 	rr.slotOf = slices.Repeat([]int32{-1}, ul.slotSpace(table))
 	//: a secondary's completions wake the primary.
 	if err := ul.registerFan(i, u); err != nil {
@@ -483,16 +506,17 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 	return rr, nil
 }
 
-// bufShape is a ring's provided buffers: how many, and their size, or a
-// test's tiny buffer ring.
-func (ul *uLoop) bufShape() (bufs, size uint32) {
+// bufShape is a ring's provided buffers: how many it may have, their size,
+// and how many it starts with; or a test's tiny buffer ring, all of it from
+// the start.
+func (ul *uLoop) bufShape() (bufs, size, first uint32) {
 	//: a test's tiny buffer ring.
 	if ul.hooks.bufs > 0 {
 		//: as the hook asks, 64 bytes at least.
-		return ul.hooks.bufs, max(ul.hooks.bufSize, 64)
+		return ul.hooks.bufs, max(ul.hooks.bufSize, 64), ul.hooks.bufs
 	}
 	//: the defaults.
-	return defaultBufs, defaultBufSize
+	return defaultBufs, defaultBufSize, bufsFirst
 }
 
 // registerFan registers the secondaries' eventfd as ring i's CQ notifier,
@@ -862,6 +886,7 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
 		rr.pace()
 		rr.watchdog()
 		rr.sweep()
+		rr.closeBackstop()
 	}
 	lp.h.OnBatchEnd(lp)
 	lp.endBatch()
@@ -891,9 +916,10 @@ func (rr *uRing) reapAll() {
 	for range reapRounds {
 		n := rr.u.reap(rr.ul.lp.sz.cqBatch, rr.handle)
 		rr.r.st.completions += uint64(n)
-		//: the kernel held completions back: a submit flushes them.
+		//: the kernel held completions back: an enter with GETEVENTS
+		//: flushes them, a plain submit does not.
 		if rr.u.overflowed() {
-			rr.u.submit()
+			rr.u.flushOverflow()
 			continue
 		}
 		//: empty.
@@ -969,6 +995,7 @@ func (rr *uRing) onAccept(li int, c *cqe) {
 		return
 	}
 	index := uint32(c.res)
+	rr.countAccept(li)
 	//: draining, or past MaxConns: accepted and closed.
 	if rr.refuses(index) {
 		lp.grp.rejected.Add(1)
@@ -989,6 +1016,15 @@ func (rr *uRing) onAccept(li int, c *cqe) {
 	rr.backoff = backoffMin
 	rr.armRecv(slot)
 	r.opened(slot)
+}
+
+// countAccept counts a connection accepted on listener li in the group's
+// set: the listener's queue moved, whatever becomes of the connection.
+func (rr *uRing) countAccept(li int) {
+	//: a listener of the loop's.
+	if li < len(rr.ul.lfds) {
+		rr.ul.set.accepted(li)
+	}
 }
 
 // acceptFailed pauses the ring when an accept failed for want of entries:
@@ -1371,7 +1407,28 @@ func (rr *uRing) returnBuffers() {
 		slices.Reverse(rr.recycle)
 	}
 	rr.giveBack()
+	rr.provide()
 	rr.rearmStarved()
+}
+
+// provide hands the kernel buffers it never had when the ring runs short:
+// recvs wait for more than it holds, or it holds under a quarter of those
+// provided. It grows by bufsStep at least, up to the ring's count, and never
+// gives any back: a ring's buffers follow the most it had out at once, its
+// live connections' bursts, rather than its table (ADR 0201 §D1).
+func (rr *uRing) provide() {
+	u := rr.u
+	want := len(rr.starved) - rr.inRing
+	//: low: a step ahead of the next burst.
+	if rr.inRing < int(u.bufProvided)/4 {
+		want = max(want, int(bufsStep))
+	}
+	//: enough.
+	if want <= 0 {
+		//: nothing.
+		return
+	}
+	rr.inRing += int(u.growBufs(max(uint32(want), bufsStep)))
 }
 
 // giveBack adds each buffer the batch handed out back to the ring, filled
@@ -1449,8 +1506,7 @@ func (rr *uRing) sendFlight(slot int32) {
 }
 
 // shutdown implements driver. Every close goes the same way, whoever asked
-// for it, the peer included: shutdown(SHUT_RDWR) on the descriptor, a cancel
-// of every operation still on it hard-linked behind the shutdown, and the
+// for it, the peer included: shutdown(SHUT_RDWR) on the descriptor, and the
 // close once the count of operations in flight reaches zero (maybeClose).
 //
 // The shutdown is what tells the peer. Before 6.13 a direct descriptor's
@@ -1458,31 +1514,109 @@ func (rr *uRing) sendFlight(slot int32) {
 // are put strictly in order: one idle connection whose recv was armed early
 // holds the file of every later close, and with it the FIN (io_uring/rsrc.c,
 // io_rsrc_node_ref_zero, until 6.13 gave each file a node of its own). The
-// shutdown sends the FIN at once and ends this connection's own recv on zero,
-// whatever the put does later; a peer that closed first is shut down too, or
-// the socket would sit in CLOSE_WAIT and its peer in FIN_WAIT2 until the put.
-// The cancel is linked behind the shutdown so it can never cancel it, which
-// the kernel runs in its worker before 6.13; it only ends the sends still in
-// flight. The shutdown is counted and never skips its completion: the close
-// is due when the count reaches zero, not when the recv ends.
+// shutdown sends the FIN at once, whatever the put does later; a peer that
+// closed first is shut down too, or the socket would sit in CLOSE_WAIT and
+// its peer in FIN_WAIT2 until the put.
+//
+// The shutdown also ends every operation still on the socket, so no cancel
+// follows it (ADR 0200 §D2). inet_shutdown sets sk_shutdown and calls
+// sk_state_change whatever the state, TCP_CLOSE included
+// (net/ipv4/af_inet.c, 6.8 to 7.0), which wakes every waiter of the socket:
+// the recv retries and ends on zero, a send waiting for room fails with
+// EPIPE. A cancel by descriptor, which the close hard-linked behind the
+// shutdown before, walks every bucket of the ring's poll table at each step
+// (io_uring/poll.c, io_poll_file_find) and every pending io-wq work: one
+// costs every armed request of the ring, a drain of n connections n², and
+// 60 000 idle connections took 249 s to stop. Should an operation outlive
+// the shutdown all the same, closeBackstop cancels it by user_data, which
+// looks one hash bucket up, after closeBackstopTicks. The shutdown is
+// counted and never skips its completion: the close is due when the count
+// reaches zero, not when the recv ends.
 func (rr *uRing) shutdown(r *ring, slot int32) {
 	c := &r.conns[slot]
-	//: two SQEs in a row, or no chain: the close waits for the operations to
-	//: end by themselves.
-	if !rr.u.reserve(2) {
+	rr.closing = append(rr.closing, closeWait{slot: slot, gen: c.gen, at: rr.ul.lp.tick + closeBackstopTicks})
+	s := rr.u.get()
+	//: no room: the close waits for the operations to end by themselves, or
+	//: for the backstop.
+	if s == nil {
 		r.st.retries++
 		rr.maybeClose(slot)
 		//: later.
 		return
 	}
-	s := rr.u.get()
 	prepShutdownFixed(s, uint32(c.fd), syscall.SHUT_RDWR, udPack(udShutdown, c.gen, uint32(slot)))
 	rr.ul.onFD(s)
-	s.flags |= sqeIOHardlink
-	s = rr.u.get()
-	prepCancelFixed(s, uint32(c.fd), udPack(udCancel, c.gen, uint32(slot)))
-	rr.ul.onFD(s)
-	c.ops += 2
+	c.ops++
+}
+
+// closeBackstop cancels, by user_data, the recv and the send of every slot
+// whose shutdown was issued closeBackstopTicks ago and that still waits on
+// an operation: the shutdown ends them (uRing.shutdown), so this only bounds
+// a close the kernel would otherwise hold forever. The slots wait in the
+// order their shutdowns were issued, so the walk stops at the first not due.
+func (rr *uRing) closeBackstop() {
+	now := rr.ul.lp.tick
+	//: the due ones, oldest first; no room stops at the one that met it.
+	for rr.closingHead < len(rr.closing) && rr.closing[rr.closingHead].at <= now {
+		//: no room: that one again at the next batch.
+		if !rr.backstop(rr.closing[rr.closingHead]) {
+			//: later.
+			break
+		}
+		rr.closingHead++
+	}
+	rr.compactClosing()
+}
+
+// compactClosing drops the closes closeBackstop looked at: all of them once
+// every one was, or, on a ring that closes faster than the backstop's delay
+// and so never empties the queue, the looked-at prefix once it is most of
+// the queue. The queue then holds about a delay's worth of closes, never
+// one entry per close for the ring's life.
+func (rr *uRing) compactClosing() {
+	//: every one looked at: the queue starts over.
+	if rr.closingHead == len(rr.closing) {
+		rr.closing, rr.closingHead = rr.closing[:0], 0
+		//: emptied.
+		return
+	}
+	//: a busy ring: the prefix moved out, in place.
+	if rr.closingHead >= closingCompact && 2*rr.closingHead >= len(rr.closing) {
+		n := copy(rr.closing, rr.closing[rr.closingHead:])
+		rr.closing, rr.closingHead = rr.closing[:n], 0
+	}
+}
+
+// backstop cancels the recv, and the send in flight, of w's slot when it is
+// still the same connection and still waits on an operation. It reports
+// false when the SQ had no room.
+func (rr *uRing) backstop(w closeWait) bool {
+	c := &rr.r.conns[w.slot]
+	//: closed since, or reused.
+	if c.gen != w.gen || c.state != stDead || c.ops == 0 {
+		//: nothing to do.
+		return true
+	}
+	rr.backstops++
+	//: the recv, then the send when one is the kernel's.
+	return rr.cancelOp(w.slot, udRecv) && (c.flags&fSending == 0 || rr.cancelOp(w.slot, udSend))
+}
+
+// cancelOp cancels slot's operation op by its user_data, counted, and
+// reports false when the SQ had no room.
+func (rr *uRing) cancelOp(slot int32, op uint64) bool {
+	c := &rr.r.conns[slot]
+	s := rr.u.get()
+	//: no room.
+	if s == nil {
+		rr.r.st.retries++
+		//: later.
+		return false
+	}
+	prepCancelUserData(s, udPack(op, c.gen, uint32(slot)), udPack(udCancel, c.gen, uint32(slot)))
+	c.ops++
+	//: cancelled, or nothing left to.
+	return true
 }
 
 // sweep bounds the files a direct descriptor's close leaves pinned where the
@@ -1591,7 +1725,12 @@ func (rr *uRing) unread(r *ring, slot int32) bool {
 // watchdog re-arms an accept that looks stalled, and drains a ring whose
 // accept stays stalled. It acts on an observable stall only: the accept armed
 // and not paused, the listener's queue not empty, and no accept completion
-// for watchdogTicks.
+// for watchdogTicks — on this ring, nor on any other ring of the group for
+// that listener. Several rings arm accepts on one listener and the kernel
+// hands each connection to one of them: a ring whose accepts lose the race
+// for a while sees no completion while the queue moves, and judging it alone
+// drained healthy rings one after the other, the last one left taking every
+// connection until its table filled (ADR 0200 §D1).
 func (rr *uRing) watchdog() {
 	lp := rr.ul.lp
 	//: nothing to watch, or already looked at this tick.
@@ -1600,26 +1739,44 @@ func (rr *uRing) watchdog() {
 		return
 	}
 	rr.judged = lp.tick
-	//: any listener with a queue and an armed accept.
+	//: the first listener that stalls.
 	for i, fd := range rr.ul.lfds {
-		//: unarmed accepts are pace's.
-		if rr.armed[i] == 0 || listenerQueue(fd) == 0 {
+		//: armed, queued, and nobody took from it.
+		if !rr.stalledOn(i, fd) {
 			continue
 		}
 		rr.r.st.watchdog++
 		rr.stalls++
-		rr.lastAccept = lp.tick
+		rr.cancelAccepts()
 		//: past the re-arms: the ring drains; the others keep accepting.
 		if rr.stalls > watchdogFires {
 			rr.r.draining = true
-			rr.cancelAccepts()
-			//: drained.
-			return
 		}
-		rr.cancelAccepts()
-		//: re-armed when the cancels complete.
+		//: re-armed when the cancels complete, or drained.
 		return
 	}
+}
+
+// stalledOn reports whether listener i, fd, stalls for this ring: an accept
+// armed, connections queued, and no accept on it by any ring of the group
+// since the watchdog last looked. A queue that moved starts the window and
+// the re-arms over.
+func (rr *uRing) stalledOn(i, fd int) bool {
+	//: unarmed accepts are pace's; an empty queue is idle.
+	if rr.armed[i] == 0 || listenerQueue(fd) == 0 {
+		//: not stalled.
+		return false
+	}
+	n := rr.ul.set.acceptsOf(i)
+	moved := n != rr.seen[i]
+	rr.seen[i] = n
+	rr.lastAccept = rr.ul.lp.tick
+	//: another ring took connections: judged again a window later.
+	if moved {
+		rr.stalls = 0
+	}
+	//: stalled unless it moved.
+	return !moved
 }
 
 // queued is how many connections wait in the listening socket fd's queue:
