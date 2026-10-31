@@ -391,17 +391,20 @@ func (u *uring) submit() {
 // grouped wait's bound (ADR 0199). The kernel wakes the thread once the CQ
 // holds want entries past its head, or when ts runs out, and an ETIME with
 // completions in the CQ returns zero (io_cqring_wait, io_uring/io_uring.c,
-// 6.8 to 7.0); either way the caller reaps what came.
+// 6.8 to 7.0); either way the caller reaps what came. A completion already in
+// the CQ makes it a submit, with no scheduler round trip, and no system call
+// at all when nothing is pending (ADR 0202).
 func (u *uring) wait(ts *kernelTimespec, want uint32) {
+	//: a completion already there: the caller reaps it now.
+	if u.ready() > 0 {
+		u.submit()
+		//: submitted, or nothing to.
+		return
+	}
 	u.publish()
 	arg := getEventsArg{ts: uint64(uintptr(unsafe.Pointer(ts)))}
-	minComplete := max(want, 1)
-	//: a completion already there makes the wait a submit.
-	if u.ready() > 0 {
-		minComplete = 0
-	}
 	fd, reg := u.enterTarget()
-	got, errno := uringEnterWait(fd, u.pending(), minComplete, enterGetEvents|enterExtArg|reg, unsafe.Pointer(&arg), unsafe.Sizeof(arg))
+	got, errno := uringEnterWait(fd, u.pending(), max(want, 1), enterGetEvents|enterExtArg|reg, unsafe.Pointer(&arg), unsafe.Sizeof(arg))
 	//: by outcome; the CQ is peeked by the caller whatever happened.
 	switch errno {
 	//: submitted, and woken.

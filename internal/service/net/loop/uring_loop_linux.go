@@ -161,6 +161,9 @@ type uRing struct {
 	lastSweep   int64
 	sweepTick   int64
 	sweeps      int
+	// judged is the tick the watchdog last looked at the listeners: once a
+	// tick, not once a batch, since a look is a getsockopt each.
+	judged int64
 }
 
 // uLoop is one loop on io_uring: one thread owns every ring.
@@ -804,8 +807,7 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32) {
 		rr.u.submit()
 	}
 	ul.rings[0].u.wait(ts, want)
-	started := time.Now()
-	lp.tick = lp.now()
+	lp.begin()
 	ul.reaped = 0
 	//: every ring, whoever woke the loop.
 	for _, rr := range ul.rings {
@@ -822,7 +824,7 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32) {
 		rr.sweep()
 	}
 	lp.h.OnBatchEnd(lp)
-	lp.endBatch(started)
+	lp.endBatch()
 	//: buffers go back only now: OnBatchEnd has returned.
 	for _, rr := range ul.rings {
 		rr.returnBuffers()
@@ -1551,11 +1553,12 @@ func (rr *uRing) unread(r *ring, slot int32) bool {
 // for watchdogTicks.
 func (rr *uRing) watchdog() {
 	lp := rr.ul.lp
-	//: nothing to watch.
-	if rr.paused || rr.r.draining || lp.draining || lp.tick-rr.lastAccept < watchdogTicks {
+	//: nothing to watch, or already looked at this tick.
+	if rr.paused || rr.r.draining || lp.draining || lp.tick-rr.lastAccept < watchdogTicks || rr.judged == lp.tick {
 		//: healthy, or not judged.
 		return
 	}
+	rr.judged = lp.tick
 	//: any listener with a queue and an armed accept.
 	for i, fd := range rr.ul.lfds {
 		//: unarmed accepts are pace's.
