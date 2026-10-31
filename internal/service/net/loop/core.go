@@ -768,12 +768,6 @@ func (r *ring) compactListed() {
 	r.compact = r.compact[:0]
 }
 
-// now converts the wall clock into the loop's ticks.
-func (lp *loop) now() int64 {
-	//: monotonic, from the loop's start.
-	return int64(time.Since(lp.epoch)/tickEvery) + 1
-}
-
 // lookup resolves ref to its ring and slot, or reports it stale.
 func (lp *loop) lookup(ref corenet.LoopConnRef) (*ring, int32, bool) {
 	//: a ring this loop does not have.

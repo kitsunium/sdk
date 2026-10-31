@@ -1043,9 +1043,6 @@ sequences:
           value: s
       - set: r.compact
         value: r.compact[:0]
-  - of: (*loop).now
-    steps:
-      - return: int64(time.Since(lp.epoch)/tickEvery) + 1
   - of: (*loop).lookup
     steps:
       - opt:

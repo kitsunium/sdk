@@ -955,7 +955,6 @@ files:
       - (*loop).endBatch
       - (*loop).yield
       - (*ring).compactListed
-      - (*loop).now
       - (*loop).lookup
       - (*loop).Write
       - (*loop).growOut
@@ -2282,10 +2281,6 @@ types:
         name: yield
         recv: lp *loop
         results: bool
-      - doc: now converts the wall clock into the loop's ticks.
-        name: now
-        recv: lp *loop
-        results: int64
       - doc: lookup resolves ref to its ring and slot, or reports it stale.
         name: lookup
         params: ref corenet.LoopConnRef
