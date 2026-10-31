@@ -180,7 +180,7 @@ func selfTestRing(flags uint32, direct bool) (*uring, error) {
 		return nil, probeError("self_test "+step, errno)
 	}
 	//: the buffers and the table, as a serving ring has them.
-	if errno := rg.setupBuffers(8, 4096); errno != 0 {
+	if errno := rg.setupBuffers(8, 4096, 8); errno != 0 {
 		rg.close()
 		//: named.
 		return nil, probeError("self_test buf_ring", errno)

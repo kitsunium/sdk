@@ -470,9 +470,9 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
 	}
 	rr.r = newRing(lp, i, rr)
-	bufs, size := ul.bufShape()
+	bufs, size, first := ul.bufShape()
 	//: stage 4: provided buffers and the sparse table.
-	if errno := u.setupBuffers(bufs, size); errno != 0 || ul.hooks.failStage == "buf_ring" {
+	if errno := u.setupBuffers(bufs, size, first); errno != 0 || ul.hooks.failStage == "buf_ring" {
 		u.close()
 		//: named.
 		return nil, probeError("buf_ring", orErrno(errno, syscall.EOPNOTSUPP))
@@ -484,7 +484,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 		//: named.
 		return nil, err
 	}
-	rr.inRing = int(bufs)
+	rr.inRing = int(u.bufProvided)
 	rr.slotOf = slices.Repeat([]int32{-1}, ul.slotSpace(table))
 	//: a secondary's completions wake the primary.
 	if err := ul.registerFan(i, u); err != nil {
@@ -497,16 +497,17 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 	return rr, nil
 }
 
-// bufShape is a ring's provided buffers: how many, and their size, or a
-// test's tiny buffer ring.
-func (ul *uLoop) bufShape() (bufs, size uint32) {
+// bufShape is a ring's provided buffers: how many it may have, their size,
+// and how many it starts with; or a test's tiny buffer ring, all of it from
+// the start.
+func (ul *uLoop) bufShape() (bufs, size, first uint32) {
 	//: a test's tiny buffer ring.
 	if ul.hooks.bufs > 0 {
 		//: as the hook asks, 64 bytes at least.
-		return ul.hooks.bufs, max(ul.hooks.bufSize, 64)
+		return ul.hooks.bufs, max(ul.hooks.bufSize, 64), ul.hooks.bufs
 	}
 	//: the defaults.
-	return defaultBufs, defaultBufSize
+	return defaultBufs, defaultBufSize, bufsFirst
 }
 
 // registerFan registers the secondaries' eventfd as ring i's CQ notifier,
@@ -1363,7 +1364,28 @@ func (rr *uRing) returnBuffers() {
 		slices.Reverse(rr.recycle)
 	}
 	rr.giveBack()
+	rr.provide()
 	rr.rearmStarved()
+}
+
+// provide hands the kernel buffers it never had when the ring runs short:
+// recvs wait for more than it holds, or it holds under a quarter of those
+// provided. It grows by bufsStep at least, up to the ring's count, and never
+// gives any back: a ring's buffers follow the most it had out at once, its
+// live connections' bursts, rather than its table (ADR 0201 §D1).
+func (rr *uRing) provide() {
+	u := rr.u
+	want := len(rr.starved) - rr.inRing
+	//: low: a step ahead of the next burst.
+	if rr.inRing < int(u.bufProvided)/4 {
+		want = max(want, int(bufsStep))
+	}
+	//: enough.
+	if want <= 0 {
+		//: nothing.
+		return
+	}
+	rr.inRing += int(u.growBufs(max(uint32(want), bufsStep)))
 }
 
 // giveBack adds each buffer the batch handed out back to the ring, filled

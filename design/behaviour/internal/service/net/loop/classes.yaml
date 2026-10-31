@@ -135,6 +135,14 @@ constants:
         name: evictPerTick
         type: int
         value: "16"
+      - doc: |-
+          slotStep is the most slots a ring's table grows by at once: doubling
+          up to it, then by it. Past a few thousand connections append's growth
+          left up to a quarter of the table unused and briefly held the old array
+          beside the new one, about 100 B a slot each.
+        name: slotStep
+        type: int
+        value: "2048"
     name: lowWaterDiv
   - doc: |-
       loopDebug reports whether the loopdebug build tag compiled the thread
@@ -820,14 +828,30 @@ constants:
         name: bufGroup
         type: uint16
         value: "1"
-      - doc: defaultBufs is how many provided buffers a ring has.
+      - doc: |-
+          defaultBufs is how many provided buffers a ring may hand the kernel,
+          its buffer ring's entries. They are mapped at setup and handed out as
+          the ring needs them (uRing.provide): an untouched buffer is no
+          resident memory, so a ring's buffers cost the most it ever had out at
+          once, not this count (ADR 0201 §D1).
         name: defaultBufs
         type: uint32
-        value: "4096"
-      - doc: defaultBufSize is the size of one provided buffer, in bytes.
+        value: "8192"
+      - doc: |-
+          defaultBufSize is the size of one provided buffer, in bytes: an HTTP
+          request of a keep-alive connection fits in one; a larger one arrives
+          over several completions, as a split read always could.
         name: defaultBufSize
         type: uint32
-        value: "4096"
+        value: "2048"
+      - doc: bufsFirst is how many buffers a ring hands the kernel at setup.
+        name: bufsFirst
+        type: uint32
+        value: "512"
+      - doc: bufsStep is the fewest more it hands each time it runs short.
+        name: bufsStep
+        type: uint32
+        value: "512"
       - doc: enterRetries bounds the retries of a busy submit.
         name: enterRetries
         type: int
@@ -889,6 +913,8 @@ files:
       - ringStats
       - loop
       - newRing
+      - slotCap
+      - growTo
       - (*ring).take
       - (*ring).opened
       - (*ring).abandon
@@ -1175,6 +1201,7 @@ files:
       - (*uRing).onWake
       - (*uRing).onFan
       - (*uRing).returnBuffers
+      - (*uRing).provide
       - (*uRing).giveBack
       - fillStale
       - (*uRing).rearmStarved
@@ -1249,6 +1276,7 @@ files:
       - (*uring).overflowed
       - (*uring).flushOverflow
       - (*uring).setupBuffers
+      - (*uring).growBufs
       - (*uring).mapBufRing
       - registerBufRing
       - (*uring).bufEntries
@@ -1274,6 +1302,7 @@ files:
       - newWheel
       - (*wheel).arm
       - (*wheel).disarm
+      - (*wheel).reserve
       - (*wheel).grow
       - (*wheel).armed
       - (*wheel).advance
@@ -1307,6 +1336,17 @@ functions:
     name: newRing
     params: lp *loop, i int, drv driver
     results: "*ring"
+  - doc: |-
+      slotCap is the capacity a ring's table of capacity cur grows to: double,
+      64 at least, up to slotStep slots more, never past table.
+    name: slotCap
+    params: cur, table int
+    results: int
+  - doc: growTo returns s with capacity c, its elements copied.
+    name: growTo
+    params: s []T, c int
+    results: "[]T"
+    typeParams: T any
   - doc: |-
       clampConsumed treats an OnData return outside 0 to n as n, as LoopHandler
       documents.
@@ -3497,6 +3537,14 @@ types:
         name: returnBuffers
         recv: rr *uRing
       - doc: |-
+          provide hands the kernel buffers it never had when the ring runs short:
+          recvs wait for more than it holds, or it holds under a quarter of those
+          provided. It grows by bufsStep at least, up to the ring's count, and never
+          gives any back: a ring's buffers follow the most it had out at once, its
+          live connections' bursts, rather than its table (ADR 0201 §D1).
+        name: provide
+        recv: rr *uRing
+      - doc: |-
           giveBack adds each buffer the batch handed out back to the ring, filled
           with staleFill under test, and publishes them once.
         name: giveBack
@@ -3831,11 +3879,12 @@ types:
         recv: ul *uLoop
         results: "*uRing, error"
       - doc: |-
-          bufShape is a ring's provided buffers: how many, and their size, or a
-          test's tiny buffer ring.
+          bufShape is a ring's provided buffers: how many it may have, their size,
+          and how many it starts with; or a test's tiny buffer ring, all of it from
+          the start.
         name: bufShape
         recv: ul *uLoop
-        results: bufs, size uint32
+        results: bufs, size, first uint32
       - doc: |-
           registerFan registers the secondaries' eventfd as ring i's CQ notifier,
           never the Post eventfd; the primary, ring 0, needs none.
@@ -4139,6 +4188,11 @@ types:
         type: uint32
       - name: bufSize
         type: uint32
+      - doc: |-
+          bufProvided is how many buffers, bids 0 to bufProvided-1, the kernel
+          has been given so far; the others were never touched.
+        name: bufProvided
+        type: uint32
       - name: bufTail
         type: uint16
       - name: shadowBid
@@ -4290,12 +4344,22 @@ types:
         name: flushOverflow
         recv: u *uring
       - doc: |-
-          setupBuffers maps count buffers of size bytes and registers their ring as
-          group bufGroup. count must be a power of two.
+          setupBuffers maps count buffers of size bytes, registers their ring as
+          group bufGroup, and hands the kernel the first first of them; growBufs
+          hands it the others. count must be a power of two. The mapping is private
+          and anonymous, so a buffer the kernel was never given is no resident page.
         name: setupBuffers
-        params: count, size uint32
+        params: count, size, first uint32
         recv: u *uring
         results: syscall.Errno
+      - doc: |-
+          growBufs hands the kernel up to n buffers it never had, in bid order,
+          published once, and says how many. Every bid is in the ring at most once,
+          so the ring never holds more than its count.
+        name: growBufs
+        params: n uint32
+        recv: u *uring
+        results: uint32
       - doc: |-
           mapBufRing registers group bufGroup's ring of count entries and maps it.
           It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a ring in user
@@ -4377,6 +4441,12 @@ types:
       - doc: disarm clears slot's timer; an unarmed slot is left as it is.
         name: disarm
         params: slot int32
+        recv: w *wheel
+      - doc: |-
+          reserve gives the wheel room for c slots, so grow appends without
+          reallocating: the wheel's arrays follow the ring's table step by step.
+        name: reserve
+        params: c int
         recv: w *wheel
       - doc: grow extends the wheel to n slots, the new ones unarmed.
         name: grow

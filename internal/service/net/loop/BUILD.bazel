@@ -103,6 +103,7 @@ go_test(
     name = "loop_test",
     srcs = [
         "batch_cost_internal_test.go",
+        "bufs_uring_linux_test.go",
         "conformance_caps_linux_test.go",
         "conformance_caps_uring_linux_test.go",
         "conformance_drain_linux_test.go",
@@ -115,6 +116,7 @@ go_test(
         "gen_api_test.go",
         "memory_linux_test.go",
         "parts_internal_test.go",
+        "slots_internal_test.go",
         "uring_abi_linux_internal_test.go",
         "uring_wait_linux_test.go",
         "watchdog_uring_linux_test.go",
