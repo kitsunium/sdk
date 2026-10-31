@@ -93,6 +93,10 @@ type loopHooks struct {
 	secondaryPlain bool
 	// sweepEvery shortens io_uring's sweep period, in ticks.
 	sweepEvery int64
+	// taken sees the opcode and flags of every SQE a serving io_uring ring
+	// hands the kernel, on the loop's thread: the stop tests count what a
+	// close issues.
+	taken func(op, flags uint8, opFlags uint32)
 }
 
 // Group is a running loop group: its loops, their threads and their rings.

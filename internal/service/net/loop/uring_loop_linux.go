@@ -464,6 +464,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 		return nil, probeError(step, errno)
 	}
 	ul.registerRing(u)
+	u.taken = ul.hooks.taken
 	lp := ul.lp
 	rr := &uRing{
 		ul: ul, u: u, armed: make([]int, len(ul.lfds)),

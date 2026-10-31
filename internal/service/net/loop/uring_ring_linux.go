@@ -83,6 +83,9 @@ type uring struct {
 	// ringIdx is the ring's index among its thread's registered rings
 	// (IORING_REGISTER_RING_FDS), -1 when it is entered by descriptor.
 	ringIdx int32
+	// taken sees every SQE the kernel took, on the ring's thread; nil but in
+	// the stop tests (loopHooks.taken).
+	taken func(op, flags uint8, opFlags uint32)
 }
 
 // openURing sets an io_uring of entries SQEs up with flags, mapping it and building the
@@ -270,11 +273,29 @@ func (u *uring) slot() *sqe {
 // submit leaves the rest at sqes[got:pending], and the kernel starts at 0
 // again: they are moved down, in order, links and all.
 func (u *uring) consumed(got uint32) {
+	//: a stop test counts what the kernel took, before a rewind moves it.
+	if u.taken != nil {
+		u.see(got)
+	}
 	//: the kernel took fewer than were pending.
 	if u.rewind() && got < u.pending() {
 		copy(u.sqes[:u.pending()-got], u.sqes[got:u.pending()])
 	}
 	u.submitted += got
+}
+
+// see hands the got SQEs the kernel just took to taken, oldest first: from
+// SQE 0 under SQ_REWIND, from the last submitted tail otherwise.
+func (u *uring) see(got uint32) {
+	//: in the order they were filled.
+	for i := range got {
+		s := &u.sqes[(u.submitted+i)&u.sqMask]
+		//: the rewind's are where its submit started.
+		if u.rewind() {
+			s = &u.sqes[i]
+		}
+		u.taken(s.opcode, s.flags, s.opFlags)
+	}
 }
 
 // publish hands every filled SQE to the kernel's view of the SQ tail; under
