@@ -15,8 +15,17 @@ import (
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 )
 
+// silentIn reports whether dir holds SILENT, without opening it: a running
+// node removes it, or renames a lowered one over it, and Windows refuses
+// both while another handle has the file open.
+func silentIn(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, fileSilent))
+	return err == nil
+}
+
 // silenceRecordIn reads dir's SILENT: its term and index, ok false when
-// there is none or it is not 16 bytes.
+// there is none or it is not 16 bytes. It opens the file: never while a
+// node may remove or replace it but from that node's own write path.
 func silenceRecordIn(dir string) (term, index uint64, ok bool) {
 	b, err := os.ReadFile(filepath.Join(dir, fileSilent))
 	if err != nil || len(b) != 16 {
@@ -264,7 +273,7 @@ func TestALoweredSilencePointIsOnDiskBeforeItsTruncation(t *testing.T) {
 	start(v)
 	c.net.Isolate(v.id, false)
 	for deadline := time.Now().Add(10 * time.Second); ; {
-		if _, _, silent := silenceRecordIn(v.dir); !silent && cut.Load() != nil {
+		if !silentIn(v.dir) && cut.Load() != nil {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -292,7 +301,7 @@ func TestALoweredSilencePointIsOnDiskBeforeItsTruncation(t *testing.T) {
 	t.Logf("crash state: log last %d, SILENT point %d; the leader's log ends at %d", crashLast, crashPoint, lead.node.Status().Commit)
 	start(restarted)
 	for deadline := time.Now().Add(5 * time.Second); ; {
-		if _, _, silent := silenceRecordIn(dir); !silent {
+		if !silentIn(dir) {
 			break
 		}
 		if time.Now().After(deadline) {
