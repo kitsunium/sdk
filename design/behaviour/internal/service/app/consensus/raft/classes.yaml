@@ -2478,6 +2478,20 @@ types:
           restartLogAt discards the whole log, whose boundary entry does not match
           the snapshot at (idx, t), and restarts it empty on that snapshot: the
           entries dropped are truncated in the Ready and the store compacted to idx.
+
+          A log that held idx under another term lowers a silence's truncation
+          point to idx+1, as a conflicting append does (#792). The snapshot is
+          committed: an entry this node held at idx or past it, those the
+          truncation dropped included, committed, would make this log the
+          committed one through idx (Log Matching), and it is not, so none of them
+          ever counted towards a commit. Only the append path lowered the point,
+          and a node brought onto the leader's snapshot over a tail of an older
+          term kept its old point, past the leader's whole log, and stayed silent
+          in a cluster that wrote nothing. lowerSilence names the point in this
+          Ready, beside the truncation, for the driver to persist first (#793);
+          the rest of the condition holds as after a conflict, the commit #636 and
+          #766 fix under the leader of the node's own term included. A log that
+          ends before idx proves nothing of the entries it lacks.
         name: restartLogAt
         params: idx, t uint64, chainTip uint32
         recv: r *Raft
@@ -3412,7 +3426,8 @@ types:
       - doc: |-
           lowerSilence lowers the truncation point of a silence to first, where
           an append of a leader of a term at least SilentTerm conflicts with this
-          log below that point (#787). The conflict proves that no entry this node
+          log below that point (#787), or past a snapshot installed over a log
+          that held its index under another term (restartLogAt, #792). The conflict proves that no entry this node
           held from first on, those the truncation dropped included, was or will
           be committed with its acknowledgement. Such an entry is of a term at most
           SilentTerm: committed by that term's leader, at any time, it is in the

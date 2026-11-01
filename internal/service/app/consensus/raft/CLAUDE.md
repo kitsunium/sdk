@@ -374,3 +374,16 @@ under coverage before touching `shard_count`.
   carries the truncation, for the driver to persist first
   (`TestALoweredSilencePointSurvivesARestartBeforeTheCommit`,
   `TestOnlyALoweringLeavesInTheReady`; no mutation, the type is full).
+- Keep a silent node's truncation point above a snapshot it installs over
+  a log that held the snapshot's index under another term: the snapshot is
+  committed, so no entry of that log from there on ever counted towards a
+  commit (Log Matching), and a node brought onto the leader's snapshot over
+  a tail of an older term kept a point past the leader's whole log, silent
+  in a cluster that wrote nothing (#792). `restartLogAt` lowers it to the
+  index after the snapshot through `lowerSilence`; a boundary held at its
+  term keeps the suffix for the next append, and a log that ends before the
+  index proves nothing
+  (`TestASilentNodeInstalledOverAnOlderTermsTailEndsItsSilenceInAQuietCluster`,
+  `TestAnInstalledSilencePointSurvivesARestart`,
+  `TestAnInstallLowersTheSilencePointOnlyOverAnotherTerm`; no mutation, the
+  type is full).

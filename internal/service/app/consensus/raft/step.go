@@ -611,7 +611,8 @@ func (r *Raft) appendNew(m *core.MessageValue, start int, prevChain uint32) bool
 
 // lowerSilence lowers the truncation point of a silence to first, where
 // an append of a leader of a term at least SilentTerm conflicts with this
-// log below that point (#787). The conflict proves that no entry this node
+// log below that point (#787), or past a snapshot installed over a log
+// that held its index under another term (restartLogAt, #792). The conflict proves that no entry this node
 // held from first on, those the truncation dropped included, was or will
 // be committed with its acknowledgement. Such an entry is of a term at most
 // SilentTerm: committed by that term's leader, at any time, it is in the

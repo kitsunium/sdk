@@ -442,7 +442,13 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   queues the write (`fileLog.lowerSilence`: the same record, the term
   kept, only lower, never written back once removed;
   `TestALoweredSilencePointIsOnDiskBeforeItsTruncation`,
-  `TestALoweredSilenceKeepsItsRecordsForm`).
+  `TestALoweredSilenceKeepsItsRecordsForm`). Nor finish at a start an
+  install a crash interrupted over a log that held the snapshot's index
+  under another term without lowering SILENT past the snapshot first: raft
+  lowers it on the install's Ready (#792), which the crash never reached,
+  and the start dropped that log under the old point. `finishInstall`
+  lowers it before the log changes, over that log only
+  (`TestAnInterruptedInstallLowersTheSilencePointBeforeTheLog`).
 - Turn a joining stamp into a member's on raft's commit alone: it moves
   when an append is accepted, in memory, and `checkAdmission` wrote the
   stamp on the loop in the turn that handed the storage actor the entries

@@ -781,10 +781,9 @@ func (n *Node) finishInstall(base *coreconsensus.SnapshotMetaValue, first, last 
 	if snapIdx < first {
 		return first, last, nil
 	}
-	match := false
-	if snapIdx <= last {
-		t, terr := n.cfg.Log.Term(snapIdx)
-		match = terr == nil && t == base.Position.Term
+	match, err := n.boundaryMatches(base, last)
+	if err != nil {
+		return first, last, err
 	}
 	if !match {
 		if err := n.cfg.Log.TruncateSuffix(first); err != nil {
@@ -802,6 +801,28 @@ func (n *Node) finishInstall(base *coreconsensus.SnapshotMetaValue, first, last 
 	}
 	newFirst, newLast = n.cfg.Log.Bounds()
 	return newFirst, newLast, nil
+}
+
+// boundaryMatches reports whether the log, which ends at last, holds the
+// snapshot's boundary entry at its term. One it holds under another term
+// lowers a silence's point past the snapshot first, before finishInstall
+// drops that log, as raft's restartLogAt lowers it when the install is not
+// interrupted (#792): a crash after the publication, during the restore,
+// left the old point, and the dropped log too short for it.
+func (n *Node) boundaryMatches(base *coreconsensus.SnapshotMetaValue, last uint64) (bool, error) {
+	snapIdx := base.Position.Index
+	if snapIdx > last {
+		return false, nil
+	}
+	t, terr := n.cfg.Log.Term(snapIdx)
+	if terr != nil || t == base.Position.Term {
+		// A term the log cannot read is no match, and proves nothing.
+		return terr == nil, nil
+	}
+	if err := lowerSilenceIn(n.cfg.Log, snapIdx+1); err != nil {
+		return false, storageFailed("silence condition", err)
+	}
+	return false, nil
 }
 
 // readTail reads the log after the base into memory, MaxBatchBytes at a
@@ -1542,11 +1563,18 @@ func (n *Node) reportNotices(rd *raft.ReadyValue) {
 // reached it, silent in a cluster that wrote nothing (#793). A store that
 // cannot record it stops the node, as every failed write of its disk (D4).
 func (n *Node) lowerSilence(index uint64) {
-	if s, ok := n.cfg.Log.(interface{ lowerSilence(index uint64) error }); ok {
-		if err := s.lowerSilence(index); err != nil {
-			n.stop(storageFailed("lower silence", err), true)
-		}
+	if err := lowerSilenceIn(n.cfg.Log, index); err != nil {
+		n.stop(storageFailed("lower silence", err), true)
 	}
+}
+
+// lowerSilenceIn lowers the silence condition log persists to index; a
+// store that keeps none has nothing to lower.
+func lowerSilenceIn(log coreconsensus.LogStore, index uint64) error {
+	if s, ok := log.(interface{ lowerSilence(index uint64) error }); ok {
+		return s.lowerSilence(index)
+	}
+	return nil
 }
 
 // endSilence persists the end of the silence condition; a store that

@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,11 +13,13 @@ import (
 // SilenceLowered before that Ready's write reaches the store, 0 once a
 // Ready says SilenceEnded. A restart starts the node on it, as silenceOf
 // reads SILENT back. lowered keeps, per node, each lowering with the
-// truncation the same Ready carried.
+// truncation the same Ready carried. A snapshot a Ready asks to send is
+// installed as the driver does (installs counts them).
 type pointNet struct {
 	*silenceNet
-	point   map[core.NodeID]uint64
-	lowered map[core.NodeID][]loweredAt
+	point    map[core.NodeID]uint64
+	lowered  map[core.NodeID][]loweredAt
+	installs int
 }
 
 // loweredAt is one Ready that lowered a silence: the new point and the
@@ -40,6 +43,9 @@ func (h *pointNet) round() int {
 		}
 		out = append(out, rd.Messages...)
 		out = append(out, rd.AfterSync...)
+		for _, to := range rd.SendSnapshot {
+			h.sendSnapshot(r, to)
+		}
 	}
 	n := 0
 	for _, m := range out {
@@ -52,6 +58,31 @@ func (h *pointNet) round() int {
 		}
 	}
 	return n
+}
+
+// sendSnapshot ships r's base to peer to as the driver and the simulator
+// do: the peer checks the offer on its loop and installs it, and r is told
+// the transfer ended.
+func (h *pointNet) sendSnapshot(r *Raft, to core.NodeID) {
+	p := h.nodes[to]
+	if p == nil || h.down[to] || r.role != core.RoleLeader {
+		r.SnapshotDone(to, 0, false)
+		return
+	}
+	idx := r.log.snapIndex
+	eng := r.EngineAt(idx)
+	meta := core.SnapshotMetaValue{
+		ID: fmt.Sprintf("s-%d-%d", r.id, idx), Position: core.PositionValue{Term: r.log.snapTerm, Index: idx},
+		ChainTip: r.log.snapChain, Membership: r.ConfAt(idx), Timing: eng.Timing,
+		ClusterVersion: eng.Cluster, ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
+	}
+	if code := p.CheckOffer(r.id, core.InstallOfferValue{Term: r.term, SnapshotID: meta.ID, Meta: meta}, p.NoTable()); code != 0 {
+		r.SnapshotDone(to, 0, false)
+		return
+	}
+	p.InstallSnapshot(meta)
+	h.installs++
+	r.SnapshotDone(to, idx, true)
 }
 
 // persist does to node id's condition what its driver does with rd.
@@ -233,6 +264,137 @@ func TestOnlyALoweringLeavesInTheReady(t *testing.T) {
 			}
 			if rd.SilenceLowered != tc.want {
 				t.Fatalf("the Ready lowers the point to %d (SilentIndex now %d), want %d", rd.SilenceLowered, r.cfg.SilentIndex, tc.want)
+			}
+		})
+	}
+}
+
+// installedOverTheTail runs olderTailNet with C down while A is elected
+// at term 2 and its no-op at 4 committed, then compacts A's log to 4, as a
+// restart on its newest snapshot or a cut leaves it, and brings C back:
+// A no longer holds the term of index 3, and sends C its snapshot (4, 2).
+func installedOverTheTail(t *testing.T) *pointNet {
+	t.Helper()
+	h := olderTailNet(t, 3)
+	a := h.nodes[1]
+	h.now = t0.Add(3 * time.Second)
+	a.Tick(h.now)
+	h.settle()
+	for range 10 {
+		h.tick(100 * time.Millisecond)
+	}
+	if a.role != core.RoleLeader || a.term != 2 || a.termStart != 4 || a.log.committed != 4 {
+		t.Fatalf("setup: node 1 role %v term %d, term start %d, commit %d", a.role, a.term, a.termStart, a.log.committed)
+	}
+	a.Compact(4)
+	h.settle()
+	if a.log.snapIndex != 4 {
+		t.Fatalf("setup: A's log starts after %d, want 4", a.log.snapIndex)
+	}
+	h.down[3] = false
+	return h
+}
+
+// #792: #791 lowered a silent node's truncation point only on the append
+// path. Brought onto the leader's snapshot instead, over its tail 4..6 of
+// term 1, C dropped that tail in InstallSnapshot (restartLogAt) and kept
+// its point at 7, past A's whole log; A's one no-op, at 5, committed below
+// it, and C stayed silent for as long as nobody wrote: once A failed, B and
+// C elected no one. C held the snapshot's index under another term, so
+// none of its entries from there on ever counted: the install lowers the
+// point to 5, in the Ready that drops the tail, and A's no-op ends the
+// silence.
+func TestASilentNodeInstalledOverAnOlderTermsTailEndsItsSilenceInAQuietCluster(t *testing.T) {
+	h := installedOverTheTail(t)
+	a, c := h.nodes[1], h.nodes[3]
+	for i := 0; i < 300 && c.cfg.SilentIndex != 0; i++ {
+		h.tick(100 * time.Millisecond)
+	}
+	if h.installs == 0 {
+		t.Fatalf("setup: A never sent C a snapshot")
+	}
+	if c.cfg.SilentIndex != 0 || h.point[3] != 0 {
+		t.Fatalf("installed over its tail, C is still silent %d/%d (persisted %d) after 30 s of a quiet cluster: A last %d commit %d, C last %d commit %d",
+			c.cfg.SilentTerm, c.cfg.SilentIndex, h.point[3], a.log.lastIndex(), a.log.committed, c.log.lastIndex(), c.log.committed)
+	}
+	if got := h.lowered[3]; len(got) != 1 || got[0].index != 5 || got[0].truncateFrom == 0 {
+		t.Fatalf("the Readies lowered C's point as %+v, want once to 5, in the Ready that drops the tail", got)
+	}
+	for i := uint64(1); i <= a.log.committed; i++ {
+		want, _ := a.log.term(i)
+		if got, ok := c.log.term(i); i > c.log.snapIndex && (!ok || got != want) {
+			t.Fatalf("C's silence ended with index %d at term %d, A's is %d", i, got, want)
+		}
+	}
+	if l := h.electedWithoutA(); l == nil {
+		t.Fatalf("with A down, B and C elected no one: B role %v, C role %v", h.nodes[2].role, c.role)
+	}
+}
+
+// #792 through #793's path: the point the install lowered is the one C's
+// driver persists, so C restarted before A's no-op is committed to it
+// comes back on 5, not 7, and ends its silence in a quiet cluster.
+func TestAnInstalledSilencePointSurvivesARestart(t *testing.T) {
+	h := installedOverTheTail(t)
+	h.drop = func(m core.MessageValue) bool { return m.To == 3 && m.Kind == core.MsgApp && m.Commit >= 5 }
+	a := h.nodes[1]
+	for range 10 {
+		h.tick(100 * time.Millisecond)
+	}
+	c := h.nodes[3]
+	if h.installs == 0 || c.cfg.SilentIndex != 5 || h.point[3] != 5 || c.log.committed >= 5 {
+		t.Fatalf("setup: installs %d, C silent %d/%d persisted %d commit %d; want the install, the point lowered to 5 and persisted, commit below 5",
+			h.installs, c.cfg.SilentTerm, c.cfg.SilentIndex, h.point[3], c.log.committed)
+	}
+	h.drop = nil
+	c = h.restartC()
+	for i := 0; i < 300 && c.cfg.SilentIndex != 0; i++ {
+		h.tick(100 * time.Millisecond)
+	}
+	if c.cfg.SilentIndex != 0 {
+		t.Fatalf("restarted after the install, C is still silent %d/%d after 30 s of a quiet cluster: A last %d commit %d, C last %d commit %d",
+			c.cfg.SilentTerm, c.cfg.SilentIndex, a.log.lastIndex(), a.log.committed, c.log.lastIndex(), c.log.committed)
+	}
+}
+
+// An install lowers the point only when the log held the snapshot's index
+// under another term, past the snapshot and below the point, for a
+// condition a term reaches: a matching boundary keeps the suffix for the
+// next append to judge, and a log that ends before the index proves
+// nothing of the entries it lacks.
+func TestAnInstallLowersTheSilencePointOnlyOverAnotherTerm(t *testing.T) {
+	cases := []struct {
+		name               string
+		held               int
+		silentTerm, silent uint64
+		snapTerm, snapAt   uint64
+		want               uint64
+	}{
+		{name: "the index held under another term", held: 6, silentTerm: 2, silent: 7, snapTerm: 2, snapAt: 4, want: 5},
+		{name: "the index held at its term", held: 6, silentTerm: 2, silent: 7, snapTerm: 1, snapAt: 4, want: 7},
+		{name: "a log that ends before the index", held: 3, silentTerm: 2, silent: 9, snapTerm: 2, snapAt: 5, want: 9},
+		{name: "a point already past the snapshot", held: 6, silentTerm: 2, silent: 5, snapTerm: 2, snapAt: 4, want: 5},
+		{name: "a condition no term reaches", held: 6, silentTerm: 1 << 62, silent: 7, snapTerm: 2, snapAt: 4, want: 7},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := quietSilenceCfg(3)
+			cfg.SilentTerm, cfg.SilentIndex = tc.silentTerm, tc.silent
+			r := NewRaft(cfg, &StartState{
+				HardState: core.HardState{Term: 2, Commit: 2}, Snapshot: core.SnapshotMetaValue{Membership: testConf(1, 2, 3)},
+				Entries: chainEntries(0, 1, 1, 1, 1, 1, 1, 1)[:tc.held], Now: t0,
+			})
+			r.Ready()
+			r.InstallSnapshot(core.SnapshotMetaValue{Position: core.PositionValue{Term: tc.snapTerm, Index: tc.snapAt}, Membership: testConf(1, 2, 3)})
+			if r.log.snapIndex != tc.snapAt {
+				t.Fatalf("setup: the install left the base at %d, want %d", r.log.snapIndex, tc.snapAt)
+			}
+			rd := r.Ready()
+			if r.cfg.SilentIndex != tc.want {
+				t.Fatalf("SilentIndex %d after the install, want %d", r.cfg.SilentIndex, tc.want)
+			}
+			if lowered := tc.want != tc.silent; (rd.SilenceLowered != 0) != lowered || (lowered && rd.SilenceLowered != tc.want) {
+				t.Fatalf("the Ready lowers the point to %d, want %d (lowered %v)", rd.SilenceLowered, tc.want, lowered)
 			}
 		})
 	}

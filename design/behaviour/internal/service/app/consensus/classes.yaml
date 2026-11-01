@@ -1232,6 +1232,7 @@ files:
       - (*Node).unpublishNewer
       - (*Node).baseOrNoTable
       - (*Node).finishInstall
+      - (*Node).boundaryMatches
       - (*Node).readTail
       - tailLoad
       - (*tailLoad).add
@@ -1275,6 +1276,7 @@ files:
       - (*Node).handleOne
       - (*Node).reportNotices
       - (*Node).lowerSilence
+      - lowerSilenceIn
       - (*Node).endSilence
       - (*Node).queueApply
       - (*Node).answerReady
@@ -2637,6 +2639,12 @@ functions:
     name: baseTerm
     params: logTerm, metaTerm uint64, matched bool, first uint64
     results: uint64, error
+  - doc: |-
+      lowerSilenceIn lowers the silence condition log persists to index; a
+      store that keeps none has nothing to lower.
+    name: lowerSilenceIn
+    params: log coreconsensus.LogStore, index uint64
+    results: error
   - doc: |-
       needsSync reports whether a Ready must be durable before its completion:
       all but one that only carries a commit, which is written lazily (raft's
@@ -6770,6 +6778,17 @@ types:
         params: base *coreconsensus.SnapshotMetaValue, first, last uint64
         recv: n *Node
         results: newFirst, newLast uint64, err error
+      - doc: |-
+          boundaryMatches reports whether the log, which ends at last, holds the
+          snapshot's boundary entry at its term. One it holds under another term
+          lowers a silence's point past the snapshot first, before finishInstall
+          drops that log, as raft's restartLogAt lowers it when the install is not
+          interrupted (#792): a crash after the publication, during the restore,
+          left the old point, and the dropped log too short for it.
+        name: boundaryMatches
+        params: base *coreconsensus.SnapshotMetaValue, last uint64
+        recv: n *Node
+        results: bool, error
       - doc: |-
           readTail reads the log after the base into memory, MaxBatchBytes at a
           time into one slice sized once, each payload kept copied so the step

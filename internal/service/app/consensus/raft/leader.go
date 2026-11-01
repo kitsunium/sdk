@@ -1784,7 +1784,24 @@ func (r *Raft) installEngine(meta *core.SnapshotMetaValue) {
 // restartLogAt discards the whole log, whose boundary entry does not match
 // the snapshot at (idx, t), and restarts it empty on that snapshot: the
 // entries dropped are truncated in the Ready and the store compacted to idx.
+//
+// A log that held idx under another term lowers a silence's truncation
+// point to idx+1, as a conflicting append does (#792). The snapshot is
+// committed: an entry this node held at idx or past it, those the
+// truncation dropped included, committed, would make this log the
+// committed one through idx (Log Matching), and it is not, so none of them
+// ever counted towards a commit. Only the append path lowered the point,
+// and a node brought onto the leader's snapshot over a tail of an older
+// term kept its old point, past the leader's whole log, and stayed silent
+// in a cluster that wrote nothing. lowerSilence names the point in this
+// Ready, beside the truncation, for the driver to persist first (#793);
+// the rest of the condition holds as after a conflict, the commit #636 and
+// #766 fix under the leader of the node's own term included. A log that
+// ends before idx proves nothing of the entries it lacks.
 func (r *Raft) restartLogAt(idx, t uint64, chainTip uint32) {
+	if held, ok := r.log.term(idx); ok && held != t {
+		r.lowerSilence(r.term, idx+1)
+	}
 	if r.log.lastIndex() > r.log.snapIndex {
 		r.truncateFrom(r.log.snapIndex + 1)
 	}

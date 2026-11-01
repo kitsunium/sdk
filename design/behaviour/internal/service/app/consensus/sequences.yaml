@@ -9456,8 +9456,8 @@ sequences:
         kind: actor
       - id: (*Node).finishInstall
         kind: self
-      - id: n.cfg.Log.Term
-        kind: value
+      - id: n.boundaryMatches
+        kind: internal
       - id: n.cfg.Log.TruncateSuffix
         kind: value
       - id: compactLog
@@ -9477,16 +9477,13 @@ sequences:
           do:
             - return: first, last, nil
           when: snapIdx < first
-      - bind: match
-        eval: "false"
+      - bind: match, err
+        eval: n.boundaryMatches(base, last)
+        to: n.boundaryMatches
       - opt:
           do:
-            - bind: t, terr
-              eval: n.cfg.Log.Term(snapIdx)
-              to: n.cfg.Log.Term
-            - set: match
-              value: terr == nil && t == base.Position.Term
-          when: snapIdx <= last
+            - return: first, last, err
+          when: err != nil
       - opt:
           do:
             - opt:
@@ -9522,6 +9519,39 @@ sequences:
         to: n.cfg.Log.Bounds
         value: n.cfg.Log.Bounds()
       - return: newFirst, newLast, nil
+  - of: (*Node).boundaryMatches
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).boundaryMatches
+        kind: self
+      - id: n.cfg.Log.Term
+        kind: value
+      - id: lowerSilenceIn
+        kind: internal
+    steps:
+      - bind: snapIdx
+        eval: base.Position.Index
+      - opt:
+          do:
+            - return: false, nil
+          when: snapIdx > last
+      - bind: t, terr
+        eval: n.cfg.Log.Term(snapIdx)
+        to: n.cfg.Log.Term
+      - opt:
+          do:
+            - return: terr == nil, nil
+          when: terr != nil || t == base.Position.Term
+      - opt:
+          do:
+            - return: false, storageFailed("silence condition", err)
+          init:
+            bind: err
+            eval: lowerSilenceIn(n.cfg.Log, snapIdx+1)
+            to: lowerSilenceIn
+          when: err != nil
+      - return: false, nil
   - of: (*Node).readTail
     participants:
       - id: caller
@@ -10714,26 +10744,38 @@ sequences:
         kind: actor
       - id: (*Node).lowerSilence
         kind: self
-      - id: s.lowerSilence
+      - id: lowerSilenceIn
         kind: internal
       - id: n.stop
         kind: internal
     steps:
       - opt:
           do:
-            - opt:
-                do:
-                  - eval: n.stop(storageFailed("lower silence", err), true)
-                    to: n.stop
-                init:
-                  bind: err
-                  eval: s.lowerSilence(index)
-                  to: s.lowerSilence
-                when: err != nil
+            - eval: n.stop(storageFailed("lower silence", err), true)
+              to: n.stop
+          init:
+            bind: err
+            eval: lowerSilenceIn(n.cfg.Log, index)
+            to: lowerSilenceIn
+          when: err != nil
+  - of: lowerSilenceIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: lowerSilenceIn
+        kind: self
+      - id: s.lowerSilence
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s.lowerSilence(index)
+              to: s.lowerSilence
           init:
             bind: s, ok
-            eval: n.cfg.Log.(interface{ lowerSilence(index uint64) error })
+            eval: log.(interface{ lowerSilence(index uint64) error })
           when: ok
+      - return: nil
   - of: (*Node).endSilence
     participants:
       - id: caller

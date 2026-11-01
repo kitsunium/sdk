@@ -2364,9 +2364,22 @@ sequences:
         kind: actor
       - id: (*Raft).restartLogAt
         kind: self
+      - id: r.log.term
+        kind: internal
+      - id: r.lowerSilence
+        kind: internal
       - id: r.truncateFrom
         kind: internal
     steps:
+      - opt:
+          do:
+            - eval: r.lowerSilence(r.term, idx+1)
+              to: r.lowerSilence
+          init:
+            bind: held, ok
+            eval: r.log.term(idx)
+            to: r.log.term
+          when: ok && held != t
       - opt:
           do:
             - eval: r.truncateFrom(r.log.snapIndex + 1)

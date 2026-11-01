@@ -302,3 +302,70 @@ func TestALoweredSilencePointIsOnDiskBeforeItsTruncation(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// #792, on the install's crash window: an install publishes its snapshot,
+// restores it, and only then moves raft onto it, whose Ready lowers a
+// silence's point over a log that held the snapshot's index under another
+// term. A crash in between, during a restore of seconds, restarted the
+// node on the old point, and finishInstall dropped that log at the start:
+// silent again over a log too short for its point, as in #793. The start
+// now lowers the point past the snapshot before it drops the log, and only
+// over that log: one that holds the index at its term keeps its suffix,
+// and one that ends before the index proves nothing.
+func TestAnInterruptedInstallLowersTheSilencePointBeforeTheLog(t *testing.T) {
+	cases := []struct {
+		name             string
+		held             uint64
+		snapAt, snapTerm uint64
+		silent, want     uint64
+	}{
+		{name: "the index held under another term", held: 6, snapAt: 4, snapTerm: 2, silent: 7, want: 5},
+		{name: "the index held at its term", held: 6, snapAt: 4, snapTerm: 1, silent: 7, want: 7},
+		{name: "a log that ends before the index", held: 3, snapAt: 5, snapTerm: 2, silent: 9, want: 9},
+		{name: "no silence", held: 6, snapAt: 4, snapTerm: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			dd := silenceOpen(t, dir, t.TempDir())
+			defer func() {
+				if err := dd.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			if err := dd.Log().Append(ents(1, tc.held, 1), nil); err != nil {
+				t.Fatal(err)
+			}
+			mustSync(t, dd.Log())
+			if tc.silent != 0 {
+				if err := writeFileSync(filepath.Join(dir, fileSilent), silenceRecord(2, tc.silent)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// The point SILENT holds at each write the start syncs.
+			var seen []uint64
+			dd.d.log.duringSync = func() {
+				_, index, _ := silenceRecordIn(dir)
+				seen = append(seen, index)
+			}
+			n := &Node{cfg: Config{Log: dd.Log()}}
+			first, last := dd.Log().Bounds()
+			base := coreconsensus.SnapshotMetaValue{Position: coreconsensus.PositionValue{Term: tc.snapTerm, Index: tc.snapAt}}
+			if _, _, err := n.finishInstall(&base, first, last); err != nil {
+				t.Fatal(err)
+			}
+			term, index, ok := silenceRecordIn(dir)
+			if ok != (tc.silent != 0) || index != tc.want || (ok && term != 2) {
+				t.Fatalf("after the start SILENT is %d/%d (present %v), want 2/%d", term, index, ok, tc.want)
+			}
+			if tc.want != tc.silent && len(seen) == 0 {
+				t.Fatal("setup: the start synced no write of its log")
+			}
+			for _, at := range seen {
+				if at != tc.want {
+					t.Fatalf("SILENT held the point %d when the start synced its log (%v), want %d before the log changes", at, seen, tc.want)
+				}
+			}
+		})
+	}
+}
