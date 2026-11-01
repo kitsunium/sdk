@@ -1,7 +1,9 @@
 //go:build linux
 
 // Package loop — the stop's cost: a drain or a close of many idle
-// connections takes a time linear in them, on every backend.
+// connections is linear in them, on every backend. What a backend issues is
+// counted where it can be (stopGuard): that is the regression's verdict; the
+// time bound only catches a stop that hangs.
 package loop
 
 import (
@@ -22,39 +24,56 @@ const (
 	// (a cancel by descriptor walks every armed request, ADR 0200 §D2).
 	stopConns int = 20000
 	// stopBound is how long draining or closing stopConns connections may
-	// take, the race detector and coverage on, on a loaded runner: linear,
-	// it takes a fraction of it (0.2 s under Docker, 2.3 s under Bazel
-	// coverage); quadratic, 5 s under Docker on eight CPUs.
-	stopBound time.Duration = 4 * time.Second
+	// take before the test calls it hung. It judges no cost: linear, the stop
+	// takes 0.2 s under Docker and 2.3 s under Bazel coverage, quadratic 5 s
+	// under Docker on eight CPUs, too close to tell apart on a loaded runner.
+	// io_uring's cost is judged by its SQEs (stopGuard), at any speed.
+	stopBound time.Duration = 30 * time.Second
 	// stopDialers is how many goroutines open the connections.
 	stopDialers int = 64
 )
 
+// stopGuard counts what a backend issues to stop a group, where the count
+// tells a linear stop from a quadratic one (stopGuardOf).
+type stopGuard interface {
+	// set hooks the counters into the group's Config.
+	set(c *Config)
+	// check judges the counts once conns connections were stopped.
+	check(t *testing.T, conns int)
+}
+
 // TestConformance_drainBounded drains stopConns idle connections, each heard
-// once, spread over three rings on io_uring: the drain closes them all within
-// stopBound, and every peer reads the end.
+// once, spread over three rings on io_uring: the drain issues what a linear
+// stop issues (stopGuard), returns, and every peer reads the end.
 func TestConformance_drainBounded(t *testing.T) {
 	stopBounded(t, true)
 }
 
 // TestConformance_closeBounded closes the group under stopConns idle
-// connections: Close returns within stopBound, and every peer reads the end.
+// connections: Close issues what a linear stop issues (stopGuard), returns,
+// and every peer reads the end.
 func TestConformance_closeBounded(t *testing.T) {
 	stopBounded(t, false)
 }
 
 // stopBounded holds stopConns heard connections, then drains (drain) or
-// closes the group, and bounds how long that took.
+// closes the group, judges what the backend issued, and calls a stop past
+// stopBound hung.
 func stopBounded(t *testing.T, drain bool) {
 	if lim := descriptorLimit(); lim < uint64(2*stopConns+256) {
 		t.Skipf("RLIMIT_NOFILE %d is too low", lim)
 	}
 	eachBackend(t, func(t *testing.T, b backendCase) {
 		h := &lineH{}
+		guard := stopGuardOf(b)
 		g, addr := serve(t, b, h, func(c *Config) {
 			//: three rings on one listener, as a group past one table is.
 			if b.backend == corenet.LoopBackendIOURing {
 				c.Value.Loops, c.Value.Rings = 1, 3
+			}
+			//: counted where the backend can be.
+			if guard != nil {
+				guard.set(c)
 			}
 		})
 		conns := heardConns(t, addr, stopConns)
@@ -77,7 +96,10 @@ func stopBounded(t *testing.T, drain bool) {
 		took := time.Since(from)
 		t.Logf("kernel %s: %s of %d connections took %v", kernelRelease(), map[bool]string{true: "drain", false: "close"}[drain], stopConns, took)
 		if took > stopBound {
-			t.Fatalf("stopping %d connections took %v, want under %v", stopConns, took, stopBound)
+			t.Fatalf("stopping %d connections took %v: hung, want under %v", stopConns, took, stopBound)
+		}
+		if guard != nil {
+			guard.check(t, stopConns)
 		}
 		readEnds(t, conns)
 	})

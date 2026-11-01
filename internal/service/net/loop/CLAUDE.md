@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-31T12:00:00Z -->
+<!-- updated: 2026-11-01T12:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -321,9 +321,14 @@ reading its echo and a clean end, the listener refusing after; 1 280 queued
 past epoll's batch; and `TestConformance_drainOutOfDescriptors`, a child
 under RLIMIT 64 whose take waits for the drain's closes. The stop's cost
 (`conformance_stop_linux_test.go`, ADR 0200): 20 000 idle connections, heard
-once, on three rings, drained and closed each within 4 s, every peer reading
-the end (0.2 s under Docker on 7.0 with the race detector; 5.15 s for the
-drain with the cancel by descriptor). `watchdog_uring_linux_test.go` pins the
+once, on three rings, drained and closed, every peer reading the end. On
+io_uring the verdict is counted, not timed (`conformance_stop_uring_linux_test.go`):
+`loopHooks.taken` sees every SQE a ring hands the kernel, and the stop must
+issue one shutdown a connection, no cancel by descriptor and no hard link —
+the linked cancel fails it at any speed (20 000 of each). The 30 s bound only
+calls a stop hung: a linear stop takes 0.2 s under Docker on 7.0 with the race
+detector, the quadratic one 3.6 to 5.15 s, too close to tell apart on a
+loaded runner. `watchdog_uring_linux_test.go` pins the
 watchdog's per-listener verdict.
 `conformance_caps_linux_test.go` and `conformance_caps_uring_linux_test.go`
 hold the capabilities (ADR 0189): the report (one row each, no probe defect,

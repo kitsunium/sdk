@@ -126,3 +126,17 @@ workflows:
             - op: ++
               set: rr.sweeps
           when: rr.sweepAt >= len(conns)
+  - of: (*uring).see
+    steps:
+      - loop:
+          do:
+            - bind: s
+              eval: "&u.sqes[(u.submitted+i)&u.sqMask]"
+            - opt:
+                do:
+                  - set: s
+                    value: "&u.sqes[i]"
+                when: u.rewind()
+            - eval: u.taken(s.opcode, s.flags, s.opFlags)
+          key: i
+          range: got

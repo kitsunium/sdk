@@ -1273,6 +1273,7 @@ files:
       - (*uring).room
       - (*uring).slot
       - (*uring).consumed
+      - (*uring).see
       - (*uring).publish
       - (*uring).enterSubmit
       - (*uring).enterTarget
@@ -2751,6 +2752,12 @@ types:
       - doc: sweepEvery shortens io_uring's sweep period, in ticks.
         name: sweepEvery
         type: int64
+      - doc: |-
+          taken sees the opcode and flags of every SQE a serving io_uring ring
+          hands the kernel, on the loop's thread: the stop tests count what a
+          close issues.
+        name: taken
+        type: func(op, flags uint8, opFlags uint32)
     kind: struct
     name: loopHooks
   - fields:
@@ -4263,6 +4270,11 @@ types:
           (IORING_REGISTER_RING_FDS), -1 when it is entered by descriptor.
         name: ringIdx
         type: int32
+      - doc: |-
+          taken sees every SQE the kernel took, on the ring's thread; nil but in
+          the stop tests (loopHooks.taken).
+        name: taken
+        type: func(op, flags uint8, opFlags uint32)
     kind: struct
     methods:
       - doc: |-
@@ -4323,6 +4335,12 @@ types:
           submit leaves the rest at sqes[got:pending], and the kernel starts at 0
           again: they are moved down, in order, links and all.
         name: consumed
+        params: got uint32
+        recv: u *uring
+      - doc: |-
+          see hands the got SQEs the kernel just took to taken, oldest first: from
+          SQE 0 under SQ_REWIND, from the last submitted tail otherwise.
+        name: see
         params: got uint32
         recv: u *uring
       - doc: |-
