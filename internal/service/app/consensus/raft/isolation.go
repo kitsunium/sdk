@@ -4,6 +4,22 @@ import (
 	core "github.com/kitsunium/sdk/internal/core/app/consensus"
 )
 
+// The ways reach departs from the guard's count.
+const (
+	// reachUndenied counts a pin DenyPin withdrew as the key it was (#773).
+	reachUndenied reach = 1 << iota
+	// reachLeaderWhereKnown counts this leader, as any other voucher, only
+	// at the address the stale voter's configuration names: the guard's bet
+	// that it leads on, and dials the voter wherever it moved, left out
+	// (#765).
+	reachLeaderWhereKnown
+	// reachNoBaseBet takes no bet over a compacted log: a voter the
+	// snapshot's base lists is not reached because this leader is listed
+	// before it, which says the voter knows it, not that it knows it as a
+	// voter (#765).
+	reachNoBaseBet
+)
+
 // The causes an IsolationValue carries.
 const (
 	// IsolationStranded is set on a voter #603's guard finds stranded: it no
@@ -34,6 +50,13 @@ const (
 	// the owner's option (b)).
 	IsolationLeaderUnconfirmed
 )
+
+// reach is how the guard counts a stale voter's vouchers, one bit each.
+// Its zero value is the guard's own count, the one every change is judged
+// by; a bit set counts one more voucher than the guard does, or takes one
+// bet less, to tell what a voter's isolation rests on, and decides nothing
+// (isolation).
+type reach uint8
 
 // IsolationValue is a voter this leader may never reach again, and why
 // (#773, #765): one line of Isolated, or of GuardRefusal.
@@ -85,16 +108,16 @@ func (r *Raft) GuardRefusal() []IsolationValue {
 func (r *Raft) isolation(next *core.MembershipValue, v core.NodeID) IsolationFlags {
 	if r.reachedBy(next, v) {
 		var f IsolationFlags
-		if !r.reaches(next, v, reach{leaderWhereKnown: true}) {
+		if !r.reaches(next, v, reachLeaderWhereKnown) {
 			f |= IsolationLeaderMoved
 		}
-		if !r.reaches(next, v, reach{noBaseBet: true}) {
+		if !r.reaches(next, v, reachNoBaseBet) {
 			f |= IsolationLeaderUnconfirmed
 		}
 		return f
 	}
 	f := IsolationStranded
-	if r.reaches(next, v, reach{undenied: true}) {
+	if r.reaches(next, v, reachUndenied) {
 		f |= IsolationPinDenied
 	}
 	return f

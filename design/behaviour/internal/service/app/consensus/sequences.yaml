@@ -10626,9 +10626,7 @@ sequences:
         kind: self
       - id: wire
         kind: package
-      - id: isolatedText
-        kind: internal
-      - id: n.obs.warn
+      - id: n.auditEntry
         kind: internal
     steps:
       - loop:
@@ -10650,28 +10648,41 @@ sequences:
                 do:
                   - continue: true
                 when: err != nil
-            - bind: attrs
-              eval: |-
-                []corelogger.AttrValue{
-                			lattr("index", e.Position.Index), lattr("kind", uint64(e.Kind)), lstr("operator", a.Operator),
-                			lattr("origin", uint64(a.Origin)), lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)),
-                		}
-            - opt:
-                do:
-                  - opt:
-                      do:
-                        - set: attrs
-                          value: append(attrs, lstr("isolated", iso))
-                      init:
-                        bind: iso
-                        eval: isolatedText(n.r.Isolated())
-                        to: isolatedText
-                      when: iso != ""
-                when: isolates(e.Kind, a.Change)
-            - eval: "n.obs.warn(\"consensus: administrative entry appended\", attrs...)"
-              to: n.obs.warn
+            - eval: n.auditEntry(e, &a)
+              to: n.auditEntry
           key: i
           range: rd.Entries
+  - of: (*Node).auditEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).auditEntry
+        kind: self
+      - id: isolatedText
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - bind: attrs
+        eval: |-
+          []corelogger.AttrValue{
+          		lattr("index", e.Position.Index), lattr("kind", uint64(e.Kind)), lstr("operator", a.Operator),
+          		lattr("origin", uint64(a.Origin)), lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)),
+          	}
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: attrs
+                    value: append(attrs, lstr("isolated", iso))
+                init:
+                  bind: iso
+                  eval: isolatedText(n.r.Isolated())
+                  to: isolatedText
+                when: iso != ""
+          when: isolates(e.Kind, a.Change)
+      - eval: "n.obs.warn(\"consensus: administrative entry appended\", attrs...)"
+        to: n.obs.warn
   - of: isolates
     steps:
       - opt:

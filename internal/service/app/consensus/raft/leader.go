@@ -1051,13 +1051,16 @@ func (r *Raft) removalStrands(next *core.MembershipValue, target core.NodeID, wa
 // voter and no cause (#773).
 func (r *Raft) refusesStranding(next *core.MembershipValue) bool {
 	r.guardRefusal = nil
+	if !r.strands(next) {
+		return false
+	}
 	for _, v := range r.judged(next) {
 		if !r.reachedBy(next, v) {
 			had := r.isolation(r.conf(), v) & IsolationPinDenied
 			r.guardRefusal = append(r.guardRefusal, IsolationValue{ID: v, Flags: IsolationStranded | had})
 		}
 	}
-	return len(r.guardRefusal) != 0
+	return true
 }
 
 // neverVoter reports whether id is a learner in every configuration this
@@ -1115,23 +1118,6 @@ func (r *Raft) judged(next *core.MembershipValue) []core.NodeID {
 	return vs
 }
 
-// reach is how the guard counts a stale voter's vouchers. Its zero value is
-// the guard's own count, the one every change is judged by; a field set
-// counts one more voucher than the guard does, to tell what a voter's
-// isolation rests on, and decides nothing (isolation).
-type reach struct {
-	// undenied counts a pin DenyPin withdrew as the key it was (#773).
-	undenied bool
-	// leaderWhereKnown counts this leader, as any other voucher, only at the
-	// address the stale voter's configuration names: the guard's bet that
-	// it leads on, and dials the voter wherever it moved, left out (#765).
-	leaderWhereKnown bool
-	// noBaseBet takes no bet over a compacted log: a voter the snapshot's
-	// base lists is not reached because this leader is listed before it,
-	// which says the voter knows it, not that it knows it as a voter (#765).
-	noBaseBet bool
-}
-
 // reachedBy reports whether voter v, whatever configuration of its past it
 // holds, still knows in next this leader or a voter that would vouch for
 // it. A voter that answers, heard at a match this leader's log still
@@ -1147,13 +1133,13 @@ type reach struct {
 // is unknown: only this leader listed before it, so added before it, is
 // then known to it for sure.
 func (r *Raft) reachedBy(next *core.MembershipValue, v core.NodeID) bool {
-	return r.reaches(next, v, reach{})
+	return r.reaches(next, v, 0)
 }
 
 // reaches is reachedBy with the vouchers counted as how says.
 func (r *Raft) reaches(next *core.MembershipValue, v core.NodeID, how reach) bool {
 	if pr := r.prs[v]; pr != nil && r.answering(v) && pr.match >= r.log.snapIndex {
-		return vouchedAs(next, r.confAt(pr.match), v, r.vouchingLeader(how), how)
+		return vouched(next, r.confAt(pr.match), v, r.vouchingLeader(how), how)
 	}
 	if !r.vouchedInRetained(next, v, how) {
 		return false
@@ -1166,7 +1152,7 @@ func (r *Raft) reaches(next *core.MembershipValue, v core.NodeID, how reach) boo
 	// The bet over a compacted log, kept by the owner's decision on #765:
 	// this leader, added before v, is known to it, as a voter it is
 	// assumed. Isolated names a voter it alone reaches.
-	return !how.noBaseBet && listedBefore(next, r.id, v)
+	return how&reachNoBaseBet == 0 && listedBefore(next, r.id, v)
 }
 
 // vouchedInRetained reports whether v is vouched for in every retained
@@ -1174,11 +1160,11 @@ func (r *Raft) reaches(next *core.MembershipValue, v core.NodeID, how reach) boo
 // says.
 func (r *Raft) vouchedInRetained(next *core.MembershipValue, v core.NodeID, how reach) bool {
 	leader := r.vouchingLeader(how)
-	if !vouchedAs(next, &r.base, v, leader, how) {
+	if !vouched(next, &r.base, v, leader, how) {
 		return false
 	}
 	for k := range r.confs {
-		if !vouchedAs(next, &r.confs[k].m, v, leader, how) {
+		if !vouched(next, &r.confs[k].m, v, leader, how) {
 			return false
 		}
 	}
@@ -1189,7 +1175,7 @@ func (r *Raft) vouchedInRetained(next *core.MembershipValue, v core.NodeID, how 
 // or no member at all when how counts it only where the stale voter knows
 // it, as any other voucher (an ID is never 0).
 func (r *Raft) vouchingLeader(how reach) core.NodeID {
-	if how.leaderWhereKnown {
+	if how&reachLeaderWhereKnown != 0 {
 		return 0
 	}
 	return r.id
@@ -1230,17 +1216,16 @@ func listedBefore(next *core.MembershipValue, first, then core.NodeID) bool {
 // record, and counted as a voucher it let through the removal of the last
 // member a voter down at the time knew, which came back hearing no one
 // (#773).
-func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
-	return vouchedAs(next, known, v, leader, reach{})
-}
-
-// vouchedAs is vouched with the vouchers counted as how says.
-func vouchedAs(next, known *core.MembershipValue, v, leader core.NodeID, how reach) bool {
+//
+// how counts the vouchers as the guard does when 0, the count every change
+// is judged by.
+func vouched(next, known *core.MembershipValue, v, leader core.NodeID, how reach) bool {
 	if _, listed := known.Member(v); !listed {
 		return true
 	}
+	undenied := how&reachUndenied != 0
 	for _, k := range known.Members {
-		if k.ID != v && vouches(next, k, leader, how) {
+		if k.ID != v && vouches(next, k, leader, undenied) {
 			return true
 		}
 	}
@@ -1250,11 +1235,11 @@ func vouchedAs(next, known *core.MembershipValue, v, leader core.NodeID, how rea
 // vouches reports whether k, as a stale voter's configuration lists it,
 // still answers that voter's PreVote in next: a voter of that
 // configuration, pinned there under a non-zero key that next still pins,
-// at the address that configuration names, or at any when it leads. how
-// may count a withdrawn pin back.
-func vouches(next *core.MembershipValue, k core.MemberValue, leader core.NodeID, how reach) bool {
+// at the address that configuration names, or at any when it leads.
+// undenied counts a withdrawn pin back (reachUndenied).
+func vouches(next *core.MembershipValue, k core.MemberValue, leader core.NodeID, undenied bool) bool {
 	m, stays := next.Member(k.ID)
-	return k.Voter && stays && pinnedAs(k.SPKI, m.SPKI, how.undenied) && (k.ID == leader || m.Address == k.Address)
+	return k.Voter && stays && pinnedAs(k.SPKI, m.SPKI, undenied) && (k.ID == leader || m.Address == k.Address)
 }
 
 // pinnedAs reports whether a voucher pinned under known, the key a stale

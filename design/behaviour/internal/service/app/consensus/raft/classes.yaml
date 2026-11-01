@@ -1,6 +1,26 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: The ways reach departs from the guard's count.
+    grouped: true
+    items:
+      - doc: reachUndenied counts a pin DenyPin withdrew as the key it was (#773).
+        name: reachUndenied
+        type: reach
+        value: 1 << iota
+      - doc: |-
+          reachLeaderWhereKnown counts this leader, as any other voucher, only
+          at the address the stale voter's configuration names: the guard's bet
+          that it leads on, and dials the voter wherever it moved, left out
+          (#765).
+        name: reachLeaderWhereKnown
+      - doc: |-
+          reachNoBaseBet takes no bet over a compacted log: a voter the
+          snapshot's base lists is not reached because this leader is listed
+          before it, which says the voter knows it, not that it knows it as a
+          voter (#765).
+        name: reachNoBaseBet
+    name: reachUndenied
   - doc: The causes an IsolationValue carries.
     grouped: true
     items:
@@ -494,7 +514,9 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - reachUndenied
       - IsolationStranded
+      - reach
       - IsolationValue
       - IsolationFlags
       - IsolationFlags.Has
@@ -554,14 +576,12 @@ files:
       - (*Raft).answering
       - (*Raft).strands
       - (*Raft).judged
-      - reach
       - (*Raft).reachedBy
       - (*Raft).reaches
       - (*Raft).vouchedInRetained
       - (*Raft).vouchingLeader
       - listedBefore
       - vouched
-      - vouchedAs
       - vouches
       - pinnedAs
       - (*Raft).updateAddress
@@ -860,21 +880,20 @@ functions:
       record, and counted as a voucher it let through the removal of the last
       member a voter down at the time knew, which came back hearing no one
       (#773).
+
+      how counts the vouchers as the guard does when 0, the count every change
+      is judged by.
     name: vouched
-    params: next, known *core.MembershipValue, v, leader core.NodeID
-    results: bool
-  - doc: vouchedAs is vouched with the vouchers counted as how says.
-    name: vouchedAs
     params: next, known *core.MembershipValue, v, leader core.NodeID, how reach
     results: bool
   - doc: |-
       vouches reports whether k, as a stale voter's configuration lists it,
       still answers that voter's PreVote in next: a voter of that
       configuration, pinned there under a non-zero key that next still pins,
-      at the address that configuration names, or at any when it leads. how
-      may count a withdrawn pin back.
+      at the address that configuration names, or at any when it leads.
+      undenied counts a withdrawn pin back (reachUndenied).
     name: vouches
-    params: next *core.MembershipValue, k core.MemberValue, leader core.NodeID, how reach
+    params: next *core.MembershipValue, k core.MemberValue, leader core.NodeID, undenied bool
     results: bool
   - doc: |-
       pinnedAs reports whether a voucher pinned under known, the key a stale
@@ -992,6 +1011,15 @@ package:
   name: raft
   purpose: "Package raft is the consensus engine's step function (ADR 0152 D15): a value with no goroutine, no I/O and no clock."
 types:
+  - doc: |-
+      reach is how the guard counts a stale voter's vouchers, one bit each.
+      Its zero value is the guard's own count, the one every change is judged
+      by; a bit set counts one more voucher than the guard does, or takes one
+      bet less, to tell what a voter's isolation rests on, and decides nothing
+      (isolation).
+    kind: named
+    name: reach
+    underlying: uint8
   - fields:
       - doc: ID is the voter.
         name: ID
@@ -1011,29 +1039,6 @@ types:
         results: bool
     name: IsolationFlags
     underlying: uint8
-  - doc: |-
-      reach is how the guard counts a stale voter's vouchers. Its zero value is
-      the guard's own count, the one every change is judged by; a field set
-      counts one more voucher than the guard does, to tell what a voter's
-      isolation rests on, and decides nothing (isolation).
-    fields:
-      - doc: undenied counts a pin DenyPin withdrew as the key it was (#773).
-        name: undenied
-        type: bool
-      - doc: |-
-          leaderWhereKnown counts this leader, as any other voucher, only at the
-          address the stale voter's configuration names: the guard's bet that
-          it leads on, and dials the voter wherever it moved, left out (#765).
-        name: leaderWhereKnown
-        type: bool
-      - doc: |-
-          noBaseBet takes no bet over a compacted log: a voter the snapshot's
-          base lists is not reached because this leader is listed before it,
-          which says the voter knows it, not that it knows it as a voter (#765).
-        name: noBaseBet
-        type: bool
-    kind: struct
-    name: reach
   - doc: |-
       fwdKey names one submission: the follower that forwarded it and its
       submission id, which never repeats across the follower's restarts (R7-23).

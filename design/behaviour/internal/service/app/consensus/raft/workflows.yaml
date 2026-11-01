@@ -99,6 +99,10 @@ workflows:
     steps:
       - set: r.guardRefusal
         value: nil
+      - opt:
+          do:
+            - return: "false"
+          when: "!r.strands(next)"
       - loop:
           do:
             - opt:
@@ -111,7 +115,7 @@ workflows:
           key: _
           range: r.judged(next)
           value: v
-      - return: len(r.guardRefusal) != 0
+      - return: "true"
   - of: (*Raft).judged
     steps:
       - var:

@@ -84,13 +84,13 @@ sequences:
                   - op: "|="
                     set: f
                     value: IsolationLeaderMoved
-                when: "!r.reaches(next, v, reach{leaderWhereKnown: true})"
+                when: "!r.reaches(next, v, reachLeaderWhereKnown)"
             - opt:
                 do:
                   - op: "|="
                     set: f
                     value: IsolationLeaderUnconfirmed
-                when: "!r.reaches(next, v, reach{noBaseBet: true})"
+                when: "!r.reaches(next, v, reachNoBaseBet)"
             - return: f
           when: r.reachedBy(next, v)
       - bind: f
@@ -100,7 +100,7 @@ sequences:
             - op: "|="
               set: f
               value: IsolationPinDenied
-          when: "r.reaches(next, v, reach{undenied: true})"
+          when: r.reaches(next, v, reachUndenied)
       - return: f
   - of: (*Raft).becomeLeader
     participants:
@@ -1540,7 +1540,7 @@ sequences:
       - id: r.reaches
         kind: internal
     steps:
-      - return: r.reaches(next, v, reach{})
+      - return: r.reaches(next, v, 0)
         to: r.reaches
   - of: (*Raft).reaches
     participants:
@@ -1548,15 +1548,15 @@ sequences:
         kind: actor
       - id: (*Raft).reaches
         kind: self
-      - id: vouchedAs
+      - id: vouched
         kind: internal
       - id: r.base.Member
         kind: value
     steps:
       - opt:
           do:
-            - return: vouchedAs(next, r.confAt(pr.match), v, r.vouchingLeader(how), how)
-              to: vouchedAs
+            - return: vouched(next, r.confAt(pr.match), v, r.vouchingLeader(how), how)
+              to: vouched
           init:
             bind: pr
             eval: r.prs[v]
@@ -1573,7 +1573,7 @@ sequences:
             eval: r.base.Member(v)
             to: r.base.Member
           when: "!listed || r.log.snapIndex == 0"
-      - return: "!how.noBaseBet && listedBefore(next, r.id, v)"
+      - return: how&reachNoBaseBet == 0 && listedBefore(next, r.id, v)
   - of: (*Raft).vouchedInRetained
     participants:
       - id: caller
@@ -1589,13 +1589,13 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: "!vouchedAs(next, &r.base, v, leader, how)"
+          when: "!vouched(next, &r.base, v, leader, how)"
       - loop:
           do:
             - opt:
                 do:
                   - return: "false"
-                when: "!vouchedAs(next, &r.confs[k].m, v, leader, how)"
+                when: "!vouched(next, &r.confs[k].m, v, leader, how)"
           key: k
           range: r.confs
       - return: "true"
@@ -1604,24 +1604,13 @@ sequences:
       - opt:
           do:
             - return: "0"
-          when: how.leaderWhereKnown
+          when: how&reachLeaderWhereKnown != 0
       - return: r.id
   - of: vouched
     participants:
       - id: caller
         kind: actor
       - id: vouched
-        kind: self
-      - id: vouchedAs
-        kind: internal
-    steps:
-      - return: vouchedAs(next, known, v, leader, reach{})
-        to: vouchedAs
-  - of: vouchedAs
-    participants:
-      - id: caller
-        kind: actor
-      - id: vouchedAs
         kind: self
       - id: known.Member
         kind: value
@@ -1634,12 +1623,14 @@ sequences:
             eval: known.Member(v)
             to: known.Member
           when: "!listed"
+      - bind: undenied
+        eval: how&reachUndenied != 0
       - loop:
           do:
             - opt:
                 do:
                   - return: "true"
-                when: k.ID != v && vouches(next, k, leader, how)
+                when: k.ID != v && vouches(next, k, leader, undenied)
           key: _
           range: known.Members
           value: k
@@ -1656,7 +1647,7 @@ sequences:
       - bind: m, stays
         eval: next.Member(k.ID)
         to: next.Member
-      - return: k.Voter && stays && pinnedAs(k.SPKI, m.SPKI, how.undenied) && (k.ID == leader || m.Address == k.Address)
+      - return: k.Voter && stays && pinnedAs(k.SPKI, m.SPKI, undenied) && (k.ID == leader || m.Address == k.Address)
   - of: pinnedAs
     steps:
       - var:

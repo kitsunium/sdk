@@ -38,16 +38,16 @@ func TestVouchedNeedsTheVoterAtTheAddressTheStaleVoterKnows(t *testing.T) {
 	}
 	known := at(testConf(1, 2, 3), "a1", "a2", "a3")
 	next := at(testConf(1, 2, 4), "a1", "a2-moved", "a4")
-	if vouched(&next, &known, 1, 4) {
+	if vouched(&next, &known, 1, 4, 0) {
 		t.Error("a voter knowing 2 at a2 and 3, which left, was taken as reachable once 2 moved to a2-moved")
 	}
 	next = at(testConf(1, 2, 4), "a1", "a2", "a4")
-	if !vouched(&next, &known, 1, 4) {
+	if !vouched(&next, &known, 1, 4, 0) {
 		t.Error("a voter knowing 2 at the address 2 still serves was taken as stranded")
 	}
 	known = at(testConf(1, 2, 4), "a1", "a2", "a4")
 	next = at(testConf(1, 2, 4), "a1", "a2-moved", "a4-moved")
-	if !vouched(&next, &known, 1, 4) {
+	if !vouched(&next, &known, 1, 4, 0) {
 		t.Error("a voter listing the leader at its old address was taken as stranded: the leader dials it")
 	}
 }

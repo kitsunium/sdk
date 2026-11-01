@@ -1303,6 +1303,7 @@ files:
       - (*Node).applyMoved
       - (*Node).wakeLoop
       - (*Node).auditAppended
+      - (*Node).auditEntry
       - isolates
       - (*Node).stopOnUnsupported
       - (*Node).sendMessages
@@ -7117,6 +7118,14 @@ types:
           and the line names 0 (#561).
         name: auditAppended
         params: rd *raft.ReadyValue
+        recv: n *Node
+      - doc: |-
+          auditEntry is auditAppended's line for one engine entry e this leader
+          appended, a its payload: the operator, the origin, the change and its
+          target, and for a change that may leave a stopped voter isolated every
+          voter the configuration it leads to isolates, and why (isolates).
+        name: auditEntry
+        params: e *coreconsensus.EntryValue, a *wire.AdminValue
         recv: n *Node
       - doc: |-
           stopOnUnsupported stops the node with VERSION_UNSUPPORTED when a Ready

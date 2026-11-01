@@ -6828,8 +6828,8 @@ side, as #763's option (b) would.
   reaches only through this leader known at another address
   `IsolationLeaderMoved`, and one it reaches only on the compacted log's
   bet `IsolationLeaderUnconfirmed`. Each is the guard's own `reachedBy`
-  with one bet left out (`reach.leaderWhereKnown`, the leader counted as
-  any other voucher; `reach.noBaseBet`), and decides nothing.
+  with one bet left out (`reachLeaderWhereKnown`, the leader counted as
+  any other voucher; `reachNoBaseBet`), and decides nothing.
 - **Where it is said.** In the status: `PeerLeaderMoved` and
   `PeerLeaderUnconfirmed`, bits 32 and 64 of `PeerFlags`, added and
   re-exported. In the audit: the `isolated` attribute of the leader's
