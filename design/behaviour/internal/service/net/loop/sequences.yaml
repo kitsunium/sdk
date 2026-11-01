@@ -4317,6 +4317,8 @@ sequences:
           when: errno != 0
       - eval: ul.registerRing(u)
         to: ul.registerRing
+      - set: u.taken
+        value: ul.hooks.taken
       - bind: lp
         eval: ul.lp
       - bind: rr
@@ -7087,7 +7089,19 @@ sequences:
           when: u.rewind()
       - return: "&u.sqes[u.tail&u.sqMask]"
   - of: (*uring).consumed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).consumed
+        kind: self
+      - id: u.see
+        kind: internal
     steps:
+      - opt:
+          do:
+            - eval: u.see(got)
+              to: u.see
+          when: u.taken != nil
       - opt:
           do:
             - eval: copy(u.sqes[:u.pending()-got], u.sqes[got:u.pending()])
