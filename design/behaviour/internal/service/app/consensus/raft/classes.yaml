@@ -503,6 +503,7 @@ files:
       - (*Raft).vouchedInRetained
       - listedBefore
       - vouched
+      - vouches
       - (*Raft).updateAddress
       - (*Raft).moveStrands
       - (*Raft).updateSnapshotLimit
@@ -787,8 +788,26 @@ functions:
       asked no one that follows it, and its transport refused the new leader's
       key (#765). A leader that is a voter of known is counted at any address:
       while it leads it dials v, which admits it by key.
+
+      Every voucher, the leader included, is counted only under the key known
+      pins for it, which next still pins: v admits a member by that key alone.
+      A key DenyPin withdrew, the zero pin, admits nobody and counts for none,
+      as the offline check holds (stranded, #758). A member whose pin was
+      withdrawn stays in next at its address, but once the change commits every
+      member refuses it (#551): it hears no leader, answers no PreVote with a
+      record, and counted as a voucher it let through the removal of the last
+      member a voter down at the time knew, which came back hearing no one
+      (#773).
     name: vouched
     params: next, known *core.MembershipValue, v, leader core.NodeID
+    results: bool
+  - doc: |-
+      vouches reports whether k, as a stale voter's configuration lists it,
+      still answers that voter's PreVote in next: a voter of that
+      configuration, pinned there under a non-zero key that next still pins,
+      at the address that configuration names, or at any when it leads.
+    name: vouches
+    params: next *core.MembershipValue, k core.MemberValue, leader core.NodeID
     results: bool
   - doc: |-
       ownCopy returns a copy of b the step function owns, out of a frame the
@@ -1821,7 +1840,8 @@ types:
           heartbeat interval, and the copy queued behind it at every answer took
           the link from what the peer lacked (#767). A silent peer answers no
           append, so its report alone tells whether the probe reached it, and it
-          is sent the batch at its next as before.
+          is sent the batch at its next as before: followSilentReport holds it in
+          probe, never in replicate, where its full window was sent nothing (#774).
         name: handleHeartbeatResp
         params: pr *progress, m core.MessageValue
         recv: r *Raft
@@ -1862,6 +1882,16 @@ types:
           silent, so nothing else moves its probe, and it needs this leader's
           commit to vote again: resent the same batch at every heartbeat, it stayed
           silent for as long as this leader led. Neither field ever raises match.
+
+          A peer still replicating is probed too, its match kept: no
+          acknowledgement will move its window again. Held in replicate with that
+          window full, it was sent only the empty append probeBehind sends after
+          the window's end, which it accepted in silence, and never an entry of
+          this leader's term, so it stayed silent for as long as this leader led
+          (#774). Only the transport's report of a failure to reach it moved it to
+          probe, and nothing ensures one reaches the leader. The probe resumes past
+          the commit the answer reports, so the window it already holds is not
+          sent again.
         name: followSilentReport
         params: pr *progress, m core.MessageValue
         recv: r *Raft

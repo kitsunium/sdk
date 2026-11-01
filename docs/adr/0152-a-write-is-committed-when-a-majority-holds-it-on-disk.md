@@ -6226,6 +6226,108 @@ rotted `.meta`
   - then a republication, fresh publications and removals run beside
     listings and reads, with no side failing `STORAGE_FAILED`.
 
+## Amendment — a silent peer is probed, never left in replicate (2026-10-30, #774)
+
+#767 had a heartbeat answer that reports less than the oldest append in
+flight probe the peer behind its window, with an empty append after its
+next less one, instead of moving it to probe. A silent peer reports 0,
+unless its last entry is of the leader's term, and acknowledges nothing.
+One that the leader still held in replicate, its window full, was sent
+that empty append at every answer: it accepted it in silence, the window
+never moved, and a full window sends no entry. It never received an entry
+of the leader's term and stayed silent for as long as that leader led and
+did not compact past its window: one voter short, no failure tolerance
+left on three. Before #767 the same answer moved it to probe, and #636's
+path fed it from the commit it reports. Only the transport's report of a
+failure to reach it (`ReportUnreachable`) still did, and nothing ensures
+one reaches the leader: the loop drops it when saturated, the memory
+transport makes none, and a peer back before its sender saw the failure
+leaves none. The state needs a peer the leader held in replicate before
+it went down: a leader elected during the silence starts it in probe, and
+only an acknowledgement moves it to replicate
+([#774](https://github.com/kitsunium/sdk/issues/774)).
+
+- **A silent report probes a replicating peer.** `followSilentReport`,
+  which already moved to probe a peer whose report lowers its match, now
+  moves one still replicating to probe, its match kept: no acknowledgement
+  will move its window again. The probe resumes past the commit the
+  report carries, where #636's path resumes, so the window the peer holds
+  is not sent again, then one batch at each heartbeat answer as before.
+  `probeBehind` and #560's delay now meet only peers that are not silent.
+- **What #767 and #766 keep.** A peer that is not silent is judged as
+  #767 judges it: probed behind, never sent again. A silent probing peer
+  was already sent the batch at its next on each report, which #767 left
+  unchanged. The match is not raised, so #766's argument for the commit a
+  silence waits for is untouched: the appends are still sent past the
+  match, which only an acknowledgement raised.
+- **No format change.** No frame, field, flag or record changes, nothing
+  persisted, no protocol raise, and no raft mutation: the type is full,
+  and a test holds it.
+- **Tests.** `TestASilentPeerLeftInReplicateWithAFullWindowEndsItsSilence`
+  (raft, the issue's scenario on the step functions, no progress forced:
+  a window of two appends, filled with entries the peer writes before its
+  acknowledgements are lost; on main the peer is sent 200 empty appends
+  and no entry over 10 s and stays silent at 9 while the leader's term
+  starts at 31; fixed, it ends its silence, and no entry is sent to it
+  twice nor any it held; the same scenario with the unreachable report,
+  which already recovered, stays green). #560's, #636's, #766's and
+  #767's tests stay green.
+
+## Amendment — a member whose pin was denied vouches for no one (2026-10-30, #773)
+
+#603's guard counted as a stale voter's voucher any voter of its
+configuration that stays in the next one at the address it knows (#761),
+or the leader (#765). It never looked at the key. `DenyPin` leaves its
+target in the configuration, at its address, under the zero pin; once the
+change commits every member closes its lanes and refuses its handshakes
+(#551), so it hears no leader and never answers a PreVote with a record
+(#542). Founders A, B and C; A went down knowing {A, B, C}; D, E and F
+joined and were promoted, and D led. The operator denied B's pin, the
+first step of the key-compromise runbook, with C, D, E and F answering, 4
+of 6; then removed C, which answered. The guard counted B for A on every
+configuration that lists A and admitted it. A came back asking B, cut
+off, and C, gone, its transport refusing D's key: a live voter out of the
+quorum for as long as D led, and one more failure from no quorum. The
+offline check of #758 already held the rule this guard missed: a key
+`DenyPin` withdrew, the zero pin, admits nobody and counts for none
+([#773](https://github.com/kitsunium/sdk/issues/773)).
+
+- **A voucher counts under the key the stale voter pins.** `vouched` now
+  counts a voter of the stale voter's configuration only when that
+  configuration pins it under a non-zero key and the next one pins it
+  under the same key, the leader included: a stale voter admits a member by
+  that key alone. A member whose pin was denied, in the next configuration
+  or already in the stale voter's own, vouches for no one. The address
+  rules of #761 and #765 are unchanged.
+- **The ways out are those of #603.** A removal or a move the guard now
+  refuses waits for the stale voter: it comes back, a member it reaches
+  under a key it pins answers its PreVote with the leader's record, and
+  once it is heard on a configuration that lists the leader the change
+  goes through. A member that does not answer, the denied one or the stale
+  voter itself, is never judged, so the runbook's removal of the old ID
+  and the removal of a dead voter stay open.
+- **What it leaves.** A `DenyPin` is not judged: denying the pin of the
+  last member a stale voter reaches under a key it pins strands that voter
+  as the removal did, in either order (`Remove(C)` then `DenyPin(B)`).
+  Judging it with `strands` would refuse the fence of a compromised key for
+  as long as a voter is down; admitting it, and stating that the fence
+  outranks the guard, leaves that voter stranded until it is removed. That
+  choice is left to a decision.
+- No frame, payload or record format changes, nothing new is persisted, no
+  protocol raise and no raft mutation.
+- **Tests.** `TestVouchedNeedsTheVoucherUnderTheKeyTheStaleVoterPins`
+  (raft: a denied voucher in the next configuration or in the stale
+  voter's own, another key, the leader's pin denied; a pinned voucher, or
+  one beside a denied one, still counts),
+  `TestARemovalCountsNoMemberWhosePinWasDeniedAsAVoucher` (raft, the
+  issue's scenario on the memory network's admission model; on main the
+  removal is admitted on the count of the denied member) and
+  `TestTheLastVoucherBesideADeniedPinIsRemovedOnlyOnceTheStaleVoterIsBack`
+  (over TCP mutual TLS: on main `Remove(C)` is admitted; fixed, it is
+  refused `MEMBERSHIP_INVALID` while A is down, A catches up through C, and
+  C's removal then goes through). The tests of #603, #761, #763 and #765
+  stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6268,6 +6370,8 @@ rotted `.meta`
 | #766 | Raft hunt loop, 2026-10-30 | under the leader of its own `SilentTerm`, the commit a silent node must hold is fixed once the rest of the silence condition holds, the highest its accepted appends carried up to then, no longer the commit each append carries, which writes faster than one batch per heartbeat kept out of reach; #636's residual starts at that append; no format change, nothing persisted, no raft mutation (amendment of 2026-10-30, #766) |
 | #767 | Raft hunt loop, 2026-10-30 | a heartbeat answer that reports less than the oldest append in flight, and a probing peer's answer, send an empty append behind what is in flight instead of the window or the probe again, whose refusal finds a lost append and whose acknowledgement at the match ends the probe; no format change, no raft mutation (amendment of 2026-10-30, #767) |
 | #768 | Raft hunt loop, 2026-10-30 | the snapshot store holds its lock over the files a listing, an `Open`, a publication's renames and a removal touch, and a handle closes its file before its pin drops, so Windows never refuses a cut's publication or retention's removal beside the loop's listing; no sync under the lock; no format change, no raft mutation (amendment of 2026-10-30, #768) |
+| #774 | Raft hunt loop, 2026-10-30 | a silent peer's heartbeat answer moves a peer the leader still holds in replicate to probe, its match kept, so a full window no longer leaves it sent only empty appends and silent for as long as that leader leads; the probe resumes past the commit it reports; no format change, no raft mutation (amendment of 2026-10-30, #774) |
+| #773 | Raft hunt loop, 2026-10-30 | #603's guard counts a stale voter's voucher only under the non-zero key that voter's configuration pins and the next one still pins, the leader included, so a member whose pin `DenyPin` withdrew vouches for no one; whether a `DenyPin` itself is judged left to a decision; no format change, no raft mutation (amendment of 2026-10-30, #773) |
 
 ## raft-sql-poc (owner's prior Raft)
 

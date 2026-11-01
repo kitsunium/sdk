@@ -659,13 +659,17 @@ sequences:
           do:
             - return: ""
           when: pr.state == stateSnapshot
-      - opt:
-          do:
-            - set: pr.match
-              value: m.RejectHint
-            - eval: pr.becomeProbe()
-              to: pr.becomeProbe
-          when: m.RejectHint < pr.match
+      - alt:
+          - do:
+              - set: pr.match
+                value: m.RejectHint
+              - eval: pr.becomeProbe()
+                to: pr.becomeProbe
+            when: m.RejectHint < pr.match
+          - do:
+              - eval: pr.becomeProbe()
+                to: pr.becomeProbe
+            when: pr.state == stateReplicate
       - opt:
           do:
             - set: pr.next
@@ -1453,8 +1457,6 @@ sequences:
         kind: self
       - id: known.Member
         kind: value
-      - id: next.Member
-        kind: value
     steps:
       - opt:
           do:
@@ -1468,20 +1470,32 @@ sequences:
           do:
             - opt:
                 do:
-                  - continue: true
-                when: k.ID == v || !k.Voter
-            - opt:
-                do:
                   - return: "true"
-                init:
-                  bind: m, stays
-                  eval: next.Member(k.ID)
-                  to: next.Member
-                when: stays && (k.ID == leader || m.Address == k.Address)
+                when: k.ID != v && vouches(next, k, leader)
           key: _
           range: known.Members
           value: k
       - return: "false"
+  - of: vouches
+    participants:
+      - id: caller
+        kind: actor
+      - id: vouches
+        kind: self
+      - id: next.Member
+        kind: value
+    steps:
+      - var:
+          name: unpinned
+          type: "[32]byte"
+      - opt:
+          do:
+            - return: "false"
+          when: "!k.Voter || k.SPKI == unpinned"
+      - bind: m, stays
+        eval: next.Member(k.ID)
+        to: next.Member
+      - return: stays && m.SPKI == k.SPKI && (k.ID == leader || m.Address == k.Address)
   - of: (*Raft).updateAddress
     steps:
       - opt:

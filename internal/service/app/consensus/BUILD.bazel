@@ -100,6 +100,7 @@ go_test(
         "codec_rolling_internal_test.go",
         "cut_internal_test.go",
         "defects_internal_test.go",
+        "deniedvoucher_internal_test.go",
         "denypin_internal_test.go",
         "disk_cluster_internal_test.go",
         "diskfull_internal_test.go",
