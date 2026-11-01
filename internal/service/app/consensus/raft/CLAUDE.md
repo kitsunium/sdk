@@ -362,7 +362,15 @@ under coverage before touching `shard_count`.
   least `SilentTerm` finds below it: no entry the node held from there on
   ever counted towards a commit (Leader Completeness, Log Matching), and
   past a tail of an older term the leader's log may never reach the old
-  point (`lowerSilence`, in memory only,
+  point (`lowerSilence`,
   `TestASilentNodeOverAnOlderTermsTailEndsItsSilenceInAQuietCluster`,
   `TestAConflictLowersTheTruncationPointOnlyUnderALeaderOfItsTerm`; no
   mutation, the type is full).
+- Lower a silence's truncation point in memory alone: the truncation that
+  justifies it is durable, and a node restarted before the commit reached
+  it came back on the old point with a log that no longer reached it, and
+  stayed silent in a cluster that wrote nothing (#793). `lowerSilence`
+  names the point in `ReadyValue.SilenceLowered`, in the Ready that
+  carries the truncation, for the driver to persist first
+  (`TestALoweredSilencePointSurvivesARestartBeforeTheCommit`,
+  `TestOnlyALoweringLeavesInTheReady`; no mutation, the type is full).

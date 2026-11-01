@@ -256,6 +256,12 @@ type ReadyValue struct {
 	// SilenceEnded is set once the silence condition held: the driver
 	// removes it durably.
 	SilenceEnded bool
+	// SilenceLowered is the index the silence condition's truncation point
+	// was lowered to, 0 when it was not: no entry this node held from there
+	// on counted towards a commit (lowerSilence). The driver persists it,
+	// under the condition's term, before this Ready's truncation reaches the
+	// store, so a restart obeys it (#793).
+	SilenceLowered uint64
 	// LeaderUnheard is set when this node, which may not campaign (a
 	// learner, a silent voter, one with no table), heard no leader for
 	// askElectionTimeouts maximum election timeouts and asked its members
@@ -878,10 +884,10 @@ func (rd *ReadyValue) hasNotices() bool {
 }
 
 // hasStateNotice reports whether the Ready tells the driver of a state: the
-// end of the silence, an entry this version cannot apply, or a node that may
-// not campaign and hears no leader.
+// end of the silence or its lowered point, an entry this version cannot
+// apply, or a node that may not campaign and hears no leader.
 func (rd *ReadyValue) hasStateNotice() bool {
-	return rd.SilenceEnded || rd.Unsupported.Index != 0 || rd.LeaderUnheard
+	return rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard
 }
 
 // Ready returns the work of the turns since the last call and resets it.

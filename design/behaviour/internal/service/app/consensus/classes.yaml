@@ -1274,6 +1274,7 @@ files:
       - (*Node).logLeaderRecords
       - (*Node).handleOne
       - (*Node).reportNotices
+      - (*Node).lowerSilence
       - (*Node).endSilence
       - (*Node).queueApply
       - (*Node).answerReady
@@ -1507,6 +1508,7 @@ files:
       - silenceRecord
       - DataDir.reopenSilenced
       - (*fileLog).silence
+      - (*fileLog).lowerSilence
       - (*fileLog).endSilence
     name: offline.go
   - decls:
@@ -4907,6 +4909,18 @@ types:
         name: silence
         recv: l *fileLog
         results: term, index uint64, unreadable, err error
+      - doc: |-
+          lowerSilence lowers the persisted silence condition's index to index,
+          its term and its form kept (silenceRecord), durably: written aside and
+          renamed over it, so a crash leaves the old record or the new one (#793).
+          It never raises the index nor writes a condition the directory does not
+          hold: one already ended stays ended, one unreadable stays as it is, the
+          safe side silence reports, and one not filled in yet (0) is filled in
+          from the log by the next start.
+        name: lowerSilence
+        params: index uint64
+        recv: l *fileLog
+        results: error
       - doc: endSilence removes the silence condition durably.
         name: endSilence
         recv: l *fileLog
@@ -7025,10 +7039,23 @@ types:
         recv: n *Node
       - doc: |-
           reportNotices acts on the Ready's notices that change no state of the
-          loop: the end of the silence condition, the chain refusals D13 counts by
-          leader, and a truncation worth a line in the log.
+          loop: the silence condition lowered or ended, the chain refusals D13
+          counts by leader, and a truncation worth a line in the log. It runs
+          before handleOne queues the Ready's write: a lowered point is durable
+          before the truncation it rides with (#793).
         name: reportNotices
         params: rd *raft.ReadyValue
+        recv: n *Node
+      - doc: |-
+          lowerSilence persists the silence condition's lowered truncation point,
+          on the loop as endSilence does, so before the storage actor is handed the
+          truncation that justifies it. Raft lowered the point in memory only, and a
+          node restarted after its truncation reached the disk and before the
+          commit reached it came back on the old point, with a log that no longer
+          reached it, silent in a cluster that wrote nothing (#793). A store that
+          cannot record it stops the node, as every failed write of its disk (D4).
+        name: lowerSilence
+        params: index uint64
         recv: n *Node
       - doc: |-
           endSilence persists the end of the silence condition; a store that
@@ -9944,6 +9971,12 @@ vars:
         value: (*fileLog)(nil)
       - name: _
         type: interface{ endSilence() error }
+        value: (*fileLog)(nil)
+      - name: _
+        type: |-
+          interface {
+          		lowerSilence(index uint64) error
+          	}
         value: (*fileLog)(nil)
       - name: _
         type: |-

@@ -1515,9 +1515,14 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 }
 
 // reportNotices acts on the Ready's notices that change no state of the
-// loop: the end of the silence condition, the chain refusals D13 counts by
-// leader, and a truncation worth a line in the log.
+// loop: the silence condition lowered or ended, the chain refusals D13
+// counts by leader, and a truncation worth a line in the log. It runs
+// before handleOne queues the Ready's write: a lowered point is durable
+// before the truncation it rides with (#793).
 func (n *Node) reportNotices(rd *raft.ReadyValue) {
+	if rd.SilenceLowered != 0 && !rd.SilenceEnded {
+		n.lowerSilence(rd.SilenceLowered)
+	}
 	if rd.SilenceEnded {
 		n.endSilence()
 	}
@@ -1526,6 +1531,21 @@ func (n *Node) reportNotices(rd *raft.ReadyValue) {
 	}
 	if rd.TruncateFrom != 0 {
 		n.obs.info("consensus: log truncated", lattr("from", rd.TruncateFrom))
+	}
+}
+
+// lowerSilence persists the silence condition's lowered truncation point,
+// on the loop as endSilence does, so before the storage actor is handed the
+// truncation that justifies it. Raft lowered the point in memory only, and a
+// node restarted after its truncation reached the disk and before the
+// commit reached it came back on the old point, with a log that no longer
+// reached it, silent in a cluster that wrote nothing (#793). A store that
+// cannot record it stops the node, as every failed write of its disk (D4).
+func (n *Node) lowerSilence(index uint64) {
+	if s, ok := n.cfg.Log.(interface{ lowerSilence(index uint64) error }); ok {
+		if err := s.lowerSilence(index); err != nil {
+			n.stop(storageFailed("lower silence", err), true)
+		}
 	}
 }
 

@@ -1433,6 +1433,14 @@ types:
         name: SilenceEnded
         type: bool
       - doc: |-
+          SilenceLowered is the index the silence condition's truncation point
+          was lowered to, 0 when it was not: no entry this node held from there
+          on counted towards a commit (lowerSilence). The driver persists it,
+          under the condition's term, before this Ready's truncation reaches the
+          store, so a restart obeys it (#793).
+        name: SilenceLowered
+        type: uint64
+      - doc: |-
           LeaderUnheard is set when this node, which may not campaign (a
           learner, a silent voter, one with no table), heard no leader for
           askElectionTimeouts maximum election timeouts and asked its members
@@ -1498,8 +1506,8 @@ types:
         results: bool
       - doc: |-
           hasStateNotice reports whether the Ready tells the driver of a state: the
-          end of the silence, an entry this version cannot apply, or a node that may
-          not campaign and hears no leader.
+          end of the silence or its lowered point, an entry this version cannot
+          apply, or a node that may not campaign and hears no leader.
         name: hasStateNotice
         recv: rd *ReadyValue
         results: bool
@@ -3420,8 +3428,17 @@ types:
 
           The rest of the condition is unchanged: an entry of the leader's term
           committed at or past the new point, the commit #636 fixes, the end once
-          durable (#684). The point is lowered in memory: a restart obeys the one
-          the node persisted, the safe side.
+          durable (#684).
+
+          The lowered point leaves in the Ready (SilenceLowered), which the driver
+          persists before that Ready's truncation reaches the store. Lowered in
+          memory only, it was lost to a restart before the commit reached the
+          node, which came back on the old point with a log that no longer
+          reached it, and stayed silent in a cluster that wrote nothing (#793).
+          Persisted first is safe: a crash before the truncation is durable
+          restarts the node over the entries the conflict proved, all the same,
+          never counted, and the condition still asks for an entry of the
+          leader's term past the point.
         name: lowerSilence
         params: term, first uint64
         recv: r *Raft

@@ -10677,6 +10677,8 @@ sequences:
         kind: actor
       - id: (*Node).reportNotices
         kind: self
+      - id: n.lowerSilence
+        kind: internal
       - id: n.endSilence
         kind: internal
       - id: n.obs.inc
@@ -10684,6 +10686,11 @@ sequences:
       - id: n.obs.info
         kind: internal
     steps:
+      - opt:
+          do:
+            - eval: n.lowerSilence(rd.SilenceLowered)
+              to: n.lowerSilence
+          when: rd.SilenceLowered != 0 && !rd.SilenceEnded
       - opt:
           do:
             - eval: n.endSilence()
@@ -10701,6 +10708,32 @@ sequences:
             - eval: "n.obs.info(\"consensus: log truncated\", lattr(\"from\", rd.TruncateFrom))"
               to: n.obs.info
           when: rd.TruncateFrom != 0
+  - of: (*Node).lowerSilence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).lowerSilence
+        kind: self
+      - id: s.lowerSilence
+        kind: internal
+      - id: n.stop
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: n.stop(storageFailed("lower silence", err), true)
+                    to: n.stop
+                init:
+                  bind: err
+                  eval: s.lowerSilence(index)
+                  to: s.lowerSilence
+                when: err != nil
+          init:
+            bind: s, ok
+            eval: n.cfg.Log.(interface{ lowerSilence(index uint64) error })
+          when: ok
   - of: (*Node).endSilence
     participants:
       - id: caller
@@ -17217,6 +17250,41 @@ sequences:
                 when: err != nil
           when: index == 0
       - return: term, index, nil, nil
+  - of: (*fileLog).lowerSilence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).lowerSilence
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: writeFileSync
+        kind: internal
+    steps:
+      - bind: path
+        eval: filepath.Join(l.dir, fileSilent)
+        to: filepath
+      - bind: b, err
+        eval: os.ReadFile(path)
+        to: os
+      - opt:
+          do:
+            - return: err
+          when: err != nil && !os.IsNotExist(err)
+      - opt:
+          do:
+            - return: nil
+          when: len(b) != 16
+      - bind: term, cur
+        eval: binary.LittleEndian.Uint64(b), binary.LittleEndian.Uint64(b[8:])
+      - opt:
+          do:
+            - return: nil
+          when: cur == 0 || index == 0 || index >= cur
+      - return: writeFileSync(path, silenceRecord(term, index))
+        to: writeFileSync
   - of: (*fileLog).endSilence
     participants:
       - id: caller

@@ -432,6 +432,17 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `StorageDone` reports the log durable through the commit that met the
   condition, and the driver removes SILENT in the Ready after (#684,
   `TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt`).
+- Hand the storage actor a truncation that lowers a silence's point before
+  that point is on disk: raft lowered it in memory only and the driver
+  persisted only the end of a silence, so a node restarted once the
+  truncation was durable, before the commit reached it, came back on the
+  old point with a log that no longer reached it, and stayed silent in a
+  cluster that wrote nothing (#793). `reportNotices` writes
+  `ReadyValue.SilenceLowered` to SILENT on the loop before `handleOne`
+  queues the write (`fileLog.lowerSilence`: the same record, the term
+  kept, only lower, never written back once removed;
+  `TestALoweredSilencePointIsOnDiskBeforeItsTruncation`,
+  `TestALoweredSilenceKeepsItsRecordsForm`).
 - Turn a joining stamp into a member's on raft's commit alone: it moves
   when an append is accepted, in memory, and `checkAdmission` wrote the
   stamp on the loop in the turn that handed the storage actor the entries

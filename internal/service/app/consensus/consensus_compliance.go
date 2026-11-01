@@ -34,6 +34,9 @@ var (
 	} = (*fileLog)(nil)
 	_ interface{ endSilence() error } = (*fileLog)(nil)
 	_ interface {
+		lowerSilence(index uint64) error
+	} = (*fileLog)(nil)
+	_ interface {
 		logStats() (bytes, free, tails int64)
 	} = (*fileLog)(nil)
 	_ spaceReporter = (*fileLog)(nil)
