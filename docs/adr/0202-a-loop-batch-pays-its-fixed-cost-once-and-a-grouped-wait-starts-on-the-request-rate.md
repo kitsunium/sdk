@@ -129,7 +129,7 @@ batches rather than arrivals — had added 5.6 % of wakeups.
   connection accepted no longer makes a system call a batch for its
   watchdog.
 - With `BatchWait` of a few milliseconds a sparse load keeps its waits
-  grouped: a third fewer batches, 8 % fewer wakeups of the loop's thread.
+  grouped: 35 % fewer batches, 9 % fewer wakeups of the loop's thread.
 - The default load is unchanged: the rate starts the grouped wait only where
   two requests come within 250 µs.
 
