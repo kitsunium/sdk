@@ -335,26 +335,15 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	pr.facts = pr.facts&^(peerProtocol2|peerProtocol3) | announced(m.Flags)
 	switch m.Kind {
 	case core.MsgAppResp:
-		pr.facts = pr.facts&^peerSilent | silenceIn(m.Flags)
+		pr.noteSilence(m.Flags)
 		r.handleAppResp(pr, m)
 	case core.MsgHeartbeatResp:
-		pr.facts = pr.facts&^peerSilent | silenceIn(m.Flags)
+		pr.noteSilence(m.Flags)
 		r.handleHeartbeatResp(pr, m)
 	default:
 		// Nothing else carries news for a leader of this term: the
 		// contact above is all it records.
 	}
-}
-
-// silenceIn is peerSilent when an answer carries FlagTruncated: a silent
-// node marks its every refusal and heartbeat answer, and sends no
-// acknowledgement (#636). An answer without it, an acknowledgement above
-// all, is from a node that is not silent, or no longer.
-func silenceIn(flags core.MessageFlags) peerFacts {
-	if flags&core.FlagTruncated != 0 {
-		return peerSilent
-	}
-	return 0
 }
 
 // handleHeartbeatResp acknowledges every round up to the one answered,
@@ -389,6 +378,36 @@ func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	}
 	r.watchWindow(pr, m.From, m.Index)
 	r.refeed(pr, m.From, probing)
+	if silent {
+		r.feedSilence(pr, m)
+	}
+}
+
+// feedSilence appends a no-op of this term for a silent peer whose report
+// says it holds this leader's whole log, committed: its commit reaches the
+// last index. Its silence ends only on an entry of a term at least its own,
+// past its truncation point, committed (R3-09), and a node truncated past
+// its last entry, its truncation point one past the leader's whole log, was
+// sent nothing: refeed has nothing past its match. The library appends on
+// its own only at an election, so in a cluster that wrote nothing the node
+// stayed silent for as long as nobody wrote, one voter short, and one more
+// failure left two live voters of three that elected no one (#787).
+//
+// The no-op is committed by a majority without the peer, and is one past
+// the leader's last index: past the truncation point of a node that holds
+// that whole log, unless the node's log diverged from it, where the
+// conflict lowered that point already (lowerSilence). One per silence: a
+// peer silent for a reason no leader lifts, an unreadable condition, is
+// fed once a term, and the fact is cleared with the silence. A transfer in
+// flight appends nothing, as it proposes nothing.
+func (r *Raft) feedSilence(pr *progress, m core.MessageValue) {
+	if pr.facts&peerSilentFed != 0 || m.Commit < r.log.lastIndex() || r.transferTo != 0 {
+		return
+	}
+	pr.facts |= peerSilentFed
+	noop := core.EntryValue{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}
+	r.appendAsLeader([]core.EntryValue{noop})
+	r.broadcastAppend(false)
 }
 
 // watchWindow probes a replicating peer whose window did not move since its

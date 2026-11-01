@@ -419,7 +419,10 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   down: its window, full, was sent only empty appends, and with no
   unreachable report reaching the leader, as over the memory transport,
   it stayed silent for as long as that leader led (#774, raft's
-  `followSilentReport`).
+  `followSilentReport`). Nor leave a silent node that holds the leader's
+  whole log waiting for a write: its truncation point lies past that log,
+  and in a cluster that wrote nothing it stayed silent for good (#787,
+  raft's `feedSilence` and `lowerSilence`).
 - End a silence on disk before the entries that meet its condition are: raft
   judged it on the append's entries, in memory, and said so in the same
   Ready, and `endSilence` removed SILENT on the loop before the storage

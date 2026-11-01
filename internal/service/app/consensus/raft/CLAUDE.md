@@ -346,3 +346,20 @@ under coverage before touching `shard_count`.
   kept, past the commit it reports (#774,
   `TestASilentPeerLeftInReplicateWithAFullWindowEndsItsSilence`; no
   mutation, the type is full).
+- Leave a silent peer whose heartbeat answer reports this leader's whole
+  log committed waiting for a write: truncated past its last entry, its
+  truncation point lies past that log, `refeed` has nothing to send, and
+  in a cluster that wrote nothing it stayed silent for as long as nobody
+  wrote, one failure from no leader (#787). `feedSilence` appends one
+  no-op of the term for it, once per silence (`peerSilentFed`, cleared
+  with `peerSilent`) and never during a transfer
+  (`TestASilentNodeHoldingTheWholeLogEndsItsSilenceInAQuietCluster`,
+  `TestTheLeaderAppendsOneNoOpPerSilence`). Nor keep a silent node's
+  truncation point above a conflict an append of a leader of a term at
+  least `SilentTerm` finds below it: no entry the node held from there on
+  ever counted towards a commit (Leader Completeness, Log Matching), and
+  past a tail of an older term the leader's log may never reach the old
+  point (`lowerSilence`, in memory only,
+  `TestASilentNodeOverAnOlderTermsTailEndsItsSilenceInAQuietCluster`,
+  `TestAConflictLowersTheTruncationPointOnlyUnderALeaderOfItsTerm`; no
+  mutation, the type is full).

@@ -6425,6 +6425,77 @@ of them silent in the same quiet window
   removal once both answer without the flag). The tests of #530, #603,
   #677, #761, #763, #765 and #773 stay green.
 
+## Amendment — a silence ends in a cluster that writes nothing (2026-11-01, #787)
+
+A node `TruncateAndStaySilent` made silent ends its silence on an accepted
+append once a leader of a term at least its own has rewritten its log past
+the truncation point and committed an entry of its term there (R4-03),
+holding, under the leader of its own term, the commit #636 and #766 fix.
+A damaged record past the node's last entry, a hard state say, drops no
+entry, and `reopenSilenced` puts the truncation point one past the log:
+past the leader's whole log too, when the node held all of it. The leader
+had nothing to send it, `refeed` returning on a match at its last index,
+and the library appends on its own only at an election. In a cluster that
+wrote nothing, a night without a push, the node stayed silent for as long
+as nobody wrote: one voter short, and one more failure left two live
+voters of three that elected no one, so nobody wrote and the silence
+never ended. R5-13 states a cost that lasts while a leader rewrites the
+log, not for as long as the cluster is quiet. The same held, writes or
+not, for a node back over a tail of an older term the leader never held:
+its truncation point lay past that tail, and only writes crossing it
+ended the silence
+([#787](https://github.com/kitsunium/sdk/issues/787)).
+
+- **The leader appends a no-op for a silent node that holds its whole
+  log.** On a silent heartbeat answer (`FlagTruncated`) whose commit
+  reaches the leader's last index, the leader appends one `EntryNoOp` of
+  its term (`feedSilence`), which a majority without the node commits: an
+  entry of the leader's term one past its whole log, so past the node's
+  truncation point, committed, and the rest of R4-03 and #636 holds as
+  before. One per silence and per term: a node silent for a reason no
+  leader lifts, an unreadable condition, gets one, and the fact is cleared
+  once the node answers without the flag. A transfer in flight appends
+  nothing. The kind is the election's no-op, which every release reads
+  and the driver never applies.
+- **A conflict below the truncation point lowers it.** An append of a
+  leader of a term at least `SilentTerm` that conflicts with the node's log
+  at an index below the truncation point makes that index the point
+  (`lowerSilence`). No entry the node held there or after, those the
+  truncation dropped included, was or will be committed with its
+  acknowledgement. Such an entry is of a term at most `SilentTerm`:
+  committed by that term's leader, at any time, it is in the log of every
+  leader of a later term (Leader Completeness), and this leader holds
+  every entry of its own term, so the two logs would be the same through
+  it (Log Matching), and they are not at the conflict. A leader of a later
+  term counts only acknowledgements of its own term, which a silent node
+  never sends. The tail of an older term is the one the conflict drops, so
+  the leader's own commit of its term ends the silence, no write needed. The point is
+  lowered in memory: a restart obeys the persisted one, the safe side. A
+  conflict at or past the point, or from a leader of an older term, changes
+  nothing.
+- **What it keeps.** The condition's other parts are unchanged: an entry
+  of the leader's term committed past the point, the commit #636 and #766
+  fix under the leader of the node's own term, the end once durable (#684),
+  the term #418 persists. A silent node still acknowledges nothing, and the
+  no-op is committed without it. #774's probe and #767's are untouched.
+- **What it leaves.** A no-op committed needs a majority without the
+  silent node: with the other voter of three down, the silence still lasts
+  until it returns, as R5-13 states.
+- **No format change.** No frame, field, flag or record changes, nothing
+  persisted, no protocol raise, and no raft mutation: the type is full.
+- **Tests.** `TestASilentNodeHoldingTheWholeLogEndsItsSilenceInAQuietCluster`
+  (raft, the issue's scenario on the step functions; on main the node stays
+  silent through 30 s of a quiet cluster, and with the leader down the two
+  others elect no one; fixed, the leader's no-op at 12 ends the silence and
+  they elect one), `TestTheLeaderAppendsOneNoOpPerSilence` (one no-op for a
+  silence no term ends, none in a quiet cluster with no silent node),
+  `TestASilentNodeOverAnOlderTermsTailEndsItsSilenceInAQuietCluster` (a
+  tail of an older term past the leader's log; on main the node stays
+  silent at its point 7 over the leader's log ending at 4, and so it does
+  with the no-op alone, at 5) and
+  `TestAConflictLowersTheTruncationPointOnlyUnderALeaderOfItsTerm`.
+  The tests of #418, #636, #684, #766, #767 and #774 stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6471,6 +6542,7 @@ of them silent in the same quiet window
 | #773 | Raft hunt loop, 2026-10-30 | #603's guard counts a stale voter's voucher only under the non-zero key that voter's configuration pins and the next one still pins, the leader included, so a member whose pin `DenyPin` withdrew vouches for no one; whether a `DenyPin` itself is judged left to a decision; no format change, no raft mutation (amendment of 2026-10-30, #773) |
 | #771 | Raft hunt loop, 2026-11-01 | a streamed snapshot's pin is renewed at its bound while its follower moved since and is no further behind than the stream's end left it, so a catch-up by appends longer than the bound is no longer compacted past and sent the newest snapshot again; a follower that stops or falls further behind still loses it at the next bound, and a tight log still lifts it; no format change, no raft mutation (amendment of 2026-11-01, #771) |
 | #790 | Raft hunt loop, 2026-11-01 | the strict reconfiguration check counts a voter whose last answer carried `FlagTruncated`, a silent one, as a voter that does not answer, so a change that would need a silent voter's acknowledgement to commit is refused `MEMBERSHIP_INVALID`; #603's guard and the raise still count it; no format change, no raft mutation (amendment of 2026-11-01, #790) |
+| #787 | Raft hunt loop, 2026-11-01 | a leader appends one no-op of its term for a silent node whose heartbeat answer reports its whole log committed, once per silence and per term, and a conflict of a leader of a term at least `SilentTerm` below the truncation point lowers that point in memory, so a silence ends in a cluster that writes nothing; no format change, no raft mutation (amendment of 2026-11-01, #787) |
 
 ## raft-sql-poc (owner's prior Raft)
 

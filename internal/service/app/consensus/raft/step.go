@@ -598,6 +598,7 @@ func (r *Raft) appendNew(m *core.MessageValue, start int, prevChain uint32) bool
 	}
 	if first <= r.log.lastIndex() {
 		r.truncateFrom(first)
+		r.lowerSilence(m.Term, first)
 	}
 	es := make([]core.EntryValue, len(m.Entries)-start)
 	for k := range es {
@@ -606,6 +607,32 @@ func (r *Raft) appendNew(m *core.MessageValue, start int, prevChain uint32) bool
 	}
 	r.appendEntries(es)
 	return true
+}
+
+// lowerSilence lowers the truncation point of a silence to first, where
+// an append of a leader of a term at least SilentTerm conflicts with this
+// log below that point (#787). The conflict proves that no entry this node
+// held from first on, those the truncation dropped included, was or will
+// be committed with its acknowledgement. Such an entry is of a term at most
+// SilentTerm: committed by that term's leader, at any time, it is in the
+// log of every leader of a later term (Leader Completeness), and this
+// leader holds every entry of its own term; so this leader's log and the
+// node's log before the damage would be the same through it (Log
+// Matching), and they are not at first. A leader of a later term counts
+// only acknowledgements of its own term, which a silent node never sends.
+// The node then needs no entry past the old point: the leader's own log
+// may never reach it, past the tail of an older term the conflict just
+// dropped, and in a cluster that wrote nothing the node stayed silent for
+// as long as nobody wrote.
+//
+// The rest of the condition is unchanged: an entry of the leader's term
+// committed at or past the new point, the commit #636 fixes, the end once
+// durable (#684). The point is lowered in memory: a restart obeys the one
+// the node persisted, the safe side.
+func (r *Raft) lowerSilence(term, first uint64) {
+	if first < r.cfg.SilentIndex && term >= r.cfg.SilentTerm {
+		r.cfg.SilentIndex = first
+	}
 }
 
 // verifyChain checks the body and the chain of m's entries from start on

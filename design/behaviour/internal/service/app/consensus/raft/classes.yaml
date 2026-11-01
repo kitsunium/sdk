@@ -376,6 +376,10 @@ constants:
           acknowledges no append, so it counts for no change that must commit
           (activeMajority, #790).
         name: peerSilent
+      - doc: |-
+          peerSilentFed is set once the leader appended a no-op for the peer's
+          silence (feedSilence, #787), and cleared with peerSilent.
+        name: peerSilentFed
     name: peerProbeSent
   - grouped: true
     items:
@@ -471,8 +475,8 @@ files:
       - (*Raft).sendEntries
       - (*Raft).maybeCommit
       - (*Raft).stepLeader
-      - silenceIn
       - (*Raft).handleHeartbeatResp
+      - (*Raft).feedSilence
       - (*Raft).watchWindow
       - (*Raft).refeed
       - (*Raft).probeBehind
@@ -614,6 +618,7 @@ files:
       - progressState
       - stateProbe
       - progress
+      - (*progress).noteSilence
       - (*progress).becomeProbe
       - (*progress).becomeReplicate
       - (*progress).becomeSnapshot
@@ -757,6 +762,7 @@ files:
       - (*Raft).dropUnknownKinds
       - (*Raft).firstNewEntry
       - (*Raft).appendNew
+      - (*Raft).lowerSilence
       - (*Raft).verifyChain
       - (*Raft).acknowledgeAppend
       - (*Raft).chainRefused
@@ -766,14 +772,6 @@ files:
       - (*Raft).endSilenceOnceDurable
     name: step.go
 functions:
-  - doc: |-
-      silenceIn is peerSilent when an answer carries FlagTruncated: a silent
-      node marks its every refusal and heartbeat answer, and sends no
-      acknowledgement (#636). An answer without it, an acknowledgement above
-      all, is from a node that is not silent, or no longer.
-    name: silenceIn
-    params: flags core.MessageFlags
-    results: peerFacts
   - doc: |-
       announcementOf is the announcement every frame of a node speaking
       protocol version v carries: FlagProtocol2 from 2, and FlagProtocol3 beside
@@ -1158,6 +1156,15 @@ types:
         type: time.Time
     kind: struct
     methods:
+      - doc: |-
+          noteSilence records whether the peer's answer says it is silent: a silent
+          node marks its every refusal and heartbeat answer with FlagTruncated, and
+          sends no acknowledgement (#636). An answer without it, an
+          acknowledgement above all, is from a node that is not silent, or no
+          longer, and clears the no-op fed for its silence too (#787).
+        name: noteSilence
+        params: flags core.MessageFlags
+        recv: p *progress
       - doc: |-
           becomeProbe restarts the peer at one append at a time from its match. Out
           of a snapshot transfer it resumes after the snapshot it was sent, since the
@@ -1858,6 +1865,27 @@ types:
           is sent the batch at its next as before: followSilentReport holds it in
           probe, never in replicate, where its full window was sent nothing (#774).
         name: handleHeartbeatResp
+        params: pr *progress, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          feedSilence appends a no-op of this term for a silent peer whose report
+          says it holds this leader's whole log, committed: its commit reaches the
+          last index. Its silence ends only on an entry of a term at least its own,
+          past its truncation point, committed (R3-09), and a node truncated past
+          its last entry, its truncation point one past the leader's whole log, was
+          sent nothing: refeed has nothing past its match. The library appends on
+          its own only at an election, so in a cluster that wrote nothing the node
+          stayed silent for as long as nobody wrote, one voter short, and one more
+          failure left two live voters of three that elected no one (#787).
+
+          The no-op is committed by a majority without the peer, and is one past
+          the leader's last index: past the truncation point of a node that holds
+          that whole log, unless the node's log diverged from it, where the
+          conflict lowered that point already (lowerSilence). One per silence: a
+          peer silent for a reason no leader lifts, an unreadable condition, is
+          fed once a term, and the fact is cleared with the silence. A transfer in
+          flight appends nothing, as it proposes nothing.
+        name: feedSilence
         params: pr *progress, m core.MessageValue
         recv: r *Raft
       - doc: |-
@@ -3373,6 +3401,30 @@ types:
         params: m *core.MessageValue, start int, prevChain uint32
         recv: r *Raft
         results: bool
+      - doc: |-
+          lowerSilence lowers the truncation point of a silence to first, where
+          an append of a leader of a term at least SilentTerm conflicts with this
+          log below that point (#787). The conflict proves that no entry this node
+          held from first on, those the truncation dropped included, was or will
+          be committed with its acknowledgement. Such an entry is of a term at most
+          SilentTerm: committed by that term's leader, at any time, it is in the
+          log of every leader of a later term (Leader Completeness), and this
+          leader holds every entry of its own term; so this leader's log and the
+          node's log before the damage would be the same through it (Log
+          Matching), and they are not at first. A leader of a later term counts
+          only acknowledgements of its own term, which a silent node never sends.
+          The node then needs no entry past the old point: the leader's own log
+          may never reach it, past the tail of an older term the conflict just
+          dropped, and in a cluster that wrote nothing the node stayed silent for
+          as long as nobody wrote.
+
+          The rest of the condition is unchanged: an entry of the leader's term
+          committed at or past the new point, the commit #636 fixes, the end once
+          durable (#684). The point is lowered in memory: a restart obeys the one
+          the node persisted, the safe side.
+        name: lowerSilence
+        params: term, first uint64
+        recv: r *Raft
       - doc: |-
           verifyChain checks the body and the chain of m's entries from start on
           before anything is appended: a mismatch refuses the acknowledgement, and
