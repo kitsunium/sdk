@@ -2364,9 +2364,22 @@ sequences:
         kind: actor
       - id: (*Raft).restartLogAt
         kind: self
+      - id: r.log.term
+        kind: internal
+      - id: r.lowerSilence
+        kind: internal
       - id: r.truncateFrom
         kind: internal
     steps:
+      - opt:
+          do:
+            - eval: r.lowerSilence(r.cfg.SilentTerm, idx+1)
+              to: r.lowerSilence
+          init:
+            bind: held, ok
+            eval: r.log.term(idx)
+            to: r.log.term
+          when: ok && held != t
       - opt:
           do:
             - eval: r.truncateFrom(r.log.snapIndex + 1)
@@ -3858,7 +3871,7 @@ sequences:
           		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.hasStateNotice()
   - of: (*ReadyValue).hasStateNotice
     steps:
-      - return: rd.SilenceEnded || rd.Unsupported.Index != 0 || rd.LeaderUnheard
+      - return: rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard
   - of: (*Raft).Ready
     participants:
       - id: caller
@@ -5610,6 +5623,8 @@ sequences:
       - opt:
           do:
             - set: r.cfg.SilentIndex
+              value: first
+            - set: r.rd.SilenceLowered
               value: first
           when: first < r.cfg.SilentIndex && term >= r.cfg.SilentTerm
   - of: (*Raft).verifyChain

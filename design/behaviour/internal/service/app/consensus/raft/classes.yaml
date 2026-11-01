@@ -1433,6 +1433,14 @@ types:
         name: SilenceEnded
         type: bool
       - doc: |-
+          SilenceLowered is the index the silence condition's truncation point
+          was lowered to, 0 when it was not: no entry this node held from there
+          on counted towards a commit (lowerSilence). The driver persists it,
+          under the condition's term, before this Ready's truncation reaches the
+          store, so a restart obeys it (#793).
+        name: SilenceLowered
+        type: uint64
+      - doc: |-
           LeaderUnheard is set when this node, which may not campaign (a
           learner, a silent voter, one with no table), heard no leader for
           askElectionTimeouts maximum election timeouts and asked its members
@@ -1498,8 +1506,8 @@ types:
         results: bool
       - doc: |-
           hasStateNotice reports whether the Ready tells the driver of a state: the
-          end of the silence, an entry this version cannot apply, or a node that may
-          not campaign and hears no leader.
+          end of the silence or its lowered point, an entry this version cannot
+          apply, or a node that may not campaign and hears no leader.
         name: hasStateNotice
         recv: rd *ReadyValue
         results: bool
@@ -2470,6 +2478,25 @@ types:
           restartLogAt discards the whole log, whose boundary entry does not match
           the snapshot at (idx, t), and restarts it empty on that snapshot: the
           entries dropped are truncated in the Ready and the store compacted to idx.
+
+          A log that held idx under another term lowers a silence's truncation
+          point to idx+1, as a conflicting append does (#792). The snapshot is
+          committed: an entry this node held at idx or past it, those the
+          truncation dropped included, committed, would make this log the
+          committed one through idx (Log Matching), and it is not, so none of them
+          ever counted towards a commit. Only the append path lowered the point,
+          and a node brought onto the leader's snapshot over a tail of an older
+          term kept its old point, past the leader's whole log, and stayed silent
+          in a cluster that wrote nothing. The proof is the snapshot's commit, not
+          its sender's log, so it holds whatever that sender's term: unlike an
+          append's conflict it needs no leader of a term at least SilentTerm, which
+          a node whose truncation dropped the record of a later term (#418) may
+          install from, and lowerSilence is asked at SilentTerm itself.
+          lowerSilence names the point in this Ready, beside the truncation, for
+          the driver to persist first (#793); the rest of the condition holds as
+          after a conflict, the commit #636 and #766 fix under the leader of the
+          node's own term included. A log that ends before idx proves nothing of
+          the entries it lacks.
         name: restartLogAt
         params: idx, t uint64, chainTip uint32
         recv: r *Raft
@@ -3404,7 +3431,8 @@ types:
       - doc: |-
           lowerSilence lowers the truncation point of a silence to first, where
           an append of a leader of a term at least SilentTerm conflicts with this
-          log below that point (#787). The conflict proves that no entry this node
+          log below that point (#787), or past a snapshot installed over a log
+          that held its index under another term (restartLogAt, #792). The conflict proves that no entry this node
           held from first on, those the truncation dropped included, was or will
           be committed with its acknowledgement. Such an entry is of a term at most
           SilentTerm: committed by that term's leader, at any time, it is in the
@@ -3420,8 +3448,17 @@ types:
 
           The rest of the condition is unchanged: an entry of the leader's term
           committed at or past the new point, the commit #636 fixes, the end once
-          durable (#684). The point is lowered in memory: a restart obeys the one
-          the node persisted, the safe side.
+          durable (#684).
+
+          The lowered point leaves in the Ready (SilenceLowered), which the driver
+          persists before that Ready's truncation reaches the store. Lowered in
+          memory only, it was lost to a restart before the commit reached the
+          node, which came back on the old point with a log that no longer
+          reached it, and stayed silent in a cluster that wrote nothing (#793).
+          Persisted first is safe: a crash before the truncation is durable
+          restarts the node over the entries the conflict proved, all the same,
+          never counted, and the condition still asks for an entry of the
+          leader's term past the point.
         name: lowerSilence
         params: term, first uint64
         recv: r *Raft

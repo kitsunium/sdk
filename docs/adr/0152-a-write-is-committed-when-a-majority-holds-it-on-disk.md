@@ -6547,6 +6547,144 @@ otherwise keeps for its next start
   `TestAChunkStreamThatCannotBeReadIsAStorageFailure`. The tests of #506,
   #555, #574, #640 and #746 stay green.
 
+## Amendment — a silence's lowered truncation point is on disk before its truncation (2026-11-01, #793)
+
+#787's fix (PR #791) lowers a silent node's truncation point to the index
+where an append of a leader of a term at least `SilentTerm` conflicts with
+its log (`lowerSilence`), in memory only, while the truncation that
+justifies it leaves in the same Ready and is made durable. A node
+restarted once that batch was on disk, and before the commit reached it,
+came back on the old point `SILENT` still held, with a log that no longer
+reached it and no conflict left to lower it again. The leader's one no-op
+per silence and per term fell short of the old point by the length of the
+dropped tail, so in a cluster that wrote nothing the node stayed silent:
+one voter short, and one more failure left two live voters of three that
+elected no one. The window runs from the sync of the conflicting batch to
+the durable end of the silence, about one round trip, and stays open for
+as long as the leader cannot commit its no-op; any restart inside it, a
+crash or a rolling restart, is enough
+([#793](https://github.com/kitsunium/sdk/issues/793)).
+
+- **The lowered point leaves in the Ready.** `lowerSilence` names the new
+  point in `ReadyValue.SilenceLowered`, in the Ready that carries the
+  truncation; a Ready that lowers nothing names 0.
+- **The driver writes it before the truncation.** `reportNotices` runs on
+  the loop before `handleOne` hands the storage actor the Ready's write,
+  and writes the lowered point to the existing `SILENT` file
+  (`fileLog.lowerSilence`), where `endSilence` removes it: the point is on
+  disk no later than the truncation. A failed write stops the node, as
+  every failed write of its disk (D4), and the storage actor stages
+  nothing after a hard stop.
+- **A crash between the two writes.** Point first, then truncation: a
+  crash between them restarts the node on the lowered point over a log
+  that still holds the tail the conflict dropped. No entry of that tail
+  ever counted towards a commit, a fact of the cluster's log whatever this
+  disk holds, and the condition still asks for an entry of the leader's
+  term committed past the point, which the leader writes over that tail.
+  The reverse order is the defect.
+- **The record keeps its form.** The same file and the same 16 bytes
+  (`silenceRecord`: the term, then the index), written aside, synced and
+  renamed over it, so a crash leaves the old record or the new one. The
+  term is the one on disk, never changed. A node of any release reads it
+  back as before, and one rolled back to an earlier release obeys the
+  lowered point, which the same argument makes safe. The write only
+  lowers: it never raises the index, never writes a condition the
+  directory no longer holds, so an ended silence stays ended, and leaves as
+  they are an unreadable record, the safe side, and one whose index is not
+  filled in yet, which the next start fills in from the log.
+- **What it keeps.** The end of the silence is unchanged (#684): raft
+  judges it once the log is durable through the commit that met it, and
+  the driver removes `SILENT` in the Ready after. Both writes run on the
+  loop in Ready order, and no lowering follows an end, so a removed record
+  is never written back. `TruncateAndStaySilent` reads only the term of a
+  record a crashed run left (#418) and takes its point from the log it
+  truncates; `Recover` and `WipeAndRejoin` remove the record as before.
+- **What it costs.** One file written and synced on the loop per lowering,
+  as at the end of a silence: at most once per conflict found while
+  silent.
+- **No format change.** No frame, flag or record changes, no protocol
+  raise, and no raft mutation: the type is full. `ReadyValue`, an internal
+  type, gains `SilenceLowered`.
+- **Tests.** `TestALoweredSilencePointIsOnDiskBeforeItsTruncation` (on
+  disk, three nodes: a cut-off leader's tail of two entries past the
+  commit, its record of the third rotten, `TruncateAndStaySilent`, the
+  conflict at the new leader's no-op; on main `SILENT` still said 6 when
+  the storage actor wrote the truncation from 4, and the node restarted
+  from what that batch left stayed silent through 5 s of a quiet cluster,
+  the leader at 5; fixed, `SILENT` says 4 first and the restarted node
+  ends its silence),
+  `TestALoweredSilencePointSurvivesARestartBeforeTheCommit` (raft, the
+  issue's scenario, the node restarted on the point its driver persisted;
+  on main, the issue's test, the node stays silent at 2/7 through 30 s and
+  the two others elect no one once the leader fails),
+  `TestOnlyALoweringLeavesInTheReady` and
+  `TestALoweredSilenceKeepsItsRecordsForm`. The tests of #418, #636, #684,
+  #766, #787 and #790 stay green.
+
+## Amendment — an install over another term's entry lowers a silence's truncation point (2026-11-01, #792)
+
+#787's fix (PR #791) lowers a silent node's truncation point only on the
+append path, where a leader's append conflicts with the node's log. A
+node brought onto the leader's snapshot instead, over a tail of an older
+term, dropped that tail when `InstallSnapshot` found the snapshot's index
+held under another term (`restartLogAt`), and kept its old point, past the
+leader's whole log. The leader's one no-op per silence and per term
+(#787) committed below it, and in a cluster that wrote nothing the node
+stayed silent: one voter short, and one more failure left two live voters
+of three that elected no one. The leader sends the snapshot whenever its
+log starts past the node's divergence: after a compaction, or after its
+own restart, which rebuilds its log from its newest snapshot
+([#792](https://github.com/kitsunium/sdk/issues/792)).
+
+- **The install lowers the point.** When the log held the snapshot's
+  index under another term, `restartLogAt` lowers the point to the index
+  after the snapshot (`lowerSilence`). The snapshot is committed: an entry
+  the node held at that index or past it, those the truncation dropped
+  included, committed, would make the node's log the committed one through
+  the index (Log Matching), and it is not, so none of them ever counted
+  towards a commit, under the leader of the node's own term as under a
+  later one. The point is the index after the snapshot, never the
+  snapshot's own, as at a start (#636): the leader's commit of an entry of
+  its term past the snapshot ends the silence.
+- **Whatever the sender's term.** The proof is the snapshot's commit, not
+  its sender's log, so unlike an append's conflict it needs no leader of a
+  term at least `SilentTerm`: a node whose truncation dropped the record
+  of a later term (#418) restarts below its `SilentTerm`, and an install
+  from a leader of its own term lowers the point too. No such leader ends
+  the silence, which still asks for a leader of a term at least
+  `SilentTerm`; the point it lowered spares the next one a conflict it
+  might never find.
+- **Only then.** A boundary entry held at the snapshot's term keeps the
+  suffix, and the next append judges it; a log that ends before the index
+  proves nothing of the entries it lacks; a point already at or past the
+  index after the snapshot is kept. An unreadable condition stays as it is
+  on disk, and no term ends it.
+- **Durable as a conflict's.** The lowering leaves in the install's Ready
+  beside the truncation (`ReadyValue.SilenceLowered`), and the driver
+  writes it to `SILENT` before the storage actor writes that truncation
+  (#793). An install a crash interrupted after its snapshot was published,
+  during a restore that may take seconds, is finished at the next start
+  (`finishInstall`), which drops the log the same way: it now lowers
+  `SILENT` past the snapshot first, over the same log only.
+- **What it keeps.** The rest of the condition is unchanged: an entry of
+  the leader's term committed past the point, the commit #636 and #766 fix
+  under the leader of the node's own term, the end once durable (#684).
+  `CheckOffer` and the install's other guards are untouched.
+- **No format change.** No frame, flag or record changes, no protocol
+  raise, and no raft mutation: the type is full.
+- **Tests.** `TestASilentNodeInstalledOverAnOlderTermsTailEndsItsSilenceInAQuietCluster`
+  (raft, the issue's scenario, the leader's log compacted to its no-op and
+  the node installed over its tail; on main the node stays silent at 2/7
+  through 30 s of a quiet cluster, the leader's log ending at 5, and with
+  the leader down the two others elect no one; fixed, the point falls to 5
+  and the leader's no-op ends the silence),
+  `TestAnInstalledSilencePointSurvivesARestart` (the node restarted on the
+  point its driver persisted), `TestAnInstallLowersTheSilencePointOnlyOverAnotherTerm`
+  and `TestAnInterruptedInstallLowersTheSilencePointBeforeTheLog` (the
+  start over a published snapshot: `SILENT` lowered before any write of
+  the log is synced, and only over a log that held the index under another
+  term). The tests of #636, #684, #766, #787, #790 and #793 stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6595,6 +6733,8 @@ otherwise keeps for its next start
 | #790 | Raft hunt loop, 2026-11-01 | the strict reconfiguration check counts a voter whose last answer carried `FlagTruncated`, a silent one, as a voter that does not answer, so a change that would need a silent voter's acknowledgement to commit is refused `MEMBERSHIP_INVALID`; #603's guard and the raise still count it; no format change, no raft mutation (amendment of 2026-11-01, #790) |
 | #787 | Raft hunt loop, 2026-11-01 | a leader appends one no-op of its term for a silent node whose heartbeat answer reports its whole log committed, once per silence and per term, and a conflict of a leader of a term at least `SilentTerm` below the truncation point lowers that point in memory, so a silence ends in a cluster that writes nothing; no format change, no raft mutation (amendment of 2026-11-01, #787) |
 | #789 | Raft hunt loop, 2026-11-01 | `Recover` and `Inspect` refuse STORAGE_FAILED an interrupted install whose snapshot the disk cannot read, instead of setting it aside as one that fails its checksums, and a read of the chunks or of a `.meta` that fails for any reason but a stream cut short is STORAGE_FAILED, never SNAPSHOT_CORRUPT; no format change (amendment of 2026-11-01, #789) |
+| #793 | Raft hunt loop, 2026-11-01 | a silent node's lowered truncation point leaves in the Ready that carries the truncation (`ReadyValue.SilenceLowered`), and the driver writes it to `SILENT`, same record, lowered only, before the storage actor writes that truncation, so a restart before the commit reaches the node obeys it; no format change, no raft mutation (amendment of 2026-11-01, #793) |
+| #792 | Raft hunt loop, 2026-11-01 | an install over a log that held the snapshot's index under another term lowers a silent node's truncation point to the index after the snapshot, as a conflicting append does, durably through #793's path, and a start that finishes such an interrupted install lowers `SILENT` before it drops the log; no format change, no raft mutation (amendment of 2026-11-01, #792) |
 
 ## raft-sql-poc (owner's prior Raft)
 

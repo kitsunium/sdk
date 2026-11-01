@@ -362,7 +362,31 @@ under coverage before touching `shard_count`.
   least `SilentTerm` finds below it: no entry the node held from there on
   ever counted towards a commit (Leader Completeness, Log Matching), and
   past a tail of an older term the leader's log may never reach the old
-  point (`lowerSilence`, in memory only,
+  point (`lowerSilence`,
   `TestASilentNodeOverAnOlderTermsTailEndsItsSilenceInAQuietCluster`,
   `TestAConflictLowersTheTruncationPointOnlyUnderALeaderOfItsTerm`; no
   mutation, the type is full).
+- Lower a silence's truncation point in memory alone: the truncation that
+  justifies it is durable, and a node restarted before the commit reached
+  it came back on the old point with a log that no longer reached it, and
+  stayed silent in a cluster that wrote nothing (#793). `lowerSilence`
+  names the point in `ReadyValue.SilenceLowered`, in the Ready that
+  carries the truncation, for the driver to persist first
+  (`TestALoweredSilencePointSurvivesARestartBeforeTheCommit`,
+  `TestOnlyALoweringLeavesInTheReady`; no mutation, the type is full).
+- Keep a silent node's truncation point above a snapshot it installs over
+  a log that held the snapshot's index under another term: the snapshot is
+  committed, so no entry of that log from there on ever counted towards a
+  commit (Log Matching), and a node brought onto the leader's snapshot over
+  a tail of an older term kept a point past the leader's whole log, silent
+  in a cluster that wrote nothing (#792). `restartLogAt` lowers it to the
+  index after the snapshot through `lowerSilence`, asked at `SilentTerm`
+  itself: the proof is the snapshot's commit, whatever its sender's term,
+  and a node whose truncation dropped a later term's record (#418) may be
+  installed by a leader below it. A boundary held at its term keeps the
+  suffix for the next append, and a log that ends before the index proves
+  nothing
+  (`TestASilentNodeInstalledOverAnOlderTermsTailEndsItsSilenceInAQuietCluster`,
+  `TestAnInstalledSilencePointSurvivesARestart`,
+  `TestAnInstallLowersTheSilencePointOnlyOverAnotherTerm`; no mutation, the
+  type is full).

@@ -781,10 +781,9 @@ func (n *Node) finishInstall(base *coreconsensus.SnapshotMetaValue, first, last 
 	if snapIdx < first {
 		return first, last, nil
 	}
-	match := false
-	if snapIdx <= last {
-		t, terr := n.cfg.Log.Term(snapIdx)
-		match = terr == nil && t == base.Position.Term
+	match, err := n.boundaryMatches(base, last)
+	if err != nil {
+		return first, last, err
 	}
 	if !match {
 		if err := n.cfg.Log.TruncateSuffix(first); err != nil {
@@ -802,6 +801,28 @@ func (n *Node) finishInstall(base *coreconsensus.SnapshotMetaValue, first, last 
 	}
 	newFirst, newLast = n.cfg.Log.Bounds()
 	return newFirst, newLast, nil
+}
+
+// boundaryMatches reports whether the log, which ends at last, holds the
+// snapshot's boundary entry at its term. One it holds under another term
+// lowers a silence's point past the snapshot first, before finishInstall
+// drops that log, as raft's restartLogAt lowers it when the install is not
+// interrupted (#792): a crash after the publication, during the restore,
+// left the old point, and the dropped log too short for it.
+func (n *Node) boundaryMatches(base *coreconsensus.SnapshotMetaValue, last uint64) (bool, error) {
+	snapIdx := base.Position.Index
+	if snapIdx > last {
+		return false, nil
+	}
+	t, terr := n.cfg.Log.Term(snapIdx)
+	if terr != nil || t == base.Position.Term {
+		// A term the log cannot read is no match, and proves nothing.
+		return terr == nil, nil
+	}
+	if err := lowerSilenceIn(n.cfg.Log, snapIdx+1); err != nil {
+		return false, storageFailed("silence condition", err)
+	}
+	return false, nil
 }
 
 // readTail reads the log after the base into memory, MaxBatchBytes at a
@@ -1515,9 +1536,14 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 }
 
 // reportNotices acts on the Ready's notices that change no state of the
-// loop: the end of the silence condition, the chain refusals D13 counts by
-// leader, and a truncation worth a line in the log.
+// loop: the silence condition lowered or ended, the chain refusals D13
+// counts by leader, and a truncation worth a line in the log. It runs
+// before handleOne queues the Ready's write: a lowered point is durable
+// before the truncation it rides with (#793).
 func (n *Node) reportNotices(rd *raft.ReadyValue) {
+	if rd.SilenceLowered != 0 && !rd.SilenceEnded {
+		n.lowerSilence(rd.SilenceLowered)
+	}
 	if rd.SilenceEnded {
 		n.endSilence()
 	}
@@ -1527,6 +1553,28 @@ func (n *Node) reportNotices(rd *raft.ReadyValue) {
 	if rd.TruncateFrom != 0 {
 		n.obs.info("consensus: log truncated", lattr("from", rd.TruncateFrom))
 	}
+}
+
+// lowerSilence persists the silence condition's lowered truncation point,
+// on the loop as endSilence does, so before the storage actor is handed the
+// truncation that justifies it. Raft lowered the point in memory only, and a
+// node restarted after its truncation reached the disk and before the
+// commit reached it came back on the old point, with a log that no longer
+// reached it, silent in a cluster that wrote nothing (#793). A store that
+// cannot record it stops the node, as every failed write of its disk (D4).
+func (n *Node) lowerSilence(index uint64) {
+	if err := lowerSilenceIn(n.cfg.Log, index); err != nil {
+		n.stop(storageFailed("lower silence", err), true)
+	}
+}
+
+// lowerSilenceIn lowers the silence condition log persists to index; a
+// store that keeps none has nothing to lower.
+func lowerSilenceIn(log coreconsensus.LogStore, index uint64) error {
+	if s, ok := log.(interface{ lowerSilence(index uint64) error }); ok {
+		return s.lowerSilence(index)
+	}
+	return nil
 }
 
 // endSilence persists the end of the silence condition; a store that

@@ -2141,6 +2141,30 @@ func (l *fileLog) silence() (term, index uint64, unreadable, err error) {
 	return term, index, nil, nil
 }
 
+// lowerSilence lowers the persisted silence condition's index to index,
+// its term and its form kept (silenceRecord), durably: written aside and
+// renamed over it, so a crash leaves the old record or the new one (#793).
+// It never raises the index nor writes a condition the directory does not
+// hold: one already ended stays ended, one unreadable stays as it is, the
+// safe side silence reports, and one not filled in yet (0) is filled in
+// from the log by the next start.
+func (l *fileLog) lowerSilence(index uint64) error {
+	path := filepath.Join(l.dir, fileSilent)
+	b, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if len(b) != 16 {
+		// None, or unreadable.
+		return nil
+	}
+	term, cur := binary.LittleEndian.Uint64(b), binary.LittleEndian.Uint64(b[8:])
+	if cur == 0 || index == 0 || index >= cur {
+		return nil
+	}
+	return writeFileSync(path, silenceRecord(term, index))
+}
+
 // endSilence removes the silence condition durably.
 func (l *fileLog) endSilence() error {
 	if err := os.Remove(filepath.Join(l.dir, fileSilent)); err != nil && !os.IsNotExist(err) {

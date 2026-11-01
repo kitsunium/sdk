@@ -4118,6 +4118,14 @@ packages:
               name: SilenceEnded
               type: bool
             - doc: |-
+                SilenceLowered is the index the silence condition's truncation point
+                was lowered to, 0 when it was not: no entry this node held from there
+                on counted towards a commit (lowerSilence). The driver persists it,
+                under the condition's term, before this Ready's truncation reaches the
+                store, so a restart obeys it (#793).
+              name: SilenceLowered
+              type: uint64
+            - doc: |-
                 LeaderUnheard is set when this node, which may not campaign (a
                 learner, a silent voter, one with no table), heard no leader for
                 askElectionTimeouts maximum election timeouts and asked its members

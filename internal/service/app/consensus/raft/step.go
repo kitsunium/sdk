@@ -611,7 +611,8 @@ func (r *Raft) appendNew(m *core.MessageValue, start int, prevChain uint32) bool
 
 // lowerSilence lowers the truncation point of a silence to first, where
 // an append of a leader of a term at least SilentTerm conflicts with this
-// log below that point (#787). The conflict proves that no entry this node
+// log below that point (#787), or past a snapshot installed over a log
+// that held its index under another term (restartLogAt, #792). The conflict proves that no entry this node
 // held from first on, those the truncation dropped included, was or will
 // be committed with its acknowledgement. Such an entry is of a term at most
 // SilentTerm: committed by that term's leader, at any time, it is in the
@@ -627,11 +628,21 @@ func (r *Raft) appendNew(m *core.MessageValue, start int, prevChain uint32) bool
 //
 // The rest of the condition is unchanged: an entry of the leader's term
 // committed at or past the new point, the commit #636 fixes, the end once
-// durable (#684). The point is lowered in memory: a restart obeys the one
-// the node persisted, the safe side.
+// durable (#684).
+//
+// The lowered point leaves in the Ready (SilenceLowered), which the driver
+// persists before that Ready's truncation reaches the store. Lowered in
+// memory only, it was lost to a restart before the commit reached the
+// node, which came back on the old point with a log that no longer
+// reached it, and stayed silent in a cluster that wrote nothing (#793).
+// Persisted first is safe: a crash before the truncation is durable
+// restarts the node over the entries the conflict proved, all the same,
+// never counted, and the condition still asks for an entry of the
+// leader's term past the point.
 func (r *Raft) lowerSilence(term, first uint64) {
 	if first < r.cfg.SilentIndex && term >= r.cfg.SilentTerm {
 		r.cfg.SilentIndex = first
+		r.rd.SilenceLowered = first
 	}
 }
 
