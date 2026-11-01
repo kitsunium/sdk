@@ -81,6 +81,7 @@ go_test(
         "voucheraddress_internal_test.go",
         "wholelogsilence_internal_test.go",
         "wholelogsilencepoint_internal_test.go",
+        "wholelogsilencerestart_internal_test.go",
         "wirebatch_internal_test.go",
     ],
     embed = [":raft"],

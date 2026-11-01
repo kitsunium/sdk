@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T12:00:00Z -->
+<!-- updated: 2026-11-01T14:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -422,7 +422,10 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `followSilentReport`). Nor leave a silent node that holds the leader's
   whole log waiting for a write: its truncation point lies past that log,
   and in a cluster that wrote nothing it stayed silent for good (#787,
-  raft's `feedSilence` and `lowerSilence`).
+  raft's `feedSilence` and `lowerSilence`). Nor once a restart on the
+  leader's snapshot raised that point past the leader's no-op: the
+  transfer that covers it feeds the node once more (#795, raft's
+  `SnapshotDone`).
 - End a silence on disk before the entries that meet its condition are: raft
   judged it on the append's entries, in memory, and said so in the same
   Ready, and `endSilence` removed SILENT on the loop before the storage

@@ -27,9 +27,6 @@ const (
 	// acknowledges no append, so it counts for no change that must commit
 	// (activeMajority, #790).
 	peerSilent
-	// peerSilentFed is set once the leader appended a no-op for the peer's
-	// silence (feedSilence, #787), and cleared with peerSilent.
-	peerSilentFed
 )
 
 // peerFacts are a peer's yes/no state in the leader's progress, one bit each.
@@ -70,6 +67,12 @@ type progress struct {
 	// heldSince is when a peer whose window did not move first reported
 	// holding the oldest append in flight; zero when it does not.
 	heldSince time.Time
+	// silentFed is the index of the no-op the leader appended for the
+	// peer's silence (feedSilence, #787), 0 when none: cleared with
+	// peerSilent, and by a snapshot transfer to the peer that covers it,
+	// over which a restart of the peer raises its truncation point past
+	// that no-op (SnapshotDone, #795).
+	silentFed uint64
 }
 
 // noteSilence records whether the peer's answer says it is silent: a silent
@@ -82,7 +85,8 @@ func (p *progress) noteSilence(flags core.MessageFlags) {
 		p.facts |= peerSilent
 		return
 	}
-	p.facts &^= peerSilent | peerSilentFed
+	p.facts &^= peerSilent
+	p.silentFed = 0
 }
 
 // becomeProbe restarts the peer at one append at a time from its match. Out
