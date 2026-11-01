@@ -46,6 +46,11 @@ const (
 	// receives into nothing else: switched off, io_uring is never set up and the group
 	// runs on epoll.
 	CapabilityURingPbuf Capability = "uring-pbuf"
+	// CapabilityURingPbufInc is the provided-buffer ring consumed incrementally
+	// (IOU_PBUF_RING_INC, 6.12): a buffer serves recv after recv, each from where the
+	// last stopped (ADR 0204). Switched off, or refused by the kernel, each recv takes
+	// a whole buffer.
+	CapabilityURingPbufInc Capability = "uring-pbuf-inc"
 	// CapabilityURingDirect is io_uring's direct descriptors, chosen when the release
 	// check passes (a kernel from 6.13). Switched off, connections live in the process
 	// table and the release check does not run.
@@ -82,9 +87,6 @@ const (
 	CapabilityURingSendZC Capability = "uring-send-zc"
 	// CapabilityURingBundle is io_uring's receive and send bundles.
 	CapabilityURingBundle Capability = "uring-bundle"
-	// CapabilityURingPbufInc is the incrementally consumed buffer ring
-	// (IOU_PBUF_RING_INC).
-	CapabilityURingPbufInc Capability = "uring-pbuf-inc"
 	// CapabilityBusyPoll is busy polling of the network device's queue.
 	CapabilityBusyPoll Capability = "busy-poll"
 	// CapabilityURingZCRX is io_uring's zero-copy receive.

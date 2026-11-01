@@ -87,8 +87,11 @@ const (
 	cancelFDFixed uint32 = 1 << 3
 
 	// CQE flags.
-	cqeFBuffer     uint32 = 1 << 0
-	cqeFMore       uint32 = 1 << 1
+	cqeFBuffer uint32 = 1 << 0
+	cqeFMore   uint32 = 1 << 1
+	// cqeFBufMore is IORING_CQE_F_BUF_MORE (6.12): the completion's buffer
+	// stays the kernel's, partly consumed, for more completions.
+	cqeFBufMore    uint32 = 1 << 4
 	cqeBufferShift uint32 = 16
 
 	// fileIndexAlloc is IORING_FILE_INDEX_ALLOC, (~0U): the kernel picks a
@@ -110,7 +113,10 @@ const (
 	// pbufRingMmap is IOU_PBUF_RING_MMAP (6.4): the kernel allocates the
 	// buffer ring and the loop maps it, at offPbufRing | bgid << offPbufShift,
 	// so no user page is pinned against RLIMIT_MEMLOCK.
-	pbufRingMmap uint16  = 1
+	pbufRingMmap uint16 = 1
+	// pbufRingInc is IOU_PBUF_RING_INC (6.12): a buffer is consumed as far
+	// as each completion took, and serves the next from where it stopped.
+	pbufRingInc  uint16  = 2
 	offPbufRing  uintptr = 0x80000000
 	offPbufShift uintptr = 16
 

@@ -51,6 +51,7 @@ type capClass struct {
 var loopCaps = [...]capClass{
 	{corenet.CapabilityURingMultishotRecv, classKernel},
 	{corenet.CapabilityURingPbuf, classKernel},
+	{corenet.CapabilityURingPbufInc, classKernel},
 	{corenet.CapabilityURingDirect, classKernel},
 	{corenet.CapabilityEpollExclusive, classKernel},
 	{corenet.CapabilityURingDeferTaskrun, classCode},
@@ -59,7 +60,6 @@ var loopCaps = [...]capClass{
 	{corenet.CapabilityURingSQRewind, classCode},
 	{corenet.CapabilityURingSendZC, classB},
 	{corenet.CapabilityURingBundle, classB},
-	{corenet.CapabilityURingPbufInc, classB},
 	{corenet.CapabilityBusyPoll, classB},
 	{corenet.CapabilityURingZCRX, classB},
 	{corenet.CapabilityReuseportCBPF, classB},

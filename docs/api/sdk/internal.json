@@ -25561,7 +25561,7 @@
       "spelled": "Capability",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
       "value": "\"uring-pbuf-inc\"",
-      "doc": "CapabilityURingPbufInc is the incrementally consumed buffer ring\n(IOU_PBUF_RING_INC).\n",
+      "doc": "CapabilityURingPbufInc is the provided-buffer ring consumed incrementally\n(IOU_PBUF_RING_INC, 6.12): a buffer serves recv after recv, each from where the\nlast stopped (ADR 0204). Switched off, or refused by the kernel, each recv takes\na whole buffer.\n",
       "file": "core/net/capability.go",
       "layer": "core",
       "family": "net"

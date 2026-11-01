@@ -273,6 +273,9 @@ type uLoop struct {
 	arrived     uint64
 	spacing     time.Duration
 	lastArrival time.Duration
+	// incRefused is the kernel's refusal of IOU_PBUF_RING_INC to a ring of
+	// the loop, zero while none refused it.
+	incRefused syscall.Errno
 	// bufBytes is the bytes of provided buffers the loop's rings handed
 	// their kernels so far, bounded by bufBudget (bufBudgetFor).
 	bufBytes uint64
@@ -481,6 +484,7 @@ func (ul *uLoop) build(rings int, sweep bool) error {
 		ul.rings = append(ul.rings, rr)
 		lp.rings = append(lp.rings, rr.r)
 	}
+	ul.reportPbufInc()
 	primary := ul.rings[0]
 	primary.pollFD(ul.wakefd, udWake)
 	//: secondaries signal the primary through one registered eventfd.
@@ -523,9 +527,8 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
 	}
 	rr.r = newRing(lp, i, rr)
-	bufs, size, first := ul.bufShape()
 	//: stage 4: provided buffers and the sparse table.
-	if errno := u.setupBuffers(bufs, size, first); errno != 0 || ul.hooks.failStage == "buf_ring" {
+	if errno := ul.setupBufs(u); errno != 0 || ul.hooks.failStage == "buf_ring" {
 		u.close()
 		//: named.
 		return nil, probeError("buf_ring", orErrno(errno, syscall.EOPNOTSUPP))
@@ -549,6 +552,38 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 	rr.armAccepts()
 	//: built.
 	return rr, nil
+}
+
+// setupBufs gives ring u its provided buffers, consumed incrementally
+// (IOU_PBUF_RING_INC) unless the operator switched it off or the kernel
+// refused it to a ring of the loop before: the first refusal settles the
+// loop's rings, and the report (ADR 0204).
+func (ul *uLoop) setupBufs(u *uring) syscall.Errno {
+	bufs, size, first := ul.bufShape()
+	//: a test plays a kernel before 6.12.
+	if ul.hooks.failStage == "pbuf_inc" {
+		ul.incRefused = syscall.EINVAL
+	}
+	inc := ul.sw.wants(corenet.CapabilityURingPbufInc) && ul.incRefused == 0
+	errno := u.setupBuffers(bufs, size, first, inc)
+	//: refused here: no later ring asks again.
+	if u.incRefused != 0 {
+		ul.incRefused = u.incRefused
+	}
+	//: the buffers' own answer.
+	return errno
+}
+
+// reportPbufInc records what the rings' buffer rings settled:
+// IOU_PBUF_RING_INC on, or absent with the kernel's refusal. A switched-off
+// row stays disabled: the flag was never asked for.
+func (ul *uLoop) reportPbufInc() {
+	reason := ""
+	//: refused by the kernel.
+	if ul.incRefused != 0 {
+		reason = "IOU_PBUF_RING_INC refused: " + ul.incRefused.Error()
+	}
+	ul.rep.found(ul.sw, corenet.CapabilityURingPbufInc, ul.incRefused == 0, reason)
 }
 
 // bufShape is a ring's provided buffers: how many it may have, their size,
@@ -1330,12 +1365,7 @@ func (rr *uRing) owns(slot int32, gen uint32) bool {
 // onRecv delivers received bytes and keeps the multishot armed.
 func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 	more := c.flags&cqeFMore != 0
-	//: a buffer, whatever else, goes back after the batch.
-	if c.flags&cqeFBuffer != 0 {
-		bid := uint16(c.flags >> cqeBufferShift)
-		rr.recycle = append(rr.recycle, bid)
-		rr.inRing[rr.u.groupOf(bid)]--
-	}
+	data := rr.takeBuf(c)
 	//: a slot is never released with an operation in flight, so this is a
 	//: kernel or bookkeeping error; the buffer is returned, nothing else.
 	if !rr.owns(slot, gen) {
@@ -1353,7 +1383,7 @@ func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 	switch {
 	//: bytes, in buffer bid.
 	case c.res > 0 && c.flags&cqeFBuffer != 0:
-		rr.recvBytes(slot, uint16(c.flags>>cqeBufferShift), c.res, more)
+		rr.recvBytes(slot, data, more)
 	//: out of buffers: re-armed once some come back.
 	case c.res == -int32(errnoENOBUFS):
 		rr.recvStarved(slot)
@@ -1372,6 +1402,31 @@ func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 	rr.maybeClose(slot)
 }
 
+// takeBuf returns the bytes a recv completion received, none without a
+// buffer, and queues the buffer to go back after the batch once the kernel
+// is done with it: incrementally consumed, only on its completion without
+// BUF_MORE (ADR 0204).
+func (rr *uRing) takeBuf(c *cqe) []byte {
+	//: no buffer: nothing received.
+	if c.flags&cqeFBuffer == 0 {
+		//: none.
+		return nil
+	}
+	bid := uint16(c.flags >> cqeBufferShift)
+	data, kept := rr.u.took(bid, c.res, c.flags&cqeFBufMore != 0)
+	//: a test watches the buffer's uses.
+	if rr.ul.hooks.bufSeen != nil {
+		rr.ul.hooks.bufSeen(bid, int(rr.u.bufSize)-cap(data), len(data), kept, false)
+	}
+	//: the kernel's no more.
+	if !kept {
+		rr.recycle = append(rr.recycle, bid)
+		rr.inRing[rr.u.groupOf(bid)]--
+	}
+	//: the bytes.
+	return data
+}
+
 // recvCancelled re-arms the recv of a connection still open whose recv was
 // cancelled and ended.
 func (rr *uRing) recvCancelled(slot int32, more bool) {
@@ -1381,13 +1436,13 @@ func (rr *uRing) recvCancelled(slot int32, more bool) {
 	}
 }
 
-// recvBytes delivers n bytes of buffer bid to an open connection, and
-// re-arms its recv when the multishot ended.
-func (rr *uRing) recvBytes(slot int32, bid uint16, n int32, more bool) {
+// recvBytes delivers the bytes a completion received to an open
+// connection, and re-arms its recv when the multishot ended.
+func (rr *uRing) recvBytes(slot int32, data []byte, more bool) {
 	rr.ul.arrived++
 	//: only an open connection reads.
 	if rr.r.conns[slot].state == stOpen {
-		rr.r.deliver(slot, rr.u.buf(bid)[:n])
+		rr.r.deliver(slot, data)
 	}
 	//: re-armed unless the connection is going.
 	if !more && rr.r.conns[slot].state == stOpen {
@@ -1689,6 +1744,10 @@ func (rr *uRing) giveBack() {
 		}
 		u.addBuf(bid)
 		rr.inRing[u.groupOf(bid)]++
+		//: a test watches the returns.
+		if rr.ul.hooks.bufSeen != nil {
+			rr.ul.hooks.bufSeen(bid, 0, 0, false, true)
+		}
 	}
 	//: published once for the batch.
 	if len(rr.recycle) > 0 {

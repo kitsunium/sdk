@@ -84,6 +84,14 @@ type uring struct {
 	// bufProvided is how many buffers, bids 0 to bufProvided-1, the kernel
 	// has been given so far; the others were never touched.
 	bufProvided uint32
+	// bufInc is whether the groups' rings are consumed incrementally
+	// (IOU_PBUF_RING_INC): a buffer serves completions until one comes
+	// without IORING_CQE_F_BUF_MORE, each from where the last stopped,
+	// bufOff[bid] bytes in. incRefused is the kernel's answer when it
+	// refused the flag.
+	bufInc     bool
+	bufOff     []uint32
+	incRefused syscall.Errno
 	// retries counts busy submits retried.
 	retries uint64
 	// setup is the flags the ring was set up with, as asked: what the kernel
@@ -517,8 +525,10 @@ func (u *uring) flushOverflow() {
 // count must be a power of two, at most maxBufs; a group holds defaultBufs
 // of them, or count when that is fewer. The mapping is private and
 // anonymous, so a buffer the kernel was never given is no resident page, and
-// a group never needed costs no kernel memory.
-func (u *uring) setupBuffers(count, size, first uint32) syscall.Errno {
+// a group never needed costs no kernel memory. With inc the rings are asked
+// for incremental consumption; a kernel that refuses it (EINVAL, before
+// 6.12) gets the rings as before, the refusal kept in incRefused.
+func (u *uring) setupBuffers(count, size, first uint32, inc bool) syscall.Errno {
 	bm, err := syscall.Mmap(-1, 0, int(count)*int(size), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	//: no buffer memory.
 	if err != nil {
@@ -526,9 +536,15 @@ func (u *uring) setupBuffers(count, size, first uint32) syscall.Errno {
 		return errnoOfErr(err)
 	}
 	u.bufMem, u.bufCount, u.bufSize, u.bufPer = bm, count, size, min(count, defaultBufs)
-	//: the first group's ring: the kernel's own pages first, user pages
-	//: before 6.4.
-	if errno := u.addGroup(); errno != 0 {
+	u.bufInc = inc
+	errno := u.addGroup()
+	//: incremental consumption refused: the rings as before.
+	if inc && errno == syscall.EINVAL {
+		u.bufInc, u.incRefused = false, errno
+		errno = u.addGroup()
+	}
+	//: the first group's ring refused.
+	if errno != 0 {
 		//: refused.
 		return errno
 	}
@@ -552,6 +568,10 @@ func (u *uring) growBufs(n uint32) uint32 {
 			u.bufCount = bid
 			break
 		}
+		//: incremental: each new bid starts consumed nowhere.
+		if u.bufInc {
+			u.bufOff = append(u.bufOff, 0)
+		}
 		u.addBuf(uint16(bid))
 	}
 	n = bid - u.bufProvided
@@ -564,7 +584,12 @@ func (u *uring) growBufs(n uint32) uint32 {
 // addGroup registers the ring of the next group and maps it.
 func (u *uring) addGroup() syscall.Errno {
 	g := uint16(len(u.groups))
-	rm, errno := u.mapBufRing(bufGroup+g, u.bufPer)
+	var flags uint16
+	//: every group consumed the same way.
+	if u.bufInc {
+		flags = pbufRingInc
+	}
+	rm, errno := u.mapBufRing(bufGroup+g, u.bufPer, flags)
 	//: refused.
 	if errno != 0 {
 		//: as answered.
@@ -575,14 +600,16 @@ func (u *uring) addGroup() syscall.Errno {
 	return 0
 }
 
-// mapBufRing registers group bgid's ring of count entries and maps it.
-// It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a ring in user
-// pages is pinned and charged to RLIMIT_MEMLOCK, which an unprivileged
-// process runs out of after a few rings (CI's non-root lane did). A kernel
-// that does not know the flag (EINVAL) gets the ring in user pages.
-func (u *uring) mapBufRing(bgid uint16, count uint32) ([]byte, syscall.Errno) {
+// mapBufRing registers group bgid's ring of count entries, with flags, and
+// maps it. It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a
+// ring in user pages is pinned and charged to RLIMIT_MEMLOCK, which an
+// unprivileged process runs out of after a few rings (CI's non-root lane
+// did). A kernel that does not know the flag (EINVAL) gets the ring in user
+// pages; with flags, an EINVAL is returned instead, since the kernel may
+// refuse those as well (a kernel with IOU_PBUF_RING_INC has MMAP).
+func (u *uring) mapBufRing(bgid uint16, count uint32, flags uint16) ([]byte, syscall.Errno) {
 	ringBytes := max(int(count)*int(unsafe.Sizeof(uringBuf{})), syscall.Getpagesize())
-	errno := registerBufRing(u.fd, &bufReg{ringEntries: count, bgid: bgid, flags: pbufRingMmap})
+	errno := registerBufRing(u.fd, &bufReg{ringEntries: count, bgid: bgid, flags: pbufRingMmap | flags})
 	//: the kernel's pages: mapped at the group's offset.
 	if errno == 0 {
 		off := offPbufRing | uintptr(bgid)<<offPbufShift
@@ -595,8 +622,9 @@ func (u *uring) mapBufRing(bgid uint16, count uint32) ([]byte, syscall.Errno) {
 		//: mapped.
 		return rm, 0
 	}
-	//: a refusal other than an unknown flag is final.
-	if errno != syscall.EINVAL {
+	//: a refusal other than an unknown flag is final, and so is one of the
+	//: caller's flags.
+	if errno != syscall.EINVAL || flags != 0 {
 		//: refused.
 		return nil, errno
 	}
@@ -647,6 +675,24 @@ func (u *uring) groupOf(bid uint16) int {
 	return int(uint32(bid) / u.bufPer)
 }
 
+// took returns the n bytes a completion received into buffer bid, and
+// whether the buffer stays the kernel's (bufMore, incremental only). Under
+// incremental consumption the bytes start where the buffer's previous
+// completion stopped; otherwise at its start.
+func (u *uring) took(bid uint16, n int32, bufMore bool) ([]byte, bool) {
+	b := u.buf(bid)
+	n = max(n, 0)
+	//: from its start: the whole buffer was the completion's.
+	if !u.bufInc {
+		//: never kept.
+		return b[:n], false
+	}
+	off := u.bufOff[bid]
+	u.bufOff[bid] = off + uint32(n)
+	//: the next completion of the buffer starts past these.
+	return b[off : off+uint32(n)], bufMore
+}
+
 // buf returns buffer bid's bytes.
 func (u *uring) buf(bid uint16) []byte {
 	o := int(bid) * int(u.bufSize)
@@ -663,6 +709,10 @@ func (u *uring) addBuf(bid uint16) {
 	e := &u.bufEntries(u.groupOf(bid))[i]
 	e.addr = uint64(uintptr(unsafe.Pointer(&u.bufMem[int(bid)*int(u.bufSize)])))
 	e.len = u.bufSize
+	//: whole again: its next completion starts at its first byte.
+	if u.bufInc {
+		u.bufOff[bid] = 0
+	}
 	//: entry 0's bid is published with the tail, in one store.
 	if i == 0 {
 		g.shadowBid = bid

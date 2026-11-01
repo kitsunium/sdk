@@ -52,66 +52,72 @@ func TestConformance_noStarvationAtScale(t *testing.T) {
 	}
 	eachBackend(t, func(t *testing.T, b backendCase) {
 		onlyIOURing(t, b)
-		var hold atomic.Bool
-		release := make(chan struct{})
-		held := make(chan struct{}, 1)
-		h := &lineH{}
-		h.batchEnd = func(corenet.LoopIO) {
-			if hold.CompareAndSwap(true, false) {
-				held <- struct{}{}
-				<-release
-			}
-		}
-		g, addr := serve(t, b, h, func(c *Config) { c.Value.Loops, c.Value.Rings = 1, 1 })
-		ul := uringOf(g)
-		rr := ul.rings[0]
-		all := openScale(t, addr, n+1)
-		defer func() {
-			for _, c := range all {
-				_ = c.Close()
-			}
-		}()
-		holder, conns := all[n], all[:n]
-		for burst := range scaleBursts {
-			before := g.State().RingStates[0].BufferStarved
-			release = make(chan struct{})
-			hold.Store(true)
-			_, _ = holder.Write([]byte("hold\n"))
-			<-held
-			for i, c := range conns {
-				if _, err := fmt.Fprintf(c, "b%d %06d\n", burst, i); err != nil {
-					t.Fatal(err)
+		eachBufMode(t, func(t *testing.T, inc bool) {
+			var hold atomic.Bool
+			release := make(chan struct{})
+			held := make(chan struct{}, 1)
+			h := &lineH{}
+			h.batchEnd = func(corenet.LoopIO) {
+				if hold.CompareAndSwap(true, false) {
+					held <- struct{}{}
+					<-release
 				}
 			}
-			time.Sleep(200 * time.Millisecond)
-			start := time.Now()
-			close(release)
-			readHold(t, holder)
-			for i, c := range conns {
-				want := fmt.Sprintf("b%d %06d\n", burst, i)
-				got := make([]byte, len(want))
-				_ = c.SetReadDeadline(time.Now().Add(30 * time.Second))
-				if _, err := io.ReadFull(c, got); err != nil || string(got) != want {
-					t.Fatalf("burst %d, connection %d: %q, %v, want %q", burst, i, got, err, want)
-				}
-			}
-			starved := g.State().RingStates[0].BufferStarved - before
-			var provided, count uint32
-			var bytes uint64
-			var given, armed, inRing []int
-			onLoop(t, g, func() {
-				provided, count, bytes = rr.u.bufProvided, rr.u.bufCount, ul.bufBytes
-				given, armed, inRing = slices.Clone(rr.given), slices.Clone(rr.armedOn), slices.Clone(rr.inRing)
+			g, addr := serve(t, b, h, func(c *Config) {
+				c.Value.Loops, c.Value.Rings = 1, 1
+				bufMode(c, inc)
 			})
-			t.Logf("burst %d: buffers given per group %v, in the kernel's rings %v, recvs armed per group %v", burst, given, inRing, armed)
-			t.Logf("burst %d of %d connections: every echo in %v, %d starved, %d buffers provided of %d, %d MiB", burst, n, time.Since(start).Round(time.Millisecond), starved, provided, count, bytes>>20)
-			if burst > 0 && starved != 0 {
-				t.Fatalf("burst %d of %d connections: %d recvs starved after the first burst", burst, n, starved)
+			requireMode(t, g, inc)
+			ul := uringOf(g)
+			rr := ul.rings[0]
+			all := openScale(t, addr, n+1)
+			defer func() {
+				for _, c := range all {
+					_ = c.Close()
+				}
+			}()
+			holder, conns := all[n], all[:n]
+			for burst := range scaleBursts {
+				before := g.State().RingStates[0].BufferStarved
+				release = make(chan struct{})
+				hold.Store(true)
+				_, _ = holder.Write([]byte("hold\n"))
+				<-held
+				for i, c := range conns {
+					if _, err := fmt.Fprintf(c, "b%d %06d\n", burst, i); err != nil {
+						t.Fatal(err)
+					}
+				}
+				time.Sleep(200 * time.Millisecond)
+				start := time.Now()
+				close(release)
+				readHold(t, holder)
+				for i, c := range conns {
+					want := fmt.Sprintf("b%d %06d\n", burst, i)
+					got := make([]byte, len(want))
+					_ = c.SetReadDeadline(time.Now().Add(30 * time.Second))
+					if _, err := io.ReadFull(c, got); err != nil || string(got) != want {
+						t.Fatalf("burst %d, connection %d: %q, %v, want %q", burst, i, got, err, want)
+					}
+				}
+				starved := g.State().RingStates[0].BufferStarved - before
+				var provided, count uint32
+				var bytes uint64
+				var given, armed, inRing []int
+				onLoop(t, g, func() {
+					provided, count, bytes = rr.u.bufProvided, rr.u.bufCount, ul.bufBytes
+					given, armed, inRing = slices.Clone(rr.given), slices.Clone(rr.armedOn), slices.Clone(rr.inRing)
+				})
+				t.Logf("burst %d: buffers given per group %v, in the kernel's rings %v, recvs armed per group %v", burst, given, inRing, armed)
+				t.Logf("burst %d of %d connections: every echo in %v, %d starved, %d buffers provided of %d, %d MiB", burst, n, time.Since(start).Round(time.Millisecond), starved, provided, count, uint64(provided)*uint64(rr.u.bufSize)>>20)
+				if burst > 0 && starved != 0 {
+					t.Fatalf("burst %d of %d connections: %d recvs starved after the first burst", burst, n, starved)
+				}
+				if bytes > bufBudgetFor(&ul.lp.sz) || provided > uint32(n)+2*bufsStep+bufsFirst+uint32(groupSlack)*(uint32(n)/bufsStep+1) {
+					t.Fatalf("burst %d: %d buffers provided, %d bytes, for %d connections", burst, provided, bytes, n)
+				}
 			}
-			if bytes > bufBudgetFor(&ul.lp.sz) || provided > uint32(n)+2*bufsStep+bufsFirst+uint32(groupSlack)*(uint32(n)/bufsStep+1) {
-				t.Fatalf("burst %d: %d buffers provided, %d bytes, for %d connections", burst, provided, bytes, n)
-			}
-		}
+		})
 	})
 }
 

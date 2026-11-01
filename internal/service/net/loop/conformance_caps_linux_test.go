@@ -61,7 +61,7 @@ func probeCap(backend corenet.LoopBackend, c corenet.Capability) func() error {
 func init() {
 	for _, c := range []corenet.Capability{
 		corenet.CapabilityURingMultishotRecv, corenet.CapabilityURingPbuf,
-		corenet.CapabilityURingDeferTaskrun, corenet.CapabilityURingNoSQArray,
+		corenet.CapabilityURingPbufInc, corenet.CapabilityURingDeferTaskrun, corenet.CapabilityURingNoSQArray,
 		corenet.CapabilityURingRingFDs, corenet.CapabilityURingSQRewind,
 	} {
 		capProbes[string(c)] = probeCap(corenet.LoopBackendIOURing, c)
@@ -133,6 +133,7 @@ func TestCaps_kernelSwitches(t *testing.T) {
 		for _, c := range []corenet.Capability{
 			corenet.CapabilityURingMultishotRecv, corenet.CapabilityURingDirect,
 			corenet.CapabilityEpollExclusive, corenet.CapabilityTCPNoDelay,
+			corenet.CapabilityURingPbufInc,
 		} {
 			t.Run(string(c), func(t *testing.T) {
 				fd, addr := listenFD(t)
@@ -160,6 +161,10 @@ func TestCaps_kernelSwitches(t *testing.T) {
 				case corenet.CapabilityURingDirect:
 					if b.backend == corenet.LoopBackendIOURing && st.ProbeStage != "self_test+fds" {
 						t.Fatalf("probe stage %q, want self_test+fds", st.ProbeStage)
+					}
+				case corenet.CapabilityURingPbufInc:
+					if b.backend == corenet.LoopBackendIOURing && consumesIncrementally(g) {
+						t.Fatal("a ring's buffers are consumed incrementally with uring-pbuf-inc switched off")
 					}
 				case corenet.CapabilityTCPNoDelay:
 					if v, err := syscall.GetsockoptInt(lfd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY); err != nil || v != 0 {
