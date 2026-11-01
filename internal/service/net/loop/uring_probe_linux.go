@@ -269,7 +269,7 @@ func (st *selfTestRun) closeAccepted() {
 // armRecv arms the self-test's recv on res, the way the loop arms one.
 func (st *selfTestRun) armRecv(res int32, slot uint32) {
 	s := st.u.get()
-	prepRecv(s, uint32(res), udPack(udRecv, 0, slot))
+	prepRecv(s, uint32(res), bufGroup, udPack(udRecv, 0, slot))
 	//: single-shot: re-armed after each completion.
 	if !st.mode.multishot {
 		singleShot(s)

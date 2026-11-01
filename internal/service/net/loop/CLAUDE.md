@@ -29,8 +29,8 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | `stats.go` | the per-ring counters (plain on the loop, atomic for `State`, published at the end of each batch) and the batch-duration histogram behind `BatchP99` |
 | `epoll_linux.go` | the epoll backend: one thread, one epoll instance, one ring per loop; `EPOLLEXCLUSIVE` listeners; a 2 MiB mmap'd read arena per loop |
 | `uring_abi_linux.go` | the io_uring uapi in-tree (no `x/sys`, ADR 0018): syscall numbers 425–427, flags, opcodes, `sqe`/`cqe`/`uringBuf`/`uringParams`/… layouts, `fixedFd` (0-based) and `targetIndex` (index + 1), `FILE_INDEX_ALLOC` raw `0xFFFFFFFF`; one `Syscall6` per waiting enter, `RawSyscall6` to submit only |
-| `uring_ring_linux.go` | one io_uring: `SETUP_CLAMP`+`CQSIZE` with the granted sizes read back, the single mapping, the SQ/CQ views, the bounded submit (EINTR again; EBUSY/EAGAIN counted and left to the next batch), `flushOverflow` (an overflowed CQ moves into the ring only on an enter with GETEVENTS), the provided-buffer ring (8192 entries of 2 KiB mapped, 512 handed to the kernel at setup, more by `growBufs` as `uRing.provide` asks — ADR 0201) and its tail published by one 32-bit store of entry 0's bid and the tail, the sparse table, `REGISTER_PROBE`, the SQE encoders |
-| `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME; grouped by `waitArgs` once a batch reaped four or the arrivals come two within the bound, ADR 0199, ADR 0202), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the close: shutdown → count → `close_direct`, a user_data backstop after 1 s (ADR 0200); ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the accept watchdog, judged per listener |
+| `uring_ring_linux.go` | one io_uring: `SETUP_CLAMP`+`CQSIZE` with the granted sizes read back, the single mapping, the SQ/CQ views, the bounded submit (EINTR again; EBUSY/EAGAIN counted and left to the next batch), `flushOverflow` (an overflowed CQ moves into the ring only on an enter with GETEVENTS), the provided buffers (as many 2 KiB buffers as the table rounded up, 8192 to 65536, mapped at setup; 512 handed to the kernel at setup, more by `growBufs` as `uRing.provide` asks — ADR 0201, ADR 0203 §D2), their groups of 8192 (`pbufGroup`, registered as group 1+g when their first bid goes out) and each group's tail published by one 32-bit store of entry 0's bid and the tail, the sparse table, `REGISTER_PROBE`, the SQE encoders |
+| `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME; grouped by `waitArgs` once a batch reaped four or the arrivals come two within the bound, ADR 0199, ADR 0202), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the close: shutdown → count → `close_direct`, a user_data backstop after 1 s (ADR 0200); ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the rings filled in order (`fillStep`, ADR 0203 §D1); the accept watchdog, judged per listener |
 | `uring_probe_linux.go` | the last probe stage: a loopback multishot accept into a direct descriptor and a multishot recv through the buffer ring, on a ring of its own, then the release check (shutdown, the recv's end, then close_direct must show the peer the end; cancel→close without the shutdown tells whether puts are deferred) |
 | `uring_none_linux.go` | the Linux architectures outside io_uring's wave 1: `LoopBackendUnavailable`, epoll serves |
 | `group_linux.go`, `group_other.go` | backend choice, `RLIMIT_NOFILE`, `mmap`; elsewhere, `UnsupportedPlatform` |
@@ -149,22 +149,40 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   at count zero: until then the index stays taken in the kernel, so `ALLOC`
   cannot hand it to a new connection while a completion for the old one may
   still come. Slots waiting on their close count against the accept reserve.
-- **io_uring: a ring's buffers follow its bursts, not its table (ADR 0201
-  §D1).** Its 8192 buffers of 2 KiB are mapped private and anonymous at setup,
-  and only the first 512 are handed to the kernel: a buffer it never had is
-  no resident page. After each batch `provide` hands it more, `bufsStep` at
-  least, when recvs wait for more buffers than it holds or it holds under a
-  quarter of those provided; it never takes any back. A ring's resident
-  buffers are the most it had out at once — 1 MiB idle, 16 MiB at most —
-  where 4096 buffers of 4 KiB cost 16 MiB per ring once the kernel had
-  rotated through them. A request larger than a buffer arrives over several
-  completions and the spill joins them, as a split read always did.
+- **io_uring: a ring's buffers follow its bursts, up to its table (ADR 0201
+  §D1, ADR 0203 §D2).** As many 2 KiB buffers as the table holds
+  connections, rounded up to a power of two (`bufCountFor`: 8192 to 65536, a
+  bid being 16 bits), are mapped private and anonymous at setup, and only the
+  first 512 are handed to the kernel: a buffer it never had is no resident
+  page. The kernel's buffer ring holds under 65 536 entries, so the bids go
+  in groups of 8192, group g registered as buffer group 1+g only when its
+  first bid is handed out: an idle ring has one, 128 KiB of kernel memory.
+  After each batch `provide` hands it as many more as recvs starved since it
+  last looked (`starvedSeen`), `bufsStep` at least, or `bufsStep` when it
+  holds under a quarter of those provided, within `bufBudgetFor` (128 MiB a
+  loop, every ring together, less under `MaxConns`: a buffer a connection of
+  the loop's share and each ring's first 512; `uLoop.bufBytes`); it never takes any back. A
+  ring's resident buffers are the most it had out at once — 1 MiB idle,
+  98 MiB after 50 000 connections sent at once. A recv is armed on the
+  group with the most buffers beyond the recvs armed on it and `groupSlack`
+  (32; `roomiest`, `given`, `armedOn`, `recvGroup`): a multishot recv stays
+  on its group, and one that received tries again at once, taking a buffer
+  it recycles on EAGAIN or failing with ENOBUFS on an empty ring
+  (`io_recv_finish`) — a group with exactly a buffer a recv ends each burst
+  with spurious ENOBUFS. A growth adds the slack to what the burst lacked. A
+  request larger than a buffer arrives over several completions and the
+  spill joins them, as a split read always did.
 - **io_uring: buffers go back after `OnBatchEnd`, once each.** A CQE's bid is
   queued on `recycle` and returned by `returnBuffers` after the batch. A recv
   that ran out (ENOBUFS, no `F_MORE`) waits on `starved`, a bounded queue,
-  and is re-armed as long as the kernel holds a buffer (`inRing`), not only
-  when this batch returned one. Re-arming only on a batch's own returns once
-  starved a connection forever (`TestConformance_bufferFaults`).
+  and is re-armed as long as the kernel holds a buffer (`inRing`, per group),
+  not only when this batch returned one. Re-arming only on a batch's own
+  returns once starved a connection forever (`TestConformance_bufferFaults`).
+  `inRing` counts a buffer out only once its completion is reaped, so the
+  CQ's backlog (`ready`) is counted out first, and nothing is re-armed while
+  the kernel holds completions back: re-armed on buffers already gone, a
+  burst of 50 000 starved 786 384 times (`TestConformance_noStarvationAtScale`,
+  ADR 0203 §D2).
 - **io_uring: the multishot state machine.** A CQE without `F_MORE` disarms.
   recv is re-armed unless `res == 0` or fatal. accept stops under the reserve
   (`ENFILE` included) and resumes at twice it, and is re-armed by `pace`.
@@ -245,6 +263,19 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   (!memchr_inv(reg.resv, 0, ...)) return -EINVAL`), so a zero `resv` is
   refused. `registerBufRing` retries once with one `resv` byte set: that kernel
   accepts it, and a correct kernel refuses it again with the same EINVAL.
+- **io_uring: a loop's rings fill in order (ADR 0203 §D1).** Only ring 0
+  accepts at start. A ring is full (`fillFull`) once its free entries fall to
+  `fillMargin` (an eighth of the table, twice the accept reserve at least) or
+  when it is passed over (the watchdog drained it, or the primary a test keeps
+  idle), and not full again only past twice the margin. Ring *i* arms accepts
+  only while every ring before it is full (`opens`); one that loses the right
+  is closed (`fillClosed`), cancels its accepts once and keeps its connections. `pace`
+  steps the rings in order each batch, not while the group drains. Spread
+  over three rings, 10,000 connections paid each batch two more submits and
+  the fan eventfd's wakes: 6.9 µs a request on one vCPU.
+  `TestURingFill_inOrder` pins the hysteresis,
+  `TestConformance_ringsFillInOrder` the order, `BenchmarkURingRings_fill`
+  measures one ring against three.
 - **Serving accepts are single-shot.** A multishot accept into the direct
   table keeps accepting the whole backlog before the loop sees the reserve
   reached. Past the last entry the kernel accepts, cannot install, and drops

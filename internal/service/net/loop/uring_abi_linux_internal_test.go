@@ -131,7 +131,7 @@ func TestURingEncoders(t *testing.T) {
 		{"single-shot accept direct", func(s *sqe) { prepAccept(s, 7, 99, false) }, []field{
 			{0, 1, uint64(opAccept)}, {2, 2, 0}, {4, 4, 7}, {28, 4, 0}, {44, 4, 0xFFFFFFFF},
 		}},
-		{"multishot recv on fixed index 0", func(s *sqe) { prepRecv(s, 0, 5) }, []field{
+		{"multishot recv on fixed index 0", func(s *sqe) { prepRecv(s, 0, bufGroup, 5) }, []field{
 			{0, 1, uint64(opRecv)}, {1, 1, uint64(sqeFixedFile | sqeBufferSelect)}, {2, 2, uint64(recvMultishot)}, {4, 4, 0}, {40, 2, uint64(bufGroup)}, {32, 8, 5},
 		}},
 		{"send on fixed index 3", func(s *sqe) { prepSend(s, 3, payload, 6) }, []field{

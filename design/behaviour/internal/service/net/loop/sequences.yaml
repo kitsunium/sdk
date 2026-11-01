@@ -4306,9 +4306,13 @@ sequences:
         kind: internal
       - id: ul.registerTable
         kind: internal
+      - id: rr.credit
+        kind: internal
       - id: slices
         kind: stdlib
       - id: ul.registerFan
+        kind: internal
+      - id: rr.fillAtStart
         kind: internal
       - id: rr.armAccepts
         kind: internal
@@ -4373,8 +4377,8 @@ sequences:
             eval: ul.registerTable(u, table)
             to: ul.registerTable
           when: err != nil
-      - set: rr.inRing
-        value: int(u.bufProvided)
+      - eval: rr.credit(0, u.bufProvided)
+        to: rr.credit
       - set: rr.slotOf
         to: slices
         value: slices.Repeat([]int32{-1}, ul.slotSpace(table))
@@ -4388,16 +4392,37 @@ sequences:
             eval: ul.registerFan(i, u)
             to: ul.registerFan
           when: err != nil
+      - eval: rr.fillAtStart()
+        to: rr.fillAtStart
       - eval: rr.armAccepts()
         to: rr.armAccepts
       - return: rr, nil
   - of: (*uLoop).bufShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).bufShape
+        kind: self
+      - id: bufCountFor
+        kind: internal
     steps:
       - opt:
           do:
             - return: ul.hooks.bufs, max(ul.hooks.bufSize, 64), ul.hooks.bufs
           when: ul.hooks.bufs > 0
-      - return: defaultBufs, defaultBufSize, bufsFirst
+      - return: bufCountFor(ul.lp.sz.tableSize), defaultBufSize, bufsFirst
+        to: bufCountFor
+  - of: bufCountFor
+    steps:
+      - bind: "n"
+        eval: defaultBufs
+      - loop:
+          cond: int(n) < table && n < maxBufs
+          do:
+            - op: "*="
+              set: "n"
+              value: "2"
+      - return: "n"
   - of: (*uLoop).registerFan
     participants:
       - id: caller
@@ -4541,7 +4566,78 @@ sequences:
           value: fd
   - of: (*uRing).acceptsNothing
     steps:
-      - return: rr.paused || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+      - return: rr.paused || rr.fill&fillClosed != 0 || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+  - of: (*uRing).passedOver
+    steps:
+      - return: rr.r.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+  - of: (*uRing).fillAtStart
+    steps:
+      - opt:
+          do:
+            - op: "|="
+              set: rr.fill
+              value: fillFull
+          when: rr.passedOver()
+      - opt:
+          do:
+            - op: "|="
+              set: rr.fill
+              value: fillClosed
+          when: "!rr.ul.opens(rr.r.index)"
+  - of: (*uRing).fillStep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).fillStep
+        kind: self
+      - id: fillMargin
+        kind: internal
+      - id: rr.ul.opens
+        kind: internal
+      - id: rr.cancelAccepts
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: rr.ul.lp.draining
+      - bind: free
+        eval: rr.ul.lp.sz.tableSize - rr.used()
+      - bind: margin
+        eval: fillMargin(rr.ul.lp.sz.tableSize)
+        to: fillMargin
+      - switch:
+          cases:
+            - case: rr.passedOver() || free <= margin
+              do:
+                - op: "|="
+                  set: rr.fill
+                  value: fillFull
+            - case: free > 2*margin
+              do:
+                - op: "&^="
+                  set: rr.fill
+                  value: fillFull
+      - bind: open
+        eval: rr.ul.opens(rr.r.index)
+        to: rr.ul.opens
+      - opt:
+          do:
+            - op: "|="
+              set: rr.fill
+              value: fillClosed
+            - eval: rr.cancelAccepts()
+              to: rr.cancelAccepts
+          when: "!open && rr.fill&fillClosed == 0"
+      - opt:
+          do:
+            - op: "&^="
+              set: rr.fill
+              value: fillClosed
+          when: open
+  - of: fillMargin
+    steps:
+      - return: max(table/fillShare, 2*max(min(acceptReserve, table/8), 1))
   - of: (*uRing).acceptRoom
     steps:
       - bind: table
@@ -4700,6 +4796,8 @@ sequences:
         kind: internal
       - id: rr.r.evict
         kind: internal
+      - id: rr.fillStep
+        kind: internal
       - id: rr.armAccepts
         kind: internal
     steps:
@@ -4729,6 +4827,8 @@ sequences:
             - eval: rr.r.evict()
               to: rr.r.evict
           when: rr.ul.lp.hard && !rr.ul.direct
+      - eval: rr.fillStep()
+        to: rr.fillStep
       - eval: rr.armAccepts()
         to: rr.armAccepts
   - of: (*uLoop).serve
@@ -5196,6 +5296,17 @@ sequences:
         kind: actor
       - id: (*uRing).armRecv
         kind: self
+      - id: rr.armRecvOn
+        kind: internal
+    steps:
+      - eval: rr.armRecvOn(slot, rr.roomiest(nil))
+        to: rr.armRecvOn
+  - of: (*uRing).armRecvOn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).armRecvOn
+        kind: self
       - id: rr.u.get
         kind: internal
       - id: rr.r.fail
@@ -5222,7 +5333,7 @@ sequences:
               to: rr.r.fail
             - return: ""
           when: s == nil
-      - eval: prepRecv(s, uint32(c.fd), udPack(udRecv, c.gen, uint32(slot)))
+      - eval: prepRecv(s, uint32(c.fd), bufGroup+uint16(g), udPack(udRecv, c.gen, uint32(slot)))
         to: prepRecv
       - opt:
           do:
@@ -5235,6 +5346,15 @@ sequences:
         set: c.ops
       - eval: rr.setEpoch(slot, rr.closes)
         to: rr.setEpoch
+      - loop:
+          cond: int(slot) >= len(rr.recvGroup)
+          do:
+            - set: rr.recvGroup
+              value: append(rr.recvGroup, 0)
+      - set: rr.recvGroup[slot]
+        value: uint8(g)
+      - op: ++
+        set: rr.armedOn[g]
   - of: (*uRing).setEpoch
     steps:
       - opt:
@@ -5276,10 +5396,12 @@ sequences:
         eval: c.flags&cqeFMore != 0
       - opt:
           do:
+            - bind: bid
+              eval: uint16(c.flags >> cqeBufferShift)
             - set: rr.recycle
-              value: append(rr.recycle, uint16(c.flags>>cqeBufferShift))
+              value: append(rr.recycle, bid)
             - op: "--"
-              set: rr.inRing
+              set: rr.inRing[rr.u.groupOf(bid)]
           when: c.flags&cqeFBuffer != 0
       - opt:
           do:
@@ -5291,6 +5413,8 @@ sequences:
               set: rr.r.conns[slot].ops
             - eval: rr.setEpoch(slot, noEpoch)
               to: rr.setEpoch
+            - op: "--"
+              set: rr.armedOn[rr.recvGroup[slot]]
           when: "!more"
       - switch:
           cases:
@@ -5680,23 +5804,114 @@ sequences:
       - eval: rr.rearmStarved()
         to: rr.rearmStarved
   - of: (*uRing).provide
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).provide
+        kind: self
+      - id: u.growBufs
+        kind: internal
+      - id: rr.credit
+        kind: internal
     steps:
       - bind: u
         eval: rr.u
       - bind: want
-        eval: len(rr.starved) - rr.inRing
+        eval: int(rr.r.st.starved - rr.starvedSeen)
+      - set: rr.starvedSeen
+        value: rr.r.st.starved
+      - opt:
+          do:
+            - op: +=
+              set: want
+              value: groupSlack
+          when: want > 0
       - opt:
           do:
             - set: want
               value: max(want, int(bufsStep))
-          when: rr.inRing < int(u.bufProvided)/4
+          when: held(rr.inRing) < int(u.bufProvided)/4
+      - bind: left
+        eval: uint32(rr.ul.bufLeft() / uint64(u.bufSize))
       - opt:
           do:
             - return: ""
-          when: want <= 0
+          when: want <= 0 || left == 0
+      - bind: from
+        eval: u.bufProvided
+      - bind: "n"
+        eval: u.growBufs(min(max(uint32(want), bufsStep), left))
+        to: u.growBufs
       - op: +=
-        set: rr.inRing
-        value: int(u.growBufs(max(uint32(want), bufsStep)))
+        set: rr.ul.bufBytes
+        value: uint64(n) * uint64(u.bufSize)
+      - eval: rr.credit(from, from+n)
+        to: rr.credit
+  - of: (*uLoop).bufLeft
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).bufLeft
+        kind: self
+      - id: bufBudgetFor
+        kind: internal
+    steps:
+      - bind: budget
+        eval: bufBudgetFor(&ul.lp.sz)
+        to: bufBudgetFor
+      - return: budget - min(ul.bufBytes, budget)
+  - of: bufBudgetFor
+    steps:
+      - opt:
+          do:
+            - return: loopBufBudget
+          when: sz.maxConns <= 0
+      - bind: loops
+        eval: max(sz.loops, 1)
+      - bind: conns
+        eval: uint64((sz.maxConns+loops-1)/loops) + uint64(max(sz.rings, 1))*uint64(bufsFirst)
+      - return: min(loopBufBudget, conns*uint64(defaultBufSize))
+  - of: held
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - op: +=
+              set: "n"
+              value: k
+          key: _
+          range: inRing
+          value: k
+      - return: "n"
+  - of: (*uRing).credit
+    steps:
+      - bind: per
+        eval: rr.u.bufPer
+      - loop:
+          cond: from < to
+          do:
+            - bind: g
+              eval: int(from / per)
+            - bind: end
+              eval: min(to, (uint32(g)+1)*per)
+            - loop:
+                cond: len(rr.inRing) <= g
+                do:
+                  - set: rr.inRing
+                    value: append(rr.inRing, 0)
+                  - set: rr.given
+                    value: append(rr.given, 0)
+                  - set: rr.armedOn
+                    value: append(rr.armedOn, 0)
+            - op: +=
+              set: rr.inRing[g]
+              value: int(end - from)
+            - op: +=
+              set: rr.given[g]
+              value: int(end - from)
+            - set: from
+              value: end
   - of: (*uRing).giveBack
     participants:
       - id: caller
@@ -5721,6 +5936,8 @@ sequences:
                 when: rr.ul.hooks.fill
             - eval: u.addBuf(bid)
               to: u.addBuf
+            - op: ++
+              set: rr.inRing[u.groupOf(bid)]
           key: _
           range: rr.recycle
           value: bid
@@ -5728,9 +5945,6 @@ sequences:
           do:
             - eval: u.publishBufs()
               to: u.publishBufs
-            - op: +=
-              set: rr.inRing
-              value: len(rr.recycle)
             - set: rr.recycle
               value: rr.recycle[:0]
           when: len(rr.recycle) > 0
@@ -5748,22 +5962,47 @@ sequences:
         kind: actor
       - id: (*uRing).rearmStarved
         kind: self
-      - id: rr.armRecv
+      - id: rr.roomiest
+        kind: internal
+      - id: rr.armRecvOn
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(rr.starved) == 0 || rr.u.overflowed()
+      - bind: left
+        eval: rr.promise[:0]
+      - set: left
+        value: append(left, rr.inRing...)
+      - set: rr.promise
+        value: left
+      - bind: room
+        eval: held(left) - int(rr.u.ready())
       - bind: k
         eval: "0"
       - loop:
-          cond: k < len(rr.starved) && k < rr.inRing
+          cond: k < len(rr.starved) && room > 0
           do:
+            - bind: g
+              eval: rr.roomiest(left)
+              to: rr.roomiest
+            - opt:
+                do:
+                  - break: true
+                when: g < 0
             - bind: slot
               eval: rr.starved[k]
             - op: ++
               set: k
             - opt:
                 do:
-                  - eval: rr.armRecv(slot)
-                    to: rr.armRecv
+                  - eval: rr.armRecvOn(slot, g)
+                    to: rr.armRecvOn
+                  - op: "--"
+                    set: left[g]
+                  - op: "--"
+                    set: room
                 when: rr.r.conns[slot].state == stOpen
       - set: rr.starved
         value: rr.starved[:copy(rr.starved, rr.starved[k:])]
@@ -6663,7 +6902,7 @@ sequences:
       - bind: s
         eval: st.u.get()
         to: st.u.get
-      - eval: prepRecv(s, uint32(res), udPack(udRecv, 0, slot))
+      - eval: prepRecv(s, uint32(res), bufGroup, udPack(udRecv, 0, slot))
         to: prepRecv
       - opt:
           do:
@@ -7064,6 +7303,15 @@ sequences:
     steps:
       - eval: u.unregisterRing()
         to: u.unregisterRing
+      - bind: maps
+        eval: "[][]byte{u.bufMem, u.sqeMem, u.ringMem}"
+      - loop:
+          do:
+            - set: maps
+              value: append(maps, g.ring)
+          key: _
+          range: u.groups
+          value: g
       - loop:
           do:
             - opt:
@@ -7072,9 +7320,9 @@ sequences:
                     to: swallowErr
                 when: m != nil
           key: _
-          range: "[][]byte{u.bufRing, u.bufMem, u.sqeMem, u.ringMem}"
+          range: maps
           value: m
-      - set: u.bufRing, u.bufMem, u.sqeMem, u.ringMem
+      - set: u.groups, u.bufMem, u.sqeMem, u.ringMem
         value: nil, nil, nil, nil
       - opt:
           do:
@@ -7419,7 +7667,7 @@ sequences:
         kind: stdlib
       - id: errnoOfErr
         kind: internal
-      - id: u.mapBufRing
+      - id: u.addGroup
         kind: internal
       - id: u.growBufs
         kind: internal
@@ -7432,15 +7680,15 @@ sequences:
             - return: errnoOfErr(err)
               to: errnoOfErr
           when: err != nil
-      - set: u.bufMem, u.bufCount, u.bufSize
-        value: bm, count, size
+      - set: u.bufMem, u.bufCount, u.bufSize, u.bufPer
+        value: bm, count, size, min(count, defaultBufs)
       - opt:
           do:
             - return: errno
           init:
             bind: errno
-            eval: u.mapBufRing(count)
-            to: u.mapBufRing
+            eval: u.addGroup()
+            to: u.addGroup
           when: errno != 0
       - eval: u.growBufs(min(first, count))
         to: u.growBufs
@@ -7458,22 +7706,50 @@ sequences:
     steps:
       - set: "n"
         value: min(n, u.bufCount-u.bufProvided)
+      - bind: end
+        eval: u.bufProvided + n
+      - bind: bid
+        eval: u.bufProvided
       - loop:
-          cond: bid < u.bufProvided+n
+          cond: bid < end
           do:
+            - opt:
+                do:
+                  - set: u.bufCount
+                    value: bid
+                  - break: true
+                when: bid%u.bufPer == 0 && int(bid/u.bufPer) == len(u.groups) && u.addGroup() != 0
             - eval: u.addBuf(uint16(bid))
               to: u.addBuf
-          init: bid := u.bufProvided
           post: bid++
-      - op: +=
-        set: u.bufProvided
-        value: "n"
+      - set: "n"
+        value: bid - u.bufProvided
+      - set: u.bufProvided
+        value: bid
+      - eval: u.publishBufs()
+        to: u.publishBufs
+      - return: "n"
+  - of: (*uring).addGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).addGroup
+        kind: self
+      - id: u.mapBufRing
+        kind: internal
+    steps:
+      - bind: g
+        eval: uint16(len(u.groups))
+      - bind: rm, errno
+        eval: u.mapBufRing(bufGroup+g, u.bufPer)
+        to: u.mapBufRing
       - opt:
           do:
-            - eval: u.publishBufs()
-              to: u.publishBufs
-          when: n > 0
-      - return: "n"
+            - return: errno
+          when: errno != 0
+      - set: u.groups
+        value: "append(u.groups, pbufGroup{ring: rm})"
+      - return: "0"
   - of: (*uring).mapBufRing
     participants:
       - id: caller
@@ -7484,46 +7760,49 @@ sequences:
         kind: internal
       - id: syscall
         kind: stdlib
-      - id: errnoOfErr
+      - id: swallowErr
         kind: internal
     steps:
       - bind: ringBytes
         eval: max(int(count)*int(unsafe.Sizeof(uringBuf{})), syscall.Getpagesize())
       - bind: errno
-        eval: "registerBufRing(u.fd, &bufReg{ringEntries: count, bgid: bufGroup, flags: pbufRingMmap})"
+        eval: "registerBufRing(u.fd, &bufReg{ringEntries: count, bgid: bgid, flags: pbufRingMmap})"
         to: registerBufRing
       - opt:
           do:
             - bind: "off"
-              eval: offPbufRing | uintptr(bufGroup)<<offPbufShift
+              eval: offPbufRing | uintptr(bgid)<<offPbufShift
             - bind: rm, err
               eval: syscall.Mmap(u.fd, int64(off), ringBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED|syscall.MAP_POPULATE)
               to: syscall
             - opt:
                 do:
-                  - return: errnoOfErr(err)
-                    to: errnoOfErr
+                  - return: nil, errnoOfErr(err)
                 when: err != nil
-            - set: u.bufRing
-              value: rm
-            - return: "0"
+            - return: rm, 0
           when: errno == 0
       - opt:
           do:
-            - return: errno
+            - return: nil, errno
           when: errno != syscall.EINVAL
       - bind: rm, err
         eval: syscall.Mmap(-1, 0, ringBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
         to: syscall
       - opt:
           do:
-            - return: errnoOfErr(err)
-              to: errnoOfErr
+            - return: nil, errnoOfErr(err)
           when: err != nil
-      - set: u.bufRing
-        value: rm
-      - return: "registerBufRing(u.fd, &bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})"
-        to: registerBufRing
+      - opt:
+          do:
+            - eval: swallowErr(syscall.Munmap(rm))
+              to: swallowErr
+            - return: nil, errno
+          init:
+            bind: errno
+            eval: "registerBufRing(u.fd, &bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bgid})"
+            to: registerBufRing
+          when: errno != 0
+      - return: rm, 0
   - of: registerBufRing
     participants:
       - id: caller
@@ -7555,8 +7834,11 @@ sequences:
       - id: unsafe
         kind: stdlib
     steps:
-      - return: unsafe.Slice((*uringBuf)(unsafe.Pointer(&u.bufRing[0])), u.bufCount)
+      - return: unsafe.Slice((*uringBuf)(unsafe.Pointer(&u.groups[g].ring[0])), u.bufPer)
         to: unsafe
+  - of: (*uring).groupOf
+    steps:
+      - return: int(uint32(bid) / u.bufPer)
   - of: (*uring).buf
     steps:
       - bind: o
@@ -7564,17 +7846,19 @@ sequences:
       - return: "u.bufMem[o : o+int(u.bufSize) : o+int(u.bufSize)]"
   - of: (*uring).addBuf
     steps:
+      - bind: g
+        eval: "&u.groups[u.groupOf(bid)]"
       - bind: i
-        eval: uint32(u.bufTail) & (u.bufCount - 1)
+        eval: uint32(g.tail) & (u.bufPer - 1)
       - bind: e
-        eval: "&u.bufEntries()[i]"
+        eval: "&u.bufEntries(u.groupOf(bid))[i]"
       - set: e.addr
         value: uint64(uintptr(unsafe.Pointer(&u.bufMem[int(bid)*int(u.bufSize)])))
       - set: e.len
         value: u.bufSize
       - alt:
           - do:
-              - set: u.shadowBid
+              - set: g.shadowBid
                 value: bid
             when: i == 0
           - do:
@@ -7582,7 +7866,9 @@ sequences:
                 value: bid
             else: true
       - op: ++
-        set: u.bufTail
+        set: g.tail
+      - set: g.dirty
+        value: "true"
   - of: (*uring).publishBufs
     participants:
       - id: caller
@@ -7592,10 +7878,22 @@ sequences:
       - id: atomic
         kind: stdlib
     steps:
-      - bind: w
-        eval: (*uint32)(unsafe.Pointer(&u.bufRing[12]))
-      - eval: atomic.StoreUint32(w, uint32(u.shadowBid)|uint32(u.bufTail)<<16)
-        to: atomic
+      - loop:
+          do:
+            - bind: g
+              eval: "&u.groups[i]"
+            - opt:
+                do:
+                  - continue: true
+                when: "!g.dirty"
+            - bind: w
+              eval: (*uint32)(unsafe.Pointer(&g.ring[12]))
+            - eval: atomic.StoreUint32(w, uint32(g.shadowBid)|uint32(g.tail)<<16)
+              to: atomic
+            - set: g.dirty
+              value: "false"
+          key: i
+          range: u.groups
   - of: (*uring).registerSparse
     participants:
       - id: caller
@@ -7678,7 +7976,7 @@ sequences:
       - set: s.ioprio
         value: recvMultishot
       - set: s.bufIndex
-        value: bufGroup
+        value: bgid
       - set: s.userData
         value: ud
   - of: prepSend

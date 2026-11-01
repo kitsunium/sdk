@@ -77,6 +77,29 @@ const (
 	// closingCompact is the fewest looked-at closes compactClosing moves
 	// out of a queue that never empties.
 	closingCompact int = 1024
+	// loopBufBudget bounds the bytes of provided buffers one loop hands its
+	// rings' kernels, every ring together: resident once the kernel wrote
+	// them, never taken back (ADR 0203 §D2).
+	loopBufBudget uint64 = 128 << 20
+	// groupSlack is how many buffers of a group are kept beyond the recvs
+	// armed on it. A multishot recv that received tries again at once, and
+	// that try takes a buffer from the ring and recycles it on EAGAIN, or
+	// fails the recv with ENOBUFS on an empty ring (io_recv, io_recv_finish,
+	// io_uring/net.c, 6.12 to 7.0): a group with exactly a buffer a recv
+	// ends its every burst with spurious ENOBUFS, each a completion and a
+	// re-arm (ADR 0203 §D2).
+	groupSlack int = 32
+	// fillFull is uRing.fill's bit for a ring near its table's end, or
+	// passed over, so the ring after it accepts too.
+	fillFull uint8 = 1
+	// fillClosed is uRing.fill's bit for a ring a ring before it keeps from
+	// accepting: one of them is not full.
+	fillClosed uint8 = 2
+	// fillShare is the share of its table, as a divisor, a ring may still
+	// have free when the next ring starts accepting (uRing.fillStep): an
+	// eighth, so the next ring's accepts are armed well before this one
+	// pauses under its reserve (ADR 0203 §D1).
+	fillShare int = 8
 )
 
 // udPack builds a user_data: the operation, 24 bits of generation, the slot.
@@ -122,6 +145,12 @@ type uRing struct {
 	// ring that stopped accepting under its reserve.
 	armed  []int
 	paused bool
+	// fill holds fillFull, the ring near its table's end or accepting
+	// nothing for a reason of its own, so the ring after it accepts too; and
+	// fillClosed, a ring before it not full, so this one accepts nothing new
+	// (ADR 0203 §D1). Rings fill in order: a ring past the first is used only
+	// once those before it are.
+	fill uint8
 	// queueDone is, per listener, that the ring took its share of the
 	// listener's queue as the group drains and handed it back (plan P6);
 	// queueCancel that a cancel of its accepts is in flight. take is
@@ -137,10 +166,21 @@ type uRing struct {
 	// come back; recycle the buffers the batch handed out.
 	starved []int32
 	recycle []uint16
-	// inRing is how many provided buffers the kernel holds: a starved recv
-	// is re-armed only while some remain, whether or not this batch
-	// returned any.
-	inRing int
+	// given is, per group, the buffers handed to the kernel so far;
+	// armedOn the recvs armed on it; recvGroup, per slot, the group its
+	// recv was last armed on.
+	given     []int
+	armedOn   []int
+	recvGroup []uint8
+	// starvedSeen is the ring's starved count provide last looked at.
+	starvedSeen uint64
+	// promise is rearmStarved's scratch: each group's buffers not yet
+	// promised to a re-armed recv.
+	promise []int
+	// inRing is how many provided buffers the kernel holds, per group: a
+	// starved recv is re-armed only while some remain, whether or not this
+	// batch returned any, on the group that holds the most.
+	inRing []int
 	// lastAccept is the tick of the ring's last accept completion, or of the
 	// watchdog's last verdict; stalls counts the watchdog's re-arms. seen is,
 	// per listener, the group's accepts on it (listenerSet.accepts) when the
@@ -233,6 +273,9 @@ type uLoop struct {
 	arrived     uint64
 	spacing     time.Duration
 	lastArrival time.Duration
+	// bufBytes is the bytes of provided buffers the loop's rings handed
+	// their kernels so far, bounded by bufBudget (bufBudgetFor).
+	bufBytes uint64
 }
 
 // ringUses is what a loop's rings use beyond their setup flags.
@@ -494,7 +537,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 		//: named.
 		return nil, err
 	}
-	rr.inRing = int(u.bufProvided)
+	rr.credit(0, u.bufProvided)
 	rr.slotOf = slices.Repeat([]int32{-1}, ul.slotSpace(table))
 	//: a secondary's completions wake the primary.
 	if err := ul.registerFan(i, u); err != nil {
@@ -502,6 +545,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 		//: named.
 		return nil, err
 	}
+	rr.fillAtStart()
 	rr.armAccepts()
 	//: built.
 	return rr, nil
@@ -516,8 +560,22 @@ func (ul *uLoop) bufShape() (bufs, size, first uint32) {
 		//: as the hook asks, 64 bytes at least.
 		return ul.hooks.bufs, max(ul.hooks.bufSize, 64), ul.hooks.bufs
 	}
-	//: the defaults.
-	return defaultBufs, defaultBufSize, bufsFirst
+	//: as many as the table holds connections, a power of two between
+	//: the floor and what a bid can name (ADR 0203 §D2).
+	return bufCountFor(ul.lp.sz.tableSize), defaultBufSize, bufsFirst
+}
+
+// bufCountFor is how many provided buffers a ring of table entries may hand
+// its kernel: the table rounded up to a power of two, defaultBufs at least,
+// maxBufs at most.
+func bufCountFor(table int) uint32 {
+	n := defaultBufs
+	//: doubled up to the table, or the bound.
+	for int(n) < table && n < maxBufs {
+		n *= 2
+	}
+	//: the count.
+	return n
 }
 
 // registerFan registers the secondaries' eventfd as ring i's CQ notifier,
@@ -622,11 +680,94 @@ func (rr *uRing) armAccepts() {
 	}
 }
 
-// acceptsNothing reports a ring that arms no accept: paused, draining, or
-// the primary a test keeps idle.
+// acceptsNothing reports a ring that arms no accept: paused, draining,
+// closed until the rings before it are full, or the primary a test keeps
+// idle.
 func (rr *uRing) acceptsNothing() bool {
 	//: any of them.
-	return rr.paused || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+	return rr.paused || rr.fill&fillClosed != 0 || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+}
+
+// passedOver reports a ring that accepts nothing for a reason of its own,
+// whatever its table holds: the watchdog drained it, or it is the primary a
+// test keeps idle. The ring after it accepts in its place.
+func (rr *uRing) passedOver() bool {
+	//: either.
+	return rr.r.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+}
+
+// fillAtStart sets the fill state of a ring as it is built, after the rings
+// before it: full when passed over from the start, closed behind a ring that
+// has room — every ring past the first, unless the primary is a test's idle
+// one.
+func (rr *uRing) fillAtStart() {
+	//: passed over: the next ring accepts in its place.
+	if rr.passedOver() {
+		rr.fill |= fillFull
+	}
+	//: closed until the rings before it are full.
+	if !rr.ul.opens(rr.r.index) {
+		rr.fill |= fillClosed
+	}
+}
+
+// opens reports whether ring i may accept: every ring before it is full.
+func (ul *uLoop) opens(i int) bool {
+	//: the rings before it, in order.
+	for _, rr := range ul.rings[:i] {
+		//: one has room: it takes the connections.
+		if rr.fill&fillFull == 0 {
+			//: closed.
+			return false
+		}
+	}
+	//: open.
+	return true
+}
+
+// fillStep moves the ring's fill state with hysteresis: full once its free
+// entries fall to fillMargin, or once it is passed over; not full again only
+// past twice the margin, so a table hovering at the margin does not open and
+// close the next ring at each batch. A ring a ring before it no longer lets
+// accept cancels its accepts in flight once; the connections it holds stay
+// (ADR 0203 §D1). The rings are stepped in order, so ring i reads its
+// predecessors' state of this batch.
+func (rr *uRing) fillStep() {
+	//: the drain's take arms accepts on every ring: the fill is the
+	//: serving group's.
+	if rr.ul.lp.draining {
+		//: as it stands.
+		return
+	}
+	free := rr.ul.lp.sz.tableSize - rr.used()
+	margin := fillMargin(rr.ul.lp.sz.tableSize)
+	//: by the free entries, a passed-over ring always full.
+	switch {
+	//: near the end, or out of the order: the next ring accepts too.
+	case rr.passedOver() || free <= margin:
+		rr.fill |= fillFull
+	//: well clear of it: the next ring takes nothing new.
+	case free > 2*margin:
+		rr.fill &^= fillFull
+	}
+	open := rr.ul.opens(rr.r.index)
+	//: a ring before it has room again: this one stops accepting.
+	if !open && rr.fill&fillClosed == 0 {
+		rr.fill |= fillClosed
+		rr.cancelAccepts()
+	}
+	//: every ring before it full: it accepts.
+	if open {
+		rr.fill &^= fillClosed
+	}
+}
+
+// fillMargin is how many free entries of a table of table entries make a
+// ring full: an eighth, and never under twice the accept reserve, so the
+// next ring accepts before this one pauses.
+func fillMargin(table int) int {
+	//: the larger.
+	return max(table/fillShare, 2*max(min(acceptReserve, table/8), 1))
 }
 
 // acceptRoom is how many more accepts may be in flight: the free entries
@@ -793,6 +934,7 @@ func (rr *uRing) pace() {
 	if rr.ul.lp.hard && !rr.ul.direct {
 		rr.r.evict()
 	}
+	rr.fillStep()
 	rr.armAccepts()
 }
 
@@ -1110,8 +1252,36 @@ func (rr *uRing) orphanClose(index uint32) {
 	prepCloseDirect(s, index, udPack(udOrphanClose, 0, index))
 }
 
-// armRecv arms slot's multishot recv, counted.
+// armRecv arms slot's multishot recv on the roomiest group, counted.
 func (rr *uRing) armRecv(slot int32) {
+	rr.armRecvOn(slot, rr.roomiest(nil))
+}
+
+// roomiest is the group with the most buffers handed to the kernel beyond
+// the recvs armed on it and groupSlack, among those left still holds one of when left is
+// given; -1 when none does. A recv armed on a group with room has a buffer of
+// its own there when every connection sends at once: a multishot recv stays
+// on its group, so a group armed past its buffers starves at each burst
+// however many the other groups hold (ADR 0203 §D2).
+func (rr *uRing) roomiest(left []int) int {
+	best, room := -1, 0
+	//: each group.
+	for g := range rr.given {
+		//: nothing left to promise there.
+		if left != nil && left[g] <= 0 {
+			continue
+		}
+		//: more room than the best so far.
+		if r := rr.given[g] - rr.armedOn[g] - groupSlack; best < 0 || r > room {
+			best, room = g, r
+		}
+	}
+	//: the group, or none.
+	return best
+}
+
+// armRecvOn arms slot's multishot recv on buffer group g, counted.
+func (rr *uRing) armRecvOn(slot int32, g int) {
 	c := &rr.r.conns[slot]
 	s := rr.u.get()
 	//: no room: the slot fails rather than sits deaf.
@@ -1121,7 +1291,7 @@ func (rr *uRing) armRecv(slot int32) {
 		//: closed.
 		return
 	}
-	prepRecv(s, uint32(c.fd), udPack(udRecv, c.gen, uint32(slot)))
+	prepRecv(s, uint32(c.fd), bufGroup+uint16(g), udPack(udRecv, c.gen, uint32(slot)))
 	//: uring-multishot-recv switched off: one completion, re-armed after it.
 	if !rr.ul.uses.multishot {
 		singleShot(s)
@@ -1129,6 +1299,12 @@ func (rr *uRing) armRecv(slot int32) {
 	rr.ul.onFD(s)
 	c.ops++
 	rr.setEpoch(slot, rr.closes)
+	//: the table grows with the peak; so do the recvs' groups.
+	for int(slot) >= len(rr.recvGroup) {
+		rr.recvGroup = append(rr.recvGroup, 0)
+	}
+	rr.recvGroup[slot] = uint8(g)
+	rr.armedOn[g]++
 }
 
 // setEpoch records the closes count slot's recv was armed at, or noEpoch.
@@ -1156,8 +1332,9 @@ func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 	more := c.flags&cqeFMore != 0
 	//: a buffer, whatever else, goes back after the batch.
 	if c.flags&cqeFBuffer != 0 {
-		rr.recycle = append(rr.recycle, uint16(c.flags>>cqeBufferShift))
-		rr.inRing--
+		bid := uint16(c.flags >> cqeBufferShift)
+		rr.recycle = append(rr.recycle, bid)
+		rr.inRing[rr.u.groupOf(bid)]--
 	}
 	//: a slot is never released with an operation in flight, so this is a
 	//: kernel or bookkeeping error; the buffer is returned, nothing else.
@@ -1170,6 +1347,7 @@ func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 	if !more {
 		rr.r.conns[slot].ops--
 		rr.setEpoch(slot, noEpoch)
+		rr.armedOn[rr.recvGroup[slot]]--
 	}
 	//: by result.
 	switch {
@@ -1413,23 +1591,90 @@ func (rr *uRing) returnBuffers() {
 }
 
 // provide hands the kernel buffers it never had when the ring runs short:
-// recvs wait for more than it holds, or it holds under a quarter of those
-// provided. It grows by bufsStep at least, up to the ring's count, and never
+// a recv found its ring empty since the last look — each such ENOBUFS is one
+// buffer the burst lacked —, or the ring holds under a quarter of those
+// provided. It grows by as many as recvs starved, bufsStep at least, up to
+// the ring's count and within what is left of the loop's budget, and never
 // gives any back: a ring's buffers follow the most it had out at once, its
-// live connections' bursts, rather than its table (ADR 0201 §D1).
+// live connections' bursts, rather than its table (ADR 0201 §D1, ADR 0203
+// §D2).
 func (rr *uRing) provide() {
 	u := rr.u
-	want := len(rr.starved) - rr.inRing
+	want := int(rr.r.st.starved - rr.starvedSeen)
+	rr.starvedSeen = rr.r.st.starved
+	//: short: what the burst lacked, and the slack a group keeps.
+	if want > 0 {
+		want += groupSlack
+	}
 	//: low: a step ahead of the next burst.
-	if rr.inRing < int(u.bufProvided)/4 {
+	if held(rr.inRing) < int(u.bufProvided)/4 {
 		want = max(want, int(bufsStep))
 	}
-	//: enough.
-	if want <= 0 {
+	left := uint32(rr.ul.bufLeft() / uint64(u.bufSize))
+	//: enough, or the budget spent.
+	if want <= 0 || left == 0 {
 		//: nothing.
 		return
 	}
-	rr.inRing += int(u.growBufs(max(uint32(want), bufsStep)))
+	from := u.bufProvided
+	n := u.growBufs(min(max(uint32(want), bufsStep), left))
+	rr.ul.bufBytes += uint64(n) * uint64(u.bufSize)
+	rr.credit(from, from+n)
+}
+
+// bufLeft is the bytes of buffers the loop may still hand its rings.
+func (ul *uLoop) bufLeft() uint64 {
+	budget := bufBudgetFor(&ul.lp.sz)
+	//: never below zero.
+	return budget - min(ul.bufBytes, budget)
+}
+
+// bufBudgetFor is the bytes of provided buffers one loop of sz may hand its
+// rings: loopBufBudget, or less under MaxConns — a buffer for each of the
+// loop's share of the connections, and the first ones every ring starts
+// with —, since a burst never needs a buffer more than a connection sends
+// (ADR 0203 §D2).
+func bufBudgetFor(sz *sizing) uint64 {
+	//: no ceiling on the connections: the constant.
+	if sz.maxConns <= 0 {
+		//: the default.
+		return loopBufBudget
+	}
+	loops := max(sz.loops, 1)
+	conns := uint64((sz.maxConns+loops-1)/loops) + uint64(max(sz.rings, 1))*uint64(bufsFirst)
+	//: the smaller.
+	return min(loopBufBudget, conns*uint64(defaultBufSize))
+}
+
+// held is how many buffers the kernel holds, every group together.
+func held(inRing []int) int {
+	n := 0
+	//: each group.
+	for _, k := range inRing {
+		n += k
+	}
+	//: the total.
+	return n
+}
+
+// credit counts bids from to to-1, just handed to the kernel, in their
+// groups.
+func (rr *uRing) credit(from, to uint32) {
+	per := rr.u.bufPer
+	//: each bid's group, a group at a time.
+	for from < to {
+		g := int(from / per)
+		end := min(to, (uint32(g)+1)*per)
+		//: a group seen for the first time.
+		for len(rr.inRing) <= g {
+			rr.inRing = append(rr.inRing, 0)
+			rr.given = append(rr.given, 0)
+			rr.armedOn = append(rr.armedOn, 0)
+		}
+		rr.inRing[g] += int(end - from)
+		rr.given[g] += int(end - from)
+		from = end
+	}
 }
 
 // giveBack adds each buffer the batch handed out back to the ring, filled
@@ -1443,11 +1688,11 @@ func (rr *uRing) giveBack() {
 			fillStale(u.buf(bid))
 		}
 		u.addBuf(bid)
+		rr.inRing[u.groupOf(bid)]++
 	}
 	//: published once for the batch.
 	if len(rr.recycle) > 0 {
 		u.publishBufs()
-		rr.inRing += len(rr.recycle)
 		rr.recycle = rr.recycle[:0]
 	}
 }
@@ -1461,16 +1706,38 @@ func fillStale(b []byte) {
 }
 
 // rearmStarved re-arms one starved recv per buffer the kernel holds, the
-// oldest first; a recv re-armed on an empty ring would only fail again.
+// oldest first, each on the group with the most buffers not yet promised; a
+// recv re-armed on an empty ring would only fail again. inRing counts a
+// buffer out only once its completion is reaped, so the completions still
+// in the CQ are taken off first — each may hold one —, and nothing is
+// re-armed while the kernel holds completions back (overflow): re-armed on
+// buffers already gone, a backlog of tens of thousands starved over and over
+// (ADR 0203 §D2).
 func (rr *uRing) rearmStarved() {
+	//: nobody waits, or the CQ's backlog is not known.
+	if len(rr.starved) == 0 || rr.u.overflowed() {
+		//: nothing now.
+		return
+	}
+	left := rr.promise[:0]
+	left = append(left, rr.inRing...)
+	rr.promise = left
+	room := held(left) - int(rr.u.ready())
 	k := 0
 	//: the oldest first, as many as the ring holds buffers for.
-	for k < len(rr.starved) && k < rr.inRing {
+	for k < len(rr.starved) && room > 0 {
+		g := rr.roomiest(left)
+		//: no buffer left to promise.
+		if g < 0 {
+			break
+		}
 		slot := rr.starved[k]
 		k++
 		//: re-armed only if still open.
 		if rr.r.conns[slot].state == stOpen {
-			rr.armRecv(slot)
+			rr.armRecvOn(slot, g)
+			left[g]--
+			room--
 		}
 	}
 	rr.starved = rr.starved[:copy(rr.starved, rr.starved[k:])]

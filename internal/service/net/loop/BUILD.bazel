@@ -115,16 +115,22 @@ go_test(
         "core_internal_test.go",
         "drain_take_linux_test.go",
         "drain_take_uring_linux_test.go",
+        "fill_uring_linux_test.go",
         "gen_api_test.go",
         "memory_linux_test.go",
         "parts_internal_test.go",
         "slots_internal_test.go",
+        "starve_uring_linux_test.go",
         "uring_abi_linux_internal_test.go",
         "uring_cost_linux_test.go",
         "uring_wait_linux_test.go",
         "watchdog_uring_linux_test.go",
     ],
     embed = [":loop"],
+    # The scale test holds 50,000 connections where the host allows; under
+    # coverage on the hosted runner it overran its shard's 60 s with the stop
+    # tests. The lanes that run the suite with go test keep the full count.
+    env = {"KITSUNIUM_LOOP_SCALE": "10000"},  # keep
     gotags = ["loopdebug"],  # keep
     # The stop tests open 20,000 connections per backend, twice, and with
     # them the suite overran .bazelrc's 60 s under coverage on a loaded

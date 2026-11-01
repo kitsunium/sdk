@@ -57,6 +57,18 @@ workflows:
                 when: r.rows[i].Name == c && r.rows[i].Status != statusDisabled
           key: i
           range: r.rows
+  - of: (*uLoop).opens
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: rr.fill&fillFull == 0
+          key: _
+          range: ul.rings[:i]
+          value: rr
+      - return: "true"
   - of: (*uRing).cancelAccepts
     steps:
       - loop:
@@ -84,6 +96,27 @@ workflows:
           range: ul.rings
           value: rr
       - return: "true"
+  - of: (*uRing).roomiest
+    steps:
+      - bind: best, room
+        eval: "-1, 0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: left != nil && left[g] <= 0
+            - opt:
+                do:
+                  - set: best, room
+                    value: g, r
+                init:
+                  bind: r
+                  eval: rr.given[g] - rr.armedOn[g] - groupSlack
+                when: best < 0 || r > room
+          key: g
+          range: rr.given
+      - return: best
   - of: (*uRing).sweep
     steps:
       - bind: lp
