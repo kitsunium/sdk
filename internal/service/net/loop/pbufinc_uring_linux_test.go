@@ -129,6 +129,17 @@ func TestURingPbufInc_refused(t *testing.T) {
 	})
 }
 
+// consumesIncrementally reports whether a ring of g's first loop consumes
+// its buffers incrementally.
+func consumesIncrementally(g *Group) bool {
+	for _, rr := range uringOf(g).rings {
+		if rr.u.bufInc {
+			return true
+		}
+	}
+	return false
+}
+
 // capStatus is the status g's report gives c.
 func capStatus(g *Group, c corenet.Capability) string {
 	for _, row := range g.State().Capabilities {

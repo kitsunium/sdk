@@ -975,6 +975,42 @@ func childServe(spec string) int {
 	return 0
 }
 
+// eachBufMode runs fn with io_uring's buffers consumed incrementally
+// (IOU_PBUF_RING_INC) and one buffer a completion, as subtests "inc" and
+// "plain"; fn calls requireMode once its group runs.
+func eachBufMode(t *testing.T, fn func(t *testing.T, inc bool)) {
+	t.Helper()
+	for _, inc := range []bool{true, false} {
+		name := "plain"
+		if inc {
+			name = "inc"
+		}
+		t.Run(name, func(t *testing.T) { fn(t, inc) })
+	}
+}
+
+// bufMode switches incremental consumption off in c unless inc.
+func bufMode(c *Config, inc bool) {
+	if !inc {
+		c.Disabled = append(c.Disabled, corenet.CapabilityURingPbufInc)
+	}
+}
+
+// requireMode skips the "inc" case of a group whose kernel refused
+// incremental consumption: it would run one buffer a completion under the
+// other mode's name.
+func requireMode(t *testing.T, g *Group, inc bool) {
+	t.Helper()
+	if !inc {
+		return
+	}
+	for _, row := range g.State().Capabilities {
+		if row.Name == corenet.CapabilityURingPbufInc && row.Status != statusOn {
+			t.Skipf("uring-pbuf-inc %s on %s: %s", row.Status, kernelRelease(), row.Reason)
+		}
+	}
+}
+
 // onlyIOURing skips a case that injects io_uring's own faults.
 func onlyIOURing(t *testing.T, b backendCase) {
 	t.Helper()
@@ -992,54 +1028,51 @@ func onlyIOURing(t *testing.T, b backendCase) {
 func TestConformance_bufferFaults(t *testing.T) {
 	eachBackend(t, func(t *testing.T, b backendCase) {
 		onlyIOURing(t, b)
-		eachBufMode(t, func(t *testing.T, inc bool) { bufferFaults(t, b, inc) })
-	})
-}
-
-// bufferFaults is TestConformance_bufferFaults on one backend and one buffer
-// mode.
-func bufferFaults(t *testing.T, b backendCase, inc bool) {
-	h := &lineH{}
-	g, addr := serve(t, b, h, func(c *Config) {
-		c.hooks = loopHooks{bufs: 2, bufSize: 64, fill: true, shuffle: true}
-		bufMode(c, inc)
-	})
-	var wg sync.WaitGroup
-	for k := range 8 {
-		wg.Go(func() {
-			c, err := stdnet.DialTimeout("tcp", addr, time.Second)
-			if err != nil {
-				t.Error(err)
-				return
+		eachBufMode(t, func(t *testing.T, inc bool) {
+			h := &lineH{}
+			g, addr := serve(t, b, h, func(c *Config) {
+				c.hooks = loopHooks{bufs: 2, bufSize: 64, fill: true, shuffle: true}
+				bufMode(c, inc)
+			})
+			requireMode(t, g, inc)
+			var wg sync.WaitGroup
+			for k := range 8 {
+				wg.Go(func() {
+					c, err := stdnet.DialTimeout("tcp", addr, time.Second)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					defer c.Close()
+					_ = c.SetDeadline(time.Now().Add(20 * time.Second))
+					r := bufio.NewReader(c)
+					for i := range 100 {
+						n := 1 + (i*37+k*101)%300
+						line := bytes.Repeat([]byte{byte('a' + k)}, n)
+						line = append(line, '\n')
+						if _, err := c.Write(line); err != nil {
+							t.Error(err)
+							return
+						}
+						got, err := r.ReadBytes('\n')
+						if err != nil || !bytes.Equal(got, line) {
+							t.Errorf("client %d line %d: %d bytes back, %v", k, i, len(got), err)
+							return
+						}
+					}
+				})
 			}
-			defer c.Close()
-			_ = c.SetDeadline(time.Now().Add(20 * time.Second))
-			r := bufio.NewReader(c)
-			for i := range 100 {
-				n := 1 + (i*37+k*101)%300
-				line := bytes.Repeat([]byte{byte('a' + k)}, n)
-				line = append(line, '\n')
-				if _, err := c.Write(line); err != nil {
-					t.Error(err)
-					return
-				}
-				got, err := r.ReadBytes('\n')
-				if err != nil || !bytes.Equal(got, line) {
-					t.Errorf("client %d line %d: %d bytes back, %v", k, i, len(got), err)
-					return
-				}
+			wg.Wait()
+			var starved uint64
+			for _, r := range g.State().RingStates {
+				starved += r.BufferStarved
+			}
+			t.Logf("ENOBUFS re-arms: %d", starved)
+			if starved == 0 {
+				t.Fatal("a two-entry buffer ring never ran out: the fault was not injected")
 			}
 		})
-	}
-	wg.Wait()
-	var starved uint64
-	for _, r := range g.State().RingStates {
-		starved += r.BufferStarved
-	}
-	t.Logf("ENOBUFS re-arms: %d", starved)
-	if starved == 0 {
-		t.Fatal("a two-entry buffer ring never ran out: the fault was not injected")
-	}
+	})
 }
 
 // TestConformance_probeStages fails each stage of the io_uring probe in turn:

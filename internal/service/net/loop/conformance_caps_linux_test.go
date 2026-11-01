@@ -163,12 +163,8 @@ func TestCaps_kernelSwitches(t *testing.T) {
 						t.Fatalf("probe stage %q, want self_test+fds", st.ProbeStage)
 					}
 				case corenet.CapabilityURingPbufInc:
-					if b.backend == corenet.LoopBackendIOURing {
-						for _, rr := range uringOf(g).rings {
-							if rr.u.bufInc {
-								t.Fatal("a ring's buffers are consumed incrementally with uring-pbuf-inc switched off")
-							}
-						}
+					if b.backend == corenet.LoopBackendIOURing && consumesIncrementally(g) {
+						t.Fatal("a ring's buffers are consumed incrementally with uring-pbuf-inc switched off")
 					}
 				case corenet.CapabilityTCPNoDelay:
 					if v, err := syscall.GetsockoptInt(lfd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY); err != nil || v != 0 {
