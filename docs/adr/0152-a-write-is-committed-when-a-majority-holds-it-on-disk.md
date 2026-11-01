@@ -6496,6 +6496,57 @@ ended the silence
   `TestAConflictLowersTheTruncationPointOnlyUnderALeaderOfItsTerm`.
   The tests of #418, #636, #684, #766, #767 and #774 stay green.
 
+## Amendment — Recover refuses an interrupted install it cannot read (2026-11-01, #789)
+
+#506's fix (PR #555) had `Recover` finish an install a crash interrupted
+after its snapshot was published, and set aside, as the start does, one
+that fails its checksums (`interruptedInstall`). It set aside every failure
+of `verifySnapshotFile` but VERSION_UNSUPPORTED (#640), a STORAGE_FAILED
+included: a `.snap` the disk could not open at that moment (EIO, EMFILE,
+EACCES). `Recover` then planned from the short log below the snapshot and
+wrote its forced entry there, while the snapshot stayed published, of the
+old lineage and above the index kept. A start keeps a snapshot that failed
+for this node's disk (`ownFailure`) and restores it as soon as the disk
+reads it: `finishInstall` then dropped the log past it, the forced entry
+and every write the new history had acknowledged, and the node ran the old
+voters under the new cluster, with no leader possible. `Inspect` took the
+same path and under-ranked such a survivor, as in #746. A read error inside
+the chunks, or on a `.meta` an `Open` read again, was taken for a corrupt
+snapshot, which a start unpublishes only once another one restores, and
+otherwise keeps for its next start
+([#789](https://github.com/kitsunium/sdk/issues/789)).
+
+- **A snapshot the disk cannot read refuses.** `interruptedInstall` sets
+  aside only a snapshot that failed for a fault of its own; a
+  STORAGE_FAILED refuses `Recover` and `Inspect`, the directory untouched,
+  and the operator runs them again once the disk reads. A
+  SNAPSHOT_TOO_LARGE is the snapshot's own fault there, the bound being its
+  own metadata's, and a stream past it never restores at a start.
+- **The disk's failure is told from corruption.** A read of the chunk
+  stream that fails for any reason but a stream cut short is the reader's
+  failure, kept when it carries a code and STORAGE_FAILED otherwise
+  (`chunkReadFailed`), and a `.meta` that is there but cannot be read is a
+  STORAGE_FAILED at `Open` as at a listing. A stream that ends short stays
+  SNAPSHOT_CORRUPT. The start keeps such a snapshot for its next try, a
+  sender keeps a copy it cannot read back (`sentCorrupt`), and an installed
+  copy that did not restore is removed as before.
+- **What it leaves.** A snapshot whose bytes a read returned wrong once,
+  and right later, still fails its checksums at `Recover` and may restore
+  at a start; `Recover` removing the old lineage's snapshots it sets aside,
+  or a start refusing a snapshot its lineage rejects, would close it, and
+  is left for a separate decision.
+- **No format change.** No frame, field or record changes, nothing new
+  persisted, no protocol raise.
+- **Tests.** `TestRecoverRefusesAnInterruptedInstallItCannotRead` (on disk,
+  the issue's scenario, the `.snap` made unreadable by its mode; on main
+  `Recover` succeeds with the log at [1,6] below the install at 205;
+  fixed, `Recover` and `Inspect` refuse STORAGE_FAILED with nothing
+  written, `Open` of an unreadable `.meta` is STORAGE_FAILED, and once the
+  snapshot reads `Recover` finishes the install and the node runs the
+  forced configuration) and
+  `TestAChunkStreamThatCannotBeReadIsAStorageFailure`. The tests of #506,
+  #555, #574, #640 and #746 stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6543,6 +6594,7 @@ ended the silence
 | #771 | Raft hunt loop, 2026-11-01 | a streamed snapshot's pin is renewed at its bound while its follower moved since and is no further behind than the stream's end left it, so a catch-up by appends longer than the bound is no longer compacted past and sent the newest snapshot again; a follower that stops or falls further behind still loses it at the next bound, and a tight log still lifts it; no format change, no raft mutation (amendment of 2026-11-01, #771) |
 | #790 | Raft hunt loop, 2026-11-01 | the strict reconfiguration check counts a voter whose last answer carried `FlagTruncated`, a silent one, as a voter that does not answer, so a change that would need a silent voter's acknowledgement to commit is refused `MEMBERSHIP_INVALID`; #603's guard and the raise still count it; no format change, no raft mutation (amendment of 2026-11-01, #790) |
 | #787 | Raft hunt loop, 2026-11-01 | a leader appends one no-op of its term for a silent node whose heartbeat answer reports its whole log committed, once per silence and per term, and a conflict of a leader of a term at least `SilentTerm` below the truncation point lowers that point in memory, so a silence ends in a cluster that writes nothing; no format change, no raft mutation (amendment of 2026-11-01, #787) |
+| #789 | Raft hunt loop, 2026-11-01 | `Recover` and `Inspect` refuse STORAGE_FAILED an interrupted install whose snapshot the disk cannot read, instead of setting it aside as one that fails its checksums, and a read of the chunks or of a `.meta` that fails for any reason but a stream cut short is STORAGE_FAILED, never SNAPSHOT_CORRUPT; no format change (amendment of 2026-11-01, #789) |
 
 ## raft-sql-poc (owner's prior Raft)
 

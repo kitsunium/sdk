@@ -657,8 +657,15 @@ func (s *fileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, err := os.ReadFile(filepath.Join(s.dir, id+".meta"))
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, origin(coreconsensus.SnapshotCorrupt, errs.String("id", id), errs.String("why", "no meta"))
+	}
+	if err != nil {
+		// There but unreadable is the disk's, as a listing reads it
+		// (published): read as no meta, a start set the snapshot aside as
+		// corrupt and restored it once the disk read again, over a Recover
+		// that had planned past it (#789).
+		return nil, storageFailed("read snapshot meta", err)
 	}
 	var m coreconsensus.SnapshotMetaValue
 	if err := wire.ParseSnapshotMeta(b, &m); err != nil {

@@ -3,6 +3,7 @@ package consensus
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"hash"
 	"hash/crc32"
 	"io"
@@ -152,16 +153,34 @@ func (c *chunkReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// chunkReadFailed is a read of the chunk stream that failed: a stream that
+// ends short is SNAPSHOT_CORRUPT, the check named why, and any other
+// failure is the reader's, kept when it carries a code and STORAGE_FAILED
+// otherwise. Read as corrupt, an EIO of the moment inside the chunks let
+// Recover set aside an interrupted install as one that fails its checksums,
+// which a start, the disk reading again, restored over the new history
+// (#789): only the snapshot's own fault may set it aside (ownFailure).
+func chunkReadFailed(err error, why string) error {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return snapshotCorrupt(why)
+	}
+	if _, coded := errs.CodeOf(err); coded {
+		return err
+	}
+	return storageFailed("read snapshot", err)
+}
+
 // next reads, checks and decodes one chunk. The announced lengths are
 // bounded BEFORE anything is allocated for them (R2-11), and a chunk whose
-// checksum or decoded length disagrees with its header is refused.
+// checksum or decoded length disagrees with its header is refused. A read
+// that fails is chunkReadFailed's.
 func (c *chunkReader) next() error {
 	var h [chunkHeaderLen]byte
 	if _, err := io.ReadFull(c.r, h[:]); err != nil {
 		if err == io.EOF {
 			return io.EOF
 		}
-		return snapshotCorrupt("short chunk header")
+		return chunkReadFailed(err, "short chunk header")
 	}
 	encLen := int64(binary.LittleEndian.Uint32(h[0:]))
 	decLen := int64(binary.LittleEndian.Uint32(h[4:]))
@@ -177,7 +196,7 @@ func (c *chunkReader) next() error {
 	}
 	c.enc = c.enc[:encLen]
 	if _, err := io.ReadFull(c.r, c.enc); err != nil {
-		return snapshotCorrupt("short chunk")
+		return chunkReadFailed(err, "short chunk")
 	}
 	if crc32.Checksum(c.enc, castagnoli) != binary.LittleEndian.Uint32(h[8:]) {
 		return snapshotCorrupt("chunk checksum")

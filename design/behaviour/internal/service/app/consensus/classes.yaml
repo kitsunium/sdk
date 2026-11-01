@@ -1573,6 +1573,7 @@ files:
       - newChunkReader
       - snapshotCorrupt
       - (*chunkReader).Read
+      - chunkReadFailed
       - (*chunkReader).next
       - verifySnapshot
       - maxEncodedChunk
@@ -3073,6 +3074,17 @@ functions:
     name: snapshotCorrupt
     params: why string
     results: error
+  - doc: |-
+      chunkReadFailed is a read of the chunk stream that failed: a stream that
+      ends short is SNAPSHOT_CORRUPT, the check named why, and any other
+      failure is the reader's, kept when it carries a code and STORAGE_FAILED
+      otherwise. Read as corrupt, an EIO of the moment inside the chunks let
+      Recover set aside an interrupted install as one that fails its checksums,
+      which a start, the disk reading again, restored over the new history
+      (#789): only the snapshot's own fault may set it aside (ownFailure).
+    name: chunkReadFailed
+    params: err error, why string
+    results: error
   - doc: verifySnapshot decodes a whole snapshot and checks its sizes and digest.
     name: verifySnapshot
     params: r io.Reader, meta coreconsensus.SnapshotMetaValue, codec coretransform.BoundedDecompressor, limit int64
@@ -3914,7 +3926,16 @@ types:
           a cut before #544 published at term 0 is set aside unread, as the start
           sets it aside (restoreLatest): taken for an install, it dropped the log
           for a position with no term, which the compaction then refused, and
-          Inspect ranked the survivor at term 0. It reads and writes nothing else.
+          Inspect ranked the survivor at term 0. One this node's disk cannot read,
+          a STORAGE_FAILED, refuses too: only a snapshot's own fault sets it aside.
+          Set aside, it let Recover plan from the short log below it, while a start
+          keeps such a snapshot published (ownFailure) and restores it as soon as
+          the disk reads it again, dropping the log past it: the forced entry and
+          every write the new history acknowledged (#789). The operator runs it
+          again once the disk reads. A SNAPSHOT_TOO_LARGE, which a start keeps as
+          a limit of its configuration, is the snapshot's own fault here: the bound
+          is its own metadata's, and a stream past it never restores. It reads and
+          writes nothing else.
         name: interruptedInstall
         recv: d DataDir
         results: coreconsensus.SnapshotMetaValue, bool, error
@@ -9058,7 +9079,8 @@ types:
       - doc: |-
           next reads, checks and decodes one chunk. The announced lengths are
           bounded BEFORE anything is allocated for them (R2-11), and a chunk whose
-          checksum or decoded length disagrees with its header is refused.
+          checksum or decoded length disagrees with its header is refused. A read
+          that fails is chunkReadFailed's.
         name: next
         recv: c *chunkReader
         results: error

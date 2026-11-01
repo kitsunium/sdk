@@ -542,6 +542,14 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   its checksums: `interruptedInstall` did, and Recover planned from the
   older log below an install above the protocol and wrote a new history
   from it (#640, `TestRecoverRefusesAnInterruptedInstallAboveTheProtocol`).
+  Nor skip one it cannot read, STORAGE_FAILED: a start keeps such a
+  snapshot published (`ownFailure`) and restored it once the disk read
+  again, dropping the forced entry and every write of the new history.
+  `interruptedInstall` refuses it, as Inspect then does, and a read of a
+  `.meta` or of the chunks that fails for any reason but a stream cut short
+  is STORAGE_FAILED, never SNAPSHOT_CORRUPT (`chunkReadFailed`, #789,
+  `TestRecoverRefusesAnInterruptedInstallItCannotRead`,
+  `TestAChunkStreamThatCannotBeReadIsAStorageFailure`).
 - Stream again a snapshot a peer refused SNAPSHOT_CORRUPT without reading
   it back: `sentCorrupt` verifies the sender's copy and replaces one that
   fails (#525, `TestALeaderReplacesASnapshotItsPeerFindsCorrupt`).
