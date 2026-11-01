@@ -380,9 +380,12 @@ under coverage before touching `shard_count`.
   commit (Log Matching), and a node brought onto the leader's snapshot over
   a tail of an older term kept a point past the leader's whole log, silent
   in a cluster that wrote nothing (#792). `restartLogAt` lowers it to the
-  index after the snapshot through `lowerSilence`; a boundary held at its
-  term keeps the suffix for the next append, and a log that ends before the
-  index proves nothing
+  index after the snapshot through `lowerSilence`, asked at `SilentTerm`
+  itself: the proof is the snapshot's commit, whatever its sender's term,
+  and a node whose truncation dropped a later term's record (#418) may be
+  installed by a leader below it. A boundary held at its term keeps the
+  suffix for the next append, and a log that ends before the index proves
+  nothing
   (`TestASilentNodeInstalledOverAnOlderTermsTailEndsItsSilenceInAQuietCluster`,
   `TestAnInstalledSilencePointSurvivesARestart`,
   `TestAnInstallLowersTheSilencePointOnlyOverAnotherTerm`; no mutation, the

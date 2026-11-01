@@ -358,10 +358,12 @@ func TestAnInstalledSilencePointSurvivesARestart(t *testing.T) {
 }
 
 // An install lowers the point only when the log held the snapshot's index
-// under another term, past the snapshot and below the point, for a
-// condition a term reaches: a matching boundary keeps the suffix for the
-// next append to judge, and a log that ends before the index proves
-// nothing of the entries it lacks.
+// under another term, past the snapshot and below the point: a matching
+// boundary keeps the suffix for the next append to judge, and a log that
+// ends before the index proves nothing of the entries it lacks. The proof
+// is the snapshot's commit, so it holds on a node whose term is below its
+// SilentTerm too, one whose truncation dropped the record of a later term
+// (#418), installed by a leader of its own term.
 func TestAnInstallLowersTheSilencePointOnlyOverAnotherTerm(t *testing.T) {
 	cases := []struct {
 		name               string
@@ -374,7 +376,7 @@ func TestAnInstallLowersTheSilencePointOnlyOverAnotherTerm(t *testing.T) {
 		{name: "the index held at its term", held: 6, silentTerm: 2, silent: 7, snapTerm: 1, snapAt: 4, want: 7},
 		{name: "a log that ends before the index", held: 3, silentTerm: 2, silent: 9, snapTerm: 2, snapAt: 5, want: 9},
 		{name: "a point already past the snapshot", held: 6, silentTerm: 2, silent: 5, snapTerm: 2, snapAt: 4, want: 5},
-		{name: "a condition no term reaches", held: 6, silentTerm: 1 << 62, silent: 7, snapTerm: 2, snapAt: 4, want: 7},
+		{name: "a node below its SilentTerm", held: 6, silentTerm: 3, silent: 7, snapTerm: 2, snapAt: 4, want: 5},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

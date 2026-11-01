@@ -6638,20 +6638,27 @@ own restart, which rebuilds its log from its newest snapshot
 
 - **The install lowers the point.** When the log held the snapshot's
   index under another term, `restartLogAt` lowers the point to the index
-  after the snapshot (`lowerSilence`, at the node's term, which an
-  install's leader holds). The snapshot is committed: an entry the node
-  held at that index or past it, those the truncation dropped included,
-  committed, would make the node's log the committed one through the
-  index (Log Matching), and it is not, so none of them ever counted
+  after the snapshot (`lowerSilence`). The snapshot is committed: an entry
+  the node held at that index or past it, those the truncation dropped
+  included, committed, would make the node's log the committed one through
+  the index (Log Matching), and it is not, so none of them ever counted
   towards a commit, under the leader of the node's own term as under a
   later one. The point is the index after the snapshot, never the
   snapshot's own, as at a start (#636): the leader's commit of an entry of
   its term past the snapshot ends the silence.
+- **Whatever the sender's term.** The proof is the snapshot's commit, not
+  its sender's log, so unlike an append's conflict it needs no leader of a
+  term at least `SilentTerm`: a node whose truncation dropped the record
+  of a later term (#418) restarts below its `SilentTerm`, and an install
+  from a leader of its own term lowers the point too. No such leader ends
+  the silence, which still asks for a leader of a term at least
+  `SilentTerm`; the point it lowered spares the next one a conflict it
+  might never find.
 - **Only then.** A boundary entry held at the snapshot's term keeps the
   suffix, and the next append judges it; a log that ends before the index
   proves nothing of the entries it lacks; a point already at or past the
-  index after the snapshot is kept; an unreadable condition, which no
-  term reaches, is never lowered.
+  index after the snapshot is kept. An unreadable condition stays as it is
+  on disk, and no term ends it.
 - **Durable as a conflict's.** The lowering leaves in the install's Ready
   beside the truncation (`ReadyValue.SilenceLowered`), and the driver
   writes it to `SILENT` before the storage actor writes that truncation
