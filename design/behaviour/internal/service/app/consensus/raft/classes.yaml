@@ -370,6 +370,12 @@ constants:
           peerProtocol3 is set while the peer's last message of the term
           carried FlagProtocol3.
         name: peerProtocol3
+      - doc: |-
+          peerSilent is set while the peer's last answer, to an append or a
+          heartbeat, said it is silent (FlagTruncated, #636): it answers, but
+          acknowledges no append, so it counts for no change that must commit
+          (activeMajority, #790).
+        name: peerSilent
     name: peerProbeSent
   - grouped: true
     items:
@@ -465,6 +471,7 @@ files:
       - (*Raft).sendEntries
       - (*Raft).maybeCommit
       - (*Raft).stepLeader
+      - silenceIn
       - (*Raft).handleHeartbeatResp
       - (*Raft).watchWindow
       - (*Raft).refeed
@@ -759,6 +766,14 @@ files:
       - (*Raft).endSilenceOnceDurable
     name: step.go
 functions:
+  - doc: |-
+      silenceIn is peerSilent when an answer carries FlagTruncated: a silent
+      node marks its every refusal and heartbeat answer, and sends no
+      acknowledgement (#636). An answer without it, an acknowledgement above
+      all, is from a node that is not silent, or no longer.
+    name: silenceIn
+    params: flags core.MessageFlags
+    results: peerFacts
   - doc: |-
       announcementOf is the announcement every frame of a node speaking
       protocol version v carries: FlagProtocol2 from 2, and FlagProtocol3 beside
@@ -2253,16 +2268,27 @@ types:
         results: bool
       - doc: |-
           activeMajority is etcd's strict reconfiguration check: the voters of m
-          that answer the leader NOW form a majority of m (R2-27).
+          that answer the leader NOW, and can acknowledge the change, form a
+          majority of m (R2-27).
+
+          A silent voter (peerSilent) answers every heartbeat but acknowledges no
+          append until a leader commits an entry of its term past its truncation
+          point (#636), and is not counted. Counted, it let a removal of a live
+          voter through over voters {leader, silent}: the configuration governs
+          from its append (D8), so the removal needed the silent voter's
+          acknowledgement, which waited for a commit the removal itself blocked,
+          and nothing committed again, every node up (#790). answering still
+          counts it: it answers a PreVote with the leader's record, which is what
+          strands and checkHeard ask.
         name: activeMajority
         params: m core.MembershipValue
         recv: r *Raft
         results: bool
       - doc: |-
-          activeMajorityWithout is activeMajority with silent counted as a voter
-          that does not answer, whatever it did last.
+          activeMajorityWithout is activeMajority with cut counted as a voter that
+          does not answer, whatever it did last.
         name: activeMajorityWithout
-        params: m core.MembershipValue, silent core.NodeID
+        params: m core.MembershipValue, cut core.NodeID
         recv: r *Raft
         results: bool
       - doc: |-

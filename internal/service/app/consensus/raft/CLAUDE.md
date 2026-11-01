@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-30T12:00:00Z -->
+<!-- updated: 2026-11-01T12:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -132,6 +132,16 @@ under coverage before touching `shard_count`.
 - Admit a DenyPin of this leader, or one that leaves no answering majority
   without its target, or withdraw the pin from the admission set before the
   change commits (#530, `mutDenyPinUnchecked`, `mutDenyPinAtAppend`).
+- Count a silent voter, one whose last answer carried `FlagTruncated`
+  (`peerSilent`), in the strict reconfiguration check (`activeMajority`):
+  it answers heartbeats but acknowledges no append, and a removal of a
+  live voter admitted over voters {leader, silent} needed an
+  acknowledgement that waited for a commit the removal blocked; nothing
+  committed again, every node up (#790,
+  `TestARemovalThatLeavesASilentVoterInTheMajorityIsRefused`,
+  `TestAChangeIsJudgedWithoutTheSilentVoters`; no mutation, the type is
+  full). `answering` still counts it, for #603's guard and `checkHeard`: it
+  answers a PreVote with the leader's record.
 - Report to a heartbeat a contract generation a restart would not rebuild,
   or campaign inside the node's own vote-refusal window: a lease granted on
   that report outlived the window after a crash (#521,

@@ -535,14 +535,25 @@ sequences:
           cases:
             - case: core.MsgAppResp
               do:
+                - set: pr.facts
+                  value: pr.facts&^peerSilent | silenceIn(m.Flags)
                 - eval: r.handleAppResp(pr, m)
                   to: r.handleAppResp
             - case: core.MsgHeartbeatResp
               do:
+                - set: pr.facts
+                  value: pr.facts&^peerSilent | silenceIn(m.Flags)
                 - eval: r.handleHeartbeatResp(pr, m)
                   to: r.handleHeartbeatResp
             - default: true
           "on": m.Kind
+  - of: silenceIn
+    steps:
+      - opt:
+          do:
+            - return: peerSilent
+          when: flags&core.FlagTruncated != 0
+      - return: "0"
   - of: (*Raft).handleHeartbeatResp
     participants:
       - id: caller
@@ -1615,7 +1626,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: id == silent
+                when: id == cut
             - opt:
                 do:
                   - op: ++
@@ -1623,7 +1634,7 @@ sequences:
                 init:
                   bind: pr
                   eval: r.prs[id]
-                when: pr != nil && pr.facts&peerHeard != 0 && r.now.Sub(pr.lastHeard) < r.voteWindow
+                when: pr != nil && pr.facts&(peerHeard|peerSilent) == peerHeard && r.now.Sub(pr.lastHeard) < r.voteWindow
           key: _
           range: vs
           value: id

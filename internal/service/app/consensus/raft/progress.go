@@ -18,6 +18,11 @@ const (
 	// peerProtocol3 is set while the peer's last message of the term
 	// carried FlagProtocol3.
 	peerProtocol3
+	// peerSilent is set while the peer's last answer, to an append or a
+	// heartbeat, said it is silent (FlagTruncated, #636): it answers, but
+	// acknowledges no append, so it counts for no change that must commit
+	// (activeMajority, #790).
+	peerSilent
 )
 
 // peerFacts are a peer's yes/no state in the leader's progress, one bit each.

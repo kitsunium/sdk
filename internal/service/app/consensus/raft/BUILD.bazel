@@ -62,6 +62,7 @@ go_test(
         "slowack_internal_test.go",
         "soak_internal_test.go",
         "staletail_internal_test.go",
+        "strictsilent_internal_test.go",
         "timing_internal_test.go",
         "transferissuer_internal_test.go",
         "transit_internal_test.go",

@@ -6378,6 +6378,53 @@ lengthened the next cycle's pin
   every cycle and never caught up under the load. The tests of #550, #588,
   #602, #610, #622 and #623 stay green.
 
+## Amendment — a silent voter counts for no change that must commit (2026-11-01, #790)
+
+R2-27's strict check admits a membership change, an address change, a
+snapshot limit or a `DenyPin` only while the voters that answer the leader
+now are a majority of the configuration the change leaves
+(`activeMajority`). It counted every voter heard within the vote window. A
+voter `TruncateAndStaySilent` made silent answers every heartbeat, with
+`FlagTruncated` (#636), and acknowledges no append until a leader commits an
+entry of its term past its truncation point. Voters A, B and C, MinVoters
+2, C silent over A's whole log before any write: the operator removed B,
+alive. The check counted A and C, 2 of 2, and admitted it. The
+configuration governs from its append (D8): the removal needed C's
+acknowledgement, C's silence waited for a commit the removal blocked, and
+nothing committed again, every node up, until an offline `Recover`. B,
+removed, could not help. Under MinVoters 3 the same takes five voters, two
+of them silent in the same quiet window
+([#790](https://github.com/kitsunium/sdk/issues/790)).
+
+- **A silent voter is not counted.** The leader keeps, per peer, whether
+  its last answer to an append or a heartbeat carried `FlagTruncated`
+  (`peerSilent`): a silent node marks every refusal and heartbeat answer,
+  and sends no acknowledgement, so an answer without the flag clears it.
+  `activeMajority`, and so `removeMember`, `promote`, `updateAddress`,
+  `updateSnapshotLimit` and `denyPin`, counts a silent voter as one that
+  does not answer. The removal above is refused `MEMBERSHIP_INVALID`, and
+  admitted once C's silence ends; the removal of the silent voter itself
+  is still admitted.
+- **What it keeps.** `answering`, which #603's guard (`reachedBy`,
+  `removalStrands`, `moveStrands`, #761, #763, #765, #773) and the raise's
+  `checkHeard` (#665) read, still counts a silent voter: it answers a
+  PreVote with the leader's record. `quorumActive`, CheckQuorum's count and
+  `addLearner`'s, is unchanged: a learner's admission leaves the voters as
+  they are, and commits once the cluster commits anything at all.
+- **No format change.** The flag is the one #636 put on the wire; no frame,
+  field, flag or record changes, nothing persisted, no protocol raise, and
+  no raft mutation: the type is full.
+- **Tests.** `TestARemovalThatLeavesASilentVoterInTheMajorityIsRefused`
+  (raft, the issue's scenario on the step functions, A's appends to C held
+  back so that its silence lasts; on main `Remove(2)` is admitted at index
+  12 and A's commit stays at 11; fixed, it is refused, then admitted and
+  committed once a write ended C's silence) and
+  `TestAChangeIsJudgedWithoutTheSilentVoters` (raft: five voters, two
+  silent; a removal of a live voter, a `DenyPin` and the leader's move are
+  refused, the removal of a silent voter is admitted, and so is the first
+  removal once both answer without the flag). The tests of #530, #603,
+  #677, #761, #763, #765 and #773 stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6423,6 +6470,7 @@ lengthened the next cycle's pin
 | #774 | Raft hunt loop, 2026-10-30 | a silent peer's heartbeat answer moves a peer the leader still holds in replicate to probe, its match kept, so a full window no longer leaves it sent only empty appends and silent for as long as that leader leads; the probe resumes past the commit it reports; no format change, no raft mutation (amendment of 2026-10-30, #774) |
 | #773 | Raft hunt loop, 2026-10-30 | #603's guard counts a stale voter's voucher only under the non-zero key that voter's configuration pins and the next one still pins, the leader included, so a member whose pin `DenyPin` withdrew vouches for no one; whether a `DenyPin` itself is judged left to a decision; no format change, no raft mutation (amendment of 2026-10-30, #773) |
 | #771 | Raft hunt loop, 2026-11-01 | a streamed snapshot's pin is renewed at its bound while its follower moved since and is no further behind than the stream's end left it, so a catch-up by appends longer than the bound is no longer compacted past and sent the newest snapshot again; a follower that stops or falls further behind still loses it at the next bound, and a tight log still lifts it; no format change, no raft mutation (amendment of 2026-11-01, #771) |
+| #790 | Raft hunt loop, 2026-11-01 | the strict reconfiguration check counts a voter whose last answer carried `FlagTruncated`, a silent one, as a voter that does not answer, so a change that would need a silent voter's acknowledgement to commit is refused `MEMBERSHIP_INVALID`; #603's guard and the raise still count it; no format change, no raft mutation (amendment of 2026-11-01, #790) |
 
 ## raft-sql-poc (owner's prior Raft)
 
