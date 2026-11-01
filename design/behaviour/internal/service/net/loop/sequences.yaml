@@ -5822,6 +5822,12 @@ sequences:
         value: rr.r.st.starved
       - opt:
           do:
+            - op: +=
+              set: want
+              value: groupSlack
+          when: want > 0
+      - opt:
+          do:
             - set: want
               value: max(want, int(bufsStep))
           when: held(rr.inRing) < int(u.bufProvided)/4

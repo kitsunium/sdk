@@ -10,6 +10,7 @@ import (
 	"io"
 	stdnet "net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,8 +39,8 @@ const (
 // one ring, the loop held at its batch end while every one of them sends a
 // line, then released — one more connection's line holds it: every recv completes into the CQ while nothing is
 // returned, so the burst needs a buffer a connection. The first burst grows
-// the ring's buffers from bufsFirst; the second starves at most one recv in
-// a thousand, the last none, every echo exact, the buffers provided at most the connections plus a step, and
+// the ring's buffers from bufsFirst; every later one starves no recv, every
+// echo exact, the buffers provided at most the connections plus a step, and
 // the loop within its budget.
 func TestConformance_noStarvationAtScale(t *testing.T) {
 	if testing.Short() {
@@ -97,15 +98,17 @@ func TestConformance_noStarvationAtScale(t *testing.T) {
 			starved := g.State().RingStates[0].BufferStarved - before
 			var provided, count uint32
 			var bytes uint64
-			onLoop(t, g, func() { provided, count, bytes = rr.u.bufProvided, rr.u.bufCount, ul.bufBytes })
+			var given, armed, inRing []int
+			onLoop(t, g, func() {
+				provided, count, bytes = rr.u.bufProvided, rr.u.bufCount, ul.bufBytes
+				given, armed, inRing = slices.Clone(rr.given), slices.Clone(rr.armedOn), slices.Clone(rr.inRing)
+			})
+			t.Logf("burst %d: buffers given per group %v, in the kernel's rings %v, recvs armed per group %v", burst, given, inRing, armed)
 			t.Logf("burst %d of %d connections: every echo in %v, %d starved, %d buffers provided of %d, %d MiB", burst, n, time.Since(start).Round(time.Millisecond), starved, provided, count, bytes>>20)
-			// The first burst grows the buffers to what it lacked, exactly:
-			// the next may starve a few recvs where a group's last buffer
-			// was the holder's, and grows a step; the last starves none.
-			if burst > 0 && uint64(starved)*1000 > uint64(n) || burst == scaleBursts-1 && starved != 0 {
+			if burst > 0 && starved != 0 {
 				t.Fatalf("burst %d of %d connections: %d recvs starved after the first burst", burst, n, starved)
 			}
-			if bytes > bufBudgetFor(&ul.lp.sz) || provided > uint32(n)+2*bufsStep+bufsFirst {
+			if bytes > bufBudgetFor(&ul.lp.sz) || provided > uint32(n)+2*bufsStep+bufsFirst+uint32(groupSlack)*(uint32(n)/bufsStep+1) {
 				t.Fatalf("burst %d: %d buffers provided, %d bytes, for %d connections", burst, provided, bytes, n)
 			}
 		}

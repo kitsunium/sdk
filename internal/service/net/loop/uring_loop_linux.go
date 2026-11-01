@@ -81,6 +81,14 @@ const (
 	// rings' kernels, every ring together: resident once the kernel wrote
 	// them, never taken back (ADR 0203 §D2).
 	loopBufBudget uint64 = 128 << 20
+	// groupSlack is how many buffers of a group are kept beyond the recvs
+	// armed on it. A multishot recv that received tries again at once, and
+	// that try takes a buffer from the ring and recycles it on EAGAIN, or
+	// fails the recv with ENOBUFS on an empty ring (io_recv, io_recv_finish,
+	// io_uring/net.c, 6.12 to 7.0): a group with exactly a buffer a recv
+	// ends its every burst with spurious ENOBUFS, each a completion and a
+	// re-arm (ADR 0203 §D2).
+	groupSlack int = 32
 	// fillFull is uRing.fill's bit for a ring near its table's end, or
 	// passed over, so the ring after it accepts too.
 	fillFull uint8 = 1
@@ -1250,7 +1258,7 @@ func (rr *uRing) armRecv(slot int32) {
 }
 
 // roomiest is the group with the most buffers handed to the kernel beyond
-// the recvs armed on it, among those left still holds one of when left is
+// the recvs armed on it and groupSlack, among those left still holds one of when left is
 // given; -1 when none does. A recv armed on a group with room has a buffer of
 // its own there when every connection sends at once: a multishot recv stays
 // on its group, so a group armed past its buffers starves at each burst
@@ -1264,7 +1272,7 @@ func (rr *uRing) roomiest(left []int) int {
 			continue
 		}
 		//: more room than the best so far.
-		if r := rr.given[g] - rr.armedOn[g]; best < 0 || r > room {
+		if r := rr.given[g] - rr.armedOn[g] - groupSlack; best < 0 || r > room {
 			best, room = g, r
 		}
 	}
@@ -1594,6 +1602,10 @@ func (rr *uRing) provide() {
 	u := rr.u
 	want := int(rr.r.st.starved - rr.starvedSeen)
 	rr.starvedSeen = rr.r.st.starved
+	//: short: what the burst lacked, and the slack a group keeps.
+	if want > 0 {
+		want += groupSlack
+	}
 	//: low: a step ahead of the next burst.
 	if held(rr.inRing) < int(u.bufProvided)/4 {
 		want = max(want, int(bufsStep))

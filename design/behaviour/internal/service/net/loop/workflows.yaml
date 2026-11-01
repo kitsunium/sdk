@@ -112,7 +112,7 @@ workflows:
                     value: g, r
                 init:
                   bind: r
-                  eval: rr.given[g] - rr.armedOn[g]
+                  eval: rr.given[g] - rr.armedOn[g] - groupSlack
                 when: best < 0 || r > room
           key: g
           range: rr.given

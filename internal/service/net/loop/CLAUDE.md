@@ -163,9 +163,13 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   loop, every ring together, less under `MaxConns`: a buffer a connection of
   the loop's share and each ring's first 512; `uLoop.bufBytes`); it never takes any back. A
   ring's resident buffers are the most it had out at once — 1 MiB idle,
-  97 MiB after 50 000 connections sent at once. A recv is armed on the
-  group with the most buffers beyond the recvs armed on it (`roomiest`,
-  `given`, `armedOn`, `recvGroup`): a multishot recv stays on its group. A
+  98 MiB after 50 000 connections sent at once. A recv is armed on the
+  group with the most buffers beyond the recvs armed on it and `groupSlack`
+  (32; `roomiest`, `given`, `armedOn`, `recvGroup`): a multishot recv stays
+  on its group, and one that received tries again at once, taking a buffer
+  it recycles on EAGAIN or failing with ENOBUFS on an empty ring
+  (`io_recv_finish`) — a group with exactly a buffer a recv ends each burst
+  with spurious ENOBUFS. A growth adds the slack to what the burst lacked. A
   request larger than a buffer arrives over several completions and the
   spill joins them, as a split read always did.
 - **io_uring: buffers go back after `OnBatchEnd`, once each.** A CQE's bid is

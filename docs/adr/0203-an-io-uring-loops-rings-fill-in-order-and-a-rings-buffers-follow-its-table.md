@@ -89,8 +89,17 @@ no `LoopValue` field is added for it, which would be a published shape for
 a bound the connections already set.
 
 A recv is armed on the group with the most buffers beyond the recvs
-already armed on it: a multishot recv stays on its group, so a group armed
-past its buffers would starve at every burst whatever the others hold. A
+already armed on it and 32 more (`groupSlack`): a multishot recv stays on
+its group, so a group armed past its buffers would starve at every burst
+whatever the others hold. The slack is the kernel's: a multishot recv that
+received tries again at once (`io_recv_finish`, io_uring/net.c), and the
+try takes a buffer from the ring, recycled on `EAGAIN` — or, on an empty
+ring, fails the recv with `ENOBUFS` although its bytes were delivered. A
+group with exactly a buffer a recv ended each burst with hundreds of such
+`ENOBUFS` (905 of 1,809 recvs on the last group, 10,000 connections on one
+CPU, the kernel's own head read back by `IORING_REGISTER_PBUF_STATUS`
+showing every buffer present); a growth adds the slack to what the burst
+lacked. A
 starved recv is re-armed only while the kernel holds a buffer for it: the
 completions still in the CQ are counted out first, and nothing is re-armed
 while the kernel holds completions back.
@@ -109,13 +118,13 @@ while the kernel holds completions back.
   armed.
 - `TestConformance_noStarvationAtScale` (50,000 connections on one ring, all
   sending at once while the loop is held, Docker linux/arm64, 7.0): the
-  first burst starves 49,489 recvs once each and grows the ring to 50,001
-  buffers; the second starves 21 and grows a step; the third starves none.
+  first burst starves 49,489 recvs once each and grows the ring to 50,801
+  buffers; the second and the third starve none, on eight CPUs as on one.
   Every echo arrives in 243 to 266 ms after the first burst, against 454 to
   466 ms and 786,384 `ENOBUFS` a burst on 8,192 buffers of which 2,049 were
   ever provided.
 - Memory: a ring holds what its bursts took, never more than its table
-  rounded up — 97 MiB of resident buffers after a burst of 50,000, 1 MiB
+  rounded up — 98 MiB of resident buffers after a burst of 50,000, 1 MiB
   idle — and a loop at most 128 MiB, every ring together, less under a
   `MaxConns` that needs fewer. On a 1 GB host
   that is the cost of serving such a burst without starving; past the
