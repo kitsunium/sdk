@@ -2185,10 +2185,11 @@ packages:
       - blockDoc: The facts a PeerHealthValue carries.
         doc: |-
           PeerStranded is set on a voter #603's guard finds stranded: it no
-          longer answers, or lags, and no member of any configuration it may
-          hold would answer its PreVote with this leader's record once it is
-          back, so it would hear no one. The guard refuses every removal or move
-          of a member that answers and may vouch, until it is back or removed.
+          longer answers, or lags, and it may hold a configuration of which no
+          member would answer its PreVote with this leader's record once it is
+          back, so it may hear no one. A risk, not a certainty: the guard cannot
+          tell which configuration it holds, and refuses every removal or move of
+          a member that answers and may vouch, until it is back or removed.
         name: PeerStranded
         type: PeerFlags
         value: "8"
@@ -3846,10 +3847,11 @@ packages:
       - blockDoc: The causes an IsolationValue carries.
         doc: |-
           IsolationStranded is set on a voter #603's guard finds stranded: it no
-          longer answers, or lags, and no member of any configuration it may hold
-          would answer its PreVote with this leader's record once it is back, so
-          it would hear no one. The guard refuses every removal or move of a
-          member that answers and may vouch, until it is back or removed.
+          longer answers, or lags, and it may hold a configuration of which no
+          member would answer its PreVote with this leader's record once it is
+          back, so it may hear no one. A risk, not a certainty: the guard cannot
+          tell which configuration it holds, and refuses every removal or move of
+          a member that answers and may vouch, until it is back or removed.
         name: IsolationStranded
         type: IsolationFlags
         value: "1"
@@ -5473,19 +5475,36 @@ packages:
             reexport: svcconsensus.PeerSnapshot
             type: svcconsensus.PeerFlags
             value: "4"
-          - name: PeerStranded
+          - doc: |-
+              PeerStranded is set on a voter the leader may never reach again: it
+              may hold a configuration of which no member would answer it. Every
+              removal or move of a member that answers and may vouch is refused
+              until it is back or removed.
+            name: PeerStranded
             reexport: svcconsensus.PeerStranded
             type: svcconsensus.PeerFlags
             value: "8"
-          - name: PeerPinDenied
+          - doc: |-
+              PeerPinDenied is set beside PeerStranded when a pin DenyPin withdrew
+              is what leaves the voter so.
+            name: PeerPinDenied
             reexport: svcconsensus.PeerPinDenied
             type: svcconsensus.PeerFlags
             value: "16"
-          - name: PeerLeaderMoved
+          - doc: |-
+              PeerLeaderMoved is set on a voter reached only through this leader,
+              which it knows at another address: once the leadership moves to a
+              member it does not know, it is stranded.
+            name: PeerLeaderMoved
             reexport: svcconsensus.PeerLeaderMoved
             type: svcconsensus.PeerFlags
             value: "32"
-          - name: PeerLeaderUnconfirmed
+          - doc: |-
+              PeerLeaderUnconfirmed is set on a voter reached only on the bet,
+              over a compacted log, that it knows this leader as a voter: known
+              as a learner, once the leadership moves to a member it does not
+              know, it is stranded.
+            name: PeerLeaderUnconfirmed
             reexport: svcconsensus.PeerLeaderUnconfirmed
             type: svcconsensus.PeerFlags
             value: "64"

@@ -25,10 +25,11 @@ const (
 	// PeerSnapshot is set while a snapshot is being sent to the peer.
 	PeerSnapshot
 	// PeerStranded is set on a voter #603's guard finds stranded: it no
-	// longer answers, or lags, and no member of any configuration it may
-	// hold would answer its PreVote with this leader's record once it is
-	// back, so it would hear no one. The guard refuses every removal or move
-	// of a member that answers and may vouch, until it is back or removed.
+	// longer answers, or lags, and it may hold a configuration of which no
+	// member would answer its PreVote with this leader's record once it is
+	// back, so it may hear no one. A risk, not a certainty: the guard cannot
+	// tell which configuration it holds, and refuses every removal or move of
+	// a member that answers and may vouch, until it is back or removed.
 	PeerStranded
 	// PeerPinDenied is set beside PeerStranded when a pin DenyPin withdrew
 	// is what leaves the voter so. The DenyPin was admitted: a key's fence

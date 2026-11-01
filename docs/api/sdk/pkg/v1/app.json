@@ -2737,7 +2737,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "32",
       "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerLeaderMoved",
-      "doc": "The facts a PeerHealthValue carries, read with PeerFlags.Has.\n",
+      "doc": "PeerLeaderMoved is set on a voter reached only through this leader,\nwhich it knows at another address: once the leadership moves to a\nmember it does not know, it is stranded.\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -2751,7 +2751,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "64",
       "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerLeaderUnconfirmed",
-      "doc": "The facts a PeerHealthValue carries, read with PeerFlags.Has.\n",
+      "doc": "PeerLeaderUnconfirmed is set on a voter reached only on the bet,\nover a compacted log, that it knows this leader as a voter: known\nas a learner, once the leadership moves to a member it does not\nknow, it is stranded.\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -2765,7 +2765,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "16",
       "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerPinDenied",
-      "doc": "The facts a PeerHealthValue carries, read with PeerFlags.Has.\n",
+      "doc": "PeerPinDenied is set beside PeerStranded when a pin DenyPin withdrew\nis what leaves the voter so.\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -2811,7 +2811,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "8",
       "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerStranded",
-      "doc": "The facts a PeerHealthValue carries, read with PeerFlags.Has.\n",
+      "doc": "PeerStranded is set on a voter the leader may never reach again: it\nmay hold a configuration of which no member would answer it. Every\nremoval or move of a member that answers and may vouch is refused\nuntil it is back or removed.\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",
       "family": "app"

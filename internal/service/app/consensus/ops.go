@@ -217,7 +217,9 @@ func (n *Node) proposeAlone(now time.Time, p *proposal) {
 // neither which voter nor what left it so (#773). None for a change the
 // guard did not refuse. A change forwarded by a follower is judged on the
 // leader, whose answer frame carries the code alone: its refusal names
-// neither, and the leader's health does.
+// neither. The leader's health names a voter stranded already, by a
+// DenyPin among others, never one only the refused change would strand:
+// the fields need the change submitted on the leader.
 func guardFields(vs []raft.IsolationValue) []errs.FieldValue {
 	if len(vs) == 0 {
 		return nil

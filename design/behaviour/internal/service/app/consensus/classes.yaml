@@ -235,10 +235,11 @@ constants:
         name: PeerSnapshot
       - doc: |-
           PeerStranded is set on a voter #603's guard finds stranded: it no
-          longer answers, or lags, and no member of any configuration it may
-          hold would answer its PreVote with this leader's record once it is
-          back, so it would hear no one. The guard refuses every removal or move
-          of a member that answers and may vouch, until it is back or removed.
+          longer answers, or lags, and it may hold a configuration of which no
+          member would answer its PreVote with this leader's record once it is
+          back, so it may hear no one. A risk, not a certainty: the guard cannot
+          tell which configuration it holds, and refuses every removal or move of
+          a member that answers and may vouch, until it is back or removed.
         name: PeerStranded
       - doc: |-
           PeerPinDenied is set beside PeerStranded when a pin DenyPin withdrew
@@ -3123,7 +3124,9 @@ functions:
       neither which voter nor what left it so (#773). None for a change the
       guard did not refuse. A change forwarded by a follower is judged on the
       leader, whose answer frame carries the code alone: its refusal names
-      neither, and the leader's health does.
+      neither. The leader's health names a voter stranded already, by a
+      DenyPin among others, never one only the refused change would strand:
+      the fields need the change submitted on the leader.
     name: guardFields
     params: vs []raft.IsolationValue
     results: "[]errs.FieldValue"

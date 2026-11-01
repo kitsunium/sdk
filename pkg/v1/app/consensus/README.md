@@ -583,7 +583,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.MsgVoteRe
 const PeerLeaderMoved svcconsensus.PeerFlags = 32
 ```
 
-The facts a PeerHealthValue carries, read with PeerFlags.Has.
+PeerLeaderMoved is set on a voter reached only through this leader, which it knows at another address: once the leadership moves to a member it does not know, it is stranded.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerLeaderMoved`.
 
@@ -592,7 +592,7 @@ Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerLe
 const PeerLeaderUnconfirmed svcconsensus.PeerFlags = 64
 ```
 
-The facts a PeerHealthValue carries, read with PeerFlags.Has.
+PeerLeaderUnconfirmed is set on a voter reached only on the bet, over a compacted log, that it knows this leader as a voter: known as a learner, once the leadership moves to a member it does not know, it is stranded.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerLeaderUnconfirmed`.
 
@@ -601,7 +601,7 @@ Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerLe
 const PeerPinDenied svcconsensus.PeerFlags = 16
 ```
 
-The facts a PeerHealthValue carries, read with PeerFlags.Has.
+PeerPinDenied is set beside PeerStranded when a pin DenyPin withdrew is what leaves the voter so.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerPinDenied`.
 
@@ -619,7 +619,7 @@ Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerSn
 const PeerStranded svcconsensus.PeerFlags = 8
 ```
 
-The facts a PeerHealthValue carries, read with PeerFlags.Has.
+PeerStranded is set on a voter the leader may never reach again: it may hold a configuration of which no member would answer it. Every removal or move of a member that answers and may vouch is refused until it is back or removed.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerStranded`.
 

@@ -6781,9 +6781,13 @@ outranking the guard, documented; (c) admit it, and say what it leaves.
   `DenyPin` (`Raft.GuardRefusal`). The code is still `MEMBERSHIP_INVALID`.
 - **What it leaves.** A change submitted on a follower is judged on the
   leader, whose answer frame carries the code alone: its refusal names
-  neither the voter nor the cause, and the leader's health does. The
-  leader alone knows which voters answer, so a follower's health names
-  none, as for every peer line.
+  neither the voter nor the cause. The leader's health names a voter
+  stranded already, a `DenyPin`'s among others, never one that only the
+  refused change would strand: the refusal's fields need the change
+  submitted on the leader. The leader alone knows which voters answer, so
+  a follower's health names none, as for every peer line. `PeerStranded`
+  is a risk, as the guard's verdict is: the voter may hold a configuration
+  of which no member answers it, not surely one.
 - No frame, payload or record format changes, nothing new is persisted,
   no protocol raise and no raft mutation.
 - **Tests.** `TestADenyPinThatLeavesAStoppedVoterNoVoucherIsSaidEverywhere`

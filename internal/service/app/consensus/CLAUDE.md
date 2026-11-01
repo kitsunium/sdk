@@ -1179,7 +1179,8 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   (`TestADenyPinThatLeavesAStoppedVoterNoVoucherIsSaidEverywhere`,
   `TestAStoppedVoterADenyPinLeftWithNoVoucherIsNamedWithItsCause`). A
   change forwarded from a follower is refused with the code alone: the
-  answer frame carries nothing more.
+  answer frame carries nothing more, and the leader's health names only a
+  voter stranded already, never one the refused change alone would strand.
 - Drop #603's two bets on the leader, or let them pass unsaid: the leader
   counted at any address, and over a compacted log a voter listed after
   it taken to know it as a voter. Strict rules refuse D20's last move and

@@ -52263,7 +52263,7 @@
       "spelled": "PeerFlags",
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "8",
-      "doc": "PeerStranded is set on a voter #603's guard finds stranded: it no\nlonger answers, or lags, and no member of any configuration it may\nhold would answer its PreVote with this leader's record once it is\nback, so it would hear no one. The guard refuses every removal or move\nof a member that answers and may vouch, until it is back or removed.\n",
+      "doc": "PeerStranded is set on a voter #603's guard finds stranded: it no\nlonger answers, or lags, and it may hold a configuration of which no\nmember would answer its PreVote with this leader's record once it is\nback, so it may hear no one. A risk, not a certainty: the guard cannot\ntell which configuration it holds, and refuses every removal or move of\na member that answers and may vouch, until it is back or removed.\n",
       "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
@@ -53140,7 +53140,7 @@
       "spelled": "IsolationFlags",
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags",
       "value": "1",
-      "doc": "IsolationStranded is set on a voter #603's guard finds stranded: it no\nlonger answers, or lags, and no member of any configuration it may hold\nwould answer its PreVote with this leader's record once it is back, so\nit would hear no one. The guard refuses every removal or move of a\nmember that answers and may vouch, until it is back or removed.\n",
+      "doc": "IsolationStranded is set on a voter #603's guard finds stranded: it no\nlonger answers, or lags, and it may hold a configuration of which no\nmember would answer its PreVote with this leader's record once it is\nback, so it may hear no one. A risk, not a certainty: the guard cannot\ntell which configuration it holds, and refuses every removal or move of\na member that answers and may vouch, until it is back or removed.\n",
       "file": "service/app/consensus/raft/isolation.go",
       "layer": "service",
       "family": "app"
