@@ -83,16 +83,16 @@ func TestARemovalStrandsNoVoterOnceItsConfigurationIsKnown(t *testing.T) {
 func TestVouchedNeedsAStayingVoterOrTheLeader(t *testing.T) {
 	known := testConf(1, 2, 3)
 	next := testConf(1, 4, 5)
-	if vouched(&next, &known, 1, 4) {
+	if vouched(&next, &known, 1, 4, 0) {
 		t.Error("a voter knowing only 2 and 3, both gone, was taken as reachable by leader 4")
 	}
 	next = testConf(1, 3, 4)
-	if !vouched(&next, &known, 1, 4) {
+	if !vouched(&next, &known, 1, 4, 0) {
 		t.Error("a voter knowing voter 3, which stays, was taken as stranded")
 	}
 	learner := testConf(1, 2, 3)
 	learner.Members[2].Voter = false
-	if vouched(&next, &learner, 1, 4) {
+	if vouched(&next, &learner, 1, 4, 0) {
 		t.Error("a voter whose only staying member was a learner to it was taken as reachable: it sends a learner no PreVote")
 	}
 	// A voter sends its PreVote to the voters of its configuration alone
@@ -104,11 +104,11 @@ func TestVouchedNeedsAStayingVoterOrTheLeader(t *testing.T) {
 	withLeader := testConf(1, 2, 4)
 	withLeader.Members[2].Voter = false
 	next = testConf(1, 4, 5)
-	if vouched(&next, &withLeader, 1, 4) {
+	if vouched(&next, &withLeader, 1, 4, 0) {
 		t.Error("a voter listing the leader as a learner only was taken as reachable: it sends the leader no PreVote")
 	}
 	withLeader.Members[2].Voter = true
-	if !vouched(&next, &withLeader, 1, 4) {
+	if !vouched(&next, &withLeader, 1, 4, 0) {
 		t.Error("a voter listing the leader as a voter was taken as stranded")
 	}
 }

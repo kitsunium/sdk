@@ -52175,7 +52175,7 @@
         {
           "name": "Flags",
           "type": "PeerFlags",
-          "doc": "Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,\nPeerSnapshot.\n"
+          "doc": "Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,\nPeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,\nPeerLeaderUnconfirmed.\n"
         },
         {
           "name": "Match",
@@ -52204,6 +52204,45 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerLeaderMoved",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerLeaderMoved",
+      "spelled": "PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "32",
+      "doc": "PeerLeaderMoved is set on a voter, down or behind, that #603's guard\nreaches only through this leader, which the voter knows at another\naddress: the leader moved since. Once the leadership moves to a member\nit does not know, nothing answers it. The move and the changes that\nrely on it were admitted: the guard counts the leader at any address\n(#765).\n",
+      "file": "service/app/consensus/health.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerLeaderUnconfirmed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerLeaderUnconfirmed",
+      "spelled": "PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "64",
+      "doc": "PeerLeaderUnconfirmed is set on a voter, down, that #603's guard\nreaches only on its bet over a compacted log: the voter knows this\nleader, but whether as a voter or as a learner, which it sends no\nPreVote to, the log no longer says. Known as a learner, once the\nleadership moves to a member it does not know, nothing answers it. The\nchanges that rely on it were admitted (#765).\n",
+      "file": "service/app/consensus/health.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerPinDenied",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerPinDenied",
+      "spelled": "PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "16",
+      "doc": "PeerPinDenied is set beside PeerStranded when a pin DenyPin withdrew\nis what leaves the voter so. The DenyPin was admitted: a key's fence\nnever waits for a voter that is down (#773).\n",
+      "file": "service/app/consensus/health.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshot",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -52212,6 +52251,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "4",
       "doc": "PeerSnapshot is set while a snapshot is being sent to the peer.\n",
+      "file": "service/app/consensus/health.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerStranded",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerStranded",
+      "spelled": "PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "8",
+      "doc": "PeerStranded is set on a voter #603's guard finds stranded: it no\nlonger answers, or lags, and it may hold a configuration of which no\nmember would answer its PreVote with this leader's record once it is\nback, so it may hear no one. A risk, not a certainty: the guard cannot\ntell which configuration it holds, and refuses every removal or move of\na member that answers and may vouch, until it is back or removed.\n",
       "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
@@ -53017,6 +53069,107 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "IsolationFlags",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "IsolationFlags are why a voter may never be reached again, one bit each,\nread with Has.\n",
+      "file": "service/app/consensus/raft/isolation.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags.Has",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "Has",
+      "recv": "IsolationFlags",
+      "spelled": "func(x IsolationFlags) bool",
+      "canonical": "func(x github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags) bool",
+      "doc": "Has reports whether every cause of x is set.\n",
+      "file": "service/app/consensus/raft/isolation.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationLeaderMoved",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "IsolationLeaderMoved",
+      "spelled": "IsolationFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags",
+      "value": "4",
+      "doc": "IsolationLeaderMoved is set on a voter the guard reaches only through\nthis leader, which the voter knows at another address: the guard\ncounts the leader at any address, since it dials the voter while it\nleads, but the voter asks the address it knows, and once the\nleadership moves to a member it does not know, nothing answers it. The\nleader's own move, and the change that relies on it, are admitted\n(#765, the owner's option (b)).\n",
+      "file": "service/app/consensus/raft/isolation.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationLeaderUnconfirmed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "IsolationLeaderUnconfirmed",
+      "spelled": "IsolationFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags",
+      "value": "8",
+      "doc": "IsolationLeaderUnconfirmed is set on a voter the guard reaches only on\nthe bet a compacted log makes: listed in the snapshot's base after\nthis leader, it knows this leader, but whether as a voter, which it\nsends its PreVote to, or as a learner, the log no longer says. Known\nas a learner, once the leadership moves to a member it does not know,\nnothing answers it. The change that relies on it is admitted (#765,\nthe owner's option (b)).\n",
+      "file": "service/app/consensus/raft/isolation.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationPinDenied",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "IsolationPinDenied",
+      "spelled": "IsolationFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags",
+      "value": "2",
+      "doc": "IsolationPinDenied is set beside IsolationStranded when a pin DenyPin\nwithdrew is what leaves the voter so: counted back, it would be\nreached. A DenyPin is never refused for what it leaves a stopped voter\nwith: a key's fence does not wait for a voter that is down (#773).\n",
+      "file": "service/app/consensus/raft/isolation.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationStranded",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "IsolationStranded",
+      "spelled": "IsolationFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags",
+      "value": "1",
+      "doc": "IsolationStranded is set on a voter #603's guard finds stranded: it no\nlonger answers, or lags, and it may hold a configuration of which no\nmember would answer its PreVote with this leader's record once it is\nback, so it may hear no one. A risk, not a certainty: the guard cannot\ntell which configuration it holds, and refuses every removal or move of\na member that answers and may vouch, until it is back or removed.\n",
+      "file": "service/app/consensus/raft/isolation.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "IsolationValue",
+      "spelled": "struct{ID core.NodeID; Flags IsolationFlags}",
+      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Flags github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags}",
+      "fields": [
+        {
+          "name": "ID",
+          "type": "core.NodeID",
+          "doc": "ID is the voter.\n"
+        },
+        {
+          "name": "Flags",
+          "type": "IsolationFlags",
+          "doc": "Flags are why: IsolationStranded, IsolationPinDenied,\nIsolationLeaderMoved, IsolationLeaderUnconfirmed.\n"
+        }
+      ],
+      "doc": "IsolationValue is a voter this leader may never reach again, and why\n(#773, #765): one line of Isolated, or of GuardRefusal.\n",
+      "file": "service/app/consensus/raft/isolation.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.NewRaft",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -53299,6 +53452,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).GuardRefusal",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "GuardRefusal",
+      "recv": "Raft",
+      "spelled": "func() []IsolationValue",
+      "canonical": "func() []github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationValue",
+      "doc": "GuardRefusal returns what #603's guard found when it refused the change\nthe last Propose was handed: each voter that change would strand, with\nIsolationPinDenied when a DenyPin left it so already. nil when the guard\ndid not refuse that change: refused on another ground, or admitted.\n",
+      "file": "service/app/consensus/raft/isolation.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).HasReady",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -53321,6 +53487,19 @@
       "canonical": "func(meta github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue)",
       "doc": "InstallSnapshot moves the log onto a snapshot the driver has published and\nrestored. The suffix after it is kept only when the boundary entry matches\n(D7).\n",
       "file": "service/app/consensus/raft/leader.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).Isolated",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "Isolated",
+      "recv": "Raft",
+      "spelled": "func() []IsolationValue",
+      "canonical": "func() []github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationValue",
+      "doc": "Isolated returns the voters of the configuration this leader governs by\nthat #603's guard finds stranded, or reaches only on one of its bets on\nthis leader, with what leaves each so, in configuration order; nil off\nthe leader. It judges them as the guard would judge a change to that\nconfiguration, and decides nothing.\n",
+      "file": "service/app/consensus/raft/isolation.go",
       "layer": "service",
       "family": "app"
     },

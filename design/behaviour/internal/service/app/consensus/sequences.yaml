@@ -6438,6 +6438,10 @@ sequences:
         kind: value
       - id: snapshotLimit
         kind: internal
+      - id: n.peerHealth
+        kind: internal
+      - id: isolationFlags
+        kind: internal
     steps:
       - bind: now
         eval: n.clk.Now()
@@ -6460,13 +6464,111 @@ sequences:
         eval: n.r.Status().Last
       - bind: window
         eval: n.r.Status().Timing.ElectionTimeoutMin
+      - bind: isolated
+        eval: map[coreconsensus.NodeID]raft.IsolationFlags{}
       - loop:
           do:
+            - set: isolated[v.ID]
+              value: v.Flags
+          key: _
+          range: n.r.Isolated()
+          value: v
+      - loop:
+          do:
+            - bind: ph
+              eval: n.peerHealth(&p, now, last, window)
+              to: n.peerHealth
+            - op: "|="
+              set: ph.Flags
+              to: isolationFlags
+              value: isolationFlags(isolated[p.ID])
             - set: h.Peers
-              value: append(h.Peers, n.peerHealth(&p, now, last, window))
+              value: append(h.Peers, ph)
           key: _
           range: n.r.PeerStats()
           value: p
+  - of: isolatedText
+    participants:
+      - id: caller
+        kind: actor
+      - id: isolatedText
+        kind: self
+      - id: b.WriteByte
+        kind: value
+      - id: b.WriteString
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteByte(',')
+                    to: b.WriteByte
+                when: i > 0
+            - eval: b.WriteString(strconv.FormatUint(uint64(v.ID), 10))
+              to: b.WriteString
+            - bind: sep
+              eval: byte(':')
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - eval: b.WriteByte(sep)
+                          to: b.WriteByte
+                        - eval: b.WriteString(c.name)
+                          to: b.WriteString
+                        - set: sep
+                          value: "'+'"
+                      when: v.Flags.Has(c.flag)
+                key: _
+                range: isolationCauses
+                value: c
+          key: i
+          range: vs
+          value: v
+      - return: b.String()
+        to: b.String
+  - of: onThisLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: onThisLeader
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: |-
+          slices.ContainsFunc(vs, func(v raft.IsolationValue) bool {
+          		return v.Flags&(raft.IsolationLeaderMoved|raft.IsolationLeaderUnconfirmed) != 0
+          	})
+        to: slices
+  - of: (*Node).warnHandOver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).warnHandOver
+        kind: self
+      - id: n.r.Isolated
+        kind: value
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: |-
+                n.obs.warn("consensus: leadership handed over while a stopped voter is reached only through this leader",
+                			lattr("to", uint64(to)), lstr("isolated", isolatedText(vs)))
+              to: n.obs.warn
+          init:
+            bind: vs
+            eval: n.r.Isolated()
+            to: n.r.Isolated
+          when: onThisLeader(vs)
   - of: (*Node).peerHealth
     participants:
       - id: caller
@@ -10524,7 +10626,7 @@ sequences:
         kind: self
       - id: wire
         kind: package
-      - id: n.obs.warn
+      - id: n.auditEntry
         kind: internal
     steps:
       - loop:
@@ -10546,12 +10648,60 @@ sequences:
                 do:
                   - continue: true
                 when: err != nil
-            - eval: |-
-                n.obs.warn("consensus: administrative entry appended", lattr("index", e.Position.Index), lattr("kind", uint64(e.Kind)),
-                			lstr("operator", a.Operator), lattr("origin", uint64(a.Origin)), lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)))
-              to: n.obs.warn
+            - eval: n.auditEntry(e, &a)
+              to: n.auditEntry
           key: i
           range: rd.Entries
+  - of: (*Node).auditEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).auditEntry
+        kind: self
+      - id: isolatedText
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - bind: attrs
+        eval: |-
+          []corelogger.AttrValue{
+          		lattr("index", e.Position.Index), lattr("kind", uint64(e.Kind)), lstr("operator", a.Operator),
+          		lattr("origin", uint64(a.Origin)), lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)),
+          	}
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: attrs
+                    value: append(attrs, lstr("isolated", iso))
+                init:
+                  bind: iso
+                  eval: isolatedText(n.r.Isolated())
+                  to: isolatedText
+                when: iso != ""
+          when: isolates(e.Kind, a.Change)
+      - eval: "n.obs.warn(\"consensus: administrative entry appended\", attrs...)"
+        to: n.obs.warn
+  - of: isolates
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: kind == coreconsensus.EntryTransfer
+      - opt:
+          do:
+            - return: "false"
+          when: kind != coreconsensus.EntryMembership
+      - switch:
+          cases:
+            - case: wire.ChangeRemove, wire.ChangeUpdateAddress, wire.ChangeDenyPin
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": change
   - of: (*Node).stopOnUnsupported
     participants:
       - id: caller
@@ -11146,6 +11296,8 @@ sequences:
         kind: value
       - id: n.r.Progress
         kind: value
+      - id: n.warnHandOver
+        kind: internal
     steps:
       - bind: prefs
         eval: n.cfg.PreferredLeaders
@@ -11176,6 +11328,8 @@ sequences:
                 do:
                   - return: "false"
                 when: n.r.TransferLeadership(now, prefs[i]) != 0
+            - eval: n.warnHandOver(prefs[i])
+              to: n.warnHandOver
             - set: n.prefer.next
               value: i + 1
             - return: "true"
@@ -12277,8 +12431,8 @@ sequences:
         kind: internal
       - id: n.obs.warn
         kind: internal
-      - id: n.r.TransferLeadership
-        kind: value
+      - id: n.warnHandOver
+        kind: internal
       - id: n.r.SetApplyStalled
         kind: value
     steps:
@@ -12296,8 +12450,11 @@ sequences:
           		lattr("to", uint64(to)), lattr("stable", st.Stable), lattr("last", st.Last),
           		lattr("applied", applied), lattr("commit", st.Commit))
         to: n.obs.warn
-      - eval: n.r.TransferLeadership(now, to)
-        to: n.r.TransferLeadership
+      - opt:
+          do:
+            - eval: n.warnHandOver(to)
+              to: n.warnHandOver
+          when: n.r.TransferLeadership(now, to) == 0
       - set: w.stableAt, w.appliedAt, w.to
         value: now, now, to
       - opt:
@@ -17637,11 +17794,25 @@ sequences:
           do:
             - send:
                 chan: p.done
-                value: "propResult{err: origin(sentinelOf(code))}"
+                value: "propResult{err: origin(sentinelOf(code), guardFields(n.r.GuardRefusal())...)}"
             - return: ""
           when: code != 0
       - eval: n.appended(p, pos[0], true)
         to: n.appended
+  - of: guardFields
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(vs) == 0
+      - bind: why
+        eval: "\"a stopped voter would be left with no voucher it can reach: bring it back, or remove it first\""
+      - opt:
+          do:
+            - set: why
+              value: "\"a DenyPin withdrew the last voucher of a stopped voter: bring it back, or remove it first\""
+          when: slices.ContainsFunc(vs, func(v raft.IsolationValue) bool { return v.Flags.Has(raft.IsolationPinDenied) })
+      - return: "[]errs.FieldValue{errs.String(\"why\", why), errs.String(\"isolated\", isolatedText(vs))}"
   - of: (*Node).appended
     participants:
       - id: caller
@@ -18489,6 +18660,9 @@ sequences:
             			return
             		}
             		code = n.r.TransferLeadership(n.clk.Now(), to)
+            		if code == 0 {
+            			n.warnHandOver(to)
+            		}
             		n.handleReady()
             	})
       - opt:

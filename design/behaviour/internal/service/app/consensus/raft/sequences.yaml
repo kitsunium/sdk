@@ -30,6 +30,78 @@ sequences:
         to: fmt
       - return: s.String()
         to: s.String
+  - of: IsolationFlags.Has
+    steps:
+      - return: f&x == x
+  - of: (*Raft).Isolated
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).Isolated
+        kind: self
+      - id: r.conf
+        kind: internal
+      - id: r.isolation
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: r.role != core.RoleLeader
+      - bind: cur
+        eval: r.conf()
+        to: r.conf
+      - var:
+          name: out
+          type: "[]IsolationValue"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: "append(out, IsolationValue{ID: v, Flags: f})"
+                init:
+                  bind: f
+                  eval: r.isolation(cur, v)
+                  to: r.isolation
+                when: f != 0
+          key: _
+          range: r.judged(cur)
+          value: v
+      - return: out
+  - of: (*Raft).GuardRefusal
+    steps:
+      - return: r.guardRefusal
+  - of: (*Raft).isolation
+    steps:
+      - opt:
+          do:
+            - var:
+                name: f
+                type: IsolationFlags
+            - opt:
+                do:
+                  - op: "|="
+                    set: f
+                    value: IsolationLeaderMoved
+                when: "!r.reaches(next, v, reachLeaderWhereKnown)"
+            - opt:
+                do:
+                  - op: "|="
+                    set: f
+                    value: IsolationLeaderUnconfirmed
+                when: "!r.reaches(next, v, reachNoBaseBet)"
+            - return: f
+          when: r.reachedBy(next, v)
+      - bind: f
+        eval: IsolationStranded
+      - opt:
+          do:
+            - op: "|="
+              set: f
+              value: IsolationPinDenied
+          when: r.reaches(next, v, reachUndenied)
+      - return: f
   - of: (*Raft).becomeLeader
     participants:
       - id: caller
@@ -908,6 +980,8 @@ sequences:
     steps:
       - set: r.now
         value: now
+      - set: r.guardRefusal
+        value: nil
       - opt:
           do:
             - return: nil, codeNotLeader
@@ -1400,15 +1474,15 @@ sequences:
         kind: actor
       - id: (*Raft).removalStrands
         kind: self
-      - id: r.strands
+      - id: r.refusesStranding
         kind: internal
     steps:
       - opt:
           do:
             - return: "false"
           when: r.mutated(mutRemoveStrands) || !r.answering(target) || (!wasVoter && r.neverVoter(target))
-      - return: r.strands(next)
-        to: r.strands
+      - return: r.refusesStranding(next)
+        to: r.refusesStranding
   - of: (*Raft).neverVoter
     participants:
       - id: caller
@@ -1446,22 +1520,42 @@ sequences:
       - bind: pr
         eval: r.prs[id]
       - return: pr != nil && pr.facts&peerHeard != 0 && r.now.Sub(pr.lastHeard) < r.voteWindow
+  - of: (*Raft).strands
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).strands
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.ContainsFunc(r.judged(next), func(v core.NodeID) bool { return !r.reachedBy(next, v) })
+        to: slices
   - of: (*Raft).reachedBy
     participants:
       - id: caller
         kind: actor
       - id: (*Raft).reachedBy
         kind: self
+      - id: r.reaches
+        kind: internal
+    steps:
+      - return: r.reaches(next, v, 0)
+        to: r.reaches
+  - of: (*Raft).reaches
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).reaches
+        kind: self
       - id: vouched
         kind: internal
       - id: r.base.Member
         kind: value
-      - id: listedBefore
-        kind: internal
     steps:
       - opt:
           do:
-            - return: vouched(next, r.confAt(pr.match), v, r.id)
+            - return: vouched(next, r.confAt(pr.match), v, r.vouchingLeader(how), how)
               to: vouched
           init:
             bind: pr
@@ -1470,7 +1564,7 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: "!r.vouchedInRetained(next, v)"
+          when: "!r.vouchedInRetained(next, v, how)"
       - opt:
           do:
             - return: "true"
@@ -1479,8 +1573,39 @@ sequences:
             eval: r.base.Member(v)
             to: r.base.Member
           when: "!listed || r.log.snapIndex == 0"
-      - return: listedBefore(next, r.id, v)
-        to: listedBefore
+      - return: how&reachNoBaseBet == 0 && listedBefore(next, r.id, v)
+  - of: (*Raft).vouchedInRetained
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).vouchedInRetained
+        kind: self
+      - id: r.vouchingLeader
+        kind: internal
+    steps:
+      - bind: leader
+        eval: r.vouchingLeader(how)
+        to: r.vouchingLeader
+      - opt:
+          do:
+            - return: "false"
+          when: "!vouched(next, &r.base, v, leader, how)"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!vouched(next, &r.confs[k].m, v, leader, how)"
+          key: k
+          range: r.confs
+      - return: "true"
+  - of: (*Raft).vouchingLeader
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: how&reachLeaderWhereKnown != 0
+      - return: r.id
   - of: vouched
     participants:
       - id: caller
@@ -1498,12 +1623,14 @@ sequences:
             eval: known.Member(v)
             to: known.Member
           when: "!listed"
+      - bind: undenied
+        eval: how&reachUndenied != 0
       - loop:
           do:
             - opt:
                 do:
                   - return: "true"
-                when: k.ID != v && vouches(next, k, leader)
+                when: k.ID != v && vouches(next, k, leader, undenied)
           key: _
           range: known.Members
           value: k
@@ -1517,17 +1644,20 @@ sequences:
       - id: next.Member
         kind: value
     steps:
+      - bind: m, stays
+        eval: next.Member(k.ID)
+        to: next.Member
+      - return: k.Voter && stays && pinnedAs(k.SPKI, m.SPKI, undenied) && (k.ID == leader || m.Address == k.Address)
+  - of: pinnedAs
+    steps:
       - var:
           name: unpinned
           type: "[32]byte"
       - opt:
           do:
-            - return: "false"
-          when: "!k.Voter || k.SPKI == unpinned"
-      - bind: m, stays
-        eval: next.Member(k.ID)
-        to: next.Member
-      - return: stays && m.SPKI == k.SPKI && (k.ID == leader || m.Address == k.Address)
+            - return: "true"
+          when: undenied && (known == unpinned || now == unpinned)
+      - return: known != unpinned && now == known
   - of: (*Raft).updateAddress
     steps:
       - opt:
@@ -1547,15 +1677,15 @@ sequences:
         kind: actor
       - id: (*Raft).moveStrands
         kind: self
-      - id: r.strands
+      - id: r.refusesStranding
         kind: internal
     steps:
       - opt:
           do:
             - return: "false"
           when: target == r.id || !r.answering(target) || r.neverVoter(target)
-      - return: r.strands(next)
-        to: r.strands
+      - return: r.refusesStranding(next)
+        to: r.refusesStranding
   - of: (*Raft).updateSnapshotLimit
     steps:
       - opt:

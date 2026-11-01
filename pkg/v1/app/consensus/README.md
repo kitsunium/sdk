@@ -578,6 +578,33 @@ The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.MsgVoteResp`.
 
+<a name="PeerLeaderMoved"></a>
+```go
+const PeerLeaderMoved svcconsensus.PeerFlags = 32
+```
+
+PeerLeaderMoved is set on a voter reached only through this leader, which it knows at another address: once the leadership moves to a member it does not know, it is stranded.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerLeaderMoved`.
+
+<a name="PeerLeaderUnconfirmed"></a>
+```go
+const PeerLeaderUnconfirmed svcconsensus.PeerFlags = 64
+```
+
+PeerLeaderUnconfirmed is set on a voter reached only on the bet, over a compacted log, that it knows this leader as a voter: known as a learner, once the leadership moves to a member it does not know, it is stranded.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerLeaderUnconfirmed`.
+
+<a name="PeerPinDenied"></a>
+```go
+const PeerPinDenied svcconsensus.PeerFlags = 16
+```
+
+PeerPinDenied is set beside PeerStranded when a pin DenyPin withdrew is what leaves the voter so.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerPinDenied`.
+
 <a name="PeerSnapshot"></a>
 ```go
 const PeerSnapshot svcconsensus.PeerFlags = 4
@@ -586,6 +613,15 @@ const PeerSnapshot svcconsensus.PeerFlags = 4
 The facts a PeerHealthValue carries, read with PeerFlags.Has.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshot`.
+
+<a name="PeerStranded"></a>
+```go
+const PeerStranded svcconsensus.PeerFlags = 8
+```
+
+PeerStranded is set on a voter the leader may never reach again: it may hold a configuration of which no member would answer it. Every removal or move of a member that answers and may vouch is refused until it is back or removed.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerStranded`.
 
 <a name="PeerUnreachable"></a>
 ```go
@@ -3323,7 +3359,8 @@ type PeerHealthValue struct {
 	// ID is the peer.
 	ID          coreconsensus.NodeID
 	// Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
-	// PeerSnapshot.
+	// PeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,
+	// PeerLeaderUnconfirmed.
 	Flags       PeerFlags
 	// Match is the highest index the peer holds durably, as acknowledged.
 	Match       uint64

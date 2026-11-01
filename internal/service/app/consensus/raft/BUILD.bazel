@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "debug.go",
         "doc.go",
+        "isolation.go",
         "leader.go",
         "leaderrecord.go",
         "log.go",
@@ -83,6 +84,8 @@ go_test(
         "wholelogsilencepoint_internal_test.go",
         "wholelogsilencerestart_internal_test.go",
         "wirebatch_internal_test.go",
+        "withleaderbet_internal_test.go",
+        "withoutvoucher_internal_test.go",
     ],
     embed = [":raft"],
     # The deterministic simulations take ~300 CPU-seconds under race and

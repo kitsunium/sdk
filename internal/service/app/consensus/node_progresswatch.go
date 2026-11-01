@@ -89,7 +89,9 @@ func (n *Node) handOver(now time.Time, st *raft.StatusValue, applied uint64, stu
 	n.obs.warn("consensus: the leader makes no progress, handing leadership over",
 		lattr("to", uint64(to)), lattr("stable", st.Stable), lattr("last", st.Last),
 		lattr("applied", applied), lattr("commit", st.Commit))
-	n.r.TransferLeadership(now, to)
+	if n.r.TransferLeadership(now, to) == 0 {
+		n.warnHandOver(to)
+	}
 	w.stableAt, w.appliedAt, w.to = now, now, to
 	if stuckApply && !w.ceded {
 		w.ceded, w.moved = true, applied

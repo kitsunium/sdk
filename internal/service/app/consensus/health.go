@@ -1,6 +1,9 @@
 package consensus
 
 import (
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -21,6 +24,31 @@ const (
 	PeerUnreachable
 	// PeerSnapshot is set while a snapshot is being sent to the peer.
 	PeerSnapshot
+	// PeerStranded is set on a voter #603's guard finds stranded: it no
+	// longer answers, or lags, and it may hold a configuration of which no
+	// member would answer its PreVote with this leader's record once it is
+	// back, so it may hear no one. A risk, not a certainty: the guard cannot
+	// tell which configuration it holds, and refuses every removal or move of
+	// a member that answers and may vouch, until it is back or removed.
+	PeerStranded
+	// PeerPinDenied is set beside PeerStranded when a pin DenyPin withdrew
+	// is what leaves the voter so. The DenyPin was admitted: a key's fence
+	// never waits for a voter that is down (#773).
+	PeerPinDenied
+	// PeerLeaderMoved is set on a voter, down or behind, that #603's guard
+	// reaches only through this leader, which the voter knows at another
+	// address: the leader moved since. Once the leadership moves to a member
+	// it does not know, nothing answers it. The move and the changes that
+	// rely on it were admitted: the guard counts the leader at any address
+	// (#765).
+	PeerLeaderMoved
+	// PeerLeaderUnconfirmed is set on a voter, down, that #603's guard
+	// reaches only on its bet over a compacted log: the voter knows this
+	// leader, but whether as a voter or as a learner, which it sends no
+	// PreVote to, the log no longer says. Known as a learner, once the
+	// leadership moves to a member it does not know, nothing answers it. The
+	// changes that rely on it were admitted (#765).
+	PeerLeaderUnconfirmed
 )
 
 // The answers a HealthValue carries.
@@ -49,7 +77,8 @@ type PeerHealthValue struct {
 	// ID is the peer.
 	ID coreconsensus.NodeID
 	// Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
-	// PeerSnapshot.
+	// PeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,
+	// PeerLeaderUnconfirmed.
 	Flags PeerFlags
 	// Match is the highest index the peer holds durably, as acknowledged.
 	Match uint64
@@ -237,8 +266,81 @@ func (n *Node) loopHealth(h *HealthValue) {
 	h.SnapshotLimit = snapshotLimit(n.cfg.MaxSnapshotBytes, &conf)
 	last := n.r.Status().Last
 	window := n.r.Status().Timing.ElectionTimeoutMin
+	isolated := map[coreconsensus.NodeID]raft.IsolationFlags{}
+	for _, v := range n.r.Isolated() {
+		isolated[v.ID] = v.Flags
+	}
 	for _, p := range n.r.PeerStats() {
-		h.Peers = append(h.Peers, n.peerHealth(&p, now, last, window))
+		ph := n.peerHealth(&p, now, last, window)
+		ph.Flags |= isolationFlags(isolated[p.ID])
+		h.Peers = append(h.Peers, ph)
+	}
+}
+
+// isolationFlags are the health facts of a voter's isolation causes.
+func isolationFlags(f raft.IsolationFlags) PeerFlags {
+	var out PeerFlags
+	for _, c := range isolationCauses {
+		if f.Has(c.flag) {
+			out |= c.peer
+		}
+	}
+	return out
+}
+
+// isolatedText renders voters and their isolation causes for an audit
+// line or a refusal: "id:cause+cause", comma-separated, in the order
+// given; "" for none.
+func isolatedText(vs []raft.IsolationValue) string {
+	var b strings.Builder
+	for i, v := range vs {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatUint(uint64(v.ID), 10))
+		sep := byte(':')
+		for _, c := range isolationCauses {
+			if v.Flags.Has(c.flag) {
+				b.WriteByte(sep)
+				b.WriteString(c.name)
+				sep = '+'
+			}
+		}
+	}
+	return b.String()
+}
+
+// isolationCauses names each isolation cause, in the order isolatedText
+// writes them.
+var isolationCauses = []struct {
+	flag raft.IsolationFlags
+	peer PeerFlags
+	name string
+}{
+	{raft.IsolationStranded, PeerStranded, "stranded"},
+	{raft.IsolationPinDenied, PeerPinDenied, "pin-denied"},
+	{raft.IsolationLeaderMoved, PeerLeaderMoved, "leader-moved"},
+	{raft.IsolationLeaderUnconfirmed, PeerLeaderUnconfirmed, "leader-unconfirmed"},
+}
+
+// onThisLeader reports whether a voter of vs is reached only on one of
+// #603's bets on this leader, which a hand-over ends (#765).
+func onThisLeader(vs []raft.IsolationValue) bool {
+	return slices.ContainsFunc(vs, func(v raft.IsolationValue) bool {
+		return v.Flags&(raft.IsolationLeaderMoved|raft.IsolationLeaderUnconfirmed) != 0
+	})
+}
+
+// warnHandOver says, at Warn, that the hand-over of this leader's
+// leadership to to, just started, ends the bet some voter that no longer
+// answers is reached on: the guard reaches it only through this leader,
+// which it knows at another address or may know as a learner only, and
+// once a member it does not know leads, nothing answers it (#765). The
+// hand-over goes on: the owner kept both bets. It runs on the loop.
+func (n *Node) warnHandOver(to coreconsensus.NodeID) {
+	if vs := n.r.Isolated(); onThisLeader(vs) {
+		n.obs.warn("consensus: leadership handed over while a stopped voter is reached only through this leader",
+			lattr("to", uint64(to)), lstr("isolated", isolatedText(vs)))
 	}
 }
 

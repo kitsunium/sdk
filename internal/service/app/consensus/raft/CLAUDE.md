@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T14:00:00Z -->
+<!-- updated: 2026-11-01T18:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -134,7 +134,22 @@ under coverage before touching `shard_count`.
   (`TestAnOlderReleaseRefusesTheLimitAsLeaderAndAdoptsItAsFollower`).
 - Admit a DenyPin of this leader, or one that leaves no answering majority
   without its target, or withdraw the pin from the admission set before the
-  change commits (#530, `mutDenyPinUnchecked`, `mutDenyPinAtAppend`).
+  change commits (#530, `mutDenyPinUnchecked`, `mutDenyPinAtAppend`). Nor
+  refuse one for the stopped voter it leaves with no voucher: it is
+  admitted, and `Isolated` names that voter (#773, the owner's option (c)).
+- Judge a voter's isolation, for `Isolated` or `GuardRefusal`, other than
+  by `reaches`, #603's own count: its zero `reach` is the guard's, and a
+  bit set counts one more voucher (`reachUndenied`, a withdrawn pin
+  counted back) or takes one bet on the leader less
+  (`reachLeaderWhereKnown`, `reachNoBaseBet`) to tell the cause, never to
+  admit or refuse a change (#773, #765,
+  `TestAStoppedVoterADenyPinLeftWithNoVoucherIsNamedWithItsCause`,
+  `TestAVoterReachedOnlyThroughAMovedLeaderIsNamed`,
+  `TestAVoterReachedOnlyOnTheCompactedLogsBetIsNamed`). Nor hand `vouches`
+  the whole `reach`: the leader is counted as any other voucher by passing
+  no leader (`vouchingLeader`), the withdrawn pin as one bool, and
+  `vouches` stays under the inline budget kit holds it to (cost 78 of
+  80).
 - Count a silent voter, one whose last answer carried `FlagTruncated`
   (`peerSilent`), in the strict reconfiguration check (`activeMajority`):
   it answers heartbeats but acknowledges no append, and a removal of a

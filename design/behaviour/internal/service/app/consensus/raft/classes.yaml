@@ -1,6 +1,64 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: The ways reach departs from the guard's count.
+    grouped: true
+    items:
+      - doc: reachUndenied counts a pin DenyPin withdrew as the key it was (#773).
+        name: reachUndenied
+        type: reach
+        value: 1 << iota
+      - doc: |-
+          reachLeaderWhereKnown counts this leader, as any other voucher, only
+          at the address the stale voter's configuration names: the guard's bet
+          that it leads on, and dials the voter wherever it moved, left out
+          (#765).
+        name: reachLeaderWhereKnown
+      - doc: |-
+          reachNoBaseBet takes no bet over a compacted log: a voter the
+          snapshot's base lists is not reached because this leader is listed
+          before it, which says the voter knows it, not that it knows it as a
+          voter (#765).
+        name: reachNoBaseBet
+    name: reachUndenied
+  - doc: The causes an IsolationValue carries.
+    grouped: true
+    items:
+      - doc: |-
+          IsolationStranded is set on a voter #603's guard finds stranded: it no
+          longer answers, or lags, and it may hold a configuration of which no
+          member would answer its PreVote with this leader's record once it is
+          back, so it may hear no one. A risk, not a certainty: the guard cannot
+          tell which configuration it holds, and refuses every removal or move of
+          a member that answers and may vouch, until it is back or removed.
+        name: IsolationStranded
+        type: IsolationFlags
+        value: 1 << iota
+      - doc: |-
+          IsolationPinDenied is set beside IsolationStranded when a pin DenyPin
+          withdrew is what leaves the voter so: counted back, it would be
+          reached. A DenyPin is never refused for what it leaves a stopped voter
+          with: a key's fence does not wait for a voter that is down (#773).
+        name: IsolationPinDenied
+      - doc: |-
+          IsolationLeaderMoved is set on a voter the guard reaches only through
+          this leader, which the voter knows at another address: the guard
+          counts the leader at any address, since it dials the voter while it
+          leads, but the voter asks the address it knows, and once the
+          leadership moves to a member it does not know, nothing answers it. The
+          leader's own move, and the change that relies on it, are admitted
+          (#765, the owner's option (b)).
+        name: IsolationLeaderMoved
+      - doc: |-
+          IsolationLeaderUnconfirmed is set on a voter the guard reaches only on
+          the bet a compacted log makes: listed in the snapshot's base after
+          this leader, it knows this leader, but whether as a voter, which it
+          sends its PreVote to, or as a learner, the log no longer says. Known
+          as a learner, once the leadership moves to a member it does not know,
+          nothing answers it. The change that relies on it is admitted (#765,
+          the owner's option (b)).
+        name: IsolationLeaderUnconfirmed
+    name: IsolationStranded
   - doc: |-
       The refusals the step function returns, short names for the domain's codes:
       it answers with a code rather than an error, so a refusal costs no
@@ -457,6 +515,17 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - reachUndenied
+      - IsolationStranded
+      - reach
+      - IsolationValue
+      - IsolationFlags
+      - IsolationFlags.Has
+      - (*Raft).Isolated
+      - (*Raft).GuardRefusal
+      - (*Raft).isolation
+    name: isolation.go
+  - decls:
       - maxFwdAnswers
       - (*Raft).becomeLeader
       - (*Raft).appendAsLeader
@@ -503,14 +572,19 @@ files:
       - (*Raft).admittedAt
       - (*Raft).removeMember
       - (*Raft).removalStrands
+      - (*Raft).refusesStranding
       - (*Raft).neverVoter
       - (*Raft).answering
       - (*Raft).strands
+      - (*Raft).judged
       - (*Raft).reachedBy
+      - (*Raft).reaches
       - (*Raft).vouchedInRetained
+      - (*Raft).vouchingLeader
       - listedBefore
       - vouched
       - vouches
+      - pinnedAs
       - (*Raft).updateAddress
       - (*Raft).moveStrands
       - (*Raft).updateSnapshotLimit
@@ -807,16 +881,30 @@ functions:
       record, and counted as a voucher it let through the removal of the last
       member a voter down at the time knew, which came back hearing no one
       (#773).
+
+      how counts the vouchers as the guard does when 0, the count every change
+      is judged by.
     name: vouched
-    params: next, known *core.MembershipValue, v, leader core.NodeID
+    params: next, known *core.MembershipValue, v, leader core.NodeID, how reach
     results: bool
   - doc: |-
       vouches reports whether k, as a stale voter's configuration lists it,
       still answers that voter's PreVote in next: a voter of that
       configuration, pinned there under a non-zero key that next still pins,
       at the address that configuration names, or at any when it leads.
+      undenied counts a withdrawn pin back (reachUndenied).
     name: vouches
-    params: next *core.MembershipValue, k core.MemberValue, leader core.NodeID
+    params: next *core.MembershipValue, k core.MemberValue, leader core.NodeID, undenied bool
+    results: bool
+  - doc: |-
+      pinnedAs reports whether a voucher pinned under known, the key a stale
+      voter's configuration holds for it, is still pinned under it in next,
+      where it holds now: under the same key, never the zero pin, which admits
+      nobody. undenied counts a withdrawn pin back: a member's key never
+      changes but to the zero pin DenyPin leaves, so a zero on either side is
+      the key it was.
+    name: pinnedAs
+    params: known, now [32]byte, undenied bool
     results: bool
   - doc: |-
       ownCopy returns a copy of b the step function owns, out of a frame the
@@ -924,6 +1012,34 @@ package:
   name: raft
   purpose: "Package raft is the consensus engine's step function (ADR 0152 D15): a value with no goroutine, no I/O and no clock."
 types:
+  - doc: |-
+      reach is how the guard counts a stale voter's vouchers, one bit each.
+      Its zero value is the guard's own count, the one every change is judged
+      by; a bit set counts one more voucher than the guard does, or takes one
+      bet less, to tell what a voter's isolation rests on, and decides nothing
+      (isolation).
+    kind: named
+    name: reach
+    underlying: uint8
+  - fields:
+      - doc: ID is the voter.
+        name: ID
+        type: core.NodeID
+      - doc: |-
+          Flags are why: IsolationStranded, IsolationPinDenied,
+          IsolationLeaderMoved, IsolationLeaderUnconfirmed.
+        name: Flags
+        type: IsolationFlags
+    kind: struct
+    name: IsolationValue
+  - kind: named
+    methods:
+      - name: Has
+        params: x IsolationFlags
+        recv: f IsolationFlags
+        results: bool
+    name: IsolationFlags
+    underlying: uint8
   - doc: |-
       fwdKey names one submission: the follower that forwarded it and its
       submission id, which never repeats across the follower's restarts (R7-23).
@@ -1739,6 +1855,13 @@ types:
         type: core.NodeID
       - name: refusals
         type: int
+      - doc: |-
+          guardRefusal is what #603's guard found when it refused the change
+          the last Propose was handed: the voters that change would strand, nil
+          when the guard did not refuse it (GuardRefusal, #773). Never
+          persisted.
+        name: guardRefusal
+        type: "[]IsolationValue"
       - name: seq
         type: uint64
       - name: rd
@@ -1775,6 +1898,20 @@ types:
       - name: Debug
         recv: r *Raft
         results: string
+      - name: Isolated
+        recv: r *Raft
+        results: "[]IsolationValue"
+      - name: GuardRefusal
+        recv: r *Raft
+        results: "[]IsolationValue"
+      - doc: |-
+          isolation is what leaves voter v of next isolated, or at risk of it, as
+          the guard counts its vouchers (reaches), 0 when nothing does: stranded,
+          or reached only on one of the guard's bets on this leader.
+        name: isolation
+        params: next *core.MembershipValue, v core.NodeID
+        recv: r *Raft
+        results: IsolationFlags
       - doc: |-
           becomeLeader takes leadership of the current term: a fresh progress per
           member, no lease and no read until the term's no-op, which it appends and
@@ -2183,6 +2320,18 @@ types:
         recv: r *Raft
         results: bool
       - doc: |-
+          refusesStranding reports whether next strands a voter, as strands does,
+          for a change the guard judges, and keeps what it found for the refusal to
+          say (GuardRefusal): each voter next strands, and, when that voter is
+          stranded already under the configuration in force, what left it so. A
+          voter that a DenyPin left with no voucher refuses every later removal or
+          move of a member that answers and may vouch, and the refusal named no
+          voter and no cause (#773).
+        name: refusesStranding
+        params: next *core.MembershipValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
           neverVoter reports whether id is a learner in every configuration this
           leader retains that lists it, the snapshot base's included. A member is
           promoted, never demoted, so it was a learner in every configuration
@@ -2219,6 +2368,13 @@ types:
         recv: r *Raft
         results: bool
       - doc: |-
+          judged lists the voters of next the guard judges: every one but this
+          leader.
+        name: judged
+        params: next *core.MembershipValue
+        recv: r *Raft
+        results: "[]core.NodeID"
+      - doc: |-
           reachedBy reports whether voter v, whatever configuration of its past it
           holds, still knows in next this leader or a voter that would vouch for
           it. A voter that answers, heard at a match this leader's log still
@@ -2237,13 +2393,27 @@ types:
         params: next *core.MembershipValue, v core.NodeID
         recv: r *Raft
         results: bool
-      - doc: |-
-          vouchedInRetained reports whether v is vouched for in every retained
-          configuration, the snapshot base's included.
-        name: vouchedInRetained
-        params: next *core.MembershipValue, v core.NodeID
+      - doc: reaches is reachedBy with the vouchers counted as how says.
+        name: reaches
+        params: next *core.MembershipValue, v core.NodeID, how reach
         recv: r *Raft
         results: bool
+      - doc: |-
+          vouchedInRetained reports whether v is vouched for in every retained
+          configuration, the snapshot base's included, the vouchers counted as how
+          says.
+        name: vouchedInRetained
+        params: next *core.MembershipValue, v core.NodeID, how reach
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          vouchingLeader is the member vouches counts at any address: this leader,
+          or no member at all when how counts it only where the stale voter knows
+          it, as any other voucher (an ID is never 0).
+        name: vouchingLeader
+        params: how reach
+        recv: r *Raft
+        results: core.NodeID
       - doc: |-
           updateAddress changes the address of the member at idx to the one admin
           carries, while a majority answers, unless the move may strand a voter.

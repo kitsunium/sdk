@@ -42,7 +42,7 @@ func TestVouchedNeedsTheVoucherUnderTheKeyTheStaleVoterPins(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		//: vouched must answer as the stale voter's transport would.
-		if got := vouched(&c.next, &c.known, 1, c.leader); got != c.want {
+		if got := vouched(&c.next, &c.known, 1, c.leader, 0); got != c.want {
 			t.Errorf("vouched = %v, want %v: %s", got, c.want, c.why)
 		}
 	}
