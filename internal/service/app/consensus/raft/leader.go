@@ -335,8 +335,10 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	pr.facts = pr.facts&^(peerProtocol2|peerProtocol3) | announced(m.Flags)
 	switch m.Kind {
 	case core.MsgAppResp:
+		pr.noteSilence(m.Flags)
 		r.handleAppResp(pr, m)
 	case core.MsgHeartbeatResp:
+		pr.noteSilence(m.Flags)
 		r.handleHeartbeatResp(pr, m)
 	default:
 		// Nothing else carries news for a leader of this term: the
@@ -376,6 +378,36 @@ func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	}
 	r.watchWindow(pr, m.From, m.Index)
 	r.refeed(pr, m.From, probing)
+	if silent {
+		r.feedSilence(pr, m)
+	}
+}
+
+// feedSilence appends a no-op of this term for a silent peer whose report
+// says it holds this leader's whole log, committed: its commit reaches the
+// last index. Its silence ends only on an entry of a term at least its own,
+// past its truncation point, committed (R3-09), and a node truncated past
+// its last entry, its truncation point one past the leader's whole log, was
+// sent nothing: refeed has nothing past its match. The library appends on
+// its own only at an election, so in a cluster that wrote nothing the node
+// stayed silent for as long as nobody wrote, one voter short, and one more
+// failure left two live voters of three that elected no one (#787).
+//
+// The no-op is committed by a majority without the peer, and is one past
+// the leader's last index: past the truncation point of a node that holds
+// that whole log, unless the node's log diverged from it, where the
+// conflict lowered that point already (lowerSilence). One per silence: a
+// peer silent for a reason no leader lifts, an unreadable condition, is
+// fed once a term, and the fact is cleared with the silence. A transfer in
+// flight appends nothing, as it proposes nothing.
+func (r *Raft) feedSilence(pr *progress, m core.MessageValue) {
+	if pr.facts&peerSilentFed != 0 || m.Commit < r.log.lastIndex() || r.transferTo != 0 {
+		return
+	}
+	pr.facts |= peerSilentFed
+	noop := core.EntryValue{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}
+	r.appendAsLeader([]core.EntryValue{noop})
+	r.broadcastAppend(false)
 }
 
 // watchWindow probes a replicating peer whose window did not move since its
@@ -1251,14 +1283,25 @@ func (r *Raft) atProtocol3() bool {
 }
 
 // activeMajority is etcd's strict reconfiguration check: the voters of m
-// that answer the leader NOW form a majority of m (R2-27).
+// that answer the leader NOW, and can acknowledge the change, form a
+// majority of m (R2-27).
+//
+// A silent voter (peerSilent) answers every heartbeat but acknowledges no
+// append until a leader commits an entry of its term past its truncation
+// point (#636), and is not counted. Counted, it let a removal of a live
+// voter through over voters {leader, silent}: the configuration governs
+// from its append (D8), so the removal needed the silent voter's
+// acknowledgement, which waited for a commit the removal itself blocked,
+// and nothing committed again, every node up (#790). answering still
+// counts it: it answers a PreVote with the leader's record, which is what
+// strands and checkHeard ask.
 func (r *Raft) activeMajority(m core.MembershipValue) bool {
 	return r.activeMajorityWithout(m, 0)
 }
 
-// activeMajorityWithout is activeMajority with silent counted as a voter
-// that does not answer, whatever it did last.
-func (r *Raft) activeMajorityWithout(m core.MembershipValue, silent core.NodeID) bool {
+// activeMajorityWithout is activeMajority with cut counted as a voter that
+// does not answer, whatever it did last.
+func (r *Raft) activeMajorityWithout(m core.MembershipValue, cut core.NodeID) bool {
 	vs := m.Voters()
 	n := 0
 	for _, id := range vs {
@@ -1266,10 +1309,10 @@ func (r *Raft) activeMajorityWithout(m core.MembershipValue, silent core.NodeID)
 			n++
 			continue
 		}
-		if id == silent {
+		if id == cut {
 			continue
 		}
-		if pr := r.prs[id]; pr != nil && pr.facts&peerHeard != 0 && r.now.Sub(pr.lastHeard) < r.voteWindow {
+		if pr := r.prs[id]; pr != nil && pr.facts&(peerHeard|peerSilent) == peerHeard && r.now.Sub(pr.lastHeard) < r.voteWindow {
 			n++
 		}
 	}

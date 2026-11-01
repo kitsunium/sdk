@@ -499,6 +499,8 @@ sequences:
         kind: self
       - id: r.serveLeaseRead
         kind: internal
+      - id: pr.noteSilence
+        kind: internal
       - id: r.handleAppResp
         kind: internal
       - id: r.handleHeartbeatResp
@@ -535,10 +537,14 @@ sequences:
           cases:
             - case: core.MsgAppResp
               do:
+                - eval: pr.noteSilence(m.Flags)
+                  to: pr.noteSilence
                 - eval: r.handleAppResp(pr, m)
                   to: r.handleAppResp
             - case: core.MsgHeartbeatResp
               do:
+                - eval: pr.noteSilence(m.Flags)
+                  to: pr.noteSilence
                 - eval: r.handleHeartbeatResp(pr, m)
                   to: r.handleHeartbeatResp
             - default: true
@@ -558,6 +564,8 @@ sequences:
       - id: r.watchWindow
         kind: internal
       - id: r.refeed
+        kind: internal
+      - id: r.feedSilence
         kind: internal
     steps:
       - eval: r.ackRounds(m.From, m.Context, m.Contract)
@@ -583,6 +591,35 @@ sequences:
         to: r.watchWindow
       - eval: r.refeed(pr, m.From, probing)
         to: r.refeed
+      - opt:
+          do:
+            - eval: r.feedSilence(pr, m)
+              to: r.feedSilence
+          when: silent
+  - of: (*Raft).feedSilence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).feedSilence
+        kind: self
+      - id: r.appendAsLeader
+        kind: internal
+      - id: r.broadcastAppend
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: pr.facts&peerSilentFed != 0 || m.Commit < r.log.lastIndex() || r.transferTo != 0
+      - op: "|="
+        set: pr.facts
+        value: peerSilentFed
+      - bind: noop
+        eval: "core.EntryValue{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}"
+      - eval: r.appendAsLeader([]core.EntryValue{noop})
+        to: r.appendAsLeader
+      - eval: r.broadcastAppend(false)
+        to: r.broadcastAppend
   - of: (*Raft).watchWindow
     participants:
       - id: caller
@@ -1615,7 +1652,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: id == silent
+                when: id == cut
             - opt:
                 do:
                   - op: ++
@@ -1623,7 +1660,7 @@ sequences:
                 init:
                   bind: pr
                   eval: r.prs[id]
-                when: pr != nil && pr.facts&peerHeard != 0 && r.now.Sub(pr.lastHeard) < r.voteWindow
+                when: pr != nil && pr.facts&(peerHeard|peerSilent) == peerHeard && r.now.Sub(pr.lastHeard) < r.voteWindow
           key: _
           range: vs
           value: id
@@ -3097,6 +3134,18 @@ sequences:
             - return: x
           when: "on"
       - return: "0"
+  - of: (*progress).noteSilence
+    steps:
+      - opt:
+          do:
+            - op: "|="
+              set: p.facts
+              value: peerSilent
+            - return: ""
+          when: flags&core.FlagTruncated != 0
+      - op: "&^="
+        set: p.facts
+        value: peerSilent | peerSilentFed
   - of: (*progress).becomeProbe
     participants:
       - id: caller
@@ -5518,6 +5567,8 @@ sequences:
         kind: self
       - id: r.truncateFrom
         kind: internal
+      - id: r.lowerSilence
+        kind: internal
       - id: ownCopy
         kind: internal
       - id: r.appendEntries
@@ -5537,6 +5588,8 @@ sequences:
           do:
             - eval: r.truncateFrom(first)
               to: r.truncateFrom
+            - eval: r.lowerSilence(m.Term, first)
+              to: r.lowerSilence
           when: first <= r.log.lastIndex()
       - bind: es
         eval: make([]core.EntryValue, len(m.Entries)-start)
@@ -5552,6 +5605,13 @@ sequences:
       - eval: r.appendEntries(es)
         to: r.appendEntries
       - return: "true"
+  - of: (*Raft).lowerSilence
+    steps:
+      - opt:
+          do:
+            - set: r.cfg.SilentIndex
+              value: first
+          when: first < r.cfg.SilentIndex && term >= r.cfg.SilentTerm
   - of: (*Raft).verifyChain
     participants:
       - id: caller

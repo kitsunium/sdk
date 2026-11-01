@@ -1,6 +1,10 @@
 package raft
 
-import "time"
+import (
+	"time"
+
+	core "github.com/kitsunium/sdk/internal/core/app/consensus"
+)
 
 // The facts a progress holds, one bit each in peerFacts.
 const (
@@ -18,6 +22,14 @@ const (
 	// peerProtocol3 is set while the peer's last message of the term
 	// carried FlagProtocol3.
 	peerProtocol3
+	// peerSilent is set while the peer's last answer, to an append or a
+	// heartbeat, said it is silent (FlagTruncated, #636): it answers, but
+	// acknowledges no append, so it counts for no change that must commit
+	// (activeMajority, #790).
+	peerSilent
+	// peerSilentFed is set once the leader appended a no-op for the peer's
+	// silence (feedSilence, #787), and cleared with peerSilent.
+	peerSilentFed
 )
 
 // peerFacts are a peer's yes/no state in the leader's progress, one bit each.
@@ -58,6 +70,19 @@ type progress struct {
 	// heldSince is when a peer whose window did not move first reported
 	// holding the oldest append in flight; zero when it does not.
 	heldSince time.Time
+}
+
+// noteSilence records whether the peer's answer says it is silent: a silent
+// node marks its every refusal and heartbeat answer with FlagTruncated, and
+// sends no acknowledgement (#636). An answer without it, an
+// acknowledgement above all, is from a node that is not silent, or no
+// longer, and clears the no-op fed for its silence too (#787).
+func (p *progress) noteSilence(flags core.MessageFlags) {
+	if flags&core.FlagTruncated != 0 {
+		p.facts |= peerSilent
+		return
+	}
+	p.facts &^= peerSilent | peerSilentFed
 }
 
 // becomeProbe restarts the peer at one append at a time from its match. Out

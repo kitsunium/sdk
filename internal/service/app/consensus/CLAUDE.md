@@ -419,7 +419,10 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   down: its window, full, was sent only empty appends, and with no
   unreachable report reaching the leader, as over the memory transport,
   it stayed silent for as long as that leader led (#774, raft's
-  `followSilentReport`).
+  `followSilentReport`). Nor leave a silent node that holds the leader's
+  whole log waiting for a write: its truncation point lies past that log,
+  and in a cluster that wrote nothing it stayed silent for good (#787,
+  raft's `feedSilence` and `lowerSilence`).
 - End a silence on disk before the entries that meet its condition are: raft
   judged it on the append's entries, in memory, and said so in the same
   Ready, and `endSilence` removed SILENT on the loop before the storage
@@ -539,6 +542,14 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   its checksums: `interruptedInstall` did, and Recover planned from the
   older log below an install above the protocol and wrote a new history
   from it (#640, `TestRecoverRefusesAnInterruptedInstallAboveTheProtocol`).
+  Nor skip one it cannot read, STORAGE_FAILED: a start keeps such a
+  snapshot published (`ownFailure`) and restored it once the disk read
+  again, dropping the forced entry and every write of the new history.
+  `interruptedInstall` refuses it, as Inspect then does, and a read of a
+  `.meta` or of the chunks that fails for any reason but a stream cut short
+  is STORAGE_FAILED, never SNAPSHOT_CORRUPT (`chunkReadFailed`, #789,
+  `TestRecoverRefusesAnInterruptedInstallItCannotRead`,
+  `TestAChunkStreamThatCannotBeReadIsAStorageFailure`).
 - Stream again a snapshot a peer refused SNAPSHOT_CORRUPT without reading
   it back: `sentCorrupt` verifies the sender's copy and replaces one that
   fails (#525, `TestALeaderReplacesASnapshotItsPeerFindsCorrupt`).

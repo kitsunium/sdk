@@ -6147,6 +6147,10 @@ sequences:
       - opt:
           do:
             - return: nil, origin(coreconsensus.SnapshotCorrupt, errs.String("id", id), errs.String("why", "no meta"))
+          when: errors.Is(err, os.ErrNotExist)
+      - opt:
+          do:
+            - return: nil, storageFailed("read snapshot meta", err)
           when: err != nil
       - var:
           name: m
@@ -14655,7 +14659,7 @@ sequences:
                   - opt:
                       do:
                         - return: coreconsensus.SnapshotMetaValue{}, false, verr
-                      when: errs.HasCode(verr, coreconsensus.CodeVersionUnsupported)
+                      when: errs.HasCode(verr, coreconsensus.CodeVersionUnsupported) || errs.HasCode(verr, coreconsensus.CodeStorageFailed)
                   - continue: true
                 init:
                   bind: verr
@@ -18739,6 +18743,34 @@ sequences:
         set: c.pos
         value: "n"
       - return: n, nil
+  - of: chunkReadFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: chunkReadFailed
+        kind: self
+      - id: snapshotCorrupt
+        kind: internal
+      - id: errs
+        kind: package
+      - id: storageFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: snapshotCorrupt(why)
+              to: snapshotCorrupt
+          when: errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: _, coded
+            eval: errs.CodeOf(err)
+            to: errs
+          when: coded
+      - return: storageFailed("read snapshot", err)
+        to: storageFailed
   - of: (*chunkReader).next
     participants:
       - id: caller
@@ -18747,9 +18779,11 @@ sequences:
         kind: self
       - id: io
         kind: stdlib
-      - id: snapshotCorrupt
+      - id: chunkReadFailed
         kind: internal
       - id: origin
+        kind: internal
+      - id: snapshotCorrupt
         kind: internal
       - id: c.codec.DecompressBounded
         kind: value
@@ -18765,8 +18799,8 @@ sequences:
                 do:
                   - return: io.EOF
                 when: err == io.EOF
-            - return: snapshotCorrupt("short chunk header")
-              to: snapshotCorrupt
+            - return: chunkReadFailed(err, "short chunk header")
+              to: chunkReadFailed
           init:
             bind: _, err
             eval: io.ReadFull(c.r, h[:])
@@ -18790,8 +18824,8 @@ sequences:
         value: c.enc[:encLen]
       - opt:
           do:
-            - return: snapshotCorrupt("short chunk")
-              to: snapshotCorrupt
+            - return: chunkReadFailed(err, "short chunk")
+              to: chunkReadFailed
           init:
             bind: _, err
             eval: io.ReadFull(c.r, c.enc)

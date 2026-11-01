@@ -573,7 +573,16 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 // a cut before #544 published at term 0 is set aside unread, as the start
 // sets it aside (restoreLatest): taken for an install, it dropped the log
 // for a position with no term, which the compaction then refused, and
-// Inspect ranked the survivor at term 0. It reads and writes nothing else.
+// Inspect ranked the survivor at term 0. One this node's disk cannot read,
+// a STORAGE_FAILED, refuses too: only a snapshot's own fault sets it aside.
+// Set aside, it let Recover plan from the short log below it, while a start
+// keeps such a snapshot published (ownFailure) and restores it as soon as
+// the disk reads it again, dropping the log past it: the forced entry and
+// every write the new history acknowledged (#789). The operator runs it
+// again once the disk reads. A SNAPSHOT_TOO_LARGE, which a start keeps as
+// a limit of its configuration, is the snapshot's own fault here: the bound
+// is its own metadata's, and a stream past it never restores. It reads and
+// writes nothing else.
 func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, error) {
 	metas, err := d.d.snaps.List()
 	if err != nil {
@@ -584,7 +593,7 @@ func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, er
 			continue // the start sets it aside too (#544)
 		}
 		if verr := d.verifySnapshotFile(m); verr != nil {
-			if errs.HasCode(verr, coreconsensus.CodeVersionUnsupported) {
+			if errs.HasCode(verr, coreconsensus.CodeVersionUnsupported) || errs.HasCode(verr, coreconsensus.CodeStorageFailed) {
 				return coreconsensus.SnapshotMetaValue{}, false, verr
 			}
 			continue // a start falls back past it too (D7)

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-30T12:00:00Z -->
+<!-- updated: 2026-11-01T12:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -22,9 +22,12 @@ and a restart loading the committed commands past `recent` without their
 payloads, as the driver does (`TestSimBoundedApply*`, #663, #664).
 
 Bazel deals top-level tests to shards by their index, so a new test file
-whose name sorts before the simulator's (`sim_*`, `soak_*`) moves every
-seed part to another shard: name it after them, or measure the shards
-again.
+whose name sorts before a seed suite's (`checks_*`, `lincheck_*`, `sim_*`,
+`unapplied_*`, every file calling `seedPart` or `eachSeed`) moves its seed
+parts to other shards: name it after them, or measure the shards again.
+`strictsilent_*` sorted before `unapplied_*` and put
+`TestSimBoundedApplyP2` beside `TestChecksPassUnmutated` and two more seed
+parts, a shard past 60 s under coverage (#790's PR).
 
 The suites cost ~300 CPU-seconds under race and coverage against a 60 s cap
 per target, so `raft_test` has 26 shards and Bazel deals them TOP-LEVEL tests:
@@ -132,6 +135,16 @@ under coverage before touching `shard_count`.
 - Admit a DenyPin of this leader, or one that leaves no answering majority
   without its target, or withdraw the pin from the admission set before the
   change commits (#530, `mutDenyPinUnchecked`, `mutDenyPinAtAppend`).
+- Count a silent voter, one whose last answer carried `FlagTruncated`
+  (`peerSilent`), in the strict reconfiguration check (`activeMajority`):
+  it answers heartbeats but acknowledges no append, and a removal of a
+  live voter admitted over voters {leader, silent} needed an
+  acknowledgement that waited for a commit the removal blocked; nothing
+  committed again, every node up (#790,
+  `TestARemovalThatLeavesASilentVoterInTheMajorityIsRefused`,
+  `TestAChangeIsJudgedWithoutTheSilentVoters`; no mutation, the type is
+  full). `answering` still counts it, for #603's guard and `checkHeard`: it
+  answers a PreVote with the leader's record.
 - Report to a heartbeat a contract generation a restart would not rebuild,
   or campaign inside the node's own vote-refusal window: a lease granted on
   that report outlived the window after a crash (#521,
@@ -335,4 +348,21 @@ under coverage before touching `shard_count`.
   leader, moved it to probe. `followSilentReport` probes it, its match
   kept, past the commit it reports (#774,
   `TestASilentPeerLeftInReplicateWithAFullWindowEndsItsSilence`; no
+  mutation, the type is full).
+- Leave a silent peer whose heartbeat answer reports this leader's whole
+  log committed waiting for a write: truncated past its last entry, its
+  truncation point lies past that log, `refeed` has nothing to send, and
+  in a cluster that wrote nothing it stayed silent for as long as nobody
+  wrote, one failure from no leader (#787). `feedSilence` appends one
+  no-op of the term for it, once per silence (`peerSilentFed`, cleared
+  with `peerSilent`) and never during a transfer
+  (`TestASilentNodeHoldingTheWholeLogEndsItsSilenceInAQuietCluster`,
+  `TestTheLeaderAppendsOneNoOpPerSilence`). Nor keep a silent node's
+  truncation point above a conflict an append of a leader of a term at
+  least `SilentTerm` finds below it: no entry the node held from there on
+  ever counted towards a commit (Leader Completeness, Log Matching), and
+  past a tail of an older term the leader's log may never reach the old
+  point (`lowerSilence`, in memory only,
+  `TestASilentNodeOverAnOlderTermsTailEndsItsSilenceInAQuietCluster`,
+  `TestAConflictLowersTheTruncationPointOnlyUnderALeaderOfItsTerm`; no
   mutation, the type is full).

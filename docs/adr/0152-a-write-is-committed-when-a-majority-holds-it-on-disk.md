@@ -6378,6 +6378,175 @@ lengthened the next cycle's pin
   every cycle and never caught up under the load. The tests of #550, #588,
   #602, #610, #622 and #623 stay green.
 
+## Amendment — a silent voter counts for no change that must commit (2026-11-01, #790)
+
+R2-27's strict check admits a membership change, an address change, a
+snapshot limit or a `DenyPin` only while the voters that answer the leader
+now are a majority of the configuration the change leaves
+(`activeMajority`). It counted every voter heard within the vote window. A
+voter `TruncateAndStaySilent` made silent answers every heartbeat, with
+`FlagTruncated` (#636), and acknowledges no append until a leader commits an
+entry of its term past its truncation point. Voters A, B and C, MinVoters
+2, C silent over A's whole log before any write: the operator removed B,
+alive. The check counted A and C, 2 of 2, and admitted it. The
+configuration governs from its append (D8): the removal needed C's
+acknowledgement, C's silence waited for a commit the removal blocked, and
+nothing committed again, every node up, until an offline `Recover`. B,
+removed, could not help. Under MinVoters 3 the same takes five voters, two
+of them silent in the same quiet window
+([#790](https://github.com/kitsunium/sdk/issues/790)).
+
+- **A silent voter is not counted.** The leader keeps, per peer, whether
+  its last answer to an append or a heartbeat carried `FlagTruncated`
+  (`peerSilent`): a silent node marks every refusal and heartbeat answer,
+  and sends no acknowledgement, so an answer without the flag clears it.
+  `activeMajority`, and so `removeMember`, `promote`, `updateAddress`,
+  `updateSnapshotLimit` and `denyPin`, counts a silent voter as one that
+  does not answer. The removal above is refused `MEMBERSHIP_INVALID`, and
+  admitted once C's silence ends; the removal of the silent voter itself
+  is still admitted.
+- **What it keeps.** `answering`, which #603's guard (`reachedBy`,
+  `removalStrands`, `moveStrands`, #761, #763, #765, #773) and the raise's
+  `checkHeard` (#665) read, still counts a silent voter: it answers a
+  PreVote with the leader's record. `quorumActive`, CheckQuorum's count and
+  `addLearner`'s, is unchanged: a learner's admission leaves the voters as
+  they are, and commits once the cluster commits anything at all.
+- **No format change.** The flag is the one #636 put on the wire; no frame,
+  field, flag or record changes, nothing persisted, no protocol raise, and
+  no raft mutation: the type is full.
+- **Tests.** `TestARemovalThatLeavesASilentVoterInTheMajorityIsRefused`
+  (raft, the issue's scenario on the step functions, A's appends to C held
+  back so that its silence lasts; on main `Remove(2)` is admitted at index
+  12 and A's commit stays at 11; fixed, it is refused, then admitted and
+  committed once a write ended C's silence) and
+  `TestAChangeIsJudgedWithoutTheSilentVoters` (raft: five voters, two
+  silent; a removal of a live voter, a `DenyPin` and the leader's move are
+  refused, the removal of a silent voter is admitted, and so is the first
+  removal once both answer without the flag). The tests of #530, #603,
+  #677, #761, #763, #765 and #773 stay green.
+
+## Amendment — a silence ends in a cluster that writes nothing (2026-11-01, #787)
+
+A node `TruncateAndStaySilent` made silent ends its silence on an accepted
+append once a leader of a term at least its own has rewritten its log past
+the truncation point and committed an entry of its term there (R4-03),
+holding, under the leader of its own term, the commit #636 and #766 fix.
+A damaged record past the node's last entry, a hard state say, drops no
+entry, and `reopenSilenced` puts the truncation point one past the log:
+past the leader's whole log too, when the node held all of it. The leader
+had nothing to send it, `refeed` returning on a match at its last index,
+and the library appends on its own only at an election. In a cluster that
+wrote nothing, a night without a push, the node stayed silent for as long
+as nobody wrote: one voter short, and one more failure left two live
+voters of three that elected no one, so nobody wrote and the silence
+never ended. R5-13 states a cost that lasts while a leader rewrites the
+log, not for as long as the cluster is quiet. The same held, writes or
+not, for a node back over a tail of an older term the leader never held:
+its truncation point lay past that tail, and only writes crossing it
+ended the silence
+([#787](https://github.com/kitsunium/sdk/issues/787)).
+
+- **The leader appends a no-op for a silent node that holds its whole
+  log.** On a silent heartbeat answer (`FlagTruncated`) whose commit
+  reaches the leader's last index, the leader appends one `EntryNoOp` of
+  its term (`feedSilence`), which a majority without the node commits: an
+  entry of the leader's term one past its whole log, so past the node's
+  truncation point, committed, and the rest of R4-03 and #636 holds as
+  before. One per silence and per term: a node silent for a reason no
+  leader lifts, an unreadable condition, gets one, and the fact is cleared
+  once the node answers without the flag. A transfer in flight appends
+  nothing. The kind is the election's no-op, which every release reads
+  and the driver never applies.
+- **A conflict below the truncation point lowers it.** An append of a
+  leader of a term at least `SilentTerm` that conflicts with the node's log
+  at an index below the truncation point makes that index the point
+  (`lowerSilence`). No entry the node held there or after, those the
+  truncation dropped included, was or will be committed with its
+  acknowledgement. Such an entry is of a term at most `SilentTerm`:
+  committed by that term's leader, at any time, it is in the log of every
+  leader of a later term (Leader Completeness), and this leader holds
+  every entry of its own term, so the two logs would be the same through
+  it (Log Matching), and they are not at the conflict. A leader of a later
+  term counts only acknowledgements of its own term, which a silent node
+  never sends. The tail of an older term is the one the conflict drops, so
+  the leader's own commit of its term ends the silence, no write needed. The point is
+  lowered in memory: a restart obeys the persisted one, the safe side. A
+  conflict at or past the point, or from a leader of an older term, changes
+  nothing.
+- **What it keeps.** The condition's other parts are unchanged: an entry
+  of the leader's term committed past the point, the commit #636 and #766
+  fix under the leader of the node's own term, the end once durable (#684),
+  the term #418 persists. A silent node still acknowledges nothing, and the
+  no-op is committed without it. #774's probe and #767's are untouched.
+- **What it leaves.** A no-op committed needs a majority without the
+  silent node: with the other voter of three down, the silence still lasts
+  until it returns, as R5-13 states.
+- **No format change.** No frame, field, flag or record changes, nothing
+  persisted, no protocol raise, and no raft mutation: the type is full.
+- **Tests.** `TestASilentNodeHoldingTheWholeLogEndsItsSilenceInAQuietCluster`
+  (raft, the issue's scenario on the step functions; on main the node stays
+  silent through 30 s of a quiet cluster, and with the leader down the two
+  others elect no one; fixed, the leader's no-op at 12 ends the silence and
+  they elect one), `TestTheLeaderAppendsOneNoOpPerSilence` (one no-op for a
+  silence no term ends, none in a quiet cluster with no silent node),
+  `TestASilentNodeOverAnOlderTermsTailEndsItsSilenceInAQuietCluster` (a
+  tail of an older term past the leader's log; on main the node stays
+  silent at its point 7 over the leader's log ending at 4, and so it does
+  with the no-op alone, at 5) and
+  `TestAConflictLowersTheTruncationPointOnlyUnderALeaderOfItsTerm`.
+  The tests of #418, #636, #684, #766, #767 and #774 stay green.
+
+## Amendment — Recover refuses an interrupted install it cannot read (2026-11-01, #789)
+
+#506's fix (PR #555) had `Recover` finish an install a crash interrupted
+after its snapshot was published, and set aside, as the start does, one
+that fails its checksums (`interruptedInstall`). It set aside every failure
+of `verifySnapshotFile` but VERSION_UNSUPPORTED (#640), a STORAGE_FAILED
+included: a `.snap` the disk could not open at that moment (EIO, EMFILE,
+EACCES). `Recover` then planned from the short log below the snapshot and
+wrote its forced entry there, while the snapshot stayed published, of the
+old lineage and above the index kept. A start keeps a snapshot that failed
+for this node's disk (`ownFailure`) and restores it as soon as the disk
+reads it: `finishInstall` then dropped the log past it, the forced entry
+and every write the new history had acknowledged, and the node ran the old
+voters under the new cluster, with no leader possible. `Inspect` took the
+same path and under-ranked such a survivor, as in #746. A read error inside
+the chunks, or on a `.meta` an `Open` read again, was taken for a corrupt
+snapshot, which a start unpublishes only once another one restores, and
+otherwise keeps for its next start
+([#789](https://github.com/kitsunium/sdk/issues/789)).
+
+- **A snapshot the disk cannot read refuses.** `interruptedInstall` sets
+  aside only a snapshot that failed for a fault of its own; a
+  STORAGE_FAILED refuses `Recover` and `Inspect`, the directory untouched,
+  and the operator runs them again once the disk reads. A
+  SNAPSHOT_TOO_LARGE is the snapshot's own fault there, the bound being its
+  own metadata's, and a stream past it never restores at a start.
+- **The disk's failure is told from corruption.** A read of the chunk
+  stream that fails for any reason but a stream cut short is the reader's
+  failure, kept when it carries a code and STORAGE_FAILED otherwise
+  (`chunkReadFailed`), and a `.meta` that is there but cannot be read is a
+  STORAGE_FAILED at `Open` as at a listing. A stream that ends short stays
+  SNAPSHOT_CORRUPT. The start keeps such a snapshot for its next try, a
+  sender keeps a copy it cannot read back (`sentCorrupt`), and an installed
+  copy that did not restore is removed as before.
+- **What it leaves.** A snapshot whose bytes a read returned wrong once,
+  and right later, still fails its checksums at `Recover` and may restore
+  at a start; `Recover` removing the old lineage's snapshots it sets aside,
+  or a start refusing a snapshot its lineage rejects, would close it, and
+  is left for a separate decision.
+- **No format change.** No frame, field or record changes, nothing new
+  persisted, no protocol raise.
+- **Tests.** `TestRecoverRefusesAnInterruptedInstallItCannotRead` (on disk,
+  the issue's scenario, the `.snap` made unreadable by its mode; on main
+  `Recover` succeeds with the log at [1,6] below the install at 205;
+  fixed, `Recover` and `Inspect` refuse STORAGE_FAILED with nothing
+  written, `Open` of an unreadable `.meta` is STORAGE_FAILED, and once the
+  snapshot reads `Recover` finishes the install and the node runs the
+  forced configuration) and
+  `TestAChunkStreamThatCannotBeReadIsAStorageFailure`. The tests of #506,
+  #555, #574, #640 and #746 stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6423,6 +6592,9 @@ lengthened the next cycle's pin
 | #774 | Raft hunt loop, 2026-10-30 | a silent peer's heartbeat answer moves a peer the leader still holds in replicate to probe, its match kept, so a full window no longer leaves it sent only empty appends and silent for as long as that leader leads; the probe resumes past the commit it reports; no format change, no raft mutation (amendment of 2026-10-30, #774) |
 | #773 | Raft hunt loop, 2026-10-30 | #603's guard counts a stale voter's voucher only under the non-zero key that voter's configuration pins and the next one still pins, the leader included, so a member whose pin `DenyPin` withdrew vouches for no one; whether a `DenyPin` itself is judged left to a decision; no format change, no raft mutation (amendment of 2026-10-30, #773) |
 | #771 | Raft hunt loop, 2026-11-01 | a streamed snapshot's pin is renewed at its bound while its follower moved since and is no further behind than the stream's end left it, so a catch-up by appends longer than the bound is no longer compacted past and sent the newest snapshot again; a follower that stops or falls further behind still loses it at the next bound, and a tight log still lifts it; no format change, no raft mutation (amendment of 2026-11-01, #771) |
+| #790 | Raft hunt loop, 2026-11-01 | the strict reconfiguration check counts a voter whose last answer carried `FlagTruncated`, a silent one, as a voter that does not answer, so a change that would need a silent voter's acknowledgement to commit is refused `MEMBERSHIP_INVALID`; #603's guard and the raise still count it; no format change, no raft mutation (amendment of 2026-11-01, #790) |
+| #787 | Raft hunt loop, 2026-11-01 | a leader appends one no-op of its term for a silent node whose heartbeat answer reports its whole log committed, once per silence and per term, and a conflict of a leader of a term at least `SilentTerm` below the truncation point lowers that point in memory, so a silence ends in a cluster that writes nothing; no format change, no raft mutation (amendment of 2026-11-01, #787) |
+| #789 | Raft hunt loop, 2026-11-01 | `Recover` and `Inspect` refuse STORAGE_FAILED an interrupted install whose snapshot the disk cannot read, instead of setting it aside as one that fails its checksums, and a read of the chunks or of a `.meta` that fails for any reason but a stream cut short is STORAGE_FAILED, never SNAPSHOT_CORRUPT; no format change (amendment of 2026-11-01, #789) |
 
 ## raft-sql-poc (owner's prior Raft)
 
