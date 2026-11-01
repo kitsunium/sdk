@@ -81,7 +81,12 @@ the kernel refuses ends the growth there.
 `provide` grows by as many buffers as recvs starved since it last looked,
 `bufsStep` (512) at least — each `ENOBUFS` is a buffer the burst lacked —,
 and by `bufsStep` when the kernel holds under a quarter of those provided.
-A loop's rings together hand out at most `loopBufBudget`, 128 MiB.
+A loop's rings together hand out at most `loopBufBudget`, 128 MiB, or
+less under `MaxConns`: a buffer for each of the loop's share of the
+connections plus the 512 each ring starts with (`bufBudgetFor`) — a burst
+never needs a buffer more than a connection sends. `MaxConns` is the knob;
+no `LoopValue` field is added for it, which would be a published shape for
+a bound the connections already set.
 
 A recv is armed on the group with the most buffers beyond the recvs
 already armed on it: a multishot recv stays on its group, so a group armed
@@ -111,7 +116,8 @@ while the kernel holds completions back.
   ever provided.
 - Memory: a ring holds what its bursts took, never more than its table
   rounded up — 97 MiB of resident buffers after a burst of 50,000, 1 MiB
-  idle — and a loop at most 128 MiB, every ring together. On a 1 GB host
+  idle — and a loop at most 128 MiB, every ring together, less under a
+  `MaxConns` that needs fewer. On a 1 GB host
   that is the cost of serving such a burst without starving; past the
   budget a burst starves again, and its recvs are re-armed as buffers come
   back. Each further group is 128 KiB of kernel memory, charged to

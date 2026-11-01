@@ -266,7 +266,7 @@ type uLoop struct {
 	spacing     time.Duration
 	lastArrival time.Duration
 	// bufBytes is the bytes of provided buffers the loop's rings handed
-	// their kernels so far, bounded by loopBufBudget.
+	// their kernels so far, bounded by bufBudget (bufBudgetFor).
 	bufBytes uint64
 }
 
@@ -1612,8 +1612,26 @@ func (rr *uRing) provide() {
 
 // bufLeft is the bytes of buffers the loop may still hand its rings.
 func (ul *uLoop) bufLeft() uint64 {
+	budget := bufBudgetFor(&ul.lp.sz)
 	//: never below zero.
-	return loopBufBudget - min(ul.bufBytes, loopBufBudget)
+	return budget - min(ul.bufBytes, budget)
+}
+
+// bufBudgetFor is the bytes of provided buffers one loop of sz may hand its
+// rings: loopBufBudget, or less under MaxConns — a buffer for each of the
+// loop's share of the connections, and the first ones every ring starts
+// with —, since a burst never needs a buffer more than a connection sends
+// (ADR 0203 §D2).
+func bufBudgetFor(sz *sizing) uint64 {
+	//: no ceiling on the connections: the constant.
+	if sz.maxConns <= 0 {
+		//: the default.
+		return loopBufBudget
+	}
+	loops := max(sz.loops, 1)
+	conns := uint64((sz.maxConns+loops-1)/loops) + uint64(max(sz.rings, 1))*uint64(bufsFirst)
+	//: the smaller.
+	return min(loopBufBudget, conns*uint64(defaultBufSize))
 }
 
 // held is how many buffers the kernel holds, every group together.

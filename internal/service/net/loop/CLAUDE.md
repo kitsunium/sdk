@@ -159,8 +159,9 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   first bid is handed out: an idle ring has one, 128 KiB of kernel memory.
   After each batch `provide` hands it as many more as recvs starved since it
   last looked (`starvedSeen`), `bufsStep` at least, or `bufsStep` when it
-  holds under a quarter of those provided, within `loopBufBudget` (128 MiB a
-  loop, every ring together, `uLoop.bufBytes`); it never takes any back. A
+  holds under a quarter of those provided, within `bufBudgetFor` (128 MiB a
+  loop, every ring together, less under `MaxConns`: a buffer a connection of
+  the loop's share and each ring's first 512; `uLoop.bufBytes`); it never takes any back. A
   ring's resident buffers are the most it had out at once — 1 MiB idle,
   97 MiB after 50 000 connections sent at once. A recv is armed on the
   group with the most buffers beyond the recvs armed on it (`roomiest`,

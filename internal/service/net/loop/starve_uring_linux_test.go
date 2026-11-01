@@ -104,7 +104,7 @@ func TestConformance_noStarvationAtScale(t *testing.T) {
 			if burst > 0 && uint64(starved)*1000 > uint64(n) || burst == scaleBursts-1 && starved != 0 {
 				t.Fatalf("burst %d of %d connections: %d recvs starved after the first burst", burst, n, starved)
 			}
-			if bytes > loopBufBudget || provided > uint32(n)+2*bufsStep+bufsFirst {
+			if bytes > bufBudgetFor(&ul.lp.sz) || provided > uint32(n)+2*bufsStep+bufsFirst {
 				t.Fatalf("burst %d: %d buffers provided, %d bytes, for %d connections", burst, provided, bytes, n)
 			}
 		}

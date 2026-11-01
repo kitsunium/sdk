@@ -5842,8 +5842,29 @@ sequences:
       - eval: rr.credit(from, from+n)
         to: rr.credit
   - of: (*uLoop).bufLeft
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).bufLeft
+        kind: self
+      - id: bufBudgetFor
+        kind: internal
     steps:
-      - return: loopBufBudget - min(ul.bufBytes, loopBufBudget)
+      - bind: budget
+        eval: bufBudgetFor(&ul.lp.sz)
+        to: bufBudgetFor
+      - return: budget - min(ul.bufBytes, budget)
+  - of: bufBudgetFor
+    steps:
+      - opt:
+          do:
+            - return: loopBufBudget
+          when: sz.maxConns <= 0
+      - bind: loops
+        eval: max(sz.loops, 1)
+      - bind: conns
+        eval: uint64((sz.maxConns+loops-1)/loops) + uint64(max(sz.rings, 1))*uint64(bufsFirst)
+      - return: min(loopBufBudget, conns*uint64(defaultBufSize))
   - of: held
     steps:
       - bind: "n"

@@ -1258,6 +1258,7 @@ files:
       - (*uRing).returnBuffers
       - (*uRing).provide
       - (*uLoop).bufLeft
+      - bufBudgetFor
       - held
       - (*uRing).credit
       - (*uRing).giveBack
@@ -1674,6 +1675,15 @@ functions:
     name: takeWaits
     params: res int32, live int64
     results: bool
+  - doc: |-
+      bufBudgetFor is the bytes of provided buffers one loop of sz may hand its
+      rings: loopBufBudget, or less under MaxConns — a buffer for each of the
+      loop's share of the connections, and the first ones every ring starts
+      with —, since a burst never needs a buffer more than a connection sends
+      (ADR 0203 §D2).
+    name: bufBudgetFor
+    params: sz *sizing
+    results: uint64
   - doc: held is how many buffers the kernel holds, every group together.
     name: held
     params: inRing []int
@@ -3970,7 +3980,7 @@ types:
         type: time.Duration
       - doc: |-
           bufBytes is the bytes of provided buffers the loop's rings handed
-          their kernels so far, bounded by loopBufBudget.
+          their kernels so far, bounded by bufBudget (bufBudgetFor).
         name: bufBytes
         type: uint64
     kind: struct

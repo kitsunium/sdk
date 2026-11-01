@@ -89,6 +89,18 @@ func TestBufs_groupsAsNeeded(t *testing.T) {
 	if got := bufCountFor(65535); got != maxBufs {
 		t.Fatalf("bufCountFor(65535) = %d, want %d", got, maxBufs)
 	}
+	for _, c := range []struct {
+		sz   sizing
+		want uint64
+	}{
+		{sizing{loops: 1, rings: 3}, loopBufBudget},
+		{sizing{loops: 1, rings: 3, maxConns: 196000}, loopBufBudget},
+		{sizing{loops: 2, rings: 1, maxConns: 10000}, uint64(5000+bufsFirst) * uint64(defaultBufSize)},
+	} {
+		if got := bufBudgetFor(&c.sz); got != c.want {
+			t.Fatalf("bufBudgetFor(%+v) = %d, want %d", c.sz, got, c.want)
+		}
+	}
 	if got := bufCountFor(1024); got != defaultBufs {
 		t.Fatalf("bufCountFor(1024) = %d, want %d", got, defaultBufs)
 	}
