@@ -10,6 +10,7 @@ import (
 	"io"
 	stdnet "net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -113,9 +114,13 @@ func TestConformance_noStarvationAtScale(t *testing.T) {
 
 // scaleCount is how many connections this host lets one process hold on
 // loopback: scaleConns, or fewer under RLIMIT_NOFILE (a client socket each,
-// and a server one on process descriptors) or the local port range.
+// and a server one on process descriptors), the local port range, or
+// KITSUNIUM_LOOP_SCALE (Bazel's lane, under coverage, sets 10,000).
 func scaleCount() int {
 	n := min(scaleConns, int(descriptorLimit()/2)-256)
+	if v, err := strconv.Atoi(os.Getenv("KITSUNIUM_LOOP_SCALE")); err == nil && v > 0 {
+		n = min(n, v)
+	}
 	raw, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
 	if err != nil {
 		return 0
