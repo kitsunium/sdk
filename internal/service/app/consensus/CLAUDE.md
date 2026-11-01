@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T14:00:00Z -->
+<!-- updated: 2026-11-01T18:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -1164,9 +1164,22 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   once the change commits (#551), and C's removal admitted on B's count
   left A, down, coming back hearing no one (#773, `vouched`,
   `TestTheLastVoucherBesideADeniedPinIsRemovedOnlyOnceTheStaleVoterIsBack`,
-  `TestARemovalCountsNoMemberWhosePinWasDeniedAsAVoucher`). A `DenyPin`
-  itself is not judged by the guard: whether the fence of a compromised
-  key may be refused while a voter is down is left to a decision.
+  `TestARemovalCountsNoMemberWhosePinWasDeniedAsAVoucher`).
+- Refuse a `DenyPin` for what it leaves a stopped voter with, or let it
+  pass unsaid: fencing a key never waits for a voter that is down (the
+  owner's option (c)), and `Remove(C)` then `DenyPin(B)` left A, down, with
+  no voucher while the status, the audit line and every later refusal
+  said nothing (#773). `Raft.Isolated` names every voter the guard finds
+  stranded, and the withdrawn pin that leaves it so, by the guard's own
+  `reachedBy` (`reach`, never a second judgement): the health's
+  `PeerStranded` and `PeerPinDenied`, the `isolated` attribute of the
+  audit line of a removal, a move or a `DenyPin` (`isolates`), and the
+  `why` and `isolated` fields of a refusal the guard decides
+  (`GuardRefusal`, `guardFields`)
+  (`TestADenyPinThatLeavesAStoppedVoterNoVoucherIsSaidEverywhere`,
+  `TestAStoppedVoterADenyPinLeftWithNoVoucherIsNamedWithItsCause`). A
+  change forwarded from a follower is refused with the code alone: the
+  answer frame carries nothing more.
 - Cancel a snapshot stream because the log is tight: its pin's hold on
   compaction is lifted, for good, and the stream goes on; only a stream
   that is due is cancelled (`streamDue`). Cancelled with it, no stream

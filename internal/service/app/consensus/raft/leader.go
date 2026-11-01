@@ -648,6 +648,7 @@ func (r *Raft) Propose(now time.Time, es []core.EntryValue) ([]core.PositionValu
 // the member that forwarded them, authenticated by the transport.
 func (r *Raft) propose(now time.Time, es []core.EntryValue, origin core.NodeID) ([]core.PositionValue, errs.Code) {
 	r.now = now
+	r.guardRefusal = nil
 	if r.role != core.RoleLeader || r.transferTo != 0 {
 		return nil, codeNotLeader
 	}
@@ -1038,7 +1039,25 @@ func (r *Raft) removalStrands(next *core.MembershipValue, target core.NodeID, wa
 	if r.mutated(mutRemoveStrands) || !r.answering(target) || (!wasVoter && r.neverVoter(target)) {
 		return false
 	}
-	return r.strands(next)
+	return r.refusesStranding(next)
+}
+
+// refusesStranding reports whether next strands a voter, as strands does,
+// for a change the guard judges, and keeps what it found for the refusal to
+// say (GuardRefusal): each voter next strands, and, when that voter is
+// stranded already under the configuration in force, what left it so. A
+// voter that a DenyPin left with no voucher refuses every later removal or
+// move of a member that answers and may vouch, and the refusal named no
+// voter and no cause (#773).
+func (r *Raft) refusesStranding(next *core.MembershipValue) bool {
+	r.guardRefusal = nil
+	for _, v := range r.judged(next) {
+		if !r.reachedBy(next, v) {
+			had := r.isolation(r.conf(), v) & IsolationPinDenied
+			r.guardRefusal = append(r.guardRefusal, IsolationValue{ID: v, Flags: IsolationStranded | had})
+		}
+	}
+	return len(r.guardRefusal) != 0
 }
 
 // neverVoter reports whether id is a learner in every configuration this
@@ -1081,12 +1100,28 @@ func (r *Raft) answering(id core.NodeID) bool {
 // vouch for anyone now, and its removal or move is never refused here, so
 // a dead voter can always be removed, or moved.
 func (r *Raft) strands(next *core.MembershipValue) bool {
+	return slices.ContainsFunc(r.judged(next), func(v core.NodeID) bool { return !r.reachedBy(next, v) })
+}
+
+// judged lists the voters of next the guard judges: every one but this
+// leader.
+func (r *Raft) judged(next *core.MembershipValue) []core.NodeID {
+	var vs []core.NodeID
 	for _, m := range next.Members {
-		if m.Voter && m.ID != r.id && !r.reachedBy(next, m.ID) {
-			return true
+		if m.Voter && m.ID != r.id {
+			vs = append(vs, m.ID)
 		}
 	}
-	return false
+	return vs
+}
+
+// reach is how the guard counts a stale voter's vouchers. Its zero value is
+// the guard's own count, the one every change is judged by; a field set
+// counts one more voucher than the guard does, to tell what a voter's
+// isolation rests on, and decides nothing (isolation).
+type reach struct {
+	// undenied counts a pin DenyPin withdrew as the key it was (#773).
+	undenied bool
 }
 
 // reachedBy reports whether voter v, whatever configuration of its past it
@@ -1104,10 +1139,15 @@ func (r *Raft) strands(next *core.MembershipValue) bool {
 // is unknown: only this leader listed before it, so added before it, is
 // then known to it for sure.
 func (r *Raft) reachedBy(next *core.MembershipValue, v core.NodeID) bool {
+	return r.reaches(next, v, reach{})
+}
+
+// reaches is reachedBy with the vouchers counted as how says.
+func (r *Raft) reaches(next *core.MembershipValue, v core.NodeID, how reach) bool {
 	if pr := r.prs[v]; pr != nil && r.answering(v) && pr.match >= r.log.snapIndex {
-		return vouched(next, r.confAt(pr.match), v, r.id)
+		return vouchedAs(next, r.confAt(pr.match), v, r.id, how)
 	}
-	if !r.vouchedInRetained(next, v) {
+	if !r.vouchedInRetained(next, v, how) {
 		return false
 	}
 	if _, listed := r.base.Member(v); !listed || r.log.snapIndex == 0 {
@@ -1119,13 +1159,14 @@ func (r *Raft) reachedBy(next *core.MembershipValue, v core.NodeID) bool {
 }
 
 // vouchedInRetained reports whether v is vouched for in every retained
-// configuration, the snapshot base's included.
-func (r *Raft) vouchedInRetained(next *core.MembershipValue, v core.NodeID) bool {
-	if !vouched(next, &r.base, v, r.id) {
+// configuration, the snapshot base's included, the vouchers counted as how
+// says.
+func (r *Raft) vouchedInRetained(next *core.MembershipValue, v core.NodeID, how reach) bool {
+	if !vouchedAs(next, &r.base, v, r.id, how) {
 		return false
 	}
 	for k := range r.confs {
-		if !vouched(next, &r.confs[k].m, v, r.id) {
+		if !vouchedAs(next, &r.confs[k].m, v, r.id, how) {
 			return false
 		}
 	}
@@ -1168,11 +1209,16 @@ func listedBefore(next *core.MembershipValue, first, then core.NodeID) bool {
 // member a voter down at the time knew, which came back hearing no one
 // (#773).
 func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
+	return vouchedAs(next, known, v, leader, reach{})
+}
+
+// vouchedAs is vouched with the vouchers counted as how says.
+func vouchedAs(next, known *core.MembershipValue, v, leader core.NodeID, how reach) bool {
 	if _, listed := known.Member(v); !listed {
 		return true
 	}
 	for _, k := range known.Members {
-		if k.ID != v && vouches(next, k, leader) {
+		if k.ID != v && vouches(next, k, leader, how) {
 			return true
 		}
 	}
@@ -1182,14 +1228,25 @@ func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
 // vouches reports whether k, as a stale voter's configuration lists it,
 // still answers that voter's PreVote in next: a voter of that
 // configuration, pinned there under a non-zero key that next still pins,
-// at the address that configuration names, or at any when it leads.
-func vouches(next *core.MembershipValue, k core.MemberValue, leader core.NodeID) bool {
-	var unpinned [32]byte
-	if !k.Voter || k.SPKI == unpinned {
-		return false
-	}
+// at the address that configuration names, or at any when it leads. how
+// may count a withdrawn pin back.
+func vouches(next *core.MembershipValue, k core.MemberValue, leader core.NodeID, how reach) bool {
 	m, stays := next.Member(k.ID)
-	return stays && m.SPKI == k.SPKI && (k.ID == leader || m.Address == k.Address)
+	return k.Voter && stays && pinnedAs(k.SPKI, m.SPKI, how.undenied) && (k.ID == leader || m.Address == k.Address)
+}
+
+// pinnedAs reports whether a voucher pinned under known, the key a stale
+// voter's configuration holds for it, is still pinned under it in next,
+// where it holds now: under the same key, never the zero pin, which admits
+// nobody. undenied counts a withdrawn pin back: a member's key never
+// changes but to the zero pin DenyPin leaves, so a zero on either side is
+// the key it was.
+func pinnedAs(known, now [32]byte, undenied bool) bool {
+	var unpinned [32]byte
+	if undenied && (known == unpinned || now == unpinned) {
+		return true
+	}
+	return known != unpinned && now == known
 }
 
 // updateAddress changes the address of the member at idx to the one admin
@@ -1217,7 +1274,7 @@ func (r *Raft) moveStrands(next *core.MembershipValue, target core.NodeID) bool 
 	if target == r.id || !r.answering(target) || r.neverVoter(target) {
 		return false
 	}
-	return r.strands(next)
+	return r.refusesStranding(next)
 }
 
 // updateSnapshotLimit records, for the member at idx, the MaxSnapshotBytes

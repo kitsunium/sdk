@@ -2729,6 +2729,20 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PeerPinDenied",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "PeerPinDenied",
+      "spelled": "svcconsensus.PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "16",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerPinDenied",
+      "doc": "The facts a PeerHealthValue carries, read with PeerFlags.Has.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PeerRejected",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
@@ -2755,6 +2769,20 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshot",
+      "doc": "The facts a PeerHealthValue carries, read with PeerFlags.Has.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PeerStranded",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "PeerStranded",
+      "spelled": "svcconsensus.PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "8",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerStranded",
       "doc": "The facts a PeerHealthValue carries, read with PeerFlags.Has.\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",

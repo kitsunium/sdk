@@ -233,6 +233,18 @@ constants:
         name: PeerUnreachable
       - doc: PeerSnapshot is set while a snapshot is being sent to the peer.
         name: PeerSnapshot
+      - doc: |-
+          PeerStranded is set on a voter #603's guard finds stranded: it no
+          longer answers, or lags, and no member of any configuration it may
+          hold would answer its PreVote with this leader's record once it is
+          back, so it would hear no one. The guard refuses every removal or move
+          of a member that answers and may vouch, until it is back or removed.
+        name: PeerStranded
+      - doc: |-
+          PeerPinDenied is set beside PeerStranded when a pin DenyPin withdrew
+          is what leaves the voter so. The DenyPin was admitted: a key's fence
+          never waits for a voter that is down (#773).
+        name: PeerPinDenied
     name: PeerVoter
   - doc: The answers a HealthValue carries.
     grouped: true
@@ -1078,6 +1090,9 @@ files:
       - (*Node).applyReady
       - applyReady
       - (*Node).loopHealth
+      - isolationFlags
+      - isolatedText
+      - isolationCauses
       - (*Node).peerHealth
       - (*Node).peerUnreachable
     name: health.go
@@ -1270,6 +1285,7 @@ files:
       - (*Node).applyMoved
       - (*Node).wakeLoop
       - (*Node).auditAppended
+      - isolates
       - (*Node).stopOnUnsupported
       - (*Node).sendMessages
       - (*Node).logLeaderRecords
@@ -1522,6 +1538,7 @@ files:
       - (*Node).proposeBatch
       - (*Node).refuseOverload
       - (*Node).proposeAlone
+      - guardFields
       - (*Node).appended
       - (*Node).answerApplied
       - (*Node).displace
@@ -2449,6 +2466,17 @@ functions:
     name: applyReady
     params: caughtUp bool, commit, applied uint64, moved, window time.Duration
     results: bool
+  - doc: isolationFlags are the health facts of a voter's isolation causes.
+    name: isolationFlags
+    params: f raft.IsolationFlags
+    results: PeerFlags
+  - doc: |-
+      isolatedText renders voters and their isolation causes for an audit
+      line or a refusal: "id:cause+cause", comma-separated, in the order
+      given; "" for none.
+    name: isolatedText
+    params: vs []raft.IsolationValue
+    results: string
   - doc: drawID draws a random NodeID, never 0.
     name: drawID
     results: coreconsensus.NodeID
@@ -2639,6 +2667,15 @@ functions:
     name: baseTerm
     params: logTerm, metaTerm uint64, matched bool, first uint64
     results: uint64, error
+  - doc: |-
+      isolates reports whether an administrative entry of kind and change may
+      leave a stopped voter isolated, so that its audit line names every voter
+      the configuration it leads to isolates, and why (Raft.Isolated): a
+      removal, a move or a DenyPin. A DenyPin is admitted whatever it leaves a
+      stopped voter with, and its line named the change alone (#773).
+    name: isolates
+    params: kind coreconsensus.EntryKind, change uint8
+    results: bool
   - doc: |-
       lowerSilenceIn lowers the silence condition log persists to index; a
       store that keeps none has nothing to lower.
@@ -3049,6 +3086,18 @@ functions:
     name: claimed
     params: ps []*proposal
     results: "[]*proposal"
+  - doc: |-
+      guardFields are the fields of a refusal #603's guard decided: why, and
+      the voters the change would strand with what left each so (isolated).
+      A voter a DenyPin left with no voucher refuses every later removal or
+      move of a member that answers and may vouch, and the refusal said
+      neither which voter nor what left it so (#773). None for a change the
+      guard did not refuse. A change forwarded by a follower is judged on the
+      leader, whose answer frame carries the code alone: its refusal names
+      neither, and the leader's health does.
+    name: guardFields
+    params: vs []raft.IsolationValue
+    results: "[]errs.FieldValue"
   - name: ProposeAs
     params: ctx context.Context, r coreconsensus.Replicated, data []byte
     results: coreconsensus.TokenValue, R, error
@@ -5469,7 +5518,7 @@ types:
         type: coreconsensus.NodeID
       - doc: |-
           Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
-          PeerSnapshot.
+          PeerSnapshot, PeerStranded, PeerPinDenied.
         name: Flags
         type: PeerFlags
       - doc: Match is the highest index the peer holds durably, as acknowledged.
@@ -10106,6 +10155,20 @@ vars:
       - name: syncDirAtOpen
         value: syncDir
     name: syncFileAtOpen
+  - doc: |-
+      isolationCauses names each isolation cause, in the order isolatedText
+      writes them.
+    items:
+      - name: isolationCauses
+        value: |-
+          []struct {
+          	flag raft.IsolationFlags
+          	name string
+          }{
+          	{raft.IsolationStranded, "stranded"},
+          	{raft.IsolationPinDenied, "pin-denied"},
+          }
+    name: isolationCauses
   - grouped: true
     items:
       - doc: |-

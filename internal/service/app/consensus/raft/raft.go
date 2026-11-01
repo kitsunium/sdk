@@ -457,6 +457,11 @@ type Raft struct {
 	refusedAt   uint64
 	refusedFrom core.NodeID
 	refusals    int
+	// guardRefusal is what #603's guard found when it refused the change
+	// the last Propose was handed: the voters that change would strand, nil
+	// when the guard did not refuse it (GuardRefusal, #773). Never
+	// persisted.
+	guardRefusal []IsolationValue
 
 	seq uint64
 	rd  ReadyValue

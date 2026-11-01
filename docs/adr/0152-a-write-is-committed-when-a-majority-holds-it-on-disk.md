@@ -6744,6 +6744,58 @@ elected no one
   through 30 s) and `TestOnlyATransferOverTheNoOpFeedsTheSilentPeerAgain`.
   The tests of #636, #766, #787, #790, #792 and #793 stay green.
 
+## Amendment — a DenyPin that leaves a stopped voter no voucher is admitted, and said (2026-11-01, #773)
+
+The amendment of 2026-10-30 left one order of #773 to a decision. With a
+voter V down, `Remove(C)` is admitted while B, pinned, vouches for V; a
+`DenyPin(B)` then withdraws B's pin, and V is left with no member it
+knows that would answer its PreVote under the key it pins. The guard
+never judged a `DenyPin`, and nothing said what it left: the status was
+silent, the audit line named the change alone, and every later removal
+or move the guard refused because of V was a bare `MEMBERSHIP_INVALID`
+([#773](https://github.com/kitsunium/sdk/issues/773)). Three options
+were put to the owner: (a) judge a `DenyPin` as a removal, refusing the
+fence of a compromised key while a voter is down; (b) admit it, the fence
+outranking the guard, documented; (c) admit it, and say what it leaves.
+
+- **The owner's decision: option (c).** A `DenyPin` is admitted whatever
+  it leaves a stopped voter with: fencing a key never waits for a voter
+  that is down. Nothing admitted before is refused now, and the way out is
+  #603's: bring V back, or remove it, which no guard judges.
+- **One notion: a voter the leader may never reach again.** `Raft.Isolated`
+  lists, on the leader, every voter of the configuration it governs by
+  that #603's guard finds stranded (`IsolationStranded`), and marks
+  `IsolationPinDenied` the one a withdrawn pin leaves so. Both are the
+  guard's own `reachedBy`: the cause is the same judgement with every pin
+  `DenyPin` withdrew counted back as the key it was (a member's key never
+  changes but to the zero pin). It decides nothing.
+- **Where it is said.** In the status: `HealthValue.Peers` carries
+  `PeerStranded` and `PeerPinDenied`, bits 8 and 16 of `PeerFlags`, added
+  and re-exported by `pkg/v1/app/consensus`. In the audit: the leader's
+  line "consensus: administrative entry appended" of a removal, a move or
+  a `DenyPin` carries `isolated`, every voter the configuration it leads
+  to isolates, `id:cause+cause` (`stranded`, `pin-denied`). In the
+  refusal: a removal or a move the guard refuses carries the fields `why`
+  and `isolated`, each voter it would strand, `pin-denied` for one a
+  `DenyPin` already left with no voucher, and then a `why` that names the
+  `DenyPin` (`Raft.GuardRefusal`). The code is still `MEMBERSHIP_INVALID`.
+- **What it leaves.** A change submitted on a follower is judged on the
+  leader, whose answer frame carries the code alone: its refusal names
+  neither the voter nor the cause, and the leader's health does. The
+  leader alone knows which voters answer, so a follower's health names
+  none, as for every peer line.
+- No frame, payload or record format changes, nothing new is persisted,
+  no protocol raise and no raft mutation.
+- **Tests.** `TestADenyPinThatLeavesAStoppedVoterNoVoucherIsSaidEverywhere`
+  (the issue's reverse order on the memory network's admission model; on
+  main the health shows A as a voter that does not answer and nothing
+  more, the audit line of the `DenyPin` names no voter, and E's move,
+  refused because of A, carries no field) and
+  `TestAStoppedVoterADenyPinLeftWithNoVoucherIsNamedWithItsCause` (raft:
+  both orders, the refusals of a removal and a move named, none for a
+  refusal on another ground). The tests of #603, #748, #761, #763, #764,
+  #765 and #785 stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6795,6 +6847,7 @@ elected no one
 | #793 | Raft hunt loop, 2026-11-01 | a silent node's lowered truncation point leaves in the Ready that carries the truncation (`ReadyValue.SilenceLowered`), and the driver writes it to `SILENT`, same record, lowered only, before the storage actor writes that truncation, so a restart before the commit reaches the node obeys it; no format change, no raft mutation (amendment of 2026-11-01, #793) |
 | #792 | Raft hunt loop, 2026-11-01 | an install over a log that held the snapshot's index under another term lowers a silent node's truncation point to the index after the snapshot, as a conflicting append does, durably through #793's path, and a start that finishes such an interrupted install lowers `SILENT` before it drops the log; no format change, no raft mutation (amendment of 2026-11-01, #792) |
 | #795 | Raft hunt loop, 2026-11-01 | the leader keeps the index of the no-op it fed a silence, and a snapshot transfer the peer installed at or past it feeds the peer once more, so a node restarted on that snapshot, its point raised past the leader's whole log, ends its silence in a cluster that writes nothing; a snapshot the node cut itself left to a decision; no format change, no raft mutation (amendment of 2026-11-01, #795) |
+| #773 (c) | the owner's decision, 2026-11-01 | a `DenyPin` that leaves a stopped voter no voucher is admitted, and said: `Raft.Isolated` names, by #603's own judgement, every voter the leader may never reach again and the withdrawn pin that leaves it so; the health's `PeerStranded` and `PeerPinDenied`, the audit line's `isolated`, and the `why` and `isolated` of a refusal the guard decides; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #773) |
 
 ## raft-sql-poc (owner's prior Raft)
 

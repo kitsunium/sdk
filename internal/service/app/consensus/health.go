@@ -1,6 +1,8 @@
 package consensus
 
 import (
+	"strconv"
+	"strings"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -21,6 +23,16 @@ const (
 	PeerUnreachable
 	// PeerSnapshot is set while a snapshot is being sent to the peer.
 	PeerSnapshot
+	// PeerStranded is set on a voter #603's guard finds stranded: it no
+	// longer answers, or lags, and no member of any configuration it may
+	// hold would answer its PreVote with this leader's record once it is
+	// back, so it would hear no one. The guard refuses every removal or move
+	// of a member that answers and may vouch, until it is back or removed.
+	PeerStranded
+	// PeerPinDenied is set beside PeerStranded when a pin DenyPin withdrew
+	// is what leaves the voter so. The DenyPin was admitted: a key's fence
+	// never waits for a voter that is down (#773).
+	PeerPinDenied
 )
 
 // The answers a HealthValue carries.
@@ -49,7 +61,7 @@ type PeerHealthValue struct {
 	// ID is the peer.
 	ID coreconsensus.NodeID
 	// Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
-	// PeerSnapshot.
+	// PeerSnapshot, PeerStranded, PeerPinDenied.
 	Flags PeerFlags
 	// Match is the highest index the peer holds durably, as acknowledged.
 	Match uint64
@@ -237,9 +249,59 @@ func (n *Node) loopHealth(h *HealthValue) {
 	h.SnapshotLimit = snapshotLimit(n.cfg.MaxSnapshotBytes, &conf)
 	last := n.r.Status().Last
 	window := n.r.Status().Timing.ElectionTimeoutMin
-	for _, p := range n.r.PeerStats() {
-		h.Peers = append(h.Peers, n.peerHealth(&p, now, last, window))
+	isolated := map[coreconsensus.NodeID]raft.IsolationFlags{}
+	for _, v := range n.r.Isolated() {
+		isolated[v.ID] = v.Flags
 	}
+	for _, p := range n.r.PeerStats() {
+		ph := n.peerHealth(&p, now, last, window)
+		ph.Flags |= isolationFlags(isolated[p.ID])
+		h.Peers = append(h.Peers, ph)
+	}
+}
+
+// isolationFlags are the health facts of a voter's isolation causes.
+func isolationFlags(f raft.IsolationFlags) PeerFlags {
+	var out PeerFlags
+	if f.Has(raft.IsolationStranded) {
+		out |= PeerStranded
+	}
+	if f.Has(raft.IsolationPinDenied) {
+		out |= PeerPinDenied
+	}
+	return out
+}
+
+// isolatedText renders voters and their isolation causes for an audit
+// line or a refusal: "id:cause+cause", comma-separated, in the order
+// given; "" for none.
+func isolatedText(vs []raft.IsolationValue) string {
+	var b strings.Builder
+	for i, v := range vs {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatUint(uint64(v.ID), 10))
+		sep := byte(':')
+		for _, c := range isolationCauses {
+			if v.Flags.Has(c.flag) {
+				b.WriteByte(sep)
+				b.WriteString(c.name)
+				sep = '+'
+			}
+		}
+	}
+	return b.String()
+}
+
+// isolationCauses names each isolation cause, in the order isolatedText
+// writes them.
+var isolationCauses = []struct {
+	flag raft.IsolationFlags
+	name string
+}{
+	{raft.IsolationStranded, "stranded"},
+	{raft.IsolationPinDenied, "pin-denied"},
 }
 
 // peerHealth is one peer's line of a verdict. A peer is unreachable when it

@@ -95,30 +95,51 @@ workflows:
           range: r.conf().Members
           value: m
       - return: "0"
-  - of: (*Raft).strands
+  - of: (*Raft).refusesStranding
     steps:
+      - set: r.guardRefusal
+        value: nil
       - loop:
           do:
             - opt:
                 do:
-                  - return: "true"
-                when: m.Voter && m.ID != r.id && !r.reachedBy(next, m.ID)
+                  - bind: had
+                    eval: r.isolation(r.conf(), v) & IsolationPinDenied
+                  - set: r.guardRefusal
+                    value: "append(r.guardRefusal, IsolationValue{ID: v, Flags: IsolationStranded | had})"
+                when: "!r.reachedBy(next, v)"
+          key: _
+          range: r.judged(next)
+          value: v
+      - return: len(r.guardRefusal) != 0
+  - of: (*Raft).judged
+    steps:
+      - var:
+          name: vs
+          type: "[]core.NodeID"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: vs
+                    value: append(vs, m.ID)
+                when: m.Voter && m.ID != r.id
           key: _
           range: next.Members
           value: m
-      - return: "false"
+      - return: vs
   - of: (*Raft).vouchedInRetained
     steps:
       - opt:
           do:
             - return: "false"
-          when: "!vouched(next, &r.base, v, r.id)"
+          when: "!vouchedAs(next, &r.base, v, r.id, how)"
       - loop:
           do:
             - opt:
                 do:
                   - return: "false"
-                when: "!vouched(next, &r.confs[k].m, v, r.id)"
+                when: "!vouchedAs(next, &r.confs[k].m, v, r.id, how)"
           key: k
           range: r.confs
       - return: "true"

@@ -204,10 +204,29 @@ func (n *Node) refuseOverload(p *proposal) bool {
 func (n *Node) proposeAlone(now time.Time, p *proposal) {
 	pos, code := n.r.Propose(now, []coreconsensus.EntryValue{p.entry})
 	if code != 0 {
-		p.done <- propResult{err: origin(sentinelOf(code))}
+		p.done <- propResult{err: origin(sentinelOf(code), guardFields(n.r.GuardRefusal())...)}
 		return
 	}
 	n.appended(p, pos[0], true)
+}
+
+// guardFields are the fields of a refusal #603's guard decided: why, and
+// the voters the change would strand with what left each so (isolated).
+// A voter a DenyPin left with no voucher refuses every later removal or
+// move of a member that answers and may vouch, and the refusal said
+// neither which voter nor what left it so (#773). None for a change the
+// guard did not refuse. A change forwarded by a follower is judged on the
+// leader, whose answer frame carries the code alone: its refusal names
+// neither, and the leader's health does.
+func guardFields(vs []raft.IsolationValue) []errs.FieldValue {
+	if len(vs) == 0 {
+		return nil
+	}
+	why := "a stopped voter would be left with no voucher it can reach: bring it back, or remove it first"
+	if slices.ContainsFunc(vs, func(v raft.IsolationValue) bool { return v.Flags.Has(raft.IsolationPinDenied) }) {
+		why = "a DenyPin withdrew the last voucher of a stopped voter: bring it back, or remove it first"
+	}
+	return []errs.FieldValue{errs.String("why", why), errs.String("isolated", isolatedText(vs))}
 }
 
 // appended registers a proposal's waiter at its position.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -1454,8 +1455,33 @@ func (n *Node) auditAppended(rd *raft.ReadyValue) {
 		if err != nil {
 			continue
 		}
-		n.obs.warn("consensus: administrative entry appended", lattr("index", e.Position.Index), lattr("kind", uint64(e.Kind)),
-			lstr("operator", a.Operator), lattr("origin", uint64(a.Origin)), lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)))
+		attrs := []corelogger.AttrValue{
+			lattr("index", e.Position.Index), lattr("kind", uint64(e.Kind)), lstr("operator", a.Operator),
+			lattr("origin", uint64(a.Origin)), lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)),
+		}
+		if isolates(e.Kind, a.Change) {
+			if iso := isolatedText(n.r.Isolated()); iso != "" {
+				attrs = append(attrs, lstr("isolated", iso))
+			}
+		}
+		n.obs.warn("consensus: administrative entry appended", attrs...)
+	}
+}
+
+// isolates reports whether an administrative entry of kind and change may
+// leave a stopped voter isolated, so that its audit line names every voter
+// the configuration it leads to isolates, and why (Raft.Isolated): a
+// removal, a move or a DenyPin. A DenyPin is admitted whatever it leaves a
+// stopped voter with, and its line named the change alone (#773).
+func isolates(kind coreconsensus.EntryKind, change uint8) bool {
+	if kind != coreconsensus.EntryMembership {
+		return false
+	}
+	switch change {
+	case wire.ChangeRemove, wire.ChangeUpdateAddress, wire.ChangeDenyPin:
+		return true
+	default:
+		return false
 	}
 }
 

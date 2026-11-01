@@ -6438,6 +6438,10 @@ sequences:
         kind: value
       - id: snapshotLimit
         kind: internal
+      - id: n.peerHealth
+        kind: internal
+      - id: isolationFlags
+        kind: internal
     steps:
       - bind: now
         eval: n.clk.Now()
@@ -6460,13 +6464,93 @@ sequences:
         eval: n.r.Status().Last
       - bind: window
         eval: n.r.Status().Timing.ElectionTimeoutMin
+      - bind: isolated
+        eval: map[coreconsensus.NodeID]raft.IsolationFlags{}
       - loop:
           do:
+            - set: isolated[v.ID]
+              value: v.Flags
+          key: _
+          range: n.r.Isolated()
+          value: v
+      - loop:
+          do:
+            - bind: ph
+              eval: n.peerHealth(&p, now, last, window)
+              to: n.peerHealth
+            - op: "|="
+              set: ph.Flags
+              to: isolationFlags
+              value: isolationFlags(isolated[p.ID])
             - set: h.Peers
-              value: append(h.Peers, n.peerHealth(&p, now, last, window))
+              value: append(h.Peers, ph)
           key: _
           range: n.r.PeerStats()
           value: p
+  - of: isolationFlags
+    steps:
+      - var:
+          name: out
+          type: PeerFlags
+      - opt:
+          do:
+            - op: "|="
+              set: out
+              value: PeerStranded
+          when: f.Has(raft.IsolationStranded)
+      - opt:
+          do:
+            - op: "|="
+              set: out
+              value: PeerPinDenied
+          when: f.Has(raft.IsolationPinDenied)
+      - return: out
+  - of: isolatedText
+    participants:
+      - id: caller
+        kind: actor
+      - id: isolatedText
+        kind: self
+      - id: b.WriteByte
+        kind: value
+      - id: b.WriteString
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteByte(',')
+                    to: b.WriteByte
+                when: i > 0
+            - eval: b.WriteString(strconv.FormatUint(uint64(v.ID), 10))
+              to: b.WriteString
+            - bind: sep
+              eval: byte(':')
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - eval: b.WriteByte(sep)
+                          to: b.WriteByte
+                        - eval: b.WriteString(c.name)
+                          to: b.WriteString
+                        - set: sep
+                          value: "'+'"
+                      when: v.Flags.Has(c.flag)
+                key: _
+                range: isolationCauses
+                value: c
+          key: i
+          range: vs
+          value: v
+      - return: b.String()
+        to: b.String
   - of: (*Node).peerHealth
     participants:
       - id: caller
@@ -10524,6 +10608,8 @@ sequences:
         kind: self
       - id: wire
         kind: package
+      - id: isolatedText
+        kind: internal
       - id: n.obs.warn
         kind: internal
     steps:
@@ -10546,12 +10632,43 @@ sequences:
                 do:
                   - continue: true
                 when: err != nil
-            - eval: |-
-                n.obs.warn("consensus: administrative entry appended", lattr("index", e.Position.Index), lattr("kind", uint64(e.Kind)),
-                			lstr("operator", a.Operator), lattr("origin", uint64(a.Origin)), lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)))
+            - bind: attrs
+              eval: |-
+                []corelogger.AttrValue{
+                			lattr("index", e.Position.Index), lattr("kind", uint64(e.Kind)), lstr("operator", a.Operator),
+                			lattr("origin", uint64(a.Origin)), lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)),
+                		}
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - set: attrs
+                          value: append(attrs, lstr("isolated", iso))
+                      init:
+                        bind: iso
+                        eval: isolatedText(n.r.Isolated())
+                        to: isolatedText
+                      when: iso != ""
+                when: isolates(e.Kind, a.Change)
+            - eval: "n.obs.warn(\"consensus: administrative entry appended\", attrs...)"
               to: n.obs.warn
           key: i
           range: rd.Entries
+  - of: isolates
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: kind != coreconsensus.EntryMembership
+      - switch:
+          cases:
+            - case: wire.ChangeRemove, wire.ChangeUpdateAddress, wire.ChangeDenyPin
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": change
   - of: (*Node).stopOnUnsupported
     participants:
       - id: caller
@@ -17637,11 +17754,25 @@ sequences:
           do:
             - send:
                 chan: p.done
-                value: "propResult{err: origin(sentinelOf(code))}"
+                value: "propResult{err: origin(sentinelOf(code), guardFields(n.r.GuardRefusal())...)}"
             - return: ""
           when: code != 0
       - eval: n.appended(p, pos[0], true)
         to: n.appended
+  - of: guardFields
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(vs) == 0
+      - bind: why
+        eval: "\"a stopped voter would be left with no voucher it can reach: bring it back, or remove it first\""
+      - opt:
+          do:
+            - set: why
+              value: "\"a DenyPin withdrew the last voucher of a stopped voter: bring it back, or remove it first\""
+          when: slices.ContainsFunc(vs, func(v raft.IsolationValue) bool { return v.Flags.Has(raft.IsolationPinDenied) })
+      - return: "[]errs.FieldValue{errs.String(\"why\", why), errs.String(\"isolated\", isolatedText(vs))}"
   - of: (*Node).appended
     participants:
       - id: caller

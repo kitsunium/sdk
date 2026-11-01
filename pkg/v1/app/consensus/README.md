@@ -578,6 +578,15 @@ The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.MsgVoteResp`.
 
+<a name="PeerPinDenied"></a>
+```go
+const PeerPinDenied svcconsensus.PeerFlags = 16
+```
+
+The facts a PeerHealthValue carries, read with PeerFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerPinDenied`.
+
 <a name="PeerSnapshot"></a>
 ```go
 const PeerSnapshot svcconsensus.PeerFlags = 4
@@ -586,6 +595,15 @@ const PeerSnapshot svcconsensus.PeerFlags = 4
 The facts a PeerHealthValue carries, read with PeerFlags.Has.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshot`.
+
+<a name="PeerStranded"></a>
+```go
+const PeerStranded svcconsensus.PeerFlags = 8
+```
+
+The facts a PeerHealthValue carries, read with PeerFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerStranded`.
 
 <a name="PeerUnreachable"></a>
 ```go
@@ -3323,7 +3341,7 @@ type PeerHealthValue struct {
 	// ID is the peer.
 	ID          coreconsensus.NodeID
 	// Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
-	// PeerSnapshot.
+	// PeerSnapshot, PeerStranded, PeerPinDenied.
 	Flags       PeerFlags
 	// Match is the highest index the peer holds durably, as acknowledged.
 	Match       uint64
