@@ -211,38 +211,38 @@ func TestAStreamedPinOutlastsItsBoundWhileItsFollowerCatchesUp(t *testing.T) {
 // it — slower than the writes, it would hold the log growing until the log
 // is tight, and only a snapshot brings it back.
 func TestARenewedStreamedPinEndsOnceItsFollowerNoLongerCatchesUp(t *testing.T) {
-	for i, tc := range []struct {
+	type tc struct {
 		name   string
+		id     byte
 		behind bool
-	}{
-		{"stopped", false},
-		{"falling behind", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, l, lag, v, index := valveRun(t, byte(2+i))
-			at := stepPast(t, l, lag, v, index)
-			if _, _, kept := pinDue(l, lag, 1); !kept {
-				t.Fatalf("setup: the pin of a follower at %d, past %d, ended at its first bound", at, index)
+	}
+	runCase := func(t *testing.T, c tc) {
+		_, l, lag, v, index := valveRun(t, c.id)
+		at := stepPast(t, l, lag, v, index)
+		if _, _, kept := pinDue(l, lag, 1); !kept {
+			t.Fatalf("setup: the pin of a follower at %d, past %d, ended at its first bound", at, index)
+		}
+		if c.behind {
+			// Writes the follower is not sent, more than it caught up since
+			// its install, then one step: it moved, and it is further behind
+			// than its install left it.
+			for k := range 60 {
+				propose(t, l.node, catchUpEntry("c", k))
 			}
-			if tc.behind {
-				// Writes the follower is not sent, more than it caught up
-				// since its install, then one step: it moved, and it is
-				// further behind than its install left it.
-				for k := range 60 {
-					propose(t, l.node, catchUpEntry("c", k))
-				}
-				var match uint64
-				l.node.exec(func() { match, _, _ = l.node.r.Progress(lag.id) })
-				stepPast(t, l, lag, v, match)
-			}
-			// A late acknowledgement may still move the follower once after
-			// the last renewal: let it land, then the pin is renewed at most
-			// once more, and ends.
-			time.Sleep(100 * time.Millisecond)
-			match, last, kept := pinDue(l, lag, 2)
-			if kept {
-				t.Fatalf("the pin of a follower that no longer catches up — at %d, %d behind the leader's last index %d — held past two more bounds", match, last-match, last)
-			}
-		})
+			var match uint64
+			l.node.exec(func() { match, _, _ = l.node.r.Progress(lag.id) })
+			stepPast(t, l, lag, v, match)
+		}
+		// A late acknowledgement may still move the follower once after the
+		// last renewal: let it land, then the pin is renewed at most once
+		// more, and ends.
+		time.Sleep(100 * time.Millisecond)
+		match, last, kept := pinDue(l, lag, 2)
+		if kept {
+			t.Fatalf("the pin of a follower that no longer catches up — at %d, %d behind the leader's last index %d — held past two more bounds", match, last-match, last)
+		}
+	}
+	for _, c := range []tc{{name: "stopped", id: 2}, {name: "falling behind", id: 3, behind: true}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }

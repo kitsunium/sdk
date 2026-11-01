@@ -1729,13 +1729,8 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     waited for it on the event loop.
   - On the receiving side, an install from a higher term, or of a newer
     snapshot id, replaces a stale receive spool.
-  - Once the transfer ended, the pin follows the peer's match until the
-    peer catches up, for its peer's pin bound, renewed at that bound while
-    the peer moved since and is no further behind than the transfer's end
-    left it (amendment of 2026-11-01, #771).
   - A simulator case makes a transfer last longer than the cut interval,
-    under write load, and the follower must still catch up, by appends
-    for longer than the pin bound as well (#771).
+    under write load, and the follower must still catch up.
 - **Install (R1-15, R2-10):**
   - only from the leader of the receiver's current term;
   - the `InstallRequest` carries the sender's authenticated identity and
