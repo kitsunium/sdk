@@ -24,7 +24,7 @@ func TestBufs_growUpToCount(t *testing.T) {
 		t.Skipf("io_uring %s: %v", step, errno)
 	}
 	defer u.close()
-	if errno := u.setupBuffers(64, 64, 8); errno != 0 {
+	if errno := u.setupBuffers(64, 64, 8, false); errno != 0 {
 		t.Skipf("buffer ring: %v", errno)
 	}
 	if u.bufProvided != 8 || u.groups[0].tail != 8 {
@@ -58,7 +58,7 @@ func TestBufs_groupsAsNeeded(t *testing.T) {
 		t.Skipf("io_uring %s: %v", step, errno)
 	}
 	defer u.close()
-	if errno := u.setupBuffers(2*defaultBufs, 64, 8); errno != 0 {
+	if errno := u.setupBuffers(2*defaultBufs, 64, 8, false); errno != 0 {
 		t.Skipf("buffer ring: %v", errno)
 	}
 	if len(u.groups) != 1 || u.bufPer != defaultBufs {
@@ -128,7 +128,12 @@ func TestConformance_buffersFollowDemand(t *testing.T) {
 				<-release
 			}
 		}
-		g, addr := serve(t, b, h, func(c *Config) { c.Value.Loops, c.Value.Rings = 1, 1 })
+		// The growth is the plain mode's: consumed incrementally, a burst
+		// of short lines fits in the first buffers (pbufinc_uring_linux_test.go).
+		g, addr := serve(t, b, h, func(c *Config) {
+			c.Value.Loops, c.Value.Rings = 1, 1
+			bufMode(c, false)
+		})
 		rr := uringOf(g).rings[0]
 		var count uint32
 		provided := func() (n uint32) {

@@ -119,6 +119,7 @@ go_test(
         "gen_api_test.go",
         "memory_linux_test.go",
         "parts_internal_test.go",
+        "pbufinc_uring_linux_test.go",
         "slots_internal_test.go",
         "starve_uring_linux_test.go",
         "uring_abi_linux_internal_test.go",

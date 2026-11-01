@@ -67,6 +67,14 @@ constants:
         type: Capability
         value: "\"uring-pbuf\""
       - doc: |-
+          CapabilityURingPbufInc is the provided-buffer ring consumed incrementally
+          (IOU_PBUF_RING_INC, 6.12): a buffer serves recv after recv, each from where the
+          last stopped (ADR 0204). Switched off, or refused by the kernel, each recv takes
+          a whole buffer.
+        name: CapabilityURingPbufInc
+        type: Capability
+        value: "\"uring-pbuf-inc\""
+      - doc: |-
           CapabilityURingDirect is io_uring's direct descriptors, chosen when the release
           check passes (a kernel from 6.13). Switched off, connections live in the process
           table and the release check does not run.
@@ -127,12 +135,6 @@ constants:
         name: CapabilityURingBundle
         type: Capability
         value: "\"uring-bundle\""
-      - doc: |-
-          CapabilityURingPbufInc is the incrementally consumed buffer ring
-          (IOU_PBUF_RING_INC).
-        name: CapabilityURingPbufInc
-        type: Capability
-        value: "\"uring-pbuf-inc\""
       - doc: CapabilityBusyPoll is busy polling of the network device's queue.
         name: CapabilityBusyPoll
         type: Capability

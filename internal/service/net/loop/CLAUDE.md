@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T12:00:00Z -->
+<!-- updated: 2026-11-01T18:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -172,8 +172,26 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   with spurious ENOBUFS. A growth adds the slack to what the burst lacked. A
   request larger than a buffer arrives over several completions and the
   spill joins them, as a split read always did.
+- **io_uring: a buffer serves recv after recv where the kernel allows (ADR
+  0204).** Every buffer group is registered with `IOU_PBUF_RING_INC` (6.12):
+  the kernel consumes a buffer as far as each completion took and posts it
+  with `IORING_CQE_F_BUF_MORE` while it keeps the rest. `uring.took` hands
+  out a completion's bytes from `bufOff[bid]`, where the buffer's previous
+  completion stopped, and `takeBuf` neither counts a `BUF_MORE` buffer out of
+  `inRing` nor queues it: only its completion without the flag does, and
+  `addBuf` resets its count when it goes back. The first ring the kernel
+  refuses the flag (`EINVAL`, before 6.12; `failStage` `pbuf_inc` plays it)
+  registers its groups plainly, the loop's later rings do not ask
+  (`uLoop.incRefused`), and the row reads absent. Starvation, growth,
+  groups and their slack are ADR 0203's, a conservative bound here. 50 000
+  connections bursting on one ring: 512 buffers and no ENOBUFS, against
+  50 801 and 49 489 a buffer a recv; the burst's last echo +16 % at the
+  median on two CPUs (`TestConformance_noStarvationAtScale` and
+  `TestConformance_bufferFaults` run both modes; `TestURingPbufInc_bufMore`
+  watches each buffer through `loopHooks.bufSeen`).
 - **io_uring: buffers go back after `OnBatchEnd`, once each.** A CQE's bid is
-  queued on `recycle` and returned by `returnBuffers` after the batch. A recv
+  queued on `recycle` — on its last completion, under incremental
+  consumption — and returned by `returnBuffers` after the batch. A recv
   that ran out (ENOBUFS, no `F_MORE`) waits on `starved`, a bounded queue,
   and is re-armed as long as the kernel holds a buffer (`inRing`, per group),
   not only when this batch returned one. Re-arming only on a batch's own
@@ -295,14 +313,15 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   with the reason in `State` and on the start line. An explicit io_uring
   fails with `LoopBackendUnavailable` naming the stage.
 - **Capabilities: classes, switches, report (ADR 0189).** Class A-kernel
-  (multishot recv, the buffer ring, direct descriptors, `EPOLLEXCLUSIVE`,
-  `TCP_NODELAY`) is on once probed; class A-code (`DEFER_TASKRUN`,
+  (multishot recv, the buffer ring, its incremental consumption, direct
+  descriptors, `EPOLLEXCLUSIVE`, `TCP_NODELAY`) is on once probed; class A-code (`DEFER_TASKRUN`,
   `NO_SQARRAY`, `RING_FDS`, `SQ_REWIND`) only on `LoopValue.Capabilities`;
   class B is declared and refused. `Config.Disabled` is never probed:
   `uring-pbuf` off rules io_uring out (auto runs epoll, not degraded),
   `uring-multishot-recv` off makes every recv single-shot (`singleShot`, the
   state machine re-arms), `uring-direct` off puts the self-test and the
-  connections in the process table, `epoll-exclusive` off registers the
+  connections in the process table, `uring-pbuf-inc` off registers the
+  buffer rings without `IOU_PBUF_RING_INC`, `epoll-exclusive` off registers the
   listeners plainly (probed on a throwaway epoll and eventfd otherwise).
   `State().Capabilities` holds one row per `loopCaps` entry, server appends
   its `tcp-nodelay` row.

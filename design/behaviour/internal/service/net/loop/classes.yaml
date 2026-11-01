@@ -601,6 +601,12 @@ constants:
       - name: cqeFMore
         type: uint32
         value: 1 << 1
+      - doc: |-
+          cqeFBufMore is IORING_CQE_F_BUF_MORE (6.12): the completion's buffer
+          stays the kernel's, partly consumed, for more completions.
+        name: cqeFBufMore
+        type: uint32
+        value: 1 << 4
       - name: cqeBufferShift
         type: uint32
         value: "16"
@@ -647,6 +653,12 @@ constants:
         name: pbufRingMmap
         type: uint16
         value: "1"
+      - doc: |-
+          pbufRingInc is IOU_PBUF_RING_INC (6.12): a buffer is consumed as far
+          as each completion took, and serves the next from where it stopped.
+        name: pbufRingInc
+        type: uint16
+        value: "2"
       - name: offPbufRing
         type: uintptr
         value: "0x80000000"
@@ -1209,6 +1221,8 @@ files:
       - (*uLoop).build
       - orErrno
       - (*uLoop).newRing
+      - (*uLoop).setupBufs
+      - (*uLoop).reportPbufInc
       - (*uLoop).bufShape
       - bufCountFor
       - (*uLoop).registerFan
@@ -1254,6 +1268,7 @@ files:
       - (*uRing).setEpoch
       - (*uRing).owns
       - (*uRing).onRecv
+      - (*uRing).takeBuf
       - (*uRing).recvCancelled
       - (*uRing).recvBytes
       - (*uRing).recvStarved
@@ -1354,6 +1369,7 @@ files:
       - registerBufRing
       - (*uring).bufEntries
       - (*uring).groupOf
+      - (*uring).took
       - (*uring).buf
       - (*uring).addBuf
       - (*uring).publishBufs
@@ -2848,6 +2864,15 @@ types:
           close issues.
         name: taken
         type: func(op, flags uint8, opFlags uint32)
+      - doc: |-
+          bufSeen sees, on the loop's thread, each recv completion that carried
+          a provided buffer — its bid, where its bytes start in the buffer, how
+          many, and whether the kernel keeps the buffer (BUF_MORE) — and, with
+          returned set, each buffer handed back to the kernel. The
+          incremental-consumption test checks a buffer is returned only once the
+          kernel let it go.
+        name: bufSeen
+        type: func(bid uint16, off, n int, kept, returned bool)
     kind: struct
     name: loopHooks
   - fields:
@@ -3660,16 +3685,25 @@ types:
         params: slot int32, gen uint32, c *cqe
         recv: rr *uRing
       - doc: |-
+          takeBuf returns the bytes a recv completion received, none without a
+          buffer, and queues the buffer to go back after the batch once the kernel
+          is done with it: incrementally consumed, only on its completion without
+          BUF_MORE (ADR 0204).
+        name: takeBuf
+        params: c *cqe
+        recv: rr *uRing
+        results: "[]byte"
+      - doc: |-
           recvCancelled re-arms the recv of a connection still open whose recv was
           cancelled and ended.
         name: recvCancelled
         params: slot int32, more bool
         recv: rr *uRing
       - doc: |-
-          recvBytes delivers n bytes of buffer bid to an open connection, and
-          re-arms its recv when the multishot ended.
+          recvBytes delivers the bytes a completion received to an open
+          connection, and re-arms its recv when the multishot ended.
         name: recvBytes
-        params: slot int32, bid uint16, n int32, more bool
+        params: slot int32, data []byte, more bool
         recv: rr *uRing
       - doc: |-
           recvStarved queues an open connection whose recv ran out of buffers, to
@@ -3990,6 +4024,11 @@ types:
       - name: lastArrival
         type: time.Duration
       - doc: |-
+          incRefused is the kernel's refusal of IOU_PBUF_RING_INC to a ring of
+          the loop, zero while none refused it.
+        name: incRefused
+        type: syscall.Errno
+      - doc: |-
           bufBytes is the bytes of provided buffers the loop's rings handed
           their kernels so far, bounded by bufBudget (bufBudgetFor).
         name: bufBytes
@@ -4098,6 +4137,21 @@ types:
         params: i int, sweep bool
         recv: ul *uLoop
         results: "*uRing, error"
+      - doc: |-
+          setupBufs gives ring u its provided buffers, consumed incrementally
+          (IOU_PBUF_RING_INC) unless the operator switched it off or the kernel
+          refused it to a ring of the loop before: the first refusal settles the
+          loop's rings, and the report (ADR 0204).
+        name: setupBufs
+        params: u *uring
+        recv: ul *uLoop
+        results: syscall.Errno
+      - doc: |-
+          reportPbufInc records what the rings' buffer rings settled:
+          IOU_PBUF_RING_INC on, or absent with the kernel's refusal. A switched-off
+          row stays disabled: the flag was never asked for.
+        name: reportPbufInc
+        recv: ul *uLoop
       - doc: |-
           bufShape is a ring's provided buffers: how many it may have, their size,
           and how many it starts with; or a test's tiny buffer ring, all of it from
@@ -4446,6 +4500,18 @@ types:
           has been given so far; the others were never touched.
         name: bufProvided
         type: uint32
+      - doc: |-
+          bufInc is whether the groups' rings are consumed incrementally
+          (IOU_PBUF_RING_INC): a buffer serves completions until one comes
+          without IORING_CQE_F_BUF_MORE, each from where the last stopped,
+          bufOff[bid] bytes in. incRefused is the kernel's answer when it
+          refused the flag.
+        name: bufInc
+        type: bool
+      - name: bufOff
+        type: "[]uint32"
+      - name: incRefused
+        type: syscall.Errno
       - doc: retries counts busy submits retried.
         name: retries
         type: uint64
@@ -4612,9 +4678,11 @@ types:
           count must be a power of two, at most maxBufs; a group holds defaultBufs
           of them, or count when that is fewer. The mapping is private and
           anonymous, so a buffer the kernel was never given is no resident page, and
-          a group never needed costs no kernel memory.
+          a group never needed costs no kernel memory. With inc the rings are asked
+          for incremental consumption; a kernel that refuses it (EINVAL, before
+          6.12) gets the rings as before, the refusal kept in incRefused.
         name: setupBuffers
-        params: count, size, first uint32
+        params: count, size, first uint32, inc bool
         recv: u *uring
         results: syscall.Errno
       - doc: |-
@@ -4631,13 +4699,15 @@ types:
         recv: u *uring
         results: syscall.Errno
       - doc: |-
-          mapBufRing registers group bgid's ring of count entries and maps it.
-          It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a ring in user
-          pages is pinned and charged to RLIMIT_MEMLOCK, which an unprivileged
-          process runs out of after a few rings (CI's non-root lane did). A kernel
-          that does not know the flag (EINVAL) gets the ring in user pages.
+          mapBufRing registers group bgid's ring of count entries, with flags, and
+          maps it. It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a
+          ring in user pages is pinned and charged to RLIMIT_MEMLOCK, which an
+          unprivileged process runs out of after a few rings (CI's non-root lane
+          did). A kernel that does not know the flag (EINVAL) gets the ring in user
+          pages; with flags, an EINVAL is returned instead, since the kernel may
+          refuse those as well (a kernel with IOU_PBUF_RING_INC has MMAP).
         name: mapBufRing
-        params: bgid uint16, count uint32
+        params: bgid uint16, count uint32, flags uint16
         recv: u *uring
         results: "[]byte, syscall.Errno"
       - doc: bufEntries views group g's buffer ring.
@@ -4650,6 +4720,15 @@ types:
         params: bid uint16
         recv: u *uring
         results: int
+      - doc: |-
+          took returns the n bytes a completion received into buffer bid, and
+          whether the buffer stays the kernel's (bufMore, incremental only). Under
+          incremental consumption the bytes start where the buffer's previous
+          completion stopped; otherwise at its start.
+        name: took
+        params: bid uint16, n int32, bufMore bool
+        recv: u *uring
+        results: "[]byte, bool"
       - doc: buf returns buffer bid's bytes.
         name: buf
         params: bid uint16
@@ -4767,6 +4846,7 @@ vars:
           [...]capClass{
           	{corenet.CapabilityURingMultishotRecv, classKernel},
           	{corenet.CapabilityURingPbuf, classKernel},
+          	{corenet.CapabilityURingPbufInc, classKernel},
           	{corenet.CapabilityURingDirect, classKernel},
           	{corenet.CapabilityEpollExclusive, classKernel},
           	{corenet.CapabilityURingDeferTaskrun, classCode},
@@ -4775,7 +4855,6 @@ vars:
           	{corenet.CapabilityURingSQRewind, classCode},
           	{corenet.CapabilityURingSendZC, classB},
           	{corenet.CapabilityURingBundle, classB},
-          	{corenet.CapabilityURingPbufInc, classB},
           	{corenet.CapabilityBusyPoll, classB},
           	{corenet.CapabilityURingZCRX, classB},
           	{corenet.CapabilityReuseportCBPF, classB},
