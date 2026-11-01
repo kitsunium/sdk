@@ -77,6 +77,17 @@ const (
 	// closingCompact is the fewest looked-at closes compactClosing moves
 	// out of a queue that never empties.
 	closingCompact int = 1024
+	// fillFull is uRing.fill's bit for a ring near its table's end, or
+	// passed over, so the ring after it accepts too.
+	fillFull uint8 = 1
+	// fillClosed is uRing.fill's bit for a ring a ring before it keeps from
+	// accepting: one of them is not full.
+	fillClosed uint8 = 2
+	// fillShare is the share of its table, as a divisor, a ring may still
+	// have free when the next ring starts accepting (uRing.fillStep): an
+	// eighth, so the next ring's accepts are armed well before this one
+	// pauses under its reserve (ADR 0203 §D1).
+	fillShare int = 8
 )
 
 // udPack builds a user_data: the operation, 24 bits of generation, the slot.
@@ -122,6 +133,12 @@ type uRing struct {
 	// ring that stopped accepting under its reserve.
 	armed  []int
 	paused bool
+	// fill holds fillFull, the ring near its table's end or accepting
+	// nothing for a reason of its own, so the ring after it accepts too; and
+	// fillClosed, a ring before it not full, so this one accepts nothing new
+	// (ADR 0203 §D1). Rings fill in order: a ring past the first is used only
+	// once those before it are.
+	fill uint8
 	// queueDone is, per listener, that the ring took its share of the
 	// listener's queue as the group drains and handed it back (plan P6);
 	// queueCancel that a cancel of its accepts is in flight. take is
@@ -502,6 +519,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 		//: named.
 		return nil, err
 	}
+	rr.fillAtStart()
 	rr.armAccepts()
 	//: built.
 	return rr, nil
@@ -622,11 +640,94 @@ func (rr *uRing) armAccepts() {
 	}
 }
 
-// acceptsNothing reports a ring that arms no accept: paused, draining, or
-// the primary a test keeps idle.
+// acceptsNothing reports a ring that arms no accept: paused, draining,
+// closed until the rings before it are full, or the primary a test keeps
+// idle.
 func (rr *uRing) acceptsNothing() bool {
 	//: any of them.
-	return rr.paused || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+	return rr.paused || rr.fill&fillClosed != 0 || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+}
+
+// passedOver reports a ring that accepts nothing for a reason of its own,
+// whatever its table holds: the watchdog drained it, or it is the primary a
+// test keeps idle. The ring after it accepts in its place.
+func (rr *uRing) passedOver() bool {
+	//: either.
+	return rr.r.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+}
+
+// fillAtStart sets the fill state of a ring as it is built, after the rings
+// before it: full when passed over from the start, closed behind a ring that
+// has room — every ring past the first, unless the primary is a test's idle
+// one.
+func (rr *uRing) fillAtStart() {
+	//: passed over: the next ring accepts in its place.
+	if rr.passedOver() {
+		rr.fill |= fillFull
+	}
+	//: closed until the rings before it are full.
+	if !rr.ul.opens(rr.r.index) {
+		rr.fill |= fillClosed
+	}
+}
+
+// opens reports whether ring i may accept: every ring before it is full.
+func (ul *uLoop) opens(i int) bool {
+	//: the rings before it, in order.
+	for _, rr := range ul.rings[:i] {
+		//: one has room: it takes the connections.
+		if rr.fill&fillFull == 0 {
+			//: closed.
+			return false
+		}
+	}
+	//: open.
+	return true
+}
+
+// fillStep moves the ring's fill state with hysteresis: full once its free
+// entries fall to fillMargin, or once it is passed over; not full again only
+// past twice the margin, so a table hovering at the margin does not open and
+// close the next ring at each batch. A ring a ring before it no longer lets
+// accept cancels its accepts in flight once; the connections it holds stay
+// (ADR 0203 §D1). The rings are stepped in order, so ring i reads its
+// predecessors' state of this batch.
+func (rr *uRing) fillStep() {
+	//: the drain's take arms accepts on every ring: the fill is the
+	//: serving group's.
+	if rr.ul.lp.draining {
+		//: as it stands.
+		return
+	}
+	free := rr.ul.lp.sz.tableSize - rr.used()
+	margin := fillMargin(rr.ul.lp.sz.tableSize)
+	//: by the free entries, a passed-over ring always full.
+	switch {
+	//: near the end, or out of the order: the next ring accepts too.
+	case rr.passedOver() || free <= margin:
+		rr.fill |= fillFull
+	//: well clear of it: the next ring takes nothing new.
+	case free > 2*margin:
+		rr.fill &^= fillFull
+	}
+	open := rr.ul.opens(rr.r.index)
+	//: a ring before it has room again: this one stops accepting.
+	if !open && rr.fill&fillClosed == 0 {
+		rr.fill |= fillClosed
+		rr.cancelAccepts()
+	}
+	//: every ring before it full: it accepts.
+	if open {
+		rr.fill &^= fillClosed
+	}
+}
+
+// fillMargin is how many free entries of a table of table entries make a
+// ring full: an eighth, and never under twice the accept reserve, so the
+// next ring accepts before this one pauses.
+func fillMargin(table int) int {
+	//: the larger.
+	return max(table/fillShare, 2*max(min(acceptReserve, table/8), 1))
 }
 
 // acceptRoom is how many more accepts may be in flight: the free entries
@@ -793,6 +894,7 @@ func (rr *uRing) pace() {
 	if rr.ul.lp.hard && !rr.ul.direct {
 		rr.r.evict()
 	}
+	rr.fillStep()
 	rr.armAccepts()
 }
 

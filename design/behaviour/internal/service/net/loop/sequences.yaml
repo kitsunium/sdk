@@ -4310,6 +4310,8 @@ sequences:
         kind: stdlib
       - id: ul.registerFan
         kind: internal
+      - id: rr.fillAtStart
+        kind: internal
       - id: rr.armAccepts
         kind: internal
     steps:
@@ -4388,6 +4390,8 @@ sequences:
             eval: ul.registerFan(i, u)
             to: ul.registerFan
           when: err != nil
+      - eval: rr.fillAtStart()
+        to: rr.fillAtStart
       - eval: rr.armAccepts()
         to: rr.armAccepts
       - return: rr, nil
@@ -4541,7 +4545,78 @@ sequences:
           value: fd
   - of: (*uRing).acceptsNothing
     steps:
-      - return: rr.paused || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+      - return: rr.paused || rr.fill&fillClosed != 0 || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+  - of: (*uRing).passedOver
+    steps:
+      - return: rr.r.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+  - of: (*uRing).fillAtStart
+    steps:
+      - opt:
+          do:
+            - op: "|="
+              set: rr.fill
+              value: fillFull
+          when: rr.passedOver()
+      - opt:
+          do:
+            - op: "|="
+              set: rr.fill
+              value: fillClosed
+          when: "!rr.ul.opens(rr.r.index)"
+  - of: (*uRing).fillStep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).fillStep
+        kind: self
+      - id: fillMargin
+        kind: internal
+      - id: rr.ul.opens
+        kind: internal
+      - id: rr.cancelAccepts
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: rr.ul.lp.draining
+      - bind: free
+        eval: rr.ul.lp.sz.tableSize - rr.used()
+      - bind: margin
+        eval: fillMargin(rr.ul.lp.sz.tableSize)
+        to: fillMargin
+      - switch:
+          cases:
+            - case: rr.passedOver() || free <= margin
+              do:
+                - op: "|="
+                  set: rr.fill
+                  value: fillFull
+            - case: free > 2*margin
+              do:
+                - op: "&^="
+                  set: rr.fill
+                  value: fillFull
+      - bind: open
+        eval: rr.ul.opens(rr.r.index)
+        to: rr.ul.opens
+      - opt:
+          do:
+            - op: "|="
+              set: rr.fill
+              value: fillClosed
+            - eval: rr.cancelAccepts()
+              to: rr.cancelAccepts
+          when: "!open && rr.fill&fillClosed == 0"
+      - opt:
+          do:
+            - op: "&^="
+              set: rr.fill
+              value: fillClosed
+          when: open
+  - of: fillMargin
+    steps:
+      - return: max(table/fillShare, 2*max(min(acceptReserve, table/8), 1))
   - of: (*uRing).acceptRoom
     steps:
       - bind: table
@@ -4700,6 +4775,8 @@ sequences:
         kind: internal
       - id: rr.r.evict
         kind: internal
+      - id: rr.fillStep
+        kind: internal
       - id: rr.armAccepts
         kind: internal
     steps:
@@ -4729,6 +4806,8 @@ sequences:
             - eval: rr.r.evict()
               to: rr.r.evict
           when: rr.ul.lp.hard && !rr.ul.direct
+      - eval: rr.fillStep()
+        to: rr.fillStep
       - eval: rr.armAccepts()
         to: rr.armAccepts
   - of: (*uLoop).serve

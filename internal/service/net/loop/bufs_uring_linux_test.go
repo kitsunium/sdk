@@ -121,7 +121,7 @@ func TestConformance_buffersFollowDemand(t *testing.T) {
 
 // heard opens n connections to addr one after the other, each sending one
 // line and reading its echo.
-func heard(t *testing.T, addr string, n int) []stdnet.Conn {
+func heard(t testing.TB, addr string, n int) []stdnet.Conn {
 	t.Helper()
 	conns := make([]stdnet.Conn, 0, n)
 	for range n {

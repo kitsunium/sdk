@@ -322,7 +322,7 @@ func pattern(n int) []byte {
 
 // serve starts a group on b with h, listening on loopback, and returns its
 // address. mod adjusts the Config first.
-func serve(t *testing.T, b backendCase, h corenet.LoopHandler, mod func(*Config)) (*Group, string) {
+func serve(t testing.TB, b backendCase, h corenet.LoopHandler, mod func(*Config)) (*Group, string) {
 	t.Helper()
 	fd, addr := listenFD(t)
 	cfg := Config{Group: t.Name(), Value: corenet.LoopValue{Backend: b.backend}, Handler: h, Listeners: []Listener{{FD: fd}}, Log: io.Discard}
@@ -339,7 +339,7 @@ func serve(t *testing.T, b backendCase, h corenet.LoopHandler, mod func(*Config)
 
 // listenFD binds a loopback listener and hands back a duplicated,
 // non-blocking, close-on-exec descriptor of it, as server does.
-func listenFD(t *testing.T) (int, string) {
+func listenFD(t testing.TB) (int, string) {
 	t.Helper()
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {

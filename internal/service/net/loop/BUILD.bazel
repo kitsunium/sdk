@@ -115,6 +115,7 @@ go_test(
         "core_internal_test.go",
         "drain_take_linux_test.go",
         "drain_take_uring_linux_test.go",
+        "fill_uring_linux_test.go",
         "gen_api_test.go",
         "memory_linux_test.go",
         "parts_internal_test.go",

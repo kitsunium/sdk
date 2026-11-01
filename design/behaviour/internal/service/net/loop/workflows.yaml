@@ -57,6 +57,18 @@ workflows:
                 when: r.rows[i].Name == c && r.rows[i].Status != statusDisabled
           key: i
           range: r.rows
+  - of: (*uLoop).opens
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: rr.fill&fillFull == 0
+          key: _
+          range: ul.rings[:i]
+          value: rr
+      - return: "true"
   - of: (*uRing).cancelAccepts
     steps:
       - loop:

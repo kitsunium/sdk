@@ -802,6 +802,26 @@ constants:
         name: closingCompact
         type: int
         value: "1024"
+      - doc: |-
+          fillFull is uRing.fill's bit for a ring near its table's end, or
+          passed over, so the ring after it accepts too.
+        name: fillFull
+        type: uint8
+        value: "1"
+      - doc: |-
+          fillClosed is uRing.fill's bit for a ring a ring before it keeps from
+          accepting: one of them is not full.
+        name: fillClosed
+        type: uint8
+        value: "2"
+      - doc: |-
+          fillShare is the share of its table, as a divisor, a ring may still
+          have free when the next ring starts accepting (uRing.fillStep): an
+          eighth, so the next ring's accepts are armed well before this one
+          pauses under its reserve (ADR 0203 §D1).
+        name: fillShare
+        type: int
+        value: "8"
     name: acceptDepth
   - doc: |-
       peerPeekBytes is the release check's read buffer: any read will do, the
@@ -1169,6 +1189,11 @@ files:
       - (*uRing).pollFD
       - (*uRing).armAccepts
       - (*uRing).acceptsNothing
+      - (*uRing).passedOver
+      - (*uRing).fillAtStart
+      - (*uLoop).opens
+      - (*uRing).fillStep
+      - fillMargin
       - (*uRing).acceptRoom
       - (*uRing).cancelAccepts
       - (*uRing).cancelAccept
@@ -1600,6 +1625,13 @@ functions:
     name: orErrno
     params: a, b syscall.Errno
     results: syscall.Errno
+  - doc: |-
+      fillMargin is how many free entries of a table of table entries make a
+      ring full: an eighth, and never under twice the accept reserve, so the
+      next ring accepts before this one pauses.
+    name: fillMargin
+    params: table int
+    results: int
   - doc: |-
       takeWaits reports whether an accept's failure leaves the drain's take
       going: its own cancel, a connection the peer abandoned, a signal, an empty
@@ -3269,6 +3301,14 @@ types:
       - name: paused
         type: bool
       - doc: |-
+          fill holds fillFull, the ring near its table's end or accepting
+          nothing for a reason of its own, so the ring after it accepts too; and
+          fillClosed, a ring before it not full, so this one accepts nothing new
+          (ADR 0203 §D1). Rings fill in order: a ring past the first is used only
+          once those before it are.
+        name: fill
+        type: uint8
+      - doc: |-
           queueDone is, per listener, that the ring took its share of the
           listener's queue as the group drains and handed it back (plan P6);
           queueCancel that a cancel of its accepts is in flight. take is
@@ -3378,11 +3418,36 @@ types:
         name: armAccepts
         recv: rr *uRing
       - doc: |-
-          acceptsNothing reports a ring that arms no accept: paused, draining, or
-          the primary a test keeps idle.
+          acceptsNothing reports a ring that arms no accept: paused, draining,
+          closed until the rings before it are full, or the primary a test keeps
+          idle.
         name: acceptsNothing
         recv: rr *uRing
         results: bool
+      - doc: |-
+          passedOver reports a ring that accepts nothing for a reason of its own,
+          whatever its table holds: the watchdog drained it, or it is the primary a
+          test keeps idle. The ring after it accepts in its place.
+        name: passedOver
+        recv: rr *uRing
+        results: bool
+      - doc: |-
+          fillAtStart sets the fill state of a ring as it is built, after the rings
+          before it: full when passed over from the start, closed behind a ring that
+          has room — every ring past the first, unless the primary is a test's idle
+          one.
+        name: fillAtStart
+        recv: rr *uRing
+      - doc: |-
+          fillStep moves the ring's fill state with hysteresis: full once its free
+          entries fall to fillMargin, or once it is passed over; not full again only
+          past twice the margin, so a table hovering at the margin does not open and
+          close the next ring at each batch. A ring a ring before it no longer lets
+          accept cancels its accepts in flight once; the connections it holds stay
+          (ADR 0203 §D1). The rings are stepped in order, so ring i reads its
+          predecessors' state of this batch.
+        name: fillStep
+        recv: rr *uRing
       - doc: |-
           acceptRoom is how many more accepts may be in flight: the free entries
           above the reserve, less those the accepts in flight will take.
@@ -3954,6 +4019,11 @@ types:
         name: onFD
         params: s *sqe
         recv: ul *uLoop
+      - doc: "opens reports whether ring i may accept: every ring before it is full."
+        name: opens
+        params: i int
+        recv: ul *uLoop
+        results: bool
       - doc: |-
           queuesTaken reports whether every ring of the loop handed every listener
           back.
