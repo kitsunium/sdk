@@ -1729,8 +1729,13 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     waited for it on the event loop.
   - On the receiving side, an install from a higher term, or of a newer
     snapshot id, replaces a stale receive spool.
+  - Once the transfer ended, the pin follows the peer's match until the
+    peer catches up, for its peer's pin bound, renewed at that bound while
+    the peer moved since and is no further behind than the transfer's end
+    left it (amendment of 2026-11-01, #771).
   - A simulator case makes a transfer last longer than the cut interval,
-    under write load, and the follower must still catch up.
+    under write load, and the follower must still catch up, by appends
+    for longer than the pin bound as well (#771).
 - **Install (R1-15, R2-10):**
   - only from the leader of the receiver's current term;
   - the `InstallRequest` carries the sender's authenticated identity and
@@ -6328,6 +6333,56 @@ offline check of #758 already held the rule this guard missed: a key
   C's removal then goes through). The tests of #603, #761, #763 and #765
   stay green.
 
+## Amendment — a streamed snapshot's pin is renewed while its follower catches up (2026-11-01, #771)
+
+#550 pinned compaction, once a snapshot streamed, to the peer's match until
+the peer caught up, for its pin bound after the stream's end: #602's ten
+maximum election timeouts, which #610 doubles for a receiver slow to
+restore. The bound ran from the stream's end whatever the follower's
+progress. A follower that installed a long transfer under a steady write
+rate sits at the snapshot, behind by what was written meanwhile, and
+catches up by appends at its link's rate less the write rate. When that
+took longer than the bound, the pin ended, the cut pushed at once compacted
+past its match, the leader offered it the newest snapshot, and it fell as
+far behind again: cycle after cycle it never caught up while the writes
+lasted, one voter short and one full transfer each time. #610's doubling
+follows a stream that came due, never one that kept moving, so nothing
+lengthened the next cycle's pin
+([#771](https://github.com/kitsunium/sdk/issues/771)).
+
+- **The pin is renewed while its follower catches up.** At its bound, a
+  streamed snapshot's pin holds for another pin bound when its follower
+  moved since the stream's end or the last renewal, and is no further
+  behind the leader's last index than the stream's end left it
+  (`renewPin`). The tick (`watchPins`) and a cut (`afterCut`) both renew it
+  before they judge it, so a cut never ends a pin the next tick keeps.
+- **Still bounded.** A follower that stopped moving keeps its pin until the
+  first bound after its last move, two bounds at most. One that falls
+  further behind than the stream's end left it, slower than the writes,
+  loses it at the next bound: held, it would keep the log growing until
+  the log is tight, and only a snapshot brings it back. The log a renewed
+  pin holds back is the follower's lag, no more at each bound than the
+  stream's end left, and a tight log still ends every streamed pin (#622).
+  A pin ends as before once this node no longer leads the peer, and once
+  the peer's match reaches the last index (#588).
+- **What the earlier fixes keep.** A stream's pin, its bound, its doubling
+  (#602, #610, #623) and the lift on a tight log (#622) are unchanged.
+- **No format change.** No frame, field, flag or record changes, nothing
+  persisted, no protocol raise, and no raft mutation.
+- **Tests.** `TestAStreamedPinOutlastsItsBoundWhileItsFollowerCatchesUp`
+  (the leader's frames to the follower held by a valve the test steps, the
+  bound crossed by handing `watchPins` the instant after it; on main the
+  pin of a follower 7 entries past its install and 53 behind the leader
+  ends at its first bound; fixed, it is renewed twice, and the follower
+  catches up by appends with no second snapshot) and
+  `TestARenewedStreamedPinEndsOnceItsFollowerNoLongerCatchesUp` (a renewed
+  pin ends at the next bounds once its follower stops, and once it falls
+  further behind than its install left it). The issue's scenario, a 20 s
+  transfer under 160 entries a second with a pin bound of 10 s, catches up
+  by appends 39 s in with one transfer; on main it was sent a snapshot at
+  every cycle and never caught up under the load. The tests of #550, #588,
+  #602, #610, #622 and #623 stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6372,6 +6427,7 @@ offline check of #758 already held the rule this guard missed: a key
 | #768 | Raft hunt loop, 2026-10-30 | the snapshot store holds its lock over the files a listing, an `Open`, a publication's renames and a removal touch, and a handle closes its file before its pin drops, so Windows never refuses a cut's publication or retention's removal beside the loop's listing; no sync under the lock; no format change, no raft mutation (amendment of 2026-10-30, #768) |
 | #774 | Raft hunt loop, 2026-10-30 | a silent peer's heartbeat answer moves a peer the leader still holds in replicate to probe, its match kept, so a full window no longer leaves it sent only empty appends and silent for as long as that leader leads; the probe resumes past the commit it reports; no format change, no raft mutation (amendment of 2026-10-30, #774) |
 | #773 | Raft hunt loop, 2026-10-30 | #603's guard counts a stale voter's voucher only under the non-zero key that voter's configuration pins and the next one still pins, the leader included, so a member whose pin `DenyPin` withdrew vouches for no one; whether a `DenyPin` itself is judged left to a decision; no format change, no raft mutation (amendment of 2026-10-30, #773) |
+| #771 | Raft hunt loop, 2026-11-01 | a streamed snapshot's pin is renewed at its bound while its follower moved since and is no further behind than the stream's end left it, so a catch-up by appends longer than the bound is no longer compacted past and sent the newest snapshot again; a follower that stops or falls further behind still loses it at the next bound, and a tight log still lifts it; no format change, no raft mutation (amendment of 2026-11-01, #771) |
 
 ## raft-sql-poc (owner's prior Raft)
 

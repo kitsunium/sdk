@@ -95,6 +95,7 @@ go_test(
         "adoptedfrom_internal_test.go",
         "allpeersgone_internal_test.go",
         "cancel_internal_test.go",
+        "catchuppin_internal_test.go",
         "cluster_internal_test.go",
         "codec_offline_internal_test.go",
         "codec_rolling_internal_test.go",

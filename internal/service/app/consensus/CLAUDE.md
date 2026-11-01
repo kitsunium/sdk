@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-30T12:00:00Z -->
+<!-- updated: 2026-11-01T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -1045,6 +1045,16 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   bound for good: a receiver only slow to restore never caught up, and the
   bound doubles for a peer that still answered when its pin fell due (#610,
   `growPin`, `TestAFollowerSlowerToRestoreThanThePinBoundCatchesUp`).
+- End a streamed snapshot's pin at a bound fixed from its stream's end: a
+  follower that caught up by appends for longer than that, after a long
+  transfer under a steady write rate, was compacted past and sent the
+  newest snapshot cycle after cycle. The pin is renewed at its bound while
+  its follower moved since and is no further behind than the stream's end
+  left it (#771, `renewPin`,
+  `TestAStreamedPinOutlastsItsBoundWhileItsFollowerCatchesUp`). Nor renew
+  it for a follower that stopped or fell further behind: slower than the
+  writes, it would hold the log growing until the log is tight
+  (`TestARenewedStreamedPinEndsOnceItsFollowerNoLongerCatchesUp`).
 - Accept an offer of the snapshot this node is restoring: it was streamed
   again and committed over the file the restore reads (#610,
   `answerRestoring`, `TestAnOfferOfTheSnapshotBeingRestoredIsRefused`).

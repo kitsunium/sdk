@@ -545,6 +545,7 @@ func (n *Node) afterCut() {
 	n.exec(func() {
 		now := n.clk.Now()
 		for to, pin := range n.sending {
+			pin = n.renewPin(to, pin, now)
 			at, held := n.pinAt(to, pin, now)
 			if !held {
 				n.releasePin(to, pin, now)
@@ -940,8 +941,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.streamEnded(meta, to, err)
 		n.exec(func() {
 			if err == nil {
-				until := n.clk.Now().Add(n.pinBound(to))
-				n.sending[to] = sendPin{index: meta.Position.Index, until: until}
+				n.sending[to] = n.streamedPin(to, meta.Position.Index, n.r.Status().Last, n.clk.Now())
 			} else {
 				delete(n.sending, to)
 				n.aq.push(applyItem{compact: true})

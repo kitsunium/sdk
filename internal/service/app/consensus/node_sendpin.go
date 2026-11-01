@@ -30,18 +30,71 @@ const pinScaleMax uint8 = 6
 // peer's match until the peer catches up or until passes: the leader only
 // probes the peer after an install, and a cut that landed in that window
 // compacted past the entries the peer needed next, so it was offered
-// snapshot after snapshot (#550).
+// snapshot after snapshot (#550). follow, set once streamed, renews until
+// while the peer still catches up (renewPin).
 type sendPin struct {
 	index  uint64
 	until  time.Time
 	sent   *atomic.Int64
 	moved  *atomic.Int64
+	follow *pinFollow
 	lifted bool
+}
+
+// pinFollow follows the catch-up of a streamed snapshot's peer: at is where
+// the peer stood when its pin was last renewed, the snapshot's index at
+// first, and lag how far behind the leader's last index the stream's end
+// left it. It holds on the pin's side so a pin stays small enough to pass
+// by value.
+type pinFollow struct {
+	at  uint64
+	lag uint64
+}
+
+// streamedPin is the pin of the snapshot at index once its stream to peer
+// to ended at now, the leader's log then at last: it holds a pinBound,
+// renewed while the peer catches up (renewPin).
+func (n *Node) streamedPin(to coreconsensus.NodeID, index, last uint64, now time.Time) sendPin {
+	return sendPin{index: index, until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}
+}
+
+// catchingUp reports whether the peer, at pos with the leader's log at
+// last, still catches up: it moved since the pin was last renewed, and is
+// no further behind than the stream's end left it. One slower than the
+// writes falls further behind, and would hold the log growing until it is
+// tight: only a snapshot brings it back.
+func (f *pinFollow) catchingUp(pos, last uint64) bool {
+	return pos > f.at && last-min(last, pos) <= f.lag
+}
+
+// renewPin renews, once until passed at now, the pin of a streamed snapshot
+// to peer to whose peer still catches up (catchingUp): it holds a pinBound
+// past now, and records where the peer stands. The bound was fixed from the
+// stream's end, whatever the peer's progress: a peer that caught up by
+// appends for longer than that, as one that installed a long transfer under
+// a steady write rate does, was compacted past, offered the newest snapshot
+// again, and fell as far behind again: it never caught up while the writes
+// lasted (#771). A peer that stopped moving, or fell further behind, loses
+// it at the next bound, and a tight log still lifts it (pinAt). Any other
+// pin is returned unchanged. It runs on the loop.
+func (n *Node) renewPin(to coreconsensus.NodeID, pin sendPin, now time.Time) sendPin {
+	if pin.follow == nil || !now.After(pin.until) {
+		return pin
+	}
+	match, _, ok := n.r.Progress(to)
+	pos := max(pin.index, match)
+	if !ok || !pin.follow.catchingUp(pos, n.r.Status().Last) {
+		return pin
+	}
+	pin.until, pin.follow.at = now.Add(n.pinBound(to)), pos
+	n.sending[to] = pin
+	return pin
 }
 
 // pinAt is the index pin holds compaction back to at now, and false once
 // it no longer holds: a streamed snapshot's pin ends when this node no
-// longer leads the peer, or when until passed. A stream's pin ends once
+// longer leads the peer, or when until passed, which renewPin moves on
+// while the peer catches up. A stream's pin ends once
 // its stream is due (streamDue), or once it was lifted. No pin holds once
 // the log is tight. It runs on the loop.
 func (n *Node) pinAt(to coreconsensus.NodeID, pin sendPin, now time.Time) (uint64, bool) {
@@ -62,8 +115,8 @@ func (n *Node) pinAt(to coreconsensus.NodeID, pin sendPin, now time.Time) (uint6
 }
 
 // pinBound is how long a stream's pin to peer to holds once its stream
-// stopped moving, and a streamed snapshot's pin once its stream ended:
-// pinAfterStream maximum election
+// stopped moving, and a streamed snapshot's pin once its stream ended or
+// since its last renewal: pinAfterStream maximum election
 // timeouts, doubled each time a stream's pin to that peer fell due while
 // the peer still answered, up to pinScaleMax times. The bound alone could
 // not tell a receiver stuck in its install from one only slow to restore:
@@ -127,9 +180,9 @@ func (n *Node) growPin(to coreconsensus.NodeID, now time.Time) {
 }
 
 // watchPins ends, at each tick, the pins of streamed snapshots that no
-// longer hold: their peer caught up with the log, left, or until passed;
-// it cancels the streams that are due, and lifts the others' hold once the
-// log is tight (releasePin).
+// longer hold: their peer caught up with the log, left, or until passed
+// while it no longer caught up (renewPin); it cancels the streams that are
+// due, and lifts the others' hold once the log is tight (releasePin).
 // Compaction only runs after a cut, so the log is compacted again at once:
 // a pin that ended once the writes stopped held it back until the next
 // write. Caught up is the peer's match at the last index, never the pin's
@@ -141,6 +194,7 @@ func (n *Node) watchPins(now time.Time) {
 	last := n.r.Status().Last
 	ended := false
 	for to, pin := range n.sending {
+		pin = n.renewPin(to, pin, now)
 		_, held := n.pinAt(to, pin, now)
 		if pin.until.IsZero() {
 			if !held && n.releasePin(to, pin, now) {
