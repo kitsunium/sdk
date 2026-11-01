@@ -12344,6 +12344,39 @@ sequences:
         eval: n.cuttingSince.Load()
         to: n.cuttingSince.Load
       - return: since != 0 && now.Sub(time.Unix(0, since)) < cutAllowance*etMax
+  - of: (*Node).streamedPin
+    steps:
+      - return: "sendPin{index: index, until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}"
+  - of: (*pinFollow).catchingUp
+    steps:
+      - return: pos > f.at && last-min(last, pos) <= f.lag
+  - of: (*Node).renewPin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).renewPin
+        kind: self
+      - id: n.r.Progress
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: pin
+          when: pin.follow == nil || !now.After(pin.until)
+      - bind: match, _, ok
+        eval: n.r.Progress(to)
+        to: n.r.Progress
+      - bind: pos
+        eval: max(pin.index, match)
+      - opt:
+          do:
+            - return: pin
+          when: "!ok || !pin.follow.catchingUp(pos, n.r.Status().Last)"
+      - set: pin.until, pin.follow.at
+        value: now.Add(n.pinBound(to)), pos
+      - set: n.sending[to]
+        value: pin
+      - return: pin
   - of: (*Node).pinAt
     participants:
       - id: caller
@@ -12443,6 +12476,8 @@ sequences:
         kind: actor
       - id: (*Node).watchPins
         kind: self
+      - id: n.renewPin
+        kind: internal
       - id: n.pinAt
         kind: internal
       - id: n.r.Progress
@@ -12458,6 +12493,9 @@ sequences:
         eval: "false"
       - loop:
           do:
+            - set: pin
+              to: n.renewPin
+              value: n.renewPin(to, pin, now)
             - bind: _, held
               eval: n.pinAt(to, pin, now)
               to: n.pinAt
@@ -19713,6 +19751,7 @@ sequences:
           n.exec(func() {
           		now := n.clk.Now()
           		for to, pin := range n.sending {
+          			pin = n.renewPin(to, pin, now)
           			at, held := n.pinAt(to, pin, now)
           			if !held {
           				n.releasePin(to, pin, now)
@@ -20365,8 +20404,7 @@ sequences:
           		n.streamEnded(meta, to, err)
           		n.exec(func() {
           			if err == nil {
-          				until := n.clk.Now().Add(n.pinBound(to))
-          				n.sending[to] = sendPin{index: meta.Position.Index, until: until}
+          				n.sending[to] = n.streamedPin(to, meta.Position.Index, n.r.Status().Last, n.clk.Now())
           			} else {
           				delete(n.sending, to)
           				n.aq.push(applyItem{compact: true})

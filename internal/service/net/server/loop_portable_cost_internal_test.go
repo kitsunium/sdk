@@ -70,20 +70,40 @@ func portablePrime(tb testing.TB, pl *portableLoop) {
 }
 
 // portableBatchCost is the fastest of rounds batches where one connection is
-// active among open.
+// active among open, none of them due for the timers' scan. The scan walks
+// every open connection by design, once a tick, from the batch it falls due
+// in; left due inside the rounds, it was one round among many only while it
+// took less than the tick. Under -race and coverage on a loaded runner, the
+// scan of 10 000 connections took the whole 10 ms tick: the next scan was
+// due at once, every round scanned, and the fastest round was the scan
+// itself (#779). Each round now starts with the next scan an hour away and
+// must leave it there: a batch that scans when no scan is due, as one that
+// walked the timers at every batch did, fails here whatever the runner's
+// speed. A last batch, the scan due, must schedule the next one past it.
 func portableBatchCost(t *testing.T, open, rounds int) time.Duration {
 	t.Helper()
 	pl := newOpenPortable(&portableLineH{}, open)
 	portablePrime(t, pl)
 	best := time.Duration(1 << 62)
 	for range rounds {
+		next := time.Now().Add(time.Hour)
+		pl.timersAt = next
 		started := time.Now()
 		portableActiveBatch(pl)
 		best = min(best, time.Since(started))
+		if !pl.timersAt.Equal(next) {
+			t.Fatalf("a batch among %d open connections scanned the timers an hour before their scan was due: next scan %v, want %v", open, pl.timersAt, next)
+		}
 	}
 	pc := pl.conns[0]
 	if pc.spillOff != 0 || string(pc.spill) != "GE" || len(pl.compact) != 0 {
 		t.Fatalf("spill = %q at %d, listed %v: not compacted", pc.spill, pc.spillOff, pl.compact)
+	}
+	due := time.Now()
+	pl.timersAt = due
+	portableActiveBatch(pl)
+	if !pl.timersAt.After(due) {
+		t.Fatalf("a batch with the timers' scan due left the next scan at %v, not past %v", pl.timersAt, due)
 	}
 	return best
 }
@@ -97,8 +117,9 @@ func TestPortable_batchCostIndependentOfOpen(t *testing.T) {
 	const rounds = 400
 	small := portableBatchCost(t, 8, rounds)
 	large := portableBatchCost(t, 10_000, rounds)
-	// The fastest of many rounds discards the scheduler's noise; a scan of
-	// the timers that falls due inside the rounds is one round among them.
+	// The fastest of many rounds discards the scheduler's noise; none of
+	// them runs the timers' scan, whose cost grows with the open connections
+	// by design, once a tick (portableBatchCost).
 	if large > 8*small+20*time.Microsecond {
 		t.Fatalf("a batch costs %v with 10000 open connections, %v with 8: it walks the open ones", large, small)
 	}
