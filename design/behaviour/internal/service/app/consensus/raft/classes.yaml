@@ -19,6 +19,24 @@ constants:
           reached. A DenyPin is never refused for what it leaves a stopped voter
           with: a key's fence does not wait for a voter that is down (#773).
         name: IsolationPinDenied
+      - doc: |-
+          IsolationLeaderMoved is set on a voter the guard reaches only through
+          this leader, which the voter knows at another address: the guard
+          counts the leader at any address, since it dials the voter while it
+          leads, but the voter asks the address it knows, and once the
+          leadership moves to a member it does not know, nothing answers it. The
+          leader's own move, and the change that relies on it, are admitted
+          (#765, the owner's option (b)).
+        name: IsolationLeaderMoved
+      - doc: |-
+          IsolationLeaderUnconfirmed is set on a voter the guard reaches only on
+          the bet a compacted log makes: listed in the snapshot's base after
+          this leader, it knows this leader, but whether as a voter, which it
+          sends its PreVote to, or as a learner, the log no longer says. Known
+          as a learner, once the leadership moves to a member it does not know,
+          nothing answers it. The change that relies on it is admitted (#765,
+          the owner's option (b)).
+        name: IsolationLeaderUnconfirmed
     name: IsolationStranded
   - doc: |-
       The refusals the step function returns, short names for the domain's codes:
@@ -540,6 +558,7 @@ files:
       - (*Raft).reachedBy
       - (*Raft).reaches
       - (*Raft).vouchedInRetained
+      - (*Raft).vouchingLeader
       - listedBefore
       - vouched
       - vouchedAs
@@ -977,7 +996,9 @@ types:
       - doc: ID is the voter.
         name: ID
         type: core.NodeID
-      - doc: "Flags are why: IsolationStranded, IsolationPinDenied."
+      - doc: |-
+          Flags are why: IsolationStranded, IsolationPinDenied,
+          IsolationLeaderMoved, IsolationLeaderUnconfirmed.
         name: Flags
         type: IsolationFlags
     kind: struct
@@ -998,6 +1019,18 @@ types:
     fields:
       - doc: undenied counts a pin DenyPin withdrew as the key it was (#773).
         name: undenied
+        type: bool
+      - doc: |-
+          leaderWhereKnown counts this leader, as any other voucher, only at the
+          address the stale voter's configuration names: the guard's bet that
+          it leads on, and dials the voter wherever it moved, left out (#765).
+        name: leaderWhereKnown
+        type: bool
+      - doc: |-
+          noBaseBet takes no bet over a compacted log: a voter the snapshot's
+          base lists is not reached because this leader is listed before it,
+          which says the voter knows it, not that it knows it as a voter (#765).
+        name: noBaseBet
         type: bool
     kind: struct
     name: reach
@@ -1866,8 +1899,9 @@ types:
         recv: r *Raft
         results: "[]IsolationValue"
       - doc: |-
-          isolation is what leaves voter v of next isolated, as the guard counts
-          its vouchers (reaches), 0 when nothing does.
+          isolation is what leaves voter v of next isolated, or at risk of it, as
+          the guard counts its vouchers (reaches), 0 when nothing does: stranded,
+          or reached only on one of the guard's bets on this leader.
         name: isolation
         params: next *core.MembershipValue, v core.NodeID
         recv: r *Raft
@@ -2366,6 +2400,14 @@ types:
         params: next *core.MembershipValue, v core.NodeID, how reach
         recv: r *Raft
         results: bool
+      - doc: |-
+          vouchingLeader is the member vouches counts at any address: this leader,
+          or no member at all when how counts it only where the stale voter knows
+          it, as any other voucher (an ID is never 0).
+        name: vouchingLeader
+        params: how reach
+        recv: r *Raft
+        results: core.NodeID
       - doc: |-
           updateAddress changes the address of the member at idx to the one admin
           carries, while a majority answers, unless the move may strand a voter.

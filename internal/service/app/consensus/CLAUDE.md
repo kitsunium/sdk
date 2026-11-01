@@ -1180,6 +1180,20 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestAStoppedVoterADenyPinLeftWithNoVoucherIsNamedWithItsCause`). A
   change forwarded from a follower is refused with the code alone: the
   answer frame carries nothing more.
+- Drop #603's two bets on the leader, or let them pass unsaid: the leader
+  counted at any address, and over a compacted log a voter listed after
+  it taken to know it as a voter. Strict rules refuse D20's last move and
+  every change while a base voter is down; the owner kept both (option
+  (b)), and a voter reached only on one is named instead, since a
+  hand-over to a member it does not know leaves it hearing no one (#765).
+  `IsolationLeaderMoved` and `IsolationLeaderUnconfirmed` (the guard's
+  `reach` with one bet left out), the health's `PeerLeaderMoved` and
+  `PeerLeaderUnconfirmed`, the `isolated` attribute of the audit line of
+  the leader's own move, a removal, a move or a transfer, and
+  `warnHandOver` for a hand-over with no entry (`handOff`, `handOver`,
+  `preferLeader`)
+  (`TestALeaderThatMovedItselfIsSaidToBeAStoppedVotersLastVoucher`,
+  `TestACompactedLogsBetOnAStoppedVoterIsSaid`).
 - Cancel a snapshot stream because the log is tight: its pin's hold on
   compaction is lifted, for good, and the stream goes on; only a stream
   that is due is cancelled (`streamDue`). Cancelled with it, no stream

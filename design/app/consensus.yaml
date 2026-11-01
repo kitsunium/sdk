@@ -2200,6 +2200,28 @@ packages:
         name: PeerPinDenied
         type: PeerFlags
         value: "16"
+      - blockDoc: The facts a PeerHealthValue carries.
+        doc: |-
+          PeerLeaderMoved is set on a voter, down or behind, that #603's guard
+          reaches only through this leader, which the voter knows at another
+          address: the leader moved since. Once the leadership moves to a member
+          it does not know, nothing answers it. The move and the changes that
+          rely on it were admitted: the guard counts the leader at any address
+          (#765).
+        name: PeerLeaderMoved
+        type: PeerFlags
+        value: "32"
+      - blockDoc: The facts a PeerHealthValue carries.
+        doc: |-
+          PeerLeaderUnconfirmed is set on a voter, down, that #603's guard
+          reaches only on its bet over a compacted log: the voter knows this
+          leader, but whether as a voter or as a learner, which it sends no
+          PreVote to, the log no longer says. Known as a learner, once the
+          leadership moves to a member it does not know, nothing answers it. The
+          changes that rely on it were admitted (#765).
+        name: PeerLeaderUnconfirmed
+        type: PeerFlags
+        value: "64"
       - blockDoc: The answers a HealthValue carries.
         doc: |-
           HealthReady is the readiness answer: running, a leader known,
@@ -2832,7 +2854,8 @@ packages:
               type: coreconsensus.NodeID
             - doc: |-
                 Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
-                PeerSnapshot, PeerStranded, PeerPinDenied.
+                PeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,
+                PeerLeaderUnconfirmed.
               name: Flags
               type: PeerFlags
             - doc: Match is the highest index the peer holds durably, as acknowledged.
@@ -3839,6 +3862,30 @@ packages:
         name: IsolationPinDenied
         type: IsolationFlags
         value: "2"
+      - blockDoc: The causes an IsolationValue carries.
+        doc: |-
+          IsolationLeaderMoved is set on a voter the guard reaches only through
+          this leader, which the voter knows at another address: the guard
+          counts the leader at any address, since it dials the voter while it
+          leads, but the voter asks the address it knows, and once the
+          leadership moves to a member it does not know, nothing answers it. The
+          leader's own move, and the change that relies on it, are admitted
+          (#765, the owner's option (b)).
+        name: IsolationLeaderMoved
+        type: IsolationFlags
+        value: "4"
+      - blockDoc: The causes an IsolationValue carries.
+        doc: |-
+          IsolationLeaderUnconfirmed is set on a voter the guard reaches only on
+          the bet a compacted log makes: listed in the snapshot's base after
+          this leader, it knows this leader, but whether as a voter, which it
+          sends its PreVote to, or as a learner, the log no longer says. Known
+          as a learner, once the leadership moves to a member it does not know,
+          nothing answers it. The change that relies on it is admitted (#765,
+          the owner's option (b)).
+        name: IsolationLeaderUnconfirmed
+        type: IsolationFlags
+        value: "8"
       - doc: |-
           ProtocolMax is the highest protocol version this engine speaks: a cluster
           version above it is refused, and stops a node that finds it committed.
@@ -3931,14 +3978,16 @@ packages:
         underlying: uint8
       - doc: |-
           IsolationValue is a voter this leader may never reach again, and why
-          (#773): one line of Isolated, or of GuardRefusal.
+          (#773, #765): one line of Isolated, or of GuardRefusal.
         name: IsolationValue
         struct:
           fields:
             - doc: ID is the voter.
               name: ID
               type: core.NodeID
-            - doc: "Flags are why: IsolationStranded, IsolationPinDenied."
+            - doc: |-
+                Flags are why: IsolationStranded, IsolationPinDenied,
+                IsolationLeaderMoved, IsolationLeaderUnconfirmed.
               name: Flags
               type: IsolationFlags
       - doc: |-
@@ -4583,9 +4632,10 @@ packages:
             recv: pointer
           - doc: |-
               Isolated returns the voters of the configuration this leader governs by
-              that #603's guard finds stranded, with what leaves each so, in
-              configuration order; nil off the leader. It judges them as the guard
-              would judge a change to that configuration, and decides nothing.
+              that #603's guard finds stranded, or reaches only on one of its bets on
+              this leader, with what leaves each so, in configuration order; nil off
+              the leader. It judges them as the guard would judge a change to that
+              configuration, and decides nothing.
             name: Isolated
             out:
               - type: "[]IsolationValue"
@@ -5431,6 +5481,14 @@ packages:
             reexport: svcconsensus.PeerPinDenied
             type: svcconsensus.PeerFlags
             value: "16"
+          - name: PeerLeaderMoved
+            reexport: svcconsensus.PeerLeaderMoved
+            type: svcconsensus.PeerFlags
+            value: "32"
+          - name: PeerLeaderUnconfirmed
+            reexport: svcconsensus.PeerLeaderUnconfirmed
+            type: svcconsensus.PeerFlags
+            value: "64"
         doc: The facts a PeerHealthValue carries, read with PeerFlags.Has.
       - const:
           - name: ReadIndex

@@ -139,9 +139,15 @@ under coverage before touching `shard_count`.
   admitted, and `Isolated` names that voter (#773, the owner's option (c)).
 - Judge a voter's isolation, for `Isolated` or `GuardRefusal`, other than
   by `reaches`, #603's own count: its zero `reach` is the guard's, and a
-  field set counts one more voucher (a withdrawn pin counted back) to tell
-  the cause, never to admit or refuse a change (#773,
-  `TestAStoppedVoterADenyPinLeftWithNoVoucherIsNamedWithItsCause`).
+  field set counts one more voucher (a withdrawn pin counted back) or one
+  less (a bet on the leader left out: `leaderWhereKnown`, `noBaseBet`) to
+  tell the cause, never to admit or refuse a change (#773, #765,
+  `TestAStoppedVoterADenyPinLeftWithNoVoucherIsNamedWithItsCause`,
+  `TestAVoterReachedOnlyThroughAMovedLeaderIsNamed`,
+  `TestAVoterReachedOnlyOnTheCompactedLogsBetIsNamed`). Nor make `vouches`
+  look at `reach.leaderWhereKnown`: the leader is counted as any other
+  voucher by passing no leader (`vouchingLeader`), and `vouches` stays
+  under the inline budget kit holds it to.
 - Count a silent voter, one whose last answer carried `FlagTruncated`
   (`peerSilent`), in the strict reconfiguration check (`activeMajority`):
   it answers heartbeats but acknowledges no append, and a removal of a

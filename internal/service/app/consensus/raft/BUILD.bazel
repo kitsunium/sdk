@@ -84,6 +84,7 @@ go_test(
         "wholelogsilencepoint_internal_test.go",
         "wholelogsilencerestart_internal_test.go",
         "wirebatch_internal_test.go",
+        "withleaderbet_internal_test.go",
         "withoutvoucher_internal_test.go",
     ],
     embed = [":raft"],

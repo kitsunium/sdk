@@ -17,14 +17,31 @@ const (
 	// reached. A DenyPin is never refused for what it leaves a stopped voter
 	// with: a key's fence does not wait for a voter that is down (#773).
 	IsolationPinDenied
+	// IsolationLeaderMoved is set on a voter the guard reaches only through
+	// this leader, which the voter knows at another address: the guard
+	// counts the leader at any address, since it dials the voter while it
+	// leads, but the voter asks the address it knows, and once the
+	// leadership moves to a member it does not know, nothing answers it. The
+	// leader's own move, and the change that relies on it, are admitted
+	// (#765, the owner's option (b)).
+	IsolationLeaderMoved
+	// IsolationLeaderUnconfirmed is set on a voter the guard reaches only on
+	// the bet a compacted log makes: listed in the snapshot's base after
+	// this leader, it knows this leader, but whether as a voter, which it
+	// sends its PreVote to, or as a learner, the log no longer says. Known
+	// as a learner, once the leadership moves to a member it does not know,
+	// nothing answers it. The change that relies on it is admitted (#765,
+	// the owner's option (b)).
+	IsolationLeaderUnconfirmed
 )
 
 // IsolationValue is a voter this leader may never reach again, and why
-// (#773): one line of Isolated, or of GuardRefusal.
+// (#773, #765): one line of Isolated, or of GuardRefusal.
 type IsolationValue struct {
 	// ID is the voter.
 	ID core.NodeID
-	// Flags are why: IsolationStranded, IsolationPinDenied.
+	// Flags are why: IsolationStranded, IsolationPinDenied,
+	// IsolationLeaderMoved, IsolationLeaderUnconfirmed.
 	Flags IsolationFlags
 }
 
@@ -36,9 +53,10 @@ type IsolationFlags uint8
 func (f IsolationFlags) Has(x IsolationFlags) bool { return f&x == x }
 
 // Isolated returns the voters of the configuration this leader governs by
-// that #603's guard finds stranded, with what leaves each so, in
-// configuration order; nil off the leader. It judges them as the guard
-// would judge a change to that configuration, and decides nothing.
+// that #603's guard finds stranded, or reaches only on one of its bets on
+// this leader, with what leaves each so, in configuration order; nil off
+// the leader. It judges them as the guard would judge a change to that
+// configuration, and decides nothing.
 func (r *Raft) Isolated() []IsolationValue {
 	if r.role != core.RoleLeader {
 		return nil
@@ -61,11 +79,19 @@ func (r *Raft) GuardRefusal() []IsolationValue {
 	return r.guardRefusal
 }
 
-// isolation is what leaves voter v of next isolated, as the guard counts
-// its vouchers (reaches), 0 when nothing does.
+// isolation is what leaves voter v of next isolated, or at risk of it, as
+// the guard counts its vouchers (reaches), 0 when nothing does: stranded,
+// or reached only on one of the guard's bets on this leader.
 func (r *Raft) isolation(next *core.MembershipValue, v core.NodeID) IsolationFlags {
 	if r.reachedBy(next, v) {
-		return 0
+		var f IsolationFlags
+		if !r.reaches(next, v, reach{leaderWhereKnown: true}) {
+			f |= IsolationLeaderMoved
+		}
+		if !r.reaches(next, v, reach{noBaseBet: true}) {
+			f |= IsolationLeaderUnconfirmed
+		}
+		return f
 	}
 	f := IsolationStranded
 	if r.reaches(next, v, reach{undenied: true}) {

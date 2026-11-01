@@ -162,6 +162,23 @@ workflows:
           range: l.slots
           value: s
       - return: "false"
+  - of: isolationFlags
+    steps:
+      - var:
+          name: out
+          type: PeerFlags
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: "|="
+                    set: out
+                    value: c.peer
+                when: f.Has(c.flag)
+          key: _
+          range: isolationCauses
+          value: c
+      - return: out
   - of: validSlot
     steps:
       - opt:

@@ -6796,6 +6796,75 @@ outranking the guard, documented; (c) admit it, and say what it leaves.
   refusal on another ground). The tests of #603, #748, #761, #763, #764,
   #765 and #785 stay green.
 
+## Amendment — the guard's two bets on the leader are kept, and said (2026-11-01, #765)
+
+The amendment of 2026-10-29 left two bets of #603's guard to a decision
+([#765](https://github.com/kitsunium/sdk/issues/765)). Both count this
+leader as a stopped voter's voucher on a premise the voter's own
+configuration does not show, a premise that holds only while this leader
+leads:
+
+- **The moved leader.** The leader is counted at any address, since it
+  dials every voter that lists it. A leader that moved itself while a
+  voter V was down, which the guard never judges, then handed the
+  leadership to a member V does not know, leaves V asking the leader's old
+  address, and nothing answers it.
+- **The compacted log.** Once the log is compacted, a voter V the
+  snapshot's base lists after the leader is judged reached: the leader,
+  added before V, is known to it for sure, but whether as a voter, which V
+  sends its PreVote to, or as a learner, the log no longer says.
+
+Three options were put to the owner: (a) strict rules for both, refusing
+the last `UpdateAddress` of a D20 migration while a voter is down, and
+every removal or move of an answering voter while a voter of the base is
+down; (b) keep both bets, documented; (c) close them from the voter's
+side, as #763's option (b) would.
+
+- **The owner's decision: option (b), with a warning.** Both bets stay as
+  they are, and no change admitted today is refused. The risk is said
+  instead, by #773's mechanism: one notion, a voter the leader may never
+  reach again, with a cause per reason.
+- **Two causes beside #773's.** `Raft.Isolated` marks a voter the guard
+  reaches only through this leader known at another address
+  `IsolationLeaderMoved`, and one it reaches only on the compacted log's
+  bet `IsolationLeaderUnconfirmed`. Each is the guard's own `reachedBy`
+  with one bet left out (`reach.leaderWhereKnown`, the leader counted as
+  any other voucher; `reach.noBaseBet`), and decides nothing.
+- **Where it is said.** In the status: `PeerLeaderMoved` and
+  `PeerLeaderUnconfirmed`, bits 32 and 64 of `PeerFlags`, added and
+  re-exported. In the audit: the `isolated` attribute of the leader's
+  line for the operations admitted on a bet, its own `UpdateAddress`, a
+  removal or a move, and a `TransferLeadership`, whose entry now carries
+  it too (`leader-moved`, `leader-unconfirmed`); a hand-over that starts
+  with no entry, the hand-off of `Close` or of the leader's own removal,
+  the watch of a leader that makes no progress (#554) and the
+  preferred-leader watch (#676), logs "consensus: leadership handed over
+  while a stopped voter is reached only through this leader" with the
+  same attribute. In the refusal: once the leadership moved and the bet
+  is lost, the new leader finds the voter stranded, and every removal or
+  move its guard refuses because of it names it (#773's `isolated`). An
+  admission returns no error to carry a text: its record is the leader's
+  audit line.
+- **What it leaves.** An election moves the leadership with no operation
+  to audit; the status says it before, and the new leader's after. Over a
+  compacted log the second cause names every voter that does not answer
+  and is listed after the leader, the founders of a cluster that never
+  had a learner included, where the bet holds: the log cannot tell them
+  apart.
+- No frame, payload or record format changes, nothing new is persisted,
+  no protocol raise and no raft mutation.
+- **Tests.** `TestALeaderThatMovedItselfIsSaidToBeAStoppedVotersLastVoucher`
+  (memory network with its admission model; on main the health of L shows
+  V as a voter and nothing more after L's move, the audit lines of the
+  move and of the hand-over to D name no voter, and D's health does not
+  name V stranded), `TestACompactedLogsBetOnAStoppedVoterIsSaid` (on main
+  the health shows V as a voter and nothing more over the compacted log,
+  and the audit line of X's removal names no voter),
+  `TestAVoterReachedOnlyThroughAMovedLeaderIsNamed` and
+  `TestAVoterReachedOnlyOnTheCompactedLogsBetIsNamed` (raft). The tests of
+  #603, #748 (`movedAll`'s "A-and-B-moved"), #761, #763, #764, #773 and
+  #785 stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6848,6 +6917,7 @@ outranking the guard, documented; (c) admit it, and say what it leaves.
 | #792 | Raft hunt loop, 2026-11-01 | an install over a log that held the snapshot's index under another term lowers a silent node's truncation point to the index after the snapshot, as a conflicting append does, durably through #793's path, and a start that finishes such an interrupted install lowers `SILENT` before it drops the log; no format change, no raft mutation (amendment of 2026-11-01, #792) |
 | #795 | Raft hunt loop, 2026-11-01 | the leader keeps the index of the no-op it fed a silence, and a snapshot transfer the peer installed at or past it feeds the peer once more, so a node restarted on that snapshot, its point raised past the leader's whole log, ends its silence in a cluster that writes nothing; a snapshot the node cut itself left to a decision; no format change, no raft mutation (amendment of 2026-11-01, #795) |
 | #773 (c) | the owner's decision, 2026-11-01 | a `DenyPin` that leaves a stopped voter no voucher is admitted, and said: `Raft.Isolated` names, by #603's own judgement, every voter the leader may never reach again and the withdrawn pin that leaves it so; the health's `PeerStranded` and `PeerPinDenied`, the audit line's `isolated`, and the `why` and `isolated` of a refusal the guard decides; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #773) |
+| #765 (b) | the owner's decision, 2026-11-01 | #603's guard keeps its two bets on the leader, the leader counted at any address and the compacted log's bet that a voter listed after it knows it as a voter, and says when a stopped voter's reach rests on one: `IsolationLeaderMoved` and `IsolationLeaderUnconfirmed` in `Raft.Isolated`, the health's `PeerLeaderMoved` and `PeerLeaderUnconfirmed`, the audit line's `isolated` for the leader's own move, a removal, a move and a transfer, and a Warn line for a hand-over with no entry; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #765) |
 
 ## raft-sql-poc (owner's prior Raft)
 

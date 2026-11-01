@@ -245,6 +245,22 @@ constants:
           is what leaves the voter so. The DenyPin was admitted: a key's fence
           never waits for a voter that is down (#773).
         name: PeerPinDenied
+      - doc: |-
+          PeerLeaderMoved is set on a voter, down or behind, that #603's guard
+          reaches only through this leader, which the voter knows at another
+          address: the leader moved since. Once the leadership moves to a member
+          it does not know, nothing answers it. The move and the changes that
+          rely on it were admitted: the guard counts the leader at any address
+          (#765).
+        name: PeerLeaderMoved
+      - doc: |-
+          PeerLeaderUnconfirmed is set on a voter, down, that #603's guard
+          reaches only on its bet over a compacted log: the voter knows this
+          leader, but whether as a voter or as a learner, which it sends no
+          PreVote to, the log no longer says. Known as a learner, once the
+          leadership moves to a member it does not know, nothing answers it. The
+          changes that rely on it were admitted (#765).
+        name: PeerLeaderUnconfirmed
     name: PeerVoter
   - doc: The answers a HealthValue carries.
     grouped: true
@@ -1093,6 +1109,8 @@ files:
       - isolationFlags
       - isolatedText
       - isolationCauses
+      - onThisLeader
+      - (*Node).warnHandOver
       - (*Node).peerHealth
       - (*Node).peerUnreachable
     name: health.go
@@ -2477,6 +2495,12 @@ functions:
     name: isolatedText
     params: vs []raft.IsolationValue
     results: string
+  - doc: |-
+      onThisLeader reports whether a voter of vs is reached only on one of
+      #603's bets on this leader, which a hand-over ends (#765).
+    name: onThisLeader
+    params: vs []raft.IsolationValue
+    results: bool
   - doc: drawID draws a random NodeID, never 0.
     name: drawID
     results: coreconsensus.NodeID
@@ -2671,8 +2695,12 @@ functions:
       isolates reports whether an administrative entry of kind and change may
       leave a stopped voter isolated, so that its audit line names every voter
       the configuration it leads to isolates, and why (Raft.Isolated): a
-      removal, a move or a DenyPin. A DenyPin is admitted whatever it leaves a
-      stopped voter with, and its line named the change alone (#773).
+      removal, a move or a DenyPin, and a transfer. A DenyPin is admitted
+      whatever it leaves a stopped voter with, and its line named the change
+      alone (#773). The leader's own move, a removal or a move admitted on the
+      compacted log's bet, and a transfer that ends the bet that this leader
+      vouches for a stopped voter, are admitted too, and their lines named no
+      voter either (#765).
     name: isolates
     params: kind coreconsensus.EntryKind, change uint8
     results: bool
@@ -5518,7 +5546,8 @@ types:
         type: coreconsensus.NodeID
       - doc: |-
           Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
-          PeerSnapshot, PeerStranded, PeerPinDenied.
+          PeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,
+          PeerLeaderUnconfirmed.
         name: Flags
         type: PeerFlags
       - doc: Match is the highest index the peer holds durably, as acknowledged.
@@ -6442,6 +6471,16 @@ types:
           peer's view. It runs on the loop, through exec.
         name: loopHealth
         params: h *HealthValue
+        recv: n *Node
+      - doc: |-
+          warnHandOver says, at Warn, that the hand-over of this leader's
+          leadership to to, just started, ends the bet some voter that no longer
+          answers is reached on: the guard reaches it only through this leader,
+          which it knows at another address or may know as a learner only, and
+          once a member it does not know leads, nothing answers it (#765). The
+          hand-over goes on: the owner kept both bets. It runs on the loop.
+        name: warnHandOver
+        params: to coreconsensus.NodeID
         recv: n *Node
       - doc: |-
           peerHealth is one peer's line of a verdict. A peer is unreachable when it
@@ -10163,10 +10202,13 @@ vars:
         value: |-
           []struct {
           	flag raft.IsolationFlags
+          	peer PeerFlags
           	name string
           }{
-          	{raft.IsolationStranded, "stranded"},
-          	{raft.IsolationPinDenied, "pin-denied"},
+          	{raft.IsolationStranded, PeerStranded, "stranded"},
+          	{raft.IsolationPinDenied, PeerPinDenied, "pin-denied"},
+          	{raft.IsolationLeaderMoved, PeerLeaderMoved, "leader-moved"},
+          	{raft.IsolationLeaderUnconfirmed, PeerLeaderUnconfirmed, "leader-unconfirmed"},
           }
     name: isolationCauses
   - grouped: true

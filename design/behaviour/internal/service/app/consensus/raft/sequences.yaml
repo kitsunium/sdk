@@ -76,7 +76,22 @@ sequences:
     steps:
       - opt:
           do:
-            - return: "0"
+            - var:
+                name: f
+                type: IsolationFlags
+            - opt:
+                do:
+                  - op: "|="
+                    set: f
+                    value: IsolationLeaderMoved
+                when: "!r.reaches(next, v, reach{leaderWhereKnown: true})"
+            - opt:
+                do:
+                  - op: "|="
+                    set: f
+                    value: IsolationLeaderUnconfirmed
+                when: "!r.reaches(next, v, reach{noBaseBet: true})"
+            - return: f
           when: r.reachedBy(next, v)
       - bind: f
         eval: IsolationStranded
@@ -1537,12 +1552,10 @@ sequences:
         kind: internal
       - id: r.base.Member
         kind: value
-      - id: listedBefore
-        kind: internal
     steps:
       - opt:
           do:
-            - return: vouchedAs(next, r.confAt(pr.match), v, r.id, how)
+            - return: vouchedAs(next, r.confAt(pr.match), v, r.vouchingLeader(how), how)
               to: vouchedAs
           init:
             bind: pr
@@ -1560,8 +1573,39 @@ sequences:
             eval: r.base.Member(v)
             to: r.base.Member
           when: "!listed || r.log.snapIndex == 0"
-      - return: listedBefore(next, r.id, v)
-        to: listedBefore
+      - return: "!how.noBaseBet && listedBefore(next, r.id, v)"
+  - of: (*Raft).vouchedInRetained
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).vouchedInRetained
+        kind: self
+      - id: r.vouchingLeader
+        kind: internal
+    steps:
+      - bind: leader
+        eval: r.vouchingLeader(how)
+        to: r.vouchingLeader
+      - opt:
+          do:
+            - return: "false"
+          when: "!vouchedAs(next, &r.base, v, leader, how)"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!vouchedAs(next, &r.confs[k].m, v, leader, how)"
+          key: k
+          range: r.confs
+      - return: "true"
+  - of: (*Raft).vouchingLeader
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: how.leaderWhereKnown
+      - return: r.id
   - of: vouched
     participants:
       - id: caller

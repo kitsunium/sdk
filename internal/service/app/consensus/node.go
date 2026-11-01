@@ -1471,9 +1471,16 @@ func (n *Node) auditAppended(rd *raft.ReadyValue) {
 // isolates reports whether an administrative entry of kind and change may
 // leave a stopped voter isolated, so that its audit line names every voter
 // the configuration it leads to isolates, and why (Raft.Isolated): a
-// removal, a move or a DenyPin. A DenyPin is admitted whatever it leaves a
-// stopped voter with, and its line named the change alone (#773).
+// removal, a move or a DenyPin, and a transfer. A DenyPin is admitted
+// whatever it leaves a stopped voter with, and its line named the change
+// alone (#773). The leader's own move, a removal or a move admitted on the
+// compacted log's bet, and a transfer that ends the bet that this leader
+// vouches for a stopped voter, are admitted too, and their lines named no
+// voter either (#765).
 func isolates(kind coreconsensus.EntryKind, change uint8) bool {
+	if kind == coreconsensus.EntryTransfer {
+		return true
+	}
 	if kind != coreconsensus.EntryMembership {
 		return false
 	}
@@ -1870,6 +1877,7 @@ func (n *Node) preferLeader(now time.Time, st *raft.StatusValue) bool {
 		if n.r.TransferLeadership(now, prefs[i]) != 0 {
 			return false
 		}
+		n.warnHandOver(prefs[i])
 		n.prefer.next = i + 1
 		return true
 	}

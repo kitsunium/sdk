@@ -725,6 +725,9 @@ func (n *Node) startLocal(to coreconsensus.NodeID) (<-chan errs.Code, error) {
 			return
 		}
 		code = n.r.TransferLeadership(n.clk.Now(), to)
+		if code == 0 {
+			n.warnHandOver(to)
+		}
 		n.handleReady()
 	}) {
 		return nil, n.stoppedErr()

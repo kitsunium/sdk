@@ -1122,6 +1122,14 @@ func (r *Raft) judged(next *core.MembershipValue) []core.NodeID {
 type reach struct {
 	// undenied counts a pin DenyPin withdrew as the key it was (#773).
 	undenied bool
+	// leaderWhereKnown counts this leader, as any other voucher, only at the
+	// address the stale voter's configuration names: the guard's bet that
+	// it leads on, and dials the voter wherever it moved, left out (#765).
+	leaderWhereKnown bool
+	// noBaseBet takes no bet over a compacted log: a voter the snapshot's
+	// base lists is not reached because this leader is listed before it,
+	// which says the voter knows it, not that it knows it as a voter (#765).
+	noBaseBet bool
 }
 
 // reachedBy reports whether voter v, whatever configuration of its past it
@@ -1145,7 +1153,7 @@ func (r *Raft) reachedBy(next *core.MembershipValue, v core.NodeID) bool {
 // reaches is reachedBy with the vouchers counted as how says.
 func (r *Raft) reaches(next *core.MembershipValue, v core.NodeID, how reach) bool {
 	if pr := r.prs[v]; pr != nil && r.answering(v) && pr.match >= r.log.snapIndex {
-		return vouchedAs(next, r.confAt(pr.match), v, r.id, how)
+		return vouchedAs(next, r.confAt(pr.match), v, r.vouchingLeader(how), how)
 	}
 	if !r.vouchedInRetained(next, v, how) {
 		return false
@@ -1155,22 +1163,36 @@ func (r *Raft) reaches(next *core.MembershipValue, v core.NodeID, how reach) boo
 		// compacted: the retained configurations are every one it may hold.
 		return true
 	}
-	return listedBefore(next, r.id, v)
+	// The bet over a compacted log, kept by the owner's decision on #765:
+	// this leader, added before v, is known to it, as a voter it is
+	// assumed. Isolated names a voter it alone reaches.
+	return !how.noBaseBet && listedBefore(next, r.id, v)
 }
 
 // vouchedInRetained reports whether v is vouched for in every retained
 // configuration, the snapshot base's included, the vouchers counted as how
 // says.
 func (r *Raft) vouchedInRetained(next *core.MembershipValue, v core.NodeID, how reach) bool {
-	if !vouchedAs(next, &r.base, v, r.id, how) {
+	leader := r.vouchingLeader(how)
+	if !vouchedAs(next, &r.base, v, leader, how) {
 		return false
 	}
 	for k := range r.confs {
-		if !vouchedAs(next, &r.confs[k].m, v, r.id, how) {
+		if !vouchedAs(next, &r.confs[k].m, v, leader, how) {
 			return false
 		}
 	}
 	return true
+}
+
+// vouchingLeader is the member vouches counts at any address: this leader,
+// or no member at all when how counts it only where the stale voter knows
+// it, as any other voucher (an ID is never 0).
+func (r *Raft) vouchingLeader(how reach) core.NodeID {
+	if how.leaderWhereKnown {
+		return 0
+	}
+	return r.id
 }
 
 // listedBefore reports whether first comes before then in next's members,

@@ -6487,24 +6487,6 @@ sequences:
           key: _
           range: n.r.PeerStats()
           value: p
-  - of: isolationFlags
-    steps:
-      - var:
-          name: out
-          type: PeerFlags
-      - opt:
-          do:
-            - op: "|="
-              set: out
-              value: PeerStranded
-          when: f.Has(raft.IsolationStranded)
-      - opt:
-          do:
-            - op: "|="
-              set: out
-              value: PeerPinDenied
-          when: f.Has(raft.IsolationPinDenied)
-      - return: out
   - of: isolatedText
     participants:
       - id: caller
@@ -6551,6 +6533,42 @@ sequences:
           value: v
       - return: b.String()
         to: b.String
+  - of: onThisLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: onThisLeader
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: |-
+          slices.ContainsFunc(vs, func(v raft.IsolationValue) bool {
+          		return v.Flags&(raft.IsolationLeaderMoved|raft.IsolationLeaderUnconfirmed) != 0
+          	})
+        to: slices
+  - of: (*Node).warnHandOver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).warnHandOver
+        kind: self
+      - id: n.r.Isolated
+        kind: value
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: |-
+                n.obs.warn("consensus: leadership handed over while a stopped voter is reached only through this leader",
+                			lattr("to", uint64(to)), lstr("isolated", isolatedText(vs)))
+              to: n.obs.warn
+          init:
+            bind: vs
+            eval: n.r.Isolated()
+            to: n.r.Isolated
+          when: onThisLeader(vs)
   - of: (*Node).peerHealth
     participants:
       - id: caller
@@ -10658,6 +10676,10 @@ sequences:
     steps:
       - opt:
           do:
+            - return: "true"
+          when: kind == coreconsensus.EntryTransfer
+      - opt:
+          do:
             - return: "false"
           when: kind != coreconsensus.EntryMembership
       - switch:
@@ -11263,6 +11285,8 @@ sequences:
         kind: value
       - id: n.r.Progress
         kind: value
+      - id: n.warnHandOver
+        kind: internal
     steps:
       - bind: prefs
         eval: n.cfg.PreferredLeaders
@@ -11293,6 +11317,8 @@ sequences:
                 do:
                   - return: "false"
                 when: n.r.TransferLeadership(now, prefs[i]) != 0
+            - eval: n.warnHandOver(prefs[i])
+              to: n.warnHandOver
             - set: n.prefer.next
               value: i + 1
             - return: "true"
@@ -12394,8 +12420,8 @@ sequences:
         kind: internal
       - id: n.obs.warn
         kind: internal
-      - id: n.r.TransferLeadership
-        kind: value
+      - id: n.warnHandOver
+        kind: internal
       - id: n.r.SetApplyStalled
         kind: value
     steps:
@@ -12413,8 +12439,11 @@ sequences:
           		lattr("to", uint64(to)), lattr("stable", st.Stable), lattr("last", st.Last),
           		lattr("applied", applied), lattr("commit", st.Commit))
         to: n.obs.warn
-      - eval: n.r.TransferLeadership(now, to)
-        to: n.r.TransferLeadership
+      - opt:
+          do:
+            - eval: n.warnHandOver(to)
+              to: n.warnHandOver
+          when: n.r.TransferLeadership(now, to) == 0
       - set: w.stableAt, w.appliedAt, w.to
         value: now, now, to
       - opt:
@@ -18620,6 +18649,9 @@ sequences:
             			return
             		}
             		code = n.r.TransferLeadership(n.clk.Now(), to)
+            		if code == 0 {
+            			n.warnHandOver(to)
+            		}
             		n.handleReady()
             	})
       - opt:

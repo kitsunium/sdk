@@ -52175,7 +52175,7 @@
         {
           "name": "Flags",
           "type": "PeerFlags",
-          "doc": "Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,\nPeerSnapshot, PeerStranded, PeerPinDenied.\n"
+          "doc": "Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,\nPeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,\nPeerLeaderUnconfirmed.\n"
         },
         {
           "name": "Match",
@@ -52199,6 +52199,32 @@
         }
       ],
       "doc": "PeerHealthValue is the leader's view of one peer (D13), one line of\nHealthValue.Peers. It is taken on the event loop and stale at the next\nturn.\n",
+      "file": "service/app/consensus/health.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerLeaderMoved",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerLeaderMoved",
+      "spelled": "PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "32",
+      "doc": "PeerLeaderMoved is set on a voter, down or behind, that #603's guard\nreaches only through this leader, which the voter knows at another\naddress: the leader moved since. Once the leadership moves to a member\nit does not know, nothing answers it. The move and the changes that\nrely on it were admitted: the guard counts the leader at any address\n(#765).\n",
+      "file": "service/app/consensus/health.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerLeaderUnconfirmed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerLeaderUnconfirmed",
+      "spelled": "PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "64",
+      "doc": "PeerLeaderUnconfirmed is set on a voter, down, that #603's guard\nreaches only on its bet over a compacted log: the voter knows this\nleader, but whether as a voter or as a learner, which it sends no\nPreVote to, the log no longer says. Known as a learner, once the\nleadership moves to a member it does not know, nothing answers it. The\nchanges that rely on it were admitted (#765).\n",
       "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
@@ -53068,6 +53094,32 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationLeaderMoved",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "IsolationLeaderMoved",
+      "spelled": "IsolationFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags",
+      "value": "4",
+      "doc": "IsolationLeaderMoved is set on a voter the guard reaches only through\nthis leader, which the voter knows at another address: the guard\ncounts the leader at any address, since it dials the voter while it\nleads, but the voter asks the address it knows, and once the\nleadership moves to a member it does not know, nothing answers it. The\nleader's own move, and the change that relies on it, are admitted\n(#765, the owner's option (b)).\n",
+      "file": "service/app/consensus/raft/isolation.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationLeaderUnconfirmed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "IsolationLeaderUnconfirmed",
+      "spelled": "IsolationFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationFlags",
+      "value": "8",
+      "doc": "IsolationLeaderUnconfirmed is set on a voter the guard reaches only on\nthe bet a compacted log makes: listed in the snapshot's base after\nthis leader, it knows this leader, but whether as a voter, which it\nsends its PreVote to, or as a learner, the log no longer says. Known\nas a learner, once the leadership moves to a member it does not know,\nnothing answers it. The change that relies on it is admitted (#765,\nthe owner's option (b)).\n",
+      "file": "service/app/consensus/raft/isolation.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationPinDenied",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -53109,10 +53161,10 @@
         {
           "name": "Flags",
           "type": "IsolationFlags",
-          "doc": "Flags are why: IsolationStranded, IsolationPinDenied.\n"
+          "doc": "Flags are why: IsolationStranded, IsolationPinDenied,\nIsolationLeaderMoved, IsolationLeaderUnconfirmed.\n"
         }
       ],
-      "doc": "IsolationValue is a voter this leader may never reach again, and why\n(#773): one line of Isolated, or of GuardRefusal.\n",
+      "doc": "IsolationValue is a voter this leader may never reach again, and why\n(#773, #765): one line of Isolated, or of GuardRefusal.\n",
       "file": "service/app/consensus/raft/isolation.go",
       "layer": "service",
       "family": "app"
@@ -53446,7 +53498,7 @@
       "recv": "Raft",
       "spelled": "func() []IsolationValue",
       "canonical": "func() []github.com/kitsunium/sdk/internal/service/app/consensus/raft.IsolationValue",
-      "doc": "Isolated returns the voters of the configuration this leader governs by\nthat #603's guard finds stranded, with what leaves each so, in\nconfiguration order; nil off the leader. It judges them as the guard\nwould judge a change to that configuration, and decides nothing.\n",
+      "doc": "Isolated returns the voters of the configuration this leader governs by\nthat #603's guard finds stranded, or reaches only on one of its bets on\nthis leader, with what leaves each so, in configuration order; nil off\nthe leader. It judges them as the guard would judge a change to that\nconfiguration, and decides nothing.\n",
       "file": "service/app/consensus/raft/isolation.go",
       "layer": "service",
       "family": "app"

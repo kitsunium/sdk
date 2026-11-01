@@ -128,21 +128,6 @@ workflows:
           range: next.Members
           value: m
       - return: vs
-  - of: (*Raft).vouchedInRetained
-    steps:
-      - opt:
-          do:
-            - return: "false"
-          when: "!vouchedAs(next, &r.base, v, r.id, how)"
-      - loop:
-          do:
-            - opt:
-                do:
-                  - return: "false"
-                when: "!vouchedAs(next, &r.confs[k].m, v, r.id, how)"
-          key: k
-          range: r.confs
-      - return: "true"
   - of: listedBefore
     steps:
       - loop:
