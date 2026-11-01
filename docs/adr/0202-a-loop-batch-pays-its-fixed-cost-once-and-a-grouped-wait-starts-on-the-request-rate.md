@@ -105,15 +105,16 @@ code, interleaved run by run, benchstat medians.
 
 | Benchmark | main | this ADR | delta |
 |---|---|---|---|
-| `Core_batchClock` (one empty batch's clock) | 138.4 ns | 70.6 ns | −49 % (p=0.000, n=10) |
-| `Core_batch/open=10000` | 193.7 ns | 117.5 ns | −39 % (p=0.000, n=10) |
-| `URingWait_ready` | 210.2 ns | 3.1 ns | −98.5 % (p=0.000, n=10) |
-| `URingWatchdog_quiet` (16 batches a tick) | 215.2 ns | 16.2 ns | −92.5 % (p=0.000, n=10) |
-| `SparseKeepAlive/wait=4ms` batches a request | 0.304 | 0.210 | −31 % (p=0.008, n=5) |
-| `SparseKeepAlive/wait=4ms` loop wakeups a request | 0.460 | 0.424 | −7.9 % (p=0.008, n=5) |
-| `SparseKeepAlive/wait=4ms` context switches a request | 0.805 | 0.752 | −6.7 % (p=0.008, n=5) |
-| `SparseKeepAlive/wait=1ms` batches a request | 1.53 | 1.47 | ~ (p=0.222, n=5) |
-| `SparseKeepAlive/wait=1ms` loop wakeups a request | 0.949 | 0.909 | ~ (p=1.000, n=5) |
+| `Core_batchClock` (one empty batch's clock) | 145.2 ns | 73.9 ns | −49 % (p=0.000, n=10) |
+| `Core_batch/open=10000` | 195.3 ns | 114.2 ns | −42 % (p=0.000, n=10) |
+| `URingWait_ready` | 210.9 ns | 3.1 ns | −98.6 % (p=0.000, n=10) |
+| `URingWatchdog_quiet` (16 batches a tick) | 214.1 ns | 15.6 ns | −92.7 % (p=0.000, n=10) |
+| `SparseKeepAlive/wait=4ms` batches a request | 0.344 | 0.224 | −35 % (p=0.008, n=5) |
+| `SparseKeepAlive/wait=4ms` loop wakeups a request | 0.477 | 0.433 | −9.3 % (p=0.008, n=5) |
+| `SparseKeepAlive/wait=4ms` context switches a request | 0.818 | 0.764 | −6.7 % (p=0.008, n=5) |
+| `SparseKeepAlive/wait=1ms` batches, loop wakeups a request | 1.55, 0.962 | 1.54, 0.968 | ~ (p=0.111, p=1.000, n=5) |
+
+main is 6425e6296, ADR 0200 and 0201 included.
 
 The CPU a request of `SparseKeepAlive` stayed inside the host's spread (±10 to
 ±40 % between runs, other workloads sharing the host): the cost benchmarks
@@ -128,7 +129,7 @@ batches rather than arrivals — had added 5.6 % of wakeups.
   connection accepted no longer makes a system call a batch for its
   watchdog.
 - With `BatchWait` of a few milliseconds a sparse load keeps its waits
-  grouped: a third fewer batches, 8 % fewer wakeups of the loop's thread.
+  grouped: 35 % fewer batches, 9 % fewer wakeups of the loop's thread.
 - The default load is unchanged: the rate starts the grouped wait only where
   two requests come within 250 µs.
 
