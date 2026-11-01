@@ -6685,6 +6685,65 @@ own restart, which rebuilds its log from its newest snapshot
   the log is synced, and only over a log that held the index under another
   term). The tests of #636, #684, #766, #787, #790 and #793 stay green.
 
+## Amendment — a transfer over the no-op fed for a silence feeds it once more (2026-11-01, #795)
+
+#787's fix (PR #791) has the leader append one no-op of its term for a
+silent node whose heartbeat answer reports the leader's whole log
+committed, once per silence and per term. A start raises a silent node's
+truncation point to the index after its snapshot when that snapshot
+covers the point (`raiseSilenceOverSnapshot`, #636), and the node cannot
+tell the leader's snapshot from one it cut itself. A node that missed the
+no-op, installed the leader's snapshot over it, and restarted before the
+leader's next append, a crash or a clean stop within one heartbeat
+interval, came back with its point one past the leader's whole log. The
+no-op was spent: in a cluster that wrote nothing the node stayed silent,
+one voter short, and one more failure left two live voters of three that
+elected no one
+([#795](https://github.com/kitsunium/sdk/issues/795)).
+
+- **The leader keeps the index of the no-op, and a transfer over it
+  re-arms the feed.** `progress.silentFed` replaces the `peerSilentFed`
+  bit: the index of the no-op appended for the peer's silence, cleared
+  with the silence as before, and by `SnapshotDone` when the snapshot the
+  peer installed is at or past it. The next silent heartbeat answer that
+  reports the whole log committed is then fed one more no-op. A raise
+  sets the point to the index after a committed snapshot, at most the
+  leader's last index plus one, so that no-op is past it, and the rest of
+  R4-03, #636 and #766 holds as before.
+- **The bound.** Only the leader's own transfers re-arm it, and only over
+  the no-op: a snapshot below it leaves the point at most at it. Each
+  further no-op needs a completed transfer of the whole state, which the
+  leader starts only for a peer whose next its log no longer reaches, one
+  that asks for it with no table, or the kept index; appending a no-op
+  starts none. An unreadable condition, which no term ends, is still
+  fed once a term in a cluster that wrote nothing, and once more per such
+  transfer. A peer installed without restarting may get the no-op it no
+  longer needs: one entry per transfer.
+- **What it leaves.** The frame does not carry the point, and a node's
+  answers are the same whether its point was raised or its condition is
+  unreadable. A node that cut its own snapshot over the no-op once its
+  condition held, before the end of its silence was durable, and
+  restarted on it, comes back past the leader's whole log with no
+  transfer the leader saw, and stays silent while nobody writes, as
+  before this amendment. Feeding again on the reported commit alone would
+  feed an unreadable condition a no-op every heartbeat or so, for good;
+  ending that
+  residual needs a bound that feeds such a condition more than once a
+  term, the point on the wire under the protocol rule, or the start told
+  which snapshot it raises over: a decision.
+- **No format change.** No frame, field, flag or record changes, nothing
+  persisted, no protocol raise, and no raft mutation: the type is full.
+- **Tests.** `TestASilentNodeRestartedOnAnInstalledSnapshotEndsItsSilenceInAQuietCluster`
+  (raft, the issue's scenario on the step functions; on main the node
+  restarts at 2/13 over the leader's log ending at 12 and stays silent
+  through 30 s of a quiet cluster, and with the leader down the two others
+  elect no one; fixed, the leader's second no-op, at 13, ends the silence
+  and they elect one), `TestASilentNodeInstalledOverTheNoOpEndsItsSilenceWithoutARestart`
+  (the control), `TestATransferFeedsASilenceNoTermEndsOnceMore` (an
+  unreadable condition: one more no-op for the transfer, none other
+  through 30 s) and `TestOnlyATransferOverTheNoOpFeedsTheSilentPeerAgain`.
+  The tests of #636, #766, #787, #790, #792 and #793 stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6735,6 +6794,7 @@ own restart, which rebuilds its log from its newest snapshot
 | #789 | Raft hunt loop, 2026-11-01 | `Recover` and `Inspect` refuse STORAGE_FAILED an interrupted install whose snapshot the disk cannot read, instead of setting it aside as one that fails its checksums, and a read of the chunks or of a `.meta` that fails for any reason but a stream cut short is STORAGE_FAILED, never SNAPSHOT_CORRUPT; no format change (amendment of 2026-11-01, #789) |
 | #793 | Raft hunt loop, 2026-11-01 | a silent node's lowered truncation point leaves in the Ready that carries the truncation (`ReadyValue.SilenceLowered`), and the driver writes it to `SILENT`, same record, lowered only, before the storage actor writes that truncation, so a restart before the commit reaches the node obeys it; no format change, no raft mutation (amendment of 2026-11-01, #793) |
 | #792 | Raft hunt loop, 2026-11-01 | an install over a log that held the snapshot's index under another term lowers a silent node's truncation point to the index after the snapshot, as a conflicting append does, durably through #793's path, and a start that finishes such an interrupted install lowers `SILENT` before it drops the log; no format change, no raft mutation (amendment of 2026-11-01, #792) |
+| #795 | Raft hunt loop, 2026-11-01 | the leader keeps the index of the no-op it fed a silence, and a snapshot transfer the peer installed at or past it feeds the peer once more, so a node restarted on that snapshot, its point raised past the leader's whole log, ends its silence in a cluster that writes nothing; a snapshot the node cut itself left to a decision; no format change, no raft mutation (amendment of 2026-11-01, #795) |
 
 ## raft-sql-poc (owner's prior Raft)
 

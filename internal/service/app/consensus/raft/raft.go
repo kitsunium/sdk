@@ -711,6 +711,12 @@ func (r *Raft) SnapshotDone(to core.NodeID, index uint64, ok bool) {
 		// one it installed. Resumed after the older base, the leader found
 		// that entry compacted and sent another snapshot (#550).
 		pr.pendingSnapshot = max(pr.pendingSnapshot, index)
+		// A snapshot that covers the no-op fed for the peer's silence
+		// lets a restart raise its truncation point past it: the peer may
+		// be fed again (feedSilence, #795).
+		if index >= pr.silentFed {
+			pr.silentFed = 0
+		}
 	} else {
 		pr.pendingSnapshot = 0
 	}

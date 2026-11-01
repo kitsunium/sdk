@@ -602,22 +602,17 @@ sequences:
         kind: actor
       - id: (*Raft).feedSilence
         kind: self
-      - id: r.appendAsLeader
-        kind: internal
       - id: r.broadcastAppend
         kind: internal
     steps:
       - opt:
           do:
             - return: ""
-          when: pr.facts&peerSilentFed != 0 || m.Commit < r.log.lastIndex() || r.transferTo != 0
-      - op: "|="
-        set: pr.facts
-        value: peerSilentFed
+          when: pr.silentFed != 0 || m.Commit < r.log.lastIndex() || r.transferTo != 0
       - bind: noop
         eval: "core.EntryValue{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}"
-      - eval: r.appendAsLeader([]core.EntryValue{noop})
-        to: r.appendAsLeader
+      - set: pr.silentFed
+        value: r.appendAsLeader([]core.EntryValue{noop})[0].Index
       - eval: r.broadcastAppend(false)
         to: r.broadcastAppend
   - of: (*Raft).watchWindow
@@ -3158,7 +3153,9 @@ sequences:
           when: flags&core.FlagTruncated != 0
       - op: "&^="
         set: p.facts
-        value: peerSilent | peerSilentFed
+        value: peerSilent
+      - set: p.silentFed
+        value: "0"
   - of: (*progress).becomeProbe
     participants:
       - id: caller
@@ -3682,6 +3679,11 @@ sequences:
           - do:
               - set: pr.pendingSnapshot
                 value: max(pr.pendingSnapshot, index)
+              - opt:
+                  do:
+                    - set: pr.silentFed
+                      value: "0"
+                  when: index >= pr.silentFed
             when: ok
           - do:
               - set: pr.pendingSnapshot

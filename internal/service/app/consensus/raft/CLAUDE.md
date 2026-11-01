@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T12:00:00Z -->
+<!-- updated: 2026-11-01T14:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -354,10 +354,26 @@ under coverage before touching `shard_count`.
   truncation point lies past that log, `refeed` has nothing to send, and
   in a cluster that wrote nothing it stayed silent for as long as nobody
   wrote, one failure from no leader (#787). `feedSilence` appends one
-  no-op of the term for it, once per silence (`peerSilentFed`, cleared
-  with `peerSilent`) and never during a transfer
+  no-op of the term for it, once per silence (`progress.silentFed`, its
+  index, cleared with `peerSilent`) and never during a transfer
   (`TestASilentNodeHoldingTheWholeLogEndsItsSilenceInAQuietCluster`,
-  `TestTheLeaderAppendsOneNoOpPerSilence`). Nor keep a silent node's
+  `TestTheLeaderAppendsOneNoOpPerSilence`). Nor keep that no-op spent
+  once a snapshot transfer to the peer covered it: a node restarted
+  between that install and the leader's next append came back with its
+  point raised past the leader's whole log (`raiseSilenceOverSnapshot`),
+  and stayed silent while nobody wrote (#795). `SnapshotDone` clears
+  `silentFed` when the snapshot installed is at or past it, so the next
+  silent answer that reports the whole log is fed one more no-op. Each
+  further no-op needs a whole state's transfer, and an unreadable
+  condition is still fed once a term in a quiet cluster. A snapshot the
+  node cut itself over the no-op is not seen: restarted on it before its
+  end is durable, it reports what an unreadable condition reports, and
+  only its point on the wire would tell them apart (ADR 0152's #795
+  amendment)
+  (`TestASilentNodeRestartedOnAnInstalledSnapshotEndsItsSilenceInAQuietCluster`,
+  `TestATransferFeedsASilenceNoTermEndsOnceMore`,
+  `TestOnlyATransferOverTheNoOpFeedsTheSilentPeerAgain`; no mutation, the
+  type is full). Nor keep a silent node's
   truncation point above a conflict an append of a leader of a term at
   least `SilentTerm` finds below it: no entry the node held from there on
   ever counted towards a commit (Leader Completeness, Log Matching), and

@@ -398,15 +398,29 @@ func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 // that whole log, unless the node's log diverged from it, where the
 // conflict lowered that point already (lowerSilence). One per silence: a
 // peer silent for a reason no leader lifts, an unreadable condition, is
-// fed once a term, and the fact is cleared with the silence. A transfer in
-// flight appends nothing, as it proposes nothing.
+// fed once a term, and the index fed is cleared with the silence. A
+// transfer in flight appends nothing, as it proposes nothing.
+//
+// A snapshot transfer that covers the no-op feeds the peer once more
+// (SnapshotDone). The truncation point moves past the no-op only at a
+// start, over a snapshot that covers it (raiseSilenceOverSnapshot, #636):
+// a node restarted between installing this leader's snapshot and its next
+// append came back past this leader's whole log, and was fed nothing again
+// (#795). The start raises the point to the index after the snapshot,
+// which is committed, so the next no-op, one past the whole log the node
+// reports holding, is past it. Each further no-op needs a transfer that
+// carries the whole state, never a no-op alone, so an unreadable
+// condition is still fed once a term in a cluster that wrote nothing. A
+// snapshot the node cut itself is not seen: restarted on one over the
+// no-op before its silence's end was durable, it answers as an unreadable
+// condition does, and only its point, which no frame carries, would tell
+// the two apart.
 func (r *Raft) feedSilence(pr *progress, m core.MessageValue) {
-	if pr.facts&peerSilentFed != 0 || m.Commit < r.log.lastIndex() || r.transferTo != 0 {
+	if pr.silentFed != 0 || m.Commit < r.log.lastIndex() || r.transferTo != 0 {
 		return
 	}
-	pr.facts |= peerSilentFed
 	noop := core.EntryValue{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}
-	r.appendAsLeader([]core.EntryValue{noop})
+	pr.silentFed = r.appendAsLeader([]core.EntryValue{noop})[0].Index
 	r.broadcastAppend(false)
 }
 

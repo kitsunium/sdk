@@ -376,10 +376,6 @@ constants:
           acknowledges no append, so it counts for no change that must commit
           (activeMajority, #790).
         name: peerSilent
-      - doc: |-
-          peerSilentFed is set once the leader appended a no-op for the peer's
-          silence (feedSilence, #787), and cleared with peerSilent.
-        name: peerSilentFed
     name: peerProbeSent
   - grouped: true
     items:
@@ -1154,6 +1150,14 @@ types:
           holding the oldest append in flight; zero when it does not.
         name: heldSince
         type: time.Time
+      - doc: |-
+          silentFed is the index of the no-op the leader appended for the
+          peer's silence (feedSilence, #787), 0 when none: cleared with
+          peerSilent, and by a snapshot transfer to the peer that covers it,
+          over which a restart of the peer raises its truncation point past
+          that no-op (SnapshotDone, #795).
+        name: silentFed
+        type: uint64
     kind: struct
     methods:
       - doc: |-
@@ -1891,8 +1895,23 @@ types:
           that whole log, unless the node's log diverged from it, where the
           conflict lowered that point already (lowerSilence). One per silence: a
           peer silent for a reason no leader lifts, an unreadable condition, is
-          fed once a term, and the fact is cleared with the silence. A transfer in
-          flight appends nothing, as it proposes nothing.
+          fed once a term, and the index fed is cleared with the silence. A
+          transfer in flight appends nothing, as it proposes nothing.
+
+          A snapshot transfer that covers the no-op feeds the peer once more
+          (SnapshotDone). The truncation point moves past the no-op only at a
+          start, over a snapshot that covers it (raiseSilenceOverSnapshot, #636):
+          a node restarted between installing this leader's snapshot and its next
+          append came back past this leader's whole log, and was fed nothing again
+          (#795). The start raises the point to the index after the snapshot,
+          which is committed, so the next no-op, one past the whole log the node
+          reports holding, is past it. Each further no-op needs a transfer that
+          carries the whole state, never a no-op alone, so an unreadable
+          condition is still fed once a term in a cluster that wrote nothing. A
+          snapshot the node cut itself is not seen: restarted on one over the
+          no-op before its silence's end was durable, it answers as an unreadable
+          condition does, and only its point, which no frame carries, would tell
+          the two apart.
         name: feedSilence
         params: pr *progress, m core.MessageValue
         recv: r *Raft
