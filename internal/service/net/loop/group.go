@@ -277,6 +277,9 @@ func newLoop(g *Group, cfg Config, i int, mapper func(int) ([]byte, error)) *loo
 		index: i, sz: g.sz, h: cfg.Handler, busy: cfg.Busy, grp: g.grp,
 		epoch:    time.Now(),
 		lowWater: g.sz.outputCap / lowWaterDiv,
+		// the first batch's end is past any interval: the first yield is
+		// due there.
+		yielded: -g.sz.yield,
 	}
 	//: the idle bound and the eviction age, in ticks, rounded up.
 	if cfg.IdleTimeout > 0 {

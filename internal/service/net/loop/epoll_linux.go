@@ -338,14 +338,13 @@ func (el *epollLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 	//: one iteration per batch until the group stops or the drain completes.
 	for {
 		n := el.wait()
-		started := time.Now()
-		lp.tick = lp.now()
+		lp.begin()
 		el.handle(n)
 		el.control()
 		el.r.wheel.advance(lp.tick, el.r.expire)
 		el.pace()
 		lp.h.OnBatchEnd(lp)
-		lp.endBatch(started)
+		lp.endBatch()
 		el.off = 0
 		lp.yield()
 		//: finished: stopped, or drained to the last connection.

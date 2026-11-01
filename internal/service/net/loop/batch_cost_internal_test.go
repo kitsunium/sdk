@@ -52,14 +52,14 @@ func (h *answerH) OnData(io corenet.LoopIO, ref corenet.LoopConnRef, buf []byte)
 func activeBatch(lp *loop, r *ring, slot int32) {
 	r.deliver(slot, []byte("T /a\nGE"))
 	lp.h.OnBatchEnd(lp)
-	lp.endBatch(time.Now())
+	lp.endBatch()
 }
 
 // primeSpill leaves the start of a request in slot's spill.
 func primeSpill(tb testing.TB, lp *loop, r *ring, slot int32) {
 	tb.Helper()
 	r.deliver(slot, []byte("GE"))
-	lp.endBatch(time.Now())
+	lp.endBatch()
 	if !r.hasSpill(slot) {
 		tb.Fatal("no spill held")
 	}
@@ -129,7 +129,7 @@ func TestCore_compactTouchedOnly(t *testing.T) {
 	}
 	r.opened(again)
 	lp.h.OnBatchEnd(lp)
-	lp.endBatch(time.Now())
+	lp.endBatch()
 	spillIs(t, lp, r, a, "z")
 	if r.conns[a].flags&fCompact != 0 || len(r.compact) != 0 {
 		t.Fatal("the compaction list survived the batch")
@@ -153,6 +153,17 @@ func BenchmarkCore_batch(b *testing.B) {
 				activeBatch(lp, r, slot)
 			}
 		})
+	}
+}
+
+// BenchmarkCore_batchClock measures the clock of one batch: read at its start
+// for the tick, at its end for the histogram and the yield, nothing between.
+func BenchmarkCore_batchClock(b *testing.B) {
+	lp, _, _ := newTestLoop(&scriptH{}, corenet.LoopValue{}, 0)
+	b.ReportAllocs()
+	for b.Loop() {
+		lp.begin()
+		lp.endBatch()
 	}
 }
 

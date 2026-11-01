@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"math"
 	"os"
 	"runtime"
 	"sync/atomic"
@@ -140,10 +141,13 @@ type loop struct {
 	hard bool
 	// lowWater is the output mark under which OnWritable fires.
 	lowWater int
-	// ended is when the last batch ended; yielded when the loop last
-	// yielded to the scheduler (sz.yield).
-	ended   time.Time
-	yielded time.Time
+	// started is when the running batch started, ended when the last one
+	// ended, yielded when the loop last yielded to the scheduler (sz.yield):
+	// each on the monotonic clock since epoch, one read a batch's end and one
+	// its start (begin).
+	started time.Duration
+	ended   time.Duration
+	yielded time.Duration
 }
 
 // newRing builds ring i of lp over drv.
@@ -707,9 +711,15 @@ func (r *ring) evict() int {
 	return done
 }
 
+// begin starts a batch: the clock read once, the tick derived from it.
+func (lp *loop) begin() {
+	lp.started = time.Since(lp.epoch)
+	lp.tick = int64(lp.started/tickEvery) + 1
+}
+
 // endBatch runs once OnBatchEnd has returned: flushes, releases the chunks the
 // batch held, compacts spills, and publishes the counters.
-func (lp *loop) endBatch(started time.Time) {
+func (lp *loop) endBatch() {
 	//: every ring's output leaves in the order it was written.
 	for _, r := range lp.rings {
 		r.flushDirty()
@@ -725,8 +735,8 @@ func (lp *loop) endBatch(started time.Time) {
 		r.st.batches++
 		r.publish()
 	}
-	lp.ended = time.Now()
-	lp.grp.observe(lp.ended.Sub(started))
+	lp.ended = time.Since(lp.epoch)
+	lp.grp.observe(lp.ended - lp.started)
 }
 
 // yield hands the loop's thread back to the Go scheduler once sz.yield has
@@ -736,7 +746,7 @@ func (lp *loop) endBatch(started time.Time) {
 // in the middle of a wait. It reports whether it yielded.
 func (lp *loop) yield() bool {
 	//: off, or not due.
-	if lp.sz.yield <= 0 || lp.ended.Sub(lp.yielded) < lp.sz.yield {
+	if lp.sz.yield <= 0 || lp.ended-lp.yielded < lp.sz.yield {
 		//: serving on.
 		return false
 	}
@@ -757,12 +767,6 @@ func (r *ring) compactListed() {
 		r.compactSpill(s)
 	}
 	r.compact = r.compact[:0]
-}
-
-// now converts the wall clock into the loop's ticks.
-func (lp *loop) now() int64 {
-	//: monotonic, from the loop's start.
-	return int64(time.Since(lp.epoch)/tickEvery) + 1
 }
 
 // lookup resolves ref to its ring and slot, or reports it stale.
@@ -892,12 +896,27 @@ func (lp *loop) SetDeadline(ref corenet.LoopConnRef, d time.Duration) error {
 	if d <= 0 {
 		c.deadline = 0
 	} else {
-		//: rounded up, so it fires no earlier than asked.
-		c.deadline = lp.now() + int64((d+tickEvery-1)/tickEvery)
+		c.deadline = deadlineTick(time.Since(lp.epoch), d)
 	}
 	r.armTimer(slot)
 	//: armed.
 	return nil
+}
+
+// deadlineTick is the first tick whose batch starts at least d after now,
+// both from the loop's epoch: the absolute instant rounded up to a tick
+// boundary, one-based as the tick is, and saturated rather than overflowed.
+// Counted from the call, not from the batch's tick, so a deadline set late
+// in a long batch fires no earlier than asked; no adapter of the request
+// path sets one a request.
+func deadlineTick(now, d time.Duration) int64 {
+	//: so far ahead it never fires.
+	if d > math.MaxInt64-now-tickEvery {
+		//: saturated.
+		return math.MaxInt64
+	}
+	//: rounded up, then one-based.
+	return int64((now+d+tickEvery-1)/tickEvery) + 1
 }
 
 // Pressure implements corenet.LoopIO.

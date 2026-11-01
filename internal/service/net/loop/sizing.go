@@ -45,6 +45,10 @@ const (
 	// the next wait to be grouped: below it the loop is not loaded, and
 	// waiting would only add latency.
 	batchWaitFrom uint64 = 4
+	// spacingWeight is the weight of one batch in the moving average of the
+	// time between two arrivals (ADR 0202): an eighth, so a burst of a few
+	// batches does not swing it, and a few dozen settle it.
+	spacingWeight time.Duration = 8
 	// yieldEvery is the most serving time between two yields of a native
 	// loop to the Go scheduler, when GOMAXPROCS leaves it a spare P (ADR
 	// 0199). Measured: 2 ms and 5 ms cost the same.

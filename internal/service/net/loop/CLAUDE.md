@@ -30,7 +30,7 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | `epoll_linux.go` | the epoll backend: one thread, one epoll instance, one ring per loop; `EPOLLEXCLUSIVE` listeners; a 2 MiB mmap'd read arena per loop |
 | `uring_abi_linux.go` | the io_uring uapi in-tree (no `x/sys`, ADR 0018): syscall numbers 425–427, flags, opcodes, `sqe`/`cqe`/`uringBuf`/`uringParams`/… layouts, `fixedFd` (0-based) and `targetIndex` (index + 1), `FILE_INDEX_ALLOC` raw `0xFFFFFFFF`; one `Syscall6` per waiting enter, `RawSyscall6` to submit only |
 | `uring_ring_linux.go` | one io_uring: `SETUP_CLAMP`+`CQSIZE` with the granted sizes read back, the single mapping, the SQ/CQ views, the bounded submit (EINTR again; EBUSY/EAGAIN counted and left to the next batch), `flushOverflow` (an overflowed CQ moves into the ring only on an enter with GETEVENTS), the provided-buffer ring (8192 entries of 2 KiB mapped, 512 handed to the kernel at setup, more by `growBufs` as `uRing.provide` asks — ADR 0201) and its tail published by one 32-bit store of entry 0's bid and the tail, the sparse table, `REGISTER_PROBE`, the SQE encoders |
-| `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME; grouped by `waitArgs` once a batch reaped four, ADR 0199), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the close: shutdown → count → `close_direct`, a user_data backstop after 1 s (ADR 0200); ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the accept watchdog, judged per listener |
+| `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME; grouped by `waitArgs` once a batch reaped four or the arrivals come two within the bound, ADR 0199, ADR 0202), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the close: shutdown → count → `close_direct`, a user_data backstop after 1 s (ADR 0200); ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the accept watchdog, judged per listener |
 | `uring_probe_linux.go` | the last probe stage: a loopback multishot accept into a direct descriptor and a multishot recv through the buffer ring, on a ring of its own, then the release check (shutdown, the recv's end, then close_direct must show the peer the end; cancel→close without the shutdown tells whether puts are deferred) |
 | `uring_none_linux.go` | the Linux architectures outside io_uring's wave 1: `LoopBackendUnavailable`, epoll serves |
 | `group_linux.go`, `group_other.go` | backend choice, `RLIMIT_NOFILE`, `mmap`; elsewhere, `UnsupportedPlatform` |
@@ -92,17 +92,33 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   connections per batch was paid per request.
   `TestCore_batchCostIndependentOfOpen` pins it, `BenchmarkCore_batch`
   measures it.
-- **A loaded io_uring loop groups its wait (ADR 0199).** Once a batch
-  reaped `batchWaitFrom` (4) completions, every ring together, the primary's
-  next wait asks for `batchWaitMin` (32, at most `CQBatch`) within
-  `batchWait` (250 µs, at most the tick): one `io_uring_enter`, `EXT_ARG`,
-  relative timeout. The kernel wakes on that many CQEs past the head or at
-  the bound, and an `ETIME` with CQEs returns zero (`io_cqring_wait`).
-  Idle, draining or `BatchWait < 0`: one completion or the tick, as before.
-  `min_wait_usec` (`IORING_FEAT_MIN_TIMEOUT`) is not used: mainline 6.12 to
-  6.18 keep waiting for `min_complete` once its window passed empty, the
-  stable fixes (e15cb2200b93, 29fe1bd01b99) are not visible in the feature
-  bit. `TestURingWait` pins the semantics on a coop and a deferred ring.
+- **A loaded io_uring loop groups its wait (ADR 0199, ADR 0202).** Once a
+  batch reaped `batchWaitFrom` (4) completions, every ring together, or
+  reaped some while two arrivals at least are expected within `batchWait`
+  (`busy`: `spacing`, the moving average of the time between two recv
+  completions carrying bytes, folded by `woke` an eighth a batch with
+  arrivals), the primary's next wait asks for `batchWaitMin` (32, at most
+  `CQBatch`) within `batchWait` (250 µs, at most the tick): one
+  `io_uring_enter`, `EXT_ARG`, relative timeout. The kernel wakes on that
+  many CQEs past the head or at the bound, and an `ETIME` with CQEs returns
+  zero (`io_cqring_wait`); a window that ends with an empty CQ is waited
+  through plainly, no batch served for it. Idle, draining or
+  `BatchWait < 0`: one completion or the tick, as before. `min_wait_usec`
+  (`IORING_FEAT_MIN_TIMEOUT`) is not used: mainline 6.12 to 6.18 keep
+  waiting for `min_complete` once its window passed empty, the stable fixes
+  (e15cb2200b93, 29fe1bd01b99) are not visible in the feature bit, and on a
+  fixed 7.0 it measured as the bounded wait's equal (ADR 0202 §D5).
+  `TestURingWait` pins the semantics on a coop and a deferred ring,
+  `TestURingWaitArgs` and `TestURingWoke` the rule.
+- **A batch pays its fixed cost once (ADR 0202).** `begin` reads the
+  monotonic clock since the epoch once at a batch's start (the tick),
+  `endBatch` once at its end (the histogram, the yield); `SetDeadline` reads
+  it again, so a deadline set late in a long batch is not brought forward. The accept watchdog looks at most once a tick (`judged`):
+  its look is a `getsockopt` a listener. `uring.wait` with a CQE already
+  there only submits what is pending (`RawSyscall6`), and makes no system
+  call when nothing is. `BenchmarkCore_batchClock`,
+  `BenchmarkURingWait_ready` and `BenchmarkURingWatchdog_quiet` measure them;
+  `server`'s `BenchmarkSparseKeepAlive` the whole under a sparse keep-alive load.
 - **A native loop yields to a spare P (ADR 0199).** A locked loop never moves
   its P's `schedtick`, so sysmon preempts it every 10 ms and retakes its P
   in its waits (10.9 % of the samples at one vCPU). `loop.yield` calls

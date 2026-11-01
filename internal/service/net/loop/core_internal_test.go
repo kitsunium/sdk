@@ -5,6 +5,7 @@ package loop
 import (
 	"bytes"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -120,7 +121,7 @@ func TestCore_partialConsume(t *testing.T) {
 	r.deliver(s, []byte("GET /a\nGET"))
 	r.deliver(s, []byte(" /b\nGE"))
 	h.OnBatchEnd(lp)
-	lp.endBatch(time.Now())
+	lp.endBatch()
 	r.deliver(s, []byte("T /c\n"))
 	want := []string{"GET /a\nGET", "GET /b\nGE", "GET /c\n"}
 	if len(h.seen) != len(want) {
@@ -162,7 +163,7 @@ func TestCore_spillHandedOutStaysPut(t *testing.T) {
 			t.Fatalf("buffer %d changed before OnBatchEnd", i)
 		}
 	}
-	lp.endBatch(time.Now())
+	lp.endBatch()
 	if got := lp.slab.data(r.conns[s].spill); len(got) != 18000 {
 		t.Fatalf("spill holds %d bytes, want 18000", len(got))
 	}
@@ -185,7 +186,7 @@ func TestCore_writeOrderAndStale(t *testing.T) {
 	}
 	for range 10 {
 		r.markDirty(s)
-		lp.endBatch(time.Now())
+		lp.endBatch()
 	}
 	if got := d.sent[s].String(); got != "one two three" {
 		t.Fatalf("sent %q", got)
@@ -196,7 +197,7 @@ func TestCore_writeOrderAndStale(t *testing.T) {
 	if err := lp.Close(ref); !errors.Is(err, corenet.LoopStaleRef) {
 		t.Fatalf("second Close = %v", err)
 	}
-	lp.endBatch(time.Now())
+	lp.endBatch()
 	if len(h.closes) != 1 || h.closes[0] != nil {
 		t.Fatalf("closes = %v", h.closes)
 	}
@@ -316,7 +317,7 @@ func TestCore_allocs(t *testing.T) {
 		_ = io.SetDeadline(ref, time.Second)
 		_ = io.Pressure(ref)
 		r.markDirty(s)
-		lp.endBatch(time.Now())
+		lp.endBatch()
 	})
 	if n != 0 {
 		t.Fatalf("LoopIO allocates %.1f per call", n)
@@ -334,7 +335,7 @@ func TestCore_yieldBound(t *testing.T) {
 	t.Parallel()
 	lp, _, _ := newTestLoop(&scriptH{}, corenet.LoopValue{}, 0)
 	lp.sz.yield = yieldEvery
-	t0 := time.Now()
+	lp.yielded = -yieldEvery // as newLoop sets it for a loop that yields
 	for _, c := range []struct {
 		at   time.Duration
 		want bool
@@ -347,13 +348,13 @@ func TestCore_yieldBound(t *testing.T) {
 		{2*yieldEvery - time.Nanosecond, false},
 		{3 * yieldEvery, true},
 	} {
-		lp.ended = t0.Add(c.at)
+		lp.ended = c.at
 		if got := lp.yield(); got != c.want {
 			t.Fatalf("yield at %v = %v, want %v", c.at, got, c.want)
 		}
 	}
 	lp.sz.yield = 0
-	lp.ended = t0.Add(time.Hour)
+	lp.ended = time.Hour
 	if lp.yield() {
 		t.Fatal("a loop with no spare P yielded")
 	}
@@ -364,9 +365,32 @@ func TestCore_yieldBound(t *testing.T) {
 func TestCore_endBatchStampsEnd(t *testing.T) {
 	t.Parallel()
 	lp, _, _ := newTestLoop(&scriptH{}, corenet.LoopValue{}, 0)
-	before := time.Now()
-	lp.endBatch(before)
-	if lp.ended.Before(before) {
-		t.Fatalf("ended %v before the batch started %v", lp.ended, before)
+	lp.begin()
+	lp.endBatch()
+	if lp.ended < lp.started {
+		t.Fatalf("ended %v before the batch started %v", lp.ended, lp.started)
+	}
+}
+
+// TestCore_deadlineTick pins that a deadline never fires before it is due:
+// the first tick it fires on starts at or after the call plus d, whatever the
+// call's offset in its tick, and one past the range saturates.
+func TestCore_deadlineTick(t *testing.T) {
+	t.Parallel()
+	ms := time.Millisecond
+	for _, c := range []struct{ now, d time.Duration }{
+		{0, 0}, {4 * ms, 5 * ms}, {9 * ms, 10 * ms}, {10 * ms, 10 * ms}, {123 * ms, time.Second}, {9*ms + 999*time.Microsecond, time.Nanosecond},
+	} {
+		got := deadlineTick(c.now, c.d)
+		// The batch that sees tick got starts at (got-1) ticks from the epoch.
+		if starts := time.Duration(got-1) * tickEvery; starts < c.now+c.d {
+			t.Fatalf("deadlineTick(%v, %v) = %d, its batch starts at %v, before %v", c.now, c.d, got, starts, c.now+c.d)
+		}
+		if starts := time.Duration(got-2) * tickEvery; starts >= c.now+c.d {
+			t.Fatalf("deadlineTick(%v, %v) = %d: a tick later than needed", c.now, c.d, got)
+		}
+	}
+	if got := deadlineTick(time.Second, time.Duration(math.MaxInt64)); got != math.MaxInt64 {
+		t.Fatalf("an overflowing deadline = %d, want saturated", got)
 	}
 }

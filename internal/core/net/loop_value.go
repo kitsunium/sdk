@@ -112,8 +112,10 @@ type LoopValue struct {
 	// selects 256.
 	Outbound int `json:"outbound"`
 	// BatchWait bounds how long an io_uring loop holds its wait for
-	// BatchWaitMin completions once its previous batch reaped at least four,
-	// so a loaded loop serves larger batches for fewer wakeups (ADR 0199). It
+	// BatchWaitMin completions while it is loaded: its previous batch reaped
+	// at least four, or two receives carrying bytes at least come within the
+	// bound at the rate they arrive. A loaded loop so serves larger batches for fewer
+	// wakeups (ADR 0199, ADR 0202). It
 	// bounds each grouped wait, not a request's latency: a request read over
 	// several batches may meet one at each. Zero selects 250 µs,
 	// a negative value turns the grouped wait off, and anything past the 10 ms

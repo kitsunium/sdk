@@ -97,9 +97,10 @@ func TestURingWait(t *testing.T) {
 	}
 }
 
-// TestURingWaitArgs pins when the loop groups its wait (ADR 0199): only once
-// the last batch reaped batchWaitFrom completions, with the grouped wait on,
-// and never while draining.
+// TestURingWaitArgs pins when the loop groups its wait (ADR 0199, ADR 0202):
+// once the last batch reaped batchWaitFrom completions, or reaped some while
+// two arrivals at least come within the bound; with the grouped wait on, and
+// never while draining.
 func TestURingWaitArgs(t *testing.T) {
 	t.Parallel()
 	tick, grouped := &kernelTimespec{nsec: int64(tickEvery)}, &kernelTimespec{nsec: int64(defaultBatchWait)}
@@ -107,20 +108,46 @@ func TestURingWaitArgs(t *testing.T) {
 		name     string
 		wait     time.Duration
 		reaped   uint64
+		spacing  time.Duration
 		draining bool
 		ts       *kernelTimespec
 		want     uint32
 	}{
-		{"idle", defaultBatchWait, 0, false, tick, 1},
-		{"under the threshold", defaultBatchWait, batchWaitFrom - 1, false, tick, 1},
-		{"loaded", defaultBatchWait, batchWaitFrom, false, grouped, uint32(defaultBatchWaitMin)},
-		{"off", 0, 512, false, tick, 1},
-		{"draining", defaultBatchWait, 512, true, tick, 1},
+		{"idle", defaultBatchWait, 0, 0, false, tick, 1},
+		{"under the threshold, sparse", defaultBatchWait, batchWaitFrom - 1, tickEvery, false, tick, 1},
+		{"under the threshold, one an arrival a bound", defaultBatchWait, 1, defaultBatchWait, false, tick, 1},
+		{"under the threshold, two an arrival a bound", defaultBatchWait, 1, defaultBatchWait / 2, false, grouped, uint32(defaultBatchWaitMin)},
+		{"frequent but the last batch empty", defaultBatchWait, 0, time.Microsecond, false, tick, 1},
+		{"loaded", defaultBatchWait, batchWaitFrom, tickEvery, false, grouped, uint32(defaultBatchWaitMin)},
+		{"off", 0, 512, 0, false, tick, 1},
+		{"draining", defaultBatchWait, 512, 0, true, tick, 1},
 	} {
-		ul := &uLoop{lp: &loop{sz: sizing{batchWait: c.wait, batchWaitMin: defaultBatchWaitMin}, draining: c.draining}, reaped: c.reaped}
+		ul := &uLoop{lp: &loop{sz: sizing{batchWait: c.wait, batchWaitMin: defaultBatchWaitMin}, draining: c.draining}, reaped: c.reaped, spacing: c.spacing}
 		ts, want := ul.waitArgs(tick, grouped)
 		if ts != c.ts || want != c.want {
 			t.Fatalf("%s: waitArgs = (%v, %d), want (%v, %d)", c.name, ts, want, c.ts, c.want)
 		}
+	}
+}
+
+// TestURingWoke pins the moving average of the time between two arrivals: a
+// batch with none leaves it, a steady rate settles it near its spacing however
+// the arrivals are grouped into batches.
+func TestURingWoke(t *testing.T) {
+	t.Parallel()
+	ul := &uLoop{lp: &loop{}, spacing: tickEvery}
+	ul.lp.started = time.Second
+	ul.reaped = 3
+	ul.woke()
+	if ul.spacing != tickEvery || ul.lastArrival != 0 {
+		t.Fatalf("a batch with no arrival moved the average: %v, %v", ul.spacing, ul.lastArrival)
+	}
+	for i := range 128 {
+		ul.arrived = uint64(1 + i%3)
+		ul.lp.started += time.Duration(ul.arrived) * 100 * time.Microsecond
+		ul.woke()
+	}
+	if ul.spacing < 100*time.Microsecond || ul.spacing > 110*time.Microsecond {
+		t.Fatalf("after 128 batches of arrivals 100 µs apart the average is %v", ul.spacing)
 	}
 }

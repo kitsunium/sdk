@@ -29655,7 +29655,7 @@
           "name": "BatchWait",
           "type": "DurationValue",
           "tag": "json:\"batch_wait\"",
-          "doc": "BatchWait bounds how long an io_uring loop holds its wait for\nBatchWaitMin completions once its previous batch reaped at least four,\nso a loaded loop serves larger batches for fewer wakeups (ADR 0199). It\nbounds each grouped wait, not a request's latency: a request read over\nseveral batches may meet one at each. Zero selects 250 µs,\na negative value turns the grouped wait off, and anything past the 10 ms\ntick is the tick. epoll and the portable backend ignore it.\n"
+          "doc": "BatchWait bounds how long an io_uring loop holds its wait for\nBatchWaitMin completions while it is loaded: its previous batch reaped\nat least four, or two receives carrying bytes at least come within the\nbound at the rate they arrive. A loaded loop so serves larger batches for fewer\nwakeups (ADR 0199, ADR 0202). It\nbounds each grouped wait, not a request's latency: a request read over\nseveral batches may meet one at each. Zero selects 250 µs,\na negative value turns the grouped wait off, and anything past the 10 ms\ntick is the tick. epoll and the portable backend ignore it.\n"
         },
         {
           "name": "BatchWaitMin",
