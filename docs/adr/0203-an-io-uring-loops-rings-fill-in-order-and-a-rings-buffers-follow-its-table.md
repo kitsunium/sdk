@@ -155,9 +155,12 @@ None: no API changes.
   of 65,535 at a burst of 50,000.
 - **Smaller buffers** — refused for the reason ADR 0201 gives: a request
   with a few headers passes 1 KiB.
-- **Giving buffers back after a burst** — deferred, as in ADR 0201: a buffer
-  in the kernel's ring may be written at any moment, so only one the loop
-  holds could be released, and the loop holds none between batches.
+## Deferred
+
+- **Giving buffers back after a burst**, as in ADR 0201: a buffer in the
+  kernel's ring may be written at any moment, so only one the loop holds
+  could be released, and the loop holds none between batches. A ring keeps
+  the most its bursts took, within the loop's budget.
 
 ## References
 
