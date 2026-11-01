@@ -22,9 +22,12 @@ and a restart loading the committed commands past `recent` without their
 payloads, as the driver does (`TestSimBoundedApply*`, #663, #664).
 
 Bazel deals top-level tests to shards by their index, so a new test file
-whose name sorts before the simulator's (`sim_*`, `soak_*`) moves every
-seed part to another shard: name it after them, or measure the shards
-again.
+whose name sorts before a seed suite's (`checks_*`, `lincheck_*`, `sim_*`,
+`unapplied_*`, every file calling `seedPart` or `eachSeed`) moves its seed
+parts to other shards: name it after them, or measure the shards again.
+`strictsilent_*` sorted before `unapplied_*` and put
+`TestSimBoundedApplyP2` beside `TestChecksPassUnmutated` and two more seed
+parts, a shard past 60 s under coverage (#790's PR).
 
 The suites cost ~300 CPU-seconds under race and coverage against a 60 s cap
 per target, so `raft_test` has 26 shards and Bazel deals them TOP-LEVEL tests:
