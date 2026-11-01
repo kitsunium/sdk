@@ -27,25 +27,70 @@ func TestBufs_growUpToCount(t *testing.T) {
 	if errno := u.setupBuffers(64, 64, 8); errno != 0 {
 		t.Skipf("buffer ring: %v", errno)
 	}
-	if u.bufProvided != 8 || u.bufTail != 8 {
-		t.Fatalf("after setup: %d provided, tail %d, want 8 and 8", u.bufProvided, u.bufTail)
+	if u.bufProvided != 8 || u.groups[0].tail != 8 {
+		t.Fatalf("after setup: %d provided, tail %d, want 8 and 8", u.bufProvided, u.groups[0].tail)
 	}
 	if n := u.growBufs(100); n != 56 || u.bufProvided != 64 {
 		t.Fatalf("growBufs(100) = %d, %d provided, want 56 and 64", n, u.bufProvided)
 	}
-	if n := u.growBufs(1); n != 0 || u.bufTail != 64 {
-		t.Fatalf("growBufs past the count = %d, tail %d, want 0 and 64", n, u.bufTail)
+	if n := u.growBufs(1); n != 0 || u.groups[0].tail != 64 {
+		t.Fatalf("growBufs past the count = %d, tail %d, want 0 and 64", n, u.groups[0].tail)
 	}
 	seen := map[uint16]bool{}
-	for i, e := range u.bufEntries() {
+	for i, e := range u.bufEntries(0) {
 		bid := e.bid
 		if i == 0 {
-			bid = u.shadowBid
+			bid = u.groups[0].shadowBid
 		}
 		if seen[bid] {
 			t.Fatalf("bid %d in the ring twice", bid)
 		}
 		seen[bid] = true
+	}
+}
+
+// TestBufs_groupsAsNeeded pins a count past one group's ring: only the first
+// group is registered at setup, the second once its first bid is handed out,
+// each group's ring holding its own bids, every one once (ADR 0203 §D2).
+func TestBufs_groupsAsNeeded(t *testing.T) {
+	u, step, errno := openURing(probeEntries, 0)
+	if errno != 0 {
+		t.Skipf("io_uring %s: %v", step, errno)
+	}
+	defer u.close()
+	if errno := u.setupBuffers(2*defaultBufs, 64, 8); errno != 0 {
+		t.Skipf("buffer ring: %v", errno)
+	}
+	if len(u.groups) != 1 || u.bufPer != defaultBufs {
+		t.Fatalf("after setup: %d groups of %d, want 1 of %d", len(u.groups), u.bufPer, defaultBufs)
+	}
+	if n := u.growBufs(defaultBufs - 8); n != defaultBufs-8 || len(u.groups) != 1 {
+		t.Fatalf("filling group 0: %d handed, %d groups, want %d and 1", n, len(u.groups), defaultBufs-8)
+	}
+	if n := u.growBufs(2 * defaultBufs); n != defaultBufs || len(u.groups) != 2 {
+		t.Fatalf("past group 0: %d handed, %d groups, want %d and 2", n, len(u.groups), defaultBufs)
+	}
+	for g := range u.groups {
+		if u.groups[g].tail != uint16(defaultBufs) {
+			t.Fatalf("group %d: tail %d, want %d", g, u.groups[g].tail, defaultBufs)
+		}
+		seen := map[uint16]bool{}
+		for i, e := range u.bufEntries(g) {
+			bid := e.bid
+			if i == 0 {
+				bid = u.groups[g].shadowBid
+			}
+			if u.groupOf(bid) != g || seen[bid] {
+				t.Fatalf("group %d: bid %d belongs to group %d or is there twice", g, bid, u.groupOf(bid))
+			}
+			seen[bid] = true
+		}
+	}
+	if got := bufCountFor(65535); got != maxBufs {
+		t.Fatalf("bufCountFor(65535) = %d, want %d", got, maxBufs)
+	}
+	if got := bufCountFor(1024); got != defaultBufs {
+		t.Fatalf("bufCountFor(1024) = %d, want %d", got, defaultBufs)
 	}
 }
 
@@ -73,8 +118,9 @@ func TestConformance_buffersFollowDemand(t *testing.T) {
 		}
 		g, addr := serve(t, b, h, func(c *Config) { c.Value.Loops, c.Value.Rings = 1, 1 })
 		rr := uringOf(g).rings[0]
+		var count uint32
 		provided := func() (n uint32) {
-			onLoop(t, g, func() { n = rr.u.bufProvided })
+			onLoop(t, g, func() { n, count = rr.u.bufProvided, rr.u.bufCount })
 			return n
 		}
 		conns := heard(t, addr, idle+burst)
@@ -112,9 +158,9 @@ func TestConformance_buffersFollowDemand(t *testing.T) {
 			t.Fatalf("a burst echo: %v", err)
 		}
 		n := provided()
-		t.Logf("after a burst of %d: %d buffers provided of %d, %d starved", burst, n, defaultBufs, g.State().RingStates[0].BufferStarved)
-		if n <= bufsFirst || n > defaultBufs {
-			t.Fatalf("after a burst of %d: %d buffers provided, want more than %d and at most %d", burst, n, bufsFirst, defaultBufs)
+		t.Logf("after a burst of %d: %d buffers provided of %d, %d starved", burst, n, count, g.State().RingStates[0].BufferStarved)
+		if n <= bufsFirst || n > count {
+			t.Fatalf("after a burst of %d: %d buffers provided, want more than %d and at most %d", burst, n, bufsFirst, count)
 		}
 	})
 }

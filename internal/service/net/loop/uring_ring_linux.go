@@ -20,14 +20,20 @@ const (
 	probeEntries uint32 = 16
 	// cqFactor is how many times uringEntries CQSIZE asks for the CQ.
 	cqFactor uint32 = 4
-	// bufGroup is the provided-buffer group every recv selects from.
+	// bufGroup is the first provided-buffer group a recv selects from; a
+	// ring's group g is bufGroup+g.
 	bufGroup uint16 = 1
-	// defaultBufs is how many provided buffers a ring may hand the kernel,
-	// its buffer ring's entries. They are mapped at setup and handed out as
-	// the ring needs them (uRing.provide): an untouched buffer is no
-	// resident memory, so a ring's buffers cost the most it ever had out at
-	// once, not this count (ADR 0201 §D1).
+	// defaultBufs is the fewest provided buffers a ring may hand the kernel,
+	// and the entries of each of its buffer rings. They are mapped at setup
+	// and handed out as the ring needs them (uRing.provide): an untouched
+	// buffer is no resident memory, so a ring's buffers cost the most it
+	// ever had out at once, not its count (ADR 0201 §D1).
 	defaultBufs uint32 = 8192
+	// maxBufs is the most provided buffers a ring may hand the kernel: a
+	// bid is 16 bits. A ring may have as many as its table holds
+	// connections, a power of two, in groups of defaultBufs registered as
+	// they are first needed (ADR 0203 §D2).
+	maxBufs uint32 = 1 << 16
 	// defaultBufSize is the size of one provided buffer, in bytes: an HTTP
 	// request of a keep-alive connection fits in one; a larger one arrives
 	// over several completions, as a split read always could.
@@ -65,16 +71,19 @@ type uring struct {
 	cqMask uint32
 	cqLen  uint32
 	cqes   []cqe
-	// bufRing is the provided-buffer ring's mapping; bufs the buffers'.
-	bufRing  []byte
+	// bufMem is every buffer's mapping, by bid; bufCount how many it holds,
+	// bufSize the bytes of one, bufPer the entries of one group's ring.
 	bufMem   []byte
 	bufCount uint32
 	bufSize  uint32
+	bufPer   uint32
+	// groups are the provided-buffer groups registered so far: group g
+	// holds bids g*bufPer to (g+1)*bufPer-1 and is registered as
+	// bufGroup+g, once its first bid is handed out.
+	groups []pbufGroup
 	// bufProvided is how many buffers, bids 0 to bufProvided-1, the kernel
 	// has been given so far; the others were never touched.
 	bufProvided uint32
-	bufTail     uint16
-	shadowBid   uint16
 	// retries counts busy submits retried.
 	retries uint64
 	// setup is the flags the ring was set up with, as asked: what the kernel
@@ -86,6 +95,16 @@ type uring struct {
 	// taken sees every SQE the kernel took, on the ring's thread; nil but in
 	// the stop tests (loopHooks.taken).
 	taken func(op, flags uint8, opFlags uint32)
+}
+
+// pbufGroup is one provided-buffer group: its ring's mapping, its tail, and
+// entry 0's bid, written with the tail; dirty is a buffer added since the
+// tail was last published.
+type pbufGroup struct {
+	ring      []byte
+	tail      uint16
+	shadowBid uint16
+	dirty     bool
 }
 
 // openURing sets an io_uring of entries SQEs up with flags, mapping it and building the
@@ -191,13 +210,19 @@ func errnoOfErr(err error) syscall.Errno {
 func (u *uring) close() {
 	u.unregisterRing()
 	//: each mapping that exists.
-	for _, m := range [][]byte{u.bufRing, u.bufMem, u.sqeMem, u.ringMem} {
+	maps := [][]byte{u.bufMem, u.sqeMem, u.ringMem}
+	//: each group's ring.
+	for _, g := range u.groups {
+		maps = append(maps, g.ring)
+	}
+	//: each mapping that exists.
+	for _, m := range maps {
 		//: mapped.
 		if m != nil {
 			swallowErr(syscall.Munmap(m))
 		}
 	}
-	u.bufRing, u.bufMem, u.sqeMem, u.ringMem = nil, nil, nil, nil
+	u.groups, u.bufMem, u.sqeMem, u.ringMem = nil, nil, nil, nil
 	//: the ring itself.
 	if u.fd >= 0 {
 		swallowErr(syscall.Close(u.fd))
@@ -486,10 +511,13 @@ func (u *uring) flushOverflow() {
 	}
 }
 
-// setupBuffers maps count buffers of size bytes, registers their ring as
-// group bufGroup, and hands the kernel the first first of them; growBufs
-// hands it the others. count must be a power of two. The mapping is private
-// and anonymous, so a buffer the kernel was never given is no resident page.
+// setupBuffers maps count buffers of size bytes, registers the ring of their
+// first group, and hands the kernel the first first of them; growBufs hands
+// it the others, registering each further group as its first bid goes out.
+// count must be a power of two, at most maxBufs; a group holds defaultBufs
+// of them, or count when that is fewer. The mapping is private and
+// anonymous, so a buffer the kernel was never given is no resident page, and
+// a group never needed costs no kernel memory.
 func (u *uring) setupBuffers(count, size, first uint32) syscall.Errno {
 	bm, err := syscall.Mmap(-1, 0, int(count)*int(size), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	//: no buffer memory.
@@ -497,9 +525,10 @@ func (u *uring) setupBuffers(count, size, first uint32) syscall.Errno {
 		//: refused.
 		return errnoOfErr(err)
 	}
-	u.bufMem, u.bufCount, u.bufSize = bm, count, size
-	//: the ring itself: the kernel's own pages first, user pages before 6.4.
-	if errno := u.mapBufRing(count); errno != 0 {
+	u.bufMem, u.bufCount, u.bufSize, u.bufPer = bm, count, size, min(count, defaultBufs)
+	//: the first group's ring: the kernel's own pages first, user pages
+	//: before 6.4.
+	if errno := u.addGroup(); errno != 0 {
 		//: refused.
 		return errno
 	}
@@ -509,58 +538,82 @@ func (u *uring) setupBuffers(count, size, first uint32) syscall.Errno {
 }
 
 // growBufs hands the kernel up to n buffers it never had, in bid order,
-// published once, and says how many. Every bid is in the ring at most once,
-// so the ring never holds more than its count.
+// published once, and says how many. Every bid is in its group's ring at most
+// once, so a ring never holds more than its entries. A group whose ring the
+// kernel refuses ends the growth there: the ring keeps the groups it has.
 func (u *uring) growBufs(n uint32) uint32 {
 	n = min(n, u.bufCount-u.bufProvided)
-	//: each new bid, at the ring's tail.
-	for bid := u.bufProvided; bid < u.bufProvided+n; bid++ {
+	end := u.bufProvided + n
+	bid := u.bufProvided
+	//: each new bid, at its group's tail; a new group registered first.
+	for ; bid < end; bid++ {
+		//: the group's first bid: its ring is registered now.
+		if bid%u.bufPer == 0 && int(bid/u.bufPer) == len(u.groups) && u.addGroup() != 0 {
+			u.bufCount = bid
+			break
+		}
 		u.addBuf(uint16(bid))
 	}
-	u.bufProvided += n
-	//: published once.
-	if n > 0 {
-		u.publishBufs()
-	}
+	n = bid - u.bufProvided
+	u.bufProvided = bid
+	u.publishBufs()
 	//: how many.
 	return n
 }
 
-// mapBufRing registers group bufGroup's ring of count entries and maps it.
+// addGroup registers the ring of the next group and maps it.
+func (u *uring) addGroup() syscall.Errno {
+	g := uint16(len(u.groups))
+	rm, errno := u.mapBufRing(bufGroup+g, u.bufPer)
+	//: refused.
+	if errno != 0 {
+		//: as answered.
+		return errno
+	}
+	u.groups = append(u.groups, pbufGroup{ring: rm})
+	//: registered.
+	return 0
+}
+
+// mapBufRing registers group bgid's ring of count entries and maps it.
 // It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a ring in user
 // pages is pinned and charged to RLIMIT_MEMLOCK, which an unprivileged
 // process runs out of after a few rings (CI's non-root lane did). A kernel
 // that does not know the flag (EINVAL) gets the ring in user pages.
-func (u *uring) mapBufRing(count uint32) syscall.Errno {
+func (u *uring) mapBufRing(bgid uint16, count uint32) ([]byte, syscall.Errno) {
 	ringBytes := max(int(count)*int(unsafe.Sizeof(uringBuf{})), syscall.Getpagesize())
-	errno := registerBufRing(u.fd, &bufReg{ringEntries: count, bgid: bufGroup, flags: pbufRingMmap})
+	errno := registerBufRing(u.fd, &bufReg{ringEntries: count, bgid: bgid, flags: pbufRingMmap})
 	//: the kernel's pages: mapped at the group's offset.
 	if errno == 0 {
-		off := offPbufRing | uintptr(bufGroup)<<offPbufShift
+		off := offPbufRing | uintptr(bgid)<<offPbufShift
 		rm, err := syscall.Mmap(u.fd, int64(off), ringBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED|syscall.MAP_POPULATE)
 		//: registered but not mappable.
 		if err != nil {
 			//: refused.
-			return errnoOfErr(err)
+			return nil, errnoOfErr(err)
 		}
-		u.bufRing = rm
 		//: mapped.
-		return 0
+		return rm, 0
 	}
 	//: a refusal other than an unknown flag is final.
 	if errno != syscall.EINVAL {
 		//: refused.
-		return errno
+		return nil, errno
 	}
 	rm, err := syscall.Mmap(-1, 0, ringBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	//: no ring memory.
 	if err != nil {
 		//: refused.
-		return errnoOfErr(err)
+		return nil, errnoOfErr(err)
 	}
-	u.bufRing = rm
 	//: the kernel learns the ring in user pages.
-	return registerBufRing(u.fd, &bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})
+	if errno := registerBufRing(u.fd, &bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bgid}); errno != 0 {
+		swallowErr(syscall.Munmap(rm))
+		//: refused.
+		return nil, errno
+	}
+	//: registered.
+	return rm, 0
 }
 
 // registerBufRing is IORING_REGISTER_PBUF_RING with reg, resv zero as the
@@ -582,10 +635,16 @@ func registerBufRing(fd int, reg *bufReg) syscall.Errno {
 	return uringRegister(fd, regPbufRing, unsafe.Pointer(&quirk), 1)
 }
 
-// bufEntries views the buffer ring.
-func (u *uring) bufEntries() []uringBuf {
-	//: count entries of 16 bytes.
-	return unsafe.Slice((*uringBuf)(unsafe.Pointer(&u.bufRing[0])), u.bufCount)
+// bufEntries views group g's buffer ring.
+func (u *uring) bufEntries(g int) []uringBuf {
+	//: bufPer entries of 16 bytes.
+	return unsafe.Slice((*uringBuf)(unsafe.Pointer(&u.groups[g].ring[0])), u.bufPer)
+}
+
+// groupOf is the group buffer bid belongs to.
+func (u *uring) groupOf(bid uint16) int {
+	//: by its place in the mapping.
+	return int(uint32(bid) / u.bufPer)
 }
 
 // buf returns buffer bid's bytes.
@@ -595,30 +654,42 @@ func (u *uring) buf(bid uint16) []byte {
 	return u.bufMem[o : o+int(u.bufSize) : o+int(u.bufSize)]
 }
 
-// addBuf writes buffer bid at the ring's next entry, unpublished. Entry 0's
-// bid shares its word with the ring's tail, so it is kept in shadowBid and
-// written with the tail by publishBufs.
+// addBuf writes buffer bid at its group's ring's next entry, unpublished.
+// Entry 0's bid shares its word with the ring's tail, so it is kept in
+// shadowBid and written with the tail by publishBufs.
 func (u *uring) addBuf(bid uint16) {
-	i := uint32(u.bufTail) & (u.bufCount - 1)
-	e := &u.bufEntries()[i]
+	g := &u.groups[u.groupOf(bid)]
+	i := uint32(g.tail) & (u.bufPer - 1)
+	e := &u.bufEntries(u.groupOf(bid))[i]
 	e.addr = uint64(uintptr(unsafe.Pointer(&u.bufMem[int(bid)*int(u.bufSize)])))
 	e.len = u.bufSize
 	//: entry 0's bid is published with the tail, in one store.
 	if i == 0 {
-		u.shadowBid = bid
+		g.shadowBid = bid
 	} else {
 		e.bid = bid
 	}
-	u.bufTail++
+	g.tail++
+	g.dirty = true
 }
 
-// publishBufs makes every added buffer the kernel's: one 32-bit store of
-// entry 0's bid and the tail, its last two bytes, after every entry field
-// was written. The word is little-endian on every architecture this file
-// builds for: bid in the low half, tail in the high one.
+// publishBufs makes every added buffer the kernel's: for each group with
+// one, a 32-bit store of entry 0's bid and the tail, its ring's last two
+// bytes, after every entry field was written. The word is little-endian on
+// every architecture this file builds for: bid in the low half, tail in the
+// high one.
 func (u *uring) publishBufs() {
-	w := (*uint32)(unsafe.Pointer(&u.bufRing[12]))
-	atomic.StoreUint32(w, uint32(u.shadowBid)|uint32(u.bufTail)<<16)
+	//: each group a buffer was added to.
+	for i := range u.groups {
+		g := &u.groups[i]
+		//: nothing added.
+		if !g.dirty {
+			continue
+		}
+		w := (*uint32)(unsafe.Pointer(&g.ring[12]))
+		atomic.StoreUint32(w, uint32(g.shadowBid)|uint32(g.tail)<<16)
+		g.dirty = false
+	}
 }
 
 // registerSparse registers a sparse direct-descriptor table of n entries.
@@ -671,13 +742,13 @@ func prepAccept(s *sqe, lfd int, ud uint64, multishot bool) {
 }
 
 // prepRecv fills s as a multishot recv on direct descriptor index, selecting
-// provided buffers.
-func prepRecv(s *sqe, index uint32, ud uint64) {
+// provided buffers from group bgid.
+func prepRecv(s *sqe, index uint32, bgid uint16, ud uint64) {
 	s.opcode = opRecv
 	s.fd = fixedFd(index)
 	s.flags = sqeFixedFile | sqeBufferSelect
 	s.ioprio = recvMultishot
-	s.bufIndex = bufGroup
+	s.bufIndex = bgid
 	s.userData = ud
 }
 

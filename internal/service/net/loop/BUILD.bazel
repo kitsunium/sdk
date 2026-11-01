@@ -120,6 +120,7 @@ go_test(
         "memory_linux_test.go",
         "parts_internal_test.go",
         "slots_internal_test.go",
+        "starve_uring_linux_test.go",
         "uring_abi_linux_internal_test.go",
         "uring_cost_linux_test.go",
         "uring_wait_linux_test.go",

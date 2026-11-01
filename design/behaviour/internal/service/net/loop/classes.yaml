@@ -803,6 +803,13 @@ constants:
         type: int
         value: "1024"
       - doc: |-
+          loopBufBudget bounds the bytes of provided buffers one loop hands its
+          rings' kernels, every ring together: resident once the kernel wrote
+          them, never taken back (ADR 0203 §D2).
+        name: loopBufBudget
+        type: uint64
+        value: 128 << 20
+      - doc: |-
           fillFull is uRing.fill's bit for a ring near its table's end, or
           passed over, so the ring after it accepts too.
         name: fillFull
@@ -851,19 +858,29 @@ constants:
         name: cqFactor
         type: uint32
         value: "4"
-      - doc: bufGroup is the provided-buffer group every recv selects from.
+      - doc: |-
+          bufGroup is the first provided-buffer group a recv selects from; a
+          ring's group g is bufGroup+g.
         name: bufGroup
         type: uint16
         value: "1"
       - doc: |-
-          defaultBufs is how many provided buffers a ring may hand the kernel,
-          its buffer ring's entries. They are mapped at setup and handed out as
-          the ring needs them (uRing.provide): an untouched buffer is no
-          resident memory, so a ring's buffers cost the most it ever had out at
-          once, not this count (ADR 0201 §D1).
+          defaultBufs is the fewest provided buffers a ring may hand the kernel,
+          and the entries of each of its buffer rings. They are mapped at setup
+          and handed out as the ring needs them (uRing.provide): an untouched
+          buffer is no resident memory, so a ring's buffers cost the most it
+          ever had out at once, not its count (ADR 0201 §D1).
         name: defaultBufs
         type: uint32
         value: "8192"
+      - doc: |-
+          maxBufs is the most provided buffers a ring may hand the kernel: a
+          bid is 16 bits. A ring may have as many as its table holds
+          connections, a power of two, in groups of defaultBufs registered as
+          they are first needed (ADR 0203 §D2).
+        name: maxBufs
+        type: uint32
+        value: 1 << 16
       - doc: |-
           defaultBufSize is the size of one provided buffer, in bytes: an HTTP
           request of a keep-alive connection fits in one; a larger one arrives
@@ -1182,6 +1199,7 @@ files:
       - orErrno
       - (*uLoop).newRing
       - (*uLoop).bufShape
+      - bufCountFor
       - (*uLoop).registerFan
       - (*uLoop).registerTable
       - (*uLoop).slotSpace
@@ -1220,6 +1238,8 @@ files:
       - (*uRing).refuses
       - (*uRing).orphanClose
       - (*uRing).armRecv
+      - (*uRing).roomiest
+      - (*uRing).armRecvOn
       - (*uRing).setEpoch
       - (*uRing).owns
       - (*uRing).onRecv
@@ -1237,6 +1257,9 @@ files:
       - (*uRing).onFan
       - (*uRing).returnBuffers
       - (*uRing).provide
+      - (*uLoop).bufLeft
+      - held
+      - (*uRing).credit
       - (*uRing).giveBack
       - fillStale
       - (*uRing).rearmStarved
@@ -1286,6 +1309,7 @@ files:
   - decls:
       - uringEntries
       - uring
+      - pbufGroup
       - openURing
       - (*uring).mapRings
       - (*uring).buildViews
@@ -1313,9 +1337,11 @@ files:
       - (*uring).flushOverflow
       - (*uring).setupBuffers
       - (*uring).growBufs
+      - (*uring).addGroup
       - (*uring).mapBufRing
       - registerBufRing
       - (*uring).bufEntries
+      - (*uring).groupOf
       - (*uring).buf
       - (*uring).addBuf
       - (*uring).publishBufs
@@ -1626,6 +1652,13 @@ functions:
     params: a, b syscall.Errno
     results: syscall.Errno
   - doc: |-
+      bufCountFor is how many provided buffers a ring of table entries may hand
+      its kernel: the table rounded up to a power of two, defaultBufs at least,
+      maxBufs at most.
+    name: bufCountFor
+    params: table int
+    results: uint32
+  - doc: |-
       fillMargin is how many free entries of a table of table entries make a
       ring full: an eighth, and never under twice the accept reserve, so the
       next ring accepts before this one pauses.
@@ -1641,6 +1674,10 @@ functions:
     name: takeWaits
     params: res int32, live int64
     results: bool
+  - doc: held is how many buffers the kernel holds, every group together.
+    name: held
+    params: inRing []int
+    results: int
   - doc: fillStale overwrites b with staleFill.
     name: fillStale
     params: b []byte
@@ -1720,9 +1757,9 @@ functions:
     params: s *sqe, lfd int, ud uint64, multishot bool
   - doc: |-
       prepRecv fills s as a multishot recv on direct descriptor index, selecting
-      provided buffers.
+      provided buffers from group bgid.
     name: prepRecv
-    params: s *sqe, index uint32, ud uint64
+    params: s *sqe, index uint32, bgid uint16, ud uint64
   - doc: prepSend fills s as a send of p on direct descriptor index.
     name: prepSend
     params: s *sqe, index uint32, p []byte, ud uint64
@@ -3333,11 +3370,29 @@ types:
       - name: recycle
         type: "[]uint16"
       - doc: |-
-          inRing is how many provided buffers the kernel holds: a starved recv
-          is re-armed only while some remain, whether or not this batch
-          returned any.
+          given is, per group, the buffers handed to the kernel so far;
+          armedOn the recvs armed on it; recvGroup, per slot, the group its
+          recv was last armed on.
+        name: given
+        type: "[]int"
+      - name: armedOn
+        type: "[]int"
+      - name: recvGroup
+        type: "[]uint8"
+      - doc: starvedSeen is the ring's starved count provide last looked at.
+        name: starvedSeen
+        type: uint64
+      - doc: |-
+          promise is rearmStarved's scratch: each group's buffers not yet
+          promised to a re-armed recv.
+        name: promise
+        type: "[]int"
+      - doc: |-
+          inRing is how many provided buffers the kernel holds, per group: a
+          starved recv is re-armed only while some remain, whether or not this
+          batch returned any, on the group that holds the most.
         name: inRing
-        type: int
+        type: "[]int"
       - doc: |-
           lastAccept is the tick of the ring's last accept completion, or of the
           watchdog's last verdict; stalls counts the watchdog's re-arms. seen is,
@@ -3551,9 +3606,24 @@ types:
         name: orphanClose
         params: index uint32
         recv: rr *uRing
-      - doc: armRecv arms slot's multishot recv, counted.
+      - doc: armRecv arms slot's multishot recv on the roomiest group, counted.
         name: armRecv
         params: slot int32
+        recv: rr *uRing
+      - doc: |-
+          roomiest is the group with the most buffers handed to the kernel beyond
+          the recvs armed on it, among those left still holds one of when left is
+          given; -1 when none does. A recv armed on a group with room has a buffer of
+          its own there when every connection sends at once: a multishot recv stays
+          on its group, so a group armed past its buffers starves at each burst
+          however many the other groups hold (ADR 0203 §D2).
+        name: roomiest
+        params: left []int
+        recv: rr *uRing
+        results: int
+      - doc: armRecvOn arms slot's multishot recv on buffer group g, counted.
+        name: armRecvOn
+        params: slot int32, g int
         recv: rr *uRing
       - doc: setEpoch records the closes count slot's recv was armed at, or noEpoch.
         name: setEpoch
@@ -3638,11 +3708,20 @@ types:
         recv: rr *uRing
       - doc: |-
           provide hands the kernel buffers it never had when the ring runs short:
-          recvs wait for more than it holds, or it holds under a quarter of those
-          provided. It grows by bufsStep at least, up to the ring's count, and never
+          a recv found its ring empty since the last look — each such ENOBUFS is one
+          buffer the burst lacked —, or the ring holds under a quarter of those
+          provided. It grows by as many as recvs starved, bufsStep at least, up to
+          the ring's count and within what is left of the loop's budget, and never
           gives any back: a ring's buffers follow the most it had out at once, its
-          live connections' bursts, rather than its table (ADR 0201 §D1).
+          live connections' bursts, rather than its table (ADR 0201 §D1, ADR 0203
+          §D2).
         name: provide
+        recv: rr *uRing
+      - doc: |-
+          credit counts bids from to to-1, just handed to the kernel, in their
+          groups.
+        name: credit
+        params: from, to uint32
         recv: rr *uRing
       - doc: |-
           giveBack adds each buffer the batch handed out back to the ring, filled
@@ -3651,7 +3730,13 @@ types:
         recv: rr *uRing
       - doc: |-
           rearmStarved re-arms one starved recv per buffer the kernel holds, the
-          oldest first; a recv re-armed on an empty ring would only fail again.
+          oldest first, each on the group with the most buffers not yet promised; a
+          recv re-armed on an empty ring would only fail again. inRing counts a
+          buffer out only once its completion is reaped, so the completions still
+          in the CQ are taken off first — each may hold one —, and nothing is
+          re-armed while the kernel holds completions back (overflow): re-armed on
+          buffers already gone, a backlog of tens of thousands starved over and over
+          (ADR 0203 §D2).
         name: rearmStarved
         recv: rr *uRing
       - doc: |-
@@ -3883,6 +3968,11 @@ types:
         type: time.Duration
       - name: lastArrival
         type: time.Duration
+      - doc: |-
+          bufBytes is the bytes of provided buffers the loop's rings handed
+          their kernels so far, bounded by loopBufBudget.
+        name: bufBytes
+        type: uint64
     kind: struct
     methods:
       - doc: |-
@@ -4068,6 +4158,10 @@ types:
         name: live
         recv: ul *uLoop
         results: int
+      - doc: bufLeft is the bytes of buffers the loop may still hand its rings.
+        name: bufLeft
+        recv: ul *uLoop
+        results: uint64
       - doc: control applies the group's drain.
         name: control
         recv: ul *uLoop
@@ -4309,24 +4403,28 @@ types:
         type: uint32
       - name: cqes
         type: "[]cqe"
-      - doc: bufRing is the provided-buffer ring's mapping; bufs the buffers'.
-        name: bufRing
-        type: "[]byte"
-      - name: bufMem
+      - doc: |-
+          bufMem is every buffer's mapping, by bid; bufCount how many it holds,
+          bufSize the bytes of one, bufPer the entries of one group's ring.
+        name: bufMem
         type: "[]byte"
       - name: bufCount
         type: uint32
       - name: bufSize
         type: uint32
+      - name: bufPer
+        type: uint32
+      - doc: |-
+          groups are the provided-buffer groups registered so far: group g
+          holds bids g*bufPer to (g+1)*bufPer-1 and is registered as
+          bufGroup+g, once its first bid is handed out.
+        name: groups
+        type: "[]pbufGroup"
       - doc: |-
           bufProvided is how many buffers, bids 0 to bufProvided-1, the kernel
           has been given so far; the others were never touched.
         name: bufProvided
         type: uint32
-      - name: bufTail
-        type: uint16
-      - name: shadowBid
-        type: uint16
       - doc: retries counts busy submits retried.
         name: retries
         type: uint64
@@ -4487,53 +4585,68 @@ types:
         name: flushOverflow
         recv: u *uring
       - doc: |-
-          setupBuffers maps count buffers of size bytes, registers their ring as
-          group bufGroup, and hands the kernel the first first of them; growBufs
-          hands it the others. count must be a power of two. The mapping is private
-          and anonymous, so a buffer the kernel was never given is no resident page.
+          setupBuffers maps count buffers of size bytes, registers the ring of their
+          first group, and hands the kernel the first first of them; growBufs hands
+          it the others, registering each further group as its first bid goes out.
+          count must be a power of two, at most maxBufs; a group holds defaultBufs
+          of them, or count when that is fewer. The mapping is private and
+          anonymous, so a buffer the kernel was never given is no resident page, and
+          a group never needed costs no kernel memory.
         name: setupBuffers
         params: count, size, first uint32
         recv: u *uring
         results: syscall.Errno
       - doc: |-
           growBufs hands the kernel up to n buffers it never had, in bid order,
-          published once, and says how many. Every bid is in the ring at most once,
-          so the ring never holds more than its count.
+          published once, and says how many. Every bid is in its group's ring at most
+          once, so a ring never holds more than its entries. A group whose ring the
+          kernel refuses ends the growth there: the ring keeps the groups it has.
         name: growBufs
         params: n uint32
         recv: u *uring
         results: uint32
+      - doc: addGroup registers the ring of the next group and maps it.
+        name: addGroup
+        recv: u *uring
+        results: syscall.Errno
       - doc: |-
-          mapBufRing registers group bufGroup's ring of count entries and maps it.
+          mapBufRing registers group bgid's ring of count entries and maps it.
           It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a ring in user
           pages is pinned and charged to RLIMIT_MEMLOCK, which an unprivileged
           process runs out of after a few rings (CI's non-root lane did). A kernel
           that does not know the flag (EINVAL) gets the ring in user pages.
         name: mapBufRing
-        params: count uint32
+        params: bgid uint16, count uint32
         recv: u *uring
-        results: syscall.Errno
-      - doc: bufEntries views the buffer ring.
+        results: "[]byte, syscall.Errno"
+      - doc: bufEntries views group g's buffer ring.
         name: bufEntries
+        params: g int
         recv: u *uring
         results: "[]uringBuf"
+      - doc: groupOf is the group buffer bid belongs to.
+        name: groupOf
+        params: bid uint16
+        recv: u *uring
+        results: int
       - doc: buf returns buffer bid's bytes.
         name: buf
         params: bid uint16
         recv: u *uring
         results: "[]byte"
       - doc: |-
-          addBuf writes buffer bid at the ring's next entry, unpublished. Entry 0's
-          bid shares its word with the ring's tail, so it is kept in shadowBid and
-          written with the tail by publishBufs.
+          addBuf writes buffer bid at its group's ring's next entry, unpublished.
+          Entry 0's bid shares its word with the ring's tail, so it is kept in
+          shadowBid and written with the tail by publishBufs.
         name: addBuf
         params: bid uint16
         recv: u *uring
       - doc: |-
-          publishBufs makes every added buffer the kernel's: one 32-bit store of
-          entry 0's bid and the tail, its last two bytes, after every entry field
-          was written. The word is little-endian on every architecture this file
-          builds for: bid in the low half, tail in the high one.
+          publishBufs makes every added buffer the kernel's: for each group with
+          one, a 32-bit store of entry 0's bid and the tail, its ring's last two
+          bytes, after every entry field was written. The word is little-endian on
+          every architecture this file builds for: bid in the low half, tail in the
+          high one.
         name: publishBufs
         recv: u *uring
       - doc: registerSparse registers a sparse direct-descriptor table of n entries.
@@ -4547,6 +4660,21 @@ types:
         recv: u *uring
         results: bool, syscall.Errno
     name: uring
+  - doc: |-
+      pbufGroup is one provided-buffer group: its ring's mapping, its tail, and
+      entry 0's bid, written with the tail; dirty is a buffer added since the
+      tail was last published.
+    fields:
+      - name: ring
+        type: "[]byte"
+      - name: tail
+        type: uint16
+      - name: shadowBid
+        type: uint16
+      - name: dirty
+        type: bool
+    kind: struct
+    name: pbufGroup
   - doc: |-
       wheel is a hashed timer wheel over one ring's connection slots: one timer
       per slot, armed at an absolute tick, in index-linked buckets, so it holds
