@@ -42,7 +42,7 @@ func TestURingPbufInc_bufMore(t *testing.T) {
 		open := map[uint16]bool{}
 		next := map[uint16]int{}
 		hooks := loopHooks{bufs: 4, bufSize: size, fill: true, shuffle: true}
-		hooks.bufSeen = func(bid uint16, off, n int, bufMore, returned bool) {
+		hooks.bufSeen = func(bid uint16, off, n int, bufMore, _, returned bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			if returned {

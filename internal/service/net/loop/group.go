@@ -97,13 +97,13 @@ type loopHooks struct {
 	// hands the kernel, on the loop's thread: the stop tests count what a
 	// close issues.
 	taken func(op, flags uint8, opFlags uint32)
-	// bufSeen sees, on the loop's thread, each recv completion that carried
-	// a provided buffer — its bid, where its bytes start in the buffer, how
-	// many, and whether the kernel keeps the buffer (BUF_MORE) — and, with
-	// returned set, each buffer handed back to the kernel. The
-	// incremental-consumption test checks a buffer is returned only once the
-	// kernel let it go.
-	bufSeen func(bid uint16, off, n int, kept, returned bool)
+	// bufSeen sees, on the loop's thread, each buffer a recv completion
+	// used — its bid, where its bytes start in the buffer, how many, whether
+	// the kernel keeps the buffer (BUF_MORE), and first on a completion's
+	// first buffer, a bundle's following ones without — and, with returned
+	// set, each buffer handed back to the kernel. The incremental and bundle
+	// tests check a buffer is returned only once the kernel let it go.
+	bufSeen func(bid uint16, off, n int, kept, first, returned bool)
 }
 
 // Group is a running loop group: its loops, their threads and their rings.

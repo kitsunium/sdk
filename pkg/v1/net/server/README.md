@@ -277,6 +277,15 @@ CapabilityURingNoSQArray opts a loop group into uring-no-sqarray, a class A-code
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityURingNoSQArray`.
 
+<a name="CapabilityURingRecvBundle"></a>
+```go
+const CapabilityURingRecvBundle Capability = "uring-recv-bundle"
+```
+
+CapabilityURingRecvBundle opts a loop group into uring-recv-bundle, a class A-code kernel capability.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityURingRecvBundle`.
+
 <a name="CapabilityURingRingFDs"></a>
 ```go
 const CapabilityURingRingFDs Capability = "uring-ring-fds"

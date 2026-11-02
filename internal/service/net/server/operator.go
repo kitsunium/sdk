@@ -67,6 +67,7 @@ var capabilityRegistry = [...]capabilityEntry{
 	{token: corenet.CapabilityURingNoSQArray, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingRingFDs, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingSQRewind, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingRecvBundle, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingSendZC, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingBundle, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityBusyPoll, rank: rankKernel, switchable: true, kernel: true},

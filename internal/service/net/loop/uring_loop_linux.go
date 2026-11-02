@@ -172,6 +172,13 @@ type uRing struct {
 	given     []int
 	armedOn   []int
 	recvGroup []uint8
+	// held counts the returns giveBack put off because an entry still named
+	// a buffer the kernel held (uring.entryFree).
+	held int
+	// segs and segBids are takeBuf's scratch: a completion's bytes, a slice
+	// a buffer, and each one's buffer.
+	segs    [][]byte
+	segBids []uint16
 	// starvedSeen is the ring's starved count provide last looked at.
 	starvedSeen uint64
 	// promise is rearmStarved's scratch: each group's buffers not yet
@@ -286,6 +293,9 @@ type ringUses struct {
 	// multishot is whether recvs are multishot; ringFDs whether rings are
 	// registered with the thread.
 	multishot, ringFDs bool
+	// recvFlags are ioprio flags every recv carries: recvBundle when a recv
+	// fills several buffers in one completion (ADR 0205).
+	recvFlags uint16
 }
 
 // uringRunner runs the group's io_uring loops.
@@ -485,6 +495,7 @@ func (ul *uLoop) build(rings int, sweep bool) error {
 		lp.rings = append(lp.rings, rr.r)
 	}
 	ul.reportPbufInc()
+	ul.probeBundle()
 	primary := ul.rings[0]
 	primary.pollFD(ul.wakefd, udWake)
 	//: secondaries signal the primary through one registered eventfd.
@@ -1331,6 +1342,8 @@ func (rr *uRing) armRecvOn(slot int32, g int) {
 	if !rr.ul.uses.multishot {
 		singleShot(s)
 	}
+	//: a bundle: as many buffers as the bytes waiting need, in one completion.
+	s.ioprio |= rr.ul.uses.recvFlags
 	rr.ul.onFD(s)
 	c.ops++
 	rr.setEpoch(slot, rr.closes)
@@ -1365,7 +1378,7 @@ func (rr *uRing) owns(slot int32, gen uint32) bool {
 // onRecv delivers received bytes and keeps the multishot armed.
 func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 	more := c.flags&cqeFMore != 0
-	data := rr.takeBuf(c)
+	rr.takeBuf(c)
 	//: a slot is never released with an operation in flight, so this is a
 	//: kernel or bookkeeping error; the buffer is returned, nothing else.
 	if !rr.owns(slot, gen) {
@@ -1383,7 +1396,7 @@ func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 	switch {
 	//: bytes, in buffer bid.
 	case c.res > 0 && c.flags&cqeFBuffer != 0:
-		rr.recvBytes(slot, data, more)
+		rr.recvBytes(slot, more)
 	//: out of buffers: re-armed once some come back.
 	case c.res == -int32(errnoENOBUFS):
 		rr.recvStarved(slot)
@@ -1402,29 +1415,34 @@ func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 	rr.maybeClose(slot)
 }
 
-// takeBuf returns the bytes a recv completion received, none without a
-// buffer, and queues the buffer to go back after the batch once the kernel
-// is done with it: incrementally consumed, only on its completion without
-// BUF_MORE (ADR 0204).
-func (rr *uRing) takeBuf(c *cqe) []byte {
+// takeBuf places the bytes a recv completion received in rr.segs, one
+// slice a buffer — several for a bundle (ADR 0205) —, none without a
+// buffer, and queues each buffer to go back after the batch once the kernel
+// is done with it: incrementally consumed, the last only on a completion
+// without BUF_MORE (ADR 0204).
+func (rr *uRing) takeBuf(c *cqe) {
+	rr.segs, rr.segBids = rr.segs[:0], rr.segBids[:0]
 	//: no buffer: nothing received.
 	if c.flags&cqeFBuffer == 0 {
 		//: none.
-		return nil
+		return
 	}
-	bid := uint16(c.flags >> cqeBufferShift)
-	data, kept := rr.u.took(bid, c.res, c.flags&cqeFBufMore != 0)
-	//: a test watches the buffer's uses.
-	if rr.ul.hooks.bufSeen != nil {
-		rr.ul.hooks.bufSeen(bid, int(rr.u.bufSize)-cap(data), len(data), kept, false)
+	var keptLast bool
+	rr.segs, rr.segBids, keptLast = rr.u.spans(uint16(c.flags>>cqeBufferShift), c.res, c.flags&cqeFBufMore != 0, rr.segs, rr.segBids)
+	//: each buffer the completion used.
+	for i, bid := range rr.segBids {
+		kept := keptLast && i == len(rr.segBids)-1
+		//: a test watches the buffer's uses.
+		if rr.ul.hooks.bufSeen != nil {
+			rr.ul.hooks.bufSeen(bid, int(rr.u.bufSize)-cap(rr.segs[i]), len(rr.segs[i]), kept, i == 0, false)
+		}
+		//: the kernel's no more.
+		if !kept {
+			rr.u.release(bid)
+			rr.recycle = append(rr.recycle, bid)
+			rr.inRing[rr.u.groupOf(bid)]--
+		}
 	}
-	//: the kernel's no more.
-	if !kept {
-		rr.recycle = append(rr.recycle, bid)
-		rr.inRing[rr.u.groupOf(bid)]--
-	}
-	//: the bytes.
-	return data
 }
 
 // recvCancelled re-arms the recv of a connection still open whose recv was
@@ -1436,13 +1454,17 @@ func (rr *uRing) recvCancelled(slot int32, more bool) {
 	}
 }
 
-// recvBytes delivers the bytes a completion received to an open
-// connection, and re-arms its recv when the multishot ended.
-func (rr *uRing) recvBytes(slot int32, data []byte, more bool) {
+// recvBytes delivers the bytes a completion received, rr.segs, to an open
+// connection, buffer by buffer as split reads, and re-arms its recv when the
+// multishot ended.
+func (rr *uRing) recvBytes(slot int32, more bool) {
 	rr.ul.arrived++
-	//: only an open connection reads.
-	if rr.r.conns[slot].state == stOpen {
-		rr.r.deliver(slot, data)
+	//: each buffer's bytes, while the connection reads.
+	for _, seg := range rr.segs {
+		//: only an open connection reads.
+		if rr.r.conns[slot].state == stOpen {
+			rr.r.deliver(slot, seg)
+		}
 	}
 	//: re-armed unless the connection is going.
 	if !more && rr.r.conns[slot].state == stOpen {
@@ -1736,8 +1758,16 @@ func (rr *uRing) credit(from, to uint32) {
 // with staleFill under test, and publishes them once.
 func (rr *uRing) giveBack() {
 	u := rr.u
-	//: each buffer once, filled under test.
-	for _, bid := range rr.recycle {
+	k := 0
+	//: each buffer once, filled under test, in order, until an entry still
+	//: names a buffer whose completion is not taken: the rest waits.
+	for ; k < len(rr.recycle); k++ {
+		bid := rr.recycle[k]
+		//: its group's next entry is not free yet.
+		if !u.entryFree(u.groupOf(bid)) {
+			rr.held++
+			break
+		}
 		//: a stale byte would show as staleFill.
 		if rr.ul.hooks.fill {
 			fillStale(u.buf(bid))
@@ -1746,13 +1776,13 @@ func (rr *uRing) giveBack() {
 		rr.inRing[u.groupOf(bid)]++
 		//: a test watches the returns.
 		if rr.ul.hooks.bufSeen != nil {
-			rr.ul.hooks.bufSeen(bid, 0, 0, false, true)
+			rr.ul.hooks.bufSeen(bid, 0, 0, false, false, true)
 		}
 	}
 	//: published once for the batch.
-	if len(rr.recycle) > 0 {
+	if k > 0 {
 		u.publishBufs()
-		rr.recycle = rr.recycle[:0]
+		rr.recycle = rr.recycle[:copy(rr.recycle, rr.recycle[k:])]
 	}
 }
 

@@ -25470,7 +25470,7 @@
       "spelled": "Capability",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
       "value": "\"uring-bundle\"",
-      "doc": "CapabilityURingBundle is io_uring's receive and send bundles.\n",
+      "doc": "CapabilityURingBundle is io_uring's send bundles; the receive bundle is\nCapabilityURingRecvBundle's (ADR 0205).\n",
       "file": "core/net/capability.go",
       "layer": "core",
       "family": "net"
@@ -25562,6 +25562,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
       "value": "\"uring-pbuf-inc\"",
       "doc": "CapabilityURingPbufInc is the provided-buffer ring consumed incrementally\n(IOU_PBUF_RING_INC, 6.12): a buffer serves recv after recv, each from where the\nlast stopped (ADR 0204). Switched off, or refused by the kernel, each recv takes\na whole buffer.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingRecvBundle",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingRecvBundle",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-recv-bundle\"",
+      "doc": "CapabilityURingRecvBundle is io_uring's receive bundle (IORING_RECVSEND_BUNDLE,\n6.10): one completion fills as many provided buffers as the bytes waiting need\n(ADR 0205). Opted into, on only where a probe recv fills two buffers — not with\nincremental consumption before 6.15; otherwise each completion fills one buffer.\n",
       "file": "core/net/capability.go",
       "layer": "core",
       "family": "net"

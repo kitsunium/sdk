@@ -61,7 +61,8 @@ func probeCap(backend corenet.LoopBackend, c corenet.Capability) func() error {
 func init() {
 	for _, c := range []corenet.Capability{
 		corenet.CapabilityURingMultishotRecv, corenet.CapabilityURingPbuf,
-		corenet.CapabilityURingPbufInc, corenet.CapabilityURingDeferTaskrun, corenet.CapabilityURingNoSQArray,
+		corenet.CapabilityURingPbufInc, corenet.CapabilityURingRecvBundle,
+		corenet.CapabilityURingDeferTaskrun, corenet.CapabilityURingNoSQArray,
 		corenet.CapabilityURingRingFDs, corenet.CapabilityURingSQRewind,
 	} {
 		capProbes[string(c)] = probeCap(corenet.LoopBackendIOURing, c)

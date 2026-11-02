@@ -8,3 +8,9 @@ func consumesIncrementally(_ *Group) bool {
 	//: no ring.
 	return false
 }
+
+// bundled is false: epoll serves.
+func bundled(_ *Group) bool {
+	//: no ring.
+	return false
+}
