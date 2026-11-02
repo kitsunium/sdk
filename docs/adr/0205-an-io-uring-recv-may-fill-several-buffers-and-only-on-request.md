@@ -36,6 +36,15 @@ How bundles combine with `IOU_PBUF_RING_INC`, read in the kernel's sources:
 - **Without incremental consumption the buffers are consumed whole.**
   `io_kbuf_commit` advances the head by the bundle's buffer count (l. 74;
   the count comes from `io_bundle_nbufs`, io_uring/net.c l. 875).
+- **Through 6.15 a first recv gets one buffer too.** A bundle is sized
+  only from the bytes the socket said it holds (`arg.max_len =
+  min_not_zero(sr->len, kmsg->msg.msg_inq)` only when `msg_inq > 0`,
+  io_uring/net.c v6.12 l. 1089, v6.14 l. 1098, v6.15 l. 1081), and with
+  no length the peek keeps a single iovec (`KBUF_MODE_EXPAND && … &&
+  arg->max_len`, kbuf.c v6.12 l. 240). v7.0 sizes it from the recv's own
+  length first (net.c l. 1128–1131). On 6.12.110, 6.12.111 and 6.14.0 (CI's
+  alpine, debian and fedora kernels), a single-shot bundle over a socket
+  pair filled one buffer even without incremental consumption.
 - **io-wq recvs get no bundle.** A recv that runs unlocked, in io-wq, gets
   one buffer (`io_recv_buf_select`).
 
@@ -69,9 +78,10 @@ hold:
    bytes into two 64-byte buffers returns all 100 bytes;
 3. the group opted in.
 
-An `EINVAL`, or one buffer filled — incremental consumption before 6.15 —
-reads `absent` (`missing` if opted into) with the reason, and the recvs
-fill one buffer per completion.
+An `EINVAL`, or one buffer filled — incremental consumption before 6.15,
+or a first recv before 7.0 — reads `absent` (`missing` if opted into) with
+the reason, and the recvs fill one buffer per completion. The probe
+measures; it never reads a version.
 
 ### D3 — An entry is not written again while its buffer may be the kernel's
 
@@ -128,8 +138,10 @@ Measured in Docker, linux/arm64, kernel 7.0, two CPUs:
   This is why the capability is opt-in rather than class A-kernel.
 - **The default does not change.** Against main, `BenchmarkURingRings_fill`
   is unchanged (p=0.912 with one ring and with three).
-- **On 6.12 and up to 6.14 the probe finds no bundle**, since incremental
-  consumption is the default there (ADR 0204).
+- **Before 7.0 the probe finds no bundle**, whatever the buffer mode, on
+  the CI kernels above: incremental consumption is the default there (ADR
+  0204), and a first recv fills one buffer anyway. The bundle tests skip
+  where the probe or the recv filled one buffer, and run on 7.x.
 - `TestConformance_bufferFaults` opts in, so where the kernel has bundles
   a completion spans its two 64-byte buffers in their scrambled ring order.
 - **Memory:** three bytes of Go heap per buffer provided (`bufPos`,

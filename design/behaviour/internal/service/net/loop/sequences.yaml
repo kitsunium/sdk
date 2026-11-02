@@ -3600,7 +3600,7 @@ sequences:
                 - return: "\"recv bundle refused: \" + errno.Error()"
             - case: res < bundleProbeBytes
               do:
-                - return: "\"a bundle filled one buffer of a ring consumed incrementally (before 6.15)\""
+                - return: "\"a probe bundle filled one buffer (incremental consumption before 6.15, or a first recv before 7.0)\""
       - return: "\"\""
   - of: bundleRecv
     participants:

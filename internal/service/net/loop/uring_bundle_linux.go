@@ -27,7 +27,10 @@ const (
 // its own one bundle recv of bundleProbeBytes fills both of two buffers set
 // up as the serving rings' are. A kernel that refuses the flag (EINVAL) or
 // fills one buffer only reports the capability absent: through 6.14 a
-// buffer ring consumed incrementally hands a bundle one buffer
+// buffer ring consumed incrementally hands a bundle one buffer, and through
+// 6.15 a recv sizes a bundle only from the bytes the socket said it holds,
+// which a first recv does not know (io_recv_buf_select, io_uring/net.c
+// v6.12 to v6.15); the probe measures it rather than reads a version
 // (io_ring_buffers_peek's nr_avail = 1 under IOBL_INC, io_uring/kbuf.c
 // v6.12 to v6.14, gone in v6.15), which a bundle gains nothing from (ADR
 // 0205). It runs on the loop's thread, after the rings are built.
@@ -80,7 +83,7 @@ func (ul *uLoop) bundleRefusal() string {
 	//: one buffer only: incremental consumption before 6.15.
 	case res < bundleProbeBytes:
 		//: absent.
-		return "a bundle filled one buffer of a ring consumed incrementally (before 6.15)"
+		return "a probe bundle filled one buffer (incremental consumption before 6.15, or a first recv before 7.0)"
 	}
 	//: both buffers in one completion.
 	return ""

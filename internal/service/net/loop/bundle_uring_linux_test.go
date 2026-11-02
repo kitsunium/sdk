@@ -176,6 +176,12 @@ func TestBufs_bundleEntriesOutliveTheirCompletion(t *testing.T) {
 	}
 	var bundle cqe
 	u.reap(1, func(c *cqe) { bundle = *c })
+	// A kernel that does not bundle a first recv here — 6.12 and 6.14 fill
+	// one buffer, as the probe finds — has no bundle whose entries could be
+	// overwritten.
+	if bundle.userData == 2 && bundle.res > 0 && bundle.res <= 64 {
+		t.Skipf("the bundle filled one buffer (%d bytes) on %s: no bundle to outlive", bundle.res, kernelRelease())
+	}
 	segs, bids, _ = u.spans(uint16(bundle.flags>>cqeBufferShift), bundle.res, false, nil, nil)
 	if bundle.userData != 2 || bundle.res != 100 || fmt.Sprint(bids) != "[1 2]" || len(segs[0]) != 64 || len(segs[1]) != 36 {
 		t.Fatalf("the bundle's completion %+v walked %v", bundle, bids)
