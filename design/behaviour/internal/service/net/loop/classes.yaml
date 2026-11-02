@@ -840,6 +840,14 @@ constants:
         type: int64
         value: "100"
       - doc: |-
+          budgetChunk is how many completions a ring reaps between two looks at
+          the clock while LoopValue.BatchBudget bounds the batch (ADR 0206): a
+          clock read each, at a few dozen nanoseconds, against a few
+          microseconds of serving a completion.
+        name: budgetChunk
+        type: int
+        value: "16"
+      - doc: |-
           closingCompact is the fewest looked-at closes compactClosing moves
           out of a queue that never empties.
         name: closingCompact
@@ -1043,6 +1051,7 @@ files:
       - (*ring).lruTouch
       - (*ring).evict
       - (*loop).begin
+      - (*loop).overBudget
       - (*loop).endBatch
       - (*loop).yield
       - (*ring).compactListed
@@ -1288,8 +1297,12 @@ files:
       - (*uLoop).busy
       - (*uLoop).woke
       - (*uLoop).batch
+      - (*uLoop).await
+      - (*uLoop).reapRings
+      - (*uLoop).submitLate
       - (*uLoop).live
       - (*uRing).reapAll
+      - reapShape
       - (*uRing).handle
       - (*uRing).onConnOp
       - (*uRing).onAccept
@@ -1739,6 +1752,13 @@ functions:
     name: fillMargin
     params: table int
     results: int
+  - doc: |-
+      reapShape is how many completions one reap takes and how many reaps a
+      ring gets a batch: CQBatch, reapRounds times; under a budget the same
+      share in reaps of budgetChunk, the clock looked at between them.
+    name: reapShape
+    params: sz *sizing
+    results: chunk, rounds int
   - doc: |-
       takeWaits reports whether an accept's failure leaves the drain's take
       going: its own cancel, a connection the peer abandoned, a signal, an empty
@@ -2315,6 +2335,8 @@ types:
         type: uint64
       - name: watchdog
         type: uint64
+      - name: cut
+        type: uint64
     kind: struct
     name: ringCounters
   - doc: |-
@@ -2340,6 +2362,8 @@ types:
       - name: evicted
         type: atomic.Uint64
       - name: watchdog
+        type: atomic.Uint64
+      - name: cut
         type: atomic.Uint64
       - name: draining
         type: atomic.Bool
@@ -2432,6 +2456,12 @@ types:
       - doc: "begin starts a batch: the clock read once, the tick derived from it."
         name: begin
         recv: lp *loop
+      - doc: |-
+          overBudget reports whether the batch has run for sz.batchBudget, never
+          without one: one read of the monotonic clock (ADR 0206).
+        name: overBudget
+        recv: lp *loop
+        results: bool
       - doc: |-
           endBatch runs once OnBatchEnd has returned: flushes, releases the chunks the
           batch held, compacts spills, and publishes the counters.
@@ -3084,6 +3114,11 @@ types:
       - name: batchWaitMin
         type: int
       - doc: |-
+          batchBudget bounds one io_uring batch's reaping, zero for none (ADR
+          0206).
+        name: batchBudget
+        type: time.Duration
+      - doc: |-
           yield is the most serving time between two yields to the scheduler,
           zero for none: Start sets it (yieldFor), once GOMAXPROCS is read.
         name: yield
@@ -3661,9 +3696,12 @@ types:
         recv: rr *uRing
       - doc: |-
           reapAll reaps the ring's CQ until it is empty, a batch at a time, and
-          flushes an overflow the kernel held back.
+          flushes an overflow the kernel held back. Under a batch budget it reaps
+          budgetChunk at a time and stops once the budget ran out, reporting
+          whether completions were left (ADR 0206).
         name: reapAll
         recv: rr *uRing
+        results: bool
       - doc: handle serves one completion.
         name: handle
         params: c *cqe
@@ -4083,6 +4121,12 @@ types:
       - name: lastArrival
         type: time.Duration
       - doc: |-
+          cutAt is one past the ring the last batch's budget stopped reaping
+          at with completions left, zero when none did: the next batch reaps
+          them without waiting, starting with that ring (ADR 0206).
+        name: cutAt
+        type: int
+      - doc: |-
           incRefused is the kernel's refusal of IOU_PBUF_RING_INC to a ring of
           the loop, zero while none refused it.
         name: incRefused
@@ -4309,6 +4353,28 @@ types:
           drain, the timers, OnBatchEnd, the buffers returned and the yield.
         name: batch
         params: ts *kernelTimespec, want uint32, tick *kernelTimespec
+        recv: ul *uLoop
+      - doc: |-
+          await submits what is pending and waits for the next batch on the
+          primary: want completions or ts, and the tick after an empty grouped
+          window. After a batch its budget cut, the completions left are already
+          there: it only submits (ADR 0206).
+        name: await
+        params: ts *kernelTimespec, want uint32, tick *kernelTimespec
+        recv: ul *uLoop
+      - doc: |-
+          reapRings reaps every ring, whoever woke the loop, from the ring the last
+          batch's budget stopped at, and stops at the first ring the budget cuts
+          short: its completions and the next rings' wait for the next batch,
+          which starts there (ADR 0206).
+        name: reapRings
+        recv: ul *uLoop
+      - doc: |-
+          submitLate hands the kernel the answers endBatch queued at once, rather
+          than at the next wait, once the batch ran past half its budget: an answer
+          already waited that long (ADR 0206). A batch under it, and every batch
+          without a budget, pays nothing (ADR 0202).
+        name: submitLate
         recv: ul *uLoop
       - doc: live is the loop's open connections and slots still held by the kernel.
         name: live

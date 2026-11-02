@@ -74,6 +74,11 @@ const (
 	// closeBackstopTicks is how long a closed slot may wait on an operation
 	// after its shutdown was issued before closeBackstop cancels it.
 	closeBackstopTicks int64 = 100
+	// budgetChunk is how many completions a ring reaps between two looks at
+	// the clock while LoopValue.BatchBudget bounds the batch (ADR 0206): a
+	// clock read each, at a few dozen nanoseconds, against a few
+	// microseconds of serving a completion.
+	budgetChunk int = 16
 	// closingCompact is the fewest looked-at closes compactClosing moves
 	// out of a queue that never empties.
 	closingCompact int = 1024
@@ -280,6 +285,10 @@ type uLoop struct {
 	arrived     uint64
 	spacing     time.Duration
 	lastArrival time.Duration
+	// cutAt is one past the ring the last batch's budget stopped reaping
+	// at with completions left, zero when none did: the next batch reaps
+	// them without waiting, starting with that ring (ADR 0206).
+	cutAt int
 	// incRefused is the kernel's refusal of IOU_PBUF_RING_INC to a ring of
 	// the loop, zero while none refused it.
 	incRefused syscall.Errno
@@ -1051,22 +1060,9 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
 	for _, rr := range ul.rings[1:] {
 		rr.u.submit()
 	}
-	primary := ul.rings[0].u
-	primary.wait(ts, want)
-	//: a grouped wait whose bound passed with nothing: wait on plainly, with
-	//: no batch served for an empty window. The secondaries and Post signal
-	//: through the primary's CQ, so an empty one is an idle loop.
-	if want > 1 && primary.ready() == 0 {
-		primary.wait(tick, 1)
-	}
+	ul.await(ts, want, tick)
 	lp.begin()
-	ul.reaped, ul.arrived = 0, 0
-	//: every ring, whoever woke the loop.
-	for _, rr := range ul.rings {
-		before := rr.r.st.completions
-		rr.reapAll()
-		ul.reaped += rr.r.st.completions - before
-	}
+	ul.reapRings()
 	ul.woke()
 	ul.control()
 	//: timers, pacing and the watchdog, ring by ring.
@@ -1079,12 +1075,76 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
 	}
 	lp.h.OnBatchEnd(lp)
 	lp.endBatch()
+	ul.submitLate()
 	//: buffers go back only now: OnBatchEnd has returned.
 	for _, rr := range ul.rings {
 		rr.returnBuffers()
 		rr.r.st.retries = rr.u.retries
 	}
 	lp.yield()
+}
+
+// await submits what is pending and waits for the next batch on the
+// primary: want completions or ts, and the tick after an empty grouped
+// window. After a batch its budget cut, the completions left are already
+// there: it only submits (ADR 0206).
+func (ul *uLoop) await(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
+	primary := ul.rings[0].u
+	//: completions left by the budget: none to wait for.
+	if ul.cutAt > 0 {
+		primary.submit()
+		//: submitted.
+		return
+	}
+	primary.wait(ts, want)
+	//: a grouped wait whose bound passed with nothing: wait on plainly, with
+	//: no batch served for an empty window. The secondaries and Post signal
+	//: through the primary's CQ, so an empty one is an idle loop.
+	if want > 1 && primary.ready() == 0 {
+		primary.wait(tick, 1)
+	}
+}
+
+// reapRings reaps every ring, whoever woke the loop, from the ring the last
+// batch's budget stopped at, and stops at the first ring the budget cuts
+// short: its completions and the next rings' wait for the next batch,
+// which starts there (ADR 0206).
+func (ul *uLoop) reapRings() {
+	ul.reaped, ul.arrived = 0, 0
+	n, start := len(ul.rings), max(ul.cutAt-1, 0)
+	ul.cutAt = 0
+	//: each ring once, in turn.
+	for k := range n {
+		i := (start + k) % n
+		rr := ul.rings[i]
+		before := rr.r.st.completions
+		cut := rr.reapAll()
+		ul.reaped += rr.r.st.completions - before
+		//: the budget ran out with completions left.
+		if cut {
+			rr.r.st.cut++
+			ul.cutAt = i + 1
+			//: the rest next batch.
+			return
+		}
+	}
+}
+
+// submitLate hands the kernel the answers endBatch queued at once, rather
+// than at the next wait, once the batch ran past half its budget: an answer
+// already waited that long (ADR 0206). A batch under it, and every batch
+// without a budget, pays nothing (ADR 0202).
+func (ul *uLoop) submitLate() {
+	lp := ul.lp
+	//: no budget, or a short batch.
+	if lp.sz.batchBudget <= 0 || lp.ended-lp.started < lp.sz.batchBudget/2 {
+		//: at the next wait, as always.
+		return
+	}
+	//: every ring's sends now.
+	for _, rr := range ul.rings {
+		rr.u.submit()
+	}
 }
 
 // live is the loop's open connections and slots still held by the kernel.
@@ -1099,12 +1159,21 @@ func (ul *uLoop) live() int {
 }
 
 // reapAll reaps the ring's CQ until it is empty, a batch at a time, and
-// flushes an overflow the kernel held back.
-func (rr *uRing) reapAll() {
+// flushes an overflow the kernel held back. Under a batch budget it reaps
+// budgetChunk at a time and stops once the budget ran out, reporting
+// whether completions were left (ADR 0206).
+func (rr *uRing) reapAll() bool {
+	lp := rr.ul.lp
+	chunk, rounds := reapShape(&lp.sz)
 	//: bounded by batches, so one ring cannot starve the others forever.
-	for range reapRounds {
-		n := rr.u.reap(rr.ul.lp.sz.cqBatch, rr.handle)
+	for range rounds {
+		n := rr.u.reap(chunk, rr.handle)
 		rr.r.st.completions += uint64(n)
+		//: the budget ran out: what is left waits for the next batch.
+		if n > 0 && lp.overBudget() {
+			//: cut short when something is left.
+			return rr.u.ready() > 0 || rr.u.overflowed()
+		}
 		//: the kernel held completions back: an enter with GETEVENTS
 		//: flushes them, a plain submit does not.
 		if rr.u.overflowed() {
@@ -1114,9 +1183,24 @@ func (rr *uRing) reapAll() {
 		//: empty.
 		if n == 0 {
 			//: done.
-			return
+			return false
 		}
 	}
+	//: the batch's share reaped.
+	return false
+}
+
+// reapShape is how many completions one reap takes and how many reaps a
+// ring gets a batch: CQBatch, reapRounds times; under a budget the same
+// share in reaps of budgetChunk, the clock looked at between them.
+func reapShape(sz *sizing) (chunk, rounds int) {
+	//: no budget, or reaps already small.
+	if sz.batchBudget <= 0 || sz.cqBatch <= budgetChunk {
+		//: as configured.
+		return sz.cqBatch, reapRounds
+	}
+	//: the same share, finer.
+	return budgetChunk, reapRounds * sz.cqBatch / budgetChunk
 }
 
 // handle serves one completion.

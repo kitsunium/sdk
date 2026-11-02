@@ -82,6 +82,9 @@ type sizing struct {
 	// batchWaitMin is the completions it waits for.
 	batchWait    time.Duration
 	batchWaitMin int
+	// batchBudget bounds one io_uring batch's reaping, zero for none (ADR
+	// 0206).
+	batchBudget time.Duration
 	// yield is the most serving time between two yields to the scheduler,
 	// zero for none: Start sets it (yieldFor), once GOMAXPROCS is read.
 	yield time.Duration
@@ -109,6 +112,7 @@ func resolve(v corenet.LoopValue, maxConns int, rlimit uint64) (sizing, error) {
 		tableSize: int(table),
 	}
 	sz.batchWait, sz.batchWaitMin = batchWaitOf(v, sz.cqBatch)
+	sz.batchBudget = max(time.Duration(v.BatchBudget), 0)
 	sz.loops, sz.loopsSource = ResolveLoops(v.Loops)
 	sz.rings, sz.ringsSource = ringCount(v.Rings, max(sz.maxConns, sz.softConns), table)
 	//: resolved.

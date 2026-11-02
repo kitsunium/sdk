@@ -29329,8 +29329,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "LoopRingStateValue",
-      "spelled": "struct{Loop int \"json:\\\"loop\\\"\"; Ring int \"json:\\\"ring\\\"\"; Conns int64 \"json:\\\"conns\\\"\"; Accepted uint64 \"json:\\\"accepted\\\"\"; Closed uint64 \"json:\\\"closed\\\"\"; Batches uint64 \"json:\\\"batches\\\"\"; Completions uint64 \"json:\\\"completions\\\"\"; BufferStarved uint64 \"json:\\\"buffer_starved\\\"\"; EnterRetries uint64 \"json:\\\"enter_retries\\\"\"; AcceptPauses uint64 \"json:\\\"accept_pauses\\\"\"; Evicted uint64 \"json:\\\"evicted\\\"\"; WatchdogFires uint64 \"json:\\\"watchdog_fires\\\"\"; Draining bool \"json:\\\"draining\\\"\"}",
-      "canonical": "struct{Loop int \"json:\\\"loop\\\"\"; Ring int \"json:\\\"ring\\\"\"; Conns int64 \"json:\\\"conns\\\"\"; Accepted uint64 \"json:\\\"accepted\\\"\"; Closed uint64 \"json:\\\"closed\\\"\"; Batches uint64 \"json:\\\"batches\\\"\"; Completions uint64 \"json:\\\"completions\\\"\"; BufferStarved uint64 \"json:\\\"buffer_starved\\\"\"; EnterRetries uint64 \"json:\\\"enter_retries\\\"\"; AcceptPauses uint64 \"json:\\\"accept_pauses\\\"\"; Evicted uint64 \"json:\\\"evicted\\\"\"; WatchdogFires uint64 \"json:\\\"watchdog_fires\\\"\"; Draining bool \"json:\\\"draining\\\"\"}",
+      "spelled": "struct{Loop int \"json:\\\"loop\\\"\"; Ring int \"json:\\\"ring\\\"\"; Conns int64 \"json:\\\"conns\\\"\"; Accepted uint64 \"json:\\\"accepted\\\"\"; Closed uint64 \"json:\\\"closed\\\"\"; Batches uint64 \"json:\\\"batches\\\"\"; Completions uint64 \"json:\\\"completions\\\"\"; BufferStarved uint64 \"json:\\\"buffer_starved\\\"\"; EnterRetries uint64 \"json:\\\"enter_retries\\\"\"; AcceptPauses uint64 \"json:\\\"accept_pauses\\\"\"; Evicted uint64 \"json:\\\"evicted\\\"\"; WatchdogFires uint64 \"json:\\\"watchdog_fires\\\"\"; BatchesCut uint64 \"json:\\\"batches_cut\\\"\"; Draining bool \"json:\\\"draining\\\"\"}",
+      "canonical": "struct{Loop int \"json:\\\"loop\\\"\"; Ring int \"json:\\\"ring\\\"\"; Conns int64 \"json:\\\"conns\\\"\"; Accepted uint64 \"json:\\\"accepted\\\"\"; Closed uint64 \"json:\\\"closed\\\"\"; Batches uint64 \"json:\\\"batches\\\"\"; Completions uint64 \"json:\\\"completions\\\"\"; BufferStarved uint64 \"json:\\\"buffer_starved\\\"\"; EnterRetries uint64 \"json:\\\"enter_retries\\\"\"; AcceptPauses uint64 \"json:\\\"accept_pauses\\\"\"; Evicted uint64 \"json:\\\"evicted\\\"\"; WatchdogFires uint64 \"json:\\\"watchdog_fires\\\"\"; BatchesCut uint64 \"json:\\\"batches_cut\\\"\"; Draining bool \"json:\\\"draining\\\"\"}",
       "fields": [
         {
           "name": "Loop",
@@ -29403,6 +29403,12 @@
           "type": "uint64",
           "tag": "json:\"watchdog_fires\"",
           "doc": "WatchdogFires is the number of times the liveness watchdog saw a stall it\ncould observe and acted on it.\n"
+        },
+        {
+          "name": "BatchesCut",
+          "type": "uint64",
+          "tag": "json:\"batches_cut\"",
+          "doc": "BatchesCut is the number of batches BatchBudget stopped while this ring\nstill had completions to reap (ADR 0206).\n"
         },
         {
           "name": "Draining",
@@ -29601,8 +29607,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "LoopValue",
-      "spelled": "struct{Backend LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []Capability \"json:\\\"capabilities,omitempty\\\"\"; Outbound int \"json:\\\"outbound\\\"\"; BatchWait DurationValue \"json:\\\"batch_wait\\\"\"; BatchWaitMin int \"json:\\\"batch_wait_min\\\"\"}",
-      "canonical": "struct{Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []github.com/kitsunium/sdk/internal/core/net.Capability \"json:\\\"capabilities,omitempty\\\"\"; Outbound int \"json:\\\"outbound\\\"\"; BatchWait github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"batch_wait\\\"\"; BatchWaitMin int \"json:\\\"batch_wait_min\\\"\"}",
+      "spelled": "struct{Backend LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []Capability \"json:\\\"capabilities,omitempty\\\"\"; Outbound int \"json:\\\"outbound\\\"\"; BatchWait DurationValue \"json:\\\"batch_wait\\\"\"; BatchWaitMin int \"json:\\\"batch_wait_min\\\"\"; BatchBudget DurationValue \"json:\\\"batch_budget\\\"\"}",
+      "canonical": "struct{Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []github.com/kitsunium/sdk/internal/core/net.Capability \"json:\\\"capabilities,omitempty\\\"\"; Outbound int \"json:\\\"outbound\\\"\"; BatchWait github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"batch_wait\\\"\"; BatchWaitMin int \"json:\\\"batch_wait_min\\\"\"; BatchBudget github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"batch_budget\\\"\"}",
       "fields": [
         {
           "name": "Backend",
@@ -29675,6 +29681,12 @@
           "type": "int",
           "tag": "json:\"batch_wait_min\"",
           "doc": "BatchWaitMin is how many completions the grouped wait waits for before\nBatchWait runs out. Zero selects 32; past CQBatch it is CQBatch.\n"
+        },
+        {
+          "name": "BatchBudget",
+          "type": "DurationValue",
+          "tag": "json:\"batch_budget\"",
+          "doc": "BatchBudget bounds how long an io_uring loop reaps completions in one\nbatch: past it, a ring stops reaping, and a ring after it reaps at most one\nmore lot of 16 before it stops too — a bounded overrun, not a hard stop.\nWhat is left waits for the next batch, which starts at the ring it stopped\nat and does not wait. A\nrequest is answered once its batch ends, after OnBatchEnd, so a batch of\nthousands of requests holds every answer for its whole length (ADR 0206).\nA batch that ran past half of it hands its answers to the kernel at once\ninstead of at the next wait. Zero, or a negative value, bounds nothing:\nthe batch reaps up to four CQBatch a ring, as before. epoll and the\nportable backend ignore it.\n"
         }
       ],
       "doc": "LoopValue configures a loop group's engine (ADR 0186 §D5). It is a value of\nits own, passed by the Loop group option, so LimitsValue and TimeoutsValue\nkeep the meanings they publish for every engine. Every field is optional:\nzero selects the domain default, never \"unbounded\".\n",

@@ -2224,6 +2224,9 @@ type LoopRingState struct {
 	// WatchdogFires is the number of times the liveness watchdog saw a stall it
 	// could observe and acted on it.
 	WatchdogFires uint64 `json:"watchdog_fires"`
+	// BatchesCut is the number of batches BatchBudget stopped while this ring
+	// still had completions to reap (ADR 0206).
+	BatchesCut    uint64 `json:"batches_cut"`
 	// Draining reports a ring the watchdog judged sick: it accepts nothing new
 	// and closes its connections as they fall idle.
 	Draining      bool   `json:"draining"`
@@ -2395,6 +2398,18 @@ type LoopValue struct {
 	// BatchWaitMin is how many completions the grouped wait waits for before
 	// BatchWait runs out. Zero selects 32; past CQBatch it is CQBatch.
 	BatchWaitMin int           `json:"batch_wait_min"`
+	// BatchBudget bounds how long an io_uring loop reaps completions in one
+	// batch: past it, a ring stops reaping, and a ring after it reaps at most one
+	// more lot of 16 before it stops too — a bounded overrun, not a hard stop.
+	// What is left waits for the next batch, which starts at the ring it stopped
+	// at and does not wait. A
+	// request is answered once its batch ends, after OnBatchEnd, so a batch of
+	// thousands of requests holds every answer for its whole length (ADR 0206).
+	// A batch that ran past half of it hands its answers to the kernel at once
+	// instead of at the next wait. Zero, or a negative value, bounds nothing:
+	// the batch reaps up to four CQBatch a ring, as before. epoll and the
+	// portable backend ignore it.
+	BatchBudget  DurationValue `json:"batch_budget"`
 }
 ```
 

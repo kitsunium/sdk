@@ -90,7 +90,7 @@ type ring struct {
 type ringCounters struct {
 	accepted, closed, batches, completions uint64
 	starved, retries, pauses, evicted      uint64
-	watchdog                               uint64
+	watchdog, cut                          uint64
 }
 
 // ringStats are a ring's counters as State reads them, published at the
@@ -99,7 +99,7 @@ type ringStats struct {
 	conns                                  atomic.Int64
 	accepted, closed, batches, completions atomic.Uint64
 	starved, retries, pauses, evicted      atomic.Uint64
-	watchdog                               atomic.Uint64
+	watchdog, cut                          atomic.Uint64
 	draining                               atomic.Bool
 }
 
@@ -715,6 +715,13 @@ func (r *ring) evict() int {
 func (lp *loop) begin() {
 	lp.started = time.Since(lp.epoch)
 	lp.tick = int64(lp.started/tickEvery) + 1
+}
+
+// overBudget reports whether the batch has run for sz.batchBudget, never
+// without one: one read of the monotonic clock (ADR 0206).
+func (lp *loop) overBudget() bool {
+	//: bounded, and spent.
+	return lp.sz.batchBudget > 0 && time.Since(lp.epoch)-lp.started >= lp.sz.batchBudget
 }
 
 // endBatch runs once OnBatchEnd has returned: flushes, releases the chunks the

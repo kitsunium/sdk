@@ -59,5 +59,6 @@ func (r *ring) publish() {
 	p.pauses.Store(s.pauses)
 	p.evicted.Store(s.evicted)
 	p.watchdog.Store(s.watchdog)
+	p.cut.Store(s.cut)
 	p.draining.Store(r.draining)
 }
