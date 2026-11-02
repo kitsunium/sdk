@@ -2,6 +2,7 @@ package raft
 
 import (
 	"cmp"
+	"slices"
 	"time"
 
 	core "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -46,9 +47,10 @@ func (r *Raft) stepTerm(now time.Time, m core.MessageValue) bool {
 // reports whether m goes on to be handled.
 func (r *Raft) stepHigherTerm(now time.Time, m core.MessageValue) bool {
 	// TimeoutNow is honoured only at the receiver's own term (R2-13), and
-	// a vote refused for a live leader never moves a term (R1-18).
+	// a vote refused for a live leader never moves a term (R1-18), nor one
+	// refused to a member of another history (#698).
 	if (m.Kind == core.MsgTimeoutNow && !r.mutated(mutTimeoutNowAnyTerm)) ||
-		((m.Kind == core.MsgPreVote || m.Kind == core.MsgVote) && r.refuseForLiveLeader(now, m)) {
+		((m.Kind == core.MsgPreVote || m.Kind == core.MsgVote) && (r.refuseForLiveLeader(now, m) || r.refusesHistory(m.From))) {
 		return false
 	}
 	r.adoptTerm(m)
@@ -156,14 +158,16 @@ func (r *Raft) upToDate(m core.MessageValue) bool {
 
 // handleVote answers a vote or a PreVote of this node's term, after the
 // live-leader refusal already passed. Only a real vote is recorded, and its
-// grant leaves after the vote is durable (send, D5b).
+// grant leaves after the vote is durable (send, D5b). A member of another
+// history is refused: elected, its appends would be refused all the same
+// (#698).
 func (r *Raft) handleVote(now time.Time, m core.MessageValue) {
 	pre := m.Kind == core.MsgPreVote
 	resp := core.MsgVoteResp
 	if pre {
 		resp = core.MsgPreVoteResp
 	}
-	canVote := r.mayGrant(pre, m)
+	canVote := r.mayGrant(pre, m) && !r.refusesHistory(m.From)
 	restricted := r.voteRestricted(pre, m)
 	ok := canVote && r.cfg.CanVote && r.cfg.SilentIndex == 0 && (!restricted || r.upToDate(m))
 	if !ok {
@@ -356,9 +360,10 @@ func (r *Raft) stepCandidate(now time.Time, m core.MessageValue) {
 
 // followWinner follows the leader of the campaign's term that m comes
 // from, unless this node refused that leader for the term: its campaign is
-// how the refusal ends, and the leader's messages do not end it (#508).
+// how the refusal ends, and the leader's messages do not end it (#508); nor
+// one of another history, at any term (#698).
 func (r *Raft) followWinner(now time.Time, m core.MessageValue) {
-	if r.refuses(m.From) {
+	if r.refusesLeader(m.From) {
 		return
 	}
 	r.becomeFollower(m.Term, m.From)
@@ -368,12 +373,13 @@ func (r *Raft) followWinner(now time.Time, m core.MessageValue) {
 // stepFollower handles a message of the leader's term at a follower or a
 // learner; an append or a heartbeat is contact with the leader, and extends
 // the record of a vouched-for one (#618), unless this node refused that
-// leader for the term.
+// leader for the term, or for another history (#698).
 func (r *Raft) stepFollower(now time.Time, m core.MessageValue) {
-	if (m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat) && r.refuses(m.From) {
+	if (m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat) && r.refusesLeader(m.From) {
 		// After N chain refusals the leader's appends and heartbeats are
 		// neither answered nor taken as contact for the rest of the term
-		// (D4, R6-05). Answered, every rejection counted as contact for
+		// (D4, R6-05), nor a leader's of another history at any term
+		// (#698). Answered, every rejection counted as contact for
 		// CheckQuorum and the leader resent at once, in a loop that never
 		// ended; taken as contact, they kept the refusing majority from
 		// ever campaigning, and the leader was never deposed (#508).
@@ -531,9 +537,11 @@ func (r *Raft) handleAppend(m core.MessageValue) bool {
 
 // rebaseOnCommit handles an append that starts below the commit. Its
 // entries past the commit are still news: it is re-based on the committed
-// entry when it carries that entry with our term. A node that acknowledges
-// nothing — a silent one — learns the rest of the log no other way. It
-// reports false, having answered with the commit, when m cannot be re-based.
+// entry when it carries that entry with our term and our chain value. A
+// node that acknowledges nothing — a silent one — learns the rest of the
+// log no other way. It reports false, having answered with the commit, when
+// m cannot be re-based, and having refused m (refuseHeld) when it carries
+// another entry at the commit.
 func (r *Raft) rebaseOnCommit(m *core.MessageValue) bool {
 	if m.Index >= r.log.committed {
 		return true
@@ -542,6 +550,14 @@ func (r *Raft) rebaseOnCommit(m *core.MessageValue) bool {
 	t, ok := r.log.term(r.log.committed)
 	if k >= len(m.Entries) || !ok || m.Entries[k].Position.Term != t {
 		r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: r.log.committed})
+		return false
+	}
+	if m.Entries[k].ChainSum != r.log.chain(r.log.committed) {
+		// Another entry at the commit, of its term: re-based on it, the
+		// leader's entry was dropped unread and its next one verified
+		// against this node's, refused for a broken chain at every resend
+		// for as long as the two histories lived (#698).
+		r.refuseHeld(m, k)
 		return false
 	}
 	m.Entries = m.Entries[k+1:]
@@ -564,10 +580,15 @@ func (r *Raft) dropUnknownKinds(m *core.MessageValue) {
 }
 
 // firstNewEntry skips the entries of m the log already holds at the same
-// term and returns the position in m.Entries of the first one it does not,
-// -1 when it holds them all, with the chain value before it. ok is false,
-// and the append is dropped unanswered, when the entries are not one per
-// index after m.Index.
+// term and with the same chain value, and returns the position in
+// m.Entries of the first one it does not hold, -1 when it holds them all,
+// with the chain value before it. ok is false, and the append is dropped
+// unanswered, when the entries are not one per index after m.Index; and
+// refused (refuseHeld) when one is held at its term with another chain
+// value. Skipped on its term alone, such an entry handed its chain value on
+// as this log's: the leader's next entries verified against it and were
+// appended after this node's own, and two histories diverged in one log in
+// silence (#698).
 func (r *Raft) firstNewEntry(m *core.MessageValue) (start int, prevChain uint32, ok bool) {
 	prevChain = r.log.chain(m.Index)
 	for k := range m.Entries {
@@ -576,12 +597,110 @@ func (r *Raft) firstNewEntry(m *core.MessageValue) (start int, prevChain uint32,
 			return -1, prevChain, false
 		}
 		if t, held := r.log.term(e.Position.Index); held && t == e.Position.Term {
+			if e.ChainSum != r.log.chain(e.Position.Index) {
+				r.refuseHeld(m, k)
+				return -1, prevChain, false
+			}
 			prevChain = e.ChainSum
 			continue
 		}
 		return k, prevChain, true
 	}
 	return -1, prevChain, true
+}
+
+// refuseHeld refuses an append whose entry at position k this log holds at
+// the same index and term under another chain value. When the first entry
+// of m that differs proves another history (historyIn), the sender is
+// refused for good; anything else is a chain that does not verify,
+// refused as D4 refuses one, at that entry, and the leader resends.
+func (r *Raft) refuseHeld(m *core.MessageValue, k int) {
+	c, at, proved := r.historyIn(m, k)
+	if proved {
+		r.refuseHistory(c)
+		return
+	}
+	r.chainRefused(*m, at)
+}
+
+// historyIn walks m's entries through position k, each one this log holds,
+// to the first whose chain value differs from this log's there, at, and
+// reports whether it proves another history: held at its own term, its body
+// and its chain value verifying from the chain value before it, which the
+// sender shares with this log there (equal on the entry before, or m's base,
+// which that verification proves shared), and this log's own entry
+// verifying from that value too. Two sound entries at one index and term
+// are two histories: a leader appends one entry per index in its term, and
+// every later leader holds the committed ones (Log Matching). Founders
+// whose entries 1 differ are the one way to two such entries (#698); a
+// Recover starts a cluster of its own (#544), whose peers the transport
+// refuses, and an install restarts the log on a snapshot's chain tip
+// (R5-05). A sum that does not verify, on either side, is damage, and
+// proves nothing but that (D4).
+func (r *Raft) historyIn(m *core.MessageValue, k int) (HistoryConflictValue, uint64, bool) {
+	at := m.Index + uint64(k) + 1
+	if m.Index < r.log.snapIndex || !r.log.matchTerm(m.Index, m.LogTerm) {
+		return HistoryConflictValue{}, at, false
+	}
+	prev := r.log.chain(m.Index)
+	for j := range k + 1 {
+		e := &m.Entries[j]
+		// Past m.Index, itself at or past the base: held up to the last index.
+		i := m.Index + uint64(j) + 1
+		if e.Position.Index != i || i > r.log.lastIndex() {
+			return HistoryConflictValue{}, at, false
+		}
+		if own := r.log.at(i); e.ChainSum != own.ChainSum {
+			return HistoryConflictValue{From: m.From, Index: i, Term: own.Position.Term}, i, soundPair(e, own, prev)
+		}
+		prev = e.ChainSum
+	}
+	return HistoryConflictValue{}, at, false
+}
+
+// soundPair reports whether e and own, two entries at one index, are of one
+// term and each consistent with itself from the chain value prev before
+// them: e's body and chain value, and own's chain value, whose payload this
+// log may have evicted.
+func soundPair(e, own *core.EntryValue, prev uint32) bool {
+	return e.Position.Term == own.Position.Term && wire.BodySum(e.Data) == e.BodySum &&
+		wire.ChainSum(prev, e) == e.ChainSum && wire.ChainSum(prev, own) == own.ChainSum
+}
+
+// refuseHistory refuses c's member for good and names it in the Ready
+// (#698). The append that proved it goes unanswered, as every later one and
+// every heartbeat do (refusesLeader), and its votes are refused: answered,
+// each refusal was contact for that leader's CheckQuorum, and a refusing
+// majority never deposed it (#508). The refusal stands while this log
+// keeps the entry the proof compared (stands).
+func (r *Raft) refuseHistory(c HistoryConflictValue) {
+	h := historyConflict{HistoryConflictValue: c, chain: r.log.chain(c.Index)}
+	if i := slices.IndexFunc(r.conflicts, func(x historyConflict) bool { return x.From == c.From }); i >= 0 {
+		r.conflicts[i] = h
+	} else {
+		r.conflicts = append(r.conflicts, h)
+	}
+	r.rd.HistoryConflicts = append(r.rd.HistoryConflicts, c)
+}
+
+// refusesHistory reports whether this node refuses from for another
+// history (refuseHistory).
+func (r *Raft) refusesHistory(from core.NodeID) bool {
+	for i := range r.conflicts {
+		if c := &r.conflicts[i]; c.From == from && r.stands(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// stands reports whether this log still holds the entry c's proof
+// compared, under the chain value it had then: a snapshot this node cuts
+// through it keeps that value as its tip. A truncation that drops it, or a
+// leader's snapshot installed at or past it, ends the refusal with its
+// evidence, and the member is judged again at its next append.
+func (r *Raft) stands(c *historyConflict) bool {
+	return c.Index >= r.log.snapIndex && c.Index <= r.log.lastIndex() && r.log.chain(c.Index) == c.chain
 }
 
 // appendNew verifies and appends m's entries from start on, truncating a
@@ -701,6 +820,13 @@ func (r *Raft) chainRefused(m core.MessageValue, at uint64) {
 // of the current term, after MaxChainRefusals refusals of its chain.
 func (r *Raft) refuses(from core.NodeID) bool {
 	return r.refusedLead != 0 && r.refusedLead == from && r.refusedTerm == r.term && !r.mutated(mutRefusedLeadHeard)
+}
+
+// refusesLeader reports whether this node refuses the appends and
+// heartbeats of the leader from: for the term, after its chain refusals
+// (refuses), or for another history while that refusal stands (#698).
+func (r *Raft) refusesLeader(from core.NodeID) bool {
+	return r.refuses(from) || r.refusesHistory(from)
 }
 
 // maybeEndSilence lifts the silence condition, on an append this node

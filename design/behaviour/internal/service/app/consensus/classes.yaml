@@ -286,6 +286,13 @@ constants:
           four fifths of SnapshotLimit: the cuts are about to be refused
           SNAPSHOT_TOO_LARGE (R2-30). Readiness does not depend on it.
         name: HealthSnapshotNearLimit
+      - doc: |-
+          HealthHistoryRefused is set while this node refuses a member whose
+          log holds another entry than its own at an index and term both hold,
+          named in HistoryRefused: founders that passed Bootstrap different
+          entries 1, logged BOOTSTRAP_REFUSED. Only a new founding of one side
+          mends it (#698). A node that refuses its leader is not ready.
+        name: HealthHistoryRefused
     name: HealthReady
   - doc: |-
       maxSlotLen bounds a slot name, which the stamp stores behind a one-byte
@@ -507,6 +514,8 @@ constants:
         value: "\"consensus_loop_turn_seconds\""
       - name: mChainRefusals
         value: "\"consensus_chain_refusals_total\""
+      - name: mHistoryRefusals
+        value: "\"consensus_history_refusals_total\""
       - name: mStopped
         value: "\"consensus_stopped\""
       - name: mJoinsRateLimited
@@ -1311,6 +1320,7 @@ files:
       - (*Node).logLeaderRecords
       - (*Node).handleOne
       - (*Node).reportNotices
+      - (*Node).reportHistoryConflict
       - (*Node).lowerSilence
       - lowerSilenceIn
       - (*Node).endSilence
@@ -2476,7 +2486,8 @@ functions:
   - doc: |-
       isReady is the verdict's Ready: running, a leader known, everything known
       committed applied — or, once caught up, a lag that keeps moving within
-      its bound (applyOK) — and not refusing the current leader's chain (D4).
+      its bound (applyOK) — and refusing neither the current leader's chain
+      (D4) nor its history (#698).
     name: isReady
     params: h *HealthValue, st *coreconsensus.StatusValue, applyOK bool
     results: bool
@@ -5597,7 +5608,8 @@ types:
         type: coreconsensus.StatusValue
       - doc: |-
           Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
-          HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.
+          HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit,
+          HealthHistoryRefused.
         name: Flags
         type: HealthFlags
       - doc: |-
@@ -5621,6 +5633,12 @@ types:
         type: uint64
       - name: ChainRefusalLeader
         type: coreconsensus.NodeID
+      - doc: |-
+          HistoryRefused are the members this node refuses for another history,
+          their appends, heartbeats and votes, in the order it found them; nil
+          when none (HealthHistoryRefused, #698).
+        name: HistoryRefused
+        type: "[]coreconsensus.NodeID"
       - doc: StopReason says why the node stopped itself.
         name: StopReason
         type: coreconsensus.StopReasonValue
@@ -6471,8 +6489,9 @@ types:
         results: bool
       - doc: |-
           loopHealth fills the part of a verdict only the event loop can read: the
-          quorum, the failure tolerance, the chain refusal and, on a leader, every
-          peer's view. It runs on the loop, through exec.
+          quorum, the failure tolerance, the chain refusal, the members refused for
+          another history and, on a leader, every peer's view. It runs on the loop,
+          through exec.
         name: loopHealth
         params: h *HealthValue
         recv: n *Node
@@ -7159,11 +7178,24 @@ types:
       - doc: |-
           reportNotices acts on the Ready's notices that change no state of the
           loop: the silence condition lowered or ended, the chain refusals D13
-          counts by leader, and a truncation worth a line in the log. It runs
-          before handleOne queues the Ready's write: a lowered point is durable
-          before the truncation it rides with (#793).
+          counts by leader, a member refused for another history, and a truncation
+          worth a line in the log. It runs before handleOne queues the Ready's
+          write: a lowered point is durable before the truncation it rides with
+          (#793).
         name: reportNotices
         params: rd *raft.ReadyValue
+        recv: n *Node
+      - doc: |-
+          reportHistoryConflict says, at Warn and in consensus_history_refusals_total,
+          that the step function refuses a member whose log holds another entry
+          than this node's at an index and term both hold: founders that passed
+          Bootstrap different entries 1, a different member list or initial timing
+          (#698). Nothing commits that entry on both, and no truncation reconciles
+          them: the member stays refused, its appends, heartbeats and votes, while
+          this log holds the entry, until a new founding of one side. Health names
+          it (HealthHistoryRefused). It runs on the loop.
+        name: reportHistoryConflict
+        params: c raft.HistoryConflictValue
         recv: n *Node
       - doc: |-
           lowerSilence persists the silence condition's lowered truncation point,

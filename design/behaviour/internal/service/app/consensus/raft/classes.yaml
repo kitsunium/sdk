@@ -715,6 +715,8 @@ files:
       - ReadState
       - TransferResult
       - ReadyValue
+      - HistoryConflictValue
+      - historyConflict
       - UnsupportedEntryValue
       - ReadBackSpec
       - FetchSpec
@@ -799,6 +801,7 @@ files:
       - (*Raft).FailureTolerance
       - (*Raft).QuorumActive
       - (*Raft).ChainRefusal
+      - (*Raft).HistoryRefusals
     name: raft.go
   - decls:
       - (*Raft).Step
@@ -831,12 +834,19 @@ files:
       - (*Raft).rebaseOnCommit
       - (*Raft).dropUnknownKinds
       - (*Raft).firstNewEntry
+      - (*Raft).refuseHeld
+      - (*Raft).historyIn
+      - soundPair
+      - (*Raft).refuseHistory
+      - (*Raft).refusesHistory
+      - (*Raft).stands
       - (*Raft).appendNew
       - (*Raft).lowerSilence
       - (*Raft).verifyChain
       - (*Raft).acknowledgeAppend
       - (*Raft).chainRefused
       - (*Raft).refuses
+      - (*Raft).refusesLeader
       - (*Raft).maybeEndSilence
       - (*Raft).rewrittenPastSilence
       - (*Raft).endSilenceOnceDurable
@@ -994,6 +1004,14 @@ functions:
       InitialTiming (#421). A snapshot with no contract replaces nothing.
     name: adoptsTiming
     params: c, cur core.TimingContractSpec
+    results: bool
+  - doc: |-
+      soundPair reports whether e and own, two entries at one index, are of one
+      term and each consistent with itself from the chain value prev before
+      them: e's body and chain value, and own's chain value, whose payload this
+      log may have evicted.
+    name: soundPair
+    params: e, own *core.EntryValue, prev uint32
     results: bool
 imports:
   cmp: cmp
@@ -1608,6 +1626,13 @@ types:
           consensus_chain_refusals_total.
         name: ChainRefusedBy
         type: "[]core.NodeID"
+      - doc: |-
+          HistoryConflicts names, once per proof, the member whose append
+          proved it holds another entry than this log at an index and term this
+          log holds: founders that wrote different entries 1 (#698). That member
+          is refused for good; the driver says BOOTSTRAP_REFUSED.
+        name: HistoryConflicts
+        type: "[]HistoryConflictValue"
     kind: struct
     methods:
       - name: NeedsWrite
@@ -1627,11 +1652,33 @@ types:
       - doc: |-
           hasStateNotice reports whether the Ready tells the driver of a state: the
           end of the silence or its lowered point, an entry this version cannot
-          apply, or a node that may not campaign and hears no leader.
+          apply, a node that may not campaign and hears no leader, or a member
+          refused for another history, whose append this node drops unanswered.
         name: hasStateNotice
         recv: rd *ReadyValue
         results: bool
     name: ReadyValue
+  - fields:
+      - name: From
+        type: core.NodeID
+      - name: Index
+        type: uint64
+      - name: Term
+        type: uint64
+    kind: struct
+    name: HistoryConflictValue
+  - doc: |-
+      historyConflict is a standing refusal of a member for another history:
+      the proof, and this log's chain value at its index, which must still be
+      there for the refusal to stand.
+    fields:
+      - name: ""
+        role: embedded
+        type: HistoryConflictValue
+      - name: chain
+        type: uint32
+    kind: struct
+    name: historyConflict
   - fields:
       - name: Index
         type: uint64
@@ -1855,6 +1902,14 @@ types:
         type: core.NodeID
       - name: refusals
         type: int
+      - doc: |-
+          conflicts are the members an append proved to hold another history
+          than this log (#698), each with this log's chain value at the index
+          the proof compared: their appends, heartbeats and votes are refused
+          while this log holds that entry still (refusesHistory). Never
+          persisted: a restart proves it again at the member's next append.
+        name: conflicts
+        type: "[]historyConflict"
       - doc: |-
           guardRefusal is what #603's guard found when it refused the change
           the last Propose was handed: the voters that change would strand, nil
@@ -3377,6 +3432,9 @@ types:
       - name: ChainRefusal
         recv: r *Raft
         results: core.NodeID, uint64, int
+      - name: HistoryRefusals
+        recv: r *Raft
+        results: "[]HistoryConflictValue"
       - name: Step
         params: now time.Time, m core.MessageValue
         recv: r *Raft
@@ -3445,7 +3503,9 @@ types:
       - doc: |-
           handleVote answers a vote or a PreVote of this node's term, after the
           live-leader refusal already passed. Only a real vote is recorded, and its
-          grant leaves after the vote is durable (send, D5b).
+          grant leaves after the vote is durable (send, D5b). A member of another
+          history is refused: elected, its appends would be refused all the same
+          (#698).
         name: handleVote
         params: now time.Time, m core.MessageValue
         recv: r *Raft
@@ -3503,7 +3563,8 @@ types:
       - doc: |-
           followWinner follows the leader of the campaign's term that m comes
           from, unless this node refused that leader for the term: its campaign is
-          how the refusal ends, and the leader's messages do not end it (#508).
+          how the refusal ends, and the leader's messages do not end it (#508); nor
+          one of another history, at any term (#698).
         name: followWinner
         params: now time.Time, m core.MessageValue
         recv: r *Raft
@@ -3511,7 +3572,7 @@ types:
           stepFollower handles a message of the leader's term at a follower or a
           learner; an append or a heartbeat is contact with the leader, and extends
           the record of a vouched-for one (#618), unless this node refused that
-          leader for the term.
+          leader for the term, or for another history (#698).
         name: stepFollower
         params: now time.Time, m core.MessageValue
         recv: r *Raft
@@ -3583,9 +3644,11 @@ types:
       - doc: |-
           rebaseOnCommit handles an append that starts below the commit. Its
           entries past the commit are still news: it is re-based on the committed
-          entry when it carries that entry with our term. A node that acknowledges
-          nothing — a silent one — learns the rest of the log no other way. It
-          reports false, having answered with the commit, when m cannot be re-based.
+          entry when it carries that entry with our term and our chain value. A
+          node that acknowledges nothing — a silent one — learns the rest of the
+          log no other way. It reports false, having answered with the commit, when
+          m cannot be re-based, and having refused m (refuseHeld) when it carries
+          another entry at the commit.
         name: rebaseOnCommit
         params: m *core.MessageValue
         recv: r *Raft
@@ -3600,14 +3663,74 @@ types:
         recv: r *Raft
       - doc: |-
           firstNewEntry skips the entries of m the log already holds at the same
-          term and returns the position in m.Entries of the first one it does not,
-          -1 when it holds them all, with the chain value before it. ok is false,
-          and the append is dropped unanswered, when the entries are not one per
-          index after m.Index.
+          term and with the same chain value, and returns the position in
+          m.Entries of the first one it does not hold, -1 when it holds them all,
+          with the chain value before it. ok is false, and the append is dropped
+          unanswered, when the entries are not one per index after m.Index; and
+          refused (refuseHeld) when one is held at its term with another chain
+          value. Skipped on its term alone, such an entry handed its chain value on
+          as this log's: the leader's next entries verified against it and were
+          appended after this node's own, and two histories diverged in one log in
+          silence (#698).
         name: firstNewEntry
         params: m *core.MessageValue
         recv: r *Raft
         results: start int, prevChain uint32, ok bool
+      - doc: |-
+          refuseHeld refuses an append whose entry at position k this log holds at
+          the same index and term under another chain value. When the first entry
+          of m that differs proves another history (historyIn), the sender is
+          refused for good; anything else is a chain that does not verify,
+          refused as D4 refuses one, at that entry, and the leader resends.
+        name: refuseHeld
+        params: m *core.MessageValue, k int
+        recv: r *Raft
+      - doc: |-
+          historyIn walks m's entries through position k, each one this log holds,
+          to the first whose chain value differs from this log's there, at, and
+          reports whether it proves another history: held at its own term, its body
+          and its chain value verifying from the chain value before it, which the
+          sender shares with this log there (equal on the entry before, or m's base,
+          which that verification proves shared), and this log's own entry
+          verifying from that value too. Two sound entries at one index and term
+          are two histories: a leader appends one entry per index in its term, and
+          every later leader holds the committed ones (Log Matching). Founders
+          whose entries 1 differ are the one way to two such entries (#698); a
+          Recover starts a cluster of its own (#544), whose peers the transport
+          refuses, and an install restarts the log on a snapshot's chain tip
+          (R5-05). A sum that does not verify, on either side, is damage, and
+          proves nothing but that (D4).
+        name: historyIn
+        params: m *core.MessageValue, k int
+        recv: r *Raft
+        results: HistoryConflictValue, uint64, bool
+      - doc: |-
+          refuseHistory refuses c's member for good and names it in the Ready
+          (#698). The append that proved it goes unanswered, as every later one and
+          every heartbeat do (refusesLeader), and its votes are refused: answered,
+          each refusal was contact for that leader's CheckQuorum, and a refusing
+          majority never deposed it (#508). The refusal stands while this log
+          keeps the entry the proof compared (stands).
+        name: refuseHistory
+        params: c HistoryConflictValue
+        recv: r *Raft
+      - doc: |-
+          refusesHistory reports whether this node refuses from for another
+          history (refuseHistory).
+        name: refusesHistory
+        params: from core.NodeID
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          stands reports whether this log still holds the entry c's proof
+          compared, under the chain value it had then: a snapshot this node cuts
+          through it keeps that value as its tip. A truncation that drops it, or a
+          leader's snapshot installed at or past it, ends the refusal with its
+          evidence, and the member is judged again at its next append.
+        name: stands
+        params: c *historyConflict
+        recv: r *Raft
+        results: bool
       - doc: |-
           appendNew verifies and appends m's entries from start on, truncating a
           conflicting suffix first. It reports false, and the append goes
@@ -3677,6 +3800,14 @@ types:
           refuses reports whether this node refused the leader from for the rest
           of the current term, after MaxChainRefusals refusals of its chain.
         name: refuses
+        params: from core.NodeID
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          refusesLeader reports whether this node refuses the appends and
+          heartbeats of the leader from: for the term, after its chain refusals
+          (refuses), or for another history while that refusal stands (#698).
+        name: refusesLeader
         params: from core.NodeID
         recv: r *Raft
         results: bool

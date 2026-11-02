@@ -49,6 +49,7 @@ const (
 	mProtocolVersion  = "consensus_protocol_version"
 	mLoopTurn         = "consensus_loop_turn_seconds"
 	mChainRefusals    = "consensus_chain_refusals_total"
+	mHistoryRefusals  = "consensus_history_refusals_total"
 	mStopped          = "consensus_stopped"
 	mJoinsRateLimited = "consensus_joins_rate_limited_total"
 	mLogBytes         = "consensus_log_bytes"

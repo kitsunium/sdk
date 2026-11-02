@@ -4003,7 +4003,9 @@ sequences:
           		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.hasStateNotice()
   - of: (*ReadyValue).hasStateNotice
     steps:
-      - return: rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard
+      - return: |-
+          rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard ||
+          		len(rd.HistoryConflicts) != 0
   - of: (*Raft).Ready
     participants:
       - id: caller
@@ -4933,7 +4935,7 @@ sequences:
             - return: "false"
           when: |-
             (m.Kind == core.MsgTimeoutNow && !r.mutated(mutTimeoutNowAnyTerm)) ||
-            		((m.Kind == core.MsgPreVote || m.Kind == core.MsgVote) && r.refuseForLiveLeader(now, m))
+            		((m.Kind == core.MsgPreVote || m.Kind == core.MsgVote) && (r.refuseForLiveLeader(now, m) || r.refusesHistory(m.From)))
       - eval: r.adoptTerm(m)
         to: r.adoptTerm
       - return: "true"
@@ -5076,8 +5078,6 @@ sequences:
         kind: actor
       - id: (*Raft).handleVote
         kind: self
-      - id: r.mayGrant
-        kind: internal
       - id: r.voteRestricted
         kind: internal
       - id: r.send
@@ -5095,8 +5095,7 @@ sequences:
               value: core.MsgPreVoteResp
           when: pre
       - bind: canVote
-        eval: r.mayGrant(pre, m)
-        to: r.mayGrant
+        eval: r.mayGrant(pre, m) && !r.refusesHistory(m.From)
       - bind: restricted
         eval: r.voteRestricted(pre, m)
         to: r.voteRestricted
@@ -5405,7 +5404,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: r.refuses(m.From)
+          when: r.refusesLeader(m.From)
       - eval: r.becomeFollower(m.Term, m.From)
         to: r.becomeFollower
       - eval: r.stepFollower(now, m)
@@ -5428,7 +5427,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: (m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat) && r.refuses(m.From)
+          when: (m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat) && r.refusesLeader(m.From)
       - switch:
           cases:
             - case: core.MsgApp
@@ -5647,6 +5646,8 @@ sequences:
         kind: internal
       - id: r.send
         kind: internal
+      - id: r.refuseHeld
+        kind: internal
     steps:
       - opt:
           do:
@@ -5663,6 +5664,12 @@ sequences:
               to: r.send
             - return: "false"
           when: k >= len(m.Entries) || !ok || m.Entries[k].Position.Term != t
+      - opt:
+          do:
+            - eval: r.refuseHeld(m, k)
+              to: r.refuseHeld
+            - return: "false"
+          when: m.Entries[k].ChainSum != r.log.chain(r.log.committed)
       - set: m.Entries
         value: m.Entries[k+1:]
       - set: m.Index, m.LogTerm
@@ -5678,6 +5685,8 @@ sequences:
         kind: internal
       - id: r.log.term
         kind: internal
+      - id: r.refuseHeld
+        kind: internal
     steps:
       - set: prevChain
         to: r.log.chain
@@ -5692,6 +5701,12 @@ sequences:
                 when: e.Position.Index != m.Index+uint64(k)+1
             - opt:
                 do:
+                  - opt:
+                      do:
+                        - eval: r.refuseHeld(m, k)
+                          to: r.refuseHeld
+                        - return: "-1, prevChain, false"
+                      when: e.ChainSum != r.log.chain(e.Position.Index)
                   - set: prevChain
                     value: e.ChainSum
                   - continue: true
@@ -5704,6 +5719,107 @@ sequences:
           key: k
           range: m.Entries
       - return: "-1, prevChain, true"
+  - of: (*Raft).refuseHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).refuseHeld
+        kind: self
+      - id: r.historyIn
+        kind: internal
+      - id: r.refuseHistory
+        kind: internal
+      - id: r.chainRefused
+        kind: internal
+    steps:
+      - bind: c, at, proved
+        eval: r.historyIn(m, k)
+        to: r.historyIn
+      - opt:
+          do:
+            - eval: r.refuseHistory(c)
+              to: r.refuseHistory
+            - return: ""
+          when: proved
+      - eval: r.chainRefused(*m, at)
+        to: r.chainRefused
+  - of: (*Raft).historyIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).historyIn
+        kind: self
+      - id: r.log.chain
+        kind: internal
+      - id: r.log.at
+        kind: internal
+    steps:
+      - bind: at
+        eval: m.Index + uint64(k) + 1
+      - opt:
+          do:
+            - return: HistoryConflictValue{}, at, false
+          when: m.Index < r.log.snapIndex || !r.log.matchTerm(m.Index, m.LogTerm)
+      - bind: prev
+        eval: r.log.chain(m.Index)
+        to: r.log.chain
+      - loop:
+          do:
+            - bind: e
+              eval: "&m.Entries[j]"
+            - bind: i
+              eval: m.Index + uint64(j) + 1
+            - opt:
+                do:
+                  - return: HistoryConflictValue{}, at, false
+                when: e.Position.Index != i || i > r.log.lastIndex()
+            - opt:
+                do:
+                  - return: "HistoryConflictValue{From: m.From, Index: i, Term: own.Position.Term}, i, soundPair(e, own, prev)"
+                init:
+                  bind: own
+                  eval: r.log.at(i)
+                  to: r.log.at
+                when: e.ChainSum != own.ChainSum
+            - set: prev
+              value: e.ChainSum
+          key: j
+          range: k + 1
+      - return: HistoryConflictValue{}, at, false
+  - of: soundPair
+    steps:
+      - return: |-
+          e.Position.Term == own.Position.Term && wire.BodySum(e.Data) == e.BodySum &&
+          		wire.ChainSum(prev, e) == e.ChainSum && wire.ChainSum(prev, own) == own.ChainSum
+  - of: (*Raft).refuseHistory
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).refuseHistory
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: h
+        eval: "historyConflict{HistoryConflictValue: c, chain: r.log.chain(c.Index)}"
+      - alt:
+          - do:
+              - set: r.conflicts[i]
+                value: h
+            init:
+              bind: i
+              eval: slices.IndexFunc(r.conflicts, func(x historyConflict) bool { return x.From == c.From })
+              to: slices
+            when: i >= 0
+          - do:
+              - set: r.conflicts
+                value: append(r.conflicts, h)
+            else: true
+      - set: r.rd.HistoryConflicts
+        value: append(r.rd.HistoryConflicts, c)
+  - of: (*Raft).stands
+    steps:
+      - return: c.Index >= r.log.snapIndex && c.Index <= r.log.lastIndex() && r.log.chain(c.Index) == c.chain
   - of: (*Raft).appendNew
     participants:
       - id: caller
@@ -5853,6 +5969,9 @@ sequences:
   - of: (*Raft).refuses
     steps:
       - return: r.refusedLead != 0 && r.refusedLead == from && r.refusedTerm == r.term && !r.mutated(mutRefusedLeadHeard)
+  - of: (*Raft).refusesLeader
+    steps:
+      - return: r.refuses(from) || r.refusesHistory(from)
   - of: (*Raft).maybeEndSilence
     participants:
       - id: caller

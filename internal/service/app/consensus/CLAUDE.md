@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T18:00:00Z -->
+<!-- updated: 2026-11-02T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -700,6 +700,18 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   the one NewNode validated (#523,
   `TestTheFoundingContractIsTheOneNewNodeValidates`,
   `TestAFoundingContractWithoutItsMinimumRulesEveryNode`).
+- Leave a member of another history to chain refusals alone: founders that
+  passed `Bootstrap` different timings each commit their own entry 1, and
+  the founding digest compares nothing across founders. The step function
+  refuses such a member for good (`ReadyValue.HistoryConflicts`, raft's
+  `historyIn`); `reportHistoryConflict` logs it at Warn with
+  `BOOTSTRAP_REFUSED` and counts `consensus_history_refusals_total`, and
+  `Health` sets `HealthHistoryRefused` and `HistoryRefused` from
+  `Raft.HistoryRefusals`, a refused leader making the node unready. Founder
+  0 of another timing said nothing in 10 s while the two others committed
+  (#698, `TestAFounderOfAnotherTimingIsRefusedAndSaysWhy`; the control
+  `TestFoundersOfOneTimingTruncateWithoutARefusal`). The founders'
+  comparison before `Bootstrap` is to come, under the version rule.
 - Cut a denied member before its DenyPin commits, or deny the pin of the
   last voter a quorum needs: over TCP the entry then waited forever for the
   acknowledgement the transport refused (#530,

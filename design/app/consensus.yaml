@@ -2256,6 +2256,16 @@ packages:
         name: HealthSnapshotNearLimit
         type: HealthFlags
         value: "16"
+      - blockDoc: The answers a HealthValue carries.
+        doc: |-
+          HealthHistoryRefused is set while this node refuses a member whose
+          log holds another entry than its own at an index and term both hold,
+          named in HistoryRefused: founders that passed Bootstrap different
+          entries 1, logged BOOTSTRAP_REFUSED. Only a new founding of one side
+          mends it (#698). A node that refuses its leader is not ready.
+        name: HealthHistoryRefused
+        type: HealthFlags
+        value: "32"
       - doc: |-
           WipeAndRejoin wipes the directory; the operator then Removes the old
           NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
@@ -2911,7 +2921,8 @@ packages:
               type: coreconsensus.StatusValue
             - doc: |-
                 Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
-                HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.
+                HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit,
+                HealthHistoryRefused.
               name: Flags
               type: HealthFlags
             - doc: |-
@@ -2935,6 +2946,12 @@ packages:
               type: uint64
             - name: ChainRefusalLeader
               type: coreconsensus.NodeID
+            - doc: |-
+                HistoryRefused are the members this node refuses for another history,
+                their appends, heartbeats and votes, in the order it found them; nil
+                when none (HealthHistoryRefused, #698).
+              name: HistoryRefused
+              type: "[]coreconsensus.NodeID"
             - doc: StopReason says why the node stopped itself.
               name: StopReason
               type: coreconsensus.StopReasonValue
@@ -4287,6 +4304,26 @@ packages:
                 consensus_chain_refusals_total.
               name: ChainRefusedBy
               type: "[]core.NodeID"
+            - doc: |-
+                HistoryConflicts names, once per proof, the member whose append
+                proved it holds another entry than this log at an index and term this
+                log holds: founders that wrote different entries 1 (#698). That member
+                is refused for good; the driver says BOOTSTRAP_REFUSED.
+              name: HistoryConflicts
+              type: "[]HistoryConflictValue"
+      - doc: |-
+          HistoryConflictValue is a member whose log holds another entry than this
+          node's at Index, of Term in both: two histories, which no truncation
+          reconciles (#698).
+        name: HistoryConflictValue
+        struct:
+          fields:
+            - name: From
+              type: core.NodeID
+            - name: Index
+              type: uint64
+            - name: Term
+              type: uint64
       - doc: |-
           UnsupportedEntryValue is an entry a leader sent that this version cannot
           apply; Index is 0 when there is none.
@@ -4631,6 +4668,14 @@ packages:
               - type: core.NodeID
               - type: uint64
               - type: int
+            recv: pointer
+          - doc: |-
+              HistoryRefusals returns the members this node refuses for another
+              history, in the order it proved them, each with the index and term the
+              proof compared; nil when it refuses none (#698).
+            name: HistoryRefusals
+            out:
+              - type: "[]HistoryConflictValue"
             recv: pointer
           - doc: |-
               Isolated returns the voters of the configuration this leader governs by
@@ -5461,6 +5506,10 @@ packages:
             reexport: svcconsensus.HealthSnapshotNearLimit
             type: svcconsensus.HealthFlags
             value: "16"
+          - name: HealthHistoryRefused
+            reexport: svcconsensus.HealthHistoryRefused
+            type: svcconsensus.HealthFlags
+            value: "32"
         doc: The answers a HealthValue carries, read with HealthFlags.Has.
       - const:
           - name: PeerVoter

@@ -1578,9 +1578,10 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 
 // reportNotices acts on the Ready's notices that change no state of the
 // loop: the silence condition lowered or ended, the chain refusals D13
-// counts by leader, and a truncation worth a line in the log. It runs
-// before handleOne queues the Ready's write: a lowered point is durable
-// before the truncation it rides with (#793).
+// counts by leader, a member refused for another history, and a truncation
+// worth a line in the log. It runs before handleOne queues the Ready's
+// write: a lowered point is durable before the truncation it rides with
+// (#793).
 func (n *Node) reportNotices(rd *raft.ReadyValue) {
 	if rd.SilenceLowered != 0 && !rd.SilenceEnded {
 		n.lowerSilence(rd.SilenceLowered)
@@ -1591,9 +1592,27 @@ func (n *Node) reportNotices(rd *raft.ReadyValue) {
 	for _, lead := range rd.ChainRefusedBy {
 		n.obs.inc(mChainRefusals, coreotel.String("leader", lead.String()))
 	}
+	for _, c := range rd.HistoryConflicts {
+		n.reportHistoryConflict(c)
+	}
 	if rd.TruncateFrom != 0 {
 		n.obs.info("consensus: log truncated", lattr("from", rd.TruncateFrom))
 	}
+}
+
+// reportHistoryConflict says, at Warn and in consensus_history_refusals_total,
+// that the step function refuses a member whose log holds another entry
+// than this node's at an index and term both hold: founders that passed
+// Bootstrap different entries 1, a different member list or initial timing
+// (#698). Nothing commits that entry on both, and no truncation reconciles
+// them: the member stays refused, its appends, heartbeats and votes, while
+// this log holds the entry, until a new founding of one side. Health names
+// it (HealthHistoryRefused). It runs on the loop.
+func (n *Node) reportHistoryConflict(c raft.HistoryConflictValue) {
+	n.obs.inc(mHistoryRefusals, coreotel.String("member", c.From.String()))
+	err := origin(coreconsensus.BootstrapRefused)
+	n.obs.warn("consensus: a member holds another history, founded on another entry 1; its appends and votes are refused",
+		lattr("member", uint64(c.From)), lattr("index", c.Index), lattr("term", c.Term), lstr("error", err.Error()))
 }
 
 // lowerSilence persists the silence condition's lowered truncation point,

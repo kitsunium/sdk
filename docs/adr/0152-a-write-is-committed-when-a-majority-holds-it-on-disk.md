@@ -618,6 +618,11 @@ vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
     keeps leading. The refusal is then reported, through `Health` and the
     alert of D13, and the refusing node stays out of the commit quorum until
     the term ends.
+  - **Another history is refused at every term (#698).** An entry at the
+    node's commit, or held past it, at the same index and term but under
+    another chain value, both entries consistent with themselves, proves
+    two histories: that member is refused for good, its votes included,
+    while the node keeps the entry (amendment of 2026-11-02, #698).
 
 **Durability, as the kernel gives it (R1-09, R7-22).** On Linux,
 `segment_linux.go` calls `fdatasync(2)`. `fallocate(2)` stays OFF: segments
@@ -1978,7 +1983,10 @@ one term — once before the loss, once after — and elect two leaders.
   is compared and written in NodeID order, so its order on the command line
   does not matter: entry 1 is byte-identical on every founder, as the chain
   requires (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M1). The founders also pass the same initial
-  timing contract, which entry 1 carries.
+  timing contract, which entry 1 carries. Nothing compares it across
+  founders yet: a member founded on another entry 1 is refused for good by
+  the others' step functions, and each says `BOOTSTRAP_REFUSED`
+  (amendment of 2026-11-02, #698).
   **`Bootstrap`, `Recover` and `RestoreSnapshot` require a non-zero SPKI for
   every member (R9-04).** An empty pin is refused, so no member is ever
   admitted on its slot alone. A RUNNING server
@@ -2445,6 +2453,7 @@ written before the code. **They are spelled as Prometheus exposes them
 | `consensus_tls_reload_failures_total`, `consensus_tls_peer_cert_expiry_seconds` | counter, gauge by peer (R2-28) |
 | `consensus_loop_turn_seconds` | histogram (R7-20) |
 | `consensus_chain_refusals_total`, `consensus_snapshot_pins` | counter by leader, gauge (R7-19, R7-38) |
+| `consensus_history_refusals_total` | counter by member: a member refused for another history, `BOOTSTRAP_REFUSED` (#698) |
 | `consensus_stopped` | gauge by `StopReason`, set before the process exits (R7-37) |
 
 **The product pushes stop reasons (R7-37).** A stopped node exits, so a
@@ -2466,6 +2475,7 @@ thresholds, provisional like D16's numbers:
 | certificate | `consensus_tls_cert_expiry_seconds` under 7 days, or any reload failure |
 | peer unreachable | `consensus_peer_unreachable == 1` for 1 min |
 | chain refusals | `consensus_chain_refusals_total` increasing |
+| another history | `consensus_history_refusals_total` increasing, or `HealthHistoryRefused` (#698) |
 | loop turn | p99 of `consensus_loop_turn_seconds` above the drift budget for 5 min |
 | snapshot pin | `consensus_snapshot_pins` held longer than the pin TTL of D19 |
 
@@ -6869,6 +6879,100 @@ side, as #763's option (b) would.
   #603, #748 (`movedAll`'s "A-and-B-moved"), #761, #763, #764, #773 and
   #785 stay green.
 
+## Amendment — a member of another history is refused for good, and said (2026-11-02, #698)
+
+R2-24 has every founder pass `Bootstrap` the same initial timing contract,
+which entry 1 carries, and nothing checks it: the founding digest covers
+the member list alone (#421's fix, PR #423), and only on one node.
+Founders given different `InitialTiming`s, one field is enough, each
+commit a different entry 1 at (1, 1). A follower re-based the leader's
+stepped-back append on its own entry 1 (`rebaseOnCommit`), dropping the
+leader's unread, and refused the next entry for a broken chain at every
+resend; after N refusals it stopped answering for the term (#508), and the
+next term started it over. With three timings nothing ever committed; with
+one, the odd founder never replicated and the cluster ran with no failure
+tolerance; neither was said but as chain refusals
+([#698](https://github.com/kitsunium/sdk/issues/698)). The owner decided
+two steps (2026-11-01): this detection now, with no format change, and the
+founders comparing their entry 1 before `Bootstrap`, under the version rule
+(`ProtocolMax`, `FlagProtocol`, `checkAnnounced`), in a change of its own.
+
+- **The proof.** In `rebaseOnCommit` the leader's entry at the node's
+  commit, of the node's term, must carry the node's chain value as well;
+  in `firstNewEntry` an entry held at the same index and term must too.
+  When it does not, `historyIn` walks the append to its first entry whose
+  chain value differs from the log's: held at its own term, its body and
+  chain value verifying from the chain value before it, which the sender
+  shares with this log (equal on the entry before, or the append's base,
+  which that verification proves shared), and the log's own entry
+  verifying from that value too. Two such entries at one index and term
+  are two histories.
+- **No legitimate leader is refused.** A leader appends one entry per
+  index in its term and never rewrites it, and every later leader holds
+  the committed entries: two logs holding one index at one term hold the
+  same entries through it (Log Matching), and the chain value, a function
+  of every header and body sum before it, is the same. Raft's repair is a
+  conflict of terms at one index, an uncommitted entry of an older term
+  overwritten by the leader's of its own, which `firstNewEntry` hands to
+  `appendNew` as before. A `Recover` (#544) keeps the kept entries byte for
+  byte, writes its forced entry at a term above any the survivor knew, and
+  starts a new cluster, whose peers the transport refuses
+  (`CLUSTER_MISMATCH`), as `RestoreSnapshot` does; an install restarts the
+  log on its snapshot's chain tip (R5-05), and nothing is proved below the
+  log's base. A damaged entry fails its own sums: a chain refusal, as
+  before (D4). `Bootstrap` is the one place where several writers put an
+  entry at one index and term, every founder at (1, 1), and it is one entry
+  only when their inputs are.
+- **The refusal.** The member is refused for good: its appends and
+  heartbeats neither answered nor taken as contact, as #508 refuses a
+  leader for a term, here at every term; its PreVotes and votes refused,
+  and the higher term they carry not adopted. Held in memory beside the
+  log's own chain value at the index it compared, it stands while the log
+  keeps that entry: a truncation that drops it, or a leader's snapshot
+  installed past it, ends it, and the member is judged again at its next
+  append. A restart proves it again at the member's first stepped-back
+  append; nothing is persisted.
+- **Said.** `ReadyValue.HistoryConflicts` names the member, the index and
+  the term, once per proof. The driver logs it at Warn with
+  `BOOTSTRAP_REFUSED`, counts it in `consensus_history_refusals_total` by
+  member, and `Health` sets `HealthHistoryRefused` and lists the members in
+  `HistoryRefused`; a node that refuses its leader is not ready.
+- **The trap closed.** `firstNewEntry` skipped an entry held at the same
+  term on its term alone and took the message's chain value as its own:
+  the leader's next entries verified against it and were appended after
+  the node's own entry, two histories in one log, in silence. A `Bootstrap`
+  that left entry 1 uncommitted would have walked into it (the fixer's
+  measurement on #698). Such an entry is now refused: another history when
+  proved, a chain refusal otherwise, and the leader resends.
+- **What it does not do.** Both entries 1 stay committed where they were
+  written: this detects, it does not prevent. With three timings nothing
+  commits, and every node says why; with one, the odd founder stays out
+  until it is founded again, or until a leader whose log no longer reaches
+  entry 1, which proves nothing, installs its snapshot on it. A mixed
+  cluster stays correct: a node of an earlier release refuses the chain as
+  before.
+- **No format change.** No frame, field, flag, record or stamp changes,
+  nothing persisted, no protocol raise, and no raft mutation: the type is
+  full.
+- **Tests.** `TestAFounderOfAnotherTimingIsRefusedAndSaysWhy` (the issue's
+  scenario, three founders and two timings on the memory network; on main
+  founder 0 says nothing in 10 s while the two others commit 863 writes,
+  pre-candidate at commit 1; fixed, it logs `BOOTSTRAP_REFUSED` naming a
+  founder of the other history at (1, 1), its health names it, and its log
+  chains), `TestFoundersOfOneTimingTruncateWithoutARefusal` (the control: a
+  cut-off leader's lone entry truncated, no refusal anywhere), and, on the
+  step function, `TestAFounderRefusesForGoodALeaderFoundedOnAnotherEntry`,
+  `TestAHeldEntryWhoseChainDiffersIsNeverSkipped` and
+  `TestAHeldEntryOfTheSameTermWithAnotherBodyProvesAnotherHistory` (on main
+  the leader is answered and voted for at a later term, the foreign entry 3
+  is appended after the node's own entry 2, and a foreign entry (2, 1) is
+  acknowledged and committed), with the controls
+  `TestAFounderFollowsALeaderFoundedOnTheSameEntry`,
+  `TestALeaderThatOverwritesAnUncommittedTailIsFollowed`,
+  `TestAnEntryThatFailsItsOwnSumsIsAChainRefusal` and
+  `TestAHistoryRefusalEndsWithTheEntryItCompared`. The tests of #421, #508,
+  #530, #544, #723 and D4's chain stay green.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6922,6 +7026,7 @@ side, as #763's option (b) would.
 | #795 | Raft hunt loop, 2026-11-01 | the leader keeps the index of the no-op it fed a silence, and a snapshot transfer the peer installed at or past it feeds the peer once more, so a node restarted on that snapshot, its point raised past the leader's whole log, ends its silence in a cluster that writes nothing; a snapshot the node cut itself left to a decision; no format change, no raft mutation (amendment of 2026-11-01, #795) |
 | #773 (c) | the owner's decision, 2026-11-01 | a `DenyPin` that leaves a stopped voter no voucher is admitted, and said: `Raft.Isolated` names, by #603's own judgement, every voter the leader may never reach again and the withdrawn pin that leaves it so; the health's `PeerStranded` and `PeerPinDenied`, the audit line's `isolated`, and the `why` and `isolated` of a refusal the guard decides; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #773) |
 | #765 (b) | the owner's decision, 2026-11-01 | #603's guard keeps its two bets on the leader, the leader counted at any address and the compacted log's bet that a voter listed after it knows it as a voter, and says when a stopped voter's reach rests on one: `IsolationLeaderMoved` and `IsolationLeaderUnconfirmed` in `Raft.Isolated`, the health's `PeerLeaderMoved` and `PeerLeaderUnconfirmed`, the audit line's `isolated` for the leader's own move, a removal, a move and a transfer, and a Warn line for a hand-over with no entry; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #765) |
+| #698 (A) | the owner's decision, 2026-11-01 | a member whose append proves it holds another entry at an index and term the node holds, founders that wrote different entries 1, is refused for good while the node keeps that entry, its appends, heartbeats and votes, and said: `ReadyValue.HistoryConflicts`, a Warn line with `BOOTSTRAP_REFUSED`, `consensus_history_refusals_total`, the health's `HealthHistoryRefused` and `HistoryRefused`; an entry held at the same term with another chain value is never skipped; the founders' comparison before `Bootstrap` (option C) left to its own change; no format change, nothing persisted, no raft mutation (amendment of 2026-11-02, #698) |
 
 ## raft-sql-poc (owner's prior Raft)
 

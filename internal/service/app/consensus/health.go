@@ -68,6 +68,12 @@ const (
 	// four fifths of SnapshotLimit: the cuts are about to be refused
 	// SNAPSHOT_TOO_LARGE (R2-30). Readiness does not depend on it.
 	HealthSnapshotNearLimit
+	// HealthHistoryRefused is set while this node refuses a member whose
+	// log holds another entry than its own at an index and term both hold,
+	// named in HistoryRefused: founders that passed Bootstrap different
+	// entries 1, logged BOOTSTRAP_REFUSED. Only a new founding of one side
+	// mends it (#698). A node that refuses its leader is not ready.
+	HealthHistoryRefused
 )
 
 // PeerHealthValue is the leader's view of one peer (D13), one line of
@@ -119,7 +125,8 @@ type HealthValue struct {
 	// Status is the node's view after its last turn.
 	Status coreconsensus.StatusValue
 	// Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
-	// HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.
+	// HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit,
+	// HealthHistoryRefused.
 	Flags HealthFlags
 	// FailureTolerance is how many voters can fail now with a majority
 	// left. Only the leader knows it: -1 elsewhere.
@@ -134,6 +141,10 @@ type HealthValue struct {
 	ChainRefusals      int
 	ChainRefusalIndex  uint64
 	ChainRefusalLeader coreconsensus.NodeID
+	// HistoryRefused are the members this node refuses for another history,
+	// their appends, heartbeats and votes, in the order it found them; nil
+	// when none (HealthHistoryRefused, #698).
+	HistoryRefused []coreconsensus.NodeID
 	// StopReason says why the node stopped itself.
 	StopReason coreconsensus.StopReasonValue
 	// DroppedFrames counts frames whose From differed from the
@@ -202,10 +213,11 @@ func (n *Node) snapshotHealth(h *HealthValue) {
 
 // isReady is the verdict's Ready: running, a leader known, everything known
 // committed applied — or, once caught up, a lag that keeps moving within
-// its bound (applyOK) — and not refusing the current leader's chain (D4).
+// its bound (applyOK) — and refusing neither the current leader's chain
+// (D4) nor its history (#698).
 func isReady(h *HealthValue, st *coreconsensus.StatusValue, applyOK bool) bool {
 	return !h.Flags.Has(HealthStopped) && h.Flags.Has(HealthHasLeader) && (st.Applied >= st.Commit || applyOK) &&
-		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
+		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader) && !slices.Contains(h.HistoryRefused, st.Leader)
 }
 
 // applyProgress is what readiness knows of the apply goroutine's progress,
@@ -255,13 +267,18 @@ func applyReady(caughtUp bool, commit, applied uint64, moved, window time.Durati
 }
 
 // loopHealth fills the part of a verdict only the event loop can read: the
-// quorum, the failure tolerance, the chain refusal and, on a leader, every
-// peer's view. It runs on the loop, through exec.
+// quorum, the failure tolerance, the chain refusal, the members refused for
+// another history and, on a leader, every peer's view. It runs on the loop,
+// through exec.
 func (n *Node) loopHealth(h *HealthValue) {
 	now := n.clk.Now()
 	h.Flags = h.Flags.set(HealthQuorumReachable, n.r.QuorumActive(now))
 	h.FailureTolerance = n.r.FailureTolerance(now)
 	h.ChainRefusalLeader, h.ChainRefusalIndex, h.ChainRefusals = n.r.ChainRefusal()
+	for _, c := range n.r.HistoryRefusals() {
+		h.HistoryRefused = append(h.HistoryRefused, c.From)
+	}
+	h.Flags = h.Flags.set(HealthHistoryRefused, len(h.HistoryRefused) != 0)
 	conf := n.r.Status().Conf
 	h.SnapshotLimit = snapshotLimit(n.cfg.MaxSnapshotBytes, &conf)
 	last := n.r.Status().Last

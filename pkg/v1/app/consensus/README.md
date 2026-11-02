@@ -362,6 +362,15 @@ The answers a HealthValue carries, read with HealthFlags.Has.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.HealthHasLeader`.
 
+<a name="HealthHistoryRefused"></a>
+```go
+const HealthHistoryRefused svcconsensus.HealthFlags = 32
+```
+
+The answers a HealthValue carries, read with HealthFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.HealthHistoryRefused`.
+
 <a name="HealthQuorumReachable"></a>
 ```go
 const HealthQuorumReachable svcconsensus.HealthFlags = 4
@@ -1988,7 +1997,8 @@ type HealthValue struct {
 	// Status is the node's view after its last turn.
 	Status             coreconsensus.StatusValue
 	// Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
-	// HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.
+	// HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit,
+	// HealthHistoryRefused.
 	Flags              HealthFlags
 	// FailureTolerance is how many voters can fail now with a majority
 	// left. Only the leader knows it: -1 elsewhere.
@@ -2003,6 +2013,10 @@ type HealthValue struct {
 	ChainRefusals      int
 	ChainRefusalIndex  uint64
 	ChainRefusalLeader coreconsensus.NodeID
+	// HistoryRefused are the members this node refuses for another history,
+	// their appends, heartbeats and votes, in the order it found them; nil
+	// when none (HealthHistoryRefused, #698).
+	HistoryRefused     []coreconsensus.NodeID
 	// StopReason says why the node stopped itself.
 	StopReason         coreconsensus.StopReasonValue
 	// DroppedFrames counts frames whose From differed from the

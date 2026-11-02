@@ -295,6 +295,28 @@ type ReadyValue struct {
 	// follower refused for a broken chain, for D13's
 	// consensus_chain_refusals_total.
 	ChainRefusedBy []core.NodeID
+	// HistoryConflicts names, once per proof, the member whose append
+	// proved it holds another entry than this log at an index and term this
+	// log holds: founders that wrote different entries 1 (#698). That member
+	// is refused for good; the driver says BOOTSTRAP_REFUSED.
+	HistoryConflicts []HistoryConflictValue
+}
+
+// HistoryConflictValue is a member whose log holds another entry than this
+// node's at Index, of Term in both: two histories, which no truncation
+// reconciles (#698).
+type HistoryConflictValue struct {
+	From  core.NodeID
+	Index uint64
+	Term  uint64
+}
+
+// historyConflict is a standing refusal of a member for another history:
+// the proof, and this log's chain value at its index, which must still be
+// there for the refusal to stand.
+type historyConflict struct {
+	HistoryConflictValue
+	chain uint32
 }
 
 // UnsupportedEntryValue is an entry a leader sent that this version cannot
@@ -457,6 +479,12 @@ type Raft struct {
 	refusedAt   uint64
 	refusedFrom core.NodeID
 	refusals    int
+	// conflicts are the members an append proved to hold another history
+	// than this log (#698), each with this log's chain value at the index
+	// the proof compared: their appends, heartbeats and votes are refused
+	// while this log holds that entry still (refusesHistory). Never
+	// persisted: a restart proves it again at the member's next append.
+	conflicts []historyConflict
 	// guardRefusal is what #603's guard found when it refused the change
 	// the last Propose was handed: the voters that change would strand, nil
 	// when the guard did not refuse it (GuardRefusal, #773). Never
@@ -896,9 +924,11 @@ func (rd *ReadyValue) hasNotices() bool {
 
 // hasStateNotice reports whether the Ready tells the driver of a state: the
 // end of the silence or its lowered point, an entry this version cannot
-// apply, or a node that may not campaign and hears no leader.
+// apply, a node that may not campaign and hears no leader, or a member
+// refused for another history, whose append this node drops unanswered.
 func (rd *ReadyValue) hasStateNotice() bool {
-	return rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard
+	return rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard ||
+		len(rd.HistoryConflicts) != 0
 }
 
 // Ready returns the work of the turns since the last call and resets it.
@@ -1563,4 +1593,17 @@ func (r *Raft) QuorumActive(now time.Time) bool {
 // how many times, while it lasts (D4, R6-05).
 func (r *Raft) ChainRefusal() (core.NodeID, uint64, int) {
 	return r.refusedFrom, r.refusedAt, r.refusals
+}
+
+// HistoryRefusals returns the members this node refuses for another
+// history, in the order it proved them, each with the index and term the
+// proof compared; nil when it refuses none (#698).
+func (r *Raft) HistoryRefusals() []HistoryConflictValue {
+	var out []HistoryConflictValue
+	for _, c := range r.conflicts {
+		if r.stands(&c) {
+			out = append(out, c.HistoryConflictValue)
+		}
+	}
+	return out
 }

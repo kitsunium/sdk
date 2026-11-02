@@ -232,6 +232,22 @@ workflows:
           range: r.voters()
           value: id
       - return: max(n-r.quorum(), -1)
+  - of: (*Raft).HistoryRefusals
+    steps:
+      - var:
+          name: out
+          type: "[]HistoryConflictValue"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, c.HistoryConflictValue)
+                when: r.stands(&c)
+          key: _
+          range: r.conflicts
+          value: c
+      - return: out
   - of: (*Raft).countVotes
     steps:
       - loop:
@@ -270,3 +286,17 @@ workflows:
                 when: "!e.Kind.Known()"
           key: k
           range: m.Entries
+  - of: (*Raft).refusesHistory
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: c
+                  eval: "&r.conflicts[i]"
+                when: c.From == from && r.stands(c)
+          key: i
+          range: r.conflicts
+      - return: "false"

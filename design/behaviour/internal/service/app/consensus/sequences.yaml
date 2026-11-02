@@ -6382,7 +6382,7 @@ sequences:
     steps:
       - return: |-
           !h.Flags.Has(HealthStopped) && h.Flags.Has(HealthHasLeader) && (st.Applied >= st.Commit || applyOK) &&
-          		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
+          		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader) && !slices.Contains(h.HistoryRefused, st.Leader)
   - of: (*applyProgress).noteApplied
     steps:
       - opt:
@@ -6455,6 +6455,16 @@ sequences:
       - set: h.ChainRefusalLeader, h.ChainRefusalIndex, h.ChainRefusals
         to: n.r.ChainRefusal
         value: n.r.ChainRefusal()
+      - loop:
+          do:
+            - set: h.HistoryRefused
+              value: append(h.HistoryRefused, c.From)
+          key: _
+          range: n.r.HistoryRefusals()
+          value: c
+      - set: h.Flags
+        to: h.Flags.set
+        value: h.Flags.set(HealthHistoryRefused, len(h.HistoryRefused) != 0)
       - bind: conf
         eval: n.r.Status().Conf
       - set: h.SnapshotLimit
@@ -10863,6 +10873,8 @@ sequences:
         kind: internal
       - id: n.obs.inc
         kind: internal
+      - id: n.reportHistoryConflict
+        kind: internal
       - id: n.obs.info
         kind: internal
     steps:
@@ -10883,11 +10895,40 @@ sequences:
           key: _
           range: rd.ChainRefusedBy
           value: lead
+      - loop:
+          do:
+            - eval: n.reportHistoryConflict(c)
+              to: n.reportHistoryConflict
+          key: _
+          range: rd.HistoryConflicts
+          value: c
       - opt:
           do:
             - eval: "n.obs.info(\"consensus: log truncated\", lattr(\"from\", rd.TruncateFrom))"
               to: n.obs.info
           when: rd.TruncateFrom != 0
+  - of: (*Node).reportHistoryConflict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).reportHistoryConflict
+        kind: self
+      - id: n.obs.inc
+        kind: internal
+      - id: origin
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - eval: n.obs.inc(mHistoryRefusals, coreotel.String("member", c.From.String()))
+        to: n.obs.inc
+      - bind: err
+        eval: origin(coreconsensus.BootstrapRefused)
+        to: origin
+      - eval: |-
+          n.obs.warn("consensus: a member holds another history, founded on another entry 1; its appends and votes are refused",
+          		lattr("member", uint64(c.From)), lattr("index", c.Index), lattr("term", c.Term), lstr("error", err.Error()))
+        to: n.obs.warn
   - of: (*Node).lowerSilence
     participants:
       - id: caller

@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T18:00:00Z -->
+<!-- updated: 2026-11-02T12:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -120,6 +120,26 @@ under coverage before touching `shard_count`.
   rejection was contact for CheckQuorum and the trigger of an immediate
   resend, and the refusing majority never campaigned (#508,
   `mutRefusedLeadHeard`, `checkRefusedLeaderIsNotHeard`).
+- Re-base an append on the commit, or skip an entry held at the same term,
+  on its term alone: the chain value must match too. Founders of different
+  entries 1 each hold (1, 1) committed; re-based, the leader's entry 1 was
+  dropped unread and its next refused for a broken chain at every resend,
+  and a skipped entry handed its chain value on as the node's, so the
+  leader's next entries were appended after the node's own in silence.
+  `refuseHeld` refuses either: `historyIn` proves another history when the
+  first entry that differs is held at its term and both it and the node's
+  own entry verify from the chain value before them, and a chain refusal
+  is D4's otherwise. A member proved so is refused for good, appends,
+  heartbeats and votes (`refusesLeader`, `refusesHistory`), and a higher
+  term its vote carries is not adopted, while the log keeps the entry the
+  proof compared (`stands`); nothing is persisted, and no raft mutation
+  covers it, the type being full (#698,
+  `TestAFounderRefusesForGoodALeaderFoundedOnAnotherEntry`,
+  `TestAHeldEntryWhoseChainDiffersIsNeverSkipped`,
+  `TestAHeldEntryOfTheSameTermWithAnotherBodyProvesAnotherHistory`; the
+  controls `TestALeaderThatOverwritesAnUncommittedTailIsFollowed`,
+  `TestAnEntryThatFailsItsOwnSumsIsAChainRefusal`,
+  `TestAHistoryRefusalEndsWithTheEntryItCompared`).
 - Admit a `ChangeSnapshotLimit` from any origin but the member it names
   (the authenticated origin `validateAdmin` holds, a forwarder or this
   leader), of a limit of 0 or below, or of the limit already recorded: only

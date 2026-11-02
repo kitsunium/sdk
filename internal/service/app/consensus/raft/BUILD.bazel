@@ -75,6 +75,7 @@ go_test(
         "unlistedleader_internal_test.go",
         "unreachedleader_internal_test.go",
         "unreachedtail_internal_test.go",
+        "unsharedhistory_internal_test.go",
         "updatelimit_internal_test.go",
         "upgrade_internal_test.go",
         "votersilent_internal_test.go",
