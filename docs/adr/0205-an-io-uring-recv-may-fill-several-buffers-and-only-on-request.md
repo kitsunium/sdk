@@ -73,6 +73,45 @@ An `EINVAL`, or one buffer filled — incremental consumption before 6.15 —
 reads `absent` (`missing` if opted into) with the reason, and the recvs
 fill one buffer per completion.
 
+### D3 — An entry is not written again while its buffer may be the kernel's
+
+A completion names its bundle's buffers by their entries, so an entry the
+kernel consumed must keep its bid until that completion is taken.
+
+**Why the order already guarantees this.** The kernel commits buffers in
+ring order (the head only advances), and a completion is posted under the
+same lock as its commit (`io_recv_finish`). A bundle is never taken
+unlocked (`io_recv_buf_select`), and the CQ — its overflow included — is
+reaped in posting order.
+
+Suppose a bundle's completion is still in the CQ. The only buffers the
+loop can have returned since are those of completions reaped before it,
+and those took entries before the bundle's. Every buffer at an entry after
+the bundle's first one is either still in the ring or in a completion
+behind it. Writing the bundle's first entry again would therefore need one
+more buffer than the group holds. The tail can reach that entry, but not
+write it: `TestBufs_bundleEntriesOutliveTheirCompletion` reproduces the
+sequence on a real ring — a recv at entry 0, a bundle at entries 1 and 2,
+only the first completion reaped and its buffer returned — and the
+bundle's completion still walks bids 1 and 2.
+
+**What is held anyway.** The loop holds the invariant itself rather than
+leaving it to these kernel orders:
+
+- Each bid is marked held from its return until its last completion is
+  taken (`uring.bufHeld`, `release`).
+- Before writing an entry, `giveBack` and `growBufs` check that the buffer
+  last added there was released, or has since been added at a later entry
+  (`entryFree`). If not, the remaining returns wait for the next batch,
+  counted in `uRing.held`; `TestBufs_returnWaitsForItsEntry` pins this.
+
+**Alternatives.** Withholding every return while the CQ is not empty
+would starve a loaded ring. Capturing the bid sequence when a completion
+is reaped is too late: an entry overwritten before that is lost. Counting
+the entries still referenced needs to know which ones a pending
+completion covers, which only the completion says. The held flag costs a
+byte per buffer and one comparison per return.
+
 ## Consequences
 
 Measured in Docker, linux/arm64, kernel 7.0, two CPUs:
@@ -93,8 +132,9 @@ Measured in Docker, linux/arm64, kernel 7.0, two CPUs:
   consumption is the default there (ADR 0204).
 - `TestConformance_bufferFaults` opts in, so where the kernel has bundles
   a completion spans its two 64-byte buffers in their scrambled ring order.
-- **Memory:** two bytes of Go heap per buffer provided (`bufPos`), and two
-  per entry of each registered group (`order`).
+- **Memory:** three bytes of Go heap per buffer provided (`bufPos`,
+  `bufHeld`), and two per entry of each registered group (`order`).
+- `uRing.held` stays at zero in every test that bundles (D3).
 
 ## Breaking changes
 

@@ -172,6 +172,9 @@ type uRing struct {
 	given     []int
 	armedOn   []int
 	recvGroup []uint8
+	// held counts the returns giveBack put off because an entry still named
+	// a buffer the kernel held (uring.entryFree).
+	held int
 	// segs and segBids are takeBuf's scratch: a completion's bytes, a slice
 	// a buffer, and each one's buffer.
 	segs    [][]byte
@@ -1435,6 +1438,7 @@ func (rr *uRing) takeBuf(c *cqe) {
 		}
 		//: the kernel's no more.
 		if !kept {
+			rr.u.release(bid)
 			rr.recycle = append(rr.recycle, bid)
 			rr.inRing[rr.u.groupOf(bid)]--
 		}
@@ -1754,8 +1758,16 @@ func (rr *uRing) credit(from, to uint32) {
 // with staleFill under test, and publishes them once.
 func (rr *uRing) giveBack() {
 	u := rr.u
-	//: each buffer once, filled under test.
-	for _, bid := range rr.recycle {
+	k := 0
+	//: each buffer once, filled under test, in order, until an entry still
+	//: names a buffer whose completion is not taken: the rest waits.
+	for ; k < len(rr.recycle); k++ {
+		bid := rr.recycle[k]
+		//: its group's next entry is not free yet.
+		if !u.entryFree(u.groupOf(bid)) {
+			rr.held++
+			break
+		}
 		//: a stale byte would show as staleFill.
 		if rr.ul.hooks.fill {
 			fillStale(u.buf(bid))
@@ -1768,9 +1780,9 @@ func (rr *uRing) giveBack() {
 		}
 	}
 	//: published once for the batch.
-	if len(rr.recycle) > 0 {
+	if k > 0 {
 		u.publishBufs()
-		rr.recycle = rr.recycle[:0]
+		rr.recycle = rr.recycle[:copy(rr.recycle, rr.recycle[k:])]
 	}
 }
 

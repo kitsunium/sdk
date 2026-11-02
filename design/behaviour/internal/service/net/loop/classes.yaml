@@ -1407,6 +1407,8 @@ files:
       - (*uring).bufEntries
       - (*uring).groupOf
       - (*uring).spans
+      - (*uring).release
+      - (*uring).entryFree
       - (*uring).nextBid
       - (*uring).buf
       - (*uring).addBuf
@@ -3470,6 +3472,11 @@ types:
       - name: recvGroup
         type: "[]uint8"
       - doc: |-
+          held counts the returns giveBack put off because an entry still named
+          a buffer the kernel held (uring.entryFree).
+        name: held
+        type: int
+      - doc: |-
           segs and segBids are takeBuf's scratch: a completion's bytes, a slice
           a buffer, and each one's buffer.
         name: segs
@@ -4590,9 +4597,13 @@ types:
         type: syscall.Errno
       - doc: |-
           bufPos is, per bid, the ring tail it was last added at: its entry in
-          its group's ring, where a bundle that starts in it goes on.
+          its group's ring, where a bundle that starts in it goes on. bufHeld is,
+          per bid, that the kernel may still hold it: added, and its last
+          completion not taken yet (released).
         name: bufPos
         type: "[]uint16"
+      - name: bufHeld
+        type: "[]bool"
       - doc: retries counts busy submits retried.
         name: retries
         type: uint64
@@ -4816,6 +4827,26 @@ types:
         params: bid uint16, n int32, bufMore bool, segs [][]byte, bids []uint16
         recv: u *uring
         results: "[][]byte, []uint16, bool"
+      - doc: |-
+          release records that the kernel is done with bid: its last completion
+          was taken. Its entry may be written again.
+        name: release
+        params: bid uint16
+        recv: u *uring
+      - doc: |-
+          entryFree reports whether group g's next entry may be written: never
+          written yet, or the buffer last added there is released, or was added
+          again since at a later entry. A bundle's completion names its buffers by
+          their entries (nextBid), so an entry whose buffer the kernel consumed but
+          whose completion is not taken yet must not be overwritten. The CQ is
+          reaped in the order the kernel committed buffers, which commits them in
+          ring order, so the return of a buffer that came back before such a
+          completion never reaches its entries (ADR 0205 §D3): this holds the
+          invariant should either order change.
+        name: entryFree
+        params: g int
+        recv: u *uring
+        results: bool
       - doc: "nextBid is the buffer at the ring entry after bid's: a bundle's next."
         name: nextBid
         params: bid uint16
@@ -4868,8 +4899,12 @@ types:
       - doc: |-
           order is the bid at each entry of the ring, as last added: a bundle's
           buffers after its first are the entries after the first's (ADR 0205).
+          adds counts the entries ever added, up to the ring's size: below it an
+          entry was never written.
         name: order
         type: "[]uint16"
+      - name: adds
+        type: uint32
     kind: struct
     name: pbufGroup
   - doc: |-

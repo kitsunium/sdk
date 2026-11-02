@@ -93,8 +93,11 @@ type uring struct {
 	bufOff     []uint32
 	incRefused syscall.Errno
 	// bufPos is, per bid, the ring tail it was last added at: its entry in
-	// its group's ring, where a bundle that starts in it goes on.
-	bufPos []uint16
+	// its group's ring, where a bundle that starts in it goes on. bufHeld is,
+	// per bid, that the kernel may still hold it: added, and its last
+	// completion not taken yet (released).
+	bufPos  []uint16
+	bufHeld []bool
 	// retries counts busy submits retried.
 	retries uint64
 	// setup is the flags the ring was set up with, as asked: what the kernel
@@ -118,7 +121,10 @@ type pbufGroup struct {
 	dirty     bool
 	// order is the bid at each entry of the ring, as last added: a bundle's
 	// buffers after its first are the entries after the first's (ADR 0205).
+	// adds counts the entries ever added, up to the ring's size: below it an
+	// entry was never written.
 	order []uint16
+	adds  uint32
 }
 
 // openURing sets an io_uring of entries SQEs up with flags, mapping it and building the
@@ -579,6 +585,16 @@ func (u *uring) growBufs(n uint32) uint32 {
 			u.bufOff = append(u.bufOff, 0)
 		}
 		u.bufPos = append(u.bufPos, 0)
+		u.bufHeld = append(u.bufHeld, false)
+		//: the entry still names a buffer the kernel holds: no further.
+		if !u.entryFree(u.groupOf(uint16(bid))) {
+			u.bufPos, u.bufHeld = u.bufPos[:bid], u.bufHeld[:bid]
+			//: the incremental count too.
+			if u.bufInc {
+				u.bufOff = u.bufOff[:bid]
+			}
+			break
+		}
 		u.addBuf(uint16(bid))
 	}
 	n = bid - u.bufProvided
@@ -718,6 +734,33 @@ func (u *uring) spans(bid uint16, n int32, bufMore bool, segs [][]byte, bids []u
 	}
 }
 
+// release records that the kernel is done with bid: its last completion
+// was taken. Its entry may be written again.
+func (u *uring) release(bid uint16) {
+	u.bufHeld[bid] = false
+}
+
+// entryFree reports whether group g's next entry may be written: never
+// written yet, or the buffer last added there is released, or was added
+// again since at a later entry. A bundle's completion names its buffers by
+// their entries (nextBid), so an entry whose buffer the kernel consumed but
+// whose completion is not taken yet must not be overwritten. The CQ is
+// reaped in the order the kernel committed buffers, which commits them in
+// ring order, so the return of a buffer that came back before such a
+// completion never reaches its entries (ADR 0205 §D3): this holds the
+// invariant should either order change.
+func (u *uring) entryFree(g int) bool {
+	grp := &u.groups[g]
+	//: the first pass: nothing there.
+	if grp.adds < u.bufPer {
+		//: free.
+		return true
+	}
+	x := grp.order[uint32(grp.tail)&(u.bufPer-1)]
+	//: held at this very entry: wait for its completion.
+	return !u.bufHeld[x] || u.bufPos[x] != grp.tail-uint16(u.bufPer)
+}
+
 // nextBid is the buffer at the ring entry after bid's: a bundle's next.
 func (u *uring) nextBid(bid uint16) uint16 {
 	g := &u.groups[u.groupOf(bid)]
@@ -746,7 +789,9 @@ func (u *uring) addBuf(bid uint16) {
 		u.bufOff[bid] = 0
 	}
 	g.order[i] = bid
+	g.adds = min(g.adds+1, u.bufPer)
 	u.bufPos[bid] = g.tail
+	u.bufHeld[bid] = true
 	//: entry 0's bid is published with the tail, in one store.
 	if i == 0 {
 		g.shadowBid = bid

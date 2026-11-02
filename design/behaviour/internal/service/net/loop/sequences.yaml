@@ -5641,6 +5641,8 @@ sequences:
         kind: self
       - id: rr.u.spans
         kind: internal
+      - id: rr.u.release
+        kind: internal
     steps:
       - set: rr.segs, rr.segBids
         value: rr.segs[:0], rr.segBids[:0]
@@ -5664,6 +5666,8 @@ sequences:
                 when: rr.ul.hooks.bufSeen != nil
             - opt:
                 do:
+                  - eval: rr.u.release(bid)
+                    to: rr.u.release
                   - set: rr.recycle
                     value: append(rr.recycle, bid)
                   - op: "--"
@@ -6164,8 +6168,19 @@ sequences:
     steps:
       - bind: u
         eval: rr.u
+      - bind: k
+        eval: "0"
       - loop:
+          cond: k < len(rr.recycle)
           do:
+            - bind: bid
+              eval: rr.recycle[k]
+            - opt:
+                do:
+                  - op: ++
+                    set: rr.held
+                  - break: true
+                when: "!u.entryFree(u.groupOf(bid))"
             - opt:
                 do:
                   - eval: fillStale(u.buf(bid))
@@ -6179,16 +6194,14 @@ sequences:
                 do:
                   - eval: rr.ul.hooks.bufSeen(bid, 0, 0, false, false, true)
                 when: rr.ul.hooks.bufSeen != nil
-          key: _
-          range: rr.recycle
-          value: bid
+          post: k++
       - opt:
           do:
             - eval: u.publishBufs()
               to: u.publishBufs
             - set: rr.recycle
-              value: rr.recycle[:0]
-          when: len(rr.recycle) > 0
+              value: rr.recycle[:copy(rr.recycle, rr.recycle[k:])]
+          when: k > 0
   - of: fillStale
     steps:
       - loop:
@@ -7976,6 +7989,19 @@ sequences:
                 when: u.bufInc
             - set: u.bufPos
               value: append(u.bufPos, 0)
+            - set: u.bufHeld
+              value: append(u.bufHeld, false)
+            - opt:
+                do:
+                  - set: u.bufPos, u.bufHeld
+                    value: u.bufPos[:bid], u.bufHeld[:bid]
+                  - opt:
+                      do:
+                        - set: u.bufOff
+                          value: u.bufOff[:bid]
+                      when: u.bufInc
+                  - break: true
+                when: "!u.entryFree(u.groupOf(uint16(bid)))"
             - eval: u.addBuf(uint16(bid))
               to: u.addBuf
           post: bid++
@@ -8147,6 +8173,21 @@ sequences:
               to: u.nextBid
               value: u.nextBid(bid)
           forever: true
+  - of: (*uring).release
+    steps:
+      - set: u.bufHeld[bid]
+        value: "false"
+  - of: (*uring).entryFree
+    steps:
+      - bind: grp
+        eval: "&u.groups[g]"
+      - opt:
+          do:
+            - return: "true"
+          when: grp.adds < u.bufPer
+      - bind: x
+        eval: grp.order[uint32(grp.tail)&(u.bufPer-1)]
+      - return: "!u.bufHeld[x] || u.bufPos[x] != grp.tail-uint16(u.bufPer)"
   - of: (*uring).nextBid
     steps:
       - bind: g
@@ -8176,8 +8217,12 @@ sequences:
           when: u.bufInc
       - set: g.order[i]
         value: bid
+      - set: g.adds
+        value: min(g.adds+1, u.bufPer)
       - set: u.bufPos[bid]
         value: g.tail
+      - set: u.bufHeld[bid]
+        value: "true"
       - alt:
           - do:
               - set: g.shadowBid

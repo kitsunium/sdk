@@ -12,6 +12,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -73,6 +74,111 @@ func TestBufs_spans(t *testing.T) {
 				t.Fatalf("the rest of 2: %v %v %v at %d", lens(segs), bids, kept, off(2, segs[0]))
 			}
 		})
+	}
+}
+
+// TestBufs_returnWaitsForItsEntry pins uring.entryFree on a ring of four
+// buffers: once the ring wrapped, an entry whose buffer the kernel may still
+// hold — added there and not released — is not written again, and is once
+// the buffer is released or was added again at a later entry.
+func TestBufs_returnWaitsForItsEntry(t *testing.T) {
+	u, step, errno := openURing(probeEntries, 0)
+	if errno != 0 {
+		t.Skipf("io_uring %s: %v", step, errno)
+	}
+	defer u.close()
+	if errno := u.setupBuffers(4, 64, 4, false); errno != 0 {
+		t.Skipf("buffer ring: %v", errno)
+	}
+	if u.entryFree(0) {
+		t.Fatal("entry 4 (0) free while bid 0, added there, is held")
+	}
+	u.release(0)
+	if !u.entryFree(0) {
+		t.Fatal("entry 4 (0) not free once bid 0 is released")
+	}
+	u.addBuf(0)
+	if u.entryFree(0) {
+		t.Fatal("entry 5 (1) free while bid 1, added there, is held: a pending bundle's entry would be overwritten")
+	}
+	u.release(1)
+	if !u.entryFree(0) {
+		t.Fatal("entry 5 (1) not free once bid 1 is released")
+	}
+}
+
+// TestBufs_bundleEntriesOutliveTheirCompletion reproduces the order a
+// return could race: on a ring of four 64-byte buffers, a recv takes entry 0
+// and a bundle entries 1 and 2; the first completion alone is reaped and
+// its buffer returned, the bundle's left in the CQ. No buffer can be
+// returned onto entries 1 and 2 — the only ones free come back from
+// completions reaped before the bundle's, which the kernel committed
+// earlier in ring order — and the bundle's completion, reaped last, still
+// walks bids 1 and 2.
+func TestBufs_bundleEntriesOutliveTheirCompletion(t *testing.T) {
+	u, step, errno := openURing(probeEntries, 0)
+	if errno != 0 {
+		t.Skipf("io_uring %s: %v", step, errno)
+	}
+	defer u.close()
+	if u.params.features&featRecvSendBundle == 0 {
+		t.Skip("IORING_FEAT_RECVSEND_BUNDLE not advertised")
+	}
+	if errno := u.setupBuffers(4, 64, 4, false); errno != 0 {
+		t.Skipf("buffer ring: %v", errno)
+	}
+	pair := func() [2]int {
+		fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { closeFDs(fds[:]) })
+		return fds
+	}
+	recv := func(fd int, ioprio uint16, ud uint64) {
+		s := u.get()
+		s.opcode, s.fd, s.flags, s.ioprio, s.bufIndex, s.userData = opRecv, int32(fd), sqeBufferSelect, ioprio, bufGroup, ud
+		u.submit()
+	}
+	one, two := pair(), pair()
+	if _, err := syscall.Write(one[0], make([]byte, 10)); err != nil {
+		t.Fatal(err)
+	}
+	recv(one[1], 0, 1)
+	if _, err := syscall.Write(two[0], make([]byte, 100)); err != nil {
+		t.Fatal(err)
+	}
+	recv(two[1], recvBundle, 2)
+	tick := kernelTimespec{nsec: int64(time.Second)}
+	for u.ready() < 2 {
+		u.wait(&tick, 2)
+	}
+	var first cqe
+	u.reap(1, func(c *cqe) { first = *c })
+	if first.userData != 1 || first.res != 10 {
+		t.Fatalf("first completion %+v, want the 10-byte recv", first)
+	}
+	segs, bids, _ := u.spans(uint16(first.flags>>cqeBufferShift), first.res, false, nil, nil)
+	if len(segs) != 1 || bids[0] != 0 {
+		t.Fatalf("the recv took %v", bids)
+	}
+	u.release(0)
+	returned := 0
+	for _, b := range []uint16{0} {
+		if u.entryFree(0) {
+			u.addBuf(b)
+			returned++
+		}
+	}
+	u.publishBufs()
+	if returned != 1 || u.entryFree(0) {
+		t.Fatalf("%d returned, next entry free %v: want bid 0 back at entry 4 and entry 5, the bundle's, held", returned, u.entryFree(0))
+	}
+	var bundle cqe
+	u.reap(1, func(c *cqe) { bundle = *c })
+	segs, bids, _ = u.spans(uint16(bundle.flags>>cqeBufferShift), bundle.res, false, nil, nil)
+	if bundle.userData != 2 || bundle.res != 100 || fmt.Sprint(bids) != "[1 2]" || len(segs[0]) != 64 || len(segs[1]) != 36 {
+		t.Fatalf("the bundle's completion %+v walked %v", bundle, bids)
 	}
 }
 
@@ -155,6 +261,11 @@ func TestURingRecvBundle_spansBuffers(t *testing.T) {
 			got := make([]byte, want.Len())
 			if _, err := io.ReadFull(r, got); err != nil || !bytes.Equal(got, want.Bytes()) {
 				t.Fatalf("%d bytes of echo, %v: not the lines sent", len(got), err)
+			}
+			var put int
+			onLoop(t, g, func() { put = uringOf(g).rings[0].held })
+			if put != 0 {
+				t.Fatalf("%d returns put off for an entry still held: the CQ was not reaped in ring order", put)
 			}
 			mu.Lock()
 			defer mu.Unlock()

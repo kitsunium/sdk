@@ -198,7 +198,11 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   completion's bytes from its bid through the entries after it
   (`pbufGroup.order`, `bufPos`), `takeBuf` counts out and queues each buffer
   but a last one `BUF_MORE` keeps, and `recvBytes` delivers them buffer by
-  buffer into `rr.segs`. Measured no gain on 240-byte requests and 25 %
+  buffer into `rr.segs`. An entry is written again only once the buffer last
+  added there was released (`bufHeld`, `entryFree`): a pending bundle's
+  completion names its buffers by entry; ring-order commits and an in-order
+  CQ already guarantee it, `giveBack` and `growBufs` hold it anyway
+  (`uRing.held` counts the returns put off, ADR 0205 §D3). Measured no gain on 240-byte requests and 25 %
   slower on 8 KiB ones, hence opt-in (`BenchmarkURingRecvBundle`);
   `TestConformance_bufferFaults` opts in, `TestURingRecvBundle_spansBuffers`
   watches each buffer through `bufSeen`'s `first`.
