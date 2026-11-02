@@ -502,6 +502,10 @@ constants:
         name: featMinTimeout
         type: uint32
         value: 1 << 15
+      - doc: featRecvSendBundle is IORING_FEAT_RECVSEND_BUNDLE (6.10).
+        name: featRecvSendBundle
+        type: uint32
+        value: 1 << 14
       - doc: io_uring_enter flags.
         name: enterGetEvents
         type: uint32
@@ -580,6 +584,12 @@ constants:
       - name: recvMultishot
         type: uint16
         value: 1 << 1
+      - doc: |-
+          recvBundle is IORING_RECVSEND_BUNDLE (6.10): a recv fills several
+          provided buffers, consecutive in their ring, in one completion.
+        name: recvBundle
+        type: uint16
+        value: 1 << 4
       - doc: "len flag of POLL_ADD: a multishot poll."
         name: pollAddMulti
         type: uint32
@@ -686,6 +696,27 @@ constants:
         type: syscall.Errno
         value: syscall.ENOBUFS
     name: sysIOURingSetup
+  - grouped: true
+    items:
+      - doc: |-
+          bundleProbeBufs is the bundle probe's buffers: two, so a bundle that
+          spans them shows.
+        name: bundleProbeBufs
+        type: uint32
+        value: "2"
+      - doc: bundleProbeSize is the bytes of one of them.
+        name: bundleProbeSize
+        type: uint32
+        value: "64"
+      - doc: "bundleProbeBytes is what the probe sends: more than one buffer holds."
+        name: bundleProbeBytes
+        type: int
+        value: "100"
+      - doc: bundleProbeWait bounds the probe's wait for its completion.
+        name: bundleProbeWait
+        type: time.Duration
+        value: 200 * time.Millisecond
+    name: bundleProbeBufs
   - doc: |-
       The setup flags every ring may carry: the floor every kernel the backend
       serves accepts, and SINGLE_ISSUER, which 6.0 added.
@@ -1181,6 +1212,12 @@ files:
       - targetIndex
     name: uring_abi_linux.go
   - decls:
+      - bundleProbeBufs
+      - (*uLoop).probeBundle
+      - (*uLoop).bundleRefusal
+      - bundleRecv
+    name: uring_bundle_linux.go
+  - decls:
       - setupBase
       - setupDrops
       - (*uLoop).probe
@@ -1369,7 +1406,10 @@ files:
       - registerBufRing
       - (*uring).bufEntries
       - (*uring).groupOf
-      - (*uring).took
+      - (*uring).spans
+      - (*uring).release
+      - (*uring).entryFree
+      - (*uring).nextBid
       - (*uring).buf
       - (*uring).addBuf
       - (*uring).publishBufs
@@ -1630,6 +1670,12 @@ functions:
     name: targetIndex
     params: index uint32
     results: uint32
+  - doc: |-
+      bundleRecv sends bundleProbeBytes over a socket pair and receives them on
+      u with one single-shot bundle recv, returning its result or its errno.
+    name: bundleRecv
+    params: u *uring
+    results: int, syscall.Errno
   - doc: |-
       layoutFlags is the SQ layout every ring takes: NO_SQARRAY as asked, or
       because SQ_REWIND needs it, and SQ_REWIND once its self-test passed.
@@ -2865,14 +2911,14 @@ types:
         name: taken
         type: func(op, flags uint8, opFlags uint32)
       - doc: |-
-          bufSeen sees, on the loop's thread, each recv completion that carried
-          a provided buffer — its bid, where its bytes start in the buffer, how
-          many, and whether the kernel keeps the buffer (BUF_MORE) — and, with
-          returned set, each buffer handed back to the kernel. The
-          incremental-consumption test checks a buffer is returned only once the
-          kernel let it go.
+          bufSeen sees, on the loop's thread, each buffer a recv completion
+          used — its bid, where its bytes start in the buffer, how many, whether
+          the kernel keeps the buffer (BUF_MORE), and first on a completion's
+          first buffer, a bundle's following ones without — and, with returned
+          set, each buffer handed back to the kernel. The incremental and bundle
+          tests check a buffer is returned only once the kernel let it go.
         name: bufSeen
-        type: func(bid uint16, off, n int, kept, returned bool)
+        type: func(bid uint16, off, n int, kept, first, returned bool)
     kind: struct
     name: loopHooks
   - fields:
@@ -3425,6 +3471,18 @@ types:
         type: "[]int"
       - name: recvGroup
         type: "[]uint8"
+      - doc: |-
+          held counts the returns giveBack put off because an entry still named
+          a buffer the kernel held (uring.entryFree).
+        name: held
+        type: int
+      - doc: |-
+          segs and segBids are takeBuf's scratch: a completion's bytes, a slice
+          a buffer, and each one's buffer.
+        name: segs
+        type: "[][]byte"
+      - name: segBids
+        type: "[]uint16"
       - doc: starvedSeen is the ring's starved count provide last looked at.
         name: starvedSeen
         type: uint64
@@ -3685,14 +3743,14 @@ types:
         params: slot int32, gen uint32, c *cqe
         recv: rr *uRing
       - doc: |-
-          takeBuf returns the bytes a recv completion received, none without a
-          buffer, and queues the buffer to go back after the batch once the kernel
-          is done with it: incrementally consumed, only on its completion without
-          BUF_MORE (ADR 0204).
+          takeBuf places the bytes a recv completion received in rr.segs, one
+          slice a buffer — several for a bundle (ADR 0205) —, none without a
+          buffer, and queues each buffer to go back after the batch once the kernel
+          is done with it: incrementally consumed, the last only on a completion
+          without BUF_MORE (ADR 0204).
         name: takeBuf
         params: c *cqe
         recv: rr *uRing
-        results: "[]byte"
       - doc: |-
           recvCancelled re-arms the recv of a connection still open whose recv was
           cancelled and ended.
@@ -3700,10 +3758,11 @@ types:
         params: slot int32, more bool
         recv: rr *uRing
       - doc: |-
-          recvBytes delivers the bytes a completion received to an open
-          connection, and re-arms its recv when the multishot ended.
+          recvBytes delivers the bytes a completion received, rr.segs, to an open
+          connection, buffer by buffer as split reads, and re-arms its recv when the
+          multishot ended.
         name: recvBytes
-        params: slot int32, data []byte, more bool
+        params: slot int32, more bool
         recv: rr *uRing
       - doc: |-
           recvStarved queues an open connection whose recv ran out of buffers, to
@@ -4036,6 +4095,25 @@ types:
     kind: struct
     methods:
       - doc: |-
+          probeBundle decides whether the loop's recvs are bundles
+          (IORING_RECVSEND_BUNDLE): the group opted into uring-recv-bundle (class
+          A-code), the operator did not switch it off, the kernel advertises IORING_FEAT_RECVSEND_BUNDLE, and on a ring of
+          its own one bundle recv of bundleProbeBytes fills both of two buffers set
+          up as the serving rings' are. A kernel that refuses the flag (EINVAL) or
+          fills one buffer only reports the capability absent: through 6.14 a
+          buffer ring consumed incrementally hands a bundle one buffer
+          (io_ring_buffers_peek's nr_avail = 1 under IOBL_INC, io_uring/kbuf.c
+          v6.12 to v6.14, gone in v6.15), which a bundle gains nothing from (ADR
+          0205). It runs on the loop's thread, after the rings are built.
+        name: probeBundle
+        recv: ul *uLoop
+      - doc: |-
+          bundleRefusal runs the bundle probe and says why bundles are refused, ""
+          when one spanned both buffers.
+        name: bundleRefusal
+        recv: ul *uLoop
+        results: string
+      - doc: |-
           probe runs stages 1 to 3 on throwaway rings, on this locked thread from
           setup to close (ADR 0189): io_uring_setup with every flag the switches
           allow, giving them up one by one on EINVAL (setupDrops); the features;
@@ -4280,6 +4358,11 @@ types:
           registered with the thread.
         name: ringFDs
         type: bool
+      - doc: |-
+          recvFlags are ioprio flags every recv carries: recvBundle when a recv
+          fills several buffers in one completion (ADR 0205).
+        name: recvFlags
+        type: uint16
     kind: struct
     name: ringUses
   - doc: uringRunner runs the group's io_uring loops.
@@ -4512,6 +4595,15 @@ types:
         type: "[]uint32"
       - name: incRefused
         type: syscall.Errno
+      - doc: |-
+          bufPos is, per bid, the ring tail it was last added at: its entry in
+          its group's ring, where a bundle that starts in it goes on. bufHeld is,
+          per bid, that the kernel may still hold it: added, and its last
+          completion not taken yet (released).
+        name: bufPos
+        type: "[]uint16"
+      - name: bufHeld
+        type: "[]bool"
       - doc: retries counts busy submits retried.
         name: retries
         type: uint64
@@ -4721,14 +4813,45 @@ types:
         recv: u *uring
         results: int
       - doc: |-
-          took returns the n bytes a completion received into buffer bid, and
-          whether the buffer stays the kernel's (bufMore, incremental only). Under
-          incremental consumption the bytes start where the buffer's previous
-          completion stopped; otherwise at its start.
-        name: took
-        params: bid uint16, n int32, bufMore bool
+          spans appends to segs the n bytes a completion received, buffer by
+          buffer from bid in its ring's order, and to bids each one's buffer, and
+          says whether the kernel keeps the last (bufMore, incremental only): it is
+          done with every other one. Without a bundle the bytes fit in bid. Under
+          incremental consumption the first buffer's bytes start where its previous
+          completion stopped, and the kernel moves on from it once full
+          (io_kbuf_inc_commit, io_uring/kbuf.c, 6.12 to 7.0): IORING_CQE_F_BUF_MORE
+          on a bundle's completion speaks of its last buffer, its bid of the first
+          (__io_put_kbufs). Without it a buffer is consumed whole whatever it took,
+          a bundle's buffers filled in turn (ADR 0205).
+        name: spans
+        params: bid uint16, n int32, bufMore bool, segs [][]byte, bids []uint16
         recv: u *uring
-        results: "[]byte, bool"
+        results: "[][]byte, []uint16, bool"
+      - doc: |-
+          release records that the kernel is done with bid: its last completion
+          was taken. Its entry may be written again.
+        name: release
+        params: bid uint16
+        recv: u *uring
+      - doc: |-
+          entryFree reports whether group g's next entry may be written: never
+          written yet, or the buffer last added there is released, or was added
+          again since at a later entry. A bundle's completion names its buffers by
+          their entries (nextBid), so an entry whose buffer the kernel consumed but
+          whose completion is not taken yet must not be overwritten. The CQ is
+          reaped in the order the kernel committed buffers, which commits them in
+          ring order, so the return of a buffer that came back before such a
+          completion never reaches its entries (ADR 0205 §D3): this holds the
+          invariant should either order change.
+        name: entryFree
+        params: g int
+        recv: u *uring
+        results: bool
+      - doc: "nextBid is the buffer at the ring entry after bid's: a bundle's next."
+        name: nextBid
+        params: bid uint16
+        recv: u *uring
+        results: uint16
       - doc: buf returns buffer bid's bytes.
         name: buf
         params: bid uint16
@@ -4773,6 +4896,15 @@ types:
         type: uint16
       - name: dirty
         type: bool
+      - doc: |-
+          order is the bid at each entry of the ring, as last added: a bundle's
+          buffers after its first are the entries after the first's (ADR 0205).
+          adds counts the entries ever added, up to the ring's size: below it an
+          entry was never written.
+        name: order
+        type: "[]uint16"
+      - name: adds
+        type: uint32
     kind: struct
     name: pbufGroup
   - doc: |-
@@ -4853,6 +4985,7 @@ vars:
           	{corenet.CapabilityURingNoSQArray, classCode},
           	{corenet.CapabilityURingRingFDs, classCode},
           	{corenet.CapabilityURingSQRewind, classCode},
+          	{corenet.CapabilityURingRecvBundle, classCode},
           	{corenet.CapabilityURingSendZC, classB},
           	{corenet.CapabilityURingBundle, classB},
           	{corenet.CapabilityBusyPoll, classB},

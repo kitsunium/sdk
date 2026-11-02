@@ -123,6 +123,14 @@ constants:
         name: CapabilityURingSQRewind
         type: Capability
         value: "\"uring-sq-rewind\""
+      - doc: |-
+          CapabilityURingRecvBundle is io_uring's receive bundle (IORING_RECVSEND_BUNDLE,
+          6.10): one completion fills as many provided buffers as the bytes waiting need
+          (ADR 0205). Opted into, on only where a probe recv fills two buffers — not with
+          incremental consumption before 6.15; otherwise each completion fills one buffer.
+        name: CapabilityURingRecvBundle
+        type: Capability
+        value: "\"uring-recv-bundle\""
     name: CapabilityURingDeferTaskrun
   - doc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
     grouped: true
@@ -131,7 +139,9 @@ constants:
         name: CapabilityURingSendZC
         type: Capability
         value: "\"uring-send-zc\""
-      - doc: CapabilityURingBundle is io_uring's receive and send bundles.
+      - doc: |-
+          CapabilityURingBundle is io_uring's send bundles; the receive bundle is
+          CapabilityURingRecvBundle's (ADR 0205).
         name: CapabilityURingBundle
         type: Capability
         value: "\"uring-bundle\""

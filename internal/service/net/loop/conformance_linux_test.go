@@ -1032,6 +1032,9 @@ func TestConformance_bufferFaults(t *testing.T) {
 			h := &lineH{}
 			g, addr := serve(t, b, h, func(c *Config) {
 				c.hooks = loopHooks{bufs: 2, bufSize: 64, fill: true, shuffle: true}
+				// Bundles where the kernel has them: a completion spans both
+				// buffers in their scrambled ring order (ADR 0205).
+				c.Value.Capabilities = []corenet.Capability{corenet.CapabilityURingRecvBundle}
 				bufMode(c, inc)
 			})
 			requireMode(t, g, inc)

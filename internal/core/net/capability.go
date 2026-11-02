@@ -79,13 +79,19 @@ const (
 	// submission is filled from SQE 0. It needs the kernel 7.0 lane before it may
 	// leave class A-code.
 	CapabilityURingSQRewind Capability = "uring-sq-rewind"
+	// CapabilityURingRecvBundle is io_uring's receive bundle (IORING_RECVSEND_BUNDLE,
+	// 6.10): one completion fills as many provided buffers as the bytes waiting need
+	// (ADR 0205). Opted into, on only where a probe recv fills two buffers — not with
+	// incremental consumption before 6.15; otherwise each completion fills one buffer.
+	CapabilityURingRecvBundle Capability = "uring-recv-bundle"
 )
 
 // The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
 const (
 	// CapabilityURingSendZC is io_uring's zero-copy send.
 	CapabilityURingSendZC Capability = "uring-send-zc"
-	// CapabilityURingBundle is io_uring's receive and send bundles.
+	// CapabilityURingBundle is io_uring's send bundles; the receive bundle is
+	// CapabilityURingRecvBundle's (ADR 0205).
 	CapabilityURingBundle Capability = "uring-bundle"
 	// CapabilityBusyPoll is busy polling of the network device's queue.
 	CapabilityBusyPoll Capability = "busy-poll"

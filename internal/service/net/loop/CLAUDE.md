@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T18:00:00Z -->
+<!-- updated: 2026-11-02T12:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -189,6 +189,23 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   median on two CPUs (`TestConformance_noStarvationAtScale` and
   `TestConformance_bufferFaults` run both modes; `TestURingPbufInc_bufMore`
   watches each buffer through `loopHooks.bufSeen`).
+- **io_uring: a recv may fill several buffers, on request (ADR 0205).**
+  With `uring-recv-bundle` opted into, recvs carry `IORING_RECVSEND_BUNDLE`
+  once `probeBundle` (`uring_bundle_linux.go`) saw, on a ring of its own
+  consumed as the serving rings are, one bundle recv of 100 bytes fill two
+  64-byte buffers: through 6.14 an incrementally consumed ring hands a
+  bundle one buffer, and the row reads absent there. `uring.spans` walks a
+  completion's bytes from its bid through the entries after it
+  (`pbufGroup.order`, `bufPos`), `takeBuf` counts out and queues each buffer
+  but a last one `BUF_MORE` keeps, and `recvBytes` delivers them buffer by
+  buffer into `rr.segs`. An entry is written again only once the buffer last
+  added there was released (`bufHeld`, `entryFree`): a pending bundle's
+  completion names its buffers by entry; ring-order commits and an in-order
+  CQ already guarantee it, `giveBack` and `growBufs` hold it anyway
+  (`uRing.held` counts the returns put off, ADR 0205 §D3). Measured no gain on 240-byte requests and 25 %
+  slower on 8 KiB ones, hence opt-in (`BenchmarkURingRecvBundle`);
+  `TestConformance_bufferFaults` opts in, `TestURingRecvBundle_spansBuffers`
+  watches each buffer through `bufSeen`'s `first`.
 - **io_uring: buffers go back after `OnBatchEnd`, once each.** A CQE's bid is
   queued on `recycle` — on its last completion, under incremental
   consumption — and returned by `returnBuffers` after the batch. A recv
@@ -314,8 +331,9 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   fails with `LoopBackendUnavailable` naming the stage.
 - **Capabilities: classes, switches, report (ADR 0189).** Class A-kernel
   (multishot recv, the buffer ring, its incremental consumption, direct
-  descriptors, `EPOLLEXCLUSIVE`, `TCP_NODELAY`) is on once probed; class A-code (`DEFER_TASKRUN`,
-  `NO_SQARRAY`, `RING_FDS`, `SQ_REWIND`) only on `LoopValue.Capabilities`;
+  descriptors, `EPOLLEXCLUSIVE`, `TCP_NODELAY`) is on once probed; class
+  A-code (`DEFER_TASKRUN`, `NO_SQARRAY`, `RING_FDS`, `SQ_REWIND`, receive
+  bundles) only on `LoopValue.Capabilities`;
   class B is declared and refused. `Config.Disabled` is never probed:
   `uring-pbuf` off rules io_uring out (auto runs epoll, not degraded),
   `uring-multishot-recv` off makes every recv single-shot (`singleShot`, the

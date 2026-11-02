@@ -1247,6 +1247,20 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.CapabilityURingRecvBundle",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "CapabilityURingRecvBundle",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.Capability",
+      "value": "\"uring-recv-bundle\"",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingRecvBundle",
+      "doc": "CapabilityURingRecvBundle opts a loop group into uring-recv-bundle, a class A-code kernel capability.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.CapabilityURingRingFDs",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",

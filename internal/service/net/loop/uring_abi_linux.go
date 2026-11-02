@@ -39,6 +39,8 @@ const (
 	featExtArg     uint32 = 1 << 8
 	// featMinTimeout is IORING_FEAT_MIN_TIMEOUT (6.12), class B's min_wait.
 	featMinTimeout uint32 = 1 << 15
+	// featRecvSendBundle is IORING_FEAT_RECVSEND_BUNDLE (6.10).
+	featRecvSendBundle uint32 = 1 << 14
 
 	// io_uring_enter flags.
 	enterGetEvents uint32 = 1 << 0
@@ -77,6 +79,9 @@ const (
 	// ioprio flags of accept and recv.
 	acceptMultishot uint16 = 1 << 0
 	recvMultishot   uint16 = 1 << 1
+	// recvBundle is IORING_RECVSEND_BUNDLE (6.10): a recv fills several
+	// provided buffers, consecutive in their ring, in one completion.
+	recvBundle uint16 = 1 << 4
 
 	// len flag of POLL_ADD: a multishot poll.
 	pollAddMulti uint32 = 1 << 0
