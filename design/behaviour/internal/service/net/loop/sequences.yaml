@@ -953,6 +953,9 @@ sequences:
         value: time.Since(lp.epoch)
       - set: lp.tick
         value: int64(lp.started/tickEvery) + 1
+  - of: (*loop).overBudget
+    steps:
+      - return: lp.sz.batchBudget > 0 && time.Since(lp.epoch)-lp.started >= lp.sz.batchBudget
   - of: (*loop).endBatch
     participants:
       - id: caller
@@ -2781,6 +2784,7 @@ sequences:
                       				BufferStarved: p.starved.Load(), EnterRetries: p.retries.Load(),
                       				AcceptPauses: p.pauses.Load(), Evicted: p.evicted.Load(),
                       				WatchdogFires: p.watchdog.Load(), Draining: p.draining.Load(),
+                      				BatchesCut: p.cut.Load(),
                       			})
                 key: _
                 range: lp.rings
@@ -3145,6 +3149,8 @@ sequences:
       - set: sz.batchWait, sz.batchWaitMin
         to: batchWaitOf
         value: batchWaitOf(v, sz.cqBatch)
+      - set: sz.batchBudget
+        value: max(time.Duration(v.BatchBudget), 0)
       - set: sz.loops, sz.loopsSource
         to: ResolveLoops
         value: ResolveLoops(v.Loops)
@@ -3426,6 +3432,8 @@ sequences:
         kind: value
       - id: p.watchdog.Store
         kind: value
+      - id: p.cut.Store
+        kind: value
       - id: p.draining.Store
         kind: value
     steps:
@@ -3451,6 +3459,8 @@ sequences:
         to: p.evicted.Store
       - eval: p.watchdog.Store(s.watchdog)
         to: p.watchdog.Store
+      - eval: p.cut.Store(s.cut)
+        to: p.cut.Store
       - eval: p.draining.Store(r.draining)
         to: p.draining.Store
   - of: uringSetup
@@ -5092,11 +5102,11 @@ sequences:
         kind: self
       - id: rr.u.submit
         kind: internal
-      - id: primary.wait
+      - id: ul.await
         kind: internal
       - id: lp.begin
         kind: internal
-      - id: rr.reapAll
+      - id: ul.reapRings
         kind: internal
       - id: ul.woke
         kind: internal
@@ -5116,6 +5126,8 @@ sequences:
         kind: value
       - id: lp.endBatch
         kind: internal
+      - id: ul.submitLate
+        kind: internal
       - id: rr.returnBuffers
         kind: internal
       - id: lp.yield
@@ -5130,31 +5142,12 @@ sequences:
           key: _
           range: ul.rings[1:]
           value: rr
-      - bind: primary
-        eval: ul.rings[0].u
-      - eval: primary.wait(ts, want)
-        to: primary.wait
-      - opt:
-          do:
-            - eval: primary.wait(tick, 1)
-              to: primary.wait
-          when: want > 1 && primary.ready() == 0
+      - eval: ul.await(ts, want, tick)
+        to: ul.await
       - eval: lp.begin()
         to: lp.begin
-      - set: ul.reaped, ul.arrived
-        value: 0, 0
-      - loop:
-          do:
-            - bind: before
-              eval: rr.r.st.completions
-            - eval: rr.reapAll()
-              to: rr.reapAll
-            - op: +=
-              set: ul.reaped
-              value: rr.r.st.completions - before
-          key: _
-          range: ul.rings
-          value: rr
+      - eval: ul.reapRings()
+        to: ul.reapRings
       - eval: ul.woke()
         to: ul.woke
       - eval: ul.control()
@@ -5178,6 +5171,8 @@ sequences:
         to: lp.h.OnBatchEnd
       - eval: lp.endBatch()
         to: lp.endBatch
+      - eval: ul.submitLate()
+        to: ul.submitLate
       - loop:
           do:
             - eval: rr.returnBuffers()
@@ -5189,6 +5184,93 @@ sequences:
           value: rr
       - eval: lp.yield()
         to: lp.yield
+  - of: (*uLoop).await
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).await
+        kind: self
+      - id: primary.submit
+        kind: internal
+      - id: primary.wait
+        kind: internal
+    steps:
+      - bind: primary
+        eval: ul.rings[0].u
+      - opt:
+          do:
+            - eval: primary.submit()
+              to: primary.submit
+            - return: ""
+          when: ul.cutAt > 0
+      - eval: primary.wait(ts, want)
+        to: primary.wait
+      - opt:
+          do:
+            - eval: primary.wait(tick, 1)
+              to: primary.wait
+          when: want > 1 && primary.ready() == 0
+  - of: (*uLoop).reapRings
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).reapRings
+        kind: self
+      - id: rr.reapAll
+        kind: internal
+    steps:
+      - set: ul.reaped, ul.arrived
+        value: 0, 0
+      - bind: n, start
+        eval: len(ul.rings), max(ul.cutAt-1, 0)
+      - set: ul.cutAt
+        value: "0"
+      - loop:
+          do:
+            - bind: i
+              eval: (start + k) % n
+            - bind: rr
+              eval: ul.rings[i]
+            - bind: before
+              eval: rr.r.st.completions
+            - bind: cut
+              eval: rr.reapAll()
+              to: rr.reapAll
+            - op: +=
+              set: ul.reaped
+              value: rr.r.st.completions - before
+            - opt:
+                do:
+                  - op: ++
+                    set: rr.r.st.cut
+                  - set: ul.cutAt
+                    value: i + 1
+                  - return: ""
+                when: cut
+          key: k
+          range: "n"
+  - of: (*uLoop).submitLate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).submitLate
+        kind: self
+      - id: rr.u.submit
+        kind: internal
+    steps:
+      - bind: lp
+        eval: ul.lp
+      - opt:
+          do:
+            - return: ""
+          when: lp.sz.batchBudget <= 0 || lp.ended-lp.started < lp.sz.batchBudget/2
+      - loop:
+          do:
+            - eval: rr.u.submit()
+              to: rr.u.submit
+          key: _
+          range: ul.rings
+          value: rr
   - of: (*uLoop).live
     participants:
       - id: caller
@@ -5216,19 +5298,30 @@ sequences:
         kind: actor
       - id: (*uRing).reapAll
         kind: self
+      - id: reapShape
+        kind: internal
       - id: rr.u.reap
         kind: internal
       - id: rr.u.flushOverflow
         kind: internal
     steps:
+      - bind: lp
+        eval: rr.ul.lp
+      - bind: chunk, rounds
+        eval: reapShape(&lp.sz)
+        to: reapShape
       - loop:
           do:
             - bind: "n"
-              eval: rr.u.reap(rr.ul.lp.sz.cqBatch, rr.handle)
+              eval: rr.u.reap(chunk, rr.handle)
               to: rr.u.reap
             - op: +=
               set: rr.r.st.completions
               value: uint64(n)
+            - opt:
+                do:
+                  - return: rr.u.ready() > 0 || rr.u.overflowed()
+                when: n > 0 && lp.overBudget()
             - opt:
                 do:
                   - eval: rr.u.flushOverflow()
@@ -5237,9 +5330,17 @@ sequences:
                 when: rr.u.overflowed()
             - opt:
                 do:
-                  - return: ""
+                  - return: "false"
                 when: n == 0
-          range: reapRounds
+          range: rounds
+      - return: "false"
+  - of: reapShape
+    steps:
+      - opt:
+          do:
+            - return: sz.cqBatch, reapRounds
+          when: sz.batchBudget <= 0 || sz.cqBatch <= budgetChunk
+      - return: budgetChunk, reapRounds * sz.cqBatch / budgetChunk
   - of: (*uRing).handle
     participants:
       - id: caller

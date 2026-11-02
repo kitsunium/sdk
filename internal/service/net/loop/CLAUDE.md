@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-02T12:00:00Z -->
+<!-- updated: 2026-11-02T18:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -110,6 +110,20 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   fixed 7.0 it measured as the bounded wait's equal (ADR 0202 §D5).
   `TestURingWait` pins the semantics on a coop and a deferred ring,
   `TestURingWaitArgs` and `TestURingWoke` the rule.
+- **An io_uring batch may be bounded in time (ADR 0206).** An answer leaves
+  only after its batch: `Write` copies, `endBatch` turns the output into send
+  SQEs after `OnBatchEnd`, and the next wait submits them. With
+  `LoopValue.BatchBudget` (`sz.batchBudget`) a ring reaps `budgetChunk` (16)
+  at a time (`reapShape`) and `lp.overBudget` reads the clock between reaps;
+  once spent with completions left the batch is cut (`reapAll` reports it,
+  `reapRings` stops, `BatchesCut` counts it on that ring), and the next batch
+  starts at that ring (`cutAt`) and only submits (`await`): a secondary's
+  leftovers would otherwise sleep to the tick, its eventfd already fired. A
+  batch past half its budget submits every ring's sends right after
+  `endBatch` (`submitLate`). Zero changes nothing, epoll ignores it.
+  `TestURingBudget_cutsBatches` checks the cut on a ring and on a secondary,
+  `BenchmarkURingBatchBudget` measures a held burst's first, median and last
+  echo.
 - **A batch pays its fixed cost once (ADR 0202).** `begin` reads the
   monotonic clock since the epoch once at a batch's start (the tick),
   `endBatch` once at its end (the histogram, the yield); `SetDeadline` reads

@@ -31,6 +31,9 @@ type LoopRingStateValue struct {
 	// WatchdogFires is the number of times the liveness watchdog saw a stall it
 	// could observe and acted on it.
 	WatchdogFires uint64 `json:"watchdog_fires"`
+	// BatchesCut is the number of batches BatchBudget stopped while this ring
+	// still had completions to reap (ADR 0206).
+	BatchesCut uint64 `json:"batches_cut"`
 	// Draining reports a ring the watchdog judged sick: it accepts nothing new
 	// and closes its connections as they fall idle.
 	Draining bool `json:"draining"`

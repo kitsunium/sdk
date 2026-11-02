@@ -263,6 +263,7 @@ func (g *Group) State() corenet.LoopStateValue {
 				BufferStarved: p.starved.Load(), EnterRetries: p.retries.Load(),
 				AcceptPauses: p.pauses.Load(), Evicted: p.evicted.Load(),
 				WatchdogFires: p.watchdog.Load(), Draining: p.draining.Load(),
+				BatchesCut: p.cut.Load(),
 			})
 		}
 	}
