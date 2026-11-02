@@ -54,7 +54,10 @@ With a positive `BatchBudget`:
 - **The cut.** Once the batch has run for its budget, the ring stops
   reaping. If it still had completions, the batch is cut: the rings after
   it are not reaped either, and the cut is counted in that ring's
-  `LoopRingStateValue.BatchesCut`.
+  `LoopRingStateValue.BatchesCut`. If the reap that found the budget spent
+  emptied its ring, the batch goes on to the next rings, each reaping at
+  most one more lot of 16 before it stops: the overrun is bounded, not a
+  hard stop.
 - **The next batch.** It starts with the ring the cut stopped at, so ring
   0 is not always served first. It does not wait: it only submits what is
   pending. A secondary's leftover completions would otherwise sleep until
