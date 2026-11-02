@@ -594,6 +594,38 @@ constants:
           members under one NodeID.
         name: whyRepeatedID
         value: "\"two members under one id\""
+      - doc: |-
+          whyStrandedExit ends the reason of a truncation refused because the
+          configuration it keeps strands the node: what it would come to, and
+          the way out (#758, #763).
+        name: whyStrandedExit
+        value: |-
+          "the node would ask and admit only removed members and stay silent for good; clear the quarantine with WipeAndRejoin, " +
+          		"then Remove this node's ID on the cluster, after a Promote of one more voter when MinVoters refuses the removal, " +
+          		"so that its slot takes a JOIN again (R8-11)"
+      - doc: |-
+          whyNoAsk is the reason a member's TruncateAndStaySilent is refused
+          when it was given no means to ask a live member (#763).
+        name: whyNoAsk
+        value: |-
+          "a member's truncation reads the configuration the cluster runs with from a live member, and no means to ask one was given: " +
+          		"pass QuarantineOptions.Ask, a TCPTransport's AskMembership built with this node's certificate, to ClearQuarantineWith"
+      - doc: |-
+          whyNoLive is the reason a member's TruncateAndStaySilent is refused
+          when no member answered (#763).
+        name: whyNoLive
+        value: |-
+          "no live member answered: the configuration the cluster runs with cannot be read, and a change made while this node was down " +
+          		"may have left none of the members it keeps; start a member this node's log names and clear again, or clear the quarantine with WipeAndRejoin, " +
+          		"then Remove this node's ID on the cluster and Init under a new one (R8-11)"
+      - doc: |-
+          whyNotListed is the reason a member's TruncateAndStaySilent is refused
+          when the configuration a live member runs with no longer lists the
+          node (#763).
+        name: whyNotListed
+        value: |-
+          "the configuration the cluster runs with, read from a live member, no longer lists this node: " +
+          		"clear the quarantine with WipeAndRejoin and Init under a new NodeID (R8-11)"
     name: fileSilent
   - doc: |-
       offlineBatchBytes and offlineBatchEntries bound one read of the log by an
@@ -699,6 +731,19 @@ constants:
         name: joinV2Prefix
         type: int
         value: 1 + 8
+      - doc: |-
+          laneMembership carries one read of the configuration a member runs
+          with, asked by another member's offline TruncateAndStaySilent
+          (#763): the dialer writes the lane byte alone, and the member answers
+          one chunk, its configuration as AppendMembership encodes it, as the
+          JOIN answer carries one, then the connection ends. It is served to a
+          member only, on the key and the slot the membership pins. A member
+          that predates it serves no unknown lane and ends the connection
+          without an answer, which the asker counts as a member that did not
+          answer: no raft message changes, and the protocol version stays.
+        name: laneMembership
+        type: byte
+        value: "5"
       - doc: sanScheme is the URI scheme of a node certificate's one URI SAN.
         name: sanScheme
         value: "\"kitsunium-consensus\""
@@ -1165,6 +1210,7 @@ files:
       - refreshJoiner
       - (*Node).refreshJoin
       - (*Node).runJoinRefresh
+      - (*Node).servedMembership
     name: join.go
   - decls:
       - MemoryLog
@@ -1221,6 +1267,8 @@ files:
       - (*MemoryTransport).SetMembership
       - (*MemoryTransport).setMembershipAt
       - (*MemoryTransport).bindWarn
+      - (*MemoryTransport).bindMembership
+      - (*MemoryTransport).AskMembership
       - (*MemoryTransport).releaseJoinAnswer
       - (*MemoryNetwork).admitted
       - (*MemoryTransport).Join
@@ -1456,7 +1504,9 @@ files:
       - readQuarantineMarker
       - stopMarkers
       - QuarantineExit
+      - QuarantineOptions
       - ClearQuarantine
+      - ClearQuarantineWith
       - DataDir.wipeAndRejoin
       - DataDir.markWipe
       - DataDir.clearWipeMarker
@@ -1538,6 +1588,12 @@ files:
       - (*truncationConfs).cut
       - (*truncationConfs).strands
       - stranded
+      - liveRefusal
+      - askNewest
+      - listsUnder
+      - (*truncationConfs).peers
+      - peerSet
+      - (*peerSet).add
       - truncateAtDamage
       - maxRecordTerm
       - recordTerm
@@ -1805,6 +1861,9 @@ files:
       - (*TCPTransport).releaseJoinAnswer
       - joinAnswerListsPeer
       - joinAnswerReason
+      - (*TCPTransport).serveMembership
+      - (*TCPTransport).bindMembership
+      - (*TCPTransport).AskMembership
       - (*TCPTransport).BindJoinReason
       - (*TCPTransport).RefusedBeforeHandshake
       - (*TCPTransport).CertExpiry
@@ -2815,6 +2874,9 @@ functions:
   - name: ClearQuarantine
     params: d DataDir, exit QuarantineExit, op coreconsensus.Operator
     results: error
+  - name: ClearQuarantineWith
+    params: ctx context.Context, d DataDir, exit QuarantineExit, op coreconsensus.Operator, opt *QuarantineOptions
+    results: error
   - doc: |-
       wipedWithStamp reports whether the wipe removes the data directory's
       entry name with the stamp: the quarantine marker, the silence condition
@@ -3069,6 +3131,41 @@ functions:
       peer from it. A key DenyPin withdrew, the zero pin, admits nobody.
     name: stranded
     params: self coreconsensus.NodeID, kept, newest *coreconsensus.MembershipValue
+    results: bool
+  - doc: |-
+      liveRefusal is the refusal of a member's truncation that the
+      configuration the cluster runs with strands, nil when it does not (#763).
+      seen is what truncationStrands read, nil for a directory that is not a
+      member's, which needs no configuration. The log holds no change committed
+      while the node was down: a voter that #603's guard still judged on the
+      configuration the leader last heard it at, a vote window after it failed,
+      had the last of the members it keeps removed then, and its truncation,
+      which the log's newest configuration let through, brought it back silent
+      over members that had all left.
+
+      Every other member the configurations read name is asked, under the
+      newest record of it, through opt.Ask (askNewest); the newest
+      configuration answered is judged as truncationConfs judges the log's
+      newest (stranded). Without opt.Ask, or with no answer, the truncation is
+      refused: it is never taken blind.
+
+      It refuses at best: a member that lags, or a partitioned one, answers a
+      configuration older than the cluster's, and the newest answered is taken.
+    name: liveRefusal
+    params: ctx context.Context, seen *truncationConfs, opt *QuarantineOptions
+    results: error
+  - doc: |-
+      askNewest asks each of peers, in turn, for the configuration it runs
+      with, and returns the one of the highest index; ok is false when none
+      answered. An answer that does not list the member asked, under the key
+      it was asked under, is not that member's and is set aside. It stops
+      asking once ctx is done.
+    name: askNewest
+    params: ctx context.Context, ask func(context.Context, coreconsensus.MemberValue) (coreconsensus.MembershipValue, error), peers []coreconsensus.MemberValue
+    results: coreconsensus.MembershipValue, bool
+  - doc: listsUnder reports whether m lists member p under p's key.
+    name: listsUnder
+    params: m *coreconsensus.MembershipValue, p *coreconsensus.MemberValue
     results: bool
   - doc: |-
       truncateAtDamage deletes every segment after segment segN, and segN too
@@ -4252,7 +4349,14 @@ types:
           the cluster, after one more voter is promoted when MinVoters refuses the
           removal: until then the old ID holds the slot, and the JOIN is refused
           (R8-11).
+
+          The log holds no change committed while the node was down: a member's
+          truncation also reads the configuration the cluster runs with from a live
+          member (liveRefusal, #763), and is refused the same way when it lists none
+          of the kept configuration's other members, and with its own reason when it
+          no longer lists this node or when no member answers.
         name: truncateAndStaySilent
+        params: ctx context.Context, opt *QuarantineOptions
         recv: d DataDir
         results: error
       - doc: |-
@@ -4297,11 +4401,13 @@ types:
           entry the damage itself took cannot be read: when no configuration entry
           past the kept one can be read there, nothing is known, and the truncation
           is taken. What the reopen keeps is cut as truncationKeepsMembers cuts it
-          (reopenKeeps, #745).
+          (reopenKeeps, #745). It returns what it read, which liveRefusal judges
+          against a live member's configuration, nil for a directory that is not a
+          member's.
         name: truncationStrands
         params: logDir string, segN uint64, off int64
         recv: d DataDir
-        results: bool, error
+        results: bool, *truncationConfs, error
       - doc: |-
           reopenSilenced reopens the truncated log and fills in the silence
           condition's index, its end, durably.
@@ -6021,6 +6127,16 @@ types:
           it, as on the TCP transport (#634).
         name: warn
         type: func(msg string, attrs ...corelogger.AttrValue)
+      - doc: |-
+          membership reads the configuration the bound node runs with, for a
+          member that asks it (#763); nil answers nothing.
+        name: membership
+        type: func() (coreconsensus.MembershipValue, bool)
+      - doc: |-
+          predatesMembership answers no read of the configuration, as a member
+          built before it. Set by the package's own tests only.
+        name: predatesMembership
+        type: bool
     kind: struct
     methods:
       - name: Send
@@ -6070,6 +6186,16 @@ types:
         name: bindWarn
         params: warn func(msg string, attrs ...corelogger.AttrValue)
         recv: t *MemoryTransport
+      - doc: |-
+          bindMembership binds read, which answers a member's read of the
+          configuration the node runs with, as the TCP transport does (#763).
+        name: bindMembership
+        params: read func() (coreconsensus.MembershipValue, bool)
+        recv: t *MemoryTransport
+      - name: AskMembership
+        params: _ context.Context, m coreconsensus.MemberValue
+        recv: t *MemoryTransport
+        results: coreconsensus.MembershipValue, error
       - doc: |-
           releaseJoinAnswer drops the JOIN answer's group once the node is
           admitted, as the TCP transport does (#552).
@@ -6769,6 +6895,15 @@ types:
         name: runJoinRefresh
         params: j refreshJoiner
         recv: n *Node
+      - doc: |-
+          servedMembership is the configuration this node runs with, the one
+          Membership reads, for another member that asks it: that member's offline
+          TruncateAndStaySilent, whose log holds no change committed while it was
+          down, judges what it keeps on the answer (#763). ok is false once the loop
+          stopped, and a stopped node answers nothing.
+        name: servedMembership
+        recv: n *Node
+        results: coreconsensus.MembershipValue, bool
       - doc: lineage is the node's log identity as it stands.
         name: lineage
         recv: n *Node
@@ -6789,7 +6924,8 @@ types:
       - doc: |-
           bindTransport hands the transport the node's callbacks. An unreachable
           report is queued to the loop and dropped when the loop is saturated, as
-          it is advisory; the JOIN handler with reasons is bound when supported.
+          it is advisory; the JOIN handler with reasons, and the read of the
+          configuration a member asks (#763), are bound when supported.
         name: bindTransport
         recv: n *Node
         results: error
@@ -8903,6 +9039,17 @@ types:
     name: QuarantineExit
     underlying: uint8
   - fields:
+      - doc: |-
+          Ask reads, from member m, the configuration it runs with, and fails
+          when m does not answer. It reaches m at the address, and authenticates
+          it under the key, that the node's own log names for it: a
+          TCPTransport's AskMembership, built with this node's own certificate,
+          or a MemoryTransport's in tests.
+        name: Ask
+        type: func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+    kind: struct
+    name: QuarantineOptions
+  - fields:
       - doc: "Confirm must equal the new cluster id in hex: a typed confirmation."
         name: Confirm
         type: string
@@ -9079,6 +9226,16 @@ types:
         name: strands
         recv: c *truncationConfs
         results: bool
+      - doc: |-
+          peers is every member other than self that the configurations read name,
+          each under its newest record: the members a member's truncation asks for
+          the configuration the cluster runs with. The configurations are taken
+          newest first: those logged past the snapshot, the snapshot's, those
+          logged below it, then the kept one. A member whose pin DenyPin withdrew, the zero key, is
+          left out: no member admits it, and nothing would authenticate it.
+        name: peers
+        recv: c *truncationConfs
+        results: "[]coreconsensus.MemberValue"
     name: truncationConfs
   - doc: |-
       loggedConf is the configuration of the entry at index, seq telling an
@@ -9092,6 +9249,19 @@ types:
         type: uint64
     kind: struct
     name: loggedConf
+  - doc: peerSet gathers members once each, under the first record added.
+    fields:
+      - name: seen
+        type: map[coreconsensus.NodeID]bool
+      - name: out
+        type: "[]coreconsensus.MemberValue"
+    kind: struct
+    methods:
+      - doc: add adds every member of m not added yet, the zero key left out.
+        name: add
+        params: m *coreconsensus.MembershipValue
+        recv: p *peerSet
+    name: peerSet
   - fields:
       - name: CertFile
         type: string
@@ -9444,6 +9614,18 @@ types:
           predatesJoinV2 serves laneJoinV2 as a member built before it does:
           the connection ends unanswered. Set by the package's own tests only.
         name: predatesJoinV2
+        type: atomic.Bool
+      - doc: |-
+          membership reads the configuration the node bound to this transport
+          runs with, for a member that asks it on laneMembership (#763); ok is
+          false once that node stopped. nil answers nothing.
+        name: membership
+        type: func() (coreconsensus.MembershipValue, bool)
+      - doc: |-
+          predatesMembership serves laneMembership as a member built before it
+          does: the connection ends unanswered. Set by the package's own tests
+          only.
+        name: predatesMembership
         type: atomic.Bool
       - doc: hold keeps the JOIN answer's configuration and release (#632).
         name: hold
@@ -9883,6 +10065,24 @@ types:
           JOIN sent again installs nothing.
         name: releaseJoinAnswer
         recv: t *TCPTransport
+      - doc: |-
+          serveMembership answers a member's read of the configuration the node
+          bound to this transport runs with (#763), under the JOIN's deadline. A
+          transport no running node is bound to answers nothing, as one that
+          predates the lane.
+        name: serveMembership
+        params: c net.Conn
+        recv: t *TCPTransport
+      - doc: |-
+          bindMembership binds read, which answers a member's read of the
+          configuration the node runs with (#763).
+        name: bindMembership
+        params: read func() (coreconsensus.MembershipValue, bool)
+        recv: t *TCPTransport
+      - name: AskMembership
+        params: ctx context.Context, m coreconsensus.MemberValue
+        recv: t *TCPTransport
+        results: coreconsensus.MembershipValue, error
       - name: BindJoinReason
         params: _ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
         recv: t *TCPTransport
@@ -10158,6 +10358,21 @@ vars:
         name: _
         type: undecodableBinder
         value: (*TCPTransport)(nil)
+      - doc: |-
+          A member's offline truncation reads the configuration a live member
+          runs with through its transport (#763).
+        name: _
+        type: |-
+          interface {
+          		bindMembership(read func() (coreconsensus.MembershipValue, bool))
+          	}
+        value: (*TCPTransport)(nil)
+      - name: _
+        type: |-
+          interface {
+          		bindMembership(read func() (coreconsensus.MembershipValue, bool))
+          	}
+        value: (*MemoryTransport)(nil)
       - name: _
         type: |-
           interface {

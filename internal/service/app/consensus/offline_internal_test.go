@@ -650,8 +650,9 @@ func TestAnInstalledNodeRestartsAfterAppending(t *testing.T) {
 
 // silenceByDamage damages synced data in the last segment of the crashed
 // victim, checks the start is refused LOG_QUARANTINED, and takes the
-// TruncateAndStaySilent exit, leaving victim's directory open and silent.
-func silenceByDamage(t *testing.T, c *cluster, victim *diskNode) {
+// TruncateAndStaySilent exit asking through opt, leaving victim's directory
+// open and silent.
+func silenceByDamage(t *testing.T, c *cluster, victim *diskNode, opt *QuarantineOptions) {
 	t.Helper()
 	segs := must(filepath.Glob(filepath.Join(victim.dir, "log", "seg-????????????????")))(t)
 	if len(segs) == 0 {
@@ -699,7 +700,7 @@ func silenceByDamage(t *testing.T, c *cluster, victim *diskNode) {
 	if _, err := NewNode(diskConfig(c, victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("damaged log: %v", err)
 	}
-	if err := ClearQuarantine(victim.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(context.Background(), victim.dd, TruncateAndStaySilent, "op:silent", opt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(victim.dir, fileSilent)); err != nil {
@@ -740,11 +741,14 @@ func TestASilentNodeIsNeverElected(t *testing.T) {
 	}
 	waitAppliedOnly(t, lead, tok.Index)
 	waitAppliedOnly(t, victim, tok.Index)
+	// Every peer is down by the truncation: they stand in with the
+	// configuration they last ran with.
+	conf := lead.node.Membership()
 	c.net.Isolate(lead.id, true)
 	lead.crash(t, c)
 	c.net.Isolate(victim.id, true)
 	victim.crash(t, c)
-	silenceByDamage(t, c, victim)
+	silenceByDamage(t, c, victim, askingAnswer(conf))
 	victim.node = must(NewNode(diskConfig(c, victim)))(t)
 	lagger.open(t, c)
 	c.net.Cut(victim.id, lagger.id, false)
@@ -770,11 +774,12 @@ func TestASilentNodeIsNeverElected(t *testing.T) {
 // only voter of that history and never campaign, so never be elected.
 func TestRecoverEndsTheSilence(t *testing.T) {
 	c, nodes := threeOnDisk(t, 40)
+	conf := nodes[0].node.Membership()
 	for _, dn := range nodes {
 		dn.crash(t, c)
 	}
 	victim := nodes[2]
-	silenceByDamage(t, c, victim)
+	silenceByDamage(t, c, victim, askingAnswer(conf))
 	recoverAlone(t, c, nodes, victim, coreconsensus.ClusterID{6})
 	if _, err := os.Stat(filepath.Join(victim.dir, fileSilent)); !os.IsNotExist(err) {
 		t.Fatalf("the silence condition survived Recover: %v", err)
@@ -789,7 +794,7 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 	c, nodes := threeOnDisk(t, 40)
 	victim := nodes[2]
 	victim.crash(t, c)
-	silenceByDamage(t, c, victim)
+	silenceByDamage(t, c, victim, askingFrom(c, victim.id))
 	n, err := NewNode(diskConfig(c, victim))
 	if err != nil {
 		t.Fatal(err)
@@ -990,7 +995,7 @@ func silenceUnderItsLeaderOnDiskWith(t *testing.T, before func(s *silencedOnDisk
 	if _, err := NewNode(s.config(s.victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("damaged log: %v", err)
 	}
-	if err := ClearQuarantine(s.victim.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(context.Background(), s.victim.dd, TruncateAndStaySilent, "op:silent", askingAnswer(s.lead.node.Membership())); err != nil {
 		t.Fatal(err)
 	}
 	_, s.hint = s.victim.dd.Log().Bounds()

@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/hex"
@@ -62,6 +63,26 @@ const (
 	// whyRepeatedID is the reason Recover and RestoreSnapshot refuse two
 	// members under one NodeID.
 	whyRepeatedID = "two members under one id"
+	// whyStrandedExit ends the reason of a truncation refused because the
+	// configuration it keeps strands the node: what it would come to, and
+	// the way out (#758, #763).
+	whyStrandedExit = "the node would ask and admit only removed members and stay silent for good; clear the quarantine with WipeAndRejoin, " +
+		"then Remove this node's ID on the cluster, after a Promote of one more voter when MinVoters refuses the removal, " +
+		"so that its slot takes a JOIN again (R8-11)"
+	// whyNoAsk is the reason a member's TruncateAndStaySilent is refused
+	// when it was given no means to ask a live member (#763).
+	whyNoAsk = "a member's truncation reads the configuration the cluster runs with from a live member, and no means to ask one was given: " +
+		"pass QuarantineOptions.Ask, a TCPTransport's AskMembership built with this node's certificate, to ClearQuarantineWith"
+	// whyNoLive is the reason a member's TruncateAndStaySilent is refused
+	// when no member answered (#763).
+	whyNoLive = "no live member answered: the configuration the cluster runs with cannot be read, and a change made while this node was down " +
+		"may have left none of the members it keeps; start a member this node's log names and clear again, or clear the quarantine with WipeAndRejoin, " +
+		"then Remove this node's ID on the cluster and Init under a new one (R8-11)"
+	// whyNotListed is the reason a member's TruncateAndStaySilent is refused
+	// when the configuration a live member runs with no longer lists the
+	// node (#763).
+	whyNotListed = "the configuration the cluster runs with, read from a live member, no longer lists this node: " +
+		"clear the quarantine with WipeAndRejoin and Init under a new NodeID (R8-11)"
 )
 
 // offlineBatchBytes and offlineBatchEntries bound one read of the log by an
@@ -306,9 +327,35 @@ func stopMarkers(dir string) ([]string, error) {
 // QuarantineExit is one of the two exits ClearQuarantine allows (R3-09).
 type QuarantineExit uint8
 
+// QuarantineOptions are what a member's TruncateAndStaySilent needs beyond
+// ClearQuarantine's arguments: the means to read the configuration the
+// cluster runs with from a live member (#763).
+type QuarantineOptions struct {
+	// Ask reads, from member m, the configuration it runs with, and fails
+	// when m does not answer. It reaches m at the address, and authenticates
+	// it under the key, that the node's own log names for it: a
+	// TCPTransport's AskMembership, built with this node's own certificate,
+	// or a MemoryTransport's in tests.
+	Ask func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+}
+
 // ClearQuarantine clears a quarantined, or stopped, directory through one of
 // the two exits. There is no third exit that keeps the damaged node voting.
+// It gives TruncateAndStaySilent no means to ask a live member, so on a
+// member's directory that exit is refused: ClearQuarantineWith takes them.
 func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) error {
+	return ClearQuarantineWith(context.Background(), d, exit, op, nil)
+}
+
+// ClearQuarantineWith is ClearQuarantine with opt's means to read, from a
+// live member, the configuration the cluster runs with. A member's
+// TruncateAndStaySilent asks every other member its log names, takes the
+// newest configuration answered, and is refused, before anything is
+// written, when no member answers, when that configuration no longer lists
+// this node, or when it lists none of the members the truncation keeps:
+// the node would restart silent, asking and admitting only members that
+// have left, and never vote again (#763). ctx bounds the asking.
+func ClearQuarantineWith(ctx context.Context, d DataDir, exit QuarantineExit, op coreconsensus.Operator, opt *QuarantineOptions) error {
 	if err := d.offline(); err != nil {
 		return err
 	}
@@ -333,7 +380,7 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 		if err := d.audit(op, "clear-quarantine truncate-and-stay-silent"); err != nil {
 			return err
 		}
-		return d.truncateAndStaySilent()
+		return d.truncateAndStaySilent(ctx, opt)
 	default:
 		return misconfigured("exit", "unknown")
 	}
@@ -1576,7 +1623,13 @@ func (l *fileLog) resetTo(index, term uint64) error {
 // the cluster, after one more voter is promoted when MinVoters refuses the
 // removal: until then the old ID holds the slot, and the JOIN is refused
 // (R8-11).
-func (d DataDir) truncateAndStaySilent() error {
+//
+// The log holds no change committed while the node was down: a member's
+// truncation also reads the configuration the cluster runs with from a live
+// member (liveRefusal, #763), and is refused the same way when it lists none
+// of the kept configuration's other members, and with its own reason when it
+// no longer lists this node or when no member answers.
+func (d DataDir) truncateAndStaySilent(ctx context.Context, opt *QuarantineOptions) error {
 	segN, off, err := d.quarantinePoint()
 	if err != nil {
 		return err
@@ -1589,15 +1642,15 @@ func (d DataDir) truncateAndStaySilent() error {
 	if !keeps {
 		return recoverRefused("the truncation leaves no configuration: the node would admit and ask no member; clear the quarantine with WipeAndRejoin")
 	}
-	strands, err := d.truncationStrands(logDir, segN, off)
+	strands, seen, err := d.truncationStrands(logDir, segN, off)
 	if err != nil {
 		return err
 	}
 	if strands {
-		return recoverRefused("the truncation keeps a configuration none of whose other members the log's newest configuration still lists: " +
-			"the node would ask and admit only removed members and stay silent for good; clear the quarantine with WipeAndRejoin, " +
-			"then Remove this node's ID on the cluster, after a Promote of one more voter when MinVoters refuses the removal, " +
-			"so that its slot takes a JOIN again (R8-11)")
+		return recoverRefused("the truncation keeps a configuration none of whose other members the log's newest configuration still lists: " + whyStrandedExit)
+	}
+	if err := liveRefusal(ctx, seen, opt); err != nil {
+		return err
 	}
 	maxTerm, err := logMaxTerm(logDir)
 	if err != nil {
@@ -1830,24 +1883,26 @@ func holdsConfiguration(b []byte) bool {
 // entry the damage itself took cannot be read: when no configuration entry
 // past the kept one can be read there, nothing is known, and the truncation
 // is taken. What the reopen keeps is cut as truncationKeepsMembers cuts it
-// (reopenKeeps, #745).
-func (d DataDir) truncationStrands(logDir string, segN uint64, off int64) (bool, error) {
+// (reopenKeeps, #745). It returns what it read, which liveRefusal judges
+// against a live member's configuration, nil for a directory that is not a
+// member's.
+func (d DataDir) truncationStrands(logDir string, segN uint64, off int64) (bool, *truncationConfs, error) {
 	if d.d.log.stamp.State != coreconsensus.StampMember {
-		return false, nil
+		return false, nil, nil
 	}
 	metas, err := d.d.snaps.List()
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	segs, err := logSegments(logDir)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	seen := newTruncationConfs(d.d.log.stamp.ID, metas)
 	for _, n := range slices.Sorted(maps.Keys(segs)) {
 		b, err := os.ReadFile(segs[n])
 		if err != nil {
-			return false, storageFailed("read segment", err)
+			return false, nil, storageFailed("read segment", err)
 		}
 		switch {
 		case n < segN:
@@ -1862,7 +1917,7 @@ func (d DataDir) truncationStrands(logDir string, segN uint64, off int64) (bool,
 			seen.read(b)
 		}
 	}
-	return seen.strands(), nil
+	return seen.strands(), seen, nil
 }
 
 // truncationConfs follows a member's configurations through its log, in
@@ -2003,6 +2058,125 @@ func stranded(self coreconsensus.NodeID, kept, newest *coreconsensus.MembershipV
 		x, listed := newest.Member(m.ID)
 		return m.ID != self && listed && !isZeroDigest(m.SPKI) && x.SPKI == m.SPKI
 	})
+}
+
+// liveRefusal is the refusal of a member's truncation that the
+// configuration the cluster runs with strands, nil when it does not (#763).
+// seen is what truncationStrands read, nil for a directory that is not a
+// member's, which needs no configuration. The log holds no change committed
+// while the node was down: a voter that #603's guard still judged on the
+// configuration the leader last heard it at, a vote window after it failed,
+// had the last of the members it keeps removed then, and its truncation,
+// which the log's newest configuration let through, brought it back silent
+// over members that had all left.
+//
+// Every other member the configurations read name is asked, under the
+// newest record of it, through opt.Ask (askNewest); the newest
+// configuration answered is judged as truncationConfs judges the log's
+// newest (stranded). Without opt.Ask, or with no answer, the truncation is
+// refused: it is never taken blind.
+//
+// It refuses at best: a member that lags, or a partitioned one, answers a
+// configuration older than the cluster's, and the newest answered is taken.
+func liveRefusal(ctx context.Context, seen *truncationConfs, opt *QuarantineOptions) error {
+	if seen == nil || !seen.keeps {
+		// No configuration kept is #723's refusal, judged before.
+		return nil
+	}
+	if opt == nil || opt.Ask == nil {
+		return recoverRefused(whyNoAsk)
+	}
+	peers := seen.peers()
+	live, ok := askNewest(ctx, opt.Ask, peers)
+	switch {
+	case !ok:
+		return origin(coreconsensus.RecoverRefused, errs.String("why", whyNoLive), errs.Int("asked", len(peers)))
+	case !slices.ContainsFunc(live.Members, func(m coreconsensus.MemberValue) bool { return m.ID == seen.self }):
+		return recoverRefused(whyNotListed)
+	case stranded(seen.self, &seen.kept, &live):
+		return recoverRefused("the truncation keeps a configuration none of whose other members the configuration the cluster runs with, " +
+			"read from a live member, still lists: " + whyStrandedExit)
+	}
+	return nil
+}
+
+// askNewest asks each of peers, in turn, for the configuration it runs
+// with, and returns the one of the highest index; ok is false when none
+// answered. An answer that does not list the member asked, under the key
+// it was asked under, is not that member's and is set aside. It stops
+// asking once ctx is done.
+func askNewest(ctx context.Context, ask func(context.Context, coreconsensus.MemberValue) (coreconsensus.MembershipValue, error), peers []coreconsensus.MemberValue) (coreconsensus.MembershipValue, bool) {
+	var newest coreconsensus.MembershipValue
+	found := false
+	for i := range peers {
+		if ctx.Err() != nil {
+			break
+		}
+		m, err := ask(ctx, peers[i])
+		if err != nil || !listsUnder(&m, &peers[i]) {
+			continue
+		}
+		if !found || m.Index > newest.Index {
+			newest, found = m, true
+		}
+	}
+	return newest, found
+}
+
+// listsUnder reports whether m lists member p under p's key.
+func listsUnder(m *coreconsensus.MembershipValue, p *coreconsensus.MemberValue) bool {
+	x, ok := m.Member(p.ID)
+	return ok && x.SPKI == p.SPKI
+}
+
+// peers is every member other than self that the configurations read name,
+// each under its newest record: the members a member's truncation asks for
+// the configuration the cluster runs with. The configurations are taken
+// newest first: those logged past the snapshot, the snapshot's, those
+// logged below it, then the kept one. A member whose newest record carries
+// the zero key DenyPin leaves is not asked, under that key or an older one:
+// no member admits it, and the key withdrawn would authenticate it.
+func (c *truncationConfs) peers() []coreconsensus.MemberValue {
+	p := peerSet{seen: map[coreconsensus.NodeID]bool{c.self: true}}
+	for i := len(c.logged) - 1; i >= 0; i-- {
+		if c.logged[i].index > c.snapAt {
+			p.add(&c.logged[i].m)
+		}
+	}
+	if c.snap != nil {
+		p.add(c.snap)
+	}
+	for i := len(c.logged) - 1; i >= 0; i-- {
+		if c.logged[i].index <= c.snapAt {
+			p.add(&c.logged[i].m)
+		}
+	}
+	// The kept configuration, which an entry of the dropped part may have
+	// overwritten in the log, is the one the node restarts with.
+	p.add(&c.kept)
+	return p.out
+}
+
+// peerSet gathers members once each, under the first record met.
+type peerSet struct {
+	seen map[coreconsensus.NodeID]bool
+	out  []coreconsensus.MemberValue
+}
+
+// add adds every member of m not met yet, unless its record carries the
+// zero key; either way the member is met, and an older record of it is
+// never taken.
+func (p *peerSet) add(m *coreconsensus.MembershipValue) {
+	for i := range m.Members {
+		x := &m.Members[i]
+		if p.seen[x.ID] {
+			continue
+		}
+		p.seen[x.ID] = true
+		if !isZeroDigest(x.SPKI) {
+			p.out = append(p.out, *x)
+		}
+	}
 }
 
 // truncateAtDamage deletes every segment after segment segN, and segN too

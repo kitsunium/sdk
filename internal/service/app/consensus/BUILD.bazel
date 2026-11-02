@@ -200,6 +200,7 @@ go_test(
         "yieldback_internal_test.go",
         "zstranded_internal_test.go",
         "zstrandedbet_internal_test.go",
+        "zwhiledown_internal_test.go",
     ],
     data = glob(["testdata/**"]),
     embed = [":consensus"],

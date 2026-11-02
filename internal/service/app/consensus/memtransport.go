@@ -126,6 +126,12 @@ type MemoryTransport struct {
 	// warn is the node's log, for an offer refused before the node judged
 	// it, as on the TCP transport (#634).
 	warn func(msg string, attrs ...corelogger.AttrValue)
+	// membership reads the configuration the bound node runs with, for a
+	// member that asks it (#763); nil answers nothing.
+	membership func() (coreconsensus.MembershipValue, bool)
+	// predatesMembership answers no read of the configuration, as a member
+	// built before it. Set by the package's own tests only.
+	predatesMembership bool
 }
 
 // memRun is one delivery goroutine's life: Close closes stop, once, and
@@ -303,6 +309,42 @@ func (t *MemoryTransport) bindWarn(warn func(msg string, attrs ...corelogger.Att
 	t.mu.Unlock()
 }
 
+// bindMembership binds read, which answers a member's read of the
+// configuration the node runs with, as the TCP transport does (#763).
+func (t *MemoryTransport) bindMembership(read func() (coreconsensus.MembershipValue, bool)) {
+	t.mu.Lock()
+	t.membership = read
+	t.mu.Unlock()
+}
+
+// AskMembership reads, from member m, the configuration it runs with, as
+// the TCP transport does (#763): m is reached when the link is up both
+// ways, authenticated under the key the memory transport gives it, and
+// answers only a node it admits, while a node runs bound to its transport.
+func (t *MemoryTransport) AskMembership(_ context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error) {
+	dst := t.net.route(t.id, m.ID)
+	if dst == nil || t.net.route(m.ID, t.id) == nil {
+		return coreconsensus.MembershipValue{}, origin(coreconsensus.PeerRejected, errs.String("why", "unreachable"))
+	}
+	if m.SPKI != memSPKI(m.ID) {
+		return coreconsensus.MembershipValue{}, origin(coreconsensus.PeerRejected, errs.String("why", "key does not match the member's pin"))
+	}
+	if !t.net.admitted(dst, t.id) {
+		return coreconsensus.MembershipValue{}, origin(coreconsensus.PeerRejected, errs.String("why", "not admitted"))
+	}
+	dst.mu.Lock()
+	read, old := dst.membership, dst.predatesMembership
+	dst.mu.Unlock()
+	if read == nil || old {
+		return coreconsensus.MembershipValue{}, origin(coreconsensus.PeerRejected, errs.String("why", "unanswered"))
+	}
+	conf, ok := read()
+	if !ok {
+		return coreconsensus.MembershipValue{}, origin(coreconsensus.PeerRejected, errs.String("why", "unanswered"))
+	}
+	return conf, nil
+}
+
 // releaseJoinAnswer drops the JOIN answer's group once the node is
 // admitted, as the TCP transport does (#552).
 func (t *MemoryTransport) releaseJoinAnswer() {
@@ -429,7 +471,7 @@ func (t *MemoryTransport) Close() error {
 	}
 	t.cur = nil
 	r.end()
-	t.deliver, t.offer, t.install, t.join, t.joinR = nil, nil, nil, nil, nil
+	t.deliver, t.offer, t.install, t.join, t.joinR, t.membership = nil, nil, nil, nil, nil, nil
 	t.mu.Unlock()
 	<-r.done
 	return nil

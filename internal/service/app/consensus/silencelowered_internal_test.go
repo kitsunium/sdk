@@ -239,7 +239,7 @@ func TestALoweredSilencePointIsOnDiskBeforeItsTruncation(t *testing.T) {
 	if _, err := NewNode(diskConfig(c, v)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("setup: damaged log: %v", err)
 	}
-	if err := ClearQuarantine(v.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(context.Background(), v.dd, TruncateAndStaySilent, "op:silent", askingAnswer(lead.node.Membership())); err != nil {
 		t.Fatal(err)
 	}
 	silentTerm, point, ok := silenceRecordIn(v.dir)

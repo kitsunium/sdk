@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T18:00:00Z -->
+<!-- updated: 2026-11-01T22:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -9,7 +9,7 @@ in checksummed chunks, the segmented file log and its recovery procedure,
 the no-space guard over the log quota and the free space (`space.go`),
 the file snapshot store, the data directory with its lock, stamp and stop
 markers, the offline operations (`Init`, `Recover`, `RestoreSnapshot`,
-`Inspect`, `ClearQuarantine`), what a non-member observer reads and
+`Inspect`, `ClearQuarantine`, `ClearQuarantineWith`), what a non-member observer reads and
 rebuilds from (`Node.ReadCommitted`, COMPACTED below the log's first
 index; `OpenSnapshot`, SNAPSHOT_CORRUPT at the end of a stream that
 differs from its metadata; `ImportObserved`, a snapshot and the tail read
@@ -510,6 +510,30 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   the key it pins; at best: what the damage took is not known, and is not
   refused (#758, `TestATruncationBackToMembersAllRemovedSinceIsRefused`,
   `TestTheStrandingTruncationIsJudgedOnTheLogsNewestConfiguration`).
+- Take a member's `TruncateAndStaySilent` on its log alone, or blind: the
+  log holds no change committed while the node was down, and B, removed a
+  few milliseconds after V's crash, inside the vote window #764's guard
+  still judges V in, left V silent over {A, B, V} for good. `liveRefusal`
+  asks every other member the configurations read name (`peers`) through
+  `QuarantineOptions.Ask`, judges the newest answer as `stranded` judges
+  the log's, and refuses `RECOVER_REFUSED` before anything is written when
+  it lists none of the kept members, no longer lists the node, or when no
+  member answers; `ClearQuarantine`, which gives no `Ask`, refuses a
+  member's exit (#763, the owner's option (c),
+  `TestATruncationBackToMembersRemovedWhileTheNodeWasDownIsRefused`,
+  `TestATruncationNoLiveMemberAnswersIsRefused`,
+  `TestTheNewestLiveConfigurationIsJudged`). A test whose subject is not
+  the asking stands in for the live members with `askingAnswer` once their
+  links are cut or they are down, and asks through the victim's own end
+  of the network otherwise (`askingFrom`).
+- Serve `laneMembership` to anyone but a member on its pinned key and
+  slot, or read its answer without the member's pin, its certificate's
+  slot, and the member listed under that key: the configuration decides a
+  truncation (`serveMembership`, `AskMembership`,
+  `TestAMembersConfigurationIsReadOverTCPByAMemberOnly`). A member built
+  before the lane ends the connection unanswered, as for `laneJoinV2`,
+  and the asker counts it as one that did not answer: no raft frame
+  changed, and `ProtocolMax` stays.
 - Refuse a JOIN on a held slot when the member holding it is the requester
   itself — id, incarnation, slot and key all equal: a joiner restarted
   before anything reached its log admits the members only from a JOIN
@@ -1151,7 +1175,8 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   good (#763, `reachedBy`, `TestARemovalWhileAHeardVoterIsDownWaitsForIt`,
   `TestARemovalIsJudgedOnAVotersConfigurationOnlyWhileItAnswers`). At
   best: a voter that failed less than a vote window before the change, or
-  before the change reached it, is still judged as heard.
+  before the change reached it, is still judged as heard; its truncation
+  then reads the change from a live member (`liveRefusal`).
 - Count the leader as a stale voter's voucher when that voter knows it as
   a learner only: a voter sends its PreVote to the voters of its
   configuration alone, and once the leadership moved to a member it did

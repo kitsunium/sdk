@@ -51,6 +51,16 @@ const (
 	// joinV2Prefix is a versioned JOIN's bytes before laneJoin's: the
 	// version and the little-endian u64 limit.
 	joinV2Prefix int = 1 + 8
+	// laneMembership carries one read of the configuration a member runs
+	// with, asked by another member's offline TruncateAndStaySilent
+	// (#763): the dialer writes the lane byte alone, and the member answers
+	// one chunk, its configuration as AppendMembership encodes it, as the
+	// JOIN answer carries one, then the connection ends. It is served to a
+	// member only, on the key and the slot the membership pins. A member
+	// that predates it serves no unknown lane and ends the connection
+	// without an answer, which the asker counts as a member that did not
+	// answer: no raft message changes, and the protocol version stays.
+	laneMembership byte = 5
 
 	// sanScheme is the URI scheme of a node certificate's one URI SAN.
 	sanScheme = "kitsunium-consensus"
@@ -304,6 +314,14 @@ type TCPTransport struct {
 	// predatesJoinV2 serves laneJoinV2 as a member built before it does:
 	// the connection ends unanswered. Set by the package's own tests only.
 	predatesJoinV2 atomic.Bool
+	// membership reads the configuration the node bound to this transport
+	// runs with, for a member that asks it on laneMembership (#763); ok is
+	// false once that node stopped. nil answers nothing.
+	membership func() (coreconsensus.MembershipValue, bool)
+	// predatesMembership serves laneMembership as a member built before it
+	// does: the connection ends unanswered. Set by the package's own tests
+	// only.
+	predatesMembership atomic.Bool
 	// hold keeps the JOIN answer's configuration and release (#632).
 	hold joinHold
 	// warn is the node's log, for what the transport refuses before any
@@ -651,6 +669,8 @@ func (t *TCPTransport) serveMember(conn *tls.Conn, peer coreconsensus.Authentica
 		t.dropBack(k, bl)
 	case laneSnapshot:
 		t.serveSnapshot(conn, peer)
+	case laneMembership:
+		t.serveMembership(conn)
 	default:
 		// An unknown lane is served nothing: the connection ends, as it
 		// always has.
@@ -2138,6 +2158,79 @@ func joinAnswerReason(b []byte) (reason string, ok bool) {
 		return "", false
 	}
 	return string(b[2 : 2+n]), true
+}
+
+// serveMembership answers a member's read of the configuration the node
+// bound to this transport runs with (#763), under the JOIN's deadline. A
+// transport no running node is bound to answers nothing, as one that
+// predates the lane.
+func (t *TCPTransport) serveMembership(c net.Conn) {
+	t.mu.Lock()
+	read := t.membership
+	t.mu.Unlock()
+	if read == nil || t.predatesMembership.Load() {
+		return
+	}
+	m, ok := read()
+	if !ok {
+		return
+	}
+	if err := c.SetWriteDeadline(time.Now().Add(t.cfg.JoinTimeout)); err != nil {
+		return
+	}
+	abandon(writeChunk(c, wire.AppendMembership(nil, &m)))
+}
+
+// bindMembership binds read, which answers a member's read of the
+// configuration the node runs with (#763).
+func (t *TCPTransport) bindMembership(read func() (coreconsensus.MembershipValue, bool)) {
+	t.mu.Lock()
+	t.membership = read
+	t.mu.Unlock()
+}
+
+// AskMembership reads, from member m, the configuration it runs with
+// (#763): the connection is dialled to m's address, the handshake must
+// present m's pinned key on a certificate of this cluster naming m's slot,
+// and the answer must list m under that key. m answers only a node its
+// membership admits, under the certificate this transport presents: built
+// with a member's own, it is what that member's TruncateAndStaySilent asks
+// through (QuarantineOptions.Ask). A member that predates the lane ends the
+// connection unanswered.
+func (t *TCPTransport) AskMembership(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error) {
+	if m.Address == "" || isZeroDigest(m.SPKI) {
+		// A member without a pin is never dialled, since nothing would tell
+		// it from an impostor.
+		return coreconsensus.MembershipValue{}, peerRejected("no address or no pin for the member")
+	}
+	c, err := t.dial(ctx, m.Address, laneMembership, &m.SPKI)
+	if err != nil {
+		return coreconsensus.MembershipValue{}, err
+	}
+	defer func() { abandon(c.Close()) }()
+	defer context.AfterFunc(ctx, func() { abandon(c.Close()) })()
+	peer, verified := tlsid.PeerOf(c.ConnectionState())
+	if !verified {
+		return coreconsensus.MembershipValue{}, peerRejected("no verified peer")
+	}
+	if _, slot, err := parseSAN(peer.Leaf); err != nil || slot != m.Slot {
+		return coreconsensus.MembershipValue{}, peerRejected("the certificate names another slot than the member's")
+	}
+	if err := c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout)); err != nil {
+		return coreconsensus.MembershipValue{}, err
+	}
+	b, err := readChunk(c, t.cfg.MaxControlFrameBytes)
+	if err != nil {
+		return coreconsensus.MembershipValue{}, origin(coreconsensus.FrameInvalid, errs.String("what", "membership answer"))
+	}
+	conf, err := wire.ParseMembership(b)
+	if err != nil {
+		return coreconsensus.MembershipValue{}, err
+	}
+	if !listsUnder(&conf, &m) {
+		return coreconsensus.MembershipValue{}, peerRejected("the answer does not list its own sender")
+	}
+	return conf, nil
 }
 
 // BindJoinReason implements JoinReasonBinder: the JOIN callback that also
