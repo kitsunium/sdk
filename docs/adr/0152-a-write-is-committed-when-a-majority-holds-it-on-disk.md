@@ -6869,6 +6869,43 @@ side, as #763's option (b) would.
   #603, #748 (`movedAll`'s "A-and-B-moved"), #761, #763, #764, #773 and
   #785 stay green.
 
+## Amendment — a silence restarted past the leader's whole log: the residual, then the point on the wire (2026-11-02, #795)
+
+The amendment of 2026-11-01 (#795) feeds a silent node once more when a
+transfer of the leader's covers the no-op fed for its silence, and left
+one order to a decision: a node that cut its own snapshot over that no-op
+once its condition held, before the end of its silence reached its disk,
+and restarted on that cut, comes back with its truncation point raised
+past the leader's whole log (`raiseSilenceOverSnapshot`, #636). The
+leader spent its no-op and saw no transfer, and the node's answers are
+those of an unreadable condition
+([#795](https://github.com/kitsunium/sdk/issues/795), the comment of the
+hunt's pass 80). The owner chose on 2026-11-01 option (iv) now, then
+option (ii):
+
+- **(iv) The residual, stated.**
+  - **Trigger.** A silent node whose start raised its point past the
+    leader's whole log while that leader holds the no-op it fed the
+    silence spent and completed no transfer to the node since. The order
+    the hunt found: the node's own cut over the no-op on its disk, its
+    `SILENT` not yet removed, then a restart, a crash or a clean stop.
+    It needs that restart inside the window, and a cluster that writes
+    nothing after it.
+  - **Cost.** The node stays silent while nobody writes: one voter
+    short, and one more failure leaves two live voters of three that
+    elect no one. No acknowledged write is lost, and the node never
+    votes or acknowledges before its condition holds.
+  - **The operator's way out.** Any write: the leader appends it past
+    the node's point and commits it with a majority, and the node's
+    condition holds on the append that carries it. Or a leadership
+    transfer: the new leader's term starts with an entry of its own past
+    the point, and its progress has fed no silence yet. A member still
+    silent in a quiet cluster (`SILENT` on its disk, no log line saying
+    its condition met) is ended by one write, or by moving the
+    leadership.
+- No frame, field, flag or record changes, nothing persisted, no
+  protocol raise and no raft mutation.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6922,6 +6959,7 @@ side, as #763's option (b) would.
 | #795 | Raft hunt loop, 2026-11-01 | the leader keeps the index of the no-op it fed a silence, and a snapshot transfer the peer installed at or past it feeds the peer once more, so a node restarted on that snapshot, its point raised past the leader's whole log, ends its silence in a cluster that writes nothing; a snapshot the node cut itself left to a decision; no format change, no raft mutation (amendment of 2026-11-01, #795) |
 | #773 (c) | the owner's decision, 2026-11-01 | a `DenyPin` that leaves a stopped voter no voucher is admitted, and said: `Raft.Isolated` names, by #603's own judgement, every voter the leader may never reach again and the withdrawn pin that leaves it so; the health's `PeerStranded` and `PeerPinDenied`, the audit line's `isolated`, and the `why` and `isolated` of a refusal the guard decides; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #773) |
 | #765 (b) | the owner's decision, 2026-11-01 | #603's guard keeps its two bets on the leader, the leader counted at any address and the compacted log's bet that a voter listed after it knows it as a voter, and says when a stopped voter's reach rests on one: `IsolationLeaderMoved` and `IsolationLeaderUnconfirmed` in `Raft.Isolated`, the health's `PeerLeaderMoved` and `PeerLeaderUnconfirmed`, the audit line's `isolated` for the leader's own move, a removal, a move and a transfer, and a Warn line for a hand-over with no entry; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #765) |
+| #795 (iv) | the owner's decision, 2026-11-01 | the residual #795's first fix left, a silent node restarted on its own cut over the no-op fed for its silence before the end reached its disk, its point raised past the leader's whole log, is stated with its trigger, its cost and the operator's way out, one write or a leadership transfer; no format change (amendment of 2026-11-02, #795) |
 
 ## raft-sql-poc (owner's prior Raft)
 
