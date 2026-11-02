@@ -58,6 +58,7 @@ var loopCaps = [...]capClass{
 	{corenet.CapabilityURingNoSQArray, classCode},
 	{corenet.CapabilityURingRingFDs, classCode},
 	{corenet.CapabilityURingSQRewind, classCode},
+	{corenet.CapabilityURingRecvBundle, classCode},
 	{corenet.CapabilityURingSendZC, classB},
 	{corenet.CapabilityURingBundle, classB},
 	{corenet.CapabilityBusyPoll, classB},
