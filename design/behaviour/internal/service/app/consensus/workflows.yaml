@@ -354,16 +354,21 @@ workflows:
     steps:
       - loop:
           do:
+            - bind: x
+              eval: "&m.Members[i]"
             - opt:
                 do:
-                  - set: p.seen[x.ID]
-                    value: "true"
+                  - continue: true
+                when: p.seen[x.ID]
+            - set: p.seen[x.ID]
+              value: "true"
+            - opt:
+                do:
                   - set: p.out
-                    value: append(p.out, x)
-                when: "!p.seen[x.ID] && !isZeroDigest(x.SPKI)"
-          key: _
+                    value: append(p.out, *x)
+                when: "!isZeroDigest(x.SPKI)"
+          key: i
           range: m.Members
-          value: x
   - of: claimed
     steps:
       - bind: k

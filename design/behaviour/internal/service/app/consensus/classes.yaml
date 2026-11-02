@@ -9231,8 +9231,9 @@ types:
           each under its newest record: the members a member's truncation asks for
           the configuration the cluster runs with. The configurations are taken
           newest first: those logged past the snapshot, the snapshot's, those
-          logged below it, then the kept one. A member whose pin DenyPin withdrew, the zero key, is
-          left out: no member admits it, and nothing would authenticate it.
+          logged below it, then the kept one. A member whose newest record carries
+          the zero key DenyPin leaves is not asked, under that key or an older one:
+          no member admits it, and the key withdrawn would authenticate it.
         name: peers
         recv: c *truncationConfs
         results: "[]coreconsensus.MemberValue"
@@ -9249,7 +9250,7 @@ types:
         type: uint64
     kind: struct
     name: loggedConf
-  - doc: peerSet gathers members once each, under the first record added.
+  - doc: peerSet gathers members once each, under the first record met.
     fields:
       - name: seen
         type: map[coreconsensus.NodeID]bool
@@ -9257,7 +9258,10 @@ types:
         type: "[]coreconsensus.MemberValue"
     kind: struct
     methods:
-      - doc: add adds every member of m not added yet, the zero key left out.
+      - doc: |-
+          add adds every member of m not met yet, unless its record carries the
+          zero key; either way the member is met, and an older record of it is
+          never taken.
         name: add
         params: m *coreconsensus.MembershipValue
         recv: p *peerSet
