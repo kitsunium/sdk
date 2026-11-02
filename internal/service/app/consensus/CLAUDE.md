@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T18:00:00Z -->
+<!-- updated: 2026-11-02T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -425,7 +425,11 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   raft's `feedSilence` and `lowerSilence`). Nor once a restart on the
   leader's snapshot raised that point past the leader's no-op: the
   transfer that covers it feeds the node once more (#795, raft's
-  `SnapshotDone`).
+  `SnapshotDone`). Nor once a restart on its own cut over the no-op did,
+  which no transfer shows: from protocol 4 its heartbeat answer carries the
+  point, and the leader feeds a point past its log once (#795, raft's
+  `reportedPoint`); a pair that does not both speak 4 stays silent until a
+  write or a leadership transfer, ADR 0152's stated residual.
 - End a silence on disk before the entries that meet its condition are: raft
   judged it on the append's entries, in memory, and said so in the same
   Ready, and `endSilence` removed SILENT on the loop before the storage
@@ -921,6 +925,9 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   payload and the snapshot meta of version 3, which carry the retired keys,
   and `Recover`'s forced entry of version 3 (#648, raft's
   `checkNothingNewBelowProtocol3` and `TestAMixedClusterRaisesTo3OnceEveryMemberSpeaksIt`).
+  Protocol 4 writes nothing persisted: its one change, a silent node's
+  point in its heartbeat answer, is chosen by the peer's announcement, as
+  #542's leader record is (#795).
 - Commit an administrative entry with an origin the forwarder wrote, or
   append one as leader without a Warn naming its origin (#561,
   `TestAForwardedRemoveRecordsTheFollowerAsItsOrigin`, raft's

@@ -1358,6 +1358,20 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.FlagProtocol4",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "FlagProtocol4",
+      "spelled": "coreconsensus.MessageFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
+      "value": "64",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol4",
+      "doc": "The read modes and durabilities.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.FlagTransfer",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",

@@ -335,6 +335,15 @@ The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol3`.
 
+<a name="FlagProtocol4"></a>
+```go
+const FlagProtocol4 coreconsensus.MessageFlags = 64
+```
+
+The read modes and durabilities.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol4`.
+
 <a name="FlagTransfer"></a>
 ```go
 const FlagTransfer coreconsensus.MessageFlags = 1
@@ -2993,7 +3002,10 @@ type MessageValue struct {
 	// Term is the sender's term.
 	Term           uint64
 	// LogTerm is the term of the entry at Index: the previous entry of an
-	// append, the last entry of a vote request.
+	// append, the last entry of a vote request. In a silent node's answer
+	// to a heartbeat that announces protocol 4, it is the node's
+	// truncation point instead: the layout is frozen, and no heartbeat
+	// answer used the slot.
 	LogTerm        uint64
 	// Index is the previous index of an append, the last index of a vote
 	// request, the verified prefix of an acknowledgement, a read index.

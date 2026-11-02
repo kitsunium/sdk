@@ -22,6 +22,9 @@ const (
 	// peerProtocol3 is set while the peer's last message of the term
 	// carried FlagProtocol3.
 	peerProtocol3
+	// peerProtocol4 is set while the peer's last message of the term
+	// carried FlagProtocol4.
+	peerProtocol4
 	// peerSilent is set while the peer's last answer, to an append or a
 	// heartbeat, said it is silent (FlagTruncated, #636): it answers, but
 	// acknowledges no append, so it counts for no change that must commit
@@ -73,20 +76,25 @@ type progress struct {
 	// over which a restart of the peer raises its truncation point past
 	// that no-op (SnapshotDone, #795).
 	silentFed uint64
+	// fedPoint is the truncation point the peer's answer reported when
+	// that no-op was appended, 0 when it reported none (protocol 4,
+	// #795): read only while silentFed is set, it is fed once.
+	fedPoint uint64
 }
 
 // noteSilence records whether the peer's answer says it is silent: a silent
 // node marks its every refusal and heartbeat answer with FlagTruncated, and
 // sends no acknowledgement (#636). An answer without it, an
 // acknowledgement above all, is from a node that is not silent, or no
-// longer, and clears the no-op fed for its silence too (#787).
+// longer, and clears the no-op fed for its silence too, with the point it
+// was fed for (#787, #795).
 func (p *progress) noteSilence(flags core.MessageFlags) {
 	if flags&core.FlagTruncated != 0 {
 		p.facts |= peerSilent
 		return
 	}
 	p.facts &^= peerSilent
-	p.silentFed = 0
+	p.silentFed, p.fedPoint = 0, 0
 }
 
 // becomeProbe restarts the peer at one append at a time from its match. Out

@@ -419,7 +419,7 @@ func (r *Raft) followHeartbeat(now time.Time, m core.MessageValue) {
 		Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract(),
 		Index: r.heldOfTerm(),
 	}
-	r.reportSilence(&resp)
+	r.reportSilence(&resp, m.Flags)
 	r.send(resp)
 	if r.cfg.NoTable {
 		// A node with no table asks for a snapshot on every heartbeat, as
@@ -458,13 +458,25 @@ func (r *Raft) heldOfTerm() uint64 {
 // which needs the commit of a leader of its own term to vote again, never
 // got past that batch. A leader of a release that does not read them
 // ignores the flag and both fields on a heartbeat answer.
-func (r *Raft) reportSilence(m *core.MessageValue) {
+//
+// From protocol 4 the answer to a heartbeat that announces it carries the
+// truncation point in LogTerm: a node restarted past the leader's whole
+// log, its point raised over a snapshot that covers the no-op the leader
+// fed it, answers otherwise as an unreadable condition does, and was fed
+// nothing more (#795). It is reported only under a term at least
+// SilentTerm, the leader whose appends may end the silence: never for an
+// unreadable condition, which no term reaches. A heartbeat that does not
+// announce 4 is a leader that does not read it, and the slot stays 0.
+func (r *Raft) reportSilence(m *core.MessageValue, heard core.MessageFlags) {
 	if r.cfg.SilentIndex == 0 {
 		return
 	}
 	m.Flags |= core.FlagTruncated
 	m.RejectHint = min(r.log.lastIndex(), r.log.stable)
 	m.Commit = r.log.committed
+	if r.speaks() >= Protocol4 && heard&core.FlagProtocol4 != 0 && r.term >= r.cfg.SilentTerm {
+		m.LogTerm = r.cfg.SilentIndex
+	}
 }
 
 // reportedContract is the contract generation a heartbeat answer reports:

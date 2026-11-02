@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T18:00:00Z -->
+<!-- updated: 2026-11-02T12:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -179,10 +179,14 @@ under coverage before touching `shard_count`.
   `checkMembershipPublishedOnChange`).
 - Raise the cluster version to 2 while a member of the latest
   configuration was not heard in the term announcing it (FlagProtocol2), or
-  to 3 while one was not heard announcing FlagProtocol3, or apply a raise
-  above the version this node speaks: D18 refuses the raise while any
-  member does not speak it (lot S3, #648, `mutRaiseUnannounced`,
-  `checkRaise3Announced`). A node of protocol 3 announces both flags. Nor
+  to 3 while one was not heard announcing FlagProtocol3, or to 4 while one
+  was not heard announcing FlagProtocol4, or apply a raise above the
+  version this node speaks: D18 refuses the raise while any member does
+  not speak it (lot S3, #648, #795, `mutRaiseUnannounced`,
+  `checkRaise3Announced`, `TestARaiseTo4WaitsForEveryMemberToAnnounceIt`).
+  A node of protocol 3 announces both flags, one of protocol 4 all three;
+  `checkAnnounced` takes the facts `announced(announcementOf(v))` derives,
+  one source for the flags, and stays within its inlining budget. Nor
   raise while a member was last heard a vote window ago or more, whatever
   it announced: a voter that announced 3 once and went down was rolled
   back meanwhile, and met the raise only as a snapshot it could not read
@@ -380,15 +384,27 @@ under coverage before touching `shard_count`.
   `silentFed` when the snapshot installed is at or past it, so the next
   silent answer that reports the whole log is fed one more no-op. Each
   further no-op needs a whole state's transfer, and an unreadable
-  condition is still fed once a term in a quiet cluster. A snapshot the
-  node cut itself over the no-op is not seen: restarted on it before its
-  end is durable, it reports what an unreadable condition reports, and
-  only its point on the wire would tell them apart (ADR 0152's #795
-  amendment)
+  condition is still fed once a term in a quiet cluster
   (`TestASilentNodeRestartedOnAnInstalledSnapshotEndsItsSilenceInAQuietCluster`,
   `TestATransferFeedsASilenceNoTermEndsOnceMore`,
   `TestOnlyATransferOverTheNoOpFeedsTheSilentPeerAgain`; no mutation, the
-  type is full). Nor keep a silent node's
+  type is full). Nor leave a node restarted on its own cut over the no-op,
+  before its end reached its disk, with no word of its point: it answers
+  as an unreadable condition does, and no transfer re-arms the feed (the
+  pass-80 comment). From protocol 4 its answer to a heartbeat that
+  announces 4 carries its point in `LogTerm` (`reportSilence`), under a
+  term at least `SilentTerm` only, so never for an unreadable condition,
+  and the leader feeds a point past its last index one more no-op, once
+  per point (`reportedPoint`, `progress.fedPoint`); the point is chosen by
+  the peer's announcement, never by the cluster version, and a pair that
+  does not both speak 4 keeps the feed above (ADR 0152's amendment of
+  2026-11-02,
+  `TestASilentNodeRestartedOnItsOwnCutOverTheNoOpEndsItsSilenceInAQuietCluster`,
+  `TestTheLeaderFeedsASilentPeerOncePerPointItReportsPastTheLog`,
+  `TestAnUnreadableConditionRestartedOnItsCutIsFedNoMore`,
+  `TestASilentPeerOfProtocol3ReportsNoPointToALeaderOfProtocol4`,
+  `TestALeaderOfProtocol3IsReportedNoPoint`; no mutation, the type is
+  full). Nor keep a silent node's
   truncation point above a conflict an append of a leader of a term at
   least `SilentTerm` finds below it: no entry the node held from there on
   ever counted towards a commit (Leader Completeness, Log Matching), and

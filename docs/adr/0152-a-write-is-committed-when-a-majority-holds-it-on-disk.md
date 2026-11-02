@@ -6730,7 +6730,9 @@ elected no one
   ending that
   residual needs a bound that feeds such a condition more than once a
   term, the point on the wire under the protocol rule, or the start told
-  which snapshot it raises over: a decision.
+  which snapshot it raises over: a decision (taken on 2026-11-01, options
+  (iv) then (ii): see the amendment of 2026-11-02, under which the frame
+  carries the point from protocol 4).
 - **No format change.** No frame, field, flag or record changes, nothing
   persisted, no protocol raise, and no raft mutation: the type is full.
 - **Tests.** `TestASilentNodeRestartedOnAnInstalledSnapshotEndsItsSilenceInAQuietCluster`
@@ -6903,8 +6905,75 @@ option (ii):
     silent in a quiet cluster (`SILENT` on its disk, no log line saying
     its condition met) is ended by one write, or by moving the
     leadership.
-- No frame, field, flag or record changes, nothing persisted, no
-  protocol raise and no raft mutation.
+- **(ii) The point on the wire, under protocol 4.**
+  - **What the frame carries.** A silent node's answer to a heartbeat
+    carries its truncation point in `LogTerm`, a slot no heartbeat
+    answer used: the frame's layout is frozen (D18). The leader appends
+    one more no-op of its term for the node when that point lies past its
+    last index, the node reports the whole log committed, no leadership
+    transfer is under way, and the point is not the one it last fed for
+    (`progress.fedPoint`). The no-op is one past the last index, so it
+    reaches any point a raise sets, the index after a committed snapshot,
+    and its conflict lowers a point past it over an older term's tail
+    (#787's `lowerSilence`).
+  - **The version rule, applied as protocols 2 and 3 applied it.**
+    `ProtocolMax` is 4. A node of protocol 4 sets `FlagProtocol4` on
+    every frame, beside `FlagProtocol2` and `FlagProtocol3`; a node of
+    protocol 3 or below tests the bits it names only, and ignores it. The
+    leader keeps, per member, whether its last message of the term
+    carried it, and `RaiseClusterVersion(4)` is refused
+    `VERSION_UNSUPPORTED` while a member of the latest configuration was
+    not heard in the term announcing it, or was last heard a vote window
+    ago (`checkAnnounced`, `checkHeard`). The point is consumed by its
+    receiver alone, so, as #542's leader record, it is chosen by the
+    peer's announcement and never by the committed cluster version: the
+    node writes it only in its answer to a heartbeat that announces 4,
+    and the leader reads it only from an answer that announces 4, and
+    only when it speaks 4 itself. Gated on the raise, it would wait for
+    an operator's point of no return that nothing else needs.
+  - **What protocol 4 writes.** Nothing persisted or replicated: no
+    entry, payload, snapshot metadata or record changes, and a cluster at
+    version 4 writes what one at 3 writes. The raise to 4 is admitted as
+    any raise to a version every member speaks, and is a point of no
+    return as the others are: a node of protocol 3 stops on the raise's
+    entry and on a snapshot of cluster version 4 (#640). A product has no
+    reason to make it before a later protocol needs it.
+  - **Mixed cluster.** A pair that does not both speak 4 keeps today's
+    behaviour. A node of protocol 3 sends no point; a leader of protocol
+    3 announces no 4, so it is sent none, and would read none. The leader
+    then feeds one no-op per silence and per term, and once more per
+    transfer that covers it (#795's first fix), and (iv)'s residual holds
+    for that pair only, with the same way out.
+  - **The bound.** A node reports its point only under a leader of a
+    term at least its `SilentTerm`, whose appends alone may end its
+    silence (R3-09): an unreadable condition, whose term no leader
+    reaches, never reports one, and keeps its one no-op a term. The
+    leader feeds at most once per point reported, and only while the
+    node reports the whole log committed, so one such no-op at most is in
+    flight to a peer. A point changes only at the node's start, the raise
+    or the point it persisted, or by a lowering, which never raises it: a
+    new point past the leader's log takes a restart of the node, or an
+    install that lowers its point, never an append alone, so the leader
+    never loops.
+  - One flag and one slot of the frozen frame, under protocol 4; nothing
+    persisted; no raft mutation, the type being full: tests cover the
+    regression.
+- **Tests.** `TestASilentNodeRestartedOnItsOwnCutOverTheNoOpEndsItsSilenceInAQuietCluster`
+  (raft, the pass-80 order on the step functions; on main the node
+  restarts at 2/13 over the leader's log ending at 12 and stays silent
+  through 30 s of a quiet cluster; fixed, the leader's no-op at 13 ends
+  the silence, and with the leader down the two others elect one),
+  `TestTheLeaderFeedsASilentPeerOncePerPointItReportsPastTheLog` (the
+  bound; on main a point past the log feeds nothing),
+  `TestAnUnreadableConditionRestartedOnItsCutIsFedNoMore`, the mixed
+  cluster both ways, each residual ended by one write
+  (`TestASilentPeerOfProtocol3ReportsNoPointToALeaderOfProtocol4`,
+  `TestALeaderOfProtocol3IsReportedNoPoint`),
+  `TestALeaderOfProtocol3ReadsNoPoint`, `TestEveryMessageAnnouncesProtocol4`
+  and `TestARaiseTo4WaitsForEveryMemberToAnnounceIt`.
+  `TestTheLeaderAppendsOneNoOpPerSilence` is unchanged and green, as are
+  the tests of #636, #684, #766, #787, #790, #792, #793 and #795's first
+  fix.
 
 ## Revision history
 
@@ -6960,6 +7029,7 @@ option (ii):
 | #773 (c) | the owner's decision, 2026-11-01 | a `DenyPin` that leaves a stopped voter no voucher is admitted, and said: `Raft.Isolated` names, by #603's own judgement, every voter the leader may never reach again and the withdrawn pin that leaves it so; the health's `PeerStranded` and `PeerPinDenied`, the audit line's `isolated`, and the `why` and `isolated` of a refusal the guard decides; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #773) |
 | #765 (b) | the owner's decision, 2026-11-01 | #603's guard keeps its two bets on the leader, the leader counted at any address and the compacted log's bet that a voter listed after it knows it as a voter, and says when a stopped voter's reach rests on one: `IsolationLeaderMoved` and `IsolationLeaderUnconfirmed` in `Raft.Isolated`, the health's `PeerLeaderMoved` and `PeerLeaderUnconfirmed`, the audit line's `isolated` for the leader's own move, a removal, a move and a transfer, and a Warn line for a hand-over with no entry; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #765) |
 | #795 (iv) | the owner's decision, 2026-11-01 | the residual #795's first fix left, a silent node restarted on its own cut over the no-op fed for its silence before the end reached its disk, its point raised past the leader's whole log, is stated with its trigger, its cost and the operator's way out, one write or a leadership transfer; no format change (amendment of 2026-11-02, #795) |
+| #795 (ii) | the owner's decision, 2026-11-01 | protocol version 4: a silent node's answer to a heartbeat that announces 4 carries its truncation point in `LogTerm`, and the leader feeds a point past its last index one more no-op, once per point, so a node restarted on its own cut over the no-op ends its silence in a quiet cluster; `FlagProtocol4` announced on every frame, the raise to 4 refused until every member announces it and answers, the point chosen by the peer's announcement, never by the cluster version, a pair that does not both speak 4 keeping today's feed; nothing persisted, no raft mutation (amendment of 2026-11-02, #795) |
 
 ## raft-sql-poc (owner's prior Raft)
 

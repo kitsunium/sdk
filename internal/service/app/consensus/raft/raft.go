@@ -41,8 +41,10 @@ const (
 // Version 2 adds the snapshot metadata's checksum, the admin payload's
 // Origin and the log identity's AdoptedFrom, each written only once the
 // committed cluster version is 2 (lot S3). Version 3 adds the retired keys
-// of the configuration, written only once it is 3 (#648).
-const ProtocolMax uint32 = 3
+// of the configuration, written only once it is 3 (#648). Version 4 adds
+// a silent node's truncation point to its heartbeat answer, chosen by the
+// leader's announcement, never by the cluster version (#795).
+const ProtocolMax uint32 = 4
 
 // Protocol2 is the protocol version whose formats a node writes once the
 // cluster version is raised to it.
@@ -52,6 +54,11 @@ const Protocol2 uint32 = 2
 // key of every member removed, and of every pin denied, and refuses it to
 // any new member (#648).
 const Protocol3 uint32 = 3
+
+// Protocol4 is the protocol version from which a silent node reports its
+// truncation point to a leader that announces it, and that leader feeds
+// it again while the point lies past its log (#795).
+const Protocol4 uint32 = 4
 
 // raftFacts are the step function's own yes/no state, one bit each.
 type raftFacts uint8

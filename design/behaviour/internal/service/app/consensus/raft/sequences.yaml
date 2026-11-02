@@ -604,7 +604,7 @@ sequences:
         set: pr.facts
         value: peerHeard
       - set: pr.facts
-        value: pr.facts&^(peerProtocol2|peerProtocol3) | announced(m.Flags)
+        value: pr.facts&^(peerProtocol2|peerProtocol3|peerProtocol4) | announced(m.Flags)
       - switch:
           cases:
             - case: core.MsgAppResp
@@ -674,19 +674,35 @@ sequences:
         kind: actor
       - id: (*Raft).feedSilence
         kind: self
+      - id: r.reportedPoint
+        kind: internal
       - id: r.broadcastAppend
         kind: internal
     steps:
       - opt:
           do:
             - return: ""
-          when: pr.silentFed != 0 || m.Commit < r.log.lastIndex() || r.transferTo != 0
+          when: m.Commit < r.log.lastIndex() || r.transferTo != 0
+      - bind: point
+        eval: r.reportedPoint(&m)
+        to: r.reportedPoint
+      - opt:
+          do:
+            - return: ""
+          when: pr.silentFed != 0 && (point <= r.log.lastIndex() || point == pr.fedPoint)
       - bind: noop
         eval: "core.EntryValue{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}"
-      - set: pr.silentFed
-        value: r.appendAsLeader([]core.EntryValue{noop})[0].Index
+      - set: pr.silentFed, pr.fedPoint
+        value: r.appendAsLeader([]core.EntryValue{noop})[0].Index, point
       - eval: r.broadcastAppend(false)
         to: r.broadcastAppend
+  - of: (*Raft).reportedPoint
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: r.speaks() < Protocol4 || m.Flags&core.FlagProtocol4 == 0
+      - return: m.LogTerm
   - of: (*Raft).watchWindow
     participants:
       - id: caller
@@ -1190,7 +1206,7 @@ sequences:
             - return: code
           init:
             bind: code
-            eval: r.checkAnnounced(admin.ClusterVersion)
+            eval: r.checkAnnounced(announced(announcementOf(admin.ClusterVersion)))
             to: r.checkAnnounced
           when: code != 0
       - return: r.checkHeard(admin.ClusterVersion)
@@ -1212,6 +1228,12 @@ sequences:
               set: f
               value: core.FlagProtocol3
           when: v >= Protocol3
+      - opt:
+          do:
+            - op: "|="
+              set: f
+              value: core.FlagProtocol4
+          when: v >= Protocol4
       - return: f
   - of: (*Raft).announces
     participants:
@@ -1241,6 +1263,12 @@ sequences:
               set: f
               value: peerProtocol3
           when: flags&core.FlagProtocol3 != 0
+      - opt:
+          do:
+            - op: "|="
+              set: f
+              value: peerProtocol4
+          when: flags&core.FlagProtocol4 != 0
       - return: f
   - of: (*Raft).checkNoSpaceClear
     steps:
@@ -3284,8 +3312,8 @@ sequences:
       - op: "&^="
         set: p.facts
         value: peerSilent
-      - set: p.silentFed
-        value: "0"
+      - set: p.silentFed, p.fedPoint
+        value: 0, 0
   - of: (*progress).becomeProbe
     participants:
       - id: caller
@@ -5514,7 +5542,7 @@ sequences:
           		Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract(),
           		Index: r.heldOfTerm(),
           	}
-      - eval: r.reportSilence(&resp)
+      - eval: r.reportSilence(&resp, m.Flags)
         to: r.reportSilence
       - eval: r.send(resp)
         to: r.send
@@ -5563,6 +5591,11 @@ sequences:
         value: min(r.log.lastIndex(), r.log.stable)
       - set: m.Commit
         value: r.log.committed
+      - opt:
+          do:
+            - set: m.LogTerm
+              value: r.cfg.SilentIndex
+          when: r.speaks() >= Protocol4 && heard&core.FlagProtocol4 != 0 && r.term >= r.cfg.SilentTerm
   - of: (*Raft).reportedContract
     steps:
       - opt:

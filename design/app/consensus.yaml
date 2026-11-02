@@ -431,6 +431,17 @@ packages:
         name: FlagProtocol3
         type: MessageFlags
         value: "32"
+      - blockDoc: The flags.
+        doc: |-
+          FlagProtocol4 marks a frame from a node that speaks protocol version
+          4, which sets FlagProtocol2 and FlagProtocol3 beside it. A node of
+          protocol 3 or below tests the bits it names only and ignores it, and
+          a leader refuses to raise the cluster version to 4 while a member's
+          last frame of the term lacks it. A silent node of protocol 4 reports
+          its truncation point in its answer to a heartbeat that announces 4.
+        name: FlagProtocol4
+        type: MessageFlags
+        value: "64"
       - blockDoc: The states of a stamp.
         doc: |-
           StampJoining is a directory Init prepared: it may join as an empty
@@ -1683,7 +1694,10 @@ packages:
               type: uint64
             - doc: |-
                 LogTerm is the term of the entry at Index: the previous entry of an
-                append, the last entry of a vote request.
+                append, the last entry of a vote request. In a silent node's answer
+                to a heartbeat that announces protocol 4, it is the node's
+                truncation point instead: the layout is frozen, and no heartbeat
+                answer used the slot.
               name: LogTerm
               type: uint64
             - doc: |-
@@ -3894,10 +3908,12 @@ packages:
           Version 2 adds the snapshot metadata's checksum, the admin payload's
           Origin and the log identity's AdoptedFrom, each written only once the
           committed cluster version is 2 (lot S3). Version 3 adds the retired keys
-          of the configuration, written only once it is 3 (#648).
+          of the configuration, written only once it is 3 (#648). Version 4 adds
+          a silent node's truncation point to its heartbeat answer, chosen by the
+          leader's announcement, never by the cluster version (#795).
         name: ProtocolMax
         type: uint32
-        value: "3"
+        value: "4"
       - doc: |-
           Protocol2 is the protocol version whose formats a node writes once the
           cluster version is raised to it.
@@ -3911,6 +3927,13 @@ packages:
         name: Protocol3
         type: uint32
         value: "3"
+      - doc: |-
+          Protocol4 is the protocol version from which a silent node reports its
+          truncation point to a leader that announces it, and that leader feeds
+          it again while the point lies past its log (#795).
+        name: Protocol4
+        type: uint32
+        value: "4"
     doc: |-
       Package raft is the consensus engine's step function (ADR 0152 D15): a
       value with no goroutine, no I/O and no clock. Every decision of the
@@ -5578,6 +5601,10 @@ packages:
             reexport: coreconsensus.FlagProtocol3
             type: coreconsensus.MessageFlags
             value: "32"
+          - name: FlagProtocol4
+            reexport: coreconsensus.FlagProtocol4
+            type: coreconsensus.MessageFlags
+            value: "64"
           - name: MsgForward
             reexport: coreconsensus.MsgForward
             type: coreconsensus.MessageKind

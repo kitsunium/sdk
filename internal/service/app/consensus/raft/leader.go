@@ -332,7 +332,7 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	pr.facts |= peerHeard
 	// The announcement follows the peer's last message: a member rolled
 	// back to a previous release stops carrying it at once.
-	pr.facts = pr.facts&^(peerProtocol2|peerProtocol3) | announced(m.Flags)
+	pr.facts = pr.facts&^(peerProtocol2|peerProtocol3|peerProtocol4) | announced(m.Flags)
 	switch m.Kind {
 	case core.MsgAppResp:
 		pr.noteSilence(m.Flags)
@@ -410,18 +410,44 @@ func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 // which is committed, so the next no-op, one past the whole log the node
 // reports holding, is past it. Each further no-op needs a transfer that
 // carries the whole state, never a no-op alone, so an unreadable
-// condition is still fed once a term in a cluster that wrote nothing. A
-// snapshot the node cut itself is not seen: restarted on one over the
-// no-op before its silence's end was durable, it answers as an unreadable
-// condition does, and only its point, which no frame carries, would tell
-// the two apart.
+// condition is still fed once a term in a cluster that wrote nothing.
+//
+// A snapshot the node cut itself is seen by no transfer: restarted on one
+// over the no-op before the end of its silence reached its disk, it came
+// back past this leader's whole log, its answers those of an unreadable
+// condition (#795, the pass-80 comment). From protocol 4 its heartbeat
+// answer carries its truncation point (reportedPoint), and the peer is fed
+// again for a point past the last index, once per point (fedPoint). The
+// no-op is one past that index, so it reaches any point a raise sets, the
+// index after a committed snapshot, and its conflict lowers a point past
+// it over an older term's tail (lowerSilence). A point changes only at the
+// peer's start, or by a lowering, which never raises it, so the feed stays
+// bounded by the peer's restarts; and a node reports it only under a term
+// at least its own SilentTerm (reportSilence), so an unreadable condition,
+// which no term ends, is never fed for it.
 func (r *Raft) feedSilence(pr *progress, m core.MessageValue) {
-	if pr.silentFed != 0 || m.Commit < r.log.lastIndex() || r.transferTo != 0 {
+	if m.Commit < r.log.lastIndex() || r.transferTo != 0 {
+		return
+	}
+	point := r.reportedPoint(&m)
+	if pr.silentFed != 0 && (point <= r.log.lastIndex() || point == pr.fedPoint) {
 		return
 	}
 	noop := core.EntryValue{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}
-	pr.silentFed = r.appendAsLeader([]core.EntryValue{noop})[0].Index
+	pr.silentFed, pr.fedPoint = r.appendAsLeader([]core.EntryValue{noop})[0].Index, point
 	r.broadcastAppend(false)
+}
+
+// reportedPoint is the truncation point a silent peer's heartbeat answer
+// carries, 0 when it carries none: the point rides in LogTerm from protocol
+// 4, read only when this leader speaks it and the answer announces it. A
+// peer of protocol 3 or below neither sends nor reads it, and keeps one
+// no-op per silence and per covering transfer (#795).
+func (r *Raft) reportedPoint(m *core.MessageValue) uint64 {
+	if r.speaks() < Protocol4 || m.Flags&core.FlagProtocol4 == 0 {
+		return 0
+	}
+	return m.LogTerm
 }
 
 // watchWindow probes a replicating peer whose window did not move since its
@@ -801,25 +827,26 @@ func (r *Raft) checkClusterVersion(admin *wire.AdminValue) errs.Code {
 	if r.mutated(mutRaiseUnannounced) {
 		return 0
 	}
-	if code := r.checkAnnounced(admin.ClusterVersion); code != 0 {
+	if code := r.checkAnnounced(announced(announcementOf(admin.ClusterVersion))); code != 0 {
 		return code
 	}
 	return r.checkHeard(admin.ClusterVersion)
 }
 
-// checkAnnounced refuses a raise to v while a member of the latest
-// configuration, voter or learner, was not heard in this term announcing
-// it: the operation is refused while any member does not speak the version
-// (D18). A member of a previous release would stop on the raise, and on
-// every format written after it. A node of protocol 3 announces 2 as well.
-func (r *Raft) checkAnnounced(v uint32) errs.Code {
-	if v < Protocol2 {
+// checkAnnounced refuses a raise to a version v while a member of the
+// latest configuration, voter or learner, was not heard in this term
+// announcing it: the operation is refused while any member does not speak
+// the version (D18). A member of a previous release would stop on the
+// raise, and on every format written after it. want is what a node of v
+// announces, as facts (announced(announcementOf(v))): a node of protocol 3
+// announces 2 as well, one of protocol 4 announces 2 and 3, and below 2
+// there is nothing to wait for. The caller derives it, so the flags have
+// one source and this check stays within its inlining budget.
+func (r *Raft) checkAnnounced(want peerFacts) errs.Code {
+	if want == 0 {
 		return 0
 	}
-	want := peerHeard | peerProtocol2
-	if v >= Protocol3 {
-		want |= peerProtocol3
-	}
+	want |= peerHeard
 	for _, m := range r.conf().Members {
 		if pr := r.prs[m.ID]; pr == nil || pr.facts&want != want {
 			return codeVersion
@@ -851,8 +878,8 @@ func (r *Raft) checkHeard(v uint32) errs.Code {
 }
 
 // announcementOf is the announcement every frame of a node speaking
-// protocol version v carries: FlagProtocol2 from 2, and FlagProtocol3 beside
-// it from 3 (D18, #648).
+// protocol version v carries: FlagProtocol2 from 2, FlagProtocol3 beside it
+// from 3, and FlagProtocol4 beside both from 4 (D18, #648, #795).
 func announcementOf(v uint32) core.MessageFlags {
 	var f core.MessageFlags
 	if v >= Protocol2 {
@@ -860,6 +887,9 @@ func announcementOf(v uint32) core.MessageFlags {
 	}
 	if v >= Protocol3 {
 		f |= core.FlagProtocol3
+	}
+	if v >= Protocol4 {
+		f |= core.FlagProtocol4
 	}
 	return f
 }
@@ -878,6 +908,9 @@ func announced(flags core.MessageFlags) peerFacts {
 	}
 	if flags&core.FlagProtocol3 != 0 {
 		f |= peerProtocol3
+	}
+	if flags&core.FlagProtocol4 != 0 {
+		f |= peerProtocol4
 	}
 	return f
 }
