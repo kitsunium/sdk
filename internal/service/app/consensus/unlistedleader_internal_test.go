@@ -125,7 +125,7 @@ func TestTheSilentFounderRejoinsALeaderAdmittedWhileItWasDown(t *testing.T) {
 	if _, err := NewNode(cfg(victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("damaged log: %v", err)
 	}
-	if err := ClearQuarantine(victim.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(context.Background(), victim.dd, TruncateAndStaySilent, "op:silent", askingAnswer(d.node.Membership())); err != nil {
 		t.Fatal(err)
 	}
 	silent := func() bool {

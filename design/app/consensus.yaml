@@ -2464,6 +2464,8 @@ packages:
       - doc: |-
           ClearQuarantine clears a quarantined, or stopped, directory through one of
           the two exits. There is no third exit that keeps the damaged node voting.
+          It gives TruncateAndStaySilent no means to ask a live member, so on a
+          member's directory that exit is refused: ClearQuarantineWith takes them.
         in:
           - name: d
             type: DataDir
@@ -2472,6 +2474,29 @@ packages:
           - name: op
             type: coreconsensus.Operator
         name: ClearQuarantine
+        out:
+          - type: error
+      - doc: |-
+          ClearQuarantineWith is ClearQuarantine with opt's means to read, from a
+          live member, the configuration the cluster runs with. A member's
+          TruncateAndStaySilent asks every other member its log names, takes the
+          newest configuration answered, and is refused, before anything is
+          written, when no member answers, when that configuration no longer lists
+          this node, or when it lists none of the members the truncation keeps:
+          the node would restart silent, asking and admitting only members that
+          have left, and never vote again (#763). ctx bounds the asking.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: d
+            type: DataDir
+          - name: exit
+            type: QuarantineExit
+          - name: op
+            type: coreconsensus.Operator
+          - name: opt
+            type: "*QuarantineOptions"
+        name: ClearQuarantineWith
         out:
           - type: error
       - doc: ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
@@ -3214,6 +3239,21 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
+              AskMembership reads, from member m, the configuration it runs with, as
+              the TCP transport does (#763): m is reached when the link is up both
+              ways, authenticated under the key the memory transport gives it, and
+              answers only a node it admits, while a node runs bound to its transport.
+            in:
+              - name: _
+                type: context.Context
+              - name: m
+                type: coreconsensus.MemberValue
+            name: AskMembership
+            out:
+              - type: coreconsensus.MembershipValue
+              - type: error
+            recv: pointer
+          - doc: |-
               Close stops delivery; a later Bind starts it again, as a restarted node
               does.
             name: Close
@@ -3528,6 +3568,21 @@ packages:
         name: QuarantineExit
         underlying: uint8
       - doc: |-
+          QuarantineOptions are what a member's TruncateAndStaySilent needs beyond
+          ClearQuarantine's arguments: the means to read the configuration the
+          cluster runs with from a live member (#763).
+        name: QuarantineOptions
+        struct:
+          fields:
+            - doc: |-
+                Ask reads, from member m, the configuration it runs with, and fails
+                when m does not answer. It reaches m at the address, and authenticates
+                it under the key, that the node's own log names for it: a
+                TCPTransport's AskMembership, built with this node's own certificate,
+                or a MemoryTransport's in tests.
+              name: Ask
+              type: func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+      - doc: |-
           RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
           Recover refuses, before it writes anything, an invalid operator, a
           confirmation that does not name the new cluster, no witness key, an old
@@ -3775,6 +3830,25 @@ packages:
             name: Join
             out:
               - type: coreconsensus.PositionValue
+              - type: error
+            recv: pointer
+          - doc: |-
+              AskMembership reads, from member m, the configuration it runs with
+              (#763): the connection is dialled to m's address, the handshake must
+              present m's pinned key on a certificate of this cluster naming m's slot,
+              and the answer must list m under that key. m answers only a node its
+              membership admits, under the certificate this transport presents: built
+              with a member's own, it is what that member's TruncateAndStaySilent asks
+              through (QuarantineOptions.Ask). A member that predates the lane ends the
+              connection unanswered.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: m
+                type: coreconsensus.MemberValue
+            name: AskMembership
+            out:
+              - type: coreconsensus.MembershipValue
               - type: error
             recv: pointer
           - doc: |-
@@ -5180,6 +5254,8 @@ packages:
             target: svcconsensus.ReportValue
           - name: QuarantineExit
             target: svcconsensus.QuarantineExit
+          - name: QuarantineOptions
+            target: svcconsensus.QuarantineOptions
           - name: RecoverOptions
             target: svcconsensus.RecoverOptions
           - name: RestoreOptions
@@ -5263,7 +5339,8 @@ packages:
       - func:
           doc: |-
             ClearQuarantine clears a quarantined or stopped directory by one of its
-            two exits.
+            two exits. On a member's directory TruncateAndStaySilent is refused:
+            it needs ClearQuarantineWith's means to ask a live member.
           forward: svcconsensus.ClearQuarantine
           in:
             - name: d
@@ -5273,6 +5350,28 @@ packages:
             - name: op
               type: Operator
           name: ClearQuarantine
+          out:
+            - type: error
+      - func:
+          doc: |-
+            ClearQuarantineWith is ClearQuarantine with the means to read the
+            cluster's configuration from a live member, which a member's
+            TruncateAndStaySilent needs: it is refused when no member answers, or
+            when that configuration no longer lists the node or lists none of the
+            members the truncation keeps.
+          forward: svcconsensus.ClearQuarantineWith
+          in:
+            - name: ctx
+              type: context.Context
+            - name: d
+              type: DataDir
+            - name: exit
+              type: QuarantineExit
+            - name: op
+              type: Operator
+            - name: opt
+              type: "*QuarantineOptions"
+          name: ClearQuarantineWith
           out:
             - type: error
       - func:

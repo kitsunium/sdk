@@ -50628,7 +50628,19 @@
       "name": "ClearQuarantine",
       "spelled": "func(d DataDir, exit QuarantineExit, op coreconsensus.Operator) error",
       "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, exit github.com/kitsunium/sdk/internal/service/app/consensus.QuarantineExit, op github.com/kitsunium/sdk/internal/core/app/consensus.Operator) error",
-      "doc": "ClearQuarantine clears a quarantined, or stopped, directory through one of\nthe two exits. There is no third exit that keeps the damaged node voting.\n",
+      "doc": "ClearQuarantine clears a quarantined, or stopped, directory through one of\nthe two exits. There is no third exit that keeps the damaged node voting.\nIt gives TruncateAndStaySilent no means to ask a live member, so on a\nmember's directory that exit is refused: ClearQuarantineWith takes them.\n",
+      "file": "service/app/consensus/offline.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.ClearQuarantineWith",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "ClearQuarantineWith",
+      "spelled": "func(ctx context.Context, d DataDir, exit QuarantineExit, op coreconsensus.Operator, opt *QuarantineOptions) error",
+      "canonical": "func(ctx context.Context, d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, exit github.com/kitsunium/sdk/internal/service/app/consensus.QuarantineExit, op github.com/kitsunium/sdk/internal/core/app/consensus.Operator, opt *github.com/kitsunium/sdk/internal/service/app/consensus.QuarantineOptions) error",
+      "doc": "ClearQuarantineWith is ClearQuarantine with opt's means to read, from a\nlive member, the configuration the cluster runs with. A member's\nTruncateAndStaySilent asks every other member its log names, takes the\nnewest configuration answered, and is refused, before anything is\nwritten, when no member answers, when that configuration no longer lists\nthis node, or when it lists none of the members the truncation keeps:\nthe node would restart silent, asking and admitting only members that\nhave left, and never vote again (#763). ctx bounds the asking.\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
       "family": "app"
@@ -51562,6 +51574,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*MemoryTransport).AskMembership",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "AskMembership",
+      "recv": "MemoryTransport",
+      "spelled": "func(_ context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)",
+      "canonical": "func(_ context.Context, m github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue) (github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue, error)",
+      "doc": "AskMembership reads, from member m, the configuration it runs with, as\nthe TCP transport does (#763): m is reached when the link is up both\nways, authenticated under the key the memory transport gives it, and\nanswers only a node it admits, while a node runs bound to its transport.\n",
+      "file": "service/app/consensus/memtransport.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*MemoryTransport).Bind",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -52319,6 +52344,25 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.QuarantineOptions",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "QuarantineOptions",
+      "spelled": "struct{Ask func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)}",
+      "canonical": "struct{Ask func(ctx context.Context, m github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue) (github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue, error)}",
+      "fields": [
+        {
+          "name": "Ask",
+          "type": "func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)",
+          "doc": "Ask reads, from member m, the configuration it runs with, and fails\nwhen m does not answer. It reaches m at the address, and authenticates\nit under the key, that the node's own log names for it: a\nTCPTransport's AskMembership, built with this node's own certificate,\nor a MemoryTransport's in tests.\n"
+        }
+      ],
+      "doc": "QuarantineOptions are what a member's TruncateAndStaySilent needs beyond\nClearQuarantine's arguments: the means to read the configuration the\ncluster runs with from a live member (#763).\n",
+      "file": "service/app/consensus/offline.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.ReadIndex",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -52587,6 +52631,19 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "Addr returns the bound address.\n",
+      "file": "service/app/consensus/tcp.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*TCPTransport).AskMembership",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "AskMembership",
+      "recv": "TCPTransport",
+      "spelled": "func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)",
+      "canonical": "func(ctx context.Context, m github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue) (github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue, error)",
+      "doc": "AskMembership reads, from member m, the configuration it runs with\n(#763): the connection is dialled to m's address, the handshake must\npresent m's pinned key on a certificate of this cluster naming m's slot,\nand the answer must list m under that key. m answers only a node its\nmembership admits, under the certificate this transport presents: built\nwith a member's own, it is what that member's TruncateAndStaySilent asks\nthrough (QuarantineOptions.Ask). A member that predates the lane ends the\nconnection unanswered.\n",
       "file": "service/app/consensus/tcp.go",
       "layer": "service",
       "family": "app"

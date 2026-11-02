@@ -219,7 +219,7 @@ func replacedQuarantined(t *testing.T, removeB bool, damage func(*testing.T, *di
 // waits for it to end its silence and apply a write of the leader.
 func (x *replacedCase) rejoins(t *testing.T) {
 	t.Helper()
-	if err := ClearQuarantine(x.v.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(x.ctx, x.v.dd, TruncateAndStaySilent, "op:silent", askingFrom(x.c, x.v.id)); err != nil {
 		t.Fatalf("TruncateAndStaySilent: %v (why %q)", err, fieldOf(err, "why"))
 	}
 	if !x.silent() {

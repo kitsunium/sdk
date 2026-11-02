@@ -1211,6 +1211,11 @@ longer answers as one it never heard (amendment of 2026-10-29,
 [#763](https://github.com/kitsunium/sdk/issues/763)), at best: a voter that
 failed less than a vote window before the change, or before the change
 reached it, is still judged on the configuration the leader heard it at.
+What that window lets through, the truncation refuses itself: a member's
+`TruncateAndStaySilent` reads the configuration the cluster runs with from
+a live member, and is refused when it lists none of the members the
+truncation keeps, and when no member answers (amendment of 2026-11-01,
+#763, the owner's option (c)).
 
 **Limits TLS does not set (R1-24, from raft-sql-poc).**
 - A frame's announced length is checked against `MaxFrameBytes` before
@@ -5886,7 +5891,8 @@ operator ([#758](https://github.com/kitsunium/sdk/issues/758)).
   uncommitted removal that a later leader dropped may refuse an exit the
   node would have survived, and `WipeAndRejoin` stays open. A change
   committed while the node was down is not in its log at all: the leader
-  refuses it instead, at best (amendment of 2026-10-29, #763).
+  refuses it instead, at best (amendment of 2026-10-29, #763), and the
+  truncation reads it from a live member (amendment of 2026-11-01, #763).
 - **The way out the reason names.** `WipeAndRejoin` alone is not enough:
   the JOIN of the wiped directory is refused while the old ID holds the
   slot (R8-11), and the removal of the old ID is refused below `MinVoters`
@@ -5998,7 +6004,8 @@ failed, D and V, two live voters of three, committed nothing
   committed while it is down can still leave it, truncated, over members
   all gone. Closing that window takes the silent node a way back of its
   own, or the operator's word on the current configuration at the
-  truncation; neither is taken here.
+  truncation; neither is taken here. The owner chose the second, read
+  from a live member (amendment of 2026-11-01, #763).
 - No frame, payload or record format changes, nothing new is persisted,
   and no raft mutation (the type is full).
   `TestARemovalWhileAHeardVoterIsDownWaitsForIt` holds the issue's
@@ -6869,6 +6876,119 @@ side, as #763's option (b) would.
   #603, #748 (`movedAll`'s "A-and-B-moved"), #761, #763, #764, #773 and
   #785 stay green.
 
+## Amendment — a member's truncation reads the configuration the cluster runs with from a live member (2026-11-01, #763)
+
+The amendment of 2026-10-29 left a window to a decision
+([#763](https://github.com/kitsunium/sdk/issues/763)): the leader judges a
+voter on the configuration it last heard it at for one vote window after
+the voter stops answering, and between the judgement of a change and its
+arrival in the voter's log. A founder V of {A, B, V} saw D and E join and
+be promoted, D lead and A be removed: its log ended on {B, V, D, E}. V
+crashed, its log damaged before D's admission, and B, removed on D a few
+milliseconds later, inside that window, was then stopped for good. #758's
+refusal reads only V's log, whose newest configuration still lists B: the
+exit was taken, V restarted silent over {A, B, V}, asked A and B, both
+gone, refused D and E, and never voted again.
+
+Three options were put to the owner: (b) a silent node admits, for
+replication only and while the silence lasts, the members of the newest
+configuration the truncated part names, one more file persisted at the
+truncation; (c) the truncation reads the current configuration from a
+live member and is refused when no other kept member is listed there;
+(d) the residual accepted and documented.
+
+- **The owner's decision: option (c).** A member's `TruncateAndStaySilent`
+  reads the configuration the cluster runs with from a live member, and is
+  refused when it lists none of the members the truncation keeps. When no
+  member answers it is refused too: it is never taken blind.
+- **Who is asked.** Every other member the configurations the node reads
+  name — those logged past the snapshot, in the part kept or dropped, the
+  snapshot's, those logged below it, then the kept one — once each, under
+  its newest record; a member whose newest record carries the zero key
+  `DenyPin` leaves is not asked, under that key or an older one: no member
+  admits it, and the key withdrawn would authenticate it
+  (`truncationConfs.peers`).
+  Each is asked through `QuarantineOptions.Ask`, and the configuration of
+  the highest index answered is judged (`askNewest`); an answer that does
+  not list the member asked under the key it was asked under is not that
+  member's, and is set aside.
+- **What is refused.** Each refusal is `RECOVER_REFUSED`, before anything
+  is written, the directory still quarantined, its `why` naming the way
+  out (`liveRefusal`):
+  - the configuration answered lists none of the kept configuration's
+    other members under the key it pins, as #758 judges the log's newest
+    (`stranded`): `WipeAndRejoin`, the `Promote` `MinVoters` may ask for,
+    then `Remove` of the old ID, as #758's;
+  - it no longer lists the node: `WipeAndRejoin`, then `Init` under a new
+    ID;
+  - no member answered, with `asked`, how many were: the case below;
+  - no means to ask was given, `ClearQuarantine` or no `Ask`: pass
+    `ClearQuarantineWith`.
+- **No member answers: the operator's way out.** The operator brings a
+  member back, any member the node's log names, started and reachable
+  under its key at the address the log names, and clears again: a member
+  answers whether or not it hears a leader, so a lone member of a cluster
+  that lost its majority answers too. Otherwise an existing procedure
+  applies: `WipeAndRejoin`, then the removal of the old ID on the cluster
+  and `Init` under a new one once the cluster is back (R8-11); `Recover`
+  from the survivor of the highest `(LastTerm, Last)` when the majority is
+  lost for good (R3-27).
+- **The read is authenticated as replication is.** The shipped transport
+  serves it on a fifth lane, `laneMembership` (5), to a member only, on
+  the key and the slot the membership pins: the dialer writes the lane
+  byte alone, the member answers one chunk, the configuration it runs
+  with (`Membership`) as `AppendMembership` encodes it, the encoding the
+  JOIN answer already carries, and the connection ends.
+  `TCPTransport.AskMembership` dials the member at the address the asking
+  node's log names, pins the key that log names, checks that the
+  certificate names this cluster and the member's slot, and requires the
+  answer to list the member under that key. Built with the asking node's
+  own certificate, it is answered only by a member whose membership still
+  admits that node; a member that no longer admits it ends the
+  connection. A node that stopped answers nothing.
+- **Mixed versions.** A member that predates the lane serves no unknown
+  lane and ends the connection without an answer, as for `laneJoinV2`
+  (amendment of 2026-10-22, #556): the asking node counts it as a member
+  that did not answer. No raft message changes, so the protocol version
+  stays where it is and nothing is announced. While every live member runs
+  an older build, the exit is refused, and upgrading one member opens it.
+- **The API, added only.** `QuarantineOptions` (its `Ask`),
+  `ClearQuarantineWith(ctx, d, exit, op, opt)`, and `AskMembership` on
+  `TCPTransport` and `MemoryTransport`, re-exported by
+  `pkg/v1/app/consensus`. `ClearQuarantine` keeps its signature; on a
+  member's directory its `TruncateAndStaySilent` is now refused, since it
+  can ask no one. A directory that is not a member's needs no
+  configuration and asks no one, and `WipeAndRejoin` asks no one.
+- **At best.** A member that lags, or one cut off from the leader, answers
+  a configuration older than the cluster's: the newest answered is taken.
+  The configuration a member answers is the one it runs with, committed or
+  not: an uncommitted removal a later leader drops may refuse an exit the
+  node would have survived, and `WipeAndRejoin` stays open. A member moved
+  while the node was down is not reached at the address the node's log
+  names, and counts as one that did not answer.
+- **What it leaves.** #764's window stays on the leader, but no truncation
+  passes through it any more: the truncation reads what the leader
+  decided. A directory an earlier release already truncated starts as
+  before.
+- No payload, record or raft frame changes, nothing new is persisted, no
+  protocol raise and no raft mutation; one transport lane is added, which
+  an older member ends unanswered.
+- **Tests.** `TestATruncationBackToMembersRemovedWhileTheNodeWasDownIsRefused`
+  (the issue's scenario, B removed a few milliseconds after V's crash:
+  refused, the directory unchanged; on main the exit was taken; the
+  control, damaged at the tail, keeps {B, V, D, E} and rejoins),
+  `TestATruncationNoLiveMemberAnswersIsRefused` (no means to ask, V cut
+  off, every live member of an older build, a configuration that no longer
+  lists V, then one member upgraded and V rejoins),
+  `TestTheNewestLiveConfigurationIsJudged` (who is asked, the newest
+  answer, an answer under another key, a context done) and
+  `TestAMembersConfigurationIsReadOverTCPByAMemberOnly` (the lane over
+  mutual TLS: another pin, a node the membership does not list, a member
+  of an older build beside one that answers, a stopped node). The tests of
+  #418, #636, #684, #723, #745, #758, #760 and #764 stay green, those
+  that take the exit asking the live members, or standing in for them
+  once their links are cut or they are down.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6922,6 +7042,7 @@ side, as #763's option (b) would.
 | #795 | Raft hunt loop, 2026-11-01 | the leader keeps the index of the no-op it fed a silence, and a snapshot transfer the peer installed at or past it feeds the peer once more, so a node restarted on that snapshot, its point raised past the leader's whole log, ends its silence in a cluster that writes nothing; a snapshot the node cut itself left to a decision; no format change, no raft mutation (amendment of 2026-11-01, #795) |
 | #773 (c) | the owner's decision, 2026-11-01 | a `DenyPin` that leaves a stopped voter no voucher is admitted, and said: `Raft.Isolated` names, by #603's own judgement, every voter the leader may never reach again and the withdrawn pin that leaves it so; the health's `PeerStranded` and `PeerPinDenied`, the audit line's `isolated`, and the `why` and `isolated` of a refusal the guard decides; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #773) |
 | #765 (b) | the owner's decision, 2026-11-01 | #603's guard keeps its two bets on the leader, the leader counted at any address and the compacted log's bet that a voter listed after it knows it as a voter, and says when a stopped voter's reach rests on one: `IsolationLeaderMoved` and `IsolationLeaderUnconfirmed` in `Raft.Isolated`, the health's `PeerLeaderMoved` and `PeerLeaderUnconfirmed`, the audit line's `isolated` for the leader's own move, a removal, a move and a transfer, and a Warn line for a hand-over with no entry; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #765) |
+| #763 (c) | the owner's decision, 2026-11-01 | a member's `TruncateAndStaySilent` reads the configuration the cluster runs with from a live member, every other member its log names asked under the key the log pins, the newest answer judged, and is refused `RECOVER_REFUSED` before anything is written when that configuration lists none of the kept members, no longer lists the node, or when no member answers; `QuarantineOptions`, `ClearQuarantineWith` and `AskMembership` added, a transport lane `laneMembership` (5) that an older member ends unanswered; no raft frame, payload or record change, nothing persisted, no protocol raise, no raft mutation (amendment of 2026-11-01, #763) |
 
 ## raft-sql-poc (owner's prior Raft)
 
