@@ -21,6 +21,16 @@ type LockWaiter = iapp.LockWaiter
 // DatabaseOption configures a database: [Keeps], [Migrations].
 type DatabaseOption = iapp.DatabaseConfigurer
 
+// Classifier is an [Engine] that reads its driver's errors: Transient says
+// whether a failed transaction is one the database asks to run again. The
+// framework runs such a transaction again, its outermost level, up to
+// <name>-tx-retries times — never one a [Service].Go body opens.
+type Classifier = iapp.Classifier
+
+// TransactOption asks a transaction for an isolation level or for
+// read-only: [Serializable], [RepeatableRead], [ReadOnly].
+type TransactOption = iapp.TransactOption
+
 // Keepable is what a database keeps: a service — every store it declares —,
 // a store, or a module (ADR 0008) — every store of its services.
 type Keepable = iapp.Keeper

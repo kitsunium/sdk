@@ -22,6 +22,9 @@ type database struct {
 	tm      sql.Transactor
 	checker sql.Checker
 	dialect sql.Dialect
+	// transient is the engine's own reading of a failed transaction, nil
+	// when it offers none.
+	transient func(error) bool
 }
 
 // openDatabase opens kit's scope on the pool cfg names: its tuning applied
@@ -48,7 +51,7 @@ func openDatabase(cfg plug.DatabaseConfig) (plug.Database, error) {
 	if err != nil {
 		return nil, said(err)
 	}
-	return &database{cfg: scfg, tm: tm, checker: checker, dialect: dialect}, nil
+	return &database{cfg: scfg, tm: tm, checker: checker, dialect: dialect, transient: cfg.Transient}, nil
 }
 
 // dialectOf is the SDK's dialect the engine's name says.
@@ -66,10 +69,17 @@ func dialectOf(name string) (sql.Dialect, error) {
 
 // Transact runs fn in a transaction of the database, or in a savepoint of
 // the one ctx carries for it.
-func (d *database) Transact(ctx context.Context, fn func(ctx context.Context) error) error {
-	return said(d.tm.Transact(ctx, sql.TxOptions{}, func(ctx context.Context, _ sql.Executor) error {
+func (d *database) Transact(ctx context.Context, opts plug.TxOptionsValue, fn func(ctx context.Context) error) error {
+	return said(d.tm.Transact(ctx, sql.TxOptions{Isolation: opts.Isolation, ReadOnly: opts.ReadOnly}, func(ctx context.Context, _ sql.Executor) error {
 		return fn(ctx)
 	}))
+}
+
+// Transient reports whether err is a failed transaction the database asks to
+// run again: the engine's own reading, then the SDK's — SQLSTATE 40001 and
+// 40P01, SQLite's busy and locked (sql.Classify, #1058).
+func (d *database) Transient(err error) bool {
+	return (d.transient != nil && d.transient(err)) || sql.Classify(err)
 }
 
 // InTransaction reports whether ctx carries a transaction of the database.

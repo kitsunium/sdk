@@ -424,6 +424,21 @@ packages:
               a queue it cannot read or a dead letter it does not hold.
             name: CodeOTLPExport
             value: "0x00_04_02_5A"
+          - comment: 0.4.2.91 — a nested app.Transact was given an isolation level or read-only
+            doc: |-
+              CodeTransactionNested refuses a Transact inside another that asks for
+              an isolation level or read-only ([Serializable], [RepeatableRead],
+              [ReadOnly]): the inner level is a savepoint of the outer
+              transaction, which can change neither.
+            name: CodeTransactionNested
+            value: "0x00_04_02_5B"
+          - comment: 0.4.2.92 — a store write inside a transaction opened read-only
+            doc: |-
+              CodeTransactionReadOnly refuses a store's write inside a transaction
+              opened with [ReadOnly], on every backend, before it reaches the
+              database.
+            name: CodeTransactionReadOnly
+            value: "0x00_04_02_5C"
         type: errs.Code
     constants:
       - blockDoc: The environments.
@@ -1326,7 +1341,9 @@ packages:
           naming a file that holds it, then the environment's secret store —, and
           its settings: <name>-max-open (10), <name>-max-idle (2), <name>-max-lifetime
           (30m), <name>-max-idle-time (0: none), <name>-timeout (5s), <name>-check-timeout
-          (5s) and <name>-migrate (start, or manual). Outside dev the URL is
+          (5s), <name>-tx-retries (3: how many times a transaction the database asks
+          to run again runs again, 0 for never — [Classifier]), <name>-tx-retry-delay
+          (50ms: the first wait before it does) and <name>-migrate (start, or manual). Outside dev the URL is
           required and writes its TLS mode; in dev a database without one leaves its
           stores in the data directory, and a SQLite database without one is the
           file <data>/<name>.sqlite. [InMemory] on the app opens none.
@@ -3079,7 +3096,12 @@ packages:
           between the commit and the release loses what was held.
 
           On a database the transaction is the database's own, at its default
-          isolation. On the data directory and in memory the framework keeps its own: it takes
+          isolation unless opts ask for another: [Serializable] or [RepeatableRead]
+          opens it at that level, [ReadOnly] tells the database it only reads, and a
+          store's write inside it is refused ([Invalid], [CodeTransactionReadOnly]) on
+          every backend. Options go on the outermost Transact: a nested one given
+          any is refused ([Invalid], [CodeTransactionNested]), its savepoint able to
+          change neither. On the data directory and in memory the framework keeps its own: it takes
           the data's writer turn — one transaction at a time; a write outside any
           waits for it, and such writes share the turn among themselves —, its
           writes land at once, and an error writes each entity's previous value
@@ -3094,9 +3116,38 @@ packages:
             type: context.Context
           - name: fn
             type: func(context.Context) error
+          - name: opts
+            type: TransactOption
         name: Transact
         out:
           - type: error
+        variadic: true
+      - doc: |-
+          Serializable opens the transaction at the SERIALIZABLE isolation level: it
+          commits only if running it alone would have given the same result, and a
+          concurrent transaction that would break that fails instead — on
+          PostgreSQL with SQLSTATE 40001, which the database asks to run again. On
+          the data directory and in memory, whose transactions already take one
+          writer at a time, it changes nothing.
+        name: Serializable
+        out:
+          - type: TransactOption
+      - doc: |-
+          RepeatableRead opens the transaction at the REPEATABLE READ isolation
+          level: a row it read reads the same until it ends. On the data directory
+          and in memory it changes nothing.
+        name: RepeatableRead
+        out:
+          - type: TransactOption
+      - doc: |-
+          ReadOnly opens the transaction read-only: the database is told it only
+          reads, and a store's write inside it is refused ([Invalid],
+          [CodeTransactionReadOnly]) on every backend, before it reaches one.
+          Given to a query's declaration, it runs the query's Ask in such a
+          transaction — the caller's own, when the Ask runs inside one.
+        name: ReadOnly
+        out:
+          - type: TransactOption
       - doc: |-
           NewWorkflowService is a workflow no service declares yet, over the
           entities of store whose state state reads: [Service.Workflow] makes one and
@@ -3297,6 +3348,34 @@ packages:
       textproto: net/textproto
     path: github.com/kitsunium/sdk/framework/internal/app
     types:
+      - doc: |-
+          Classifier is an [Engine] that reads its driver's errors: Transient says
+          whether a failed transaction is one the database asks to run again — on
+          PostgreSQL SQLSTATE 40001 and 40P01, on MySQL errors 1213 and 1205, on
+          SQLite a busy or locked database —, a sibling of Engine. The framework
+          runs such a transaction again, the outermost level only, up to
+          <name>-tx-retries times, waiting <name>-tx-retry-delay grown by 2 with
+          full jitter on the app's clock, each retry a retries attribute on the
+          transaction's span and a retry on the telemetry port. A transaction a
+          [Service.Go] body opens runs once: the framework cannot know the body
+          may run its function twice. An engine that does not implement it
+          still has the SDK's own reading of SQLSTATE and SQLite result codes.
+        interface:
+          methods:
+            - name: Transient
+              in:
+                - name: err
+                  type: error
+              out:
+                - type: bool
+        name: Classifier
+      - doc: |-
+          TransactOption asks a transaction for an isolation level or for
+          read-only: [Serializable], [RepeatableRead], [ReadOnly]. None given is the
+          database's default, as always.
+        name: TransactOption
+        struct:
+          unexported: true
       - doc: |-
           AttrsProvider is what the app's auth data says about the caller to the
           SDK's authz: the attributes [Command.Allow] and [Query.Allow] hand a
@@ -4584,7 +4663,8 @@ packages:
       - doc: |-
           QueryConfigurer configures a query: the options every operation takes —
           [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient], [Timeout],
-          [Bulkhead].
+          [Bulkhead] — and a transaction's — [ReadOnly], [Serializable],
+          [RepeatableRead] —, which run its Ask in a transaction opened with them.
         interface:
           unexported: true
         name: QueryConfigurer
@@ -7644,6 +7724,42 @@ packages:
                   type: error
         name: LaterPublisher
       - doc: |-
+          DeadLetterManager is a Broker whose dead letters an operator replays
+          into the live queue or drops for good, from the product's CLI
+          (issue #1138). A sibling of [Broker].
+        interface:
+          methods:
+            - doc: |-
+                Replay moves the dead letter id back into the live queue, its
+                attempts counted afresh: its consumer handles it again. found is
+                false when the queue holds no dead letter id.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: id
+                  type: string
+              name: Replay
+              out:
+                - name: found
+                  type: bool
+                - name: err
+                  type: error
+            - doc: |-
+                Drop deletes the dead letter id for good. found is false when the
+                queue holds no dead letter id.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: id
+                  type: string
+              name: Drop
+              out:
+                - name: found
+                  type: bool
+                - name: err
+                  type: error
+        name: DeadLetterManager
+      - doc: |-
           Clock is the app's clock as a queue stamps and waits on it: the framework's core
           hands the one its app runs on, a test's manual clock included.
         interface:
@@ -7976,6 +8092,13 @@ packages:
             - doc: CheckTimeout bounds a check of the database.
               name: CheckTimeout
               type: time.Duration
+            - doc: |-
+                Transient is the engine's own reading of a failed transaction — true
+                when the database asks for it to run again —, nil when the engine
+                offers none (app.Classifier). The store subsystem reads the SDK's
+                Classify beside it.
+              name: Transient
+              type: func(err error) bool
       - doc: |-
           TableSpec is one of the framework's tables on a database, as the store subsystem's
           migration makes it: a store's, or a store's versions beside the store's
@@ -8062,6 +8185,34 @@ packages:
               name: At
               type: time.Time
       - doc: |-
+          Classifier is a [Database] that says whether a failed transaction is one
+          the database asks to run again: a serialization failure, a deadlock, a
+          lock wait that timed out. app.Transact runs such a transaction again, at
+          its outermost level. A sibling of [Database].
+        interface:
+          methods:
+            - doc: Transient reports whether err asks for the transaction to run again.
+              in:
+                - name: err
+                  type: error
+              name: Transient
+              out:
+                - type: bool
+        name: Classifier
+      - doc: |-
+          TxOptionsValue is what app.Transact asks of a database transaction: an
+          isolation level — the zero value the database's default — and whether it
+          only reads. A savepoint is given the zero value.
+        name: TxOptionsValue
+        struct:
+          fields:
+            - doc: Isolation is the transaction's isolation level; zero is the database's default.
+              name: Isolation
+              type: sql.IsolationLevel
+            - doc: ReadOnly tells the database the transaction only reads.
+              name: ReadOnly
+              type: bool
+      - doc: |-
           Database is the framework's scope on one database (ADR 0179 §2): the transactions
           app.Transact opens on it, their savepoints, and the functions held until
           their end. The core knows a database only through it; the store package
@@ -8071,10 +8222,13 @@ packages:
             - doc: |-
                 Transact runs fn in a transaction of the database, or in a savepoint
                 of the one ctx carries for it: nil commits or releases, an error
-                rolls back.
+                rolls back. opts are the transaction's: its isolation level and
+                whether it only reads; a savepoint is given none.
               in:
                 - name: ctx
                   type: context.Context
+                - name: opts
+                  type: TxOptionsValue
                 - name: fn
                   type: func(ctx context.Context) error
               name: Transact
@@ -10203,6 +10357,18 @@ packages:
         name: DatabaseOption
         target: iapp.DatabaseConfigurer
       - doc: |-
+          TransactOption asks a transaction for an isolation level or for
+          read-only: [Serializable], [RepeatableRead], [ReadOnly].
+        name: TransactOption
+        target: iapp.TransactOption
+      - doc: |-
+          Classifier is an [Engine] that reads its driver's errors: Transient says
+          whether a failed transaction is one the database asks to run again. The
+          framework runs such a transaction again, its outermost level, up to
+          <name>-tx-retries times — never one a [Service].Go body opens.
+        name: Classifier
+        target: iapp.Classifier
+      - doc: |-
           Keepable is what a database keeps: a service — every store it declares —,
           a store, or a module (ADR 0008) — every store of its services.
         name: Keepable
@@ -10482,7 +10648,8 @@ packages:
       - doc: |-
           QueryOption configures a query: the options every operation takes —
           [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient], [Timeout],
-          [Bulkhead].
+          [Bulkhead] — and a transaction's — [ReadOnly], [Serializable],
+          [RepeatableRead] —, which run its Ask in a transaction opened with them.
         name: QueryOption
         target: iapp.QueryConfigurer
       - doc: |-
@@ -11263,6 +11430,19 @@ packages:
         name: CodeOTLPExport
         type: errs.Code
         value: "0x00_04_02_5A"
+      - doc: |-
+          CodeTransactionNested refuses a Transact inside another that asks for an
+          isolation level or read-only ([Serializable], [RepeatableRead],
+          [ReadOnly]): the inner level is a savepoint, which can change neither.
+        name: CodeTransactionNested
+        type: errs.Code
+        value: "0x00_04_02_5B"
+      - doc: |-
+          CodeTransactionReadOnly refuses a store's write inside a transaction
+          opened with [ReadOnly], on every backend.
+        name: CodeTransactionReadOnly
+        type: errs.Code
+        value: "0x00_04_02_5C"
       - blockDoc: The two signals an export forwards, as an [OTLPBatch] names them.
         doc: |-
           OTLPTraces names the trace signal: an OTLP/JSON
@@ -11910,7 +12090,9 @@ packages:
           naming a file that holds it, then the environment's secret store —, and
           its settings: <name>-max-open (10), <name>-max-idle (2), <name>-max-lifetime
           (30m), <name>-max-idle-time (0: none), <name>-timeout (5s), <name>-check-timeout
-          (5s) and <name>-migrate (start, or manual). Outside dev the URL is
+          (5s), <name>-tx-retries (3: how many times a transaction the database asks
+          to run again runs again, 0 for never — [Classifier]), <name>-tx-retry-delay
+          (50ms: the first wait before it does) and <name>-migrate (start, or manual). Outside dev the URL is
           required and writes its TLS mode; in dev a database without one leaves its
           stores in the data directory, and a SQLite database without one is the
           file <data>/<name>.sqlite. [InMemory] on the app opens none.
@@ -13520,7 +13702,12 @@ packages:
           between the commit and the release loses what was held.
 
           On a database the transaction is the database's own, at its default
-          isolation. On the data directory and in memory the framework keeps its own: it takes
+          isolation unless opts ask for another: [Serializable] or [RepeatableRead]
+          opens it at that level, [ReadOnly] tells the database it only reads, and a
+          store's write inside it is refused ([Invalid], [CodeTransactionReadOnly]) on
+          every backend. Options go on the outermost Transact: a nested one given
+          any is refused ([Invalid], [CodeTransactionNested]), its savepoint able to
+          change neither. On the data directory and in memory the framework keeps its own: it takes
           the data's writer turn — one transaction at a time; a write outside any
           waits for it, and such writes share the turn among themselves —, its
           writes land at once, and an error writes each entity's previous value
@@ -13535,9 +13722,38 @@ packages:
             type: context.Context
           - name: fn
             type: func(context.Context) error
+          - name: opts
+            type: TransactOption
         name: Transact
         out:
           - type: error
+        variadic: true
+      - doc: |-
+          Serializable opens the transaction at the SERIALIZABLE isolation level: it
+          commits only if running it alone would have given the same result, and a
+          concurrent transaction that would break that fails instead — on
+          PostgreSQL with SQLSTATE 40001, which the database asks to run again. On
+          the data directory and in memory, whose transactions already take one
+          writer at a time, it changes nothing.
+        name: Serializable
+        out:
+          - type: TransactOption
+      - doc: |-
+          RepeatableRead opens the transaction at the REPEATABLE READ isolation
+          level: a row it read reads the same until it ends. On the data directory
+          and in memory it changes nothing.
+        name: RepeatableRead
+        out:
+          - type: TransactOption
+      - doc: |-
+          ReadOnly opens the transaction read-only: the database is told it only
+          reads, and a store's write inside it is refused ([Invalid],
+          [CodeTransactionReadOnly]) on every backend, before it reaches one.
+          Given to a query's declaration, it runs the query's Ask in such a
+          transaction — the caller's own, when the Ask runs inside one.
+        name: ReadOnly
+        out:
+          - type: TransactOption
       - doc: |-
           OTLP declares that the app forwards its traces and the metrics the
           framework derives from them to an OpenTelemetry collector over OTLP/HTTP:

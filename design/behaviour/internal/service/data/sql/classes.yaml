@@ -1,6 +1,19 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: The operations a statement budget names when it cuts one.
+    grouped: true
+    items:
+      - name: operationExec
+        type: string
+        value: "\"exec\""
+      - name: operationQuery
+        type: string
+        value: "\"query\""
+      - name: operationPrepare
+        type: string
+        value: "\"prepare\""
+    name: operationExec
   - doc: |-
       DefaultMaxLifetime is the connection lifetime a non-positive
       [PoolConfig.MaxLifetime] clamps to.
@@ -133,7 +146,94 @@ constants:
         name: bindName
       - comment: "3"
         name: bindAppliedAt
+      - comment: "4"
+        name: bindChecksum
     name: bindVersion
+  - doc: |-
+      bindBackfillChecksum and bindBackfillVersion are the bind positions of the
+      backfill's UPDATE, whose SET comes before its WHERE.
+    grouped: true
+    items:
+      - comment: "1"
+        name: bindBackfillChecksum
+        type: int
+        value: iota + 1
+      - comment: "2"
+        name: bindBackfillVersion
+    name: bindBackfillChecksum
+  - doc: |-
+      MaxObservedQuery is how many bytes of a statement's SQL text a
+      [coresql.StatementObserver] receives: a longer text is cut at the last
+      whole UTF-8 character within it. A generated IN list or a bulk VALUES
+      clause is no slower to log for being a megabyte long, and no more useful.
+    items:
+      - name: MaxObservedQuery
+        type: int
+        value: "1024"
+    name: MaxObservedQuery
+  - doc: The SQL texts the three transaction verbs are told with.
+    grouped: true
+    items:
+      - name: textBegin
+        type: string
+        value: "\"BEGIN\""
+      - name: textCommit
+        type: string
+        value: "\"COMMIT\""
+      - name: textRollback
+        type: string
+        value: "\"ROLLBACK\""
+    name: textBegin
+  - doc: |-
+      sqliteBusy and sqliteLocked are SQLite's two primary result codes that
+      mean "another connection holds what this one needs": the low byte of every
+      extended form, SQLITE_BUSY_SNAPSHOT (517) among them.
+    grouped: true
+    items:
+      - name: sqliteBusy
+        type: int
+        value: "5"
+      - name: sqliteLocked
+        type: int
+        value: "6"
+      - doc: sqlitePrimary masks an extended result code down to its primary code.
+        name: sqlitePrimary
+        type: int
+        value: "0xff"
+    name: sqliteBusy
+  - doc: |-
+      DefaultRetryAttempts is how many times a retrying transactor runs a
+      transaction when [RetryConfig.Attempts] is not positive: the first attempt
+      and two more. A conflict that three attempts did not clear is contention
+      the caller should hear about, not one a fourth will.
+    items:
+      - name: DefaultRetryAttempts
+        type: int
+        value: "3"
+    name: DefaultRetryAttempts
+  - doc: |-
+      DefaultRetryDelay is the base of the wait between two attempts when
+      [RetryConfig.Backoff] is the zero value, which then grows by 2 per attempt
+      with full jitter: two transactions that deadlocked each other and retry
+      on the same curve without jitter meet again at the same instant.
+    items:
+      - name: DefaultRetryDelay
+        type: time.Duration
+        value: 25 * time.Millisecond
+    name: DefaultRetryDelay
+  - doc: |-
+      The bound-parameter ceilings InsertRows clamps a statement to: SQLite's
+      SQLITE_MAX_VARIABLE_NUMBER as the oldest releases ship it, and the 16-bit
+      count PostgreSQL's and MySQL's wire protocols carry.
+    grouped: true
+    items:
+      - name: sqliteMaxParams
+        type: int
+        value: "999"
+      - name: serverMaxParams
+        type: int
+        value: "65535"
+    name: sqliteMaxParams
   - doc: |-
       rootScope identifies the scope of a root transaction. A savepoint scope is
       identified by its savepoint counter, which starts at one, so zero is free
@@ -145,6 +245,27 @@ constants:
     name: rootScope
 files:
   - decls:
+      - operationExec
+      - noRelease
+      - stmtBudget
+      - stmtBudget.bound
+      - stmtBudget.verdict
+      - statementRunner
+      - stmtBudget.exec
+      - stmtBudget.query
+      - stmtBudget.prepare
+      - timedPool
+      - resolved.executors
+      - resolved.pool
+      - timedPool.ExecContext
+      - timedPool.QueryContext
+      - timedPool.QueryRowContext
+      - timedPool.PrepareContext
+    name: budget.go
+  - decls:
+      - _
+    name: budget_compliance.go
+  - decls:
       - DefaultMaxLifetime
       - DefaultMaxIdle
       - DefaultCheckTimeout
@@ -154,6 +275,7 @@ files:
       - Config.resolvedClock
       - Config.probeBudget
       - PoolConfig.apply
+      - PoolConfig.install
       - PoolConfig.idleCeiling
       - PoolConfig.lifetime
     name: config.go
@@ -188,6 +310,7 @@ files:
     name: health.go
   - decls:
       - (*transactor).Join
+      - (*transactor).Reader
       - (*transactor).Defer
       - (*transactor).OnAbort
     name: join.go
@@ -196,6 +319,7 @@ files:
       - migrator
       - NewMigrator
       - (*migrator).Plan
+      - (*migrator).planned
       - (*migrator).Up
       - (*migrator).upAll
       - (*migrator).Down
@@ -248,17 +372,104 @@ files:
   - decls:
       - tablePhase
       - bindVersion
+      - bindBackfillChecksum
       - createTableSQL
+      - checksumProbeSQL
+      - addChecksumSQL
       - (*migrator).ensureTable
+      - (*migrator).hasChecksumColumn
       - (*migrator).applied
+      - (*migrator).verified
+      - (*migrator).compareChecksums
+      - (*migrator).recordedChecksums
+      - (*migrator).backfill
+      - checksumArg
       - (*migrator).pending
       - (*migrator).record
       - (*migrator).forget
       - scanVersions
     name: migrate_table.go
   - decls:
+      - MaxObservedQuery
+      - textBegin
+      - Observe
+      - bounded
+      - observedConnector
+      - (*observedConnector).Connect
+      - (*observedConnector).Driver
+      - (*observedConnector).Close
+      - observedConn
+      - (*observedConn).Prepare
+      - (*observedConn).PrepareContext
+      - (*observedConn).Close
+      - (*observedConn).Begin
+      - (*observedConn).BeginTx
+      - (*observedConn).ExecContext
+      - (*observedConn).QueryContext
+      - (*observedConn).Ping
+      - (*observedConn).ResetSession
+      - (*observedConn).IsValid
+      - (*observedConn).CheckNamedValue
+      - observedStmt
+      - (*observedStmt).Close
+      - (*observedStmt).NumInput
+      - (*observedStmt).Exec
+      - (*observedStmt).Query
+      - (*observedStmt).ExecContext
+      - (*observedStmt).QueryContext
+      - (*observedStmt).CheckNamedValue
+      - observedTx
+      - (*observedTx).Commit
+      - (*observedTx).Rollback
+      - observedRows
+      - (*observedRows).Columns
+      - (*observedRows).Next
+      - (*observedRows).Close
+      - affected
+      - named
+      - values
+      - SlowQueries
+      - slowQueries
+      - slowQueries.Begin
+      - Traced
+      - traced
+      - traced.Begin
+    name: observe.go
+  - decls:
       - resolved
     name: resolved.go
+  - decls:
+      - sqliteBusy
+      - DefaultRetryAttempts
+      - DefaultRetryDelay
+      - RetryConfig
+      - retrying
+      - retryingSiblings
+      - retryMark
+      - NewRetrying
+      - RetryConfig.attempts
+      - RetryConfig.curve
+      - RetryConfig.classifier
+      - RetryConfig.clock
+      - (*retrying).Transact
+      - (*retrying).nested
+      - (*retrying).retriable
+      - (*retrying).wait
+      - Classify
+      - transientCause
+      - anyCause
+    name: retry.go
+  - decls:
+      - sqliteMaxParams
+      - Each
+      - firstFailure
+      - yieldFailure
+      - InsertSpec
+      - InsertRows
+      - insertable
+      - rowsPerStatement
+      - valuesSQL
+    name: rows.go
   - decls:
       - savepointStmts
     name: savepoint_stmts.go
@@ -271,12 +482,14 @@ files:
     name: sql.go
   - decls:
       - Statements
+      - ChecksumOf
     name: statements.go
   - decls:
       - transactor
       - NewTransactor
       - (*transactor).Transact
       - (*transactor).root
+      - (*transactor).poolFor
       - (*transactor).settle
       - rollback
       - cleanup
@@ -472,7 +685,8 @@ functions:
   - doc: |-
       createTableSQL renders the version table's definition.
 
-      Three columns and no more, all of them portable:
+      Three columns, all of them portable, and a fourth for a set that declares
+      checksums:
 
         - version BIGINT PRIMARY KEY — the identity. BIGINT is spelled the same
           by PostgreSQL, MySQL and SQLite.
@@ -483,17 +697,125 @@ functions:
           precision and in time-zone handling across the three engines; an
           integer does not. The runner reads it from the injected clock, so the
           value is deterministic in a test.
+        - checksum TEXT, nullable — the fingerprint of the statements the
+          migration ran (#1056), NULL for one that declares none. Only a set
+          that declares a checksum creates it, so a set that declares none sends
+          the statement it always sent; a three-column table gets it from the
+          first locked run whose set declares one (ensureTable).
 
       The identifier is interpolated, not bound — a table name cannot be a
       parameter. It was validated by isIdentifier at construction,
       which is the whole defence.
     name: createTableSQL
+    params: table string, checksums bool
+    results: string
+  - doc: |-
+      checksumProbeSQL renders the read that answers whether the version table
+      has its checksum column: a SELECT of it that matches no row, which an
+      engine refuses when the column is absent and answers with nothing
+      otherwise. Reading the catalogue instead would be three dialects' worth
+      of information_schema, pragma_table_info and their quirks.
+    name: checksumProbeSQL
     params: table string
     results: string
+  - doc: |-
+      addChecksumSQL renders the statement that gives a three-column version
+      table, created by an earlier release, its checksum column. The three
+      engines spell it alike, and a nullable column needs no default.
+    name: addChecksumSQL
+    params: table string
+    results: string
+  - doc: |-
+      checksumArg is a declared checksum as the version row binds it: NULL for a
+      migration that declares none, so "unverified" is never an empty string a
+      later comparison would read as a fingerprint.
+    name: checksumArg
+    params: sum string
+    results: any
   - doc: scanVersions collects the version column into a set and tracks the highest.
     name: scanVersions
     params: rows *stdsql.Rows
     results: versions map[uint64]bool, highest uint64, err error
+  - name: Observe
+    params: c driver.Connector, obs coresql.StatementObserver
+    results: driver.Connector
+  - doc: |-
+      bounded cuts query to MaxObservedQuery bytes, at the last whole UTF-8
+      character within them.
+    name: bounded
+    params: query string
+    results: string
+  - doc: affected is an exec's rows affected when the driver reports them, else 0.
+    name: affected
+    params: result driver.Result, err error
+    results: int64
+  - doc: named turns positional arguments into named ones, by position.
+    name: named
+    params: args []driver.Value
+    results: "[]driver.NamedValue"
+  - doc: values turns named arguments into positional ones.
+    name: values
+    params: args []driver.NamedValue
+    results: "[]driver.Value"
+  - name: SlowQueries
+    params: threshold time.Duration, log corelogger.Logger, clk clock.Clock
+    results: coresql.StatementObserver
+  - name: Traced
+    params: tracer coretrace.Tracer
+    results: coresql.StatementObserver
+  - name: NewRetrying
+    params: tm coresql.Transactor, cfg RetryConfig
+    results: manager coresql.Transactor, err error
+  - name: Classify
+    params: err error
+    results: bool
+  - doc: |-
+      transientCause reads one error of a chain: a SQLSTATE or a SQLite result
+      code that asks for the transaction to run again.
+    name: transientCause
+    params: err error
+    results: bool
+  - doc: |-
+      anyCause reports whether match holds for err or for any error it wraps or
+      joins, depth first.
+    name: anyCause
+    params: err error, match func(error) bool
+    results: bool
+  - name: Each
+    params: rows *stdsql.Rows, scan func(*stdsql.Rows) (T, error)
+    results: iter.Seq2[T, error]
+    typeParams: T any
+  - doc: |-
+      firstFailure is err, or closeErr when err is nil: one failure is said, the
+      first, and a close's only when nothing failed before it.
+    name: firstFailure
+    params: err, closeErr error
+    results: error
+  - doc: |-
+      yieldFailure yields err once beside T's zero value: the last thing a walk
+      says, whatever the caller answers.
+    name: yieldFailure
+    params: yield func(T, error) bool, err error
+    typeParams: T any
+  - name: InsertRows
+    params: ctx context.Context, ex coresql.Executor, d coresql.Dialect, into InsertSpec, rows [][]any
+    results: inserted int64, err error
+  - doc: |-
+      insertable refuses what could never be a statement: an unusable dialect, no
+      column, or a row whose width is not the columns'.
+    name: insertable
+    params: d coresql.Dialect, cols []string, rows [][]any
+    results: error
+  - doc: rowsPerStatement clamps asked to what one statement of d binds.
+    name: rowsPerStatement
+    params: d coresql.Dialect, width, asked int
+    results: int
+  - doc: |-
+      valuesSQL renders head followed by n tuples of width markers, numbered
+      across the statement.
+    name: valuesSQL
+    params: head string, d coresql.Dialect, n, width int
+    results: string
   - doc: |-
       failed returns the SDK's verdict for a driver-level failure, side by side
       with the driver's own error.
@@ -512,6 +834,9 @@ functions:
   - name: Statements
     params: stmts ...string
     results: coresql.Step
+  - name: ChecksumOf
+    params: stmts ...string
+    results: string
   - name: NewTransactor
     params: cfg Config
     results: manager coresql.Transactor, err error
@@ -572,26 +897,142 @@ functions:
     results: Withheld
 imports:
   atomic: sync/atomic
+  binary: encoding/binary
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
   coresql: github.com/kitsunium/sdk/internal/core/data/sql
+  coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
+  driver: database/sql/driver
   errors: errors
   fmt: fmt
   fnv: hash/fnv
+  hex: encoding/hex
+  io: io
+  iter: iter
+  kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
   kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
   maps: maps
+  sha256: crypto/sha256
   slices: slices
   stdsql: database/sql
   strconv: strconv
   strings: strings
   sync: sync
   time: time
+  utf8: unicode/utf8
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/sql
   name: sql
   purpose: Package sql — hosts Config, the parameters every port in this package is built from, and the pool policy it applies.
 types:
+  - doc: |-
+      stmtBudget bounds one statement on the injected clock (Config's
+      StatementTimeout). The zero value bounds nothing.
+    fields:
+      - doc: limit is the budget; non-positive is none.
+        name: limit
+        type: time.Duration
+      - doc: clk is the clock the budget is measured on.
+        name: clk
+        type: clock.Timed
+    kind: struct
+    methods:
+      - doc: |-
+          bound returns the context a statement runs with — ctx, cut with
+          StatementTimedOut as its cause once the budget elapses on the clock — and
+          the release that ends the wait for a statement that returned in time.
+
+          A watcher goroutine waits on the clock's timer, because a kernel clock
+          fires a channel rather than a function; it ends with the timer, with ctx,
+          or with the release, whichever comes first. A query is never released: its
+          rows read through the cut context until they close, so the watcher lives
+          until the budget elapses or ctx ends.
+        name: bound
+        params: ctx context.Context
+        recv: b stmtBudget
+        results: cut context.Context, release func()
+      - doc: |-
+          verdict is err as the caller reads it: joined with StatementTimedOut when
+          the budget cut the statement, the operation named; otherwise as it came.
+        name: verdict
+        params: cut context.Context, operation string, err error
+        recv: b stmtBudget
+        results: error
+      - doc: exec runs a statement that returns no rows on on, within the budget.
+        name: exec
+        params: ctx context.Context, on statementRunner, query string, args []any
+        recv: b stmtBudget
+        results: stdsql.Result, error
+      - doc: |-
+          query runs a statement that returns rows on on, within the budget — the
+          reading of its rows included, so the cut context is never released early.
+        name: query
+        params: ctx context.Context, on statementRunner, query string, args []any
+        recv: b stmtBudget
+        results: "*stdsql.Rows, error"
+      - doc: prepare compiles a statement on on, the compilation within the budget.
+        name: prepare
+        params: ctx context.Context, on statementRunner, query string
+        recv: b stmtBudget
+        results: "*stdsql.Stmt, error"
+    name: stmtBudget
+  - doc: |-
+      statementRunner is what a bounded statement runs on: a pool or a
+      transaction, both of which database/sql gives the same four methods.
+    kind: named
+    name: statementRunner
+    underlying: |-
+      interface {
+      	ExecContext(ctx context.Context, query string, args ...any) (stdsql.Result, error)
+      	QueryContext(ctx context.Context, query string, args ...any) (*stdsql.Rows, error)
+      	QueryRowContext(ctx context.Context, query string, args ...any) *stdsql.Row
+      	PrepareContext(ctx context.Context, query string) (*stdsql.Stmt, error)
+      }
+  - doc: |-
+      timedPool is a pool whose statements run under the statement budget: what
+      Join and Reader answer outside a transaction when Config.StatementTimeout is
+      set. It satisfies core/data/sql.Executor and its sibling Preparer, as the
+      *sql.DB it stands for does.
+    fields:
+      - doc: db is the pool the statements run on.
+        name: db
+        type: "*stdsql.DB"
+      - doc: budget bounds each of them.
+        name: budget
+        type: stmtBudget
+    kind: struct
+    methods:
+      - doc: ExecContext runs a statement that returns no rows, within the budget.
+        name: ExecContext
+        params: ctx context.Context, query string, args ...any
+        recv: p timedPool
+        results: stdsql.Result, error
+      - doc: |-
+          QueryContext runs a statement that returns rows, within the budget — the
+          reading of its rows included.
+        name: QueryContext
+        params: ctx context.Context, query string, args ...any
+        recv: p timedPool
+        results: "*stdsql.Rows, error"
+      - doc: |-
+          QueryRowContext runs a statement expected to return at most one row,
+          within the budget; a cut surfaces from Scan as the context's end.
+        name: QueryRowContext
+        params: ctx context.Context, query string, args ...any
+        recv: p timedPool
+        results: "*stdsql.Row"
+      - doc: |-
+          PrepareContext compiles a statement on the pool, the compilation within
+          the budget.
+        name: PrepareContext
+        params: ctx context.Context, query string
+        recv: p timedPool
+        results: "*stdsql.Stmt, error"
+    name: timedPool
   - fields:
       - doc: |-
           MaxOpen is the hard ceiling on open connections. It is REQUIRED and
@@ -636,6 +1077,10 @@ types:
         params: db *stdsql.DB
         recv: p PoolConfig
         results: error
+      - doc: install sets the policy on db, which apply validated.
+        name: install
+        params: db *stdsql.DB
+        recv: p PoolConfig
       - doc: idleCeiling applies both documented idle clamps.
         name: idleCeiling
         recv: p PoolConfig
@@ -676,6 +1121,31 @@ types:
           non-positive value clamps to [DefaultCheckTimeout].
         name: CheckTimeout
         type: time.Duration
+      - doc: |-
+          StatementTimeout bounds each statement the transactor's executors run —
+          inside a transaction, and through Join or Reader on a pool — measured
+          on Clock. Zero, or negative, is none: a statement then runs until the
+          caller's context ends, as database/sql runs it.
+
+          An Exec or a Prepare is bounded until it returns; a Query until its
+          rows are read and closed, or the budget elapses, whichever comes first
+          — the cut context lives until then, one timer per statement in
+          flight. A cut answered by the call itself is joined with
+          [core/data/sql.StatementTimedOut], its "operation" field naming exec,
+          query or prepare; a cut met while reading rows surfaces from Next,
+          Err or Scan as the context's own end. The migration runner never
+          applies it: a migration's DDL runs as long as it takes, under the
+          caller's context.
+        name: StatementTimeout
+        type: time.Duration
+      - doc: |-
+          ReadReplica is a second pool, on a replica of DB, that a read-only
+          transaction and [core/data/sql.Router]'s Reader run on. Nil is none:
+          every transaction opens on DB. Pool is applied to it as to DB, and the
+          health probe pings both. It is the caller's, opened with its own
+          driver, and this package never closes it.
+        name: ReadReplica
+        type: "*stdsql.DB"
     kind: struct
     methods:
       - doc: |-
@@ -842,6 +1312,14 @@ types:
         recv: m *migrator
         results: pending []coresql.MigrationValue, err error
       - doc: |-
+          planned is Plan's work, and Up's under the lock: locked says whether the
+          version table may be written — its checksum column added, the checksums
+          recorded before it backfilled.
+        name: planned
+        params: ctx context.Context, locked bool
+        recv: m *migrator
+        results: pending []coresql.MigrationValue, err error
+      - doc: |-
           Up applies every pending migration in ascending version order, each atomic
           on its own, under the migration lock.
         name: Up
@@ -993,7 +1471,9 @@ types:
         recv: m *migrator
         results: error
       - doc: |-
-          ensureTable creates the bookkeeping table if it is absent.
+          ensureTable creates the bookkeeping table if it is absent and, under the
+          migration lock, gives one created before checksums existed its checksum
+          column when the set declares a checksum.
 
           It runs where ctx says. Under an advisory lock that is the pool — no
           transaction is needed for an idempotent DDL statement, and wrapping one would
@@ -1001,16 +1481,67 @@ types:
           file lock it is the run's own transaction: the pool's other connections are
           exactly the writers the lock is holding off, this one included.
         name: ensureTable
-        params: ctx context.Context
+        params: ctx context.Context, locked bool
         recv: m *migrator
         results: error
       - doc: |-
-          applied reads every recorded version and the highest of them, where ctx
-          says, for the reason ensureTable gives.
-        name: applied
+          hasChecksumColumn reports whether the version table has its checksum
+          column, by the probe checksumProbeSQL renders. Any refusal is read as an
+          absent column: a failure that is something else fails again at the ALTER
+          or at the read that follows, with the driver's own error.
+        name: hasChecksumColumn
         params: ctx context.Context
         recv: m *migrator
+        results: bool
+      - doc: |-
+          applied reads every recorded version and the highest of them, where ctx
+          says, for the reason ensureTable gives. A set that declares checksums reads
+          them too and refuses, before anything is applied, an applied migration
+          whose declared checksum is not the recorded one (direction names the run);
+          under the lock it then backfills the versions recorded without one.
+        name: applied
+        params: |2
+
+          	ctx context.Context, locked bool, direction string,
+        recv: m *migrator
         results: versions map[uint64]bool, highest uint64, err error
+      - doc: |-
+          verified reads the recorded versions with their checksums, refuses a
+          changed migration, and under the lock backfills the unrecorded checksums
+          the set declares.
+        name: verified
+        params: |2
+
+          	ctx context.Context, locked bool, direction string,
+        recv: m *migrator
+        results: versions map[uint64]bool, highest uint64, err error
+      - doc: |-
+          compareChecksums holds every declared checksum against the recorded one,
+          before anything runs: it returns the applied migrations recorded before
+          checksums existed — the next locked run fills them —, or MIGRATION_CHANGED
+          for the first whose text is not the text that ran.
+        name: compareChecksums
+        params: |2
+
+          	sums map[uint64]stdsql.NullString, direction string,
+        recv: m *migrator
+        results: missing []coresql.MigrationValue, changed error
+      - doc: |-
+          recordedChecksums reads every recorded version with its checksum, NULL for
+          one recorded without.
+        name: recordedChecksums
+        params: |2
+
+          	ctx context.Context,
+        recv: m *migrator
+        results: sums map[uint64]stdsql.NullString, highest uint64, err error
+      - doc: |-
+          backfill writes the declared checksum of each migration recorded without
+          one. The WHERE keeps a checksum another writer recorded meanwhile.
+        name: backfill
+        params: ctx context.Context, missing []coresql.MigrationValue
+        recv: m *migrator
+        results: error
       - doc: |-
           pending returns the migrations not yet applied, in ascending order, and
           refuses the two-branches-merged hazard.
@@ -1123,13 +1654,268 @@ types:
       - doc: retry is the interval between acquisition attempts.
         name: retry
         type: time.Duration
+      - doc: |-
+          checksums reports whether any migration of the set declares a
+          checksum: only then does the runner read, write and add the version
+          table's checksum column, so a set that declares none sends exactly the
+          statements it always sent.
+        name: checksums
+        type: bool
     kind: struct
     name: migratePlan
+  - doc: observedConnector opens observed connections.
+    fields:
+      - doc: inner is the caller's connector.
+        name: inner
+        type: driver.Connector
+      - doc: obs is told about every statement.
+        name: obs
+        type: coresql.StatementObserver
+    kind: struct
+    methods:
+      - doc: Connect opens a connection of the inner connector, observed.
+        name: Connect
+        params: ctx context.Context
+        recv: c *observedConnector
+        results: driver.Conn, error
+      - doc: Driver is the inner connector's driver.
+        name: Driver
+        recv: c *observedConnector
+        results: driver.Driver
+      - doc: |-
+          Close closes the inner connector when it is an io.Closer, as database/sql
+          would on a DB.Close.
+        name: Close
+        recv: c *observedConnector
+        results: error
+    name: observedConnector
+  - doc: observedConn is one connection whose statements are told to an observer.
+    fields:
+      - doc: inner is the driver's connection.
+        name: inner
+        type: driver.Conn
+      - doc: obs is told about every statement.
+        name: obs
+        type: coresql.StatementObserver
+    kind: struct
+    methods:
+      - doc: Prepare compiles a statement, told as a prepare.
+        name: Prepare
+        params: query string
+        recv: c *observedConn
+        results: driver.Stmt, error
+      - doc: |-
+          PrepareContext compiles a statement, told as a prepare; the statement it
+          returns tells its own executions.
+        name: PrepareContext
+        params: ctx context.Context, query string
+        recv: c *observedConn
+        results: driver.Stmt, error
+      - doc: Close closes the driver's connection.
+        name: Close
+        recv: c *observedConn
+        results: error
+      - doc: Begin opens a transaction; database/sql calls BeginTx.
+        name: Begin
+        recv: c *observedConn
+        results: driver.Tx, error
+      - doc: |-
+          BeginTx opens a transaction, told as BEGIN; its end is told as COMMIT or
+          ROLLBACK.
+        name: BeginTx
+        params: ctx context.Context, opts driver.TxOptions
+        recv: c *observedConn
+        results: driver.Tx, error
+      - doc: |-
+          ExecContext runs a statement that returns no rows, told as an exec. A
+          driver without the context form answers ErrSkip, and database/sql prepares
+          the statement instead.
+        name: ExecContext
+        params: ctx context.Context, query string, args []driver.NamedValue
+        recv: c *observedConn
+        results: driver.Result, error
+      - doc: |-
+          QueryContext runs a statement that returns rows, told as a query whose end
+          is the rows' close.
+        name: QueryContext
+        params: ctx context.Context, query string, args []driver.NamedValue
+        recv: c *observedConn
+        results: driver.Rows, error
+      - doc: |-
+          Ping forwards to the driver's own, and answers nil for a driver without
+          one, as database/sql does.
+        name: Ping
+        params: ctx context.Context
+        recv: c *observedConn
+        results: error
+      - doc: |-
+          ResetSession forwards to the driver's own, and answers nil for a driver
+          without one, as database/sql does.
+        name: ResetSession
+        params: ctx context.Context
+        recv: c *observedConn
+        results: error
+      - doc: |-
+          IsValid forwards to the driver's own, and answers true for a driver
+          without one, as database/sql does.
+        name: IsValid
+        recv: c *observedConn
+        results: bool
+      - doc: |-
+          CheckNamedValue forwards to the driver's own argument checker, and answers
+          ErrSkip for a driver without one, which hands the argument to
+          database/sql's default conversion — what it would have done.
+        name: CheckNamedValue
+        params: value *driver.NamedValue
+        recv: c *observedConn
+        results: error
+    name: observedConn
+  - doc: observedStmt is a prepared statement whose executions are told.
+    fields:
+      - doc: inner is the driver's statement.
+        name: inner
+        type: driver.Stmt
+      - doc: conn is the observed connection that prepared it.
+        name: conn
+        type: "*observedConn"
+      - doc: query is the bounded text it was prepared from.
+        name: query
+        type: string
+    kind: struct
+    methods:
+      - doc: Close closes the driver's statement.
+        name: Close
+        recv: s *observedStmt
+        results: error
+      - doc: NumInput is the driver's own count.
+        name: NumInput
+        recv: s *observedStmt
+        results: int
+      - doc: Exec runs the statement; database/sql calls ExecContext.
+        name: Exec
+        params: args []driver.Value
+        recv: s *observedStmt
+        results: driver.Result, error
+      - doc: Query runs the statement; database/sql calls QueryContext.
+        name: Query
+        params: args []driver.Value
+        recv: s *observedStmt
+        results: driver.Rows, error
+      - doc: ExecContext runs the statement, told as an exec.
+        name: ExecContext
+        params: ctx context.Context, args []driver.NamedValue
+        recv: s *observedStmt
+        results: driver.Result, error
+      - doc: |-
+          QueryContext runs the statement, told as a query whose end is the rows'
+          close.
+        name: QueryContext
+        params: ctx context.Context, args []driver.NamedValue
+        recv: s *observedStmt
+        results: driver.Rows, error
+      - doc: |-
+          CheckNamedValue forwards to the statement's own argument checker, else the
+          connection's — the order database/sql reads them in — else answers ErrSkip.
+        name: CheckNamedValue
+        params: value *driver.NamedValue
+        recv: s *observedStmt
+        results: error
+    name: observedStmt
+  - doc: observedTx is a transaction whose end is told.
+    fields:
+      - doc: inner is the driver's transaction.
+        name: inner
+        type: driver.Tx
+      - doc: obs is told about its end.
+        name: obs
+        type: coresql.StatementObserver
+      - doc: ctx is the context it began under.
+        name: ctx
+        type: context.Context
+    kind: struct
+    methods:
+      - doc: Commit commits, told as COMMIT.
+        name: Commit
+        recv: t *observedTx
+        results: error
+      - doc: Rollback rolls back, told as ROLLBACK.
+        name: Rollback
+        recv: t *observedTx
+        results: error
+    name: observedTx
+  - doc: observedRows counts the rows read and tells the query's end at the close.
+    fields:
+      - doc: inner is the driver's rows.
+        name: inner
+        type: driver.Rows
+      - doc: end is told once, at the first close.
+        name: end
+        type: func(rows int64, err error)
+      - doc: read counts the rows Next delivered.
+        name: read
+        type: int64
+      - doc: failed is the first failure Next met, other than the end.
+        name: failed
+        type: error
+      - doc: told is set once end was told.
+        name: told
+        type: bool
+    kind: struct
+    methods:
+      - doc: Columns names the result columns.
+        name: Columns
+        recv: r *observedRows
+        results: "[]string"
+      - doc: Next reads a row, counted.
+        name: Next
+        params: dest []driver.Value
+        recv: r *observedRows
+        results: error
+      - doc: Close closes the rows and tells the query's end, once.
+        name: Close
+        recv: r *observedRows
+        results: error
+    name: observedRows
+  - doc: slowQueries is the observer SlowQueries returns.
+    fields:
+      - doc: threshold is the duration from which a statement is logged.
+        name: threshold
+        type: time.Duration
+      - doc: log receives the records.
+        name: log
+        type: corelogger.Logger
+      - doc: clk times each statement.
+        name: clk
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: Begin starts timing a statement; its end logs it when it was slow.
+        name: Begin
+        params: ctx context.Context, kind coresql.StatementKind, query string
+        recv: s slowQueries
+        results: func(rows int64, err error)
+    name: slowQueries
+  - doc: traced is the observer Traced returns.
+    fields:
+      - doc: tracer starts the spans.
+        name: tracer
+        type: coretrace.Tracer
+    kind: struct
+    methods:
+      - doc: Begin opens the statement's span; its end closes it.
+        name: Begin
+        params: ctx context.Context, kind coresql.StatementKind, query string
+        recv: t traced
+        results: func(rows int64, err error)
+    name: traced
   - doc: |-
       resolved is the validated, clamped form of a Config. Constructors work from
       this so the clamps are applied in exactly one place.
     fields:
       - name: db
+        type: "*stdsql.DB"
+      - doc: replica is the read replica's pool, nil when none was configured.
+        name: replica
         type: "*stdsql.DB"
       - name: dialect
         type: coresql.Dialect
@@ -1137,8 +1923,190 @@ types:
         type: clock.Timed
       - name: probe
         type: time.Duration
+      - doc: budget bounds each statement the transactor's executors run.
+        name: budget
+        type: stmtBudget
+      - doc: |-
+          primary and reader are the executors handed out outside a transaction:
+          the primary's pool and the one reads are routed to, each bounded by
+          the budget when one is set — built once, so Join stays one load.
+        name: primary
+        type: coresql.Executor
+      - doc: |-
+          primary and reader are the executors handed out outside a transaction:
+          the primary's pool and the one reads are routed to, each bounded by
+          the budget when one is set — built once, so Join stays one load.
+        name: reader
+        type: coresql.Executor
     kind: struct
+    methods:
+      - doc: |-
+          executors returns the pools the transactor hands out outside a
+          transaction: the primary's, and the one reads are routed to — the
+          replica's when one is configured.
+        name: executors
+        recv: r resolved
+        results: primary, reader coresql.Executor
+      - doc: |-
+          pool is db as the transactor hands it out: itself when no budget is set,
+          so an unbounded caller still reaches the *sql.DB it configured.
+        name: pool
+        params: db *stdsql.DB
+        recv: r resolved
+        results: coresql.Executor
     name: resolved
+  - fields:
+      - doc: |-
+          Attempts is how many times a root transaction may run in all, the
+          first included: 1 runs it once and never again. A non-positive value
+          clamps to [DefaultRetryAttempts].
+        name: Attempts
+        type: int
+      - doc: |-
+          Backoff is the curve of the waits between two attempts: the wait
+          after the n-th failed attempt is Backoff.Delay(n). The zero value
+          clamps to [DefaultRetryDelay] grown by 2 per attempt with full jitter;
+          any other value is the caller's curve, as given — a BaseDelay of zero
+          with a ceiling or a jitter is a caller's choice to retry at once.
+        name: Backoff
+        type: kbackoff.Value
+      - doc: |-
+          Transient decides which failures earn another attempt. A nil value
+          clamps to [Classify]. A context's end never does, whatever Transient
+          answers.
+        name: Transient
+        type: coresql.Transient
+      - doc: |-
+          Clock is the time source the waits are read from. A nil Clock falls
+          back to clock.System; a test hands a ManualClock and advances it
+          rather than sleeping.
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    methods:
+      - doc: attempts applies the documented clamp.
+        name: attempts
+        recv: c RetryConfig
+        results: int
+      - doc: curve applies the documented clamp.
+        name: curve
+        recv: c RetryConfig
+        results: kbackoff.Value
+      - doc: classifier applies the documented clamp.
+        name: classifier
+        recv: c RetryConfig
+        results: coresql.Transient
+      - doc: clock applies the documented time-source fallback.
+        name: clock
+        recv: c RetryConfig
+        results: clock.Timed
+    name: RetryConfig
+  - doc: |-
+      retrying is the core/data/sql.Transactor NewRetrying returns: tm's own
+      transactions, run again on a transient failure. Its identity keys the
+      context mark a nested call is recognised by.
+    fields:
+      - doc: inner is the transactor every attempt runs on.
+        name: inner
+        type: coresql.Transactor
+      - doc: |-
+          joiner is inner's Joiner, nil when it offers none: how a context that
+          carries a transaction inner opened itself is recognised as nested.
+        name: joiner
+        type: coresql.Joiner
+      - doc: attempts is the clamped budget, the first run included.
+        name: attempts
+        type: int
+      - doc: curve is the clamped backoff.
+        name: curve
+        type: kbackoff.Value
+      - doc: transient is the clamped classifier.
+        name: transient
+        type: coresql.Transient
+      - doc: clk is the clock every wait is read from.
+        name: clk
+        type: clock.Timed
+    kind: struct
+    methods:
+      - doc: |-
+          Transact runs fn in a transaction of the inner transactor, and runs the
+          whole transaction again while it fails on a transient error and the budget
+          allows.
+        name: Transact
+        params: ctx context.Context, opts coresql.TxOptionsValue, fn coresql.TxFunc
+        recv: r *retrying
+        results: error
+      - doc: |-
+          nested reports whether ctx already carries a transaction a Transact on r
+          must join rather than open: one this transactor opened, or one the inner
+          transactor opened itself.
+        name: nested
+        params: ctx context.Context
+        recv: r *retrying
+        results: bool
+      - doc: |-
+          retriable reports whether err earns another attempt: never for a context's
+          end, else the classifier's verdict.
+        name: retriable
+        params: err error
+        recv: r *retrying
+        results: bool
+      - doc: |-
+          wait blocks for the curve's wait after the attempt-th failure, on the
+          injected clock, or until ctx ends.
+        name: wait
+        params: ctx context.Context, attempt int
+        recv: r *retrying
+        results: error
+    name: retrying
+  - doc: |-
+      retryingSiblings is a retrying transactor over one that offers the three
+      ADR 0139 siblings: each forwards to it, so a consumer that asserts for
+      them reaches the transactor the attempts run on.
+    fields:
+      - name: ""
+        role: embedded
+        type: "*retrying"
+      - name: ""
+        role: embedded
+        type: coresql.Joiner
+      - name: ""
+        role: embedded
+        type: coresql.Deferrer
+      - name: ""
+        role: embedded
+        type: coresql.Aborter
+    kind: struct
+    name: retryingSiblings
+  - doc: |-
+      retryMark is the context key a root attempt marks its context with: a
+      Transact on the same retrying transactor under it is nested.
+    fields:
+      - doc: owner is the retrying transactor that opened the root.
+        name: owner
+        type: "*retrying"
+    kind: struct
+    name: retryMark
+  - fields:
+      - doc: |-
+          Table is the table the rows go into, interpolated as given — bare,
+          or already quoted with [coresql.Dialect].QuoteIdent. Validate it
+          first.
+        name: Table
+        type: string
+      - doc: |-
+          Columns are the table's columns each row gives a value for, in that
+          order, interpolated as given like Table.
+        name: Columns
+        type: "[]string"
+      - doc: |-
+          PerStatement is how many rows one statement carries at most,
+          clamped to the engine's bound-parameter ceiling divided by the
+          number of columns; a non-positive one takes that ceiling.
+        name: PerStatement
+        type: int
+    kind: struct
+    name: InsertSpec
   - doc: |-
       savepointStmts groups one savepoint's rendered statements so runNested
       stays under the parameter ceiling and reads as one operation.
@@ -1189,6 +2157,14 @@ types:
         recv: t *transactor
         results: ex coresql.Executor, inTx bool
       - doc: |-
+          Reader returns the executor a read issued under ctx runs on: the innermost
+          scope of the transaction ctx carries for this transactor, else the read
+          replica's pool, else the primary's (core/data/sql.Router).
+        name: Reader
+        params: ctx context.Context
+        recv: t *transactor
+        results: coresql.Executor
+      - doc: |-
           Defer holds fn until the transaction ctx carries for this transactor
           commits, and reports whether it did (core/data/sql.Deferrer, ADR 0139).
 
@@ -1225,6 +2201,14 @@ types:
         params: ctx context.Context, opts coresql.TxOptionsValue, fn coresql.TxFunc
         recv: t *transactor
         results: error
+      - doc: |-
+          poolFor is the pool a root transaction with opts opens on: the read
+          replica's for a read-only one when a replica was configured, the primary's
+          otherwise.
+        name: poolFor
+        params: opts coresql.TxOptionsValue
+        recv: t *transactor
+        results: "*stdsql.DB"
       - doc: |-
           settle ends a root transaction: commit on success, roll back otherwise.
 
@@ -1359,6 +2343,9 @@ types:
       - doc: tx is the single database transaction every scope runs on.
         name: tx
         type: "*stdsql.Tx"
+      - doc: budget bounds each statement a scope's executor runs.
+        name: budget
+        type: stmtBudget
       - doc: |-
           poisoned is non-nil once the transaction can no longer be trusted:
           a savepoint rollback failed, so what the engine has kept is unknown.
@@ -1458,6 +2445,28 @@ types:
         results: error
     name: Withheld
 vars:
+  - doc: |-
+      noRelease is the release of an unbounded statement: nothing to stop. A
+      package-level value, so the unbounded path allocates nothing.
+    items:
+      - name: noRelease
+        type: func()
+        value: func() {}
+    name: noRelease
+  - doc: |-
+      Compile-time assertions that the two executors a bounded statement runs on
+      are the statementRunner the budget takes: the pool outside a transaction
+      and the scope inside one. Each reaches the budget only through a method of
+      its own, so without these the build would not notice either drift away.
+    grouped: true
+    items:
+      - name: _
+        type: statementRunner
+        value: (*timedPool)(nil)
+      - name: _
+        type: statementRunner
+        value: (*scopedExecutor)(nil)
+    name: _
   - doc: |-
       deadContext is an already-cancelled context, built once at init.
 

@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"acc.plain@example.com\":{\"current\":{\"number\":\"x\",\"meta\":{\"reviewer@example.com\":5}}}}")

@@ -2,6 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-10
+- **Amended**: 2026-11-02 — four of the deferred items resolved (see the dated section at the end): a retrying root transactor over a `Transient` classifier, migration checksums for statement-built steps, a statement budget, read-only transactions routed to a read replica; and a statement observer under the pool
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0012](0012-logger-writer-registry.md) (vendor connectors live in `third-party/`), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values clamp or refuse, never sit inert), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows a sibling, never a method), [ADR 0050](0050-sdk-lifecycle-domain.md) (cleanup runs on a detached context), [ADR 0016](0016-sdk-process-supervision-domain.md) / [ADR 0026](0026-sdk-resilience-domain.md) / [ADR 0041](0041-sdk-scheduler-domain.md) (no-registry precedents), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse rather than approximate)
 
@@ -554,17 +555,20 @@ an oversight:
   sibling, but nothing in the SDK caches prepared statements. Doing it well
   needs a per-connection cache `database/sql` does not expose, and doing it
   badly re-prepares on every pool churn.
-- **Read/write splitting and replica routing.** It is a *topology* concern:
+- **Read/write splitting and replica routing.** *Resolved by the 2026-11-02
+  amendment, for read-only transactions.* It is a *topology* concern:
   the SDK would have to know which statements are safe on a replica, which
   means parsing SQL (D1) or trusting an annotation nobody maintains.
 - **`LISTEN`/`NOTIFY`, and any long-lived connection feature.** They need a
   connection outside the pool with its own lifecycle, and the natural home is
   the `events` domain's wire, not this one.
-- **A `resilience` bridge.** Retrying a *transaction* is not retrying a call:
+- **A `resilience` bridge.** *Resolved by the 2026-11-02 amendment.*
+  Retrying a *transaction* is not retrying a call:
   it needs the unit of work to be idempotent and the retry to re-open, not
   re-run. `resilience.Runner` composes over `Transact` from the outside today;
   a first-class integration needs its own decision.
-- **Migration checksums.** Detecting that migration 7's *text* changed after it
+- **Migration checksums.** *Resolved by the 2026-11-02 amendment, for steps
+  built from statements.* Detecting that migration 7's *text* changed after it
   was applied is genuinely useful, and it requires the SDK to have an opinion
   about what a migration's identity is beyond its version — which conflicts
   with `Step` being an opaque func (D12). Revisit if a text-based front end
@@ -583,3 +587,86 @@ an oversight:
 - MySQL: `GET_LOCK` / `RELEASE_LOCK` (session-scoped); implicit commit on DDL
 - Go: `database/sql`, `database/sql/driver`, `(*sql.Tx).grabConn`,
   `sql.ErrTxDone`, `Tx.awaitDone`
+
+## Amendment (2026-11-02): retry, checksums, a statement budget, a replica, an observer
+
+Four items deferred above were resolved, each the way its deferral said it
+would have to be, and one seam was added. Issues kitsunium/sdk#1058, #1056,
+#837 and #1122.
+
+**A retrying root transactor (#1058).** The deferral said retrying a
+transaction "needs the unit of work to be idempotent and the retry to
+re-open, not re-run". `NewRetrying(tm, RetryConfig)` does exactly that: each
+attempt is a whole transaction of `tm` — a new `BEGIN`, the unit of work from
+its start, `tm`'s own commit or rollback — so what an attempt held with
+`Defer` is dropped with its rollback and runs once, after the commit that
+stood, and `OnAbort` runs after each rollback. A NESTED call — its context
+already carries a transaction of `tm`, opened through the retrying transactor
+or through `tm` itself, found by the context mark and by `Joiner` — joins it
+and is never run again on its own: a savepoint cannot be retried without the
+transaction around it. The verdict is a func port, `Transient func(err error)
+bool`, in `core/data/sql`; `Classify` is the SDK's reading of it, through the
+methods drivers expose and never a driver import (D2): SQLSTATE 40001 and 40P01
+through `SQLState() string`, SQLite's BUSY and LOCKED — any extended form —
+through `Code() int`. MySQL's 1213 and 1205 are fields of go-sql-driver's
+error, not methods, so a connector composes its own reading. A context's end is
+never transient. The waits are `kernel/backoff`'s curve on the injected clock
+(D13); the zero curve is 25 ms grown by 2 with full jitter, because two
+transactions that deadlocked each other and retry on the same curve meet again.
+A spent budget answers `TX_RETRIES_EXHAUSTED` (`0.3.54.19`) joined beside the
+last attempt's error, with an `attempts` field. The transactor offers the three
+ADR 0139 siblings exactly when `tm` offers all three.
+
+**Migration checksums (#1056).** The deferral waited for "a text-based front
+end": `Statements` is one. `MigrationValue.Checksum` is a value field (ADR
+0039); `ChecksumOf(stmts...)` is SHA-256 over the statements, each preceded
+by its length as an 8-byte big-endian integer, in lowercase hex — the prefix
+keeps two statements from being read as their concatenation. Empty means
+unverified, which a func step must be (D12). The version table gains a
+nullable `checksum TEXT` column: the `CREATE TABLE` of a set that declares a
+checksum declares it, and a three-column table — from an earlier release, or
+from a set that declared none — gets it from the first LOCKED run whose set
+declares one (`SELECT checksum … WHERE 1 = 0` refused, then `ALTER TABLE
+… ADD COLUMN checksum TEXT`, spelled alike on the three engines); `Plan`, which
+takes no lock and applies nothing, reads such a table as unverified. `Plan`,
+`Up` and `Down` refuse before applying anything when a declared checksum
+differs from a recorded one: `MIGRATION_CHANGED` (`0.3.54.18`), fields
+`version` and `direction`, never the text. A version recorded without one is
+backfilled by the next locked run that declares it. A set that declares no
+checksum sends exactly the statements it always sent.
+
+**A statement budget and a read replica (#837).** `Config.StatementTimeout`
+bounds each statement the transactor's executors run — in a transaction, and
+through `Join` or the new `Router.Reader` on a pool — on the injected clock: an
+`Exec` or a `Prepare` until it returns, a `Query` until its rows close or the
+budget elapses. A cut the call itself answers is joined with
+`STATEMENT_TIMED_OUT` (`0.3.54.20`), its `operation` named; one met while
+reading rows surfaces as the context's end. The migration runner never applies
+it. `Config.ReadReplica` resolves the replica deferral without parsing SQL: the
+CALLER says which transactions only read, with the `ReadOnly` option every
+transaction already carried, and such a transaction opens on the replica; a
+write inside it is the replica's to refuse. `Router` is the ADR 0039 sibling
+that routes a read outside a transaction. The pool policy is applied to both
+pools, and the probe pings both. Two helpers come with them: `Each`, the
+Next/Scan/Err/Close loop written once as an `iter.Seq2` that closes its rows,
+and `InsertRows`, a multi-row `INSERT` into the table and columns an
+`InsertSpec` names, chunked under the engine's ceiling on bound parameters
+(999 on SQLite, 65535 on the two servers) — composing a
+statement from the caller's own identifiers, which D1 permits for the SDK's
+own bookkeeping and which the helper states it does not validate.
+
+**A statement observer (#1122).** `StatementObserver` — `Begin(ctx, kind,
+query) (end func(rows int64, err error))` — is told about every statement a
+pool sends through `Observe(connector, obs)`, a `driver.Connector` wrapper:
+no driver import, and the caller still hands this package a `*sql.DB`. It sees
+the SQL text cut to 1 KiB and never an argument or a row (ADR 0005). The
+wrapped connection keeps every optional interface database/sql reads, declining
+as its defaults would where the driver has none. Two observers ship:
+`SlowQueries`, one `Warn` per statement over a threshold, timed on the injected
+clock, a failure named by its class as `Withheld` renders it; and `Traced`, one
+client span per statement.
+
+**Measured** (`internal/service/data/sql/BENCH.md`): the unwrapped
+`TransactCommit` keeps its 13 allocations; through `Observe` with an observer
+that does nothing it costs one more, the observed transaction; through
+`NewRetrying` with nothing to retry, one more, the root's context mark.

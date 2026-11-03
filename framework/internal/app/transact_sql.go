@@ -41,6 +41,9 @@ type sqlScope struct {
 type scopeBase struct {
 	ctx context.Context
 	db  plug.Database
+	// opts are the transaction's options for the outermost level, none for
+	// a savepoint.
+	opts plug.TxOptionsValue
 }
 
 // openScope opens a transaction on at's database and returns once the
@@ -57,7 +60,7 @@ func openScope(wait context.Context, at scopeBase) (*sqlScope, error) {
 	ready := make(chan struct{})
 	go func() {
 		defer cancel()
-		s.done <- s.run(began, db, ready)
+		s.done <- s.run(began, db, at.opts, ready)
 	}()
 	select {
 	case <-ready:
@@ -80,14 +83,14 @@ var errHeldPanicked = errs.New(CodeTransactionPanic, "TRANSACTION_HELD_PANICKED"
 // run is the SDK's Transact of the scope, its function waiting for the
 // level's end. A panic of what the SDK runs after the commit is caught, for
 // the level's end to raise.
-func (s *sqlScope) run(ctx context.Context, db plug.Database, ready chan struct{}) (err error) {
+func (s *sqlScope) run(ctx context.Context, db plug.Database, opts plug.TxOptionsValue, ready chan struct{}) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			s.caught = p
 			err = errHeldPanicked
 		}
 	}()
-	return db.Transact(ctx, func(ctx context.Context) error {
+	return db.Transact(ctx, opts, func(ctx context.Context) error {
 		s.ctx = ctx
 		close(ready)
 		return <-s.end
@@ -122,6 +125,10 @@ func joinCall(ctx context.Context, a *App, r *databaseRun, store string, write b
 	if t.app == nil {
 		t.app = a
 	}
+	if write && t.opts.ReadOnly {
+		t.mu.Unlock()
+		return nil, readOnlyRefusal(store)
+	}
 	switch {
 	case t.db == nil && !t.local:
 		t.db = r
@@ -153,8 +160,9 @@ func (u *unit) sqlScope(wait context.Context, r *databaseRun) (*sqlScope, error)
 	if u.scope != nil {
 		return u.scope, nil
 	}
-	base := u.tx.base
+	base, opts := u.tx.base, u.tx.opts
 	if u.parent != nil {
+		opts = plug.TxOptionsValue{}
 		outer, err := u.parent.sqlScope(wait, r)
 		if err != nil {
 			return nil, err
@@ -165,7 +173,7 @@ func (u *unit) sqlScope(wait context.Context, r *databaseRun) (*sqlScope, error)
 	if db == nil {
 		return nil, Unavailable(fmt.Sprintf("database %q is not open", r.d.name))
 	}
-	s, err := openScope(wait, scopeBase{ctx: base, db: db})
+	s, err := openScope(wait, scopeBase{ctx: base, db: db, opts: opts})
 	if err != nil {
 		return nil, r.said(err)
 	}

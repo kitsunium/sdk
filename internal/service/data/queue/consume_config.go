@@ -15,8 +15,9 @@ import (
 // It is a CLAMP and not a refusal (ADR 0031): its zero has one reading — "you
 // did not think about polling" — and 100 ms is defensible for every queue,
 // because it bounds idle latency at a tenth of a second while costing one
-// directory read per worker per tenth of a second. A caller who cares picks
-// their own.
+// probe per tenth of a second — on the file broker a stat of each state
+// directory while the queue is quiet, a read of them once it moves. A caller
+// who cares picks their own.
 //
 // Every broker in this package is a [corequeue.Waker], so for them it bounds
 // only what a wake cannot see — a publication made by ANOTHER process into a
@@ -128,6 +129,21 @@ type ConsumerConfig struct {
 	// the margin before its lease ends. Measured on Clock. A caller's stop
 	// budget — a lifecycle component's — must cover it plus SettleTimeout.
 	DrainTimeout time.Duration
+	// AckedWindow is how many message identifiers the engine remembers
+	// having handled: the last AckedWindow messages whose handler returned
+	// nil or [corequeue.Acknowledged] in this process. A delivery of one of
+	// them — its lease lapsed before the acknowledgement landed, and the
+	// broker delivered it again — is acknowledged without running the
+	// handler a second time.
+	//
+	// It narrows the duplicates at-least-once delivery leaves, as the mail
+	// spool's memory of what it delivered does, for every broker; it does
+	// not remove them. The window is this process's and is lost when it
+	// stops: a redelivery to another consumer, or after a restart, still
+	// runs the handler, which is still idempotent. Zero, or negative,
+	// remembers nothing — every delivery runs the handler, what Consume
+	// always did.
+	AckedWindow int
 	// AutoExtend renews the lease of the message a handler is running, a
 	// third of the lease after it was granted or last renewed, for as long
 	// as the handler runs — the heartbeat of SQS, JetStream's in-progress

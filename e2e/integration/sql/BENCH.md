@@ -1,4 +1,4 @@
-<!-- generated from e2e/integration/sql/docstore_bench_test.go (third-party/db/sql/ until ADR 0157) — run `GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchmem -benchtime=2s ./integration/sql/` in e2e/ to refresh (Docker for PostgreSQL and MySQL); the pattern matches BenchmarkSQLStoreVersions too -->
+<!-- generated from e2e/integration/sql/docstore_bench_test.go (third-party/db/sql/ until ADR 0157) — run `GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchmem -benchtime=2s ./integration/sql/` in e2e/ to refresh (Docker for PostgreSQL and MySQL); the pattern matches BenchmarkSQLStoreVersions too. The queue's rows are queue_bench_test.go's: `-bench BenchmarkSQLQueue` -->
 # Benchmarks — the document store over SQL, on real engines
 
 These numbers answer the question ADR 0139's cost table leaves open:
@@ -149,3 +149,75 @@ plain one (207 µs against 144, 203 against 153 for an `Update`), not twice.
 Reading every version of a document is one statement whatever it holds: a
 LEFT JOIN of the documents' table and the versions', 0.36 ms on PostgreSQL —
 about a `Get` — and 33 µs on SQLite for eleven versions.
+
+## The queue broker over SQL (issue #1048)
+
+`BenchmarkSQLQueue` (`queue_bench_test.go`) times the SQL broker's three verbs
+through the public facade and a real driver — the deferral ADR 0151 left
+("timing the SQL broker on the real engines beside docstore's"): `Publish`
+(one INSERT), `Receive` of one message from a backlog made off the clock (the
+probe, then the lease's transaction — one UPDATE … RETURNING on PostgreSQL),
+and `Ack` (one DELETE). The SDK's own allocations per verb, over the fake
+engine, are `internal/service/data/queue/BENCH.md`'s.
+
+| Dimension | Value |
+|---|---|
+| CPU cores          | 8 (AMD EPYC 7351P 16-Core Processor), the 4-CPU lane |
+| OS / kernel        | Linux 6.12.101+deb13-amd64, a VM on overlayfs |
+| Go toolchain       | go1.27.3 linux/amd64 |
+| Engines            | SQLite through `modernc.org/sqlite` v1.59.0 (a file, WAL, `busy_timeout(10000)`) |
+| Git branch         | `wip/sdk-lot-6-cq` |
+| Generated (UTC)    | 2026-11-03 |
+| Bench wall-clock   | `-benchtime=2s -count=3`, 25 s |
+
+```
+BenchmarkSQLQueue/sqlite/Publish-4 	    2510	    970328 ns/op	     987 B/op	      23 allocs/op
+BenchmarkSQLQueue/sqlite/Publish-4 	    2716	    990436 ns/op	     987 B/op	      23 allocs/op
+BenchmarkSQLQueue/sqlite/Receive-4 	    1732	   1308290 ns/op	    5013 B/op	     119 allocs/op
+BenchmarkSQLQueue/sqlite/Receive-4 	    1878	   1321703 ns/op	    5015 B/op	     119 allocs/op
+BenchmarkSQLQueue/sqlite/Ack-4     	    2383	    994924 ns/op	     777 B/op	      19 allocs/op
+BenchmarkSQLQueue/sqlite/Ack-4     	    2560	    969027 ns/op	     778 B/op	      19 allocs/op
+```
+
+**PostgreSQL and MySQL are not measured yet.** This machine has no container
+runtime (its root filesystem is full), so their rows wait for a run with
+Docker — the same command, which skips an engine Docker cannot start. On
+SQLite each verb costs about one commit's flush on this device: ~1 ms for a
+Publish and an Ack, each a statement in a transaction of its own, ~1.3 ms for
+a Receive, whose probe is a read and whose lease is one write transaction.
+That is the flush, not the SDK: 23, 119 and 19 allocations, a few kilobytes,
+beside a millisecond.
+
+## A batch, and the trash index (#1057, #1054)
+
+`BenchmarkSQLStoreBatch` writes 100 existing documents of a 1 000-document
+store as one `Batch` — one transaction — against the same 100 `Put`s, each
+its own. `BenchmarkSQLStoreTombstones` reads `Tombstones` over a versions
+table of 110 000 version rows — 10 000 documents keeping ten former versions
+and a head — and 100 trash rows, inserted as the store lays them out, before
+`SQLVersionsTrashIndexMigration` and after it.
+
+| Dimension | Value |
+|---|---|
+| Machine | 4 of 8 vCPUs (`GOMAXPROCS=4`, AMD EPYC 7351P), 15 GiB, Linux 6.12.101 (Debian 13), ext4, go1.27.3 linux/amd64, shared with other jobs |
+| Engines | SQLite through `modernc.org/sqlite` (a file, WAL, `busy_timeout(10000)`) only: this machine runs no Docker, so the PostgreSQL and MySQL rows are CI's — the same command without `/sqlite` |
+| Git branch | `wip/sdk-lot-6-cd` (pre-commit) |
+| Generated (UTC) | 2026-11-03 |
+| Command | `GOWORK=off go test -tags integration -run '^$' -bench 'BenchmarkSQLStoreBatch/sqlite\|BenchmarkSQLStoreTombstones/sqlite' -benchmem -benchtime=2s ./integration/sql/` in `e2e/` |
+
+```
+BenchmarkSQLStoreBatch/sqlite/batch=100-4         	     100	  24697230 ns/op	  553410 B/op	   12630 allocs/op
+BenchmarkSQLStoreBatch/sqlite/puts=100-4          	      14	 151320642 ns/op	  636307 B/op	   14310 allocs/op
+BenchmarkSQLStoreTombstones/sqlite/index=none-4   	      99	  23584022 ns/op	   25816 B/op	     734 allocs/op
+BenchmarkSQLStoreTombstones/sqlite/index=trash-4  	    6848	    310523 ns/op	   25814 B/op	     733 allocs/op
+```
+
+On SQLite a batch of 100 is six times cheaper than 100 `Put`s (25 ms
+against 151 ms): it commits once, and a commit is SQLite's flush. On the
+file engine a batch buys atomicity and no speed
+(`internal/service/data/docstore/BENCH.md`); here it buys both.
+
+The trash index turns `Tombstones` from a scan of the 110 000 rows into a
+read of the 100 it holds: 23.6 ms before, 0.31 ms after, 76 times less,
+with the same rows answered. What the call allocates is the answer's, the
+same both ways.

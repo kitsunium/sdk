@@ -14,6 +14,62 @@ workflows:
           key: index
           range: len(field)
       - return: "true"
+  - of: (*memoryBroker).earliestReady
+    steps:
+      - var:
+          name: due
+          type: time.Time
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: due
+                    value: list[0].visibleAt
+                when: len(list) > 0 && (due.IsZero() || list[0].visibleAt.Before(due))
+          key: _
+          range: b.ready
+          value: list
+      - return: due
+  - of: (*sqlBulkStatements).insertRows
+    steps:
+      - bind: rows
+        eval: make([]byte, 0, n*32)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: rows
+                    value: append(rows, ", "...)
+                when: row > 0
+            - bind: first
+              eval: row*sqlInsertArgs + 1
+            - set: rows
+              value: |-
+                append(rows, "("+s.dialect.Placeholder(first)+", 0, "+s.dialect.Placeholder(first+1)+", "+
+                			s.dialect.Placeholder(first+2)+", 0, "+s.dialect.Placeholder(first+3)+")"...)
+          key: row
+          range: "n"
+      - return: "\"INSERT INTO \" + s.table + \" (id, dead, due, enqueued_at, deliveries, payload) VALUES \" + string(rows)"
+  - of: (*sqlBulkStatements).ackHeld
+    steps:
+      - bind: p
+        eval: s.dialect.Placeholder
+      - bind: held
+        eval: make([]byte, 0, n*48)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: held
+                    value: append(held, " OR "...)
+                when: receipt > 0
+            - bind: first
+              eval: receipt*sqlAckArgs + 2
+            - set: held
+              value: append(held, "(id = "+p(first)+" AND lease = "+p(first+1)+" AND deliveries = "+p(first+2)+")"...)
+          key: receipt
+          range: "n"
+      - return: "\" WHERE dead = 0 AND due > \" + p(1) + \" AND (\" + string(held) + \")\""
   - of: earliest
     steps:
       - var:

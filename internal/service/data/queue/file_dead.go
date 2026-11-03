@@ -40,7 +40,7 @@ func (b *fileBroker) Nack(
 	//: the policy's delay, grown with the deliveries when it asks for that.
 	return b.nackWith(ctx, receipt, cause, func(deliveries int) time.Duration {
 		//: the curve every broker waits on.
-		return retryDelay(b.policy, deliveries)
+		return retryDelay(b.policy, deliveries, b.random)
 	})
 }
 
@@ -84,7 +84,7 @@ func (b *fileBroker) nackWith(
 	}
 	requeued := nameValue{
 		At: now.Add(wait(name.Deliveries)).UnixNano(), EnqueuedAt: name.EnqueuedAt,
-		Entropy: name.Entropy, Deliveries: name.Deliveries,
+		Entropy: name.Entropy, Deliveries: name.Deliveries, Priority: name.Priority,
 	}
 	renameErr := b.root.Rename(
 		path.Join(dirInflight, held), path.Join(dirReady, requeued.readyName()))
@@ -138,7 +138,7 @@ func (b *fileBroker) Release(ctx context.Context, receipt corequeue.ReceiptValue
 	}
 	requeued := nameValue{
 		At: b.clk.Now().UnixNano(), EnqueuedAt: name.EnqueuedAt,
-		Entropy: name.Entropy, Deliveries: max(name.Deliveries-1, 0),
+		Entropy: name.Entropy, Deliveries: max(name.Deliveries-1, 0), Priority: name.Priority,
 	}
 	renameErr := b.root.Rename(
 		path.Join(dirInflight, held), path.Join(dirReady, requeued.readyName()))
@@ -221,7 +221,7 @@ func (b *fileBroker) renameLease(
 ) (lease corequeue.LeaseValue, err error) {
 	renewed := nameValue{
 		At: deadline, EnqueuedAt: name.EnqueuedAt, Entropy: name.Entropy,
-		Deliveries: name.Deliveries, Lease: entropy,
+		Deliveries: name.Deliveries, Lease: entropy, Priority: name.Priority,
 	}
 	target := renewed.inflightName()
 	renameErr := b.root.Rename(path.Join(dirInflight, receipt), path.Join(dirInflight, target))
@@ -270,45 +270,8 @@ func (b *fileBroker) bury(name nameValue, receipt string, cause causeValue, now 
 func (b *fileBroker) DeadLetters(
 	ctx context.Context, max int,
 ) (dead []corequeue.DeadLetterValue, err error) {
-	//: the same refusal Receive makes.
-	if invalid := checkBatch(max); invalid != nil {
-		//: InvalidBatchSize.
-		return nil, invalid
-	}
-	//: a cancelled caller.
-	if ctx.Err() != nil {
-		//: the caller's deadline.
-		return nil, ctx.Err()
-	}
-	entries, listErr := b.entriesOf(dirDead)
-	//: the medium refused.
-	if listErr != nil {
-		//: QueueBackendFailed.
-		return nil, listErr
-	}
-	//: nil until something is found, so an empty store allocates nothing.
-	var out []corequeue.DeadLetterValue
-	//: oldest first, because fs.ReadDir sorts on a name that opens with the
-	//: enqueue instant.
-	for _, entry := range entries {
-		record, ok, readErr := b.readDead(entry.Name())
-		//: the medium refused mid-listing.
-		if readErr != nil {
-			//: QueueBackendFailed.
-			return nil, readErr
-		}
-		//: not one of ours, or a record another process is still publishing.
-		if !ok {
-			continue
-		}
-		out = append(out, record)
-		//: the caller asked for a bounded batch.
-		if len(out) == max {
-			break
-		}
-	}
-	//: evidence, still on disk.
-	return out, nil
+	//: the first page, from the first identifier.
+	return b.DeadLettersAfter(ctx, "", max)
 }
 
 // readDead reads and decodes one dead-letter record.
@@ -317,8 +280,9 @@ func (b *fileBroker) readDead(
 ) (record corequeue.DeadLetterValue, ok bool, err error) {
 	//: skip anything that is not a dead letter's name — notably the
 	//: `.vfs-*.tmp` temporary a concurrent burial is still writing.
-	if _, named := parseDead(base); !named {
-		//: not ours.
+	name, named := parseDead(base)
+	//: not ours.
+	if !named {
 		return corequeue.DeadLetterValue{}, false, nil
 	}
 	raw, readErr := b.root.ReadFile(path.Join(dirDead, base))
@@ -328,6 +292,8 @@ func (b *fileBroker) readDead(
 		return corequeue.DeadLetterValue{}, false, ignoreMissing("read", base, readErr)
 	}
 	decoded, sound := decodeDead(raw)
+	//: the level is the name's: the record's header never carried one.
+	decoded.Priority = name.Priority
 	//: a record this package did not write, or one truncated by a filesystem
 	//: that lost it: reported as absent rather than as a parse error, because
 	//: a reader of a dead-letter store wants the records it CAN read.
@@ -389,13 +355,16 @@ func decodeDead(raw []byte) (record corequeue.DeadLetterValue, ok bool) {
 			fields[key] = value
 		}
 	}
-	//: assembled from whatever the header actually carried.
+	//: assembled from whatever the header actually carried — its reason and
+	//: cause held to what a burial writes, so a record planted or cut short
+	//: never reads back a value PutDeadLetter would refuse (issue #1047,
+	//: found by FuzzDecodeDead).
 	return corequeue.DeadLetterValue{
 		Message: corequeue.MessageValue{
 			ID: fields["id"], Payload: payload, EnqueuedAt: nanoField(fields["enqueued"]),
 		},
 		FailedAt: nanoField(fields["failed"]), Deliveries: intField(fields["deliveries"]),
-		Code: uint32(intField(fields["code"])), Reason: fields["reason"], Cause: fields["public"],
+		Code: uint32(intField(fields["code"])), Reason: oneLine(fields["reason"]), Cause: oneLine(fields["public"]),
 		Trail: decodeTrail(fields["trail"]),
 	}, true
 }

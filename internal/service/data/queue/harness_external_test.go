@@ -266,7 +266,7 @@ func discard() context.Context {
 }
 
 // newSQLTransactor returns the SDK's transactor over a pool onto engine.
-func newSQLTransactor(t *testing.T, engine *sqlEngine, dialect coresql.Dialect) coresql.Transactor {
+func newSQLTransactor(t testing.TB, engine *sqlEngine, dialect coresql.Dialect) coresql.Transactor {
 	t.Helper()
 	tm, err := svcsql.NewTransactor(svcsql.Config{
 		DB: engine.open(t), Dialect: dialect, Pool: svcsql.PoolConfig{MaxOpen: 8},

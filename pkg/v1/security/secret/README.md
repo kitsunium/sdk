@@ -151,6 +151,7 @@ Package secret — subject keys: one data key per subject under a rotating root,
   - [func \(SubjectKeyStore\) Replace\(ctx context.Context, subject string, current \[\]byte, next \[\]byte\) \(replaced bool, err error\)](<#SubjectKeyStore.Replace>)
 - [type SubjectKeys](<#SubjectKeys>)
   - [func \(\*SubjectKeys\) Destroy\(ctx context.Context, subject string\) \(destroyed bool, err error\)](<#SubjectKeys.Destroy>)
+  - [func \(\*SubjectKeys\) Expire\(\) int](<#SubjectKeys.Expire>)
   - [func \(\*SubjectKeys\) OldestRoot\(ctx context.Context\) \(version int, err error\)](<#SubjectKeys.OldestRoot>)
   - [func \(\*SubjectKeys\) Open\(ctx context.Context, box \[\]byte, bind ...string\) \(plaintext \[\]byte, err error\)](<#SubjectKeys.Open>)
   - [func \(\*SubjectKeys\) Rewrap\(ctx context.Context\) \(report RewrapValue, err error\)](<#SubjectKeys.Rewrap>)
@@ -1053,7 +1054,7 @@ Replace files next under subject only while subject still holds current, byte fo
 <a name="SubjectKeys"></a>
 ## type [SubjectKeys](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
-SubjectKeys keeps one data key per subject, wrapped by a root [Keyring](#Keyring): Seal and Open under a subject's key, Destroy to erase everything it sealed, Rewrap after the root rotates.
+SubjectKeys keeps one data key per subject, wrapped by a root [Keyring](#Keyring): Seal and Open under a subject's key, Destroy to erase everything it sealed, Rewrap after the root rotates, Expire to wipe the opened keys past their TTL.
 
 ```go
 type SubjectKeys = svcsecret.SubjectKeys
@@ -1077,6 +1078,23 @@ Destroy deletes subject's data key, and reports whether one was held. Every box 
 This process's cache drops and wipes the key at once. Another process that cached it keeps it for up to its CacheTTL. A wrapped copy of the key that the store's backend kept elsewhere — a write-ahead log, a backup — opens only while the root version that wrapped it is kept: the erasure is complete everywhere once that version is pruned.
 
 Destroying a subject that holds no key is not an error. A later Seal for the same subject makes a NEW key, which opens nothing the destroyed one sealed.
+
+<a name="SubjectKeys.Expire"></a>
+### func \(SubjectKeys\) [Expire](<https://github.com/kitsunium/sdk/blob/main/internal/service/security/secret/subjectkeys.go>)
+
+```go
+func (*SubjectKeys) Expire() int
+```
+
+Expire wipes every opened key whose CacheTTL has passed, and reports how many it wiped. A key otherwise leaves memory only when a call — on any subject — or a capacity eviction reaches it, so a process that makes no call keeps an idle subject's key, opened, for as long as it makes none.
+
+The engine starts no goroutine: the caller sweeps on its own ticker or scheduler, and stops it with the engine. Called every half CacheTTL, it wipes an idle key within one and a half CacheTTL:
+
+```
+daemon := worker.Every(ttl/2, func() { keys.Expire() })
+```
+
+A wiped key stays in the store: the next call on its subject reads and opens it again. Expire reads no store, costs nothing when no key is due, and returns 0 without a cache.
 
 <a name="SubjectKeys.OldestRoot"></a>
 ### func \(SubjectKeys\) [OldestRoot](<https://github.com/kitsunium/sdk/blob/main/internal/service/security/secret/subjectrewrap.go>)
@@ -1168,6 +1186,7 @@ type SubjectKeysConfig struct {
 	// cache and refused without one, because it is a promise about erasure: a
 	// key another PROCESS destroyed keeps opening — and sealing — here for up
 	// to CacheTTL. A key destroyed through this value leaves its cache at once.
+	// An idle key leaves memory when [SubjectKeys.Expire] sweeps it.
 	CacheTTL  time.Duration
 	// Clock times the cache. nil means clock.System.
 	Clock     clock.Clock

@@ -9,6 +9,24 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/collections/cache"
 )
 
+// policies are the eviction policies every behavioural table runs under: a
+// contract that holds under LRU must hold under S3-FIFO too (#834).
+var policies = []cache.Policy{cache.PolicyLRU, cache.PolicyS3FIFO}
+
+// policyNames names the policies' subtests.
+var policyNames = map[cache.Policy]string{cache.PolicyLRU: "lru", cache.PolicyS3FIFO: "s3fifo"}
+
+// forEachPolicy runs one test body once per policy, as parallel subtests.
+func forEachPolicy(t *testing.T, run func(t *testing.T, policy cache.Policy)) {
+	t.Helper()
+	for _, policy := range policies {
+		t.Run(policyNames[policy], func(t *testing.T) {
+			t.Parallel()
+			run(t, policy)
+		})
+	}
+}
+
 // fakeClock is a settable clock for deterministic TTL tests.
 type fakeClock struct{ now time.Time }
 
@@ -20,6 +38,12 @@ func (f *fakeClock) advance(d time.Duration)         { f.now = f.now.Add(d) }
 // most-recently-used, which is what makes the LRU victim predictable.
 func TestCache_Fetch(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testCacheFetch)
+}
+
+// testCacheFetch is TestCache_Fetch under one policy.
+func testCacheFetch(t *testing.T, policy cache.Policy) {
+	t.Helper()
 	type tc struct {
 		name    string
 		key     string
@@ -32,7 +56,7 @@ func TestCache_Fetch(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		cch := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: 2})
+		cch := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: 2, Policy: policy})
 		cch.Set("a", 1)
 		cch.Set("b", 2)
 		//: touching "a" makes "b" the LRU victim.
@@ -54,6 +78,12 @@ func TestCache_Fetch(t *testing.T) {
 // deadline, and not one tick before it.
 func TestCache_SetTTL(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testCacheSetTTL)
+}
+
+// testCacheSetTTL is TestCache_SetTTL under one policy.
+func testCacheSetTTL(t *testing.T, policy cache.Policy) {
+	t.Helper()
 	type tc struct {
 		name    string
 		advance time.Duration
@@ -67,7 +97,7 @@ func TestCache_SetTTL(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		clk := &fakeClock{now: time.Unix(0, 0)}
-		cch := cache.NewCache[string, int](cache.Config[string, int]{Clock: clk})
+		cch := cache.NewCache[string, int](cache.Config[string, int]{Clock: clk, Policy: policy})
 		cch.SetTTL("k", 7, time.Minute)
 		clk.advance(c.advance)
 		if _, ok := cch.Fetch("k"); ok != c.wantHit {
@@ -87,6 +117,12 @@ func TestCache_SetTTL(t *testing.T) {
 // entry, while a capacity eviction must, because nobody else can see it happen.
 func TestCache_Stats(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testCacheStats)
+}
+
+// testCacheStats is TestCache_Stats under one policy.
+func testCacheStats(t *testing.T, policy cache.Policy) {
+	t.Helper()
 	type tc struct {
 		name string
 		//: what the caller does, in order, after the cache is built.
@@ -142,6 +178,7 @@ func TestCache_Stats(t *testing.T) {
 		var evicted []string
 		var mu sync.Mutex
 		cch := cache.NewCache[string, int](cache.Config[string, int]{
+			Policy:     policy,
 			MaxEntries: 1,
 			OnEvict: func(key string, _ int) {
 				mu.Lock()
@@ -151,8 +188,10 @@ func TestCache_Stats(t *testing.T) {
 		})
 		c.steps(cch)
 
-		if st := cch.Stats(); st != c.wantStats {
-			t.Errorf("stats = %+v, want %+v", st, c.wantStats)
+		want := c.wantStats
+		want.Policy = policy
+		if st := cch.Stats(); st != want {
+			t.Errorf("stats = %+v, want %+v", st, want)
 		}
 		mu.Lock()
 		defer mu.Unlock()
@@ -177,6 +216,12 @@ func TestCache_Stats(t *testing.T) {
 // value: a Set that grew the cache would make MaxEntries meaningless.
 func TestCache_Set(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testCacheSet)
+}
+
+// testCacheSet is TestCache_Set under one policy.
+func testCacheSet(t *testing.T, policy cache.Policy) {
+	t.Helper()
 	type tc struct {
 		name      string
 		wantLen   int
@@ -188,7 +233,7 @@ func TestCache_Set(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		cch := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: 4})
+		cch := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: 4, Policy: policy})
 		cch.Set("k", 1)
 		cch.Set("k", 2)
 		if c.wantLen != 0 && cch.Len() != c.wantLen {
@@ -211,7 +256,13 @@ func TestCache_Set(t *testing.T) {
 // TestCache_Purge drops everything and leaves the cache usable.
 func TestCache_Purge(t *testing.T) {
 	t.Parallel()
-	c := cache.NewCache[int, int](cache.Config[int, int]{})
+	forEachPolicy(t, testCachePurge)
+}
+
+// testCachePurge is TestCache_Purge under one policy.
+func testCachePurge(t *testing.T, policy cache.Policy) {
+	t.Helper()
+	c := cache.NewCache[int, int](cache.Config[int, int]{Policy: policy})
 	for i := range 10 {
 		c.Set(i, i)
 	}
@@ -226,7 +277,13 @@ func TestCache_Purge(t *testing.T) {
 // length never exceeds the configured capacity, however hard it is hammered.
 func TestCache_Len(t *testing.T) {
 	t.Parallel()
-	c := cache.NewCache[int, int](cache.Config[int, int]{MaxEntries: 64})
+	forEachPolicy(t, testCacheLen)
+}
+
+// testCacheLen is TestCache_Len under one policy.
+func testCacheLen(t *testing.T, policy cache.Policy) {
+	t.Helper()
+	c := cache.NewCache[int, int](cache.Config[int, int]{MaxEntries: 64, Policy: policy})
 	var wg sync.WaitGroup
 	//: many goroutines hammer Set/Fetch concurrently.
 	for g := range 8 {
@@ -255,6 +312,12 @@ func TestCache_Len(t *testing.T) {
 // silently.
 func TestNewCache(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testNewCache)
+}
+
+// testNewCache is TestNewCache under one policy.
+func testNewCache(t *testing.T, policy cache.Policy) {
+	t.Helper()
 	type tc struct {
 		name       string
 		maxEntries int
@@ -267,7 +330,7 @@ func TestNewCache(t *testing.T) {
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
 		//: construction must not panic on a bad capacity.
-		c := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: tc.maxEntries})
+		c := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: tc.maxEntries, Policy: policy})
 		//: the cache stays usable and unbounded (nothing is evicted).
 		for i := range 100 {
 			c.Set("k"+strconv.Itoa(i), i)
@@ -296,6 +359,12 @@ func TestNewCache(t *testing.T) {
 // by Fetch rather than by capacity pressure.
 func TestOnEvictRunsOutsideLock(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testOnEvictRunsOutsideLock)
+}
+
+// testOnEvictRunsOutsideLock is TestOnEvictRunsOutsideLock under one policy.
+func testOnEvictRunsOutsideLock(t *testing.T, policy cache.Policy) {
+	t.Helper()
 	type tc struct {
 		name string
 		//: builds the cache with the re-entrant observer, then drives it to
@@ -310,6 +379,7 @@ func TestOnEvictRunsOutsideLock(t *testing.T) {
 				t.Helper()
 				var c *cache.Cache[string, int]
 				c = cache.NewCache[string, int](cache.Config[string, int]{
+					Policy:     policy,
 					MaxEntries: 1,
 					OnEvict: func(key string, _ int) {
 						//: re-enter the cache from inside the callback. With
@@ -336,7 +406,8 @@ func TestOnEvictRunsOutsideLock(t *testing.T) {
 				clk := &fakeClock{now: time.Unix(0, 0)}
 				var c *cache.Cache[string, int]
 				c = cache.NewCache[string, int](cache.Config[string, int]{
-					Clock: clk,
+					Policy: policy,
+					Clock:  clk,
 					OnEvict: func(key string, _ int) {
 						//: re-entering here proves the expiry path also
 						//: released the lock.
@@ -361,7 +432,8 @@ func TestOnEvictRunsOutsideLock(t *testing.T) {
 				clk := &fakeClock{now: time.Unix(0, 0)}
 				var c *cache.Cache[string, int]
 				c = cache.NewCache[string, int](cache.Config[string, int]{
-					Clock: clk,
+					Policy: policy,
+					Clock:  clk,
 					OnEvict: func(key string, _ int) {
 						//: Purge takes the same lock; a held mutex deadlocks.
 						c.Purge()
@@ -407,6 +479,12 @@ func TestOnEvictRunsOutsideLock(t *testing.T) {
 // OnEvict useless as a "something left the cache behind your back" signal.
 func TestCache_Delete(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testCacheDelete)
+}
+
+// testCacheDelete is TestCache_Delete under one policy.
+func testCacheDelete(t *testing.T, policy cache.Policy) {
+	t.Helper()
 	type tc struct {
 		name    string
 		seed    []string
@@ -422,6 +500,7 @@ func TestCache_Delete(t *testing.T) {
 		t.Helper()
 		var notified []string
 		cch := cache.NewCache[string, int](cache.Config[string, int]{
+			Policy:  policy,
 			OnEvict: func(key string, _ int) { notified = append(notified, key) },
 		})
 		for i, k := range c.seed {

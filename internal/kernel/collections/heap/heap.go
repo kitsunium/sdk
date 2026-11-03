@@ -1,5 +1,7 @@
 package heap
 
+import "iter"
+
 // branching is the heap's arity: every node has at most two children, which is
 // what puts the children of i at 2i+1 and 2i+2 and makes the tree implicit in a
 // flat array. It is named rather than written twice as a bare 2 because those
@@ -93,6 +95,31 @@ func (h *Heap[T]) Pop() (T, bool) {
 	}
 	//: the element that sorted first.
 	return top, true
+}
+
+// Drain yields the elements in order, popping each before it is yielded,
+// until the heap is empty: Pop's loop, as an iterator. A loop that stops
+// early leaves the rest in h, and an element the loop's body pushes is
+// yielded in its turn. Nothing is allocated.
+func (h *Heap[T]) Drain() iter.Seq[T] {
+	//: each step pops from the heap as it is then, so a push from the body is
+	//: met in its turn.
+	return func(yield func(T) bool) {
+		//: until the heap is empty or the caller stops.
+		for {
+			top, ok := h.Pop()
+			//: empty: the loop ends.
+			if !ok {
+				//: drained.
+				return
+			}
+			//: the caller stopped: what is left stays in h.
+			if !yield(top) {
+				//: the rest is the caller's.
+				return
+			}
+		}
+	}
 }
 
 // up restores the heap invariant along the path from child to the root.

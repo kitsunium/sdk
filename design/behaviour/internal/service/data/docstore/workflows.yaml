@@ -1,6 +1,84 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: (*batchView).release
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!ix.unique"
+            - loop:
+                do:
+                  - set: "v.claimed[claimKey{index: i, key: k}]"
+                    value: "\"\""
+                key: _
+                range: keys[i]
+                value: k
+          key: i
+          range: v.store.indexes
+          value: ix
+  - of: (*batchView).claim
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!ix.unique"
+            - loop:
+                do:
+                  - set: "v.claimed[claimKey{index: i, key: k}]"
+                    value: owner
+                key: _
+                range: keys[i]
+                value: k
+          key: i
+          range: v.store.indexes
+          value: ix
+  - of: (*batchView).taken
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!ix.unique"
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: ix.name, true
+                      when: v.heldElsewhere(i, ix, owner, k)
+                key: _
+                range: keys[i]
+                value: k
+          key: i
+          range: v.store.indexes
+          value: ix
+      - return: "\"\", false"
+  - of: (*batchView).heldElsewhere
+    steps:
+      - opt:
+          do:
+            - return: holder != "" && holder != owner
+          init:
+            bind: holder, decided
+            eval: "v.claimed[claimKey{index: i, key: k}]"
+          when: decided
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: _, rewritten
+                  eval: v.written[other]
+                when: other != owner && !rewritten
+          key: other
+          range: ix.entries[k]
+      - return: "false"
   - of: yieldKeys
     steps:
       - loop:
@@ -32,25 +110,6 @@ workflows:
           range: raw
           value: k
       - return: out
-  - of: (*index).drop
-    steps:
-      - loop:
-          do:
-            - opt:
-                do:
-                  - eval: delete(holders, owner)
-                  - opt:
-                      do:
-                        - eval: delete(ix.entries, k)
-                      when: len(holders) == 0
-                init:
-                  bind: holders
-                  eval: ix.entries[k]
-                when: holders != nil
-          key: _
-          range: ix.owned[owner]
-          value: k
-      - eval: delete(ix.owned, owner)
   - of: (*Store).uniqueTaken
     steps:
       - loop:
@@ -63,6 +122,35 @@ workflows:
           range: s.indexes
           value: ix
       - return: "\"\", false"
+  - of: (*Store).deferOrders
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: ix.order
+                    value: deferred
+                when: ix.order == ordered
+          key: _
+          range: s.indexes
+          value: ix
+  - of: yieldEntries
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!yield(entry, nil)"
+          key: _
+          range: page
+          value: entry
+      - opt:
+          do:
+            - return: "true"
+          when: failure == nil
+      - eval: yield(coredocstore.EntryValue{}, failure)
+      - return: "false"
   - of: isEntryName
     steps:
       - opt:

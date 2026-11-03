@@ -12,8 +12,10 @@ go_library(
     srcs = [
         "credentials.go",
         "doc.go",
+        "engine_compliance.go",
         "gen_codes.go",
         "mysql.go",
+        "transient.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/connectors/mysql",
     deps = [
@@ -42,17 +44,20 @@ go_test(
         "former_test.go",
         "gen_api_test.go",
         "mysql_test.go",
+        "queuecmd_test.go",
         "server_test.go",
         "subsystems_test.go",
+        "transient_internal_test.go",
     ],
+    embed = [":mysql"],
     deps = [
-        ":mysql",
         "//framework/app",
         "//framework/app/server",
         "//framework/app/storetest",
         "//framework/model",
         "//pkg/v1/errs",
         "//pkg/v1/security/secret",
+        "@com_github_go_sql_driver_mysql//:mysql",
     ],
 )
 

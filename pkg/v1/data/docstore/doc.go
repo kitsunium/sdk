@@ -78,6 +78,18 @@
 // detected. It keeps every document in memory. It has no transaction across
 // documents. It is a store for the documents a service owns, not a database.
 //
+// # Consistency
+//
+// The two engines state what a read after a write returns, and it is not the
+// same. A [Store] is read-your-writes within the process: once a write has
+// returned, every call of the process reads it, and a reader never waits —
+// it sees the store before a write or after it, never between. A [SQLStore]
+// reads at the isolation of the transaction a call runs on: a write is
+// visible to its own transaction at once, and to every other one once it
+// commits — never before, never if it rolls back — and a caller inside a
+// REPEATABLE READ transaction reads its snapshot. A call on the pool is a
+// transaction of its own and reads what is committed.
+//
 // # The same store over SQL
 //
 // [OpenSQL] keeps the same documents — the same keys, indexes, write modes,

@@ -16,7 +16,7 @@ only failure of its own is a programming fault, which panics.
 
 | File | Surface |
 |---|---|
-| `singleflight.go` | `Group[K,V]` + `Do` / `Forget` / `InFlight`, and the join/run/publish/await/abandon path |
+| `singleflight.go` | `Group[K,V]` + `Do` / `Forget` / `InFlight`, its sixteen `shard`s, and the join/run/publish/await/abandon path |
 | `call.go` | `call[V]` — the in-flight record shared by every caller of one key |
 | `panic.go` | `PanicValue` — the panic carried out of the shared call into every waiter |
 
@@ -78,7 +78,23 @@ system and not a kernel primitive.
 - **`Do` returns `(V, bool, error)`** — the middle value is `shared`: false for
   the caller that led the call, true for one that joined. Useful for a metric;
   never for a decision, since it describes the past.
-- **A served caller does not touch the group mutex.** `publish` retires the
+- **Sixteen shards, each a map under its own mutex** (#1035). A key's shard is
+  the low bits of `maphash.Comparable` over a seed drawn once per process; the
+  array is fixed, so the zero `Group` still needs no constructor, and each
+  shard is padded to 64 bytes so two never share a cache line. Distinct keys
+  contend only when they hash to the same shard — under a miss storm a cache's
+  `Load` leads one call per missed key, and one group-wide mutex used to
+  serialise every leader. `InFlight` sums the shards one lock at a time;
+  `Forget`, `publish` and `abandon` lock one.
+- **The critical section holds the map and nothing else** (#1035). A follower
+  finds the call and counts itself in one acquisition (`joinExisting`). A
+  leader looks, builds its call record and derives its context with the lock
+  released, then takes it again to insert (`insertOrJoin`); a candidate that
+  lost the key to another leader in between cancels the context it built and
+  joins the winner, and its `fn` never runs
+  (`TestALosingLeaderCandidateIsCancelledAndNeverRuns`). The `go` statement
+  runs with no lock held.
+- **A served caller does not touch the shard's mutex.** `publish` retires the
   entry under the lock before closing `done`, so the deduplicated path costs
   exactly one mutex acquisition (the join).
 - **Cancellation preempts waiting, not delivery.** `await` re-checks `done`
@@ -93,7 +109,7 @@ system and not a kernel primitive.
   arriving now would join. A forgotten or fully abandoned call keeps running
   uncounted, so after `Forget` plus a re-issuing `Do` it reads 1 while two
   calls for that key run. Read it as a gauge, never as "how much work is live".
-- Cross-OS: 100 % portable (`sync`, `context`, `runtime/debug`, `strings`).
+- Cross-OS: 100 % portable (`sync`, `context`, `hash/maphash`, `runtime/debug`, `strings`).
 
 ## Do NOT
 

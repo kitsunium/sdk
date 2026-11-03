@@ -193,3 +193,29 @@ func BenchmarkManual_Advance_Firing(b *testing.B) {
 	}
 	sinkInt = m.Pending()
 }
+
+// BenchmarkCoarse_Now is CoarseClock's read: one atomic load and an addition,
+// the cost a TTL cache hit pays instead of System_Now's.
+func BenchmarkCoarse_Now(b *testing.B) {
+	coarse := NewCoarse(System, time.Millisecond)
+	defer coarse.Stop()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		sinkTime = coarse.Now()
+	}
+}
+
+// BenchmarkCoarse_Now_Parallel reads one CoarseClock from every P: the
+// published word is read-shared, and the publisher writes it once a tick.
+func BenchmarkCoarse_Now_Parallel(b *testing.B) {
+	coarse := NewCoarse(System, time.Millisecond)
+	defer coarse.Stop()
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			sinkTime = coarse.Now()
+		}
+	})
+}

@@ -2,15 +2,46 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
-      initialCallsCapacity pre-sizes the in-flight map on first use. It is a hint,
-      not a bound: a Group is a deduplication window, and the number of DISTINCT
-      keys in flight at one instant is small even when the call rate is not —
-      that is the whole premise of the primitive.
+      initialCallsCapacity pre-sizes a shard's in-flight map on first use. It is a
+      hint, not a bound: a Group is a deduplication window, and the number of
+      DISTINCT keys in flight at one instant is small even when the call rate is
+      not — that is the whole premise of the primitive.
     items:
       - name: initialCallsCapacity
         type: int
         value: "8"
     name: initialCallsCapacity
+  - doc: |-
+      shardCount is how many independent maps a Group spreads its keys over (a
+      power of two, so a mask picks one): distinct keys contend only when they
+      hash to the same shard, where one map under one lock serialised them all.
+    items:
+      - name: shardCount
+        type: int
+        value: "16"
+    name: shardCount
+  - doc: |-
+      cacheLine is the 64 bytes a shard is padded to, so two shards never share a
+      cache line and one shard's lock traffic does not slow its neighbour's.
+    items:
+      - name: cacheLine
+        type: int
+        value: "64"
+    name: cacheLine
+  - doc: |-
+      shardHeld is what a shard holds before its padding: a mutex and a map
+      pointer, 16 bytes.
+    items:
+      - name: shardHeld
+        type: int
+        value: "16"
+    name: shardHeld
+  - doc: shardPad fills a shard to cacheLine, derived from cacheLine and shardHeld.
+    items:
+      - name: shardPad
+        type: int
+        value: cacheLine - shardHeld
+    name: shardPad
 files:
   - decls:
       - call
@@ -27,15 +58,24 @@ files:
     name: panic.go
   - decls:
       - initialCallsCapacity
+      - shardCount
+      - cacheLine
+      - shardHeld
+      - shardPad
+      - shardSeed
+      - shard
       - Group
+      - (*Group).shardOf
       - (*Group).Do
       - (*Group).Forget
       - (*Group).InFlight
-      - (*Group).join
-      - (*Group).run
-      - (*Group).publish
-      - (*Group).await
-      - (*Group).abandon
+      - (*shard).join
+      - (*shard).joinExisting
+      - (*shard).insertOrJoin
+      - (*shard).run
+      - (*shard).publish
+      - (*shard).await
+      - (*shard).abandon
     name: singleflight.go
 functions:
   - doc: |-
@@ -53,6 +93,7 @@ functions:
 imports:
   context: context
   debug: runtime/debug
+  maphash: hash/maphash
   strings: strings
   sync: sync
 package:
@@ -69,7 +110,7 @@ types:
       one running fn — and read by the waiters only AFTER close(done), which is
       the happens-before edge that makes the reads race-free without a second
       mutex. refs and retired are the exception: they are group bookkeeping and
-      are read and written under Group.mu.
+      are read and written under the mutex of the shard holding the call.
     fields:
       - doc: |-
           done is closed once val/err/panicked are final. Closing rather than
@@ -88,13 +129,13 @@ types:
           abandons the call, and again (harmlessly) when fn returns.
         name: cancel
         type: context.CancelFunc
-      - doc: refs counts the callers still waiting. Guarded by Group.mu.
+      - doc: refs counts the callers still waiting. Guarded by the shard's mutex.
         name: refs
         type: int
       - doc: |-
           retired records that the call has left the Group's map, so a late
           abandonment cannot delete a key that now belongs to a different call.
-          Guarded by Group.mu.
+          Guarded by the shard's mutex.
         name: retired
         type: bool
       - doc: val and err are fn's outcome.
@@ -133,16 +174,94 @@ types:
         recv: p PanicValue
         results: string
     name: PanicValue
-  - fields:
-      - doc: |-
-          : RWMutex rather than Mutex only for InFlight, the one read-only path;
-          : every other method mutates the map or a refcount and takes Lock.
-        name: mu
-        type: sync.RWMutex
+  - doc: |-
+      shard is one of a Group's maps and the mutex guarding it, with every call's
+      refs and retired.
+    fields:
+      - name: mu
+        type: sync.Mutex
       - name: calls
         type: map[K]*call[V]
+      - name: _
+        type: "[shardPad]byte"
     kind: struct
     methods:
+      - doc: |-
+          join registers this goroutine as a waiter on key's call, starting one if
+          none is in flight. joined reports whether the call was already running.
+
+          The critical section holds the map and nothing else (#1035): a follower
+          finds the call and counts itself in one acquisition; a leader looks, builds
+          its call record and context with the lock released, and takes it again to
+          insert — and a candidate that lost the key to another leader in between
+          cancels the context it built and joins the winner instead.
+        name: join
+        params: ctx context.Context, key K, fn func(ctx context.Context) (V, error)
+        recv: s *shard[K, V]
+        results: entry *call[V], joined bool
+      - doc: |-
+          joinExisting counts the caller in key's in-flight call and returns it, or
+          returns nil when none is in flight.
+        name: joinExisting
+        params: key K
+        recv: s *shard[K, V]
+        results: "*call[V]"
+      - doc: |-
+          insertOrJoin registers candidate under key and reports true, or — when a
+          call for key is already in flight — counts the caller in that call and
+          returns it with false. One acquisition decides both.
+        name: insertOrJoin
+        params: key K, candidate *call[V]
+        recv: s *shard[K, V]
+        results: winner *call[V], inserted bool
+      - doc: |-
+          run executes fn, publishes its outcome on entry, and retires key. It runs on
+          its own goroutine: that is what makes a caller's departure a departure
+          rather than a kill.
+        name: run
+        params: ctx context.Context, key K, entry *call[V], fn func(ctx context.Context) (V, error)
+        recv: s *shard[K, V]
+      - doc: |-
+          publish retires key (so the next Do starts fresh) and wakes every waiter.
+          The map entry is dropped BEFORE done is closed so a goroutine arriving in
+          between starts a new call instead of joining a finished one.
+        name: publish
+        params: key K, entry *call[V]
+        recv: s *shard[K, V]
+      - doc: |-
+          await blocks until the result lands or ctx is done.
+
+          A served caller does NOT touch the shard's mutex: publish already retired the
+          entry under it, and refs is read only to decide whether an ABANDONING caller
+          was the last one — a decision that is moot once the call is retired. Skipping
+          the bookkeeping keeps the deduplicated path at one mutex acquisition per
+          caller (the join) instead of two.
+        name: await
+        params: ctx context.Context, key K, entry *call[V], shared bool
+        recv: s *shard[K, V]
+        results: value V, isShared bool, err error
+      - doc: |-
+          abandon drops the claim of a caller that gave up. When the LAST such caller
+          leaves, the key is retired and the shared context is cancelled: a call whose
+          every caller has gone is computing a result nobody will read.
+        name: abandon
+        params: key K, entry *call[V]
+        recv: s *shard[K, V]
+    name: shard
+    typeParams: K comparable, V any
+  - fields:
+      - doc: |-
+          : a fixed array so the zero Group needs no constructor; each shard builds
+          : its map on first use.
+        name: shards
+        type: "[shardCount]shard[K, V]"
+    kind: struct
+    methods:
+      - doc: shardOf returns the shard key lives in.
+        name: shardOf
+        params: key K
+        recv: g *Group[K, V]
+        results: "*shard[K, V]"
       - name: Do
         params: ctx context.Context, key K, fn func(ctx context.Context) (V, error)
         recv: g *Group[K, V]
@@ -153,45 +272,13 @@ types:
       - name: InFlight
         recv: g *Group[K, V]
         results: int
-      - doc: |-
-          join registers this goroutine as a waiter on key's call, starting one if
-          none is in flight. joined reports whether the call was already running.
-        name: join
-        params: ctx context.Context, key K, fn func(ctx context.Context) (V, error)
-        recv: g *Group[K, V]
-        results: entry *call[V], joined bool
-      - doc: |-
-          run executes fn, publishes its outcome on entry, and retires key. It runs on
-          its own goroutine: that is what makes a caller's departure a departure
-          rather than a kill.
-        name: run
-        params: ctx context.Context, key K, entry *call[V], fn func(ctx context.Context) (V, error)
-        recv: g *Group[K, V]
-      - doc: |-
-          publish retires key (so the next Do starts fresh) and wakes every waiter.
-          The map entry is dropped BEFORE done is closed so a goroutine arriving in
-          between starts a new call instead of joining a finished one.
-        name: publish
-        params: key K, entry *call[V]
-        recv: g *Group[K, V]
-      - doc: |-
-          await blocks until the result lands or ctx is done.
-
-          A served caller does NOT touch the group mutex: publish already retired the
-          entry under it, and refs is read only to decide whether an ABANDONING caller
-          was the last one — a decision that is moot once the call is retired. Skipping
-          the bookkeeping keeps the deduplicated path at one mutex acquisition per
-          caller (the join) instead of two.
-        name: await
-        params: ctx context.Context, key K, entry *call[V], shared bool
-        recv: g *Group[K, V]
-        results: value V, isShared bool, err error
-      - doc: |-
-          abandon drops the claim of a caller that gave up. When the LAST such caller
-          leaves, the key is retired and the shared context is cancelled: a call whose
-          every caller has gone is computing a result nobody will read.
-        name: abandon
-        params: key K, entry *call[V]
-        recv: g *Group[K, V]
     name: Group
     typeParams: K comparable, V any
+vars:
+  - doc: |-
+      shardSeed keys the hash that picks a key's shard. One seed per process:
+      drawn at start, so no input can be crafted to land every key in one shard.
+    items:
+      - name: shardSeed
+        value: maphash.MakeSeed()
+    name: shardSeed

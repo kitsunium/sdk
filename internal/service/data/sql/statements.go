@@ -2,6 +2,9 @@ package sql
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 )
@@ -40,4 +43,34 @@ func Statements(stmts ...string) coresql.Step {
 		//: every statement applied.
 		return nil
 	}
+}
+
+// ChecksumOf is the fingerprint [coresql.MigrationValue].Checksum records for
+// a migration built from stmts: SHA-256 over the statements in order, each
+// preceded by its length in bytes as an 8-byte big-endian unsigned integer,
+// rendered as 64 lowercase hexadecimal digits.
+//
+// The length prefix is what makes the fingerprint the statements' and not
+// their concatenation's: "CREATE TABLE a" then "(x INT)" and
+// "CREATE TABLE a(x INT)" alone are different migrations and get different
+// checksums. Write it beside the steps it describes, from the same
+// statements, so the two cannot drift:
+//
+//	ddl := []string{"CREATE TABLE accounts (id BIGINT PRIMARY KEY)"}
+//	m := sql.Migration{Version: 1, Name: "accounts",
+//		Up: sql.Statements(ddl...), Down: sql.Statements("DROP TABLE accounts"),
+//		Checksum: sql.ChecksumOf(ddl...)}
+func ChecksumOf(stmts ...string) string {
+	digest := sha256.New()
+	var length [8]byte
+	//: each statement after its length, so two statements are never read as
+	//: their concatenation.
+	for _, stmt := range stmts {
+		binary.BigEndian.PutUint64(length[:], uint64(len(stmt)))
+		//: a hash.Hash's Write never fails.
+		_, _ = digest.Write(length[:])
+		_, _ = digest.Write([]byte(stmt))
+	}
+	//: lowercase hex, 64 digits.
+	return hex.EncodeToString(digest.Sum(nil))
 }

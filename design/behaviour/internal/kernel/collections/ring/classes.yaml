@@ -12,6 +12,7 @@ files:
       - (*queueRing).Len
       - (*queueRing).TryWrite
       - (*queueRing).TryRead
+      - Drain
     name: ring.go
 functions:
   - name: New
@@ -26,8 +27,13 @@ functions:
     params: n int
     results: "[]T"
     typeParams: T any
+  - name: Drain
+    params: q Queue[T]
+    results: iter.Seq[T]
+    typeParams: T any
 imports:
   atomic: sync/atomic
+  iter: iter
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/kernel/collections/ring

@@ -86,11 +86,13 @@ type tables struct {
 	docs map[string]docRow
 	ix   map[ixKey]bool // the value is uniq: true for a unique index's row
 	vs   map[vsKey]vsRow
+	// trashIndexed says whether the versions table carries the trash index.
+	trashIndexed bool
 }
 
 // clone copies t, so a transaction or a savepoint can be undone.
 func (t *tables) clone() *tables {
-	return &tables{docs: maps.Clone(t.docs), ix: maps.Clone(t.ix), vs: maps.Clone(t.vs)}
+	return &tables{docs: maps.Clone(t.docs), ix: maps.Clone(t.ix), vs: maps.Clone(t.vs), trashIndexed: t.trashIndexed}
 }
 
 // versionsOf returns the numbers of key's version rows, newest first, the
@@ -404,7 +406,8 @@ func writes(role string) bool {
 	switch role {
 	case "getDoc", "listDocs", "entries", "entriesLimit", "count", "exists", "lookup", "find",
 		"pageAfter", "uniqueTaken", "sharedKeys", "readVersions", "versionHead", "pruneCut", "lockFormers",
-		"firstVersion", "readTrashed", "tombstones", "versionWeight":
+		"firstVersion", "readTrashed", "tombstones", "versionWeight", "revision", "trashIndexExists",
+		"findAfter", "rangeFrom", "rangeBelow":
 		return false
 	default:
 		return true
@@ -517,9 +520,44 @@ func (e *sqlEngine) read(role, query string, args []driver.Value, work, latest *
 			return rowsOf([]string{"doc"}, nil), true
 		}
 		return e.lookup(work, str(0), str(1)), true
+	// FindAfter's next page: the holders above a key, with their keys.
+	case "findAfter":
+		if args[1] == nil {
+			return rowsOf([]string{"doc_key", "doc"}, nil), true
+		}
+		return e.findAfter(work, str(0), str(1), str(2), int(args[3].(int64))), true
+	// Range's next page, from a cursor on, under a bound or not.
+	case "rangeFrom":
+		return e.rangeOf(work, args, nil, int(args[5].(int64))), true
+	case "rangeBelow":
+		upper := args[5].([]byte)
+		return e.rangeOf(work, args, &upper, int(args[6].(int64))), true
 	// Reindex's check of the unique indexes.
 	case "sharedKeys":
 		return e.sharedKeys(work, args), true
+	// Whether the versions table carries the trash index, as MySQL's
+	// information_schema answers.
+	case "trashIndexExists":
+		n := int64(0)
+		if work.trashIndexed {
+			n = 1
+		}
+		return rowsOf([]string{"n"}, [][]driver.Value{{n}}), true
+	// A document and its row's revision.
+	case "revision":
+		row, found := work.docs[str(0)]
+		if !found {
+			return rowsOf([]string{"rev", "doc"}, nil), true
+		}
+		return rowsOf([]string{"rev", "doc"}, [][]driver.Value{{row.rev, bytes.Clone(row.doc)}}), true
+	// ReplaceIf's locking read on its revision: a read that locks where the
+	// engine locks rows, a write that moves the revision on SQLite.
+	case "lockDocIf":
+		row, found := work.docs[str(0)]
+		if !found || row.rev != args[1].(int64) {
+			return rowsOf([]string{"doc"}, nil), true
+		}
+		return e.lock(work, str(0)), true
 	// Every version of a document, with the document itself.
 	case "readVersions":
 		return e.readVersions(work, str(0)), true
@@ -657,6 +695,21 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work *tables)
 		return e.insert(work, str(0), args[1].([]byte))
 	case "replace", "writeLocked":
 		return e.replace(role, work, str(1), args[0].([]byte)), nil
+	// The trash index, created and dropped: idempotent where the dialect
+	// spells IF [NOT] EXISTS, refused twice on MySQL, which does not.
+	case "createTrashIndex", "dropTrashIndex":
+		want := role == "createTrashIndex"
+		if e.dialect == coresql.DialectMySQL && work.trashIndexed == want {
+			return none, errors.New("the fake engine refuses: the index is already as asked")
+		}
+		work.trashIndexed = want
+		return none, nil
+	// Replace on a revision: no row affected when the revision moved.
+	case "replaceIf":
+		if row, found := work.docs[str(1)]; !found || row.rev != args[2].(int64) {
+			return affecting(0), nil
+		}
+		return e.replace("replace", work, str(1), args[0].([]byte)), nil
 	// Update's locking read, a write on SQLite.
 	case "lockDoc":
 		return e.lock(work, str(0)), nil
@@ -913,6 +966,62 @@ func (e *sqlEngine) lookup(work *tables, name, key string) answer {
 		}
 	}
 	return rowsOf([]string{"doc"}, rows)
+}
+
+// findAfter answers the holders of one index key above after, in key
+// order, at most limit of them, each with its key.
+func (e *sqlEngine) findAfter(work *tables, name, key, after string, limit int) answer {
+	var holders []string
+	for k := range work.ix {
+		if k.name == name && k.key == key && k.doc > after {
+			holders = append(holders, k.doc)
+		}
+	}
+	slices.Sort(holders)
+	var rows [][]driver.Value
+	for _, holder := range holders {
+		if len(rows) == limit {
+			break
+		}
+		if row, found := work.docs[holder]; found {
+			rows = append(rows, []driver.Value{[]byte(holder), bytes.Clone(row.doc)})
+		}
+	}
+	return rowsOf([]string{"doc_key", "doc"}, rows)
+}
+
+// rangeOf answers an ordered index's entries above the cursor args binds —
+// the index's name, then its key three times and the document key —, below
+// upper when it is set, in (index key, document key) order, at most limit,
+// each as its index key, its document key and its document. The three
+// bindings of the cursor's key are checked equal: the statement reads one
+// cursor.
+func (e *sqlEngine) rangeOf(work *tables, args []driver.Value, upper *[]byte, limit int) answer {
+	name, cur, owner := string(args[0].([]byte)), args[1].([]byte), string(args[4].([]byte))
+	if !bytes.Equal(cur, args[2].([]byte)) || !bytes.Equal(cur, args[3].([]byte)) {
+		return rowsOf([]string{"index_key", "doc_key", "doc"}, nil)
+	}
+	var entries []ixKey
+	for k := range work.ix {
+		key := []byte(k.key)
+		above := bytes.Compare(key, cur) > 0 || (bytes.Equal(key, cur) && k.doc > owner)
+		if k.name == name && above && (upper == nil || bytes.Compare(key, *upper) < 0) {
+			entries = append(entries, k)
+		}
+	}
+	slices.SortFunc(entries, func(a, b ixKey) int {
+		return cmp.Or(cmp.Compare(a.key, b.key), cmp.Compare(a.doc, b.doc))
+	})
+	var rows [][]driver.Value
+	for _, k := range entries {
+		if len(rows) == limit {
+			break
+		}
+		if row, found := work.docs[k.doc]; found {
+			rows = append(rows, []driver.Value{[]byte(k.key), []byte(k.doc), bytes.Clone(row.doc)})
+		}
+	}
+	return rowsOf([]string{"index_key", "doc_key", "doc"}, rows)
 }
 
 // sharedKeys answers the named indexes that file one key under two documents.

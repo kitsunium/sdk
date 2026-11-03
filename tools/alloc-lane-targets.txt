@@ -176,6 +176,7 @@
 # below: kit gen writes it from the design.
 //internal/core/data/codec/scratch:scratch_test
 //internal/kernel/clock:clock_test
+//internal/kernel/collections/heap:heap_test
 //internal/kernel/collections/ring:ring_test
 //internal/kernel/concur/buffer:buffer_test
 //internal/kernel/concur/recycler:recycler_test
@@ -184,6 +185,7 @@
 //internal/kernel/jsonenc:jsonenc_test
 //internal/kernel/semver:semver_test
 //internal/kernel/swar:swar_test
+//internal/service/data/queue:queue_test
 //internal/service/net/http1:http1_test
 //pkg/v1/observe/logger:logger_test
 # END kit gen

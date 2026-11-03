@@ -196,3 +196,47 @@ func openSQLite(t *testing.T, path, suffix string) *stdsql.DB {
 	})
 	return db
 }
+
+// TestAThreeColumnVersionTableGainsItsChecksumColumn is #1056's acceptance on
+// every engine: a version table an earlier release created — three columns,
+// its rows recorded with no checksum — gains the checksum column on the first
+// run whose set declares one, keeps its rows, has the checksum backfilled,
+// and from then on refuses the migration once its text is edited.
+func TestAThreeColumnVersionTableGainsItsChecksumColumn(t *testing.T) {
+	t.Parallel()
+	eachEngine(t, func(t *testing.T, e *engine) {
+		versions, accounts := uniqueName("versions_"), uniqueName("accounts_")
+		must(t, errors.Join(
+			exec(t, e, "CREATE TABLE "+versions+
+				" (version BIGINT NOT NULL PRIMARY KEY, name TEXT NOT NULL, applied_at_unix BIGINT NOT NULL)"),
+			exec(t, e, "CREATE TABLE "+accounts+" (id BIGINT NOT NULL)"),
+			exec(t, e, "INSERT INTO "+versions+" (version, name, applied_at_unix) VALUES (1, 'accounts', 0)"),
+		))
+		ddl := []string{"CREATE TABLE " + accounts + " (id BIGINT NOT NULL)"}
+		applied := sql.Migration{
+			Version: 1, Name: "accounts", Up: sql.Statements(ddl...), Down: sql.Statements("DROP TABLE " + accounts),
+			Checksum: sql.ChecksumOf(ddl...),
+		}
+		must(t, migrator(t, e, versions, time.Minute, applied).Up(t.Context()))
+		var recorded string
+		must(t, e.db.QueryRowContext(t.Context(), "SELECT checksum FROM "+versions+" WHERE version = 1").Scan(&recorded))
+		if recorded != applied.Checksum {
+			t.Fatalf("the backfilled checksum = %q, want %q", recorded, applied.Checksum)
+		}
+		if n := countRows(t, e, versions); n != 1 {
+			t.Fatalf("the version table holds %d rows after gaining its column, want its one", n)
+		}
+		edited := applied
+		edited.Checksum = sql.ChecksumOf("CREATE TABLE " + accounts + " (id BIGINT NOT NULL, cents BIGINT)")
+		if err := migrator(t, e, versions, time.Minute, edited).Up(t.Context()); !errs.HasCode(err, sql.MigrationChanged.Code()) {
+			t.Fatalf("Up() over an edited migration = %v, want MIGRATION_CHANGED", err)
+		}
+	})
+}
+
+// exec runs one statement on e's pool.
+func exec(t *testing.T, e *engine, stmt string) error {
+	t.Helper()
+	_, err := e.db.ExecContext(t.Context(), stmt)
+	return err
+}

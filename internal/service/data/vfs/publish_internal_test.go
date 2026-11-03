@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -420,4 +421,159 @@ func TestWrapHelpersRestateTheirSentinelExactly(t *testing.T) {
 // branch of syncPublished.
 func failingSyncOps() atomicOps {
 	return atomicOps{syncDir: func(_ string) error { return errInjected }}
+}
+
+// countingOps wraps ops and counts the file flushes and the directory flushes
+// each mechanic performs — the strace-free count issue #827 asks for.
+func countingOps(ops atomicOps, files, dirs *int) atomicOps {
+	counted := ops
+	counted.create = func(name string, perm fs.FileMode) (tempFile, error) {
+		file, err := ops.create(name, perm)
+		if err != nil {
+			return nil, err
+		}
+		return &countedTemp{tempFile: file, syncs: files}, nil
+	}
+	counted.syncDir = func(dir string) error {
+		*dirs++
+		return ops.syncDir(dir)
+	}
+	return counted
+}
+
+// countedTemp counts its Sync calls.
+type countedTemp struct {
+	tempFile
+	syncs *int
+}
+
+// Sync counts, then flushes.
+func (c *countedTemp) Sync() error {
+	*c.syncs++
+	return c.tempFile.Sync()
+}
+
+// batchOf returns n files named in dir with distinct payloads.
+func batchOf(dir string, n int) []corevfs.FileValue {
+	files := make([]corevfs.FileValue, n)
+	for index := range files {
+		files[index] = corevfs.FileValue{
+			Name: path.Join(dir, "m"+strings.Repeat("x", index)+".msg"),
+			Data: []byte(strings.Repeat("payload ", index+1)),
+		}
+	}
+	return files
+}
+
+// TestABatchFlushesEachFileOnceAndItsDirectoryOnce is issue #827's count: a
+// batch of sixteen into one directory flushes sixteen files and ONE
+// directory, where sixteen WriteAtomic calls flush sixteen of each; a batch
+// across two directories flushes each once.
+func TestABatchFlushesEachFileOnceAndItsDirectoryOnce(t *testing.T) {
+	t.Parallel()
+	disk, _ := newDiskFS(t)
+	for _, dir := range []string{"ready", "dead"} {
+		if err := disk.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s) = %v", dir, err)
+		}
+	}
+	var files, dirs int
+	disk.ops = countingOps(disk.nativeOps(), &files, &dirs)
+	if published, err := disk.WriteAtomicAll(batchOf("ready", 16), 0o600); published != 16 || err != nil {
+		t.Fatalf("WriteAtomicAll(16) = %d, %v, want 16, nil", published, err)
+	}
+	if files != 16 || dirs != 1 {
+		t.Fatalf("a batch of 16 flushed %d files and %d directories, want 16 and 1", files, dirs)
+	}
+	files, dirs = 0, 0
+	mixed := append(batchOf("ready", 2), batchOf("dead", 2)...)
+	if published, err := disk.WriteAtomicAll(mixed, 0o600); published != 4 || err != nil {
+		t.Fatalf("WriteAtomicAll(two directories) = %d, %v, want 4, nil", published, err)
+	}
+	if files != 4 || dirs != 2 {
+		t.Fatalf("a batch across two directories flushed %d files and %d directories, want 4 and 2", files, dirs)
+	}
+}
+
+// TestABatchThatFailsAtTheKthFileLeavesTheFirstKDurableAndTheRestUntouched
+// is WriteAtomic's failure guarantee stated for a batch (issue #827). Every
+// step 1 to 4 is sabotaged at the second of three files: the count is 1,
+// the error PUBLISH_FAILED with the cause kept, the first file holds its new
+// bytes and its directory was flushed, the second and third hash to what
+// they held before, and no temporary survives.
+func TestABatchThatFailsAtTheKthFileLeavesTheFirstKDurableAndTheRestUntouched(t *testing.T) {
+	t.Parallel()
+	for _, failAt := range []step{stepCreate, stepWrite, stepSync, stepClose, stepRename} {
+		t.Run(strconv.Itoa(int(failAt)), func(t *testing.T) {
+			t.Parallel()
+			disk, dir := newDiskFS(t)
+			batch := batchOf(".", 3)
+			for _, file := range batch[1:] {
+				if err := disk.WriteFile(file.Name, []byte("previous "+file.Name), 0o600); err != nil {
+					t.Fatalf("seeding %s: %v", file.Name, err)
+				}
+			}
+			before := []string{hashOf(t, filepath.Join(dir, batch[1].Name)), hashOf(t, filepath.Join(dir, batch[2].Name))}
+			var files, dirs int
+			calls := 0
+			native := disk.nativeOps()
+			sabotaged := brittleOps(disk, failAt, false)
+			mixed := native
+			mixed.create = func(name string, perm fs.FileMode) (tempFile, error) {
+				calls++
+				if calls == 2 {
+					return sabotaged.create(name, perm)
+				}
+				return native.create(name, perm)
+			}
+			mixed.rename = func(from, to string) error {
+				if to == batch[1].Name {
+					return sabotaged.rename(from, to)
+				}
+				return native.rename(from, to)
+			}
+			disk.ops = countingOps(mixed, &files, &dirs)
+
+			published, err := disk.WriteAtomicAll(batch, 0o600)
+
+			if published != 1 || !kerrs.HasCode(err, corevfs.CodePublishFailed) {
+				t.Fatalf("WriteAtomicAll = %d, %v, want 1 and PUBLISH_FAILED", published, err)
+			}
+			if !errors.Is(err, errInjected) && failAt != stepCreate {
+				t.Errorf("the injected cause did not survive in the chain: %v", err)
+			}
+			if got, readErr := os.ReadFile(filepath.Join(dir, batch[0].Name)); readErr != nil || string(got) != string(batch[0].Data) {
+				t.Errorf("the first file = %q, %v, want its new bytes", got, readErr)
+			}
+			if dirs != 1 {
+				t.Errorf("the first file's directory was flushed %d times before the error, want 1", dirs)
+			}
+			after := []string{hashOf(t, filepath.Join(dir, batch[1].Name)), hashOf(t, filepath.Join(dir, batch[2].Name))}
+			if after[0] != before[0] || after[1] != before[1] {
+				t.Errorf("the files at and after the failure moved: before=%v after=%v", before, after)
+			}
+			if orphans := leftoverTemps(t, dir); len(orphans) != 0 {
+				t.Errorf("temporaries left behind: %v", orphans)
+			}
+		})
+	}
+}
+
+// TestABatchWhoseDirectoryFlushFailsIsNotRolledBack is step 5's asymmetry
+// for a batch: every file is renamed and visible, the count says so, and the
+// verdict is DIRECTORY_SYNC_FAILED, never PUBLISH_FAILED.
+func TestABatchWhoseDirectoryFlushFailsIsNotRolledBack(t *testing.T) {
+	t.Parallel()
+	disk, dir := newDiskFS(t)
+	disk.ops = brittleOps(disk, stepSyncDir, false)
+	batch := batchOf(".", 3)
+	published, err := disk.WriteAtomicAll(batch, 0o600)
+	if published != 3 || !kerrs.HasCode(err, corevfs.CodeDirectorySyncFailed) || kerrs.HasCode(err, corevfs.CodePublishFailed) {
+		t.Fatalf("WriteAtomicAll = %d, %v, want 3 and DIRECTORY_SYNC_FAILED alone", published, err)
+	}
+	for _, file := range batch {
+		if got, readErr := os.ReadFile(filepath.Join(dir, file.Name)); readErr != nil || string(got) != string(file.Data) {
+			t.Errorf("%s = %q, %v, want its new bytes — the renames are not rolled back", file.Name, got, readErr)
+		}
+	}
 }

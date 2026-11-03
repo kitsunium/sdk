@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:30:00Z -->
+<!-- updated: 2026-11-02T00:00:00Z -->
 # framework/connectors — the engines a database runs on, and the ssh identity
 
 The platform's ADR 0004: a store is the port, a database's engine the adapter the app plugs
@@ -14,6 +14,15 @@ driver its `go.mod` required would sit in every product's module graph and
 | `postgres` | `github.com/jackc/pgx/v5` (`stdlib`) | libpq's: `postgres://…?sslmode=…` or `key=value` pairs |
 | `mysql` | `github.com/go-sql-driver/mysql` | `mysql://` / `mariadb://` URL, or the driver's DSN; its `tls` parameter |
 | `sqlite` | `modernc.org/sqlite` (no cgo) | the file's path or a `file:` URI; WAL, busy timeout, `_txlock=immediate` by default |
+
+Each database engine is also an `app.Classifier` (#1000): `Transient`
+(`transient.go`) reads its own driver's error — PostgreSQL's SQLSTATE 40001
+and 40P01 (`pgconn.PgError`), MySQL's 1213 and 1205 (`MySQLError.Number`, a
+field the SDK's `sql.Classify` cannot read), SQLite's busy and locked in every
+extended form —, with a table test per code (`transient_*test.go`), and the
+framework runs such a failed transaction again. The engine is the only code
+that knows its driver's error type; the SDK's reading through methods stays
+beside it.
 
 One connector is not a database engine: `ssh` (ADR 0158 §3) is the
 `golang.org/x/crypto/ssh` implementation of `framework/entitlement.Identity`,

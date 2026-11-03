@@ -447,6 +447,18 @@ func (e *Error) ExitCode() int {
 	return defaultExitCode
 }
 
+// Params restates this Error as the parameters of a [Wrap]: its code,
+// reason, public and private messages, and its exit status. A cause from
+// outside the SDK wrapped with them carries this Error's identity —
+// errors.Is finds it by code and reason — and stays in the chain, so a
+// package wrapping a vendor's error under its own sentinel reads the
+// sentinel once and cannot drift from it. The HTTP override is not a
+// wrap parameter and is not carried.
+func (e *Error) Params() WrapParams {
+	//: the five things a wrap takes, read from the immutable members.
+	return WrapParams{Code: e.code, Reason: e.reason, Public: e.public, Private: e.private, ExitCode: e.ExitCode()}
+}
+
 // HasCode returns true if any *Error in err's chain has code == c OR any
 // trail entry matches c. The walk recurses through BOTH single-error
 // wrappers (Unwrap() error) AND multi-error wrappers (Unwrap() []error,

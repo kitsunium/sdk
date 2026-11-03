@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	corecache "github.com/kitsunium/sdk/internal/core/data/cache"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	kcache "github.com/kitsunium/sdk/internal/kernel/collections/cache"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svccache "github.com/kitsunium/sdk/internal/service/data/cache"
 )
@@ -20,10 +22,34 @@ import (
 // it is exactly the untyped shape Load must normalise.
 var errOrigin = errors.New("origin unreachable")
 
+// forEachPolicy runs body once per eviction policy, as parallel subtests
+// named lru and s3fifo: every memory store a body builds through newStore or
+// policyConfig runs the policy its subtest names, so each table of this
+// package runs twice (#834).
+func forEachPolicy(t *testing.T, body func(t *testing.T)) {
+	t.Helper()
+	for _, name := range []string{"lru", "s3fifo"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			body(t)
+		})
+	}
+}
+
+// policyConfig sets cfg.Policy from the subtest t runs in.
+func policyConfig(t *testing.T, cfg svccache.MemoryConfig) svccache.MemoryConfig {
+	t.Helper()
+	//: forEachPolicy names the subtest after the policy.
+	if strings.Contains(t.Name(), "/s3fifo") {
+		cfg.Policy = kcache.PolicyS3FIFO
+	}
+	return cfg
+}
+
 // newStore builds a memory store or fails the test.
 func newStore(t *testing.T, cfg svccache.MemoryConfig) corecache.Store[string] {
 	t.Helper()
-	store, err := svccache.NewMemory[string](cfg)
+	store, err := svccache.NewMemory[string](policyConfig(t, cfg))
 	if err != nil {
 		t.Fatalf("NewMemory: %v", err)
 	}
@@ -37,6 +63,12 @@ func entry(value string, ttl time.Duration, tags ...string) corecache.EntryValue
 
 func TestMemoryStoreImplementsEverySibling(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testMemoryStoreImplementsEverySibling)
+}
+
+// testMemoryStoreImplementsEverySibling is TestMemoryStoreImplementsEverySibling under the policy its subtest names.
+func testMemoryStoreImplementsEverySibling(t *testing.T) {
+	t.Helper()
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	if _, ok := store.(corecache.EntryFetcher[string]); !ok {
 		t.Error("the memory store does not implement EntryFetcher")
@@ -51,6 +83,12 @@ func TestMemoryStoreImplementsEverySibling(t *testing.T) {
 
 func TestSetFetchDelete(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testSetFetchDelete)
+}
+
+// testSetFetchDelete is TestSetFetchDelete under the policy its subtest names.
+func testSetFetchDelete(t *testing.T) {
+	t.Helper()
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	ctx := t.Context()
 
@@ -79,6 +117,12 @@ func TestSetFetchDelete(t *testing.T) {
 // must not build a cache that silently never evicts.
 func TestZeroConfigIsRefused(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testZeroConfigIsRefused)
+}
+
+// testZeroConfigIsRefused is TestZeroConfigIsRefused under the policy its subtest names.
+func testZeroConfigIsRefused(t *testing.T) {
+	t.Helper()
 	cases := []struct {
 		name string
 		cfg  svccache.MemoryConfig
@@ -106,6 +150,12 @@ func TestZeroConfigIsRefused(t *testing.T) {
 
 func TestUnstorableEntriesAreRefused(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testUnstorableEntriesAreRefused)
+}
+
+// testUnstorableEntriesAreRefused is TestUnstorableEntriesAreRefused under the policy its subtest names.
+func testUnstorableEntriesAreRefused(t *testing.T) {
+	t.Helper()
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	cases := []struct {
 		name  string
@@ -129,6 +179,12 @@ func TestUnstorableEntriesAreRefused(t *testing.T) {
 
 func TestTTLVocabulary(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testTTLVocabulary)
+}
+
+// testTTLVocabulary is TestTTLVocabulary under the policy its subtest names.
+func testTTLVocabulary(t *testing.T) {
+	t.Helper()
 	manual := clock.NewManualClock(time.Unix(0, 0))
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 8, DefaultTTL: time.Minute, Clock: manual})
 
@@ -158,6 +214,12 @@ func TestTTLVocabulary(t *testing.T) {
 
 func TestFetchEntryReportsTheRemainingLifetimeNotTheOriginal(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testFetchEntryReportsTheRemainingLifetimeNotTheOriginal)
+}
+
+// testFetchEntryReportsTheRemainingLifetimeNotTheOriginal is TestFetchEntryReportsTheRemainingLifetimeNotTheOriginal under the policy its subtest names.
+func testFetchEntryReportsTheRemainingLifetimeNotTheOriginal(t *testing.T) {
+	t.Helper()
 	manual := clock.NewManualClock(time.Unix(0, 0))
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 8, Clock: manual})
 	fetcher, _ := store.(corecache.EntryFetcher[string])
@@ -188,6 +250,12 @@ func TestFetchEntryReportsTheRemainingLifetimeNotTheOriginal(t *testing.T) {
 
 func TestInvalidateTagRemovesExactlyTheTaggedEntries(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testInvalidateTagRemovesExactlyTheTaggedEntries)
+}
+
+// testInvalidateTagRemovesExactlyTheTaggedEntries is TestInvalidateTagRemovesExactlyTheTaggedEntries under the policy its subtest names.
+func testInvalidateTagRemovesExactlyTheTaggedEntries(t *testing.T) {
+	t.Helper()
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 32})
 	tagger, _ := store.(corecache.Tagger)
 
@@ -230,6 +298,12 @@ func TestInvalidateTagRemovesExactlyTheTaggedEntries(t *testing.T) {
 // through the tags it no longer carries.
 func TestOverwritingReplacesTheTags(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testOverwritingReplacesTheTags)
+}
+
+// testOverwritingReplacesTheTags is TestOverwritingReplacesTheTags under the policy its subtest names.
+func testOverwritingReplacesTheTags(t *testing.T) {
+	t.Helper()
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	tagger, _ := store.(corecache.Tagger)
 
@@ -247,6 +321,12 @@ func TestOverwritingReplacesTheTags(t *testing.T) {
 // TestLoadRunsTheFillOnceForConcurrentMisses is the anti-stampede claim.
 func TestLoadRunsTheFillOnceForConcurrentMisses(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testLoadRunsTheFillOnceForConcurrentMisses)
+}
+
+// testLoadRunsTheFillOnceForConcurrentMisses is TestLoadRunsTheFillOnceForConcurrentMisses under the policy its subtest names.
+func testLoadRunsTheFillOnceForConcurrentMisses(t *testing.T) {
+	t.Helper()
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	loader, _ := store.(corecache.Loader[string])
 	var fills atomic.Int64
@@ -283,6 +363,12 @@ func TestLoadRunsTheFillOnceForConcurrentMisses(t *testing.T) {
 
 func TestLoadServesAHitWithoutFilling(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testLoadServesAHitWithoutFilling)
+}
+
+// testLoadServesAHitWithoutFilling is TestLoadServesAHitWithoutFilling under the policy its subtest names.
+func testLoadServesAHitWithoutFilling(t *testing.T) {
+	t.Helper()
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	loader, _ := store.(corecache.Loader[string])
 	mustSet(t, store, "k", entry("stored", time.Minute))
@@ -298,6 +384,12 @@ func TestLoadServesAHitWithoutFilling(t *testing.T) {
 
 func TestAFailedFillStoresNothing(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testAFailedFillStoresNothing)
+}
+
+// testAFailedFillStoresNothing is TestAFailedFillStoresNothing under the policy its subtest names.
+func testAFailedFillStoresNothing(t *testing.T) {
+	t.Helper()
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	loader, _ := store.(corecache.Loader[string])
 
@@ -317,6 +409,12 @@ func TestAFailedFillStoresNothing(t *testing.T) {
 // with a generic one.
 func TestATypedFillErrorKeepsItsOwnCode(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testATypedFillErrorKeepsItsOwnCode)
+}
+
+// testATypedFillErrorKeepsItsOwnCode is TestATypedFillErrorKeepsItsOwnCode under the policy its subtest names.
+func testATypedFillErrorKeepsItsOwnCode(t *testing.T) {
+	t.Helper()
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	loader, _ := store.(corecache.Loader[string])
 
@@ -350,6 +448,12 @@ func TestATypedFillErrorKeepsItsOwnCode(t *testing.T) {
 // pre-mutation file.
 func TestAnUntypedFillErrorKeepsItsIdentity(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testAnUntypedFillErrorKeepsItsIdentity)
+}
+
+// testAnUntypedFillErrorKeepsItsIdentity is TestAnUntypedFillErrorKeepsItsIdentity under the policy its subtest names.
+func testAnUntypedFillErrorKeepsItsIdentity(t *testing.T) {
+	t.Helper()
 	chain, err := svccache.NewChain(svccache.ChainConfig{},
 		newStore(t, svccache.MemoryConfig{MaxEntries: 8}), newStore(t, svccache.MemoryConfig{MaxEntries: 8}))
 	if err != nil {
@@ -387,6 +491,12 @@ func TestAnUntypedFillErrorKeepsItsIdentity(t *testing.T) {
 // forever.
 func TestEvictionUnlinksTheTagIndex(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testEvictionUnlinksTheTagIndex)
+}
+
+// testEvictionUnlinksTheTagIndex is TestEvictionUnlinksTheTagIndex under the policy its subtest names.
+func testEvictionUnlinksTheTagIndex(t *testing.T) {
+	t.Helper()
 	store := newStore(t, svccache.MemoryConfig{MaxEntries: 4})
 	tagger, _ := store.(corecache.Tagger)
 

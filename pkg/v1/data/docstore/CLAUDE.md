@@ -20,8 +20,8 @@ restored or purged (ADR 0143, amended for ADR 0178 C4).
 | Symbol | Kind | Notes |
 |---|---|---|
 | `Open[T](cfg, indexes...)` | func | a `*Store[T]`, loaded from `cfg.FS` when set |
-| `Unique[T](name, key)` / `Index[T](name, keys)` | func | index declarations |
-| `Store[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Keys`, `Lookup`, `Find`, `Stats`; `Put`, `Insert`, `Replace`, `Update`, `Delete`; `PutStamped`, `InsertStamped`, `ReplaceStamped`, `UpdateStamped`; `Versions`, `Version`, `RewriteVersions`, `VersionWeight`; `Trash`, `Restore`, `Purge`, `Tombstones`; `PutDocument`; `OnWrite`, `OnDelete`; `Fold`, `Close` |
+| `Unique[T](name, key)` / `Index[T](name, keys)` / `Ordered[T](name, key)` | func | index declarations; `Ordered` keeps its keys in order, for `Range` |
+| `Store[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Keys`, `Lookup`, `Find`, `Stats`; `Put`, `Insert`, `Replace`, `Update`, `Delete`; `PutStamped`, `InsertStamped`, `ReplaceStamped`, `UpdateStamped`; `Versions`, `Version`, `RewriteVersions`, `VersionWeight`; `Trash`, `Restore`, `Purge`, `Tombstones`; `PutDocument`; `Revision`, `ReplaceIf`; `Batch`; `OnWrite`, `OnDelete`; `Fold`, `Close` |
 | `Config[T]` | type alias | `Key` (required), `FS` + `Path` (both or neither), `FoldAt`, `Versions` + `Clock` + `Held` |
 | `Version` | type alias | `= coredocstore.VersionValue` — `Number` (from 1), `At`, `Meta`, `JSON` (compact, the caller's copy) |
 | `Stamp` | type alias | `= coredocstore.StampValue` — `Meta` (who, which command), `InPlace` (no version) |
@@ -32,10 +32,11 @@ restored or purged (ADR 0143, amended for ADR 0178 C4).
 | `Stats` | type alias | `= svcdocstore.StatsValue` — `Documents`, `Pending`, `Folds`, `FoldError`, `Versions` (what the versions weigh) |
 | `DefaultFoldAt` | const | 1024 |
 | `OpenSQL[T](cfg, indexes...)` | func | a `*SQLStore[T]` over `cfg.Transactor`; sends no statement |
-| `SQLStore[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Keys`, `Count`, `Lookup`, `Find`; `Put`, `Insert`, `Replace`, `Update`, `Delete` and their Stamped forms; `Versions`, `Version`, `RewriteVersions`, `VersionWeight`; `Trash`, `Restore`, `Purge`, `Tombstones`; `PutDocument`; `OnWrite`, `OnDelete`; `Reindex` — every read and write takes a context (the two hook registrations do not) |
+| `SQLStore[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Keys`, `Count`, `Lookup`, `Find`; `Put`, `Insert`, `Replace`, `Update`, `Delete` and their Stamped forms; `Versions`, `Version`, `RewriteVersions`, `VersionWeight`; `Trash`, `Restore`, `Purge`, `Tombstones`; `PutDocument`; `Revision`, `ReplaceIf`; `Batch`; `OnWrite`, `OnDelete`; `Reindex` — every read and write takes a context (the two hook registrations do not) |
 | `SQLConfig[T]` | type alias | `Key`, `Transactor`, `Dialect`, `Table` (required), `IndexKey`, `Versions` + `Clock` + `Held` |
 | `SQLMigration(dialect, table, version)` | func | the two tables as one idempotent `sql.Migration` |
 | `SQLVersionsMigration(dialect, table, version)` | func | the versions table `<table>___vs`, which a store opened with `Versions` needs; its Down drops it |
+| `SQLVersionsTrashIndexMigration(dialect, table, version)` | func | the trash's index `<table>___tr`, after `SQLVersionsMigration`, for an earlier release's table and a new one alike; idempotent both ways (ADR 0143, amended 2026-11-02) |
 | `MaxSQLTableLen` / `MaxSQLKeyLen` / `MaxSQLIndexNameLen` | const | 58 / 1024 / 64 bytes |
 | `Collection[T]` / `Versioned[T]` | type alias | `= coredocstore.Collection[T]` / `Versioned[T]` — the ports `*Store[T]` implements, a call taking no context |
 | `CollectionContext[T]` / `VersionedContext[T]` | type alias | `= coredocstore.CollectionContext[T]` / `VersionedContext[T]` — the same calls each taking a context, which `*SQLStore[T]` implements |
@@ -43,9 +44,14 @@ restored or purged (ADR 0143, amended for ADR 0178 C4).
 | `KeyLister` / `KeyListerContext` | type alias | `= coredocstore.KeyLister` / `KeyListerContext` — `Keys(after)`, the keys alone in byte order, which `*Store[T]` / `*SQLStore[T]` implement (ADR 0178) |
 | `VersionWriter` / `VersionWriterContext` | type alias | `= coredocstore.VersionWriter` / `VersionWriterContext` — `PutDocument(key, versions, trashedAt)`, a document written with its versions and its trash as they are given, which `*Store[T]` / `*SQLStore[T]` implement (ADR 0178) |
 | `VersionWeigher` / `VersionWeigherContext` | type alias | `= coredocstore.VersionWeigher` / `VersionWeigherContext` — `VersionWeight()`, what the versions weigh: a counter on `*Store[T]`, one aggregate statement on `*SQLStore[T]` (ADR 0143) |
+| `Revisioned[T]` / `RevisionedContext[T]` | type alias | `= coredocstore.Revisioned[T]` / `RevisionedContext[T]` — `Revision(key)` and `ReplaceIf(v, rev)`, a replacement on the revision the caller read, which `*Store[T]` / `*SQLStore[T]` implement (ADR 0209) |
+| `Revision` | type alias | `= coredocstore.RevisionValue` — an opaque token, compared only for equality |
+| `Batcher[T]` / `BatcherContext[T]` / `BatchWriter[T]` | type alias | `= coredocstore.Batcher[T]` / `BatcherContext[T]` / `BatchWriter[T]` — `Batch(fn)`, several writes as one: every write or none, which `*Store[T]` / `*SQLStore[T]` implement (ADR 0209, amended 2026-11-02) |
+| `Pager[T]` / `PagerContext[T]` | type alias | `= coredocstore.Pager[T]` / `PagerContext[T]` — `Documents(after, limit)` and `FindAfter(index, key, after, limit)`, a page at a time (#836) |
+| `Ranged[T]` / `RangedContext[T]` | type alias | `= coredocstore.Ranged[T]` / `RangedContext[T]` — `Range(index, lo, hi, limit)` over an `Ordered` index (#836) |
 | `Announcer` | type alias | `= coredocstore.Announcer` — `OnWrite`, `OnDelete`, which both engines implement |
-| `Code*` | const | `0.3.80.1`–`0.3.80.22` |
-| `DocumentNotFound` … `WriteUnconfirmed`, `StatementFailed`, `KeyTooLong`, `VersionsNotKept`, `VersionNotFound`, `VersionsRewriteRefused`, `DocumentNotTrashed`, `VersionsInvalid` | var | the twenty-two sentinels |
+| `Code*` | const | `0.3.80.1`–`0.3.80.24` |
+| `DocumentNotFound` … `WriteUnconfirmed`, `StatementFailed`, `KeyTooLong`, `VersionsNotKept`, `VersionNotFound`, `VersionsRewriteRefused`, `DocumentNotTrashed`, `VersionsInvalid`, `RevisionMismatch`, `IndexNotOrdered` | var | the twenty-three sentinels |
 
 Every type is an alias. The engines, their configurations and `Stats` alias
 the service (ADR 0074); the values both engines share, the index declaration,

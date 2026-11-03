@@ -50,6 +50,8 @@ type txState struct {
 	mu sync.RWMutex
 	// tx is the single database transaction every scope runs on.
 	tx *stdsql.Tx
+	// budget bounds each statement a scope's executor runs.
+	budget stmtBudget
 	// poisoned is non-nil once the transaction can no longer be trusted:
 	// a savepoint rollback failed, so what the engine has kept is unknown.
 	poisoned error

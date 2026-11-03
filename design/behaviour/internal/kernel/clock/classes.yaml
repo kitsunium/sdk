@@ -13,6 +13,15 @@ files:
   - decls:
       - _
     name: clock_compliance.go
+  - decls:
+      - CoarseClock
+      - NewCoarse
+      - (*CoarseClock).publish
+      - (*CoarseClock).store
+      - (*CoarseClock).Now
+      - (*CoarseClock).Since
+      - (*CoarseClock).Stop
+    name: coarse.go
   - decls: []
     name: doc.go
   - decls:
@@ -88,6 +97,9 @@ files:
       - requirePositivePeriod
     name: waiter.go
 functions:
+  - name: NewCoarse
+    params: base Timed, resolution time.Duration
+    results: "*CoarseClock"
   - name: NewManualClock
     params: start time.Time
     results: "*ManualClock"
@@ -127,6 +139,7 @@ functions:
     name: requirePositivePeriod
     params: op string, d time.Duration
 imports:
+  atomic: sync/atomic
   math: math
   sync: sync
   time: time
@@ -136,6 +149,44 @@ package:
   name: clock
   purpose: Package clock abstracts the passage of time so higher layers can inject a deterministic time source in tests instead of coupling to the wall clock.
 types:
+  - fields:
+      - doc: base is the clock read every resolution, and after Stop on every call.
+        name: base
+        type: Timed
+      - doc: |-
+          reading is the last published instant; nil once stopped, when Now reads
+          base instead. One pointer per tick: the reader's whole cost is a load.
+        name: reading
+        type: atomic.Pointer[time.Time]
+      - name: ticker
+        type: Ticker
+      - name: quit
+        type: chan struct{}
+      - doc: running is the publishing goroutine, which Stop waits out.
+        name: running
+        type: sync.WaitGroup
+      - name: once
+        type: sync.Once
+    kind: struct
+    methods:
+      - doc: "publish is the goroutine: every tick it stores base's reading, until Stop."
+        name: publish
+        recv: c *CoarseClock
+      - doc: |-
+          store publishes the base's current reading — monotonic part included, so a
+          Since across two readings measures what base would.
+        name: store
+        recv: c *CoarseClock
+      - name: Now
+        recv: c *CoarseClock
+        results: time.Time
+      - name: Since
+        params: t time.Time
+        recv: c *CoarseClock
+        results: time.Duration
+      - name: Stop
+        recv: c *CoarseClock
+    name: CoarseClock
   - kind: named
     name: Clock
     underlying: |-
@@ -509,6 +560,10 @@ vars:
     name: _
   - grouped: true
     items:
+      - doc: "CoarseClock implements Clock: the compiler holds it."
+        name: _
+        type: Clock
+        value: (*CoarseClock)(nil)
       - doc: "ManualClock implements Clock: the compiler holds it."
         name: _
         type: Clock

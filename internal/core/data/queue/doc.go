@@ -113,4 +113,10 @@
 //
 // Package queue — the ADR 0039 sibling that lets a consumer sleep until there
 // may be work, and the value it answers with (ADR 0104).
+//
+// Package queue — the siblings that act on a whole queue rather than one
+// message (ADR 0054 and ADR 0151, amended 2026-11-02): a backlog counted
+// without its payloads, the live messages purged or listed through an
+// iterator, a batch published or acknowledged in one call, and the dead
+// letters paged after a cursor, replayed or purged in bulk.
 package queue

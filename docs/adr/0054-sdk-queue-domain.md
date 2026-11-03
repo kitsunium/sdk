@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) — `Consume` sleeps on the `Waker` sibling; [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) — a third broker, `NewSQL`, whose publication joins the caller's transaction (the frontier's Transaction row read as the WORK's, which still runs in its own), `PolicyValue.MaxRetryDelay`, and the `Rejecter` and `DeadLetterManager` siblings; amended in place on 2026-10-21 for kitsunium/sdk#474 — a `Releaser` sibling, and `Consume`'s stop, drain and lease bound (see the Amendment section); [ADR 0183](0183-a-message-may-wait-for-its-instant-and-recurrence-stays-the-schedulers.md) — resolves the Deferred `PublishAt`: a queue holds a message until one instant, durably (`DelayedPublisher`), recurrence stays the scheduler's, beside `DelayedNacker` and `OncePublisher`; ADR 0151, amended on 2026-10-23 for kitsunium/sdk#500 — D10's dead letter keeps, beside the origin's reason, code and Public half, the codes its wrappers added (`DeadLetterValue.Trail`)
+- **Amended by**: [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) — `Consume` sleeps on the `Waker` sibling; [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) — a third broker, `NewSQL`, whose publication joins the caller's transaction (the frontier's Transaction row read as the WORK's, which still runs in its own), `PolicyValue.MaxRetryDelay`, and the `Rejecter` and `DeadLetterManager` siblings; amended in place on 2026-10-21 for kitsunium/sdk#474 — a `Releaser` sibling, and `Consume`'s stop, drain and lease bound (see the Amendment section); [ADR 0183](0183-a-message-may-wait-for-its-instant-and-recurrence-stays-the-schedulers.md) — resolves the Deferred `PublishAt`: a queue holds a message until one instant, durably (`DelayedPublisher`), recurrence stays the scheduler's, beside `DelayedNacker` and `OncePublisher`; ADR 0151, amended on 2026-10-23 for kitsunium/sdk#500 — D10's dead letter keeps, beside the origin's reason, code and Public half, the codes its wrappers added (`DeadLetterValue.Trail`); amended in place on 2026-11-02 for kitsunium/sdk#816, #827, #833, #835, #1043, #1046 and #1152 — six siblings that act on a whole queue (`MessageLister`, `Counter`, `Purger`, `DeadLetterPager`, `BatchPublisher`, `Acker` — the Deferred `AckAll`, decided), one order for the dead letters, `PolicyValue.MaxAge`, and the handler's `Acknowledged`; and #1049, the idle workers of one `Consume` polling through one of them (see the second Amendment section); amended in place on 2026-11-03 for kitsunium/sdk#811, #827 and #1045 — the file broker's listing reused while its directory is "racily clean", `PublishMany` under one directory flush, and the Deferred priorities decided: five levels, strict, a compatible name grammar and an opt-in SQL column (see the last Amendment section); [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — resolves the Deferred `third-party/` connector three times: a broker over Valkey streams (`third-party/db/redis/queue`), over NATS JetStream (`third-party/nats/queue`) and over SQS (`third-party/aws/queue/sqs`), each dead-lettering with the cause itself
 - **Related**: [ADR 0053](0053-sdk-events-domain.md) (the frontier table, written before this domain existed), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0052](0052-sdk-lock-domain.md) (leases that expire, and the `flock(2)` measurement), [ADR 0056](0056-sdk-vfs-domain.md) (`vfs`, whose `WriteAtomic` is this domain's durable publish), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse rather than approximate), [ADR 0001](0001-sdk-go-multimodule-layout.md) / [ADR 0005](0005-sdk-error-codes-dotted-quad.md)
 
 ## Context
@@ -553,6 +553,8 @@ and the documentation the change is obliged to keep in step (rule 11).
 - **A `third-party/` connector** (NATS, AMQP, Kafka, SQS) behind this same
   `Broker` port. It is the reason the port is four methods and the reason the
   two capabilities are siblings rather than methods.
+  Resolved for NATS JetStream and SQS, and for Valkey streams besides, by
+  [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md); AMQP stays deferred, and Kafka is not this port (#990).
 - **Per-key (partitioned) ordering.** Deferred by name because the honest
   version of it means a failed message BLOCKS its key — head-of-line blocking —
   which is a different product decision and not a feature flag on this one.
@@ -563,6 +565,8 @@ and the documentation the change is obliged to keep in step (rule 11).
 - **Priority queues.** The name grammar sorts on one instant; a priority would
   be a second sort key and a starvation policy, and starvation policies are not
   something to add silently.
+  *Decided on 2026-11-03 (the last Amendment section): five levels, strict,
+  the starvation stated and tested.*
 - **A metrics binding** (published, delivered, dead-lettered, lease expiries).
   `NackValue` and `DeliveryValue` carry what such a binding would need; wiring
   it here would make `queue` depend on `metrics` for everyone who does not want
@@ -570,6 +574,8 @@ and the documentation the change is obliged to keep in step (rule 11).
 - **Batch acknowledgement** (`AckAll`). It would amortise the durable broker's
   syscalls the way `BatchSize` amortises its directory scan; it needs a
   partial-failure semantic first, and that deserves its own decision.
+  *Decided on 2026-11-02 (second Amendment section): `Acker.AckMany`, its
+  partial-failure semantic one outcome per receipt.*
 
 ## Amendment — 2026-10-21: a stop hands back what it did not do, and a handler ends before its lease (kitsunium/sdk#474)
 
@@ -614,6 +620,150 @@ Decided:
 Not decided here: the framework's wiring — `DrainTimeout` tied to the
 lifecycle's stop budget, `AutoExtend` on by default per queue — which is the
 framework's and the Studio's to expose.
+
+## Amendment — 2026-11-02: the siblings that act on a whole queue, one order for the dead letters, a message's lifetime, and a handler that acknowledges itself (kitsunium/sdk#816, #827, #833, #835, #1043, #1046, #1152)
+
+Every verb of the domain acted on one message. An operator who needed the
+depth of a queue paged its payloads; one who had to empty it of a bad
+deployment's garbage received and acknowledged each message, running the
+handlers it meant to spare; a producer with a batch paid one round trip per
+message, and a consumer one acknowledgement per message. And the dead-letter
+store, read "oldest first", was read three ways. Decided:
+
+1. **Six siblings (ADR 0039), each frozen at what it ships with.**
+   `MessageLister.AllMessages(ctx, after)` is `MessageReader.Messages` as an
+   `iter.Seq2`, its storage failure yielded once. `Counter.Stats(ctx)` answers
+   the waiting, leased and dead counts, the oldest live enqueue instant and the
+   next due instant, without reading a payload. `Purger.Purge(ctx)` removes
+   every live message, never a dead letter — the second call of the domain,
+   beside `DeleteDeadLetter`, that destroys a message without its consumer's
+   acknowledgement, never made by the SDK itself. `DeadLetterPager
+   .DeadLettersAfter(ctx, after, max)` pages the store after a cursor.
+   `BatchPublisher.PublishMany(ctx, payloads)` checks every payload before it
+   writes any; a broker that joins the caller's transaction publishes the
+   batch in it, atomically, and one that writes message by message returns
+   the messages published before a failure. `Acker.AckMany(ctx, receipts)`.
+2. **`AckAll`'s partial-failure semantic is the result.** `AckMany` returns an
+   `AckResultValue`: one `AckOutcome` per receipt — acknowledged, a lapsed
+   lease, a receipt never issued — and a refused receipt is an outcome, never
+   the call's error. The error is the medium's; beside it, every receipt the
+   broker did not reach reads `AckNotAttempted`, the zero, so no caller
+   guesses which half landed. A batch is not bounded by a code: the SQL broker
+   splits it into statements, one per 167 receipts.
+3. **One order for the dead-letter store: the identifier's.** The file broker
+   listed by name — the enqueue instant —, the SQL broker by failure instant
+   and the memory broker by burial, so a message enqueued first and buried
+   last came back first on one and last on the two others. Every broker mints
+   an identifier from the enqueue instant, so the byte order of the
+   identifiers is "oldest enqueued first", total, and resumable; `DeadLetters`
+   is `DeadLettersAfter`'s first page. A visible change of order on the SQL
+   and memory brokers, made because the port's promise had one reading and
+   two brokers broke it.
+4. **`PolicyValue.MaxAge`.** A message whose age reached it is never delivered:
+   the Receive that reaches it moves it to the dead-letter store with
+   `MESSAGE_EXPIRED` (`0.2.23.11`) and the count it had — evidence, never a
+   message silently gone. A message already leased keeps its lease. Zero
+   never expires, which is what every policy did.
+5. **`Acknowledged` (`0.2.23.12`), the inbox half of ADR 0151's outbox.** A
+   handler that acknowledged its delivery inside the transaction holding its
+   effects returns it, and `Consume` sends nothing for it: the effects and the
+   acknowledgement commit together or not at all. One that only says so leaves
+   its message leased until the lease lapses. `ConsumerConfig.AckedWindow`
+   remembers the last N messages a handler finished in this process, and
+   acknowledges a redelivery of one — its acknowledgement lost to a lapsed
+   lease — without running the handler: process-local, lost on restart, a
+   narrowing of the duplicates and never their removal.
+6. **The idle workers of one `Consume` poll through one of them**
+   (kitsunium/sdk#1049). Each worker polled an empty queue on its own:
+   `Parallelism` 8 at the default 100 ms was eighty probes a second on the SQL
+   broker and a hundred and sixty directory scans on the file broker, all
+   asking one question. Now the first idle worker takes a slot and waits as
+   ADR 0104 has a worker wait — the broker's wake, its due instant, the poll —
+   and the other idle workers wait on it; when it finds work it hands the slot
+   on and wakes them, so a publication reaches them at once and an idle
+   interval costs one probe. ADR 0104's contract holds: no latency lost in
+   process, `PollInterval` still the bound on another process's publication.
+   A worker holding work never polls for the others.
+
+Still deferred: priorities (a second sort key in the name grammar and a
+column in the table — a persisted format, kitsunium/sdk#1045, left to its
+owner's decision), and a publication of several files under one directory
+flush, which `vfs` would have to offer before the file broker's `PublishMany`
+can amortise it. *Both decided on 2026-11-03 (the next Amendment sections).*
+
+## Amendment — 2026-11-03: a listing reused while its directory is quiet, a batch under one directory flush, and priorities (kitsunium/sdk#811, #827, #1045)
+
+D6 made a lexicographic sort a chronological one, and every `Receive` of the
+file broker paid for it in full: both state directories read and sorted,
+4 026 allocations and 2.9 ms for an idle poll of a thousand messages not yet
+visible, every `PollInterval`. The directory's mtime says whether anything
+changed; the question is only when it can be believed. Decided:
+
+1. **A listing is reused only while its directory is "racily clean"**, git's
+   rule for its index: the directory's mtime is the one the listing recorded,
+   AND it was older than the instant the listing began by a margin of three
+   seconds on the real clock. A change made in the listing's own tick can
+   leave the mtime unchanged — the kernel stamps from a clock up to a tick
+   behind and the filesystem truncates to its granularity, two seconds on FAT
+   —, so such a listing is read again, and a publication by another process
+   in the same tick is seen by the next `Receive`. A listing is reused ten
+   seconds at most, on the monotonic clock: the cases the mtime cannot see — a
+   wall clock stepped back, a network filesystem stamping from a server clock
+   far behind, a restored mtime — cost a delay, never a loss.
+2. **What it buys, and what it does not.** An idle poll, a `Stats` and a
+   listing of a queue nobody touched for longer than the margin cost one stat
+   per state directory (`Stats` on a quiet queue reads no directory, which
+   lifts #833's reserve). A queue being consumed moves its directory's mtime at
+   every lease and is read on every `Receive`, as before: reusing a listing
+   after the consumer's own rename would reuse it after another process's
+   rename in the same tick. The listing itself is cheaper — names alone, no
+   `fs.DirEntry` — so a backlog of a thousand costs a third of what it did;
+   the backlog limit of the Consequences section stands for a backlog that
+   keeps moving.
+3. **`PublishMany` on the file broker shares the directory flush** (#827).
+   The 2026-11-02 amendment left it publishing message by message until
+   `vfs` offered a publication of several files under one flush; ADR 0056,
+   amended 2026-11-03, offers it — `AtomicBatchWriter.WriteAtomicAll`. D7's
+   boundary is unchanged: the five steps are vfs's, this domain names the
+   messages and hands the batch over. Each message keeps its own file flush
+   before its rename; `ready/` is flushed once after the last. On a failure
+   at the k-th, the k−1 returned are durable and the rest were not
+   published, as the port says; a directory flush that failed returns none
+   — they are visible, their durability in doubt, as `Publish` returns
+   nothing beside the same failure — and a retry may duplicate, which D1
+   permits.
+4. **Priorities, a closed set, strict** (#1045; the owner's decision, option
+   (a) of the issue). The Deferred section kept them out because "a second
+   sort key and a starvation policy are not something to add silently";
+   they are added out loud. `Priority` has five levels, `PriorityLowest`
+   (−2) to `PriorityHighest` (2), the zero `PriorityNormal` — `Publish`'s
+   level, and the one every message written before this amendment reads as.
+   `PriorityPublisher.PublishPriority(ctx, payload, level)` is a sibling (D8,
+   ADR 0039); a level outside the set is `QUEUE_MISCONFIGURED`. A Receive
+   hands out the VISIBLE messages of the highest level first, then by
+   visibility, then by identifier; a message not yet visible holds back no
+   one. **The one non-guarantee: the order is strict and ages nothing, so a
+   steady stream at one level starves every level below it** — the policy
+   of every broker a connector would wrap (RabbitMQ's priority queues,
+   River's, Oban's), shown by a test as D4's reorder is. Ageing would move
+   the instants `Wake` reports and is not done. The level is kept across a
+   nack, a release, a lapsed lease, a burial, a replay and a copy:
+   `LiveMessageValue.Priority` and `DeadLetterValue.Priority`.
+   **The persisted formats change, compatibly.** On file (D6) a normal
+   message is named as before, byte for byte — an earlier release sharing
+   the directory still sees it, and every name on disk keeps working —, and
+   every other level opens its three names with one digit,
+   `PriorityHighest − level`, which the ready listing sorts first, so one
+   read still serves the walk; a name with no digit is the normal level, the
+   normal digit is never written, and a dead letter's record is unchanged.
+   On SQL (ADR 0151) the level lives in an opt-in column, `priority`
+   `NOT NULL DEFAULT 0`, added by `SQLPriorityMigration` — a migration of its
+   own, since `SQLMigration`'s statements are frozen by their checksum
+   (ADR 0055, amended 2026-11-02) — with an index over (dead, priority, due,
+   id); `SQLConfig.Priority` makes the broker read and write it, and without
+   it every statement is the one it sent before, byte for byte, and a level
+   other than the normal one is refused. The memory broker keeps one ready
+   list per level.
 
 ## References
 

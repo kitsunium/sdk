@@ -56,6 +56,7 @@ type SubjectKeysConfig struct {
 	// cache and refused without one, because it is a promise about erasure: a
 	// key another PROCESS destroyed keeps opening — and sealing — here for up
 	// to CacheTTL. A key destroyed through this value leaves its cache at once.
+	// An idle key leaves memory when [SubjectKeys.Expire] sweeps it.
 	CacheTTL time.Duration
 	// Clock times the cache. nil means clock.System.
 	Clock clock.Clock
@@ -264,6 +265,25 @@ func (s *SubjectKeys) Destroy(ctx context.Context, subject string) (destroyed bo
 	}
 	//: whether there was a key to destroy.
 	return deleted, nil
+}
+
+// Expire wipes every opened key whose CacheTTL has passed, and reports how
+// many it wiped. A key otherwise leaves memory only when a call — on any
+// subject — or a capacity eviction reaches it, so a process that makes no
+// call keeps an idle subject's key, opened, for as long as it makes none.
+//
+// The engine starts no goroutine: the caller sweeps on its own ticker or
+// scheduler, and stops it with the engine. Called every half CacheTTL, it
+// wipes an idle key within one and a half CacheTTL:
+//
+//	daemon := worker.Every(ttl/2, func() { keys.Expire() })
+//
+// A wiped key stays in the store: the next call on its subject reads and
+// opens it again. Expire reads no store, costs nothing when no key is due,
+// and returns 0 without a cache.
+func (s *SubjectKeys) Expire() int {
+	//: the cache sweeps and wipes; the store is not read.
+	return s.cache.expire()
 }
 
 // acquire returns a copy of subject's AEAD key, which the caller zeroizes, the

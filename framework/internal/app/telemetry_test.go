@@ -14,6 +14,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/app"
 	"github.com/kitsunium/sdk/framework/telemetry"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
 
@@ -76,6 +77,45 @@ func TestADaemonReportsItsSpansOnTheTelemetrySocket(t *testing.T) {
 		if ok && ev.Kind == telemetry.KindSpan && ev.Op == telemetry.OpConnect {
 			if int(ev.Node) != ref || ev.Outcome != telemetry.OutcomeOK {
 				t.Errorf("the connection's record: %+v", ev)
+			}
+			return
+		}
+	}
+}
+
+// TestATransactionRetryIsReportedOnTheTelemetryPort pins #1000's KindRetry:
+// a transaction the database asks to run again puts a retry on the
+// telemetry port before its next run, as a port's call does.
+func TestATransactionRetryIsReportedOnTheTelemetryPort(t *testing.T) {
+	db := app.NewFakeDB(sql.DialectPostgres)
+	telPath := filepath.Join(shortDir(t), "run", "t.sock")
+	l, _ := retriedLedger(t, db, app.NewService("idle", "Nothing."), app.Telemetry(telPath))
+	tc, err := ipc.Dial(t.Context(), ipc.Config{Path: telPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tc.Close()
+	r := bufio.NewReader(tc)
+	if _, err := r.ReadBytes('\n'); err != nil {
+		t.Fatal(err)
+	}
+	db.FailCommits(serializationFailure{})
+	if err := app.Transact(t.Context(), func(ctx context.Context) error {
+		return l.entries.Insert(ctx, entry{ID: "reported"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tc.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	b := make([]byte, telemetry.RecordSize)
+	for {
+		if _, err := io.ReadFull(r, b); err != nil {
+			t.Fatalf("no retry on the telemetry port: %v", err)
+		}
+		if ev, _, ok := telemetry.Decode(b); ok && ev.Kind == telemetry.KindRetry {
+			if ev.Outcome != telemetry.OutcomeError || ev.Op != telemetry.OpCall {
+				t.Errorf("the retry's record: %+v", ev)
 			}
 			return
 		}

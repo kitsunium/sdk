@@ -81,15 +81,23 @@ func newKeyCache(size int, ttl time.Duration, clk clock.Clock) *keyCache {
 	//: no cache: the store is read on every call.
 	if size == 0 {
 		//: a cache that holds nothing.
-		return &keyCache{}
+		return new(keyCache)
 	}
 	//: expiry and eviction both wipe; Delete does not fire it, forget wipes.
 	return &keyCache{entries: kcache.NewCache(kcache.Config[string, *openedKey]{
 		MaxEntries: size,
 		DefaultTTL: ttl,
 		Clock:      clk,
-		OnEvict:    func(_ string, opened *openedKey) { opened.wipe() },
+		OnEvict:    wipeEvicted,
 	})}
+}
+
+// wipeEvicted is the cache's OnEvict: a key that leaves by expiry or by
+// eviction is wiped. A named function rather than a literal keeps
+// newKeyCache within the inliner's budget.
+func wipeEvicted(_ string, opened *openedKey) {
+	//: the opened key's material is zeroed.
+	opened.wipe()
 }
 
 // fetch returns the opened key cached for subject, if any is live.
@@ -99,8 +107,25 @@ func (c *keyCache) fetch(subject string) (opened *openedKey, found bool) {
 		//: a miss.
 		return nil, false
 	}
-	//: an expired entry is evicted — and wiped — by the lookup itself.
+	//: every lookup first sweeps the keys whose TTL has passed, whatever
+	//: their subject (#1038): an idle subject's opened key is wiped by the
+	//: next call on any subject, not kept until its own is read again. The
+	//: sweep costs nothing when no key is due.
+	c.entries.Expire()
+	//: the subject's own entry, live or absent.
 	return c.entries.Fetch(subject)
+}
+
+// expire wipes every opened key whose TTL has passed, through the cache's
+// OnEvict, and reports how many it wiped. A disabled cache holds nothing.
+func (c *keyCache) expire() int {
+	//: a disabled cache has nothing to sweep.
+	if c.entries == nil {
+		//: nothing wiped.
+		return 0
+	}
+	//: each reaped entry reaches wipeEvicted after the cache's lock is released.
+	return c.entries.Expire()
 }
 
 // current returns the epoch a fill must present to offer what it opens.

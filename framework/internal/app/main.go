@@ -165,6 +165,9 @@ func (a *App) mainCommands() map[string]func(ctx context.Context, args []string)
 	if run := a.otlpCLI(); run != nil {
 		cmds["otlp"] = run
 	}
+	if run := a.queueCLI(); run != nil {
+		cmds["queue"] = run
+	}
 	return cmds
 }
 
@@ -187,6 +190,9 @@ func (a *App) usageBreaker(w io.Writer) {
 	if a.otlpCLI() != nil {
 		fmt.Fprintf(w, "  %[1]s otlp dead-letters|replay [traces|metrics] [--drop] [ID...]\n%[2]s the OTLP export's dead letters, listed, replayed or dropped\n", a.name, strings.Repeat(" ", 37))
 		fmt.Fprintf(w, "  %[1]s otlp migrate [traces|metrics]\n%[2]s the OTLP export's batches left under the data directory, moved onto otlp-database\n", a.name, strings.Repeat(" ", 37))
+	}
+	if a.queueCLI() != nil {
+		fmt.Fprintf(w, "  %[1]s queue dead-letters [NODE] | queue replay|drop NODE ID...\n%[2]s a consumer's dead letters, listed, replayed or dropped\n", a.name, strings.Repeat(" ", 37))
 	}
 }
 

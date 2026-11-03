@@ -1,6 +1,196 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: stmtBudget.bound
+    participants:
+      - id: caller
+        kind: actor
+      - id: stmtBudget.bound
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: b.clk.NewTimer
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ctx, noRelease
+          when: b.limit <= 0
+      - bind: cut, cancel
+        eval: context.WithCancelCause(ctx)
+        to: context
+      - bind: timer
+        eval: b.clk.NewTimer(b.limit)
+        to: b.clk.NewTimer
+      - bind: released
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		defer timer.Stop()
+          		select {
+          		//: the budget elapsed first: the statement is cut, its cause named.
+          		case <-timer.C():
+          			cancel(coresql.StatementTimedOut)
+          		//: the statement returned in time.
+          		case <-released:
+          		//: the caller's own end, which the cut context already carries.
+          		case <-cut.Done():
+          		}
+          	}()
+      - var:
+          name: once
+          type: sync.Once
+      - return: |-
+          cut, func() {
+          		once.Do(func() {
+          			close(released)
+          			cancel(nil)
+          		})
+          	}
+  - of: stmtBudget.verdict
+    participants:
+      - id: caller
+        kind: actor
+      - id: stmtBudget.verdict
+        kind: self
+      - id: failed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          when: err == nil || b.limit <= 0 || !errors.Is(context.Cause(cut), coresql.StatementTimedOut)
+      - return: failed(coresql.StatementTimedOut, err, kerrs.String("operation", operation))
+        to: failed
+  - of: stmtBudget.exec
+    participants:
+      - id: caller
+        kind: actor
+      - id: stmtBudget.exec
+        kind: self
+      - id: b.bound
+        kind: internal
+      - id: on.ExecContext
+        kind: internal
+    steps:
+      - bind: cut, release
+        eval: b.bound(ctx)
+        to: b.bound
+      - defer: release()
+      - bind: result, err
+        eval: on.ExecContext(cut, query, args...)
+        to: on.ExecContext
+      - return: result, b.verdict(cut, operationExec, err)
+  - of: stmtBudget.query
+    participants:
+      - id: caller
+        kind: actor
+      - id: stmtBudget.query
+        kind: self
+      - id: b.bound
+        kind: internal
+      - id: on.QueryContext
+        kind: internal
+    steps:
+      - bind: cut, _
+        eval: b.bound(ctx)
+        to: b.bound
+      - bind: rows, err
+        eval: on.QueryContext(cut, query, args...)
+        to: on.QueryContext
+      - return: rows, b.verdict(cut, operationQuery, err)
+  - of: stmtBudget.prepare
+    participants:
+      - id: caller
+        kind: actor
+      - id: stmtBudget.prepare
+        kind: self
+      - id: b.bound
+        kind: internal
+      - id: on.PrepareContext
+        kind: internal
+    steps:
+      - bind: cut, release
+        eval: b.bound(ctx)
+        to: b.bound
+      - defer: release()
+      - bind: stmt, err
+        eval: on.PrepareContext(cut, query)
+        to: on.PrepareContext
+      - return: stmt, b.verdict(cut, operationPrepare, err)
+  - of: resolved.executors
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolved.executors
+        kind: self
+      - id: r.pool
+        kind: internal
+    steps:
+      - set: primary
+        to: r.pool
+        value: r.pool(r.db)
+      - opt:
+          do:
+            - return: primary, primary
+          when: r.replica == nil
+      - return: primary, r.pool(r.replica)
+  - of: resolved.pool
+    steps:
+      - opt:
+          do:
+            - return: db
+          when: r.budget.limit <= 0
+      - return: "timedPool{db: db, budget: r.budget}"
+  - of: timedPool.ExecContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: timedPool.ExecContext
+        kind: self
+      - id: p.budget.exec
+        kind: internal
+    steps:
+      - return: p.budget.exec(ctx, p.db, query, args)
+        to: p.budget.exec
+  - of: timedPool.QueryContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: timedPool.QueryContext
+        kind: self
+      - id: p.budget.query
+        kind: internal
+    steps:
+      - return: p.budget.query(ctx, p.db, query, args)
+        to: p.budget.query
+  - of: timedPool.QueryRowContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: timedPool.QueryRowContext
+        kind: self
+      - id: p.budget.bound
+        kind: internal
+      - id: p.db.QueryRowContext
+        kind: value
+    steps:
+      - bind: cut, _
+        eval: p.budget.bound(ctx)
+        to: p.budget.bound
+      - return: p.db.QueryRowContext(cut, query, args...)
+        to: p.db.QueryRowContext
+  - of: timedPool.PrepareContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: timedPool.PrepareContext
+        kind: self
+      - id: p.budget.prepare
+        kind: internal
+    steps:
+      - return: p.budget.prepare(ctx, p.db, query)
+        to: p.budget.prepare
   - of: Config.resolve
     participants:
       - id: caller
@@ -8,6 +198,12 @@ sequences:
       - id: Config.resolve
         kind: self
       - id: c.Pool.apply
+        kind: internal
+      - id: c.Pool.install
+        kind: internal
+      - id: c.resolvedClock
+        kind: internal
+      - id: settings.executors
         kind: internal
     steps:
       - opt:
@@ -30,8 +226,23 @@ sequences:
             eval: c.Pool.apply(c.DB)
             to: c.Pool.apply
           when: err != nil
+      - opt:
+          do:
+            - eval: c.Pool.install(c.ReadReplica)
+              to: c.Pool.install
+          when: c.ReadReplica != nil
+      - bind: clk
+        eval: c.resolvedClock()
+        to: c.resolvedClock
       - set: settings
-        value: "resolved{db: c.DB, dialect: c.Dialect, clk: c.resolvedClock(), probe: c.probeBudget()}"
+        value: |-
+          resolved{
+          		db: c.DB, replica: c.ReadReplica, dialect: c.Dialect, clk: clk, probe: c.probeBudget(),
+          		budget: stmtBudget{limit: c.StatementTimeout, clk: clk},
+          	}
+      - set: settings.primary, settings.reader
+        to: settings.executors
+        value: settings.executors()
       - return: settings, nil
   - of: Config.resolvedClock
     steps:
@@ -55,6 +266,25 @@ sequences:
         kind: self
       - id: kerrs
         kind: package
+      - id: p.install
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coresql.PoolMisconfigured, kerrs.WrapParams{},
+                			kerrs.String("field", "MaxOpen"), kerrs.Int("value", p.MaxOpen))
+              to: kerrs
+          when: p.MaxOpen <= 0
+      - eval: p.install(db)
+        to: p.install
+      - return: nil
+  - of: PoolConfig.install
+    participants:
+      - id: caller
+        kind: actor
+      - id: PoolConfig.install
+        kind: self
       - id: db.SetMaxOpenConns
         kind: value
       - id: db.SetMaxIdleConns
@@ -64,13 +294,6 @@ sequences:
       - id: db.SetConnMaxIdleTime
         kind: value
     steps:
-      - opt:
-          do:
-            - return: |-
-                kerrs.Wrap(coresql.PoolMisconfigured, kerrs.WrapParams{},
-                			kerrs.String("field", "MaxOpen"), kerrs.Int("value", p.MaxOpen))
-              to: kerrs
-          when: p.MaxOpen <= 0
       - eval: db.SetMaxOpenConns(p.MaxOpen)
         to: db.SetMaxOpenConns
       - eval: db.SetMaxIdleConns(p.idleCeiling())
@@ -79,7 +302,6 @@ sequences:
         to: db.SetConnMaxLifetime
       - eval: db.SetConnMaxIdleTime(p.MaxIdleTime)
         to: db.SetConnMaxIdleTime
-      - return: nil
   - of: PoolConfig.idleCeiling
     steps:
       - opt:
@@ -199,6 +421,8 @@ sequences:
         kind: self
       - id: e.usable
         kind: internal
+      - id: e.state.budget.exec
+        kind: internal
       - id: e.state.tx.ExecContext
         kind: value
     steps:
@@ -210,6 +434,11 @@ sequences:
             eval: e.usable()
             to: e.usable
           when: err != nil
+      - opt:
+          do:
+            - return: e.state.budget.exec(ctx, e.state.tx, query, args)
+              to: e.state.budget.exec
+          when: e.state.budget.limit > 0
       - return: e.state.tx.ExecContext(ctx, query, args...)
         to: e.state.tx.ExecContext
   - of: (*scopedExecutor).QueryContext
@@ -219,6 +448,8 @@ sequences:
       - id: (*scopedExecutor).QueryContext
         kind: self
       - id: e.usable
+        kind: internal
+      - id: e.state.budget.query
         kind: internal
       - id: e.state.tx.QueryContext
         kind: value
@@ -231,6 +462,11 @@ sequences:
             eval: e.usable()
             to: e.usable
           when: err != nil
+      - opt:
+          do:
+            - return: e.state.budget.query(ctx, e.state.tx, query, args)
+              to: e.state.budget.query
+          when: e.state.budget.limit > 0
       - return: e.state.tx.QueryContext(ctx, query, args...)
         to: e.state.tx.QueryContext
   - of: (*scopedExecutor).QueryRowContext
@@ -241,12 +477,17 @@ sequences:
         kind: self
       - id: e.usable
         kind: internal
+      - id: e.state.budget.bound
+        kind: internal
       - id: e.state.tx.QueryRowContext
         kind: value
     steps:
       - opt:
           do:
-            - return: e.state.tx.QueryRowContext(ctx, query, args...)
+            - bind: cut, _
+              eval: e.state.budget.bound(ctx)
+              to: e.state.budget.bound
+            - return: e.state.tx.QueryRowContext(cut, query, args...)
               to: e.state.tx.QueryRowContext
           init:
             bind: err
@@ -263,6 +504,8 @@ sequences:
         kind: self
       - id: e.usable
         kind: internal
+      - id: e.state.budget.prepare
+        kind: internal
       - id: e.state.tx.PrepareContext
         kind: value
     steps:
@@ -274,6 +517,11 @@ sequences:
             eval: e.usable()
             to: e.usable
           when: err != nil
+      - opt:
+          do:
+            - return: e.state.budget.prepare(ctx, e.state.tx, query)
+              to: e.state.budget.prepare
+          when: e.state.budget.limit > 0
       - return: e.state.tx.PrepareContext(ctx, query)
         to: e.state.tx.PrepareContext
   - of: NewChecker
@@ -323,8 +571,14 @@ sequences:
         eval: make(chan error, 1)
       - go: |-
           func() {
-          		//: the only statement this port ever sends.
-          		answer <- c.cfg.db.PingContext(probe)
+          		err := c.cfg.db.PingContext(probe)
+          		//: a replica reads for the primary, so it answers too.
+          		if err == nil && c.cfg.replica != nil {
+          			//: the second and last ping.
+          			err = c.cfg.replica.PingContext(probe)
+          		}
+          		//: the only statements this port ever sends.
+          		answer <- err
           	}()
       - select:
           cases:
@@ -369,7 +623,25 @@ sequences:
             eval: scopeFor(ctx, t)
             to: scopeFor
           when: scope != nil
-      - return: t.cfg.db, false
+      - return: t.cfg.primary, false
+  - of: (*transactor).Reader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*transactor).Reader
+        kind: self
+      - id: scopeFor
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: scope.exec
+          init:
+            bind: scope
+            eval: scopeFor(ctx, t)
+            to: scopeFor
+          when: scope != nil
+      - return: t.cfg.reader
   - of: (*transactor).Defer
     participants:
       - id: caller
@@ -435,12 +707,25 @@ sequences:
           do:
             - return: nil, err
           when: err != nil
+      - set: res.budget
+        value: stmtBudget{}
       - return: "&migrator{cfg: res, plan: plan, tx: &transactor{cfg: res}}, nil"
   - of: (*migrator).Plan
     participants:
       - id: caller
         kind: actor
       - id: (*migrator).Plan
+        kind: self
+      - id: m.planned
+        kind: internal
+    steps:
+      - return: m.planned(ctx, false)
+        to: m.planned
+  - of: (*migrator).planned
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).planned
         kind: self
       - id: m.ensureTable
         kind: internal
@@ -454,11 +739,11 @@ sequences:
             - return: nil, err
           init:
             bind: err
-            eval: m.ensureTable(ctx)
+            eval: m.ensureTable(ctx, locked)
             to: m.ensureTable
           when: err != nil
       - bind: applied, highest, err
-        eval: m.applied(ctx)
+        eval: m.applied(ctx, locked, directionUp)
         to: m.applied
       - opt:
           do:
@@ -483,14 +768,14 @@ sequences:
         kind: actor
       - id: (*migrator).upAll
         kind: self
-      - id: m.Plan
+      - id: m.planned
         kind: internal
       - id: m.applyOne
         kind: internal
     steps:
       - bind: pending, err
-        eval: m.Plan(ctx)
-        to: m.Plan
+        eval: m.planned(ctx, true)
+        to: m.planned
       - opt:
           do:
             - return: err
@@ -542,11 +827,11 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: m.ensureTable(ctx)
+            eval: m.ensureTable(ctx, true)
             to: m.ensureTable
           when: err != nil
       - bind: applied, _, err
-        eval: m.applied(ctx)
+        eval: m.applied(ctx, true, directionDown)
         to: m.applied
       - opt:
           do:
@@ -779,6 +1064,7 @@ sequences:
           migratePlan{
           		migrations: sorted, table: table,
           		lockBudget: m.lockBudget(), retry: m.retryInterval(),
+          		checksums: slices.ContainsFunc(sorted, func(mv coresql.MigrationValue) bool { return mv.Checksum != "" }),
           	}, nil
   - of: MigrateConfig.resolvedTable
     steps:
@@ -972,7 +1258,7 @@ sequences:
             - return: err
           init:
             bind: _, err
-            eval: ex.ExecContext(ctx, createTableSQL(m.plan.table))
+            eval: ex.ExecContext(ctx, createTableSQL(m.plan.table, m.plan.checksums))
             to: ex.ExecContext
           when: err != nil
       - bind: _, err
@@ -1184,9 +1470,21 @@ sequences:
         to: failed
   - of: createTableSQL
     steps:
-      - return: |-
-          "CREATE TABLE IF NOT EXISTS " + table +
-          		" (version BIGINT NOT NULL PRIMARY KEY, name TEXT NOT NULL, applied_at_unix BIGINT NOT NULL)"
+      - bind: columns
+        eval: "\"version BIGINT NOT NULL PRIMARY KEY, name TEXT NOT NULL, applied_at_unix BIGINT NOT NULL\""
+      - opt:
+          do:
+            - op: +=
+              set: columns
+              value: "\", checksum TEXT\""
+          when: checksums
+      - return: "\"CREATE TABLE IF NOT EXISTS \" + table + \" (\" + columns + \")\""
+  - of: checksumProbeSQL
+    steps:
+      - return: "\"SELECT checksum FROM \" + table + \" WHERE 1 = 0\""
+  - of: addChecksumSQL
+    steps:
+      - return: "\"ALTER TABLE \" + table + \" ADD COLUMN checksum TEXT\""
   - of: (*migrator).ensureTable
     participants:
       - id: caller
@@ -1204,20 +1502,56 @@ sequences:
         eval: m.tx.Join(ctx)
         to: m.tx.Join
       - bind: _, err
-        eval: ex.ExecContext(ctx, createTableSQL(m.plan.table))
+        eval: ex.ExecContext(ctx, createTableSQL(m.plan.table, m.plan.checksums))
         to: ex.ExecContext
       - opt:
           do:
             - return: failed(coresql.MigrationFailed, err, kerrs.String("phase", tablePhase))
               to: failed
           when: err != nil
+      - opt:
+          do:
+            - return: nil
+          when: "!m.plan.checksums || !locked || m.hasChecksumColumn(ctx)"
+      - set: _, err
+        to: ex.ExecContext
+        value: ex.ExecContext(ctx, addChecksumSQL(m.plan.table))
+      - opt:
+          do:
+            - return: failed(coresql.MigrationFailed, err, kerrs.String("phase", tablePhase))
+              to: failed
+          when: err != nil
       - return: nil
+  - of: (*migrator).hasChecksumColumn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).hasChecksumColumn
+        kind: self
+      - id: m.tx.Join
+        kind: internal
+      - id: ex.QueryContext
+        kind: value
+    steps:
+      - bind: ex, _
+        eval: m.tx.Join(ctx)
+        to: m.tx.Join
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, checksumProbeSQL(m.plan.table))
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil
+      - return: rows.Close() == nil
   - of: (*migrator).applied
     participants:
       - id: caller
         kind: actor
       - id: (*migrator).applied
         kind: self
+      - id: m.verified
+        kind: internal
       - id: m.tx.Join
         kind: internal
       - id: ex.QueryContext
@@ -1225,6 +1559,11 @@ sequences:
       - id: scanVersions
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: m.verified(ctx, locked, direction)
+              to: m.verified
+          when: m.plan.checksums && (locked || m.hasChecksumColumn(ctx))
       - bind: ex, _
         eval: m.tx.Join(ctx)
         to: m.tx.Join
@@ -1245,6 +1584,166 @@ sequences:
           	}()
       - return: scanVersions(rows)
         to: scanVersions
+  - of: (*migrator).verified
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).verified
+        kind: self
+      - id: m.recordedChecksums
+        kind: internal
+      - id: m.compareChecksums
+        kind: internal
+      - id: m.backfill
+        kind: internal
+    steps:
+      - bind: sums, highest, err
+        eval: m.recordedChecksums(ctx)
+        to: m.recordedChecksums
+      - opt:
+          do:
+            - return: nil, 0, err
+          when: err != nil
+      - bind: missing, changed
+        eval: m.compareChecksums(sums, direction)
+        to: m.compareChecksums
+      - opt:
+          do:
+            - return: nil, 0, changed
+          when: changed != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, 0, err
+                init:
+                  bind: err
+                  eval: m.backfill(ctx, missing)
+                  to: m.backfill
+                when: err != nil
+          when: locked
+      - set: versions
+        value: make(map[uint64]bool, len(sums))
+      - loop:
+          do:
+            - set: versions[version]
+              value: "true"
+          key: version
+          range: sums
+      - return: versions, highest, nil
+  - of: (*migrator).recordedChecksums
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).recordedChecksums
+        kind: self
+      - id: m.tx.Join
+        kind: internal
+      - id: ex.QueryContext
+        kind: value
+      - id: rows.Scan
+        kind: value
+      - id: rows.Err
+        kind: value
+    steps:
+      - bind: ex, _
+        eval: m.tx.Join(ctx)
+        to: m.tx.Join
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, "SELECT version, checksum FROM "+m.plan.table+" ORDER BY version")
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, 0, failed(coresql.MigrationFailed, err, kerrs.String("phase", tablePhase))
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: a close error after a successful scan still invalidates the read.
+          		if cerr := rows.Close(); cerr != nil && err == nil {
+          			//: the driver's error travels beside the verdict.
+          			err = failed(coresql.MigrationFailed, cerr, kerrs.String("phase", tablePhase))
+          		}
+          	}()
+      - set: sums
+        value: make(map[uint64]stdsql.NullString)
+      - loop:
+          cond: rows.Next()
+          do:
+            - var:
+                name: recorded
+                type: int64
+            - var:
+                name: sum
+                type: stdsql.NullString
+            - opt:
+                do:
+                  - return: nil, 0, failed(coresql.MigrationFailed, serr, kerrs.String("phase", tablePhase))
+                init:
+                  bind: serr
+                  eval: rows.Scan(&recorded, &sum)
+                  to: rows.Scan
+                when: serr != nil
+            - opt:
+                do:
+                  - return: |-
+                      nil, 0, failed(coresql.MigrationFailed, nil,
+                      				kerrs.String("phase", tablePhase), kerrs.Int64("version", recorded))
+                when: recorded < 0
+            - set: sums[uint64(recorded)]
+              value: sum
+            - set: highest
+              value: max(highest, uint64(recorded))
+      - opt:
+          do:
+            - return: nil, 0, failed(coresql.MigrationFailed, rerr, kerrs.String("phase", tablePhase))
+          init:
+            bind: rerr
+            eval: rows.Err()
+            to: rows.Err
+          when: rerr != nil
+      - return: sums, highest, nil
+  - of: (*migrator).backfill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*migrator).backfill
+        kind: self
+      - id: m.tx.Join
+        kind: internal
+      - id: ex.ExecContext
+        kind: value
+      - id: failed
+        kind: internal
+    steps:
+      - bind: ex, _
+        eval: m.tx.Join(ctx)
+        to: m.tx.Join
+      - bind: query
+        eval: |-
+          "UPDATE " + m.plan.table + " SET checksum = " + m.cfg.dialect.Placeholder(bindBackfillChecksum) +
+          		" WHERE version = " + m.cfg.dialect.Placeholder(bindBackfillVersion) + " AND checksum IS NULL"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: failed(coresql.MigrationFailed, err, kerrs.String("phase", tablePhase), versionField(migration))
+                    to: failed
+                init:
+                  bind: _, err
+                  eval: ex.ExecContext(ctx, query, migration.Checksum, int64(migration.Version))
+                  to: ex.ExecContext
+                when: err != nil
+          key: _
+          range: missing
+          value: migration
+      - return: nil
+  - of: checksumArg
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: sum == ""
+      - return: sum
   - of: (*migrator).record
     participants:
       - id: caller
@@ -1254,6 +1753,20 @@ sequences:
       - id: ex.ExecContext
         kind: value
     steps:
+      - opt:
+          do:
+            - bind: query
+              eval: |-
+                "INSERT INTO " + m.plan.table + " (version, name, applied_at_unix, checksum) VALUES (" +
+                			m.cfg.dialect.Placeholder(bindVersion) + ", " + m.cfg.dialect.Placeholder(bindName) + ", " +
+                			m.cfg.dialect.Placeholder(bindAppliedAt) + ", " + m.cfg.dialect.Placeholder(bindChecksum) + ")"
+            - bind: _, err
+              eval: |-
+                ex.ExecContext(ctx, query,
+                			int64(migration.Version), migration.Name, m.cfg.clk.Now().Unix(), checksumArg(migration.Checksum))
+              to: ex.ExecContext
+            - return: err
+          when: m.plan.checksums
       - bind: query
         eval: |-
           "INSERT INTO " + m.plan.table + " (version, name, applied_at_unix) VALUES (" +
@@ -1331,6 +1844,1159 @@ sequences:
             to: rows.Err
           when: rerr != nil
       - return: versions, highest, nil
+  - of: Observe
+    steps:
+      - opt:
+          do:
+            - return: c
+          when: obs == nil
+      - return: "&observedConnector{inner: c, obs: obs}"
+  - of: bounded
+    steps:
+      - opt:
+          do:
+            - return: query
+          when: len(query) <= MaxObservedQuery
+      - bind: cut
+        eval: MaxObservedQuery
+      - loop:
+          cond: cut > 0 && !utf8.RuneStart(query[cut])
+          do:
+            - op: "--"
+              set: cut
+      - return: query[:cut]
+  - of: (*observedConnector).Connect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConnector).Connect
+        kind: self
+      - id: c.inner.Connect
+        kind: value
+    steps:
+      - bind: conn, err
+        eval: c.inner.Connect(ctx)
+        to: c.inner.Connect
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&observedConn{inner: conn, obs: c.obs}, nil"
+  - of: (*observedConnector).Driver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConnector).Driver
+        kind: self
+      - id: c.inner.Driver
+        kind: value
+    steps:
+      - return: c.inner.Driver()
+        to: c.inner.Driver
+  - of: (*observedConnector).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConnector).Close
+        kind: self
+      - id: closer.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: closer.Close()
+              to: closer.Close
+          init:
+            bind: closer, ok
+            eval: c.inner.(io.Closer)
+          when: ok
+      - return: nil
+  - of: (*observedConn).Prepare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).Prepare
+        kind: self
+      - id: c.PrepareContext
+        kind: internal
+    steps:
+      - return: c.PrepareContext(context.Background(), query)
+        to: c.PrepareContext
+  - of: (*observedConn).PrepareContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).PrepareContext
+        kind: self
+      - id: c.obs.Begin
+        kind: value
+      - id: preparer.PrepareContext
+        kind: value
+      - id: c.inner.Prepare
+        kind: value
+    steps:
+      - bind: end
+        eval: c.obs.Begin(ctx, coresql.StatementPrepare, bounded(query))
+        to: c.obs.Begin
+      - var:
+          name: stmt
+          type: driver.Stmt
+      - var:
+          name: err
+          type: error
+      - alt:
+          - do:
+              - set: stmt, err
+                to: preparer.PrepareContext
+                value: preparer.PrepareContext(ctx, query)
+            init:
+              bind: preparer, ok
+              eval: c.inner.(driver.ConnPrepareContext)
+            when: ok
+          - do:
+              - set: stmt, err
+                to: c.inner.Prepare
+                value: c.inner.Prepare(query)
+            else: true
+      - eval: end(0, err)
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&observedStmt{inner: stmt, conn: c, query: bounded(query)}, nil"
+  - of: (*observedConn).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).Close
+        kind: self
+      - id: c.inner.Close
+        kind: value
+    steps:
+      - return: c.inner.Close()
+        to: c.inner.Close
+  - of: (*observedConn).Begin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).Begin
+        kind: self
+      - id: c.BeginTx
+        kind: internal
+    steps:
+      - return: c.BeginTx(context.Background(), driver.TxOptions{})
+        to: c.BeginTx
+  - of: (*observedConn).BeginTx
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).BeginTx
+        kind: self
+      - id: c.obs.Begin
+        kind: value
+      - id: beginner.BeginTx
+        kind: value
+      - id: c.inner.Begin
+        kind: value
+    steps:
+      - bind: end
+        eval: c.obs.Begin(ctx, coresql.StatementBegin, textBegin)
+        to: c.obs.Begin
+      - var:
+          name: tx
+          type: driver.Tx
+      - var:
+          name: err
+          type: error
+      - alt:
+          - do:
+              - set: tx, err
+                to: beginner.BeginTx
+                value: beginner.BeginTx(ctx, opts)
+            init:
+              bind: beginner, ok
+              eval: c.inner.(driver.ConnBeginTx)
+            when: ok
+          - do:
+              - set: tx, err
+                to: c.inner.Begin
+                value: c.inner.Begin()
+            else: true
+      - eval: end(0, err)
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&observedTx{inner: tx, obs: c.obs, ctx: ctx}, nil"
+  - of: (*observedConn).ExecContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).ExecContext
+        kind: self
+      - id: c.obs.Begin
+        kind: value
+      - id: execer.ExecContext
+        kind: value
+    steps:
+      - bind: execer, ok
+        eval: c.inner.(driver.ExecerContext)
+      - opt:
+          do:
+            - return: nil, driver.ErrSkip
+          when: "!ok"
+      - bind: end
+        eval: c.obs.Begin(ctx, coresql.StatementExec, bounded(query))
+        to: c.obs.Begin
+      - bind: result, err
+        eval: execer.ExecContext(ctx, query, args)
+        to: execer.ExecContext
+      - eval: end(affected(result, err), err)
+      - return: result, err
+  - of: (*observedConn).QueryContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).QueryContext
+        kind: self
+      - id: c.obs.Begin
+        kind: value
+      - id: queryer.QueryContext
+        kind: value
+    steps:
+      - bind: queryer, ok
+        eval: c.inner.(driver.QueryerContext)
+      - opt:
+          do:
+            - return: nil, driver.ErrSkip
+          when: "!ok"
+      - bind: end
+        eval: c.obs.Begin(ctx, coresql.StatementQuery, bounded(query))
+        to: c.obs.Begin
+      - bind: rows, err
+        eval: queryer.QueryContext(ctx, query, args)
+        to: queryer.QueryContext
+      - opt:
+          do:
+            - eval: end(0, err)
+            - return: nil, err
+          when: err != nil
+      - return: "&observedRows{inner: rows, end: end}, nil"
+  - of: (*observedConn).Ping
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).Ping
+        kind: self
+      - id: pinger.Ping
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: pinger.Ping(ctx)
+              to: pinger.Ping
+          init:
+            bind: pinger, ok
+            eval: c.inner.(driver.Pinger)
+          when: ok
+      - return: nil
+  - of: (*observedConn).ResetSession
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).ResetSession
+        kind: self
+      - id: resetter.ResetSession
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: resetter.ResetSession(ctx)
+              to: resetter.ResetSession
+          init:
+            bind: resetter, ok
+            eval: c.inner.(driver.SessionResetter)
+          when: ok
+      - return: nil
+  - of: (*observedConn).IsValid
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).IsValid
+        kind: self
+      - id: validator.IsValid
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: validator.IsValid()
+              to: validator.IsValid
+          init:
+            bind: validator, ok
+            eval: c.inner.(driver.Validator)
+          when: ok
+      - return: "true"
+  - of: (*observedConn).CheckNamedValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedConn).CheckNamedValue
+        kind: self
+      - id: checker.CheckNamedValue
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: checker.CheckNamedValue(value)
+              to: checker.CheckNamedValue
+          init:
+            bind: checker, ok
+            eval: c.inner.(driver.NamedValueChecker)
+          when: ok
+      - return: driver.ErrSkip
+  - of: (*observedStmt).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedStmt).Close
+        kind: self
+      - id: s.inner.Close
+        kind: value
+    steps:
+      - return: s.inner.Close()
+        to: s.inner.Close
+  - of: (*observedStmt).NumInput
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedStmt).NumInput
+        kind: self
+      - id: s.inner.NumInput
+        kind: value
+    steps:
+      - return: s.inner.NumInput()
+        to: s.inner.NumInput
+  - of: (*observedStmt).Exec
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedStmt).Exec
+        kind: self
+      - id: s.ExecContext
+        kind: internal
+    steps:
+      - return: s.ExecContext(context.Background(), named(args))
+        to: s.ExecContext
+  - of: (*observedStmt).Query
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedStmt).Query
+        kind: self
+      - id: s.QueryContext
+        kind: internal
+    steps:
+      - return: s.QueryContext(context.Background(), named(args))
+        to: s.QueryContext
+  - of: (*observedStmt).ExecContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedStmt).ExecContext
+        kind: self
+      - id: s.conn.obs.Begin
+        kind: value
+      - id: execer.ExecContext
+        kind: value
+      - id: s.inner.Exec
+        kind: value
+    steps:
+      - bind: end
+        eval: s.conn.obs.Begin(ctx, coresql.StatementExec, s.query)
+        to: s.conn.obs.Begin
+      - var:
+          name: result
+          type: driver.Result
+      - var:
+          name: err
+          type: error
+      - alt:
+          - do:
+              - set: result, err
+                to: execer.ExecContext
+                value: execer.ExecContext(ctx, args)
+            init:
+              bind: execer, ok
+              eval: s.inner.(driver.StmtExecContext)
+            when: ok
+          - do:
+              - set: result, err
+                to: s.inner.Exec
+                value: s.inner.Exec(values(args))
+            else: true
+      - eval: end(affected(result, err), err)
+      - return: result, err
+  - of: (*observedStmt).QueryContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedStmt).QueryContext
+        kind: self
+      - id: s.conn.obs.Begin
+        kind: value
+      - id: queryer.QueryContext
+        kind: value
+      - id: s.inner.Query
+        kind: value
+    steps:
+      - bind: end
+        eval: s.conn.obs.Begin(ctx, coresql.StatementQuery, s.query)
+        to: s.conn.obs.Begin
+      - var:
+          name: rows
+          type: driver.Rows
+      - var:
+          name: err
+          type: error
+      - alt:
+          - do:
+              - set: rows, err
+                to: queryer.QueryContext
+                value: queryer.QueryContext(ctx, args)
+            init:
+              bind: queryer, ok
+              eval: s.inner.(driver.StmtQueryContext)
+            when: ok
+          - do:
+              - set: rows, err
+                to: s.inner.Query
+                value: s.inner.Query(values(args))
+            else: true
+      - opt:
+          do:
+            - eval: end(0, err)
+            - return: nil, err
+          when: err != nil
+      - return: "&observedRows{inner: rows, end: end}, nil"
+  - of: (*observedStmt).CheckNamedValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedStmt).CheckNamedValue
+        kind: self
+      - id: checker.CheckNamedValue
+        kind: value
+      - id: s.conn.CheckNamedValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: checker.CheckNamedValue(value)
+              to: checker.CheckNamedValue
+          init:
+            bind: checker, ok
+            eval: s.inner.(driver.NamedValueChecker)
+          when: ok
+      - return: s.conn.CheckNamedValue(value)
+        to: s.conn.CheckNamedValue
+  - of: (*observedTx).Commit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedTx).Commit
+        kind: self
+      - id: t.obs.Begin
+        kind: value
+      - id: t.inner.Commit
+        kind: value
+    steps:
+      - bind: end
+        eval: t.obs.Begin(t.ctx, coresql.StatementCommit, textCommit)
+        to: t.obs.Begin
+      - bind: err
+        eval: t.inner.Commit()
+        to: t.inner.Commit
+      - eval: end(0, err)
+      - return: err
+  - of: (*observedTx).Rollback
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedTx).Rollback
+        kind: self
+      - id: t.obs.Begin
+        kind: value
+      - id: t.inner.Rollback
+        kind: value
+    steps:
+      - bind: end
+        eval: t.obs.Begin(t.ctx, coresql.StatementRollback, textRollback)
+        to: t.obs.Begin
+      - bind: err
+        eval: t.inner.Rollback()
+        to: t.inner.Rollback
+      - eval: end(0, err)
+      - return: err
+  - of: (*observedRows).Columns
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedRows).Columns
+        kind: self
+      - id: r.inner.Columns
+        kind: value
+    steps:
+      - return: r.inner.Columns()
+        to: r.inner.Columns
+  - of: (*observedRows).Next
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedRows).Next
+        kind: self
+      - id: r.inner.Next
+        kind: value
+    steps:
+      - bind: err
+        eval: r.inner.Next(dest)
+        to: r.inner.Next
+      - opt:
+          do:
+            - op: ++
+              set: r.read
+            - return: nil
+          when: err == nil
+      - opt:
+          do:
+            - set: r.failed
+              value: err
+          when: "!errors.Is(err, io.EOF) && r.failed == nil"
+      - return: err
+  - of: (*observedRows).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*observedRows).Close
+        kind: self
+      - id: r.inner.Close
+        kind: value
+    steps:
+      - bind: err
+        eval: r.inner.Close()
+        to: r.inner.Close
+      - opt:
+          do:
+            - set: r.told
+              value: "true"
+            - eval: r.end(r.read, errors.Join(r.failed, err))
+          when: "!r.told"
+      - return: err
+  - of: affected
+    participants:
+      - id: caller
+        kind: actor
+      - id: affected
+        kind: self
+      - id: result.RowsAffected
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: err != nil || result == nil
+      - bind: n, countErr
+        eval: result.RowsAffected()
+        to: result.RowsAffected
+      - opt:
+          do:
+            - return: "0"
+          when: countErr != nil
+      - return: "n"
+  - of: named
+    steps:
+      - bind: out
+        eval: make([]driver.NamedValue, len(args))
+      - loop:
+          do:
+            - set: out[i]
+              value: "driver.NamedValue{Ordinal: i + 1, Value: arg}"
+          key: i
+          range: args
+          value: arg
+      - return: out
+  - of: values
+    steps:
+      - bind: out
+        eval: make([]driver.Value, len(args))
+      - loop:
+          do:
+            - set: out[i]
+              value: arg.Value
+          key: i
+          range: args
+          value: arg
+      - return: out
+  - of: SlowQueries
+    steps:
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: "slowQueries{threshold: threshold, log: log, clk: clk}"
+  - of: slowQueries.Begin
+    participants:
+      - id: caller
+        kind: actor
+      - id: slowQueries.Begin
+        kind: self
+      - id: s.clk.Now
+        kind: value
+      - id: s.clk.Since
+        kind: value
+      - id: s.log.Log
+        kind: value
+    steps:
+      - bind: start
+        eval: s.clk.Now()
+        to: s.clk.Now
+      - return:
+          closure:
+            params: rows int64, err error
+            steps:
+              - bind: took
+                eval: s.clk.Since(start)
+                to: s.clk.Since
+              - opt:
+                  do:
+                    - return: ""
+                  when: took < s.threshold || errors.Is(err, driver.ErrSkip) || s.log == nil || !s.log.Enabled(ctx, level.Warn)
+              - bind: attrs
+                eval: |-
+                  []corelogger.AttrValue{
+                  			{Key: "kind", Value: corelogger.StringValue(kind.String())},
+                  			{Key: "query", Value: corelogger.StringValue(query)},
+                  			{Key: "duration", Value: corelogger.DurationValue(took)},
+                  			{Key: "rows", Value: corelogger.Int64Value(rows)},
+                  		}
+              - opt:
+                  do:
+                    - set: attrs
+                      value: "append(attrs, corelogger.AttrValue{Key: \"error\", Value: corelogger.StringValue(NewWithheld(err).Error())})"
+                  when: err != nil
+              - eval: "s.log.Log(ctx, level.Warn, \"sql: a slow statement\", attrs...)"
+                to: s.log.Log
+  - of: Traced
+    steps:
+      - return: "traced{tracer: tracer}"
+  - of: traced.Begin
+    participants:
+      - id: caller
+        kind: actor
+      - id: traced.Begin
+        kind: self
+      - id: t.tracer.Start
+        kind: value
+      - id: span.SetAttrs
+        kind: value
+      - id: span.SetStatus
+        kind: value
+      - id: span.End
+        kind: value
+    steps:
+      - bind: _, span
+        eval: |-
+          t.tracer.Start(ctx, "sql "+kind.String(), coretrace.SpanParams{
+          		Kind:  coretrace.SpanKindClient,
+          		Attrs: []coreotel.AttrValue{coreotel.String("db.query.text", query)},
+          	})
+        to: t.tracer.Start
+      - return:
+          closure:
+            params: rows int64, err error
+            steps:
+              - eval: span.SetAttrs(coreotel.Int64("db.response.returned_rows", rows))
+                to: span.SetAttrs
+              - opt:
+                  do:
+                    - eval: span.SetStatus(coretrace.StatusError, NewWithheld(err).Error())
+                      to: span.SetStatus
+                  when: err != nil && !errors.Is(err, driver.ErrSkip)
+              - eval: span.End()
+                to: span.End
+  - of: NewRetrying
+    steps:
+      - opt:
+          do:
+            - return: nil, kerrs.Wrap(coresql.ConfigInvalid, kerrs.WrapParams{}, kerrs.String("missing", "transactor"))
+          when: tm == nil
+      - bind: r
+        eval: "&retrying{inner: tm, attempts: cfg.attempts(), curve: cfg.curve(), transient: cfg.classifier(), clk: cfg.clock()}"
+      - bind: joiner, joins
+        eval: tm.(coresql.Joiner)
+      - bind: deferrer, defers
+        eval: tm.(coresql.Deferrer)
+      - bind: aborter, aborts
+        eval: tm.(coresql.Aborter)
+      - opt:
+          do:
+            - set: r.joiner, _
+              value: tm.(coresql.Joiner)
+            - return: r, nil
+          when: "!joins || !defers || !aborts"
+      - set: r.joiner
+        value: joiner
+      - return: "&retryingSiblings{retrying: r, Joiner: joiner, Deferrer: deferrer, Aborter: aborter}, nil"
+  - of: RetryConfig.attempts
+    steps:
+      - opt:
+          do:
+            - return: DefaultRetryAttempts
+          when: c.Attempts <= 0
+      - return: c.Attempts
+  - of: RetryConfig.curve
+    steps:
+      - opt:
+          do:
+            - return: "kbackoff.Value{BaseDelay: DefaultRetryDelay, JitterMode: kbackoff.JitterFull}"
+          when: c.Backoff == (kbackoff.Value{})
+      - return: c.Backoff
+  - of: RetryConfig.classifier
+    steps:
+      - opt:
+          do:
+            - return: Classify
+          when: c.Transient == nil
+      - return: c.Transient
+  - of: RetryConfig.clock
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: c.Clock == nil
+      - return: c.Clock
+  - of: (*retrying).Transact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retrying).Transact
+        kind: self
+      - id: r.inner.Transact
+        kind: value
+      - id: context
+        kind: stdlib
+      - id: failed
+        kind: internal
+      - id: r.wait
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: r.inner.Transact(ctx, opts, fn)
+              to: r.inner.Transact
+          when: fn == nil || r.nested(ctx)
+      - bind: marked
+        eval: "context.WithValue(ctx, retryMark{owner: r}, struct{}{})"
+        to: context
+      - loop:
+          do:
+            - bind: err
+              eval: r.inner.Transact(marked, opts, fn)
+              to: r.inner.Transact
+            - opt:
+                do:
+                  - return: err
+                when: err == nil || ctx.Err() != nil || !r.retriable(err)
+            - opt:
+                do:
+                  - return: failed(coresql.TxRetriesExhausted, err, kerrs.Int("attempts", attempt))
+                    to: failed
+                when: attempt >= r.attempts
+            - opt:
+                do:
+                  - return: errors.Join(err, waitErr)
+                    to: errors
+                init:
+                  bind: waitErr
+                  eval: r.wait(ctx, attempt)
+                  to: r.wait
+                when: waitErr != nil
+          init: attempt := 1
+          post: attempt++
+  - of: (*retrying).nested
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retrying).nested
+        kind: self
+      - id: r.joiner.Join
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: "ctx.Value(retryMark{owner: r}) != nil"
+      - opt:
+          do:
+            - return: "false"
+          when: r.joiner == nil
+      - bind: _, inTx
+        eval: r.joiner.Join(ctx)
+        to: r.joiner.Join
+      - return: inTx
+  - of: (*retrying).retriable
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+      - return: r.transient(err)
+  - of: (*retrying).wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retrying).wait
+        kind: self
+      - id: r.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: context
+        kind: stdlib
+    steps:
+      - bind: timer
+        eval: r.clk.NewTimer(r.curve.Delay(attempt))
+        to: r.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-timer.C()
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - return: context.Cause(ctx)
+                  to: context
+  - of: Classify
+    participants:
+      - id: caller
+        kind: actor
+      - id: Classify
+        kind: self
+      - id: anyCause
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+      - return: anyCause(err, transientCause)
+        to: anyCause
+  - of: transientCause
+    steps:
+      - opt:
+          do:
+            - switch:
+                cases:
+                  - case: "\"40001\", \"40P01\""
+                    do:
+                      - return: "true"
+                "on": stated.SQLState()
+            - return: "false"
+          init:
+            bind: stated, ok
+            eval: err.(interface{ SQLState() string })
+          when: ok
+      - opt:
+          do:
+            - switch:
+                cases:
+                  - case: sqliteBusy, sqliteLocked
+                    do:
+                      - return: "true"
+                "on": coded.Code() & sqlitePrimary
+          init:
+            bind: coded, ok
+            eval: err.(interface{ Code() int })
+          when: ok
+      - return: "false"
+  - of: anyCause
+    participants:
+      - id: caller
+        kind: actor
+      - id: anyCause
+        kind: self
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: err == nil
+      - opt:
+          do:
+            - return: "true"
+          when: match(err)
+      - typeswitch:
+          bind: unwrapped
+          cases:
+            - do:
+                - loop:
+                    do:
+                      - opt:
+                          do:
+                            - return: "true"
+                          when: anyCause(cause, match)
+                    key: _
+                    range: unwrapped.Unwrap()
+                    value: cause
+              types: interface{ Unwrap() []error }
+            - do:
+                - return: anyCause(unwrapped.Unwrap(), match)
+                  to: anyCause
+              types: interface{ Unwrap() error }
+          "on": err
+      - return: "false"
+  - of: Each
+    participants:
+      - id: caller
+        kind: actor
+      - id: Each
+        kind: self
+      - id: yieldFailure
+        kind: internal
+      - id: firstFailure
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(T, error) bool
+            steps:
+              - opt:
+                  do:
+                    - return: ""
+                  when: rows == nil
+              - bind: closed
+                eval: "false"
+              - defer: |-
+                  func() {
+                  			//: the paths below close explicitly; this one is a stop or a panic.
+                  			if !closed {
+                  				_ = rows.Close()
+                  			}
+                  		}()
+              - loop:
+                  cond: rows.Next()
+                  do:
+                    - bind: value, err
+                      eval: scan(rows)
+                    - opt:
+                        do:
+                          - set: closed
+                            value: "true"
+                          - eval: yieldFailure(yield, firstFailure(err, rows.Close()))
+                            to: yieldFailure
+                          - return: ""
+                        when: err != nil
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yield(value, nil)"
+              - set: closed
+                value: "true"
+              - opt:
+                  do:
+                    - eval: yieldFailure(yield, err)
+                      to: yieldFailure
+                  init:
+                    bind: err
+                    eval: firstFailure(rows.Err(), rows.Close())
+                    to: firstFailure
+                  when: err != nil
+  - of: firstFailure
+    steps:
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: closeErr
+  - of: yieldFailure
+    steps:
+      - var:
+          name: zero
+          type: T
+      - opt:
+          do:
+            - return: ""
+          when: "!yield(zero, err)"
+  - of: InsertRows
+    participants:
+      - id: caller
+        kind: actor
+      - id: InsertRows
+        kind: self
+      - id: insertable
+        kind: internal
+      - id: rowsPerStatement
+        kind: internal
+      - id: ex.ExecContext
+        kind: value
+      - id: result.RowsAffected
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, err
+          init:
+            bind: err
+            eval: insertable(d, into.Columns, rows)
+            to: insertable
+          when: err != nil
+      - bind: cols
+        eval: into.Columns
+      - bind: per
+        eval: rowsPerStatement(d, len(cols), into.PerStatement)
+        to: rowsPerStatement
+      - bind: head
+        eval: "\"INSERT INTO \" + into.Table + \" (\" + strings.Join(cols, \", \") + \") VALUES \""
+      - bind: args
+        eval: make([]any, 0, min(len(rows), per)*len(cols))
+      - loop:
+          cond: start < len(rows)
+          do:
+            - bind: chunk
+              eval: rows[start:min(start+per, len(rows))]
+            - set: args
+              value: args[:0]
+            - loop:
+                do:
+                  - set: args
+                    value: append(args, row...)
+                key: _
+                range: chunk
+                value: row
+            - bind: result, execErr
+              eval: ex.ExecContext(ctx, valuesSQL(head, d, len(chunk), len(cols)), args...)
+              to: ex.ExecContext
+            - opt:
+                do:
+                  - return: inserted, execErr
+                when: execErr != nil
+            - alt:
+                - do:
+                    - op: +=
+                      set: inserted
+                      value: "n"
+                  init:
+                    bind: n, countErr
+                    eval: result.RowsAffected()
+                    to: result.RowsAffected
+                  when: countErr == nil
+                - do:
+                    - op: +=
+                      set: inserted
+                      value: int64(len(chunk))
+                  else: true
+          init: start := 0
+          post: start += per
+      - return: inserted, nil
+  - of: insertable
+    participants:
+      - id: caller
+        kind: actor
+      - id: insertable
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(coresql.ConfigInvalid, kerrs.WrapParams{}, kerrs.String("missing", "dialect"))
+              to: kerrs
+          when: "!d.Valid()"
+      - opt:
+          do:
+            - return: kerrs.Wrap(coresql.ConfigInvalid, kerrs.WrapParams{}, kerrs.String("missing", "columns"))
+              to: kerrs
+          when: len(cols) == 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      kerrs.Wrap(coresql.ConfigInvalid, kerrs.WrapParams{},
+                      				kerrs.String("invalid", "row width"), kerrs.Int("row", i), kerrs.Int("width", len(row)),
+                      				kerrs.Int("columns", len(cols)))
+                    to: kerrs
+                when: len(row) != len(cols)
+          key: i
+          range: rows
+          value: row
+      - return: nil
+  - of: rowsPerStatement
+    steps:
+      - bind: ceiling
+        eval: serverMaxParams
+      - opt:
+          do:
+            - set: ceiling
+              value: sqliteMaxParams
+          when: d == coresql.DialectSQLite
+      - bind: most
+        eval: max(ceiling/width, 1)
+      - opt:
+          do:
+            - return: most
+          when: asked <= 0 || asked > most
+      - return: asked
+  - of: valuesSQL
+    participants:
+      - id: caller
+        kind: actor
+      - id: valuesSQL
+        kind: self
+      - id: b.Grow
+        kind: value
+      - id: b.WriteString
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - eval: b.Grow(len(head) + n*width*len(strconv.Itoa(n*width))*2)
+        to: b.Grow
+      - eval: b.WriteString(head)
+        to: b.WriteString
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteString(", ")
+                    to: b.WriteString
+                when: row > 0
+            - eval: b.WriteString("(")
+              to: b.WriteString
+            - loop:
+                cond: col <= width
+                do:
+                  - opt:
+                      do:
+                        - eval: b.WriteString(", ")
+                          to: b.WriteString
+                      when: col > 1
+                  - eval: b.WriteString(d.Placeholder(row*width + col))
+                    to: b.WriteString
+                init: col := 1
+                post: col++
+            - eval: b.WriteString(")")
+              to: b.WriteString
+          key: row
+          range: "n"
+      - return: b.String()
+        to: b.String
   - of: failed
     participants:
       - id: caller
@@ -1379,6 +3045,42 @@ sequences:
                   range: stmts
                   value: stmt
               - return: nil
+  - of: ChecksumOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: ChecksumOf
+        kind: self
+      - id: sha256
+        kind: stdlib
+      - id: binary.BigEndian.PutUint64
+        kind: value
+      - id: digest.Write
+        kind: value
+      - id: hex
+        kind: stdlib
+    steps:
+      - bind: digest
+        eval: sha256.New()
+        to: sha256
+      - var:
+          name: length
+          type: "[8]byte"
+      - loop:
+          do:
+            - eval: binary.BigEndian.PutUint64(length[:], uint64(len(stmt)))
+              to: binary.BigEndian.PutUint64
+            - set: _, _
+              to: digest.Write
+              value: digest.Write(length[:])
+            - set: _, _
+              to: digest.Write
+              value: digest.Write([]byte(stmt))
+          key: _
+          range: stmts
+          value: stmt
+      - return: hex.EncodeToString(digest.Sum(nil))
+        to: hex
   - of: NewTransactor
     participants:
       - id: caller
@@ -1433,7 +3135,7 @@ sequences:
         kind: actor
       - id: (*transactor).root
         kind: self
-      - id: t.cfg.db.BeginTx
+      - id: t.poolFor(opts).BeginTx
         kind: value
       - id: failed
         kind: internal
@@ -1449,15 +3151,15 @@ sequences:
         kind: internal
     steps:
       - bind: tx, err
-        eval: t.cfg.db.BeginTx(ctx, opts.StdOptions())
-        to: t.cfg.db.BeginTx
+        eval: t.poolFor(opts).BeginTx(ctx, opts.StdOptions())
+        to: t.poolFor(opts).BeginTx
       - opt:
           do:
             - return: failed(coresql.BeginFailed, err)
               to: failed
           when: err != nil
       - bind: state
-        eval: "&txState{tx: tx, dialect: t.cfg.dialect}"
+        eval: "&txState{tx: tx, dialect: t.cfg.dialect, budget: t.cfg.budget}"
       - bind: scoped
         eval: newScopedExecutor(state)
         to: newScopedExecutor
@@ -1511,6 +3213,13 @@ sequences:
       - eval: runAborted(aborted)
         to: runAborted
       - return: err
+  - of: (*transactor).poolFor
+    steps:
+      - opt:
+          do:
+            - return: t.cfg.replica
+          when: opts.ReadOnly && t.cfg.replica != nil
+      - return: t.cfg.db
   - of: (*transactor).settle
     participants:
       - id: caller

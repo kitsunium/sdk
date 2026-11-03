@@ -1,12 +1,14 @@
 package cache
 
 import (
+	"math/rand/v2"
 	"strconv"
 	"testing"
 	"time"
 
 	corecache "github.com/kitsunium/sdk/internal/core/data/cache"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	kcache "github.com/kitsunium/sdk/internal/kernel/collections/cache"
 )
 
 // concrete builds a memoryStore and hands back the concrete type, which the
@@ -35,8 +37,19 @@ func concrete(t *testing.T, cfg MemoryConfig) *memoryStore[string] {
 // workload that exercises all four rather than after each one.
 func TestTagIndexNeverNamesAKeyTheStoreNoLongerHolds(t *testing.T) {
 	t.Parallel()
+	forEachShape(t, func(t *testing.T, stripes int, policy kcache.Policy) {
+		tagIndexWorkload(t, MemoryConfig{MaxEntries: 16, Stripes: stripes, Policy: policy})
+	})
+}
+
+// tagIndexWorkload is TestTagIndexNeverNamesAKeyTheStoreNoLongerHolds on one
+// configuration. The sweep (#1059) is a fifth removal path, so the workload
+// runs it too.
+func tagIndexWorkload(t *testing.T, cfg MemoryConfig) {
+	t.Helper()
 	manual := clock.NewManualClock(time.Unix(0, 0))
-	store := concrete(t, MemoryConfig{MaxEntries: 16, Clock: manual})
+	cfg.Clock = manual
+	store := concrete(t, cfg)
 	ctx := t.Context()
 
 	for round := range 200 {
@@ -61,6 +74,12 @@ func TestTagIndexNeverNamesAKeyTheStoreNoLongerHolds(t *testing.T) {
 			}
 		}
 		manual.Advance(400 * time.Millisecond)
+		//: the caller-driven sweep, every few rounds.
+		if round%13 == 0 {
+			if _, err := store.Expire(ctx); err != nil {
+				t.Fatalf("Expire: %v", err)
+			}
+		}
 		//: touch every key so lazy expiry actually fires.
 		for probe := range 40 {
 			if _, _, fetchErr := store.Fetch(ctx, strconv.Itoa(probe)); fetchErr != nil {
@@ -69,21 +88,43 @@ func TestTagIndexNeverNamesAKeyTheStoreNoLongerHolds(t *testing.T) {
 		}
 	}
 
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if indexed, held := len(store.tags.byKey), store.lru.Len(); indexed > held {
-		t.Fatalf("the index names %d keys but the store holds %d — a removal path left the reverse index behind", indexed, held)
+	for _, stripe := range store.stripes {
+		assertStripeIndexed(t, stripe)
 	}
-	for key := range store.tags.byKey {
-		if _, ok := store.lru.Fetch(key); !ok {
+}
+
+// assertStripeIndexed checks one stripe's index against its primitive.
+func assertStripeIndexed(t *testing.T, stripe *memoryStripe[string]) {
+	t.Helper()
+	stripe.mu.Lock()
+	defer stripe.mu.Unlock()
+	if indexed, held := len(stripe.tags.byKey), stripe.lru.Len(); indexed > held {
+		t.Fatalf("the index names %d keys but the stripe holds %d — a removal path left the reverse index behind", indexed, held)
+	}
+	for key := range stripe.tags.byKey {
+		if _, ok := stripe.lru.Fetch(key); !ok {
 			t.Fatalf("the index names %q, which the store no longer holds", key)
 		}
 	}
 	//: no empty bucket may survive, or the outer map grows with every tag the
 	//: store has EVER seen rather than with the tags it currently carries.
-	for tag, bucket := range store.tags.byTag {
+	for tag, bucket := range stripe.tags.byTag {
 		if len(bucket) == 0 {
 			t.Fatalf("tag %q kept an empty bucket", tag)
+		}
+	}
+}
+
+// forEachShape runs body at one stripe and at eight (#808), under both
+// eviction policies (#834), as parallel subtests.
+func forEachShape(t *testing.T, body func(t *testing.T, stripes int, policy kcache.Policy)) {
+	t.Helper()
+	for _, stripes := range []int{1, 8} {
+		for _, policy := range []kcache.Policy{kcache.PolicyLRU, kcache.PolicyS3FIFO} {
+			t.Run("stripes="+strconv.Itoa(stripes)+"/policy="+strconv.Itoa(int(policy)), func(t *testing.T) {
+				t.Parallel()
+				body(t, stripes, policy)
+			})
 		}
 	}
 }
@@ -97,7 +138,16 @@ func TestTagIndexNeverNamesAKeyTheStoreNoLongerHolds(t *testing.T) {
 // against, only provoked.
 func TestEvictionUnderTheStoreLockDoesNotDeadlock(t *testing.T) {
 	t.Parallel()
-	store := concrete(t, MemoryConfig{MaxEntries: 2})
+	forEachShape(t, func(t *testing.T, stripes int, policy kcache.Policy) {
+		evictionWorkload(t, MemoryConfig{MaxEntries: 16, Stripes: stripes, Policy: policy})
+	})
+}
+
+// evictionWorkload is TestEvictionUnderTheStoreLockDoesNotDeadlock on one
+// configuration.
+func evictionWorkload(t *testing.T, cfg MemoryConfig) {
+	t.Helper()
+	store := concrete(t, cfg)
 	for i := range 500 {
 		if err := store.Set(t.Context(), strconv.Itoa(i), corecache.EntryValue[string]{
 			Value: "v", Tags: []string{"t"},
@@ -105,8 +155,12 @@ func TestEvictionUnderTheStoreLockDoesNotDeadlock(t *testing.T) {
 			t.Fatalf("Set: %v", err)
 		}
 	}
-	if got := store.lru.Len(); got != 2 {
-		t.Fatalf("the store holds %d entries, want 2", got)
+	held := 0
+	for _, stripe := range store.stripes {
+		held += stripe.lru.Len()
+	}
+	if held != cfg.MaxEntries {
+		t.Fatalf("the store holds %d entries, want %d", held, cfg.MaxEntries)
 	}
 }
 
@@ -145,10 +199,11 @@ func TestTagsAreDeduplicated(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	store.mu.Lock()
-	owned := len(store.tags.byKey["k"])
-	bucket := len(store.tags.byTag["t"])
-	store.mu.Unlock()
+	stripe := store.stripeOf("k")
+	stripe.mu.Lock()
+	owned := len(stripe.tags.byKey["k"])
+	bucket := len(stripe.tags.byTag["t"])
+	stripe.mu.Unlock()
 	if owned != 1 || bucket != 1 {
 		t.Fatalf("the index holds %d tags and a bucket of %d, want 1 and 1", owned, bucket)
 	}
@@ -169,4 +224,38 @@ func TestTheCallersTagSliceIsNotRetained(t *testing.T) {
 	if err != nil || removed != 1 {
 		t.Fatalf("InvalidateTag = (%d, %v), want (1, nil) — the store kept the caller's slice", removed, err)
 	}
+}
+
+// TestTheByteBoundHoldsAfterEverySet is #839's acceptance: a 1 MiB budget
+// under values of 1 KiB to 256 KiB never holds more than 1 MiB, read off the
+// stripes' primitives after every Set, at one stripe and at eight.
+func TestTheByteBoundHoldsAfterEverySet(t *testing.T) {
+	t.Parallel()
+	const budget = 1 << 20
+	forEachShape(t, func(t *testing.T, stripes int, policy kcache.Policy) {
+		built, err := NewWeighedMemory(MemoryConfig{MaxEntries: 1000, MaxBytes: budget, Stripes: stripes, Policy: policy},
+			func(value []byte) int64 { return int64(len(value)) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		store := built.(*memoryStore[[]byte])
+		random := rand.New(rand.NewPCG(uint64(stripes), 11))
+		for i := range 600 {
+			value := make([]byte, 1024+random.IntN(255*1024))
+			if err := store.Set(t.Context(), "k"+strconv.Itoa(random.IntN(200)), corecache.EntryValue[[]byte]{Value: value}); err != nil {
+				//: a value over one stripe's share is refused; that is the bound.
+				if stripes > 1 {
+					continue
+				}
+				t.Fatalf("Set %d: %v", i, err)
+			}
+			var held int64
+			for _, stripe := range store.stripes {
+				held += stripe.lru.Stats().Weight
+			}
+			if held > budget {
+				t.Fatalf("after Set %d the store holds %d bytes, over %d", i, held, budget)
+			}
+		}
+	})
 }

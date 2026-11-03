@@ -22,18 +22,10 @@ const (
 	// replaceOnly refuses a missing key, so a document deleted meanwhile is
 	// never brought back.
 	replaceOnly
+	// replaceOnRevision is replaceOnly on the SQL engine's ReplaceIf: the
+	// row's revision must still be the one the caller read (ADR 0209).
+	replaceOnRevision
 )
-
-// prepared is a document ready to be stored: its JSON, its keys in every
-// index, and its own key.
-type prepared struct {
-	// raw is the document's JSON.
-	raw json.RawMessage
-	// keys are its keys in every index, aligned with the store's indexes.
-	keys [][]string
-	// key is its store key.
-	key string
-}
 
 // Put stores v under its key, creating it or replacing whatever was there.
 // On a store that keeps versions, it makes one, stamped with nothing.

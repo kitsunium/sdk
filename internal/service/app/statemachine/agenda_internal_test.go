@@ -1,5 +1,5 @@
-// Package statemachine — white-box tests of the agenda: lazy deletion, the
-// rebuild that bounds it, the order take hands keys out in, and the backoff.
+// Package statemachine — white-box tests of the agenda: one heap entry per
+// scheduled key, the order take hands keys out in, and the backoff.
 package statemachine
 
 import (
@@ -13,44 +13,44 @@ import (
 // t0 is the instant the agenda tests schedule from.
 var t0 = time.Date(2026, 9, 24, 9, 0, 0, 0, time.UTC)
 
-// TestARescheduleLeavesAStaleEntryThatIsDroppedWhenItSurfaces pins lazy
-// deletion: moving an entity's instant pushes a fresh entry, and the old one
-// is recognised and dropped rather than taken.
-func TestARescheduleLeavesAStaleEntryThatIsDroppedWhenItSurfaces(t *testing.T) {
+// TestARescheduleReKeysTheOneEntryOfItsKey pins the indexed heap (#1036):
+// moving an entity's instant re-keys its entry in place rather than leaving a
+// stale one behind, and unscheduling removes it at once.
+func TestARescheduleReKeysTheOneEntryOfItsKey(t *testing.T) {
 	t.Parallel()
 	a := newAgenda()
 	a.schedule("k", t0.Add(time.Minute))
 	a.schedule("k", t0.Add(time.Hour))
-	if a.heap.Len() != 2 || a.live != 1 {
-		t.Fatalf("heap %d entries, %d live; want the stale one kept until it surfaces", a.heap.Len(), a.live)
+	if a.heap.Len() != 1 {
+		t.Fatalf("heap %d entries; want the one entry of the key, re-keyed", a.heap.Len())
 	}
 	if keys := a.take(t0.Add(30 * time.Minute)); len(keys) != 0 {
-		t.Fatalf("take() = %v: a stale entry was taken", keys)
+		t.Fatalf("take() = %v: the replaced instant was taken", keys)
 	}
 	if next := a.next(t0); !next.Equal(t0.Add(time.Hour)) {
-		t.Errorf("next() = %v; want the live entry's instant", next)
+		t.Errorf("next() = %v; want the rescheduled instant", next)
 	}
 	a.unschedule("k")
-	if next := a.next(t0); !next.IsZero() || a.live != 0 {
-		t.Errorf("after unschedule, next() = %v with %d live", next, a.live)
+	if next := a.next(t0); !next.IsZero() || a.heap.Len() != 0 {
+		t.Errorf("after unschedule, next() = %v with %d entries", next, a.heap.Len())
 	}
 }
 
-// TestTheHeapIsRebuiltBeforeStaleEntriesOutgrowItsBound pins the memory bound:
-// rescheduling one entity many times never lets the heap hold more than
-// staleFactor times its live entries plus the slack.
-func TestTheHeapIsRebuiltBeforeStaleEntriesOutgrowItsBound(t *testing.T) {
+// TestTheHeapHoldsOneEntryPerScheduledKey pins the memory bound the rebuild
+// used to approximate: rescheduling one entity many times never grows the
+// heap beyond one entry per scheduled key.
+func TestTheHeapHoldsOneEntryPerScheduledKey(t *testing.T) {
 	t.Parallel()
 	a := newAgenda()
 	a.schedule("other", t0.Add(24*time.Hour))
 	for i := range 10_000 {
 		a.schedule("k", t0.Add(time.Duration(i)*time.Second))
-		if bound := staleFactor*a.live + compactSlack + 1; a.heap.Len() > bound {
-			t.Fatalf("after %d reschedules the heap holds %d entries, over %d", i+1, a.heap.Len(), bound)
+		if a.heap.Len() != 2 {
+			t.Fatalf("after %d reschedules the heap holds %d entries, want 2", i+1, a.heap.Len())
 		}
 	}
 	if keys := a.take(t0.Add(48 * time.Hour)); !slices.Equal(keys, []string{"k", "other"}) {
-		t.Errorf("take() = %v; each live entry exactly once, in due order", keys)
+		t.Errorf("take() = %v; each entry exactly once, in due order", keys)
 	}
 }
 
@@ -100,7 +100,7 @@ func TestAFailureHoldsItsKeyBackUntilTheBackoffEnds(t *testing.T) {
 		t.Error("a success must clear the backoff")
 	}
 	a.forget("k")
-	if _, ok := a.plans["k"]; ok || a.live != 0 {
+	if _, ok := a.plans["k"]; ok || a.heap.Len() != 0 {
 		t.Error("forget left a plan behind")
 	}
 }

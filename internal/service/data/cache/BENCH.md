@@ -89,10 +89,129 @@ lower than a naive per-entry accounting would suggest. The tag TEXT is not
 duplicated between the two index maps: Go strings are immutable, so both hold
 headers pointing at one backing array.
 
+## Wave L6 (2026-11-02): stripes, bytes, policy, sweep, batches, the chain
+
+Measured on the shared 8-core AMD EPYC 7351P VM, go1.27.3, branch
+`wip/sdk-lot-6-cache` (pre-commit), `-cpu=8 -benchtime=200ms`; base `ee1f48b`.
+
+### The existing rows
+
+```
+                               │ svc-base.txt │             svc-new.txt             │
+                               │    sec/op    │    sec/op     vs base               │
+Set_Untagged-8                   717.3n ±  4%   865.4n ±  7%  +20.65% (p=0.002 n=6)
+Set_OneTag-8                     1.405µ ±  8%   1.681µ ± 14%  +19.72% (p=0.002 n=6)
+Set_ThreeTags-8                  2.187µ ±  1%   2.379µ ± 18%   +8.83% (p=0.002 n=6)
+InvalidateTag_In1k-8             35.35µ ±  2%   37.26µ ± 18%   +5.39% (p=0.041 n=6)
+InvalidateTag_In100k-8           41.34µ ±  9%   44.48µ ±  7%        ~ (p=0.132 n=6)
+Fetch_Hit-8                      180.8n ± 14%   222.1n ±  5%  +22.84% (p=0.002 n=6)
+Load_Hit-8                       207.9n ± 11%   213.0n ± 13%   +2.45% (p=0.026 n=6)
+InvalidateTag_In100k_Striped-8                  49.60µ ± 30%
+FetchMany_16-8                                  4.514µ ± 11%
+Expire_10kDeadIn100k-8                          11.23m ± 10%
+Chain_NearHit-8                                 379.8n ±  3%
+Chain_FarHitPromote-8                           6.222µ ±  8%
+geomean                          1.984µ         5.852µ        +12.23%
+```
+
+A hit costs ~15–25 % more and an untagged `Set` ~20 % more (214 → 278 B): the
+record carries the negative entry's error and the measured weight (#838,
+#839), the primitive's node its expiry handle, weight and policy counter
+(#1038, #834), and every operation finds its stripe first (#808). Interleaved
+re-runs put `Fetch_Hit` at +18 % to +29 % and `Load_Hit` at +15 % to +20 % —
+over the 10 % #1059 allowed. Still 0 allocations on a hit. Tag invalidation
+keeps its O(k) shape (`InvalidateTag_In1k` and `_In100k` within ~5 % of each
+other and of the base).
+
+### Stripes (#808)
+
+```
+BenchmarkFetch_Parallel/stripes=1           	  993510	       267.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFetch_Parallel/stripes=1-8         	  370041	       598.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFetch_Parallel/stripes=8           	  876453	       291.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFetch_Parallel/stripes=8-8         	  639080	       362.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFetch_Parallel/stripes=64          	  856066	       256.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFetch_Parallel/stripes=64-8        	 1000000	       202.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad_Parallel/stripes=1            	 1000000	       227.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad_Parallel/stripes=1-8          	  358414	       595.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad_Parallel/stripes=8            	  943200	       259.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad_Parallel/stripes=8-8          	  830887	       309.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad_Parallel/stripes=64           	  951540	       250.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLoad_Parallel/stripes=64-8         	 1632507	       213.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet_Parallel/stripes=1             	 1727719	       138.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet_Parallel/stripes=1-8           	  500049	       415.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet_Parallel/stripes=8             	 1000000	       218.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet_Parallel/stripes=8-8           	  767685	       327.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet_Parallel/stripes=64            	 1352448	       177.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet_Parallel/stripes=64-8          	 1521158	       199.0 ns/op	       0 B/op	       0 allocs/op
+```
+
+Each goroutine starts at its own offset in the key set. At 8 goroutines one
+stripe serialises every hit behind the store's lock (`Fetch_Parallel/stripes=1-8`
+~560 ns, 2.5× a single-threaded `Fetch_Hit`); 8 stripes bring it to ~360 ns
+(1.6×, within #808's bound of 2×) and 64 stripes to ~200 ns, below a
+single-threaded hit. `Load` (all hits) and `Set` follow. `InvalidateTag` walks
+the stripes one lock at a time: `InvalidateTag_In100k_Striped` (8 stripes)
+against `InvalidateTag_In100k` is the walk's cost.
+
+### Batches, the sweep, the miss storm
+
+```
+BenchmarkInvalidateTag_In100k_Striped-8   	    5551	     48664 ns/op	    4480 B/op	      41 allocs/op
+BenchmarkFetchMany_16-8                   	   49605	      5022 ns/op	       313.9 ns/key	    1240 B/op	       4 allocs/op
+BenchmarkExpire_10kDeadIn100k-8           	      21	  11121788 ns/op	 4559747 B/op	      20 allocs/op
+```
+
+- **`FetchMany_16`** (~4.5 µs for 16 keys, ~280 ns a key, 4 allocations — the
+  result map) is NOT below a single `Fetch_Hit` per key on the memory store:
+  #840 asked for 40 %, and a lock round trip is not where a memory hit spends
+  its time — the map lookup, the relink and the result map are. The batch pays
+  where a key costs a round trip: a remote tier, or the chain below.
+- **`Expire_10kDeadIn100k`** sweeps 10 000 dead entries among 100 000 in
+  ~11 ms (~1.1 µs each: the heap pop, the list unlink, the map delete and the
+  tag-index unlink); the 90 000 live ones are never visited.
+- **`Load_MissParallel`** (every `Load` a new key, 8 stripes) is the miss storm
+  #1035 took the singleflight group's lock off: ~4.1 µs at 8 goroutines
+  against ~5.9 µs at one.
+
+### The chain (#1121)
+
+Two memory tiers — the configuration that isolates the chain's own cost, its
+promotion lock (#460), from any tier's.
+
+```
+BenchmarkChain_NearHit-8                  	  601123	       384.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain_FarHitPromote-8            	   33732	      6384 ns/op	    1176 B/op	       7 allocs/op
+BenchmarkLoad_MissParallel               	   40593	      6112 ns/op	     613 B/op	       8 allocs/op
+BenchmarkLoad_MissParallel-8             	   56611	      4314 ns/op	     613 B/op	       9 allocs/op
+BenchmarkChain_SetUnderPromotions        	  228904	      1736 ns/op	       8 B/op	       0 allocs/op
+BenchmarkChain_SetUnderPromotions-8      	   98811	      2858 ns/op	       9 B/op	       0 allocs/op
+BenchmarkChain_DeleteUnderPromotions     	  615752	       566.5 ns/op	       3 B/op	       0 allocs/op
+BenchmarkChain_DeleteUnderPromotions-8   	  485044	       580.2 ns/op	       0 B/op	       0 allocs/op
+```
+
+- **`Chain_NearHit`** (~380 ns, 0 allocs) is a near-tier hit: the far tier and
+  the promotion lock are never touched; the delta against a memory
+  `Fetch_Hit` is the walk and `FetchEntry`'s tag copy.
+- **`Chain_FarHitPromote`** (~6.2 µs) misses near, hits far and promotes: the
+  far `FetchEntry` (its tags cloned), the promotion lock taken for reading, and
+  a `Set` into the near tier — the tag index and a new node there. Its 7
+  allocations (~1.2 KiB) are the tag slice `FetchEntry` clones, the near tier's
+  node, and the near index's owned copy of the tags and the tag's bucket, which
+  the untimed `Delete` of every iteration had emptied.
+- **`Chain_SetUnderPromotions`** — writers racing a goroutine that keeps
+  promoting far hits — reads ~1.7 µs at one goroutine and ~2.9 µs at eight:
+  every `Set` announces itself by taking the promotion lock for writing, so it
+  waits out the promotion in flight, and eight writers queue on that one
+  `RWMutex`. That is the lock #460 added, as a number.
+  **`Chain_DeleteUnderPromotions`** (~0.6–0.7 µs) is the same race for `Delete`,
+  cheaper because removing writes no node.
+
 ## What is deliberately not measured
 
-- **Chained tiers.** A chain's cost is the sum of its tiers' plus one
-  promotion, and both halves are already here. Benchmarking two memory tiers
-  would measure a configuration nobody deploys.
-- **Cross-process stampede protection.** There is none — see `CLAUDE.md`
-  §"One process, and only one".
+- **Cross-process stampede protection** (`LoadLeased`, #830). Its hit path is
+  `Load`'s, measured above; its miss path is the locker's — a `flock(2)`
+  attempt per step on the file locker — and the poll step the caller chose,
+  neither of them this package's cost. Its correctness is pinned across a real
+  process boundary instead (`lease_process_external_test.go`, `CLAUDE.md`
+  §"`LoadLeased` takes the lease").

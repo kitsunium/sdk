@@ -1,8 +1,10 @@
 package queue
 
 import (
+	"math"
 	"time"
 
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -65,7 +67,11 @@ const MaxDeadlineOffset time.Duration = 100 * 365 * 24 * time.Hour
 //     backoff wants. A zero size bound means [DefaultMaxMessageBytes].
 //   - [PolicyValue.MaxRetryDelay] is neither: its zero is the behaviour the
 //     struct had before the field existed — a retry delay that does not grow —
-//     which is one reading and the only backward-compatible one.
+//     which is one reading and the only backward-compatible one. So are
+//     [PolicyValue.RetryJitter] and [PolicyValue.RetryJitterMode], whose zero
+//     is the exact instant every retry waited before, and
+//     [PolicyValue.MaxAge] and [PolicyValue.DeadLetterRetention], whose zero
+//     keeps a message, and a dead letter, for as long as it always was kept.
 //
 // Both branches in one struct is the point. A domain in which every zero is
 // refused teaches a reader nothing except that the author was nervous.
@@ -136,6 +142,58 @@ type PolicyValue struct {
 	// Zero means [DefaultMaxMessageBytes]. Negative is refused, because it
 	// is not a bound at all and the caller who wrote it meant something.
 	MaxMessageBytes int
+	// MaxAge is how long a message may wait for a consumer, measured from
+	// its [MessageValue.EnqueuedAt]. A message whose age has reached it is
+	// never handed to a consumer: the next [Broker.Receive] that reaches it
+	// moves it to the dead-letter store with [MessageExpired] as its reason
+	// — evidence of what expired, never a message silently gone. A message
+	// a consumer already leases is not taken from it: its acknowledgement
+	// still lands, and only a delivery after its age is refused.
+	//
+	// It is for work that is worthless late — a notification an hour
+	// stale, a cache warm-up for a deployment already replaced —, the
+	// lifetime SQS and RabbitMQ call a message's retention and TTL.
+	//
+	// Zero means a message never expires, which is what every policy did
+	// before the field existed: that is its one reading. A negative value
+	// is refused, and so is one above [MaxDeadlineOffset]
+	// ([QueueMisconfigured], naming the field).
+	MaxAge time.Duration
+	// DeadLetterRetention is how long a dead letter is kept, measured from
+	// its [DeadLetterValue.FailedAt]. A dead letter older than it is removed
+	// by a later [Broker.Receive] — at most one sweep a minute on the
+	// broker's clock —, so a queue that dead-letters steadily stops growing
+	// its store until somebody deletes by hand.
+	//
+	// Zero keeps every dead letter for good, which is what every policy did
+	// before the field existed. A negative value is refused, and so is one
+	// above [MaxDeadlineOffset] ([QueueMisconfigured], naming the field).
+	DeadLetterRetention time.Duration
+	// RetryJitter widens each policy retry delay by a random fraction of
+	// itself, drawn from [0, RetryJitter) and added, so messages nacked in
+	// the same instant — every message of every consumer during a
+	// downstream's outage — come back spread over a window instead of in
+	// one burst aimed at a dependency already failing to keep up. A delay
+	// held at MaxRetryDelay may reach MaxRetryDelay × (1 + RetryJitter).
+	// It is read only under the zero [PolicyValue.RetryJitterMode].
+	//
+	// Zero is no jitter: the exact instant every retry waited before the
+	// field existed. A value outside [0, 1], NaN included, is refused, and
+	// so is a jitter with no MaxRetryDelay — a growing delay is what it
+	// spreads ([QueueMisconfigured], naming the field). A delay a caller
+	// names through [DelayedNacker] is the caller's, and never jittered.
+	RetryJitter float64
+	// RetryJitterMode is how the retry delay is randomised, as
+	// kernel/backoff's curve is (ADR 0184): the zero, additive, widens it
+	// by [PolicyValue.RetryJitter]; full draws the whole delay from
+	// [0, grown]; decorrelated draws it from [RetryDelay, 3 × the delay
+	// before], held at MaxRetryDelay. The last two ignore RetryJitter, and
+	// setting one beside them is refused rather than ignored.
+	//
+	// A mode other than the zero needs a MaxRetryDelay, as RetryJitter
+	// does, and a mode the package does not define is refused
+	// ([QueueMisconfigured], naming the field).
+	RetryJitterMode kbackoff.JitterMode
 }
 
 // Validate reports whether the policy is one a broker can honour, and refuses
@@ -176,8 +234,101 @@ func (p PolicyValue) Validate() error {
 			errs.String("field", "RetryDelay"),
 			errs.Int64("value_ns", int64(p.RetryDelay)))
 	}
-	//: a policy a broker can honour, once its growth is one too.
-	return p.validateRetryGrowth()
+	//: a lifetime, live or dead, that is not one a durable broker can write
+	//: down, or not a lifetime at all.
+	if lifetimeErr := p.validateLifetimes(); lifetimeErr != nil {
+		//: QueueMisconfigured, naming the field.
+		return lifetimeErr
+	}
+	//: a growth the curve can follow, then a jitter the growth can carry.
+	if growthErr := p.validateRetryGrowth(); growthErr != nil {
+		//: QueueMisconfigured, naming MaxRetryDelay.
+		return growthErr
+	}
+	//: a policy a broker can honour, once its jitter is one too.
+	return p.validateRetryJitter()
+}
+
+// validateLifetimes refuses a MaxAge or a DeadLetterRetention that is
+// negative — not a lifetime, and the caller who wrote it meant something — or
+// past MaxDeadlineOffset, an instant no durable broker records. Zero keeps a
+// message, or a dead letter, for good and is accepted.
+func (p PolicyValue) validateLifetimes() error {
+	//: the live message's lifetime first.
+	if refused := lifetimeRefused("MaxAge", p.MaxAge); refused != nil {
+		//: QueueMisconfigured, naming MaxAge.
+		return refused
+	}
+	//: then the dead letter's, under the same rule.
+	return lifetimeRefused("DeadLetterRetention", p.DeadLetterRetention)
+}
+
+// lifetimeRefused is QueueMisconfigured naming field when value is negative
+// or past MaxDeadlineOffset, and nil when it lies in [0, MaxDeadlineOffset].
+func lifetimeRefused(field string, value time.Duration) error {
+	//: inside [0, MaxDeadlineOffset] is a lifetime, zero the absence of one.
+	if value >= 0 && value <= MaxDeadlineOffset {
+		//: accepted.
+		return nil
+	}
+	//: QueueMisconfigured, naming the field.
+	return errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+		errs.String("field", field), errs.Int64("value_ns", int64(value)))
+}
+
+// validateRetryJitter refuses a RetryJitter or a RetryJitterMode no broker can
+// lay on the retry delay: a fraction outside [0, 1] or NaN, a mode the backoff
+// curve does not define, a fraction beside a mode that ignores it, and either
+// with no MaxRetryDelay — the growing delay a jitter spreads. The zeros ask for
+// no jitter and are accepted.
+func (p PolicyValue) validateRetryJitter() error {
+	//: the fraction and the mode alone, most basic first.
+	if shapeErr := p.validateJitterShape(); shapeErr != nil {
+		//: QueueMisconfigured, naming the field and what is wrong with it.
+		return shapeErr
+	}
+	//: a jitter spreads a growing delay, and there is none to spread.
+	if (p.RetryJitter != 0 || p.RetryJitterMode != kbackoff.JitterAdditive) && p.MaxRetryDelay == 0 {
+		field := "RetryJitter"
+		//: the mode is what was set when the fraction is zero.
+		if p.RetryJitter == 0 {
+			field = "RetryJitterMode"
+		}
+		//: QueueMisconfigured, naming the field and what is wrong with it.
+		return jitterRefused(field, "no MaxRetryDelay")
+	}
+	//: no jitter, or one the curve can draw.
+	return nil
+}
+
+// validateJitterShape refuses a fraction outside [0, 1] or NaN, a mode the
+// backoff curve does not define, and a fraction beside a mode that ignores it.
+func (p PolicyValue) validateJitterShape() error {
+	//: the three ways the fraction and the mode alone are no jitter.
+	switch {
+	//: NaN compares false with everything, so it is named before the range.
+	case math.IsNaN(p.RetryJitter) || p.RetryJitter < 0 || p.RetryJitter > 1:
+		//: a fraction that is no fraction.
+		return jitterRefused("RetryJitter", "outside [0, 1]")
+	//: a mode the curve would read as additive, which is not what was written.
+	case p.RetryJitterMode > kbackoff.JitterDecorrelated:
+		//: a mode the curve does not define.
+		return jitterRefused("RetryJitterMode", "undefined")
+	//: full and decorrelated draw the whole delay and read no fraction.
+	case p.RetryJitterMode != kbackoff.JitterAdditive && p.RetryJitter != 0:
+		//: a fraction nothing reads.
+		return jitterRefused("RetryJitter", "ignored by RetryJitterMode")
+	default:
+		//: a shape the curve can draw.
+		return nil
+	}
+}
+
+// jitterRefused is QueueMisconfigured naming field and what is wrong with it.
+func jitterRefused(field, problem string) error {
+	//: the field and the problem, as every refusal of the policy names them.
+	return errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+		errs.String("field", field), errs.String("problem", problem))
 }
 
 // validateRetryGrowth refuses a MaxRetryDelay that is not a ceiling a retry

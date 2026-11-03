@@ -81,3 +81,11 @@ type VersionWeightValue struct {
 	// The instants and the metadata they carry are not counted.
 	Bytes int64
 }
+
+// RevisionValue is the token [Revisioned].Revision returns with a document
+// and ReplaceIf compares: opaque, an engine's own, equal to the one read
+// while the stored document is the one read. The file engine renders the
+// SHA-256 of the document's JSON as json.Marshal writes it, which holds
+// across a fold and a reopen; the SQL engine renders the row's revision,
+// which every write moves. Compare two only for equality.
+type RevisionValue string

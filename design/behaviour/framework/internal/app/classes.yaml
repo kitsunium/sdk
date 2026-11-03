@@ -341,6 +341,10 @@ constants:
         value: "\"check-timeout\""
       - name: dbMigrate
         value: "\"migrate\""
+      - name: dbTxRetries
+        value: "\"tx-retries\""
+      - name: dbTxRetryDelay
+        value: "\"tx-retry-delay\""
     name: dbURL
   - doc: |-
       The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
@@ -525,6 +529,14 @@ constants:
       - name: formerBinding
         value: "\"former\""
     name: formerBinding
+  - doc: |-
+      filterHint is the capacity Filter's answer starts with: a guess, grown by
+      append past it.
+    items:
+      - name: filterHint
+        type: int
+        value: "16"
+    name: filterHint
   - doc: studioPackage is the package a product imports to serve the Studio's API.
     items:
       - name: studioPackage
@@ -1341,6 +1353,35 @@ constants:
       - name: queuePackage
         value: "\"github.com/kitsunium/sdk/framework/app/queue\""
     name: queuePackage
+  - doc: queueUsageText is `queue`'s usage; %[1]s is the product's name.
+    items:
+      - name: queueUsageText
+        type: string
+        value: |-
+          `usage:
+            %[1]s queue dead-letters [NODE]
+                the messages a consumer gave up on — a subscription's, a watch's, a
+                queued command's, a mailer's outbox — every consumer's, or NODE's:
+                their consumer, their ID, when the last attempt failed, the failure's
+                code, reason and public text, their attempts and their size — never
+                their payload
+            %[1]s queue replay NODE ID...
+                move the dead letters named back into NODE's live queue, their attempts
+                counted afresh: its consumer handles them again, a running product's
+                at its next poll, a stopped one's at its next start
+            %[1]s queue drop NODE ID...
+                delete the dead letters named for good
+          The queues are read where the start keeps them: on the database that keeps
+          the consumer, or under the data directory. A product that keeps its data in
+          memory has none to read.
+          `
+    name: queueUsageText
+  - doc: queueMaxDeadLetters bounds the dead letters the command reads per consumer.
+    items:
+      - name: queueMaxDeadLetters
+        type: int
+        value: "1000"
+    name: queueMaxDeadLetters
   - doc: The per-client buckets' bounds.
     grouped: true
     items:
@@ -2606,6 +2647,7 @@ files:
       - Migrations
       - Database
       - (*database).declareSettings
+      - isMigrateMode
       - databaseSetting
       - (*database).settingDecls
       - (*database).urlSecret
@@ -2650,6 +2692,7 @@ files:
   - decls:
       - Engine
       - LockWaiter
+      - Classifier
       - DatabaseConfigurer
       - Keeper
       - MigrationExecutor
@@ -2701,6 +2744,7 @@ files:
       - (*App).describeURL
       - (*App).openPool
       - (*App).tune
+      - engineTransient
       - (*App).startDatabase
       - (*App).bringUp
       - (*databaseRun).opened
@@ -3069,6 +3113,7 @@ files:
       - (*App).holdList
     name: hold.go
   - decls:
+      - filterHint
       - indexOption
       - indexOption.storeConfigure
       - Unique
@@ -3082,6 +3127,7 @@ files:
       - (*storeCore).findIn
       - (*storeCore).find
       - (*storeCore).filterIn
+      - (*storeCore).filter
       - (*StoreService).declareIndexes
       - (*storeCore).indexed
       - (*storeCore).specs
@@ -3723,6 +3769,8 @@ files:
       - withOTLPQueue
       - (*App).listOTLPDeadLetters
       - otlpDeadLetterLine
+      - deadLetterRow
+      - deadLetterRow.line
       - (*App).replayOTLPDeadLetters
       - otlpActOn
       - otlpIDs
@@ -4173,6 +4221,7 @@ files:
       - (*Query).Authorize
       - (*Query).Expose
       - (*Query).Ask
+      - (*Query).invoke
       - (*Query).steps
       - (*Query).perform
       - (*Query).edgeKind
@@ -4201,6 +4250,28 @@ files:
       - pluggedClock.NewTimer
       - pluggedClock.NewTicker
     name: queue_plug.go
+  - decls:
+      - queueUsageText
+      - queueMaxDeadLetters
+      - queueVerbs
+      - queueArgs
+      - (*App).queueCLI
+      - (*App).queueCommand
+      - parseQueueArgs
+      - (*App).queueSettingsRefused
+      - (*App).queueOwners
+      - (*App).queueOwnersNamed
+      - (*App).sayQueueOwners
+      - consumerQueue
+      - (*App).withConsumerQueues
+      - (*App).anyQueueOnDatabase
+      - (*App).openConsumerQueueForCommand
+      - (*App).placeConsumerQueue
+      - closeQueue
+      - listQueueDeadLetters
+      - actOnQueueDeadLetters
+      - actOnDeadLetter
+    name: queuecmd.go
   - decls:
       - commandQueue
       - (*commandQueue).claim
@@ -5374,7 +5445,19 @@ files:
   - decls:
       - localName
       - Transact
+      - TransactOption
+      - Serializable
+      - RepeatableRead
+      - ReadOnly
+      - TransactOption.queryConfigure
+      - txOptionsOf
       - transact
+      - transactWith
+      - transactOnce
+      - (*txn).retryAfter
+      - (*App).inRoutine
+      - (*txn).reportRetry
+      - (*txn).waitRetry
       - txLevel
       - beginTransaction
       - (*txLevel).finish
@@ -5384,6 +5467,9 @@ files:
       - unitOf
       - withoutUnit
       - txn
+      - (*txn).setOptions
+      - nestedRefusal
+      - readOnlyRefusal
       - (*txn).ended
       - unit
       - newUnit
@@ -6521,6 +6607,12 @@ functions:
   - name: Database
     params: name string, engine Engine, opts ...DatabaseConfigurer
     results: AppConfigurer
+  - doc: |-
+      isMigrateMode reports whether mode is one a database's migrations run in:
+      at the start, or by hand.
+    name: isMigrateMode
+    params: mode string
+    results: bool
   - doc: "databaseSetting declares one setting of a database: <name>-<suffix>."
     name: databaseSetting
     params: d *database, suffix string, def T, check func(any) phrase
@@ -6605,6 +6697,12 @@ functions:
     params: a *App, s *SettingService[T]
     results: T
     typeParams: T SettingValue
+  - doc: |-
+      engineTransient is the engine's own reading of a failed transaction, nil
+      when it offers none ([Classifier]).
+    name: engineTransient
+    params: e Engine
+    results: func(error) bool
   - doc: versionText is a migration's version as a command prints it.
     name: versionText
     params: v uint64
@@ -8271,6 +8369,34 @@ functions:
     params: err error
     results: bool
   - doc: |-
+      parseQueueArgs reads `queue`'s arguments: dead-letters and a consumer at
+      most, or replay or drop, a consumer and one ID or more; ok is false for any
+      other.
+    name: parseQueueArgs
+    params: args []string
+    results: queueArgs, bool
+  - doc: closeQueue releases what an opened queue holds, nothing for none.
+    name: closeQueue
+    params: broker plug.Broker
+    results: error
+  - doc: |-
+      listQueueDeadLetters writes the dead letters of queues on stdout, one a
+      line, never a payload.
+    name: listQueueDeadLetters
+    params: ctx context.Context, queues []consumerQueue, stdout io.Writer
+    results: error
+  - doc: |-
+      actOnQueueDeadLetters replays, or drops, the dead letters p names in q, and
+      says how many on stdout; a named one the queue does not hold is said on
+      stderr and fails the command once the others are done.
+    name: actOnQueueDeadLetters
+    params: ctx context.Context, q consumerQueue, p *queueArgs, stdout, stderr io.Writer
+    results: error
+  - doc: actOnDeadLetter replays the dead letter id of manager, or drops it.
+    name: actOnDeadLetter
+    params: ctx context.Context, manager plug.DeadLetterManager, id string, drop bool
+    results: bool, error
+  - doc: |-
       queueWhere is where the queue of the consumer b of a waits: "sql" on the
       database that keeps it (ADR 0178 C1) — open, or which the app will open
       —, "file" under a data directory, "memory" without one.
@@ -9739,8 +9865,20 @@ functions:
     results: "*TopicService[T]"
     typeParams: T any
   - name: Transact
-    params: ctx context.Context, fn func(context.Context) error
+    params: ctx context.Context, fn func(context.Context) error, opts ...TransactOption
     results: error
+  - name: Serializable
+    results: TransactOption
+  - name: RepeatableRead
+    results: TransactOption
+  - name: ReadOnly
+    results: TransactOption
+  - doc: |-
+      txOptionsOf folds opts into what a database transaction is asked: the last
+      level given wins, and read-only once asked stays.
+    name: txOptionsOf
+    params: opts []TransactOption
+    results: plug.TxOptionsValue
   - doc: |-
       transact runs fn as a level of the transaction ctx carries, or as the
       outermost level of a new one. a is the app, when the caller knows it: a
@@ -9749,6 +9887,23 @@ functions:
     name: transact
     params: ctx context.Context, a *App, fn func(context.Context) error
     results: error
+  - doc: |-
+      transactWith is transact with the options the outermost level opens with:
+      a nested level given any is refused before fn runs, its savepoint able to
+      change neither the isolation level nor read-only. The outermost level runs
+      again — fn from its start, in a new transaction — while it fails on an
+      error its database calls transient and <name>-tx-retries allows (#1000);
+      a nested level runs once, as its savepoint cannot run alone.
+    name: transactWith
+    params: ctx context.Context, a *App, fn func(context.Context) error, opts plug.TxOptionsValue
+    results: error
+  - doc: |-
+      transactOnce runs fn as one level: the outermost of a new transaction, or
+      one nested in the transaction ctx carries. attempt counts the runs of an
+      outermost level before this one, which its span says.
+    name: transactOnce
+    params: ctx context.Context, a *App, fn func(context.Context) error, opts plug.TxOptionsValue, attempt int
+    results: ran *txn, err error
   - doc: |-
       beginTransaction begins a level of the transaction ctx carries, or the
       outermost level of a new one, and returns the context its calls run with:
@@ -9770,6 +9925,15 @@ functions:
     name: withoutUnit
     params: ctx context.Context
     results: context.Context
+  - doc: nestedRefusal is the refusal of a nested Transact given options.
+    name: nestedRefusal
+    results: error
+  - doc: |-
+      readOnlyRefusal is the refusal of a store's write inside a read-only
+      transaction.
+    name: readOnlyRefusal
+    params: store string
+    results: error
   - doc: |-
       newUnit is a level of the transaction ctx carries, or the outermost level
       of a new one.
@@ -12968,6 +13132,76 @@ types:
         params: cfg plug.QueueConfig
         recv: a *App
         results: plug.Broker, error
+      - doc: |-
+          queueCLI is Main's `queue` command, nil in a program that does not import
+          the queue subsystem: it has no consumer's queue to read.
+        name: queueCLI
+        recv: a *App
+        results: func(ctx context.Context, args []string) int
+      - doc: queueCommand runs `queue …`.
+        name: queueCommand
+        params: ctx context.Context, args []string, stdout, stderr io.Writer
+        recv: a *App
+        results: int
+      - doc: |-
+          queueSettingsRefused resolves the settings — the databases' among them —
+          and says every error the start would refuse them for.
+        name: queueSettingsRefused
+        params: stderr io.Writer
+        recv: a *App
+        results: bool
+      - doc: queueOwners are the consumers the app mounts that keep a queue, by ID.
+        name: queueOwners
+        recv: a *App
+        results: "[]queueOwner"
+      - doc: |-
+          queueOwnersNamed are the consumers the command acts on: every one when
+          node is "", else the one whose ID is node; known is false when none is.
+        name: queueOwnersNamed
+        params: node string
+        recv: a *App
+        results: owners []queueOwner, known bool
+      - doc: |-
+          sayQueueOwners says on stderr that node is no consumer, and which ones the
+          product mounts.
+        name: sayQueueOwners
+        params: stderr io.Writer, node string
+        recv: a *App
+      - doc: |-
+          withConsumerQueues runs fn with the queues of owners opened as the start
+          opens them — the databases that keep some opened for the command —, and
+          closes them after; refused when the product keeps its data in memory.
+        name: withConsumerQueues
+        params: ctx context.Context, owners []queueOwner, fn func([]consumerQueue) error
+        recv: a *App
+        results: err error
+      - doc: |-
+          anyQueueOnDatabase reports whether a database keeps the queue of one of
+          owners.
+        name: anyQueueOnDatabase
+        params: owners []queueOwner
+        recv: a *App
+        results: bool
+      - doc: |-
+          openConsumerQueueForCommand opens the queue of the consumer q as its start
+          opens it: its table on the database that keeps it, open; else its file
+          queue under the data directory — nil, and nothing created, when that
+          directory is not there. A mailer's outbox is opened under its own policy,
+          and on a database without its sealing: a dead letter is replayed or
+          dropped as it lies, and listed by the size it rests at.
+        name: openConsumerQueueForCommand
+        params: q queueOwner
+        recv: a *App
+        results: plug.Broker, error
+      - doc: |-
+          placeConsumerQueue places cfg, the queue of the consumer b kept under
+          under, where the start places it: its table on the open database that
+          keeps it, else its file queue under the data directory — exists false
+          when that directory is not there, which nothing creates.
+        name: placeConsumerQueue
+        params: cfg *plug.QueueConfig, b *nodeBase, under string
+        recv: a *App
+        results: exists bool, err error
       - name: Fields
         params: m Mark
         recv: a *App
@@ -13933,6 +14167,14 @@ types:
         name: reportGaveUp
         params: node string, err error
         recv: a *App
+      - doc: |-
+          inRoutine reports whether ctx runs in a [Service.Go] body: the product's
+          own loop, which the framework cannot know may run a function twice — so a
+          transaction it opens is never run again (#1000).
+        name: inRoutine
+        params: ctx context.Context
+        recv: a *App
+        results: bool
       - doc: |-
           writeTurn is what a local write of the store needs before it runs: in a
           transaction, the turn for the transaction — at its first write there —;
@@ -15859,6 +16101,13 @@ types:
         type: "*SettingService[time.Duration]"
       - name: migrate
         type: "*SettingService[string]"
+      - doc: |-
+          txRetries and txRetryDelay are how often, and after how long a first
+          wait, a transaction the database asks to run again runs again (#1000).
+        name: txRetries
+        type: "*SettingService[int]"
+      - name: txRetryDelay
+        type: "*SettingService[time.Duration]"
     kind: struct
     methods:
       - doc: |-
@@ -15997,6 +16246,12 @@ types:
       	// OpenWaiting opens the pool url names, as Open does, its connections
       	// waiting wait for a lock when url writes no wait of its own.
       	OpenWaiting(url secret.Value, current func(context.Context) (secret.Value, error), wait time.Duration) (*stdsql.DB, error)
+      }
+  - kind: named
+    name: Classifier
+    underlying: |-
+      interface {
+      	Transient(err error) bool
       }
   - kind: named
     name: DatabaseConfigurer
@@ -19671,6 +19926,37 @@ types:
         recv: p *otlpArgs
         results: bool
     name: otlpArgs
+  - doc: |-
+      deadLetterRow is one dead letter as `otlp` and `queue` list it: where it
+      waits — a signal, a consumer —, its ID, when it failed, its code, reason and
+      attempts, its size, the failure's public text, and the codes it gathered
+      as it was wrapped (#500). Never its payload.
+    fields:
+      - name: failedAt
+        type: time.Time
+      - name: where
+        type: string
+      - name: id
+        type: string
+      - name: reason
+        type: string
+      - name: cause
+        type: string
+      - name: trail
+        type: "[]uint32"
+      - name: attempts
+        type: int
+      - name: size
+        type: int
+      - name: code
+        type: uint32
+    kind: struct
+    methods:
+      - doc: line is the row as the commands print it, tab-separated.
+        name: line
+        recv: r deadLetterRow
+        results: string
+    name: deadLetterRow
   - fields:
       - doc: |-
           passwordRule is the policy without its entity type, which the store's
@@ -21120,6 +21406,16 @@ types:
         recv: q *Query[Q, R]
         results: R, error
       - doc: |-
+          invoke runs the query's pipeline: in a transaction opened with the
+          options it was declared with ([ReadOnly] — the database told it only
+          reads, a store's write refused —, or a level), when it was declared with
+          some and the Ask runs in no transaction; in the caller's otherwise, whose
+          options stand.
+        name: invoke
+        params: ctx context.Context, a *App, in Q
+        recv: q *Query[Q, R]
+        results: R, error
+      - doc: |-
           steps are a query's own, inside its policies: its authorization, then
           its handler.
         name: steps
@@ -21158,6 +21454,11 @@ types:
       - name: ""
         role: embedded
         type: callOptions
+      - doc: |-
+          tx are the options of the transaction an Ask runs in, given by
+          [ReadOnly], [Serializable] or [RepeatableRead]; none runs it in none.
+        name: tx
+        type: plug.TxOptionsValue
     kind: struct
     name: queryOptions
   - doc: |-
@@ -21213,6 +21514,28 @@ types:
         recv: c pluggedClock
         results: plug.Ticker
     name: pluggedClock
+  - doc: |-
+      queueArgs are `queue`'s arguments, read: the verb, the consumer it names —
+      "" for every one —, and the dead letters it names.
+    fields:
+      - name: verb
+        type: string
+      - name: node
+        type: string
+      - name: ids
+        type: "[]string"
+    kind: struct
+    name: queueArgs
+  - doc: |-
+      consumerQueue is one consumer's queue as the command opened it: nil
+      broker when the consumer has none yet — a file queue nothing ever wrote.
+    fields:
+      - name: broker
+        type: plug.Broker
+      - name: node
+        type: string
+    kind: struct
+    name: consumerQueue
   - doc: commandQueue is a queued command's queue in one run of the app.
     fields:
       - name: broker
@@ -24330,6 +24653,15 @@ types:
         recv: s *storeCore
         results: "[]any, error"
       - doc: |-
+          filter is every entity keep keeps, in key order, through the engine's
+          Filter: on a database a page of records at a time, never the whole table
+          at once (#1153); each record decoded once, the first that does not decode
+          failing the read.
+        name: filter
+        params: ctx context.Context, keep func(v any) bool
+        recv: s *storeCore
+        results: "[]any, error"
+      - doc: |-
           indexed reports whether the store files index keys: an index it
           declares, or kit's subject index (privacy_keys.go) — what a database's
           table files under kit's index key.
@@ -26561,6 +26893,22 @@ types:
         recv: f deliveryOption
     name: deliveryOption
     underlying: func(o *deliveryOptions)
+  - fields:
+      - doc: isolation is the level asked for, zero for none.
+        name: isolation
+        type: stdsql.IsolationLevel
+      - doc: readOnly asks for a transaction that only reads.
+        name: readOnly
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          queryConfigure makes o a query's: its Ask runs in a transaction opened
+          with it, folded with the options given before it.
+        name: queryConfigure
+        params: q *queryOptions
+        recv: o TransactOption
+    name: TransactOption
   - doc: |-
       txLevel is a level begun and not yet finished: its unit, and its span
       when it draws one.
@@ -26635,8 +26983,40 @@ types:
       - doc: done is set once the outermost level ended.
         name: done
         type: bool
+      - doc: |-
+          opts are what the outermost level opened with: its isolation level and
+          read-only, which a store's write is refused under.
+        name: opts
+        type: plug.TxOptionsValue
     kind: struct
     methods:
+      - doc: |-
+          retryAfter says whether the transaction t, whose outermost level ended
+          with err after attempt runs before it, runs again, and after how long: on
+          a database whose classifier calls err transient, while <name>-tx-retries
+          allows, waiting <name>-tx-retry-delay grown by 2 with full jitter.
+        name: retryAfter
+        params: ctx context.Context, err error, attempt int
+        recv: t *txn
+        results: time.Duration, bool
+      - doc: |-
+          reportRetry puts the transaction's next run on the telemetry port, as a
+          port's retry is (#1000): the node that runs it, the failure's code, the
+          wait before the next run.
+        name: reportRetry
+        params: ctx context.Context, err error, wait time.Duration
+        recv: t *txn
+      - doc: waitRetry waits d on the app's clock, or until ctx ends.
+        name: waitRetry
+        params: ctx context.Context, d time.Duration
+        recv: t *txn
+        results: error
+      - doc: |-
+          setOptions records the outermost level's options, once: a nested level
+          never sets any (transactWith refuses it).
+        name: setOptions
+        params: opts plug.TxOptionsValue
+        recv: t *txn
       - doc: ended reports whether the transaction's outermost level returned.
         name: ended
         recv: t *txn
@@ -26886,7 +27266,7 @@ types:
           level's end. A panic of what the SDK runs after the commit is caught, for
           the level's end to raise.
         name: run
-        params: ctx context.Context, db plug.Database, ready chan struct{}
+        params: ctx context.Context, db plug.Database, opts plug.TxOptionsValue, ready chan struct{}
         recv: s *sqlScope
         results: err error
       - doc: |-
@@ -26906,6 +27286,11 @@ types:
         type: context.Context
       - name: db
         type: plug.Database
+      - doc: |-
+          opts are the transaction's options for the outermost level, none for
+          a savepoint.
+        name: opts
+        type: plug.TxOptionsValue
     kind: struct
     name: scopeBase
   - doc: |-
@@ -28418,6 +28803,10 @@ vars:
       - name: _
         type: QueryConfigurer
         value: callOption(nil)
+      - doc: A transaction's options configure a query too (#1140).
+        name: _
+        type: QueryConfigurer
+        value: TransactOption{}
       - name: _
         type: ExposeConfigurer
         value: endpointOption(nil)
@@ -28812,16 +29201,17 @@ vars:
     name: personalNames
   - doc: |-
       reservedCommands are Main's own: a product's CLI command may not take one
-      — breaker and otlp included, which are Main's only in an app whose port
-      declares a breaker and in one that declares an OTLP export, so that adding
-      one never hides it behind the product's command.
+      — breaker, otlp and queue included, which are Main's only in an app whose
+      port declares a breaker, in one that declares an OTLP export and in one
+      that imports the queue subsystem, so that adding one never hides it behind
+      the product's command.
     items:
       - name: reservedCommands
         value: |-
           map[string]bool{
           	"serve": true, "graph": true, "healthcheck": true, "config": true, "secrets": true,
           	"migrate": true, "privacy": true, "revisions": true, "watch": true, "data": true, "help": true,
-          	"breaker": true, "otlp": true,
+          	"breaker": true, "otlp": true, "queue": true,
           }
     name: reservedCommands
   - grouped: true
@@ -29270,6 +29660,11 @@ vars:
       - name: errRekeyed
         value: "errs.New(CodeKeyRekeyed, \"KEY_REKEYED\", \"the key depends on personal data\", \"app: an erasure's update would change the record's key\")"
     name: errNothingToErase
+  - doc: queueVerbs are `queue`'s verbs.
+    items:
+      - name: queueVerbs
+        value: "[]string{\"dead-letters\", \"replay\", \"drop\"}"
+    name: queueVerbs
   - doc: queuePlace says where a queue of each kind waits, in a mechanic's label.
     items:
       - name: queuePlace

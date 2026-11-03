@@ -1,6 +1,467 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: (*suite).backend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*suite).backend
+        kind: self
+      - id: s.running.Graph().Node
+        kind: value
+    steps:
+      - bind: node
+        eval: s.running.Graph().Node("st-" + s.name + "/store/docs")
+        to: s.running.Graph().Node
+      - opt:
+          do:
+            - return: "\"\""
+          when: node == nil || node.Store == nil
+      - return: node.Store.Backend
+  - of: (*suite).onDatabase
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*suite).onDatabase
+        kind: self
+      - id: s.backend
+        kind: internal
+    steps:
+      - bind: backend
+        eval: s.backend()
+        to: s.backend
+      - return: backend != "memory" && backend != "file" && backend != ""
+  - of: durable
+    participants:
+      - id: caller
+        kind: actor
+      - id: durable
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: t.Skip
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - opt:
+          do:
+            - eval: t.Skip("memory keeps nothing past a stop")
+              to: t.Skip
+          when: s.backend() == "memory"
+  - of: (*suite).again
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*suite).again
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: s.stop
+        kind: internal
+      - id: build
+        kind: internal
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - eval: s.stop(t)
+        to: s.stop
+      - return: build(s.name, s.place, s.clock, declare)
+        to: build
+  - of: watchCatchUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: watchCatchUp
+        kind: self
+      - id: durable
+        kind: internal
+      - id: t.Context
+        kind: value
+      - id: must
+        kind: internal
+      - id: s.again
+        kind: internal
+      - id: replaying.running.Main
+        kind: value
+      - id: t.Fatalf
+        kind: value
+      - id: t.Errorf
+        kind: value
+      - id: build
+        kind: internal
+      - id: heard.start
+        kind: internal
+      - id: heard.settle
+        kind: internal
+      - id: heard.again
+        kind: internal
+      - id: next.start
+        kind: internal
+      - id: next.settle
+        kind: internal
+      - id: t.Error
+        kind: value
+    steps:
+      - eval: durable(t, s)
+        to: durable
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - loop:
+          do:
+            - eval: "must(t, s.memos.Insert(ctx, memo{ID: id, Text: \"unheard\"}))"
+              to: must
+          key: _
+          range: "[]string{\"m2\", \"m1\"}"
+          value: id
+      - bind: replaying
+        eval: s.again(t, declareMemos)
+        to: s.again
+      - opt:
+          do:
+            - eval: t.Fatalf("watch replay exited %d, want 0", exit)
+              to: t.Fatalf
+          init:
+            bind: exit
+            eval: replaying.running.Main(ctx, []string{"watch", "replay", "st-" + s.name + "/subscription/screen"})
+            to: replaying.running.Main
+          when: exit != 0
+      - opt:
+          do:
+            - eval: t.Errorf("watch replay of no watch exited %d, want 1", exit)
+              to: t.Errorf
+          init:
+            bind: exit
+            eval: replaying.running.Main(ctx, []string{"watch", "replay", "st-" + s.name + "/subscription/nothing"})
+            to: replaying.running.Main
+          when: exit != 1
+      - bind: heard
+        eval: build(s.name, s.place, s.clock, declareMemos)
+        to: build
+      - eval: heard.start(t)
+        to: heard.start
+      - eval: heard.settle(t, "after")
+        to: heard.settle
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: t.Errorf("after watch replay the watch did not hear %s", id)
+                    to: t.Errorf
+                when: "!heard.listed.has(id)"
+          key: _
+          range: "[]string{\"m1\", \"m2\"}"
+          value: id
+      - bind: next
+        eval: heard.again(t, declareMemos)
+        to: heard.again
+      - eval: next.start(t)
+        to: next.start
+      - eval: next.settle(t, "next")
+        to: next.settle
+      - opt:
+          do:
+            - eval: t.Error("a memo heard before a clean stop was heard again")
+              to: t.Error
+          when: next.listed.has("m1") || next.listed.has("after")
+  - of: declareTimers
+    participants:
+      - id: caller
+        kind: actor
+      - id: declareTimers
+        kind: self
+      - id: svc.Store
+        kind: value
+      - id: svc.Workflow("expiry", s.timers, stateOf).Initial("new").After
+        kind: value
+    steps:
+      - set: s.timers
+        to: svc.Store
+        value: svc.Store("timers", doc.key)
+      - set: s.expiry
+        to: svc.Workflow("expiry", s.timers, stateOf).Initial("new").After
+        value: svc.Workflow("expiry", s.timers, stateOf).Initial("new").After("expire", time.Hour, "new", "expired")
+  - of: workflowJournal
+    participants:
+      - id: caller
+        kind: actor
+      - id: workflowJournal
+        kind: self
+      - id: durable
+        kind: internal
+      - id: t.Context
+        kind: value
+      - id: s.expiry.Start
+        kind: value
+      - id: t.Fatalf
+        kind: value
+      - id: s.again
+        kind: internal
+      - id: restarted.start
+        kind: internal
+      - id: s.clock.Advance
+        kind: value
+      - id: time
+        kind: stdlib
+      - id: restarted.timers.Get
+        kind: value
+      - id: ticking
+        kind: internal
+    steps:
+      - eval: durable(t, s)
+        to: durable
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"start the entity: %v\", err)"
+              to: t.Fatalf
+          init:
+            bind: _, err
+            eval: "s.expiry.Start(ctx, doc{ID: \"t1\"})"
+            to: s.expiry.Start
+          when: err != nil
+      - bind: restarted
+        eval: s.again(t, declareTimers)
+        to: s.again
+      - eval: restarted.start(t)
+        to: restarted.start
+      - eval: s.clock.Advance(time.Hour - time.Second)
+        to: s.clock.Advance
+      - eval: time.Sleep(10 * pollEvery)
+        to: time
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"before its instant: %+v %v, want the entity still new\", d, err)"
+              to: t.Fatalf
+          init:
+            bind: d, err
+            eval: restarted.timers.Get(ctx, "t1")
+            to: restarted.timers.Get
+          when: err != nil || d.State != "new"
+      - eval: |-
+          ticking(t, restarted, "the timer armed before the restart", func() bool {
+          		d, err := restarted.timers.Get(ctx, "t1")
+          		return err == nil && d.State == "expired"
+          	})
+        to: ticking
+  - of: dataCopy
+    participants:
+      - id: caller
+        kind: actor
+      - id: dataCopy
+        kind: self
+      - id: t.Skip
+        kind: value
+      - id: t.Context
+        kind: value
+      - id: s.stop
+        kind: internal
+      - id: t.TempDir
+        kind: value
+      - id: build
+        kind: internal
+      - id: files.start
+        kind: internal
+      - id: must
+        kind: internal
+      - id: files.stop
+        kind: internal
+      - id: build(s.name, into, nil, declareMemoStore).running.Main
+        kind: value
+      - id: t.Fatalf
+        kind: value
+      - id: t.Error
+        kind: value
+      - id: after.start
+        kind: internal
+      - id: expectCopied
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: t.Skip("no database to copy into")
+              to: t.Skip
+          when: "!s.onDatabase()"
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - eval: s.stop(t)
+        to: s.stop
+      - bind: dir
+        eval: t.TempDir()
+        to: t.TempDir
+      - bind: files
+        eval: build(s.name, []app.AppOption{app.DataDir(dir)}, nil, declareMemoStore)
+        to: build
+      - eval: files.start(t)
+        to: files.start
+      - loop:
+          do:
+            - eval: "must(t, files.memos.Insert(ctx, memo{ID: id, Text: \"copied\"}))"
+              to: must
+          key: _
+          range: copiedMemos
+          value: id
+      - eval: files.stop(t)
+        to: files.stop
+      - bind: into
+        eval: append(slices.Clone(s.place), app.DataDir(dir))
+      - opt:
+          do:
+            - eval: t.Fatalf("data copy exited %d, want 0", exit)
+              to: t.Fatalf
+          init:
+            bind: exit
+            eval: build(s.name, into, nil, declareMemoStore).running.Main(ctx, copyArgs)
+            to: build(s.name, into, nil, declareMemoStore).running.Main
+          when: exit != 0
+      - opt:
+          do:
+            - eval: t.Error("a second copy into a database that holds the memos was not refused")
+              to: t.Error
+          init:
+            bind: exit
+            eval: build(s.name, into, nil, declareMemoStore).running.Main(ctx, copyArgs)
+            to: build(s.name, into, nil, declareMemoStore).running.Main
+          when: exit == 0
+      - bind: after
+        eval: build(s.name, into, nil, declareMemoStore)
+        to: build
+      - eval: after.start(t)
+        to: after.start
+      - eval: expectCopied(t, after)
+        to: expectCopied
+  - of: expectCopied
+    participants:
+      - id: caller
+        kind: actor
+      - id: expectCopied
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: s.memos.Get
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: "t.Errorf(\"%s after the copy: %+v %v\", id, got, err)"
+                    to: t.Errorf
+                init:
+                  bind: got, err
+                  eval: s.memos.Get(t.Context(), id)
+                  to: s.memos.Get
+                when: err != nil || got.Text != "copied"
+          key: _
+          range: copiedMemos
+          value: id
+      - opt:
+          do:
+            - eval: t.Errorf("after the copy the memos are kept in %q, want the database", s.backend())
+              to: t.Errorf
+          when: "!s.onDatabase()"
+  - of: (*suite).otlpPlace
+    steps:
+      - return: |-
+          append(slices.Clone(s.place),
+          		app.OTLP(app.OTLPDatabase("database"), app.OTLPSender(send), app.OTLPSendTimeout(time.Hour)),
+          		app.Set("otlp-drain", time.Duration(0)), app.Set("otlp-interval", time.Second))
+  - of: (*exports).refuse
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*exports).refuse
+        kind: self
+      - id: e.refused.Add
+        kind: value
+      - id: app
+        kind: package
+    steps:
+      - eval: e.refused.Add(1)
+        to: e.refused.Add
+      - return: app.Unavailable("the collector is down")
+        to: app
+  - of: (*exports).accept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*exports).accept
+        kind: self
+      - id: e.sent.Add
+        kind: value
+    steps:
+      - eval: e.sent.Add(1)
+        to: e.sent.Add
+      - return: nil
+  - of: otlpTables
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpTables
+        kind: self
+      - id: t.Skip
+        kind: value
+      - id: s.stop
+        kind: internal
+      - id: build
+        kind: internal
+      - id: first.start
+        kind: internal
+      - id: must
+        kind: internal
+      - id: ticking
+        kind: internal
+      - id: t.Fatalf
+        kind: value
+      - id: first.stop
+        kind: internal
+      - id: second.start
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: t.Skip("no database to keep the export's queues")
+              to: t.Skip
+          when: "!s.onDatabase()"
+      - eval: s.stop(t)
+        to: s.stop
+      - bind: down
+        eval: "&exports{}"
+      - bind: first
+        eval: build(s.name, s.otlpPlace(down.refuse), s.clock, nil)
+        to: build
+      - eval: first.start(t)
+        to: first.start
+      - eval: "must(t, first.docs.Put(t.Context(), doc{ID: \"traced\"}))"
+        to: must
+      - eval: ticking(t, first, "a batch refused by a collector that is down", func() bool { return down.refused.Load() > 0 })
+        to: ticking
+      - bind: export
+        eval: first.running.Graph().Runtime.Export
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"the export's queues: %+v, want them on the database, durable\", export)"
+              to: t.Fatalf
+          when: export == nil || len(export.Signals) == 0 || export.Signals[0].Store != "database:database" || !export.Signals[0].Durable
+      - eval: first.stop(t)
+        to: first.stop
+      - bind: up
+        eval: "&exports{}"
+      - bind: second
+        eval: build(s.name, s.otlpPlace(up.accept), s.clock, nil)
+        to: build
+      - eval: second.start(t)
+        to: second.start
+      - eval: ticking(t, second, "the first run's backlog sent by the second", func() bool { return up.sent.Load() > 0 })
+        to: ticking
   - of: doc.key
     steps:
       - return: d.ID
@@ -49,24 +510,12 @@ sequences:
         kind: value
       - id: t.Setenv
         kind: value
-      - id: app
-        kind: package
-      - id: svc.Store
-        kind: value
-      - id: svc.Subscribe
-        kind: value
-      - id: app.NewApp(App, svc).With
-        kind: value
       - id: clock
         kind: package
-      - id: a.With
-        kind: value
-      - id: a.Start
-        kind: value
-      - id: t.Fatalf
-        kind: value
-      - id: t.Cleanup
-        kind: value
+      - id: build
+        kind: internal
+      - id: s.start
+        kind: internal
     steps:
       - eval: t.Helper()
         to: t.Helper
@@ -76,6 +525,38 @@ sequences:
         to: t.Setenv
       - eval: t.Setenv("STORETEST_DATABASE_TIMEOUT", "1m")
         to: t.Setenv
+      - var:
+          name: clk
+          type: "*clock.ManualClock"
+      - opt:
+          do:
+            - set: clk
+              to: clock
+              value: clock.NewManualClock(epoch)
+          when: clocked
+      - bind: s
+        eval: build(name, b.Options(t, App), clk, declarations[name])
+        to: build
+      - eval: s.start(t)
+        to: s.start
+      - return: s
+  - of: build
+    participants:
+      - id: caller
+        kind: actor
+      - id: build
+        kind: self
+      - id: app
+        kind: package
+      - id: svc.Store
+        kind: value
+      - id: svc.Subscribe
+        kind: value
+      - id: app.NewApp(App, svc).With
+        kind: value
+      - id: s.running.With
+        kind: value
+    steps:
       - bind: svc
         eval: app.NewService("st-"+name, "A case of the framework's store conformance suite.")
         to: app
@@ -99,43 +580,94 @@ sequences:
           		lifecycle: svc.Workflow("lifecycle", docs, stateOf).Initial("new").When("ready", "new", "done", isReady),
           		pages:     pages,
           		pageFlow:  svc.Workflow("publishing", pages, stateOf).Initial("new").When("ready", "new", "done", isReady).On("hold", "new", "held"),
+          		name:      name,
+          		place:     place,
           	}
       - eval: svc.Subscribe("heard", s.moved, func(_ context.Context, d doc) error { s.heard.add(d.ID); return nil })
         to: svc.Subscribe
-      - bind: a
-        eval: |-
+      - opt:
+          do:
+            - eval: declare(svc, s)
+          when: declare != nil
+      - set: s.running
+        to: app.NewApp(App, svc).With
+        value: |-
           app.NewApp(App, svc).With(append([]app.AppOption{
           		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
-          	}, b.Options(t, App)...)...)
-        to: app.NewApp(App, svc).With
+          	}, place...)...)
       - opt:
           do:
             - set: s.clock
-              to: clock
-              value: clock.NewManualClock(epoch)
-            - set: a
-              to: a.With
-              value: a.With(app.Clock(s.clock))
-          when: clocked
+              value: clk
+            - set: s.running
+              to: s.running.With
+              value: s.running.With(app.Clock(clk))
+          when: clk != nil
+      - return: s
+  - of: (*suite).start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*suite).start
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: s.running.Start
+        kind: value
+      - id: t.Fatalf
+        kind: value
+      - id: t.Cleanup
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
       - opt:
           do:
             - eval: "t.Fatalf(\"start: %v\", err)"
               to: t.Fatalf
           init:
             bind: err
-            eval: a.Start(t.Context())
-            to: a.Start
+            eval: s.running.Start(t.Context())
+            to: s.running.Start
           when: err != nil
-      - eval: |-
-          t.Cleanup(func() {
-          		ctx, cancel := context.WithTimeout(context.Background(), stopWait)
-          		defer cancel()
-          		if err := a.Stop(ctx); err != nil {
-          			t.Errorf("stop: %v", err)
-          		}
-          	})
+      - eval: t.Cleanup(func() { s.stop(t) })
         to: t.Cleanup
-      - return: s
+  - of: (*suite).stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*suite).stop
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: context
+        kind: stdlib
+      - id: s.running.Stop
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - opt:
+          do:
+            - return: ""
+          when: s.stopped
+      - set: s.stopped
+        value: "true"
+      - bind: ctx, cancel
+        eval: context.WithTimeout(context.Background(), stopWait)
+        to: context
+      - defer: cancel()
+      - opt:
+          do:
+            - eval: "t.Errorf(\"stop: %v\", err)"
+              to: t.Errorf
+          init:
+            bind: err
+            eval: s.running.Stop(ctx)
+            to: s.running.Stop
+          when: err != nil
   - of: stateOf
     steps:
       - return: "&d.State"
@@ -718,6 +1250,151 @@ sequences:
               to: expect
           key: id
           range: "map[string]string{\"outer\": \"\", \"after\": \"\", \"inner\": app.WireNotFound}"
+          value: want
+  - of: transactionOptions
+    participants:
+      - id: caller
+        kind: actor
+      - id: transactionOptions
+        kind: self
+      - id: isolatedTransactions
+        kind: internal
+      - id: readOnlyTransaction
+        kind: internal
+      - id: nestedTransactionOptions
+        kind: internal
+    steps:
+      - eval: isolatedTransactions(t, s)
+        to: isolatedTransactions
+      - eval: readOnlyTransaction(t, s)
+        to: readOnlyTransaction
+      - eval: nestedTransactionOptions(t, s)
+        to: nestedTransactionOptions
+  - of: isolatedTransactions
+    participants:
+      - id: caller
+        kind: actor
+      - id: isolatedTransactions
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: must
+        kind: internal
+      - id: s.docs.Get
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - loop:
+          do:
+            - eval: |-
+                must(t, app.Transact(ctx, func(ctx context.Context) error {
+                			return s.docs.Insert(ctx, doc{ID: id, N: 1})
+                		}, opt))
+              to: must
+            - opt:
+                do:
+                  - eval: "t.Errorf(\"a %s transaction's write: %+v %v\", id, got, err)"
+                    to: t.Errorf
+                init:
+                  bind: got, err
+                  eval: s.docs.Get(ctx, id)
+                  to: s.docs.Get
+                when: err != nil || got.N != 1
+          key: id
+          range: "map[string]app.TransactOption{\"serializable\": app.Serializable(), \"repeatable\": app.RepeatableRead()}"
+          value: opt
+  - of: readOnlyTransaction
+    participants:
+      - id: caller
+        kind: actor
+      - id: readOnlyTransaction
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: app
+        kind: package
+      - id: t.Errorf
+        kind: value
+      - id: s.docs.Get
+        kind: value
+      - id: expect
+        kind: internal
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - bind: err
+        eval: |-
+          app.Transact(ctx, func(ctx context.Context) error {
+          		if _, err := s.docs.Get(ctx, "serializable"); err != nil {
+          			return err
+          		}
+          		return s.docs.Insert(ctx, doc{ID: "read-only"})
+          	}, app.ReadOnly())
+        to: app
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a write in a read-only transaction: %v, want CodeTransactionReadOnly\", err)"
+              to: t.Errorf
+          when: "!errs.HasCode(err, app.CodeTransactionReadOnly)"
+      - set: _, err
+        to: s.docs.Get
+        value: s.docs.Get(ctx, "read-only")
+      - eval: expect(t, "the refused write", err, app.WireNotFound)
+        to: expect
+  - of: nestedTransactionOptions
+    participants:
+      - id: caller
+        kind: actor
+      - id: nestedTransactionOptions
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: app
+        kind: package
+      - id: t.Fatalf
+        kind: value
+      - id: s.docs.Get
+        kind: value
+      - id: expect
+        kind: internal
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - bind: err
+        eval: |-
+          app.Transact(ctx, func(ctx context.Context) error {
+          		if err := s.docs.Insert(ctx, doc{ID: "outer-options"}); err != nil {
+          			return err
+          		}
+          		nested := app.Transact(ctx, func(ctx context.Context) error {
+          			return s.docs.Insert(ctx, doc{ID: "nested-options"})
+          		}, app.Serializable())
+          		if !errs.HasCode(nested, app.CodeTransactionNested) {
+          			t.Errorf("a nested Transact given an option: %v, want CodeTransactionNested", nested)
+          		}
+          		return nil
+          	})
+        to: app
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"the outer transaction: %v\", err)"
+              to: t.Fatalf
+          when: err != nil
+      - loop:
+          do:
+            - bind: _, err
+              eval: s.docs.Get(ctx, id)
+              to: s.docs.Get
+            - eval: expect(t, id+" after the commit", err, want)
+              to: expect
+          key: id
+          range: "map[string]string{\"outer-options\": \"\", \"nested-options\": app.WireNotFound}"
           value: want
   - of: heldPublish
     participants:
@@ -1476,3 +2153,522 @@ sequences:
             - eval: "t.Errorf(\"the trash %s: %+v, want %+v\", what, got, want)"
               to: t.Errorf
           when: "!same"
+  - of: declareQueues
+    participants:
+      - id: caller
+        kind: actor
+      - id: declareQueues
+        kind: self
+      - id: |-
+          svc.Command("file", func(_ context.Context, d doc) (app.Empty, error) {
+          		s.filed.add(d.ID)
+          		return app.Empty{}, nil
+          	}, app.Queued()).Key
+        kind: value
+      - id: svc.Subscribe
+        kind: value
+      - id: svc.Topic[doc]("onced").Once
+        kind: value
+    steps:
+      - set: s.filed, s.later
+        value: "&heard{}, &heard{}"
+      - set: s.file
+        to: |-
+          svc.Command("file", func(_ context.Context, d doc) (app.Empty, error) {
+          		s.filed.add(d.ID)
+          		return app.Empty{}, nil
+          	}, app.Queued()).Key
+        value: |-
+          svc.Command("file", func(_ context.Context, d doc) (app.Empty, error) {
+          		s.filed.add(d.ID)
+          		return app.Empty{}, nil
+          	}, app.Queued()).Key(doc.key)
+      - set: s.delayed
+        value: svc.Topic[doc]("delayed")
+      - eval: svc.Subscribe("delayed-heard", s.delayed, func(_ context.Context, d doc) error { s.later.add(d.ID); return nil })
+        to: svc.Subscribe
+      - set: s.onced
+        to: svc.Topic[doc]("onced").Once
+        value: svc.Topic[doc]("onced").Once(doc.key, time.Hour)
+      - eval: svc.Subscribe("onced-heard", s.onced, func(_ context.Context, d doc) error { s.later.add(d.ID); return nil })
+        to: svc.Subscribe
+  - of: ticking
+    participants:
+      - id: caller
+        kind: actor
+      - id: ticking
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: eventually
+        kind: internal
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - eval: |-
+          eventually(t, what, func() bool {
+          		s.clock.Advance(time.Second)
+          		return cond()
+          	})
+        to: eventually
+  - of: queuedCommand
+    participants:
+      - id: caller
+        kind: actor
+      - id: queuedCommand
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: must
+        kind: internal
+      - id: ticking
+        kind: internal
+      - id: app
+        kind: package
+      - id: t.Fatal
+        kind: value
+      - id: s.clock.Now().Add
+        kind: value
+      - id: time
+        kind: stdlib
+      - id: s.clock.Advance
+        kind: value
+      - id: s.file.Dispatch
+        kind: value
+      - id: eventually
+        kind: internal
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - eval: |-
+          must(t, app.Transact(ctx, func(ctx context.Context) error {
+          		_, err := s.file.Dispatch(ctx, doc{ID: "kept"})
+          		return err
+          	}))
+        to: must
+      - eval: ticking(t, s, "the committed dispatch", func() bool { return s.filed.has("kept") })
+        to: ticking
+      - bind: err
+        eval: |-
+          app.Transact(ctx, func(ctx context.Context) error {
+          		_, dispatchErr := s.file.Dispatch(ctx, doc{ID: "dropped"})
+          		return errors.Join(dispatchErr, errRolled)
+          	})
+        to: app
+      - opt:
+          do:
+            - eval: t.Fatal(err)
+              to: t.Fatal
+          when: "!errors.Is(err, errRolled)"
+      - bind: at
+        eval: s.clock.Now().Add(time.Hour)
+        to: s.clock.Now().Add
+      - eval: "must(t, s.file.DispatchAt(ctx, doc{ID: \"later\"}, at))"
+        to: must
+      - eval: "must(t, s.file.DispatchAt(ctx, doc{ID: \"later\", N: 1}, at.Add(time.Hour)))"
+        to: must
+      - eval: time.Sleep(10 * pollEvery)
+        to: time
+      - opt:
+          do:
+            - eval: t.Fatal("a dispatch for later was handled before its instant")
+              to: t.Fatal
+          when: s.filed.has("later")
+      - eval: s.clock.Advance(time.Hour)
+        to: s.clock.Advance
+      - eval: ticking(t, s, "the dispatch for later", func() bool { return s.filed.has("later") })
+        to: ticking
+      - set: _, err
+        to: s.file.Dispatch
+        value: "s.file.Dispatch(ctx, doc{ID: \"settled\"})"
+      - eval: must(t, err)
+        to: must
+      - eval: eventually(t, "the dispatch after the one for later", func() bool { return s.filed.has("settled") })
+        to: eventually
+      - eval: s.clock.Advance(2 * time.Hour)
+        to: s.clock.Advance
+      - set: _, err
+        to: s.file.Dispatch
+        value: "s.file.Dispatch(ctx, doc{ID: \"after\"})"
+      - eval: must(t, err)
+        to: must
+      - eval: ticking(t, s, "the dispatch after", func() bool { return s.filed.has("after") })
+        to: ticking
+      - opt:
+          do:
+            - eval: |-
+                t.Errorf("a rolled back dispatch handled: %v; a key that waited handled %d times, want once",
+                			s.filed.has("dropped"), s.filed.count("later"))
+              to: t.Errorf
+          when: s.filed.has("dropped") || s.filed.count("later") != 1
+  - of: topicLater
+    participants:
+      - id: caller
+        kind: actor
+      - id: topicLater
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: must
+        kind: internal
+      - id: time
+        kind: stdlib
+      - id: t.Fatal
+        kind: value
+      - id: s.clock.Advance
+        kind: value
+      - id: ticking
+        kind: internal
+      - id: s.later.count
+        kind: internal
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - eval: "must(t, s.delayed.PublishAt(ctx, doc{ID: \"soon\"}, s.clock.Now().Add(time.Hour)))"
+        to: must
+      - eval: time.Sleep(10 * pollEvery)
+        to: time
+      - opt:
+          do:
+            - eval: t.Fatal("a message for later was delivered before its instant")
+              to: t.Fatal
+          when: s.later.has("soon")
+      - eval: s.clock.Advance(time.Hour)
+        to: s.clock.Advance
+      - eval: ticking(t, s, "the message for later", func() bool { return s.later.has("soon") })
+        to: ticking
+      - eval: "must(t, s.onced.Publish(ctx, doc{ID: \"x\"}))"
+        to: must
+      - eval: "must(t, s.onced.Publish(ctx, doc{ID: \"x\", N: 1}))"
+        to: must
+      - eval: "must(t, s.onced.Publish(ctx, doc{ID: \"y\"}))"
+        to: must
+      - eval: ticking(t, s, "the messages once", func() bool { return s.later.has("x") && s.later.has("y") })
+        to: ticking
+      - eval: time.Sleep(10 * pollEvery)
+        to: time
+      - opt:
+          do:
+            - eval: t.Errorf("a key published twice within its window was delivered %d times", n)
+              to: t.Errorf
+          init:
+            bind: "n"
+            eval: s.later.count("x")
+            to: s.later.count
+          when: n != 1
+  - of: queryReadOnly
+    participants:
+      - id: caller
+        kind: actor
+      - id: queryReadOnly
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: must
+        kind: internal
+      - id: s.reader.Ask
+        kind: value
+      - id: t.Fatalf
+        kind: value
+      - id: expect
+        kind: internal
+      - id: s.docs.Get
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - eval: "must(t, s.docs.Put(ctx, doc{ID: \"a\", N: 1}))"
+        to: must
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"a read-only query's read: %+v %v\", got, err)"
+              to: t.Fatalf
+          init:
+            bind: got, err
+            eval: "s.reader.Ask(ctx, doc{ID: \"a\"})"
+            to: s.reader.Ask
+          when: err != nil || got.N != 1
+      - bind: _, err
+        eval: "s.reader.Ask(ctx, doc{ID: \"b\", N: 2})"
+        to: s.reader.Ask
+      - eval: expect(t, "a read-only query's write", err, app.WireInvalid)
+        to: expect
+      - opt:
+          do:
+            - eval: "t.Errorf(\"a refused write left a document: %v\", err)"
+              to: t.Errorf
+          init:
+            bind: _, err
+            eval: s.docs.Get(ctx, "b")
+            to: s.docs.Get
+          when: code(err) != app.WireNotFound
+      - eval: |-
+          must(t, app.Transact(ctx, func(ctx context.Context) error {
+          		_, err := s.reader.Ask(ctx, doc{ID: "c", N: askedN})
+          		return err
+          	}))
+        to: must
+      - opt:
+          do:
+            - eval: "t.Errorf(\"an Ask inside the caller's transaction: %+v %v\", got, err)"
+              to: t.Errorf
+          init:
+            bind: got, err
+            eval: s.docs.Get(ctx, "c")
+            to: s.docs.Get
+          when: err != nil || got.N != askedN
+  - of: memo.key
+    steps:
+      - return: m.ID
+  - of: (*listing).notice
+    steps:
+      - lock:
+          mutex: l
+      - set: l.heard
+        value: append(l.heard, key)
+  - of: (*listing).has
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listing).has
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: l
+      - return: slices.Contains(l.heard, key)
+        to: slices
+  - of: (*listing).listed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listing).listed
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: l
+      - return: slices.Clone(l.keys), l.err
+        to: slices
+  - of: declareMemoStore
+    participants:
+      - id: caller
+        kind: actor
+      - id: declareMemoStore
+        kind: self
+      - id: svc.Store
+        kind: value
+    steps:
+      - set: s.listed
+        value: "&listing{}"
+      - set: s.memos
+        to: svc.Store
+        value: svc.Store("memos", memo.key)
+  - of: declareMemos
+    participants:
+      - id: caller
+        kind: actor
+      - id: declareMemos
+        kind: self
+      - id: declareMemoStore
+        kind: internal
+      - id: svc.Watch
+        kind: value
+    steps:
+      - eval: declareMemoStore(svc, s)
+        to: declareMemoStore
+      - eval: svc.Watch("screen", app.Moderated, s.listed.screen, app.OwnStores())
+        to: svc.Watch
+  - of: (*listing).screen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listing).screen
+        kind: self
+      - id: l.notice
+        kind: internal
+      - id: app
+        kind: package
+    steps:
+      - defer: l.notice(w.Key)
+        to: l.notice
+      - opt:
+          do:
+            - return: nil
+          when: w.Key != listKey
+      - bind: recs, err
+        eval: app.RecordsOf(ctx, w.Store)
+        to: app
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - var:
+          name: keys
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: err
+                    value: keyErr
+                  - break: true
+                when: keyErr != nil
+            - set: keys
+              value: append(keys, key)
+          key: key
+          range: recs.Keys(ctx)
+          value: keyErr
+      - lock:
+          mutex: l
+      - set: l.keys, l.err
+        value: keys, err
+      - return: nil
+  - of: (*suite).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*suite).settle
+        kind: self
+      - id: t.Helper
+        kind: value
+      - id: must
+        kind: internal
+      - id: eventually
+        kind: internal
+    steps:
+      - eval: t.Helper()
+        to: t.Helper
+      - eval: "must(t, s.memos.Insert(t.Context(), memo{ID: id, Text: \"settle\"}))"
+        to: must
+      - eval: eventually(t, id+" heard", func() bool { return s.listed.has(id) })
+        to: eventually
+  - of: recordsKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: recordsKeys
+        kind: self
+      - id: must
+        kind: internal
+      - id: s.settle
+        kind: internal
+      - id: s.listed.listed
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: want
+        eval: "[]string{listKey}"
+      - eval: |-
+          must(t, app.Transact(t.Context(), func(ctx context.Context) error {
+          		for i := range keyedMemos {
+          			id := "m" + strconv.Itoa(1000 + i)[1:]
+          			want = append(want, id)
+          			if err := s.memos.Insert(ctx, memo{ID: id, Text: "listed"}); err != nil {
+          				return err
+          			}
+          		}
+          		return nil
+          	}))
+        to: must
+      - eval: s.settle(t, listKey)
+        to: s.settle
+      - bind: keys, err
+        eval: s.listed.listed()
+        to: s.listed.listed
+      - eval: slices.Sort(want)
+        to: slices
+      - opt:
+          do:
+            - eval: t.Errorf("Keys listed %d keys (%v), want the %d memos in key order", len(keys), err, len(want))
+              to: t.Errorf
+          when: err != nil || !slices.Equal(keys, want)
+  - of: declareOutbox
+    participants:
+      - id: caller
+        kind: actor
+      - id: declareOutbox
+        kind: self
+      - id: svc.Mailer
+        kind: value
+    steps:
+      - set: s.mailer
+        to: svc.Mailer
+        value: svc.Mailer("notify", app.From("Storetest", "storetest@example.com"), app.MailAttempts(1))
+  - of: letterAbout
+    steps:
+      - return: "mail.Message{To: []mail.Address{{Addr: \"reader@example.com\"}}, Subject: \"about \" + id, Text: \"A mail of the store conformance suite.\"}"
+  - of: outbox
+    participants:
+      - id: caller
+        kind: actor
+      - id: outbox
+        kind: self
+      - id: t.Context
+        kind: value
+      - id: app
+        kind: package
+      - id: t.Fatalf
+        kind: value
+      - id: must
+        kind: internal
+      - id: eventually
+        kind: internal
+      - id: t.Error
+        kind: value
+      - id: s.running.Graph().Node
+        kind: value
+      - id: t.Errorf
+        kind: value
+    steps:
+      - bind: ctx
+        eval: t.Context()
+        to: t.Context
+      - bind: err
+        eval: |-
+          app.Transact(ctx, func(ctx context.Context) error {
+          		_, sendErr := s.mailer.Send(ctx, letterAbout("dropped"))
+          		return errors.Join(sendErr, errRolled)
+          	})
+        to: app
+      - opt:
+          do:
+            - eval: "t.Fatalf(\"the rolled back transaction: %v\", err)"
+              to: t.Fatalf
+          when: "!errors.Is(err, errRolled)"
+      - eval: |-
+          must(t, app.Transact(ctx, func(ctx context.Context) error {
+          		_, sendErr := s.mailer.Send(ctx, letterAbout("kept"))
+          		return sendErr
+          	}))
+        to: must
+      - eval: eventually(t, "the committed mail", func() bool { return s.mailed("kept") })
+        to: eventually
+      - opt:
+          do:
+            - eval: t.Error("a mail sent in a transaction that rolled back was delivered")
+              to: t.Error
+          when: s.mailed("dropped")
+      - opt:
+          do:
+            - eval: "t.Errorf(\"the outbox on a database: %+v, want its table\", node)"
+              to: t.Errorf
+          init:
+            bind: node
+            eval: s.running.Graph().Node("st-outbox/mailer/notify")
+            to: s.running.Graph().Node
+          when: s.onDatabase() && (node == nil || node.Mailer.Outbox != "sql")

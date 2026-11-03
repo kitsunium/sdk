@@ -18,6 +18,20 @@
   ],
   "packages": [
     {
+      "path": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "sqs",
+      "dir": "queue/sqs",
+      "layer": "thirdparty",
+      "doc": "Package sqs is a core/data/queue Broker over Amazon SQS (ADR 0054's deferred\nconnector, ADR 0211). It lives in the third-party/aws module beside the s3\nand cloudwatch writers, so it costs a consumer no vendor the module did not\nalready carry (ADR 0157).\n\n# Mapping\n\nPublish is SendMessage: the payload base64-encoded in the body, since an\nSQS body is text, and the enqueue instant, read from Config.Clock, carried\nas a message attribute; the MessageId is the message's ID. Receive is one\nReceiveMessage of at most MaxReceiveBatch messages, its VisibilityTimeout\nthe policy's rounded up to the second and its WaitTimeSeconds\nConfig.WaitTime: long polling is the wait, so the broker has no Waker.\nDeliveries is ApproximateReceiveCount. Ack is DeleteMessage; Nack is\nChangeMessageVisibility to the retry delay, or, once the message has been\ndelivered MaxDeliveries times, a SendMessage to the dead-letter queue with\nits cause followed by a DeleteMessage — two requests, so a crash between\nthem dead-letters the message twice and never loses it. A message whose\nleases all lapsed is dead-lettered by the Receive that finds it past its\nbudget, its Reason LEASE_EXPIRED.\n\n# Whose clock is the lease\n\nSQS keeps the visibility timeout on its own clock and to the second, and a\nDeleteMessage with an old receipt handle may succeed. The broker therefore\nreads Config.Clock before each ReceiveMessage, so the deadline it hands out\nnever falls after the one SQS keeps, writes it into the receipt, and\nrefuses an Ack, Nack, Extend or Reject at or past it with\ncore/data/queue.LeaseExpired, LeaseLost in its trail, before anything is\nsent: a consumer that lost its lease learns it, whatever SQS would have\ndone. The deadline is only as true as the two clocks agree. A receipt is\ngood with the broker that issued it, whose table holds the receipt handle\nand the payload a dead letter needs; one minted by another broker is\ncore/data/queue.UnknownReceipt, and a renewal voids the receipt it\nreplaces.\n\n# Capabilities\n\nLeaseExtender (ChangeMessageVisibility), Rejecter (dead-lettered at once),\nDelayedNacker (up to MaxVisibility), DelayedPublisher (DelaySeconds, up to\nMaxPublishDelay) and DeadLetterReader (a ReceiveMessage on the dead-letter\nqueue with a zero visibility timeout, which hides nothing; SQS samples a\nstandard queue, so a listing longer than a page may miss one). Not\nReleaser: SQS cannot give back a receive count. Not OncePublisher: SQS\ndeduplicates on FIFO queues only, which ADR 0054 defers with per-key\nordering. Not Waker: long polling is the wait. Every failed request is the\npackage's sentinel, core/data/queue.QueueBackendFailed in its trail.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "s3",
+      "dir": "vfs/s3",
+      "layer": "thirdparty",
+      "doc": "Package s3 is a core/data/vfs FullFS over one S3 bucket, or one prefix of it\n(ADR 0056's port, ADR 0211). It lives in the third-party/aws module beside\nthe s3 logger writer, on the vendor the module already carries (ADR 0157).\n\n# The mapping\n\nA file is an object whose key is Config.Prefix joined with its name; a\ndirectory is a zero-byte marker object whose key ends in a slash, written\nby MkdirAll, or any prefix that some key extends. Open, Stat and ReadFile\nare HeadObject and GetObject; ReadDir is ListObjectsV2 with the slash\ndelimiter, paged by Config.MaxKeys; WriteFile and WriteAtomic are one\nPutObject; Remove is DeleteObject, refused on a directory that still holds\nsomething; RemoveAll is a paged DeleteObjects.\n\n# Atomic publication without a rename\n\nA PutObject is atomic per key: a reader sees the complete old object or the\ncomplete new one, never a part, and a failed PutObject leaves the old one in\nplace. That is exactly AtomicWriter's contract, so WriteAtomic is the same\nrequest as WriteFile; the port has no Rename, and none is faked. The two\ndiffer in their mode only: WriteFile keeps the mode of the file it\nrewrites, WriteAtomic records perm on every publication.\n\n# What S3 does not have\n\nModes are recorded as object metadata (ModeMetadata) and reported by Stat;\nS3 enforces none of them. Durability is S3's: a PutObject that returned is\nstored. ModTime is the object's Last-Modified, to the second. A missing\nparent is refused as on disk, so a directory exists only once MkdirAll, or\na write beneath it by another client, made it. Every call is bounded by\nConfig.Timeout, since the port's methods take no context.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
       "name": "cloudwatch",
       "dir": "writer/cloudwatch",
@@ -33,6 +47,616 @@
     }
   ],
   "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.AckFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "AckFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.101.4",
+        "reason": "ACK_FAILED",
+        "public": "The queue could not settle the message"
+      },
+      "doc": "AckFailed wraps a DeleteMessage or ChangeMessageVisibility failure on a\nlease that still held; the message stays leased until its deadline.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.BatchTooLarge",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "BatchTooLarge",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.101.7",
+        "reason": "BATCH_TOO_LARGE",
+        "public": "The receive batch is larger than SQS allows"
+      },
+      "doc": "BatchTooLarge refuses a Receive asking for more than MaxReceiveBatch messages.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.CodeSQSAckFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "CodeSQSAckFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "222468",
+      "code": {
+        "value": "0.3.101.4"
+      },
+      "doc": "CodeSQSAckFailed identifies a DeleteMessage or ChangeMessageVisibility SQS\nrefused or never answered for a receipt whose lease still held.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.CodeSQSBatchTooLarge",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "CodeSQSBatchTooLarge",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "222471",
+      "code": {
+        "value": "0.3.101.7"
+      },
+      "doc": "CodeSQSBatchTooLarge identifies a Receive asking for more than ten\nmessages, the most one ReceiveMessage returns.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.CodeSQSDelayTooLong",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "CodeSQSDelayTooLong",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "222470",
+      "code": {
+        "value": "0.3.101.6"
+      },
+      "doc": "CodeSQSDelayTooLong identifies a delay SQS cannot carry: a publication\nlater than fifteen minutes (DelaySeconds), or a hand-back or a renewal\nlater than twelve hours (ChangeMessageVisibility).\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.CodeSQSLeaseLost",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "CodeSQSLeaseLost",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "222469",
+      "code": {
+        "value": "0.3.101.5"
+      },
+      "doc": "CodeSQSLeaseLost identifies a receipt whose lease lapsed on the broker's\nclock before the call: SQS may already have handed the message to another\nconsumer, and nothing is sent.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.CodeSQSMisconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "CodeSQSMisconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "222465",
+      "code": {
+        "value": "0.3.101.1"
+      },
+      "doc": "CodeSQSMisconfigured identifies a Config New refuses before any request:\na missing queue URL, region or credentials, a policy the broker cannot\nhonour on SQS, a long-poll wait above twenty seconds.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.CodeSQSReceiveFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "CodeSQSReceiveFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "222467",
+      "code": {
+        "value": "0.3.101.3"
+      },
+      "doc": "CodeSQSReceiveFailed identifies a ReceiveMessage SQS refused or never answered.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.CodeSQSSendFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "CodeSQSSendFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "222466",
+      "code": {
+        "value": "0.3.101.2"
+      },
+      "doc": "CodeSQSSendFailed identifies a SendMessage SQS refused or never answered.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.Config",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "Config",
+      "spelled": "struct{QueueURL string; DeadLetterQueueURL string; Region string; Endpoint string; Credentials writer.CredentialProvider; Clock clock.Clock; Policy corequeue.PolicyValue; WaitTime time.Duration}",
+      "canonical": "struct{QueueURL string; DeadLetterQueueURL string; Region string; Endpoint string; Credentials github.com/kitsunium/sdk/internal/core/observe/logger/writer.CredentialProvider; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; Policy github.com/kitsunium/sdk/internal/core/data/queue.PolicyValue; WaitTime time.Duration}",
+      "fields": [
+        {
+          "name": "QueueURL",
+          "type": "string",
+          "doc": "QueueURL is the queue's URL, as GetQueueUrl returns it. Required.\n"
+        },
+        {
+          "name": "DeadLetterQueueURL",
+          "type": "string",
+          "doc": "DeadLetterQueueURL is the queue a message is moved to with its cause\nonce it has been delivered Policy.MaxDeliveries times, or rejected.\nRequired: the broker owns the decision to dead-letter (ADR 0054), and\na Nack on a last attempt with nowhere to go would lose the message.\nThe source queue's own redrive policy, if any, should allow more\nreceives than MaxDeliveries, so SQS never moves a message first.\n"
+        },
+        {
+          "name": "Region",
+          "type": "string",
+          "doc": "Region is the AWS region of both queues. Required.\n"
+        },
+        {
+          "name": "Endpoint",
+          "type": "string",
+          "doc": "Endpoint overrides the SQS endpoint — LocalStack, ElasticMQ, a VPC\nendpoint. Empty means the region's.\n"
+        },
+        {
+          "name": "Credentials",
+          "type": "writer.CredentialProvider",
+          "doc": "Credentials signs every request, re-read on each signature so a\nrotation is picked up. Required: the default credential chain is not\nwired, as for the writers.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Clock",
+          "doc": "Clock stamps the enqueue instant and the lease deadlines a receipt\ncarries, and judges them. Nil means clock.System.\n"
+        },
+        {
+          "name": "Policy",
+          "type": "corequeue.PolicyValue",
+          "doc": "Policy is the delivery discipline. Its zero value is refused, as for\nevery broker; its VisibilityTimeout and its retry ceiling must also\nfit MaxVisibility.\n"
+        },
+        {
+          "name": "WaitTime",
+          "type": "time.Duration",
+          "doc": "WaitTime is how long one Receive long-polls an empty queue before it\nreturns no message: 0 answers at once, at most MaxWaitTime.\n"
+        }
+      ],
+      "doc": "Config configures New: the queue, its dead-letter queue, how to reach\nthem, and the delivery discipline the broker enforces.\n",
+      "file": "queue/sqs/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.DelayTooLong",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "DelayTooLong",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.101.6",
+        "reason": "DELAY_TOO_LONG",
+        "public": "The requested delay is longer than SQS allows"
+      },
+      "doc": "DelayTooLong refuses a delay SQS cannot record; nothing moved.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.LeaseLost",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "LeaseLost",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.101.5",
+        "reason": "LEASE_LOST",
+        "public": "The message lease had already lapsed"
+      },
+      "doc": "LeaseLost is the trail code of core/data/queue.LeaseExpired on this\nbroker: the receipt's deadline, on the broker's clock, had passed.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.MaxPayloadBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "MaxPayloadBytes",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "195584",
+      "doc": "MaxPayloadBytes is the largest payload Publish sends: 191 KiB, which\nbase64 and the broker's attributes keep under the 256 KiB an SQS\nmessage has carried since the service began, and every emulator\naccepts. A Policy.MaxMessageBytes above it is lowered to it, and a\nlarger payload is core/data/queue.MessageTooLarge.\n",
+      "file": "queue/sqs/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.MaxPublishDelay",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "MaxPublishDelay",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "900000000000",
+      "doc": "MaxPublishDelay is the latest a delayed publication may become receivable\n(DelaySeconds 900).\n",
+      "file": "queue/sqs/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.MaxReceiveBatch",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "MaxReceiveBatch",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "10",
+      "doc": "MaxReceiveBatch is the most messages one Receive leases: ReceiveMessage's\nMaxNumberOfMessages ceiling. A larger max is refused with BatchTooLarge\nrather than clamped, so a consumer configured for more learns it at once.\n",
+      "file": "queue/sqs/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.MaxVisibility",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "MaxVisibility",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "43200000000000",
+      "doc": "MaxVisibility is the longest lease, retry delay or renewal SQS records\n(VisibilityTimeout 43200 s). A policy whose VisibilityTimeout or retry\nceiling is longer is refused at New.\n",
+      "file": "queue/sqs/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.MaxWaitTime",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "MaxWaitTime",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "20000000000",
+      "doc": "MaxWaitTime is the longest long poll SQS accepts (WaitTimeSeconds 20).\n",
+      "file": "queue/sqs/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.New",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "New",
+      "spelled": "func(cfg Config) (broker corequeue.Broker, err error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/third-party/aws/queue/sqs.Config) (broker github.com/kitsunium/sdk/internal/core/data/queue.Broker, err error)",
+      "doc": "New returns a broker over the SQS queue at cfg.QueueURL. It sends no\nrequest: everything decidable without SQS is decided here, and a refusal\nis SQSMisconfigured or core/data/queue.QueueMisconfigured.\n",
+      "file": "queue/sqs/broker.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.ReceiveFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "ReceiveFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.101.3",
+        "reason": "RECEIVE_FAILED",
+        "public": "The queue could not be read"
+      },
+      "doc": "ReceiveFailed wraps a ReceiveMessage failure; nothing was leased.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.SQSMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "SQSMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.101.1",
+        "reason": "SQS_MISCONFIGURED",
+        "public": "The SQS queue broker is misconfigured"
+      },
+      "doc": "SQSMisconfigured refuses a Config New cannot build a broker from.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/queue/sqs.SendFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+      "name": "SendFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.101.2",
+        "reason": "SEND_FAILED",
+        "public": "The queue could not accept the message"
+      },
+      "doc": "SendFailed wraps a SendMessage failure; nothing was published.\n",
+      "file": "queue/sqs/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.AccessDenied",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "AccessDenied",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.98.3",
+        "reason": "ACCESS_DENIED",
+        "public": "Access to the storage bucket was denied"
+      },
+      "doc": "AccessDenied reports a request the credentials may not make.\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.BucketMissing",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "BucketMissing",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.98.2",
+        "reason": "BUCKET_MISSING",
+        "public": "The storage bucket does not exist"
+      },
+      "doc": "BucketMissing reports a bucket S3 does not know.\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.CodeS3FSAccessDenied",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "CodeS3FSAccessDenied",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221699",
+      "code": {
+        "value": "0.3.98.3"
+      },
+      "doc": "CodeS3FSAccessDenied identifies a request the credentials are not allowed to make (403).\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.CodeS3FSBucketMissing",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "CodeS3FSBucketMissing",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221698",
+      "code": {
+        "value": "0.3.98.2"
+      },
+      "doc": "CodeS3FSBucketMissing identifies a request on a bucket S3 does not know (NoSuchBucket).\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.CodeS3FSMisconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "CodeS3FSMisconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221697",
+      "code": {
+        "value": "0.3.98.1"
+      },
+      "doc": "CodeS3FSMisconfigured identifies a Config New refuses before any request:\na missing bucket, region or credentials, a prefix that is not a clean\nrelative path, a page size outside 1..1000, a non-positive timeout.\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.CodeS3FSObjectTooLarge",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "CodeS3FSObjectTooLarge",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221701",
+      "code": {
+        "value": "0.3.98.5"
+      },
+      "doc": "CodeS3FSObjectTooLarge identifies a write above MaxObjectBytes, the most\none PutObject carries; multipart upload is out of scope.\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.CodeS3FSRequestFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "CodeS3FSRequestFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221702",
+      "code": {
+        "value": "0.3.98.6"
+      },
+      "doc": "CodeS3FSRequestFailed identifies any other S3 failure, the cause kept in the chain.\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.CodeS3FSThrottled",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "CodeS3FSThrottled",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221700",
+      "code": {
+        "value": "0.3.98.4"
+      },
+      "doc": "CodeS3FSThrottled identifies a request S3 slowed down (SlowDown, 503).\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.Config",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "Config",
+      "spelled": "struct{Bucket string; Prefix string; Region string; Endpoint string; Credentials writer.CredentialProvider; MaxKeys int32; Timeout time.Duration}",
+      "canonical": "struct{Bucket string; Prefix string; Region string; Endpoint string; Credentials github.com/kitsunium/sdk/internal/core/observe/logger/writer.CredentialProvider; MaxKeys int32; Timeout time.Duration}",
+      "fields": [
+        {
+          "name": "Bucket",
+          "type": "string",
+          "doc": "Bucket is the bucket's name. Required.\n"
+        },
+        {
+          "name": "Prefix",
+          "type": "string",
+          "doc": "Prefix roots the filesystem under a key prefix: \"assets\" makes the name\n\"a.txt\" the key \"assets/a.txt\". Empty roots it at the bucket. It must be\na clean relative path (io/fs.ValidPath), \".\" excepted.\n"
+        },
+        {
+          "name": "Region",
+          "type": "string",
+          "doc": "Region is the bucket's AWS region. Required.\n"
+        },
+        {
+          "name": "Endpoint",
+          "type": "string",
+          "doc": "Endpoint overrides the S3 endpoint, in path style — LocalStack, MinIO,\nany S3-compatible store. Empty means the region's.\n"
+        },
+        {
+          "name": "Credentials",
+          "type": "writer.CredentialProvider",
+          "doc": "Credentials signs every request, re-read on each signature. Required,\nas for the s3 writer.\n"
+        },
+        {
+          "name": "MaxKeys",
+          "type": "int32",
+          "doc": "MaxKeys is how many keys one ListObjectsV2 page asks for, 1 to 1000; a\nlisting larger than a page is read page by page. Zero is refused\nrather than defaulted (ADR 0031).\n"
+        },
+        {
+          "name": "Timeout",
+          "type": "time.Duration",
+          "doc": "Timeout bounds every request, since the port's methods take no\ncontext. Zero is refused: its two readings, \"no bound\" and \"fail at\nonce\", are opposites (ADR 0031).\n"
+        }
+      ],
+      "doc": "Config configures New: the bucket and prefix the filesystem is rooted at,\nhow to reach them, and the bounds every call keeps.\n",
+      "file": "vfs/s3/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.MaxObjectBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "MaxObjectBytes",
+      "spelled": "int64",
+      "canonical": "int64",
+      "value": "5368709120",
+      "doc": "MaxObjectBytes is the largest file WriteFile and WriteAtomic publish: the\nsingle-PutObject limit, 5 GiB.\n",
+      "file": "vfs/s3/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.ModeMetadata",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "ModeMetadata",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"mode\"",
+      "doc": "ModeMetadata is the user-metadata key a file's or a directory's\npermission bits are recorded under, in octal (x-amz-meta-mode).\n",
+      "file": "vfs/s3/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.New",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "New",
+      "spelled": "func(cfg Config) (filesystem corevfs.FullFS, err error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/third-party/aws/vfs/s3.Config) (filesystem github.com/kitsunium/sdk/internal/core/data/vfs.FullFS, err error)",
+      "doc": "New returns the filesystem rooted at cfg.Prefix in cfg.Bucket. It sends no\nrequest: a missing bucket is BucketMissing on the first call that reaches\nit.\n",
+      "file": "vfs/s3/fs.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.ObjectTooLarge",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "ObjectTooLarge",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.98.5",
+        "reason": "OBJECT_TOO_LARGE",
+        "public": "The file is too large to store"
+      },
+      "doc": "ObjectTooLarge refuses a write above MaxObjectBytes; nothing was sent.\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.RequestFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "RequestFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.98.6",
+        "reason": "REQUEST_FAILED",
+        "public": "The storage request failed"
+      },
+      "doc": "RequestFailed wraps any other S3 failure.\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.S3FSMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "S3FSMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.98.1",
+        "reason": "S3_FS_MISCONFIGURED",
+        "public": "The S3 filesystem is misconfigured"
+      },
+      "doc": "S3FSMisconfigured refuses a Config New cannot build a filesystem from.\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/aws/vfs/s3.Throttled",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+      "name": "Throttled",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.98.4",
+        "reason": "THROTTLED",
+        "public": "The storage service is throttling requests"
+      },
+      "doc": "Throttled reports a request S3 slowed down; retrying later may succeed.\n",
+      "file": "vfs/s3/gen_codes.go",
+      "layer": "thirdparty"
+    },
     {
       "id": "go:github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch.ClientInitFailed",
       "kind": "var",

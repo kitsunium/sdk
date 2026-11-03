@@ -85,7 +85,34 @@ BenchmarkSweepBaseline/entities=100000-10 	      16	  67868763 ns/op	16129038 B/
   everything on every write as well, which is why it paced itself at one run a
   second. The agenda keeps the pace (`Config.MinGap`) to coalesce bursts, not
   to survive them.
-- **Memory is bounded.** A reschedule leaves the old entry to be dropped when
-  it surfaces; the heap is rebuilt once stale entries outnumber live ones two
-  to one, so it never holds more than 2N + 64 entries —
-  `TestTheHeapIsRebuiltBeforeStaleEntriesOutgrowItsBound`.
+- **Memory is bounded.** The agenda holds one heap entry per scheduled
+  entity: a reschedule re-keys it in place and an unschedule removes it
+  (`IndexedHeap`, #1036), so the heap never holds more than N entries —
+  `TestTheHeapHoldsOneEntryPerScheduledKey`. Before #1036 a reschedule left a
+  stale entry behind and the heap was rebuilt past 2N + 64.
+
+## The indexed heap (#1036), re-measured
+
+The agenda moved from lazy deletion (a reschedule pushed a fresh entry, a
+stale one was dropped when it surfaced, the heap rebuilt past 2N + 64) to
+`IndexedHeap` (a reschedule re-keys the entry in place). `BenchmarkNextDue`
+reschedules the entity it fires on every step, so it is the reschedule-heavy
+input. Base `ee1f48b` against the new build, interleaved on one box —
+2026-11-02, go1.27.3, the shared 8-core AMD EPYC 7351P VM (slower than the
+10-core box of the table above, hence ~16 µs where it read ~4 µs),
+`-cpu=8 -benchtime=1s -count=3`:
+
+```
+                          │ stm-base.txt │             stm-new.txt              │
+                          │    sec/op    │    sec/op     vs base                │
+NextDue/entities=1000-8     16.66µ ± ∞ ¹   15.99µ ± ∞ ¹       ~ (p=0.400 n=3) ²
+NextDue/entities=10000-8    15.13µ ± ∞ ¹   15.48µ ± ∞ ¹       ~ (p=0.700 n=3) ²
+NextDue/entities=100000-8   16.02µ ± ∞ ¹   17.28µ ± ∞ ¹       ~ (p=0.700 n=3) ²
+geomean                     15.92µ         16.23µ        +1.92%
+```
+
+No measurable difference at any size: the step's cost is the transition, not
+the heap. What changed is the heap's size — one entry per scheduled entity,
+never a stale one — and the absence of the O(N log N) rebuild a burst of
+reschedules used to trigger.
+

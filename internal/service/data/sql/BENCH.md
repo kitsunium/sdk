@@ -12,10 +12,10 @@
 | RAM               | 15 GiB |
 | OS / kernel       | Linux 6.12.101+deb13-amd64 (Debian GNU/Linux 13, trixie) |
 | Architecture      | amd64 |
-| Go toolchain      | go1.27.1 linux/amd64 |
+| Go toolchain      | go1.27.3 linux/amd64 (re-measured 2026-11-02; first run go1.27.1) |
 | Git branch        | `agent-a96ced10f61bb1f1a` |
-| Git commit        | `e01714c` (the tree this domain was added to) |
-| Generated (UTC)   | 2026-09-10 |
+| Git commit        | the L6 data-lot branch over `ee1f48ba` (re-measure); `e01714c` first |
+| Generated (UTC)   | 2026-11-02 (first: 2026-09-10) |
 | Bench wall-clock  | `-benchtime=1s -count=5`, median quoted |
 | Race detector     | **off** — a race build changes allocation behaviour |
 
@@ -42,18 +42,34 @@ delta is the SDK's whole price.
 
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| `TransactCommit` — open, one statement, commit | **3 855** | 592 | 13 |
-| `StdTransactCommit` — the same three driver calls, no SDK | **3 140** | 440 | 9 |
-| `TransactRollback` — the failing path (`ROLLBACK`, no commit) | **3 073** | 472 | 12 |
-| `TransactNested1` — root + **1** savepoint, 2 statements | **5 970** | 984 | 29 |
-| `TransactNested8` — root + **8** savepoints, 9 statements | **19 074** | 3 560 | 134 |
-| `ScopedExecutorExec` — one statement through the guard | **281** | 48 | 2 |
-| `StdTxExec` — the same statement straight on `*sql.Tx` | **257** | 48 | 2 |
-| `NewMigrator` — 64 migrations: clone, sort, validate, pool policy | **4 170** | 2 849 | 3 |
-| `PlanEmptyHistory` — dry run, 64 pending, empty version table | **7 515** | 3 472 | 16 |
-| `PlanFullHistory` — dry run, 64 recorded rows scanned, none pending | **36 453** | 11 402 | 155 |
-| `ParseDialect` — accepted name | **16.2** | 0 | 0 |
-| `MigrationValidate` — one migration's construction gate | **3.9** | 0 | 0 |
+| `TransactCommit` — open, one statement, commit | **3 937** | 696 | 13 |
+| `TransactCommitObserved` — the same over a pool opened through `Observe`, an observer that does nothing (#1122) | **4 118** | 744 | 14 |
+| `TransactCommitRetrying` — the same through `NewRetrying`, nothing to retry (#1058) | **4 064** | 744 | 14 |
+| `StdTransactCommit` — the same three driver calls, no SDK | **3 109** | 440 | 9 |
+| `TransactRollback` — the failing path (`ROLLBACK`, no commit) | **3 225** | 576 | 12 |
+| `TransactNested1` — root + **1** savepoint, 2 statements | **6 311** | 1 112 | 29 |
+| `TransactNested8` — root + **8** savepoints, 9 statements | **22 077** | 3 856 | 134 |
+| `ScopedExecutorExec` — one statement through the guard | **345** | 48 | 2 |
+| `StdTxExec` — the same statement straight on `*sql.Tx` | **312** | 48 | 2 |
+| `NewMigrator` — 64 migrations: clone, sort, validate, pool policy | **4 981** | 4 384 | 3 |
+| `PlanEmptyHistory` — dry run, 64 pending, empty version table | **9 092** | 4 896 | 16 |
+| `PlanFullHistory` — dry run, 64 recorded rows scanned, none pending | **40 632** | 12 826 | 155 |
+| `ParseDialect` — accepted name | **20.6** | 0 | 0 |
+| `MigrationValidate` — one migration's construction gate | **5.2** | 0 | 0 |
+
+**The 2026-11-02 re-measure (ADR 0055's amendment of that date).** Every
+allocation count is the one first measured: the statement budget, the read
+replica and the checksums take a branch the unbounded, primary-only,
+unverified path never enters (the executor checks `budget.limit > 0` before
+anything else). Bytes grew where a value grew: the `txState` carries the
+statement budget, and `MigrationValue` its `Checksum` string — 16 B a
+migration, which `NewMigrator`'s clone of 64 and the plan's copies show. The
+two new rows are the price of the two wrappers on the path that does not use
+them: `Observe` costs one allocation per transaction (the observed
+transaction; the observer's `end` here is a shared value, so a real observer
+adds its own), at most the two #1122 allows; `NewRetrying` costs one (the
+root's context mark). The prose below quotes the first run's figures; the
+deltas it argues from hold on this run.
 
 ## How to read this
 

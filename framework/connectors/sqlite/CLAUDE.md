@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-18T22:30:00Z -->
+<!-- updated: 2026-11-02T00:00:00Z -->
 # framework/connectors/sqlite — kit's SQLite engine
 
 The module `github.com/kitsunium/sdk/framework/connectors/sqlite`: the one a
@@ -10,7 +10,10 @@ product stays one static binary (CI builds the module with `CGO_ENABLED=0`).
 
 | File | Holds |
 |---|---|
-| `sqlite.go` | `Engine()`: `Dialect` (`app.DialectSQLite`, kit's own type — ADR 0179 Q5); the blank import of `framework/app/store`, the stores a database keeps (ADR 0179 §4); `Describe` — the file, and no address, user or password —; `Open` — the file, made if need be; `current` is never asked, a file has no credentials to rotate —; `OpenWaiting` — `app.LockWaiter`, the busy timeout kit gives —; `dsn` and `split`, which read a path or a `file:` URI and add the `defaults` the URL does not write under either spelling: `_journal_mode=WAL`, `_busy_timeout=5000` (or kit's wait), `_txlock=immediate` |
+| `transient.go` | `Transient` — SQLite's busy (5) and locked (6) in every extended form, 517 among them, through the driver error's `Code()`; `transient_test.go` is its table and a real busy met by a second writer (#1000) |
+| `engine_compliance.go` | the compile-time assertion that the engine is an `app.Classifier` (#1000) |
+| `sqlite.go` | `Engine()`: `Dialect` (`app.DialectSQLite`, kit's own type — ADR 0179 Q5); the blank import of `framework/app/store`, the stores a database keeps (ADR 0179 §4); `Describe` — the file, and no address, user or password —; `Open` — the file, made if need be; `current` is never asked, a file has no credentials to rotate —; `OpenWaiting` — `app.LockWaiter`, the busy timeout kit gives —; `dsn` and `split`, which read a path or a `file:` URI and add the `defaults` the URL does not write under either spelling: `_journal_mode=WAL`, `_busy_timeout=5000` (or kit's wait), `_txlock=immediate`, `_synchronous=NORMAL` (or `_sync`), `_pragma=journal_size_limit(67108864)` (kept out by any `_pragma` of the URL's) |
+| `sqlite_bench_test.go` + `BENCH.md` | `BenchmarkACommitUnderFullAndNormal`: one write transaction's commit on a file, `FULL` against the engine's `NORMAL` (#999) — the WAL fsync NORMAL leaves to the checkpoint |
 | `busy.go` | `busyTimeout`: the busy timeout handed to SQLite for kit's wait. SQLite counts the sleeps it asked for (`busyDelays`, its own schedule), not the time that passed; where a sleep ends on a 100 Hz tick — OpenBSD, NetBSD, `sleepOvershoot` 12 ms — the timeout is the longest whose sleeps and overshoot still end within the wait (`TestTheBusyTimeoutEndsWithinTheWaitOfWallTime`), elsewhere the wait itself |
 | `driver.go` / `driver_none.go` | the blank import of modernc.org/sqlite, on every GOOS it has a port to; on dragonfly, illumos and solaris (its libc excludes them) `driverLinked` is false and `Open` refuses with `proc.UnsupportedPlatform`, so the module still builds there (the cross-build lane) |
 
@@ -22,7 +25,16 @@ Rules:
   wait for a writer; a busy timeout, so a writer waits for another; and the
   write lock taken when a transaction begins. A parameter the URL writes
   wins — under either spelling the driver reads (`_busy_timeout` or
-  `_timeout`, `_journal_mode` or `_journal`).
+  `_timeout`, `_journal_mode` or `_journal`, `_synchronous` or `_sync`).
+- Durability is NORMAL under WAL (#999): a commit no longer fsyncs the WAL,
+  the checkpoint does — a power cut may lose the last commits, never the
+  database's consistency, which is what SQLite documents for WAL + NORMAL.
+  `?_synchronous=FULL` in the URL is the product's way back to an fsync per
+  commit; the engine never overrides it. `journal_size_limit` caps at 64 MiB
+  the WAL a burst (a replay, a data copy, a retention sweep) grew, after its
+  checkpoint; `_pragma` being multi-valued, a URL that writes any `_pragma`
+  keeps its own list and sets the limit itself if it wants one. `BENCH.md`
+  measures the commit under both modes.
 - The busy timeout is kit's (ADR 0178 C2): the engine is a `app.LockWaiter`,
   and kit opens it with `OpenWaiting` and `B = T − max(250ms, T/10)`, `T`
   being `<name>-timeout` — 4.5 s for the default 5 s —, so a lost race on the

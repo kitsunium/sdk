@@ -55,6 +55,27 @@ type FakeDB struct {
 	turn chan struct{}
 	// version is what SELECT VERSION() answers, "" for 8.0.36.
 	version string
+	// commitFailures fail the next COMMITs, one each, the transaction's
+	// work dropped as a rollback drops it: how a serialization failure the
+	// database asks to run again is scripted (#1000).
+	commitFailures []error
+	// queried are the queries the database answered rows for, in order —
+	// what a test counts a read's statements by (#1153).
+	queried []string
+}
+
+// Queried are the queries the database answered rows for, in order.
+func (f *FakeDB) Queried() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.queried)
+}
+
+// FailCommits makes the next COMMITs fail with errs, one each.
+func (f *FakeDB) FailCommits(errs ...error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commitFailures = append(f.commitFailures, errs...)
 }
 
 // fakeData is what the database holds: its version tables, the product's
@@ -309,6 +330,14 @@ type fakeTx struct {
 
 func (t *fakeTx) Commit() error {
 	t.c.f.mu.Lock()
+	if len(t.c.f.commitFailures) > 0 {
+		failure := t.c.f.commitFailures[0]
+		t.c.f.commitFailures = t.c.f.commitFailures[1:]
+		t.c.f.mu.Unlock()
+		t.c.tx = nil
+		<-t.c.f.turn
+		return failure
+	}
 	t.c.f.data = t.work
 	t.c.f.mu.Unlock()
 	t.c.tx = nil
@@ -427,6 +456,9 @@ func (c *fakeConn) QueryContext(ctx context.Context, query string, args []driver
 	if rows, handled := c.lockQuery(query, args); handled {
 		return rows, nil
 	}
+	c.f.mu.Lock()
+	c.f.queried = append(c.f.queried, query)
+	c.f.mu.Unlock()
 	rows, _, err := c.run(ctx, query, func(d *fakeData) (driver.Rows, int64, error) { return statement(d, query, args) })
 	if err == nil && rows == nil {
 		rows = &fakeRows{}

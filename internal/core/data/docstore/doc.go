@@ -1,6 +1,8 @@
 // Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;
-// ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21, and
-// ADR 0178 22, for a document written with its versions). Both
+// ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21,
+// ADR 0178 22, for a document written with its versions, and ADR 0209 23,
+// for a replacement made on a revision, and 24, for a range read of an
+// index that keeps no order). Both
 // engines answer every one of them alike, and the range keeps the LL = 3 its
 // engine allocated it under now that it is declared here (ADR 0160).
 //
@@ -21,12 +23,17 @@
 //     [KeyListerContext] for the keys alone, [VersionWriter] and
 //     [VersionWriterContext] for a document written with its versions as they
 //     are, [VersionWeigher] and [VersionWeigherContext] for what the versions
-//     weigh, and [Announcer] is the pair of hooks both engines answer exactly
-//     as they are;
+//     weigh, [Revisioned] and [RevisionedContext] for a replacement made on the
+//     revision the caller read, [Batcher] and [BatcherContext] for several
+//     writes as one, through a [BatchWriter], [Pager] and [PagerContext] for
+//     the documents a page at a time, [Ranged] and [RangedContext] for an
+//     ordered index read between two keys, and [Announcer] is the pair of
+//     hooks both engines answer exactly as they are;
 //   - the values both engines read and return — [EntryValue], [VersionValue],
-//     [StampValue], [TombstoneValue], [VersionWeightValue] — and [IndexSpec],
-//     the declaration both take, with its two constructors [Unique] and
-//     [Index];
+//     [StampValue], [TombstoneValue], [VersionWeightValue], [RevisionValue] —
+//     and [IndexSpec],
+//     the declaration both take, with its three constructors [Unique],
+//     [Index] and [Ordered];
 //   - the codes of the 0.3.80.* range and their sentinels: both engines answer
 //     the same refusals under the same codes (ADR 0160).
 //
@@ -43,8 +50,11 @@
 //
 // Package docstore — the siblings of Collection (ADR 0039): a document's
 // versions, its trash, the keys alone (ADR 0178), a document written with its
-// versions as they are (ADR 0178), what the versions weigh, and the same ports
-// with a context on every call, which the SQL engine implements.
+// versions as they are (ADR 0178), what the versions weigh, a replacement made
+// on a revision and several writes as one (ADR 0209), the documents a page
+// at a time and an ordered index read between two keys (ADR 0209, amended
+// 2026-11-03), and the same ports with a context on every call, which the
+// SQL engine implements.
 //
 // Package docstore — declares the sentinel *errs.Error outcomes both engines
 // answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE

@@ -9,7 +9,11 @@ sequences:
         kind: self
       - id: errs
         kind: package
+      - id: p.validateLifetimes
+        kind: internal
       - id: p.validateRetryGrowth
+        kind: internal
+      - id: p.validateRetryJitter
         kind: internal
     steps:
       - opt:
@@ -42,8 +46,131 @@ sequences:
                 			errs.Int64("value_ns", int64(p.RetryDelay)))
               to: errs
           when: p.RetryDelay > MaxDeadlineOffset
-      - return: p.validateRetryGrowth()
-        to: p.validateRetryGrowth
+      - opt:
+          do:
+            - return: lifetimeErr
+          init:
+            bind: lifetimeErr
+            eval: p.validateLifetimes()
+            to: p.validateLifetimes
+          when: lifetimeErr != nil
+      - opt:
+          do:
+            - return: growthErr
+          init:
+            bind: growthErr
+            eval: p.validateRetryGrowth()
+            to: p.validateRetryGrowth
+          when: growthErr != nil
+      - return: p.validateRetryJitter()
+        to: p.validateRetryJitter
+  - of: PolicyValue.validateLifetimes
+    participants:
+      - id: caller
+        kind: actor
+      - id: PolicyValue.validateLifetimes
+        kind: self
+      - id: lifetimeRefused
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: lifetimeRefused("MaxAge", p.MaxAge)
+            to: lifetimeRefused
+          when: refused != nil
+      - return: lifetimeRefused("DeadLetterRetention", p.DeadLetterRetention)
+        to: lifetimeRefused
+  - of: lifetimeRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: lifetimeRefused
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: value >= 0 && value <= MaxDeadlineOffset
+      - return: |-
+          errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+          		errs.String("field", field), errs.Int64("value_ns", int64(value)))
+        to: errs
+  - of: PolicyValue.validateRetryJitter
+    participants:
+      - id: caller
+        kind: actor
+      - id: PolicyValue.validateRetryJitter
+        kind: self
+      - id: p.validateJitterShape
+        kind: internal
+      - id: jitterRefused
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: shapeErr
+          init:
+            bind: shapeErr
+            eval: p.validateJitterShape()
+            to: p.validateJitterShape
+          when: shapeErr != nil
+      - opt:
+          do:
+            - bind: field
+              eval: "\"RetryJitter\""
+            - opt:
+                do:
+                  - set: field
+                    value: "\"RetryJitterMode\""
+                when: p.RetryJitter == 0
+            - return: jitterRefused(field, "no MaxRetryDelay")
+              to: jitterRefused
+          when: (p.RetryJitter != 0 || p.RetryJitterMode != kbackoff.JitterAdditive) && p.MaxRetryDelay == 0
+      - return: nil
+  - of: PolicyValue.validateJitterShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: PolicyValue.validateJitterShape
+        kind: self
+      - id: jitterRefused
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: math.IsNaN(p.RetryJitter) || p.RetryJitter < 0 || p.RetryJitter > 1
+              do:
+                - return: jitterRefused("RetryJitter", "outside [0, 1]")
+                  to: jitterRefused
+            - case: p.RetryJitterMode > kbackoff.JitterDecorrelated
+              do:
+                - return: jitterRefused("RetryJitterMode", "undefined")
+                  to: jitterRefused
+            - case: p.RetryJitterMode != kbackoff.JitterAdditive && p.RetryJitter != 0
+              do:
+                - return: jitterRefused("RetryJitter", "ignored by RetryJitterMode")
+                  to: jitterRefused
+            - default: true
+              do:
+                - return: nil
+  - of: jitterRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: jitterRefused
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+          		errs.String("field", field), errs.String("problem", problem))
+        to: errs
   - of: PolicyValue.validateRetryGrowth
     participants:
       - id: caller

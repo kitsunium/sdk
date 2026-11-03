@@ -26,9 +26,10 @@ constants:
         value: "\"drop\""
     name: phaseCatalogue
   - doc: |-
-      sqlKeysChunk is how many keys one call of a database's engine lists, each
-      under its own <name>-timeout: a long listing is many short calls, never one
-      call the timeout ends halfway.
+      sqlKeysChunk is how many keys — or records, for Filter — one call of a
+      database's engine lists, each under its own <name>-timeout: a long listing
+      is many short calls, never one call the timeout ends halfway, and never the
+      whole table in memory at once.
     items:
       - name: sqlKeysChunk
         type: int
@@ -40,6 +41,7 @@ files:
       - openDatabase
       - dialectOf
       - (*database).Transact
+      - (*database).Transient
       - (*database).InTransaction
       - (*database).Defer
       - (*database).OnAbort
@@ -169,6 +171,7 @@ files:
       - (*sqlEngine).Get
       - (*sqlEngine).List
       - (*sqlEngine).Filter
+      - (*sqlEngine).recordsChunk
       - (*sqlEngine).Lookup
       - (*sqlEngine).Find
       - (*sqlEngine).Count
@@ -484,15 +487,28 @@ types:
         type: sql.Checker
       - name: dialect
         type: sql.Dialect
+      - doc: |-
+          transient is the engine's own reading of a failed transaction, nil
+          when it offers none.
+        name: transient
+        type: func(error) bool
     kind: struct
     methods:
       - doc: |-
           Transact runs fn in a transaction of the database, or in a savepoint of
           the one ctx carries for it.
         name: Transact
-        params: ctx context.Context, fn func(ctx context.Context) error
+        params: ctx context.Context, opts plug.TxOptionsValue, fn func(ctx context.Context) error
         recv: d *database
         results: error
+      - doc: |-
+          Transient reports whether err is a failed transaction the database asks to
+          run again: the engine's own reading, then the SDK's — SQLSTATE 40001 and
+          40P01, SQLite's busy and locked (sql.Classify, #1058).
+        name: Transient
+        params: err error
+        recv: d *database
+        results: bool
       - doc: InTransaction reports whether ctx carries a transaction of the database.
         name: InTransaction
         params: ctx context.Context
@@ -993,11 +1009,23 @@ types:
         params: ctx context.Context
         recv: e *sqlEngine
         results: "[]plug.DocumentValue, error"
-      - doc: Filter reads the records keep keeps.
+      - doc: |-
+          Filter reads the records keep keeps, a page of sqlKeysChunk records at a
+          time (#1153): each page one call — one statement on the table's primary
+          key, resuming after the last key read, through the SDK's Pager — and keep
+          asked of its records once the call is done, so what Filter holds is the
+          records it keeps and one page, never the table.
         name: Filter
         params: ctx context.Context, keep func(d plug.DocumentValue) bool
         recv: e *sqlEngine
         results: "[]plug.DocumentValue, error"
+      - doc: |-
+          recordsChunk is at most sqlKeysChunk records above after, with their keys,
+          read in one call.
+        name: recordsChunk
+        params: ctx context.Context, after string
+        recv: e *sqlEngine
+        results: "[]docstore.Entry, error"
       - doc: Lookup reads the record whose unique index holds key.
         name: Lookup
         params: ctx context.Context, index, key string

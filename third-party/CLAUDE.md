@@ -9,13 +9,15 @@ package, `go get` names the module.
 
 | Module | Packages | Vendor | Codes |
 |---|---|---|---|
-| `third-party/aws` | `writer/s3`, `writer/cloudwatch` | `github.com/aws/aws-sdk-go-v2` (+ `smithy-go`) | `0.3.35.*` s3, `0.3.25.*` cloudwatch |
+| `third-party/aws` | `writer/s3`, `writer/cloudwatch`, `vfs/s3` (a `vfs.FullFS`), `queue/sqs` (a `queue.Broker`) — ADR 0211 | `github.com/aws/aws-sdk-go-v2` (+ `smithy-go`) | `0.3.35.*` s3, `0.3.25.*` cloudwatch, `0.3.98.*` vfs/s3, `0.3.101.*` queue/sqs |
 | `third-party/codec/hcl` | the module root | `github.com/hashicorp/hcl/v2` | `0.3.37.*` |
 | `third-party/codec/protobuf` | the module root | `google.golang.org/protobuf` | `0.3.38.*` |
 | `third-party/codec/yaml` | the module root — the opt-in `"yaml-full"` Format, beside the SDK's native `"yaml"` subset (ADR 0156) | `gopkg.in/yaml.v3` | `0.3.77.*` |
+| `third-party/db/redis` | `cache` (the cache domain's remote tier), `queue` (a `queue.Broker` over streams) — ADR 0211; the redis writer joins it with #984 | `github.com/redis/go-redis/v9` | `0.3.95.*` cache, `0.3.96.*` queue |
 | `third-party/db/writer/clickhouse` | the module root | `github.com/ClickHouse/clickhouse-go/v2` | `0.3.33.*` |
 | `third-party/db/writer/mysql` | the module root | `github.com/go-sql-driver/mysql` | `0.3.32.*` |
 | `third-party/db/writer/redis` | the module root | `github.com/redis/go-redis/v9` | `0.3.34.*` |
+| `third-party/nats` | `queue` (a `queue.Broker` over JetStream) — ADR 0211 | `github.com/nats-io/nats.go` | `0.3.97.*` |
 | `third-party/transform` | the module root (zstd + s2) | `github.com/klauspost/compress` | `0.3.63.*` |
 | `third-party/x-crypto` | `argon2id`, `xchacha` | `golang.org/x/crypto` | none — the shared `core/crypto` sentinels |
 
@@ -31,7 +33,10 @@ SDK itself — `internal/`, `pkg/`, `framework/` — since ADR 0162.
   argon2id and xchacha both on `x/crypto`, zstd and s2 on one compression
   library. Two modules for one vendor would double the release surface and
   save a consumer nothing; one module for two vendors would hand every consumer
-  of one the other's graph, which is the defect ADR 0157 removes.
+  of one the other's graph, which is the defect ADR 0157 removes. One
+  exception stands until kitsunium/sdk#984 closes it: go-redis is required by
+  `third-party/db/redis`, named by its vendor (ADR 0211), and by
+  `third-party/db/writer/redis`, which #984 moves into it as `writer`.
 - **The import paths did not change.** `github.com/kitsunium/sdk/third-party/aws/writer/s3`
   is still the package; what changed is the module that hosts it.
 - **Each module requires the SDK module, and replaces it in development.**
@@ -78,8 +83,12 @@ nothing with `GOWORK=off`. Loop over `bash scripts/ci/go-modules.sh` to reach
 every module (ADR 0137).
 
 The opt-in suites behind a build tag keep the run procedure their package
-`CLAUDE.md` gives (rule 12). The AWS writers' `localstack` suites stay in
-`third-party/aws`: they need nothing beyond the AWS SDK. The database writers'
+`CLAUDE.md` gives (rule 12). The AWS `localstack` suites — the two writers',
+`vfs/s3`'s and `queue/sqs`'s — stay in `third-party/aws`: they need nothing
+beyond the AWS SDK, and the last two run the same rows over in-memory doubles
+of S3 and SQS in every lane. The Valkey and JetStream adapters' suites start
+their servers with testcontainers, so they live in `e2e/integration/queue/`
+and `e2e/integration/cache/`, as the database writers' do. The database writers'
 `integration` suites start their servers with testcontainers, so they live in
 the auxiliary `e2e` module, `e2e/integration/writer/<engine>` — kept here, each
 would put testcontainers in its module's `go.mod`, and so in the graph of every
