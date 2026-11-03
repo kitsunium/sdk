@@ -57,6 +57,10 @@ func (*yamlCodec) Extensions() []string {
 
 // Marshal writes v as one YAML document.
 func (*yamlCodec) Marshal(v any) (encoded []byte, err error) {
+	//: a channel, a function, an unsafe pointer: no wire format holds one (#1101).
+	if verr := codec.CheckValue(v); verr != nil {
+		return nil, verr
+	}
 	//: rent an already-Reset buffer from the shared codec pool.
 	buf := scratch.AcquireBuffer()
 	enc := encoder{buf: buf}
@@ -76,12 +80,15 @@ func (*yamlCodec) Marshal(v any) (encoded []byte, err error) {
 // Unmarshal reads data as exactly one YAML document of the subset into v,
 // which must be a non-nil pointer. An empty document leaves v unchanged.
 func (*yamlCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: the byte bound, before a byte is read.
 	if len(data) > maxYAMLBytes {
 		//: refused, with the sizes.
-		return errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{},
-			errs.Int("len", len(data)), errs.Int("cap", maxYAMLBytes),
-			errs.String("detail", "the document is larger than the decoder accepts"))
+		return bounded(coreyaml.SizeExceeded, "the document is larger than the decoder accepts",
+			errs.Int("len", len(data)), errs.Int("cap", maxYAMLBytes))
 	}
 	//: one document, from line 1.
 	return decodeDocument(data, v, 1)

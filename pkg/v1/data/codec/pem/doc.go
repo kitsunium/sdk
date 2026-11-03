@@ -25,6 +25,7 @@
 //	CodeMarshalFailed    0.3.10.1  encoding/pem refused to write the block
 //	CodeUnmarshalFailed  0.3.10.2  no PEM block in the input
 //	CodeValueInvalid     0.3.10.3  the value is not a *pem.Block, or the target a **pem.Block
+//	CodeSizeExceeded     0.3.10.4  a block of a stream past the 10 MiB a block may take
 //
 // No error message quotes the input.
 package pem

@@ -43,6 +43,11 @@ type allocRecord struct {
 // -race) and no t.Parallel (AllocsPerRun reads a process-global counter).
 // Budgets are ceilings — re-pin with intent on a Go toolchain bump.
 //
+// A document past the shared pool's 256 KiB cap is encoded into a buffer of
+// the size-classed tier, sized by the last such document, and allocates only
+// the caller's copy — it grew a fresh buffer on every call, 13 allocations,
+// before #906.
+//
 // What they hold: encoding a struct allocates the one slice Marshal hands the
 // caller and nothing else, the pooled scratch buffer and the cached plan
 // carrying the rest; Append into a destination with room allocates nothing,
@@ -70,6 +75,8 @@ func TestAllocBudget(t *testing.T) {
 		t.Fatalf("seed Marshal(record): %v", err)
 	}
 	dst := make([]byte, 0, 1024)
+	//: a thousand records, ~258 KB — past the shared pool's 256 KiB cap.
+	var batch any = benchBatchValue()
 	type tc struct {
 		name string
 		ceil float64
@@ -109,6 +116,13 @@ func TestAllocBudget(t *testing.T) {
 			out, aerr := appender.Append(dst[:0], smallMap)
 			if aerr != nil {
 				t.Fatalf("Append: %v", aerr)
+			}
+			allocSinkBytes = out
+		}},
+		{"marshal a document past 256 KiB", 3, func() {
+			out, merr := c.Marshal(batch)
+			if merr != nil {
+				t.Fatalf("Marshal: %v", merr)
 			}
 			allocSinkBytes = out
 		}},

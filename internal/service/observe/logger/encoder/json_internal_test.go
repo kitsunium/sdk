@@ -187,6 +187,9 @@ func Test_appendJSONFloat(t *testing.T) {
 		want string
 	}{
 		{"finite", 1.5, "1.5"},
+		{"a million is plain, as encoding/json writes it", 1e6, "1000000"},
+		{"the exponent loses its leading zero", 1e-7, "1e-7"},
+		{"past 1e21 the exponent returns", 1e21, "1e+21"},
 		{"nan degrades to null", nan(), "null"},
 		{"positive inf degrades to null", inf(1), "null"},
 		{"negative inf degrades to null", inf(-1), "null"},

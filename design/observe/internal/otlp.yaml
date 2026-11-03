@@ -413,6 +413,15 @@ packages:
                 DefaultMaxResponseBytes.
               name: MaxResponseBytes
               type: int64
+            - doc: |-
+                Gzip, when true, compresses every request body — an encoded snapshot or
+                batch, and a stored document ExportDocument posts — with compress/gzip at
+                the default level and sends it with Content-Encoding: gzip, which every
+                OTLP/HTTP collector accepts (#1051). OTLP/JSON shrinks eight to twelve
+                times. The zero value sends the body as it is. A collector that refuses
+                the encoding answers 415, classified permanent like a 400.
+              name: Gzip
+              type: bool
       - doc: |-
           KeyValue is common.v1.KeyValue: key (1) + value (2). One attribute of a
           resource, a data point, a span, an event or a link.
@@ -654,6 +663,25 @@ packages:
               - name: body
                 type: "[]byte"
             name: PostContext
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              PostEncoded posts body already encoded for the transport, labelled with
+              encoding: "" is PostContext — compressed when HTTPConfig.Gzip says so —,
+              and "gzip" a body that is already gzip, posted as it is with
+              Content-Encoding: gzip whatever HTTPConfig.Gzip says, so a document a
+              store-and-forward queue kept compressed is never decompressed on the way
+              (#1051). Any other encoding is refused before a request is built, with
+              the signal's RequestUnbuildable verdict — permanent.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: body
+                type: "[]byte"
+              - name: encoding
+                type: string
+            name: PostEncoded
             out:
               - type: error
             recv: pointer

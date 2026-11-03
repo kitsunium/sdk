@@ -2,8 +2,31 @@ package baseenc
 
 import "slices"
 
-// byteBase is the radix of the input/output byte stream (one byte = base 256).
-const byteBase int = 256
+// Limb arithmetic (#898). The magnitude is held in 32-bit limbs and divided
+// or multiplied by a power of the radix below 2^32 per step — five digits of
+// base58 (58^5 = 656 356 768) or base62 (62^5 = 916 132 832) at once, through
+// a uint64 accumulator — instead of by the radix one byte at a time: the same
+// quadratic class, about twenty times fewer steps, and the division of the
+// two shipped radices is by a constant, which the compiler turns into a
+// multiplication. Bitcoin Core and the multiformats libraries do the same.
+const (
+	// limbBits is the width of one magnitude limb.
+	limbBits uint = 32
+	// limbBytes is limbBits in bytes.
+	limbBytes int = 4
+	// byteBits is the width of one byte of the magnitude, the step a limb is
+	// written out by.
+	byteBits int = 8
+	// limbMask keeps the low limb of a uint64 accumulator.
+	limbMask uint64 = 1<<limbBits - 1
+	// base58Chunk is 58^5, the divisor of one base58 encode step.
+	base58Chunk uint64 = 58 * 58 * 58 * 58 * 58
+	// base62Chunk is 62^5, the divisor of one base62 encode step.
+	base62Chunk uint64 = 62 * 62 * 62 * 62 * 62
+	// maxDigitBits bounds log2 of any radix below 64, which sizes the decode
+	// accumulator: radix^n < 2^(6n).
+	maxDigitBits int = 6
+)
 
 // buildReverseTable returns the byte→index reverse-lookup for alphabet;
 // bytes absent from alphabet map to base45NotMember (the shared sentinel).
@@ -25,75 +48,110 @@ func buildReverseTable(alphabet string) [base45TableSize]int {
 	return table
 }
 
-// divmodInPlace divides the big-endian magnitude buf by radix in place and
-// returns the remainder. buf keeps its length (leading zeros appear); the
-// caller trims them between divisions.
-func divmodInPlace(buf []byte, radix int) int {
-	rem := 0
-	//: classic long division across the byte slice, most-significant first.
-	for i := range buf {
-		//: bring down the next byte onto the running remainder.
-		acc := rem*byteBase + int(buf[i])
-		//: quotient digit for this position.
-		buf[i] = byte(acc / radix)
-		//: carry the remainder to the next position.
-		rem = acc % radix
+// chunkOf returns the radix power one limb step divides or multiplies by, and
+// how many digits it spans, for any radix in [2, 256).
+func chunkOf(radix int) (power uint64, digits int) {
+	power, digits = uint64(radix), 1
+	//: the largest power that still fits a limb.
+	for power*uint64(radix) <= limbMask {
+		power *= uint64(radix)
+		digits++
 	}
-	//: the final remainder is the extracted base-`radix` digit.
+	//: below 2^32.
+	return power, digits
+}
+
+// divmodLimbs divides the big-endian limbs by power in place and returns the
+// remainder. The two shipped radices divide by a constant.
+func divmodLimbs(limbs []uint32, power uint64) uint64 {
+	//: a constant divisor compiles to a multiplication.
+	switch power {
+	//: base58.
+	case base58Chunk:
+		return divmodLimbsBy58(limbs)
+	//: base62.
+	case base62Chunk:
+		return divmodLimbsBy62(limbs)
+	//: any other radix: the hardware division.
+	default:
+		return divmodLimbsBy(limbs, power)
+	}
+}
+
+// divmodLimbsBy58 is divmodLimbs by 58^5, a constant.
+func divmodLimbsBy58(limbs []uint32) uint64 {
+	var rem uint64
+	//: long division over the limbs, most-significant first.
+	for i, limb := range limbs {
+		acc := rem<<limbBits | uint64(limb)
+		limbs[i] = uint32(acc / base58Chunk) //nolint:gosec // the quotient fits a limb
+		rem = acc % base58Chunk
+	}
+	//: the next five digits.
 	return rem
 }
 
-// trimLeadingZeros returns b without its leading zero bytes.
-func trimLeadingZeros(b []byte) []byte {
+// divmodLimbsBy62 is divmodLimbs by 62^5, a constant.
+func divmodLimbsBy62(limbs []uint32) uint64 {
+	var rem uint64
+	//: long division over the limbs, most-significant first.
+	for i, limb := range limbs {
+		acc := rem<<limbBits | uint64(limb)
+		limbs[i] = uint32(acc / base62Chunk) //nolint:gosec // the quotient fits a limb
+		rem = acc % base62Chunk
+	}
+	//: the next five digits.
+	return rem
+}
+
+// divmodLimbsBy is divmodLimbs by any power below 2^32.
+func divmodLimbsBy(limbs []uint32, power uint64) uint64 {
+	var rem uint64
+	//: long division over the limbs, most-significant first.
+	for i, limb := range limbs {
+		acc := rem<<limbBits | uint64(limb)
+		limbs[i] = uint32(acc / power) //nolint:gosec // the quotient fits a limb
+		rem = acc % power
+	}
+	//: the next digits.
+	return rem
+}
+
+// bytesToLimbs packs the big-endian magnitude b into big-endian 32-bit limbs,
+// the first holding the len(b) mod 4 most-significant bytes.
+func bytesToLimbs(b []byte) []uint32 {
+	limbs := make([]uint32, (len(b)+limbBytes-1)/limbBytes)
+	end := len(b)
+	//: fill from the least-significant limb.
+	for i := len(limbs) - 1; i >= 0; i-- {
+		begin := max(end-limbBytes, 0)
+		var v uint32
+		//: big-endian within the limb.
+		for _, c := range b[begin:end] {
+			v = v<<8 | uint32(c)
+		}
+		limbs[i] = v
+		end = begin
+	}
+	//: packed.
+	return limbs
+}
+
+// trimLeadingZeroLimbs returns limbs without its leading zero limbs. An
+// all-zero magnitude comes back empty, which is what ends the encode loop.
+func trimLeadingZeroLimbs(limbs []uint32) []uint32 {
 	i := 0
-	//: advance past every leading zero byte.
-	for i < len(b) && b[i] == 0 {
-		//: one more leading zero to drop.
+	//: advance past every leading zero limb.
+	for i < len(limbs) && limbs[i] == 0 {
 		i++
 	}
 	//: slice off the zero prefix.
-	return b[i:]
-}
-
-// mulAddWindow computes mag[start:] = mag[start:]*radix + add over the
-// big-endian magnitude held in the TAIL of mag, and returns the new start
-// index. A multiply that overflows the live window extends it leftwards
-// into mag's reserved prefix instead of allocating a wider slice.
-//
-// The window can never run past index 0: an n-digit base-radix number is
-// strictly below 256^n for every radix below 256, so len(s) bytes always
-// hold the magnitude of an len(s)-digit input — which is exactly how
-// decodeBaseN sizes mag.
-//
-// Growing by moving start rather than by prepending is what makes the
-// decode path allocate once per call instead of once per new
-// most-significant byte; a memory profile attributed 97.85 % of the
-// package's allocated objects to the prepend this replaced. See BENCH.md.
-func mulAddWindow(mag []byte, start, radix, add int) int {
-	carry := add
-	//: fold multiply+add through the live window, least-significant first.
-	for i := len(mag) - 1; i >= start; i-- {
-		//: byte() keeps the low 8 bits; the rest carries left.
-		acc := int(mag[i])*radix + carry
-		//: store the low byte, propagate the carry.
-		mag[i] = byte(acc)
-		carry = acc / byteBase
-	}
-	//: absorb the remaining carry into the reserved prefix (MSB-first).
-	for carry > 0 {
-		//: one more most-significant byte joins the window.
-		start--
-		//: low carry byte lands at the new high end.
-		mag[start] = byte(carry)
-		carry /= byteBase
-	}
-	//: hand back the (possibly widened) window start.
-	return start
+	return limbs[i:]
 }
 
 // encodeBaseN encodes raw as a big-endian base-conversion over alphabet
 // (radix == len(alphabet)). Leading zero bytes become leading alphabet[0]
-// chars. O(len(raw)²) — caller must cap input at maxConvBytes.
+// chars. O(len(raw)²) in limb steps — caller must cap input at maxConvBytes.
 func encodeBaseN(raw []byte, alphabet string, radix int) []byte {
 	//: count leading zero bytes — they encode as leading alphabet[0].
 	zeros := 0
@@ -102,17 +160,25 @@ func encodeBaseN(raw []byte, alphabet string, radix int) []byte {
 		//: one more leading zero to reproduce.
 		zeros++
 	}
-	//: working magnitude (divided down in place).
-	buf := make([]byte, len(raw)-zeros)
-	copy(buf, raw[zeros:])
+	//: working magnitude, divided down in place; the caller's bytes are not.
+	limbs := bytesToLimbs(raw[zeros:])
+	power, chunk := chunkOf(radix)
 	//: digits accumulate least-significant first.
-	digits := make([]byte, 0, len(raw)*base45PairBytes)
-	//: divide the magnitude down by the radix until it is exhausted.
-	for len(buf) > 0 {
-		//: next least-significant digit is the division remainder.
-		digits = append(digits, alphabet[divmodInPlace(buf, radix)])
-		//: drop the leading zero bytes the division produced.
-		buf = trimLeadingZeros(buf)
+	digits := make([]byte, 0, len(raw)*base45PairBytes+chunk)
+	//: divide the magnitude down by the radix power until it is exhausted.
+	for len(limbs) > 0 {
+		rem := divmodLimbs(limbs, power)
+		limbs = trimLeadingZeroLimbs(limbs)
+		//: the chunk's digits, least-significant first.
+		for range chunk {
+			digits = append(digits, alphabet[rem%uint64(radix)])
+			rem /= uint64(radix)
+		}
+	}
+	//: the last chunk wrote zero digits above the magnitude's top digit,
+	//: which is never zero: they are not part of the number.
+	for len(digits) > 0 && digits[len(digits)-1] == alphabet[0] {
+		digits = digits[:len(digits)-1]
 	}
 	//: assemble leading zero-chars + digits most-significant first.
 	return assembleBaseN(alphabet[0], zeros, digits)
@@ -138,7 +204,7 @@ func assembleBaseN(zeroChar byte, zeros int, digits []byte) []byte {
 
 // decodeBaseN reverses encodeBaseN for alphabet/radix. ok is false when a
 // char is outside the alphabet. Leading zero-chars restore leading zero
-// bytes. O(len(s)²) — caller must cap input at maxConvBytes.
+// bytes. O(len(s)²) in limb steps — caller must cap input at maxConvBytes.
 func decodeBaseN(s []byte, reverse *[base45TableSize]int, radix int) (raw []byte, ok bool) {
 	//: count leading zero-digit chars (index 0) — they restore zero bytes.
 	zeros := 0
@@ -147,36 +213,80 @@ func decodeBaseN(s []byte, reverse *[base45TableSize]int, radix int) (raw []byte
 		//: one more leading zero byte to reproduce.
 		zeros++
 	}
-	//: one allocation for the whole fold — see mulAddWindow for why
-	//: len(s) bytes always suffice.
-	mag := make([]byte, len(s))
-	//: the live window starts empty at the far right and grows leftwards.
-	start := len(mag)
-	//: fold each digit into the running magnitude.
-	for _, c := range s {
-		//: reverse-lookup the digit.
+	_, chunk := chunkOf(radix)
+	//: little-endian limbs, one allocation for the whole fold: radix^n is
+	//: below 2^(6n) for every radix below 64.
+	limbs := make([]uint32, 0, len(s)*maxDigitBits/int(limbBits)+2)
+	//: fold the digits in chunk by chunk: magnitude = magnitude*radix^k + v.
+	for begin := 0; begin < len(s); begin += chunk {
+		value, scale, valid := chunkValue(s[begin:min(begin+chunk, len(s))], reverse, radix)
+		//: a char outside the alphabet rejects the whole input.
+		if !valid {
+			//: nothing decoded.
+			return nil, false
+		}
+		limbs = mulAddLimbs(limbs, scale, value)
+	}
+	//: the magnitude's bytes, after the recovered leading zero bytes.
+	return assembleDecoded(zeros, limbs), true
+}
+
+// chunkValue reads up to one chunk of digits: their value, and the radix
+// power the magnitude is multiplied by to make room for them.
+func chunkValue(digits []byte, reverse *[base45TableSize]int, radix int) (value, scale uint64, valid bool) {
+	scale = 1
+	//: most-significant digit first.
+	for _, c := range digits {
 		digit := reverse[c]
 		//: base45NotMember signals a char outside the alphabet.
 		if digit == base45NotMember {
-			//: reject the whole input.
-			return nil, false
+			//: reject.
+			return 0, 0, false
 		}
-		//: magnitude = magnitude*radix + digit.
-		start = mulAddWindow(mag, start, radix, digit)
+		value = value*uint64(radix) + uint64(digit) //nolint:gosec // a table index, never negative
+		scale *= uint64(radix)
 	}
-	//: prepend the recovered leading zero bytes.
-	return assembleDecoded(zeros, mag[start:]), true
+	//: below 2^32 both.
+	return value, scale, true
 }
 
-// assembleDecoded prepends zeros zero-bytes to buf (the decoded magnitude).
-func assembleDecoded(zeros int, buf []byte) []byte {
-	//: preallocate exactly the zero prefix + the magnitude bytes.
-	out := make([]byte, 0, zeros+len(buf))
-	//: emit one zero byte per recovered leading zero.
-	for range zeros {
-		//: leading zero byte of the decoded value.
-		out = append(out, 0)
+// mulAddLimbs computes limbs = limbs*scale + add over little-endian limbs,
+// scale and add below 2^32, growing by one limb when the carry needs it.
+func mulAddLimbs(limbs []uint32, scale, add uint64) []uint32 {
+	carry := add
+	//: least-significant limb first; the carry stays below 2^32.
+	for i, limb := range limbs {
+		acc := uint64(limb)*scale + carry
+		limbs[i] = uint32(acc & limbMask) //nolint:gosec // masked to a limb
+		carry = acc >> limbBits
 	}
-	//: append the magnitude after the zero prefix.
-	return append(out, buf...)
+	//: a new most-significant limb.
+	if carry > 0 {
+		limbs = append(limbs, uint32(carry)) //nolint:gosec // below 2^32 by construction
+	}
+	//: the grown magnitude.
+	return limbs
+}
+
+// assembleDecoded writes zeros zero-bytes, then the magnitude held in the
+// little-endian limbs as big-endian bytes without leading zeros.
+func assembleDecoded(zeros int, limbs []uint32) []byte {
+	//: preallocate exactly the zero prefix + every limb's bytes.
+	out := make([]byte, 0, zeros+len(limbs)*limbBytes)
+	//: the zero prefix, already zeroed by make.
+	out = out[:zeros]
+	//: most-significant limb first.
+	for _, limb := range slices.Backward(limbs) {
+		//: four bytes per limb, big-endian.
+		for shift := int(limbBits) - byteBits; shift >= 0; shift -= byteBits {
+			b := byte(limb >> uint(shift)) //nolint:gosec // one byte of the limb
+			//: the magnitude starts at its first non-zero byte.
+			if b == 0 && len(out) == zeros {
+				continue
+			}
+			out = append(out, b)
+		}
+	}
+	//: zero prefix, then the magnitude.
+	return out
 }

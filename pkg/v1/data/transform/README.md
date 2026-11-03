@@ -23,6 +23,17 @@ Every function appends to dst, which may be nil, and src must not overlap dst's 
 
 [Decompress](#Decompress) is bounded by the scheme's own backstop — 256 MiB for the three registered here — so a bomb cannot exhaust memory, but it is the scheme's number, not the caller's. [DecompressBounded](#DecompressBounded) takes the caller's ceiling: a scheme implementing [BoundedDecompressor](#BoundedDecompressor) stops at it, so the ceiling bounds the work and not only the verdict; a scheme that does not is decompressed under its own backstop and judged afterwards. Either way no more than limit bytes are returned, and a stream that would exceed it is refused with [DecompressedTooLarge](#DecompressedTooLarge) rather than cut short — a truncated success would turn a bomb into a parsing bug further up.
 
+### Streams
+
+[NewReader](#NewReader) and [NewWriter](#NewWriter) take an io.Reader or an io.Writer of any length and never hold it whole, through a scheme implementing [StreamingCompressor](#StreamingCompressor) — the three registered here, and the third-party module's zstd and s2:
+
+```
+w, err := transform.NewWriter(transform.Gzip, conn)
+r, err := transform.NewReader(transform.Gzip, body, 64<<20)
+```
+
+The reader's limit is the stream's ceiling: it yields at most limit bytes, and the read past them fails with [DecompressedTooLarge](#DecompressedTooLarge). Close the writer, or the stream has no end; close the reader, or its decoder is not reused.
+
 ### Errors
 
 Match them with errs.HasCode, or the sentinels with errors.Is:
@@ -30,7 +41,8 @@ Match them with errs.HasCode, or the sentinels with errors.Is:
 ```
 CodeUnknownCompressor       0.2.5.1   no compressor is registered under the Algorithm
 CodeCompressedFrameInvalid  0.2.5.4   the codec package's compressed frame is malformed, or its bomb guard tripped
-CodeDecompressedTooLarge    0.2.5.6   the plaintext would exceed DecompressBounded's ceiling
+CodeDecompressedTooLarge    0.2.5.6   the plaintext would exceed DecompressBounded's or NewReader's ceiling
+CodeStreamingUnsupported    0.2.5.7   the registered scheme has no stream form
 CodeGzipFailed              0.3.26.1  compress/gzip refused the stream, compressing or decompressing
 CodeFlateFailed             0.3.26.2  compress/flate refused the stream
 CodeZlibFailed              0.3.26.3  compress/zlib refused the stream
@@ -47,6 +59,11 @@ A malformed stream is the scheme's own refusal, with the scheme's code: [GzipFai
 - [func Decompress\(algo Algorithm, dst \[\]byte, src \[\]byte\) \(decoded \[\]byte, err error\)](<#Decompress>)
 - [func DecompressBounded\(algo Algorithm, dst \[\]byte, src \[\]byte, limit int64\) \(decoded \[\]byte, err error\)](<#DecompressBounded>)
 - [func Lookup\(algo Algorithm\) \(c Compressor, ok bool\)](<#Lookup>)
+- [func NewFlateCompressor\(level int\) Compressor](<#NewFlateCompressor>)
+- [func NewGzipCompressor\(level int\) Compressor](<#NewGzipCompressor>)
+- [func NewReader\(algo Algorithm, r io.Reader, limit int64\) \(rc io.ReadCloser, err error\)](<#NewReader>)
+- [func NewWriter\(algo Algorithm, w io.Writer\) \(wc io.WriteCloser, err error\)](<#NewWriter>)
+- [func NewZlibCompressor\(level int\) Compressor](<#NewZlibCompressor>)
 - [type Algorithm](<#Algorithm>)
   - [func \(Algorithm\) Known\(\) bool](<#Algorithm.Known>)
   - [func \(Algorithm\) String\(\) string](<#Algorithm.String>)
@@ -56,6 +73,9 @@ A malformed stream is the scheme's own refusal, with the scheme's code: [GzipFai
   - [func \(Compressor\) Algorithm\(\) Algorithm](<#Compressor.Algorithm>)
   - [func \(Compressor\) Compress\(dst \[\]byte, src \[\]byte\) \(out \[\]byte, err error\)](<#Compressor.Compress>)
   - [func \(Compressor\) Decompress\(dst \[\]byte, src \[\]byte\) \(out \[\]byte, err error\)](<#Compressor.Decompress>)
+- [type StreamingCompressor](<#StreamingCompressor>)
+  - [func \(StreamingCompressor\) NewReader\(r io.Reader, max int64\) \(rc io.ReadCloser, err error\)](<#StreamingCompressor.NewReader>)
+  - [func \(StreamingCompressor\) NewWriter\(w io.Writer\) \(wc io.WriteCloser, err error\)](<#StreamingCompressor.NewWriter>)
 
 ## Constants
 
@@ -102,6 +122,17 @@ CodeGzipFailed identifies a stream compress/gzip refused, compressing or decompr
 Initialised with `github.com/kitsunium/sdk/internal/core/data/transform.CodeGzipFailed`.
 
 Code `0.3.26.1`
+
+<a name="CodeStreamingUnsupported"></a>
+```go
+const CodeStreamingUnsupported errs.Code = 132359
+```
+
+CodeStreamingUnsupported identifies a stream asked of a registered scheme that has no stream form (0.2.5.7).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/transform.CodeStreamingUnsupported`.
+
+Code `0.2.5.7`
 
 <a name="CodeUnknownCompressor"></a>
 ```go
@@ -192,6 +223,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/transform.GzipFail
 
 Code `0.3.26.1` · reason `GZIP_FAILED` · public "gzip transform failed"
 
+<a name="StreamingUnsupported"></a>
+```go
+var StreamingUnsupported *errs.Error
+```
+
+StreamingUnsupported is the sentinel of [CodeStreamingUnsupported](#CodeStreamingUnsupported), returned as is.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/transform.StreamingUnsupported`.
+
+Code `0.2.5.7` · reason `STREAMING_UNSUPPORTED` · public "The compressor has no streaming form"
+
 <a name="UnknownCompressor"></a>
 ```go
 var UnknownCompressor *errs.Error
@@ -260,6 +302,55 @@ func Lookup(algo Algorithm) (c Compressor, ok bool)
 ```
 
 Lookup returns the Compressor registered under algo.
+
+<a name="NewFlateCompressor"></a>
+## func [NewFlateCompressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/gen_facade.go>)
+
+```go
+func NewFlateCompressor(level int) Compressor
+```
+
+NewFlateCompressor returns a raw-DEFLATE Compressor encoding at level, a compress/flate constant, clamped as NewGzipCompressor's is. The result is not registered.
+
+<a name="NewGzipCompressor"></a>
+## func [NewGzipCompressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/gen_facade.go>)
+
+```go
+func NewGzipCompressor(level int) Compressor
+```
+
+NewGzipCompressor returns a gzip Compressor encoding at level — a compress/gzip constant, BestSpeed to BestCompression, HuffmanOnly or DefaultCompression. Any other level, NoCompression included, is read as DefaultCompression: no level gives a compressor that does not compress. The result is not registered; pass it where a Compressor is taken.
+
+<a name="NewReader"></a>
+## func [NewReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go>)
+
+```go
+func NewReader(algo Algorithm, r io.Reader, limit int64) (rc io.ReadCloser, err error)
+```
+
+NewReader returns a reader of r's stream decompressed by the scheme registered under algo, yielding at most limit bytes: the read that would deliver the byte past limit fails with DecompressedTooLarge, after limit bytes and never instead of them. A limit of zero admits an empty stream and a negative one is read as zero, as in DecompressBounded. Nothing is held whole — an HTTP body, a file or a log shipment is read through the decoder's window — so the limit bounds what the caller receives, and the decoder's own memory is its window. Close the reader to release the decoder; it does not close r.
+
+An unregistered algo is refused with UnknownCompressor, a registered one with no stream form with StreamingUnsupported.
+
+<a name="NewWriter"></a>
+## func [NewWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go>)
+
+```go
+func NewWriter(algo Algorithm, w io.Writer) (wc io.WriteCloser, err error)
+```
+
+NewWriter returns a writer that compresses into w with the scheme registered under algo. Close it to write the stream's end — a stream not closed is incomplete — and release the encoder; it does not close w. What it writes NewReader reads back; for every scheme but s2 it is also what Compress writes and Decompress reads.
+
+An unregistered algo is refused with UnknownCompressor, a registered one with no stream form with StreamingUnsupported.
+
+<a name="NewZlibCompressor"></a>
+## func [NewZlibCompressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/gen_facade.go>)
+
+```go
+func NewZlibCompressor(level int) Compressor
+```
+
+NewZlibCompressor returns a zlib Compressor encoding at level, a compress/zlib constant, clamped as NewGzipCompressor's is. The result is not registered.
 
 <a name="Algorithm"></a>
 ## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/gen_facade.go>)
@@ -357,6 +448,39 @@ func (Compressor) Compress(dst []byte, src []byte) (out []byte, err error)
 
 ```go
 func (Compressor) Decompress(dst []byte, src []byte) (out []byte, err error)
+```
+
+<a name="StreamingCompressor"></a>
+## type [StreamingCompressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/gen_facade.go>)
+
+StreamingCompressor is the optional extension of a Compressor that compresses and decompresses streams; NewReader and NewWriter use it.
+
+```go
+type StreamingCompressor = coretransform.StreamingCompressor
+```
+
+StreamingCompressor is an alias of `github.com/kitsunium/sdk/internal/core/data/transform.StreamingCompressor`, declared as:
+
+```go
+type StreamingCompressor interface {
+	NewReader(r io.Reader, max int64) (rc io.ReadCloser, err error)
+	NewWriter(w io.Writer) (wc io.WriteCloser, err error)
+	Compressor
+}
+```
+
+<a name="StreamingCompressor.NewReader"></a>
+### func \(StreamingCompressor\) [NewReader](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/transform/gen_ports.go>)
+
+```go
+func (StreamingCompressor) NewReader(r io.Reader, max int64) (rc io.ReadCloser, err error)
+```
+
+<a name="StreamingCompressor.NewWriter"></a>
+### func \(StreamingCompressor\) [NewWriter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/transform/gen_ports.go>)
+
+```go
+func (StreamingCompressor) NewWriter(w io.Writer) (wc io.WriteCloser, err error)
 ```
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

@@ -182,6 +182,7 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
 - [func Float64\(key string, val float64\) Attr](<#Float64>)
 - [func FrameworkVersion\(\) string](<#FrameworkVersion>)
 - [func FromConfig\(format Format, raw \[\]byte\) \(lg Logger, err error\)](<#FromConfig>)
+- [func FromConfigWithLevel\(format Format, raw \[\]byte, floor \*LevelVar\) \(lg Logger, err error\)](<#FromConfigWithLevel>)
 - [func Info\(ctx context.Context, lg Logger, msg string, attrs ...Attr\)](<#Info>)
 - [func Int\(key string, val int\) Attr](<#Int>)
 - [func Int64\(key string, val int64\) Attr](<#Int64>)
@@ -193,10 +194,12 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
 - [func NewLevelVar\(initial Level\) \*LevelVar](<#NewLevelVar>)
 - [func NewMemorySink\(\) \*MemorySink](<#NewMemorySink>)
 - [func NewMulti\(min Level, specs ...WriterSpec\) \(lg Logger, err error\)](<#NewMulti>)
+- [func NewOTLPHTTPExporter\(cfg OTLPHTTPConfig\) \(exporter DocumentExporter, err error\)](<#NewOTLPHTTPExporter>)
 - [func NewText\(cfg Config\) \(lg Logger, err error\)](<#NewText>)
 - [func NewTextEncoder\(\) Encoder](<#NewTextEncoder>)
 - [func NewWithSink\(cfg SinkConfig\) \(lg Logger, err error\)](<#NewWithSink>)
 - [func NewWriterSink\(w io.Writer\) \(sink Sink, err error\)](<#NewWriterSink>)
+- [func OTLPRetryable\(err error\) bool](<#OTLPRetryable>)
 - [func ParseLevel\(name string\) \(lvl Level, err error\)](<#ParseLevel>)
 - [func String\(key string, val string\) Attr](<#String>)
 - [func TextEncoder\(\) Encoder](<#TextEncoder>)
@@ -207,6 +210,8 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
 - [func WithCaller\(lg Logger, skip int\) Logger](<#WithCaller>)
 - [func WithError\(err error\) \[\]Attr](<#WithError>)
 - [type Attr](<#Attr>)
+- [type BatchSink](<#BatchSink>)
+  - [func \(BatchSink\) WriteBatch\(ctx context.Context, recs \[\]RecordEvent, payloads \[\]\[\]byte\) \(written int, err error\)](<#BatchSink.WriteBatch>)
 - [type Builder](<#Builder>)
   - [func \(Builder\) Any\(key string, val any\) Builder](<#Builder.Any>)
   - [func \(Builder\) Bool\(key string, val bool\) Builder](<#Builder.Bool>)
@@ -230,6 +235,10 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
   - [func \(CredentialValue\) SecretAccessKey\(\) string](<#CredentialValue.SecretAccessKey>)
   - [func \(CredentialValue\) SessionToken\(\) string](<#CredentialValue.SessionToken>)
   - [func \(CredentialValue\) String\(\) string](<#CredentialValue.String>)
+- [type DocumentExporter](<#DocumentExporter>)
+  - [func \(DocumentExporter\) ExportDocument\(ctx context.Context, doc \[\]byte\) error](<#DocumentExporter.ExportDocument>)
+- [type EncodedDocumentExporter](<#EncodedDocumentExporter>)
+  - [func \(EncodedDocumentExporter\) ExportEncodedDocument\(ctx context.Context, doc \[\]byte, encoding string\) error](<#EncodedDocumentExporter.ExportEncodedDocument>)
 - [type Encoder](<#Encoder>)
   - [func \(Encoder\) Append\(dst \[\]byte, groups \[\]string, r RecordEvent\) \(out \[\]byte\)](<#Encoder.Append>)
   - [func \(Encoder\) Name\(\) \(name string\)](<#Encoder.Name>)
@@ -258,6 +267,8 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
   - [func \(\*MemorySink\) Records\(\) \[\]corelogger.RecordEvent](<#MemorySink.Records>)
   - [func \(\*MemorySink\) Reset\(\)](<#MemorySink.Reset>)
   - [func \(\*MemorySink\) Write\(ctx context.Context, r corelogger.RecordEvent, p \[\]byte\) \(n int, err error\)](<#MemorySink.Write>)
+- [type OTLPConfig](<#OTLPConfig>)
+- [type OTLPHTTPConfig](<#OTLPHTTPConfig>)
 - [type Record](<#Record>)
 - [type RecordSnapshot](<#RecordSnapshot>)
 - [type RotFileConfig](<#RotFileConfig>)
@@ -454,6 +465,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/observe/logger/writer.C
 
 ## Variables
 
+<a name="LevelAmbiguous"></a>
+```go
+var LevelAmbiguous *errs.Error
+```
+
+LevelAmbiguous is returned by NewWithSink when SinkConfig sets both a Level and a non-zero MinLevel (0.3.1.5): two floors, and neither can be said to win.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/logger.LevelAmbiguous`.
+
+Code `0.3.1.5` · reason `LEVEL_AMBIGUOUS` · public "Logger configuration sets two minimum levels"
+
 <a name="SinkConfigRequired"></a>
 ```go
 var SinkConfigRequired *errs.Error
@@ -639,6 +661,15 @@ FromConfig returns TopologyInvalid (1.1.0.4) when format is unregistered, the bl
 
 Like NewMulti's, the returned Logger owns the writers it opened — the caller never held them — and implements io.Closer to release them, once.
 
+<a name="FromConfigWithLevel"></a>
+## func [FromConfigWithLevel](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/fromconfig.go>)
+
+```go
+func FromConfigWithLevel(format Format, raw []byte, floor *LevelVar) (lg Logger, err error)
+```
+
+FromConfigWithLevel is FromConfig gated on floor, a LevelVar the caller keeps: the topology's level, when it names one, is set into floor, and every record is checked against floor's current value, so the caller retunes the whole topology with floor.Set and rebuilds nothing. A nil floor is FromConfig.
+
 <a name="Info"></a>
 ## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/logger.go>)
 
@@ -762,6 +793,15 @@ lg, err := logger.NewMulti(logger.LevelInfo,
 )
 ```
 
+<a name="NewOTLPHTTPExporter"></a>
+## func [NewOTLPHTTPExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
+
+```go
+func NewOTLPHTTPExporter(cfg OTLPHTTPConfig) (exporter DocumentExporter, err error)
+```
+
+NewOTLPHTTPExporter returns the OTLP/HTTP logs exporter, the DocumentExporter an OTLPConfig hands its batches to — or a forwarder's Send, which posts them later (#867).
+
 <a name="NewText"></a>
 ## func [NewText](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/logger.go>)
 
@@ -817,6 +857,15 @@ lg, _ := logger.NewWithSink(logger.SinkConfig{
     Sink: logger.Multi(logger.ConsoleStderr(), fileSink),
 })
 ```
+
+<a name="OTLPRetryable"></a>
+## func [OTLPRetryable](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
+
+```go
+func OTLPRetryable(err error) bool
+```
+
+OTLPRetryable reports whether a failure of the OTLP/HTTP logs exporter is the transient one a later attempt may cure.
 
 <a name="ParseLevel"></a>
 ## func [ParseLevel](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
@@ -896,7 +945,7 @@ Warn emits a RecordEvent at LevelWarn through lg.
 func WithCaller(lg Logger, skip int) Logger
 ```
 
-WithCaller returns a derived Logger whose emitted records carry a "source" attribute resolving the call site into file:line:function. The skip argument is the extra stack-frame offset reserved for wrapper layers; pass 0 for direct callers. The returned Logger shares the original's sink and encoder; the only change is the added annotation, so the option is safe to layer onto any Logger built by this package.
+WithCaller returns a derived Logger whose emitted records carry a "source" attribute resolving the call site into file:line:function. The skip argument is the extra stack-frame offset reserved for wrapper layers; pass 0 for direct callers. The returned Logger shares the original's sink, encoder and trace correlation — a record emitted under a traced context still carries trace\_id and span\_id —; the only change is the added annotation, so the option is safe to layer onto any Logger built by this package.
 
 ```
 lg, _ := logger.Default()
@@ -936,6 +985,39 @@ type Attr struct {
 	Value Value
 }
 ```
+
+<a name="BatchSink"></a>
+## type [BatchSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
+
+BatchSink is the stable alias for the internal core.BatchSink port: a Sink that also implements it receives several records in one WriteBatch call from an async middleware configured with a BatchMax above one, instead of one Write each.
+
+```go
+type BatchSink = corelogger.BatchSink
+```
+
+BatchSink is an alias of `github.com/kitsunium/sdk/internal/core/observe/logger.BatchSink`, declared as:
+
+```go
+type BatchSink interface {
+	// WriteBatch delivers payloads[i], the formatted bytes of recs[i], in
+	// order, in as few transport calls as the sink can, and reports how
+	// many records, counted from the first, were delivered whole. When err
+	// is non-nil, recs[written:] were not delivered; when it is nil,
+	// written is len(recs). recs and payloads have the same length, and
+	// neither they nor the payloads' bytes are retained after the call
+	// returns.
+	WriteBatch(ctx context.Context, recs []RecordEvent, payloads [][]byte) (written int, err error)
+}
+```
+
+<a name="BatchSink.WriteBatch"></a>
+### func \(BatchSink\) [WriteBatch](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
+
+```go
+func (BatchSink) WriteBatch(ctx context.Context, recs []RecordEvent, payloads [][]byte) (written int, err error)
+```
+
+WriteBatch delivers payloads\[i], the formatted bytes of recs\[i], in order, in as few transport calls as the sink can, and reports how many records, counted from the first, were delivered whole. When err is non-nil, recs\[written:] were not delivered; when it is nil, written is len(recs). recs and payloads have the same length, and neither they nor the payloads' bytes are retained after the call returns.
 
 <a name="Builder"></a>
 ## type [Builder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
@@ -1252,6 +1334,54 @@ func (CredentialValue) String() string
 ```
 
 String implements fmt.Stringer and always redacts so the secret never reaches a log line through %v / %s.
+
+<a name="DocumentExporter"></a>
+## type [DocumentExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
+
+DocumentExporter is the stable alias for the port that ships a batch of log records already encoded as an OTLP/JSON document — the OTLP/HTTP logs exporter, or app/forward's queue (#867).
+
+```go
+type DocumentExporter = corelogger.DocumentExporter
+```
+
+DocumentExporter is an alias of `github.com/kitsunium/sdk/internal/core/observe/logger.DocumentExporter`, declared as:
+
+```go
+type DocumentExporter interface {
+	ExportDocument(ctx context.Context, doc []byte) error
+}
+```
+
+<a name="DocumentExporter.ExportDocument"></a>
+### func \(DocumentExporter\) [ExportDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
+
+```go
+func (DocumentExporter) ExportDocument(ctx context.Context, doc []byte) error
+```
+
+<a name="EncodedDocumentExporter"></a>
+## type [EncodedDocumentExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
+
+EncodedDocumentExporter is the stable alias for the sibling of DocumentExporter that ships a document already gzip, labelled (#1051).
+
+```go
+type EncodedDocumentExporter = corelogger.EncodedDocumentExporter
+```
+
+EncodedDocumentExporter is an alias of `github.com/kitsunium/sdk/internal/core/observe/logger.EncodedDocumentExporter`, declared as:
+
+```go
+type EncodedDocumentExporter interface {
+	ExportEncodedDocument(ctx context.Context, doc []byte, encoding string) error
+}
+```
+
+<a name="EncodedDocumentExporter.ExportEncodedDocument"></a>
+### func \(EncodedDocumentExporter\) [ExportEncodedDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
+
+```go
+func (EncodedDocumentExporter) ExportEncodedDocument(ctx context.Context, doc []byte, encoding string) error
+```
 
 <a name="Encoder"></a>
 ## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
@@ -1592,6 +1722,67 @@ func (*MemorySink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 
 Write appends a defensive snapshot of r to the buffer and reports len(p) as written. The encoder's bytes p are intentionally ignored — the sink retains the structured record, not its serialised form. The Attrs slice is deep-cloned, including any nested KindGroup payloads, so later caller mutation cannot corrupt recorded history.
 
+<a name="OTLPConfig"></a>
+## type [OTLPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
+
+OTLPConfig is the stable alias for the "otlpjson" writer's configuration: Exporter required; Resource, Scope (the metrics package's Resource and Scope, one type with them), MinLevel, BatchMax, BufferSize, OnDrop and OnError optional (#867).
+
+```go
+type OTLPConfig = otlpjson.Config
+```
+
+OTLPConfig is an alias of `github.com/kitsunium/sdk/internal/service/observe/logger/writer/otlpjson.Config`, declared as:
+
+```go
+type OTLPConfig struct {
+	// Exporter receives each batch as one OTLP/JSON document: the exporter
+	// NewOTLPHTTPExporter returns, or forward.NewLogExporter's adapter, which
+	// keeps it in a durable queue. It must not retain doc past its return.
+	Exporter   corelogger.DocumentExporter
+	// Resource identifies the producer, carried once per document.
+	Resource   coreotel.ResourceValue
+	// Scope identifies the instrumentation, carried once per document.
+	Scope      coreotel.ScopeValue
+	// MinLevel is the optional per-writer severity floor; the zero value
+	// (level.Info) inherits the handler-global level.
+	MinLevel   level.Level
+	// BatchMax is how many records one document carries at most; zero is
+	// DefaultBatchMax.
+	BatchMax   int
+	// BufferSize is the async ring capacity; a non-positive value applies
+	// async's own default.
+	BufferSize int
+	// OnDrop, when non-nil, is invoked with the count of records discarded
+	// because the non-blocking ring saturated.
+	OnDrop     func(dropped int)
+	// OnError, when non-nil, is invoked for each record of a batch the
+	// exporter refused; nil discards the failure.
+	OnError    func(err error)
+}
+```
+
+<a name="OTLPHTTPConfig"></a>
+## type [OTLPHTTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
+
+OTLPHTTPConfig is the stable alias for the OTLP/HTTP logs exporter's configuration: Endpoint (…/v1/logs), Headers, Timeout, Client, MaxResponseBytes, Gzip.
+
+```go
+type OTLPHTTPConfig = otlpjson.OTLPHTTPConfig
+```
+
+OTLPHTTPConfig is an alias of `github.com/kitsunium/sdk/internal/service/observe/logger/writer/otlpjson.OTLPHTTPConfig`, declared as:
+
+```go
+type OTLPHTTPConfig struct {
+	Endpoint         string
+	Client           *http.Client
+	Headers          map[string]string
+	Timeout          time.Duration
+	MaxResponseBytes int64
+	Gzip             bool
+}
+```
+
 <a name="Record"></a>
 ## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
 
@@ -1834,6 +2025,12 @@ type SinkConfig struct {
 	Encoder  Encoder
 	// MinLevel is the minimum severity emitted; zero value is LevelInfo.
 	MinLevel Level
+	// Level, when non-nil, is the live floor: every record is checked
+	// against Level.Level(), so a LevelVar retuned with Set takes effect on
+	// the next record of this Logger and of every Logger derived from it,
+	// with nothing rebuilt. Setting both Level and a non-zero MinLevel is
+	// refused with LevelAmbiguous (0.3.1.5).
+	Level    Leveler
 }
 ```
 

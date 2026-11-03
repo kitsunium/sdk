@@ -9,6 +9,10 @@ sequences:
         kind: self
       - id: mustNewRing
         kind: internal
+      - id: callbacksOf
+        kind: internal
+      - id: out.wireBatch
+        kind: internal
       - id: worker
         kind: package
     steps:
@@ -22,22 +26,13 @@ sequences:
       - bind: queue
         eval: mustNewRing(size)
         to: mustNewRing
-      - bind: callback
-        eval: cfg.OnDrop
-      - opt:
-          do:
-            - set: callback
-              value: noopOnDrop
-          when: callback == nil
-      - bind: errCallback
-        eval: cfg.OnError
-      - opt:
-          do:
-            - set: errCallback
-              value: noopOnError
-          when: errCallback == nil
+      - bind: callback, errCallback
+        eval: callbacksOf(&cfg)
+        to: callbacksOf
       - bind: pool
         eval: recycler.NewPool[*recordEntry](newRecordEntry)
+      - bind: batchMax
+        eval: max(cfg.BatchMax, 1)
       - bind: out
         eval: |-
           &asyncSink{
@@ -50,9 +45,14 @@ sequences:
           		onDrop:      callback,
           		onError:     errCallback,
           		flushSignal: make(chan struct{}, 1),
+          		wake:        make(chan struct{}, 1),
+          		batchMax:    batchMax,
+          		batch:       make([]*recordEntry, 0, batchMax),
           		stop:        make(chan struct{}),
           		done:        make(chan struct{}),
           	}
+      - eval: out.wireBatch()
+        to: out.wireBatch
       - opt:
           do:
             - opt:
@@ -77,6 +77,35 @@ sequences:
           		out.drain()
           	})
       - return: out
+  - of: callbacksOf
+    steps:
+      - set: onDrop, onError
+        value: cfg.OnDrop, cfg.OnError
+      - opt:
+          do:
+            - set: onDrop
+              value: noopOnDrop
+          when: onDrop == nil
+      - opt:
+          do:
+            - set: onError
+              value: noopOnError
+          when: onError == nil
+      - return: onDrop, onError
+  - of: (*asyncSink).wireBatch
+    steps:
+      - bind: bs, ok
+        eval: s.downstream.(corelogger.BatchSink)
+      - opt:
+          do:
+            - return: ""
+          when: "!ok || s.batchMax <= 1"
+      - set: s.batchSink
+        value: bs
+      - set: s.recs
+        value: make([]corelogger.RecordEvent, 0, s.batchMax)
+      - set: s.payloads
+        value: make([][]byte, 0, s.batchMax)
   - of: mustNewRing
     steps:
       - bind: queue, err
@@ -112,6 +141,8 @@ sequences:
         kind: value
       - id: s.queue.TryWrite
         kind: value
+      - id: s.wakeDrainer
+        kind: internal
       - id: s.blockForSpace
         kind: internal
       - id: s.handleFull
@@ -146,6 +177,8 @@ sequences:
           do:
             - eval: s.ringMu.Unlock()
               to: s.ringMu.Unlock
+            - eval: s.wakeDrainer()
+              to: s.wakeDrainer
             - return: len(payload), nil
           init:
             bind: werr
@@ -164,6 +197,8 @@ sequences:
         value: s.handleFull(ent)
       - eval: s.ringMu.Unlock()
         to: s.ringMu.Unlock
+      - eval: s.wakeDrainer()
+        to: s.wakeDrainer
       - return: n, err
   - of: (*asyncSink).blockForSpace
     participants:
@@ -280,6 +315,8 @@ sequences:
         kind: value
       - id: s.signalSpace
         kind: internal
+      - id: s.wakeDrainer
+        kind: internal
     steps:
       - lock:
           mutex: s.ringMu
@@ -298,7 +335,19 @@ sequences:
             - eval: s.signalSpace()
               to: s.signalSpace
           when: s.queue.Len() < s.queue.Capacity()
+      - eval: s.wakeDrainer()
+        to: s.wakeDrainer
       - return: len(ent.data), true, nil
+  - of: (*asyncSink).wakeDrainer
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!s.parked.Load()"
+      - select:
+          cases:
+            - comm: s.wake <- struct{}{}
+            - default: true
   - of: (*asyncSink).signalSpace
     steps:
       - opt:
@@ -453,6 +502,9 @@ sequences:
             - return: ""
           when: s.daemon != nil
       - eval: <-s.done
+  - of: newRecordEntry
+    steps:
+      - return: "&recordEntry{}"
   - of: (*asyncSink).drain
     participants:
       - id: caller
@@ -478,55 +530,174 @@ sequences:
         kind: actor
       - id: (*asyncSink).drainLoop
         kind: self
+      - id: s.take
+        kind: internal
+      - id: s.signalSpace
+        kind: internal
+      - id: s.deliver
+        kind: internal
+      - id: s.drainRemaining
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: batch
+              eval: s.take()
+              to: s.take
+            - opt:
+                do:
+                  - eval: s.signalSpace()
+                    to: s.signalSpace
+                  - eval: s.deliver(batch)
+                    to: s.deliver
+                  - continue: true
+                when: len(batch) > 0
+            - opt:
+                do:
+                  - eval: s.drainRemaining()
+                    to: s.drainRemaining
+                  - return: ""
+                when: "!s.park(stop)"
+          forever: true
+  - of: (*asyncSink).park
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).park
+        kind: self
+      - id: s.parked.Store
+        kind: value
+    steps:
+      - eval: s.parked.Store(true)
+        to: s.parked.Store
+      - defer: s.parked.Store(false)
+        to: s.parked.Store
+      - opt:
+          do:
+            - return: "true"
+          when: s.pending()
+      - select:
+          cases:
+            - comm: <-stop
+              do:
+                - return: "false"
+            - comm: <-s.wake
+              do:
+                - return: "true"
+  - of: (*asyncSink).pending
+    steps:
+      - lock:
+          mutex: s.ringMu
+      - return: s.queue.Len() > 0
+  - of: (*asyncSink).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).take
+        kind: self
       - id: s.ringMu.Lock
         kind: value
       - id: s.queue.TryRead
         kind: value
       - id: s.ringMu.Unlock
         kind: value
-      - id: s.signalSpace
-        kind: internal
-      - id: s.forward
-        kind: internal
-      - id: s.drainRemaining
-        kind: internal
-      - id: yieldOnce
-        kind: internal
     steps:
+      - bind: batch
+        eval: s.batch[:0]
+      - eval: s.ringMu.Lock()
+        to: s.ringMu.Lock
       - loop:
+          cond: len(batch) < s.batchMax
           do:
-            - eval: s.ringMu.Lock()
-              to: s.ringMu.Lock
             - bind: ent, err
               eval: s.queue.TryRead()
               to: s.queue.TryRead
             - opt:
                 do:
-                  - op: ++
-                    set: s.inFlight
-                when: err == nil
-            - eval: s.ringMu.Unlock()
-              to: s.ringMu.Unlock
-            - opt:
+                  - break: true
+                when: err != nil
+            - set: batch
+              value: append(batch, ent)
+      - op: +=
+        set: s.inFlight
+        value: len(batch)
+      - eval: s.ringMu.Unlock()
+        to: s.ringMu.Unlock
+      - set: s.batch
+        value: batch
+      - return: batch
+  - of: (*asyncSink).deliver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).deliver
+        kind: self
+      - id: s.forward
+        kind: internal
+      - id: s.forwardBatch
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - loop:
                 do:
-                  - eval: s.signalSpace()
-                    to: s.signalSpace
                   - eval: s.forward(ent)
                     to: s.forward
-                  - continue: true
-                when: err == nil
-            - select:
-                cases:
-                  - comm: <-stop
-                    do:
-                      - eval: s.drainRemaining()
-                        to: s.drainRemaining
-                      - return: ""
-                  - default: true
-                    do:
-                      - eval: yieldOnce()
-                        to: yieldOnce
-          forever: true
+                key: _
+                range: batch
+                value: ent
+            - return: ""
+          when: s.batchSink == nil || len(batch) == 1
+      - eval: s.forwardBatch(batch)
+        to: s.forwardBatch
+  - of: (*asyncSink).forwardBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).forwardBatch
+        kind: self
+      - id: s.batchSink.WriteBatch
+        kind: value
+      - id: s.settle
+        kind: internal
+      - id: s.recycle
+        kind: internal
+    steps:
+      - bind: recs, payloads
+        eval: s.recs[:0], s.payloads[:0]
+      - loop:
+          do:
+            - set: recs
+              value: append(recs, ent.rec)
+            - set: payloads
+              value: append(payloads, ent.data)
+          key: _
+          range: batch
+          value: ent
+      - bind: written, err
+        eval: s.batchSink.WriteBatch(asyncCtx(), recs, payloads)
+        to: s.batchSink.WriteBatch
+      - opt:
+          do:
+            - loop:
+                do:
+                  - eval: s.onError(err)
+                range: len(batch) - min(max(written, 0), len(batch))
+          when: err != nil
+      - eval: clear(recs)
+      - eval: clear(payloads)
+      - set: s.recs, s.payloads
+        value: recs[:0], payloads[:0]
+      - eval: s.settle(len(batch))
+        to: s.settle
+      - loop:
+          do:
+            - eval: s.recycle(ent)
+              to: s.recycle
+          key: _
+          range: batch
+          value: ent
+      - eval: clear(batch)
   - of: (*asyncSink).forward
     participants:
       - id: caller
@@ -537,28 +708,51 @@ sequences:
         kind: value
       - id: s.forwardDownstreamError
         kind: internal
-      - id: s.ringMu.Lock
-        kind: value
-      - id: s.ringMu.Unlock
-        kind: value
-      - id: s.pool.Put
-        kind: value
+      - id: s.settle
+        kind: internal
+      - id: s.recycle
+        kind: internal
     steps:
       - bind: n, err
         eval: s.downstream.Write(asyncCtx(), ent.rec, ent.data)
         to: s.downstream.Write
       - eval: s.forwardDownstreamError(n, err)
         to: s.forwardDownstreamError
+      - eval: s.settle(1)
+        to: s.settle
+      - eval: s.recycle(ent)
+        to: s.recycle
+  - of: (*asyncSink).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).settle
+        kind: self
+      - id: s.ringMu.Lock
+        kind: value
+      - id: s.ringMu.Unlock
+        kind: value
+    steps:
       - eval: s.ringMu.Lock()
         to: s.ringMu.Lock
-      - op: "--"
+      - op: "-="
         set: s.inFlight
+        value: "n"
       - eval: s.ringMu.Unlock()
         to: s.ringMu.Unlock
       - select:
           cases:
             - comm: s.flushSignal <- struct{}{}
             - default: true
+  - of: (*asyncSink).recycle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).recycle
+        kind: self
+      - id: s.pool.Put
+        kind: value
+    steps:
       - set: ent.rec
         value: corelogger.RecordEvent{}
       - alt:
@@ -578,50 +772,23 @@ sequences:
         kind: actor
       - id: (*asyncSink).drainRemaining
         kind: self
-      - id: s.ringMu.Lock
-        kind: value
-      - id: s.queue.TryRead
-        kind: value
-      - id: s.ringMu.Unlock
-        kind: value
-      - id: s.forward
+      - id: s.take
+        kind: internal
+      - id: s.deliver
         kind: internal
     steps:
       - loop:
           do:
-            - eval: s.ringMu.Lock()
-              to: s.ringMu.Lock
-            - bind: ent, err
-              eval: s.queue.TryRead()
-              to: s.queue.TryRead
-            - opt:
-                do:
-                  - op: ++
-                    set: s.inFlight
-                when: err == nil
-            - eval: s.ringMu.Unlock()
-              to: s.ringMu.Unlock
+            - bind: batch
+              eval: s.take()
+              to: s.take
             - opt:
                 do:
                   - return: ""
-                when: err != nil
-            - eval: s.forward(ent)
-              to: s.forward
+                when: len(batch) == 0
+            - eval: s.deliver(batch)
+              to: s.deliver
           forever: true
-  - of: newRecordEntry
-    steps:
-      - return: "&recordEntry{}"
-  - of: yieldOnce
-    participants:
-      - id: caller
-        kind: actor
-      - id: yieldOnce
-        kind: self
-      - id: runtime
-        kind: stdlib
-    steps:
-      - eval: runtime.Gosched()
-        to: runtime
   - of: isClosed
     steps:
       - select:

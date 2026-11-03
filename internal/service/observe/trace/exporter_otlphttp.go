@@ -196,3 +196,19 @@ func (e *otlpHTTPExporter) ExportDocument(ctx context.Context, doc []byte) error
 	//: transport and classification, under the caller's bound.
 	return e.sender.PostContext(ctx, doc)
 }
+
+// ExportEncodedDocument implements core/observe/trace.EncodedDocumentExporter:
+// it POSTs doc as it is, labelled with encoding — "gzip" for a document a
+// store-and-forward queue kept compressed, never decompressed on the way;
+// "" is ExportDocument — under ctx and with the verdicts of ExportContext.
+// An encoding the sender cannot label is refused before any request, as
+// the permanent rejection (#1051). An empty doc posts nothing.
+func (e *otlpHTTPExporter) ExportEncodedDocument(ctx context.Context, doc []byte, encoding string) error {
+	//: nothing to ship.
+	if len(doc) == 0 {
+		//: no socket touched.
+		return nil
+	}
+	//: labelled as it rests, under the caller's bound.
+	return e.sender.PostEncoded(ctx, doc, encoding)
+}

@@ -41,6 +41,11 @@ func (e *encoder) appendValue(b []byte, v reflect.Value, opts fieldOptions) ([]b
 		//: RFC 3339.
 		return appendSpecial(b, v), nil
 	}
+	//: a time.Duration is written as its String(), as yaml writes it (#1126).
+	if info.is(typeDuration) {
+		//: "1h30m0s", quoted.
+		return appendStringValue(b, time.Duration(v.Int()).String(), false)
+	}
 	//: a TextMarshaler is written as the string it returns.
 	if info.is(typeTextMarshalerPtr) || (info.is(typeTextMarshaler) && v.Kind() != reflect.String) {
 		//: the text, as a string.

@@ -28,6 +28,9 @@ var (
 	perfBytes  []byte
 )
 
+// perfSizedHint is a size past the shared pool's cap, in the 1 MiB class.
+const perfSizedHint = 600 << 10
+
 // perfPayload is what a detached buffer holds: small, under the cap.
 var perfPayload = []byte("a codec's encoded bytes")
 
@@ -39,6 +42,18 @@ func perfAcquireBuffer(testing.TB) func() {
 		buf := scratch.AcquireBuffer()
 		perfBuffer = buf
 		scratch.ReleaseBuffer(buf)
+	}
+}
+
+// perfAcquireBufferSized is AcquireBufferSized's fixture: a borrow of a
+// buffer from the 1 MiB class, warmed first, and its release — the round trip
+// a codec encoding 600 KiB documents makes on every call (#906).
+func perfAcquireBufferSized(testing.TB) func() {
+	scratch.ReleaseBufferSized(scratch.AcquireBufferSized(perfSizedHint))
+	return func() {
+		buf := scratch.AcquireBufferSized(perfSizedHint)
+		perfBuffer = buf
+		scratch.ReleaseBufferSized(buf)
 	}
 }
 

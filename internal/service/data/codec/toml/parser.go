@@ -350,9 +350,14 @@ func (p *parser) skipRune(problem string) error {
 // a fixed sentence: no byte of the document is ever copied into an error.
 func (p *parser) fail(at int, problem string) error {
 	line, column := position(p.data, at)
+	fields := []errs.FieldValue{errs.String(fieldProblem, problem), errs.Int(fieldLine, line), errs.Int(fieldColumn, column)}
+	//: the depth bound: the family's DEPTH_EXCEEDED, UnmarshalFailed in the trail (#894).
+	if problem == problemTooDeep {
+		//: the bound's sentinel first.
+		return errs.Wrap(coretoml.DepthExceeded, errs.WrapParams{Code: coretoml.CodeTOMLUnmarshalFailed}, fields...)
+	}
 	//: the sentinel's code and messages, with the location as fields.
-	return errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
-		errs.String(fieldProblem, problem), errs.Int(fieldLine, line), errs.Int(fieldColumn, column))
+	return errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{}, fields...)
 }
 
 // position returns the 1-based line and column of offset at in data, the

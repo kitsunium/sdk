@@ -12,7 +12,7 @@ Package csv registers the CSV codec with the SDK's codec registry — and no oth
 import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/csv"
 ```
 
-The codec is the standard library's encoding/csv over RFC 4180 records: its native value is a \[]\[]string, the rows of a table. Through the codec package's Marshal any other value is carried as its JSON, in the one cell of a one-column table, and read back the same way.
+The codec is the standard library's encoding/csv over RFC 4180 records: its native value is a \[]\[]string, the rows of a table, or a slice of structs — a header from the fields' csv tags, then one record per row, each cell converted to its field. Through the codec package's Marshal any other value is carried as its JSON, in the one cell of a one-column table, and read back the same way. It streams: one record per Decode and Encode.
 
 Everything that dispatches through the registry by format name then reads and writes it: the codec package's Marshal and Unmarshal, config.FSSource and i18n.LoadFS. Importing github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK ships; this package links this one codec, the core package declaring its codes and the standard library, and nothing else. Importing both is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
 
@@ -23,7 +23,10 @@ Failures carry the range 0.3.8.\*; match them with errs.HasCode, or the sentinel
 ```
 CodeMarshalFailed    0.3.8.1  encoding/csv refused to write the records
 CodeUnmarshalFailed  0.3.8.2  the input is not CSV encoding/csv reads
-CodeValueInvalid     0.3.8.3  the value or the target is not a [][]string
+CodeValueInvalid     0.3.8.3  the value or the target is not a [][]string or a table of structs
+CodeHeaderMismatch   0.3.8.4  the header lacks a required column, or repeats one
+CodeCellInvalid      0.3.8.5  a cell does not convert to its field's type
+CodeOptionsInvalid   0.3.8.6  NewWithOptions was given an invalid delimiter
 ```
 
 No error message quotes the input.
@@ -35,6 +38,28 @@ No error message quotes the input.
 
 ## Constants
 
+<a name="CodeCellInvalid"></a>
+```go
+const CodeCellInvalid errs.Code = 198661
+```
+
+CodeCellInvalid is 0.3.8.5: a cell does not convert to its field's type.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/csv.CodeCSVCellInvalid`.
+
+Code `0.3.8.5`
+
+<a name="CodeHeaderMismatch"></a>
+```go
+const CodeHeaderMismatch errs.Code = 198660
+```
+
+CodeHeaderMismatch is 0.3.8.4: the header lacks a column the struct requires, or repeats one it maps.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/csv.CodeCSVHeaderMismatch`.
+
+Code `0.3.8.4`
+
 <a name="CodeMarshalFailed"></a>
 ```go
 const CodeMarshalFailed errs.Code = 198657
@@ -45,6 +70,17 @@ CodeMarshalFailed is 0.3.8.1: encoding/csv refused to write the records.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/csv.CodeCSVMarshalFailed`.
 
 Code `0.3.8.1`
+
+<a name="CodeOptionsInvalid"></a>
+```go
+const CodeOptionsInvalid errs.Code = 198662
+```
+
+CodeOptionsInvalid is 0.3.8.6: options with a delimiter encoding/csv cannot use.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/csv.CodeCSVOptionsInvalid`.
+
+Code `0.3.8.6`
 
 <a name="CodeUnmarshalFailed"></a>
 ```go
@@ -77,6 +113,28 @@ Format is the name CSV is registered under. It is an untyped constant, so it goe
 
 ## Variables
 
+<a name="CellInvalid"></a>
+```go
+var CellInvalid *errs.Error
+```
+
+CellInvalid is the sentinel of [CodeCellInvalid](#CodeCellInvalid).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/csv.CellInvalid`.
+
+Code `0.3.8.5` · reason `CELL_INVALID` · public "CSV cell does not convert to its column's type"
+
+<a name="HeaderMismatch"></a>
+```go
+var HeaderMismatch *errs.Error
+```
+
+HeaderMismatch is the sentinel of [CodeHeaderMismatch](#CodeHeaderMismatch).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/csv.HeaderMismatch`.
+
+Code `0.3.8.4` · reason `HEADER_MISMATCH` · public "CSV header does not match the expected columns"
+
 <a name="MarshalFailed"></a>
 ```go
 var MarshalFailed *errs.Error
@@ -87,6 +145,17 @@ MarshalFailed is the sentinel of [CodeMarshalFailed](#CodeMarshalFailed).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/csv.MarshalFailed`.
 
 Code `0.3.8.1` · reason `MARSHAL_FAILED` · public "CSV encoding failed"
+
+<a name="OptionsInvalid"></a>
+```go
+var OptionsInvalid *errs.Error
+```
+
+OptionsInvalid is the sentinel of [CodeOptionsInvalid](#CodeOptionsInvalid).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/csv.OptionsInvalid`.
+
+Code `0.3.8.6` · reason `OPTIONS_INVALID` · public "CSV options are invalid"
 
 <a name="UnmarshalFailed"></a>
 ```go

@@ -1,7 +1,6 @@
 package encoder
 
 import (
-	"math"
 	"strconv"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
@@ -24,17 +23,6 @@ const jsonGroupSeparator byte = '.'
 
 // jsonDecimalBase is the radix passed to strconv.Append* for JSON numbers.
 const jsonDecimalBase int = 10
-
-// jsonFloatPrec is the -1 sentinel asking strconv for the shortest
-// round-trippable float64 representation.
-const jsonFloatPrec int = -1
-
-// jsonFloatBitSize tells strconv.AppendFloat we are formatting a 64-bit float.
-const jsonFloatBitSize int = 64
-
-// jsonFloatFormat is the byte verb ('g') selecting strconv's
-// exponent-or-decimal float64 mode.
-const jsonFloatFormat byte = 'g'
 
 // jsonTimestampOpen opens the object's first member, "ts", up to the opening
 // quote of its value.
@@ -80,6 +68,27 @@ func (e *jsonEncoder) Name() string {
 // (possibly re-allocated) buffer including the trailing newline. groups is
 // rendered as a dotted prefix on each attribute key ("g1.g2.key").
 func (e *jsonEncoder) Append(dst []byte, groups []string, r corelogger.RecordEvent) []byte {
+	//: the object with nothing bound ahead of the record's own attributes.
+	return e.AppendWithPrefix(dst, groups, nil, r)
+}
+
+// AppendAttrs renders attrs as they appear in an object under groups — the
+// comma before each member, the dotted group prefix, the reserved-key rename
+// and the escaping included — for a handler to keep and splice into every
+// record with AppendWithPrefix (corelogger.PrefixEncoder, #1016).
+func (e *jsonEncoder) AppendAttrs(dst []byte, groups []string, attrs []corelogger.AttrValue) []byte {
+	//: each member exactly as Append renders it.
+	for _, a := range attrs {
+		dst = append(dst, ',')
+		dst = appendJSONAttr(dst, groups, a)
+	}
+	return dst
+}
+
+// AppendWithPrefix serialises r as Append does, with prefix — the bound
+// attributes AppendAttrs rendered for the same groups — spliced after the
+// header and the trace-context members and before r's own attributes.
+func (e *jsonEncoder) AppendWithPrefix(dst []byte, groups []string, prefix []byte, r corelogger.RecordEvent) []byte {
 	//: fall back to the encoder clock when the caller did not timestamp.
 	if r.Time.IsZero() {
 		//: use injected clock so tests can freeze time deterministically.
@@ -91,6 +100,8 @@ func (e *jsonEncoder) Append(dst []byte, groups []string, r corelogger.RecordEve
 	//: the header and before the attributes — the shape the OpenTelemetry
 	//: compatibility spec shows for non-OTLP JSON logs.
 	dst = appendJSONTraceContext(dst, r)
+	//: the bound members, rendered once when they were bound.
+	dst = append(dst, prefix...)
 	//: append every record-bound attribute prefixed by the group stack.
 	for _, a := range r.Attrs {
 		//: each attr becomes a comma-prefixed "key":value member.
@@ -222,14 +233,15 @@ func appendJSONValue(dst []byte, a corelogger.AttrValue) []byte {
 	}
 }
 
-// appendJSONFloat renders f as a bare JSON number, degrading NaN and ±Inf to
-// the null literal because the JSON grammar has no representation for them.
+// appendJSONFloat renders f as the bare JSON number encoding/json writes
+// (1000000, 1e-7), degrading NaN and ±Inf to the null literal because the
+// JSON grammar has no representation for them.
 func appendJSONFloat(dst []byte, f float64) []byte {
+	out, ok := jsonenc.AppendFloat(dst, f)
 	//: NaN and ±Inf have no JSON number representation.
-	if math.IsNaN(f) || math.IsInf(f, 0) {
+	if !ok {
 		//: null is the documented degraded result for non-finite floats.
 		return append(dst, 'n', 'u', 'l', 'l')
 	}
-	//: finite floats use the shortest round-trip 'g' format.
-	return strconv.AppendFloat(dst, f, jsonFloatFormat, jsonFloatPrec, jsonFloatBitSize)
+	return out
 }

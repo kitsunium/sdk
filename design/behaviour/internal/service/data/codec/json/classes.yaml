@@ -1,5 +1,27 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - doc: fieldLimit names the byte ceiling a refused value exceeded.
+    items:
+      - name: fieldLimit
+        type: string
+        value: "\"limit\""
+    name: fieldLimit
+  - doc: The bytes the sniffer accepts at the places it checks.
+    grouped: true
+    items:
+      - doc: |-
+          jsonOutsideString is every byte JSON writes outside a string:
+          whitespace, punctuation, a number's bytes, and the letters of true,
+          false and null.
+        name: jsonOutsideString
+        type: string
+        value: "\" \\t\\n\\r,:{}[]-+.eE0123456789truefalsn\""
+      - doc: jsonValueStart is every byte a value, or an array's end, opens with.
+        name: jsonValueStart
+        type: string
+        value: "`]\"{[-0123456789tfn`"
+    name: jsonOutsideString
 files:
   - decls:
       - Codec
@@ -12,12 +34,22 @@ files:
       - marshalRawMessage
       - (*jsonCodec).Unmarshal
       - (*jsonCodec).Append
+      - appendRawMessage
+      - appendRaw
       - (*jsonCodec).NewEncoder
       - (*jsonCodec).NewDecoder
     name: codec.go
   - decls:
+      - fieldLimit
       - jsonDecoder
+      - window
+      - (*jsonCodec).NewBoundedDecoder
+      - (*window).Read
+      - (*window).open
+      - (*window).exceeded
       - (*jsonDecoder).Decode
+      - (*jsonDecoder).decodeBounded
+      - wrapDecodeErr
       - (*jsonDecoder).More
     name: decoder.go
   - decls: []
@@ -33,8 +65,43 @@ files:
       - AppendEscaped
       - AppendInt
       - AppendUint
+      - AppendFloat
       - BeginObject
     name: jsonenc.go
+  - decls:
+      - position
+      - offsetField
+    name: position.go
+  - decls:
+      - jsonOutsideString
+      - (*jsonCodec).Sniff
+      - skipJSONSpace
+      - scanJSONValue
+      - opensJSONValue
+      - skipJSONString
+      - bracketDelta
+    name: sniff.go
+  - decls:
+      - v2Options
+      - v2Codec
+      - NewV2
+      - (*v2Codec).Name
+      - (*v2Codec).MIMETypes
+      - (*v2Codec).Extensions
+      - (*v2Codec).Marshal
+      - (*v2Codec).Unmarshal
+      - (*v2Codec).Append
+      - (*v2Codec).NewEncoder
+      - (*v2Codec).NewDecoder
+      - v2Encoder
+      - (*v2Encoder).Encode
+      - (*v2Encoder).Close
+      - v2Decoder
+      - (*v2Decoder).Decode
+      - (*v2Decoder).More
+      - marshalFailedV2
+      - unmarshalFailedV2
+    name: v2.go
 functions:
   - name: New
     results: codec.Codec
@@ -47,6 +114,23 @@ functions:
     name: marshalRawMessage
     params: v any
     results: encoded []byte, ok bool
+  - doc: |-
+      appendRawMessage appends a pre-encoded json.RawMessage / *json.RawMessage
+      to dst as marshalRawMessage returns it — "null" when empty — without the
+      clone Marshal needs. ok=false when v is not a raw shape.
+    name: appendRawMessage
+    params: dst []byte, v any
+    results: appended []byte, ok bool
+  - doc: appendRaw appends raw to dst, or "null" when raw is empty.
+    name: appendRaw
+    params: dst, raw []byte
+    results: "[]byte"
+  - doc: |-
+      wrapDecodeErr wraps a stdlib decoding error as UNMARSHAL_FAILED; nil stays
+      nil.
+    name: wrapDecodeErr
+    params: jerr error
+    results: error
   - name: AppendString
     params: dst []byte, s string
     results: "[]byte"
@@ -59,18 +143,89 @@ functions:
   - name: AppendUint
     params: dst []byte, v uint64
     results: "[]byte"
+  - name: AppendFloat
+    params: dst []byte, f float64
+    results: number []byte, ok bool
   - name: BeginObject
     params: dst []byte
     results: Object
+  - doc: |-
+      position returns the byte offset encoding/json's error gives err, as the
+      family's field codec.PositionOf reads (#1125): the bytes read when the
+      decoder stopped, which encoding/json reports for a syntax error and for a
+      value its target cannot hold, and json/v2 for both of its own. Any other
+      failure — a reader's, a nil target — is placed nowhere.
+    name: position
+    params: err error
+    results: "[]errs.FieldValue"
+  - doc: |-
+      offsetField is the family's offset field for an offset the standard
+      library counts in int64. A stream's offset can pass what an int holds on a
+      32-bit platform: that refusal is placed nowhere rather than wrongly.
+    name: offsetField
+    params: off int64
+    results: "[]errs.FieldValue"
+  - doc: |-
+      skipJSONSpace returns the index of the first byte at or after i that is not
+      JSON whitespace.
+    name: skipJSONSpace
+    params: p []byte, i int
+    results: int
+  - doc: |-
+      scanJSONValue scans the object or array opening at p[i] through its bytes:
+      it returns the index just past it and closed when it ends within p, the
+      length of p and !closed when p ends inside it, and -1 when p[i] opens no
+      object or array, when an object's first member is not a string, or when a
+      byte outside a string is one JSON never writes there.
+    name: scanJSONValue
+    params: p []byte, i int
+    results: end int, closed bool
+  - doc: |-
+      opensJSONValue reports whether p[i] opens an object or an array whose first
+      token can follow the bracket: a member name or the closing brace in an
+      object, a value or the closing bracket in an array — or nothing, p ending
+      there.
+    name: opensJSONValue
+    params: p []byte, i int
+    results: bool
+  - doc: |-
+      skipJSONString returns the index of the quote closing the string opening at
+      p[i], or len(p) when p ends inside it; ok is false on a raw control byte.
+    name: skipJSONString
+    params: p []byte, i int
+    results: end int, ok bool
+  - doc: |-
+      bracketDelta is +1 for a bracket that opens, -1 for one that closes, and 0
+      for any other byte.
+    name: bracketDelta
+    params: c byte
+    results: int
+  - name: NewV2
+    results: codec.Codec
+  - doc: marshalFailedV2 wraps a json/v2 encoding failure with the codec's code.
+    name: marshalFailedV2
+    params: cause error, private string
+    results: error
+  - doc: |-
+      unmarshalFailedV2 wraps a json/v2 decoding failure with the codec's code,
+      placed where json/v2 stopped.
+    name: unmarshalFailedV2
+    params: cause error, private string
+    results: error
 imports:
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   corejson: github.com/kitsunium/sdk/internal/core/data/codec/json
+  errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   io: io
   jsonenc: github.com/kitsunium/sdk/internal/kernel/jsonenc
+  jsontext: encoding/json/jsontext
+  jsonv2: encoding/json/v2
+  math: math
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
   slices: slices
   stdjson: encoding/json
+  strings: strings
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/codec/json
@@ -112,11 +267,10 @@ types:
           optional codec.Appender interface so hot-path callers (logger encoder,
           batch sinks) can write into a recycled buffer.
 
-          Uses a *bytes.Buffer pool + json.NewEncoder(buf).Encode(v) — replaces
-          the previous Marshal-then-append shape which paid a double copy
-          (stdjson.Marshal allocs+copies into a fresh []byte, then append copies
-          again into dst). The pool path encodes once into a reusable buffer
-          then copies once into dst — one alloc, one copy in steady state.
+          The value is encoded straight onto dst: json/v2's MarshalWrite under the
+          v1 options — Marshal's bytes, with no trailing newline — writes through a
+          pooled scratch.AppendWriter over dst, so the only copy is the encoder's own
+          flush into the caller's buffer. On failure dst is returned as it was given.
         name: Append
         params: dst []byte, v any
         recv: "*jsonCodec"
@@ -131,15 +285,48 @@ types:
         params: r io.Reader
         recv: "*jsonCodec"
         results: codec.Decoder
+      - doc: |-
+          NewBoundedDecoder implements codec.BoundedStreamingCodec (#891): a decoder
+          refusing, with SIZE_EXCEEDED, a value longer than maxBytes counted from the
+          end of the previous one, after reading at most one byte more than maxBytes of it. A
+          ceiling of zero or below is refused: no bound means unlimited (ADR 0031).
+        name: NewBoundedDecoder
+        params: r io.Reader, maxBytes int64
+        recv: "*jsonCodec"
+        results: codec.Decoder, error
+      - doc: |-
+          Sniff implements codec.Sniffer (#909): prefix is JSON when, after leading
+          whitespace, it opens an object or an array whose bytes so far are JSON's,
+          and either ends inside that value or holds nothing but whitespace after it.
+          A second value after the first is ndjson's, not this codec's; a scalar at
+          the top level is too common a head to claim. It reads only prefix and
+          allocates nothing.
+        name: Sniff
+        params: prefix []byte
+        recv: "*jsonCodec"
+        results: bool
     name: jsonCodec
   - doc: jsonDecoder wraps *encoding/json.Decoder so it satisfies codec.Decoder.
     fields:
       - name: inner
         type: "*stdjson.Decoder"
+      - doc: |-
+          window bounds every value the decoder reads; nil for NewDecoder's
+          decoder, which has no ceiling.
+        name: window
+        type: "*window"
     kind: struct
     methods:
       - doc: Decode reads the next value from the wrapped stdlib decoder.
         name: Decode
+        params: v any
+        recv: d *jsonDecoder
+        results: error
+      - doc: |-
+          decodeBounded decodes the next value inside its window: refused when a
+          read past the window was needed, or when the value, read whole, is one
+          byte longer than the ceiling.
+        name: decodeBounded
         params: v any
         recv: d *jsonDecoder
         results: error
@@ -148,6 +335,46 @@ types:
         recv: d *jsonDecoder
         results: bool
     name: jsonDecoder
+  - doc: |-
+      window is the reader under a bounded decoder (#891): it hands over at most
+      one byte more than max past the end of the value decoded last, so a value longer than
+      max is refused after one byte more than max of them, however many the stream holds.
+    fields:
+      - doc: r is the stream.
+        name: r
+        type: io.Reader
+      - doc: max is the ceiling of one value.
+        name: max
+        type: int64
+      - doc: read is how many bytes r has handed over.
+        name: read
+        type: int64
+      - doc: end is how many bytes r may have handed over before a read is refused.
+        name: end
+        type: int64
+      - doc: "hit latches once a value was refused: the stream cannot be resynchronised."
+        name: hit
+        type: bool
+    kind: struct
+    methods:
+      - doc: Read hands over what r returns, never past the window's end.
+        name: Read
+        params: p []byte
+        recv: w *window
+        results: int, error
+      - doc: open starts the window of the value that begins at offset start.
+        name: open
+        params: start int64
+        recv: w *window
+      - doc: |-
+          exceeded is the SIZE_EXCEEDED refusal of a value past the ceiling, with
+          UNMARSHAL_FAILED's code joining the trail (#894), placed at the first byte
+          past the ceiling — the stream's offset end-1, counted as encoding/json
+          counts the offsets of its own refusals (#1125).
+        name: exceeded
+        recv: w *window
+        results: error
+    name: window
   - doc: jsonEncoder wraps *encoding/json.Encoder so it satisfies codec.Encoder.
     fields:
       - name: inner
@@ -171,6 +398,89 @@ types:
     kind: alias
     name: Object
     underlying: jsonenc.Object
+  - doc: v2Codec is the JSON codec under encoding/json/v2's own semantics (#893).
+    kind: struct
+    methods:
+      - doc: "Name implements codec.Codec: the format is JSON, whatever the semantics."
+        name: Name
+        recv: "*v2Codec"
+        results: string
+      - doc: MIMETypes lists the JSON media types.
+        name: MIMETypes
+        recv: "*v2Codec"
+        results: "[]string"
+      - doc: Extensions lists the JSON file extension.
+        name: Extensions
+        recv: "*v2Codec"
+        results: "[]string"
+      - doc: Marshal encodes v under json/v2's semantics.
+        name: Marshal
+        params: v any
+        recv: "*v2Codec"
+        results: encoded []byte, err error
+      - doc: Unmarshal decodes data into v under json/v2's semantics.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*v2Codec"
+        results: error
+      - doc: |-
+          Append encodes v onto dst under json/v2's semantics, through a pooled
+          scratch.AppendWriter; dst is returned as given on failure.
+        name: Append
+        params: dst []byte, v any
+        recv: "*v2Codec"
+        results: appended []byte, err error
+      - doc: |-
+          NewEncoder wraps w in a stream encoder writing one value per Encode, each
+          followed by a newline, under json/v2's semantics.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*v2Codec"
+        results: codec.Encoder
+      - doc: |-
+          NewDecoder wraps r in a stream decoder reading one value per Decode under
+          json/v2's semantics. Decode returns io.EOF, unwrapped, once drained.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*v2Codec"
+        results: codec.Decoder
+    name: v2Codec
+  - doc: v2Encoder adapts a jsontext.Encoder to codec.Encoder.
+    fields:
+      - doc: inner writes the stream.
+        name: inner
+        type: "*jsontext.Encoder"
+    kind: struct
+    methods:
+      - doc: Encode writes v as the next top-level value.
+        name: Encode
+        params: v any
+        recv: e *v2Encoder
+        results: error
+      - doc: |-
+          Close is a no-op: each value is flushed as it is written, and the encoder
+          does not own the writer.
+        name: Close
+        recv: "*v2Encoder"
+        results: error
+    name: v2Encoder
+  - doc: v2Decoder adapts a jsontext.Decoder to codec.Decoder.
+    fields:
+      - doc: inner reads the stream.
+        name: inner
+        type: "*jsontext.Decoder"
+    kind: struct
+    methods:
+      - doc: Decode reads the next top-level value into v.
+        name: Decode
+        params: v any
+        recv: d *v2Decoder
+        results: error
+      - doc: More reports whether another value starts in the stream.
+        name: More
+        recv: d *v2Decoder
+        results: bool
+    name: v2Decoder
 vars:
   - doc: |-
       Codec is the JSON singleton, registered with core/data/codec at package
@@ -181,3 +491,11 @@ vars:
         type: codec.Codec
         value: codec.Register(&jsonCodec{})
     name: Codec
+  - doc: |-
+      v2Options are the options of the codec NewV2 returns: json/v2's defaults,
+      and map members written in sorted order so the same value always encodes
+      to the same bytes, as the registered codec's do.
+    items:
+      - name: v2Options
+        value: jsonv2.Deterministic(true)
+    name: v2Options

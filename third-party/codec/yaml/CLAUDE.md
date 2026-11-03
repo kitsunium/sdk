@@ -40,6 +40,22 @@ blank-import this package to register `"yaml-full"`; `pkg/v1/data/codec` and
   site can see.
 - **A distinct Format, not a replacement.** Both can be linked into one
   program; a caller chooses per call.
+- **Depth** (#1099): gopkg.in/yaml.v3 v3.0.1 bounds nesting itself — 10 000
+  flow levels (`max_flow_level`) and 10 000 indentation levels (`max_indents`,
+  `scannerc.go`) — so, unlike hclsyntax, a megabyte of `[` is refused, not a
+  stack overflow (measured on the base: no crash under a 64 MiB stack limit).
+  What was missing is the vocabulary: that refusal came back as
+  `YAML_FULL_UNMARSHAL_FAILED`, indistinguishable from a syntax error. On
+  `Unmarshal` it is now `DEPTH_EXCEEDED` with code `0.3.77.3`: after yaml.v3
+  refused, `nestsPastV3Bound` (`depth.go`) reads the document's structure —
+  more than 10 000 flow collections open at once outside quoted scalars and
+  comments, or a line opening more than 10 000 block sequences — rather than
+  the library's message, which has no type. It only ever names the reason of a
+  refusal yaml.v3 made, so it cannot refuse a document. The stream `Decoder`
+  holds no whole document and keeps `YAML_FULL_UNMARSHAL_FAILED`. The ceiling
+  is yaml.v3's, not the native reader's 100: a second lexical pass at 100
+  would refuse documents yaml.v3 reads, for no crash to prevent — the
+  deliberate departure from #1099's proposal.
 - **Byte cap on `Unmarshal`**: `maxYAMLBytes = 10 << 20` (10 MiB). yaml.v3 caps
   alias expansion internally but has no byte budget (CWE-400 / CWE-776). The
   streaming decoder has no cap: callers size their own `io.LimitReader`.
@@ -52,6 +68,7 @@ blank-import this package to register `"yaml-full"`; `pkg/v1/data/codec` and
 |---|---|---|
 | `0.3.77.1` | `MarshalFailed` (`YAML_FULL_MARSHAL_FAILED`) | yaml.v3 encode error, a `MarshalYAML` hook error, a failing stream writer |
 | `0.3.77.2` | `UnmarshalFailed` (`YAML_FULL_UNMARSHAL_FAILED`) | yaml.v3 decode error, or input over `maxYAMLBytes` |
+| `0.3.77.3` | `DepthExceeded` (`DEPTH_EXCEEDED`) | yaml.v3 refused nesting past its own 10 000 flow or indentation levels — on `Unmarshal` |
 
 ## The native subset's reference
 

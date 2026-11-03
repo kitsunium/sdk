@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/yaml"
 )
@@ -158,7 +159,7 @@ func TestMapsMerge(t *testing.T) {
 }
 
 // TestTargetMustBeANonNilPointer refuses a target the decoder cannot write
-// through.
+// through with the family's TARGET_INVALID (#1101).
 func TestTargetMustBeANonNilPointer(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -169,8 +170,8 @@ func TestTargetMustBeANonNilPointer(t *testing.T) {
 	tests := []tc{{name: "value", target: map[string]any{}}, {name: "nil pointer", target: nilMap}, {name: "nil", target: nil}}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		if err := yaml.New().Unmarshal([]byte("a: 1"), tc.target); !errs.HasReason(err, "UNMARSHAL_FAILED") {
-			t.Errorf("%s: Unmarshal error = %v, want UNMARSHAL_FAILED", tc.name, err)
+		if err := yaml.New().Unmarshal([]byte("a: 1"), tc.target); !errs.HasCode(err, codec.CodeTargetInvalid) {
+			t.Errorf("%s: Unmarshal error = %v, want TARGET_INVALID", tc.name, err)
 		}
 	}
 	for _, tc := range tests {

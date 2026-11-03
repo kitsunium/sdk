@@ -29,10 +29,10 @@ constants:
       - doc: Base45 is RFC 9285's alphabet, the one a QR code's alphanumeric mode holds.
         name: Base45
         value: "\"base45\""
-      - doc: Base58 is Bitcoin's alphabet; its base conversion is quadratic, so its input is capped at 4 KiB.
+      - doc: Base58 is Bitcoin's alphabet; its base conversion is quadratic, so its input is capped at 64 KiB.
         name: Base58
         value: "\"base58\""
-      - doc: Base62 is the alphanumeric alphabet; capped at 4 KiB like Base58.
+      - doc: Base62 is the alphanumeric alphabet; capped at 64 KiB like Base58.
         name: Base62
         value: "\"base62\""
     name: Base64

@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "doc.go",
         "file.go",
+        "file_compliance.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/sink/file",
     visibility = [
@@ -35,6 +36,7 @@ go_test(
     srcs = [
         "file_external_test.go",
         "file_internal_test.go",
+        "flush_batch_internal_test.go",
         "gen_api_test.go",
     ],
     embed = [":file"],

@@ -19,6 +19,8 @@ sequences:
         kind: actor
       - id: (*cborCodec).Marshal
         kind: self
+      - id: codec
+        kind: package
       - id: scratch
         kind: package
       - id: appendValue
@@ -28,6 +30,14 @@ sequences:
       - id: keepScratch
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: codec.CheckValue(v)
+            to: codec
+          when: verr != nil
       - bind: buf
         eval: scratch.AcquireBuffer()
         to: scratch
@@ -49,17 +59,26 @@ sequences:
         kind: actor
       - id: (*cborCodec).Unmarshal
         kind: self
-      - id: malformed
-        kind: internal
+      - id: codec
+        kind: package
       - id: validateItem
+        kind: internal
+      - id: malformed
         kind: internal
       - id: unmarshalItem
         kind: internal
     steps:
       - opt:
           do:
-            - return: malformed(0, "the input is empty")
-              to: malformed
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
           when: len(data) == 0
       - bind: n, err
         eval: validateItem(data, maxCBORNestedLevels)
@@ -114,13 +133,37 @@ sequences:
           when: cap(encoded) > buf.Cap()
       - eval: scratch.ReleaseBuffer(buf)
         to: scratch
+  - of: (*cborCodec).NewBoundedDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*cborCodec).NewBoundedDecoder
+        kind: self
+      - id: newBoundedDecoder
+        kind: internal
+    steps:
+      - return: newBoundedDecoder(r, maxBytes, decodeMode{})
+        to: newBoundedDecoder
   - of: unmarshalItem
     participants:
       - id: caller
         kind: actor
       - id: unmarshalItem
         kind: self
+      - id: unmarshalItemMode
+        kind: internal
+    steps:
+      - return: unmarshalItemMode(data, v, decodeMode{})
+        to: unmarshalItemMode
+  - of: unmarshalItemMode
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmarshalItemMode
+        kind: self
       - id: pointerTarget
+        kind: internal
+      - id: checkMode
         kind: internal
       - id: decodeStates.Get
         kind: value
@@ -138,11 +181,21 @@ sequences:
           do:
             - return: err
           when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkMode(data, mode)
+            to: checkMode
+          when: err != nil
       - bind: d
         eval: decodeStates.Get()
         to: decodeStates.Get
       - set: d.data
         value: data
+      - set: d.strict, d.tags
+        value: mode.strict, mode.deterministic
       - bind: walkErr
         eval: d.decodeTarget(target)
         to: d.decodeTarget
@@ -154,6 +207,38 @@ sequences:
       - eval: decodeStates.Put(d)
         to: decodeStates.Put
       - return: err
+  - of: checkMode
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkMode
+        kind: self
+      - id: walk.checkKeys
+        kind: internal
+      - id: walk.checkDeterministic
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: walk
+              eval: "decodeState{data: data}"
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: walk.checkKeys()
+                  to: walk.checkKeys
+                when: err != nil
+          when: mode.strict
+      - opt:
+          do:
+            - bind: walk
+              eval: "decodeState{data: data}"
+            - return: walk.checkDeterministic()
+              to: walk.checkDeterministic
+          when: mode.deterministic
+      - return: nil
   - of: (*decodeState).decodeTarget
     participants:
       - id: caller
@@ -190,24 +275,21 @@ sequences:
         kind: actor
       - id: pointerTarget
         kind: self
-      - id: reflect
-        kind: stdlib
-      - id: rv.Elem
+      - id: codec
+        kind: package
+      - id: reflect.ValueOf(v).Elem
         kind: value
     steps:
       - opt:
           do:
-            - return: reflect.Value{}, decodeCause(nil, "Unmarshal needs a non-nil pointer, got nil")
-          when: v == nil
-      - bind: rv
-        eval: reflect.ValueOf(v)
-        to: reflect
-      - opt:
-          do:
-            - return: reflect.Value{}, decodeCause(nil, "Unmarshal needs a non-nil pointer, got "+rv.Type().String())
-          when: rv.Kind() != reflect.Pointer || rv.IsNil()
-      - return: rv.Elem(), nil
-        to: rv.Elem
+            - return: reflect.Value{}, err
+          init:
+            bind: err
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: err != nil
+      - return: reflect.ValueOf(v).Elem(), nil
+        to: reflect.ValueOf(v).Elem
   - of: (*decodeState).peek
     participants:
       - id: caller
@@ -1029,12 +1111,22 @@ sequences:
         value: value
       - return: err
   - of: hashableAny
+    participants:
+      - id: caller
+        kind: actor
+      - id: hashableAny
+        kind: self
     steps:
       - typeswitch:
+          bind: typed
           cases:
             - do:
                 - return: "false"
               types: "[]byte, []any, map[string]any, map[any]any, big.Int"
+            - do:
+                - return: hashableAny(typed.Content)
+                  to: hashableAny
+              types: TagValue
             - default: true
               do:
                 - return: "true"
@@ -1052,16 +1144,23 @@ sequences:
         kind: actor
       - id: (*decodeState).tagAny
         kind: self
+      - id: d.decodeAny
+        kind: internal
       - id: d.timeAny
         kind: internal
       - id: d.bignumContent
-        kind: internal
-      - id: d.decodeAny
         kind: internal
     steps:
       - op: +=
         set: d.off
         value: h.size
+      - opt:
+          do:
+            - bind: content, err
+              eval: d.decodeAny()
+              to: d.decodeAny
+            - return: "TagValue{Number: h.arg, Content: content}, err"
+          when: d.tags && h.arg != tagPositiveBignum && h.arg != tagNegativeBignum
       - switch:
           cases:
             - case: tagDateTime, tagEpoch
@@ -1968,6 +2067,10 @@ sequences:
               do:
                 - set: p.kind
                   value: bigIntDecoder{}
+            - case: t == tagType
+              do:
+                - set: p.kind
+                  value: tagDecoder{}
             - case: reflect.PointerTo(t).Implements(cborUnmarshalerType)
               do:
                 - set: p.kind
@@ -3300,6 +3403,8 @@ sequences:
         kind: self
       - id: d.fieldIndex
         kind: internal
+      - id: unknownMember
+        kind: internal
       - id: d.skip
         kind: internal
       - id: seen.add
@@ -3307,6 +3412,8 @@ sequences:
       - id: d.decodeField
         kind: internal
     steps:
+      - bind: at
+        eval: d.off
       - bind: idx, found, err
         eval: d.fieldIndex(p)
         to: d.fieldIndex
@@ -3314,6 +3421,11 @@ sequences:
           do:
             - return: err
           when: err != nil
+      - opt:
+          do:
+            - return: unknownMember(at, v.Type())
+              to: unknownMember
+          when: "!found && d.strict"
       - opt:
           do:
             - return: d.skip()
@@ -3552,17 +3664,36 @@ sequences:
           range: p.fields.list
       - return: d.closeIndefinite(h)
         to: d.closeIndefinite
+  - of: newBoundedDecoder
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(codec.BoundInvalid, errs.WrapParams{}, errs.Int64("limit", maxBytes))
+          when: maxBytes <= 0
+      - bind: limit
+        eval: int(min(maxBytes, int64(math.MaxInt)))
+      - return: "&cborDecoder{r: r, walk: validator{limit: maxCBORNestedLevels}, mode: mode, limit: limit}, nil"
   - of: (*cborDecoder).Decode
     participants:
       - id: caller
         kind: actor
       - id: (*cborDecoder).Decode
         kind: self
+      - id: codec
+        kind: package
       - id: d.nextItem
         kind: internal
-      - id: unmarshalItem
+      - id: unmarshalItemMode
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - opt:
           do:
             - return: d.err
@@ -3589,8 +3720,8 @@ sequences:
       - set: d.walk
         value: "validator{limit: maxCBORNestedLevels}"
       - set: err
-        to: unmarshalItem
-        value: unmarshalItem(item, v)
+        to: unmarshalItemMode
+        value: unmarshalItemMode(item, v, d.mode)
       - opt:
           do:
             - set: d.done
@@ -3624,6 +3755,10 @@ sequences:
                 do:
                   - return: d.walk.off, nil
                 when: complete
+            - opt:
+                do:
+                  - return: 0, exceeded(corecbor.SizeExceeded, len(d.buf)-d.off, "a data item in the stream is longer than the decoder's byte ceiling")
+                when: d.limit > 0 && len(d.buf)-d.off >= d.limit
             - opt:
                 do:
                   - return: 0, err
@@ -3680,6 +3815,16 @@ sequences:
         value: d.buf[:n]
       - set: d.off
         value: "0"
+  - of: (*cborDecoder).growth
+    steps:
+      - bind: "n"
+        eval: max(minReadSize, cap(d.buf))
+      - opt:
+          do:
+            - set: "n"
+              value: min(n, d.limit-len(d.buf))
+          when: d.limit > 0
+      - return: "n"
   - of: (*cborDecoder).read
     participants:
       - id: caller
@@ -3695,12 +3840,19 @@ sequences:
           do:
             - set: d.buf
               to: slices
-              value: slices.Grow(d.buf, max(minReadSize, cap(d.buf)))
+              value: slices.Grow(d.buf, d.growth())
           when: cap(d.buf)-len(d.buf) < minReadSize
+      - bind: free
+        eval: d.buf[len(d.buf):cap(d.buf)]
+      - opt:
+          do:
+            - set: free
+              value: free[:d.limit-len(d.buf)]
+          when: d.limit > 0 && len(free) > d.limit-len(d.buf)
       - loop:
           do:
             - bind: n, err
-              eval: d.r.Read(d.buf[len(d.buf):cap(d.buf)])
+              eval: d.r.Read(free)
               to: d.r.Read
             - set: d.buf
               value: d.buf[:len(d.buf)+n]
@@ -3710,19 +3862,456 @@ sequences:
                 when: n > 0 || err != nil
           range: maxEmptyReads
       - return: 0, io.ErrNoProgress
+  - of: NewDeterministic
+    steps:
+      - return: "&deterministicCodec{}"
+  - of: (*deterministicCodec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*deterministicCodec).Marshal
+        kind: self
+      - id: codec
+        kind: package
+      - id: scratch
+        kind: package
+      - id: appendValue
+        kind: internal
+      - id: bytes
+        kind: stdlib
+      - id: keepScratch
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: codec.CheckValue(v)
+            to: codec
+          when: verr != nil
+      - bind: buf
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - bind: b, err
+        eval: appendValue(buf.AvailableBuffer(), v, deterministicWalk())
+        to: appendValue
+      - opt:
+          do:
+            - set: encoded
+              to: bytes
+              value: bytes.Clone(b)
+          when: err == nil
+      - eval: keepScratch(buf, b)
+        to: keepScratch
+      - return: encoded, err
+  - of: (*deterministicCodec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*deterministicCodec).Append
+        kind: self
+      - id: appendValue
+        kind: internal
+    steps:
+      - bind: out, err
+        eval: appendValue(dst, v, deterministicWalk())
+        to: appendValue
+      - opt:
+          do:
+            - return: dst, err
+          when: err != nil
+      - return: out, nil
+  - of: (*deterministicCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*deterministicCodec).Unmarshal
+        kind: self
+      - id: codec
+        kind: package
+      - id: validateItem
+        kind: internal
+      - id: c.cborCodec.Unmarshal
+        kind: internal
+      - id: unmarshalItemMode
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
+          when: len(data) == 0
+      - bind: n, err
+        eval: validateItem(data, maxCBORNestedLevels)
+        to: validateItem
+      - opt:
+          do:
+            - return: c.cborCodec.Unmarshal(data, v)
+              to: c.cborCodec.Unmarshal
+          when: err != nil || n != len(data)
+      - return: "unmarshalItemMode(data, v, decodeMode{deterministic: true})"
+        to: unmarshalItemMode
+  - of: (*deterministicCodec).NewEncoder
+    steps:
+      - return: "&cborEncoder{w: w, start: deterministicWalk()}"
+  - of: (*deterministicCodec).NewDecoder
+    steps:
+      - return: "&cborDecoder{r: r, walk: validator{limit: maxCBORNestedLevels}, mode: decodeMode{deterministic: true}}"
+  - of: appendShortestFloat
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendShortestFloat
+        kind: self
+      - id: specialFloat
+        kind: internal
+      - id: appendHalf
+        kind: internal
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+      - id: halfOf
+        kind: internal
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: appendHalf(b, special)
+              to: appendHalf
+          init:
+            bind: special, ok
+            eval: specialFloat(f)
+            to: specialFloat
+          when: ok
+      - bind: single
+        eval: float32(f)
+      - opt:
+          do:
+            - return: binary.BigEndian.AppendUint64(append(b, float64Head), math.Float64bits(f))
+              to: binary.BigEndian.AppendUint64
+          when: float64(single) != f
+      - opt:
+          do:
+            - return: appendHalf(b, half)
+              to: appendHalf
+          init:
+            bind: half, ok
+            eval: halfOf(single)
+            to: halfOf
+          when: ok
+      - return: binary.BigEndian.AppendUint32(append(b, float32Head), math.Float32bits(single))
+        to: binary.BigEndian.AppendUint32
+  - of: halfOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: halfOf
+        kind: self
+      - id: math
+        kind: stdlib
+      - id: normalHalf
+        kind: internal
+      - id: subnormalHalf
+        kind: internal
+    steps:
+      - bind: bits
+        eval: math.Float32bits(f)
+        to: math
+      - bind: sign
+        eval: uint16(bits>>singleSignShift) & halfSignBit
+      - bind: exponent
+        eval: int(bits>>singleMantissaBits&singleExponentMask) - singleExponentBias
+      - bind: mantissa
+        eval: bits & singleMantissaMask
+      - switch:
+          cases:
+            - case: bits&singleMagnitudeMask == 0
+              do:
+                - return: sign, true
+            - case: exponent >= halfMinNormalExponent && exponent <= halfMaxExponent
+              do:
+                - return: normalHalf(sign, exponent, mantissa)
+                  to: normalHalf
+            - case: exponent >= halfSubnormalExponent && exponent < halfMinNormalExponent
+              do:
+                - return: subnormalHalf(sign, exponent, mantissa)
+                  to: subnormalHalf
+            - default: true
+              do:
+                - return: 0, false
+  - of: normalHalf
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: mantissa&(1<<singleToHalfDrop-1) != 0
+      - bind: biased
+        eval: uint16(exponent + int(halfExponentBias))
+      - return: sign | biased<<halfMantissaBits | uint16(mantissa>>singleToHalfDrop), true
+  - of: subnormalHalf
+    steps:
+      - bind: significand
+        eval: singleHiddenBit | mantissa
+      - bind: shift
+        eval: uint(-exponent - 1)
+      - opt:
+          do:
+            - return: 0, false
+          when: significand&(1<<shift-1) != 0
+      - return: sign | uint16(significand>>shift), true
+  - of: (*decodeState).checkDeterministic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkDeterministic
+        kind: self
+      - id: d.peek
+        kind: internal
+      - id: notDeterministic
+        kind: internal
+      - id: checkSimple
+        kind: internal
+      - id: d.checkEnclosed
+        kind: internal
+    steps:
+      - bind: at
+        eval: d.off
+      - bind: h, err
+        eval: d.peek()
+        to: d.peek
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: notDeterministic(at, "an indefinite-length item")
+              to: notDeterministic
+          when: h.info == infoIndefinite
+      - opt:
+          do:
+            - op: +=
+              set: d.off
+              value: h.size
+            - return: checkSimple(h, at)
+              to: checkSimple
+          when: h.major == majorSimple
+      - opt:
+          do:
+            - return: notDeterministic(at, "an integer, a length or a tag number in a longer head than it needs")
+              to: notDeterministic
+          when: "!shortestHead(h)"
+      - op: +=
+        set: d.off
+        value: h.size
+      - return: d.checkEnclosed(h)
+        to: d.checkEnclosed
+  - of: (*decodeState).checkEnclosed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkEnclosed
+        kind: self
+      - id: d.take
+        kind: internal
+      - id: d.checkDeterministic
+        kind: internal
+      - id: d.checkPairs
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: majorBytes, majorText
+              do:
+                - bind: _, err
+                  eval: d.take(h.arg)
+                  to: d.take
+                - return: err
+            - case: majorArray
+              do:
+                - loop:
+                    do:
+                      - opt:
+                          do:
+                            - return: err
+                          init:
+                            bind: err
+                            eval: d.checkDeterministic()
+                            to: d.checkDeterministic
+                          when: err != nil
+                    range: h.arg
+                - return: nil
+            - case: majorMap
+              do:
+                - return: d.checkPairs(h.arg)
+                  to: d.checkPairs
+            - case: majorTag
+              do:
+                - return: d.checkDeterministic()
+                  to: d.checkDeterministic
+            - default: true
+              do:
+                - return: nil
+          "on": h.major
+  - of: (*decodeState).checkPairs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkPairs
+        kind: self
+      - id: d.checkDeterministic
+        kind: internal
+      - id: notDeterministic
+        kind: internal
+    steps:
+      - var:
+          name: previous
+          type: "[]byte"
+      - loop:
+          do:
+            - bind: start
+              eval: d.off
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.checkDeterministic()
+                  to: d.checkDeterministic
+                when: err != nil
+            - bind: key
+              eval: d.data[start:d.off]
+            - opt:
+                do:
+                  - return: notDeterministic(start, "map keys out of the bytewise order of their encodings")
+                    to: notDeterministic
+                when: previous != nil && bytes.Compare(previous, key) >= 0
+            - set: previous
+              value: key
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.checkDeterministic()
+                  to: d.checkDeterministic
+                when: err != nil
+          range: pairs
+      - return: nil
+  - of: shortestHead
+    steps:
+      - switch:
+          cases:
+            - case: info1Byte
+              do:
+                - return: h.arg > uint64(infoDirectMax)
+            - case: info2Bytes
+              do:
+                - return: h.arg > math.MaxUint8
+            - case: info4Bytes
+              do:
+                - return: h.arg > math.MaxUint16
+            - case: info8Bytes
+              do:
+                - return: h.arg > math.MaxUint32
+            - default: true
+              do:
+                - return: "true"
+          "on": h.info
+  - of: checkSimple
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkSimple
+        kind: self
+      - id: floatOf
+        kind: internal
+      - id: notDeterministic
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!isFloatHead(h)"
+      - bind: f
+        eval: floatOf(h)
+        to: floatOf
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: notDeterministic(at, "a NaN other than 0xf97e00")
+                    to: notDeterministic
+                when: h.info != info2Bytes || uint16(h.arg) != halfNaN
+            - return: nil
+          when: math.IsNaN(f)
+      - opt:
+          do:
+            - return: notDeterministic(at, "a float in a longer form than holds it exactly")
+              to: notDeterministic
+          when: shortestFloatWidth(f) != h.size
+      - return: nil
+  - of: shortestFloatWidth
+    steps:
+      - var:
+          name: scratchHead
+          type: "[maxHeadBytes]byte"
+      - return: len(appendShortestFloat(scratchHead[:0], f))
+  - of: notDeterministic
+    participants:
+      - id: caller
+        kind: actor
+      - id: notDeterministic
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    corecbor.CodeCBORNotDeterministic,
+          		Reason:  "NOT_DETERMINISTIC",
+          		Public:  "CBOR document is not in deterministic encoding",
+          		Private: "service/data/codec/cbor.NewDeterministic: " + detail,
+          	}, errs.Int(codec.FieldOffset, at))
+        to: errs
+  - of: (*deterministicCodec).NewBoundedDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*deterministicCodec).NewBoundedDecoder
+        kind: self
+      - id: newBoundedDecoder
+        kind: internal
+    steps:
+      - return: "newBoundedDecoder(r, maxBytes, decodeMode{deterministic: true})"
+        to: newBoundedDecoder
+  - of: deterministicWalk
+    steps:
+      - return: "walkDepth{hops: deterministicMode}"
+  - of: walkDepth.deterministic
+    steps:
+      - return: w.hops&deterministicMode != 0
   - of: walkDepth.enter
     steps:
       - opt:
           do:
             - return: w, encodeFailure("a value nested more than 32 arrays, maps and tags deep")
           when: w.nest >= maxCBORNestedLevels
-      - return: "walkDepth{nest: w.nest + 1}, nil"
+      - return: "walkDepth{nest: w.nest + 1, hops: w.hops & deterministicMode}, nil"
   - of: walkDepth.follow
     steps:
       - opt:
           do:
             - return: w, encodeFailure("more than 32 pointers and interfaces between two containers")
-          when: w.hops >= maxIndirections
+          when: w.hops&^deterministicMode >= maxIndirections
       - return: "walkDepth{nest: w.nest, hops: w.hops + 1}, nil"
   - of: appendValue
     participants:
@@ -3730,6 +4319,8 @@ sequences:
         kind: actor
       - id: appendValue
         kind: self
+      - id: appendShortestFloat
+        kind: internal
       - id: appendScalar
         kind: internal
       - id: appendStringAnyMap
@@ -3743,6 +4334,17 @@ sequences:
       - id: plan.kind.encode
         kind: internal
     steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: appendShortestFloat(b, f), nil
+                    to: appendShortestFloat
+                init:
+                  bind: f, ok
+                  eval: x.(float64)
+                when: ok
+          when: at.deterministic()
       - opt:
           do:
             - return: encoded, err
@@ -4801,6 +5403,10 @@ sequences:
               do:
                 - set: p.kind
                   value: bigIntEncoder{}
+            - case: t == tagType
+              do:
+                - set: p.kind
+                  value: tagEncoder{}
             - case: reflect.PointerTo(t).Implements(cborMarshalerType)
               do:
                 - set: p.kind
@@ -5101,11 +5707,18 @@ sequences:
         kind: actor
       - id: floatEncoder.encode
         kind: self
+      - id: appendShortestFloat
+        kind: internal
       - id: appendFloat32
         kind: internal
       - id: appendFloat64
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: appendShortestFloat(b, v.Float()), nil
+              to: appendShortestFloat
+          when: at.deterministic()
       - opt:
           do:
             - return: appendFloat32(b, float32(v.Float())), nil
@@ -5249,6 +5862,8 @@ sequences:
         kind: internal
       - id: pl.encodeFieldOf
         kind: internal
+      - id: keyOrder
+        kind: internal
     steps:
       - bind: layout
         eval: layoutOf(p.typ)
@@ -5282,6 +5897,9 @@ sequences:
           key: _
           range: layout.fields
           value: f
+      - set: p.order
+        to: keyOrder
+        value: keyOrder(p.fields)
       - opt:
           do:
             - set: p.kind, p.zero
@@ -5298,6 +5916,8 @@ sequences:
         kind: self
       - id: pl.plan
         kind: internal
+      - id: timeOptionPlan
+        kind: internal
       - id: fieldKey
         kind: internal
     steps:
@@ -5308,6 +5928,13 @@ sequences:
           do:
             - return: encodeField{}, plan.refusal
           when: plan.refusal != ""
+      - set: plan, refusal
+        to: timeOptionPlan
+        value: timeOptionPlan(f, plan)
+      - opt:
+          do:
+            - return: encodeField{}, refusal
+          when: refusal != ""
       - bind: key, err
         eval: fieldKey(f)
         to: fieldKey
@@ -5316,6 +5943,49 @@ sequences:
             - return: encodeField{}, "a field name that is not valid UTF-8"
           when: err != nil
       - return: "encodeField{key: key, index: f.index, plan: plan, flags: f.flags}, \"\""
+  - of: timeOptionPlan
+    steps:
+      - bind: tag
+        eval: tagEpoch
+      - switch:
+          cases:
+            - case: f.has(flagTimeTag1)
+            - case: f.has(flagTimeTag0)
+              do:
+                - set: tag
+                  value: tagDateTime
+            - default: true
+              do:
+                - return: plan, ""
+      - opt:
+          do:
+            - return: "plan, \"the time option on a field that is not a time.Time: \" + f.typ.String()"
+          when: f.typ != timeType
+      - return: "&encodePlan{kind: timeTagEncoder{tag: tag}, typ: f.typ, zero: plan.zero}, \"\""
+  - of: keyOrder
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyOrder
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: slices.IsSortedFunc(fields, func(x, y encodeField) int { return bytes.Compare(x.key, y.key) })
+      - bind: order
+        eval: make([]int, len(fields))
+      - loop:
+          do:
+            - set: order[i]
+              value: i
+          key: i
+          range: order
+      - eval: slices.SortFunc(order, func(x, y int) int { return bytes.Compare(fields[x].key, fields[y].key) })
+        to: slices
+      - return: order
   - of: fieldKey
     participants:
       - id: caller
@@ -5340,6 +6010,8 @@ sequences:
         kind: actor
       - id: structEncoder.encode
         kind: self
+      - id: appendFieldsInOrder
+        kind: internal
       - id: at.enter
         kind: internal
       - id: appendHead
@@ -5349,6 +6021,11 @@ sequences:
       - id: rewriteMapHead
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: appendFieldsInOrder(b, v, p, at, p.order)
+              to: appendFieldsInOrder
+          when: p.order != nil && at.deterministic()
       - bind: inner, err
         eval: at.enter()
         to: at.enter
@@ -5384,6 +6061,59 @@ sequences:
                 when: wrote
           key: i
           range: p.fields
+      - return: rewriteMapHead(b, start, headLen, written, len(p.fields)), nil
+        to: rewriteMapHead
+  - of: appendFieldsInOrder
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFieldsInOrder
+        kind: self
+      - id: at.enter
+        kind: internal
+      - id: appendHead
+        kind: internal
+      - id: appendField
+        kind: internal
+      - id: rewriteMapHead
+        kind: internal
+    steps:
+      - bind: inner, err
+        eval: at.enter()
+        to: at.enter
+      - opt:
+          do:
+            - return: b, err
+          when: err != nil
+      - bind: start
+        eval: len(b)
+      - set: b
+        to: appendHead
+        value: appendHead(b, majorMap, uint64(len(p.fields)))
+      - bind: headLen
+        eval: len(b) - start
+      - bind: written
+        eval: "0"
+      - loop:
+          do:
+            - var:
+                name: wrote
+                type: bool
+            - set: b, wrote, err
+              to: appendField
+              value: appendField(b, v, &p.fields[index], inner)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+            - opt:
+                do:
+                  - op: ++
+                    set: written
+                when: wrote
+          key: _
+          range: order
+          value: index
       - return: rewriteMapHead(b, start, headLen, written, len(p.fields)), nil
         to: rewriteMapHead
   - of: structEncoder.empty
@@ -5716,7 +6446,7 @@ sequences:
         eval: scratch.AcquireBuffer()
         to: scratch
       - bind: b, err
-        eval: appendValue(buf.AvailableBuffer(), v, walkDepth{})
+        eval: appendValue(buf.AvailableBuffer(), v, e.start)
         to: appendValue
       - opt:
           do:
@@ -5793,7 +6523,27 @@ sequences:
           		Reason:  "UNMARSHAL_FAILED",
           		Public:  "CBOR decoding failed",
           		Private: privatePrefix + detail,
-          	}, errs.Int("offset", off))
+          	}, errs.Int(codec.FieldOffset, off))
+        to: errs
+  - of: exceeded
+    participants:
+      - id: caller
+        kind: actor
+      - id: exceeded
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: bound
+        eval: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    sentinel.Code(),
+          		Reason:  sentinel.Reason(),
+          		Public:  sentinel.Public(),
+          		Private: privatePrefix + detail,
+          	}, errs.Int(codec.FieldOffset, off))
+        to: errs
+      - return: "errs.Wrap(bound, errs.WrapParams{Code: corecbor.CodeCBORUnmarshalFailed})"
         to: errs
   - of: decodeCause
     participants:
@@ -5991,6 +6741,12 @@ sequences:
             - case: optionKeyAsInt
               do:
                 - return: flagKeyAsInt
+            - case: optionTimeTag1
+              do:
+                - return: flagTimeTag1
+            - case: optionTimeTag0
+              do:
+                - return: flagTimeTag0
             - default: true
               do:
                 - return: "0"
@@ -6158,6 +6914,570 @@ sequences:
           key: option
           range: strings.SplitSeq(options, ",")
       - return: "false"
+  - of: NewStrict
+    steps:
+      - return: "&strictCodec{}"
+  - of: (*strictCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*strictCodec).Unmarshal
+        kind: self
+      - id: codec
+        kind: package
+      - id: validateItem
+        kind: internal
+      - id: c.cborCodec.Unmarshal
+        kind: internal
+      - id: unmarshalItemMode
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
+          when: len(data) == 0
+      - bind: n, err
+        eval: validateItem(data, maxCBORNestedLevels)
+        to: validateItem
+      - opt:
+          do:
+            - return: c.cborCodec.Unmarshal(data, v)
+              to: c.cborCodec.Unmarshal
+          when: err != nil || n != len(data)
+      - return: "unmarshalItemMode(data, v, decodeMode{strict: true})"
+        to: unmarshalItemMode
+  - of: (*strictCodec).NewDecoder
+    steps:
+      - return: "&cborDecoder{r: r, walk: validator{limit: maxCBORNestedLevels}, mode: decodeMode{strict: true}}"
+  - of: (*decodeState).checkKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkKeys
+        kind: self
+      - id: d.peek
+        kind: internal
+      - id: d.skipString
+        kind: internal
+      - id: d.checkEntries
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.peek()
+        to: d.peek
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - op: +=
+        set: d.off
+        value: h.size
+      - switch:
+          cases:
+            - case: majorBytes, majorText
+              do:
+                - return: d.skipString(h)
+                  to: d.skipString
+            - case: majorArray
+              do:
+                - return: d.checkEntries(h, false)
+                  to: d.checkEntries
+            - case: majorMap
+              do:
+                - return: d.checkEntries(h, true)
+                  to: d.checkEntries
+            - case: majorTag
+              do:
+                - return: d.checkKeys()
+            - default: true
+              do:
+                - return: nil
+          "on": h.major
+  - of: (*decodeState).checkEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkEntries
+        kind: self
+      - id: d.checkPairKey
+        kind: internal
+      - id: d.checkKeys
+        kind: internal
+    steps:
+      - var:
+          name: small
+          type: "[strictLinearKeys]normKey"
+      - bind: seen
+        eval: small[:0]
+      - var:
+          name: many
+          type: map[string]struct{}
+      - loop:
+          cond: h.info == infoIndefinite || i < h.arg
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: h.info == infoIndefinite && d.consumeBreak()
+            - opt:
+                do:
+                  - var:
+                      name: err
+                      type: error
+                  - opt:
+                      do:
+                        - return: err
+                      init:
+                        bind: seen, many, err
+                        eval: d.checkPairKey(seen, many)
+                        op: =
+                        to: d.checkPairKey
+                      when: err != nil
+                when: pairs
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.checkKeys()
+                  to: d.checkKeys
+                when: err != nil
+          init: i := uint64(0)
+          post: i++
+      - return: nil
+  - of: (*decodeState).consumeBreak
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: d.off >= len(d.data) || d.data[d.off] != breakByte
+      - op: ++
+        set: d.off
+      - return: "true"
+  - of: (*decodeState).checkPairKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkPairKey
+        kind: self
+      - id: d.normalKey
+        kind: internal
+      - id: addKey
+        kind: internal
+    steps:
+      - bind: at
+        eval: d.off
+      - bind: key, err
+        eval: d.normalKey()
+        to: d.normalKey
+      - opt:
+          do:
+            - return: seen, many, err
+          when: err != nil
+      - bind: kept, indexed, dup
+        eval: addKey(seen, many, key)
+        to: addKey
+      - opt:
+          do:
+            - return: kept, indexed, duplicateKey(at)
+          when: dup
+      - return: kept, indexed, nil
+  - of: addKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: addKey
+        kind: self
+      - id: indexKey
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: seen, many, indexKey(many, &key)
+          when: many != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: seen, nil, true
+                when: seen[i].equal(&key)
+          key: i
+          range: seen
+      - opt:
+          do:
+            - return: append(seen, key), nil, false
+          when: len(seen) < strictLinearKeys
+      - set: many
+        value: make(map[string]struct{}, 4*strictLinearKeys)
+      - loop:
+          do:
+            - eval: indexKey(many, &seen[i])
+              to: indexKey
+          key: i
+          range: seen
+      - return: seen, many, indexKey(many, &key)
+  - of: indexKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexKey
+        kind: self
+      - id: key.setKey
+        kind: internal
+    steps:
+      - bind: k
+        eval: key.setKey()
+        to: key.setKey
+      - bind: _, held
+        eval: many[k]
+      - set: many[k]
+        value: struct{}{}
+      - return: held
+  - of: (*normKey).equal
+    steps:
+      - return: k.class == o.class && k.arg == o.arg && bytes.Equal(k.content, o.content)
+  - of: (*normKey).setKey
+    steps:
+      - return: string(append(binary.BigEndian.AppendUint64([]byte{k.class}, k.arg), k.content...))
+  - of: (*decodeState).normalKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).normalKey
+        kind: self
+      - id: d.peek
+        kind: internal
+      - id: d.stringContent
+        kind: internal
+      - id: d.skip
+        kind: internal
+    steps:
+      - bind: start
+        eval: d.off
+      - bind: h, err
+        eval: d.peek()
+        to: d.peek
+      - opt:
+          do:
+            - return: normKey{}, err
+          when: err != nil
+      - switch:
+          cases:
+            - case: majorText
+              do:
+                - return: d.stringContent(h, keyClassText)
+                  to: d.stringContent
+            - case: majorBytes
+              do:
+                - return: d.stringContent(h, keyClassBytes)
+                  to: d.stringContent
+            - case: majorUnsigned
+              do:
+                - op: +=
+                  set: d.off
+                  value: h.size
+                - return: "normKey{class: keyClassUnsigned, arg: h.arg}, nil"
+            - case: majorNegative
+              do:
+                - op: +=
+                  set: d.off
+                  value: h.size
+                - return: "normKey{class: keyClassNegative, arg: h.arg}, nil"
+            - default: true
+              do:
+                - opt:
+                    do:
+                      - return: normKey{}, serr
+                    init:
+                      bind: serr
+                      eval: d.skip()
+                      to: d.skip
+                    when: serr != nil
+                - return: "normKey{class: keyClassRaw, content: d.data[start:d.off]}, nil"
+          "on": h.major
+  - of: (*decodeState).stringContent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).stringContent
+        kind: self
+      - id: d.take
+        kind: internal
+      - id: d.peek
+        kind: internal
+    steps:
+      - op: +=
+        set: d.off
+        value: h.size
+      - opt:
+          do:
+            - bind: p, err
+              eval: d.take(h.arg)
+              to: d.take
+            - return: "normKey{class: class, content: p}, err"
+          when: h.info != infoIndefinite
+      - var:
+          name: out
+          type: "[]byte"
+      - loop:
+          cond: d.off < len(d.data) && d.data[d.off] != breakByte
+          do:
+            - bind: chunk, err
+              eval: d.peek()
+              to: d.peek
+            - opt:
+                do:
+                  - return: normKey{}, err
+                when: err != nil
+            - op: +=
+              set: d.off
+              value: chunk.size
+            - bind: p, terr
+              eval: d.take(chunk.arg)
+              to: d.take
+            - opt:
+                do:
+                  - return: normKey{}, terr
+                when: terr != nil
+            - set: out
+              value: append(out, p...)
+      - op: ++
+        set: d.off
+      - return: "normKey{class: class, content: out}, nil"
+  - of: duplicateKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: duplicateKey
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    corecbor.CodeCBORDuplicateKey,
+          		Reason:  "DUPLICATE_KEY",
+          		Public:  "CBOR document repeats a map key",
+          		Private: "service/data/codec/cbor.NewStrict: a map holds two keys that decode to the same key",
+          	}, errs.Int(codec.FieldOffset, at))
+        to: errs
+  - of: unknownMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: unknownMember
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    corecbor.CodeCBORUnknownMember,
+          		Reason:  "UNKNOWN_MEMBER",
+          		Public:  "CBOR document carries an unknown member",
+          		Private: "service/data/codec/cbor.NewStrict: a key no field of the struct claims",
+          	}, errs.Int(codec.FieldOffset, at), errs.String("type", t.String()))
+        to: errs
+  - of: (*strictCodec).NewBoundedDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*strictCodec).NewBoundedDecoder
+        kind: self
+      - id: newBoundedDecoder
+        kind: internal
+    steps:
+      - return: "newBoundedDecoder(r, maxBytes, decodeMode{strict: true})"
+        to: newBoundedDecoder
+  - of: tagEncoder.encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: tagEncoder.encode
+        kind: self
+      - id: appendTag
+        kind: internal
+    steps:
+      - bind: tag, _
+        eval: reflect.TypeAssert[TagValue](v)
+      - return: appendTag(b, tag, at)
+        to: appendTag
+  - of: tagEncoder.empty
+    steps:
+      - return: false, nil
+  - of: appendTag
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTag
+        kind: self
+      - id: at.enter
+        kind: internal
+      - id: appendHead
+        kind: internal
+      - id: appendValue
+        kind: internal
+      - id: readHead
+        kind: internal
+    steps:
+      - bind: inner, err
+        eval: at.enter()
+        to: at.enter
+      - opt:
+          do:
+            - return: b, err
+          when: err != nil
+      - set: b
+        to: appendHead
+        value: appendHead(b, majorTag, tag.Number)
+      - bind: start
+        eval: len(b)
+      - set: b, err
+        to: appendValue
+        value: appendValue(b, tag.Content, inner)
+      - opt:
+          do:
+            - return: b, err
+          when: err != nil
+      - bind: h, _
+        eval: readHead(b, start)
+        to: readHead
+      - opt:
+          do:
+            - return: b, encodeFailure("a Tag numbered 0 to 3 whose content is not the type RFC 8949 gives the number")
+          when: "!tagAdmits(tag.Number, h)"
+      - return: b, nil
+  - of: tagDecoder.decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: tagDecoder.decode
+        kind: self
+      - id: d.peek
+        kind: internal
+      - id: d.mismatch
+        kind: internal
+      - id: d.decodeAny
+        kind: internal
+      - id: setValue
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.peek()
+        to: d.peek
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - op: +=
+              set: d.off
+              value: h.size
+            - return: nil
+          when: isNull(h)
+      - opt:
+          do:
+            - return: d.mismatch(h, p.typ)
+              to: d.mismatch
+          when: h.major != majorTag
+      - op: +=
+        set: d.off
+        value: h.size
+      - bind: content, err
+        eval: d.decodeAny()
+        to: d.decodeAny
+      - eval: "setValue(v, TagValue{Number: h.arg, Content: content})"
+        to: setValue
+      - return: err
+  - of: timeTagEncoder.encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeTagEncoder.encode
+        kind: self
+      - id: appendEpochTime
+        kind: internal
+      - id: appendDateTime
+        kind: internal
+    steps:
+      - bind: instant, _
+        eval: reflect.TypeAssert[time.Time](v)
+      - opt:
+          do:
+            - return: append(b, nullByte), nil
+          when: instant.IsZero()
+      - opt:
+          do:
+            - return: appendEpochTime(b, instant), nil
+              to: appendEpochTime
+          when: e.tag == tagEpoch
+      - return: appendDateTime(b, instant), nil
+        to: appendDateTime
+  - of: timeTagEncoder.empty
+    steps:
+      - return: false, nil
+  - of: appendEpochTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendEpochTime
+        kind: self
+      - id: appendInt
+        kind: internal
+      - id: math
+        kind: stdlib
+      - id: appendShortestFloat
+        kind: internal
+      - id: appendDateTime
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendInt(appendHead(b, majorTag, tagEpoch), t.Unix())
+              to: appendInt
+          when: t.Nanosecond() == 0
+      - bind: seconds
+        eval: float64(t.Unix()) + float64(t.Nanosecond())/nanosPerSecond
+      - bind: whole, fraction
+        eval: math.Modf(seconds)
+        to: math
+      - opt:
+          do:
+            - return: appendShortestFloat(appendHead(b, majorTag, tagEpoch), seconds)
+              to: appendShortestFloat
+          when: time.Unix(int64(whole), int64(fraction*nanosPerSecond)).Equal(t)
+      - return: appendDateTime(b, t)
+        to: appendDateTime
+  - of: appendDateTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendDateTime
+        kind: self
+      - id: appendHead
+        kind: internal
+      - id: t.Format
+        kind: value
+    steps:
+      - set: b
+        to: appendHead
+        value: appendHead(b, majorTag, tagDateTime)
+      - bind: text
+        eval: t.Format(time.RFC3339Nano)
+        to: t.Format
+      - set: b
+        to: appendHead
+        value: appendHead(b, majorText, uint64(len(text)))
+      - return: append(b, text...)
   - of: validateItem
     participants:
       - id: caller
@@ -6405,15 +7725,15 @@ sequences:
         kind: actor
       - id: (*validator).bounded
         kind: self
-      - id: malformed
+      - id: exceeded
         kind: internal
     steps:
       - opt:
           do:
             - return: nil
           when: count <= uint64(bound)
-      - return: malformed(v.off, detail)
-        to: malformed
+      - return: exceeded(corecbor.SizeExceeded, v.off, detail)
+        to: exceeded
   - of: (*validator).place
     participants:
       - id: caller
@@ -6537,11 +7857,11 @@ sequences:
         kind: actor
       - id: (*validator).tooDeep
         kind: self
-      - id: malformed
+      - id: exceeded
         kind: internal
     steps:
-      - return: malformed(v.off, "arrays, maps and tags nested more than 32 levels deep")
-        to: malformed
+      - return: exceeded(corecbor.DepthExceeded, v.off, "arrays, maps and tags nested more than 32 levels deep")
+        to: exceeded
   - of: (*validator).closeIndefinite
     participants:
       - id: caller

@@ -264,7 +264,8 @@ func encodeCompositeSliceLike(dst []byte, view reflectView, depth int) (encoded 
 // via MapRange. Each (key, value) pair is dispatched through
 // encodeFieldValue with the cached key/value Kinds so scalar
 // entries skip the encodeReflectValue → encodeByKind → tryEncodeScalar
-// dispatch chain. Composite entries still take the generic path.
+// dispatch chain. Composite entries still take the generic path. The pairs
+// are then put in key order (#1104), so equal maps encode to equal bytes.
 func encodeMapDirect(dst []byte, view reflectView, depth int) (encoded []byte, err error) {
 	//: convert once for method dispatch.
 	rv := reflect.Value(view)
@@ -274,10 +275,18 @@ func encodeMapDirect(dst []byte, view reflectView, depth int) (encoded []byte, e
 	//: (skips per-element Kind() calls inside encodeReflectValue).
 	keyKind := rv.Type().Key().Kind()
 	valKind := rv.Type().Elem().Kind()
+	start := len(dst)
+	var small [smallMapPairs]pairSpan
+	spans := small[:0]
+	//: a large map's bookkeeping is reserved once.
+	if n := rv.Len(); n > smallMapPairs {
+		spans = make([]pairSpan, 0, n)
+	}
 	//: iterate via MapRange to honour Go's unordered-map contract.
 	iter := rv.MapRange()
 	//: walk every (key, value) entry.
 	for iter.Next() {
+		span := pairSpan{key: len(dst) - start}
 		//: encode the key first via the cached-kind dispatcher.
 		next, kerr := encodeFieldValue(dst, reflectView(iter.Key()), keyKind, depth+1)
 		//: surface key failure verbatim.
@@ -285,6 +294,8 @@ func encodeMapDirect(dst []byte, view reflectView, depth int) (encoded []byte, e
 			//: caller will roll dst back to its prior length.
 			return dst, kerr
 		}
+		span.value = len(next) - start
+		markKey(next[start:], &span)
 		//: encode the value second; depth shared with key (same level).
 		next2, verr := encodeFieldValue(next, reflectView(iter.Value()), valKind, depth+1)
 		//: surface value failure verbatim.
@@ -294,9 +305,11 @@ func encodeMapDirect(dst []byte, view reflectView, depth int) (encoded []byte, e
 		}
 		//: advance the buffer pointer past the pair.
 		dst = next2
+		span.end = len(dst) - start
+		spans = append(spans, span)
 	}
-	//: success path.
-	return dst, nil
+	//: every pair written, then put in key order.
+	return reorderPairs(dst, start, spans), nil
 }
 
 // encodeSliceDirect emits a tagSlice record by walking the reflect

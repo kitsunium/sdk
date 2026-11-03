@@ -59,6 +59,11 @@ const (
 	Block
 )
 
+// EncodingGzip is the Content-Encoding a batch Config.Compress kept is
+// handed to Config.SendEncoded with; a batch kept as it came is handed
+// with "", the identity encoding.
+const EncodingGzip string = "gzip"
+
 // The names String renders.
 const (
 	dropOldestName string = "drop-oldest"
@@ -77,11 +82,21 @@ const (
 // DocumentExporter).
 type Sender func(ctx context.Context, batch []byte) error
 
+// EncodedSender ships one batch as the forwarder stored it, with the
+// Content-Encoding it was stored in: EncodingGzip for a batch
+// Config.Compress kept, "" for one kept as it came. It is called as a
+// Sender is, and its verdict is classified the same way.
+//
+// An OTLP/HTTP exporter's ExportEncodedDocument has its shape (trace and
+// metrics EncodedDocumentExporter): a gzip batch is posted as it rests, with
+// Content-Encoding: gzip, never decompressed on the way.
+type EncodedSender func(ctx context.Context, batch []byte, encoding string) error
+
 // FullPolicy says what Enqueue does with a batch the queue has no room for.
 type FullPolicy uint8
 
-// Config configures [New]. Broker, Send and Retryable are required; every
-// other field is optional.
+// Config configures [New]. Broker, Retryable, and Send or SendEncoded are
+// required; every other field is optional. Compress requires SendEncoded.
 type Config struct {
 	// Broker is the queue the forwarder holds its batches in: a directory
 	// (queue.NewFile) for a backlog that outlives the process, a table
@@ -91,8 +106,22 @@ type Config struct {
 	// a batch. The forwarder neither sets its policy nor closes it.
 	Broker corequeue.Broker
 	// Send ships one stored batch: an OTLP/HTTP exporter's ExportDocument,
-	// or any function of that shape.
+	// or any function of that shape. It may be nil when SendEncoded is set,
+	// which then ships every batch. Send receives a batch as it rests: a
+	// backlog a previous process kept with Compress needs SendEncoded until
+	// it drains.
 	Send Sender
+	// SendEncoded ships one stored batch with the Content-Encoding it rests
+	// in — an OTLP/HTTP exporter's ExportEncodedDocument. When set it ships
+	// every batch, gzipped or not, and Send is not called.
+	SendEncoded EncodedSender
+	// Compress, when true, gzips every batch in Enqueue (compress/gzip, the
+	// default level) before it is published, so MaxBytes, PendingBytes and
+	// the disk hold what rests compressed — OTLP/JSON shrinks eight to
+	// twelve times — and SendEncoded posts it as it rests, labelled
+	// EncodingGzip. It requires SendEncoded: a gzipped batch handed to Send
+	// would leave labelled as JSON. The zero value keeps a batch as it came.
+	Compress bool
 	// Retryable classifies a failure of Send as one a later attempt may cure
 	// — trace.OTLPRetryable, metrics.OTLPRetryable. It is REQUIRED: nil reads
 	// as "retry everything" or as "retry nothing", two opposites. A failure
@@ -192,9 +221,13 @@ func (c *Config) validate() error {
 		//: named by field.
 		return misconfigured("Broker", "missing")
 	//: nothing to send with.
-	case c.Send == nil:
+	case c.Send == nil && c.SendEncoded == nil:
 		//: named by field.
 		return misconfigured("Send", "missing")
+	//: a gzipped batch with nothing to label it on the way out.
+	case c.Compress && c.SendEncoded == nil:
+		//: named by field.
+		return misconfigured("SendEncoded", "missing")
 	//: no verdict on a failure.
 	case c.Retryable == nil:
 		//: named by field.

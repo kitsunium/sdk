@@ -129,6 +129,10 @@ func (*yamlCodec) Marshal(v any) (encoded []byte, err error) {
 
 // Unmarshal parses data as YAML into v.
 func (*yamlCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: cap input size so attacker-controlled payloads cannot exhaust RAM.
 	if len(data) > maxYAMLBytes {
 		//: refuse before the library reads a byte.
@@ -143,7 +147,25 @@ func (*yamlCodec) Unmarshal(data []byte, v any) error {
 		return nil
 	}
 	//: wrap the library error.
-	return unmarshalFailed(uerr, "third-party/codec/yaml.Unmarshal: gopkg.in/yaml.v3 returned an error")
+	return decodeFailed(uerr, data, "third-party/codec/yaml.Unmarshal: gopkg.in/yaml.v3 returned an error")
+}
+
+// decodeFailed types a yaml.v3 decode error of data: its nesting bound as
+// DEPTH_EXCEEDED, anything else as YAML_FULL_UNMARSHAL_FAILED (#1099).
+func decodeFailed(cause error, data []byte, private string) error {
+	//: yaml.v3 refuses past 10 000 flow or indentation levels with no error
+	//: type of its own; the document's structure says whether that was why.
+	if nestsPastV3Bound(data) {
+		//: the reason every native reader's nesting refusal carries.
+		return errs.Wrap(cause, errs.WrapParams{
+			Code:    CodeYAMLFullDepthExceeded,
+			Reason:  "DEPTH_EXCEEDED",
+			Public:  "YAML document nested too deeply",
+			Private: "third-party/codec/yaml: gopkg.in/yaml.v3 refused a document nested past 10 000 levels",
+		})
+	}
+	//: a syntax error or a value the target cannot hold.
+	return unmarshalFailed(cause, private)
 }
 
 // Append encodes v as YAML and appends the bytes to dst, leaving dst untouched

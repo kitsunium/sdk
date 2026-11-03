@@ -1,0 +1,2 @@
+{"id":1,"kind":"a","html":"\u003c\u0026\u003e","bytes":"AQI=","nil":null,"at":"2026-11-03T08:00:00.000000001Z","quoted":"0.1","raw":{"x":1},"invalid":"�"}
+{"id":9223372036854775807,"kind":"\u2028","html":"","bytes":null,"nil":null,"attrs":{"a":"2","z":"1"},"at":"2026-11-03T08:00:00.000000001Z","quoted":"0","raw":null,"invalid":""}

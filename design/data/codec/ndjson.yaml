@@ -24,6 +24,14 @@ packages:
             name: CodeNDJSONValueInvalid
             value: "0x00_03_0B_03"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeNDJSONSizeExceeded identifies a stream line longer than the 10 MiB
+              ceiling a record may take: the stream decoder refuses it once it has
+              read that far, and reads no further.
+            name: CodeNDJSONSizeExceeded
+            value: "0x00_03_0B_04"
+        type: errs.Code
     doc: |-
       Package ndjson declares the error codes and the sentinels of the NDJSON
       codec, internal/service/data/codec/ndjson — range 0.3.11.* (ADR 0005
@@ -63,13 +71,22 @@ packages:
             private: "service/data/codec/ndjson: Marshal/Unmarshal called with a non-slice argument"
             public: NDJSON codec requires a slice target
             reason: VALUE_INVALID
+          - code: CodeNDJSONSizeExceeded
+            doc: SizeExceeded fires when a stream line is longer than the 10 MiB record ceiling.
+            http: 413
+            name: SizeExceeded
+            private: "service/data/codec/ndjson: a stream line is longer than scannerMaxCapacity"
+            public: NDJSON record exceeds size limit
+            reason: SIZE_EXCEEDED
   - doc: |-
       Package ndjson implements newline-delimited JSON as a codec.Codec.
       Each record is a JSON value followed by a single '\n' — the format is
       intentionally line-oriented so that partial reads remain parseable.
       The codec accepts slice values: Marshal emits one record per element,
       Unmarshal splits on '\n' and decodes each non-empty line into a new
-      slice element.
+      slice element. It is a codec.StreamingCodec too: its stream decoder hands
+      one record per Decode, reading one line at a time, and its stream encoder
+      writes one line per Encode.
     functions:
       - doc: New returns an NDJSON codec instance.
         name: New
@@ -123,6 +140,7 @@ packages:
       	CodeMarshalFailed    0.3.11.1  a record has no JSON encoding
       	CodeUnmarshalFailed  0.3.11.2  a line is not JSON its element can hold
       	CodeValueInvalid     0.3.11.3  the value or the target is not a slice
+      	CodeSizeExceeded     0.3.11.4  a stream line past the 10 MiB a record may take
 
       No error message quotes the input.
     facade:
@@ -147,6 +165,14 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_0B_03"
+          - doc: |-
+              CodeSizeExceeded is 0.3.11.4: a stream line past the 10 MiB a record
+              may take.
+            name: CodeSizeExceeded
+            reexport: corendjson.CodeNDJSONSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_0B_04"
         doc: The error codes, range 0.3.11.*, declared in the core (ADR 0160).
       - doc: "The sentinels, for errors.Is: each carries the code of the same name."
         var:
@@ -161,6 +187,10 @@ packages:
           - doc: ValueInvalid is the sentinel of [CodeValueInvalid].
             name: ValueInvalid
             reexport: corendjson.ValueInvalid
+            type: "*errs.Error"
+          - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
+            name: SizeExceeded
+            reexport: corendjson.SizeExceeded
             type: "*errs.Error"
     imports:
       corendjson: github.com/kitsunium/sdk/internal/core/data/codec/ndjson

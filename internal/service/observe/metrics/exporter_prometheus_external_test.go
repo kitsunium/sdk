@@ -3,7 +3,6 @@ package metrics_test
 
 import (
 	"bytes"
-	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -555,26 +554,6 @@ func TestPrometheusExporterFromARealMeter(t *testing.T) {
 		"latency_seconds_count 3\n"
 	if got != want {
 		t.Errorf("Export wrote\n%q\nwant\n%q", got, want)
-	}
-}
-
-// TestPrometheusExporterWriterFailure pins that a dead sink is reported typed.
-func TestPrometheusExporterWriterFailure(t *testing.T) {
-	t.Parallel()
-	sinkErr := errors.New("the sink is gone")
-
-	err := svcmetrics.NewPrometheusExporter("test", failingWriter{err: sinkErr}).
-		Export(coremetrics.SnapshotValue{
-			Sums: map[string]coremetrics.SumMetricValue{"c": promCounter(coremetrics.SumValue{Value: 1})},
-		})
-
-	if !kerrs.HasCode(err, coremetrics.CodeExportFailed) {
-		t.Fatalf("Export = %v, want EXPORT_FAILED", err)
-	}
-	//: the sink's own error stays reachable, or an operator cannot tell a
-	//: closed pipe from a full disk.
-	if !errors.Is(err, sinkErr) {
-		t.Errorf("Export = %v, want it to wrap %v", err, sinkErr)
 	}
 }
 

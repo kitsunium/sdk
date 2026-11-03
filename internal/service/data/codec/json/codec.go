@@ -2,6 +2,7 @@ package json
 
 import (
 	stdjson "encoding/json"
+	jsonv2 "encoding/json/v2"
 	"io"
 	"slices"
 
@@ -49,13 +50,19 @@ func (*jsonCodec) Extensions() []string {
 // round-trip — the caller did the work, we just return the bytes
 // verbatim (after a defensive clone so the result is caller-owned).
 func (*jsonCodec) Marshal(v any) (encoded []byte, err error) {
+	//: a channel, a function, an unsafe pointer: no wire format holds one (#1101).
+	if verr := codec.CheckValue(v); verr != nil {
+		return nil, verr
+	}
 	//: pre-encoded fast-path — proxy/gateway callers hit this often.
 	if out, ok := marshalRawMessage(v); ok {
 		//: bytes are caller-owned now.
 		return out, nil
 	}
-	//: delegate to the stdlib for the actual encoding.
-	out, jerr := stdjson.Marshal(v)
+	//: json/v2 under the v1 options: the bytes encoding/json.Marshal writes —
+	//: it is this very call in Go 1.27 — named here so the codec states the
+	//: semantics it keeps (#893).
+	out, jerr := jsonv2.Marshal(v, stdjson.DefaultOptionsV1())
 	//: success fast-path.
 	if jerr == nil {
 		//: return the encoded bytes verbatim.
@@ -106,8 +113,17 @@ func marshalRawMessage(v any) (encoded []byte, ok bool) {
 
 // Unmarshal parses data as JSON into v.
 func (*jsonCodec) Unmarshal(data []byte, v any) error {
-	//: delegate to the stdlib for the actual decoding.
-	jerr := stdjson.Unmarshal(data, v)
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
+	//: no bytes is no document in this format (#1101).
+	if len(data) == 0 {
+		return codec.EmptyInput
+	}
+	//: json/v2 under the v1 options: what encoding/json.Unmarshal reads —
+	//: case-insensitive member names, the last duplicate kept (#893).
+	jerr := jsonv2.Unmarshal(data, v, stdjson.DefaultOptionsV1())
 	//: success fast-path.
 	if jerr == nil {
 		//: nothing to wrap.
@@ -119,36 +135,34 @@ func (*jsonCodec) Unmarshal(data []byte, v any) error {
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "JSON decoding failed",
 		Private: "service/data/codec/json.Unmarshal: encoding/json returned an error",
-	})
+	}, position(jerr)...)
 }
 
 // Append encodes v as JSON and appends the bytes to dst. Implements the
 // optional codec.Appender interface so hot-path callers (logger encoder,
 // batch sinks) can write into a recycled buffer.
 //
-// Uses a *bytes.Buffer pool + json.NewEncoder(buf).Encode(v) — replaces
-// the previous Marshal-then-append shape which paid a double copy
-// (stdjson.Marshal allocs+copies into a fresh []byte, then append copies
-// again into dst). The pool path encodes once into a reusable buffer
-// then copies once into dst — one alloc, one copy in steady state.
+// The value is encoded straight onto dst: json/v2's MarshalWrite under the
+// v1 options — Marshal's bytes, with no trailing newline — writes through a
+// pooled scratch.AppendWriter over dst, so the only copy is the encoder's own
+// flush into the caller's buffer. On failure dst is returned as it was given.
 func (*jsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: pre-encoded fast-path — same shape as Marshal, no scratch buffer
-	//: needed because the bytes already exist.
-	if out, ok := marshalRawMessage(v); ok {
-		//: append the pre-encoded bytes directly onto the caller's dst.
-		return append(dst, out...), nil
+	//: pre-encoded fast-path — same shape as Marshal, appended in place.
+	if out, ok := appendRawMessage(dst, v); ok {
+		//: the caller's prefix, then the raw bytes.
+		return out, nil
 	}
-	//: rent an already-Reset buffer from the shared codec pool.
-	buf := scratch.AcquireBuffer()
-	//: stdjson.NewEncoder writes a trailing '\n' that we strip below.
-	enc := stdjson.NewEncoder(buf)
-	//: encode the value via the stdlib encoder.
-	jerr := enc.Encode(v)
-	//: encoding failure — keep dst pristine, surface the wrapped error.
+	//: a pooled writer appending to dst.
+	w := scratch.AcquireAppendWriter(dst)
+	//: the v1 options: the bytes encoding/json.Marshal writes.
+	jerr := jsonv2.MarshalWrite(w, v, stdjson.DefaultOptionsV1())
+	//: the grown slice, read before the writer goes back to the pool.
+	out := w.Bytes()
+	//: the writer forgets the slice; out stays the caller's.
+	scratch.ReleaseAppendWriter(w)
+	//: encoding failure — hand dst back as it was, surface the wrapped error.
 	if jerr != nil {
-		//: drop the buffer back to the pool if it's not oversized.
-		scratch.ReleaseBuffer(buf)
-		//: return the untouched buffer plus the wrapped error.
+		//: dst's own header: its length and its bytes are what the caller gave.
 		return dst, errs.Wrap(jerr, errs.WrapParams{
 			Code:    corejson.CodeJSONMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
@@ -156,21 +170,45 @@ func (*jsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 			Private: "service/data/codec/json.Append: encoding/json returned an error",
 		})
 	}
-	//: stdjson.Encoder.Encode always emits a trailing '\n' which is NOT
-	//: part of the JSON value — strip it so Append's output matches
-	//: Marshal's byte-for-byte (audit-pinned wire contract).
-	encoded := buf.Bytes()
-	//: defensive against an empty payload (shouldn't happen on success).
-	if n := len(encoded); n > 0 && encoded[n-1] == '\n' {
-		//: drop the trailing newline.
-		encoded = encoded[:n-1]
-	}
-	//: copy into the caller's buffer; the only copy on the hot path.
-	dst = append(dst, encoded...)
-	//: cap-discard release.
-	scratch.ReleaseBuffer(buf)
 	//: success — bytes are the caller's now.
-	return dst, nil
+	return out, nil
+}
+
+// appendRawMessage appends a pre-encoded json.RawMessage / *json.RawMessage
+// to dst as marshalRawMessage returns it — "null" when empty — without the
+// clone Marshal needs. ok=false when v is not a raw shape.
+func appendRawMessage(dst []byte, v any) (appended []byte, ok bool) {
+	//: only the two raw shapes.
+	switch r := v.(type) {
+	//: the value form.
+	case stdjson.RawMessage:
+		//: appended verbatim, null when empty.
+		return appendRaw(dst, r), true
+	//: the pointer form; nil reads as empty.
+	case *stdjson.RawMessage:
+		//: nil pointer marshals as "null".
+		if r == nil {
+			//: explicit null wire bytes.
+			return append(dst, "null"...), true
+		}
+		//: appended verbatim, null when empty.
+		return appendRaw(dst, *r), true
+	//: anything else takes the encoder.
+	default:
+		//: the caller falls back.
+		return dst, false
+	}
+}
+
+// appendRaw appends raw to dst, or "null" when raw is empty.
+func appendRaw(dst, raw []byte) []byte {
+	//: an empty raw message marshals as null.
+	if len(raw) == 0 {
+		//: explicit null wire bytes.
+		return append(dst, "null"...)
+	}
+	//: the caller vouches for the bytes, as on Marshal's path.
+	return append(dst, raw...)
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.

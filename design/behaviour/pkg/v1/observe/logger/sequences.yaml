@@ -29,6 +29,28 @@ sequences:
         kind: actor
       - id: FromConfig
         kind: self
+      - id: fromConfig
+        kind: internal
+    steps:
+      - return: fromConfig(format, raw, nil)
+        to: fromConfig
+  - of: FromConfigWithLevel
+    participants:
+      - id: caller
+        kind: actor
+      - id: FromConfigWithLevel
+        kind: self
+      - id: fromConfig
+        kind: internal
+    steps:
+      - return: fromConfig(format, raw, floor)
+        to: fromConfig
+  - of: fromConfig
+    participants:
+      - id: caller
+        kind: actor
+      - id: fromConfig
+        kind: self
       - id: decodeTopology
         kind: internal
       - id: resolveSinks
@@ -57,12 +79,7 @@ sequences:
             - return: nil, rErr
           when: rErr != nil
       - bind: built, bErr
-        eval: |-
-          NewWithSink(SinkConfig{
-          		Sink:     sink,
-          		Encoder:  TextEncoder(),
-          		MinLevel: parseLevel(topo.Level),
-          	})
+        eval: NewWithSink(topologySinkConfig(sink, topo.Level, floor))
         to: NewWithSink
       - opt:
           do:
@@ -70,6 +87,25 @@ sequences:
           when: bErr != nil
       - return: svclogger.Owning(built, sink), nil
         to: svclogger
+  - of: topologySinkConfig
+    participants:
+      - id: caller
+        kind: actor
+      - id: topologySinkConfig
+        kind: self
+      - id: floor.Set
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "SinkConfig{Sink: sink, Encoder: TextEncoder(), MinLevel: parseLevel(name)}"
+          when: floor == nil
+      - opt:
+          do:
+            - eval: floor.Set(parseLevel(name))
+              to: floor.Set
+          when: name != ""
+      - return: "SinkConfig{Sink: sink, Encoder: TextEncoder(), Level: floor}"
   - of: decodeTopology
     participants:
       - id: caller
@@ -372,6 +408,8 @@ sequences:
         kind: self
       - id: encoder
         kind: package
+      - id: handlerFor
+        kind: internal
       - id: svclogger
         kind: package
       - id: base.With
@@ -390,8 +428,8 @@ sequences:
               value: encoder.NewText(clock.System)
           when: enc == nil
       - bind: handler, hErr
-        eval: svclogger.NewHandler(enc, cfg.Sink, cfg.MinLevel)
-        to: svclogger
+        eval: handlerFor(enc, &cfg)
+        to: handlerFor
       - opt:
           do:
             - return: nil, hErr
@@ -405,6 +443,26 @@ sequences:
           when: lErr != nil
       - return: "base.With(corelogger.AttrValue{Key: \"framework_version\", Value: corelogger.StringValue(FrameworkVersion())}), nil"
         to: base.With
+  - of: handlerFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: handlerFor
+        kind: self
+      - id: svclogger
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: svclogger.NewHandler(enc, cfg.Sink, cfg.MinLevel)
+              to: svclogger
+          when: cfg.Level == nil
+      - opt:
+          do:
+            - return: nil, corelogger.LevelAmbiguous
+          when: cfg.MinLevel != LevelInfo
+      - return: svclogger.NewHandlerLeveled(enc, cfg.Sink, cfg.Level)
+        to: svclogger
   - of: NewWriterSink
     participants:
       - id: caller

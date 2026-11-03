@@ -23,6 +23,37 @@ sequences:
         kind: actor
       - id: (*jsonEncoder).Append
         kind: self
+      - id: e.AppendWithPrefix
+        kind: internal
+    steps:
+      - return: e.AppendWithPrefix(dst, groups, nil, r)
+        to: e.AppendWithPrefix
+  - of: (*jsonEncoder).AppendAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonEncoder).AppendAttrs
+        kind: self
+      - id: appendJSONAttr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: dst
+              value: append(dst, ',')
+            - set: dst
+              to: appendJSONAttr
+              value: appendJSONAttr(dst, groups, a)
+          key: _
+          range: attrs
+          value: a
+      - return: dst
+  - of: (*jsonEncoder).AppendWithPrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonEncoder).AppendWithPrefix
+        kind: self
       - id: e.clk.Now
         kind: value
       - id: appendJSONHeader
@@ -46,6 +77,8 @@ sequences:
       - set: dst
         to: appendJSONTraceContext
         value: appendJSONTraceContext(dst, r)
+      - set: dst
+        value: append(dst, prefix...)
       - loop:
           do:
             - set: dst
@@ -221,15 +254,17 @@ sequences:
         kind: actor
       - id: appendJSONFloat
         kind: self
-      - id: strconv
-        kind: stdlib
+      - id: jsonenc
+        kind: package
     steps:
+      - bind: out, ok
+        eval: jsonenc.AppendFloat(dst, f)
+        to: jsonenc
       - opt:
           do:
             - return: append(dst, 'n', 'u', 'l', 'l')
-          when: math.IsNaN(f) || math.IsInf(f, 0)
-      - return: strconv.AppendFloat(dst, f, jsonFloatFormat, jsonFloatPrec, jsonFloatBitSize)
-        to: strconv
+          when: "!ok"
+      - return: out
   - of: NewText
     steps:
       - opt:
@@ -246,6 +281,35 @@ sequences:
       - id: caller
         kind: actor
       - id: (*textEncoder).Append
+        kind: self
+      - id: e.AppendWithPrefix
+        kind: internal
+    steps:
+      - return: e.AppendWithPrefix(dst, groups, nil, r)
+        to: e.AppendWithPrefix
+  - of: (*textEncoder).AppendAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*textEncoder).AppendAttrs
+        kind: self
+      - id: appendAttrWithGroups
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: dst
+              to: appendAttrWithGroups
+              value: appendAttrWithGroups(dst, groups, a)
+          key: _
+          range: attrs
+          value: a
+      - return: dst
+  - of: (*textEncoder).AppendWithPrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*textEncoder).AppendWithPrefix
         kind: self
       - id: e.clk.Now
         kind: value
@@ -268,6 +332,8 @@ sequences:
       - set: dst
         to: appendTraceContext
         value: appendTraceContext(dst, r)
+      - set: dst
+        value: append(dst, prefix...)
       - loop:
           do:
             - set: dst

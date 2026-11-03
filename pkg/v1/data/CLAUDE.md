@@ -42,6 +42,8 @@ stays at the kernel's root, `internal/kernel/semver`.
 | `codec/strictjson/httpbody/` | `DecodeRequest` — the JSON body of an HTTP request, through `http.MaxBytesReader`, empty body first, media type second | `internal/service/data/codec/strictjson/httpbody` | `codec/strictjson/httpbody/README.md` |
 | `codec/jsonshape/` | `Of` / `For[T]` → a type's wire shape under `encoding/json` (ADR 0133) | `internal/service/data/codec/jsonshape` | `codec/jsonshape/README.md` |
 | `codec/jsonpatch/` | `Diff` → two JSON documents' difference as RFC 6902 operations (ADR 0143) | `internal/service/data/codec/jsonpatch` | `codec/jsonpatch/README.md` |
+| `codec/jcs/` | `Canonicalize` / `Marshal` → RFC 8785 canonical JSON, to sign or hash (#895) | `internal/service/data/codec/jcs` | `codec/jcs/README.md` |
+| `codec/jsonschema/` | `NewValidator` / `Validate` → a JSON Schema 2020-12 validation report (#882, ADR 0210) | `internal/service/data/codec/jsonschema` | `codec/jsonschema/README.md` |
 | `docstore/` | `Open` → a `Store[T]` over a `vfs` filesystem and `OpenSQL` → an `SQLStore[T]` over the caller's database, with unique and multi-valued indexes and versions (ADR 0110, ADR 0139, ADR 0143); the ports a double stands in for (ADR 0160) | `internal/core/data/docstore`, `internal/service/data/docstore` | `docstore/README.md` |
 | `queue/` | `NewFile` / `NewSQL` / `NewMemory` → a `Broker`, and `Consume` (ADR 0054, ADR 0104, ADR 0151) | `internal/core/data/queue`, `internal/service/data/queue` | `queue/README.md` |
 | `semver/` | `IsValid` / `Compare` / `Prerelease` and `IsPseudoVersion` / `PseudoVersionRev` / `PseudoVersionTime` (ADR 0156 §4) | `internal/kernel/semver` | `semver/README.md` |

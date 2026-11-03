@@ -252,13 +252,16 @@ func (d *decodeState) entryAny(m map[any]any, key any, stored bool) error {
 }
 
 // hashableAny reports whether a default Go value can be a map key: every
-// one can except the slices, the maps and big.Int.
+// one can except the slices, the maps and big.Int, and a Tag holding one.
 func hashableAny(key any) bool {
 	//: the default values with a slice or a map inside.
-	switch key.(type) {
+	switch typed := key.(type) {
 	case []byte, []any, map[string]any, map[any]any, big.Int:
 		//: not comparable.
 		return false
+	case TagValue:
+		//: NewDeterministic's tags: comparable when their content is.
+		return hashableAny(typed.Content)
 	default:
 		//: comparable.
 		return true
@@ -278,9 +281,16 @@ func mapHint(h itemHead) int {
 }
 
 // tagAny decodes a tag: 0 and 1 to a time.Time, 2 and 3 to a big.Int, and
-// any other tag to its content.
+// any other tag to its content — or, for NewDeterministic, every tag but a
+// bignum to a Tag, so the document encodes back to its bytes.
 func (d *decodeState) tagAny(h itemHead) (any, error) {
 	d.off += h.size
+	//: the deterministic instance keeps the tag.
+	if d.tags && h.arg != tagPositiveBignum && h.arg != tagNegativeBignum {
+		content, err := d.decodeAny()
+		//: the number and the content.
+		return TagValue{Number: h.arg, Content: content}, err
+	}
 	//: the four tags RFC 8949 §3.4 defines a value for.
 	switch h.arg {
 	case tagDateTime, tagEpoch:

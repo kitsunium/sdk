@@ -20,5 +20,5 @@ package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/csv
   name: csv
-  purpose: "Package csv registers the CSV codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/csv\" The codec is the standard library's encoding/csv over RFC 4180 records: its native value is a [][]string, the rows of a table."
+  purpose: "Package csv registers the CSV codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/csv\" The codec is the standard library's encoding/csv over RFC 4180 records: its native value is a [][]string, the rows of a table, or a slice of structs — a header from the fields' csv tags, then one record per row, each cell converted to its field."
 types: []

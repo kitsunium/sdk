@@ -8,15 +8,15 @@ import (
 )
 
 // benchTableSize is the raw payload size every nine-way comparison uses.
-// 1 KiB sits comfortably under maxConvBytes (4 KiB), so the two
+// 1 KiB sits comfortably under maxConvBytes (64 KiB), so the two
 // base-conversion variants participate in the same table as the seven
 // block encodings instead of being excluded from it — which is exactly
 // what happened in pkg/v1/data/codec/BENCH.md, where base58/base62 report 0.
 const benchTableSize int = 1024
 
 // benchLargeSize is the payload used to show what the block encodings do
-// when the input stops being an identifier. The base-conversion variants
-// refuse it by cap, which is the point.
+// when the input stops being an identifier. It is the base-conversion
+// variants' cap, which they reach in the scaling sweep, not in this table.
 const benchLargeSize int = 64 * 1024
 
 // benchXorshiftSeed seeds the deterministic payload generator. Any non-zero
@@ -43,8 +43,8 @@ type benchVariant struct {
 	label string
 	// value is the internal variant discriminator.
 	value variant
-	// conversion marks the O(n²) base-conversion variants, which carry the
-	// 4 KiB maxConvBytes cap and so cannot take benchLargeSize.
+	// conversion marks the O(n²) base-conversion variants, which the
+	// block-encoding tables leave out: their cost is the scaling sweep's.
 	conversion bool
 }
 
@@ -71,9 +71,10 @@ var benchScalingPair = []benchVariant{
 }
 
 // benchScalingSizes are the raw input sizes the scaling benchmarks sweep.
-// The top of the sweep is maxConvBytes itself, so the quadratic variants are
-// measured at the largest input they will ever legally accept.
-var benchScalingSizes = []int{64, 256, 1024, 4096}
+// The top of the sweep is maxConvBytes itself (64 KiB since #898), so the
+// quadratic variants are measured at the largest input they will ever
+// legally accept, and at the 4 KiB the cap used to be.
+var benchScalingSizes = []int{64, 256, 1024, 4096, 16384, 65536}
 
 // benchPayload returns a deterministic pseudo-random slice of n bytes.
 // Deterministic because every one of these encodings costs a function of the
@@ -169,9 +170,8 @@ func BenchmarkDecodeScaling(b *testing.B) {
 }
 
 // BenchmarkEncodeLarge runs the seven block encodings at 64 KiB. The two
-// base-conversion variants are absent by construction — maxConvBytes refuses
-// this input — and their absence here is the report's clearest statement of
-// what they are for.
+// base-conversion variants are left out: 64 KiB is their cap, and what it
+// costs them — orders of magnitude more — is the scaling sweep's top row.
 func BenchmarkEncodeLarge(b *testing.B) {
 	raw := benchPayload(benchLargeSize)
 	for _, v := range benchVariants {

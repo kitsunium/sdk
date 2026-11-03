@@ -27,6 +27,13 @@ packages:
             name: CodeFormMultiValue
             value: "0x00_03_28_03"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeFormSizeExceeded identifies input refused for a size bound: a body past maxFormBytes, or more pairs than maxFormPairs.
+              Its reason is the family's SIZE_EXCEEDED (#894).
+            name: CodeFormSizeExceeded
+            value: "0x00_03_28_04"
+        type: errs.Code
     doc: |-
       Package form declares the error codes and the sentinels of the
       application/x-www-form-urlencoded codec, internal/service/data/codec/form —
@@ -78,6 +85,12 @@ packages:
             private: "service/data/codec/form: map[string]string target cannot hold a repeated key"
             public: form key carries multiple values
             reason: MULTI_VALUE
+          - code: CodeFormSizeExceeded
+            doc: "SizeExceeded is the refusal of input past a size bound: a body past maxFormBytes, or more pairs than maxFormPairs."
+            name: SizeExceeded
+            private: "service/data/codec/form: the input exceeds a size bound"
+            public: Form input exceeds a size limit
+            reason: SIZE_EXCEEDED
   - doc: |-
       Package form implements application/x-www-form-urlencoded as a
       codec.Codec — the encoding every HTML form POSTs and every query string
@@ -182,6 +195,12 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_28_03"
+          - doc: "CodeSizeExceeded is 0.3.40.4: a body past maxFormBytes, or more pairs than maxFormPairs."
+            name: CodeSizeExceeded
+            reexport: coreform.CodeFormSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_28_04"
         doc: The error codes, range 0.3.40.*, declared in the core (ADR 0160).
       - doc: "The sentinels, for errors.Is: each carries the code of the same name."
         var:
@@ -196,6 +215,10 @@ packages:
           - doc: MultiValue is the sentinel of [CodeMultiValue].
             name: MultiValue
             reexport: coreform.MultiValue
+            type: "*errs.Error"
+          - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
+            name: SizeExceeded
+            reexport: coreform.SizeExceeded
             type: "*errs.Error"
     imports:
       coreform: github.com/kitsunium/sdk/internal/core/data/codec/form

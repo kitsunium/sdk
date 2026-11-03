@@ -6,6 +6,7 @@ import (
 
 	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/data/codec/jcs"
 )
 
 // MarshalPublic renders the public JWK: "kty", "crv", the public members, and
@@ -181,10 +182,11 @@ func (k KeyValue) WithThumbprintKid() (identified KeyValue, err error) {
 // thumbprintInput builds the RFC 7638 §3.2 canonical JSON: required members
 // only, lexicographic order, no whitespace, no optional members.
 //
-// It is assembled by concatenation rather than through encoding/json because
-// the canonical form is order-sensitive and Go's map ordering is not. Every
-// interpolated value is closed-vocabulary — a validated Curve name or base64url
-// output — so none of them can contain a character JSON would need to escape.
+// It is the RFC 8785 canonical form of the required members (codec/jcs, #895):
+// for members whose names are ASCII and whose values are a validated Curve
+// name or base64url output, RFC 7638's form and RFC 8785's are the same bytes —
+// the hand concatenation this replaced, which TestThumbprintInputIsJCS keeps as
+// its oracle.
 func (k KeyValue) thumbprintInput() (canonical []byte, err error) {
 	//: the zero KeyValue is rejected the same way every marshaller rejects it.
 	if k.IsZero() {
@@ -219,9 +221,8 @@ func (k KeyValue) thumbprintEC() (canonical []byte, err error) {
 		//: nothing to hash.
 		return nil, corejwk.MissingMember
 	}
-	//: members in lexicographic order, no whitespace.
-	return []byte(`{"crv":"` + string(k.crv) + `","kty":"EC","x":"` +
-		b64Encode(k.x) + `","y":"` + b64Encode(k.y) + `"}`), nil
+	//: the required members, in RFC 8785's canonical form.
+	return jcs.Marshal(map[string]string{"crv": string(k.crv), "kty": "EC", "x": b64Encode(k.x), "y": b64Encode(k.y)})
 }
 
 // thumbprintOKP builds the canonical form of an OKP key.
@@ -231,9 +232,8 @@ func (k KeyValue) thumbprintOKP() (canonical []byte, err error) {
 		//: nothing to hash.
 		return nil, corejwk.MissingMember
 	}
-	//: members in lexicographic order, no whitespace.
-	return []byte(`{"crv":"` + string(k.crv) + `","kty":"OKP","x":"` +
-		b64Encode(k.x) + `"}`), nil
+	//: the required members, in RFC 8785's canonical form.
+	return jcs.Marshal(map[string]string{"crv": string(k.crv), "kty": "OKP", "x": b64Encode(k.x)})
 }
 
 // thumbprintOct builds the canonical form of a symmetric key.
@@ -243,6 +243,6 @@ func (k KeyValue) thumbprintOct() (canonical []byte, err error) {
 		//: nothing to hash.
 		return nil, corejwk.NoPrivateMaterial
 	}
-	//: members in lexicographic order, no whitespace.
-	return []byte(`{"k":"` + b64Encode(k.secret()) + `","kty":"oct"}`), nil
+	//: the required members, in RFC 8785's canonical form.
+	return jcs.Marshal(map[string]string{"k": b64Encode(k.secret()), "kty": "oct"})
 }

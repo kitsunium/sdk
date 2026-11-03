@@ -1,0 +1,2312 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: buildRef
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildRef
+        kind: self
+      - id: k.c.resolveRef
+        kind: internal
+      - id: k.c.compile
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, keywordInvalid("$ref")
+          when: k.kw.kind != kindString
+      - bind: target, targetBase, err
+        eval: k.c.resolveRef(k.base, k.kw.s)
+        to: k.c.resolveRef
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: s, err
+        eval: k.c.compile(target, targetBase)
+        to: k.c.compile
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		return s.validate(e, v, path)
+          	}, nil
+  - of: compileList
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileList
+        kind: self
+      - id: c.compile
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, keywordInvalid(name)
+          when: kw.kind != kindArray
+      - bind: out
+        eval: make([]*schema, 0, len(kw.arr))
+      - loop:
+          do:
+            - bind: s, err
+              eval: c.compile(item, base)
+              to: c.compile
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: out
+              value: append(out, s)
+          key: _
+          range: kw.arr
+          value: item
+      - return: out, nil
+  - of: buildCombinator
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildCombinator
+        kind: self
+      - id: compileList
+        kind: internal
+      - id: allOf
+        kind: internal
+      - id: countMatches
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: k keyword
+            results: check, error
+            steps:
+              - bind: list, err
+                eval: compileList(k.c, k.kw, name, k.base)
+                to: compileList
+              - opt:
+                  do:
+                    - return: nil, err
+                  when: err != nil
+              - opt:
+                  do:
+                    - return: allOf(list), nil
+                      to: allOf
+                  when: name == "allOf"
+              - return: countMatches(name, list), nil
+                to: countMatches
+  - of: allOf
+    steps:
+      - return:
+          closure:
+            params: e *eval, v *value, path string
+            results: bool
+            steps:
+              - bind: ok
+                eval: "true"
+              - loop:
+                  do:
+                    - opt:
+                        do:
+                          - set: ok
+                            value: "false"
+                          - opt:
+                              do:
+                                - return: "false"
+                              when: "!e.collect"
+                        when: "!s.validate(e, v, path)"
+                  key: _
+                  range: list
+                  value: s
+              - return: ok
+  - of: countMatches
+    participants:
+      - id: caller
+        kind: actor
+      - id: countMatches
+        kind: self
+      - id: e.quiet
+        kind: internal
+      - id: e.absorb
+        kind: internal
+      - id: e.fail
+        kind: internal
+    steps:
+      - bind: message
+        eval: "\"must match at least one of the schemas\""
+      - opt:
+          do:
+            - set: message
+              value: "\"must match exactly one of the schemas\""
+          when: name == "oneOf"
+      - return:
+          closure:
+            params: e *eval, v *value, path string
+            results: bool
+            steps:
+              - bind: matches
+                eval: "0"
+              - loop:
+                  do:
+                    - bind: q
+                      eval: e.quiet()
+                      to: e.quiet
+                    - opt:
+                        do:
+                          - op: ++
+                            set: matches
+                        when: s.validate(q, v, path)
+                    - eval: e.absorb(q)
+                      to: e.absorb
+                    - opt:
+                        do:
+                          - return: "true"
+                        when: name == "anyOf" && matches > 0
+                  key: _
+                  range: list
+                  value: s
+              - opt:
+                  do:
+                    - return: "true"
+                  when: matches == 1 && name == "oneOf"
+              - return: e.fail(path, name, message, violationCode)
+                to: e.fail
+  - of: buildNot
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildNot
+        kind: self
+      - id: k.c.compile
+        kind: internal
+    steps:
+      - bind: s, err
+        eval: k.c.compile(k.kw, k.base)
+        to: k.c.compile
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		q := e.quiet()
+          		matched := s.validate(q, v, path)
+          		e.absorb(q)
+          		if !matched {
+          			return true
+          		}
+          		return e.fail(path, "not", "must not match the schema", violationCode)
+          	}, nil
+  - of: buildIf
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildIf
+        kind: self
+      - id: k.c.compile
+        kind: internal
+      - id: optionalSchema
+        kind: internal
+    steps:
+      - bind: cond, err
+        eval: k.c.compile(k.kw, k.base)
+        to: k.c.compile
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: then, err
+        eval: optionalSchema(k.c, k.parent, "then", k.base)
+        to: optionalSchema
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: otherwise, err
+        eval: optionalSchema(k.c, k.parent, "else", k.base)
+        to: optionalSchema
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		q := e.quiet()
+          		branch := otherwise
+          		if cond.validate(q, v, path) {
+          			branch = then
+          		}
+          		e.absorb(q)
+          		return branch == nil || branch.validate(e, v, path)
+          	}, nil
+  - of: optionalSchema
+    participants:
+      - id: caller
+        kind: actor
+      - id: optionalSchema
+        kind: self
+      - id: c.compile
+        kind: internal
+    steps:
+      - bind: kw, ok
+        eval: parent.obj[name]
+      - opt:
+          do:
+            - return: nil, nil
+          when: "!ok"
+      - return: c.compile(kw, base)
+        to: c.compile
+  - of: buildDependentSchemas
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildDependentSchemas
+        kind: self
+      - id: k.c.compile
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, keywordInvalid("dependentSchemas")
+          when: k.kw.kind != kindObject
+      - bind: deps
+        eval: make(map[string]*schema, len(k.kw.keys))
+      - loop:
+          do:
+            - bind: s, err
+              eval: k.c.compile(k.kw.obj[name], k.base)
+              to: k.c.compile
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: deps[name]
+              value: s
+          key: _
+          range: k.kw.keys
+          value: name
+      - bind: keys
+        eval: k.kw.keys
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		ok := true
+          		for _, name := range keys {
+          			if _, present := v.obj[name]; present && v.kind == kindObject {
+          				ok = deps[name].validate(e, v, path) && ok
+          			}
+          		}
+          		return ok
+          	}, nil
+  - of: buildItems
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildItems
+        kind: self
+      - id: compileList
+        kind: internal
+      - id: elements
+        kind: internal
+      - id: k.c.compile
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: k keyword
+            results: check, error
+            steps:
+              - opt:
+                  do:
+                    - bind: list, err
+                      eval: compileList(k.c, k.kw, name, k.base)
+                      to: compileList
+                    - opt:
+                        do:
+                          - return: nil, err
+                        when: err != nil
+                    - return: elements(list, nil, 0), nil
+                      to: elements
+                  when: name == "prefixItems"
+              - bind: s, err
+                eval: k.c.compile(k.kw, k.base)
+                to: k.c.compile
+              - opt:
+                  do:
+                    - return: nil, err
+                  when: err != nil
+              - bind: skip
+                eval: "0"
+              - opt:
+                  do:
+                    - set: skip
+                      value: len(prefix.arr)
+                  init:
+                    bind: prefix, ok
+                    eval: k.parent.obj["prefixItems"]
+                  when: ok && prefix.kind == kindArray
+              - return: elements(nil, s, skip), nil
+                to: elements
+  - of: elements
+    steps:
+      - return:
+          closure:
+            params: e *eval, v *value, path string
+            results: bool
+            steps:
+              - opt:
+                  do:
+                    - return: "true"
+                  when: v.kind != kindArray
+              - bind: ok
+                eval: "true"
+              - loop:
+                  do:
+                    - bind: s
+                      eval: rest
+                    - alt:
+                        - do:
+                            - set: s
+                              value: list[i]
+                          when: i < len(list)
+                        - do:
+                            - continue: true
+                          when: rest == nil || i < skip
+                    - opt:
+                        do:
+                          - set: ok
+                            value: "false"
+                          - opt:
+                              do:
+                                - return: "false"
+                              when: "!e.collect"
+                        when: "!s.validate(e, elem, validation.JoinIndex(path, i))"
+                  key: i
+                  range: v.arr
+                  value: elem
+              - return: ok
+  - of: buildContains
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildContains
+        kind: self
+      - id: k.c.compile
+        kind: internal
+      - id: containsBounds
+        kind: internal
+    steps:
+      - bind: s, err
+        eval: k.c.compile(k.kw, k.base)
+        to: k.c.compile
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: lo, hi, err
+        eval: containsBounds(k.parent)
+        to: containsBounds
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		if v.kind != kindArray {
+          			return true
+          		}
+          		n := 0
+          		for i, elem := range v.arr {
+          			q := e.quiet()
+          			if s.validate(q, elem, validation.JoinIndex(path, i)) {
+          				n++
+          			}
+          			e.absorb(q)
+          		}
+          		if n >= lo && (hi < 0 || n <= hi) {
+          			return true
+          		}
+          		return e.fail(path, "contains", "must hold between "+strconv.Itoa(lo)+" and the allowed number of matching elements", violationCode)
+          	}, nil
+  - of: containsBounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: containsBounds
+        kind: self
+      - id: nonNegative
+        kind: internal
+    steps:
+      - set: lo, hi
+        value: 1, -1
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: 0, 0, err
+                init:
+                  bind: lo, err
+                  eval: nonNegative(kw, "minContains")
+                  op: =
+                  to: nonNegative
+                when: err != nil
+          init:
+            bind: kw, ok
+            eval: parent.obj["minContains"]
+          when: ok
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: 0, 0, err
+                init:
+                  bind: hi, err
+                  eval: nonNegative(kw, "maxContains")
+                  op: =
+                  to: nonNegative
+                when: err != nil
+          init:
+            bind: kw, ok
+            eval: parent.obj["maxContains"]
+          when: ok
+      - return: lo, hi, nil
+  - of: buildMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildMembers
+        kind: self
+      - id: buildProperties
+        kind: internal
+      - id: buildPatternProperties
+        kind: internal
+      - id: buildAdditional
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: k keyword
+            results: check, error
+            steps:
+              - switch:
+                  cases:
+                    - case: "\"properties\""
+                      do:
+                        - return: buildProperties(k)
+                          to: buildProperties
+                    - case: "\"patternProperties\""
+                      do:
+                        - return: buildPatternProperties(k)
+                          to: buildPatternProperties
+                    - default: true
+                      do:
+                        - return: buildAdditional(k)
+                          to: buildAdditional
+                  "on": name
+  - of: compileMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: compileMap
+        kind: self
+      - id: c.compile
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, keywordInvalid(name)
+          when: kw.kind != kindObject
+      - bind: out
+        eval: make(map[string]*schema, len(kw.keys))
+      - loop:
+          do:
+            - bind: s, err
+              eval: c.compile(kw.obj[member], base)
+              to: c.compile
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: out[member]
+              value: s
+          key: _
+          range: kw.keys
+          value: member
+      - return: out, nil
+  - of: buildProperties
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildProperties
+        kind: self
+      - id: compileMap
+        kind: internal
+    steps:
+      - bind: props, err
+        eval: compileMap(k.c, k.kw, "properties", k.base)
+        to: compileMap
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: keys
+        eval: k.kw.keys
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		ok := true
+          		for _, name := range keys {
+          			if member, present := v.obj[name]; present && v.kind == kindObject {
+          				ok = props[name].validate(e, member, validation.JoinField(path, name)) && ok
+          			}
+          		}
+          		return ok
+          	}, nil
+  - of: compilePatterns
+    participants:
+      - id: caller
+        kind: actor
+      - id: compilePatterns
+        kind: self
+      - id: compileMap
+        kind: internal
+      - id: regexp
+        kind: stdlib
+    steps:
+      - bind: schemas, err
+        eval: compileMap(c, kw, "patternProperties", base)
+        to: compileMap
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: make([]patternSchema, 0, len(kw.keys))
+      - loop:
+          do:
+            - bind: re, rerr
+              eval: regexp.Compile(pattern)
+              to: regexp
+            - opt:
+                do:
+                  - return: nil, schemaInvalid("a patternProperties pattern is not a regular expression Go's regexp reads", rerr)
+                when: rerr != nil
+            - set: out
+              value: "append(out, patternSchema{re: re, s: schemas[pattern]})"
+          key: _
+          range: kw.keys
+          value: pattern
+      - return: out, nil
+  - of: buildPatternProperties
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildPatternProperties
+        kind: self
+      - id: compilePatterns
+        kind: internal
+    steps:
+      - bind: patterns, err
+        eval: compilePatterns(k.c, k.kw, k.base)
+        to: compilePatterns
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		if v.kind != kindObject {
+          			return true
+          		}
+          		ok := true
+          		for _, name := range v.keys {
+          			for _, p := range patterns {
+          				if p.re.MatchString(name) {
+          					ok = p.s.validate(e, v.obj[name], validation.JoinField(path, name)) && ok
+          				}
+          			}
+          		}
+          		return ok
+          	}, nil
+  - of: buildAdditional
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildAdditional
+        kind: self
+      - id: k.c.compile
+        kind: internal
+      - id: compilePatterns
+        kind: internal
+      - id: additional
+        kind: internal
+    steps:
+      - bind: s, err
+        eval: k.c.compile(k.kw, k.base)
+        to: k.c.compile
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: named
+        eval: map[string]bool{}
+      - opt:
+          do:
+            - loop:
+                do:
+                  - set: named[name]
+                    value: "true"
+                key: _
+                range: props.keys
+                value: name
+          init:
+            bind: props, ok
+            eval: k.parent.obj["properties"]
+          when: ok && props.kind == kindObject
+      - var:
+          name: patterns
+          type: "[]patternSchema"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: patterns, err
+                  eval: compilePatterns(k.c, pp, k.base)
+                  op: =
+                  to: compilePatterns
+                when: err != nil
+          init:
+            bind: pp, ok
+            eval: k.parent.obj["patternProperties"]
+          when: ok
+      - return: additional(s, named, patterns), nil
+        to: additional
+  - of: additional
+    steps:
+      - return:
+          closure:
+            params: e *eval, v *value, path string
+            results: bool
+            steps:
+              - opt:
+                  do:
+                    - return: "true"
+                  when: v.kind != kindObject
+              - bind: ok
+                eval: "true"
+              - loop:
+                  do:
+                    - opt:
+                        do:
+                          - continue: true
+                        when: named[name] || matchesAny(patterns, name)
+                    - set: ok
+                      value: s.validate(e, v.obj[name], validation.JoinField(path, name)) && ok
+                  key: _
+                  range: v.keys
+                  value: name
+              - return: ok
+  - of: buildPropertyNames
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildPropertyNames
+        kind: self
+      - id: k.c.compile
+        kind: internal
+    steps:
+      - bind: s, err
+        eval: k.c.compile(k.kw, k.base)
+        to: k.c.compile
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		if v.kind != kindObject {
+          			return true
+          		}
+          		ok := true
+          		for _, name := range v.keys {
+          			q := e.quiet()
+          			matched := s.validate(q, &value{kind: kindString, s: name}, path)
+          			e.absorb(q)
+          			if !matched {
+          				ok = e.fail(validation.JoinField(path, name), "propertyNames", "the member name does not match the schema", violationCode)
+          			}
+          		}
+          		return ok
+          	}, nil
+  - of: newCompiler
+    steps:
+      - bind: formats
+        eval: make(map[string]bool, len(cfg.AssertFormats))
+      - loop:
+          do:
+            - set: formats[f]
+              value: "true"
+          key: _
+          range: cfg.AssertFormats
+          value: f
+      - return: |-
+          &compiler{
+          		resources: map[string]*value{}, bases: map[*value]string{}, anchors: map[string]*value{},
+          		compiled: map[*value]*schema{}, external: normalizeKeys(cfg.Resources), formats: formats,
+          	}
+  - of: normalizeKeys
+    steps:
+      - bind: out
+        eval: make(map[string][]byte, len(resources))
+      - loop:
+          do:
+            - set: out[strings.TrimSuffix(uri, "#")]
+              value: doc
+          key: uri
+          range: resources
+          value: doc
+      - return: out
+  - of: (*compiler).index
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*compiler).index
+        kind: self
+      - id: resolve
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: c.indexChildren
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: v.kind != kindObject
+      - opt:
+          do:
+            - bind: resolved, err
+              eval: resolve(base, id.s)
+              to: resolve
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: base
+              to: strings
+              value: strings.TrimSuffix(resolved, "#")
+            - set: c.resources[base]
+              value: v
+          init:
+            bind: id, ok
+            eval: v.obj["$id"]
+          when: ok && id.kind == kindString
+      - set: c.bases[v]
+        value: base
+      - opt:
+          do:
+            - set: c.anchors[base+"#"+anchor.s]
+              value: v
+          init:
+            bind: anchor, ok
+            eval: v.obj["$anchor"]
+          when: ok && anchor.kind == kindString
+      - return: c.indexChildren(v, base)
+        to: c.indexChildren
+  - of: (*compiler).indexChildren
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*compiler).indexChildren
+        kind: self
+      - id: c.index
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: c.index(child, base)
+                  to: c.index
+                when: err != nil
+          key: _
+          range: heldSchemas(v)
+          value: child
+      - return: nil
+  - of: heldSchemas
+    participants:
+      - id: caller
+        kind: actor
+      - id: heldSchemas
+        kind: self
+      - id: appendCollections
+        kind: internal
+    steps:
+      - var:
+          name: out
+          type: "[]*value"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, child)
+                init:
+                  bind: child, ok
+                  eval: v.obj[kw]
+                when: ok
+          key: _
+          range: schemaKeywords
+          value: kw
+      - return: appendCollections(out, v)
+        to: appendCollections
+  - of: appendCollections
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendCollections
+        kind: self
+      - id: appendMembers
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, child.arr...)
+                init:
+                  bind: child, ok
+                  eval: v.obj[kw]
+                when: ok && child.kind == kindArray
+          key: _
+          range: arrayKeywords
+          value: kw
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    to: appendMembers
+                    value: appendMembers(out, child)
+                init:
+                  bind: child, ok
+                  eval: v.obj[kw]
+                when: ok && child.kind == kindObject
+          key: _
+          range: mapKeywords
+          value: kw
+      - return: out
+  - of: appendMembers
+    steps:
+      - loop:
+          do:
+            - set: out
+              value: append(out, obj.obj[name])
+          key: _
+          range: obj.keys
+          value: name
+      - return: out
+  - of: (*compiler).addDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*compiler).addDocument
+        kind: self
+      - id: parse
+        kind: internal
+      - id: c.index
+        kind: internal
+    steps:
+      - bind: root, err
+        eval: parse(doc)
+        to: parse
+      - opt:
+          do:
+            - return: nil, schemaInvalid("a schema document is not exactly one JSON value", err)
+          when: err != nil
+      - set: c.resources[uri]
+        value: root
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: c.index(root, uri)
+            op: =
+            to: c.index
+          when: err != nil
+      - return: root, nil
+  - of: (*compiler).resource
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*compiler).resource
+        kind: self
+      - id: c.addDocument
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: v, nil
+          init:
+            bind: v, ok
+            eval: c.resources[uri]
+          when: ok
+      - opt:
+          do:
+            - eval: delete(c.external, uri)
+            - return: c.addDocument(uri, doc)
+              to: c.addDocument
+          init:
+            bind: doc, ok
+            eval: c.external[uri]
+          when: ok
+      - return: nil, errs.Wrap(corejsonschema.RefUnresolved, errs.WrapParams{}, errs.String("ref", uri))
+  - of: (*compiler).resolveRef
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*compiler).resolveRef
+        kind: self
+      - id: resolve
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: c.resource
+        kind: internal
+      - id: pointer
+        kind: internal
+    steps:
+      - bind: target, err
+        eval: resolve(base, ref)
+        to: resolve
+      - opt:
+          do:
+            - return: nil, "", err
+          when: err != nil
+      - bind: docURI, fragment, _
+        eval: strings.Cut(target, "#")
+        to: strings
+      - bind: root, err
+        eval: c.resource(docURI)
+        to: c.resource
+      - opt:
+          do:
+            - return: nil, "", err
+          when: err != nil
+      - switch:
+          cases:
+            - case: fragment == ""
+              do:
+                - return: root, docURI, nil
+            - case: strings.HasPrefix(fragment, "/")
+              do:
+                - bind: v, perr
+                  eval: pointer(root, fragment)
+                  to: pointer
+                - return: v, docURI, perr
+            - default: true
+              do:
+                - opt:
+                    do:
+                      - return: v, docURI, nil
+                    init:
+                      bind: v, ok
+                      eval: c.anchors[docURI+"#"+fragment]
+                    when: ok
+                - return: nil, "", errs.Wrap(corejsonschema.RefUnresolved, errs.WrapParams{}, errs.String("ref", target))
+  - of: pointer
+    participants:
+      - id: caller
+        kind: actor
+      - id: pointer
+        kind: self
+      - id: url
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+      - id: step
+        kind: internal
+    steps:
+      - bind: decoded, err
+        eval: url.PathUnescape(fragment)
+        to: url
+      - opt:
+          do:
+            - return: nil, schemaInvalid("a $ref fragment is not a valid pointer", err)
+          when: err != nil
+      - bind: v
+        eval: root
+      - loop:
+          do:
+            - set: token
+              to: strings
+              value: strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~")
+            - opt:
+                do:
+                  - return: nil, errs.Wrap(corejsonschema.RefUnresolved, errs.WrapParams{}, errs.String("ref", fragment))
+                init:
+                  bind: v
+                  eval: step(v, token)
+                  op: =
+                  to: step
+                when: v == nil
+          key: _
+          range: strings.Split(decoded, "/")[1:]
+          value: token
+      - return: v, nil
+  - of: step
+    participants:
+      - id: caller
+        kind: actor
+      - id: step
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: v.obj[token]
+          when: v.kind == kindObject
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: v.arr[i]
+                init:
+                  bind: i, err
+                  eval: strconv.Atoi(token)
+                  to: strconv
+                when: err == nil && i >= 0 && i < len(v.arr)
+          when: v.kind == kindArray
+      - return: nil
+  - of: resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolve
+        kind: self
+      - id: url
+        kind: stdlib
+      - id: b.ResolveReference(r).String
+        kind: value
+    steps:
+      - bind: b, err
+        eval: url.Parse(base)
+        to: url
+      - opt:
+          do:
+            - return: "\"\", schemaInvalid(\"a base URI does not parse\", err)"
+          when: err != nil
+      - bind: r, err
+        eval: url.Parse(ref)
+        to: url
+      - opt:
+          do:
+            - return: "\"\", schemaInvalid(\"a $ref or $id does not parse\", err)"
+          when: err != nil
+      - return: b.ResolveReference(r).String(), nil
+        to: b.ResolveReference(r).String
+  - of: (*compiler).compile
+    steps:
+      - opt:
+          do:
+            - return: s, nil
+          init:
+            bind: s, ok
+            eval: c.compiled[v]
+          when: ok
+      - bind: s
+        eval: "&schema{}"
+      - set: c.compiled[v]
+        value: s
+      - opt:
+          do:
+            - bind: always
+              eval: v.b
+            - set: s.always
+              value: "&always"
+            - return: s, nil
+          when: v.kind == kindBool
+      - opt:
+          do:
+            - return: nil, schemaInvalid("a schema is neither an object nor a boolean", nil)
+          when: v.kind != kindObject
+      - bind: base, ok
+        eval: c.bases[v]
+      - opt:
+          do:
+            - set: base
+              value: fallback
+          when: "!ok"
+      - return: s, c.compileKeywords(s, v, base)
+  - of: (*compiler).compileKeywords
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*compiler).compileKeywords
+        kind: self
+      - id: checkDraft
+        kind: internal
+      - id: errs
+        kind: package
+      - id: builderFor
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkDraft(v)
+            to: checkDraft
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: errs.Wrap(corejsonschema.KeywordRefused, errs.WrapParams{}, errs.String("keyword", kw))
+                    to: errs
+                when: refusedKeywords[kw]
+            - bind: build, ok
+              eval: builderFor(kw)
+              to: builderFor
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - bind: chk, err
+              eval: "build(keyword{c: c, parent: v, kw: v.obj[kw], base: base})"
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - opt:
+                do:
+                  - set: s.checks
+                    value: append(s.checks, chk)
+                when: chk != nil
+          key: _
+          range: v.keys
+          value: kw
+      - return: nil
+  - of: checkDraft
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkDraft
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: draft, ok
+        eval: v.obj["$schema"]
+      - opt:
+          do:
+            - return: nil
+          when: "!ok || draft.kind == kindString && strings.TrimSuffix(draft.s, \"#\") == draft202012"
+      - return: errs.Wrap(corejsonschema.KeywordRefused, errs.WrapParams{}, errs.String("keyword", "$schema"))
+        to: errs
+  - of: schemaInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: schemaInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(corejsonschema.SchemaInvalid, errs.WrapParams{}, errs.String("problem", problem))
+              to: errs
+          when: cause == nil
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    corejsonschema.CodeJSONSchemaSchemaInvalid,
+          		Reason:  "SCHEMA_INVALID",
+          		Public:  "The schema is not a JSON Schema 2020-12 this validator compiles",
+          		Private: "service/data/codec/jsonschema: " + problem,
+          	})
+        to: errs
+  - of: (*eval).quiet
+    steps:
+      - return: "&eval{depth: e.depth}"
+  - of: (*eval).absorb
+    steps:
+      - set: e.looped
+        value: e.looped || q.looped
+  - of: (*eval).fail
+    steps:
+      - opt:
+          do:
+            - set: e.report
+              value: "append(e.report, validation.ViolationValue{Path: path, Rule: rule, Message: message, Code: code})"
+          when: e.collect
+      - return: "false"
+  - of: (*schema).validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*schema).validate
+        kind: self
+      - id: e.fail
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: e.fail(path, "false", "no value is allowed here", violationCode)
+                    to: e.fail
+                when: "!*s.always"
+            - return: "true"
+          when: s.always != nil
+      - opt:
+          do:
+            - set: e.looped
+              value: "true"
+            - return: "false"
+          when: e.depth >= maxEvalDepth
+      - op: ++
+        set: e.depth
+      - defer: func() { e.depth-- }()
+      - bind: ok
+        eval: "true"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: ok
+                    value: "false"
+                  - opt:
+                      do:
+                        - return: "false"
+                      when: "!e.collect || e.looped"
+                when: "!c(e, v, path)"
+          key: _
+          range: s.checks
+          value: c
+      - return: ok
+  - of: formatChecker
+    steps:
+      - switch:
+          cases:
+            - case: "\"date-time\""
+              do:
+                - return: isDateTime, true
+            - case: "\"uuid\""
+              do:
+                - return: isUUID, true
+            - case: "\"email\""
+              do:
+                - return: isEmail, true
+            - default: true
+              do:
+                - return: nil, false
+          "on": name
+  - of: checkFormats
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkFormats
+        kind: self
+      - id: formatChecker
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: errs.Wrap(corejsonschema.FormatUnknown, errs.WrapParams{}, errs.String("format", name))
+                    to: errs
+                init:
+                  bind: _, ok
+                  eval: formatChecker(name)
+                  to: formatChecker
+                when: "!ok"
+          key: _
+          range: names
+          value: name
+      - return: nil
+  - of: buildFormat
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildFormat
+        kind: self
+      - id: formatChecker
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, keywordInvalid("format")
+          when: k.kw.kind != kindString
+      - bind: is, known
+        eval: formatChecker(k.kw.s)
+        to: formatChecker
+      - opt:
+          do:
+            - return: nil, nil
+          when: "!known || !k.c.formats[k.kw.s]"
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		if v.kind != kindString || is(v.s) {
+          			return true
+          		}
+          		return e.fail(path, "format", "must be a valid "+k.kw.s, violationCode)
+          	}, nil
+  - of: isDateTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: isDateTime
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: _, err
+        eval: time.Parse(time.RFC3339Nano, s)
+        to: time
+      - return: err == nil
+  - of: uuidByte
+    participants:
+      - id: caller
+        kind: actor
+      - id: uuidByte
+        kind: self
+      - id: isHex
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: c == '-'
+          when: uuidLayout[i] == '-'
+      - return: isHex(c)
+        to: isHex
+  - of: isHex
+    steps:
+      - return: (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+  - of: isEmail
+    participants:
+      - id: caller
+        kind: actor
+      - id: isEmail
+        kind: self
+      - id: mail
+        kind: stdlib
+    steps:
+      - bind: addr, err
+        eval: mail.ParseAddress(s)
+        to: mail
+      - return: err == nil && addr.Name == "" && addr.Address == s
+  - of: NewValidator
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewValidator
+        kind: self
+      - id: checkFormats
+        kind: internal
+      - id: newCompiler
+        kind: internal
+      - id: c.addDocument
+        kind: internal
+      - id: c.compile
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: checkFormats(cfg.AssertFormats)
+            to: checkFormats
+          when: err != nil
+      - bind: c
+        eval: newCompiler(cfg)
+        to: newCompiler
+      - bind: root, err
+        eval: c.addDocument("", schema)
+        to: c.addDocument
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: s, err
+        eval: c.compile(root, "")
+        to: c.compile
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&Validator{root: s}, nil"
+  - of: (*Validator).Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Validator).Validate
+        kind: self
+      - id: strictjson
+        kind: package
+      - id: parse
+        kind: internal
+      - id: v.root.validate
+        kind: internal
+    steps:
+      - var:
+          name: raw
+          type: jsontext.Value
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: strictjson.Decode(bytes.NewReader(doc), &raw, maxBytes)
+            to: strictjson
+          when: err != nil
+      - bind: instance, err
+        eval: parse(raw)
+        to: parse
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(err, errs.WrapParams{
+                			Code:    corejsonschema.CodeJSONSchemaSchemaInvalid,
+                			Reason:  "SCHEMA_INVALID",
+                			Public:  "The document could not be read",
+                			Private: "service/data/codec/jsonschema.Validate: a document strictjson accepted did not parse",
+                		})
+          when: err != nil
+      - bind: e
+        eval: "&eval{collect: true}"
+      - eval: v.root.validate(e, instance, validation.RootPath)
+        to: v.root.validate
+      - opt:
+          do:
+            - return: nil, corejsonschema.ReferenceLoop
+          when: e.looped
+      - return: e.report, nil
+  - of: builderFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: builderFor
+        kind: self
+      - id: validationBuilder
+        kind: internal
+      - id: applicatorBuilder
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: b, true
+          init:
+            bind: b, ok
+            eval: validationBuilder(kw)
+            to: validationBuilder
+          when: ok
+      - return: applicatorBuilder(kw)
+        to: applicatorBuilder
+  - of: validationBuilder
+    participants:
+      - id: caller
+        kind: actor
+      - id: validationBuilder
+        kind: self
+      - id: buildBound
+        kind: internal
+      - id: buildSize
+        kind: internal
+      - id: validationBuilder2
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "\"type\""
+              do:
+                - return: buildType, true
+            - case: "\"enum\""
+              do:
+                - return: buildEnum, true
+            - case: "\"const\""
+              do:
+                - return: buildConst, true
+            - case: "\"multipleOf\""
+              do:
+                - return: buildMultipleOf, true
+            - case: "\"maximum\", \"exclusiveMaximum\", \"minimum\", \"exclusiveMinimum\""
+              do:
+                - return: buildBound(kw), true
+                  to: buildBound
+            - case: "\"maxLength\", \"minLength\", \"maxItems\", \"minItems\", \"maxProperties\", \"minProperties\""
+              do:
+                - return: buildSize(kw), true
+                  to: buildSize
+            - default: true
+              do:
+                - return: validationBuilder2(kw)
+                  to: validationBuilder2
+          "on": kw
+  - of: validationBuilder2
+    steps:
+      - switch:
+          cases:
+            - case: "\"pattern\""
+              do:
+                - return: buildPattern, true
+            - case: "\"uniqueItems\""
+              do:
+                - return: buildUniqueItems, true
+            - case: "\"required\""
+              do:
+                - return: buildRequired, true
+            - case: "\"dependentRequired\""
+              do:
+                - return: buildDependentRequired, true
+            - case: "\"format\""
+              do:
+                - return: buildFormat, true
+            - default: true
+              do:
+                - return: nil, false
+          "on": kw
+  - of: applicatorBuilder
+    participants:
+      - id: caller
+        kind: actor
+      - id: applicatorBuilder
+        kind: self
+      - id: buildCombinator
+        kind: internal
+      - id: applicatorBuilder2
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "\"$ref\""
+              do:
+                - return: buildRef, true
+            - case: "\"allOf\", \"anyOf\", \"oneOf\""
+              do:
+                - return: buildCombinator(kw), true
+                  to: buildCombinator
+            - case: "\"not\""
+              do:
+                - return: buildNot, true
+            - case: "\"if\""
+              do:
+                - return: buildIf, true
+            - case: "\"dependentSchemas\""
+              do:
+                - return: buildDependentSchemas, true
+            - default: true
+              do:
+                - return: applicatorBuilder2(kw)
+                  to: applicatorBuilder2
+          "on": kw
+  - of: applicatorBuilder2
+    participants:
+      - id: caller
+        kind: actor
+      - id: applicatorBuilder2
+        kind: self
+      - id: buildItems
+        kind: internal
+      - id: buildMembers
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "\"prefixItems\", \"items\""
+              do:
+                - return: buildItems(kw), true
+                  to: buildItems
+            - case: "\"contains\""
+              do:
+                - return: buildContains, true
+            - case: "\"properties\", \"patternProperties\", \"additionalProperties\""
+              do:
+                - return: buildMembers(kw), true
+                  to: buildMembers
+            - case: "\"propertyNames\""
+              do:
+                - return: buildPropertyNames, true
+            - default: true
+              do:
+                - return: nil, false
+          "on": kw
+  - of: keywordInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: keywordInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corejsonschema.SchemaInvalid, errs.WrapParams{}, errs.String("keyword", kw))
+        to: errs
+  - of: typeMatches
+    participants:
+      - id: caller
+        kind: actor
+      - id: typeMatches
+        kind: self
+      - id: v.isInteger
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "\"null\""
+              do:
+                - return: v.kind == kindNull
+            - case: "\"boolean\""
+              do:
+                - return: v.kind == kindBool
+            - case: "\"object\""
+              do:
+                - return: v.kind == kindObject
+            - case: "\"array\""
+              do:
+                - return: v.kind == kindArray
+            - case: "\"number\""
+              do:
+                - return: v.kind == kindNumber
+            - case: "\"integer\""
+              do:
+                - return: v.isInteger()
+                  to: v.isInteger
+            - case: "\"string\""
+              do:
+                - return: v.kind == kindString
+            - default: true
+              do:
+                - return: "false"
+          "on": name
+  - of: buildType
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildType
+        kind: self
+      - id: stringList
+        kind: internal
+    steps:
+      - bind: names, err
+        eval: stringList(k.kw, "type")
+        to: stringList
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		for _, name := range names {
+          			if typeMatches(v, name) {
+          				return true
+          			}
+          		}
+          		return e.fail(path, "type", "must be of the type the schema names", violationCode)
+          	}, nil
+  - of: buildEnum
+    steps:
+      - opt:
+          do:
+            - return: nil, keywordInvalid("enum")
+          when: k.kw.kind != kindArray
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		for _, allowed := range k.kw.arr {
+          			if equal(v, allowed) {
+          				return true
+          			}
+          		}
+          		return e.fail(path, "enum", "must be one of the allowed values", validation.CodeNotInSet)
+          	}, nil
+  - of: buildConst
+    steps:
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		if equal(v, k.kw) {
+          			return true
+          		}
+          		return e.fail(path, "const", "must be the value the schema requires", validation.CodeNotInSet)
+          	}, nil
+  - of: buildMultipleOf
+    steps:
+      - opt:
+          do:
+            - return: nil, keywordInvalid("multipleOf")
+          when: k.kw.kind != kindNumber || k.kw.n.Sign() <= 0
+      - bind: message
+        eval: "\"must be a multiple of \" + k.kw.n.RatString()"
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		if v.kind != kindNumber || new(big.Rat).Quo(v.n, k.kw.n).IsInt() {
+          			return true
+          		}
+          		return e.fail(path, "multipleOf", message, violationCode)
+          	}, nil
+  - of: buildBound
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildBound
+        kind: self
+      - id: boundMessage
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: k keyword
+            results: check, error
+            steps:
+              - opt:
+                  do:
+                    - return: nil, keywordInvalid(name)
+                  when: k.kw.kind != kindNumber
+              - bind: bound
+                eval: k.kw.n
+              - bind: precision
+                eval: "0"
+              - opt:
+                  do:
+                    - set: precision
+                      value: maxBoundDecimals
+                  when: "!bound.IsInt()"
+              - bind: message
+                eval: boundMessage(name, bound.FloatString(precision))
+                to: boundMessage
+              - return: |-
+                  func(e *eval, v *value, path string) bool {
+                  			if v.kind != kindNumber || withinBound(name, v.n.Cmp(bound)) {
+                  				return true
+                  			}
+                  			return e.fail(path, name, message, validation.CodeOutOfRange)
+                  		}, nil
+  - of: withinBound
+    steps:
+      - switch:
+          cases:
+            - case: "\"maximum\""
+              do:
+                - return: cmp <= 0
+            - case: "\"exclusiveMaximum\""
+              do:
+                - return: cmp < 0
+            - case: "\"minimum\""
+              do:
+                - return: cmp >= 0
+            - default: true
+              do:
+                - return: cmp > 0
+          "on": name
+  - of: boundMessage
+    steps:
+      - switch:
+          cases:
+            - case: "\"maximum\""
+              do:
+                - return: "\"must be at most \" + b"
+            - case: "\"exclusiveMaximum\""
+              do:
+                - return: "\"must be less than \" + b"
+            - case: "\"minimum\""
+              do:
+                - return: "\"must be at least \" + b"
+            - default: true
+              do:
+                - return: "\"must be greater than \" + b"
+          "on": name
+  - of: sizeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: sizeOf
+        kind: self
+      - id: utf8
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: "\"maxLength\", \"minLength\""
+              do:
+                - opt:
+                    do:
+                      - return: utf8.RuneCountInString(v.s)
+                        to: utf8
+                    when: v.kind == kindString
+            - case: "\"maxItems\", \"minItems\""
+              do:
+                - opt:
+                    do:
+                      - return: len(v.arr)
+                    when: v.kind == kindArray
+            - default: true
+              do:
+                - opt:
+                    do:
+                      - return: len(v.keys)
+                    when: v.kind == kindObject
+          "on": name
+      - return: "-1"
+  - of: nonNegative
+    steps:
+      - opt:
+          do:
+            - return: 0, keywordInvalid(name)
+          when: "!kw.isInteger() || kw.n.Sign() < 0 || !kw.n.Num().IsInt64()"
+      - return: int(min(kw.n.Num().Int64(), int64(math.MaxInt))), nil
+  - of: buildSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildSize
+        kind: self
+      - id: nonNegative
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: k keyword
+            results: check, error
+            steps:
+              - bind: limit, err
+                eval: nonNegative(k.kw, name)
+                to: nonNegative
+              - opt:
+                  do:
+                    - return: nil, err
+                  when: err != nil
+              - bind: isMax
+                eval: name[:3] == "max"
+              - bind: message
+                eval: "\"must have at least \" + strconv.Itoa(limit)"
+              - opt:
+                  do:
+                    - set: message
+                      value: "\"must have at most \" + strconv.Itoa(limit)"
+                  when: isMax
+              - return: |-
+                  func(e *eval, v *value, path string) bool {
+                  			size := sizeOf(name, v)
+                  			if size < 0 || (isMax && size <= limit) || (!isMax && size >= limit) {
+                  				return true
+                  			}
+                  			return e.fail(path, name, message, validation.CodeLengthOutOfRange)
+                  		}, nil
+  - of: buildPattern
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildPattern
+        kind: self
+      - id: regexp
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, keywordInvalid("pattern")
+          when: k.kw.kind != kindString
+      - bind: re, err
+        eval: regexp.Compile(k.kw.s)
+        to: regexp
+      - opt:
+          do:
+            - return: nil, schemaInvalid("a pattern is not a regular expression Go's regexp reads", err)
+          when: err != nil
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		if v.kind != kindString || re.MatchString(v.s) {
+          			return true
+          		}
+          		return e.fail(path, "pattern", "must match the pattern the schema gives", validation.CodePatternMismatch)
+          	}, nil
+  - of: buildUniqueItems
+    steps:
+      - opt:
+          do:
+            - return: nil, keywordInvalid("uniqueItems")
+          when: k.kw.kind != kindBool
+      - opt:
+          do:
+            - return: nil, nil
+          when: "!k.kw.b"
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		if v.kind != kindArray || unique(v.arr) {
+          			return true
+          		}
+          		return e.fail(path, "uniqueItems", "must not hold the same element twice", violationCode)
+          	}, nil
+  - of: unique
+    steps:
+      - loop:
+          do:
+            - loop:
+                cond: j < len(arr)
+                do:
+                  - opt:
+                      do:
+                        - return: "false"
+                      when: equal(arr[i], arr[j])
+                init: j := i + 1
+                post: j++
+          key: i
+          range: arr
+      - return: "true"
+  - of: buildRequired
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildRequired
+        kind: self
+      - id: stringList
+        kind: internal
+    steps:
+      - bind: names, err
+        eval: stringList(k.kw, "required")
+        to: stringList
+      - opt:
+          do:
+            - return: nil, keywordInvalid("required")
+          when: err != nil || k.kw.kind != kindArray
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		return requireMembers(e, v, path, names, "required")
+          	}, nil
+  - of: requireMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: requireMembers
+        kind: self
+      - id: e.fail
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: v.kind != kindObject
+      - bind: ok
+        eval: "true"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: ok
+                    to: e.fail
+                    value: e.fail(validation.JoinField(path, name), rule, "is required", validation.CodeRequired)
+                  - opt:
+                      do:
+                        - return: "false"
+                      when: "!e.collect"
+                init:
+                  bind: _, present
+                  eval: v.obj[name]
+                when: "!present"
+          key: _
+          range: names
+          value: name
+      - return: ok
+  - of: buildDependentRequired
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildDependentRequired
+        kind: self
+      - id: stringList
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, keywordInvalid("dependentRequired")
+          when: k.kw.kind != kindObject
+      - bind: deps
+        eval: make(map[string][]string, len(k.kw.keys))
+      - loop:
+          do:
+            - bind: list, err
+              eval: stringList(k.kw.obj[name], "dependentRequired")
+              to: stringList
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: deps[name]
+              value: list
+          key: _
+          range: k.kw.keys
+          value: name
+      - bind: keys
+        eval: k.kw.keys
+      - return: |-
+          func(e *eval, v *value, path string) bool {
+          		ok := true
+          		for _, name := range keys {
+          			if _, present := v.obj[name]; present && v.kind == kindObject {
+          				ok = requireMembers(e, v, path, deps[name], "dependentRequired") && ok
+          			}
+          		}
+          		return ok
+          	}, nil
+  - of: parse
+    participants:
+      - id: caller
+        kind: actor
+      - id: parse
+        kind: self
+      - id: jsontext
+        kind: stdlib
+      - id: parseValue
+        kind: internal
+      - id: dec.ReadToken
+        kind: value
+    steps:
+      - bind: dec
+        eval: jsontext.NewDecoder(bytes.NewReader(data))
+        to: jsontext
+      - bind: v, err
+        eval: parseValue(dec)
+        to: parseValue
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, notOneValue(err)
+          init:
+            bind: _, err
+            eval: dec.ReadToken()
+            op: =
+            to: dec.ReadToken
+          when: "!errors.Is(err, io.EOF)"
+      - return: v, nil
+  - of: parseValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseValue
+        kind: self
+      - id: parseObject
+        kind: internal
+      - id: parseArray
+        kind: internal
+      - id: dec.ReadValue
+        kind: internal
+      - id: new(big.Rat).SetString
+        kind: value
+      - id: parseScalar
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "'{'"
+              do:
+                - return: parseObject(dec)
+                  to: parseObject
+            - case: "'['"
+              do:
+                - return: parseArray(dec)
+                  to: parseArray
+            - case: "'0'"
+              do:
+                - bind: raw, err
+                  eval: dec.ReadValue()
+                  to: dec.ReadValue
+                - opt:
+                    do:
+                      - return: nil, err
+                    when: err != nil
+                - bind: n, ok
+                  eval: new(big.Rat).SetString(string(raw))
+                  to: new(big.Rat).SetString
+                - opt:
+                    do:
+                      - return: nil, io.ErrUnexpectedEOF
+                    when: "!ok"
+                - return: "&value{kind: kindNumber, n: n}, nil"
+            - default: true
+              do:
+                - return: parseScalar(dec)
+                  to: parseScalar
+          "on": dec.PeekKind()
+  - of: parseScalar
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseScalar
+        kind: self
+      - id: dec.ReadToken
+        kind: internal
+    steps:
+      - bind: tok, err
+        eval: dec.ReadToken()
+        to: dec.ReadToken
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - switch:
+          cases:
+            - case: "'\"'"
+              do:
+                - return: "&value{kind: kindString, s: tok.String()}, nil"
+            - case: "'t'"
+              do:
+                - return: "&value{kind: kindBool, b: true}, nil"
+            - case: "'f'"
+              do:
+                - return: "&value{kind: kindBool}, nil"
+            - case: "'n'"
+              do:
+                - return: "&value{kind: kindNull}, nil"
+            - default: true
+              do:
+                - return: nil, io.ErrUnexpectedEOF
+          "on": tok.Kind()
+  - of: parseArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseArray
+        kind: self
+      - id: dec.ReadToken
+        kind: internal
+      - id: parseValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: _, err
+            eval: dec.ReadToken()
+            to: dec.ReadToken
+          when: err != nil
+      - bind: v
+        eval: "&value{kind: kindArray}"
+      - loop:
+          cond: dec.PeekKind() != ']'
+          do:
+            - bind: elem, err
+              eval: parseValue(dec)
+              to: parseValue
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: v.arr
+              value: append(v.arr, elem)
+      - bind: _, err
+        eval: dec.ReadToken()
+        to: dec.ReadToken
+      - return: v, err
+  - of: parseObject
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseObject
+        kind: self
+      - id: dec.ReadToken
+        kind: internal
+      - id: tok.String
+        kind: value
+      - id: parseValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: _, err
+            eval: dec.ReadToken()
+            to: dec.ReadToken
+          when: err != nil
+      - bind: v
+        eval: "&value{kind: kindObject, obj: map[string]*value{}}"
+      - loop:
+          cond: dec.PeekKind() != '}'
+          do:
+            - bind: tok, err
+              eval: dec.ReadToken()
+              to: dec.ReadToken
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - bind: name
+              eval: tok.String()
+              to: tok.String
+            - bind: member, err
+              eval: parseValue(dec)
+              to: parseValue
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: v.keys
+              value: append(v.keys, name)
+            - set: v.obj[name]
+              value: member
+      - bind: _, err
+        eval: dec.ReadToken()
+        to: dec.ReadToken
+      - return: v, err
+  - of: equal
+    participants:
+      - id: caller
+        kind: actor
+      - id: equal
+        kind: self
+      - id: equalArrays
+        kind: internal
+      - id: equalObjects
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: a.kind != b.kind
+      - switch:
+          cases:
+            - case: kindNull
+              do:
+                - return: "true"
+            - case: kindBool
+              do:
+                - return: a.b == b.b
+            - case: kindNumber
+              do:
+                - return: a.n.Cmp(b.n) == 0
+            - case: kindString
+              do:
+                - return: a.s == b.s
+            - case: kindArray
+              do:
+                - return: equalArrays(a.arr, b.arr)
+                  to: equalArrays
+            - default: true
+              do:
+                - return: equalObjects(a, b)
+                  to: equalObjects
+          "on": a.kind
+  - of: (*value).isInteger
+    steps:
+      - return: v.kind == kindNumber && v.n.IsInt()
+  - of: notOneValue
+    steps:
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: io.ErrUnexpectedEOF

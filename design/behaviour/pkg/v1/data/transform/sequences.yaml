@@ -94,3 +94,66 @@ sequences:
             - return: dst, coretransform.DecompressedTooLarge
           when: int64(len(decoded)-len(dst)) > ceiling
       - return: decoded, nil
+  - of: NewReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewReader
+        kind: self
+      - id: streamingFor
+        kind: internal
+      - id: streaming.NewReader
+        kind: value
+    steps:
+      - bind: streaming, serr
+        eval: streamingFor(algo)
+        to: streamingFor
+      - opt:
+          do:
+            - return: nil, serr
+          when: serr != nil
+      - return: streaming.NewReader(r, limit)
+        to: streaming.NewReader
+  - of: NewWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewWriter
+        kind: self
+      - id: streamingFor
+        kind: internal
+      - id: streaming.NewWriter
+        kind: value
+    steps:
+      - bind: streaming, serr
+        eval: streamingFor(algo)
+        to: streamingFor
+      - opt:
+          do:
+            - return: nil, serr
+          when: serr != nil
+      - return: streaming.NewWriter(w)
+        to: streaming.NewWriter
+  - of: streamingFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamingFor
+        kind: self
+      - id: coretransform
+        kind: package
+    steps:
+      - bind: c, ok
+        eval: coretransform.Lookup(algo)
+        to: coretransform
+      - opt:
+          do:
+            - return: nil, coretransform.UnknownCompressor
+          when: "!ok"
+      - set: streaming, ok
+        value: c.(StreamingCompressor)
+      - opt:
+          do:
+            - return: nil, coretransform.StreamingUnsupported
+          when: "!ok"
+      - return: streaming, nil

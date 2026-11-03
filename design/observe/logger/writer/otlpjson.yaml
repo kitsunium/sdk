@@ -1,0 +1,200 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/writer/otlpjson
+packages:
+  - codes:
+      - const:
+          - doc: |-
+              CodeOTLPLogsEndpointInvalid identifies an OTLP/HTTP logs endpoint that is
+              not an absolute http or https URL with a path, refused at construction.
+            name: CodeOTLPLogsEndpointInvalid
+            note: "range: 0.3.104.0 - 0.3.104.255"
+            value: "0x00_03_68_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeOTLPLogsExportRejected identifies a logs batch the collector refused
+              for good — a 4xx outside the retryable four, 415 included — or a request
+              that could not be built.
+            name: CodeOTLPLogsExportRejected
+            value: "0x00_03_68_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeOTLPLogsExportUnavailable identifies a transient failure: a transport
+              fault, a timeout, or a 429/502/503/504 — the retryable class, carrying the
+              collector's Retry-After when it sent one.
+            name: CodeOTLPLogsExportUnavailable
+            value: "0x00_03_68_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeOTLPLogsPartialSuccess identifies a 2xx whose partialSuccess names
+              rejected log records; the specification forbids retrying them.
+            name: CodeOTLPLogsPartialSuccess
+            value: "0x00_03_68_04"
+        type: errs.Code
+    doc: |-
+      Package otlpjson declares the codes and sentinels of the OTLP/JSON log
+      writer, internal/service/observe/logger/writer/otlpjson: range 0.3.104.*,
+      allocated to that engine (#867) and declared here as ADR 0160 asks, so the
+      engine declares none. They are the logs signal's words for the verdicts the
+      shared OTLP/HTTP sender reaches, as metrics' 0.3.45.* and trace's codes are
+      the other two signals'.
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/writer/otlpjson
+    sentinels:
+      - var:
+          - code: CodeOTLPLogsEndpointInvalid
+            doc: OTLPLogsEndpointInvalid refuses an unusable OTLP/HTTP logs endpoint at construction.
+            name: OTLPLogsEndpointInvalid
+            private: "service/observe/logger/writer/otlpjson: the OTLP logs endpoint is not an absolute http(s) URL with a path"
+            public: The OTLP logs endpoint is not an absolute http or https URL with a path
+            reason: OTLP_LOGS_ENDPOINT_INVALID
+          - code: CodeOTLPLogsExportRejected
+            doc: OTLPLogsExportRejected is the permanent verdict on a logs batch.
+            name: OTLPLogsExportRejected
+            private: "service/observe/logger/writer/otlpjson: the collector refused the logs request for good"
+            public: The OTLP collector rejected the logs payload
+            reason: OTLP_LOGS_EXPORT_REJECTED
+          - code: CodeOTLPLogsExportUnavailable
+            doc: OTLPLogsExportUnavailable is the retryable verdict on a logs batch.
+            name: OTLPLogsExportUnavailable
+            private: "service/observe/logger/writer/otlpjson: the collector was unreachable, timed out or asked to back off"
+            public: The OTLP collector is unreachable or overloaded
+            reason: OTLP_LOGS_EXPORT_UNAVAILABLE
+          - code: CodeOTLPLogsPartialSuccess
+            doc: OTLPLogsPartialSuccess reports log records a collector accepted the request without.
+            name: OTLPLogsPartialSuccess
+            private: "service/observe/logger/writer/otlpjson: the response carried partialSuccess.rejectedLogRecords; the specification forbids retrying them"
+            public: The OTLP collector accepted the request but rejected some log records
+            reason: OTLP_LOGS_PARTIAL_SUCCESS
+  - constants:
+      - doc: OTLPLogsPath is the OTLP/HTTP logs path a collector serves.
+        name: OTLPLogsPath
+        type: string
+        value: "\"/v1/logs\""
+      - doc: |-
+          DefaultBatchMax is how many records one document carries when
+          Config.BatchMax is zero: the async drainer hands the sink up to this many.
+        name: DefaultBatchMax
+        type: int
+        value: "64"
+    doc: |-
+      Package otlpjson registers the "otlpjson" writer factory (#867): the third
+      OpenTelemetry signal. Each record the logger emits becomes an OTLP LogRecord —
+      timeUnixNano, severityNumber and severityText from the level (the
+      OpenTelemetry slog bridge's level+9), the message as the string body, the
+      attributes typed (a group flattened under dotted keys), traceId and spanId
+      from the record's correlation fields (ADR 0062) and nothing when it has none —,
+      the Resource and the InstrumentationScope once per request; the async
+      middleware batches the records, and each batch is ONE
+      ExportLogsServiceRequest handed to Config.Exporter. That exporter is the
+      OTLP/HTTP logs exporter NewOTLPHTTPExporter returns — posted by the shared
+      sender of the other two signals: bounded read, no redirect, the same
+      verdicts, gzip on demand — or the store-and-forward adapter of app/forward,
+      which keeps the batch on disk while the collector is down (ADR 0185).
+    functions:
+      - doc: |-
+          EncodeOTLPJSON writes recs as one OTLP/JSON ExportLogsServiceRequest under
+          resource and scope — the document the writer hands its exporter. Every field
+          in field-number order; a record outside a span carries no traceId and no
+          spanId. It cannot fail: every value has an OTLP spelling.
+        in:
+          - name: resource
+            type: coreotel.ResourceValue
+          - name: scope
+            type: coreotel.ScopeValue
+          - name: recs
+            type: "[]corelogger.RecordEvent"
+        name: EncodeOTLPJSON
+        out:
+          - type: "[]byte"
+      - doc: |-
+          NewOTLPHTTPExporter returns the OTLP/HTTP logs exporter: a
+          corelogger.DocumentExporter and EncodedDocumentExporter posting each
+          document to cfg.Endpoint (…/v1/logs) through the sender the metrics and
+          trace exporters share, with their verdicts under this package's codes. A
+          refused endpoint fails here, OTLPLogsEndpointInvalid.
+        in:
+          - name: cfg
+            type: OTLPHTTPConfig
+        name: NewOTLPHTTPExporter
+        out:
+          - name: exporter
+            type: corelogger.DocumentExporter
+          - name: err
+            type: error
+      - doc: |-
+          OTLPRetryable reports whether a failure of the logs exporter is the
+          transient one a later attempt may cure — what forward.Config.Retryable
+          wants.
+        in:
+          - name: err
+            type: error
+        name: OTLPRetryable
+        out:
+          - type: bool
+    imports:
+      coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+      level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+      otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/otlpjson
+    types:
+      - doc: |-
+          OTLPHTTPConfig configures the OTLP/HTTP logs exporter: the shared sender's
+          configuration — Endpoint, Headers, Timeout, Client, MaxResponseBytes, Gzip —
+          under this signal's name.
+        name: OTLPHTTPConfig
+        underlying: otlp.HTTPConfig
+      - doc: |-
+          Config tunes the "otlpjson" writer. Exporter is required; every other field
+          is optional.
+        name: Config
+        struct:
+          fields:
+            - doc: |-
+                Exporter receives each batch as one OTLP/JSON document: the exporter
+                NewOTLPHTTPExporter returns, or forward.NewLogExporter's adapter, which
+                keeps it in a durable queue. It must not retain doc past its return.
+              name: Exporter
+              type: corelogger.DocumentExporter
+            - doc: Resource identifies the producer, carried once per document.
+              name: Resource
+              type: coreotel.ResourceValue
+            - doc: Scope identifies the instrumentation, carried once per document.
+              name: Scope
+              type: coreotel.ScopeValue
+            - doc: |-
+                MinLevel is the optional per-writer severity floor; the zero value
+                (level.Info) inherits the handler-global level.
+              name: MinLevel
+              type: level.Level
+            - doc: |-
+                BatchMax is how many records one document carries at most; zero is
+                DefaultBatchMax.
+              name: BatchMax
+              type: int
+            - doc: |-
+                BufferSize is the async ring capacity; a non-positive value applies
+                async's own default.
+              name: BufferSize
+              type: int
+            - doc: |-
+                OnDrop, when non-nil, is invoked with the count of records discarded
+                because the non-blocking ring saturated.
+              name: OnDrop
+              type: func(dropped int)
+            - doc: |-
+                OnError, when non-nil, is invoked for each record of a batch the
+                exporter refused; nil discards the failure.
+              name: OnError
+              type: func(err error)
+    variables:
+      - doc: |-
+          Writer is the registered "otlpjson" factory singleton. The blank assignment
+          runs writer.Register at package load (no init()).
+        name: Writer
+        type: writer.Factory

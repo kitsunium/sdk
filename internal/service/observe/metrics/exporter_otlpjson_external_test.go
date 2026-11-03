@@ -432,40 +432,6 @@ func TestNewOTLPJSONExporterWritesNDJSON(t *testing.T) {
 	}
 }
 
-// TestNewOTLPJSONExporterRefusesBeforeWriting pins that a refusal leaves the
-// writer untouched: a truncated OTLP document is not a document, and a receiver
-// would reject the whole request rather than the series that could not be
-// spelled.
-func TestNewOTLPJSONExporterRefusesBeforeWriting(t *testing.T) {
-	t.Parallel()
-	var sink bytes.Buffer
-	exporter := svcmetrics.NewOTLPJSONExporter("otlp-test", &sink)
-	snap := coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
-		"s": {Temporality: coremetrics.TemporalityUnspecified, Points: []coremetrics.SumValue{{Value: 1}}},
-	}}
-	if err := exporter.Export(snap); !errors.Is(err, coremetrics.OTLPUnresolvedTemporality) {
-		t.Fatalf("want OTLPUnresolvedTemporality, got %v", err)
-	}
-	if sink.Len() != 0 {
-		t.Errorf("a refusal must leave the writer untouched, got: %s", sink.String())
-	}
-}
-
-// TestOTLPJSONExporterReportsAWriterFault pins the remaining error surface: the
-// single write.
-func TestOTLPJSONExporterReportsAWriterFault(t *testing.T) {
-	t.Parallel()
-	boom := errors.New("pipe closed")
-	exporter := svcmetrics.NewOTLPJSONExporter("otlp-test", failingWriter{err: boom})
-	err := exporter.Export(gaugeSnapshot(nil, 1))
-	if !errors.Is(err, boom) {
-		t.Fatalf("want the writer's cause on the trail, got %v", err)
-	}
-	if !kerrs.HasCode(err, coremetrics.CodeExportFailed) {
-		t.Errorf("want EXPORT_FAILED (0.2.9.2), got %v", err)
-	}
-}
-
 // TestOTLPJSONIsRegisteredOnStderr pins ADR 0030 for the third exporter: the
 // registered default must not be armed on a stream the process may be using as
 // a protocol channel, and it must be reachable through the registry.

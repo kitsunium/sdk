@@ -26,6 +26,8 @@ func Test_netFactory_Decode(t *testing.T) {
 		{"non-string address", map[string]any{"address": 7}, true, NetConfig{}},
 		{"bad min_level", map[string]any{"address": "h:1", "min_level": "loud"}, true, NetConfig{}},
 		{"bad buffer_size", map[string]any{"address": "h:1", "buffer_size": "big"}, true, NetConfig{}},
+		{"ndjson opt-in", map[string]any{"address": "h:1", "http_batch_ndjson": true}, false, NetConfig{Address: "h:1", HTTPBatchNDJSON: true}},
+		{"bad http_batch_ndjson", map[string]any{"address": "h:1", "http_batch_ndjson": "yes"}, true, NetConfig{}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,7 +42,7 @@ func Test_netFactory_Decode(t *testing.T) {
 			}
 			got, ok := cfg.(NetConfig)
 			//: happy arm — the typed NetConfig with the mapped fields.
-			if err != nil || !ok || got.Address != tc.want.Address || got.MinLevel != tc.want.MinLevel || got.BufferSize != tc.want.BufferSize {
+			if err != nil || !ok || got.Address != tc.want.Address || got.MinLevel != tc.want.MinLevel || got.BufferSize != tc.want.BufferSize || got.HTTPBatchNDJSON != tc.want.HTTPBatchNDJSON {
 				t.Errorf("%s: got %+v err=%v want %+v", tc.name, got, err, tc.want)
 			}
 		})

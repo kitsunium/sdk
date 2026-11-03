@@ -1,0 +1,17 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: appendQuoted
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: b
+                    value: append(b, '\\')
+                when: s[i] == '\\' || s[i] == '"'
+            - set: b
+              value: append(b, s[i])
+          key: i
+          range: len(s)
+      - return: b

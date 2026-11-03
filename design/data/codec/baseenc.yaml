@@ -76,11 +76,11 @@ packages:
             public: base-N decoding failed
             reason: BASE_ENC_DECODE_FAILED
           - code: CodeBaseEncSizeExceeded
-            doc: BaseEncSizeExceeded fires when an Unmarshal input exceeds the 10 MiB cap.
-            name: BaseEncSizeExceeded
+            doc: SizeExceeded fires when an Unmarshal input exceeds the 10 MiB cap.
+            name: SizeExceeded
             private: "service/data/codec/baseenc: len(data) exceeds maxBaseEncBytes (CWE-400 defence)"
             public: base-N input exceeds size limit
-            reason: BASE_ENC_SIZE_EXCEEDED
+            reason: SIZE_EXCEEDED
   - doc: |-
       Package baseenc — Base45 (RFC 9285) alphabet codec. Unlike base16/32/64
       and ascii85, the stdlib ships no base45 encoder, so the encode/decode
@@ -260,7 +260,7 @@ packages:
           goes wherever a format name is taken — the codec package's Marshal,
           config.FSSource's string, i18n.LoadFS's codec.Format — without a
           conversion.
-        doc: Base58 is Bitcoin's alphabet; its base conversion is quadratic, so its input is capped at 4 KiB.
+        doc: Base58 is Bitcoin's alphabet; its base conversion is quadratic, so its input is capped at 64 KiB.
         name: Base58
         value: "\"base58\""
       - blockDoc: |-
@@ -268,7 +268,7 @@ packages:
           goes wherever a format name is taken — the codec package's Marshal,
           config.FSSource's string, i18n.LoadFS's codec.Format — without a
           conversion.
-        doc: Base62 is the alphanumeric alphabet; capped at 4 KiB like Base58.
+        doc: Base62 is the alphanumeric alphabet; capped at 64 KiB like Base58.
         name: Base62
         value: "\"base62\""
     doc: |-
@@ -300,7 +300,7 @@ packages:
       	CodeMarshalFailed    0.3.24.1  the value has no JSON encoding
       	CodeUnmarshalFailed  0.3.24.2  the decoded text is not JSON the target can hold
       	CodeDecodeFailed     0.3.24.3  the input is not text of the Format's alphabet
-      	CodeSizeExceeded     0.3.24.4  an input past its bound — 10 MiB, 4 KiB for base58 and base62
+      	CodeSizeExceeded     0.3.24.4  an input past its bound — 10 MiB, 64 KiB for base58 and base62
 
       No error message quotes the input.
     facade:
@@ -328,7 +328,7 @@ packages:
             typed: true
             value: "0x00_03_18_03"
           - doc: |-
-              CodeSizeExceeded is 0.3.24.4: an input past its bound — 10 MiB, 4 KiB
+              CodeSizeExceeded is 0.3.24.4: an input past its bound — 10 MiB, 64 KiB
               for base58 and base62.
             name: CodeSizeExceeded
             reexport: corebaseenc.CodeBaseEncSizeExceeded
@@ -352,7 +352,7 @@ packages:
             type: "*errs.Error"
           - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
             name: SizeExceeded
-            reexport: corebaseenc.BaseEncSizeExceeded
+            reexport: corebaseenc.SizeExceeded
             type: "*errs.Error"
     imports:
       corebaseenc: github.com/kitsunium/sdk/internal/core/data/codec/baseenc

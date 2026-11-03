@@ -19,11 +19,11 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `proc` | proc | Spawn and wait, signals, the reaper, rlimits, cgroups and the cap already bounding the process, sd_notify and socket activation, what the program was built from | 0016, 0075, 0093, 0100, 0144 |
 | `ipc` | proc | A private socket between processes of one machine: the directory gates it, the path above that directory is refused where another account could steer it, the kernel names the peer where it can | 0148, 0182 |
 | `logger` | observe | Structured logger, one allocation per emit, trace-correlated; named writers (console, file, rotation, journald, database, network) and a `slog` bridge at the edge | 0012, 0015, 0030, 0032, 0062, 0070, 0132 |
-| `metrics` | observe | The OpenTelemetry metrics data model from its specification, zero OTel imports; text, Prometheus and OTLP/JSON exporters | 0027, 0044, 0048, 0067 |
+| `metrics` | observe | The OpenTelemetry metrics data model from its specification, zero OTel imports; text, Prometheus and OTLP/JSON exporters | 0027, 0044, 0048, 0067, 0208 |
 | `trace` | observe | The OTel span model and W3C Trace Context from their documents, sampled once at the root, exported as OTLP/JSON | 0051 |
 | `profiling` | observe | The process's own CPU, heap and goroutine profiles, decoded with the standard library and folded onto owners the caller names | 0121 |
 | `codec` | data | 24 wire formats behind one `Marshal` / `Unmarshal` dispatch with per-format facades, strict JSON decoding, a type's wire shape and JSON patch | 0003, 0021, 0022, 0023, 0036, 0037, 0102, 0133, 0134, 0143, 0156 |
-| `transform` | data | Compression: stdlib gzip, raw DEFLATE and zlib; zstd and s2 opt-in under `third-party/`, with a ceiling that cannot be omitted | 0014, 0066 |
+| `transform` | data | Compression: stdlib gzip, raw DEFLATE and zlib, each at a level of the caller's; zstd — with a dictionary of the caller's — and s2 opt-in under `third-party/`, with a ceiling that cannot be omitted; whole buffers, or streams read under the caller's ceiling | 0014, 0066, 0213 |
 | `sql` | data | Ports over `database/sql`, never an ORM or a driver: structural transaction ownership, savepoints, migrations under a lock that dies with its holder, checksummed when built from statements; a retrying root transactor, a statement budget, read-only transactions on a replica, a statement observer under the pool | 0055, 0139, 0140 |
 | `docstore` | data | Typed keyed JSON documents with indexes, versions and a trash, replaced on the revision they were read at — one overlay entry per write through `vfs`, or tables of the caller's database | 0110, 0139, 0143, 0178, 0209 |
 | `queue` | data | Durable at-least-once queue over a directory, a SQL table joined to the caller's transaction, or memory; retried — with a jitter on request — and dead-lettered with its cause's codes, its trail's included, a dead letter and a live message movable between brokers as they lie; a message held until one instant, a retry after the handler's delay, a publication once per key over a window; a message's age bounded, a backlog counted, purged, published and acknowledged in batches, dead letters paged, replayed and purged in bulk and kept for a retention, a handler that acknowledges in its own transaction, five priority levels served strictly | 0054, 0104, 0151, 0178, 0183 |
@@ -69,15 +69,15 @@ internal/
 │                       scheduler, statemachine, validation, view},
 │                  data/{cache, codec, codec/scratch,
 │                        codec/{asn1, baseenc, bson, cbor, csv, flatbuffers,
-│                               form, json, jsonpatch, msgpack, multipart,
-│                               ndjson, pem, strictjson, tlv, toml, xml,
-│                               yaml},
+│                               form, jcs, json, jsonpatch, jsonschema,
+│                               msgpack, multipart, ndjson, pem,
+│                               strictjson, tlv, toml, xml, yaml},
 │                        docstore, queue, sql, transform, vfs},
 │                  observe/{logger, logger/{level, writer},
 │                           logger/middleware/{async, encwrite, failover,
 │                           multi, recover, route, sample, tee},
 │                           logger/sink/{console, file, syslog},
-│                           logger/writer/{journald, nettransport, rotfile},
+│                           logger/writer/{journald, nettransport, otlpjson, rotfile},
 │                           metrics, otel, profiling, trace},
 │                  security/{authz, redact, secret, session, token}
 └── service/       concrete implementations
@@ -86,7 +86,7 @@ internal/
                              syslog}, middleware/{async,encwrite,failover,
                              multi,recover,route,sample,tee};
                            logger/writer — console, dbsink, file, journald,
-                             levelgate, nettransport, rotfile;
+                             levelgate, nettransport, otlpjson, rotfile;
                            logger/internal/logfile — the hardened open both
                              file sinks share;
                            metrics — in-memory meter + text/prometheus/
@@ -127,7 +127,9 @@ internal/
                              a decoder and not a Format, its request-body
                              form in strictjson/httpbody; + jsonshape, a
                              type's wire shape, not a Format; + jsonpatch,
-                             two documents' difference, not a Format;
+                             two documents' difference, not a Format; + jcs,
+                             RFC 8785 canonical JSON, not a Format; +
+                             jsonschema, a JSON Schema 2020-12 validator;
                            docstore — typed JSON documents + unique/multi
                              indexes; one overlay entry per write, one
                              snapshot at rest; + the same store over SQL,
@@ -232,6 +234,8 @@ pkg/
     │                   its request-body form in strictjson/httpbody/;
     │                   + jsonshape/ — a type's wire shape — ADR 0133;
     │                   + jsonpatch/ — two documents' difference — ADR 0143;
+    │                   + jcs/ — RFC 8785 canonical JSON — ADR 0102 (2026-11-03);
+    │                   + jsonschema/ — a JSON Schema 2020-12 validator — ADR 0210;
     │                 transform/ — compression without the codec package, the
     │                   caller's ceiling honoured — ADR 0014;
     │                 sql/ — ports over database/sql, no driver, no ORM — ADR 0055;
@@ -658,7 +662,10 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0205 — an io_uring recv may fill several buffers, and only on request, accepted on 2026-11-02, revisable while v0 (ADR 0040): amends ADR 0189 — `IORING_RECVSEND_BUNDLE` behind the class A-code `uring-recv-bundle` (`server.CapabilityURingRecvBundle`), a probe bundle recv must fill two buffers (none with incremental consumption before 6.15), a completion walked buffer by buffer in ring order; measured no gain, 25 % slower on 8 KiB, so opt-in — `docs/adr/0205-an-io-uring-recv-may-fill-several-buffers-and-only-on-request.md`
 - ADR 0206 — an io_uring batch may be bounded in time, accepted on 2026-11-02, revisable while v0 (ADR 0040): `LoopValue.BatchBudget` stops a batch's reaping once spent (reaps of 16), the next batch starts at the cut ring without waiting, a batch past half its budget submits its answers at once, `BatchesCut` in State; zero changes nothing — `docs/adr/0206-an-io-uring-batch-may-be-bounded-in-time.md`
 - ADR 0207 — concurrent callers share one flush, and each gets its verdict, accepted on 2026-11-02: the kernel primitive `concur/commit` (`Group[T]`, `New(flush, Config{MaxItems, MaxWait, Clock})`, `Do`, `Close`, `COMMIT_CLOSED` `0.1.4.1`) — flushes one at a time in batch order, on a goroutine of their own, a departed caller's item still flushed, a panic re-raised in every participant; its first adopter is vfs `WriteAtomic`'s directory flush, shared per directory with no API change; the others (vfs `WriteAtomicAll`, queue `PublishAll`, docstore, mail spool, logger flush) are siblings of their domains — `docs/adr/0207-concurrent-callers-share-one-flush-and-each-gets-its-verdict.md`
+- ADR 0208 — an instrument gets a unit, and it belongs to the NAME, accepted on 2026-11-03 (kitsunium/sdk#1021), resolving ADR 0067's deferral: a `UnitDescriber` sibling (`Unit(name, unit string)`) found by type assertion, not in `FullMeter`; `Unit` beside `Description` on the three metric envelopes; an empty, over-63-byte or non-printable-ASCII unit panics `INVALID_UNIT` `0.2.9.9`, a second differing one `UNIT_CONFLICT` `0.2.9.10`; OTLP/JSON `Metric.unit` omitted when empty, the text exporter's ` unit="…"`, and no Prometheus suffix — `docs/adr/0208-an-instrument-gets-a-unit-and-it-belongs-to-the-name.md`
 - ADR 0209 — a document is replaced on the revision it was read at, accepted on 2026-11-02 (kitsunium/sdk#1055): `core/data/docstore`'s `Revisioned[T]` / `RevisionedContext[T]` (`Revision`, `ReplaceIf`), the opaque `RevisionValue` and `REVISION_MISMATCH` `0.3.80.23`; amended the same day for several writes as one, `Batcher[T]` / `BatcherContext[T]` (#1057), and on 2026-11-03 for the documents a page at a time and an ordered index, `Pager[T]` / `Ranged[T]` and `Ordered` (#836) — `docs/adr/0209-a-document-is-replaced-on-the-revision-it-was-read-at.md`
+- ADR 0210 — a published JSON Schema is validated with the standard library, accepted on 2026-11-03 (kitsunium/sdk#882): `codec/jsonschema` (`0.3.103.*`, facade `pkg/v1/data/codec/jsonschema`) — `NewValidator(schema, Config)` compiles 2020-12's core, applicator and validation vocabularies, `$ref` within the document and to `Config.Resources`, never fetched, numbers exact, `format` asserted only for `AssertFormats` (date-time, uuid, email); another draft, `$dynamicRef`, `$vocabulary`, the unevaluated and content vocabularies refused by name; `Validate(doc, maxBytes)` reads through strictjson and returns a `validation.ReportValue` in its path grammar, never quoting the document; the official JSON-Schema-Test-Suite vendored and passed but the named groups
 - ADR 0211 — the data ports' vendor adapters, accepted on 2026-11-02: a Valkey cache tier and stream broker in `third-party/db/redis` (named by its vendor, #984), a JetStream broker in `third-party/nats`, an S3 `FullFS` and an SQS broker in `third-party/aws`; Valkey leases on the broker's clock, JetStream and SQS leases on the server's, refused at their deadline before anything is sent; the broker dead-letters with the cause — `docs/adr/0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md`
+- ADR 0213 — a compression stream is read under the caller's ceiling, accepted on 2026-11-03 (kitsunium/sdk#892): `core/data/transform`'s sibling port `StreamingCompressor` (`NewReader(r, max)`, `NewWriter(w)`) for gzip, flate, zlib, zstd and s2, at most `max` bytes then `DecompressedTooLarge`, the facade's `NewReader` / `NewWriter` and `STREAMING_UNSUPPORTED` `0.2.5.7`; closes ADR 0066's streaming deferral — `docs/adr/0213-a-compression-stream-is-read-under-the-callers-ceiling.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

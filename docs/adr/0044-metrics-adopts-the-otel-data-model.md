@@ -326,6 +326,32 @@ Named here so a future reader finds the reason rather than the gap:
   scale / offset / zero-count fields — a second point type rather than a field
   on the existing one, and the explicit-bounds histogram is what both current
   exporters can carry.
+
+  *Resolved 2026-11-03 (#869), with the exemplars above.* The precondition
+  of each was met — the trace domain (ADR 0051) and an OTLP exporter (ADR
+  0048) — and both landed as the model's own additions, every published port
+  extended by a sibling (ADR 0039):
+  - **Exemplars**: `ExemplarValue` (time, value, the raw trace and span id
+    arrays — `core/metrics` still imports nothing of `core/trace`) on
+    `SumValue.Exemplars` (one per series) and `HistogramValue.Exemplars` (one
+    per bucket), recorded by the instrument siblings `ContextCounter.AddContext`
+    and `ContextHistogram.RecordContext` when the context carries a SAMPLED span;
+    a delta window hands them over once, a cumulative one keeps each until a
+    newer measurement replaces it. OTLP/JSON emits them; the Prometheus
+    connector drops them and names the loss.
+  - **Exponential histograms**: `ExponentialHistogramValue` in
+    `SnapshotValue.ExponentialHistograms`, minted by the `ExponentialMeter`
+    sibling (`ExponentialHistogram(name, maxSize, attrs...)`, 160 buckets per
+    range by default), starting at scale 20 and lowered when a range would need
+    more buckets; `ExponentialIndex` and `ExponentialLowerBound` are the
+    specification's MapToIndex and LowerBoundary. OTLP/JSON carries the point
+    whole; Prometheus text, which has no native histogram, keeps `le="+Inf"`,
+    `_sum` and `_count`; the text exporter its count.
+  - **And the observable histogram (#868)**, which the same change needed for
+    the runtime's histograms: `AsyncHistogramMeter.ObservableHistogram`, a
+    source's own buckets carried over, and `HistogramValue.NoSum` for a source
+    that keeps no total — written as absent by OTLP/JSON and as no `_sum` line
+    by Prometheus, never as a forged 0.
 - **Homogeneous array attributes.** §Decision 2, with the allocation reason.
 - **`SchemaURL`** on Resource and Scope, and scope-level attributes. §Decision 4.
 - **The OTLP exporter itself.** §Decision 9.

@@ -19,11 +19,21 @@ sequences:
         kind: actor
       - id: (*jsonCodec).Marshal
         kind: self
+      - id: codec
+        kind: package
       - id: marshalRawMessage
         kind: internal
-      - id: stdjson
+      - id: jsonv2
         kind: stdlib
     steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: codec.CheckValue(v)
+            to: codec
+          when: verr != nil
       - opt:
           do:
             - return: out, nil
@@ -33,8 +43,8 @@ sequences:
             to: marshalRawMessage
           when: ok
       - bind: out, jerr
-        eval: stdjson.Marshal(v)
-        to: stdjson
+        eval: jsonv2.Marshal(v, stdjson.DefaultOptionsV1())
+        to: jsonv2
       - opt:
           do:
             - return: out, nil
@@ -84,14 +94,28 @@ sequences:
         kind: actor
       - id: (*jsonCodec).Unmarshal
         kind: self
-      - id: stdjson
+      - id: codec
+        kind: package
+      - id: jsonv2
         kind: stdlib
       - id: errs
         kind: package
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
+          when: len(data) == 0
       - bind: jerr
-        eval: stdjson.Unmarshal(data, v)
-        to: stdjson
+        eval: jsonv2.Unmarshal(data, v, stdjson.DefaultOptionsV1())
+        to: jsonv2
       - opt:
           do:
             - return: nil
@@ -102,7 +126,7 @@ sequences:
           		Reason:  "UNMARSHAL_FAILED",
           		Public:  "JSON decoding failed",
           		Private: "service/data/codec/json.Unmarshal: encoding/json returned an error",
-          	})
+          	}, position(jerr)...)
         to: errs
   - of: (*jsonCodec).Append
     participants:
@@ -110,38 +134,36 @@ sequences:
         kind: actor
       - id: (*jsonCodec).Append
         kind: self
-      - id: marshalRawMessage
+      - id: appendRawMessage
         kind: internal
       - id: scratch
         kind: package
-      - id: stdjson
+      - id: jsonv2
         kind: stdlib
-      - id: enc.Encode
-        kind: value
-      - id: buf.Bytes
+      - id: w.Bytes
         kind: value
     steps:
       - opt:
           do:
-            - return: append(dst, out...), nil
+            - return: out, nil
           init:
             bind: out, ok
-            eval: marshalRawMessage(v)
-            to: marshalRawMessage
+            eval: appendRawMessage(dst, v)
+            to: appendRawMessage
           when: ok
-      - bind: buf
-        eval: scratch.AcquireBuffer()
+      - bind: w
+        eval: scratch.AcquireAppendWriter(dst)
         to: scratch
-      - bind: enc
-        eval: stdjson.NewEncoder(buf)
-        to: stdjson
       - bind: jerr
-        eval: enc.Encode(v)
-        to: enc.Encode
+        eval: jsonv2.MarshalWrite(w, v, stdjson.DefaultOptionsV1())
+        to: jsonv2
+      - bind: out
+        eval: w.Bytes()
+        to: w.Bytes
+      - eval: scratch.ReleaseAppendWriter(w)
+        to: scratch
       - opt:
           do:
-            - eval: scratch.ReleaseBuffer(buf)
-              to: scratch
             - return: |-
                 dst, errs.Wrap(jerr, errs.WrapParams{
                 			Code:    corejson.CodeJSONMarshalFailed,
@@ -150,42 +172,184 @@ sequences:
                 			Private: "service/data/codec/json.Append: encoding/json returned an error",
                 		})
           when: jerr != nil
-      - bind: encoded
-        eval: buf.Bytes()
-        to: buf.Bytes
+      - return: out, nil
+  - of: appendRawMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendRawMessage
+        kind: self
+      - id: appendRaw
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: r
+          cases:
+            - do:
+                - return: appendRaw(dst, r), true
+                  to: appendRaw
+              types: stdjson.RawMessage
+            - do:
+                - opt:
+                    do:
+                      - return: append(dst, "null"...), true
+                    when: r == nil
+                - return: appendRaw(dst, *r), true
+                  to: appendRaw
+              types: "*stdjson.RawMessage"
+            - default: true
+              do:
+                - return: dst, false
+          "on": v
+  - of: appendRaw
+    steps:
       - opt:
           do:
-            - set: encoded
-              value: encoded[:n-1]
-          init:
-            bind: "n"
-            eval: len(encoded)
-          when: n > 0 && encoded[n-1] == '\n'
-      - set: dst
-        value: append(dst, encoded...)
-      - eval: scratch.ReleaseBuffer(buf)
-        to: scratch
-      - return: dst, nil
+            - return: append(dst, "null"...)
+          when: len(raw) == 0
+      - return: append(dst, raw...)
   - of: (*jsonCodec).NewEncoder
     steps:
       - return: "&jsonEncoder{inner: stdjson.NewEncoder(w)}"
   - of: (*jsonCodec).NewDecoder
     steps:
       - return: "&jsonDecoder{inner: stdjson.NewDecoder(r)}"
+  - of: (*jsonCodec).NewBoundedDecoder
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(codec.BoundInvalid, errs.WrapParams{}, errs.Int64(fieldLimit, maxBytes))
+          when: maxBytes <= 0
+      - bind: w
+        eval: "&window{r: r, max: maxBytes, end: maxBytes + 1}"
+      - return: "&jsonDecoder{inner: stdjson.NewDecoder(w), window: w}, nil"
+  - of: (*window).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*window).Read
+        kind: self
+      - id: w.r.Read
+        kind: value
+    steps:
+      - bind: room
+        eval: w.end - w.read
+      - opt:
+          do:
+            - set: w.hit
+              value: "true"
+            - return: 0, w.exceeded()
+          when: room <= 0
+      - opt:
+          do:
+            - set: p
+              value: p[:room]
+          when: int64(len(p)) > room
+      - bind: n, err
+        eval: w.r.Read(p)
+        to: w.r.Read
+      - op: +=
+        set: w.read
+        value: int64(n)
+      - return: n, err
+  - of: (*window).open
+    steps:
+      - set: w.end
+        value: start + w.max + 1
+  - of: (*window).exceeded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*window).exceeded
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corejson.SizeExceeded, errs.WrapParams{Code: corejson.CodeJSONUnmarshalFailed},
+          		append(offsetField(w.end-1), errs.Int64(fieldLimit, w.max))...)
+        to: errs
   - of: (*jsonDecoder).Decode
     participants:
       - id: caller
         kind: actor
       - id: (*jsonDecoder).Decode
         kind: self
+      - id: codec
+        kind: package
+      - id: d.decodeBounded
+        kind: internal
+      - id: wrapDecodeErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - return: d.decodeBounded(v)
+              to: d.decodeBounded
+          when: d.window != nil
+      - return: wrapDecodeErr(d.inner.Decode(v))
+        to: wrapDecodeErr
+  - of: (*jsonDecoder).decodeBounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonDecoder).decodeBounded
+        kind: self
+      - id: d.window.exceeded
+        kind: internal
+      - id: d.inner.InputOffset
+        kind: value
+      - id: d.window.open
+        kind: internal
       - id: d.inner.Decode
         kind: value
-      - id: errs
-        kind: package
+      - id: wrapDecodeErr
+        kind: internal
     steps:
+      - opt:
+          do:
+            - return: d.window.exceeded()
+              to: d.window.exceeded
+          when: d.window.hit
+      - bind: start
+        eval: d.inner.InputOffset()
+        to: d.inner.InputOffset
+      - eval: d.window.open(start)
+        to: d.window.open
       - bind: jerr
         eval: d.inner.Decode(v)
         to: d.inner.Decode
+      - bind: end
+        eval: d.inner.InputOffset()
+        to: d.inner.InputOffset
+      - opt:
+          do:
+            - set: d.window.hit
+              value: "true"
+            - return: d.window.exceeded()
+              to: d.window.exceeded
+          when: d.window.hit || (jerr == nil && end-start > d.window.max)
+      - eval: d.window.open(end)
+        to: d.window.open
+      - return: wrapDecodeErr(jerr)
+        to: wrapDecodeErr
+  - of: wrapDecodeErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapDecodeErr
+        kind: self
+      - id: errs
+        kind: package
+    steps:
       - opt:
           do:
             - return: nil
@@ -196,7 +360,7 @@ sequences:
           		Reason:  "UNMARSHAL_FAILED",
           		Public:  "JSON decoding failed",
           		Private: "service/data/codec/json.Decoder.Decode: encoding/json returned an error",
-          	})
+          	}, position(jerr)...)
         to: errs
   - of: (*jsonDecoder).More
     participants:
@@ -207,6 +371,10 @@ sequences:
       - id: d.inner.More
         kind: value
     steps:
+      - opt:
+          do:
+            - return: "false"
+          when: d.window != nil && d.window.hit
       - return: d.inner.More()
         to: d.inner.More
   - of: (*jsonEncoder).Encode
@@ -246,5 +414,375 @@ sequences:
     of: AppendInt
   - forward: jsonenc.AppendUint
     of: AppendUint
+  - forward: jsonenc.AppendFloat
+    of: AppendFloat
   - forward: jsonenc.BeginObject
     of: BeginObject
+  - of: position
+    participants:
+      - id: caller
+        kind: actor
+      - id: position
+        kind: self
+      - id: offsetField
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: offsetField(se.Offset)
+              to: offsetField
+          init:
+            bind: se, ok
+            eval: errors.AsType[*stdjson.SyntaxError](err)
+          when: ok
+      - opt:
+          do:
+            - return: offsetField(te.Offset)
+              to: offsetField
+          init:
+            bind: te, ok
+            eval: errors.AsType[*stdjson.UnmarshalTypeError](err)
+          when: ok
+      - opt:
+          do:
+            - return: offsetField(sy.ByteOffset)
+              to: offsetField
+          init:
+            bind: sy, ok
+            eval: errors.AsType[*jsontext.SyntacticError](err)
+          when: ok
+      - opt:
+          do:
+            - return: offsetField(sem.ByteOffset)
+              to: offsetField
+          init:
+            bind: sem, ok
+            eval: errors.AsType[*jsonv2.SemanticError](err)
+          when: ok && sem.ByteOffset > 0
+      - return: nil
+  - of: offsetField
+    participants:
+      - id: caller
+        kind: actor
+      - id: offsetField
+        kind: self
+      - id: codec
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: off > math.MaxInt
+      - return: "codec.PositionFields(codec.PositionValue{Offset: int(off)})"
+        to: codec
+  - of: (*jsonCodec).Sniff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonCodec).Sniff
+        kind: self
+      - id: scanJSONValue
+        kind: internal
+    steps:
+      - bind: end, closed
+        eval: scanJSONValue(prefix, skipJSONSpace(prefix, 0))
+        to: scanJSONValue
+      - opt:
+          do:
+            - return: "false"
+          when: end < 0
+      - return: "!closed || skipJSONSpace(prefix, end) == len(prefix)"
+  - of: skipJSONSpace
+    steps:
+      - loop:
+          cond: i < len(p) && (p[i] == ' ' || p[i] == '\t' || p[i] == '\n' || p[i] == '\r')
+          do:
+            - op: ++
+              set: i
+      - return: i
+  - of: scanJSONValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanJSONValue
+        kind: self
+      - id: skipJSONString
+        kind: internal
+      - id: bracketDelta
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "-1, false"
+          when: "!opensJSONValue(p, i)"
+      - bind: depth
+        eval: "0"
+      - loop:
+          cond: j < len(p)
+          do:
+            - opt:
+                do:
+                  - var:
+                      name: ok
+                      type: bool
+                  - set: j, ok
+                    to: skipJSONString
+                    value: skipJSONString(p, j)
+                  - opt:
+                      do:
+                        - return: "-1, false"
+                      when: "!ok"
+                  - continue: true
+                when: p[j] == '"'
+            - op: +=
+              set: depth
+              to: bracketDelta
+              value: bracketDelta(p[j])
+            - opt:
+                do:
+                  - return: j + 1, true
+                when: depth == 0
+            - opt:
+                do:
+                  - return: "-1, false"
+                when: strings.IndexByte(jsonOutsideString, p[j]) < 0
+          init: j := i
+          post: j++
+      - return: len(p), false
+  - of: opensJSONValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: opensJSONValue
+        kind: self
+      - id: skipJSONSpace
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: i >= len(p) || (p[i] != '{' && p[i] != '[')
+      - bind: k
+        eval: skipJSONSpace(p, i+1)
+        to: skipJSONSpace
+      - opt:
+          do:
+            - return: "true"
+          when: k == len(p)
+      - opt:
+          do:
+            - return: p[k] == '"' || p[k] == '}'
+          when: p[i] == '{'
+      - return: strings.IndexByte(jsonValueStart, p[k]) >= 0
+  - of: bracketDelta
+    steps:
+      - switch:
+          cases:
+            - case: "'{', '['"
+              do:
+                - return: "1"
+            - case: "'}', ']'"
+              do:
+                - return: "-1"
+            - default: true
+              do:
+                - return: "0"
+          "on": c
+  - of: NewV2
+    steps:
+      - return: "&v2Codec{}"
+  - of: (*v2Codec).Name
+    steps:
+      - return: "\"json\""
+  - of: (*v2Codec).MIMETypes
+    steps:
+      - return: "[]string{\"application/json\", \"text/json\"}"
+  - of: (*v2Codec).Extensions
+    steps:
+      - return: "[]string{\".json\"}"
+  - of: (*v2Codec).Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*v2Codec).Marshal
+        kind: self
+      - id: codec
+        kind: package
+      - id: jsonv2
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: codec.CheckValue(v)
+            to: codec
+          when: verr != nil
+      - bind: out, jerr
+        eval: jsonv2.Marshal(v, v2Options)
+        to: jsonv2
+      - opt:
+          do:
+            - return: "nil, marshalFailedV2(jerr, \"service/data/codec/json.NewV2().Marshal: encoding/json/v2 returned an error\")"
+          when: jerr != nil
+      - return: out, nil
+  - of: (*v2Codec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*v2Codec).Unmarshal
+        kind: self
+      - id: codec
+        kind: package
+      - id: jsonv2
+        kind: stdlib
+      - id: unmarshalFailedV2
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
+          when: len(data) == 0
+      - bind: jerr
+        eval: jsonv2.Unmarshal(data, v, v2Options)
+        to: jsonv2
+      - opt:
+          do:
+            - return: nil
+          when: jerr == nil
+      - return: "unmarshalFailedV2(jerr, \"service/data/codec/json.NewV2().Unmarshal: encoding/json/v2 returned an error\")"
+        to: unmarshalFailedV2
+  - of: (*v2Codec).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*v2Codec).Append
+        kind: self
+      - id: scratch
+        kind: package
+      - id: jsonv2
+        kind: stdlib
+      - id: w.Bytes
+        kind: value
+    steps:
+      - bind: w
+        eval: scratch.AcquireAppendWriter(dst)
+        to: scratch
+      - bind: jerr
+        eval: jsonv2.MarshalWrite(w, v, v2Options)
+        to: jsonv2
+      - bind: out
+        eval: w.Bytes()
+        to: w.Bytes
+      - eval: scratch.ReleaseAppendWriter(w)
+        to: scratch
+      - opt:
+          do:
+            - return: "dst, marshalFailedV2(jerr, \"service/data/codec/json.NewV2().Append: encoding/json/v2 returned an error\")"
+          when: jerr != nil
+      - return: out, nil
+  - of: (*v2Codec).NewEncoder
+    steps:
+      - return: "&v2Encoder{inner: jsontext.NewEncoder(w, v2Options)}"
+  - of: (*v2Codec).NewDecoder
+    steps:
+      - return: "&v2Decoder{inner: jsontext.NewDecoder(r, v2Options)}"
+  - of: (*v2Encoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*v2Encoder).Encode
+        kind: self
+      - id: jsonv2
+        kind: stdlib
+      - id: marshalFailedV2
+        kind: internal
+    steps:
+      - bind: jerr
+        eval: jsonv2.MarshalEncode(e.inner, v)
+        to: jsonv2
+      - opt:
+          do:
+            - return: nil
+          when: jerr == nil
+      - return: "marshalFailedV2(jerr, \"service/data/codec/json.NewV2().Encoder.Encode: encoding/json/v2 returned an error\")"
+        to: marshalFailedV2
+  - of: (*v2Encoder).Close
+    steps:
+      - return: nil
+  - of: (*v2Decoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*v2Decoder).Decode
+        kind: self
+      - id: codec
+        kind: package
+      - id: jsonv2
+        kind: stdlib
+      - id: unmarshalFailedV2
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - bind: jerr
+        eval: jsonv2.UnmarshalDecode(d.inner, v)
+        to: jsonv2
+      - opt:
+          do:
+            - return: jerr
+          when: jerr == nil || errors.Is(jerr, io.EOF)
+      - return: "unmarshalFailedV2(jerr, \"service/data/codec/json.NewV2().Decoder.Decode: encoding/json/v2 returned an error\")"
+        to: unmarshalFailedV2
+  - of: (*v2Decoder).More
+    steps:
+      - return: d.inner.PeekKind() != jsontext.KindInvalid
+  - of: marshalFailedV2
+    participants:
+      - id: caller
+        kind: actor
+      - id: marshalFailedV2
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    corejson.CodeJSONMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "JSON encoding failed",
+          		Private: private,
+          	})
+        to: errs
+  - of: unmarshalFailedV2
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmarshalFailedV2
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    corejson.CodeJSONUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "JSON decoding failed",
+          		Private: private,
+          	}, position(cause)...)
+        to: errs

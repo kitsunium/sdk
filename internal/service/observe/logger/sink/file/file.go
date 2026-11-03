@@ -18,6 +18,11 @@ import (
 // Operators that need group or other-reader access chmod explicitly.
 const defaultFilePerm os.FileMode = 0o600
 
+// maxRetainedBatch is the largest concatenation buffer WriteBatch keeps for
+// the next batch: a burst of large records may grow it past this once, and
+// the sink then lets it go rather than hold the burst's size for its lifetime.
+const maxRetainedBatch int = 1 << 20
+
 // openRefusals is this sink's vocabulary for the hardened open both file sinks
 // share (internal/service/observe/logger/internal/logfile): one sentinel, CodeOpenFailed, for
 // the policy refusal of a planted link and for every failed open — the kernel's
@@ -45,8 +50,16 @@ type fileSink struct {
 	// f is the underlying *os.File opened in append mode.
 	f *os.File
 	// mu serialises Write calls so concurrent goroutines emit atomic lines
-	// even when the payload exceeds PIPE_BUF.
+	// even when the payload exceeds PIPE_BUF. Flush does NOT hold it across
+	// the fsync (#815): a sync needs a stable descriptor, not the exclusion
+	// of writes, and the descriptor of this sink never changes.
 	mu sync.Mutex
+	// batch is WriteBatch's concatenation buffer, reused under mu.
+	batch []byte
+	// syncFile, when set, replaces (*os.File).Sync as the fsync Flush runs: a
+	// white-box test substitutes one that blocks, to prove a Write is not held
+	// behind it. nil in production.
+	syncFile func(f *os.File) error
 }
 
 // New opens path in append mode and wraps the resulting *os.File as a Sink.
@@ -120,6 +133,73 @@ func (s *fileSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 	return written, nil
 }
 
+// WriteBatch appends every payload to the file in ONE write, under the
+// local mutex, and reports how many records landed whole (#807): the async
+// middleware hands a backlog over in one call, and the write(2) per record
+// that made a file sink cost four times a memory one is paid once per batch.
+func (s *fileSink) WriteBatch(ctx context.Context, recs []corelogger.RecordEvent, payloads [][]byte) (written int, err error) {
+	//: honour context cancellation: cancelled contexts skip the write entirely.
+	if ctx != nil && ctx.Err() != nil {
+		//: wrap ctx.Err() so consumers get both our reason and stdlib Is().
+		return 0, errs.Wrap(ctx.Err(), errs.WrapParams{
+			Code:    corefile.CodeCtxCancelled,
+			Reason:  "CTX_CANCELLED",
+			Public:  "Logging aborted due to cancellation",
+			Private: "service/observe/logger/sink/file.WriteBatch saw a cancelled context",
+		}, errs.Int("records", len(recs)))
+	}
+	s.mu.Lock()
+	buf := s.batch[:0]
+	//: one buffer, so one write(2) and one atomic append.
+	for _, p := range payloads {
+		buf = append(buf, p...)
+	}
+	n, werr := s.f.Write(buf)
+	//: keep the buffer for the next batch unless a burst grew it too far.
+	s.batch = retained(buf)
+	s.mu.Unlock()
+	written = wholeRecords(payloads, n)
+	//: wrap any *os.File error with the WriteFailed sentinel semantics.
+	if werr != nil {
+		//: propagate through errs.Wrap so errors.Is still catches the cause.
+		return written, errs.Wrap(werr, errs.WrapParams{
+			Code:    corefile.CodeWriteFailed,
+			Reason:  "WRITE_FAILED",
+			Public:  "File write failed",
+			Private: "service/observe/logger/sink/file.WriteBatch underlying *os.File returned an error",
+		}, errs.Int("bytes", len(buf)), errs.Int("records", len(recs)), errs.Int("written", written))
+	}
+	//: every record landed.
+	return len(payloads), nil
+}
+
+// retained is buf emptied for reuse, or nil when it grew past
+// maxRetainedBatch.
+func retained(buf []byte) []byte {
+	//: a burst's buffer is not kept for the sink's lifetime.
+	if cap(buf) > maxRetainedBatch {
+		//: the next batch allocates a fresh one.
+		return nil
+	}
+	//: reuse the backing array.
+	return buf[:0]
+}
+
+// wholeRecords counts the payloads, from the first, that lie entirely within
+// the first n bytes of their concatenation.
+func wholeRecords(payloads [][]byte, n int) int {
+	//: walk the payloads until one does not fit in what was written.
+	for i, p := range payloads {
+		//: this record was cut, or never started.
+		if len(p) > n {
+			return i
+		}
+		n -= len(p)
+	}
+	//: all of them.
+	return len(payloads)
+}
+
 // Flush calls fsync on the underlying file so kernel page cache contents
 // reach durable storage.
 func (s *fileSink) Flush(ctx context.Context) error {
@@ -128,10 +208,12 @@ func (s *fileSink) Flush(ctx context.Context) error {
 		//: caller already gave up; surface the cancellation cause.
 		return ctx.Err()
 	}
-	//: serialise the sync against in-flight writes via the same mutex.
-	s.mu.Lock()
-	serr := s.f.Sync()
-	s.mu.Unlock()
+	//: the fsync runs OUTSIDE mu, so a Write is never held behind the disk
+	//: (#815). The descriptor never changes; a Close racing the sync makes
+	//: Sync report the file closed, which surfaces as SYNC_FAILED — correct for
+	//: a closing sink — and never touches a reused descriptor: os.File keeps
+	//: the descriptor open until the in-flight Sync returns.
+	serr := s.fsync()
 	//: wrap any sync error with the SyncFailed sentinel semantics.
 	if serr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
@@ -144,6 +226,16 @@ func (s *fileSink) Flush(ctx context.Context) error {
 	}
 	//: happy path — nothing to report.
 	return nil
+}
+
+// fsync is the descriptor's Sync, or the test's substitute.
+func (s *fileSink) fsync() error {
+	//: a white-box test's blocking sync.
+	if s.syncFile != nil {
+		return s.syncFile(s.f)
+	}
+	//: production: the file's own fsync.
+	return s.f.Sync()
 }
 
 // Close closes the underlying file. Subsequent Writes will fail with the

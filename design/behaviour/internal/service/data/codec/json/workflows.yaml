@@ -1,0 +1,26 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: skipJSONString
+    steps:
+      - loop:
+          cond: j < len(p)
+          do:
+            - switch:
+                cases:
+                  - case: c == '"'
+                    do:
+                      - return: j, true
+                  - case: c == '\\'
+                    do:
+                      - op: ++
+                        set: j
+                  - case: c < ' '
+                    do:
+                      - return: j, false
+                init:
+                  bind: c
+                  eval: p[j]
+          init: j := i + 1
+          post: j++
+      - return: len(p), true

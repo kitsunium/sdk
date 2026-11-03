@@ -26,10 +26,19 @@ type Config struct {
 	// is saturated. Useful for wiring a metric counter; nil disables the
 	// callback. Fires for producer-side drops (ring full under Write).
 	OnDrop func(missed int)
+	// BatchMax is how many queued records the drainer hands the downstream
+	// at once. When it is above one and the downstream implements
+	// corelogger.BatchSink, the drainer takes up to BatchMax records off the
+	// ring and delivers them with one WriteBatch — one write(2) for a file
+	// sink instead of one per record; a downstream that does not implement
+	// it still receives one Write per record. Non-positive means one, the
+	// record-at-a-time delivery of a zero Config.
+	BatchMax int
 	// OnError is invoked for every downstream Write failure seen by the
 	// drainer goroutine. Async cannot block the producer on a failing
 	// downstream, so without this hook those errors are silently lost;
 	// the callback gives operators a path to emit a counter or log to a
-	// fallback sink. nil disables the callback. Finding #24.
+	// fallback sink. nil disables the callback. Finding #24. A failed
+	// WriteBatch fires it once per record the batch did not deliver.
 	OnError func(err error)
 }

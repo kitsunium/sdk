@@ -1,0 +1,303 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/jsonschema
+packages:
+  - codes:
+      - const:
+          - doc: |-
+              CodeJSONSchemaSchemaInvalid identifies a schema NewValidator cannot compile:
+              not exactly one JSON value, a schema that is neither an object nor a
+              boolean, a keyword whose value has the wrong shape, a pattern Go's regexp
+              does not read.
+            name: CodeJSONSchemaSchemaInvalid
+            note: "range: 0.3.103.0 - 0.3.103.255"
+            value: "0x00_03_67_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeJSONSchemaKeywordRefused identifies a keyword refused by name — the
+              dynamic scope ($dynamicRef, $dynamicAnchor), $vocabulary, the unevaluated
+              and content vocabularies — or a "$schema" naming another draft than
+              2020-12.
+            name: CodeJSONSchemaKeywordRefused
+            value: "0x00_03_67_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeJSONSchemaRefUnresolved identifies a "$ref" naming neither a location
+              of the schema nor a resource Config registers: a remote reference is
+              never fetched.
+            name: CodeJSONSchemaRefUnresolved
+            value: "0x00_03_67_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeJSONSchemaFormatUnknown identifies a format Config.AssertFormats
+              names that this package cannot check.
+            name: CodeJSONSchemaFormatUnknown
+            value: "0x00_03_67_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeJSONSchemaViolation is the code a violation carries when no code of the
+              validation package names its keyword: type, multipleOf, the combinators,
+              the array and object applicators, a false schema, an asserted format.
+            name: CodeJSONSchemaViolation
+            value: "0x00_03_67_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeJSONSchemaReferenceLoop identifies a "$ref" cycle an evaluation entered
+              without consuming any of the document.
+            name: CodeJSONSchemaReferenceLoop
+            value: "0x00_03_67_06"
+        type: errs.Code
+    doc: |-
+      Package jsonschema declares the error codes and the sentinels of the JSON
+      Schema 2020-12 validator, internal/service/data/codec/jsonschema — range
+      0.3.103.* (ADR 0210).
+
+      The codes live in the core at the path that mirrors the package emitting
+      them (ADR 0160 §2). Nothing here compiles or validates.
+
+      Package jsonschema — the sentinel *errs.Error values, one per code. No
+      Public and no Private carries a byte of a schema or a document; the fields
+      name a keyword, a reference or a format, which the schema's author wrote.
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/jsonschema
+    sentinels:
+      - var:
+          - code: CodeJSONSchemaSchemaInvalid
+            doc: SchemaInvalid refuses a schema NewValidator cannot compile; its field names the problem or the keyword.
+            name: SchemaInvalid
+            private: "service/data/codec/jsonschema: the schema does not compile; the fields name the problem or the keyword"
+            public: The schema is not a JSON Schema 2020-12 this validator compiles
+            reason: SCHEMA_INVALID
+          - code: CodeJSONSchemaKeywordRefused
+            doc: KeywordRefused refuses a keyword out of this validator's scope, named in its field.
+            name: KeywordRefused
+            private: "service/data/codec/jsonschema: a keyword out of scope; the field names it"
+            public: The schema uses a keyword this validator does not support
+            reason: KEYWORD_REFUSED
+          - code: CodeJSONSchemaRefUnresolved
+            doc: RefUnresolved refuses a "$ref" naming nothing compiled or registered; its field names the reference.
+            name: RefUnresolved
+            private: "service/data/codec/jsonschema: a $ref names nothing compiled or registered; the field names it"
+            public: A schema reference could not be resolved
+            reason: REF_UNRESOLVED
+          - code: CodeJSONSchemaFormatUnknown
+            doc: FormatUnknown refuses a format to assert that this package cannot check.
+            name: FormatUnknown
+            private: "service/data/codec/jsonschema: Config.AssertFormats names a format without a checker"
+            public: A format to assert is not supported
+            reason: FORMAT_UNKNOWN
+          - code: CodeJSONSchemaViolation
+            doc: Violation is the sentinel of the code a schema violation carries when no validation code names it.
+            http: 422
+            name: Violation
+            private: "service/data/codec/jsonschema: the document violates the schema"
+            public: The document does not satisfy the schema
+            reason: VIOLATION
+          - code: CodeJSONSchemaReferenceLoop
+            doc: ReferenceLoop refuses a validation that entered a "$ref" cycle consuming nothing.
+            name: ReferenceLoop
+            private: "service/data/codec/jsonschema: a $ref cycle consumed none of the document"
+            public: The schema references itself without end
+            reason: REFERENCE_LOOP
+  - doc: |-
+      Package jsonschema validates JSON documents somebody else wrote against a
+      JSON Schema 2020-12 they publish — a webhook's payload, an OpenAPI request
+      body, another program's configuration (#882, ADR 0210) — with the standard
+      library alone.
+
+      NewValidator compiles the core, applicator and validation vocabularies:
+      "$ref" within the document and to the resources Config registers by URI —
+      a remote reference is refused, never fetched —, "$id", "$anchor", "$defs",
+      the combinators, the conditionals, the array and object applicators, and
+      every validation keyword, numbers compared exactly. "format" is an
+      annotation unless Config.AssertFormats names it (date-time, uuid, email).
+      Out of scope, each refused by name: drafts before 2020-12, "$dynamicRef"
+      and "$dynamicAnchor", "$vocabulary", the unevaluated and the content
+      vocabularies; a "pattern" Go's regexp does not read is refused when the
+      schema is compiled.
+
+      Validate reads a document through strictjson's bounds — a byte ceiling,
+      one value, no duplicated member name — and returns a
+      validation.ReportValue: each violation located in the validation
+      package's path grammar ("items[2].name"), named by its keyword, and never
+      quoting the document. A compiled Validator is immutable and reused.
+    functions:
+      - doc: |-
+          NewValidator compiles schema, a JSON Schema 2020-12 document, under cfg.
+          It refuses with SchemaInvalid a schema that is not exactly one JSON value
+          or whose keyword has the wrong shape, KeywordRefused one using a keyword
+          out of scope — "$dynamicRef" and "$dynamicAnchor", "$vocabulary",
+          "unevaluatedItems" and "unevaluatedProperties", the content vocabulary — or
+          another draft's "$schema", RefUnresolved a "$ref" naming neither the
+          document nor a registered resource, and FormatUnknown a format cfg
+          asserts that this package cannot check.
+        in:
+          - name: schema
+            type: "[]byte"
+          - name: cfg
+            type: Config
+        name: NewValidator
+        out:
+          - type: "*Validator"
+          - type: error
+    imports:
+      validation: github.com/kitsunium/sdk/internal/core/app/validation
+    path: github.com/kitsunium/sdk/internal/service/data/codec/jsonschema
+    types:
+      - doc: |-
+          Config configures NewValidator. The zero Config compiles a self-contained
+          schema with every format an annotation.
+        name: Config
+        struct:
+          fields:
+            - doc: |-
+                Resources are schema documents a "$ref" may name, by URI: each is a
+                resource at that URI, and at its "$id" when it has one. A reference to
+                any other URI is refused; nothing is fetched.
+              name: Resources
+              type: "map[string][]byte"
+            - doc: |-
+                AssertFormats are the formats asserted rather than annotated:
+                "date-time" (RFC 3339), "uuid" and "email" (an addr-spec). Naming
+                another is refused.
+              name: AssertFormats
+              type: "[]string"
+      - doc: |-
+          Validator is a compiled JSON Schema 2020-12: immutable, safe for
+          concurrent use, reused for every document it validates.
+        methods:
+          - doc: |-
+              Validate reads doc through strictjson's bounds — at most maxBytes, one
+              value, no duplicated member name — and returns the violations of the
+              schema, located in the validation package's path grammar
+              ("items[2].name"). A message never quotes the document. An empty report
+              means doc is valid; an error means doc was not read: strictjson's
+              refusal, or ReferenceLoop for a "$ref" cycle that consumes nothing.
+            in:
+              - name: doc
+                type: "[]byte"
+              - name: maxBytes
+                type: int64
+            name: Validate
+            out:
+              - type: validation.ReportValue
+              - type: error
+            recv: pointer
+        name: Validator
+        struct:
+          unexported: true
+  - doc: |-
+      Package jsonschema validates JSON documents somebody else wrote against a
+      JSON Schema 2020-12 they publish — a webhook's payload, an OpenAPI request
+      body, another program's configuration — with the standard library alone.
+
+      	v, err := jsonschema.NewValidator(schema, jsonschema.Config{})
+      	report, err := v.Validate(body, 1<<20)
+      	if !report.OK() { … report.Paths() … }
+
+      The core, applicator and validation vocabularies are compiled; "$ref"
+      resolves within the schema and to the resources Config registers, never
+      over the network; "format" is asserted only for the formats
+      Config.AssertFormats names. Drafts before 2020-12, the dynamic scope,
+      "$vocabulary", the unevaluated and content vocabularies are refused by
+      name. A report's paths follow the validation package's grammar and no
+      message quotes the document.
+    facade:
+      - const:
+          - doc: CodeSchemaInvalid is 0.3.103.1, [SchemaInvalid].
+            name: CodeSchemaInvalid
+            reexport: corejsonschema.CodeJSONSchemaSchemaInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_67_01"
+          - doc: CodeKeywordRefused is 0.3.103.2, [KeywordRefused].
+            name: CodeKeywordRefused
+            reexport: corejsonschema.CodeJSONSchemaKeywordRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_67_02"
+          - doc: CodeRefUnresolved is 0.3.103.3, [RefUnresolved].
+            name: CodeRefUnresolved
+            reexport: corejsonschema.CodeJSONSchemaRefUnresolved
+            type: errs.Code
+            typed: true
+            value: "0x00_03_67_03"
+          - doc: CodeFormatUnknown is 0.3.103.4, [FormatUnknown].
+            name: CodeFormatUnknown
+            reexport: corejsonschema.CodeJSONSchemaFormatUnknown
+            type: errs.Code
+            typed: true
+            value: "0x00_03_67_04"
+          - doc: |-
+              CodeViolation is 0.3.103.5: the code of a violation no validation code
+              names — type, multipleOf, the combinators, the applicators, format.
+            name: CodeViolation
+            reexport: corejsonschema.CodeJSONSchemaViolation
+            type: errs.Code
+            typed: true
+            value: "0x00_03_67_05"
+          - doc: CodeReferenceLoop is 0.3.103.6, [ReferenceLoop].
+            name: CodeReferenceLoop
+            reexport: corejsonschema.CodeJSONSchemaReferenceLoop
+            type: errs.Code
+            typed: true
+            value: "0x00_03_67_06"
+        doc: The error codes, range 0.3.103.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: SchemaInvalid refuses a schema NewValidator cannot compile.
+            name: SchemaInvalid
+            reexport: corejsonschema.SchemaInvalid
+            type: "*errs.Error"
+          - doc: KeywordRefused refuses a keyword out of scope, or another draft.
+            name: KeywordRefused
+            reexport: corejsonschema.KeywordRefused
+            type: "*errs.Error"
+          - doc: RefUnresolved refuses a "$ref" naming nothing compiled or registered.
+            name: RefUnresolved
+            reexport: corejsonschema.RefUnresolved
+            type: "*errs.Error"
+          - doc: FormatUnknown refuses a format to assert without a checker.
+            name: FormatUnknown
+            reexport: corejsonschema.FormatUnknown
+            type: "*errs.Error"
+          - doc: Violation is the sentinel of [CodeViolation].
+            name: Violation
+            reexport: corejsonschema.Violation
+            type: "*errs.Error"
+          - doc: ReferenceLoop refuses a "$ref" cycle that consumes nothing.
+            name: ReferenceLoop
+            reexport: corejsonschema.ReferenceLoop
+            type: "*errs.Error"
+      - alias:
+          - doc: Config configures NewValidator — the resources a "$ref" may name, the formats asserted.
+            name: Config
+            target: svcjsonschema.Config
+      - alias:
+          - doc: Validator is a compiled schema, immutable and reused; its Validate returns the report.
+            name: Validator
+            target: svcjsonschema.Validator
+      - func:
+          doc: |-
+            NewValidator compiles a JSON Schema 2020-12 document, or refuses it with
+            SchemaInvalid, KeywordRefused, RefUnresolved or FormatUnknown.
+          forward: svcjsonschema.NewValidator
+          in:
+            - name: schema
+              type: "[]byte"
+            - name: cfg
+              type: Config
+          name: NewValidator
+          out:
+            - type: "*Validator"
+            - type: error
+    imports:
+      corejsonschema: github.com/kitsunium/sdk/internal/core/data/codec/jsonschema
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcjsonschema: github.com/kitsunium/sdk/internal/service/data/codec/jsonschema
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/jsonschema

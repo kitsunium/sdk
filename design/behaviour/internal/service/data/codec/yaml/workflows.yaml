@@ -121,6 +121,10 @@ workflows:
                     do:
                       - set: opts.omitEmpty
                         value: "true"
+                  - case: "\"omitzero\""
+                    do:
+                      - set: opts.omitZero
+                        value: "true"
                   - case: "\"flow\""
                     do:
                       - set: opts.flow

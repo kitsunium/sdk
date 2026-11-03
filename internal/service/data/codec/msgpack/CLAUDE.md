@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:00:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/msgpack/
 
 ## Purpose
@@ -34,7 +34,9 @@ package always emitted; only the declaration moved.
 | Code         | Var               | Trigger |
 |---|---|---|
 | `0.3.7.1`    | `MarshalFailed`   | any encode failure: unsupported kind (chan, func, complex, unsafe.Pointer), a length over 2³²−1, nesting past `maxDepth`, a marshal method's error, `MarshalMsgpack` bytes that are not exactly one value, a struct with two fields on one key, a writer error |
-| `0.3.7.2`    | `UnmarshalFailed` | any decode failure: malformed or truncated input, input over `maxMsgPackBytes` (10 MiB), nesting past `maxDepth`, a declared length the input cannot hold, trailing bytes, a value that does not fit its target |
+| `0.3.7.2`    | `UnmarshalFailed` | any decode failure: malformed or truncated input, a declared length the input cannot hold, trailing bytes, a value that does not fit its target |
+| `0.3.7.5`    | `SizeExceeded`    | input over `maxMsgPackBytes` (10 MiB) — reason `SIZE_EXCEEDED`, `UNMARSHAL_FAILED` in the trail (#894) |
+| `0.3.7.6`    | `DepthExceeded`   | nesting past `maxDepth` — reason `DEPTH_EXCEEDED`, `UNMARSHAL_FAILED` in the trail (#894) |
 
 Two codes on purpose: callers route on the reason, and a new reason per cause
 would have changed what `errs.HasReason(err, "UNMARSHAL_FAILED")` answers. The
@@ -42,6 +44,8 @@ cause is in `Private` (log-only) and in `Fields` — `offset`, `type`, `wire`,
 `len`, `limit`, `field` — and never in a quote of the input. The over-cap
 refusal keeps its exact pre-native shape (public "MessagePack input exceeds
 size limit", fields `len`/`cap`).
+
+**Position (#1125).** A decode refusal carries its byte `offset` — `fieldOffset` is `core/data/codec.FieldOffset` —, an offset of zero meaning the first byte: `codec.PositionOf` reads it back.
 
 ## Wire choices (pinned by the golden file)
 
@@ -52,18 +56,40 @@ size limit", fields `len`/`cap`).
 - str uses fixstr / str 8 / str 16 / str 32; bin 8/16/32; fixarray / array 16 /
   32; fixmap / map 16 / 32. A nil slice, map or pointer is nil; an empty one is
   an empty container.
+- `Ext{Type, Data}` (#903, `ext.go`) is an application extension written in its
+  shortest form: fixext 1/2/4/8/16 for those payload sizes, else ext 8/16/32. The
+  vendor this codec replaced exposed `RawExt`; until `Ext` a document carrying an
+  application extension (Redis/Fluentd/Pulsar record types, UUIDs, decimals of
+  other stacks) failed as a whole on decode into `any`. The method pair
+  `MarshalMsgpackExt` / `UnmarshalMsgpackExt` the issue also sketches is not
+  implemented: a type that writes its own extension implements `MarshalMsgpack`
+  and returns the `Ext` bytes, or holds an `Ext` field.
 - `time.Time` is the timestamp extension (type −1) in its shortest form: 32-bit
   seconds, 64-bit `nsec<<34|sec`, else 96-bit — every instant before 1970 is
   96-bit. `encoding.BinaryMarshaler` AND `encoding.TextMarshaler` are written as
   bin (the vendor's choice, kept so a reader in another language sees no type
   change). A field of static type `error` is its message.
-- Map pairs follow Go's map iteration order — not deterministic, as before.
+- `time.Duration` is an integer of **int64 nanoseconds** (#1126), the rule of
+  every binary format — the text formats (yaml, toml) write its `String()`;
+  `pkg/v1/data/codec`'s `TestDurationAgreesAcrossFormats` pins both.
+- Map pairs are written in **key order** (#1104), so equal values encode to
+  equal bytes — what a content hash, a dedup key or a golden file needs: string
+  keys byte-wise (encoding/json's order), integer keys by value whatever width
+  each is written in, any other key — or two keys of different kinds — by its
+  encoded bytes, and two keys that encode alike (an `int8(1)` and an `int64(1)`
+  in one `map[any]any`, two NaN keys) by their values. The direct
+  `map[string]V` paths sort the keys before writing (on the stack up to sixteen,
+  one reserved slice beyond); the reflective path writes the pairs, then
+  reorders them in place through a pooled scratch buffer (`reorderPairs`),
+  comparing two string keys by an 8-byte prefix first. Cost: `BENCH.md`
+  §Map order. `TestMarshalWritesMapKeysInOrder` pins the bytes.
 
 ## Decode rules
 
 | Target | Accepts | Notes |
 |---|---|---|
-| any | everything but unknown extensions | fixint/int8 → `int8`, int16/32/64 → `int16/32/64`, uint 8–64 → `uint8…uint64`, float32/64, `string`, `[]byte` (copy), `[]any`, `map[string]any` (keys must be str/bin), `time.Time` |
+| any | everything | fixint/int8 → `int8`, int16/32/64 → `int16/32/64`, uint 8–64 → `uint8…uint64`, float32/64, `string`, `[]byte` (copy), `[]any`, `map[string]any` (keys must be str/bin), `time.Time`, `Ext` for any extension but the timestamp (#903) |
+| `Ext` | any extension, nil | the type and a copy of the payload — the timestamp (−1) included, raw; any other family is refused |
 | intN / uintN | any integer form | refused when the value does not fit (the vendor wrapped 300 into an int8 as 44); a negative into an unsigned is refused; nil → 0 |
 | floatN | floats and integers | float32 refuses a value beyond its range; nil → 0 |
 | string / []byte | str and bin | `[]byte` owns a copy; nil → "" / nil slice |
@@ -80,7 +106,11 @@ a COPY of their bytes.
 
 ## Struct mapping (struct.go)
 
-`msgpack:"name,omitempty"`, `"-"`, `alias:other` (decode only), `inline` /
+`msgpack:"name,omitempty"`, `msgpack:"name,omitzero"` (#1103: encoding/json's
+rule — the type's `IsZero()` when it declares one, through the field's address
+when only the pointer does, else `reflect.Value.IsZero`; decided once per field
+in `omitzero.go`; with `omitempty` too, either one leaves the field out), `"-"`,
+`alias:other` (decode only), `inline` /
 `noinline` on an embedded struct, and the `_msgpack` marker field carrying
 `as_array`/`asArray` and a struct-wide `omitempty` for later fields. No json-tag
 fallback (the vendor's default had none either). An embedded struct inlines
@@ -175,3 +205,17 @@ bazel test --config=race //internal/service/data/codec/msgpack:msgpack_test
   against the bytes that remain.
 - Add a `sync.Pool` here: buffers come from `core/data/codec/scratch`.
 - Add a reason or code per failure cause — the two reasons are the contract.
+
+## Strict instance (#1106, `strict.go`)
+
+`NewStrict()` returns a fresh, unregistered codec — the `csv.NewWithEscape`
+shape — reading a document somebody else wrote one way or not at all (ADR
+0102, amended). Before anything is decoded, a walk over the validated bytes
+refuses a map repeating a key with `DUPLICATE_KEY`
+(`0.3.7.3`), two keys counting as one when they decode to the same Go key whatever form each was written in (a str and a bin, an integer in two widths); the
+decode then refuses a member no field of the target struct claims with
+`UNKNOWN_MEMBER` (`0.3.7.4`). Up to 32 keys
+of one map are compared in place, on the stack; past that an indexed set
+takes over. The stream `Decoder` of the strict instance applies both to
+every item. The registered codec is unchanged: last-wins, unknown members
+skipped. `TestNewStrict` holds each refusal and the exact match.

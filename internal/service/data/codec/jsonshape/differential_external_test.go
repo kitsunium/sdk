@@ -8,6 +8,7 @@ package jsonshape_test
 import (
 	"bytes"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"maps"
 	"reflect"
 	"slices"
@@ -290,13 +291,75 @@ func differentialCases() []differentialCase {
 	}
 }
 
+// oracle is the encoder a shape is held to, and the description it is
+// compared with.
+type oracle struct {
+	// of describes a type.
+	of func(reflect.Type) *jsonshape.ShapeValue
+	// marshal is the encoder.
+	marshal func(any) ([]byte, error)
+	// v2 marks json/v2's own options: a case it refuses must be described
+	// as holding an Unsupported member.
+	v2 bool
+}
+
 // TestShapesMatchWhatEncodingJSONWrites runs every case against json.Marshal.
 func TestShapesMatchWhatEncodingJSONWrites(t *testing.T) {
 	t.Parallel()
+	runOracle(t, oracle{of: jsonshape.Of, marshal: json.Marshal}, differentialCases())
+}
+
+// TestShapesV2MatchWhatJSONv2Writes is #893's step 2: every case against
+// jsonv2.Marshal under its own default options, described by OfV2 — the
+// same oracle, so OfV2's identity with what json/v2 writes is checked as
+// Of's is with encoding/json.
+func TestShapesV2MatchWhatJSONv2Writes(t *testing.T) {
+	t.Parallel()
+	runOracle(t, oracle{of: jsonshape.OfV2, marshal: func(v any) ([]byte, error) { return jsonv2.Marshal(v) }, v2: true},
+		append(differentialCases(), v2Cases()...))
+}
+
+// V2Omissions holds the members json/v2's own options write differently:
+// nil collections, a byte array, and omitempty on every kind.
+type V2Omissions struct {
+	Slice     []int          `json:"slice"`
+	Map       map[string]int `json:"map"`
+	Bytes     []byte         `json:"bytes"`
+	ByteArray [2]byte        `json:"byteArray"`
+	Int       int            `json:"int,omitempty"`
+	Bool      bool           `json:"bool,omitempty"`
+	Str       string         `json:"str,omitempty"`
+	Empty     struct {
+		A int `json:"a,omitempty"`
+	} `json:"empty,omitempty"`
+	Full struct {
+		A int `json:"a"`
+	} `json:"full,omitempty"`
+	Time   time.Time `json:"time,omitempty"`
+	Quoted int64     `json:"quoted,string"`
+}
+
+// v2Cases are the structs json/v2's own options write differently from
+// encoding/json.
+func v2Cases() []differentialCase {
+	full := V2Omissions{
+		Slice: []int{1}, Map: map[string]int{"k": 1}, Bytes: []byte{1}, ByteArray: [2]byte{1, 2},
+		Int: 1, Bool: true, Str: "s", Time: time.Unix(1, 0).UTC(), Quoted: 7,
+	}
+	full.Empty.A, full.Full.A = 1, 2
+	return []differentialCase{
+		{"json/v2: nil collections, byte arrays and omitempty", full},
+		{"json/v2: a pointer method on a value encoded by value", addressing()},
+	}
+}
+
+// runOracle runs every case against o.
+func runOracle(t *testing.T, o oracle, cases []differentialCase) {
+	t.Helper()
 	runCase := func(t *testing.T, c differentialCase) {
 		t.Helper()
 		typ := reflect.TypeOf(c.full)
-		shape := jsonshape.Of(typ)
+		shape := o.of(typ)
 		value := reflect.ValueOf(c.full)
 		zeroValue := reflect.Zero(typ)
 		//: a root behind a pointer: its fields are those of the struct it
@@ -304,14 +367,25 @@ func TestShapesMatchWhatEncodingJSONWrites(t *testing.T) {
 		if typ.Kind() == reflect.Pointer {
 			value, zeroValue = value.Elem(), reflect.New(typ.Elem())
 		}
+		//: a struct json/v2 refuses whole is described as refused.
+		if o.v2 && shape.Kind == jsonshape.Unsupported {
+			if _, err := o.marshal(c.full); err == nil {
+				t.Fatalf("OfV2 says Unsupported, jsonv2.Marshal wrote the value")
+			}
+			return
+		}
 		//: every case is an object.
 		if shape.Kind != jsonshape.Object {
 			t.Fatalf("Kind = %v, want object", shape.Kind)
 		}
-		full, err := json.Marshal(c.full)
+		full, err := o.marshal(c.full)
+		//: json/v2 refuses a case whose shape says where.
+		if err != nil && o.v2 && holdsUnsupported(shape) {
+			return
+		}
 		//: every case is encodable.
 		if err != nil {
-			t.Fatalf("json.Marshal(full): %v", err)
+			t.Fatalf("Marshal(full): %v", err)
 		}
 		names, values := objectMembers(t, full)
 		written := writtenFields(shape, values)
@@ -334,9 +408,9 @@ func TestShapesMatchWhatEncodingJSONWrites(t *testing.T) {
 				}
 				continue
 			}
-			checkMember(t, field, raw, value)
+			checkMember(t, field, raw, value, o.marshal)
 		}
-		zero, err := json.Marshal(zeroValue.Interface())
+		zero, err := o.marshal(zeroValue.Interface())
 		//: the zero value is encodable too.
 		if err != nil {
 			t.Fatalf("json.Marshal(zero): %v", err)
@@ -348,7 +422,7 @@ func TestShapesMatchWhatEncodingJSONWrites(t *testing.T) {
 		}
 	}
 	//: one subtest per struct.
-	for _, c := range differentialCases() {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
@@ -356,9 +430,21 @@ func TestShapesMatchWhatEncodingJSONWrites(t *testing.T) {
 	}
 }
 
+// holdsUnsupported reports whether a member of shape, at any depth, is
+// Unsupported: what json/v2 refuses a whole value for.
+func holdsUnsupported(shape *jsonshape.ShapeValue) bool {
+	if shape == nil {
+		return false
+	}
+	if shape.Kind == jsonshape.Unsupported || holdsUnsupported(shape.Items) || holdsUnsupported(shape.Values) {
+		return true
+	}
+	return slices.ContainsFunc(shape.Fields, func(f jsonshape.FieldValue) bool { return holdsUnsupported(f.Shape) })
+}
+
 // checkMember compares one field of the shape with the member json.Marshal
 // wrote under its name.
-func checkMember(t *testing.T, field jsonshape.FieldValue, raw json.RawMessage, value reflect.Value) {
+func checkMember(t *testing.T, field jsonshape.FieldValue, raw json.RawMessage, value reflect.Value, marshal func(any) ([]byte, error)) {
 	t.Helper()
 	//: the member's JSON value has the shape's kinds, all the way down — a
 	//: quoted one is a string.
@@ -385,7 +471,7 @@ func checkMember(t *testing.T, field jsonshape.FieldValue, raw json.RawMessage, 
 	if behind.CanAddr() {
 		alone = behind.Addr().Interface()
 	}
-	written, err := json.Marshal(alone)
+	written, err := marshal(alone)
 	//: every field here is encodable alone.
 	if err != nil {
 		t.Fatalf("member %q: %v", field.Name, err)

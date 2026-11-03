@@ -207,8 +207,8 @@ func TestTheDecoderReportsItsReaderAndItsBound(t *testing.T) {
 		dec := streaming(t).NewDecoder(tc.reader)
 		var doc any
 		err := dec.Decode(&doc)
-		if !errs.HasReason(err, "UNMARSHAL_FAILED") {
-			t.Fatalf("%s: Decode error = %v, want UNMARSHAL_FAILED", tc.name, err)
+		if !errs.HasCode(err, coreyaml.CodeYAMLUnmarshalFailed) {
+			t.Fatalf("%s: Decode error = %v, want UNMARSHAL_FAILED's code", tc.name, err)
 		}
 		if tc.cause != nil && !errors.Is(err, tc.cause) {
 			t.Errorf("%s: error %v does not keep the reader's error", tc.name, err)

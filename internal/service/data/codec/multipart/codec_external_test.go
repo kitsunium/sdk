@@ -230,7 +230,7 @@ func TestUnmarshalFailures(t *testing.T) {
 		{"empty input", nil, &multipart.FormValue{}, "BOUNDARY_INVALID"},
 		{"truncated part header", []byte("--b\r\nContent"), &multipart.FormValue{}, "UNMARSHAL_FAILED"},
 		{"no json part for a value target", body, &payload{}, "UNMARSHAL_FAILED"},
-		{"non-pointer target", jsonBody(t), payload{}, "VALUE_INVALID"},
+		{"non-pointer target", jsonBody(t), payload{}, "TARGET_INVALID"},
 		//: RFC 7578 §4.2 requires a name on every part, and the encoder
 		//: refuses to write one without — decoding it used to yield a
 		//: PartValue this codec could not re-encode.
@@ -616,10 +616,11 @@ func TestDecodeRefusesOversizedPart(t *testing.T) {
 
 // TestDecodeChargesTheLastPartAgainstTheAggregate is the public face of the
 // aggregate fix. With MaxPartBytes 64 and MaxTotalBytes 100, a 60-byte part
-// leaves a 40-byte budget, so a 70-byte second part is stopped by the
-// AGGREGATE one byte past that budget — and the refusal says so, where the
-// decoder used to read on to the per-part cap and name MaxPartBytes instead. A
-// body that lands exactly on the aggregate is admitted.
+// leaves at most a 40-byte budget, so a 70-byte second part is stopped by the
+// AGGREGATE — and the refusal says so, where the decoder used to read on to
+// the per-part cap and name MaxPartBytes instead. Since #908 the aggregate is
+// the whole body, delimiters and headers included, so a body that lands
+// exactly on MaxTotalBytes is admitted and one byte less refuses it.
 //
 // SEEN FAILING against the original decoder, and again with readBudget
 // reverted to the per-part cap:
@@ -632,10 +633,13 @@ func TestDecodeChargesTheLastPartAgainstTheAggregate(t *testing.T) {
 		name     string
 		sizes    []int
 		wantKnob string
+		// slack sets MaxTotalBytes to the body's length plus slack; 0 keeps 100.
+		slack int
 	}
 	tests := []tc{
-		{"the last part crosses the aggregate first", []int{60, 70}, "MaxTotalBytes"},
-		{"a body exactly at the aggregate is admitted", []int{60, 40}, ""},
+		{"the last part crosses the aggregate first", []int{60, 70}, "MaxTotalBytes", 0},
+		{"a body exactly at the aggregate is admitted", []int{60, 40}, "", 1},
+		{"one byte under the body is refused", []int{60, 40}, "MaxTotalBytes", -1},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -648,7 +652,12 @@ func TestDecodeChargesTheLastPartAgainstTheAggregate(t *testing.T) {
 		if merr != nil {
 			t.Fatalf("%s: fixture Marshal err=%v", tc.name, merr)
 		}
-		bounded, cerr := multipart.NewWithLimits(multipart.LimitsConfig{MaxPartBytes: 64, MaxTotalBytes: 100})
+		total := int64(100)
+		//: a bound measured on the body itself.
+		if tc.slack != 0 {
+			total = int64(len(data) + min(tc.slack, 0))
+		}
+		bounded, cerr := multipart.NewWithLimits(multipart.LimitsConfig{MaxPartBytes: 64, MaxTotalBytes: total})
 		if cerr != nil {
 			t.Fatalf("%s: NewWithLimits err=%v", tc.name, cerr)
 		}
@@ -1058,4 +1067,136 @@ func jsonBody(t *testing.T) []byte {
 		t.Fatalf("jsonBody: Marshal err=%v", err)
 	}
 	return data
+}
+
+// knobOf returns the knob a LIMIT_EXCEEDED refusal names, or "".
+func knobOf(err error) string {
+	for _, f := range errs.FieldsOf(err) {
+		if f.Key() == "knob" {
+			return f.StringValue()
+		}
+	}
+	return ""
+}
+
+// TestDecodeChargesHeadersAgainstTheTotal is #908: the bounds used to be
+// charged to part bodies only, so a part's header block — read by
+// mime/multipart itself — was bounded by nothing the SDK set. Every byte the
+// reader consumes, delimiters and headers included, now counts against
+// MaxTotalBytes: a first part whose header block is twice the ceiling is
+// refused before any part is handed back, on Unmarshal and on the stream.
+func TestDecodeChargesHeadersAgainstTheTotal(t *testing.T) {
+	t.Parallel()
+	const total = 1 << 10
+	body := "--b\r\nContent-Disposition: form-data; name=\"a\"\r\nX-Pad: " +
+		strings.Repeat("p", 2*total) + "\r\n\r\nvalue\r\n--b--\r\n"
+	bounded, err := multipart.NewWithLimits(multipart.LimitsConfig{MaxTotalBytes: total})
+	if err != nil {
+		t.Fatalf("NewWithLimits: %v", err)
+	}
+	var form multipart.FormValue
+	uerr := bounded.Unmarshal([]byte(body), &form)
+	if !errs.HasReason(uerr, "LIMIT_EXCEEDED") || knobOf(uerr) != "MaxTotalBytes" {
+		t.Fatalf("Unmarshal: want LIMIT_EXCEEDED naming MaxTotalBytes, got %v (knob %q)", uerr, knobOf(uerr))
+	}
+	if len(form.Parts) != 0 {
+		t.Fatalf("Unmarshal handed back %d parts before refusing", len(form.Parts))
+	}
+	dec := bounded.(codec.StreamingCodec).NewDecoder(strings.NewReader(body))
+	var part multipart.PartValue
+	derr := dec.Decode(&part)
+	if !errs.HasReason(derr, "LIMIT_EXCEEDED") || knobOf(derr) != "MaxTotalBytes" {
+		t.Fatalf("Decode: want LIMIT_EXCEEDED naming MaxTotalBytes, got %v (knob %q), part %q", derr, knobOf(derr), part.Name)
+	}
+	if dec.More() {
+		t.Fatal("a refused stream must not promise another part")
+	}
+	//: the same body under the default ceiling still decodes.
+	if err := multipart.New().Unmarshal([]byte(body), &form); err != nil || len(form.Parts) != 1 {
+		t.Fatalf("default ceiling: err=%v, %d parts", err, len(form.Parts))
+	}
+}
+
+// stdlibBody writes form the way mime/multipart.Writer does — the oracle the
+// encoder's own framing must match byte for byte (#907).
+func stdlibBody(t *testing.T, form multipart.FormValue) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := stdmp.NewWriter(&buf)
+	if err := w.SetBoundary(form.Boundary); err != nil {
+		t.Fatalf("SetBoundary: %v", err)
+	}
+	escape := strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+	for _, p := range form.Parts {
+		h := textproto.MIMEHeader{}
+		disposition := `form-data; name="` + escape.Replace(p.Name) + `"`
+		if p.FileName != "" {
+			disposition += `; filename="` + escape.Replace(p.FileName) + `"`
+		}
+		h.Set("Content-Disposition", disposition)
+		if p.ContentType != "" {
+			h.Set("Content-Type", p.ContentType)
+		}
+		pw, err := w.CreatePart(h)
+		if err != nil {
+			t.Fatalf("CreatePart: %v", err)
+		}
+		if _, err := pw.Write(p.Data); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// TestMarshalWritesWhatTheStdlibWriterWrites pins the encoder's framing to
+// mime/multipart.Writer's, byte for byte, on every shape a part header takes:
+// a bare field, a file with a media type, quotes and backslashes to escape,
+// an empty body, no part at all, and a generated boundary.
+func TestMarshalWritesWhatTheStdlibWriterWrites(t *testing.T) {
+	t.Parallel()
+	forms := map[string]multipart.FormValue{
+		"text fields": {Boundary: "bench-boundary-0123456789", Parts: []multipart.PartValue{
+			{Name: "email", Data: []byte("user@example.test")},
+			{Name: "subject", Data: []byte("Invoice 4711")},
+		}},
+		"a file with a media type": {Boundary: "b", Parts: []multipart.PartValue{
+			{Name: "file", FileName: "invoice 4711.pdf", ContentType: "application/pdf", Data: []byte("%PDF-1.7")},
+		}},
+		"quotes and backslashes": {Boundary: "x'()+_,-./:=? y", Parts: []multipart.PartValue{
+			{Name: `a"b\c`, FileName: `C:\dir\"q".txt`, Data: []byte("v")},
+			{Name: "é ü", ContentType: "text/plain; charset=utf-8", Data: nil},
+		}},
+		"no part": {Boundary: "only-the-close"},
+	}
+	for name, form := range forms {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := multipart.New().Marshal(form)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			if want := stdlibBody(t, form); !bytes.Equal(got, want) {
+				t.Fatalf("got\n%q\nwant\n%q", got, want)
+			}
+		})
+	}
+	t.Run("a generated boundary", func(t *testing.T) {
+		t.Parallel()
+		form := multipart.FormValue{Parts: []multipart.PartValue{{Name: "k", Data: []byte("v")}}}
+		got, err := multipart.New().Marshal(form)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		boundary, berr := multipart.Boundary(got)
+		if berr != nil || len(boundary) != 60 {
+			t.Fatalf("generated boundary %q (%v), want 60 hex digits as mime/multipart draws", boundary, berr)
+		}
+		form.Boundary = boundary
+		if want := stdlibBody(t, form); !bytes.Equal(got, want) {
+			t.Fatalf("got\n%q\nwant\n%q", got, want)
+		}
+	})
 }

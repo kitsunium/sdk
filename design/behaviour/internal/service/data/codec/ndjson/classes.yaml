@@ -10,9 +10,35 @@ constants:
         type: int
         value: 10 * 1024 * 1024
     name: scannerMaxCapacity
+  - doc: |-
+      maxReservedRecords caps the slots Unmarshal reserves before it has decoded
+      a record (#1098): an input of N lines that fails at its first one, or whose
+      lines are mostly blank, must not cost N slots up front. Past it the output
+      grows geometrically, by records actually decoded.
+    items:
+      - name: maxReservedRecords
+        type: int
+        value: "4096"
+    name: maxReservedRecords
+  - doc: The bytes the sniffer accepts at the places it checks.
+    grouped: true
+    items:
+      - doc: |-
+          jsonOutsideString is every byte JSON writes outside a string:
+          whitespace, punctuation, a number's bytes, and the letters of true,
+          false and null.
+        name: jsonOutsideString
+        type: string
+        value: "\" \\t\\n\\r,:{}[]-+.eE0123456789truefalsn\""
+      - doc: jsonValueStart is every byte a value, or an array's end, opens with.
+        name: jsonValueStart
+        type: string
+        value: "`]\"{[-0123456789tfn`"
+    name: jsonOutsideString
 files:
   - decls:
       - scannerMaxCapacity
+      - maxReservedRecords
       - Codec
       - ndjsonCodec
       - New
@@ -21,31 +47,68 @@ files:
       - (*ndjsonCodec).Extensions
       - (*ndjsonCodec).Marshal
       - encodeSliceInto
+      - encodeRecordTo
       - marshalRawSliceTo
       - rawMessageView
       - asRawMessages
       - appendNDJSONRaw
       - (*ndjsonCodec).Unmarshal
       - decodeLines
+      - nextLine
+      - growSlots
       - countNDJSONRecords
       - (*ndjsonCodec).Append
       - elemForMarshal
       - asSlice
       - asSlicePointer
+      - decodeRecord
     name: codec.go
+  - decls:
+      - ndjsonDecoder
+      - (*ndjsonCodec).NewDecoder
+      - (*ndjsonDecoder).Decode
+      - (*ndjsonDecoder).More
+      - (*ndjsonDecoder).advance
+      - (*ndjsonDecoder).readLine
+      - lineEnd
+      - sizeExceeded
+    name: decoder.go
   - decls: []
     name: doc.go
+  - decls:
+      - ndjsonEncoder
+      - (*ndjsonCodec).NewEncoder
+      - (*ndjsonEncoder).Encode
+      - (*ndjsonEncoder).Close
+      - (*ndjsonEncoder).appendLine
+    name: encoder.go
+  - decls:
+      - jsonOutsideString
+      - (*ndjsonCodec).Sniff
+      - skipJSONSpace
+      - scanJSONValue
+      - opensJSONValue
+      - skipJSONString
+      - bracketDelta
+    name: sniff.go
 functions:
   - name: New
     results: codec.Codec
   - doc: |-
-      encodeSliceInto runs the per-record stdjson.Marshal loop and appends
-      each encoded record + '\n' separator onto buf. The getElem closure
-      produces one any-typed element at a time so the helper stays free of
-      reflect.Value at the API boundary. Stops at the first per-record
-      failure, returning the raw stdlib error so the caller can wrap it.
+      encodeSliceInto writes each record and its '\n' onto buf. The getElem
+      closure produces one any-typed element at a time so the helper stays free
+      of reflect.Value at the API boundary. Stops at the first per-record
+      failure, returning the raw error so the caller can wrap it.
     name: encodeSliceInto
     params: buf *bytes.Buffer, n int, getElem func(int) any
+    results: error
+  - doc: |-
+      encodeRecordTo writes one record's JSON to w: json/v2's MarshalWrite under
+      the v1 options — the bytes encoding/json.Marshal writes, compact and
+      HTML-escaped, through the engine's pooled encoder, with no slice handed
+      back per record (#893).
+    name: encodeRecordTo
+    params: w io.Writer, v any
     results: error
   - doc: |-
       marshalRawSliceTo writes a pre-encoded slice (one of []json.RawMessage
@@ -92,21 +155,34 @@ functions:
     results: appended []byte, ok bool
   - doc: |-
       decodeLines walks data line-by-line and decodes each non-empty line
-      in place into a pre-sized slice of sliceType. Avoids bufio.Scanner
-      (which would copy each line into its internal buffer) by indexing on
-      '\n' directly into the input slice — every produced sub-slice aliases
-      data so no per-line copy occurs before stdjson.Unmarshal reads it.
-      Pre-counts records so the output slice is sized once instead of
-      re-grown via reflect.Append on every line.
+      in place into a slice of sliceType. Avoids bufio.Scanner (which would copy
+      each line into its internal buffer) by indexing on '\n' directly into the
+      input slice — every produced sub-slice aliases data so no per-line copy
+      occurs before encoding/json reads it. The slice is sized by the records the
+      input holds — its non-blank lines — reserved up to maxReservedRecords at
+      first and grown geometrically past it (#1098), so blank lines cost nothing
+      and a refusal at the first line reserves no slot per line.
     name: decodeLines
     params: data []byte, sliceType reflect.Type
     results: result reflect.Value, err error
   - doc: |-
-      countNDJSONRecords estimates the number of decodable records in data
-      by counting '\n' bytes plus one for a possible trailing line that has
-      no terminator. Conservative upper bound — actual decode skips empty /
-      whitespace-only lines, but over-allocating once is much cheaper than
-      re-growing the result slice on every record via reflect.Append.
+      nextLine returns the line starting at cursor, without its '\n', and the
+      cursor past the terminator — or past the end for a last line without one.
+    name: nextLine
+    params: data []byte, cursor int
+    results: line []byte, next int
+  - doc: |-
+      growSlots returns out with its slots doubled — at least one, never more
+      than limit, the records the input can hold — and its records copied over.
+    name: growSlots
+    params: out reflect.Value, limit int
+    results: reflect.Value
+  - doc: |-
+      countNDJSONRecords counts the records data can hold: its non-blank lines,
+      blank meaning what decodeLines skips — empty once bytes.TrimSpace has run.
+      An exact count on a successful decode; never more slots than lines that
+      carry a byte to decode (#1098: a newline count reserved a slot for every
+      blank line).
     name: countNDJSONRecords
     params: data []byte
     results: int
@@ -152,15 +228,71 @@ functions:
     name: asSlicePointer
     params: v any
     results: ptr reflect.Value, ok bool
+  - doc: |-
+      decodeRecord decodes one line into ptr, a pointer to the record's slot:
+      json/v2 under the v1 options, what encoding/json.Unmarshal reads (#893).
+    name: decodeRecord
+    params: line []byte, ptr any
+    results: error
+  - doc: |-
+      lineEnd drops a line's '\n' and turns the read's error into the stream's:
+      nil after a terminator, io.EOF at the end, a wrapped failure otherwise.
+    name: lineEnd
+    params: frag []byte, err error
+    results: line []byte, end error
+  - doc: sizeExceeded is the refusal of a stream line longer than a record may be.
+    name: sizeExceeded
+    params: n int
+    results: error
+  - doc: |-
+      skipJSONSpace returns the index of the first byte at or after i that is not
+      JSON whitespace.
+    name: skipJSONSpace
+    params: p []byte, i int
+    results: int
+  - doc: |-
+      scanJSONValue scans the object or array opening at p[i] through its bytes:
+      it returns the index just past it and closed when it ends within p, the
+      length of p and !closed when p ends inside it, and -1 when p[i] opens no
+      object or array, when an object's first member is not a string, or when a
+      byte outside a string is one JSON never writes there.
+    name: scanJSONValue
+    params: p []byte, i int
+    results: end int, closed bool
+  - doc: |-
+      opensJSONValue reports whether p[i] opens an object or an array whose first
+      token can follow the bracket: a member name or the closing brace in an
+      object, a value or the closing bracket in an array — or nothing, p ending
+      there.
+    name: opensJSONValue
+    params: p []byte, i int
+    results: bool
+  - doc: |-
+      skipJSONString returns the index of the quote closing the string opening at
+      p[i], or len(p) when p ends inside it; ok is false on a raw control byte.
+    name: skipJSONString
+    params: p []byte, i int
+    results: end int, ok bool
+  - doc: |-
+      bracketDelta is +1 for a bracket that opens, -1 for one that closes, and 0
+      for any other byte.
+    name: bracketDelta
+    params: c byte
+    results: int
 imports:
+  bufio: bufio
   bytes: bytes
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   corendjson: github.com/kitsunium/sdk/internal/core/data/codec/ndjson
+  errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  jsonv2: encoding/json/v2
   reflect: reflect
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
   slices: slices
   stdjson: encoding/json
+  strings: strings
   unsafe: unsafe
 package:
   docFile: doc.go
@@ -207,7 +339,120 @@ types:
         params: dst []byte, v any
         recv: "*ndjsonCodec"
         results: appended []byte, err error
+      - doc: |-
+          NewDecoder wraps r in a streaming codec.Decoder handing one record per
+          Decode, as Unmarshal decodes each line.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*ndjsonCodec"
+        results: codec.Decoder
+      - doc: |-
+          NewEncoder wraps w in a streaming codec.Encoder writing one line per
+          Encode.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*ndjsonCodec"
+        results: codec.Encoder
+      - doc: |-
+          Sniff implements codec.Sniffer (#909): prefix is NDJSON when, after leading
+          whitespace, it holds one whole object or array on its line and the next line
+          opens another — two records at least, so a single record stays json's and
+          the two codecs never claim the same bytes. It reads only prefix and
+          allocates nothing.
+        name: Sniff
+        params: prefix []byte
+        recv: "*ndjsonCodec"
+        results: bool
     name: ndjsonCodec
+  - doc: |-
+      ndjsonDecoder reads one record per Decode from a stream of lines (#901):
+      the lines Unmarshal would decode, read one at a time through a bufio.Reader,
+      blank ones skipped, none longer than scannerMaxCapacity.
+    fields:
+      - doc: r is the buffered stream.
+        name: r
+        type: "*bufio.Reader"
+      - doc: long holds a line that outgrew r's buffer, read in pieces; reused.
+        name: long
+        type: "[]byte"
+      - doc: |-
+          line is the next record, trimmed, when ready: it aliases r's buffer or
+          long, and stays valid until the next read.
+        name: line
+        type: "[]byte"
+      - doc: ready reports that line holds a record no Decode has taken yet.
+        name: ready
+        type: bool
+      - doc: |-
+          err ends the stream: io.EOF, a failing reader or an oversized line.
+          Decode returns it from then on.
+        name: err
+        type: error
+      - doc: reported is set once Decode has returned err, so More reports false.
+        name: reported
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Decode decodes the next record into v, which must be a non-nil pointer, as
+          encoding/json.Unmarshal decodes a line. It returns io.EOF, unwrapped, once
+          the stream is drained; SIZE_EXCEEDED for a line past 10 MiB, which ends the
+          stream; UNMARSHAL_FAILED for a line v cannot hold, after which the next
+          Decode reads the line after it.
+        name: Decode
+        params: v any
+        recv: d *ndjsonDecoder
+        results: error
+      - doc: |-
+          More reports whether Decode has something to return: a record, or a
+          failure the caller has not been told of yet. It reads ahead to the next
+          non-blank line, so a stream's last record is followed by false.
+        name: More
+        recv: d *ndjsonDecoder
+        results: bool
+      - doc: |-
+          advance reads lines until the next non-blank one, unless a record is
+          already waiting or the stream has ended.
+        name: advance
+        recv: d *ndjsonDecoder
+      - doc: |-
+          readLine returns the next line without its '\n', and io.EOF with the last
+          one when it has no terminator. A line that fits the reader's buffer is
+          returned in place; a longer one is gathered into long, and refused once it
+          passes scannerMaxCapacity — the stream is read no further.
+        name: readLine
+        recv: d *ndjsonDecoder
+        results: line []byte, err error
+    name: ndjsonDecoder
+  - doc: |-
+      ndjsonEncoder writes one record per Encode (#901): the line Marshal writes
+      for the record, its '\n' included.
+    fields:
+      - doc: w is the stream; the encoder does not own it.
+        name: w
+        type: io.Writer
+      - doc: line is the record being written, reused across Encode calls.
+        name: line
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: "Encode writes v as one record: its JSON, then '\\n', in one Write."
+        name: Encode
+        params: v any
+        recv: e *ndjsonEncoder
+        results: error
+      - doc: "Close is a no-op: the encoder buffers nothing and does not own the writer."
+        name: Close
+        recv: "*ndjsonEncoder"
+        results: error
+      - doc: |-
+          appendLine builds v's line in e.line: the record as encodeRecordTo writes
+          it, then '\n'.
+        name: appendLine
+        params: v any
+        recv: e *ndjsonEncoder
+        results: error
+    name: ndjsonEncoder
 vars:
   - doc: |-
       The registered singleton. Its aliases are literals in MIMETypes and

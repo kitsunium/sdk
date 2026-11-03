@@ -18,11 +18,15 @@
 // # Mapping
 //
 // The top level is a document: a struct, a map, a [D]; anything else is
-// refused. Struct fields take the tag bson:"name,omitempty,minsize,truncate,inline"
-// and default to the field name in lower case. int, int8, int16, int32, uint8
+// refused. Struct fields take the tag bson:"name,omitempty,omitzero,minsize,truncate,inline"
+// and default to the field name in lower case; omitzero leaves out a field
+// holding its type's zero value as encoding/json does — its IsZero() when the
+// type declares one, else every bit at zero — and with omitempty either one is
+// enough. int, int8, int16, int32, uint8
 // and uint16 are written as int32 (int as int64 when it does not fit), int64,
 // uint, uint32 and uint64 as int64, floats as double, []byte as a generic
-// binary, time.Time as a UTC datetime in milliseconds, a nil slice, map or
+// binary, time.Time as a UTC datetime in milliseconds, a time.Duration as an
+// int64 of nanoseconds — the binary formats' rule (#1126) —, a nil slice, map or
 // pointer as null, and map keys in sorted order, so the same value always
 // encodes to the same bytes. A type can write and read itself through
 // MarshalBSON() ([]byte, error) and UnmarshalBSON([]byte) error.

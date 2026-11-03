@@ -1,6 +1,30 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: (*exemplarReservoir).collect
+    steps:
+      - lock:
+          mutex: r.mu
+      - var:
+          name: out
+          type: "[]coremetrics.ExemplarValue"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!held"
+            - set: out
+              value: append(out, r.slots[i])
+            - opt:
+                do:
+                  - set: r.held[i]
+                    value: "false"
+                when: delta
+          key: i
+          range: r.held
+          value: held
+      - return: out
   - of: appendEscapedHelp
     steps:
       - loop:
@@ -85,6 +109,59 @@ workflows:
           key: i
           range: len(value)
       - return: buf
+  - of: validateBuckets
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - panic: coremetrics.InvalidBuckets.Error()
+                when: math.IsNaN(b) || math.IsInf(b, 0) || (i > 0 && b == sorted[i-1])
+          key: i
+          range: sorted
+          value: b
+  - of: wentDown
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: c < previous[i]
+          key: i
+          range: counts
+          value: c
+      - return: "false"
+  - of: validateObserved
+    steps:
+      - opt:
+          do:
+            - panic: coremetrics.InvalidBuckets.Error()
+          when: len(point.Counts) != len(point.Bounds)+1
+      - loop:
+          do:
+            - opt:
+                do:
+                  - panic: coremetrics.InvalidBuckets.Error()
+                when: math.IsNaN(b) || math.IsInf(b, 0) || (i > 0 && b <= point.Bounds[i-1])
+          key: i
+          range: point.Bounds
+          value: b
+  - of: validUnit
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: unit == "" || len(unit) > coremetrics.MaxUnitLen
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: unit[i] <= ' ' || unit[i] > '~'
+          key: i
+          range: len(unit)
+      - return: "true"
   - of: otlpDocCapacity
     steps:
       - bind: size
@@ -114,9 +191,52 @@ workflows:
                               value: otlpDocPointBytes + (len(point.BucketCounts)+len(point.ExplicitBounds))*otlpDocBucketBytes
                           key: j
                           range: metric.Histogram.DataPoints
+                  - case: metric.ExponentialHistogram != nil
+                    do:
+                      - loop:
+                          do:
+                            - bind: point
+                              eval: "&metric.ExponentialHistogram.DataPoints[j]"
+                            - op: +=
+                              set: size
+                              value: otlpDocPointBytes + (point.Positive.size()+point.Negative.size())*otlpDocBucketBytes
+                          key: j
+                          range: metric.ExponentialHistogram.DataPoints
                 init:
                   bind: metric
                   eval: "&list[i]"
           key: i
           range: list
       - return: size
+  - of: otlpExemplars
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(exemplars) == 0
+      - bind: out
+        eval: make([]otlpExemplar, 0, len(exemplars))
+      - loop:
+          do:
+            - bind: rendered
+              eval: |-
+                otlpExemplar{
+                			TimeUnixNano: otlp.UnixNano(ex.Time),
+                			SpanID:       hex.EncodeToString(ex.SpanID[:]),
+                			TraceID:      hex.EncodeToString(ex.TraceID[:]),
+                		}
+            - alt:
+                - do:
+                    - set: rendered.AsInt
+                      value: new(otlp.Int64(int64(ex.Value)))
+                  when: integer
+                - do:
+                    - set: rendered.AsDouble
+                      value: new(otlp.Double(ex.Value))
+                  else: true
+            - set: out
+              value: append(out, rendered)
+          key: _
+          range: exemplars
+          value: ex
+      - return: out

@@ -53,6 +53,7 @@ files:
       - (*flatbuffersCodec).Unmarshal
       - (*flatbuffersCodec).Append
       - resolveSourceBytes
+      - checkTarget
       - validateBuffer
     name: codec.go
   - decls: []
@@ -72,9 +73,17 @@ functions:
     params: v any
     results: src []byte, err error
   - doc: |-
+      checkTarget is core/data/codec.CheckTarget, except that a BytesAcceptor
+      that is not a pointer is a target too: SetBytes is how it receives the
+      buffer (#1101).
+    name: checkTarget
+    params: v any
+    results: error
+  - doc: |-
       validateBuffer enforces the minimum FlatBuffer wire-format shape: the
       4-byte root offset header must be present, and the buffer MUST NOT exceed
-      the codec's CWE-400 ceiling.
+      the codec's CWE-400 ceiling. Each refusal is placed at the byte offset it
+      concerns (#1125): where a short buffer ends, the first byte past the cap.
     name: validateBuffer
     params: data []byte
     results: error
@@ -83,6 +92,7 @@ imports:
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   coreflatbuffers: github.com/kitsunium/sdk/internal/core/data/codec/flatbuffers
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  reflect: reflect
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers

@@ -5,8 +5,10 @@
 //
 // The codec is the msgpack.org specification written on the standard
 // library: maps, arrays, the integer and float families, strings, binary,
-// the timestamp extension, struct fields by their msgpack tag, and types
-// that marshal themselves. Input is bounded in size and depth, and read
+// the timestamp extension, application extensions as an [Ext], struct
+// fields by their msgpack tag, and types that marshal themselves. A
+// time.Duration is an integer of int64 nanoseconds, the rule of every binary
+// format (#1126). Input is bounded in size and depth, and read
 // without allocating what a declared length claims before the bytes are
 // there. It streams.
 //

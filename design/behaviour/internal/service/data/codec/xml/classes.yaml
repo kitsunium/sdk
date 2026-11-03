@@ -1,5 +1,12 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - doc: fieldLimit names the byte ceiling a refused value exceeded.
+    items:
+      - name: fieldLimit
+        type: string
+        value: "\"limit\""
+    name: fieldLimit
 files:
   - decls:
       - Codec
@@ -15,8 +22,16 @@ files:
       - (*xmlCodec).NewDecoder
     name: codec.go
   - decls:
+      - fieldLimit
       - xmlDecoder
+      - window
+      - (*xmlCodec).NewBoundedDecoder
+      - (*window).Read
+      - (*window).open
+      - (*window).exceeded
       - (*xmlDecoder).Decode
+      - (*xmlDecoder).decodeBounded
+      - (*xmlDecoder).settle
       - (*xmlDecoder).More
     name: decoder.go
   - decls: []
@@ -26,18 +41,72 @@ files:
       - (*xmlEncoder).Encode
       - (*xmlEncoder).Close
     name: encoder.go
+  - decls:
+      - position
+      - offsetField
+    name: position.go
+  - decls:
+      - utf8BOM
+      - (*xmlCodec).Sniff
+      - startTag
+      - nameLen
+      - endsName
+      - isNameStart
+      - isXMLSpace
+    name: sniff.go
 functions:
   - name: New
     results: codec.Codec
+  - doc: |-
+      position returns the line encoding/xml's SyntaxError gives err, as the
+      family's field codec.PositionOf reads (#1125) — the one coordinate
+      encoding/xml reports. Any other failure is placed nowhere.
+    name: position
+    params: err error
+    results: "[]errs.FieldValue"
+  - doc: |-
+      offsetField is the family's offset field for a stream offset, counted in
+      int64: placed nowhere past what an int holds — a 32-bit platform's long
+      stream — rather than wrongly.
+    name: offsetField
+    params: off int64
+    results: "[]errs.FieldValue"
+  - doc: |-
+      startTag reports whether p opens with '<', a name start character, name
+      characters, then whitespace, '>', '/' or the end of p.
+    name: startTag
+    params: p []byte
+    results: bool
+  - doc: nameLen returns how many of p's leading bytes are XML name characters.
+    name: nameLen
+    params: p []byte
+    results: int
+  - doc: endsName reports whether c may follow an element's name in a start tag.
+    name: endsName
+    params: c byte
+    results: bool
+  - doc: |-
+      isNameStart reports whether c may start an XML name: an ASCII letter, '_',
+      ':' or the first byte of a non-ASCII character.
+    name: isNameStart
+    params: c byte
+    results: bool
+  - doc: isXMLSpace reports whether c is XML whitespace.
+    name: isXMLSpace
+    params: c byte
+    results: bool
 imports:
+  bytes: bytes
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   corexml: github.com/kitsunium/sdk/internal/core/data/codec/xml
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   io: io
+  math: math
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
   slices: slices
   stdxml: encoding/xml
+  utf8: unicode/utf8
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/codec/xml
@@ -75,9 +144,9 @@ types:
       - doc: |-
           Append encodes v as XML and appends the bytes to dst. Implements the
           optional codec.Appender interface so hot-path callers can stream
-          records into a recycled buffer. Encodes directly into the pooled
-          *bytes.Buffer + appends onto dst — saves the slices.Clone the
-          Marshal-delegation shape paid.
+          records into a recycled buffer. The encoder writes through a pooled
+          scratch.AppendWriter over dst, so the bytes land in the caller's buffer
+          with no intermediate copy; on failure dst is returned as it was given.
         name: Append
         params: dst []byte, v any
         recv: "*xmlCodec"
@@ -92,6 +161,24 @@ types:
         params: r io.Reader
         recv: "*xmlCodec"
         results: codec.Decoder
+      - doc: |-
+          NewBoundedDecoder implements codec.BoundedStreamingCodec (#891): a decoder
+          refusing, with SIZE_EXCEEDED, an element longer than maxBytes counted from
+          the end of the previous one, after reading at most one byte more than maxBytes of it.
+          A ceiling of zero or below is refused: no bound means unlimited (ADR 0031).
+        name: NewBoundedDecoder
+        params: r io.Reader, maxBytes int64
+        recv: "*xmlCodec"
+        results: codec.Decoder, error
+      - doc: |-
+          Sniff implements codec.Sniffer (#909): prefix is XML when, after an optional
+          byte order mark and whitespace, it opens with the XML declaration, a
+          comment, a DOCTYPE or a start tag — a '<' then a name whose end the prefix
+          reaches or shows. It reads only prefix and allocates nothing.
+        name: Sniff
+        params: prefix []byte
+        recv: "*xmlCodec"
+        results: bool
     name: xmlCodec
   - doc: |-
       xmlDecoder wraps *encoding/xml.Decoder so it satisfies codec.Decoder.
@@ -104,6 +191,11 @@ types:
       - doc: ": sticky EOF flag so More() returns false after the stream drains."
         name: done
         type: bool
+      - doc: |-
+          window bounds every element the decoder reads; nil for NewDecoder's
+          decoder, which has no ceiling.
+        name: window
+        type: "*window"
     kind: struct
     methods:
       - doc: |-
@@ -113,11 +205,68 @@ types:
         params: v any
         recv: d *xmlDecoder
         results: error
+      - doc: |-
+          decodeBounded decodes the next element inside its window: refused when a
+          read past the window was needed, or when the element, read whole, is one
+          byte longer than the ceiling.
+        name: decodeBounded
+        params: v any
+        recv: d *xmlDecoder
+        results: error
+      - doc: |-
+          settle latches io.EOF, returned untouched, and wraps any other stdlib
+          error as UNMARSHAL_FAILED; nil stays nil.
+        name: settle
+        params: xerr error
+        recv: d *xmlDecoder
+        results: error
       - doc: More reports whether another XML element can be decoded.
         name: More
         recv: d *xmlDecoder
         results: bool
     name: xmlDecoder
+  - doc: |-
+      window is the reader under a bounded decoder (#891): it hands over at most
+      one byte more than max past the end of the element decoded last, so an element longer
+      than max is refused after one byte more than max of them, however many the stream holds.
+    fields:
+      - doc: r is the stream.
+        name: r
+        type: io.Reader
+      - doc: max is the ceiling of one element.
+        name: max
+        type: int64
+      - doc: read is how many bytes r has handed over.
+        name: read
+        type: int64
+      - doc: end is how many bytes r may have handed over before a read is refused.
+        name: end
+        type: int64
+      - doc: |-
+          hit latches once an element was refused: the stream cannot be
+          resynchronised.
+        name: hit
+        type: bool
+    kind: struct
+    methods:
+      - doc: Read hands over what r returns, never past the window's end.
+        name: Read
+        params: p []byte
+        recv: w *window
+        results: int, error
+      - doc: open starts the window of the element that begins at offset start.
+        name: open
+        params: start int64
+        recv: w *window
+      - doc: |-
+          exceeded is the SIZE_EXCEEDED refusal of an element past the ceiling, with
+          UNMARSHAL_FAILED's code joining the trail (#894), placed at the first byte
+          past the ceiling — the stream's offset end-1 (#1125). The window counts
+          bytes, not lines: the offset is the coordinate it knows.
+        name: exceeded
+        recv: w *window
+        results: error
+    name: window
   - doc: xmlEncoder wraps *encoding/xml.Encoder so it satisfies codec.Encoder.
     fields:
       - name: inner
@@ -147,3 +296,19 @@ vars:
         type: codec.Codec
         value: codec.Register(&xmlCodec{})
     name: Codec
+  - doc: The heads an XML document opens with.
+    grouped: true
+    items:
+      - doc: utf8BOM is the byte order mark a UTF-8 document may open with.
+        name: utf8BOM
+        value: "[]byte{0xEF, 0xBB, 0xBF}"
+      - doc: declarationHead opens an XML declaration.
+        name: declarationHead
+        value: "[]byte(\"<?xml\")"
+      - doc: commentHead opens a comment.
+        name: commentHead
+        value: "[]byte(\"<!--\")"
+      - doc: doctypeHead opens a document type declaration.
+        name: doctypeHead
+        value: "[]byte(\"<!DOCTYPE\")"
+    name: utf8BOM

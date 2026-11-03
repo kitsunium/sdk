@@ -22,6 +22,14 @@ packages:
             name: CodePEMValueInvalid
             value: "0x00_03_0A_03"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodePEMSizeExceeded identifies a block in a stream longer than the
+              10 MiB ceiling a block may take: the stream decoder refuses it once
+              it has read that far, and reads no further.
+            name: CodePEMSizeExceeded
+            value: "0x00_03_0A_04"
+        type: errs.Code
     doc: |-
       Package pem declares the error codes and the sentinels of the PEM codec,
       internal/service/data/codec/pem — range 0.3.10.* (ADR 0005
@@ -61,6 +69,13 @@ packages:
             private: "service/data/codec/pem: Marshal/Unmarshal argument is not *pem.Block"
             public: PEM codec requires a *pem.Block value
             reason: VALUE_INVALID
+          - code: CodePEMSizeExceeded
+            doc: SizeExceeded fires when a block in a stream is longer than the 10 MiB block ceiling.
+            http: 413
+            name: SizeExceeded
+            private: "service/data/codec/pem: a stream block is longer than maxStreamBlockBytes"
+            public: PEM block exceeds size limit
+            reason: SIZE_EXCEEDED
   - aliases:
       - doc: |-
           Block re-exports encoding/pem.Block so consumers do not need to import
@@ -70,7 +85,10 @@ packages:
     doc: |-
       Package pem wraps encoding/pem as a codec.Codec implementation.
       PEM is block-structured: each wire message is a typed block ("CERTIFICATE",
-      "PRIVATE KEY", etc.), so the codec operates on *pem.Block values.
+      "PRIVATE KEY", etc.), so the codec operates on *pem.Block values. It is a
+      codec.StreamingCodec too: its stream decoder hands one block per Decode —
+      a certificate chain read as encoding/pem.Decode would read it in a loop —
+      and its stream encoder writes one block per Encode.
     functions:
       - doc: New returns a PEM codec instance.
         name: New
@@ -84,8 +102,7 @@ packages:
       - blockDoc: |-
           Package-level state: the codec singleton, built with its hoisted extension
           table — the initialiser names the table, which is what orders it before
-          Register reads it (see core/data/codec.Register) —, the cached promotion
-          fast-path markers, and the Marshal-buffer pool.
+          Register reads it (see core/data/codec.Register).
         doc: ": register the singleton and expose it as a typed package var."
         name: Codec
         type: codec.Codec
@@ -124,6 +141,7 @@ packages:
       	CodeMarshalFailed    0.3.10.1  encoding/pem refused to write the block
       	CodeUnmarshalFailed  0.3.10.2  no PEM block in the input
       	CodeValueInvalid     0.3.10.3  the value is not a *pem.Block, or the target a **pem.Block
+      	CodeSizeExceeded     0.3.10.4  a block of a stream past the 10 MiB a block may take
 
       No error message quotes the input.
     facade:
@@ -148,6 +166,14 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_0A_03"
+          - doc: |-
+              CodeSizeExceeded is 0.3.10.4: a block of a stream past the 10 MiB a
+              block may take.
+            name: CodeSizeExceeded
+            reexport: corepem.CodePEMSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_0A_04"
         doc: The error codes, range 0.3.10.*, declared in the core (ADR 0160).
       - doc: "The sentinels, for errors.Is: each carries the code of the same name."
         var:
@@ -162,6 +188,10 @@ packages:
           - doc: ValueInvalid is the sentinel of [CodeValueInvalid].
             name: ValueInvalid
             reexport: corepem.ValueInvalid
+            type: "*errs.Error"
+          - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
+            name: SizeExceeded
+            reexport: corepem.SizeExceeded
             type: "*errs.Error"
     imports:
       corepem: github.com/kitsunium/sdk/internal/core/data/codec/pem

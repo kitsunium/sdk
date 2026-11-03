@@ -7,14 +7,34 @@ sequences:
           do:
             - return: inner
           when: min == level.Info
-      - return: "&gateSink{inner: inner, min: min}"
+      - return: "&gateSink{inner: inner, floor: level.Fixed(min)}"
   - of: Floor
     steps:
       - opt:
           do:
             - return: nil
           when: inner == nil
-      - return: "&gateSink{inner: inner, min: min}"
+      - return: "&gateSink{inner: inner, floor: level.Fixed(min)}"
+  - of: NewLeveled
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewLeveled
+        kind: self
+      - id: level
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: inner == nil
+      - opt:
+          do:
+            - set: floor
+              to: level
+              value: level.Fixed(level.Info)
+          when: floor == nil
+      - return: "&gateSink{inner: inner, floor: floor}"
   - of: (*gateSink).Write
     participants:
       - id: caller
@@ -27,9 +47,88 @@ sequences:
       - opt:
           do:
             - return: len(p), nil
-          when: r.Level < s.min
+          when: r.Level < s.floor.Level()
       - return: s.inner.Write(ctx, r, p)
         to: s.inner.Write
+  - of: (*gateSink).WriteBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*gateSink).WriteBatch
+        kind: self
+      - id: s.floor.Level
+        kind: value
+      - id: s.forwardRun
+        kind: internal
+    steps:
+      - bind: floor
+        eval: s.floor.Level()
+        to: s.floor.Level
+      - bind: start
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: recs[i].Level >= floor
+            - opt:
+                do:
+                  - return: start + n, ferr
+                init:
+                  bind: n, ferr
+                  eval: s.forwardRun(ctx, recs[start:i], payloads[start:i])
+                  to: s.forwardRun
+                when: ferr != nil
+            - set: start
+              value: i + 1
+          key: i
+          range: recs
+      - opt:
+          do:
+            - return: start + n, ferr
+          init:
+            bind: n, ferr
+            eval: s.forwardRun(ctx, recs[start:], payloads[start:])
+            to: s.forwardRun
+          when: ferr != nil
+      - return: len(recs), nil
+  - of: (*gateSink).forwardRun
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*gateSink).forwardRun
+        kind: self
+      - id: bs.WriteBatch
+        kind: value
+      - id: s.inner.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, nil
+          when: len(recs) == 0
+      - opt:
+          do:
+            - return: bs.WriteBatch(ctx, recs, payloads)
+              to: bs.WriteBatch
+          init:
+            bind: bs, ok
+            eval: s.inner.(corelogger.BatchSink)
+          when: ok
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i, werr
+                init:
+                  bind: _, werr
+                  eval: s.inner.Write(ctx, recs[i], payloads[i])
+                  to: s.inner.Write
+                when: werr != nil
+          key: i
+          range: recs
+      - return: len(recs), nil
   - of: (*gateSink).Flush
     participants:
       - id: caller

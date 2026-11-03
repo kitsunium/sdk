@@ -49,6 +49,47 @@ constants:
         type: int
         value: 4 << 10
     name: streamBufSize
+  - doc: The bookkeeping of a map's order (#1104).
+    grouped: true
+    items:
+      - doc: |-
+          smallMapPairs is how many pairs a map can have before the bookkeeping
+          of its order leaves the stack, and before an insertion sort stops
+          beating the general one.
+        name: smallMapPairs
+        type: int
+        value: "16"
+      - doc: |-
+          prefixBytes is how many leading payload bytes of a string key are
+          compared as one integer before the whole keys are.
+        name: prefixBytes
+        type: int
+        value: "8"
+    name: smallMapPairs
+  - doc: |-
+      The extension forms an Ext is written in (spec.md §ext format family): a
+      fixext for the five payload sizes it carries, else ext 8, 16 or 32.
+    grouped: true
+    items:
+      - doc: |-
+          codeFixext1 is fixext 1; fixext 2, 4, 8 and 16 follow it, 0xd5 to 0xd8,
+          one code per doubling of the payload.
+        name: codeFixext1
+        type: byte
+        value: "0xd4"
+      - doc: codeExt16 is ext 16.
+        name: codeExt16
+        type: byte
+        value: "0xc8"
+      - doc: codeExt32 is ext 32.
+        name: codeExt32
+        type: byte
+        value: "0xc9"
+      - doc: fixextSizes is how many payload sizes the fixext forms cover.
+        name: fixextSizes
+        type: int
+        value: "5"
+    name: codeFixext1
   - doc: Reasons and public messages, shared by every failure of one direction.
     grouped: true
     items:
@@ -76,10 +117,12 @@ constants:
   - doc: Field keys attached to failures.
     grouped: true
     items:
-      - doc: fieldOffset is the byte offset in the input where a decode failed.
+      - doc: |-
+          fieldOffset is the byte offset in the input where a decode failed, under
+          the family's key codec.PositionOf reads (#1125).
         name: fieldOffset
         type: string
-        value: "\"offset\""
+        value: codec.FieldOffset
       - doc: fieldType is the Go type the codec was encoding or decoding into.
         name: fieldType
         type: string
@@ -101,6 +144,32 @@ constants:
         type: string
         value: "\"field\""
     name: fieldOffset
+  - doc: |-
+      strictLinearKeys is how many keys of one map the duplicate check compares
+      pairwise before it switches to a set.
+    items:
+      - name: strictLinearKeys
+        type: int
+        value: "32"
+    name: strictLinearKeys
+  - doc: |-
+      Key classes of the duplicate check: two keys that decode to the same Go
+      key compare equal whatever form they were written in.
+    grouped: true
+    items:
+      - doc: keyClassText is a str or a bin, which both decode to a string key.
+        name: keyClassText
+        type: byte
+        value: "'t'"
+      - doc: keyClassInt is an integer of any width or sign.
+        name: keyClassInt
+        type: byte
+        value: "'i'"
+      - doc: keyClassRaw is any other key, compared by its encoding.
+        name: keyClassRaw
+        type: byte
+        value: "'r'"
+    name: keyClassText
   - doc: Struct-tag vocabulary.
     grouped: true
     items:
@@ -116,6 +185,12 @@ constants:
         name: optOmitEmpty
         type: string
         value: "\"omitempty\""
+      - doc: |-
+          optOmitZero leaves a field holding its type's zero value out, as
+          encoding/json's omitzero does (#1103).
+        name: optOmitZero
+        type: string
+        value: "\"omitzero\""
       - doc: optAsArray encodes the struct as an array.
         name: optAsArray
         type: string
@@ -511,6 +586,7 @@ files:
   - decls:
       - pointerToAnyType
       - unmarshalInto
+      - unmarshalIntoMode
       - (*decodeState).decodeTarget
       - pointerDecoder
       - interfaceDecoder
@@ -655,6 +731,9 @@ files:
       - isSingleValue
     name: encode_hook.go
   - decls:
+      - smallMapPairs
+      - pairSpan
+      - wireInt
       - newMapEncoder
       - stringMapEncoder
       - directMapEncoder
@@ -665,9 +744,19 @@ files:
       - appendFloat64Elem
       - appendBoolElem
       - (*mapEncoder).encode
-      - (*mapEncoder).encodePairsInPlace
-      - (*mapEncoder).encodePairsCopied
-      - (*mapEncoder).encodePair
+      - (*mapEncoder).holders
+      - (*mapEncoder).pair
+      - sortedStringKeys
+      - reorderPairs
+      - sortPairs
+      - comparePairs
+      - compareEncodedKeys
+      - strPayload
+      - intKey
+      - sizedIntKey
+      - signedKey
+      - wireInt.compare
+      - markKey
     name: encode_map.go
   - decls:
       - encodeFunc
@@ -733,6 +822,14 @@ files:
       - (*msgpackEncoder).Close
     name: encoder.go
   - decls:
+      - codeFixext1
+      - Ext
+      - extType
+      - encodeExt
+      - appendExt
+      - decodeExtValue
+    name: ext.go
+  - decls:
       - reasonMarshal
       - fieldOffset
       - familyNames
@@ -744,7 +841,35 @@ files:
       - typeField
       - unsupportedType
       - depthExceeded
+      - boundFault
     name: fault.go
+  - decls:
+      - zeroTest
+      - zeroThroughReference
+      - zeroByMethod
+      - zeroByAddress
+    name: omitzero.go
+  - decls:
+      - strictLinearKeys
+      - keyClassText
+      - strictCodec
+      - NewStrict
+      - (*strictCodec).Unmarshal
+      - (*strictCodec).NewDecoder
+      - (*decodeState).checkKeys
+      - (*decodeState).checkElements
+      - (*decodeState).checkMapKeys
+      - normKey
+      - (*normKey).equal
+      - (*normKey).setKey
+      - (*decodeState).checkPairKey
+      - addKey
+      - indexKey
+      - normalKey
+      - binPayload
+      - duplicateKey
+      - unknownMember
+    name: strict.go
   - decls:
       - tagKey
       - structField
@@ -844,7 +969,7 @@ functions:
     results: any
   - doc: |-
       extAny decodes an extension payload: the timestamp becomes a time.Time,
-      every other type is refused by name.
+      every other type an Ext holding a copy of the payload (#903).
     name: extAny
     params: ext int8, p []byte
     results: any, error
@@ -860,6 +985,13 @@ functions:
       at.
     name: unmarshalInto
     params: data []byte, v any
+    results: error
+  - doc: |-
+      unmarshalIntoMode is unmarshalInto, strictly when strict is set: a map that
+      repeats a key is refused before anything is decoded, a member no struct
+      field claims while it is.
+    name: unmarshalIntoMode
+    params: data []byte, v any, strict bool
     results: error
   - doc: |-
       pointerDecoder builds the decoder of pointer type t: nil sets the pointer
@@ -1275,6 +1407,65 @@ functions:
     name: appendBoolElem
     params: b []byte, x bool, _ int
     results: "[]byte, error"
+  - doc: |-
+      sortedStringKeys returns m's keys in byte-wise order — encoding/json's —
+      collected into buf, which a small map does not outgrow.
+    name: sortedStringKeys
+    params: m map[string]V, buf []string
+    results: "[]string"
+    typeParams: V any
+  - doc: |-
+      reorderPairs sorts the pairs written at b[start:] by their encoded keys and
+      rewrites them in that order, in place: the region is copied once into a
+      pooled scratch buffer and copied back pair by pair, so b never grows.
+    name: reorderPairs
+    params: b []byte, start int, spans []pairSpan
+    results: "[]byte"
+  - doc: |-
+      sortPairs orders spans by encoded key: an insertion sort for a small map,
+      which is most of them, and the general sort beyond.
+    name: sortPairs
+    params: region []byte, spans []pairSpan
+  - doc: |-
+      comparePairs orders two pairs by their keys, and two pairs whose keys
+      encode alike — an int8(1) and an int64(1) in one map[any]any, two NaN
+      float keys — by their values, so even those maps encode one way.
+    name: comparePairs
+    params: region []byte, x, y *pairSpan
+    results: int
+  - doc: |-
+      compareEncodedKeys orders two encoded keys: two strings byte-wise over
+      their payloads, as encoding/json orders keys; two integers by value,
+      whatever width each was written in; anything else by its encoding.
+    name: compareEncodedKeys
+    params: a, b []byte
+    results: int
+  - doc: strPayload returns the bytes of an encoded str, past its head.
+    name: strPayload
+    params: key []byte
+    results: "[]byte, bool"
+  - doc: intKey reads back an encoded integer key.
+    name: intKey
+    params: key []byte
+    results: wireInt, bool
+  - doc: |-
+      sizedIntKey reads a uint 8–64 or int 8–64 key through the header table:
+      the head's family and width, the body read big-endian at that width, and a
+      signed value sign-extended from it — the decoder's own path (beUint, widen).
+    name: sizedIntKey
+    params: c byte, body []byte
+    results: wireInt, bool
+  - doc: |-
+      signedKey places a signed value: a negative one apart, a non-negative one
+      with the unsigned values it equals.
+    name: signedKey
+    params: n int64
+    results: wireInt
+  - doc: |-
+      markKey records, for the key written at region[span.key:span.value],
+      whether it is a string and the integer its first bytes make.
+    name: markKey
+    params: region []byte, span *pairSpan
   - doc: encoderFor returns the cached encoder of t, building it on first use.
     name: encoderFor
     params: t reflect.Type
@@ -1440,6 +1631,20 @@ functions:
     name: newEncoder
     params: w io.Writer
     results: "*msgpackEncoder"
+  - doc: encodeExt writes an Ext.
+    name: encodeExt
+    params: b []byte, v reflect.Value, _ int
+    results: "[]byte, error"
+  - doc: appendExt appends e in the shortest extension form its payload allows.
+    name: appendExt
+    params: b []byte, e Ext
+    results: "[]byte, error"
+  - doc: |-
+      decodeExtValue decodes into an Ext: any extension, its type and a copy of
+      its payload; nil zeroes it.
+    name: decodeExtValue
+    params: d *decodeState, v reflect.Value
+    results: error
   - doc: |-
       marshalFault is the MARSHAL_FAILED error for an encode failure the codec
       detected itself.
@@ -1480,6 +1685,72 @@ functions:
       side: on encode it is usually a cycle, on decode a hostile input.
     name: depthExceeded
     params: encode bool
+    results: error
+  - doc: |-
+      boundFault is input refused for a size or a depth bound (#894): sentinel —
+      SizeExceeded or DepthExceeded — is the origin, so its family reason is what
+      codec.IsTooLarge and codec.IsTooDeep find, and UNMARSHAL_FAILED joins the
+      trail, so a test for any decoding failure by code still matches.
+    name: boundFault
+    params: sentinel *errs.Error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      zeroTest returns omitzero's test for a field of type t — encoding/json's
+      since Go 1.24 (#1103): the type's own IsZero when it declares one, reached
+      through the value's address when only the pointer does, and reflect's zero
+      value test otherwise. A nil pointer or interface is zero without asking it.
+    name: zeroTest
+    params: t reflect.Type
+    results: func(reflect.Value) bool
+  - doc: |-
+      zeroThroughReference is omitzero for a pointer or interface type declaring
+      IsZero: nil, or an interface holding a nil pointer, is zero; otherwise the
+      method decides.
+    name: zeroThroughReference
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      zeroByMethod calls the value's own IsZero. A value reflection may not hand
+      out — reached through an unexported embedding — is judged by its bits.
+    name: zeroByMethod
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      zeroByAddress calls IsZero through the value's address, or through an
+      addressable copy when the value has none, as encoding/json does.
+    name: zeroByAddress
+    params: v reflect.Value
+    results: bool
+  - name: NewStrict
+    results: codec.Codec
+  - doc: |-
+      addKey records key among the keys one map has shown — seen while they are
+      at most strictLinearKeys, compared pairwise on the caller's stack, many once
+      indexed by their setKey — and reports whether the map already held it. It
+      takes and returns the two by value, so seen's array stays the caller's
+      stack array.
+    name: addKey
+    params: seen []normKey, many map[string]struct{}, key normKey
+    results: kept []normKey, indexed map[string]struct{}, dup bool
+  - doc: indexKey inserts key into many and reports whether it was there already.
+    name: indexKey
+    params: many map[string]struct{}, key *normKey
+    results: bool
+  - doc: normalKey reads an encoded key in place.
+    name: normalKey
+    params: key []byte
+    results: normKey
+  - doc: binPayload returns the bytes of an encoded bin, past its head.
+    name: binPayload
+    params: key []byte
+    results: "[]byte, bool"
+  - doc: duplicateKey is the strict refusal of a repeated map key.
+    name: duplicateKey
+    params: at int
+    results: error
+  - doc: unknownMember is the strict refusal of a key no struct field claims.
+    name: unknownMember
+    params: at int, t reflect.Type
     results: error
   - doc: layoutOf returns the cached layout of struct type t, building it once.
     name: layoutOf
@@ -1533,12 +1804,14 @@ imports:
   binary: encoding/binary
   bufio: bufio
   bytes: bytes
+  cmp: cmp
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   coremsgpack: github.com/kitsunium/sdk/internal/core/data/codec/msgpack
   encoding: encoding
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   io: io
+  maps: maps
   math: math
   reflect: reflect
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
@@ -1619,6 +1892,9 @@ types:
       - doc: depth counts the containers currently open.
         name: depth
         type: int
+      - doc: "strict refuses a struct member no field claims (NewStrict, #1106)."
+        name: strict
+        type: bool
     kind: struct
     methods:
       - doc: truncated is the failure for an input that ends inside a value.
@@ -1769,6 +2045,30 @@ types:
         params: h header
         recv: d *decodeState
         results: time.Time, error
+      - doc: |-
+          checkKeys walks the value at the cursor and refuses a map holding two keys
+          that decode to the same Go key. It decodes nothing.
+        name: checkKeys
+        recv: d *decodeState
+        results: error
+      - doc: checkElements walks an array's elements.
+        name: checkElements
+        params: h header
+        recv: d *decodeState
+        results: error
+      - doc: checkMapKeys walks a map's pairs, refusing a key seen before in it.
+        name: checkMapKeys
+        params: h header
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          checkPairKey consumes a map pair's key and refuses it when the map already
+          holds it, naming where — never the key. It returns seen and many as addKey
+          leaves them.
+        name: checkPairKey
+        params: seen []normKey, many map[string]struct{}
+        recv: d *decodeState
+        results: kept []normKey, indexed map[string]struct{}, err error
     name: decodeState
   - doc: mapDecoder decodes a map pair by pair, through reflection.
     fields:
@@ -1944,6 +2244,9 @@ types:
       - doc: done latches once the stream has ended, cleanly or not.
         name: done
         type: bool
+      - doc: strict decodes every value as NewStrict's Unmarshal does.
+        name: strict
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -2088,6 +2391,46 @@ types:
         type: byte
     kind: struct
     name: lengthForms
+  - doc: pairSpan locates one encoded pair, relative to the start of the first.
+    fields:
+      - doc: |-
+          prefix is a string key's first prefixBytes payload bytes, big-endian
+          and zero-padded: two string keys whose prefixes differ are ordered by
+          one integer comparison.
+        name: prefix
+        type: uint64
+      - doc: key is where the pair's key starts.
+        name: key
+        type: int
+      - doc: value is where the pair's value starts, and its key ends.
+        name: value
+        type: int
+      - doc: end is where the pair ends.
+        name: end
+        type: int
+      - doc: str is set when the key is a string, and prefix holds its start.
+        name: str
+        type: bool
+    kind: struct
+    name: pairSpan
+  - doc: |-
+      wireInt is an encoded integer key, read back for ordering: neg holds a
+      negative value as its int64 bits, otherwise u is the value.
+    fields:
+      - doc: u is the value, or a negative value's two's-complement bits.
+        name: u
+        type: uint64
+      - doc: neg is set for a value below zero.
+        name: neg
+        type: bool
+    kind: struct
+    methods:
+      - doc: compare orders two integer keys by value.
+        name: compare
+        params: b wireInt
+        recv: a wireInt
+        results: int
+    name: wireInt
   - doc: |-
       encodeFunc appends the encoding of v to b. depth counts the levels already
       entered; a container, a pointer or an interface checks it before going one
@@ -2158,22 +2501,20 @@ types:
         recv: m *mapEncoder
         results: "[]byte, error"
       - doc: |-
-          encodePairsInPlace writes every pair through two values reused for the whole
-          map, so a pair costs no allocation.
-        name: encodePairsInPlace
-        params: b []byte, iter *reflect.MapIter, depth int
+          holders returns the two values a map handed out normally is read into for
+          its whole walk, so a pair costs no allocation; a map reached through an
+          unexported field gets none and is read through the iterator's copies.
+        name: holders
+        params: v reflect.Value
         recv: m *mapEncoder
-        results: "[]byte, error"
-      - doc: encodePairsCopied writes every pair from the iterator's own copies.
-        name: encodePairsCopied
-        params: b []byte, iter *reflect.MapIter, depth int
-        recv: m *mapEncoder
-        results: "[]byte, error"
-      - doc: encodePair writes one key and its value.
-        name: encodePair
-        params: b []byte, key, val reflect.Value, depth int
-        recv: m *mapEncoder
-        results: "[]byte, error"
+        results: keyHolder, elemHolder reflect.Value
+      - doc: |-
+          pair returns the iterator's current key and value: read into the holders
+          when there are any, else the iterator's own copies.
+        name: pair
+        params: iter *reflect.MapIter, keyHolder, elemHolder reflect.Value
+        recv: "*mapEncoder"
+        results: key, elem reflect.Value
     name: mapEncoder
   - doc: fieldEncoder is one struct field with its encoder.
     fields:
@@ -2186,11 +2527,15 @@ types:
       - doc: empty decides omitempty.
         name: empty
         type: emptyFunc
+      - doc: zero decides omitzero; nil when the field does not carry it.
+        name: zero
+        type: emptyFunc
     kind: struct
     methods:
       - doc: |-
           omitted reports whether the field is left out of struct value v: when it is
-          empty under omitempty, or when it sits behind a nil embedded pointer.
+          empty under omitempty, zero under omitzero — either is enough, as
+          encoding/json combines them — or when it sits behind a nil embedded pointer.
         name: omitted
         params: v reflect.Value
         recv: f *fieldEncoder
@@ -2259,6 +2604,63 @@ types:
         recv: "*msgpackEncoder"
         results: error
     name: msgpackEncoder
+  - fields:
+      - doc: Data is the payload, opaque to the codec.
+        name: Data
+        type: "[]byte"
+      - doc: Type is the extension type.
+        name: Type
+        type: int8
+    kind: struct
+    name: Ext
+  - doc: |-
+      strictCodec is the instance NewStrict returns: the registered codec's
+      encoding, and a decode that reads one document one way or not at all.
+    fields:
+      - name: ""
+        role: embedded
+        type: msgpackCodec
+    kind: struct
+    methods:
+      - doc: |-
+          Unmarshal parses data like the registered codec, refusing a repeated key
+          before anything is decoded and an unknown member while it is.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: c *strictCodec
+        results: error
+      - doc: NewDecoder wraps r in a strict streaming codec.Decoder.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*strictCodec"
+        results: codec.Decoder
+    name: strictCodec
+  - doc: |-
+      normKey is an encoded key in the form two keys that decode to the same Go
+      key share — a str or a bin by its bytes, an integer by its value, anything
+      else by its encoding — read in place, without a copy.
+    fields:
+      - doc: content is the text's bytes, or the encoding of a raw key.
+        name: content
+        type: "[]byte"
+      - doc: n is an integer key's value.
+        name: "n"
+        type: wireInt
+      - doc: class is the key's class.
+        name: class
+        type: byte
+    kind: struct
+    methods:
+      - doc: equal reports whether two keys decode to the same Go key.
+        name: equal
+        params: o *normKey
+        recv: k *normKey
+        results: bool
+      - doc: setKey is k as a map key, for the indexed set of a large map.
+        name: setKey
+        recv: k *normKey
+        results: string
+    name: normKey
   - doc: structField is one key of a struct's map form.
     fields:
       - doc: typ is the field's Go type.
@@ -2275,6 +2677,9 @@ types:
         type: "[]int"
       - doc: omitEmpty leaves the field out when it is empty.
         name: omitEmpty
+        type: bool
+      - doc: omitZero leaves the field out when it holds its type's zero value.
+        name: omitZero
         type: bool
     kind: struct
     name: structField
@@ -2294,7 +2699,9 @@ types:
       - doc: asArray encodes the struct as an array.
         name: asArray
         type: bool
-      - doc: hasOmitEmpty is set when any field may be left out.
+      - doc: |-
+          hasOmitEmpty is set when any field may be left out, by omitempty or
+          by omitzero.
         name: hasOmitEmpty
         type: bool
     kind: struct
@@ -2540,6 +2947,11 @@ vars:
         name: textMarshalerType
         value: reflect.TypeFor[encoding.TextMarshaler]()
     name: encoders
+  - doc: extType is Ext, matched exactly before its kind is looked at.
+    items:
+      - name: extType
+        value: reflect.TypeFor[Ext]()
+    name: extType
   - doc: familyNames is what a failure calls each family.
     items:
       - name: familyNames

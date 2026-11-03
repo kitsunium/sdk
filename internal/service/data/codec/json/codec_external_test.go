@@ -53,7 +53,7 @@ func TestMarshal(t *testing.T) {
 	}
 	tests := []tc{
 		{"round-trip success", sampleEvent{ID: "x", Severity: 1}, ""},
-		{"unsupported input surfaces MARSHAL_FAILED", make(chan int), "MARSHAL_FAILED"},
+		{"a channel is the family's VALUE_INVALID (#1101)", make(chan int), "VALUE_INVALID"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

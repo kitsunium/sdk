@@ -17,7 +17,8 @@ func (f *netFactory) Decode(raw map[string]any) (cfg writer.Config, err error) {
 	//: surfaces the redacted sentinel naming only the protocol, never a value.
 	if !decodeStr(raw, "address", &c.Address) || c.Address == "" ||
 		!decodeLevelKey(raw, &c.MinLevel) ||
-		!decodeIntKey(raw, "buffer_size", &c.BufferSize) {
+		!decodeIntKey(raw, "buffer_size", &c.BufferSize) ||
+		!decodeBoolKey(raw, "http_batch_ndjson", &c.HTTPBatchNDJSON) {
 		//: redacted: a malformed value never reaches the error.
 		return nil, f.invalid()
 	}
@@ -83,6 +84,24 @@ func decodeLevelKey(raw map[string]any, dst *level.Level) bool {
 	//: apply the parsed floor.
 	*dst = lvl
 	//: mapped cleanly.
+	return true
+}
+
+// decodeBoolKey maps an optional boolean key onto dst. An absent key leaves
+// dst untouched; a present non-boolean value reports false.
+func decodeBoolKey(raw map[string]any, key string, dst *bool) bool {
+	v, present := raw[key]
+	//: absent: the zero value stands.
+	if !present {
+		return true
+	}
+	b, ok := v.(bool)
+	//: present but not a boolean: refused.
+	if !ok {
+		return false
+	}
+	*dst = b
+	//: mapped.
 	return true
 }
 

@@ -44,45 +44,32 @@ func (*protobufCodec) Extensions() []string {
 }
 
 // Marshal encodes v as Protobuf wire bytes. v must satisfy proto.Message;
-// anything else returns PROTOBUF_MARSHAL_FAILED.
-func (*protobufCodec) Marshal(v any) (encoded []byte, err error) {
-	//: Protobuf is schema-bound — the value must be a generated message.
-	msg, ok := v.(proto.Message)
-	//: a non-message value cannot be encoded.
-	if !ok {
-		//: surface the marshal sentinel for a non-message value.
-		return nil, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeProtobufMarshalFailed,
-			Reason:  "PROTOBUF_MARSHAL_FAILED",
-			Public:  "Protobuf encoding failed",
-			Private: "third-party/codec/protobuf.Marshal: value does not satisfy proto.Message",
-		})
+// anything else returns PROTOBUF_MARSHAL_FAILED. It is Append onto nil: proto
+// sizes the message, then fills one buffer of that size.
+func (c *protobufCodec) Marshal(v any) (encoded []byte, err error) {
+	out, aerr := c.Append(nil, v)
+	//: an empty message is an empty, non-nil slice, as proto.Marshal returns it.
+	if aerr == nil && out == nil {
+		//: zero bytes on the wire.
+		return []byte{}, nil
 	}
-	//: delegate to the library encoder.
-	out, merr := proto.Marshal(msg)
-	//: success fast-path.
-	if merr == nil {
-		//: hand back the wire bytes.
-		return out, nil
-	}
-	//: wrap the library failure with the dotted-quad code.
-	return nil, errs.Wrap(merr, errs.WrapParams{
-		Code:    CodeProtobufMarshalFailed,
-		Reason:  "PROTOBUF_MARSHAL_FAILED",
-		Public:  "Protobuf encoding failed",
-		Private: "third-party/codec/protobuf.Marshal: google.golang.org/protobuf/proto.Marshal returned an error",
-	})
+	//: the one write path.
+	return out, aerr
 }
 
 // Unmarshal decodes Protobuf wire bytes into v after the size cap. v must
 // satisfy proto.Message.
 func (*protobufCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: CWE-400 defence — refuse oversized inputs before the decoder allocates.
 	if len(data) > maxProtobufBytes {
 		//: surface the size sentinel.
 		return errs.Wrap(nil, errs.WrapParams{
 			Code:    CodeProtobufSizeExceeded,
-			Reason:  "PROTOBUF_SIZE_EXCEEDED",
+			Reason:  "SIZE_EXCEEDED",
 			Public:  "Protobuf input exceeds size limit",
 			Private: "third-party/codec/protobuf.Unmarshal: len(data) > maxProtobufBytes",
 		})
@@ -115,19 +102,24 @@ func (*protobufCodec) Unmarshal(data []byte, v any) error {
 	})
 }
 
-// Append encodes v as Protobuf and appends it onto dst (optional Appender).
-// proto exposes no public append API, so the encode allocates; a failure leaves
-// dst untouched.
-func (c *protobufCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: snapshot dst so a failure restores the caller's buffer exactly.
-	origLen := len(dst)
-	//: encode (Marshal already wraps any error with the Protobuf sentinel).
-	out, merr := c.Marshal(v)
-	//: propagate a marshal failure, leaving dst untouched.
-	if merr != nil {
-		//: restore dst to its original length.
-		return dst[:origLen], merr
+// Append encodes v as Protobuf and appends it onto dst (optional Appender),
+// through proto.MarshalOptions.MarshalAppend: a dst with room for the message
+// is written in place, with no allocation. A failure leaves dst untouched.
+func (*protobufCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: Protobuf is schema-bound — the value must be a generated message.
+	msg, ok := v.(proto.Message)
+	//: a non-message value cannot be encoded.
+	if !ok {
+		//: dst untouched.
+		return dst, marshalFailed(nil, "third-party/codec/protobuf.Append: value does not satisfy proto.Message")
 	}
-	//: append the encoded message onto dst.
-	return append(dst, out...), nil
+	//: proto's default options: the bytes proto.Marshal writes.
+	out, merr := proto.MarshalOptions{}.MarshalAppend(dst, msg)
+	//: the library's failure.
+	if merr != nil {
+		//: dst's prior contents, never a torn tail.
+		return dst, marshalFailed(merr, "third-party/codec/protobuf.Append: proto.MarshalAppend returned an error")
+	}
+	//: the message after dst's contents.
+	return out, nil
 }

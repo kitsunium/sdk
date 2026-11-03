@@ -51,6 +51,9 @@ const (
 	typeValue
 	// typeBadNames: a tag names a key that is not valid UTF-8.
 	typeBadNames
+	// typeDuration: the type is time.Duration, written as its String() and
+	// read with time.ParseDuration (#1126).
+	typeDuration
 )
 
 // foldBufferBytes is the longest key folded to lower case on the stack.
@@ -104,6 +107,8 @@ type typeFlags uint8
 var (
 	// timeType is time.Time.
 	timeType = reflect.TypeFor[time.Time]()
+	// durationType is time.Duration.
+	durationType = reflect.TypeFor[time.Duration]()
 	// localDateType is LocalDate.
 	localDateType = reflect.TypeFor[LocalDate]()
 	// localTimeType is LocalTime.
@@ -185,6 +190,10 @@ func methodFlags(t reflect.Type) typeFlags {
 	//: time.Time and the three local types.
 	if t == timeType || t == localDateType || t == localTimeType || t == localDateTimeType {
 		flags |= typeSpecial
+	}
+	//: time.Duration, written as its text as yaml writes it.
+	if t == durationType {
+		flags |= typeDuration
 	}
 	//: the roles.
 	return flags

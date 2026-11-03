@@ -112,6 +112,9 @@ type quotedScan struct {
 	quote byte
 	// singleLine refuses a line break: the scalar is a key.
 	singleLine bool
+	// parent is the indentation of the block holding the scalar, -1 at the
+	// root: each of its continuation lines must be indented deeper.
+	parent int
 }
 
 // blockScalar is the state of a block scalar being read, as libyaml keeps it.
@@ -470,24 +473,24 @@ func appendFold(text []byte, breaks int) []byte {
 // scanSingleQuoted scans a single-quoted scalar from its opening quote: a
 // doubled quote is a quote, every other character is itself, and line breaks
 // fold. singleLine refuses a scalar that does not close on its line (a key).
-func (p *parser) scanSingleQuoted(singleLine bool) (string, error) {
+func (p *parser) scanSingleQuoted(parent int, singleLine bool) (string, error) {
 	//: the shared scanner.
-	return p.scanQuoted('\'', singleLine)
+	return p.scanQuoted('\'', parent, singleLine)
 }
 
 // scanDoubleQuoted scans a double-quoted scalar from its opening quote,
 // applying YAML's escapes and folding its line breaks. singleLine refuses a
 // scalar that does not close on its line (a key).
-func (p *parser) scanDoubleQuoted(singleLine bool) (string, error) {
+func (p *parser) scanDoubleQuoted(parent int, singleLine bool) (string, error) {
 	//: the shared scanner.
-	return p.scanQuoted('"', singleLine)
+	return p.scanQuoted('"', parent, singleLine)
 }
 
 // scanQuoted scans a quoted scalar whose opening quote is under the cursor.
 // One that closes on its line with nothing to unescape is the document's own
 // bytes; any other is built in p.text.
-func (p *parser) scanQuoted(quote byte, singleLine bool) (string, error) {
-	q := quotedScan{line: p.line, off: p.pos, quote: quote, singleLine: singleLine}
+func (p *parser) scanQuoted(quote byte, parent int, singleLine bool) (string, error) {
+	q := quotedScan{line: p.line, off: p.pos, quote: quote, singleLine: singleLine, parent: parent}
 	p.pos++
 	//: the common case, without a copy.
 	if text, ok := p.quotedFast(quote); ok {
@@ -609,7 +612,7 @@ func (p *parser) quotedEscape(q *quotedScan) error {
 	}
 	p.pos++
 	//: the next line's leading blanks go; empty lines stay.
-	return p.joinEscapedBreak(q.line, q.off)
+	return p.joinEscapedBreak(q)
 }
 
 // quotedBreak folds the line break under the cursor.
@@ -622,15 +625,15 @@ func (p *parser) quotedBreak(q *quotedScan) error {
 	p.text = p.text[:len(p.text)-q.blanks]
 	q.blanks = 0
 	//: fold to the next line with content.
-	return p.foldQuoted(q.line, q.off)
+	return p.foldQuoted(q)
 }
 
-// foldQuoted folds the line break under the cursor inside a quoted scalar
-// that opened at (line, off): a space when the next line follows directly,
-// one line feed per empty line otherwise, and the next line's leading blanks
-// dropped. A document marker or the end of the document inside the scalar is
-// refused.
-func (p *parser) foldQuoted(line, off int) error {
+// foldQuoted folds the line break under the cursor inside the quoted scalar
+// q: a space when the next line follows directly, one line feed per empty
+// line otherwise, and the next line's leading blanks dropped. A document
+// marker, the end of the document, or a line not indented deeper than the
+// block holding the scalar is refused.
+func (p *parser) foldQuoted(q *quotedScan) error {
 	breaks := 0
 	p.newline()
 	p.skipBlanks()
@@ -640,8 +643,8 @@ func (p *parser) foldQuoted(line, off int) error {
 		p.newline()
 		p.skipBlanks()
 	}
-	//: the end of the document, or a document marker.
-	if err := p.insideQuoted(line, off); err != nil {
+	//: the end of the document, a document marker, a shallow line.
+	if err := p.insideQuoted(q); err != nil {
 		//: refused.
 		return err
 	}
@@ -650,10 +653,10 @@ func (p *parser) foldQuoted(line, off int) error {
 	return nil
 }
 
-// joinEscapedBreak handles a line break escaped by "\" in a double-quoted
-// scalar: the break and the next line's leading blanks produce nothing, and
+// joinEscapedBreak handles a line break escaped by "\" in the double-quoted
+// scalar q: the break and the next line's leading blanks produce nothing, and
 // each empty line in between produces a line feed.
-func (p *parser) joinEscapedBreak(line, off int) error {
+func (p *parser) joinEscapedBreak(q *quotedScan) error {
 	p.newline()
 	p.skipBlanks()
 	//: empty lines after the escaped break are kept.
@@ -662,25 +665,44 @@ func (p *parser) joinEscapedBreak(line, off int) error {
 		p.newline()
 		p.skipBlanks()
 	}
-	//: the end of the document, or a document marker.
-	return p.insideQuoted(line, off)
+	//: the end of the document, a document marker, a shallow line.
+	return p.insideQuoted(q)
 }
 
-// insideQuoted refuses a quoted scalar opened at (line, off) whose next line
-// is the end of the document or a document marker.
-func (p *parser) insideQuoted(line, off int) error {
+// insideQuoted refuses the quoted scalar q when its next line, under the
+// cursor past its blanks, is the end of the document, a document marker, or
+// not indented deeper than the block holding the scalar (YAML 1.2.2 §7.3,
+// s-flow-line-prefix(n): a tab is not indentation).
+func (p *parser) insideQuoted(q *quotedScan) error {
 	//: the document ends inside the scalar.
 	if p.pos >= len(p.src) {
 		//: refused where it opened.
-		return p.errAt(line, off, "a quoted scalar is not closed")
+		return p.errAt(q.line, q.off, "a quoted scalar is not closed")
 	}
 	//: a document marker cannot sit inside a scalar.
 	if p.atDocumentMarker() {
 		//: refused where it is.
 		return p.errHere("a document marker inside a quoted scalar")
 	}
+	//: a continuation line belongs to the block holding the scalar.
+	if p.indentOf(p.lineStart) <= q.parent {
+		//: refused where the line's content starts.
+		return p.errHere("a quoted scalar's line must be indented deeper than the block holding it")
+	}
 	//: inside.
 	return nil
+}
+
+// indentOf counts the spaces opening the line that starts at lineStart: its
+// indentation, which a tab never adds to.
+func (p *parser) indentOf(lineStart int) int {
+	i := lineStart
+	//: spaces only.
+	for p.at(i) == ' ' {
+		i++
+	}
+	//: the count.
+	return i - lineStart
 }
 
 // escape appends the character the escape under the cursor (a backslash)

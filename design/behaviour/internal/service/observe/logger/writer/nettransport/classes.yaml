@@ -45,6 +45,14 @@ constants:
         type: string
         value: "\"application/json\""
     name: contentTypeJSON
+  - doc: |-
+      contentTypeNDJSON labels an HTTPBatchNDJSON body: newline-delimited JSON,
+      one record per line (#807).
+    items:
+      - name: contentTypeNDJSON
+        type: string
+        value: "\"application/x-ndjson\""
+    name: contentTypeNDJSON
   - doc: httpStatusFloor / httpStatusCeil bound the accepted 2xx success range.
     grouped: true
     items:
@@ -55,6 +63,16 @@ constants:
         type: int
         value: "300"
     name: httpStatusFloor
+  - doc: |-
+      streamBatchMax is how many queued records a network writer's drainer hands
+      its transport at once (#807): one writev(2) on tcp, the bytes on the stream
+      unchanged; one sendmmsg(2) on udp, a datagram per record; one NDJSON POST
+      on http under HTTPBatchNDJSON.
+    items:
+      - name: streamBatchMax
+        type: int
+        value: "16"
+    name: streamBatchMax
   - doc: |-
       protoTCP / protoUDP / protoHTTP are the canonical writer keys the three
       factories register under and the network identifiers passed to net.Dial.
@@ -73,35 +91,49 @@ files:
       - httpDrainMaxBytes
       - httpFallbackIdleTimeout
       - contentTypeJSON
+      - contentTypeNDJSON
       - httpStatusFloor
       - newConnSeam
-      - newHTTPSeam
+      - datagramBatch
+      - wholeRecords
+      - newHTTPSeams
+      - ndjsonBody
       - newHTTPClient
       - newHTTPTransport
       - postRecord
+      - postBody
       - swallowErr
     name: client.go
   - decls:
+      - streamBatchMax
       - NetConfig
       - compose
+      - composeSink
     name: config.go
   - decls:
       - (*netFactory).Decode
       - (*netFactory).invalid
       - decodeStr
       - decodeLevelKey
+      - decodeBoolKey
       - decodeIntKey
     name: decode.go
   - decls: []
     name: doc.go
   - decls:
       - sendFunc
+      - batchSendFunc
       - netSink
       - newNetSink
       - (*netSink).Write
+      - (*netSink).WriteBatch
+      - (*netSink).sendAll
       - (*netSink).Flush
       - (*netSink).Close
     name: netsink.go
+  - decls:
+      - _
+    name: netsink_compliance.go
   - decls:
       - protoTCP
       - WriterTCP
@@ -117,15 +149,31 @@ files:
 functions:
   - doc: |-
       newConnSeam dials network/addr (via dialer, or net.Dial when nil) and returns
-      a sendFunc that writes each record verbatim to the connection plus the
-      connection's Close as the closer. The encoder owns line framing; for udp the
-      datagram boundary is the frame, for tcp the encoder's trailing newline
-      delimits records — so send writes p as-is and stays 0 alloc.
+      a sendFunc that writes each record verbatim to the connection, the batch seam
+      and the connection's Close as the closer. The encoder owns line framing; for
+      udp the datagram boundary is the frame, for tcp the encoder's trailing newline
+      delimits records — so send writes p as-is and stays 0 alloc. sendBatch (#807)
+      writes a whole backlog with one net.Buffers.WriteTo — one writev(2) on a
+      *net.TCPConn, sequential Writes on a connection that does not take a vector —
+      and reports how many records landed whole. A udp datagram is a record and
+      gathering several would merge them, so udp's sendBatch is a
+      datagram.BatchSender instead: one sendmmsg(2) per backlog on Linux, each
+      record still its own datagram, one Write each elsewhere.
     name: newConnSeam
     params: network, addr string, dialer func(network, addr string) (net.Conn, error)
-    results: send sendFunc, closer func() error, err error
+    results: send sendFunc, sendBatch batchSendFunc, closer func() error, err error
+  - doc: datagramBatch adapts a datagram.BatchSender to the batch seam.
+    name: datagramBatch
+    params: sender *datagram.BatchSender
+    results: batchSendFunc
   - doc: |-
-      newHTTPSeam returns a sendFunc that POSTs each record to url (via client, or a
+      wholeRecords counts the payloads, from the first, that lie entirely within
+      the first n bytes of their concatenation.
+    name: wholeRecords
+    params: payloads [][]byte, n int64
+    results: int
+  - doc: |-
+      newHTTPSeams returns a sendFunc that POSTs each record to url (via client, or a
       timeout-bounded default when nil). Unlike the conn seam this allocates per
       send (request + reader) — HTTP egress is not a 0-alloc path; the 0-alloc
       invariant is the conn seam's.
@@ -136,9 +184,24 @@ functions:
       would reach whatever else shares that pool — for a client with a nil
       Transport, every other client in the process — and emptying a shared pool is
       the very call newHTTPTransport explains is not harmless.
-    name: newHTTPSeam
-    params: url string, client *http.Client
-    results: send sendFunc, closer func() error
+
+      When ndjson is true it also returns the batch call
+      HTTPBatchNDJSON opts into (#807): the backlog the drainer holds posted as
+      ONE application/x-ndjson body, a record per line — a record that does not
+      end its line gains the newline —, through the same client and verdict. A
+      refused POST delivered none of the batch. Without ndjson sendBatch is nil
+      and the drainer hands records one at a time, the wire unchanged. The body
+      is built fresh per batch: the transport may still be reading it after the
+      verdict, so it is never reused.
+    name: newHTTPSeams
+    params: url string, client *http.Client, ndjson bool
+    results: send sendFunc, sendBatch batchSendFunc, closer func() error
+  - doc: |-
+      ndjsonBody joins payloads into one NDJSON document, each record on its
+      own line.
+    name: ndjsonBody
+    params: payloads [][]byte
+    results: "[]byte"
   - doc: |-
       newHTTPClient builds the default client: bounded by timeout, refusing to
       follow a redirect, and riding a connection pool of its own.
@@ -207,6 +270,12 @@ functions:
     params: ctx context.Context, c *http.Client, url string, p []byte
     results: error
   - doc: |-
+      postBody is postRecord for a body of any content type: an NDJSON batch
+      under HTTPBatchNDJSON, one JSON record otherwise.
+    name: postBody
+    params: ctx context.Context, c *http.Client, url string, p []byte, contentType string
+    results: error
+  - doc: |-
       swallowErr intentionally drops a body-teardown error: the HTTP delivery
       verdict is already decided, and stacking a drain/close error on top would
       obscure it. It mirrors syslog's swallowDialClose so the error-discard audit
@@ -221,7 +290,13 @@ functions:
       close seams and a plain-data NetConfig — the composition order lives here,
       mirroring the dbsink and s3 factories.
     name: compose
-    params: network string, send sendFunc, closer func() error, cfg NetConfig
+    params: network string, send sendFunc, closer func() error, cfg *NetConfig
+    results: corelogger.Sink
+  - doc: |-
+      composeSink wraps base in the async ring, draining batchMax records at a
+      time, and the per-writer level floor.
+    name: composeSink
+    params: base *netSink, cfg *NetConfig, batchMax int
     results: corelogger.Sink
   - doc: |-
       decodeStr maps an optional string key onto dst, reporting false only when the
@@ -235,6 +310,12 @@ functions:
       a non-string or unknown level. An absent key leaves dst untouched.
     name: decodeLevelKey
     params: raw map[string]any, dst *level.Level
+    results: bool
+  - doc: |-
+      decodeBoolKey maps an optional boolean key onto dst. An absent key leaves
+      dst untouched; a present non-boolean value reports false.
+    name: decodeBoolKey
+    params: raw map[string]any, key string, dst *bool
     results: bool
   - doc: |-
       decodeIntKey maps an optional integer key onto dst, accepting the numeric
@@ -268,6 +349,7 @@ imports:
   context: context
   corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
   corenettransport: github.com/kitsunium/sdk/internal/core/observe/logger/writer/nettransport
+  datagram: github.com/kitsunium/sdk/internal/service/observe/logger/internal/datagram
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   http: net/http
   io: io
@@ -341,6 +423,16 @@ types:
           Code-only, like Dialer/HTTPClient — never decoded from a config blob.
         name: OnError
         type: func(err error)
+      - doc: |-
+          HTTPBatchNDJSON, when true, has the http writer post the records its
+          drainer holds — up to sixteen at a time — as ONE application/x-ndjson
+          body, one record per line, instead of one application/json POST per
+          record (#807). It changes the wire: the collector must read NDJSON
+          (Vector's and Fluent Bit's http sources do, Elasticsearch's _bulk does
+          not without action lines). A refused POST fails every record of its
+          batch. Ignored by tcp and udp. The zero value posts record by record.
+        name: HTTPBatchNDJSON
+        type: bool
     kind: struct
     name: NetConfig
   - doc: |-
@@ -351,6 +443,12 @@ types:
     kind: named
     name: sendFunc
     underlying: func(ctx context.Context, p []byte) error
+  - doc: |-
+      batchSendFunc ships several formatted records in one transport call and
+      reports how many of them, counted from the first, landed whole (#807).
+    kind: named
+    name: batchSendFunc
+    underlying: func(ctx context.Context, payloads [][]byte) (written int, err error)
   - doc: |-
       netSink is the unexported per-record sink behind core/observe/logger.Sink. It owns the
       transport's send + close seams and serialises both under mu so a Close never
@@ -364,6 +462,9 @@ types:
       - doc: send ships one record over the transport; captured at construction.
         name: send
         type: sendFunc
+      - doc: sendBatch ships a backlog in one call (tcp); nil sends record by record.
+        name: sendBatch
+        type: batchSendFunc
       - doc: |-
           closer releases the transport: net.Conn.Close for tcp/udp; for http, the
           idle connections of the pool the sink owns — the default client's — and
@@ -385,6 +486,20 @@ types:
         params: ctx context.Context, r corelogger.RecordEvent, p []byte
         recv: s *netSink
         results: n int, err error
+      - doc: |-
+          WriteBatch ships the backlog in one transport call when the seam has one —
+          one writev(2) on a tcp connection — and record by record otherwise, under
+          the mutex either way. It reports how many records landed whole; the first
+          failure ends the batch.
+        name: WriteBatch
+        params: ctx context.Context, _ []corelogger.RecordEvent, payloads [][]byte
+        recv: s *netSink
+        results: written int, err error
+      - doc: sendAll is WriteBatch's transport step. The caller holds s.mu.
+        name: sendAll
+        params: ctx context.Context, payloads [][]byte
+        recv: s *netSink
+        results: written int, err error
       - doc: |-
           Flush is a no-op: each record is shipped synchronously by Write, so nothing is
           buffered on this side (the async ring upstream owns buffering). It still
@@ -440,11 +555,17 @@ types:
           build wires the protocol seam (http client or a dialed conn) and composes the
           levelgate(async(netSink)) chain around it.
         name: build
-        params: c NetConfig
+        params: c *NetConfig
         recv: f *netFactory
         results: sink corelogger.Sink, err error
     name: netFactory
 vars:
+  - doc: netSink takes a backlog from the async drainer (#807).
+    items:
+      - name: _
+        type: corelogger.BatchSink
+        value: (*netSink)(nil)
+    name: _
   - doc: |-
       WriterTCP / WriterUDP / WriterHTTP are the registered factory singletons. The
       blank assignments run writer.Register at package load (no init()), mirroring

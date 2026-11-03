@@ -29,6 +29,41 @@ type loggerImpl struct {
 	// Logger over a sink its caller owns, and for every Logger derived with
 	// With or WithGroup — they share the writers and own none of them.
 	owned *onceCloser
+	// capturePC is whether the emission paths walk the stack for the caller's
+	// program counter: the handler's answer to corelogger.SourceRequester,
+	// asked once when the Logger is built (#1014). The walk was a fifth of an
+	// emit, paid on every record for an attribute only WithCaller renders.
+	capturePC bool
+}
+
+// over builds a Logger over h with trace, asking h once whether its records
+// must carry the caller's program counter.
+func over(h corelogger.Handler, trace corelogger.TraceContextSource) *loggerImpl {
+	//: the one place a loggerImpl is built, so capturePC is never stale.
+	return &loggerImpl{h: h, trace: trace, capturePC: wantsSource(h)}
+}
+
+// wantsSource reports h's answer to corelogger.SourceRequester; a Handler that
+// does not implement the port does not read RecordEvent.PC.
+func wantsSource(h corelogger.Handler) bool {
+	sr, ok := h.(corelogger.SourceRequester)
+	//: only an implementer can ask for the walk.
+	return ok && sr.WantsSource()
+}
+
+// callerPC is the application caller's program counter when this Logger's
+// handler reads it, zero otherwise. It is called directly by the three
+// emission paths (Log, LogAttrs, Builder.Send), so the caller is one frame
+// further up than callerSkipDepth counts from an emission path.
+func (l *loggerImpl) callerPC() uintptr {
+	//: the common case: nobody renders a source, nobody pays for the walk.
+	if !l.capturePC {
+		return 0
+	}
+	var pcs [1]uintptr
+	//: +1 for this helper's own frame.
+	runtime.Callers(callerSkipDepth+1, pcs[:])
+	return pcs[0]
 }
 
 // New wraps a core.Handler inside a core.Logger with no trace correlation.
@@ -52,7 +87,7 @@ func NewWithTraceContext(h corelogger.Handler, src corelogger.TraceContextSource
 		return nil, corelogger.HandlerNil
 	}
 	//: wrap the handler in the concrete loggerImpl.
-	return &loggerImpl{h: h, trace: src}, nil
+	return over(h, src), nil
 }
 
 // traceContext reads the span identity for ctx, or the invalid zero value when
@@ -78,11 +113,9 @@ func (l *loggerImpl) Enabled(ctx context.Context, lv level.Level) bool {
 // Log builds a RecordEvent at level lv and hands it to the Handler. Records
 // below the Handler's threshold are dropped before any formatting happens.
 func (l *loggerImpl) Log(ctx context.Context, lv level.Level, msg string, attrs ...corelogger.AttrValue) {
-	//: capture the application caller PC for handlers that resolve frames lazily.
-	var pcs [1]uintptr
-	runtime.Callers(callerSkipDepth, pcs[:])
-	//: build the RecordEvent once so we can pass it to Enabled and Handle.
-	r := corelogger.RecordEvent{Level: lv, Message: msg, PC: pcs[0], Attrs: attrs}
+	//: build the RecordEvent once so we can pass it to Enabled and Handle; the
+	//: caller PC only when the handler reads it (#1014).
+	r := corelogger.RecordEvent{Level: lv, Message: msg, PC: l.callerPC(), Attrs: attrs}
 	//: short-circuit when the handler reports disabled — avoids formatting work.
 	if !l.h.Enabled(ctx, r) {
 		//: nothing to emit at this level.
@@ -97,7 +130,7 @@ func (l *loggerImpl) Log(ctx context.Context, lv level.Level, msg string, attrs 
 // With returns a derived Logger whose emitted records carry the given attrs.
 func (l *loggerImpl) With(attrs ...corelogger.AttrValue) corelogger.Logger {
 	//: delegate attr accumulation to the Handler's WithAttrs contract.
-	return &loggerImpl{h: l.h.WithAttrs(attrs), trace: l.trace}
+	return over(l.h.WithAttrs(attrs), l.trace)
 }
 
 // Build is the package-level entry point that returns a chainable Builder
@@ -168,11 +201,9 @@ func (l *loggerImpl) Build(lv level.Level) Builder {
 // (typically from a caller-managed pool) flow through this entry point
 // without the per-call boxing cost.
 func (l *loggerImpl) LogAttrs(ctx context.Context, lv level.Level, msg string, attrs []corelogger.AttrValue) {
-	//: capture the application caller PC for handlers that resolve frames lazily.
-	var pcs [1]uintptr
-	runtime.Callers(callerSkipDepth, pcs[:])
-	//: build the RecordEvent once so we can pass it to Enabled and Handle.
-	r := corelogger.RecordEvent{Level: lv, Message: msg, PC: pcs[0], Attrs: attrs}
+	//: build the RecordEvent once so we can pass it to Enabled and Handle; the
+	//: caller PC only when the handler reads it (#1014).
+	r := corelogger.RecordEvent{Level: lv, Message: msg, PC: l.callerPC(), Attrs: attrs}
 	//: short-circuit when the handler reports disabled — avoids formatting work.
 	if !l.h.Enabled(ctx, r) {
 		//: nothing to emit at this level.
@@ -195,11 +226,11 @@ func (l *loggerImpl) WithGroup(name string) corelogger.Logger {
 		//: WithGroup returned must never close the writers under it.
 		if l.owned != nil {
 			//: the same handler and trace binding, owning nothing.
-			return &loggerImpl{h: l.h, trace: l.trace}
+			return &loggerImpl{h: l.h, trace: l.trace, capturePC: l.capturePC}
 		}
 		//: return the receiver unchanged — no extra wrapping.
 		return l
 	}
 	//: delegate group accumulation to the Handler's WithGroup contract.
-	return &loggerImpl{h: l.h.WithGroup(name), trace: l.trace}
+	return over(l.h.WithGroup(name), l.trace)
 }

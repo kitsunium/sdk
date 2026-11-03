@@ -1,6 +1,54 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: NewAppendWriter
+    steps:
+      - return: "&AppendWriter{bytes: dst, base: len(dst)}"
+  - of: AcquireAppendWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: AcquireAppendWriter
+        kind: self
+      - id: appendWriterPool.Get
+        kind: value
+    steps:
+      - bind: w
+        eval: appendWriterPool.Get()
+        to: appendWriterPool.Get
+      - set: w.bytes, w.base
+        value: dst, len(dst)
+      - return: w
+  - of: ReleaseAppendWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReleaseAppendWriter
+        kind: self
+      - id: appendWriterPool.Put
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: w == nil
+      - set: w.bytes, w.base
+        value: nil, 0
+      - eval: appendWriterPool.Put(w)
+        to: appendWriterPool.Put
+  - of: (*AppendWriter).Write
+    steps:
+      - set: w.bytes
+        value: append(w.bytes, p...)
+      - return: len(p), nil
+  - of: (*AppendWriter).Bytes
+    steps:
+      - return: w.bytes
+  - of: (*AppendWriter).Truncate
+    steps:
+      - set: w.bytes
+        value: w.bytes[:w.base]
+      - return: w.bytes
   - of: AcquireBuffer
     participants:
       - id: caller
@@ -12,6 +60,44 @@ sequences:
     steps:
       - return: bufferPool.Get()
         to: bufferPool.Get
+  - of: AcquireBufferSized
+    participants:
+      - id: caller
+        kind: actor
+      - id: AcquireBufferSized
+        kind: self
+      - id: bufferPool.Get
+        kind: value
+      - id: midClassPool.Get
+        kind: value
+      - id: topClassPool.Get
+        kind: value
+      - id: buf.Grow
+        kind: value
+    steps:
+      - var:
+          name: buf
+          type: "*bytes.Buffer"
+      - switch:
+          cases:
+            - case: hint <= MaxRetainedBufBytes
+              do:
+                - set: buf
+                  to: bufferPool.Get
+                  value: bufferPool.Get()
+            - case: hint <= midClassBytes
+              do:
+                - set: buf
+                  to: midClassPool.Get
+                  value: midClassPool.Get()
+            - default: true
+              do:
+                - set: buf
+                  to: topClassPool.Get
+                  value: topClassPool.Get()
+      - eval: buf.Grow(hint)
+        to: buf.Grow
+      - return: buf
   - of: ReleaseBuffer
     participants:
       - id: caller
@@ -27,6 +113,43 @@ sequences:
           when: buf == nil
       - eval: bufferPool.Put(buf)
         to: bufferPool.Put
+  - of: ReleaseBufferSized
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReleaseBufferSized
+        kind: self
+      - id: buf.Cap
+        kind: value
+      - id: bufferPool.Put
+        kind: value
+      - id: midClassPool.Put
+        kind: value
+      - id: topClassPool.Put
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: buf == nil
+      - switch:
+          cases:
+            - case: c <= MaxRetainedBufBytes
+              do:
+                - eval: bufferPool.Put(buf)
+                  to: bufferPool.Put
+            - case: c <= midClassBytes
+              do:
+                - eval: midClassPool.Put(buf)
+                  to: midClassPool.Put
+            - default: true
+              do:
+                - eval: topClassPool.Put(buf)
+                  to: topClassPool.Put
+          init:
+            bind: c
+            eval: buf.Cap()
+            to: buf.Cap
   - of: DetachBuffer
     participants:
       - id: caller

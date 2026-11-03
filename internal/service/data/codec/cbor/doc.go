@@ -24,7 +24,8 @@
 // thirty-two levels, a million chunks per string), before anything is
 // decoded: malformed input never touches the target. A text string must be
 // UTF-8 wherever it sits; tags 0 to 3 must enclose the type RFC 8949 gives
-// them. A tag the codec does not interpret is transparent.
+// them. A tag the codec does not interpret is transparent, except to a Tag,
+// which receives its number and its content.
 //
 // # Struct tags
 //
@@ -32,9 +33,25 @@
 // has no `cbor` tag, or its Go name; the options are omitempty, omitzero and
 // keyasint, and a blank field `_ struct{}` tagged `cbor:",toarray"` encodes
 // a struct as an array. Embedded structs follow encoding/json's rules. A
-// type implementing encoding.BinaryMarshaler is written as a byte string,
-// and one implementing encoding.BinaryUnmarshaler reads one; a type with
-// MarshalCBOR or UnmarshalCBOR writes or reads its own item.
+// time.Time field tagged `cbor:",time=tag1"` is written as tag 1: integer
+// seconds when it holds no fraction, float seconds when a double carries it
+// to the nanosecond, and otherwise as tag 0, its RFC 3339 text to the
+// nanosecond, so the instant is never rounded; `cbor:",time=tag0"` always
+// writes tag 0. Either reads back the same instant. A type implementing
+// encoding.BinaryMarshaler is written as a byte string, and one implementing
+// encoding.BinaryUnmarshaler reads one; a type with MarshalCBOR or
+// UnmarshalCBOR writes or reads its own item.
+//
+// # Tags and determinism
+//
+// A Tag writes its number and its content, for an application's own tags —
+// COSE (RFC 9052) and CWT (RFC 8392) among them; one numbered 0 to 3 must
+// enclose the type RFC 8949 gives the number. NewDeterministic returns a
+// fresh instance writing RFC 8949 §4.2.1's core deterministic encoding —
+// the registered codec's, every float in the shortest of half, single and
+// double that holds it exactly — and reading only that encoding, every tag
+// but a bignum decoded into an interface as a Tag, so a document decodes and
+// encodes back to its own bytes.
 //
 // Package cbor — the decoder's walk over input the validator has accepted.
 //
@@ -64,6 +81,9 @@
 //	tag 0 or 1                time.Time
 //	tag 2 or 3 (bignum)       big.Int
 //	any other tag             its content, as though untagged
+//
+// NewDeterministic's instance keeps every tag but a bignum: a Tag holding
+// its number and its content, decoded by the same rules.
 //
 // An unassigned simple value has no Go value and is refused, as RFC 8949
 // §5.4 allows a decoder to; so is a map key Go cannot hash — a byte string,
@@ -128,8 +148,14 @@
 // every width, floats and strings, each answering omitempty for its kind.
 //
 // Package cbor — the kind encoders of the types with an encoding of their
-// own: time.Time as Unix seconds, a type's MarshalCBOR verbatim once checked,
-// and a BinaryMarshaler as a byte string.
+// own: time.Time as Unix seconds — or as tag 1 or tag 0 under the time
+// option —, a Tag as its number and content, a type's MarshalCBOR verbatim
+// once checked, and a BinaryMarshaler as a byte string.
+//
+// Package cbor — the deterministic instance: RFC 8949 §4.2.1's core
+// deterministic encoding written, every float in its shortest exact form,
+// and the same encoding required of what is read, checked in one walk over
+// the validated item before anything is decoded.
 //
 // Package cbor — structs on the encoding side: a map keyed by field name (or
 // by integer, keyasint), or an array (toarray); omitempty and omitzero.

@@ -20,6 +20,29 @@ packages:
             name: CodeCSVValueInvalid
             value: "0x00_03_08_03"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeCSVHeaderMismatch identifies a header that does not fit the struct a
+              table is read into: a column the struct requires is missing, or one it
+              maps appears twice.
+            name: CodeCSVHeaderMismatch
+            value: "0x00_03_08_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCSVCellInvalid identifies a cell that does not convert to the type of
+              the field its column maps to: a number or a bool that does not parse, a
+              text a type's UnmarshalText refuses.
+            name: CodeCSVCellInvalid
+            value: "0x00_03_08_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCSVOptionsInvalid identifies Options NewWithOptions refuses: a
+              delimiter encoding/csv cannot use.
+            name: CodeCSVOptionsInvalid
+            value: "0x00_03_08_06"
+        type: errs.Code
     doc: |-
       Package csv declares the error codes and the sentinels of the CSV codec,
       internal/service/data/codec/csv — range 0.3.8.* (ADR 0005
@@ -59,10 +82,44 @@ packages:
             private: "service/data/codec/csv: Marshal/Unmarshal called with non-[][]string argument"
             public: CSV codec requires a [][]string value
             reason: VALUE_INVALID
+          - code: CodeCSVHeaderMismatch
+            doc: |-
+              HeaderMismatch fires when a header lacks a column the struct requires, or
+              names one it maps twice. Its fields name the column as the struct names
+              it, never a cell of the input.
+            http: 400
+            name: HeaderMismatch
+            private: "service/data/codec/csv: the header does not fit the struct; the fields name the problem and the column"
+            public: CSV header does not match the expected columns
+            reason: HEADER_MISMATCH
+          - code: CodeCSVCellInvalid
+            doc: |-
+              CellInvalid fires when a cell does not convert to its field's type. Its
+              fields name the record and the column, never the cell.
+            http: 400
+            name: CellInvalid
+            private: "service/data/codec/csv: a cell does not convert to its field's type; the fields name the record and the column"
+            public: CSV cell does not convert to its column's type
+            reason: CELL_INVALID
+          - code: CodeCSVOptionsInvalid
+            doc: OptionsInvalid fires when NewWithOptions is given a delimiter encoding/csv cannot use.
+            name: OptionsInvalid
+            private: "service/data/codec/csv: NewWithOptions was given an invalid delimiter"
+            public: CSV options are invalid
+            reason: OPTIONS_INVALID
   - doc: |-
       Package csv wraps encoding/csv as a codec.Codec implementation.
       The CSV format serialises a matrix of strings; the codec accepts
       [][]string for Marshal and writes into *[][]string on Unmarshal.
+
+      A slice of structs is a table too (#902): Marshal writes a header from the
+      columns its fields map — a csv:"name" tag, else the Go name; "-" skips a
+      field, ",optional" lets a file lack its column — then one record per row,
+      and Unmarshal into a pointer to such a slice reads the header and converts
+      each cell to its field: strings, integers, floats, bools, and any type that
+      reads and writes itself as text (time.Time in RFC 3339). Unknown columns
+      are ignored. It is a codec.StreamingCodec: one record per Decode and
+      Encode, a []string or a struct.
     functions:
       - doc: |-
           New returns the CSV singleton with escapeFormulas disabled. This preserves
@@ -84,9 +141,47 @@ packages:
         name: NewWithEscape
         out:
           - type: codec.Codec
+      - doc: |-
+          NewWithOptions returns a fresh CSV codec configured by o — the delimiter,
+          the formula mitigation, and whether a table of structs has a header row.
+          A delimiter encoding/csv refuses is OPTIONS_INVALID. The returned codec is
+          not registered: Format("csv") keeps resolving to the default singleton.
+        in:
+          - name: o
+            type: Options
+        name: NewWithOptions
+        out:
+          - name: c
+            type: codec.Codec
+          - name: err
+            type: error
     imports:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/csv
+    types:
+      - doc: |-
+          Options configure a CSV codec built by NewWithOptions. The zero Options is
+          the registered codec's behaviour.
+        name: Options
+        struct:
+          fields:
+            - doc: |-
+                Escape turns on the OWASP CSV-injection mitigation (CWE-1236) when
+                writing: a cell starting with '=', '+', '-', '@', TAB or CR is prefixed
+                with a single quote so a spreadsheet shows it as text. See NewWithEscape.
+              name: Escape
+              type: bool
+            - doc: |-
+                Comma is the field delimiter; zero means ','. It must be a valid rune
+                other than '"', '\r', '\n' and U+FFFD, as encoding/csv requires.
+              name: Comma
+              type: rune
+            - doc: |-
+                NoHeader writes and reads a table of structs without a header row: the
+                columns are the struct's fields, in order. It does not change a
+                [][]string, whose records are all data.
+              name: NoHeader
+              type: bool
     variables:
       - blockDoc: |-
           Package-level vars: the Marshal-buffer pool plus the singleton
@@ -114,9 +209,11 @@ packages:
       	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/csv"
 
       The codec is the standard library's encoding/csv over RFC 4180 records: its
-      native value is a [][]string, the rows of a table. Through the codec
-      package's Marshal any other value is carried as its JSON, in the one cell
-      of a one-column table, and read back the same way.
+      native value is a [][]string, the rows of a table, or a slice of structs —
+      a header from the fields' csv tags, then one record per row, each cell
+      converted to its field. Through the codec package's Marshal any other value
+      is carried as its JSON, in the one cell of a one-column table, and read back
+      the same way. It streams: one record per Decode and Encode.
 
       Everything that dispatches through the registry by format name then
       reads and writes it: the codec package's Marshal and Unmarshal,
@@ -134,7 +231,10 @@ packages:
 
       	CodeMarshalFailed    0.3.8.1  encoding/csv refused to write the records
       	CodeUnmarshalFailed  0.3.8.2  the input is not CSV encoding/csv reads
-      	CodeValueInvalid     0.3.8.3  the value or the target is not a [][]string
+      	CodeValueInvalid     0.3.8.3  the value or the target is not a [][]string or a table of structs
+      	CodeHeaderMismatch   0.3.8.4  the header lacks a required column, or repeats one
+      	CodeCellInvalid      0.3.8.5  a cell does not convert to its field's type
+      	CodeOptionsInvalid   0.3.8.6  NewWithOptions was given an invalid delimiter
 
       No error message quotes the input.
     facade:
@@ -159,6 +259,26 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_08_03"
+          - doc: |-
+              CodeHeaderMismatch is 0.3.8.4: the header lacks a column the struct
+              requires, or repeats one it maps.
+            name: CodeHeaderMismatch
+            reexport: corecsv.CodeCSVHeaderMismatch
+            type: errs.Code
+            typed: true
+            value: "0x00_03_08_04"
+          - doc: "CodeCellInvalid is 0.3.8.5: a cell does not convert to its field's type."
+            name: CodeCellInvalid
+            reexport: corecsv.CodeCSVCellInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_08_05"
+          - doc: "CodeOptionsInvalid is 0.3.8.6: options with a delimiter encoding/csv cannot use."
+            name: CodeOptionsInvalid
+            reexport: corecsv.CodeCSVOptionsInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_08_06"
         doc: The error codes, range 0.3.8.*, declared in the core (ADR 0160).
       - doc: "The sentinels, for errors.Is: each carries the code of the same name."
         var:
@@ -173,6 +293,18 @@ packages:
           - doc: ValueInvalid is the sentinel of [CodeValueInvalid].
             name: ValueInvalid
             reexport: corecsv.ValueInvalid
+            type: "*errs.Error"
+          - doc: HeaderMismatch is the sentinel of [CodeHeaderMismatch].
+            name: HeaderMismatch
+            reexport: corecsv.HeaderMismatch
+            type: "*errs.Error"
+          - doc: CellInvalid is the sentinel of [CodeCellInvalid].
+            name: CellInvalid
+            reexport: corecsv.CellInvalid
+            type: "*errs.Error"
+          - doc: OptionsInvalid is the sentinel of [CodeOptionsInvalid].
+            name: OptionsInvalid
+            reexport: corecsv.OptionsInvalid
             type: "*errs.Error"
     imports:
       corecsv: github.com/kitsunium/sdk/internal/core/data/codec/csv

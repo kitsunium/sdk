@@ -167,6 +167,78 @@ func TestDecompressPreservesDstPrefix(t *testing.T) {
 	}
 }
 
+// ceilingDstCase is one dst a payload under the ceiling must land on: its
+// prefix length and its spare capacity.
+type ceilingDstCase struct {
+	name   string
+	prefix int
+	spare  int
+}
+
+// TestTheCeilingCountsThePayloadNotDst pins kitsunium/sdk#1163's second line,
+// for zstd and s2: the ceiling bounds the decoded payload alone, so a dst
+// already LONGER than the ceiling still accepts a payload under it — with the
+// spare capacity to hold it, where the decode lands in place, and without,
+// where the result is a new array — and the caller's prefix is intact either
+// way. The zstd library counts len(dst) into its own budget, which is why the
+// decode is handed dst's zero-length tail; a decode handed dst itself fails
+// the "longer than the ceiling" rows.
+func TestTheCeilingCountsThePayloadNotDst(t *testing.T) {
+	t.Parallel()
+	const ceiling int64 = 4096
+	z, zerr := tptransform.NewZstdCompressor(tptransform.ZstdFastest, ceiling)
+	if zerr != nil {
+		t.Fatalf("build zstd: %v", zerr)
+	}
+	t.Cleanup(func() { closeChecked(t, z) })
+	s, serr := tptransform.NewS2Compressor(ceiling)
+	if serr != nil {
+		t.Fatalf("build s2: %v", serr)
+	}
+	plain := bytes.Repeat([]byte("under the ceiling "), 200)[:3000]
+	dsts := []ceilingDstCase{
+		{"nil", 0, 0},
+		{"prefix-with-room", 64, 3000},
+		{"prefix-without-room", 64, 0},
+		{"longer-than-the-ceiling-with-room", int(ceiling) + 100, 3000},
+		{"longer-than-the-ceiling-without-room", int(ceiling) + 100, 10},
+	}
+	for _, sc := range []scheme{
+		{tptransform.ZstdAlgorithm, z.Compress, z.Decompress},
+		{tptransform.S2Algorithm, s.Compress, s.Decompress},
+	} {
+		encoded, cerr := sc.compress(nil, plain)
+		if cerr != nil {
+			t.Fatalf("%s: compress: %v", sc.algo, cerr)
+		}
+		for _, dc := range dsts {
+			t.Run(string(sc.algo)+"/"+dc.name, func(t *testing.T) {
+				t.Parallel()
+				var dst []byte
+				//: nil stays nil: the case without a dst at all.
+				if dc.prefix+dc.spare > 0 {
+					dst = make([]byte, dc.prefix, dc.prefix+dc.spare)
+					for i := range dst {
+						dst[i] = byte(i)
+					}
+				}
+				want := append(slices.Clone(dst), plain...)
+				out, derr := sc.decompress(dst, encoded)
+				if derr != nil {
+					t.Fatalf("a %d-byte payload under a %d-byte ceiling was refused with a %d-byte dst: %v", len(plain), ceiling, len(dst), derr)
+				}
+				if !bytes.Equal(out, want) {
+					t.Fatalf("got %d bytes, want the %d-byte prefix and the %d-byte payload", len(out), len(dst), len(plain))
+				}
+				//: a payload that fits the spare capacity lands in dst's array.
+				if dc.prefix > 0 && dc.spare >= len(plain) && &out[0] != &dst[0] {
+					t.Fatal("a payload that fitted dst's spare capacity was decoded into another array")
+				}
+			})
+		}
+	}
+}
+
 // TestSchemesAreRegistered proves the blank-import contract: importing this
 // package makes both algorithms resolvable through the core registry, under the
 // exact names the constants declare.

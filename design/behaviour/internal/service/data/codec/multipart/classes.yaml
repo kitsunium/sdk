@@ -74,26 +74,52 @@ constants:
         value: "`/\\`"
     name: pathSeparators
   - doc: |-
-      partHeaderFields is the number of headers a part carries at most —
-      Content-Disposition plus an optional Content-Type. Used to size the map in
-      one shot rather than letting it grow.
-    items:
-      - name: partHeaderFields
-        type: int
-        value: "2"
-    name: partHeaderFields
-  - doc: |-
       forbiddenHeaderOctets are the three octets no part header value may carry.
-      mime/multipart.Writer.CreatePart writes every header value verbatim, so a CR
-      or an LF inside one does not corrupt the field — it ENDS the line, and the
-      rest of the value is read back as a header line of its own or, after an
-      empty line, as the start of the body. NUL ends the value for any consumer
-      written in C. The same three octets ADR 0064's mail header gate refuses.
+      A header value is written verbatim, so a CR or an LF inside one does not
+      corrupt the field — it ENDS the line, and the rest of the value is read back
+      as a header line of its own or, after an empty line, as the start of the
+      body. NUL ends the value for any consumer written in C. The same three
+      octets ADR 0064's mail header gate refuses.
     items:
       - name: forbiddenHeaderOctets
         type: string
         value: "\"\\r\\n\\x00\""
     name: forbiddenHeaderOctets
+  - doc: |-
+      The framing the encoder writes, byte for byte what mime/multipart.Writer
+      writes: its CreatePart and Close are the oracle the tests hold it to (#907).
+    grouped: true
+    items:
+      - doc: crlf ends every line of the framing.
+        name: crlf
+        type: string
+        value: "\"\\r\\n\""
+      - doc: dispositionOpen opens a part's Content-Disposition header.
+        name: dispositionOpen
+        type: string
+        value: "`Content-Disposition: form-data; name=\"`"
+      - doc: filenameOpen opens the filename parameter of a file part.
+        name: filenameOpen
+        type: string
+        value: "`; filename=\"`"
+      - doc: contentTypeOpen opens a part's optional Content-Type header.
+        name: contentTypeOpen
+        type: string
+        value: "\"Content-Type: \""
+      - doc: |-
+          headScratchBytes sizes the buffer a part's delimiter and header block
+          are built in, once per encoder: a form field's name and a short
+          filename fit, a longer header grows it once.
+        name: headScratchBytes
+        type: int
+        value: "160"
+      - doc: |-
+          generatedBoundaryBytes is how many random bytes a generated boundary
+          spells in hex — mime/multipart's 30, so 60 characters.
+        name: generatedBoundaryBytes
+        type: int
+        value: "30"
+    name: crlf
   - doc: |-
       DefaultMaxPartBytes caps one part body at 32 MiB. Generous for a form field
       or a document upload, and small enough that a single part cannot exhaust a
@@ -116,9 +142,10 @@ constants:
         value: "1024"
     name: DefaultMaxParts
   - doc: |-
-      DefaultMaxTotalBytes caps the sum of every part body at 64 MiB. Without it
-      the real ceiling would be DefaultMaxPartBytes × DefaultMaxParts, which is
-      not a bound anybody chose.
+      DefaultMaxTotalBytes caps a whole body at 64 MiB — every byte of it,
+      delimiters and part headers included. Without it the real ceiling would
+      be DefaultMaxPartBytes × DefaultMaxParts, which is not a bound anybody
+      chose.
     items:
       - comment: 64 MiB
         name: DefaultMaxTotalBytes
@@ -165,6 +192,7 @@ files:
       - (*multipartCodec).encoderFor
       - (*multipartCodec).pinnedEncoder
       - (*multipartCodec).decoderFor
+      - newDecoder
       - (*multipartCodec).encodeForm
       - (*multipartCodec).formEncoder
       - asForm
@@ -175,6 +203,10 @@ files:
       - counter
       - (*counter).readBudget
       - (*counter).admitPart
+      - wireBudget
+      - (*wireBudget).Read
+      - (*counter).admitEncodedPart
+      - (*counter).admitClosing
     name: counter.go
   - decls:
       - multipartDecoder
@@ -183,6 +215,7 @@ files:
       - (*multipartDecoder).fetch
       - (*multipartDecoder).readInto
       - (*multipartDecoder).readBody
+      - (*multipartDecoder).readFailure
       - readBounded
       - probeSize
       - publishPart
@@ -204,16 +237,18 @@ files:
   - decls: []
     name: doc.go
   - decls:
-      - partHeaderFields
       - forbiddenHeaderOctets
-      - quoteEscaper
+      - crlf
       - multipartEncoder
       - (*multipartEncoder).Encode
       - (*multipartEncoder).Close
       - (*multipartEncoder).Boundary
       - (*multipartEncoder).writePart
+      - (*multipartEncoder).appendHead
+      - (*multipartEncoder).closingLen
+      - appendQuoted
+      - generateBoundary
       - injectedHeaderField
-      - partHeader
       - asPart
       - marshalFailed
       - valueInvalid
@@ -294,6 +329,12 @@ functions:
   - name: NewWithLimits
     params: l LimitsConfig
     results: c codec.Codec, err error
+  - doc: |-
+      newDecoder builds a decoder over r whose mime/multipart reader pulls the
+      body through the decoder's own wireBudget.
+    name: newDecoder
+    params: r io.Reader, boundary string, limits LimitsConfig
+    results: "*multipartDecoder"
   - doc: asForm resolves an arbitrary value to the container shape Marshal writes.
     name: asForm
     params: v any
@@ -425,6 +466,23 @@ functions:
     params: fileName string
     results: string
   - doc: |-
+      appendQuoted appends s escaping the two characters that can end or bend a
+      quoted header parameter: the backslash and the double quote.
+
+      It is deliberately NOT mime/multipart's own (unexported) escaper, which also
+      percent-encodes CR and LF. That encoding is a REPAIR — the part would carry a
+      filename the caller never supplied while Encode reported success. This
+      package refuses those octets instead, before any header is built (see
+      forbiddenHeaderOctets), so a value reaching here holds no CR, LF or NUL.
+    name: appendQuoted
+    params: b []byte, s string
+    results: "[]byte"
+  - doc: |-
+      generateBoundary draws a delimiter as mime/multipart.Writer does: thirty
+      random bytes from crypto/rand, in lower-case hex.
+    name: generateBoundary
+    results: string
+  - doc: |-
       injectedHeaderField reports the first of the three caller-supplied header
       values carrying a forbidden octet, in declaration order, so a part with two
       bad values still names one of them deterministically. It reports the FIELD
@@ -432,10 +490,6 @@ functions:
     name: injectedHeaderField
     params: part *PartValue
     results: field string, found bool
-  - doc: partHeader builds the RFC 7578 header block for part.
-    name: partHeader
-    params: part *PartValue
-    results: textproto.MIMEHeader
   - doc: asPart resolves an arbitrary value to the part the encoder will write.
     name: asPart
     params: v any
@@ -474,15 +528,16 @@ imports:
   coremultipart: github.com/kitsunium/sdk/internal/core/data/codec/multipart
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hex: encoding/hex
   io: io
   math: math
   mime: mime
+  rand: crypto/rand
   reflect: reflect
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
   stdjson: encoding/json
   stdmp: mime/multipart
   strings: strings
-  textproto: net/textproto
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/codec/multipart
@@ -600,7 +655,10 @@ types:
         params: w io.Writer, boundary string
         recv: c *multipartCodec
         results: enc *multipartEncoder, err error
-      - doc: decoderFor builds the concrete decoder over r for an already-known boundary.
+      - doc: |-
+          decoderFor builds the concrete decoder over r for an already-known
+          boundary. mime/multipart reads r through a wireBudget, so every byte it
+          consumes — headers included — is charged against MaxTotalBytes (#908).
         name: decoderFor
         params: r io.Reader, boundary string
         recv: c *multipartCodec
@@ -656,7 +714,56 @@ types:
         params: n int64
         recv: c *counter
         results: error
+      - doc: |-
+          admitEncodedPart charges one part the encoder is about to write: the part
+          against MaxParts, its body against MaxPartBytes, and every byte it puts on
+          the wire — delimiter and header block included — against MaxTotalBytes,
+          keeping room for the closing delimiter, so the encoder emits no body the
+          decoder's wireBudget would refuse and Close never crosses the ceiling (#908).
+        name: admitEncodedPart
+        params: body, wire, closing int64
+        recv: c *counter
+        results: error
+      - doc: |-
+          admitClosing checks that the closing delimiter still fits under
+          MaxTotalBytes — it always does after a part, which reserved it; a body
+          with no part has only it to charge.
+        name: admitClosing
+        params: closing int64
+        recv: c *counter
+        results: error
     name: counter
+  - doc: |-
+      wireBudget charges every byte mime/multipart pulls from the body —
+      delimiters, header blocks, bodies and the reader's look-ahead alike —
+      against MaxTotalBytes (#908). The part-body bounds above are charged after
+      NextPart returned; a header block is read by mime/multipart itself, whose
+      only bounds are the GODEBUG-governed multipartmaxheaders defaults, which a
+      process can lift at run time. Under this reader a body cannot pull more
+      than one byte past the ceiling, whatever its parts' headers hold.
+    fields:
+      - doc: r is the body.
+        name: r
+        type: io.Reader
+      - doc: err is the refusal, latched once the ceiling is crossed.
+        name: err
+        type: error
+      - doc: limit is MaxTotalBytes.
+        name: limit
+        type: int64
+      - doc: read counts the bytes pulled from r.
+        name: read
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          Read pulls from the body no further than one byte past the ceiling, and
+          refuses once that byte arrives.
+        name: Read
+        params: p []byte
+        recv: w *wireBudget
+        results: int, error
+    name: wireBudget
   - doc: |-
       multipartDecoder adapts *mime/multipart.Reader to codec.Decoder. One Decode
       call consumes exactly one part; the parts are streamed, so the decoder holds
@@ -668,6 +775,11 @@ types:
       - doc: count charges the bounds per part, identical to the encoder's set.
         name: count
         type: counter
+      - doc: |-
+          wire charges every byte read from the body against MaxTotalBytes;
+          inner reads through it.
+        name: wire
+        type: wireBudget
       - doc: pending is the one-part look-ahead so More can answer without consuming.
         name: pending
         type: "*PartValue"
@@ -721,6 +833,14 @@ types:
         params: src io.Reader
         recv: d *multipartDecoder
         results: body []byte, err error
+      - doc: |-
+          readFailure types a failure of mime/multipart: the body's MaxTotalBytes
+          refusal, as it is, when the wireBudget stopped the read — mime/multipart
+          wraps it in its own text — and an UNMARSHAL_FAILED otherwise.
+        name: readFailure
+        params: cause error, detail string
+        recv: d *multipartDecoder
+        results: error
     name: multipartDecoder
   - doc: |-
       peeker is the part of *bufio.Reader peekHead reads through: a look at the
@@ -735,17 +855,35 @@ types:
       	Buffered() int
       }
   - doc: |-
-      multipartEncoder adapts *mime/multipart.Writer to codec.Encoder. One Encode
-      call writes exactly one part; Close writes the terminating delimiter.
+      multipartEncoder writes a multipart/form-data body. One Encode call writes
+      exactly one part; Close writes the terminating delimiter. It frames the
+      parts itself rather than through mime/multipart.Writer, whose CreatePart
+      built a textproto.MIMEHeader per part and formatted and sorted it through
+      fmt — about seventeen allocations a part, for bytes that are a handful of
+      appends (#907).
     fields:
-      - doc: inner is the stdlib writer that owns the delimiter and the framing.
-        name: inner
-        type: "*stdmp.Writer"
+      - doc: w receives the body; the encoder never closes it.
+        name: w
+        type: io.Writer
+      - doc: boundary is the delimiter, generated or pinned.
+        name: boundary
+        type: string
       - doc: |-
-          count charges the bounds per part — identical to the decoder's set, so
-          the encoder never emits a body this package would refuse to read back.
+          head is the reused buffer each part's delimiter and header block are
+          built in before they are written.
+        name: head
+        type: "[]byte"
+      - doc: |-
+          count charges the bounds per part — the same LimitsConfig as the
+          decoder's, so the encoder never emits a body this package would refuse
+          to read back.
         name: count
         type: counter
+      - doc: |-
+          open is set once a part has been written since the encoder began or
+          last closed: the next delimiter then starts on a new line.
+        name: open
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -777,6 +915,20 @@ types:
         params: part *PartValue
         recv: e *multipartEncoder
         results: error
+      - doc: |-
+          appendHead appends a part's delimiter line and its RFC 7578 header block to
+          b: the field name always, the filename and the Content-Type only when set,
+          both quoted parameters escaping the backslash and the double quote — the
+          bytes mime/multipart.Writer.CreatePart writes for the same header, whose
+          keys it sorts, Content-Disposition before Content-Type.
+        name: appendHead
+        params: b []byte, part *PartValue
+        recv: e *multipartEncoder
+        results: "[]byte"
+      - doc: closingLen is the length of the closing delimiter this encoder writes.
+        name: closingLen
+        recv: e *multipartEncoder
+        results: int64
     name: multipartEncoder
   - fields:
       - doc: Boundary is the RFC 2046 delimiter framing the parts.
@@ -821,7 +973,10 @@ types:
       - doc: MaxParts caps the number of parts; 0 selects DefaultMaxParts.
         name: MaxParts
         type: int
-      - doc: MaxTotalBytes caps the sum of part bodies; 0 selects DefaultMaxTotalBytes.
+      - doc: |-
+          MaxTotalBytes caps the whole body — every byte read or written,
+          delimiters and part headers included, not only the part bodies; 0
+          selects DefaultMaxTotalBytes.
         name: MaxTotalBytes
         type: int64
     kind: struct
@@ -860,20 +1015,6 @@ vars:
         type: codec.Codec
         value: "codec.Register(&multipartCodec{limits: defaultLimits()})"
     name: Codec
-  - doc: |-
-      quoteEscaper escapes the two characters that can end or bend a quoted header
-      parameter: the backslash and the double quote.
-
-      It is deliberately NOT a copy of mime/multipart's own (unexported) escaper,
-      which also percent-encodes CR and LF. That encoding is a REPAIR — the part
-      would carry a filename the caller never supplied while Encode reported
-      success. This package refuses those octets instead, before any header is
-      built (see forbiddenHeaderOctets), so a value reaching this replacer holds no
-      CR, LF or NUL left to encode.
-    items:
-      - name: quoteEscaper
-        value: strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
-    name: quoteEscaper
   - doc: |-
       The registered codec satisfies the base contract plus the two optional
       extensions consumers assert on, and the encoder exposes the delimiter a

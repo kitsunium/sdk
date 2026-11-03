@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-11-03T12:00:00Z -->
 # internal/service/observe/logger/middleware/async/
 
 ## Purpose
@@ -17,14 +17,33 @@ S3) so a backed-up drain never stalls the application.
 |---|---|
 | `async_sink.go`        | `asyncSink` + `New` + `Write` / `Flush` / `Close`; the `Block` wait (`blockForSpace` / `retryBlocked` / `signalSpace` / `abandon`); the production drainer runs on a `kernel/concur/worker.LoopDaemon`, whose idempotent `Stop` is the join (ADR 0014 §D6) |
 | `async_sink_policy.go` | `DropPolicy` enum (`DropNewest` default, `DropOldest`, `Block`) + `DefaultMaxBlock` (1 s) |
-| `drainer.go`           | drainer body: `drain` (the loop body the daemon runs and the white-box tests spawn directly; closes `done` via `doneOnce`) / `drainLoop` (selects on the sink's `stop`) / `forward` / `drainRemaining`; `maxSaneCap` (64 KiB) bounds pool retention against attacker-influenced records |
-| `runtime.go`           | helpers — `yieldOnce`, `isClosed`, `asyncCtx`, `forwardDownstreamError`, `swallowRingError` |
-| `entry.go`             | `recordEntry` recycled through `recycler.Pool` |
-| `config.go`            | `Config{BufferSize, Policy, MaxBlock, Clock, OnDrop, OnError}` |
+| `drainer.go`           | drainer body: `drain` (the loop body the daemon runs and the white-box tests spawn directly; closes `done` via `doneOnce`) / `drainLoop` / `park` + `pending` (the idle wait on `wake`, #806) / `take` (up to `batchMax` entries per lock) / `deliver` → `forward` (one `Write`) or `forwardBatch` (one `WriteBatch`, #807) / `settle` / `recycle` / `drainRemaining`; `maxSaneCap` (64 KiB) bounds pool retention against attacker-influenced records |
+| `runtime.go`           | helpers — `isClosed`, `asyncCtx`, `forwardDownstreamError`, `swallowRingError` |
+| `async_sink_entry.go`  | `recordEntry` recycled through `recycler.Pool` |
+| `config.go`            | `Config{BufferSize, Policy, MaxBlock, Clock, OnDrop, BatchMax, OnError}` |
 | `internal/core/observe/logger/middleware/async` | its sentinels — range 0.3.17.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
 
+- **An idle drainer parks (#806).** On an empty ring the drainer sets
+  `parked`, looks at the ring once more under `ringMu` (the Dekker step: a
+  Write that landed before the flag was visible is found here), then waits on
+  `wake` or `stop`. A producer that accepted an entry reads `parked` AFTER its
+  `TryWrite` and, when it is set, leaves a token on the one-slot `wake` — so
+  one of the two always sees the other and no wake-up is lost. A busy drainer
+  costs a producer one atomic load. The old loop yielded with `Gosched`, which
+  with nothing else runnable returned at once: one P at 100 % for a process
+  that logged nothing (`TestAnIdleAsyncSinkCostsNoCPU`, Linux: 690 ms of CPU
+  over an idle 500 ms on the base, under 25 ms now).
+- **Batches (#807).** `Config.BatchMax > 1` and a downstream that implements
+  `corelogger.BatchSink` (file, rotfile, the level gate, the tcp writer): the
+  drainer takes up to `BatchMax` entries per `ringMu` acquisition and hands them
+  over in one `WriteBatch` — one `write(2)` for a file. A downstream without the
+  port, or `BatchMax <= 1` (the zero Config), gets one `Write` per record. A
+  failed `WriteBatch` fires `OnError` once per record it did not deliver
+  (`len - written`), never once per batch. The scratch slices (`batch`, `recs`,
+  `payloads`) belong to the single drainer goroutine and are cleared after
+  every call, so no record outlives its delivery through them.
 - **Default buffer.** `Config.BufferSize <= 0` → 1024-slot ring.
 - **DropNewest** (default): full ring → drop the new entry, fire `OnDrop`,
   return `BufferFull`.
@@ -81,6 +100,9 @@ Declared in `internal/core/observe/logger/middleware/async` since ADR 0160 §2: 
 - Share a `Config` between sinks expecting independent metric counters.
 - Block in `OnDrop` / `OnError`: `OnDrop` runs inside `Write` with `ringMu`
   held, `OnError` on the drainer's hot path.
+- Read `parked` before the `TryWrite` in a producer, or set it after the
+  drainer's second look: either order reopens the lost-wakeup window.
+- Go back to a `Gosched` (or any polling) idle loop.
 
 ## Verification
 

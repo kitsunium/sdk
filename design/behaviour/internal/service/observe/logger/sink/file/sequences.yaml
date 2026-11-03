@@ -81,6 +81,73 @@ sequences:
                 		}, errs.Int("bytes", len(p)), errs.Int("level", int(r.Level)))
           when: werr != nil
       - return: written, nil
+  - of: (*fileSink).WriteBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSink).WriteBatch
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.f.Write
+        kind: value
+      - id: retained
+        kind: internal
+      - id: s.mu.Unlock
+        kind: value
+      - id: wholeRecords
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    corefile.CodeCtxCancelled,
+                			Reason:  "CTX_CANCELLED",
+                			Public:  "Logging aborted due to cancellation",
+                			Private: "service/observe/logger/sink/file.WriteBatch saw a cancelled context",
+                		}, errs.Int("records", len(recs)))
+          when: ctx != nil && ctx.Err() != nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: buf
+        eval: s.batch[:0]
+      - loop:
+          do:
+            - set: buf
+              value: append(buf, p...)
+          key: _
+          range: payloads
+          value: p
+      - bind: n, werr
+        eval: s.f.Write(buf)
+        to: s.f.Write
+      - set: s.batch
+        to: retained
+        value: retained(buf)
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - set: written
+        to: wholeRecords
+        value: wholeRecords(payloads, n)
+      - opt:
+          do:
+            - return: |-
+                written, errs.Wrap(werr, errs.WrapParams{
+                			Code:    corefile.CodeWriteFailed,
+                			Reason:  "WRITE_FAILED",
+                			Public:  "File write failed",
+                			Private: "service/observe/logger/sink/file.WriteBatch underlying *os.File returned an error",
+                		}, errs.Int("bytes", len(buf)), errs.Int("records", len(recs)), errs.Int("written", written))
+          when: werr != nil
+      - return: len(payloads), nil
+  - of: retained
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: cap(buf) > maxRetainedBatch
+      - return: buf[:0]
   - of: (*fileSink).Flush
     participants:
       - id: caller
@@ -89,12 +156,8 @@ sequences:
         kind: self
       - id: ctx.Err
         kind: value
-      - id: s.mu.Lock
-        kind: value
-      - id: s.f.Sync
-        kind: value
-      - id: s.mu.Unlock
-        kind: value
+      - id: s.fsync
+        kind: internal
       - id: errs
         kind: package
     steps:
@@ -103,13 +166,9 @@ sequences:
             - return: ctx.Err()
               to: ctx.Err
           when: ctx != nil && ctx.Err() != nil
-      - eval: s.mu.Lock()
-        to: s.mu.Lock
       - bind: serr
-        eval: s.f.Sync()
-        to: s.f.Sync
-      - eval: s.mu.Unlock()
-        to: s.mu.Unlock
+        eval: s.fsync()
+        to: s.fsync
       - opt:
           do:
             - return: |-
@@ -122,6 +181,21 @@ sequences:
               to: errs
           when: serr != nil
       - return: nil
+  - of: (*fileSink).fsync
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSink).fsync
+        kind: self
+      - id: s.f.Sync
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: s.syncFile(s.f)
+          when: s.syncFile != nil
+      - return: s.f.Sync()
+        to: s.f.Sync
   - of: (*fileSink).Close
     participants:
       - id: caller

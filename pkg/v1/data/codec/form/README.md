@@ -48,6 +48,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/form.CodeFor
 
 Code `0.3.40.3`
 
+<a name="CodeSizeExceeded"></a>
+```go
+const CodeSizeExceeded errs.Code = 206852
+```
+
+CodeSizeExceeded is 0.3.40.4: a body past maxFormBytes, or more pairs than maxFormPairs.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/form.CodeFormSizeExceeded`.
+
+Code `0.3.40.4`
+
 <a name="CodeUnmarshalFailed"></a>
 ```go
 const CodeUnmarshalFailed errs.Code = 206850
@@ -89,6 +100,17 @@ MultiValue is the sentinel of [CodeMultiValue](#CodeMultiValue).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/form.MultiValue`.
 
 Code `0.3.40.3` · reason `MULTI_VALUE` · public "form key carries multiple values"
+
+<a name="SizeExceeded"></a>
+```go
+var SizeExceeded *errs.Error
+```
+
+SizeExceeded is the sentinel of [CodeSizeExceeded](#CodeSizeExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/form.SizeExceeded`.
+
+Code `0.3.40.4` · reason `SIZE_EXCEEDED` · public "Form input exceeds a size limit"
 
 <a name="UnmarshalFailed"></a>
 ```go

@@ -93,8 +93,8 @@ func TestUnmarshal(t *testing.T) {
 		wantErr string
 	}
 	tests := []tc{
-		{"non-pointer target", []byte{0x40, 0x00}, "x", "UNMARSHAL_FAILED"},
-		{"nil pointer target", []byte{0x40, 0x00}, (*string)(nil), "UNMARSHAL_FAILED"},
+		{"non-pointer target", []byte{0x40, 0x00}, "x", "TARGET_INVALID"},
+		{"nil pointer target", []byte{0x40, 0x00}, (*string)(nil), "TARGET_INVALID"},
 		{"truncated buffer", []byte{0x40}, new(string), "TRUNCATED"},
 	}
 	runCase := func(t *testing.T, tc tc) {
@@ -1416,6 +1416,58 @@ func TestTypedMapUnhashableKey(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, tc)
+		})
+	}
+}
+
+// TestMarshalWritesMapKeysInOrder is #1104: a map record's pairs used to
+// follow Go's randomised iteration order, so one value encoded differently on
+// every call. Keys are now written in order — strings byte-wise, integers by
+// value — and two maps built in different insertion orders give equal bytes.
+func TestMarshalWritesMapKeysInOrder(t *testing.T) {
+	t.Parallel()
+	forward := map[string]int{}
+	for i, k := range []string{"b", "a", "c"} {
+		forward[k] = []int{1, 2, 3}[i]
+	}
+	backward := map[string]int{"c": 3, "a": 2, "b": 1}
+	sortedABC := []byte{0x60, 0x03, 0x40, 0x01, 'a', 0x10, 0x01, 0x02, 0x40, 0x01, 'b', 0x10, 0x01, 0x01, 0x40, 0x01, 'c', 0x10, 0x01, 0x03}
+	large := map[int]bool{}
+	for i := range 100 {
+		large[i*7919%1000-500] = i%2 == 0
+	}
+	cases := []struct {
+		name  string
+		value any
+		want  []byte
+	}{
+		{"map[string]int", forward, sortedABC},
+		{"the same map built in another order", backward, sortedABC},
+		{"integer keys by value, not by encoding", map[int]string{300: "c", -1: "a", 5: "b"}, []byte{
+			0x60, 0x03,
+			0x10, 0x01, 0xff, 0x40, 0x01, 'a',
+			0x10, 0x01, 0x05, 0x40, 0x01, 'b',
+			0x11, 0x02, 0x01, 0x2c, 0x40, 0x01, 'c',
+		}},
+		{"a hundred integer keys", large, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			want := tc.want
+			if want == nil {
+				first, err := tlv.New().Marshal(tc.value)
+				if err != nil {
+					t.Fatalf("Marshal: %v", err)
+				}
+				want = first
+			}
+			for range 1000 {
+				got, err := tlv.New().Marshal(tc.value)
+				if err != nil || !bytes.Equal(got, want) {
+					t.Fatalf("got % x (err %v), want % x", got, err, want)
+				}
+			}
 		})
 	}
 }

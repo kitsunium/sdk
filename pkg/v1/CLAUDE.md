@@ -9,6 +9,8 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 
 | Package | Role | README |
 |---|---|---|
+| `observe/metrics/goruntime/` | `RuntimeInstruments` — the Go runtime's instruments under the OpenTelemetry conventions, apart from `observe/metrics` because they read `runtime/metrics` (#868) | `pkg/v1/observe/metrics/goruntime/README.md` |
+| `observe/metrics/statsbridge/` | `Cache`, `Docstore`, `Forward`, `Queue` — an engine's Stats value as a metrics `Observer`, registered by `metrics.RegisterObservers` and read once per collection (#871) | `pkg/v1/observe/metrics/statsbridge/README.md` |
 | `observe/logger/slogbridge/` | `NewHandler` / `New` — adapt an SDK `Logger` to `log/slog` for APIs typed on the concrete `*slog.Logger` (ADR 0032). The one package allowed to import `log/slog` | `pkg/v1/observe/logger/slogbridge/README.md` |
 | `observe/logger/` | Logger facade: `Config` / `NewText` / `Default` / `NewWithSink` / `Multi` / `LevelGate` (a per-branch floor that applies Info as a floor — ADR 0132), `Info\|Warn\|Error\|Debug`, `Build` builder, `String\|Int\|…` attr ctors, `Version` (ldflags injection point), `TraceContext` / `TraceContextFromContext` — the ONE place logging and tracing meet, wired into every constructor so `trace_id` / `span_id` land on every record emitted inside a span (ADR 0062) | `pkg/v1/observe/logger/README.md` |
 | `app/mail/` | Compose and send mail — ADR 0064; header injection is refused rather than sanitised, Bcc reaches the envelope and never a header (`EnvelopeOf`), and `TLSMode`'s zero value is refused because neither "encrypt" nor "do not" is a safe guess; `NewCapture(keep)` is the bounded memory transport. It links no queue: the outbox is `app/mail/spool`. | `pkg/v1/app/mail/README.md` |
@@ -56,6 +58,8 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `data/codec/strictjson/httpbody/` | The JSON body of an HTTP request (ADR 0102): `DecodeRequest(w, req, v, maxBytes)` adds `http.MaxBytesReader` (413 and a closed connection), the empty body as its own code, and 415 for a body that does not declare JSON, then decodes as `strictjson.Decode`; the refusals are strictjson's codes. A package of its own so that `strictjson` links no `net/http`. stdlib-only | `pkg/v1/data/codec/strictjson/httpbody/README.md` |
 | `data/codec/jsonshape/` | A Go type's wire shape under encoding/json (ADR 0133): `Of` / `For[T]` → a `Shape` (`Kind`, `Format`, `Nullable`, `Fields`, `Items`, `Values`, `Ref`) whose `Field`s carry `Optional`, `Quoted`, `Rules` and the Go field behind them (`GoName`, `Tag`, `Index`). Members resolved as Go 1.27's engine resolves them — promotion through pointers and unexported structs, dominance, the tag grammar, the `embed` option — and pinned against `json.Marshal` itself. Links no codec. stdlib-only | `pkg/v1/data/codec/jsonshape/README.md` |
 | `data/codec/jsonpatch/` | Two JSON documents' difference as RFC 6902 operations (ADR 0143 §D9): `Diff(from, to)` → `[]Edit` (`Op` add / remove / replace, `Path` an RFC 6901 pointer, `Value` written, `Old` replaced or removed), in the order they apply; documents read strictly and compared as RFC 6902 §4.6 does, numbers exactly; arrays aligned before they are paired; encodes as a JSON Patch document; `NotJSON` names the document and the offset, never its content | `pkg/v1/data/codec/jsonpatch/README.md` |
+| `data/codec/jcs/` | RFC 8785 canonical JSON (#895): `Canonicalize(doc)`, `Marshal(v)` → one byte form to sign or hash; `NotJSON`, `NumberInvalid`, `MarshalFailed` (`0.3.102.*`) |
+| `data/codec/jsonschema/` | A JSON Schema 2020-12 validator (#882, ADR 0210): `NewValidator(schema, Config)` → `*Validator`, `Validate(doc, maxBytes)` → `validation.ReportValue`; `SchemaInvalid`, `KeywordRefused`, `RefUnresolved`, `FormatUnknown`, `ReferenceLoop`, `CodeViolation` (`0.3.103.*`) |
 | `data/codec/{asn1,baseenc,cbor,csv,flatbuffers,form,json,msgpack,multipart,ndjson,pem,tlv,toml,xml,yaml}/` | One format registered alone (ADR 0134): a blank import registers that codec and links nothing else — every codec is written on the standard library, YAML as a named subset (ADR 0156) — where `data/codec/`, their aggregate, links every format. Each exports its `Format` (`baseenc` its nine), an untyped constant, and its codes and sentinels aliased from the core (ADR 0160); `multipart` also `Form`, `Part`, `ContentType`, `flatbuffers` its two adapter interfaces, `toml` its local date and time types. Each suite proves the binary links no module outside the SDK | `pkg/v1/data/codec/<format>/README.md` |
 | `data/codec/bson/` | BSON alone, implemented with the standard library (ADR 0021, ADR 0134): importing it registers the codec, and it carries BSON's value types — `D`, `E`, `M`, `A`, `ObjectID`, `DateTime`, `Decimal128`, `Binary`, `Regex`, `Timestamp` and the deprecated ones — with `Marshal` / `Append` / `Unmarshal`, `ObjectIDFromHex`, `ParseDecimal128`. The driver's v1 mapping and struct tags, checked against it; malformed input refused whole before the target is written; 100 levels of nesting. stdlib-only | `pkg/v1/data/codec/bson/README.md` |
 | `net/static/` | A file tree served over HTTP (ADR 0130): `New(fsys, Config)` → an `http.Handler` that cleans the name from the root, never lists a directory, falls back to the SPA shell for extension-less routes only, sends CSP / nosniff / Referrer-Policy on every response, caches content-hashed names for good, pins the web types, and answers a refused NAME 404 and a failing tree 500. stdlib-only | `pkg/v1/net/static/README.md` |
@@ -120,8 +124,8 @@ rule 7).
 
 The data facades — `codec` (with a per-format child for each of its sixteen
 codecs, which it aggregates, and the JSON tools that are not Formats,
-`codec/strictjson` with `codec/strictjson/httpbody`, `codec/jsonshape` and
-`codec/jsonpatch`), `sql`,
+`codec/strictjson` with `codec/strictjson/httpbody`, `codec/jsonshape`,
+`codec/jsonpatch`, `codec/jcs` and `codec/jsonschema`), `sql`,
 `docstore`, `queue`, `cache`, `vfs`, `transform` and `semver` — are children of `data/`, a
 family directory with no Go code of its own (ADR 0155):
 `github.com/kitsunium/sdk/pkg/v1/data/<name>`. They moved from the root of
@@ -245,6 +249,8 @@ for m in pkg/v1/*/go.mod; do (cd "${m%/go.mod}" && GOWORK=off go test -race -cov
 - `security/authz/` — see `pkg/v1/security/authz/CLAUDE.md`
 - `app/resilience/` — see `pkg/v1/app/resilience/CLAUDE.md`
 - `observe/metrics/` — see `pkg/v1/observe/metrics/CLAUDE.md`
+- `observe/metrics/goruntime/` — see `pkg/v1/observe/metrics/goruntime/CLAUDE.md`
+- `observe/metrics/statsbridge/` — see `pkg/v1/observe/metrics/statsbridge/CLAUDE.md`
 - `data/queue/` — see `pkg/v1/data/queue/CLAUDE.md`
 - `observe/trace/` — see `pkg/v1/observe/trace/CLAUDE.md`
 - `app/config/` — see `pkg/v1/app/config/CLAUDE.md`
@@ -265,6 +271,8 @@ for m in pkg/v1/*/go.mod; do (cd "${m%/go.mod}" && GOWORK=off go test -race -cov
 - `data/codec/strictjson/httpbody/` — see `pkg/v1/data/codec/strictjson/httpbody/CLAUDE.md`
 - `data/codec/jsonshape/` — see `pkg/v1/data/codec/jsonshape/CLAUDE.md`
 - `data/codec/jsonpatch/` — see `pkg/v1/data/codec/jsonpatch/CLAUDE.md`
+- `data/codec/jcs/` — see `pkg/v1/data/codec/jcs/CLAUDE.md`
+- `data/codec/jsonschema/` — see `pkg/v1/data/codec/jsonschema/CLAUDE.md`
 - `data/codec/{asn1,baseenc,cbor,csv,flatbuffers,form,json,msgpack,multipart,ndjson,pem,tlv,toml,xml,yaml}/` — see their `CLAUDE.md`
 - `data/codec/bson/` — see `pkg/v1/data/codec/bson/CLAUDE.md`
 - `net/static/` — see `pkg/v1/net/static/CLAUDE.md`

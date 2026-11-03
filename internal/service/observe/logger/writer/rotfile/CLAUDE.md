@@ -20,7 +20,7 @@ sink is reproduced here and, critically, **re-run on every reopen**.
 |---|---|
 | `rotfile.go` | `Writer` singleton, `rotFileFactory` (`Name` / `Open`) |
 | `rotating_sink_config.go` | `Config` — an **alias** of `core/observe/logger/writer.RotFileConfig` (moved there for issue #93 so `pkg/v1/observe/logger` can re-export it); type identity unchanged |
-| `rotating_sink.go` | `rotatingSink` + `Write` / `Flush` / `Close` + `openHardened` (this sink's one door into the shared `logfile.Open`) + `openRefusals` (its `logfile.RefusalSpec`) + `newRotatingSink` (wires the interval daemon) |
+| `rotating_sink.go` | `rotatingSink` + `Write` / `WriteBatch` (one `write(2)` and one threshold check per batch, #807; both through `writeLocked`) / `Flush` (fsync outside `mu`, the descriptor pinned by `pin`, #815) / `Close` + `openHardened` (this sink's one door into the shared `logfile.Open`) + `openRefusals` (its `logfile.RefusalSpec`) + `newRotatingSink` (wires the interval daemon) |
 | `rotate_interval.go` | `tickRotate` — the `worker.Every` daemon tick body |
 | `decode.go` | `rotFileFactory.Decode` (`core/observe/logger/writer.Decoder`) + key-coercion helpers |
 | `rotate.go` | `maybeRotate` / `rotate` / `shiftBackups` (threshold + cycle) |
@@ -133,6 +133,21 @@ done here, and named rather than implied.
   is gone; `Flush` and `Close` have nothing to do without a descriptor
   (`syncOpen`, `closeOpen`). `Test_rotatingSink_aFailedReopenNeverKillsTheSink`
   holds it with a directory and with a link at `Path`.
+
+- **A Flush holds no writer (#815).** `Flush` reads the active descriptor under
+  `mu`, read-locks `pin` while it still holds `mu`, releases `mu` and fsyncs:
+  a `Write` that does not rotate never waits for the disk. `rotate` write-locks
+  `pin` (under `mu`) before closing the active file, so a rotation waits for an
+  fsync of the file it is about to close — rotations are rare — and a Flush
+  never sees its descriptor closed by a rotation. A `Close` racing the sync is
+  reported (`ROT_FILE_WRITE_FAILED` or nil, never a hang): `os.File` keeps the
+  descriptor until the in-flight `Sync` returns. Lock order: `mu` then `pin`,
+  both places. `syncFile` is the tests' blocking seam; nil in production.
+- **A batch is one write (#807).** `WriteBatch` (the `corelogger.BatchSink`
+  sibling) concatenates into one reused buffer (let go past 1 MiB), checks
+  `MaxBytes` once for the whole batch — a batch past the cap lands in a fresh
+  file, as an oversized single record does — and issues one `write(2)`; it
+  reports the records that landed whole.
 
 ### Interval rotation (`RotateEvery`, opt-in)
 

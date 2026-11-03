@@ -1,0 +1,554 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: EncodeOTLPJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: EncodeOTLPJSON
+        kind: self
+      - id: appendRequest
+        kind: internal
+    steps:
+      - return: appendRequest(nil, otlp.ResourceOf(resource), otlp.ScopeOf(scope), recs)
+        to: appendRequest
+  - of: appendRequest
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendRequest
+        kind: self
+      - id: otlp
+        kind: package
+      - id: resource.AppendJSON
+        kind: value
+      - id: scope.AppendJSON
+        kind: value
+      - id: appendLogRecord
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "resourceLogs")
+      - set: dst
+        value: append(dst, '[', '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "resource")
+      - set: dst
+        to: resource.AppendJSON
+        value: resource.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "scopeLogs")
+      - set: dst
+        value: append(dst, '[', '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "scope")
+      - set: dst
+        to: scope.AppendJSON
+        value: scope.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "logRecords")
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: appendLogRecord
+              value: appendLogRecord(dst, &recs[i])
+          key: i
+          range: recs
+      - return: append(dst, ']', '}', ']', '}', ']', '}')
+  - of: appendLogRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendLogRecord
+        kind: self
+      - id: otlp
+        kind: package
+      - id: otlp.UnixNano(rec.Time).AppendJSON
+        kind: value
+      - id: strconv
+        kind: stdlib
+      - id: appendAttrs
+        kind: internal
+      - id: appendHex
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "timeUnixNano")
+      - set: dst
+        to: otlp.UnixNano(rec.Time).AppendJSON
+        value: otlp.UnixNano(rec.Time).AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "severityNumber")
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(severityNumber(rec.Level)), decimalBase)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "severityText")
+      - set: dst
+        to: otlp
+        value: otlp.AppendString(dst, rec.Level.String())
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "body")
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "stringValue")
+      - set: dst
+        to: otlp
+        value: otlp.AppendString(dst, rec.Message)
+      - set: dst
+        value: append(dst, '}')
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "attributes")
+            - set: dst
+              value: append(dst, '[')
+            - set: dst, _
+              to: appendAttrs
+              value: appendAttrs(dst, "", rec.Attrs, false)
+            - set: dst
+              value: append(dst, ']')
+          when: len(rec.Attrs) > 0
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "traceId")
+            - set: dst
+              to: appendHex
+              value: appendHex(dst, rec.TraceContext.TraceID[:])
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "spanId")
+            - set: dst
+              to: appendHex
+              value: appendHex(dst, rec.TraceContext.SpanID[:])
+          when: rec.TraceContext.IsValid()
+      - return: append(dst, '}')
+  - of: severityNumber
+    steps:
+      - return: min(max(int(l)+severityOffset, severityMin), severityMax)
+  - of: appendHex
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendHex
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - set: dst
+        value: append(dst, '"')
+      - set: dst
+        to: hex
+        value: hex.AppendEncode(dst, id)
+      - return: append(dst, '"')
+  - of: appendAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendAttrs
+        kind: self
+      - id: appendKeyValue
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: attr
+              eval: "&attrs[i]"
+            - bind: key
+              eval: attr.Key
+            - opt:
+                do:
+                  - set: key
+                    value: prefix + string(groupSeparator) + key
+                when: prefix != ""
+            - opt:
+                do:
+                  - set: dst, wrote
+                    to: appendAttrs
+                    value: appendAttrs(dst, key, attr.Value.Group(), wrote)
+                  - continue: true
+                when: attr.Value.Kind() == corelogger.KindGroup
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: wrote
+            - set: dst
+              to: appendKeyValue
+              value: appendKeyValue(dst, key, attr.Value)
+            - set: wrote
+              value: "true"
+          key: i
+          range: attrs
+      - return: dst, wrote
+  - of: appendKeyValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendKeyValue
+        kind: self
+      - id: otlp
+        kind: package
+      - id: appendAnyValue
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "key")
+      - set: dst
+        to: otlp
+        value: otlp.AppendString(dst, key)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "value")
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: appendAnyValue
+        value: appendAnyValue(dst, v)
+      - return: append(dst, '}', '}')
+  - of: appendAnyValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendAnyValue
+        kind: self
+      - id: otlp
+        kind: package
+      - id: appendInt
+        kind: internal
+      - id: appendUint
+        kind: internal
+      - id: otlp.Double(v.Float64()).AppendJSON
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: corelogger.KindBool
+              do:
+                - set: dst
+                  to: otlp
+                  value: otlp.AppendKey(dst, "boolValue")
+                - return: otlp.AppendBool(dst, v.Bool())
+                  to: otlp
+            - case: corelogger.KindInt64
+              do:
+                - return: appendInt(dst, v.Int64())
+                  to: appendInt
+            - case: corelogger.KindUint64
+              do:
+                - return: appendUint(dst, v.Uint64())
+                  to: appendUint
+            - case: corelogger.KindFloat64
+              do:
+                - set: dst
+                  to: otlp
+                  value: otlp.AppendKey(dst, "doubleValue")
+                - return: otlp.Double(v.Float64()).AppendJSON(dst)
+                  to: otlp.Double(v.Float64()).AppendJSON
+            - case: corelogger.KindDuration
+              do:
+                - return: appendInt(dst, v.Duration().Nanoseconds())
+                  to: appendInt
+            - case: corelogger.KindTime
+              do:
+                - return: appendInt(dst, v.Time().UnixNano())
+                  to: appendInt
+            - default: true
+              do:
+                - set: dst
+                  to: otlp
+                  value: otlp.AppendKey(dst, "stringValue")
+                - return: otlp.AppendString(dst, v.String())
+                  to: otlp
+          "on": v.Kind()
+  - of: appendInt
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendInt
+        kind: self
+      - id: otlp
+        kind: package
+      - id: otlp.Int64(n).AppendJSON
+        kind: value
+    steps:
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "intValue")
+      - return: otlp.Int64(n).AppendJSON(dst)
+        to: otlp.Int64(n).AppendJSON
+  - of: appendUint
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendUint
+        kind: self
+      - id: otlp
+        kind: package
+      - id: appendInt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "stringValue")
+            - return: otlp.AppendString(dst, strconv.FormatUint(n, decimalBase))
+              to: otlp
+          when: n > 1<<63-1
+      - return: appendInt(dst, int64(n))
+        to: appendInt
+  - of: NewOTLPHTTPExporter
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewOTLPHTTPExporter
+        kind: self
+      - id: otlp
+        kind: package
+    steps:
+      - bind: sender, senderErr
+        eval: otlp.NewSender((*otlp.HTTPConfig)(&cfg), &otlpSignal)
+        to: otlp
+      - opt:
+          do:
+            - return: nil, senderErr
+          when: senderErr != nil
+      - return: "&otlpHTTPExporter{sender: sender}, nil"
+  - of: OTLPRetryable
+    participants:
+      - id: caller
+        kind: actor
+      - id: OTLPRetryable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.HasCode(err, coreotlpjson.CodeOTLPLogsExportUnavailable)
+        to: errs
+  - of: (*otlpHTTPExporter).ExportDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpHTTPExporter).ExportDocument
+        kind: self
+      - id: e.sender.PostContext
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(doc) == 0
+      - return: e.sender.PostContext(ctx, doc)
+        to: e.sender.PostContext
+  - of: (*otlpHTTPExporter).ExportEncodedDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpHTTPExporter).ExportEncodedDocument
+        kind: self
+      - id: e.sender.PostEncoded
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(doc) == 0
+      - return: e.sender.PostEncoded(ctx, doc, encoding)
+        to: e.sender.PostEncoded
+  - of: (*otlpPartialSuccess).RejectedCount
+    steps:
+      - return: int64(p.RejectedLogRecords)
+  - of: decodeRejected
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRejected
+        kind: self
+      - id: otlp
+        kind: package
+    steps:
+      - var:
+          name: message
+          type: otlpPartialSuccess
+      - return: otlp.DecodeRejected(payload, &message)
+        to: otlp
+  - of: newSink
+    steps:
+      - return: "&otlpSink{exporter: cfg.Exporter, resource: otlp.ResourceOf(cfg.Resource), scope: otlp.ScopeOf(cfg.Scope)}"
+  - of: (*otlpSink).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpSink).Write
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.export
+        kind: internal
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - set: s.one[0]
+        value: r
+      - set: err
+        to: s.export
+        value: s.export(ctx, s.one[:])
+      - set: s.one[0]
+        value: corelogger.RecordEvent{}
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - return: len(p), nil
+  - of: (*otlpSink).WriteBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpSink).WriteBatch
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.export
+        kind: internal
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - set: err
+        to: s.export
+        value: s.export(ctx, recs)
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - return: len(recs), nil
+  - of: (*otlpSink).export
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpSink).export
+        kind: self
+      - id: wrapCancelled
+        kind: internal
+      - id: appendRequest
+        kind: internal
+      - id: s.exporter.ExportDocument
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: wrapCancelled(ctx.Err())
+              to: wrapCancelled
+          when: ctx != nil && ctx.Err() != nil
+      - set: s.doc
+        to: appendRequest
+        value: appendRequest(s.doc[:0], s.resource, s.scope, recs)
+      - return: s.exporter.ExportDocument(ctx, s.doc)
+        to: s.exporter.ExportDocument
+  - of: (*otlpSink).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpSink).Flush
+        kind: self
+      - id: wrapCancelled
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapCancelled(ctx.Err())
+              to: wrapCancelled
+          when: ctx != nil && ctx.Err() != nil
+      - return: nil
+  - of: (*otlpSink).Close
+    steps:
+      - return: nil
+  - of: wrapCancelled
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapCancelled
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coreotlpjson.CodeOTLPLogsExportUnavailable,
+          		Reason:  "OTLP_LOGS_EXPORT_UNAVAILABLE",
+          		Public:  "The OTLP collector is unreachable or overloaded",
+          		Private: "service/observe/logger/writer/otlpjson: the context ended before the batch was exported",
+          	})
+        to: errs
+  - of: (*factory).Name
+    steps:
+      - return: writerName
+  - of: (*factory).Open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*factory).Open
+        kind: self
+      - id: async
+        kind: package
+      - id: levelgate
+        kind: package
+    steps:
+      - bind: c, ok
+        eval: cfg.(Config)
+      - opt:
+          do:
+            - return: nil, writer.WriterConfigInvalid
+          when: "!ok"
+      - opt:
+          do:
+            - return: nil, errs.Wrap(writer.WriterConfigInvalid, errs.WrapParams{}, errs.String("writer", writerName), errs.String("field", "Exporter"))
+          when: c.Exporter == nil
+      - bind: batchMax
+        eval: c.BatchMax
+      - opt:
+          do:
+            - set: batchMax
+              value: DefaultBatchMax
+          when: batchMax <= 0
+      - bind: nonblocking
+        eval: "async.New(newSink(&c), async.Config{BufferSize: c.BufferSize, OnDrop: c.OnDrop, OnError: c.OnError, BatchMax: batchMax})"
+        to: async
+      - return: levelgate.New(nonblocking, c.MinLevel), nil
+        to: levelgate

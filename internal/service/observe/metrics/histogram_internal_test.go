@@ -4,9 +4,12 @@ package metrics
 import (
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	coremetrics "github.com/kitsunium/sdk/internal/core/observe/metrics"
 )
 
 // Test_newHistogram pins the defensive copy and the sort.
@@ -25,12 +28,11 @@ func Test_newHistogram(t *testing.T) {
 		want    []float64
 	}
 	tests := []tc{
-		{"no buckets", nil, []float64{}},
-		{"an empty slice", []float64{}, []float64{}},
+		{"no buckets take the default ladder (#1135)", nil, coremetrics.DefaultBuckets()},
+		{"an empty slice takes the default ladder (#1135)", []float64{}, coremetrics.DefaultBuckets()},
 		{"already sorted", []float64{1, 5, 10}, []float64{1, 5, 10}},
 		{"unsorted input is sorted", []float64{10, 1, 5}, []float64{1, 5, 10}},
 		{"negative boundaries sort too", []float64{1, -1, 0}, []float64{-1, 0, 1}},
-		{"duplicate boundaries survive", []float64{1, 1, 2}, []float64{1, 1, 2}},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -65,6 +67,30 @@ func Test_newHistogram(t *testing.T) {
 	}
 }
 
+// TestNewHistogramRefusesAMalformedLayout (#1135): NaN, +Inf, -Inf or a
+// repeated bound panics with InvalidBuckets at creation.
+func TestNewHistogramRefusesAMalformedLayout(t *testing.T) {
+	t.Parallel()
+	for name, layout := range map[string][]float64{
+		"NaN":      {1, math.NaN(), 5},
+		"+Inf":     {1, math.Inf(1)},
+		"-Inf":     {math.Inf(-1), 0},
+		"repeated": {1, 1, 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			defer func() {
+				rec := recover()
+				msg, _ := rec.(string)
+				if !strings.Contains(msg, "INVALID_BUCKETS") {
+					t.Fatalf("newHistogram(%v) panicked with %v, want INVALID_BUCKETS", layout, rec)
+				}
+			}()
+			newHistogram(layout)
+		})
+	}
+}
+
 // Test_memHistogram_Record pins the bucket selection, which is the histogram's
 // entire meaning.
 //
@@ -91,8 +117,8 @@ func Test_memHistogram_Record(t *testing.T) {
 		{"above every bound overflows", []float64{1, 5}, []float64{100}, []uint64{0, 0, 1}},
 		{"a spread across every slot", []float64{1, 5}, []float64{0, 3, 100}, []uint64{1, 1, 1}},
 		{"a negative value lands in the first bucket", []float64{1, 5}, []float64{-1}, []uint64{1, 0, 0}},
-		//: with no boundaries at all every value is an overflow.
-		{"no buckets at all", nil, []float64{1, 2, 3}, []uint64{3}},
+		//: with no boundaries the default ladder (0, 5, …) holds them (#1135).
+		{"no buckets take the default ladder", nil, []float64{1, 2, 3}, []uint64{0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

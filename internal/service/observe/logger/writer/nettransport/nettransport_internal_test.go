@@ -87,7 +87,7 @@ func Test_netFactory_build(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			sink, err := (&netFactory{proto: tc.proto}).build(tc.cfg)
+			sink, err := (&netFactory{proto: tc.proto}).build(&tc.cfg)
 			//: error arm — dial failure surfaces, nil sink.
 			if tc.wantErr {
 				if sink != nil || !errs.HasCode(err, corenettransport.CodeNetTransportDialFailed) {

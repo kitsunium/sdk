@@ -11,6 +11,8 @@ go_library(
         "doc.go",
         "encoder.go",
         "helpers.go",
+        "order.go",
+        "position.go",
         "typeinfo.go",
         "types.go",
     ],

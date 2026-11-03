@@ -160,24 +160,28 @@ func TestMarshalRefusals(t *testing.T) {
 	selfRef := []any{nil}
 	selfRef[0] = selfRef
 	var ptr unsafe.Pointer
+	// A chan, a func or an unsafe pointer at the top is the family's
+	// VALUE_INVALID (#1101), refused before encoding; anywhere else it is the
+	// encoder's MARSHAL_FAILED.
 	tests := []struct {
 		name  string
 		value any
+		code  errs.Code
 	}{
-		{"chan", make(chan int)},
-		{"func", func() {}},
-		{"complex64", complex64(1)},
-		{"complex128", complex(1, 2)},
-		{"unsafe pointer", ptr},
-		{"func field", withFunc{A: 1}},
-		{"map of chan", map[string]chan int{"c": nil}},
-		{"pointer cycle", loop},
-		{"interface cycle", selfRef},
-		{"MarshalMsgpack error", selfEncoded{err: errors.New("no")}},
-		{"MarshalMsgpack truncated", selfEncoded{raw: []byte{0x92, 0x01}}},
-		{"MarshalMsgpack two values", selfEncoded{raw: []byte{0x01, 0x02}}},
-		{"MarshalMsgpack empty", selfEncoded{raw: []byte{}}},
-		{"MarshalBinary error", failingBinary{}},
+		{"chan", make(chan int), codec.CodeValueInvalid},
+		{"func", func() {}, codec.CodeValueInvalid},
+		{"complex64", complex64(1), 0},
+		{"complex128", complex(1, 2), 0},
+		{"unsafe pointer", ptr, codec.CodeValueInvalid},
+		{"func field", withFunc{A: 1}, 0},
+		{"map of chan", map[string]chan int{"c": nil}, 0},
+		{"pointer cycle", loop, 0},
+		{"interface cycle", selfRef, 0},
+		{"MarshalMsgpack error", selfEncoded{err: errors.New("no")}, 0},
+		{"MarshalMsgpack truncated", selfEncoded{raw: []byte{0x92, 0x01}}, 0},
+		{"MarshalMsgpack two values", selfEncoded{raw: []byte{0x01, 0x02}}, 0},
+		{"MarshalMsgpack empty", selfEncoded{raw: []byte{}}, 0},
+		{"MarshalBinary error", failingBinary{}, 0},
 	}
 	ap, ok := msgpack.New().(codec.Appender)
 	if !ok {
@@ -186,7 +190,11 @@ func TestMarshalRefusals(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := msgpack.New().Marshal(tc.value); !errs.HasReason(err, "MARSHAL_FAILED") {
+			_, err := msgpack.New().Marshal(tc.value)
+			if tc.code != 0 && !errs.HasCode(err, tc.code) {
+				t.Fatalf("Marshal: want code %s, got %v", tc.code, err)
+			}
+			if tc.code == 0 && !errs.HasReason(err, "MARSHAL_FAILED") {
 				t.Fatalf("Marshal: want MARSHAL_FAILED, got %v", err)
 			}
 			dst := []byte("prefix")
@@ -284,6 +292,71 @@ func TestMarshalAppendGrowsDst(t *testing.T) {
 		}
 		if string(out[:len(prefix)]) != prefix || !bytes.Equal(out[len(prefix):], want) {
 			t.Fatalf("Append onto %q: got %x", prefix, out)
+		}
+	}
+}
+
+// labels is a named map type, which takes the reflective map encoder.
+type labels map[string]int
+
+// TestMarshalWritesMapKeysInOrder is #1104: map pairs used to follow Go's
+// randomised iteration order, so one value encoded differently on every call.
+// Keys are now written in order — strings byte-wise, as encoding/json orders
+// them, integers by value — on the direct and the reflective paths, and two
+// maps built in different insertion orders encode to the same bytes.
+func TestMarshalWritesMapKeysInOrder(t *testing.T) {
+	t.Parallel()
+	forward := map[string]int{}
+	backward := map[string]int{}
+	for i, k := range []string{"b", "a", "c"} {
+		forward[k] = []int{1, 2, 3}[i]
+	}
+	for _, k := range []string{"c", "a", "b"} {
+		backward[k] = forward[k]
+	}
+	sortedABC := "83 a1 61 02 a1 62 01 a1 63 03"
+	cases := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"map[string]int, direct path", forward, sortedABC},
+		{"the same map built in another order", backward, sortedABC},
+		{"a named map type, reflective path", labels(forward), sortedABC},
+		{"longer keys after shorter ones only when they sort after", map[string]bool{"ab": true, "b": false, "a": true}, "83 a1 61 c3 a2 61 62 c3 a1 62 c2"},
+		{"integer keys by value, not by encoding", map[int]string{300: "c", -1: "a", 5: "b"}, "83 ff a1 61 05 a1 62 cd 01 2c a1 63"},
+		{"unsigned keys by value", map[uint64]bool{1 << 40: true, 7: false}, "82 07 c2 cf 00 00 01 00 00 00 00 00 c3"},
+		{"an untyped document, nested", map[string]any{"z": map[string]any{"y": 1, "x": 2}, "a": nil}, "82 a1 61 c0 a1 7a 82 a1 78 02 a1 79 01"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			want := fromHex(t, tc.want)
+			for range 1000 {
+				if got := mustMarshal(t, tc.value); !bytes.Equal(got, want) {
+					t.Fatalf("got % x, want % x", got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestMarshalOrdersALargeMap covers the maps past the stack-held key buffer:
+// a hundred keys, every call the same bytes, every key after the one before.
+func TestMarshalOrdersALargeMap(t *testing.T) {
+	t.Parallel()
+	direct := map[string]int{}
+	reflective := map[int64]string{}
+	for i := range 100 {
+		direct[string(rune('A'+i%26))+strings.Repeat("x", i/26)] = i
+		reflective[int64(i*7919%1000-500)] = "v"
+	}
+	for _, value := range []any{direct, reflective, labels(direct)} {
+		first := mustMarshal(t, value)
+		for range 50 {
+			if again := mustMarshal(t, value); !bytes.Equal(again, first) {
+				t.Fatalf("%T: two calls differ", value)
+			}
 		}
 	}
 }

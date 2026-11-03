@@ -86,7 +86,7 @@ func Test_newConnSeam(t *testing.T) {
 			t.Parallel()
 			//: failure arm — a failing dialer must surface the dial code.
 			if tc.fail {
-				_, _, err := newConnSeam("tcp", "x:1", failingDialer)
+				_, _, _, err := newConnSeam("tcp", "x:1", failingDialer)
 				if !errs.HasCode(err, corenettransport.CodeNetTransportDialFailed) {
 					t.Errorf("%s: err=%v want dial-failed", tc.name, err)
 				}
@@ -121,7 +121,7 @@ func Test_newConnSeam(t *testing.T) {
 				//: forward exactly the bytes the seam wrote.
 				got <- string(buf[:n])
 			}()
-			send, closer, err := newConnSeam("tcp", "ignored", dialer)
+			send, _, closer, err := newConnSeam("tcp", "ignored", dialer)
 			//: the injected dial must succeed.
 			if err != nil {
 				t.Fatalf("%s: newConnSeam: %v", tc.name, err)
@@ -143,7 +143,7 @@ func Test_newConnSeam(t *testing.T) {
 	}
 }
 
-func Test_newHTTPSeam(t *testing.T) {
+func Test_newHTTPSeams(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -153,7 +153,7 @@ func Test_newHTTPSeam(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			send, closer := newHTTPSeam("http://collector.local/ingest", stubClient(http.StatusOK))
+			send, _, closer := newHTTPSeams("http://collector.local/ingest", stubClient(http.StatusOK), false)
 			//: a 2xx response is a clean send.
 			if serr := send(t.Context(), []byte("rec")); serr != nil {
 				t.Errorf("%s: send: %v", tc.name, serr)
@@ -226,7 +226,7 @@ func Test_defaultClientRejectsRedirect(t *testing.T) {
 			//: the redirect bounce needs two real loopback sockets; where the
 			//: sandbox blocks them the SSRF guard is still proven by a dial refusal.
 			if !loopbackConnectWorks() {
-				_, _, err := newConnSeam("tcp", closedLoopbackAddr, nil)
+				_, _, _, err := newConnSeam("tcp", closedLoopbackAddr, nil)
 				if !errs.HasCode(err, corenettransport.CodeNetTransportDialFailed) {
 					t.Errorf("%s: loopback-blocked fallback err=%v want dial-failed", tc.name, err)
 				}
@@ -260,7 +260,7 @@ func assertDefaultClientRefusesRedirect(t *testing.T, name string, status int) {
 	t.Cleanup(front.Close)
 	//: a nil HTTPClient forces the timeout-bounded default whose CheckRedirect
 	//: refuses to follow — the path under test (client.go default branch).
-	send, closer := newHTTPSeam(front.URL, nil)
+	send, _, closer := newHTTPSeams(front.URL, nil, false)
 	t.Cleanup(func() { swallowErr(closer()) })
 	//: the redirect is non-2xx, so a refused follow surfaces as a write failure.
 	if serr := send(t.Context(), []byte("rec")); serr == nil {
@@ -330,7 +330,7 @@ func assertNilDialerFallback(t *testing.T, name string) {
 	}
 	//: refusal arm — a nil dialer to a closed port still proves net.Dial was
 	//: selected (the branch under test) and its error surfaces the dial sentinel.
-	_, _, err := newConnSeam("tcp", closedLoopbackAddr, nil)
+	_, _, _, err := newConnSeam("tcp", closedLoopbackAddr, nil)
 	if !errs.HasCode(err, corenettransport.CodeNetTransportDialFailed) {
 		t.Errorf("%s: nil-dialer refusal err=%v want dial-failed", name, err)
 	}
@@ -377,7 +377,7 @@ func assertNilDialerShipsOverTCP(t *testing.T, name string) {
 	//: block until the acceptor goroutine is running before dialing.
 	<-ready
 	//: nil dialer forces the stdlib net.Dial fallback (client.go:39-42).
-	send, closer, err := newConnSeam("tcp", ln.Addr().String(), nil)
+	send, _, closer, err := newConnSeam("tcp", ln.Addr().String(), nil)
 	if err != nil {
 		t.Fatalf("%s: newConnSeam: %v", name, err)
 	}
@@ -524,7 +524,7 @@ func httpSeamViaServer(t *testing.T, status int, hangUp, wantErr bool) (gotCT, g
 	}))
 	//: t.Cleanup (not defer) is required with parallel subtests.
 	t.Cleanup(srv.Close)
-	send, closer := newHTTPSeam(srv.URL, srv.Client())
+	send, _, closer := newHTTPSeams(srv.URL, srv.Client(), false)
 	assertSeamSend(t, send, closer, wantErr)
 	//: the hang-up arm never reached the observing half of the handler.
 	if hangUp {
@@ -539,7 +539,7 @@ func httpSeamViaTransport(t *testing.T, status int, hangUp, wantErr bool) (gotCT
 	t.Helper()
 	//: a recording transport captures the seam's request without a socket.
 	rt := &recordingRoundTripper{status: status, fail: hangUp}
-	send, closer := newHTTPSeam("http://collector.local/ingest", &http.Client{Transport: rt})
+	send, _, closer := newHTTPSeams("http://collector.local/ingest", &http.Client{Transport: rt}, false)
 	assertSeamSend(t, send, closer, wantErr)
 	//: the transport-error arm produced no observations — return empty captures.
 	if hangUp {
@@ -659,7 +659,7 @@ func Test_postRecord_boundedDrain(t *testing.T) {
 			//: handler writes to, or Close waits on a Write the kernel may never
 			//: wake — on Solaris it stayed parked after the send had returned.
 			t.Cleanup(srv.CloseClientConnections)
-			send, closer := newHTTPSeam(srv.URL, srv.Client())
+			send, _, closer := newHTTPSeams(srv.URL, srv.Client(), false)
 			t.Cleanup(func() { swallowErr(closer()) })
 			budget, cancel := context.WithTimeout(t.Context(), endlessBodyBudget)
 			t.Cleanup(cancel)
@@ -724,7 +724,7 @@ func Test_postRecord_keepAlive(t *testing.T) {
 			srv, connections := countingIngest(t, tc.status, tc.body)
 			//: the server's own client, whose pool is this test's alone — every
 			//: httptest.Server.Close empties http.DefaultTransport's.
-			send, closer := newHTTPSeam(srv.URL, srv.Client())
+			send, _, closer := newHTTPSeams(srv.URL, srv.Client(), false)
 			t.Cleanup(func() { swallowErr(closer()) })
 			for index := range reuseSends {
 				//: every send is a delivery.
@@ -775,7 +775,7 @@ func Test_newHTTPClient_ownsItsPool(t *testing.T) {
 			t.Parallel()
 			//: bodiless, because that is the answer the race turns into a fault.
 			srv, connections := countingIngest(t, http.StatusNoContent, "")
-			send, closer := newHTTPSeam(srv.URL, nil)
+			send, _, closer := newHTTPSeams(srv.URL, nil, false)
 			t.Cleanup(func() { swallowErr(closer()) })
 			for index := range reuseSends {
 				//: every send is a delivery, sweep or no sweep.
@@ -825,7 +825,7 @@ func Test_newHTTPSeam_closer(t *testing.T) {
 			//: supplied arm — the closer must not reach into the caller's pool.
 			if tc.supplied {
 				recorder := &idleCloseRecorder{}
-				send, closer := newHTTPSeam(unresolvableURL, &http.Client{Transport: recorder})
+				send, _, closer := newHTTPSeams(unresolvableURL, &http.Client{Transport: recorder}, false)
 				assertSeamSend(t, send, closer, false)
 				if calls := recorder.closed.Load(); calls != 0 {
 					t.Fatalf("%s: the closer called CloseIdleConnections on the caller's client %d time(s)", tc.name, calls)
@@ -834,7 +834,7 @@ func Test_newHTTPSeam_closer(t *testing.T) {
 			}
 			//: default arm — a send, the closer, then a send that must dial anew.
 			srv, connections := countingIngest(t, http.StatusNoContent, "")
-			send, closer := newHTTPSeam(srv.URL, nil)
+			send, _, closer := newHTTPSeams(srv.URL, nil, false)
 			assertSeamSend(t, send, closer, false)
 			assertSeamSend(t, send, closer, false)
 			//: exactly two: the closer closed the pooled connection in between.
@@ -927,7 +927,7 @@ func Test_newHTTPTransport_proxyChild(t *testing.T) {
 			if mode == "fallback" {
 				http.DefaultTransport = nil
 			}
-			send, closer := newHTTPSeam(unresolvableURL, nil)
+			send, _, closer := newHTTPSeams(unresolvableURL, nil, false)
 			t.Cleanup(func() { swallowErr(closer()) })
 			//: delivered, or the transport did not take it through the proxy.
 			if serr := send(t.Context(), []byte("rec")); serr != nil {

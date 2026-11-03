@@ -20,4 +20,8 @@ type SumValue struct {
 	// delta since the previous collection, according to
 	// SumMetricValue.Temporality.
 	Value int64
+	// Exemplars holds at most one exemplar: the last measurement of the
+	// window recorded with AddContext under a SAMPLED span (ADR 0051). Nil
+	// when none was.
+	Exemplars []ExemplarValue
 }

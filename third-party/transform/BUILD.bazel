@@ -15,6 +15,7 @@ go_library(
         "errors.go",
         "gen_codes.go",
         "s2.go",
+        "stream.go",
         "transform.go",
         "zstd.go",
     ],
@@ -22,6 +23,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/data/transform",
+        "//internal/kernel/concur/recycler",
         "//internal/kernel/errs",
         "@com_github_klauspost_compress//s2",
         "@com_github_klauspost_compress//zstd",
@@ -37,12 +39,20 @@ alias(
 go_test(
     name = "transform_test",
     srcs = [
+        "allocwindow_test.go",
         "bomb_external_test.go",
+        "conformance_external_test.go",
+        "decompress_alloc_test.go",
+        "dictionary_external_test.go",
+        "fuzz_external_test.go",
         "gen_api_test.go",
+        "main_external_test.go",
+        "stream_external_test.go",
         "transform_bench_test.go",
         "transform_external_test.go",
         "transform_internal_test.go",
     ],
+    data = glob(["testdata/**"]),
     embed = [":transform"],
     deps = [
         "//internal/core/data/transform",

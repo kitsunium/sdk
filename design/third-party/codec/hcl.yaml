@@ -25,6 +25,16 @@ packages:
             name: CodeHCLSizeExceeded
             value: "0x00_03_25_03"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeHCLDepthExceeded identifies an Unmarshal input nested past 100 levels
+              — brackets, braces, parentheses, strings and template sequences, a run of
+              unary operators or a chain of conditionals — refused by a lexical pre-scan
+              before hclsyntax's recursive-descent parser, which has no guard of its
+              own, could overflow the goroutine stack (a fatal error, not a panic).
+            name: CodeHCLDepthExceeded
+            value: "0x00_03_25_04"
+        type: errs.Code
     doc: |-
       Package hcl wraps HashiCorp HCL v2 as a codec.Codec implementation. It lives
       under third-party/, in a module of its own (ADR 0157) — NOT
@@ -38,6 +48,17 @@ packages:
       HCL is decode-oriented; symmetric value-marshal is struct-only via
       gohcl.EncodeIntoBody, so the top-level value MUST be a struct (or pointer to
       one) with `hcl:"…"` field tags. Non-streaming; implements the optional Appender.
+
+      Unmarshal bounds its input twice before hclsyntax parses it: 10 MiB, and 100
+      levels of nesting. hclsyntax's parser is recursive descent with no depth
+      guard, so a document of a million '[' overflowed the goroutine stack — a
+      fatal error that takes the process down and no recover() catches. A lexical
+      pre-scan counts tuples, objects, parentheses, strings, template
+      interpolations and directives, runs of unary operators and chains of
+      conditionals, outside comments and heredoc text, and refuses past the
+      ceiling with DEPTH_EXCEEDED (0.3.37.4). A panic of the parser on a crafted
+      document is recovered into HCL_UNMARSHAL_FAILED, as Marshal recovers
+      gohcl's.
 
       Package hcl — range 0.3.37.* (ADR 0022 third-party/codec/hcl block).
 
@@ -70,7 +91,15 @@ packages:
             name: SizeExceeded
             private: "third-party/codec/hcl: len(data) exceeds maxHCLBytes"
             public: HCL input exceeds size limit
-            reason: HCL_SIZE_EXCEEDED
+            reason: SIZE_EXCEEDED
+          - code: CodeHCLDepthExceeded
+            doc: |-
+              DepthExceeded marks an Unmarshal input nested past 100 levels; its reason
+              is the one every native reader's nesting refusal carries.
+            name: DepthExceeded
+            private: "third-party/codec/hcl: the pre-scan found nesting past maxHCLDepth"
+            public: HCL input nested too deeply
+            reason: DEPTH_EXCEEDED
     variables:
       - doc: Codec is the registered HCL singleton.
         name: Codec

@@ -117,7 +117,7 @@ func TestUnmarshal(t *testing.T) {
 		{"round-trip success", data, &good, ""},
 		{"malformed bytes surface UNMARSHAL_FAILED", []byte("[unclosed"), &bad, "UNMARSHAL_FAILED"},
 		//: input exceeding maxYAMLBytes is rejected before parsing (CWE-400).
-		{"over-cap input surfaces UNMARSHAL_FAILED", oversize, &capped, "UNMARSHAL_FAILED"},
+		{"over-cap input surfaces SIZE_EXCEEDED", oversize, &capped, "SIZE_EXCEEDED"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

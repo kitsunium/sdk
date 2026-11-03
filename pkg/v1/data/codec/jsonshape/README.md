@@ -45,7 +45,9 @@ A type that reaches itself is described once; further down, its shape is a refer
 
 - [Constants](<#constants>)
 - [func For\[T any\]\(\) \*Shape](<#For>)
+- [func ForV2\[T any\]\(\) \*Shape](<#ForV2>)
 - [func Of\(t reflect.Type\) \*Shape](<#Of>)
+- [func OfV2\(t reflect.Type\) \*Shape](<#OfV2>)
 - [type Field](<#Field>)
 - [type Kind](<#Kind>)
   - [func \(Kind\) MarshalText\(\) \(\[\]byte, error\)](<#Kind.MarshalText>)
@@ -144,6 +146,15 @@ func For[T any]() *Shape
 
 For describes the values of T on the wire: Of(reflect.TypeFor\[T]()).
 
+<a name="ForV2"></a>
+## func [ForV2](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/gen_facade.go>)
+
+```go
+func ForV2[T any]() *Shape
+```
+
+ForV2 describes the values of T under json/v2's own options: OfV2(reflect.TypeFor\[T]()).
+
 <a name="Of"></a>
 ## func [Of](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/gen_facade.go>)
 
@@ -152,6 +163,15 @@ func Of(t reflect.Type) *Shape
 ```
 
 Of describes the values of t on the wire. A nil t is Any. It never fails, and every call returns a new tree the caller may keep and change.
+
+<a name="OfV2"></a>
+## func [OfV2](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/gen_facade.go>)
+
+```go
+func OfV2(t reflect.Type) *Shape
+```
+
+OfV2 describes the values of t on the wire under encoding/json/v2's own default options: nil collections not Nullable, byte arrays as base64, time.Duration Unsupported, omitempty as json/v2 defines empty, the string option on numbers only. Of is unchanged.
 
 <a name="Field"></a>
 ## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/jsonshape/gen_facade.go>)

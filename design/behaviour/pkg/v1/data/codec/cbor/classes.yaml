@@ -20,5 +20,5 @@ package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/cbor
   name: cbor
-  purpose: "Package cbor registers the CBOR codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/cbor\" The codec is RFC 8949 written on the standard library: maps, arrays, the integers and floats, text and byte strings, tags 0 to 3 for times and big numbers, struct fields by their cbor tag or their json tag."
+  purpose: "Package cbor registers the CBOR codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/cbor\" The codec is RFC 8949 written on the standard library: maps, arrays, the integers and floats, text and byte strings, tags 0 to 3 for times and big numbers and any other as a Tag, struct fields by their cbor tag or their json tag."
 types: []

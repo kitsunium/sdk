@@ -562,6 +562,21 @@ sequences:
           when: len(doc) == 0
       - return: e.sender.PostContext(ctx, doc)
         to: e.sender.PostContext
+  - of: (*otlpHTTPExporter).ExportEncodedDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpHTTPExporter).ExportEncodedDocument
+        kind: self
+      - id: e.sender.PostEncoded
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(doc) == 0
+      - return: e.sender.PostEncoded(ctx, doc, encoding)
+        to: e.sender.PostEncoded
   - of: EncodeOTLPJSON
     participants:
       - id: caller

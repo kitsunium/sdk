@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+// maxEmptiableDepth bounds the structs emptiableV2 looks into: a struct
+// nested deeper is taken as able to be empty, which only widens Optional.
+const maxEmptiableDepth int = 32
+
 // member is one field encoding/json writes as an object member. It is
 // handled by pointer: it is too large to copy through every sort comparison.
 type member struct {
@@ -326,4 +330,217 @@ func indirect(t reflect.Type) reflect.Type {
 		return t.Elem()
 	}
 	return t
+}
+
+// optional is member.optional under the walker's semantics: json/v2's own
+// omitempty omits a member whose value encodes as null, "", {} or [] —
+// never a number or a boolean, and a struct when its fields all can be left
+// out (OfV2, #893).
+func (w *walker) optional(m *member, root reflect.Type) bool {
+	//: encoding/json's definition.
+	if !w.v2 {
+		//: the v1 rule.
+		return m.optional(root)
+	}
+	//: dropped when zero, or when its encoding can be empty.
+	if m.opts.omitZero || (m.opts.omitEmpty && emptiableV2(m.typ, 0)) {
+		//: optional.
+		return true
+	}
+	//: dropped when an embedding on the way is a nil pointer.
+	return throughPointer(root, m.index)
+}
+
+// quoted is member.quoted under the walker's semantics: json/v2's string
+// option quotes a number — an integer, a float, json.Number — and nothing
+// else.
+func (w *walker) quoted(m *member, addressable bool) bool {
+	//: encoding/json's definition.
+	if !w.v2 {
+		//: the v1 rule.
+		return m.quoted(addressable)
+	}
+	//: the option is absent, or the target is not a number.
+	return m.opts.quoted && quotableV2(m.typ)
+}
+
+// quotableV2 reports whether json/v2's string option applies to t: a number
+// that writes nothing of its own, through one unnamed pointer, or
+// json.Number.
+func quotableV2(t reflect.Type) bool {
+	//: one unnamed pointer is followed.
+	if t.Name() == "" && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	//: json.Number honours the option itself.
+	if t == numberType {
+		//: quoted.
+		return true
+	}
+	//: a type writing itself ignores the option.
+	if writesJSON(t, true) || writesText(t, true) {
+		//: not quoted.
+		return false
+	}
+	//: the numeric kinds.
+	switch t.Kind() {
+	//: integers and floats.
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64:
+		//: quoted.
+		return true
+	//: anything else: json/v2 refuses the option on it.
+	default:
+		//: not quoted.
+		return false
+	}
+}
+
+// refusesQuoting reports whether json/v2 refuses a value of t carrying the
+// string option: anything that is not a number and writes nothing of its own.
+func refusesQuoting(t reflect.Type) bool {
+	target := t
+	//: one unnamed pointer is followed.
+	if target.Name() == "" && target.Kind() == reflect.Pointer {
+		target = target.Elem()
+	}
+	//: a type writing itself ignores the option, a number takes it.
+	return !quotableV2(t) && !writesJSON(target, true) && !writesText(target, true)
+}
+
+// emptiableV2 reports whether a value of t can encode, under json/v2's own
+// options, as null, "", {} or []: a pointer, an interface, a string, a slice,
+// a map, a zero-length array, a type writing its own JSON or text — except
+// time.Time, whose text is never empty —, or a struct whose fields can all be
+// left out.
+func emptiableV2(t reflect.Type, depth int) bool {
+	//: the types whose encoding the kind does not tell: a date-time is never
+	//: empty, a duration is refused, an empty json.Number is written as 0.
+	if t == timeType || t == durationType || t == numberType {
+		//: never empty.
+		return false
+	}
+	//: whatever a type writing itself writes may be empty.
+	if writesJSON(t, true) || writesText(t, true) {
+		//: may be empty.
+		return true
+	}
+	//: by kind.
+	return kindEmptiableV2(t, depth)
+}
+
+// kindEmptiableV2 is emptiableV2 for a type laid out by its kind.
+func kindEmptiableV2(t reflect.Type, depth int) bool {
+	//: by kind.
+	switch t.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.String, reflect.Slice, reflect.Map:
+		//: null, "", [] or {}.
+		return true
+	case reflect.Array:
+		//: [] or "" only when it holds nothing.
+		return t.Len() == 0
+	case reflect.Struct:
+		//: {} when every field can be left out.
+		return depth >= maxEmptiableDepth || structEmptiableV2(t, depth)
+	default:
+		//: a number or a boolean is never empty.
+		return false
+	}
+}
+
+// structEmptiableV2 reports whether every member of the struct t can be left
+// out under json/v2's own options, so its value can encode as {}.
+func structEmptiableV2(t reflect.Type, depth int) bool {
+	written, _ := members(t)
+	//: each member.
+	for _, m := range written {
+		//: one member always written keeps the object non-empty.
+		leftOut := m.opts.omitZero || (m.opts.omitEmpty && emptiableV2(m.typ, depth+1)) || throughPointer(t, m.index)
+		//: one member that cannot go.
+		if !leftOut {
+			//: never {}.
+			return false
+		}
+	}
+	//: every member can go.
+	return true
+}
+
+// structRefusedV2 reports whether json/v2's own options refuse the struct t
+// whole, where encoding/json's legacy options ignore the fault: a json tag
+// whose unquoted name runs into a quote or a backslash, or that ends with a
+// comma; an embedded field with no name of its own carrying options other
+// than embed; or an exported embedded field of a type that is not a struct.
+// The structs it inlines are looked into, once each.
+func structRefusedV2(t reflect.Type, seen map[reflect.Type]bool) bool {
+	seen[t] = true
+	//: each declared field.
+	for field := range t.Fields() {
+		//: an unexported field that is not embedded is never looked at.
+		if !field.IsExported() && !field.Anonymous {
+			continue
+		}
+		//: a tag json/v2 cannot parse.
+		if tagRefusedV2(field.Tag.Get("json")) {
+			//: refused.
+			return true
+		}
+		//: an embedding json/v2 inlines, or refuses.
+		if field.Anonymous && embeddingRefusedV2(field, seen) {
+			//: refused.
+			return true
+		}
+	}
+	//: accepted.
+	return false
+}
+
+// embeddingRefusedV2 reports whether json/v2 refuses the embedded field: one
+// with no name of its own is inlined, so it may carry no option but embed and
+// must be a struct — an exported non-struct needs a name.
+func embeddingRefusedV2(field reflect.StructField, seen map[reflect.Type]bool) bool {
+	opts, ignored := parseTag(field)
+	//: `json:"-"`, or a named member: not inlined.
+	if ignored || opts.hasName {
+		//: judged as a member.
+		return false
+	}
+	//: options an inlined field cannot have.
+	if opts.hasOthers() {
+		//: refused.
+		return true
+	}
+	inner := indirect(field.Type)
+	//: a non-struct cannot be inlined.
+	if inner.Kind() != reflect.Struct {
+		//: refused when json/v2 would have to write it.
+		return field.IsExported()
+	}
+	//: the inlined struct's own fields, once.
+	return !seen[inner] && structRefusedV2(inner, seen)
+}
+
+// tagRefusedV2 reports whether json/v2 refuses the json tag: an unquoted
+// name followed by a reserved character other than a comma, or a trailing
+// comma.
+func tagRefusedV2(tag string) bool {
+	//: no tag, or the "never" spelling.
+	if tag == "" || tag == "-" {
+		//: accepted.
+		return false
+	}
+	//: a trailing comma.
+	if strings.HasSuffix(tag, ",") {
+		//: refused.
+		return true
+	}
+	//: a quoted name is read by the shared parser.
+	if strings.HasPrefix(tag, "'") {
+		//: accepted here.
+		return false
+	}
+	end := strings.IndexAny(tag, reservedInName)
+	//: the name runs into a reserved character that is not the comma.
+	return end >= 0 && tag[end] != ','
 }

@@ -19,6 +19,14 @@ packages:
             name: CodeYAMLFullUnmarshalFailed
             value: "0x00_03_4D_02"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeYAMLFullDepthExceeded identifies a document nested past
+              gopkg.in/yaml.v3's own bound — 10 000 flow levels or 10 000 indentation
+              levels — which the library refuses before it recurses further.
+            name: CodeYAMLFullDepthExceeded
+            value: "0x00_03_4D_03"
+        type: errs.Code
     constants:
       - doc: |-
           Format is the name this codec is registered under. It differs from the
@@ -47,6 +55,12 @@ packages:
 
       Streaming is supported: yaml.v3 exposes Encoder/Decoder types that serialise
       a sequence of documents separated by `---` markers.
+
+      Nesting is bounded by yaml.v3 itself, at 10 000 flow levels and 10 000
+      indentation levels; Unmarshal reports that refusal as DEPTH_EXCEEDED
+      (0.3.77.3), read from the document's structure, not as a syntax error. The
+      streaming Decoder, which never holds a whole document, keeps
+      YAML_FULL_UNMARSHAL_FAILED.
 
       Package yaml — range 0.3.77.* (third-party/codec/yaml block).
 
@@ -80,6 +94,15 @@ packages:
             private: "third-party/codec/yaml: gopkg.in/yaml.v3 failed to decode the document, or the input exceeds maxYAMLBytes"
             public: YAML decoding failed
             reason: YAML_FULL_UNMARSHAL_FAILED
+          - code: CodeYAMLFullDepthExceeded
+            doc: |-
+              DepthExceeded marks a document nested past gopkg.in/yaml.v3's bound of
+              10 000 levels; its reason is the one every native reader's nesting
+              refusal carries.
+            name: DepthExceeded
+            private: "third-party/codec/yaml: gopkg.in/yaml.v3 refused a document nested past 10 000 levels"
+            public: YAML document nested too deeply
+            reason: DEPTH_EXCEEDED
     variables:
       - doc: Codec is the registered full-YAML singleton.
         name: Codec

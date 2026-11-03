@@ -130,6 +130,8 @@ See ADR 0051.
   - [func \(ContextSpanExporter\) ExportContext\(ctx context.Context, spans SpansValue\) error](<#ContextSpanExporter.ExportContext>)
 - [type DocumentExporter](<#DocumentExporter>)
   - [func \(DocumentExporter\) ExportDocument\(ctx context.Context, doc \[\]byte\) error](<#DocumentExporter.ExportDocument>)
+- [type EncodedDocumentExporter](<#EncodedDocumentExporter>)
+  - [func \(EncodedDocumentExporter\) ExportEncodedDocument\(ctx context.Context, doc \[\]byte, encoding string\) error](<#EncodedDocumentExporter.ExportEncodedDocument>)
 - [type Event](<#Event>)
   - [func \(Event\) Normalized\(\) EventValue](<#Event.Normalized>)
 - [type ExporterName](<#ExporterName>)
@@ -1370,6 +1372,30 @@ type DocumentExporter interface {
 func (DocumentExporter) ExportDocument(ctx context.Context, doc []byte) error
 ```
 
+<a name="EncodedDocumentExporter"></a>
+## type [EncodedDocumentExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+EncodedDocumentExporter is the sibling of DocumentExporter an exporter implements to ship a document already encoded for the transport — the OTLP/HTTP exporter's ExportEncodedDocument posts a gzip batch as it rests, with Content-Encoding: gzip (#1051).
+
+```go
+type EncodedDocumentExporter = coretrace.EncodedDocumentExporter
+```
+
+EncodedDocumentExporter is an alias of `github.com/kitsunium/sdk/internal/core/observe/trace.EncodedDocumentExporter`, declared as:
+
+```go
+type EncodedDocumentExporter interface {
+	ExportEncodedDocument(ctx context.Context, doc []byte, encoding string) error
+}
+```
+
+<a name="EncodedDocumentExporter.ExportEncodedDocument"></a>
+### func \(EncodedDocumentExporter\) [ExportEncodedDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
+
+```go
+func (EncodedDocumentExporter) ExportEncodedDocument(ctx context.Context, doc []byte, encoding string) error
+```
+
 <a name="Event"></a>
 ## type [Event](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
@@ -1518,6 +1544,7 @@ type OTLPHTTPConfig struct {
 	Headers          map[string]string
 	Timeout          time.Duration
 	MaxResponseBytes int64
+	Gzip             bool
 }
 ```
 

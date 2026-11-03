@@ -13,6 +13,25 @@ constants:
         type: int64
         value: 256 << 20
     name: maxDecompressedBytes
+  - doc: |-
+      spillChunkBytes is the size of one spill chunk: what a decode writes into
+      once dst's spare capacity is full, so the plaintext is materialised once at
+      its final size instead of through a doubling chain. 32 KiB is the DEFLATE
+      window, so a chunk holds what one decoder refill can hand over.
+    items:
+      - name: spillChunkBytes
+        type: int
+        value: 32 << 10
+    name: spillChunkBytes
+  - doc: |-
+      spillKeepChunks is how many chunks one call hands back to spillPool: 1 MiB.
+      A larger decode drops the rest, so a single 256 MiB stream cannot leave
+      256 MiB pinned in the pool until the next two collections.
+    items:
+      - name: spillKeepChunks
+        type: int
+        value: "32"
+    name: spillKeepChunks
   - grouped: true
     items:
       - doc: |-
@@ -32,13 +51,22 @@ constants:
 files:
   - decls:
       - maxDecompressedBytes
-      - readAllBounded
+      - spillChunkBytes
+      - spillKeepChunks
+      - spillChunk
+      - spillPool
+      - appendAllBounded
+      - fillSpare
+      - spill
+      - settle
+      - releaseSpill
     name: bounded.go
   - decls: []
     name: doc.go
   - decls:
       - FlateCompressor
       - flateCompressor
+      - NewFlateCompressor
       - flateCompressor.Algorithm
       - flateCompressor.Compress
       - flateCompressor.DecompressBounded
@@ -49,6 +77,9 @@ files:
   - decls:
       - GzipCompressor
       - gzipCompressor
+      - NewGzipCompressor
+      - storedLevel
+      - writeLevel
       - gzipCompressor.Algorithm
       - gzipCompressor.Compress
       - gzipCompressor.DecompressBounded
@@ -58,11 +89,20 @@ files:
     name: gzip.go
   - decls:
       - schemeNone
-      - gzipWriterPool
+      - gzipWriterPools
       - readerBox
+      - boundedStream
+      - newBoundedStream
+      - (*boundedStream).Read
+      - (*boundedStream).atCeiling
+      - (*boundedStream).settle
+      - (*boundedStream).Close
       - readerScheme
       - readerBoxPool
-      - newZlibWriterPools
+      - newLevelPools
+      - levelPool
+      - gzipWriterPoolFor
+      - flateWriterPoolFor
       - zlibWriterPoolFor
       - takeGzipWriter
       - releaseGzipWriter
@@ -71,13 +111,31 @@ files:
       - takeZlibWriter
       - releaseZlibWriter
       - takeGzipReader
+      - takeGzipStream
+      - fillGzipBox
       - releaseGzipReader
       - takeFlateReader
       - takeFlateReaderFrom
+      - takeFlateStream
+      - fillFlateBox
       - releaseFlateReader
       - takeZlibReader
+      - takeZlibStream
+      - fillZlibBox
       - releaseZlibReader
     name: pool.go
+  - decls:
+      - resetter
+      - poolStream
+      - (*poolStream).Write
+      - (*poolStream).Close
+      - gzipCompressor.NewReader
+      - gzipCompressor.NewWriter
+      - flateCompressor.NewReader
+      - flateCompressor.NewWriter
+      - zlibCompressor.NewReader
+      - zlibCompressor.NewWriter
+    name: stream.go
   - decls:
       - gzipWrap
     name: wrap.go
@@ -85,7 +143,7 @@ files:
       - ZlibCompressor
       - zlibCompressor
       - NewZlibCompressor
-      - usableZlibLevel
+      - usableLevel
       - zlibCompressor.Algorithm
       - zlibCompressor.Compress
       - zlibCompressor.DecompressBounded
@@ -95,16 +153,59 @@ files:
     name: zlib.go
 functions:
   - doc: |-
-      readAllBounded drains r into a fresh buffer, refusing to materialise more than
-      max plaintext bytes. It reads one byte past max so an over-cap stream is
-      detected as overflow rather than silently truncated; the caller maps overflow
-      to its failure sentinel. max is an explicit parameter (production passes
-      maxDecompressedBytes) so the overflow path can be exercised against a small
-      cap in tests without materialising the production ceiling and without mutating
-      any shared state (keeping the parallel scheme tests race-free).
-    name: readAllBounded
-    params: r io.Reader, max int64
-    results: plain []byte, overflow bool, err error
+      appendAllBounded drains r onto dst, refusing to materialise more than max
+      plaintext bytes, and returns dst extended by what it read (kitsunium/sdk#1102).
+
+      The plaintext lands in dst's spare capacity first, read in place, so a
+      caller handing a dst large enough for the payload pays no allocation and no
+      copy. What does not fit is read into pooled 32 KiB chunks, and dst then grows
+      ONCE, to its final length, and the chunks are copied in: one allocation of
+      the payload's size, where io.ReadAll's doubling chain and the copy onto dst
+      after it cost three and a half times the plaintext.
+
+      It reads one byte past max, so an over-cap stream is detected as overflow
+      rather than silently truncated; the caller maps overflow to its own sentinel.
+      The +1 saturates at math.MaxInt64 (see below). On overflow or a read fault it
+      returns dst at its original length: the caller's prefix intact and never a
+      partial payload — dst's spare capacity may have been written, which the
+      port's convention allows.
+
+      max is an explicit parameter (production passes maxDecompressedBytes) so the
+      overflow path can be exercised against a small cap in tests without
+      materialising the production ceiling and without mutating shared state.
+    name: appendAllBounded
+    params: dst []byte, r io.Reader, max int64
+    results: decoded []byte, overflow bool, err error
+  - doc: |-
+      fillSpare reads r into out's spare capacity, never more than limit bytes
+      past len(out), and reports whether the stream ended there. It stops at a
+      full buffer or at the limit without probing further: spill decides what
+      that means.
+    name: fillSpare
+    params: out []byte, r io.Reader, limit int64
+    results: filled []byte, done bool, err error
+  - doc: |-
+      spill reads the rest of r into pooled chunks, then grows out once to its
+      final length and copies them in. A dst that held the payload exactly finds
+      io.EOF on its first chunk read and is returned as it is, unreallocated.
+    name: spill
+    params: dst, out []byte, r io.Reader, limit, max int64
+    results: decoded []byte, overflow bool, err error
+  - doc: |-
+      settle reports overflow when out holds more than max bytes past dst, and
+      hands out back otherwise.
+    name: settle
+    params: dst, out []byte, max int64
+    results: decoded []byte, overflow bool
+  - doc: |-
+      releaseSpill hands the first spillKeepChunks chunks back to the pool and
+      drops the rest, so one large decode cannot leave its whole plaintext pinned
+      in the pool.
+    name: releaseSpill
+    params: chunks []*spillChunk
+  - name: NewFlateCompressor
+    params: level int
+    results: coretransform.Compressor
   - doc: |-
       flateDecompress DEFLATE-decodes src and appends the result to dst, refusing to
       materialise more than max plaintext bytes. An over-cap stream returns the
@@ -121,6 +222,22 @@ functions:
     name: flateDecompressCore
     params: dst, src []byte, max int64
     results: decoded []byte, tooLarge bool, err error
+  - name: NewGzipCompressor
+    params: level int
+    results: coretransform.Compressor
+  - doc: |-
+      storedLevel maps a clamped level onto the field's representation: the
+      default is stored as the zero value, so the singleton and a default-level
+      compressor built by a constructor are one value.
+    name: storedLevel
+    params: level int
+    results: int
+  - doc: |-
+      writeLevel is the level the stdlib writer is built at: the stored level,
+      the zero value read as DefaultCompression.
+    name: writeLevel
+    params: stored int
+    results: int
   - doc: |-
       gzipDecompress gzip-decodes src and appends the result to dst, refusing to
       materialise more than max plaintext bytes. An over-cap stream returns the
@@ -138,46 +255,70 @@ functions:
     params: dst, src []byte, max int64
     results: decoded []byte, tooLarge bool, err error
   - doc: |-
-      newZlibWriterPools builds one recycler per level in the stdlib's accepted
-      band [HuffmanOnly, BestCompression]. Building the pools costs nothing at
-      package load: recycler.NewPool stores the factory and calls it only on a
-      miss, so importing this package for its gzip registration does not construct
-      twelve zlib encoders.
-    name: newZlibWriterPools
-    results: "[]*recycler.Pool[*zlib.Writer]"
+      newBoundedStream wraps a decoder box under ceiling, a negative ceiling read
+      as zero, as DecompressBounded reads it.
+    name: newBoundedStream
+    params: box *readerBox, release func(*readerBox), wrap *errs.WrapParams, ceiling int64
+    results: "*boundedStream"
   - doc: |-
-      zlibWriterPoolFor returns the recycler for level, or nil where the level is
-      outside the band zlib.NewWriterLevel accepts. A nil pool is how the
+      newLevelPools builds one recycler per level in the stdlib's accepted band
+      [HuffmanOnly, BestCompression] — the same band and the same constants for
+      compress/flate, compress/gzip and compress/zlib, which re-export flate's
+      (pinned by TestTheThreeLevelBandsAreOne). Building the pools costs nothing
+      at package load: recycler.NewPool stores the factory and calls it only on a
+      miss, so importing this package does not construct thirty-six encoders.
+    name: newLevelPools
+    results: "[]*recycler.Pool[W]"
+    typeParams: W any
+  - doc: |-
+      levelPool returns pools' recycler for level, or nil where the level is
+      outside the band the stdlib constructors accept. A nil pool is how an
       out-of-range level reaches the stdlib constructor unpooled, which is the
       branch that reports it as a typed error.
+    name: levelPool
+    params: pools []*recycler.Pool[W], level int
+    results: "*recycler.Pool[W]"
+    typeParams: W any
+  - doc: gzipWriterPoolFor returns the gzip recycler for level, nil out of band.
+    name: gzipWriterPoolFor
+    params: level int
+    results: "*recycler.Pool[*gzip.Writer]"
+  - doc: flateWriterPoolFor returns the flate recycler for level, nil out of band.
+    name: flateWriterPoolFor
+    params: level int
+    results: "*recycler.Pool[*flate.Writer]"
+  - doc: zlibWriterPoolFor returns the zlib recycler for level, nil out of band.
     name: zlibWriterPoolFor
     params: level int
     results: "*recycler.Pool[*zlib.Writer]"
   - doc: |-
-      takeGzipWriter borrows a gzip writer already bound to dst, constructing one
-      only on a pool miss. The factory yields nil rather than a writer because a
-      writer cannot be built without its destination: an eager factory could only
-      bind io.Discard and would then need a second Reset on every miss.
+      takeGzipWriter borrows a gzip writer for level, already bound to dst,
+      constructing one only on a pool miss. The factory yields nil rather than a
+      writer because a writer cannot be built without its destination: an eager
+      factory could only bind io.Discard and would then need a second Reset on
+      every miss. An out-of-range level has no pool and goes straight to the
+      stdlib constructor, which turns it into a typed error.
     name: takeGzipWriter
-    params: dst io.Writer
-    results: "*gzip.Writer"
+    params: dst io.Writer, level int
+    results: writer *gzip.Writer, err error
   - doc: |-
-      releaseGzipWriter returns w to the pool, rebound to io.Discard so the pool
-      does not pin the buffer this package just handed to the caller.
+      releaseGzipWriter returns w to its level's pool, rebound to io.Discard so
+      the pool does not pin the buffer this package just handed to the caller.
+      level always has a pool here, for the reason releaseZlibWriter states.
     name: releaseGzipWriter
-    params: w *gzip.Writer
+    params: w *gzip.Writer, level int
   - doc: |-
-      takeFlateWriter borrows a flate writer already bound to dst, constructing one
-      only on a pool miss. The constructor's error is returned rather than
-      swallowed, so the scheme keeps surfacing it.
+      takeFlateWriter borrows a flate writer for level, already bound to dst,
+      constructing one only on a pool miss. The constructor's error is returned
+      rather than swallowed, so the scheme keeps surfacing it.
     name: takeFlateWriter
-    params: dst io.Writer
+    params: dst io.Writer, level int
     results: writer *flate.Writer, err error
   - doc: |-
-      releaseFlateWriter returns w to the pool, unbound from the caller's output
-      for the reason releaseGzipWriter states.
+      releaseFlateWriter returns w to its level's pool, unbound from the caller's
+      output for the reason releaseGzipWriter states.
     name: releaseFlateWriter
-    params: w *flate.Writer
+    params: w *flate.Writer, level int
   - doc: |-
       takeZlibWriter borrows a zlib writer for level, already bound to dst. An
       out-of-range level has no pool and goes straight to the stdlib constructor,
@@ -195,8 +336,7 @@ functions:
       takeZlibWriter returned a nil error; takeZlibWriter's unpooled branch returns
       zlib.NewWriterLevel's own result verbatim; and NewWriterLevel refuses exactly
       `level < HuffmanOnly || level > BestCompression`, which is the same
-      expression, character for character, that makes zlibWriterPoolFor report no
-      pool. So the two conditions are one condition, and a nil pool here would mean
+      expression levelPool tests to report no pool — zlib's constants are flate's. So the two conditions are one condition, and a nil pool here would mean
       a writer the stdlib had refused to build was nonetheless handed back — a
       broken invariant, not a level to handle. It is left to fault, exactly as
       recycler.Pool.Get faults on a wrong-typed entry rather than masking it. The
@@ -205,11 +345,26 @@ functions:
     name: releaseZlibWriter
     params: w *zlib.Writer, level int
   - doc: |-
-      takeGzipReader borrows a gzip decoder already reading src. Both the miss path
-      and the reuse path validate the gzip header, so a malformed stream is
-      rejected identically either way — the error is the caller's to wrap.
+      takeGzipReader borrows a gzip decoder already reading src, through the box's
+      own reader. Both the miss path and the reuse path validate the gzip header,
+      so a malformed stream is rejected identically either way — the error is the
+      caller's to wrap.
     name: takeGzipReader
-    params: src io.Reader
+    params: src []byte
+    results: box *readerBox, err error
+  - doc: |-
+      takeGzipStream borrows a gzip decoder already reading the caller's stream r,
+      for a StreamingCompressor reader (ADR 0213). The box's own reader is emptied
+      so it does not hold a previous call's input.
+    name: takeGzipStream
+    params: r io.Reader
+    results: box *readerBox, err error
+  - doc: |-
+      fillGzipBox points held's decoder at src — the pooled one when held carries
+      a gzip decoder, a new one otherwise — and returns held, or puts it back and
+      returns the stream's header fault.
+    name: fillGzipBox
+    params: held *readerBox, src io.Reader
     results: box *readerBox, err error
   - doc: |-
       releaseGzipReader returns box to the pool still bound to the caller's input,
@@ -222,7 +377,7 @@ functions:
       Resetter interface is still allowed to fail, and that failure is returned
       typed rather than discarded.
     name: takeFlateReader
-    params: src io.Reader
+    params: src []byte
     results: box *readerBox, err error
   - doc: |-
       takeFlateReaderFrom is takeFlateReader over an explicit pool, which is the
@@ -230,7 +385,17 @@ functions:
       stdlib cannot reach it, so its gate has to inject a failing decoder, and only
       a pool whose Get returns what Put stored makes that injection certain.
     name: takeFlateReaderFrom
-    params: pool readerBoxPool, src io.Reader
+    params: pool readerBoxPool, src []byte
+    results: box *readerBox, err error
+  - doc: |-
+      takeFlateStream borrows a raw-DEFLATE decoder already reading the caller's
+      stream r, for a StreamingCompressor reader (ADR 0213).
+    name: takeFlateStream
+    params: r io.Reader
+    results: box *readerBox, err error
+  - doc: fillFlateBox points held's decoder at src, as fillGzipBox does for gzip.
+    name: fillFlateBox
+    params: pool readerBoxPool, held *readerBox, src io.Reader
     results: box *readerBox, err error
   - doc: |-
       releaseFlateReader returns box to the pool still bound to the caller's input,
@@ -238,10 +403,21 @@ functions:
     name: releaseFlateReader
     params: box *readerBox
   - doc: |-
-      takeZlibReader borrows a zlib decoder already reading src. Both paths parse
-      the RFC 1950 header, so a bad envelope is rejected identically either way.
+      takeZlibReader borrows a zlib decoder already reading src, through the box's
+      own reader. Both paths parse the RFC 1950 header, so a bad envelope is
+      rejected identically either way.
     name: takeZlibReader
-    params: src io.Reader
+    params: src []byte
+    results: box *readerBox, err error
+  - doc: |-
+      takeZlibStream borrows a zlib decoder already reading the caller's stream r,
+      for a StreamingCompressor reader (ADR 0213).
+    name: takeZlibStream
+    params: r io.Reader
+    results: box *readerBox, err error
+  - doc: fillZlibBox points held's decoder at src, as fillGzipBox does for gzip.
+    name: fillZlibBox
+    params: held *readerBox, src io.Reader
     results: box *readerBox, err error
   - doc: |-
       releaseZlibReader returns box to the pool still bound to the caller's input,
@@ -252,17 +428,20 @@ functions:
     params: level int
     results: coretransform.Compressor
   - doc: |-
-      usableZlibLevel maps level onto a level that actually compresses, returning
-      zlib.DefaultCompression for anything that does not. Two distinct faults land
-      here: a level outside [HuffmanOnly, BestCompression], which the stdlib writer
-      rejects outright, and zlib.NoCompression, which the stdlib accepts and which
-      produces exactly the inert compressor ADR 0031 forbids. Clamping rather than
-      refusing is the right side of the ADR 0031 line because every accepted level
-      round-trips the caller's bytes identically — the knob trades ratio against
-      CPU, it is not the content of the request — and because the sibling gzip and
-      flate schemes already hard-code DefaultCompression, which makes it the floor a
-      reader accepts without being told the number.
-    name: usableZlibLevel
+      usableLevel maps level onto a level that actually compresses, returning
+      DefaultCompression for anything that does not. It is the one clamp of the
+      three schemes' level knobs (NewGzipCompressor, NewFlateCompressor,
+      NewZlibCompressor): compress/gzip and compress/zlib re-export
+      compress/flate's level constants, so one band covers all three. Two distinct
+      faults land here: a level outside [HuffmanOnly, BestCompression], which the
+      stdlib writers reject outright, and NoCompression, which they accept and
+      which produces exactly the inert compressor ADR 0031 forbids. Clamping rather
+      than refusing is the right side of the ADR 0031 line because every accepted
+      level round-trips the caller's bytes identically — the knob trades ratio
+      against CPU, it is not the content of the request — and DefaultCompression is
+      the level every registered singleton encodes at, the floor a reader accepts
+      without being told the number.
+    name: usableLevel
     params: level int
     results: int
   - doc: |-
@@ -290,6 +469,7 @@ imports:
   io: io
   math: math
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  slices: slices
   zlib: compress/zlib
 package:
   docFile: doc.go
@@ -298,18 +478,35 @@ package:
   purpose: Package transform — shared decompression bound for the stdlib gzip, flate and zlib schemes.
 types:
   - doc: |-
-      flateCompressor is the concrete Compressor for the raw DEFLATE wire format. It
-      is a stateless value type so idempotent re-registration is a no-op.
+      spillChunk is one fixed-size spill buffer. An array, so a chunk is one
+      allocation and its pointer is what the pool holds.
+    kind: named
+    name: spillChunk
+    underlying: "[spillChunkBytes]byte"
+  - doc: |-
+      flateCompressor is the concrete Compressor for the raw DEFLATE wire format.
+      The level is fixed at construction and never mutated, so the value stays
+      comparable (idempotent re-registration is a no-op) and safe for concurrent
+      use.
+    fields:
+      - doc: |-
+          level is the compress/flate level, already clamped by usableLevel; its
+          zero value means DefaultCompression, for the reason gzipCompressor's
+          field states.
+        name: level
+        type: int
     kind: struct
     methods:
       - doc: Algorithm implements transform.Compressor and returns the canonical key.
         name: Algorithm
         recv: flateCompressor
         results: coretransform.Algorithm
-      - doc: Compress DEFLATE-encodes src and appends the result to dst.
+      - doc: |-
+          Compress DEFLATE-encodes src at the receiver's level and appends the result
+          to dst.
         name: Compress
         params: dst, src []byte
-        recv: flateCompressor
+        recv: c flateCompressor
         results: encoded []byte, err error
       - doc: |-
           DecompressBounded implements core/data/transform.BoundedDecompressor: it decodes
@@ -334,20 +531,46 @@ types:
         params: dst, src []byte
         recv: flateCompressor
         results: decoded []byte, err error
+      - doc: |-
+          NewReader implements core/data/transform.StreamingCompressor for raw
+          DEFLATE: r's stream, decoded under max. Raw DEFLATE has no header, so a
+          stream that is not one fails on its first read.
+        name: NewReader
+        params: r io.Reader, max int64
+        recv: flateCompressor
+        results: rc io.ReadCloser, err error
+      - doc: |-
+          NewWriter implements core/data/transform.StreamingCompressor for raw
+          DEFLATE: a stream into w at the receiver's level.
+        name: NewWriter
+        params: w io.Writer
+        recv: c flateCompressor
+        results: wc io.WriteCloser, err error
     name: flateCompressor
   - doc: |-
-      gzipCompressor is the concrete Compressor for the gzip wire format. It is a
-      stateless value type so idempotent re-registration is a no-op.
+      gzipCompressor is the concrete Compressor for the gzip wire format. The level
+      is fixed at construction and never mutated, so the value stays comparable
+      (idempotent re-registration is a no-op) and safe for concurrent use.
+    fields:
+      - doc: |-
+          level is the compress/gzip level, already clamped by usableLevel. Its
+          zero value means DefaultCompression: NoCompression is the one level the
+          clamp never lets through, so 0 is free to name the default, and the
+          registered singleton is the zero value it has always been.
+        name: level
+        type: int
     kind: struct
     methods:
       - doc: Algorithm implements transform.Compressor and returns the canonical key.
         name: Algorithm
         recv: gzipCompressor
         results: coretransform.Algorithm
-      - doc: Compress gzip-encodes src and appends the result to dst.
+      - doc: |-
+          Compress gzip-encodes src at the receiver's level and appends the result to
+          dst.
         name: Compress
         params: dst, src []byte
-        recv: gzipCompressor
+        recv: c gzipCompressor
         results: encoded []byte, err error
       - doc: |-
           DecompressBounded implements core/data/transform.BoundedDecompressor: it decodes
@@ -372,6 +595,21 @@ types:
         params: dst, src []byte
         recv: gzipCompressor
         results: decoded []byte, err error
+      - doc: |-
+          NewReader implements core/data/transform.StreamingCompressor for gzip: r's
+          gzip stream, decoded under max. The header is read here, so a stream that is
+          not gzip fails now with GzipFailed.
+        name: NewReader
+        params: r io.Reader, max int64
+        recv: gzipCompressor
+        results: rc io.ReadCloser, err error
+      - doc: |-
+          NewWriter implements core/data/transform.StreamingCompressor for gzip: a
+          gzip stream into w at the receiver's level.
+        name: NewWriter
+        params: w io.Writer
+        recv: c gzipCompressor
+        results: wc io.WriteCloser, err error
     name: gzipCompressor
   - doc: |-
       readerBox carries a recycled decoder, and exists because two of the three
@@ -393,8 +631,72 @@ types:
           separately, so the two cannot disagree.
         name: scheme
         type: readerScheme
+      - doc: |-
+          in is the reader over the caller's compressed input that rc decodes
+          from. It lives in the box, rebound by each take, because a fresh
+          bytes.NewReader per call escapes into the decoder and was one heap
+          allocation on every Decompress — the last one a sized dst could not
+          shed (kitsunium/sdk#1102). It holds the caller's input until the next
+          take, which the decoder did already.
+        name: in
+        type: bytes.Reader
     kind: struct
     name: readerBox
+  - doc: |-
+      boundedStream is the reader all three schemes' NewReader return (ADR 0213):
+      a pooled decoder read under the caller's ceiling. It hands over at most max
+      bytes; once they are out, one more byte is asked of the decoder, and getting
+      one fails the read with DecompressedTooLarge where getting the end returns
+      io.EOF — the probe is the stream form of appendAllBounded's detector byte.
+      Every error is sticky, and Close returns the decoder to its pool once.
+    fields:
+      - doc: box holds the pooled decoder, nil once Close has handed it back.
+        name: box
+        type: "*readerBox"
+      - doc: release returns box to the pool it was taken from.
+        name: release
+        type: func(*readerBox)
+      - doc: wrap is the scheme's WrapParams, for a decoder's fault.
+        name: wrap
+        type: "*errs.WrapParams"
+      - doc: left is how many bytes the stream may still hand over.
+        name: left
+        type: int64
+      - doc: "err is the sticky outcome: io.EOF, DecompressedTooLarge or a fault."
+        name: err
+        type: error
+      - doc: |-
+          probe is the one byte asked of the decoder at the ceiling. A field, so
+          the probe does not allocate: the struct is on the heap already.
+        name: probe
+        type: "[1]byte"
+    kind: struct
+    methods:
+      - doc: Read implements io.Reader under the ceiling.
+        name: Read
+        params: p []byte
+        recv: s *boundedStream
+        results: n int, err error
+      - doc: |-
+          atCeiling asks the decoder for one byte past the ceiling: a byte is a
+          stream that wanted more than max, the end is a stream that fitted it.
+        name: atCeiling
+        recv: s *boundedStream
+        results: error
+      - doc: |-
+          settle turns a decoder's error into the stream's: io.EOF as is, a fault
+          under the scheme's sentinel, both sticky.
+        name: settle
+        params: rerr error
+        recv: s *boundedStream
+        results: error
+      - doc: |-
+          Close returns the decoder to its pool, once. It does not close the caller's
+          reader; a second Close is a no-op.
+        name: Close
+        recv: s *boundedStream
+        results: error
+    name: boundedStream
   - doc: |-
       readerScheme names the wire format a boxed decoder was built for, and exists
       because the type assertion each take performs cannot establish it. MEASURED,
@@ -442,6 +744,48 @@ types:
       	Put(box *readerBox)
       }
   - doc: |-
+      resetter is what the three stdlib writers share: a stream encoder that a
+      pool can rebind to another destination.
+    kind: named
+    name: resetter
+    underlying: |-
+      interface {
+      	io.WriteCloser
+      	// Reset rebinds the writer to w, keeping its level.
+      	Reset(w io.Writer)
+      }
+  - doc: |-
+      poolStream is the writer all three schemes' NewWriter return (ADR 0213): a
+      pooled encoder writing into the caller's w until Close, which writes the
+      stream's end and returns the encoder to its level's pool, once.
+    fields:
+      - doc: w is the pooled encoder; closed says it went back.
+        name: w
+        type: W
+      - name: closed
+        type: bool
+      - doc: pool is the level's pool w goes back to.
+        name: pool
+        type: "*recycler.Pool[W]"
+      - doc: wrap is the scheme's WrapParams, for an encoder's fault.
+        name: wrap
+        type: "*errs.WrapParams"
+    kind: struct
+    methods:
+      - doc: "Write implements io.Writer: it compresses p into the caller's w."
+        name: Write
+        params: p []byte
+        recv: s *poolStream[W]
+        results: n int, err error
+      - doc: |-
+          Close writes the stream's end into the caller's w and returns the encoder to
+          its pool, unbound from w. It does not close w; a second Close is a no-op.
+        name: Close
+        recv: s *poolStream[W]
+        results: error
+    name: poolStream
+    typeParams: W resetter
+  - doc: |-
       zlibCompressor is the concrete Compressor for the zlib wire format. The level
       is fixed at construction and never mutated, so the value stays comparable
       (idempotent re-registration is a no-op) and safe for concurrent use — the same
@@ -451,6 +795,21 @@ types:
         type: int
     kind: struct
     methods:
+      - doc: |-
+          NewReader implements core/data/transform.StreamingCompressor for zlib: r's
+          RFC 1950 stream, decoded under max. The two-byte header is read here, so a
+          stream that is not zlib fails now with ZlibFailed.
+        name: NewReader
+        params: r io.Reader, max int64
+        recv: zlibCompressor
+        results: rc io.ReadCloser, err error
+      - doc: |-
+          NewWriter implements core/data/transform.StreamingCompressor for zlib: an
+          RFC 1950 stream into w at the receiver's level.
+        name: NewWriter
+        params: w io.Writer
+        recv: c zlibCompressor
+        results: wc io.WriteCloser, err error
       - doc: Algorithm implements transform.Compressor and returns the canonical key.
         name: Algorithm
         recv: zlibCompressor
@@ -489,6 +848,13 @@ types:
     name: zlibCompressor
 vars:
   - doc: |-
+      spillPool recycles spill chunks across decodes of all three schemes: a
+      chunk carries plaintext bytes and no pointer, so it is scheme-neutral.
+    items:
+      - name: spillPool
+        value: recycler.NewPool(func() *spillChunk { return new(spillChunk) })
+    name: spillPool
+  - doc: |-
       FlateCompressor is the flate (raw DEFLATE) singleton, registered with
       core/data/transform at package load. Binding the registration result to a named
       var keeps us clear of init().
@@ -507,21 +873,23 @@ vars:
   - grouped: true
     items:
       - doc: |-
-          gzipWriterPool recycles *gzip.Writer across Compress calls. gzip encodes at
-          DefaultCompression here and nothing varies it, so one pool covers the scheme.
-        name: gzipWriterPool
-        value: recycler.NewPool(func() *gzip.Writer { return nil })
+          gzipWriterPools recycles *gzip.Writer per level, since NewGzipCompressor
+          gave gzip a level (kitsunium/sdk#900). The level keys the pool for the
+          reason zlibWriterPools states: gzip.Writer.Reset preserves it too.
+        name: gzipWriterPools
+        value: newLevelPools[*gzip.Writer]()
       - doc: |-
-          flateWriterPool recycles *flate.Writer across Compress calls, at the single
-          DefaultCompression level this scheme encodes at.
-        name: flateWriterPool
-        value: recycler.NewPool(func() *flate.Writer { return nil })
+          flateWriterPools recycles *flate.Writer per level, since
+          NewFlateCompressor (kitsunium/sdk#900); flate.Writer.Reset keeps the
+          level the writer was built with, like the other two.
+        name: flateWriterPools
+        value: newLevelPools[*flate.Writer]()
       - doc: |-
           zlibWriterPools recycles *zlib.Writer per level. The level must key the pool
           because zlib.Writer.Reset deliberately preserves it: a writer recycled into a
           differently-levelled compressor would silently encode at the wrong ratio.
         name: zlibWriterPools
-        value: newZlibWriterPools()
+        value: newLevelPools[*zlib.Writer]()
       - doc: |-
           gzipReaderPool recycles the gzip decoder, held in a box rather than
           directly for the reason readerBox states.
@@ -537,7 +905,7 @@ vars:
           reason and boxed the same way, so the three schemes read identically.
         name: zlibReaderPool
         value: recycler.NewPool(func() *readerBox { return &readerBox{} })
-    name: gzipWriterPool
+    name: gzipWriterPools
   - grouped: true
     items:
       - doc: |-

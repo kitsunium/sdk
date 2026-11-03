@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/yaml/
 
 ## Purpose
@@ -61,7 +61,12 @@ starts at, and `UNMARSHAL_FAILED`'s code in its trail:
 Everything else outside the subset is `UnmarshalFailed` with a constant
 `detail` naming it: a multi-line implicit key, a reserved indicator (`@`,
 `` ` ``), a tab where indentation is, an unknown escape, content on the `---`
-line, a `...` closing nothing. **Refused by the source check**, before the
+line, a `...` closing nothing. So is what YAML itself refuses that libyaml
+let through (#1107, the yaml-test-suite's 9C9N, QB6E, DK95/01, Y79Y/003): a
+line of a flow collection or of a quoted scalar in block context must be
+indented deeper than the block holding it, with spaces — a tab is not
+indentation; a line opening with the collection's closing `]` or `}` is not
+judged, so `a: [1,\n  2,\n]` still reads. **Refused by the source check**, before the
 parse: a document that is not UTF-8 (a UTF-16/32 byte order mark, an invalid
 byte), a raw control character other than tab and the line breaks, a raw
 U+0085 / U+2028 / U+2029 — a line break to YAML 1.1 and text to YAML 1.2, so
@@ -144,7 +149,12 @@ where a line starts and keeps as text elsewhere (`\uFEFF` writes it).
 
 - Struct fields follow the `yaml` tag as yaml.v3 does: the key is the tag's
   name or the field's own name in lower case, `-` leaves it out, and the
-  flags are `omitempty` (asks `IsZero()` first), `flow` (write the
+  flags are `omitempty` (asks `IsZero()` first), `omitzero` (#1103, which
+  yaml.v3 refuses: encoding/json's rule — the type's `IsZero()` when it
+  declares one, through the field's address when only the pointer does, else
+  `reflect.Value.IsZero`, decided once per field in `omitzero.go`; with
+  `omitempty` too either one leaves the field out, so a type tagged for
+  encoding/json marshals as YAML), `flow` (write the
   collection inline) and `inline` (merge an embedded struct's fields, or
   collect the remaining keys into a `map[string]T`). An unknown flag, an
   `inline` on anything else, inlined structs forming a cycle and two fields
@@ -158,6 +168,8 @@ where a line starts and keeps as text elsewhere (`\uFEFF` writes it).
 - `time.Time` is written through its `MarshalText` (RFC 3339) and read from
   the forms yaml.v3 read; `time.Duration` as its `String()`, read by
   `time.ParseDuration` — an integer is refused, its unit would be a guess.
+  This is the rule of the hand-edited formats, which `toml/` follows too
+  (#1126); the binary formats write int64 nanoseconds.
 - An untyped target receives `nil`, `bool`, `int` (`int64` where an `int`
   is narrower, `uint64` past `int64`), `float64`, `string`, `[]any` and
   `map[string]any` — a mapping keyed by each key's TEXT, whatever the key's
@@ -204,11 +216,15 @@ package always emitted; only the declaration moved.
 | `0.3.4.9` | `DirectiveRefused` | `DIRECTIVE_REFUSED` | `%` at a line's start: `%YAML`, `%TAG` |
 | `0.3.4.10` | `DuplicateKey` | `DUPLICATE_KEY` | one key twice — by text in the document, by decoded value in a typed map |
 | `0.3.4.11` | `LeadingZeroRefused` | `LEADING_ZERO_REFUSED` | `0644` into a number or `any` |
+| `0.3.4.12` | `SizeExceeded` | `SIZE_EXCEEDED` | a document past `maxYAMLBytes`, more than `maxNodes` nodes, an implicit key past `maxKeyRunes` (#894; `UnmarshalFailed` in the trail) |
+| `0.3.4.13` | `DepthExceeded` | `DEPTH_EXCEEDED` | collections nested past `maxDepth` (#894; `UnmarshalFailed` in the trail) |
 
 Codes `0.3.4.1` and `0.3.4.2` keep their values and reasons from the yaml.v3
 wrapper. A refusal's origin is its own sentinel (`errs.HasReason`,
 `errs.CodeOf`), and `errs.HasCode(err, CodeYAMLUnmarshalFailed)` matches every
 decoding failure through the trail.
+
+**Position (#1125).** Every decoding refusal carries its 1-based `line` and `column` (characters) through `failed.go`'s `at`, which is `core/data/codec.PositionFields`: `codec.PositionOf` reads them back as for any format.
 
 ## Contents
 
@@ -282,3 +298,31 @@ go test -run='^$' -fuzz='^FuzzUnmarshal$' -fuzztime=60s ./internal/service/data/
 go test -run='^$' -fuzz='^FuzzNativeAgreesWithYAMLv3$' -fuzztime=60s ./third-party/codec/yaml/
 go test -run='^$' -fuzz='^FuzzNativeOutputReadsTheSame$' -fuzztime=60s ./third-party/codec/yaml/
 ```
+
+## Conformance (#1107)
+
+`testdata/yaml-test-suite/` is the YAML project's suite, tag `data-2022-01-17`
+— MIT, `LICENSE` beside it, `README.md` there naming the source and the four
+files copied of each case (`===`, `in.yaml`, `in.json`, `error`), `-text` in
+`.gitattributes` so no checkout rewrites a byte. `conformance_external_test.go`
+runs every one of its **402** cases in the ordinary lane, no network:
+
+| Outcome | Cases |
+|---|---|
+| valid, decoded equal to `in.json` | **143** |
+| valid, refused by a named subset sentinel (anchor, tag, directive, complex key, second document…) | **102** |
+| invalid, refused | **94** |
+| invalid, accepted | **0** |
+| skipped, in a named group with its reason | **63** |
+
+The skipped groups: 60 valid cases refused with `UNMARSHAL_FAILED` and one of
+ten constant details, each a construct this file lists outside the subset
+(`subsetLimits` in the test — a valid case refused with any other detail
+fails the run); 2 block scalars the input ends inside on a line of blanks
+(JEF9/02, L24T/01), read as yaml.v3 reads them — without the line break the
+suite's reference parser adds at the end of the input —, because the subset
+replaced yaml.v3 and `FuzzNativeAgreesWithYAMLv3` holds it to its values; and
+1 case the suite gives no `in.json` (4ABK). The test asserts the five counts,
+so a change of the reader that moves one is seen. To refresh: copy the same
+four files of every case from a newer data tag, update `README.md` there, the
+counts and this table.

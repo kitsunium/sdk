@@ -135,7 +135,7 @@ func TestUnmarshal(t *testing.T) {
 		{"round-trip success", []byte("{\"name\":\"a\",\"age\":1}\n"), kindSlice, ""},
 		{"blank lines are skipped", []byte("{\"name\":\"a\",\"age\":1}\n\n{\"name\":\"b\",\"age\":2}\n"), kindSlice, ""},
 		{"non-slice pointer target", []byte("{}\n"), kindString, "VALUE_INVALID"},
-		{"nil pointer target", []byte("{}\n"), kindNilSlice, "VALUE_INVALID"},
+		{"nil pointer target", []byte("{}\n"), kindNilSlice, "TARGET_INVALID"},
 		{"bad JSON line surfaces UNMARSHAL_FAILED", []byte("not json\n"), kindSlice, "UNMARSHAL_FAILED"},
 	}
 	runCase := func(t *testing.T, tc tc) {

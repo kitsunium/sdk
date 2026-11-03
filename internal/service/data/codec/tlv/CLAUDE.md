@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T01:08:46Z -->
+<!-- updated: 2026-11-03T12:00:00Z -->
 # internal/service/data/codec/tlv/
 
 ## Purpose
@@ -33,8 +33,10 @@ package always emitted; only the declaration moved.
 | `0.3.22.2`   | `UnmarshalFailed`  | malformed record, type mismatch, decoder shape error |
 | `0.3.22.3`   | `UnsupportedType`  | chan / func / complex* / unsafe.Pointer source |
 | `0.3.22.4`   | `DepthExceeded`    | nesting depth > `maxTLVDepth` (32) — CWE-674 |
-| `0.3.22.5`   | `SizeExceeded`     | Unmarshal input > `maxTLVBytes` (10 MiB) — CWE-400 |
+| `0.3.22.5`   | `SizeExceeded`     | Unmarshal input, or one record read by the stream `Decoder`, > `maxTLVBytes` (10 MiB) — CWE-400 |
 | `0.3.22.6`   | `Truncated`        | buffer ends mid-record |
+
+**Position (#1125).** `Unmarshal` places a wire refusal at the byte `offset` where the walk stopped — the record it could not read, a truncated payload where it should start, the first trailing byte —: the composite walkers hand the failing residual up, and `decodeRoot` turns it into an offset (`position.go`); the typed path, which returns no residual, walks again on a refusal only and places it when that walk stops on the same code. A value the target cannot hold is not placed. In a stream, the offset is in the record decoded. `codec.PositionOf` reads it back.
 
 ## Conventions
 
@@ -42,6 +44,14 @@ package always emitted; only the declaration moved.
   discriminators grouped by family (`0x01` nil, `0x02-03` bool,
   `0x10-13` int*, `0x20-23` uint*, `0x30-31` float*, `0x40-41`
   string/bytes, `0x50` slice, `0x60` map, `0x70` struct).
+- **Map pairs are written in key order** (#1104), so equal values encode to
+  equal bytes: string keys byte-wise, integer keys by value whatever tag
+  width and signedness each is written in, any other key — or two keys of
+  different kinds — by its encoded record, and two keys that encode alike by
+  their values (`order.go`). `encodeMapDirect` writes the pairs, then
+  `reorderPairs` sorts their spans (on the stack up to sixteen) and rewrites
+  them in place through a pooled scratch buffer. `TestMarshalWritesMapKeysInOrder`
+  pins the bytes.
 - **Narrowest tag wins** on encode: an `int(42)` is emitted as `tagInt8`,
   not `tagInt64`. Decoding always upgrades to the widest Go type
   (`int64` / `uint64` / `float64`) and re-narrows via `reflect.Convert`
@@ -56,6 +66,20 @@ package always emitted; only the declaration moved.
   depth ≤ 32 (`maxTLVDepth`), struct field-name ≤ 255 bytes
   (`maxFieldNameBytes`), pre-allocation hint clamped to 4096
   (`sliceHintCap`). Mirrors the msgpack / NDJSON cap conventions.
+- **The stream `Decoder` holds a record to `Unmarshal`'s ceiling** (#1105).
+  `readOneRecord` rebuilds one record — a composite by recursing into its
+  declared children — in a `recordFrame` that charges every byte it rebuilds,
+  headers and values of every child, against `maxTLVBytes`, and refuses with
+  `SIZE_EXCEEDED` before reading the child or value that would cross it. So
+  the stream refuses exactly the records `Unmarshal` refuses
+  (`TestStreamDecodeAgreesWithUnmarshalAtTheCeiling`, one byte under, at and
+  over), having read at most one ceiling plus a tag byte and allocated at most
+  two ceilings (`TestStreamDecodeChargesTheWholeRecordAgainstTheCeiling`, four
+  9 MiB children). The frame fills chunks no larger than what it already
+  rebuilt and never past what the ceiling leaves, then joins them once — a
+  header declaring 10 MiB against a reader that sends a handful of bytes
+  reserves those bytes only, and a record that fits the first 512-byte chunk
+  is returned without a copy (`BENCH.md` §8).
 - **`reflectView` wrapper**: a local named type (`type reflectView
   reflect.Value`) that lets package-internal helpers accept reflect
   values without the external concrete type tripping the linter's

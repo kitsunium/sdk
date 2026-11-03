@@ -420,7 +420,7 @@ func Test_baseencCodec_Unmarshal(t *testing.T) {
 	}
 }
 
-// Test_baseencCodec_Unmarshal_oversize surfaces BASE_ENC_SIZE_EXCEEDED at
+// Test_baseencCodec_Unmarshal_oversize surfaces SIZE_EXCEEDED at
 // the 10 MiB boundary so a CWE-400 regression fails loudly.
 func Test_baseencCodec_Unmarshal_oversize(t *testing.T) {
 	t.Parallel()
@@ -1183,11 +1183,11 @@ func Test_convSizeExceeded(t *testing.T) {
 			return
 		}
 		if !errs.HasCode(err, corebaseenc.CodeBaseEncSizeExceeded) {
-			t.Fatalf("convSizeExceeded = %v, want BASE_ENC_SIZE_EXCEEDED", err)
+			t.Fatalf("convSizeExceeded = %v, want SIZE_EXCEEDED", err)
 		}
 		reason, _ := errs.ReasonOf(err)
-		if reason != "BASE_ENC_SIZE_EXCEEDED" {
-			t.Errorf("reason = %q, want BASE_ENC_SIZE_EXCEEDED", reason)
+		if reason != "SIZE_EXCEEDED" {
+			t.Errorf("reason = %q, want SIZE_EXCEEDED", reason)
 		}
 		//: the public message must never name the call site; that is what the
 		//: private half is for.

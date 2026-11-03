@@ -93,8 +93,8 @@ func (s *otlpScopeMetrics) appendJSON(dst []byte) []byte {
 	return append(dst, '}')
 }
 
-// appendJSON appends one Metric: its name, its description when it has one,
-// and the one data case that is set.
+// appendJSON appends one Metric: its name, its description and its unit when
+// it has them, and the one data case that is set.
 func (m *otlpMetric) appendJSON(dst []byte) []byte {
 	//: name (1), never omitted.
 	dst = append(dst, '{')
@@ -105,6 +105,12 @@ func (m *otlpMetric) appendJSON(dst []byte) []byte {
 		//: escaped like any string.
 		dst = otlp.AppendKey(dst, "description")
 		dst = otlp.AppendString(dst, m.Description)
+	}
+	//: unit (3), omitted when empty — the same presence rule (ADR 0208).
+	if m.Unit != "" {
+		//: UCUM is printable ASCII; escaped like any string all the same.
+		dst = otlp.AppendKey(dst, "unit")
+		dst = otlp.AppendString(dst, m.Unit)
 	}
 	//: gauge (5).
 	if m.Gauge != nil {
@@ -125,6 +131,11 @@ func (m *otlpMetric) appendJSON(dst []byte) []byte {
 		//: points, temporality.
 		dst = otlp.AppendKey(dst, "histogram")
 		dst = m.Histogram.appendJSON(dst)
+	}
+	//: exponentialHistogram (10).
+	if m.ExponentialHistogram != nil {
+		dst = otlp.AppendKey(dst, "exponentialHistogram")
+		dst = m.ExponentialHistogram.appendJSON(dst)
 	}
 	return append(dst, '}')
 }
@@ -210,6 +221,8 @@ func (p *otlpNumberDataPoint) appendJSON(dst []byte) []byte {
 		dst = otlp.AppendKey(dst, "asInt")
 		dst = p.AsInt.AppendJSON(dst)
 	}
+	//: exemplars (5), omitted when none was kept.
+	dst = appendExemplars(dst, p.Exemplars)
 	//: attributes (7), omitted when empty.
 	if len(p.Attributes) > 0 {
 		//: the repeated KeyValue.
@@ -220,7 +233,7 @@ func (p *otlpNumberDataPoint) appendJSON(dst []byte) []byte {
 }
 
 // appendJSON appends one HistogramDataPoint, in field-number order; sum is
-// never omitted, and a nil one is null.
+// absent exactly when the point has none (HistogramValue.NoSum).
 func (p *otlpHistogramDataPoint) appendJSON(dst []byte) []byte {
 	//: the window and the count, decimal strings.
 	dst = append(dst, '{')
@@ -230,19 +243,16 @@ func (p *otlpHistogramDataPoint) appendJSON(dst []byte) []byte {
 	dst = p.TimeUnixNano.AppendJSON(dst)
 	dst = otlp.AppendKey(dst, "count")
 	dst = p.Count.AppendJSON(dst)
-	//: sum (5), never omitted.
-	dst = otlp.AppendKey(dst, "sum")
-	//: a nil pointer is null, as encoding/json spells it.
-	if p.Sum == nil {
-		//: the literal.
-		dst = otlp.AppendNull(dst)
-	} else {
-		//: a number or a name.
+	//: sum (5), the proto's optional: absent for a source that keeps no total.
+	if p.Sum != nil {
+		dst = otlp.AppendKey(dst, "sum")
 		dst = p.Sum.AppendJSON(dst)
 	}
 	//: bucketCounts (6) and explicitBounds (7), each omitted when empty.
 	dst = appendBucketCounts(dst, p.BucketCounts)
 	dst = appendExplicitBounds(dst, p.ExplicitBounds)
+	//: exemplars (8), omitted when none was kept.
+	dst = appendExemplars(dst, p.Exemplars)
 	//: attributes (9), omitted when empty.
 	if len(p.Attributes) > 0 {
 		//: the repeated KeyValue.
@@ -319,6 +329,14 @@ func otlpDocCapacity(list []otlpMetric) int {
 				//: the point and its two arrays.
 				point := &metric.Histogram.DataPoints[j]
 				size += otlpDocPointBytes + (len(point.BucketCounts)+len(point.ExplicitBounds))*otlpDocBucketBytes
+			}
+		//: an exponential histogram's points, two bucket runs each.
+		case metric.ExponentialHistogram != nil:
+			//: one estimate per point and per bucket.
+			for j := range metric.ExponentialHistogram.DataPoints {
+				//: the point and its two runs.
+				point := &metric.ExponentialHistogram.DataPoints[j]
+				size += otlpDocPointBytes + (point.Positive.size()+point.Negative.size())*otlpDocBucketBytes
 			}
 		}
 	}

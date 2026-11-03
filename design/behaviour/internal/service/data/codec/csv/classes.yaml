@@ -30,54 +30,230 @@ constants:
         name: promotionBufWorstCaseFactor
         type: int
         value: "2"
+      - doc: |-
+          maxReservedRecords caps the records Unmarshal reserves room for before
+          it has read one (#1098): past it the table grows by records read.
+        name: maxReservedRecords
+        type: int
+        value: "4096"
+      - doc: |-
+          defaultComma is the delimiter the registered codec writes and reads,
+          encoding/csv's own default.
+        name: defaultComma
+        type: rune
+        value: "','"
     name: promotionHeaderCell
+  - doc: The decoder's state bits.
+    grouped: true
+    items:
+      - doc: flagReady reports that record holds a record no Decode has taken yet.
+        name: flagReady
+        type: decoderFlags
+        value: 1 << iota
+      - doc: |-
+          flagHeaderDone is set once the stream's header question is settled:
+          read as a header by a Decode into a struct, or handed out as data.
+        name: flagHeaderDone
+      - doc: flagReported is set once Decode has returned err, so More reports false.
+        name: flagReported
+    name: flagReady
+  - doc: |-
+      quoteSpecials are the bytes encoding/csv's Writer escapes inside a quoted
+      field: the quote itself is doubled, CR and LF are written as they are.
+    items:
+      - name: quoteSpecials
+        type: string
+        value: "\"\\\"\\r\\n\""
+    name: quoteSpecials
+  - doc: |-
+      formulaPrefix is the byte the OWASP mitigation writes before a cell a
+      spreadsheet would evaluate (escapeIfFormulaCell).
+    items:
+      - name: formulaPrefix
+        type: byte
+        value: "'\\''"
+    name: formulaPrefix
+  - doc: The cell conversions a column can take.
+    grouped: true
+    items:
+      - doc: "kindString is a string field: the cell as it is."
+        name: kindString
+        type: cellKind
+        value: iota
+      - doc: "kindInt is a signed integer field: strconv.ParseInt / AppendInt, base 10."
+        name: kindInt
+      - doc: "kindUint is an unsigned integer field: strconv.ParseUint / AppendUint."
+        name: kindUint
+      - doc: "kindFloat is a float field: strconv.ParseFloat / AppendFloat 'g', -1."
+        name: kindFloat
+      - doc: "kindBool is a bool field: strconv.ParseBool / AppendBool."
+        name: kindBool
+      - doc: |-
+          kindText is a field whose type reads or writes itself as text:
+          encoding.TextUnmarshaler / TextMarshaler — time.Time among them.
+        name: kindText
+    name: kindString
+  - doc: The tag the typed mapping reads, and its one option.
+    grouped: true
+    items:
+      - doc: tagKey is the struct tag naming a field's column.
+        name: tagKey
+        value: "\"csv\""
+      - doc: optionalOption marks a column a file may lack.
+        name: optionalOption
+        value: "\"optional\""
+    name: tagKey
+  - doc: The typed mapping's fixed strings.
+    grouped: true
+    items:
+      - doc: |-
+          utf8BOM is the byte-order mark a spreadsheet may put before the header;
+          it is not part of the first column's name.
+        name: utf8BOM
+        value: "\"\\uFEFF\""
+      - doc: |-
+          rowEstimate is the bytes Marshal reserves per row of a typed table before
+          it knows the cells.
+        name: rowEstimate
+        type: int
+        value: "64"
+      - doc: maxCellScratch is the room reserved for one cell's formatting.
+        name: maxCellScratch
+        type: int
+        value: "64"
+    name: utf8BOM
 files:
   - decls:
       - promotionHeaderCell
       - Codec
       - csvCodec
+      - Options
+      - NewWithOptions
+      - validDelim
+      - (*csvCodec).format
       - New
       - NewWithEscape
       - (*csvCodec).Name
       - (*csvCodec).MIMETypes
       - (*csvCodec).Extensions
       - (*csvCodec).Marshal
-      - escapeFormulaCells
-      - escapeFormulaRow
+      - (*csvCodec).marshalTable
+      - valueInvalid
       - isFormulaTrigger
-      - escapeIfFormulaCell
       - (*csvCodec).Append
+      - (*csvCodec).appendValue
       - isPromotionShape
       - marshalPromotionShape
+      - appendPromotionShape
       - (*csvCodec).Unmarshal
       - readAllPreSized
       - extractRecords
+      - recordsHint
     name: codec.go
+  - decls:
+      - columnMap
+      - decoderFlags
+      - flagReady
+      - csvDecoder
+      - (*csvCodec).NewDecoder
+      - (*csvDecoder).Decode
+      - (*csvDecoder).More
+      - (*csvDecoder).take
+      - (*csvDecoder).advance
+      - (*csvDecoder).columnsFor
+      - structTarget
+    name: decoder.go
   - decls: []
     name: doc.go
+  - decls:
+      - quoteSpecials
+      - formulaPrefix
+      - fieldSpec
+      - appendRecords
+      - appendRecord
+      - appendField
+      - specFor
+      - fieldNeedsQuotes
+      - hasSpecial
+      - recordsLen
+      - fieldLen
+    name: encode.go
+  - decls:
+      - csvEncoder
+      - (*csvCodec).NewEncoder
+      - (*csvEncoder).Encode
+      - (*csvEncoder).appendValue
+      - (*csvEncoder).Close
+    name: encoder.go
+  - decls:
+      - kindString
+      - tagKey
+      - textMarshalerType
+      - cellKind
+      - columnSpec
+      - tableSchema
+      - schemaResult
+      - schemaOf
+      - (*tableSchema).collect
+      - (*tableSchema).field
+      - (*tableSchema).add
+      - hasOption
+      - kindOf
+      - isText
+      - schemaInvalid
+      - headerMismatch
+    name: schema.go
+  - decls:
+      - utf8BOM
+      - typedTable
+      - tableOf
+      - appendTable
+      - appendRow
+      - appendCell
+      - formatCell
+      - appendText
+      - appendComma
+      - marshalFailed
+      - rowsTarget
+      - rowsTargetOf
+      - mapColumns
+      - trimBOM
+      - rowAt
+      - fillRow
+      - parseCell
+      - parseValue
+      - unmarshalText
+      - unmarshalTable
+      - firstColumns
+      - fieldPosser
+      - reader
+      - decodeRows
+      - decodeRowInto
+      - isPromotionHeader
+      - hasColumn
+      - unmarshalFailed
+      - parsePosition
+      - format
+    name: typed.go
 functions:
+  - name: NewWithOptions
+    params: o Options
+    results: c codec.Codec, err error
+  - doc: validDelim is encoding/csv's check of a delimiter.
+    name: validDelim
+    params: r rune
+    results: bool
   - name: New
     results: codec.Codec
   - name: NewWithEscape
     params: escape bool
     results: codec.Codec
   - doc: |-
-      escapeFormulaCells returns a defensive copy of records with every cell
-      starting with a formula-trigger byte prefixed by a single quote so the
-      cell renders as text in Excel / LibreOffice / Google Sheets. Implements
-      the OWASP CSV Injection mitigation (CWE-1236) on an opt-in basis.
-    name: escapeFormulaCells
-    params: records [][]string
-    results: "[][]string"
-  - doc: |-
-      escapeFormulaRow returns a defensive copy of row with every cell's
-      first byte passed through escapeIfFormulaCell. Kept as a dedicated
-      helper so its per-row allocation is attributed to its own stack frame
-      rather than being flagged as an inner-loop allocation by static
-      analysis.
-    name: escapeFormulaRow
-    params: row []string
-    results: "[]string"
+      valueInvalid is the refusal of a value or a target that is not a records
+      matrix; private names the call that refused it.
+    name: valueInvalid
+    params: private string
+    results: error
   - doc: |-
       isFormulaTrigger reports whether b is a byte that a spreadsheet app
       interprets as the start of a formula. The set includes the classic
@@ -86,12 +262,6 @@ functions:
     name: isFormulaTrigger
     params: b byte
     results: bool
-  - doc: |-
-      escapeIfFormulaCell prefixes cell with a single quote when its first
-      byte would otherwise trigger spreadsheet formula evaluation.
-    name: escapeIfFormulaCell
-    params: cell string
-    results: string
   - doc: |-
       isPromotionShape reports whether records is the exact 2-row × 1-col
       shape pkg/v1/data/codec/promote.go produces — i.e. header == "_json" and
@@ -102,24 +272,29 @@ functions:
     results: bool
   - doc: |-
       marshalPromotionShape emits standards-compliant CSV bytes for the
-      2-row × 1-col promotion shape. The body cell always contains JSON
-      (with `{`, `"`, `,` etc.) so it always needs quoting; the only
-      escape needed is `"` → `""` per the double-quote-doubling rule.
-      Saves csv.Writer construction + per-row Write loop + Flush.
+      2-row × 1-col promotion shape into a buffer of its own; see
+      appendPromotionShape.
     name: marshalPromotionShape
     params: body string
     results: "[]byte"
   - doc: |-
+      appendPromotionShape appends the 2-row × 1-col promotion shape to dst. The
+      body cell always contains JSON (with `{`, `"`, `,` etc.) so it is always
+      quoted; the only escape needed is `"` → `""` per the double-quote-doubling
+      rule. Saves csv.Writer construction + per-row Write loop + Flush.
+    name: appendPromotionShape
+    params: dst []byte, body string
+    results: "[]byte"
+  - doc: |-
       readAllPreSized is the stdcsv.Reader.ReadAll equivalent with two
-      pre-allocation tricks: the outer [][]string is sized from the wire
-      newline count (one record per '\n', plus an orphan trailing record
-      if the input lacks the final terminator), and ReuseRecord lets the
-      stdlib reader avoid re-allocating the per-record []string backing
-      array on every call. Each record is cloned before storage because
+      pre-allocation tricks: the outer [][]string is sized from the wire's
+      non-empty lines (recordsHint, capped at maxReservedRecords — #1098), and
+      ReuseRecord lets the stdlib reader avoid re-allocating the per-record
+      []string backing array on every call. Each record is cloned before storage because
       ReuseRecord aliases — the strings inside are fresh (immutable)
       but the slice header isn't.
     name: readAllPreSized
-    params: br *bytes.Reader, data []byte
+    params: br *bytes.Reader, data []byte, comma rune
     results: records [][]string, err error
   - doc: |-
       extractRecords coerces v into a [][]string, accepting both direct and
@@ -127,16 +302,257 @@ functions:
     name: extractRecords
     params: v any
     results: records [][]string, ok bool
+  - doc: |-
+      recordsHint is the room Unmarshal reserves for data's records: its lines
+      holding a byte but their terminator — encoding/csv skips the others — and
+      at most maxReservedRecords. A quoted field spanning lines makes it an upper
+      bound, never a lower one; 1 MiB of newlines reserves nothing (#1098).
+    name: recordsHint
+    params: data []byte
+    results: int
+  - doc: |-
+      structTarget resolves v, a non-nil pointer to a struct, to the struct and
+      its columns.
+    name: structTarget
+    params: v any
+    results: reflect.Value, *tableSchema, error
+  - doc: |-
+      appendRecords appends records as encoding/csv's Writer.WriteAll writes them
+      with UseCRLF false: each field quoted only when it must be, a quote doubled,
+      one '\n' after each record. It writes into dst directly — the encoder an
+      Append needs — and Marshal sizes dst with recordsLen first. escape applies
+      the OWASP mitigation to every cell as escapeIfFormulaCell would.
+    name: appendRecords
+    params: dst []byte, records [][]string, comma rune, escape bool
+    results: "[]byte"
+  - doc: |-
+      appendRecord appends one record and its '\n', as encoding/csv's
+      Writer.Write writes it.
+    name: appendRecord
+    params: dst []byte, record []string, comma rune, escape bool
+    results: "[]byte"
+  - doc: |-
+      appendField appends field as spec says: after the formula prefix when it
+      gains one, between quotes with every quote doubled when it is quoted.
+    name: appendField
+    params: dst []byte, field string, spec fieldSpec
+    results: "[]byte"
+  - doc: |-
+      specFor decides how field is written: prefixed when escape is on and its
+      first byte would start a formula, quoted when encoding/csv's
+      fieldNeedsQuotes says so of the cell as written (prefix included).
+    name: specFor
+    params: field string, comma rune, escape bool
+    results: fieldSpec
+  - doc: |-
+      fieldNeedsQuotes is encoding/csv's Writer.fieldNeedsQuotes: a non-empty
+      field is quoted when it is `\.`, holds the delimiter, a quote, CR or LF, or
+      starts with a space as unicode.IsSpace reads it.
+    name: fieldNeedsQuotes
+    params: field string, comma rune
+    results: bool
+  - doc: hasSpecial reports whether field holds the delimiter, a quote, CR or LF.
+    name: hasSpecial
+    params: field string, comma rune
+    results: bool
+  - doc: |-
+      recordsLen is the exact length appendRecords writes for records, so
+      Marshal allocates its result once at its final size.
+    name: recordsLen
+    params: records [][]string, comma rune, escape bool
+    results: int
+  - doc: fieldLen is the length appendField writes for field under spec.
+    name: fieldLen
+    params: field string, spec fieldSpec
+    results: int
+  - doc: |-
+      schemaOf returns the columns of struct type t, built once per type. A type
+      with no mapped field, a field whose type no cell converts to, or two fields
+      naming one column is refused with VALUE_INVALID — which the codec package's
+      facade reads as "promote the value", as it always did for a struct.
+    name: schemaOf
+    params: t reflect.Type
+    results: "*tableSchema, error"
+  - doc: hasOption reports whether the comma-separated opts holds option.
+    name: hasOption
+    params: opts, option string
+    results: bool
+  - doc: |-
+      kindOf is the conversion a cell type takes: text first, so a named string
+      with its own MarshalText writes through it, then its kind.
+    name: kindOf
+    params: t reflect.Type
+    results: cellKind, bool
+  - doc: |-
+      isText reports whether t, or a pointer to it, reads or writes itself as
+      text.
+    name: isText
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      schemaInvalid refuses a type the typed mapping cannot write or read, with
+      VALUE_INVALID: the codec package's facade promotes such a value.
+    name: schemaInvalid
+    params: private string
+    results: error
+  - doc: |-
+      headerMismatch refuses a header that lacks a required column, or names a
+      column twice; column is the struct's name for it, never a cell of the file,
+      carried as "name": "column" is the family's key for a position (#1125).
+    name: headerMismatch
+    params: problem, column string
+    results: error
+  - doc: |-
+      tableOf resolves v — a slice or array of structs or of pointers to them,
+      directly or through a non-nil pointer — to the table Marshal writes. Any
+      other value is VALUE_INVALID.
+    name: tableOf
+    params: v any
+    results: typedTable, error
+  - doc: |-
+      appendTable appends t as CSV: the header from the column names unless
+      noHeader, then one record per row, each cell written as appendField writes
+      a cell — quoted when it must be, the formula mitigation applied when escape.
+    name: appendTable
+    params: dst []byte, t typedTable, f format
+    results: "[]byte, error"
+  - doc: appendRow appends one row's record. A nil pointer row writes empty cells.
+    name: appendRow
+    params: dst []byte, row reflect.Value, ptr bool, schema *tableSchema, f format
+    results: "[]byte, error"
+  - doc: |-
+      appendCell appends a formatted cell as appendField writes it. The string
+      does not escape, so a short cell is converted on the stack.
+    name: appendCell
+    params: dst, cell []byte, f format
+    results: "[]byte"
+  - doc: formatCell appends the text of field fv, of column col, to buf.
+    name: formatCell
+    params: buf []byte, fv reflect.Value, col *columnSpec
+    results: "[]byte, error"
+  - doc: |-
+      appendText appends what fv's MarshalText writes — on the value, or on its
+      address. A type that only reads itself as text cannot be written:
+      MARSHAL_FAILED.
+    name: appendText
+    params: buf []byte, fv reflect.Value
+    results: "[]byte, error"
+  - doc: appendComma appends the delimiter, UTF-8 encoded.
+    name: appendComma
+    params: dst []byte, comma rune
+    results: "[]byte"
+  - doc: marshalFailed is MARSHAL_FAILED with a private explanation.
+    name: marshalFailed
+    params: private string
+    results: error
+  - doc: |-
+      rowsTargetOf resolves v — a non-nil pointer to a slice of structs or of
+      pointers to them — to the target Unmarshal fills. Anything else is
+      VALUE_INVALID.
+    name: rowsTargetOf
+    params: v any
+    results: rowsTarget, error
+  - doc: |-
+      mapColumns reads the header: each cell names a column of the schema or is
+      ignored; a column the schema maps twice, or a required one missing, is
+      HEADER_MISMATCH. With noHeader the columns are the fields, in order, and
+      header is the first record, read for its width only.
+    name: mapColumns
+    params: header []string, schema *tableSchema, noHeader bool
+    results: columnMap, error
+  - doc: trimBOM drops a UTF-8 byte-order mark from the first header cell.
+    name: trimBOM
+    params: name string, i int
+    results: string
+  - doc: |-
+      fillRow sets the fields of row — an addressable struct — from record,
+      through cols. A cell that does not convert is CELL_INVALID, placed at the
+      cell's line and column as at's reader gives them (#1125), naming the record
+      number and the column's name, never the cell.
+    name: fillRow
+    params: row reflect.Value, record []string, cols columnMap, schema *tableSchema, at rowAt
+    results: error
+  - doc: |-
+      parseCell sets fv, the field of column col, from cell. An empty cell sets a
+      pointer field to nil; a number or a bool must parse.
+    name: parseCell
+    params: cell string, fv reflect.Value, col *columnSpec
+    results: error
+  - doc: parseValue sets fv, a cell type's value, from cell as kind converts it.
+    name: parseValue
+    params: cell string, fv reflect.Value, kind cellKind
+    results: error
+  - doc: unmarshalText sets fv through its address's UnmarshalText.
+    name: unmarshalText
+    params: cell string, fv reflect.Value
+    results: error
+  - doc: |-
+      unmarshalTable decodes data into the typed target: the header (unless
+      noHeader) maps the columns, each later record appends a row. A table that
+      is exactly the codec package's promotion shape, read into a struct that
+      maps no "_json" column, is VALUE_INVALID so the facade reads it as it
+      wrote it.
+    name: unmarshalTable
+    params: data []byte, t rowsTarget, f format
+    results: error
+  - doc: |-
+      firstColumns maps the columns from a table's first record: its header, or
+      with noHeader the fields in order. The facade's promotion container is
+      VALUE_INVALID unless the struct maps its "_json" column.
+    name: firstColumns
+    params: first []string, t rowsTarget, f format
+    results: columnMap, error
+  - doc: decodeRows decodes every record left in r into out, one row each.
+    name: decodeRows
+    params: r reader, out reflect.Value, cols columnMap, t rowsTarget
+    results: error
+  - doc: |-
+      decodeRowInto grows out, a settable slice, by one zero row — its storage
+      never held a row, so it is zero — and fills it from record: in place for a
+      struct row, through a new struct for a pointer row.
+    name: decodeRowInto
+    params: out reflect.Value, record []string, cols columnMap, t rowsTarget, at rowAt
+    results: error
+  - doc: |-
+      isPromotionHeader reports whether header is the codec package's promotion
+      container's: one "_json" cell.
+    name: isPromotionHeader
+    params: header []string
+    results: bool
+  - doc: hasColumn reports whether schema maps a column called name.
+    name: hasColumn
+    params: schema *tableSchema, name string
+    results: bool
+  - doc: |-
+      unmarshalFailed wraps encoding/csv's reading failure, placed where it
+      says.
+    name: unmarshalFailed
+    params: err error
+    results: error
+  - doc: |-
+      parsePosition returns the place encoding/csv's ParseError gives err — the
+      1-based line and byte column — as the family's fields (#1125), or none for
+      any other failure.
+    name: parsePosition
+    params: err error
+    results: "[]errs.FieldValue"
 imports:
   bytes: bytes
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   corecsv: github.com/kitsunium/sdk/internal/core/data/codec/csv
+  encoding: encoding
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   io: io
+  reflect: reflect
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
   slices: slices
   stdcsv: encoding/csv
+  strconv: strconv
+  strings: strings
+  sync: sync
+  unicode: unicode
+  utf8: unicode/utf8
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/codec/csv
@@ -158,8 +574,22 @@ types:
           the wire format is lossless for round-trip use.
         name: escapeFormulas
         type: bool
+      - doc: |-
+          comma is the delimiter; zero means defaultComma, so the registered
+          singleton and the instances NewWithEscape builds keep encoding/csv's.
+        name: comma
+        type: rune
+      - doc: |-
+          noHeader is whether a typed table is written and read without a header
+          row, its columns being the struct's fields in order.
+        name: noHeader
+        type: bool
     kind: struct
     methods:
+      - doc: format is how the codec writes and reads.
+        name: format
+        recv: c *csvCodec
+        results: format
       - doc: Name implements codec.Codec.
         name: Name
         recv: "*csvCodec"
@@ -178,22 +608,365 @@ types:
         recv: c *csvCodec
         results: encoded []byte, err error
       - doc: |-
+          marshalTable writes a slice of structs: a header row from the columns,
+          then one record per row (#902).
+        name: marshalTable
+        params: v any
+        recv: c *csvCodec
+        results: encoded []byte, err error
+      - doc: |-
           Append encodes records into CSV bytes and appends them to dst.
           Implements the optional codec.Appender interface so hot-path callers
-          (multi-table exports, paginated dumps) can stream CSV records into
-          a recycled buffer without an intermediate allocation per call.
-          Delegates to Marshal so the type-gate + escape-formula + wrap/error
-          contract has a single source.
+          (multi-table exports, paginated dumps) can write CSV records into a
+          recycled buffer: the records are written into dst itself, grown once to
+          the exact size when it lacks the room, with no intermediate encoding.
+          On a refusal dst is returned as it was given.
         name: Append
+        params: dst []byte, v any
+        recv: c *csvCodec
+        results: appended []byte, err error
+      - doc: |-
+          appendValue is Append's body: the type gate, then the records written in
+          place.
+        name: appendValue
         params: dst []byte, v any
         recv: c *csvCodec
         results: appended []byte, err error
       - doc: Unmarshal parses data as CSV into *[][]string.
         name: Unmarshal
         params: data []byte, v any
-        recv: "*csvCodec"
+        recv: c *csvCodec
         results: error
+      - doc: |-
+          NewDecoder wraps r in a streaming codec.Decoder handing one record per
+          Decode, into a *[]string or a pointer to a struct.
+        name: NewDecoder
+        params: r io.Reader
+        recv: c *csvCodec
+        results: codec.Decoder
+      - doc: |-
+          NewEncoder wraps w in a streaming codec.Encoder writing one record per
+          Encode.
+        name: NewEncoder
+        params: w io.Writer
+        recv: c *csvCodec
+        results: codec.Encoder
     name: csvCodec
+  - fields:
+      - doc: |-
+          Escape turns on the OWASP CSV-injection mitigation (CWE-1236) when
+          writing: a cell starting with '=', '+', '-', '@', TAB or CR is prefixed
+          with a single quote so a spreadsheet shows it as text. See NewWithEscape.
+        name: Escape
+        type: bool
+      - doc: |-
+          Comma is the field delimiter; zero means ','. It must be a valid rune
+          other than '"', '\r', '\n' and U+FFFD, as encoding/csv requires.
+        name: Comma
+        type: rune
+      - doc: |-
+          NoHeader writes and reads a table of structs without a header row: the
+          columns are the struct's fields, in order. It does not change a
+          [][]string, whose records are all data.
+        name: NoHeader
+        type: bool
+    kind: struct
+    name: Options
+  - doc: |-
+      columnMap maps each column of a file to a column of the schema, or -1 for
+      a column the struct does not map — ignored.
+    kind: named
+    name: columnMap
+    underlying: "[]int"
+  - doc: decoderFlags is the decoder's state, one bit each.
+    kind: named
+    name: decoderFlags
+    underlying: uint8
+  - doc: |-
+      csvDecoder reads one record per Decode (#902), from encoding/csv's
+      incremental Reader: into a *[]string, the record as it is; into a pointer to
+      a struct, the record converted through the header — the first record of
+      the stream, read when the first Decode into a struct finds it waiting.
+    fields:
+      - doc: r is encoding/csv's reader, reusing its record slice.
+        name: r
+        type: "*stdcsv.Reader"
+      - doc: |-
+          noHeader is the codec's setting: a struct's columns are its fields in
+          order, and no record is a header.
+        name: noHeader
+        type: bool
+      - doc: record is the record More or Decode read ahead.
+        name: record
+        type: "[]string"
+      - doc: recordNo counts the records read, the header included.
+        name: recordNo
+        type: int
+      - doc: flags are the ready, header-done and reported bits.
+        name: flags
+        type: decoderFlags
+      - doc: header is the header record, kept for the columns of each struct type.
+        name: header
+        type: "[]string"
+      - doc: cols maps the header for colsType, the struct type decoded last.
+        name: cols
+        type: columnMap
+      - doc: colsType is the struct type cols was built for.
+        name: colsType
+        type: reflect.Type
+      - doc: "err ends the stream: io.EOF or malformed CSV."
+        name: err
+        type: error
+    kind: struct
+    methods:
+      - doc: |-
+          Decode stores the next record in v: a *[]string receives it as it is — the
+          header too, when the stream starts with one; a pointer to a struct receives
+          it converted through the header, which the first such Decode reads first
+          unless the codec has NoHeader. It returns io.EOF, unwrapped, once drained;
+          UNMARSHAL_FAILED for malformed CSV, which ends the stream; HEADER_MISMATCH
+          and CELL_INVALID as Unmarshal does; VALUE_INVALID for another target.
+        name: Decode
+        params: v any
+        recv: d *csvDecoder
+        results: error
+      - doc: |-
+          More reports whether Decode has something to return: a record, or a failure
+          the caller has not been told of yet. It reads ahead one record — a header
+          still unread counts, so a stream holding only a header reports true and its
+          first Decode into a struct returns io.EOF.
+        name: More
+        recv: d *csvDecoder
+        results: bool
+      - doc: |-
+          take hands the waiting record to the caller, reading it first if needed;
+          false when the stream has ended, Decode then returning d.err.
+        name: take
+        recv: d *csvDecoder
+        results: bool
+      - doc: advance reads the next record unless one is waiting or the stream ended.
+        name: advance
+        recv: d *csvDecoder
+      - doc: |-
+          columnsFor returns the column map for struct type t: built from the header
+          — read now if it is still waiting — or positional with NoHeader, and kept
+          for the next Decode into the same type.
+        name: columnsFor
+        params: t reflect.Type, schema *tableSchema
+        recv: d *csvDecoder
+        results: columnMap, error
+    name: csvDecoder
+  - doc: |-
+      fieldSpec is how one cell is written: whether it gains the formula prefix,
+      and whether it is quoted.
+    fields:
+      - doc: prefixed is whether the cell is written after formulaPrefix.
+        name: prefixed
+        type: bool
+      - doc: quoted is whether the cell is written between quotes.
+        name: quoted
+        type: bool
+    kind: struct
+    name: fieldSpec
+  - doc: |-
+      csvEncoder writes one record per Encode (#902): a []string as it is, a
+      struct as a row of its columns, the header first — before the first struct
+      written, unless the codec has NoHeader.
+    fields:
+      - doc: w is the stream; the encoder does not own it.
+        name: w
+        type: io.Writer
+      - doc: c is the codec whose delimiter, mitigation and header setting apply.
+        name: c
+        type: "*csvCodec"
+      - doc: buf is the record being written, reused across Encode calls.
+        name: buf
+        type: "[]byte"
+      - doc: |-
+          headerDone is set once the header is written, or the first record was
+          data: a header after data would be a row.
+        name: headerDone
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Encode writes v as one record: a []string as encoding/csv's Writer writes
+          it, a struct or a non-nil pointer to one as a row of its columns — the
+          header written before the first struct unless NoHeader. Anything else is
+          VALUE_INVALID and writes nothing; a failing writer is MARSHAL_FAILED.
+        name: Encode
+        params: v any
+        recv: e *csvEncoder
+        results: error
+      - doc: |-
+          appendValue appends v's record to dst — preceded by the header when v is
+          the first struct written.
+        name: appendValue
+        params: dst []byte, v any
+        recv: e *csvEncoder
+        results: "[]byte, error"
+      - doc: |-
+          Close is a no-op: the encoder buffers nothing between calls and does not
+          own the writer.
+        name: Close
+        recv: "*csvEncoder"
+        results: error
+    name: csvEncoder
+  - doc: cellKind is how a column's cells convert to and from its field.
+    kind: named
+    name: cellKind
+    underlying: uint8
+  - doc: |-
+      columnSpec is one column of a typed table: its header name and the field
+      behind it.
+    fields:
+      - doc: "name is the header cell: the tag's name, else the Go field's."
+        name: name
+        type: string
+      - doc: index is the path to the field for reflect.Value.FieldByIndex.
+        name: index
+        type: "[]int"
+      - doc: required is whether a file must carry the column (no ",optional").
+        name: required
+        type: bool
+      - doc: kind is the cell conversion.
+        name: kind
+        type: cellKind
+      - doc: |-
+          ptr is whether the field is a pointer to its cell type: nil writes an
+          empty cell, and an empty cell reads as nil.
+        name: ptr
+        type: bool
+      - doc: "typ is the cell type: the field's, or what it points to."
+        name: typ
+        type: reflect.Type
+    kind: struct
+    name: columnSpec
+  - doc: tableSchema is the columns of a struct type, in field order.
+    fields:
+      - doc: columns are the mapped fields, in the order they are declared.
+        name: columns
+        type: "[]columnSpec"
+      - doc: "names are the columns' header cells, in order: the header Marshal writes."
+        name: names
+        type: "[]string"
+      - doc: byName finds a column by its header cell.
+        name: byName
+        type: map[string]int
+    kind: struct
+    methods:
+      - doc: |-
+          collect adds t's fields, prefix being the index path to t: exported fields
+          in declaration order, an exported embedded struct's fields in its place.
+        name: collect
+        params: t reflect.Type, prefix []int
+        recv: s *tableSchema
+        results: error
+      - doc: |-
+          field maps one struct field, index being its path from the root: skipped
+          by its tag or when unexported, an embedded struct without a column name of
+          its own lending its fields in its place, any other field a column.
+        name: field
+        params: f reflect.StructField, index []int
+        recv: s *tableSchema
+        results: error
+      - doc: "add maps field f to a column: name from the tag, else the Go name."
+        name: add
+        params: f reflect.StructField, name, opts string, index []int
+        recv: s *tableSchema
+        results: error
+    name: tableSchema
+  - doc: |-
+      schemaResult is what the cache holds for a type: its schema or why it
+      has none.
+    fields:
+      - doc: schema is the type's columns, when it has some.
+        name: schema
+        type: "*tableSchema"
+      - doc: err is the refusal, when it has none.
+        name: err
+        type: error
+    kind: struct
+    name: schemaResult
+  - doc: |-
+      typedTable is a typed value resolved for writing: its rows and their
+      struct's columns.
+    fields:
+      - doc: rows is the slice or array of structs, or of pointers to them.
+        name: rows
+        type: reflect.Value
+      - doc: ptr is whether each row is a pointer to the struct.
+        name: ptr
+        type: bool
+      - doc: schema is the struct's columns.
+        name: schema
+        type: "*tableSchema"
+    kind: struct
+    name: typedTable
+  - doc: |-
+      rowsTarget is a typed Unmarshal target: the slice the rows are appended
+      to, and their struct's columns.
+    fields:
+      - doc: slice is the settable []T or []*T.
+        name: slice
+        type: reflect.Value
+      - doc: ptr is whether each row is a pointer to the struct.
+        name: ptr
+        type: bool
+      - doc: elem is the struct type.
+        name: elem
+        type: reflect.Type
+      - doc: schema is the struct's columns.
+        name: schema
+        type: "*tableSchema"
+    kind: struct
+    name: rowsTarget
+  - doc: |-
+      rowAt is where a row comes from: the record's number and the reader that
+      read it last, which places its cells (#1125).
+    fields:
+      - doc: recordNo counts from the file's first record, the header included.
+        name: recordNo
+        type: int
+      - doc: reader places a field of that record.
+        name: reader
+        type: fieldPosser
+    kind: struct
+    name: rowAt
+  - doc: "fieldPosser places a field of the record read last: encoding/csv's Reader."
+    kind: named
+    name: fieldPosser
+    underlying: |-
+      interface {
+      	// FieldPos returns the 1-based line and byte column where field starts.
+      	FieldPos(field int) (line, column int)
+      }
+  - doc: "reader is what decodeRows reads records from: encoding/csv's Reader."
+    kind: named
+    name: reader
+    underlying: |-
+      interface {
+      	fieldPosser
+      	// Read returns the next record, or io.EOF.
+      	Read() (record []string, err error)
+      }
+  - doc: |-
+      format is how a codec instance writes and reads: its delimiter, the
+      formula mitigation, and whether a typed table has a header row.
+    fields:
+      - doc: comma is the delimiter.
+        name: comma
+        type: rune
+      - doc: escape applies the OWASP formula mitigation when writing.
+        name: escape
+        type: bool
+      - doc: |-
+          noHeader is whether a typed table has no header row: its columns are
+          the fields, in order.
+        name: noHeader
+        type: bool
+    kind: struct
+    name: format
 vars:
   - doc: |-
       Package-level vars: the Marshal-buffer pool plus the singleton
@@ -211,3 +984,16 @@ vars:
         type: codec.Codec
         value: codec.Register(&csvCodec{})
     name: Codec
+  - doc: Interface types the schema checks fields against.
+    grouped: true
+    items:
+      - doc: textMarshalerType is encoding.TextMarshaler.
+        name: textMarshalerType
+        value: reflect.TypeFor[encoding.TextMarshaler]()
+      - doc: textUnmarshalerType is encoding.TextUnmarshaler.
+        name: textUnmarshalerType
+        value: reflect.TypeFor[encoding.TextUnmarshaler]()
+      - doc: schemas caches each struct type's tableSchema (or the error building it).
+        name: schemas
+        type: sync.Map
+    name: textMarshalerType

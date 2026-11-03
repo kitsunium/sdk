@@ -15,6 +15,20 @@ packages:
             name: CodeTOMLUnmarshalFailed
             value: "0x00_03_05_02"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeTOMLSizeExceeded identifies input refused for a size bound: a document past maxDocumentBytes.
+              Its reason is the family's SIZE_EXCEEDED (#894).
+            name: CodeTOMLSizeExceeded
+            value: "0x00_03_05_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeTOMLDepthExceeded identifies input refused for a depth bound: tables and arrays nested past maxDepth.
+              Its reason is the family's DEPTH_EXCEEDED (#894).
+            name: CodeTOMLDepthExceeded
+            value: "0x00_03_05_04"
+        type: errs.Code
     doc: |-
       Package toml declares the error codes and the sentinels of the TOML codec,
       internal/service/data/codec/toml — range 0.3.5.* (ADR 0005
@@ -54,6 +68,18 @@ packages:
             private: "service/data/codec/toml: the document is not valid TOML, or a value does not fit the target; the problem, line and column fields locate it"
             public: TOML decoding failed
             reason: UNMARSHAL_FAILED
+          - code: CodeTOMLSizeExceeded
+            doc: "SizeExceeded is the refusal of input past a size bound: a document past maxDocumentBytes."
+            name: SizeExceeded
+            private: "service/data/codec/toml: the input exceeds a size bound"
+            public: TOML input exceeds a size limit
+            reason: SIZE_EXCEEDED
+          - code: CodeTOMLDepthExceeded
+            doc: "DepthExceeded is the refusal of input past a depth bound: tables and arrays nested past maxDepth."
+            name: DepthExceeded
+            private: "service/data/codec/toml: the input exceeds a depth bound"
+            public: TOML input nests too deeply
+            reason: DEPTH_EXCEEDED
   - doc: |-
       Package toml is the TOML codec, written against TOML v1.0.0
       (https://toml.io/en/v1.0.0) with the standard library alone. It implements
@@ -73,6 +99,10 @@ packages:
       date-time, and LocalDateTime, LocalDate and LocalTime for the three local
       kinds. A struct field is keyed by its toml tag, or by its name, matched
       exactly first and then without regard to case.
+
+      A time.Duration is written as the string of its String() and read with
+      time.ParseDuration, as the YAML codec does (#1126); a bare integer still
+      reads as nanoseconds, the form written before.
 
       Package toml — the decode: a parsed tree written into a Go value. Untyped
       targets (map[string]any, any, []any) are built natively; typed ones through
@@ -341,6 +371,12 @@ packages:
       value that carry no time zone. Decoded into a time.Time instead, a local
       value is placed in time.Local.
 
+      A time.Duration is written as the string of its String() — '1h30m0s' — and
+      read with time.ParseDuration, as the YAML codec writes and reads it: the
+      rule of the formats people edit by hand (#1126). A string without its unit
+      is refused; a bare integer still reads as nanoseconds, the form this codec
+      wrote before, so a file written then loads unchanged.
+
       Importing both packages is harmless: a format is registered by the package
       that implements it, which Go initialises once however many packages import
       it.
@@ -368,6 +404,18 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_05_02"
+          - doc: "CodeSizeExceeded is 0.3.5.3: a document past maxDocumentBytes."
+            name: CodeSizeExceeded
+            reexport: coretoml.CodeTOMLSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_05_03"
+          - doc: "CodeDepthExceeded is 0.3.5.4: tables and arrays nested past maxDepth."
+            name: CodeDepthExceeded
+            reexport: coretoml.CodeTOMLDepthExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_05_04"
         doc: The error codes, range 0.3.5.*, declared in the core (ADR 0160).
       - doc: "The sentinels, for errors.Is: each carries the code of the same name."
         var:
@@ -378,6 +426,14 @@ packages:
           - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
             name: UnmarshalFailed
             reexport: coretoml.UnmarshalFailed
+            type: "*errs.Error"
+          - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
+            name: SizeExceeded
+            reexport: coretoml.SizeExceeded
+            type: "*errs.Error"
+          - doc: DepthExceeded is the sentinel of [CodeDepthExceeded].
+            name: DepthExceeded
+            reexport: coretoml.DepthExceeded
             type: "*errs.Error"
       - alias:
           - doc: |-

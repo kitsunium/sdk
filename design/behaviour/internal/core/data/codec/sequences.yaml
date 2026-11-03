@@ -1,6 +1,87 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: IsTooLarge
+    steps:
+      - return: |-
+          errs.HasReason(err, reasonSizeExceeded) ||
+          		errs.HasReason(err, reasonLimitExceeded) ||
+          		errs.HasReason(err, reasonDocumentTooLarge)
+  - of: IsTooDeep
+    participants:
+      - id: caller
+        kind: actor
+      - id: IsTooDeep
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.HasReason(err, reasonDepthExceeded)
+        to: errs
+  - of: indexSniffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexSniffer
+        kind: self
+      - id: sniffers.Update
+        kind: value
+    steps:
+      - bind: s, ok
+        eval: c.(Sniffer)
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - eval: |-
+          sniffers.Update(func(current *[]sniffEntry) *[]sniffEntry {
+          		var next []sniffEntry
+          		//: the entries already listed, in their order.
+          		if current != nil {
+          			next = append(next, *current...)
+          		}
+          		next = append(next, sniffEntry{name: name, sniffer: s})
+          		//: the new list.
+          		return &next
+          	})
+        to: sniffers.Update
+  - of: Detect
+    participants:
+      - id: caller
+        kind: actor
+      - id: Detect
+        kind: self
+      - id: sniffers.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: prefix
+              value: prefix[:sniffLen]
+          when: len(prefix) > sniffLen
+      - bind: list
+        eval: sniffers.Load()
+        to: sniffers.Load
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: len(prefix) == 0 || list == nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!entry.sniffer.Sniff(prefix)"
+            - opt:
+                do:
+                  - return: "\"\", false"
+                when: ok
+            - set: f, ok
+              value: entry.name, true
+          key: _
+          range: "*list"
+          value: entry
+      - return: f, ok
   - of: conflictText
     participants:
       - id: caller
@@ -51,6 +132,142 @@ sequences:
   - of: Format.String
     steps:
       - return: string(f)
+  - of: CheckTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: CheckTarget
+        kind: self
+      - id: errs
+        kind: package
+      - id: reflect
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(TargetInvalid, errs.WrapParams{}, errs.String(fieldTarget, nilTarget))
+              to: errs
+          when: v == nil
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - return: nil
+          when: rv.Kind() == reflect.Pointer && !rv.IsNil()
+      - return: errs.Wrap(TargetInvalid, errs.WrapParams{}, errs.String(fieldTarget, rv.Type().String()))
+        to: errs
+  - of: CheckValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: CheckValue
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - bind: t
+        eval: reflect.TypeOf(v)
+        to: reflect
+      - opt:
+          do:
+            - return: nil
+          when: t == nil
+      - switch:
+          cases:
+            - case: reflect.Chan, reflect.Func, reflect.UnsafePointer
+              do:
+                - return: errs.Wrap(ValueInvalid, errs.WrapParams{}, errs.String(fieldType, t.String()))
+                  to: errs
+            - default: true
+              do:
+                - return: nil
+          "on": t.Kind()
+  - of: IsMisuse
+    steps:
+      - return: |-
+          errs.HasCode(err, CodeEmptyInput) ||
+          		errs.HasCode(err, CodeTargetInvalid) ||
+          		errs.HasCode(err, CodeValueInvalid)
+  - of: PositionFields
+    steps:
+      - bind: fields
+        eval: make([]errs.FieldValue, 0, positionFieldCount)
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.Int(FieldOffset, p.Offset))
+          when: p.Offset != 0 || p.Line == 0
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.Int(FieldLine, p.Line))
+          when: p.Line != 0
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.Int(FieldColumn, p.Column))
+          when: p.Column != 0
+      - return: fields
+  - of: PositionOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: PositionOf
+        kind: self
+      - id: coordinate
+        kind: internal
+      - id: strconv
+        kind: stdlib
+    steps:
+      - var:
+          name: seen
+          type: "[positionFieldCount]bool"
+      - loop:
+          do:
+            - bind: slot, dst
+              eval: coordinate(&p, field.Key())
+              to: coordinate
+            - opt:
+                do:
+                  - continue: true
+                when: dst == nil || seen[slot]
+            - bind: n, perr
+              eval: strconv.Atoi(field.StringValue())
+              to: strconv
+            - opt:
+                do:
+                  - continue: true
+                when: perr != nil
+            - set: "*dst"
+              value: "n"
+            - set: seen[slot]
+              value: "true"
+            - set: ok
+              value: "true"
+          key: _
+          range: errs.FieldsOf(err)
+          value: field
+      - return: p, ok
+  - of: coordinate
+    steps:
+      - switch:
+          cases:
+            - case: FieldOffset
+              do:
+                - return: slotOffset, &p.Offset
+            - case: FieldLine
+              do:
+                - return: slotLine, &p.Line
+            - case: FieldColumn
+              do:
+                - return: slotColumn, &p.Column
+            - default: true
+              do:
+                - return: 0, nil
+          "on": key
   - of: Register
     participants:
       - id: caller
@@ -64,6 +281,8 @@ sequences:
       - id: publishCodec
         kind: internal
       - id: indexAliases
+        kind: internal
+      - id: indexSniffer
         kind: internal
     steps:
       - opt:
@@ -92,6 +311,8 @@ sequences:
         to: indexAliases
       - eval: indexAliases(&extIndex, exts, name, "extension", strings.ToLower)
         to: indexAliases
+      - eval: indexSniffer(name, c)
+        to: indexSniffer
       - return: c
   - of: publishCodec
     participants:

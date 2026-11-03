@@ -12,9 +12,29 @@ import (
 // var keeps us clear of init().
 var FlateCompressor = coretransform.Register(flateCompressor{})
 
-// flateCompressor is the concrete Compressor for the raw DEFLATE wire format. It
-// is a stateless value type so idempotent re-registration is a no-op.
-type flateCompressor struct{}
+// flateCompressor is the concrete Compressor for the raw DEFLATE wire format.
+// The level is fixed at construction and never mutated, so the value stays
+// comparable (idempotent re-registration is a no-op) and safe for concurrent
+// use.
+type flateCompressor struct {
+	// level is the compress/flate level, already clamped by usableLevel; its
+	// zero value means DefaultCompression, for the reason gzipCompressor's
+	// field states.
+	level int
+}
+
+// NewFlateCompressor returns a raw-DEFLATE Compressor encoding at level, which
+// may be flate.DefaultCompression, flate.HuffmanOnly, or any value from
+// flate.BestSpeed to flate.BestCompression. Anything else — including
+// flate.NoCompression, which the stdlib accepts but which stores the payload
+// verbatim — is clamped to flate.DefaultCompression, so no configuration can
+// hand back a compressor that silently does not compress (ADR 0031). The result
+// is NOT registered; the registry entry is the default-level FlateCompressor
+// singleton, which NewFlateCompressor(flate.DefaultCompression) equals.
+func NewFlateCompressor(level int) coretransform.Compressor {
+	//: clamp at construction so the returned Compressor always compresses.
+	return flateCompressor{level: storedLevel(usableLevel(level))}
+}
 
 // Algorithm implements transform.Compressor and returns the canonical key.
 func (flateCompressor) Algorithm() coretransform.Algorithm {
@@ -22,20 +42,22 @@ func (flateCompressor) Algorithm() coretransform.Algorithm {
 	return "flate"
 }
 
-// Compress DEFLATE-encodes src and appends the result to dst.
-func (flateCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
+// Compress DEFLATE-encodes src at the receiver's level and appends the result
+// to dst.
+func (c flateCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
 	//: encode into a buffer pre-seeded with dst so the result is caller-owned.
 	buf := bytes.NewBuffer(dst)
-	//: a recycled writer at DefaultCompression, the level the gzip scheme uses
-	//: too; see pool.go for why constructing one per call dominated this path.
-	w, nerr := takeFlateWriter(buf)
+	level := writeLevel(c.level)
+	//: a recycled writer at the receiver's level; see pool.go for why
+	//: constructing one per call dominated this path.
+	w, nerr := takeFlateWriter(buf, level)
 	//: NewWriter only errors on an out-of-range level — guarded, but surfaced.
 	if nerr != nil {
 		//: wrap the construction error under the flate sentinel.
 		return dst, errs.Wrap(nerr, flateWrap)
 	}
-	//: return the encoder on every exit, including the two failure paths.
-	defer releaseFlateWriter(w)
+	//: return the encoder to its level's pool on every exit.
+	defer releaseFlateWriter(w, level)
 	//: a Write fault is rare (buffer-backed) but must still be surfaced.
 	if _, werr := w.Write(src); werr != nil {
 		//: wrap the stdlib error under the flate sentinel.
@@ -134,7 +156,7 @@ func flateDecompressCore(dst, src []byte, max int64) (decoded []byte, tooLarge b
 	//: raw DEFLATE has no header to pre-validate; the reader fails on read. The
 	//: error branch exists because the Resetter interface may fail, not because
 	//: this stream can be rejected here.
-	box, rerr := takeFlateReader(bytes.NewReader(src))
+	box, rerr := takeFlateReader(src)
 	//: a decoder that could not be prepared is a flate-direction failure.
 	if rerr != nil {
 		//: wrap the reset error under the flate sentinel.
@@ -142,8 +164,8 @@ func flateDecompressCore(dst, src []byte, max int64) (decoded []byte, tooLarge b
 	}
 	//: return the decoder on every exit below.
 	defer releaseFlateReader(box)
-	//: drain the reader through the shared bounded helper at the given cap.
-	plain, overflow, derr := readAllBounded(box.rc, max)
+	//: drain the reader straight onto dst through the shared bounded helper.
+	out, overflow, derr := appendAllBounded(dst, box.rc, max)
 	//: fold a Close fault into the result so the reader error is never dropped.
 	if cerr := box.rc.Close(); cerr != nil && derr == nil {
 		//: a clean drain followed by a Close fault still fails decompression.
@@ -161,6 +183,6 @@ func flateDecompressCore(dst, src []byte, max int64) (decoded []byte, tooLarge b
 		//: no plaintext escapes an over-cap stream.
 		return dst, true, nil
 	}
-	//: append the bounded plaintext onto the caller's dst.
-	return append(dst, plain...), false, nil
+	//: the bounded plaintext, already on the caller's dst.
+	return out, false, nil
 }

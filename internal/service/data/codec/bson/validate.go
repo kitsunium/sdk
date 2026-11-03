@@ -1,12 +1,9 @@
 package bson
 
-import (
-	"strconv"
-	"unicode/utf8"
-)
+import "unicode/utf8"
 
 // validationError says where, and why, a document is malformed. It is turned
-// into BSON_UNMARSHAL_FAILED or BSON_DEPTH_EXCEEDED by validateRoot; its text
+// into BSON_UNMARSHAL_FAILED or DEPTH_EXCEEDED by validateRoot; its text
 // names an offset and a rule, never the bytes found there.
 type validationError struct {
 	// offset is where in the input the problem was found.
@@ -28,7 +25,7 @@ func validateRoot(data []byte) error {
 			return depthError("Unmarshal")
 		}
 		//: every other malformation.
-		return unmarshalError(nil, "malformed document at byte "+strconv.Itoa(problem.offset)+": "+problem.rule)
+		return malformedAt(problem.offset, problem.rule)
 	}
 	//: well formed.
 	return nil

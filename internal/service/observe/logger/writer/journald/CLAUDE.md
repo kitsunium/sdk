@@ -20,7 +20,8 @@ family, never the path. A caller-supplied `Dialer` is used as given there too.
 |---|---|
 | `journald.go` | `Writer` singleton, `journaldFactory` (`Name`/`Open`) — connects the socket + composes the chain |
 | `journald_config.go` | `Config` value type (socket path, dialer seam, level, ring) |
-| `journald_sink.go` | `journaldSink` (`Write`/`Flush`/`Close`) — the datagram framing terminal |
+| `journald_sink.go` | `journaldSink` (`Write`/`WriteBatch`/`Flush`/`Close`) — the datagram framing terminal; `frameAll` frames a backlog into the reused buffer (#807) |
+| `journald_compliance.go` | `journaldSink` is a `corelogger.BatchSink` (#807) |
 | `decode.go` | `journaldFactory.Decode` (`core/observe/logger/writer.Decoder`) + key coercion helpers |
 | `socket_windows.go` / `socket_other.go` | `unixDatagrams` — whether the default dialer's socket family exists here (not on Windows) |
 | `wrap.go` | `wrapOpen` / `wrapWrite` — the single wrap points that put a cause under the mirror's codes; never a value parsed from a config or a record |
@@ -38,6 +39,12 @@ family, never the path. A caller-supplied `Dialer` is used as given there too.
   is **0 alloc** (the buffer grows once, then is reused under the mutex). Framing
   note: the native protocol length-prefixes multiline values; this sink emits the
   simple single-line form, valid because the SDK encoders strip CR/LF/NUL.
+- `WriteBatch` (#807) frames a backlog — up to `batchMax` 16 records, the async
+  drainer's `BatchMax` — entry after entry into the same reused buffer and sends
+  it as one datagram per entry through `logger/internal/datagram`: one
+  `sendmmsg(2)` on Linux, one `Write` each elsewhere. The entries are exactly
+  `Write`'s; journald still reads one entry per datagram. The first refusal ends
+  the batch, the entries before it counted delivered.
 
 ## Decoder (YAML-reachable via `FromConfig`)
 

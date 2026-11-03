@@ -121,7 +121,7 @@ func Test_msgpackCodec_Unmarshal(t *testing.T) {
 		{"malformed-byte-fails", []byte{0xc1}, "UNMARSHAL_FAILED"},
 		//: input one byte past maxMsgPackBytes trips the size-cap guard in
 		//: Unmarshal before any decode — the DoS defence branch.
-		{"over-cap-rejected", make([]byte, maxMsgPackBytes+1), "UNMARSHAL_FAILED"},
+		{"over-cap-rejected", make([]byte, maxMsgPackBytes+1), "SIZE_EXCEEDED"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

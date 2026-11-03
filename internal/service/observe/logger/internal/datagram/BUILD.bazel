@@ -1,0 +1,41 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "datagram",
+    srcs = [
+        "datagram.go",
+        "datagram_linux.go",
+        "datagram_other.go",
+        "doc.go",
+        "sysnum_linux_386.go",
+        "sysnum_linux_amd64.go",
+        "sysnum_linux_other.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/internal/datagram",
+    visibility = [
+        "//internal/service:service_consumers",
+        "//internal/service/observe/logger:__subpackages__",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":datagram",
+    visibility = [
+        "//internal/service:service_consumers",
+        "//internal/service/observe/logger:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "datagram_test",
+    srcs = [
+        "datagram_bench_test.go",
+        "datagram_external_test.go",
+        "datagram_linux_internal_test.go",
+        "gen_api_test.go",
+    ],
+    embed = [":datagram"],
+)

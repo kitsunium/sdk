@@ -214,7 +214,8 @@ func TestNewDecoder(t *testing.T) {
 	}
 	tests := []tc{
 		{"json streaming ok", codec.JSON, ""},
-		{"csv non-streaming", codec.CSV, "STREAMING_UNSUPPORTED"},
+		{"csv streaming ok (#902)", codec.CSV, ""},
+		{"asn1 non-streaming", codec.ASN1DER, "STREAMING_UNSUPPORTED"},
 		{"unknown format", codec.Format("nope"), "UNKNOWN_FORMAT"},
 	}
 	runCase := func(t *testing.T, tc tc) {
@@ -1250,8 +1251,16 @@ func TestStreamingRoundTrip_AllCodecs(t *testing.T) {
 		//:           it (by design; these are short-identifier codecs, not bulk
 		//:           streams). Their non-streaming round-trip is covered by the
 		//:           short-fixture adapters in TestRoundTrip_AllCodecs.
+		//:   - csv : streams []string records and structs of scalar fields
+		//:           (#902); complexRT's maps and nested structs fit no cell.
+		//:           TestCSVTypedThroughTheFacade and the codec's own stream
+		//:           tests cover it.
+		//:   - pem : streams *pem.Block values only (#901); the facade's
+		//:           promotion of other values is Marshal's, not the stream's.
+		//:           TestNewDecoderStreamsNDJSONAndPEM and the codec's own
+		//:           stream tests cover it.
 		switch strings.ToLower(string(f)) {
-		case "xml", "toml", "tlv", "base58", "base62":
+		case "xml", "toml", "tlv", "base58", "base62", "pem", "csv":
 			//: documented limitation — surface as a skip below in runCase.
 			continue
 		}

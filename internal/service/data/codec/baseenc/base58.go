@@ -8,13 +8,15 @@ const (
 	// base58Radix is the Base58 alphabet size.
 	base58Radix int = 58
 	// maxConvBytes caps the RAW (pre-encode) input of the O(n²) base-conversion
-	// variants (Base58/Base62) at 4 KiB. base-conversion is quadratic, so even a
-	// few KiB bounds the work to the low-millisecond range; bulk data belongs in
-	// a block codec (base64). Enforced on the raw bytes at Marshal/Append.
-	maxConvBytes int = 4 * 1024
+	// variants (Base58/Base62) at 64 KiB. base-conversion is quadratic; since the
+	// limb arithmetic (#898) 4 KiB encodes in about 2.5 ms and decodes in
+	// 0.6 ms, so 64 KiB — a certificate chain, a multibase CID of a block —
+	// stays bounded while bulk data still belongs in a block codec (base64).
+	// Enforced on the raw bytes at Marshal/Append.
+	maxConvBytes int = 64 * 1024
 	// maxConvEncodedBytes caps the ENCODED text at Unmarshal. Base58/Base62
 	// EXPAND raw→encoded by ~1.37× (log(256)/log(58|62)), so a maxConvBytes raw
-	// input encodes to ~5.5 KiB; capping the encoded side at the raw cap would
+	// input encodes to ~88 KiB; capping the encoded side at the raw cap would
 	// make a freshly-Marshalled value un-Unmarshalable. 2× covers the expansion
 	// with margin while still bounding the quadratic decode work.
 	maxConvEncodedBytes int = 2 * maxConvBytes

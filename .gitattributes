@@ -14,3 +14,9 @@ design/** text eol=lf
 docs/api/** text eol=lf
 # The platforms table genindex reads without running it.
 scripts/ci/platforms.sh text eol=lf
+# The json and ndjson goldens (#893) are the bytes encoding/json v1 wrote,
+# compared byte for byte by the codecs' identity tests: a CRLF checkout would
+# fail them on a codec that writes LF.
+internal/service/data/codec/json/testdata/golden/** text eol=lf
+internal/service/data/codec/ndjson/testdata/golden/** text eol=lf
+pkg/v1/data/codec/testdata/json-golden/** text eol=lf

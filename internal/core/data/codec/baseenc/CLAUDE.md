@@ -21,7 +21,7 @@ Stdlib-only: this package imports `internal/kernel/errs` and nothing else.
 | `0.3.24.1` | `CodeBaseEncMarshalFailed` | `BaseEncMarshalFailed` | `BASE_ENC_MARSHAL_FAILED` |
 | `0.3.24.2` | `CodeBaseEncUnmarshalFailed` | `BaseEncUnmarshalFailed` | `BASE_ENC_UNMARSHAL_FAILED` |
 | `0.3.24.3` | `CodeBaseEncDecodeFailed` | `BaseEncDecodeFailed` | `BASE_ENC_DECODE_FAILED` |
-| `0.3.24.4` | `CodeBaseEncSizeExceeded` | `BaseEncSizeExceeded` | `BASE_ENC_SIZE_EXCEEDED` |
+| `0.3.24.4` | `CodeBaseEncSizeExceeded` | `SizeExceeded` | `SIZE_EXCEEDED` |
 
 A `pkg/v1` facade that names these aliases this package, never the service one (ADR 0074).
 

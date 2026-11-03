@@ -13,6 +13,13 @@ packages:
             name: CodeASN1UnmarshalFailed
             value: "0x00_03_09_02"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeASN1TrailingData identifies input the strict instance refused because
+              bytes follow the first decoded structure.
+            name: CodeASN1TrailingData
+            value: "0x00_03_09_03"
+        type: errs.Code
     doc: |-
       Package asn1 declares the error codes and the sentinels of the ASN.1 DER
       codec, internal/service/data/codec/asn1 — range 0.3.9.* (ADR 0005
@@ -46,13 +53,41 @@ packages:
             private: "service/data/codec/asn1: encoding/asn1.Unmarshal returned an error"
             public: ASN.1 DER decoding failed
             reason: UNMARSHAL_FAILED
+          - code: CodeASN1TrailingData
+            doc: |-
+              TrailingData is the strict instance's refusal of bytes past the first
+              decoded structure.
+            name: TrailingData
+            private: "service/data/codec/asn1: bytes follow the first decoded structure"
+            public: ASN.1 input carries trailing data
+            reason: TRAILING_DATA
   - doc: |-
       Package asn1 wraps encoding/asn1 as a codec.Codec implementation.
       Only DER (Distinguished Encoding Rules) is emitted because the stdlib
-      produces DER exclusively; BER parsing is still accepted on Unmarshal.
+      produces DER exclusively.
+
+      Unmarshal reads what encoding/asn1 reads, which is DER with a few BER
+      relaxations and no more. Accepted: a UTCTime without seconds or with a
+      +hhmm offset instead of Z, a field holding its DEFAULT value written out, a
+      SET OF in any order, a PrintableString carrying '*' or '&'. Refused with
+      UNMARSHAL_FAILED: an indefinite length, a length or a tag number not in its
+      shortest form, a non-minimal INTEGER, a BOOLEAN other than 0x00 or 0xFF, a
+      constructed (segmented) string. The registered codec ignores bytes past
+      the first decoded structure, as encoding/asn1 returns them; NewStrict's
+      instance refuses them.
     functions:
       - doc: New returns an ASN.1 DER codec instance.
         name: New
+        out:
+          - type: codec.Codec
+      - doc: |-
+          NewStrict returns a fresh ASN.1 DER codec, not registered, whose Unmarshal
+          refuses any byte past the first decoded structure with TRAILING_DATA
+          (0.3.9.3). The registered codec accepts them, as encoding/asn1 does, so a
+          signed blob with bytes appended decodes equal to the original; a caller
+          that hashes or verifies what it decoded, rather than what it received,
+          uses this instance. Marshal and Append are the registered codec's.
+        name: NewStrict
         out:
           - type: codec.Codec
     imports:
@@ -79,7 +114,10 @@ packages:
       	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/asn1"
 
       The codec is the standard library's encoding/asn1: Marshal writes DER — the
-      only encoding that package produces — and Unmarshal also accepts BER. The
+      only encoding that package produces — and Unmarshal also accepts the few BER
+      relaxations encoding/asn1 reads (an indefinite length is not one of them).
+      [NewStrict] returns an instance that also refuses bytes past the first
+      structure, for input that is hashed or verified after it is decoded. The
       value is whatever encoding/asn1 maps: a struct of exported fields, an
       integer, a string, a time, a []byte, an asn1.ObjectIdentifier. Its MIME
       type is application/pkix-cert and its extensions .der and .cer.
@@ -100,6 +138,7 @@ packages:
 
       	CodeMarshalFailed    0.3.9.1  encoding/asn1 could not encode the value
       	CodeUnmarshalFailed  0.3.9.2  the input is not DER or BER the target can hold
+      	CodeTrailingData     0.3.9.3  NewStrict's instance found bytes past the structure
 
       No error message quotes the input.
     facade:
@@ -118,6 +157,14 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_09_02"
+          - doc: |-
+              CodeTrailingData is 0.3.9.3: NewStrict's instance found bytes past the
+              first decoded structure.
+            name: CodeTrailingData
+            reexport: coreasn1.CodeASN1TrailingData
+            type: errs.Code
+            typed: true
+            value: "0x00_03_09_03"
         doc: The error codes, range 0.3.9.*, declared in the core (ADR 0160).
       - doc: "The sentinels, for errors.Is: each carries the code of the same name."
         var:
@@ -129,7 +176,25 @@ packages:
             name: UnmarshalFailed
             reexport: coreasn1.UnmarshalFailed
             type: "*errs.Error"
+          - doc: TrailingData is the sentinel of [CodeTrailingData].
+            name: TrailingData
+            reexport: coreasn1.TrailingData
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            NewStrict returns a fresh ASN.1 DER codec, not registered, whose Unmarshal
+            refuses any byte past the first decoded structure with CodeTrailingData.
+            The registered format accepts them, as encoding/asn1 does, so a signed
+            blob with bytes appended decodes equal to the original: decode with this
+            instance whatever is hashed or verified after it is decoded. Marshal and
+            Append are the registered codec's.
+          forward: svcasn1.NewStrict
+          name: NewStrict
+          out:
+            - type: codec.Codec
     imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
       coreasn1: github.com/kitsunium/sdk/internal/core/data/codec/asn1
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcasn1: github.com/kitsunium/sdk/internal/service/data/codec/asn1
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/asn1

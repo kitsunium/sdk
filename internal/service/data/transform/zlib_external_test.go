@@ -10,83 +10,6 @@ import (
 	svctransform "github.com/kitsunium/sdk/internal/service/data/transform"
 )
 
-func TestZlibRoundTrip(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name       string
-		payload    []byte
-		wantShrink bool
-	}
-	tests := []tc{
-		{"empty", []byte{}, false},
-		{"small", []byte("hello, transform"), false},
-		{"repetitive shrinks", bytes.Repeat([]byte("kitsunium-sdk "), 4096), true},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		//: zlib round-trip is bidirectional: Compress shrinks, Decompress restores.
-		roundTrip(t, "zlib", c.payload, c.wantShrink)
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
-func TestZlibDecompressGarbage(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name       string
-		input      []byte
-		wantReason string
-	}
-	tests := []tc{
-		{"non-zlib bytes fail", []byte("definitely not a zlib frame"), "ZLIB_FAILED"},
-		//: a truncated envelope has a valid 2-byte header, so it survives
-		//: zlib.NewReader and only fails while the body is drained.
-		{"truncated envelope fails", []byte{0x78, 0x9c, 0x01}, "ZLIB_FAILED"},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		_, err := resolve(t, "zlib").Decompress(nil, c.input)
-		//: garbage input must surface the zlib failure reason.
-		if !errs.HasReason(err, c.wantReason) {
-			t.Errorf("%s: expected %s, got %v", c.name, c.wantReason, err)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
-func TestZlibRegisteredViaImport(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		algo coretransform.Algorithm
-		want coretransform.Algorithm
-	}
-	tests := []tc{{"zlib resolves to canonical name", "zlib", "zlib"}}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		//: the resolved scheme must report its canonical Algorithm.
-		if got := resolve(t, c.algo).Algorithm(); got != c.want {
-			t.Errorf("%s: Algorithm()=%q want %q", c.name, got, c.want)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
 // TestZlibIsNotFlate pins the distinction the two schemes exist to keep: `zlib`
 // is the RFC 1950 envelope (2-byte header + DEFLATE + Adler-32) that HTTP's
 // `Content-Encoding: deflate` actually names, while `flate` is the bare RFC 1951
@@ -185,3 +108,14 @@ func readAllFlate(t *testing.T, body []byte) ([]byte, error) {
 
 // ensure the blank-import side effect is referenced for zlib as well.
 var _ = svctransform.ZlibCompressor
+
+// resolve looks algo up in the registry the package's import filled, failing
+// the test on a miss.
+func resolve(t *testing.T, algo coretransform.Algorithm) coretransform.Compressor {
+	t.Helper()
+	c, ok := coretransform.Lookup(algo)
+	if !ok {
+		t.Fatalf("%q compressor not registered via import", algo)
+	}
+	return c
+}

@@ -11,11 +11,16 @@ files:
       - (*asn1Codec).Marshal
       - (*asn1Codec).Append
       - (*asn1Codec).Unmarshal
+      - strictCodec
+      - NewStrict
+      - (*strictCodec).Unmarshal
     name: codec.go
   - decls: []
     name: doc.go
 functions:
   - name: New
+    results: codec.Codec
+  - name: NewStrict
     results: codec.Codec
 imports:
   codec: github.com/kitsunium/sdk/internal/core/data/codec
@@ -58,17 +63,34 @@ types:
         recv: c *asn1Codec
         results: appended []byte, err error
       - doc: |-
-          Unmarshal parses data as ASN.1 BER/DER into v. Trailing bytes past the
-          first decoded structure are accepted silently — this matches
-          encoding/asn1's own lenient contract and preserves compatibility with
-          callers that feed a known-sized prefix of a larger buffer. If strict
-          trailing-byte rejection becomes a requirement, add a dedicated
-          UnmarshalStrict helper rather than tightening this default.
+          Unmarshal parses data as ASN.1 DER — with the BER relaxations
+          encoding/asn1 reads — into v. Trailing bytes past the first decoded
+          structure are accepted silently — this matches encoding/asn1's own lenient
+          contract and preserves compatibility with callers that feed a known-sized
+          prefix of a larger buffer. NewStrict's instance refuses them.
         name: Unmarshal
         params: data []byte, v any
         recv: "*asn1Codec"
         results: error
     name: asn1Codec
+  - doc: |-
+      strictCodec is the instance NewStrict returns: the registered codec's
+      encoding, and an Unmarshal that refuses bytes past the first structure.
+    fields:
+      - name: ""
+        role: embedded
+        type: asn1Codec
+    kind: struct
+    methods:
+      - doc: |-
+          Unmarshal parses data like the registered codec, then refuses a non-empty
+          rest: a signed blob with bytes appended must not decode equal to the
+          original. On that refusal v holds the structure encoding/asn1 decoded.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: "*strictCodec"
+        results: error
+    name: strictCodec
 vars:
   - doc: |-
       Codec is the ASN.1 DER singleton, registered with core/data/codec at package load.

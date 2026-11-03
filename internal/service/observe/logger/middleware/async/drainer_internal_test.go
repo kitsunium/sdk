@@ -34,6 +34,8 @@ func liveSink(t testing.TB, down corelogger.Sink) *asyncSink {
 		pool:       recycler.NewPool[*recordEntry](newRecordEntry),
 		policy:     DropNewest,
 		onDrop:     noopOnDrop,
+		wake:       make(chan struct{}, 1),
+		batchMax:   1,
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
 	}
@@ -51,15 +53,15 @@ func Test_asyncSink_drain(t *testing.T) {
 		//: directly under ringMu after Close signals stop, so the drainer's
 		//: terminal drainRemaining loop is the one that flushes them.
 		postCloseEnqueue int
-		//: pause forces the drainer to hit the empty-queue yield branch
-		//: (TryRead fails → default → yieldOnce) before any entry shows up.
+		//: pause forces the drainer to park on an empty queue (take returns
+		//: nothing → park on wake) before any entry shows up.
 		pause time.Duration
 	}{
 		{"drain consumes 4 entries before Close returns", 4, 0, 0},
 		{"drain consumes a single entry", 1, 0, 0},
 		{"drain handles immediate Close on empty queue", 0, 0, 0},
 		{"drain processes entries enqueued after Close via drainRemaining", 0, 3, 0},
-		{"drain yields on empty queue before any Write arrives", 1, 0, 5 * time.Millisecond},
+		{"drain parks on an empty queue before any Write arrives", 1, 0, 5 * time.Millisecond},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -67,7 +69,7 @@ func Test_asyncSink_drain(t *testing.T) {
 			down := &countingDownstream{}
 			s := liveSink(t, down)
 			rec := corelogger.RecordEvent{Level: level.Info}
-			//: optional pause forces the drainer to hit the yield branch.
+			//: optional pause forces the drainer to park first.
 			if tc.pause > 0 {
 				time.Sleep(tc.pause)
 			}
@@ -329,6 +331,8 @@ func Test_asyncSink_joinDrainer(t *testing.T) {
 					policy:      DropNewest,
 					onDrop:      noopOnDrop,
 					flushSignal: make(chan struct{}, 1),
+					wake:        make(chan struct{}, 1),
+					batchMax:    1,
 					stop:        make(chan struct{}),
 					done:        make(chan struct{}),
 				}

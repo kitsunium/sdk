@@ -19,6 +19,54 @@ constants:
         value: "\"sdk_metric_overflow\""
     name: OverflowAttrKey
   - doc: |-
+      MaxUnitLen is the longest unit UnitDescriber accepts, in bytes: a UCUM unit
+      is a short label a backend reads, never a document (ADR 0208).
+    items:
+      - name: MaxUnitLen
+        type: int
+        value: "63"
+    name: MaxUnitLen
+  - grouped: true
+    items:
+      - doc: |-
+          ExponentialMinScale is the lowest scale an exponential histogram falls to:
+          base 2^1024, three buckets cover every finite double. The OpenTelemetry
+          specification's floor.
+        name: ExponentialMinScale
+        type: int32
+        value: "-10"
+      - doc: |-
+          ExponentialMaxScale is the scale an exponential histogram starts at — base
+          2^(2^-20), a relative error under 1e-6 — and the specification's ceiling.
+          The histogram only ever lowers it, when the range it holds needs more
+          buckets than its maximum.
+        name: ExponentialMaxScale
+        type: int32
+        value: "20"
+      - doc: |-
+          DefaultExponentialMaxSize is the bucket count per range — positive and
+          negative each — an exponential histogram created with a maxSize of zero or
+          less holds: the OpenTelemetry SDKs' default, 160, which keeps a 1 µs to
+          100 s latency range at scale 3, a relative error under 4.5 %.
+        name: DefaultExponentialMaxSize
+        type: int
+        value: "160"
+    name: ExponentialMinScale
+  - doc: The two facts of IEEE 754 binary64 the mapping rests on.
+    grouped: true
+    items:
+      - doc: frexpHalf is the fraction math.Frexp returns for an exact power of two.
+        name: frexpHalf
+        type: float64
+        value: "0.5"
+      - doc: |-
+          maxNormalExponent is one past the largest double's base-2 exponent:
+          math.MaxFloat64 < 2^1024.
+        name: maxNormalExponent
+        type: int32
+        value: "1024"
+    name: frexpHalf
+  - doc: |-
       DefaultExportTimeout bounds one export when the caller's context carries no
       deadline of its own: 30 s, the OpenTelemetry metrics SDK specification's
       default exportTimeout for a periodic exporting reader
@@ -44,6 +92,22 @@ constants:
         type: string
         value: "\"github.com/kitsunium/sdk/pkg/v1/observe/metrics\""
     name: DefaultScopeName
+  - doc: The two kinds of engine statistic an Observer reports (#871).
+    grouped: true
+    items:
+      - doc: |-
+          StatCounter is a count that only grows while the engine lives — hits,
+          batches sent —, carried as an observable counter.
+        name: StatCounter
+        type: StatKind
+        value: "1"
+      - doc: |-
+          StatGauge is a level read now — entries held, a backlog —, carried as an
+          observable up-down counter.
+        name: StatGauge
+        type: StatKind
+        value: "2"
+    name: StatCounter
   - doc: The three wire spellings, which the text exporter emits verbatim.
     grouped: true
     items:
@@ -83,8 +147,27 @@ files:
       - ValidateAttrs
       - NormalizeResource
     name: attrs.go
+  - decls:
+      - MaxUnitLen
+      - defaultBuckets
+      - DefaultBuckets
+    name: default_buckets.go
   - decls: []
     name: doc.go
+  - decls:
+      - ExemplarValue
+    name: exemplar_value.go
+  - decls:
+      - ExponentialMinScale
+      - frexpHalf
+      - ExponentialIndex
+      - ExponentialLowerBound
+      - powerOfTwoIndex
+    name: exponential.go
+  - decls:
+      - ExponentialBucketsValue
+      - ExponentialHistogramValue
+    name: exponential_histogram_value.go
   - decls:
       - DefaultExportTimeout
       - ExporterName
@@ -108,6 +191,8 @@ files:
       - ObserveFloat64
       - Int64Callback
       - Float64Callback
+      - ObserveHistogram
+      - HistogramCallback
     name: observable.go
   - decls:
       - DefaultScopeName
@@ -118,7 +203,13 @@ files:
       - GaugeMetricValue
       - HistogramMetricValue
       - SnapshotValue
+      - ExponentialHistogramMetricValue
     name: snapshot_value.go
+  - decls:
+      - StatCounter
+      - StatKind
+      - ReportStat
+    name: stat.go
   - decls:
       - SumValue
     name: sum_value.go
@@ -135,6 +226,20 @@ functions:
   - name: NormalizeResource
     params: resource coreotel.ResourceValue
     results: coreotel.ResourceValue
+  - name: DefaultBuckets
+    results: "[]float64"
+  - name: ExponentialIndex
+    params: magnitude float64, scale int32
+    results: int32
+  - name: ExponentialLowerBound
+    params: index, scale int32
+    results: float64
+  - doc: |-
+      powerOfTwoIndex is the bucket index of the exact power of two 2^e at scale:
+      the bucket whose INCLUSIVE upper bound it is.
+    name: powerOfTwoIndex
+    params: e, scale int32
+    results: int32
   - name: RegisterExporter
     params: e Exporter
     results: Exporter
@@ -163,7 +268,9 @@ imports:
   context: context
   coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  math: math
   plugin: github.com/kitsunium/sdk/internal/kernel/plugin
+  slices: slices
   time: time
 package:
   docFile: doc.go
@@ -171,6 +278,74 @@ package:
   name: metrics
   purpose: Package metrics — the sibling port that registers asynchronous instruments.
 types:
+  - fields:
+      - doc: Time is when the measurement was recorded, on the meter's clock.
+        name: Time
+        type: time.Time
+      - doc: |-
+          Value is the measurement. On a sum point it holds the integer the
+          instrument was handed — exact below 2^53 — and OTLP/JSON writes it as
+          asInt; on a histogram point it is the recorded double, asDouble.
+        name: Value
+        type: float64
+      - doc: TraceID is the trace the measurement was recorded in.
+        name: TraceID
+        type: "[16]byte"
+      - doc: SpanID is the span the measurement was recorded in.
+        name: SpanID
+        type: "[8]byte"
+    kind: struct
+    name: ExemplarValue
+  - fields:
+      - doc: Offset is the bucket index of Counts[0].
+        name: Offset
+        type: int32
+      - doc: Counts holds one count per bucket, PER BUCKET (not cumulative).
+        name: Counts
+        type: "[]uint64"
+    kind: struct
+    name: ExponentialBucketsValue
+  - fields:
+      - doc: |-
+          Attrs is the series' attribute set, sorted by Key; nil for the
+          dimensionless series. See SumValue.Attrs for the aliasing rule.
+        name: Attrs
+        type: "[]coreotel.AttrValue"
+      - doc: |-
+          Scale sets the resolution: base = 2^(2^-Scale), so each bucket's upper
+          bound is base times its lower. ExponentialMinScale to
+          ExponentialMaxScale.
+        name: Scale
+        type: int32
+      - doc: |-
+          ZeroCount counts the observations whose magnitude is at most
+          ZeroThreshold — zero itself, since this SDK's threshold is 0.
+        name: ZeroCount
+        type: uint64
+      - doc: ZeroThreshold is the magnitude ZeroCount covers; 0 in this SDK.
+        name: ZeroThreshold
+        type: float64
+      - doc: Positive holds the buckets of the positive observations.
+        name: Positive
+        type: ExponentialBucketsValue
+      - doc: Negative holds the buckets of the negative observations, by magnitude.
+        name: Negative
+        type: ExponentialBucketsValue
+      - doc: Sum is the total of every observed value in the window.
+        name: Sum
+        type: float64
+      - doc: Count is how many observations the window holds, ZeroCount included.
+        name: Count
+        type: uint64
+      - doc: |-
+          Exemplars holds at most one exemplar: the last measurement of the
+          window recorded with RecordContext under a sampled span. Its buckets
+          move when the scale drops, so one per bucket would point at a bucket
+          that no longer exists.
+        name: Exemplars
+        type: "[]ExemplarValue"
+    kind: struct
+    name: ExponentialHistogramValue
   - kind: named
     methods:
       - name: String
@@ -206,12 +381,30 @@ types:
           cumulative ladder (Prometheus) builds it as it walks.
         name: Counts
         type: "[]uint64"
-      - doc: Sum is the total of every observed value in the window.
+      - doc: |-
+          Sum is the total of every observed value in the window; 0 and
+          meaningless when NoSum is true.
         name: Sum
         type: float64
       - doc: Count is how many observations the window holds.
         name: Count
         type: uint64
+      - doc: |-
+          NoSum is true when the source keeps no total of what it counted — an
+          observable histogram read off runtime/metrics, whose histograms carry
+          counts and no sum. Sum is then not a reading, and every exporter says
+          so rather than print it: OTLP/JSON writes the optional sum as absent,
+          the Prometheus connector writes no _sum line, the text exporter is
+          unchanged (it prints the count). The zero value is a histogram that
+          knows its sum, which every synchronous histogram does.
+        name: NoSum
+        type: bool
+      - doc: |-
+          Exemplars holds at most one exemplar per bucket, in bucket order: the
+          last measurement of the window recorded with RecordContext under a
+          SAMPLED span (ADR 0051). Nil when none was.
+        name: Exemplars
+        type: "[]ExemplarValue"
     kind: struct
     name: HistogramValue
   - kind: named
@@ -226,6 +419,12 @@ types:
   - kind: named
     name: Float64Callback
     underlying: func(observe ObserveFloat64)
+  - kind: named
+    name: ObserveHistogram
+    underlying: func(point HistogramValue)
+  - kind: named
+    name: HistogramCallback
+    underlying: func(observe ObserveHistogram)
   - fields:
       - doc: |-
           Temporality says which window Points cover. Never
@@ -244,6 +443,13 @@ types:
           cannot carry it loses nothing but the prose. See Describer.
         name: Description
         type: string
+      - doc: |-
+          Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+          when nobody declared one. Like Description it belongs to the name, is
+          non-identifying, and an exporter that cannot carry it loses only the
+          annotation (ADR 0208). See UnitDescriber.
+        name: Unit
+        type: string
       - doc: Points holds the name's series, sorted by attribute set.
         name: Points
         type: "[]SumValue"
@@ -254,6 +460,13 @@ types:
           Description is the instrument's human-readable docstring, or "" when
           nobody described it. See SumMetricValue.Description.
         name: Description
+        type: string
+      - doc: |-
+          Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+          when nobody declared one. Like Description it belongs to the name, is
+          non-identifying, and an exporter that cannot carry it loses only the
+          annotation (ADR 0208). See UnitDescriber.
+        name: Unit
         type: string
       - doc: Points holds the name's series, sorted by attribute set.
         name: Points
@@ -270,6 +483,13 @@ types:
           Description is the instrument's human-readable docstring, or "" when
           nobody described it. See SumMetricValue.Description.
         name: Description
+        type: string
+      - doc: |-
+          Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+          when nobody declared one. Like Description it belongs to the name, is
+          non-identifying, and an exporter that cannot carry it loses only the
+          annotation (ADR 0208). See UnitDescriber.
+        name: Unit
         type: string
       - doc: Points holds the name's series, sorted by attribute set.
         name: Points
@@ -310,8 +530,40 @@ types:
       - doc: Histograms maps an instrument name to its histogram metric.
         name: Histograms
         type: map[string]HistogramMetricValue
+      - doc: |-
+          ExponentialHistograms maps an instrument name to its exponential
+          histogram metric. Nil from a meter that holds none.
+        name: ExponentialHistograms
+        type: map[string]ExponentialHistogramMetricValue
     kind: struct
     name: SnapshotValue
+  - fields:
+      - doc: |-
+          Temporality says which window Points cover. Never
+          TemporalityUnspecified.
+        name: Temporality
+        type: Temporality
+      - doc: |-
+          Description is the instrument's human-readable docstring, or "" when
+          nobody described it. See SumMetricValue.Description.
+        name: Description
+        type: string
+      - doc: |-
+          Unit is the instrument's unit in UCUM, or "" when nobody declared one
+          (ADR 0208). See UnitDescriber.
+        name: Unit
+        type: string
+      - doc: Points holds the name's series, sorted by attribute set.
+        name: Points
+        type: "[]ExponentialHistogramValue"
+    kind: struct
+    name: ExponentialHistogramMetricValue
+  - kind: named
+    name: StatKind
+    underlying: uint8
+  - kind: named
+    name: ReportStat
+    underlying: func(name string, kind StatKind, unit string, value int64, attrs ...coreotel.AttrValue)
   - fields:
       - doc: |-
           Attrs is the series' attribute set, sorted by Key; nil for the
@@ -331,6 +583,12 @@ types:
           SumMetricValue.Temporality.
         name: Value
         type: int64
+      - doc: |-
+          Exemplars holds at most one exemplar: the last measurement of the
+          window recorded with AddContext under a SAMPLED span (ADR 0051). Nil
+          when none was.
+        name: Exemplars
+        type: "[]ExemplarValue"
     kind: struct
     name: SumValue
   - kind: named
@@ -344,6 +602,13 @@ types:
     name: Temporality
     underlying: uint8
 vars:
+  - doc: |-
+      defaultBuckets is the OpenTelemetry SDK's default explicit bucket ladder,
+      copied out by DefaultBuckets and never handed out itself.
+    items:
+      - name: defaultBuckets
+        value: "[]float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000}"
+    name: defaultBuckets
   - doc: |-
       registry maps each ExporterName to its Exporter — a read-mostly,
       copy-on-write table (kernel/plugin.Registry), the same mechanism the other

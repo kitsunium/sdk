@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/jsonshape/
 
 ## Purpose
@@ -19,7 +19,7 @@ json/v2's streaming methods by signature so it does not import json/v2.
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `shape.go` | `Kind` and its nine values (`String`, `MarshalText`), `ShapeValue`, `FieldValue`, `Of`, `For` |
+| `shape.go` | `Kind` and its nine values (`String`, `MarshalText`), `ShapeValue`, `FieldValue`, `Of`, `For`, `OfV2`, `ForV2` |
 | `walk.go` | the walker: the path of named types being described (recursion becomes a `Ref`), pointers, the three known types, opaque types, the kinds, slices (base64 or array), maps (`keyWritable`), structs |
 | `fields.go` | `members` — json/v2's struct field walk under the v1 options, breadth first; `embed` (promote, collect, or a member after all); `writable`; `dominantMembers`; `dominantFallback`; `optional`, `quoted`, `emptiable`, `throughPointer` |
 | `tag.go` | `parseTag` — the json tag grammar the engine reads: names up to a reserved character, identifiers, `case:` and `format:` values, single-quoted strings |
@@ -76,6 +76,21 @@ json/v2's streaming methods by signature so it does not import json/v2.
 - **Every call is a new tree.** No cache: a caller may keep and edit what it is
   given, and a description is built once per endpoint at startup.
 
+- **`OfV2` is the same walk under json/v2's own options** (#893, step 2): a
+  `v2` flag on the walker, nothing else forked. Measured against
+  `jsonv2.Marshal` by the same oracle (`TestShapesV2MatchWhatJSONv2Writes`,
+  every differential case plus `v2Cases`): a nil slice, map or `[]byte` is
+  written `[]`, `{}`, `""` — not Nullable; `[N]byte` is base64; a
+  `time.Duration` has no default representation — Unsupported; `omitempty`
+  leaves out what encodes as `null`, `""`, `{}` or `[]` (`emptiableV2`: never
+  a number, a boolean or a `time.Time`, a struct when all its fields can go);
+  `,string` quotes numbers only and makes any other member Unsupported; a
+  pointer method is called on every value; and a struct whose tags json/v2
+  cannot parse, or whose unnamed embedding carries options or is not a
+  struct, is refused whole (`structRefusedV2`) where the legacy options
+  ignore the fault. `Of` is unchanged: its oracle still runs against
+  `json.Marshal`, so the two descriptions cannot drift into each other.
+
 ## Error range
 
 None. `Of` never fails: what `encoding/json` refuses is described as
@@ -110,3 +125,7 @@ checks every tricky tag's name against the member `json.Marshal` writes.
 - `internal/service/security/redact/fields.go` and `internal/service/app/validation/json_reach.go`
   resolve the same members for their own purposes; ADR 0133 §Deferred says why
   they are not moved onto this package here.
+
+## Fuzz (#897)
+
+`fuzz_external_test.go` — `FuzzOfAgreesWithMarshal`: for a struct type built from the input with `reflect.StructOf` — colliding names, every tag option, an embedded struct — the members `Of` reports are exactly the keys `encoding/json` writes for a value with every field set, and a member the zero value leaves out is reported optional. The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.

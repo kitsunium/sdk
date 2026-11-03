@@ -2,6 +2,33 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      The cut-offs and the shape of encoding/json's float spelling (encode.go,
+      floatEncoder): plain notation inside [plainMin, plainMax), exponent notation
+      outside it, and an exponent of one digit written without its leading zero.
+    grouped: true
+    items:
+      - doc: plainMin is the smallest magnitude written in plain notation.
+        name: plainMin
+        type: float64
+        value: "1e-6"
+      - doc: plainMax is the first magnitude written in exponent notation again.
+        name: plainMax
+        type: float64
+        value: "1e21"
+      - doc: shortest asks strconv for the fewest digits that read back to the value.
+        name: shortest
+        type: int
+        value: "-1"
+      - doc: "float64Bits is the size strconv rounds to: the value is a float64."
+        name: float64Bits
+        type: int
+        value: "64"
+      - doc: shortExponent is the length of the tail "e-0d" whose zero is dropped.
+        name: shortExponent
+        type: int
+        value: "4"
+    name: plainMin
+  - doc: |-
       hexDigits spells the two digits of a \u00XX escape, lowercase as
       encoding/json writes them.
     items:
@@ -117,12 +144,18 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - plainMin
+      - AppendFloat
+      - trimExponentZero
+    name: float.go
+  - decls:
       - Object
       - BeginObject
       - Object.key
       - Object.String
       - Object.Int
       - Object.Uint
+      - Object.Float
       - Object.Bool
       - Object.Null
       - Object.Raw
@@ -152,6 +185,17 @@ files:
       - appendEscapedByte
     name: string.go
 functions:
+  - name: AppendFloat
+    params: dst []byte, f float64
+    results: number []byte, ok bool
+  - doc: |-
+      trimExponentZero rewrites a trailing "e-0d" as "e-d", as encoding/json does:
+      strconv pads a negative exponent to two digits and ES6 does not. A positive
+      exponent is never short here — 1e21 is the smallest written with one — so
+      only the negative form is looked for.
+    name: trimExponentZero
+    params: b []byte
+    results: "[]byte"
   - name: BeginObject
     params: dst []byte
     results: Object
@@ -236,6 +280,7 @@ functions:
     params: dst []byte, c byte
     results: "[]byte"
 imports:
+  math: math
   strconv: strconv
   swar: github.com/kitsunium/sdk/internal/kernel/swar
   unsafe: unsafe
@@ -244,7 +289,7 @@ package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/kernel/jsonenc
   name: jsonenc
-  purpose: "Package jsonenc appends JSON to a byte slice: a string literal, an integer, and an object whose members are written in the order they are named."
+  purpose: "Package jsonenc appends JSON to a byte slice: a string literal, an integer, a float, and an object whose members are written in the order they are named."
 types:
   - fields:
       - doc: dst is the slice so far, ending after the last member or the brace.
@@ -270,6 +315,10 @@ types:
         results: Object
       - name: Uint
         params: key string, v uint64
+        recv: o Object
+        results: Object
+      - name: Float
+        params: key string, f float64
         recv: o Object
         results: Object
       - name: Bool

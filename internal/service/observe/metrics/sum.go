@@ -1,6 +1,15 @@
 package metrics
 
-import "sync/atomic"
+import (
+	"context"
+	"sync/atomic"
+
+	coremetrics "github.com/kitsunium/sdk/internal/core/observe/metrics"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
+)
+
+// sumExemplarSlots is how many exemplars a sum series keeps: one.
+const sumExemplarSlots int = 1
 
 // memSum is the storage behind BOTH counter kinds: an atomic int64 total plus
 // the two flags that decide what may be written to it and how a delta window is
@@ -31,6 +40,37 @@ type memSum struct {
 	// observed marks a series whose value is written by a callback at
 	// collection time rather than accumulated by the caller.
 	observed bool
+	// ex keeps the series' one exemplar: the last measurement AddContext was
+	// handed under a sampled span (ADR 0051).
+	ex exemplarSlots
+}
+
+// AddContext adds delta as Add does and, when ctx carries a sampled span and
+// the measurement counts, keeps it as the series' exemplar — the
+// core/observe/metrics.ContextCounter sibling. The span is read only after
+// the add, and a measurement nobody traced costs one context lookup.
+func (s *memSum) AddContext(ctx context.Context, delta int64) {
+	//: a monotonic sum ignores a non-positive delta, and keeps no exemplar of it.
+	if s.monotonic && delta <= 0 {
+		return
+	}
+	s.v.Add(delta)
+	//: a sampled span makes the measurement the series' exemplar.
+	if span, ok := sampledSpan(ctx); ok {
+		s.ex.offer(sumExemplarSlots, 0, float64(delta), span)
+	}
+}
+
+// setClock implements setClocker: the exemplar's time is the meter's.
+func (s *memSum) setClock(clk clock.Clock) {
+	s.ex.setClock(clk)
+}
+
+// exemplars returns the series' exemplar, nil when it has none; a delta
+// collection consumes it.
+func (s *memSum) exemplars(delta bool) []coremetrics.ExemplarValue {
+	//: the reservoir's copy.
+	return s.ex.collect(delta)
 }
 
 // Add adjusts the total by delta.

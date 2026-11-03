@@ -159,6 +159,10 @@ func (c *multipartCodec) Marshal(v any) (encoded []byte, err error) {
 // the read side of the JSON-mediated shape. A body carrying no such part is a
 // typed UNMARSHAL_FAILED naming *FormValue as the target that would work.
 func (c *multipartCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: the delimiter is not in the Codec signature — recover it from the body.
 	boundary, berr := Boundary(data)
 	//: an unrecoverable delimiter is a typed BOUNDARY_INVALID.
@@ -260,26 +264,35 @@ func (c *multipartCodec) NewDecoderWithBoundary(r io.Reader, boundary string) (d
 // encoderFor builds the concrete encoder over w with a generated boundary.
 func (c *multipartCodec) encoderFor(w io.Writer) *multipartEncoder {
 	//: bounds are copied per encoder so concurrent streams never share counts.
-	return &multipartEncoder{inner: stdmp.NewWriter(w), count: counter{limits: c.limits}}
+	return &multipartEncoder{w: w, boundary: generateBoundary(), head: make([]byte, 0, headScratchBytes), count: counter{limits: c.limits}}
 }
 
 // pinnedEncoder builds the concrete encoder over w framed by boundary.
 func (c *multipartCodec) pinnedEncoder(w io.Writer, boundary string) (enc *multipartEncoder, err error) {
-	//: start from the generated-boundary encoder.
-	built := c.encoderFor(w)
-	//: SetBoundary is the stdlib's own RFC 2046 gate; map its refusal to ours.
-	if serr := built.inner.SetBoundary(boundary); serr != nil {
+	//: the RFC 2046 gate mime/multipart.Writer.SetBoundary applies, as ours.
+	if verr := validateBoundary(boundary); verr != nil {
 		//: typed BOUNDARY_INVALID; the value is never echoed.
-		return nil, boundaryInvalid("mime/multipart rejected the caller-supplied boundary")
+		return nil, verr
 	}
-	//: pinned and ready.
-	return built, nil
+	//: pinned and ready; no boundary is drawn only to be replaced.
+	return &multipartEncoder{w: w, boundary: boundary, head: make([]byte, 0, headScratchBytes), count: counter{limits: c.limits}}, nil
 }
 
-// decoderFor builds the concrete decoder over r for an already-known boundary.
+// decoderFor builds the concrete decoder over r for an already-known
+// boundary. mime/multipart reads r through a wireBudget, so every byte it
+// consumes — headers included — is charged against MaxTotalBytes (#908).
 func (c *multipartCodec) decoderFor(r io.Reader, boundary string) *multipartDecoder {
 	//: bounds are copied per decoder so concurrent streams never share counts.
-	return &multipartDecoder{inner: stdmp.NewReader(r, boundary), count: counter{limits: c.limits}}
+	return newDecoder(r, boundary, c.limits)
+}
+
+// newDecoder builds a decoder over r whose mime/multipart reader pulls the
+// body through the decoder's own wireBudget.
+func newDecoder(r io.Reader, boundary string, limits LimitsConfig) *multipartDecoder {
+	d := &multipartDecoder{wire: wireBudget{r: r, limit: limits.MaxTotalBytes}, count: counter{limits: limits}}
+	d.inner = stdmp.NewReader(&d.wire, boundary)
+	//: the reader charges what it pulls through the decoder's own budget.
+	return d
 }
 
 // encodeForm writes form to w through the streaming encoder — the single

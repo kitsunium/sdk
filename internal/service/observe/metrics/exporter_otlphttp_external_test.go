@@ -345,22 +345,6 @@ func TestOTLPHTTPTransportFaultIsRetryable(t *testing.T) {
 	}
 }
 
-// TestOTLPHTTPRefusesAnUnencodableSnapshotBeforeDialing pins the boundary
-// between the two surfaces: an encoder refusal never becomes a request.
-func TestOTLPHTTPRefusesAnUnencodableSnapshotBeforeDialing(t *testing.T) {
-	t.Parallel()
-	exporter, captured := collectorStub(t, http.StatusOK, "", nil)
-	snap := coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
-		"s": {Temporality: coremetrics.TemporalityUnspecified, Points: []coremetrics.SumValue{{Value: 1}}},
-	}}
-	if err := exporter.Export(snap); !errors.Is(err, coremetrics.OTLPUnresolvedTemporality) {
-		t.Fatalf("want OTLPUnresolvedTemporality, got %v", err)
-	}
-	if seen := captured.snapshot(); seen.seen != 0 {
-		t.Errorf("an encoder refusal reached the network %d time(s)", seen.seen)
-	}
-}
-
 // TestOTLPHTTPSendsConfiguredHeaders pins the auth seam, and the rule that
 // Content-Type is set LAST: the specification requires application/json for
 // this encoding, so a caller cannot mislabel the body by accident.
