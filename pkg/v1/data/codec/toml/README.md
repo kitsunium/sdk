@@ -18,6 +18,8 @@ The codec reads TOML v1.0.0 ([https://toml.io/en/v1.0.0](https://toml.io/en/v1.0
 
 A document decoded into map\[string]any or any holds map\[string]any, \[]any, string, int64, float64, bool, time.Time for an offset date-time, and [LocalDateTime](#LocalDateTime), [LocalDate](#LocalDate) and [LocalTime](#LocalTime) for the three kinds of TOML value that carry no time zone. Decoded into a time.Time instead, a local value is placed in time.Local.
 
+A time.Duration is written as the string of its String() — '1h30m0s' — and read with time.ParseDuration, as the YAML codec writes and reads it: the rule of the formats people edit by hand (#1126). A string without its unit is refused; a bare integer still reads as nanoseconds, the form this codec wrote before, so a file written then loads unchanged.
+
 Importing both packages is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
 
 ### Errors
@@ -50,6 +52,17 @@ CodeUnmarshalFailed  0.3.5.2  a document that is not TOML, past a bound, or a va
 
 ## Constants
 
+<a name="CodeDepthExceeded"></a>
+```go
+const CodeDepthExceeded errs.Code = 197892
+```
+
+CodeDepthExceeded is 0.3.5.4: tables and arrays nested past maxDepth.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/toml.CodeTOMLDepthExceeded`.
+
+Code `0.3.5.4`
+
 <a name="CodeMarshalFailed"></a>
 ```go
 const CodeMarshalFailed errs.Code = 197889
@@ -60,6 +73,17 @@ CodeMarshalFailed identifies a Go value TOML cannot represent (0.3.5.1).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/toml.CodeTOMLMarshalFailed`.
 
 Code `0.3.5.1`
+
+<a name="CodeSizeExceeded"></a>
+```go
+const CodeSizeExceeded errs.Code = 197891
+```
+
+CodeSizeExceeded is 0.3.5.3: a document past maxDocumentBytes.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/toml.CodeTOMLSizeExceeded`.
+
+Code `0.3.5.3`
 
 <a name="CodeUnmarshalFailed"></a>
 ```go
@@ -81,6 +105,17 @@ Format is the name TOML is registered under. It is an untyped constant, so it go
 
 ## Variables
 
+<a name="DepthExceeded"></a>
+```go
+var DepthExceeded *errs.Error
+```
+
+DepthExceeded is the sentinel of [CodeDepthExceeded](#CodeDepthExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/toml.DepthExceeded`.
+
+Code `0.3.5.4` · reason `DEPTH_EXCEEDED` · public "TOML input nests too deeply"
+
 <a name="MarshalFailed"></a>
 ```go
 var MarshalFailed *errs.Error
@@ -91,6 +126,17 @@ MarshalFailed is the sentinel of [CodeMarshalFailed](#CodeMarshalFailed).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/toml.MarshalFailed`.
 
 Code `0.3.5.1` · reason `MARSHAL_FAILED` · public "TOML encoding failed"
+
+<a name="SizeExceeded"></a>
+```go
+var SizeExceeded *errs.Error
+```
+
+SizeExceeded is the sentinel of [CodeSizeExceeded](#CodeSizeExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/toml.SizeExceeded`.
+
+Code `0.3.5.3` · reason `SIZE_EXCEEDED` · public "TOML input exceeds a size limit"
 
 <a name="UnmarshalFailed"></a>
 ```go

@@ -12,6 +12,22 @@ constants:
         type: int
         value: "2000"
     name: DefaultMaxSeriesPerInstrument
+  - doc: The exponential histogram's constants.
+    grouped: true
+    items:
+      - doc: |-
+          expExemplarSlots is how many exemplars an exponential series keeps: one,
+          since its buckets move whenever the scale drops.
+        name: expExemplarSlots
+        type: int
+        value: "1"
+      - doc: |-
+          minNormal is the smallest normal double, 2^-1022: a subnormal
+          magnitude is counted as it.
+        name: minNormal
+        type: float64
+        value: 0x1p-1022
+    name: expExemplarSlots
   - doc: |-
       OTLPMetricsPath is the URL path OTLP/HTTP reserves for the metrics signal.
       The specification names it under §OTLP/HTTP Request; an endpoint is a full
@@ -174,6 +190,10 @@ constants:
       - name: textKindHistogram
         type: string
         value: "\"histogram\""
+      - doc: textKindExponential names an exponential (base-2) histogram.
+        name: textKindExponential
+        type: string
+        value: "\"exponential_histogram\""
       - name: textMonotonic
         type: string
         value: "\"monotonic\""
@@ -181,6 +201,38 @@ constants:
         type: string
         value: "\"non_monotonic\""
     name: textKindSum
+  - doc: |-
+      PrometheusContentType is the Content-Type of the Prometheus text exposition
+      format, version 0.0.4 — what NewPrometheusHandler answers a scrape with.
+    items:
+      - name: PrometheusContentType
+        type: string
+        value: "\"text/plain; version=0.0.4; charset=utf-8\""
+    name: PrometheusContentType
+  - doc: The handler's fixed answers.
+    grouped: true
+    items:
+      - doc: defaultHandlerExporter names the exporter when the config names none.
+        name: defaultHandlerExporter
+        type: coremetrics.ExporterName
+        value: "\"prometheus\""
+      - doc: allowedMethods is the Allow header of a 405.
+        name: allowedMethods
+        type: string
+        value: "\"GET, HEAD\""
+      - doc: busyRetryAfter is the Retry-After of a 503, in seconds.
+        name: busyRetryAfter
+        type: string
+        value: "\"1\""
+      - doc: errorContentType labels a 500's body, the refusal's Public text.
+        name: errorContentType
+        type: string
+        value: "\"text/plain; charset=utf-8\""
+      - doc: maxPooledDocument bounds the buffers the handler keeps between scrapes.
+        name: maxPooledDocument
+        type: int
+        value: 4 << 20
+    name: defaultHandlerExporter
   - doc: minSortableSeries is the shortest slice worth handing to a sort.
     items:
       - name: minSortableSeries
@@ -209,6 +261,14 @@ constants:
         name: kindObservableUpDownCounter
       - doc: kindObservableGauge marks a name bound to an asynchronous gauge.
         name: kindObservableGauge
+      - doc: |-
+          kindObservableHistogram marks a name bound to an asynchronous
+          explicit-bucket histogram.
+        name: kindObservableHistogram
+      - doc: |-
+          kindExponentialHistogram marks a name bound to an exponential
+          histogram.
+        name: kindExponentialHistogram
     name: kindCounter
   - grouped: true
     items:
@@ -220,6 +280,8 @@ constants:
         name: groupGauge
       - doc: groupHistogram is SnapshotValue.Histograms.
         name: groupHistogram
+      - doc: groupExponential is SnapshotValue.ExponentialHistograms.
+        name: groupExponential
     name: groupSum
   - doc: |-
       The capacity an OTLP/JSON document starts with, so the appends below grow it
@@ -241,6 +303,49 @@ constants:
         type: int
         value: "10"
     name: otlpDocEnvelopeBytes
+  - doc: The runtime/metrics keys the instruments read, one Read for all of them.
+    grouped: true
+    items:
+      - name: rtTotalBytes
+        type: string
+        value: "\"/memory/classes/total:bytes\""
+      - name: rtReleasedBytes
+        type: string
+        value: "\"/memory/classes/heap/released:bytes\""
+      - name: rtMemLimit
+        type: string
+        value: "\"/gc/gomemlimit:bytes\""
+      - name: rtAllocBytes
+        type: string
+        value: "\"/gc/heap/allocs:bytes\""
+      - name: rtAllocObjects
+        type: string
+        value: "\"/gc/heap/allocs:objects\""
+      - name: rtHeapGoal
+        type: string
+        value: "\"/gc/heap/goal:bytes\""
+      - name: rtGoroutines
+        type: string
+        value: "\"/sched/goroutines:goroutines\""
+      - name: rtGOMAXPROCS
+        type: string
+        value: "\"/sched/gomaxprocs:threads\""
+      - name: rtGOGC
+        type: string
+        value: "\"/gc/gogc:percent\""
+      - name: rtSchedLatency
+        type: string
+        value: "\"/sched/latencies:seconds\""
+      - name: rtGCPauses
+        type: string
+        value: "\"/sched/pauses/total/gc:seconds\""
+    name: rtTotalBytes
+  - doc: runtimeSeconds is the UCUM unit of the two runtime histograms.
+    items:
+      - name: runtimeSeconds
+        type: string
+        value: "\"s\""
+    name: runtimeSeconds
   - doc: |-
       maxStackAttrs is how many attributes the lookup path sorts without touching
       the heap. Eight is already an unusual number of dimensions on one metric;
@@ -262,6 +367,12 @@ constants:
         type: int
         value: "192"
     name: seriesKeyCap
+  - doc: "sumExemplarSlots is how many exemplars a sum series keeps: one."
+    items:
+      - name: sumExemplarSlots
+        type: int
+        value: "1"
+    name: sumExemplarSlots
 files:
   - decls:
       - carved
@@ -273,6 +384,40 @@ files:
     name: config.go
   - decls: []
     name: doc.go
+  - decls:
+      - setClocker
+      - stampClock
+      - sampledSpan
+      - exemplarReservoir
+      - exemplarSlots
+      - (*exemplarSlots).setClock
+      - (*exemplarSlots).offer
+      - (*exemplarSlots).collect
+      - (*exemplarReservoir).offer
+      - (*exemplarReservoir).now
+      - (*exemplarReservoir).collect
+    name: exemplar.go
+  - decls:
+      - _
+    name: exemplar_compliance.go
+  - decls:
+      - expExemplarSlots
+      - expRange
+      - memExpHistogram
+      - newExpHistogram
+      - (*memExpHistogram).Record
+      - (*memExpHistogram).RecordDuration
+      - (*memExpHistogram).RecordContext
+      - (*memExpHistogram).setClock
+      - (*memExpHistogram).record
+      - (*memExpHistogram).downscaleFor
+      - (*memExpHistogram).downscale
+      - (*expRange).add
+      - (*expRange).merge
+      - (*memExpHistogram).snapshot
+      - (*expRange).value
+      - (*expRange).reset
+    name: exponential_histogram.go
   - decls:
       - OTLPMetricsPath
       - DefaultOTLPTimeout
@@ -286,6 +431,7 @@ files:
       - (*otlpHTTPExporter).Export
       - (*otlpHTTPExporter).ExportContext
       - (*otlpHTTPExporter).ExportDocument
+      - (*otlpHTTPExporter).ExportEncodedDocument
     name: exporter_otlphttp.go
   - decls:
       - otlpJSONExporterName
@@ -338,6 +484,7 @@ files:
       - metricNameByte
       - validLabelName
       - labelNameByte
+      - appendPromExponentials
     name: exporter_prometheus.go
   - decls:
       - textExporterName
@@ -355,6 +502,7 @@ files:
       - appendSums
       - appendGauges
       - appendHistograms
+      - appendExponentials
       - appendMetricHeader
       - appendSeriesLine
       - appendAttrs
@@ -371,12 +519,39 @@ files:
       - newMemGauge
     name: gauge.go
   - decls:
+      - PrometheusContentType
+      - defaultHandlerExporter
+      - PrometheusHandlerConfig
+      - prometheusHandler
+      - NewPrometheusHandler
+      - (*prometheusHandler).ServeHTTP
+      - (*prometheusHandler).serveGet
+      - (*prometheusHandler).write
+      - (*prometheusHandler).recycle
+      - publicText
+    name: handler_prometheus.go
+  - decls:
       - memHistogram
       - newHistogram
+      - validateBuckets
       - (*memHistogram).Record
+      - (*memHistogram).RecordContext
+      - (*memHistogram).setClock
+      - (*memHistogram).record
       - (*memHistogram).snapshot
       - (*memHistogram).RecordDuration
     name: histogram.go
+  - decls:
+      - observedState
+      - newObservedHistogram
+      - (*memHistogram).observe
+      - (*memHistogram).relayout
+      - newLayout
+      - wentDown
+      - (*memHistogram).storeWindow
+      - validateObserved
+      - (*memHistogram).observedSnapshot
+    name: histogram_observed.go
   - decls:
       - minSortableSeries
       - memMeter
@@ -400,7 +575,16 @@ files:
     name: meter.go
   - decls:
       - (*memMeter).Describe
+      - annotations
+      - (*memMeter).annotations
+      - (*memMeter).Unit
+      - validUnit
     name: meter_describe.go
+  - decls:
+      - (*memMeter).ExponentialHistogram
+      - collectExponentials
+      - exponentialAttrs
+    name: meter_exponential.go
   - decls:
       - observer
       - (*memMeter).ObservableCounter
@@ -411,6 +595,8 @@ files:
       - (*memMeter).observeSum
       - (*memMeter).observeGauge
       - observableBuilder
+      - (*memMeter).ObservableHistogram
+      - (*memMeter).observeHistogram
     name: meter_observable.go
   - decls:
       - metricHeader
@@ -428,6 +614,20 @@ files:
       - (*memMeter).bindName
     name: name_state.go
   - decls:
+      - ObserverConfig
+      - statPoint
+      - statSeries
+      - statReader
+      - RegisterObservers
+      - registerObserver
+      - describedStat
+      - describeStats
+      - spellStat
+      - registerStat
+      - (*statReader).emit
+      - (*statReader).store
+    name: observer.go
+  - decls:
       - otlpDocEnvelopeBytes
       - (*otlpRequest).appendJSON
       - (*otlpResourceMetrics).appendJSON
@@ -442,6 +642,22 @@ files:
       - appendExplicitBounds
       - otlpDocCapacity
     name: otlp_append.go
+  - decls:
+      - otlpExemplar
+      - otlpExponentialHistogram
+      - otlpExponentialHistogramDataPoint
+      - otlpBuckets
+      - (*otlpBuckets).size
+      - appendOTLPExponentials
+      - otlpExponentialPoints
+      - otlpOptionalSum
+      - otlpExemplars
+      - appendExemplars
+      - (*otlpExemplar).appendJSON
+      - (*otlpExponentialHistogram).appendJSON
+      - (*otlpExponentialHistogramDataPoint).appendJSON
+      - appendBuckets
+    name: otlp_exponential.go
   - decls:
       - otlpPartialSuccess
       - (*otlpPartialSuccess).RejectedCount
@@ -461,6 +677,30 @@ files:
   - decls:
       - OTLPHTTPConfig
     name: otlphttp_config.go
+  - decls:
+      - rtTotalBytes
+      - runtimeSeconds
+      - runtimeKeys
+      - RuntimeConfig
+      - runtimeInstrument
+      - runtimeHistogram
+      - runtimeSamples
+      - (*runtimeSamples).uint
+      - (*runtimeSamples).observe
+      - (*runtimeSamples).serve
+      - (*runtimeSamples).observeHistogram
+      - (*runtimeHistogram).convert
+      - resize
+      - RuntimeInstruments
+      - runtimeNotes
+      - asUnits
+      - asDocs
+      - runtimeNotes.name
+      - runtimeNotes.annotate
+      - registerRuntimeHistograms
+      - registerRuntimeHistogram
+      - registerRuntime
+    name: runtime.go
   - decls:
       - maxStackAttrs
       - seriesKeyCap
@@ -483,7 +723,11 @@ files:
       - (*seriesStore).overflow
     name: series_store.go
   - decls:
+      - sumExemplarSlots
       - memSum
+      - (*memSum).AddContext
+      - (*memSum).setClock
+      - (*memSum).exemplars
       - (*memSum).Add
       - (*memSum).Inc
       - (*memSum).Dec
@@ -495,6 +739,27 @@ files:
       - newObservableUpDownCounter
     name: sum.go
 functions:
+  - doc: stampClock hands clk to inst when inst keeps exemplars.
+    name: stampClock
+    params: inst T, clk clock.Clock
+    results: T
+    typeParams: T any
+  - doc: |-
+      sampledSpan reads the span ctx carries and reports whether a measurement
+      recorded under it may become an exemplar: a valid span whose sampled bit
+      is set — an exemplar into a trace nobody stored is a dead link (ADR 0051
+      §Deferred).
+    name: sampledSpan
+    params: ctx context.Context
+    results: span coretrace.SpanContextValue, ok bool
+  - doc: |-
+      newExpHistogram builds an exponential histogram of maxSize buckets per
+      range at ExponentialMaxScale: DefaultExponentialMaxSize for a maxSize of
+      zero or less, InvalidBuckets for one — a range a scale change cannot work
+      with.
+    name: newExpHistogram
+    params: maxSize int
+    results: "*memExpHistogram"
   - name: NewOTLPHTTPExporter
     params: name coremetrics.ExporterName, cfg OTLPHTTPConfig
     results: exporter coremetrics.ContextExporter, err error
@@ -819,6 +1084,19 @@ functions:
     name: labelNameByte
     params: c byte, first bool
     results: bool
+  - doc: |-
+      appendPromExponentials renders each exponential histogram name as a
+      "histogram" family holding only what the text exposition format can carry
+      of it: the mandatory le="+Inf" bucket, _sum and _count. Its buckets are a
+      native histogram's, which only the protobuf exposition carries; spelling
+      them as classic le buckets would mint a series per bucket and change the le
+      set whenever the scale drops. The Prometheus client exposes a native-only
+      histogram in text exactly so; OTLP/JSON carries every bucket.
+    name: appendPromExponentials
+    params: |2
+
+      	buf []byte, metrics map[string]coremetrics.ExponentialHistogramMetricValue,
+    results: doc []byte, err error
   - doc: newTextExporter is the shared constructor.
     name: newTextExporter
     params: name coremetrics.ExporterName, dst io.Writer
@@ -860,6 +1138,14 @@ functions:
       diagnostic, not a wire format.
     name: appendHistograms
     params: buf []byte, metrics map[string]coremetrics.HistogramMetricValue
+    results: "[]byte"
+  - doc: |-
+      appendExponentials renders each exponential histogram series' observation
+      count, as appendHistograms does for the explicit ones; the scale and the
+      buckets — like an explicit ladder, and like every exemplar — are reachable
+      through the Snapshot API and carried by OTLP/JSON.
+    name: appendExponentials
+    params: buf []byte, metrics map[string]coremetrics.ExponentialHistogramMetricValue
     results: "[]byte"
   - doc: |-
       appendMetricHeader appends
@@ -927,10 +1213,51 @@ functions:
       Meter's create path passes it without allocating a closure.
     name: newMemGauge
     results: "*memGauge"
-  - doc: newHistogram builds a histogram with a sorted copy of bounds.
+  - name: NewPrometheusHandler
+    params: collect func() coremetrics.SnapshotValue, cfg PrometheusHandlerConfig
+    results: handler http.Handler, err error
+  - doc: |-
+      publicText is err's wire-safe Public text — never Private, never the
+      fields — or a generic one for an error that is not the SDK's.
+    name: publicText
+    params: err error
+    results: string
+  - doc: |-
+      newHistogram builds a histogram with a sorted copy of bounds: DefaultBuckets
+      for an empty layout, a loud InvalidBuckets refusal for NaN, an infinity or a
+      repeated bound (#1135) — a structural mistake fixed at the call site, refused
+      the way ValidateAttrs refuses an empty key.
     name: newHistogram
     params: bounds []float64
     results: "*memHistogram"
+  - doc: |-
+      validateBuckets panics with InvalidBuckets when sorted holds NaN, an
+      infinity or a repeated bound. slices.Sort puts NaN first, so the walk sees
+      every bound once.
+    name: validateBuckets
+    params: sorted []float64
+  - doc: |-
+      newObservedHistogram builds a histogram series an ObservableHistogram
+      callback writes; its layout is the first reading's.
+    name: newObservedHistogram
+    results: "*memHistogram"
+  - doc: |-
+      newLayout allocates the atomic window and the previous reading of a
+      layout of buckets buckets.
+    name: newLayout
+    params: buckets int
+    results: window []atomic.Uint64, previous []uint64
+  - doc: wentDown reports whether any count fell below its previous reading.
+    name: wentDown
+    params: counts, previous []uint64
+    results: bool
+  - doc: |-
+      validateObserved panics with InvalidBuckets on a reading the meter would
+      refuse at a synchronous Histogram's creation: NaN, an infinity, a bound
+      not above the one before it, or counts that are not one per bucket plus
+      the +Inf overflow.
+    name: validateObserved
+    params: point coremetrics.HistogramValue
   - name: NewMeter
     results: coremetrics.FullMeter
   - name: NewMeterWithConfig
@@ -955,7 +1282,7 @@ functions:
     params: |2
 
       	store map[string]*seriesEntry[*memSum], names map[string]*nameState,
-      	descriptions map[string]string, temporality coremetrics.Temporality, delta bool,
+      	notes annotations, temporality coremetrics.Temporality, delta bool,
     results: map[string]coremetrics.SumMetricValue
   - doc: |-
       collectGauges groups every gauge series under its instrument name. A gauge
@@ -964,14 +1291,14 @@ functions:
     params: |2
 
       	store map[string]*seriesEntry[*memGauge], names map[string]*nameState,
-      	descriptions map[string]string,
+      	notes annotations,
     results: map[string]coremetrics.GaugeMetricValue
   - doc: collectHistograms groups every histogram series under its instrument name.
     name: collectHistograms
     params: |2
 
       	store map[string]*seriesEntry[*memHistogram], names map[string]*nameState,
-      	descriptions map[string]string, temporality coremetrics.Temporality, delta bool,
+      	notes annotations, temporality coremetrics.Temporality, delta bool,
     results: map[string]coremetrics.HistogramMetricValue
   - doc: |-
       carve yields one carved slot per instrument name of group, all cut out of a
@@ -1018,10 +1345,49 @@ functions:
     name: histogramAttrs
     params: p coremetrics.HistogramValue
     results: "[]coreotel.AttrValue"
+  - doc: |-
+      validUnit reports whether unit is 1 to MaxUnitLen bytes of printable ASCII
+      (0x21 to 0x7E — UCUM has no space).
+    name: validUnit
+    params: unit string
+    results: bool
+  - doc: |-
+      collectExponentials gathers every exponential histogram series under its
+      name, sorted by attribute set; nil when the meter holds none.
+    name: collectExponentials
+    params: |2
+
+      	store map[string]*seriesEntry[*memExpHistogram], names map[string]*nameState,
+      	notes annotations, temporality coremetrics.Temporality, delta bool,
+    results: map[string]coremetrics.ExponentialHistogramMetricValue
+  - doc: exponentialAttrs is the sort key of an exponential point.
+    name: exponentialAttrs
+    params: p coremetrics.ExponentialHistogramValue
+    results: "[]coreotel.AttrValue"
   - doc: observableBuilder returns the constructor for an observable sum of kind.
     name: observableBuilder
     params: kind instrumentKind
     results: func() *memSum
+  - name: RegisterObservers
+    params: meter coremetrics.AsyncMeter, cfg ObserverConfig, observers ...coremetrics.Observer
+  - doc: |-
+      registerObserver describes observer once and registers one instrument per
+      statistic, all fed by one reader.
+    name: registerObserver
+    params: meter coremetrics.AsyncMeter, units coremetrics.UnitDescriber, cfg ObserverConfig, observer coremetrics.Observer
+  - doc: |-
+      describeStats calls Observe once and returns each named statistic with a
+      kind, in report order, once.
+    name: describeStats
+    params: observer coremetrics.Observer
+    results: "[]describedStat"
+  - doc: spellStat is name with '.' turned into '_' when underscore is set.
+    name: spellStat
+    params: name string, underscore bool
+    results: string
+  - doc: registerStat registers the instrument of stat under name.
+    name: registerStat
+    params: meter coremetrics.AsyncMeter, name string, stat describedStat, reader *statReader
   - doc: |-
       appendNumberPoints appends the dataPoints member of a Gauge or a Sum, or
       nothing when there are none — the member is omitted when empty.
@@ -1047,12 +1413,73 @@ functions:
     params: list []otlpMetric
     results: int
   - doc: |-
+      appendOTLPExponentials renders each exponential histogram name as one
+      Metric carrying an ExponentialHistogram message, refusing an unresolved
+      temporality as every other family does.
+    name: appendOTLPExponentials
+    params: list []otlpMetric, metrics map[string]coremetrics.ExponentialHistogramMetricValue, start, end otlp.Uint64
+    results: extended []otlpMetric, err error
+  - doc: |-
+      otlpExponentialPoints renders one exponential name's series, the runs
+      copied as decimal strings.
+    name: otlpExponentialPoints
+    params: series []coremetrics.ExponentialHistogramValue, start, end otlp.Uint64
+    results: "[]otlpExponentialHistogramDataPoint"
+  - doc: |-
+      otlpOptionalSum is a histogram point's sum, nil — absent on the wire — for
+      a source that keeps no total.
+    name: otlpOptionalSum
+    params: sum float64, noSum bool
+    results: "*otlp.Double"
+  - doc: |-
+      otlpExemplars renders a point's exemplars, the value as asInt on a sum
+      (integer) point and asDouble on a histogram one; nil for none.
+    name: otlpExemplars
+    params: exemplars []coremetrics.ExemplarValue, integer bool
+    results: "[]otlpExemplar"
+  - doc: appendExemplars appends "exemplars":[…], nothing for none.
+    name: appendExemplars
+    params: dst []byte, exemplars []otlpExemplar
+    results: "[]byte"
+  - doc: |-
+      appendBuckets appends "key":{"offset":n,"bucketCounts":[…]}, nothing for
+      an empty run — the proto's default message.
+    name: appendBuckets
+    params: dst []byte, key string, b *otlpBuckets
+    results: "[]byte"
+  - doc: |-
       decodeRejected reads a 2xx body's rejected count through this signal's own
       partial-success message — the SignalSpec.DecodeRejected the shared sender
       calls. A fresh message per response: nothing is kept between exports.
     name: decodeRejected
     params: payload []byte
     results: int64
+  - doc: resize returns buf of length n, reusing its array when it is that long.
+    name: resize
+    params: buf []T, n int
+    results: "[]T"
+    typeParams: T any
+  - name: RuntimeInstruments
+    params: meter coremetrics.AsyncMeter, cfg RuntimeConfig
+  - doc: asUnits is meter's UnitDescriber, nil when it has none.
+    name: asUnits
+    params: meter coremetrics.AsyncMeter
+    results: coremetrics.UnitDescriber
+  - doc: asDocs is meter's Describer, nil when it has none.
+    name: asDocs
+    params: meter coremetrics.AsyncMeter
+    results: coremetrics.Describer
+  - doc: |-
+      registerRuntimeHistograms registers the runtime's two histograms, each
+      with its own conversion buffers.
+    name: registerRuntimeHistograms
+    params: meter coremetrics.AsyncHistogramMeter, samples *runtimeSamples, notes runtimeNotes
+  - doc: registerRuntimeHistogram registers one histogram's callback under name.
+    name: registerRuntimeHistogram
+    params: meter coremetrics.AsyncHistogramMeter, name string, hist *runtimeHistogram, samples *runtimeSamples
+  - doc: registerRuntime registers one instrument's callback under name.
+    name: registerRuntime
+    params: meter coremetrics.AsyncMeter, name string, inst *runtimeInstrument, samples *runtimeSamples
   - doc: |-
       sortAttrs returns attrs ordered by Key, writing into buf when it fits so the
       common case never allocates.
@@ -1137,14 +1564,19 @@ functions:
 imports:
   atomic: sync/atomic
   binary: encoding/binary
+  bytes: bytes
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
   coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+  coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hex: encoding/hex
+  http: net/http
   io: io
   maps: maps
   math: math
+  metrics: runtime/metrics
   os: os
   otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
   slices: slices
@@ -1234,6 +1666,204 @@ types:
         results: MeterConfig
     name: MeterConfig
   - doc: |-
+      setClocker is an instrument that stamps the time of what it keeps — an
+      exemplar — on the meter's clock. The series store hands the clock over
+      when it admits the series, before any reader can reach it.
+    kind: named
+    name: setClocker
+    underlying: |-
+      interface {
+      	setClock(clk clock.Clock)
+      }
+  - doc: |-
+      exemplarReservoir keeps at most one exemplar per slot — a bucket of an
+      explicit histogram, the one slot of a sum or an exponential histogram —
+      the last measurement offered into it. It is allocated on the first
+      sampled measurement, so a series nobody records exemplars on pays nothing.
+    fields:
+      - doc: "mu guards slots and held: an offer is four stores, a collection a copy."
+        name: mu
+        type: sync.Mutex
+      - doc: clk stamps each exemplar's time.
+        name: clk
+        type: clock.Clock
+      - doc: slots holds the exemplar of each slot; held says which are set.
+        name: slots
+        type: "[]coremetrics.ExemplarValue"
+      - name: held
+        type: "[]bool"
+    kind: struct
+    methods:
+      - doc: |-
+          offer stores value as slot's exemplar, stamped now, with span's
+          identifiers.
+        name: offer
+        params: slot int, value float64, span coretrace.SpanContextValue
+        recv: r *exemplarReservoir
+      - doc: |-
+          now is the reservoir clock's reading, the system clock's for an
+          instrument built outside a meter.
+        name: now
+        recv: r *exemplarReservoir
+        results: time.Time
+      - doc: |-
+          collect copies the exemplars held, in slot order, and empties the
+          reservoir under delta.
+        name: collect
+        params: delta bool
+        recv: r *exemplarReservoir
+        results: "[]coremetrics.ExemplarValue"
+    name: exemplarReservoir
+  - doc: exemplarSlots is one instrument's lazily allocated reservoir.
+    fields:
+      - doc: clk is the meter's clock, stamped at admission.
+        name: clk
+        type: clock.Clock
+      - doc: reservoir is nil until the first sampled measurement.
+        name: reservoir
+        type: atomic.Pointer[exemplarReservoir]
+    kind: struct
+    methods:
+      - doc: setClock implements setClocker.
+        name: setClock
+        params: clk clock.Clock
+        recv: e *exemplarSlots
+      - doc: |-
+          offer keeps value, recorded under span, as the exemplar of slot, the
+          reservoir sized size on its first use.
+        name: offer
+        params: size, slot int, value float64, span coretrace.SpanContextValue
+        recv: e *exemplarSlots
+      - doc: |-
+          collect returns the exemplars held, in slot order, nil when none is; a
+          delta collection empties the reservoir, a cumulative one keeps each
+          exemplar until a newer measurement replaces it.
+        name: collect
+        params: delta bool
+        recv: e *exemplarSlots
+        results: "[]coremetrics.ExemplarValue"
+    name: exemplarSlots
+  - doc: |-
+      expRange is one range — positive or negative — of an exponential
+      histogram: counts[i] counts the bucket at index offset+i, in a backing
+      array of the histogram's maxSize allocated at creation, so recording never
+      allocates.
+    fields:
+      - doc: counts holds the buckets in use, counts[:size] of the backing array.
+        name: counts
+        type: "[]uint64"
+      - doc: offset is the index of counts[0]; size how many buckets are in use.
+        name: offset
+        type: int32
+      - name: size
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          add counts one value in the bucket at index, sliding or growing the range
+          within its backing array; downscaleFor has made room.
+        name: add
+        params: index int32
+        recv: r *expRange
+      - doc: |-
+          merge folds the range's buckets 2^change into one: the bucket at index i
+          becomes the bucket at i>>change of the lower scale. A merged slot never
+          lies above the slot it is read from, so one ascending pass is enough.
+        name: merge
+        params: change int32
+        recv: r *expRange
+      - doc: value copies the range into its exportable form, nil counts when empty.
+        name: value
+        recv: r *expRange
+        results: coremetrics.ExponentialBucketsValue
+      - doc: reset empties the range.
+        name: reset
+        recv: r *expRange
+    name: expRange
+  - doc: |-
+      memExpHistogram is an exponential (base-2) histogram series (ADR 0044,
+      resolved): the OpenTelemetry specification's mapping, the scale lowered
+      when a range would need more than maxSize buckets. A mutex guards it — a
+      scale change rewrites every bucket, which no set of atomics can do — and
+      the critical section is an index computation and an increment.
+    fields:
+      - name: mu
+        type: sync.Mutex
+      - doc: maxSize bounds each range's buckets.
+        name: maxSize
+        type: int
+      - doc: |-
+          scale is the current resolution; it only drops, and a delta collection
+          resets it to ExponentialMaxScale with the buckets.
+        name: scale
+        type: int32
+      - doc: positive and negative hold the two ranges' buckets.
+        name: positive
+        type: expRange
+      - doc: positive and negative hold the two ranges' buckets.
+        name: negative
+        type: expRange
+      - doc: zeroCount, sum and count are the point's totals.
+        name: zeroCount
+        type: uint64
+      - name: sum
+        type: float64
+      - name: count
+        type: uint64
+      - doc: ex keeps the series' one exemplar.
+        name: ex
+        type: exemplarSlots
+    kind: struct
+    methods:
+      - doc: |-
+          Record observes value: its bucket, the sum and the count. NaN and the
+          infinities have no bucket and are dropped; zero is counted in the zero
+          bucket.
+        name: Record
+        params: value float64
+        recv: h *memExpHistogram
+      - doc: RecordDuration observes d as seconds (latency-histogram convenience).
+        name: RecordDuration
+        params: d time.Duration
+        recv: h *memExpHistogram
+      - doc: |-
+          RecordContext records value as Record does and, when ctx carries a sampled
+          span, keeps it as the series' exemplar — the
+          core/observe/metrics.ContextHistogram sibling.
+        name: RecordContext
+        params: ctx context.Context, value float64
+        recv: h *memExpHistogram
+      - doc: "setClock implements setClocker: the exemplar's time is the meter's."
+        name: setClock
+        params: clk clock.Clock
+        recv: h *memExpHistogram
+      - doc: record observes value and reports whether it counted.
+        name: record
+        params: value float64
+        recv: h *memExpHistogram
+        results: bool
+      - doc: |-
+          downscaleFor is how far the scale must drop for r to hold index within
+          maxSize buckets: 0 when it already can.
+        name: downscaleFor
+        params: r *expRange, index int32
+        recv: h *memExpHistogram
+        results: int32
+      - doc: |-
+          downscale lowers the scale by change, merging each range's buckets 2^change
+          into one.
+        name: downscale
+        params: change int32
+        recv: h *memExpHistogram
+      - doc: |-
+          snapshot copies the series into the exportable point type, consuming the
+          window — and restoring the top scale — when the meter is a delta reader.
+        name: snapshot
+        params: delta bool
+        recv: h *memExpHistogram
+        results: coremetrics.ExponentialHistogramValue
+    name: memExpHistogram
+  - doc: |-
       otlpHTTPExporter POSTs each snapshot to an OTLP collector as OTLP/JSON.
 
       It holds no mutable state, so unlike the writer-bound exporters it needs no
@@ -1282,6 +1912,17 @@ types:
         params: ctx context.Context, doc []byte
         recv: e *otlpHTTPExporter
         results: error
+      - doc: |-
+          ExportEncodedDocument implements core/observe/metrics.EncodedDocumentExporter:
+          it POSTs doc as it is, labelled with encoding — "gzip" for a document a
+          store-and-forward queue kept compressed, never decompressed on the way;
+          "" is ExportDocument — under ctx and with the verdicts of ExportContext.
+          An encoding the sender cannot label is refused before any request, as
+          the permanent rejection (#1051). An empty doc posts nothing.
+        name: ExportEncodedDocument
+        params: ctx context.Context, doc []byte, encoding string
+        recv: e *otlpHTTPExporter
+        results: error
     name: otlpHTTPExporter
   - doc: |-
       otlpJSONExporter writes each snapshot to dst as one OTLP/JSON document.
@@ -1328,8 +1969,13 @@ types:
       internal/service/observe/metrics/CLAUDE.md §What the Prometheus connector loses. The
       short list: temporality (anything but cumulative is REFUSED rather than
       mis-labelled), the
-      attribute's TYPE, the Resource, the Scope, and exemplars the SDK does not
-      produce at all.
+      attribute's TYPE, the Resource, the Scope, the unit (ADR 0208), every
+      exemplar (the text format has no field for one; OTLP/JSON carries them), the
+      _sum of a histogram whose source keeps none (NoSum: no line rather than a
+      forged 0), and an exponential histogram's buckets — the text format has no
+      native histogram, so such a family keeps only its le="+Inf" bucket, _sum and
+      _count, which is what the Prometheus client itself exposes in text for a
+      native-only histogram.
 
       mu serialises the single dst.Write for the same reason textExporter's does —
       core/observe/metrics.Exporter requires concurrency safety and dst is caller-supplied.
@@ -1371,7 +2017,7 @@ types:
       	# resource <k>=<v> …
       	# scope name="…" [version="…"]
       	# window start="…" end="…"
-      	# metric <name> <sum|gauge|histogram> [<temporality>] [monotonic|non_monotonic] [description="…"]
+      	# metric <name> <sum|gauge|histogram|exponential_histogram> [<temporality>] [monotonic|non_monotonic] [description="…"] [unit="…"]
       	<name>{<k>=<v>,…} <value>
 
       with one "# metric" header per instrument name followed by that name's
@@ -1433,6 +2079,58 @@ types:
         recv: g *memGauge
         results: float64
     name: memGauge
+  - fields:
+      - doc: Name is the exporter name the handler renders under; empty is "prometheus".
+        name: Name
+        type: coremetrics.ExporterName
+      - doc: |-
+          OnError, when non-nil, is called with a failed write of a response — a
+          scraper that hung up mid-document, the one failure left once the status
+          line is out. nil drops it: the handler has nowhere else to report it.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: PrometheusHandlerConfig
+  - doc: prometheusHandler is the /metrics endpoint NewPrometheusHandler builds.
+    fields:
+      - doc: collect is the meter's Collect, bound.
+        name: collect
+        type: func() coremetrics.SnapshotValue
+      - doc: name is the exporter name the document is rendered under.
+        name: name
+        type: coremetrics.ExporterName
+      - doc: onError receives a failed response write; nil drops it.
+        name: onError
+        type: func(err error)
+      - doc: |-
+          scrape admits one scrape at a time; TryLock, never Lock: a second scrape
+          answers 503 rather than waiting to split a delta window.
+        name: scrape
+        type: sync.Mutex
+      - doc: docs recycles the document buffers between scrapes.
+        name: docs
+        type: sync.Pool
+    kind: struct
+    methods:
+      - doc: ServeHTTP answers one scrape.
+        name: ServeHTTP
+        params: w http.ResponseWriter, r *http.Request
+        recv: h *prometheusHandler
+      - doc: |-
+          serveGet collects and renders one document, or answers 503 while another
+          scrape runs, or 500 with the refusal's Public text.
+        name: serveGet
+        params: w http.ResponseWriter
+        recv: h *prometheusHandler
+      - doc: write sends body and hands a failure — the scraper gone — to OnError.
+        name: write
+        params: w http.ResponseWriter, body []byte
+        recv: h *prometheusHandler
+      - doc: recycle returns doc to the pool unless a large scrape grew it too far.
+        name: recycle
+        params: doc *bytes.Buffer
+        recv: h *prometheusHandler
+    name: prometheusHandler
   - doc: |-
       memHistogram records observations into sorted upper-bound buckets plus a +Inf
       overflow slot; counts/sum/count are atomic for a lock-free Record.
@@ -1445,12 +2143,40 @@ types:
         type: atomic.Uint64
       - name: count
         type: atomic.Uint64
+      - doc: |-
+          ex keeps one exemplar per bucket: the last measurement RecordContext
+          was handed under a sampled span (ADR 0051).
+        name: ex
+        type: exemplarSlots
+      - doc: |-
+          observed is the state of a series written by an ObservableHistogram
+          callback at collection time (#868), nil for a synchronous histogram.
+        name: observed
+        type: "*observedState"
     kind: struct
     methods:
       - doc: Record observes value into its bucket and updates the running sum/count.
         name: Record
         params: value float64
         recv: h *memHistogram
+      - doc: |-
+          RecordContext records value as Record does and, when ctx carries a sampled
+          span, keeps it as the exemplar of the bucket it fell in — the
+          core/observe/metrics.ContextHistogram sibling.
+        name: RecordContext
+        params: ctx context.Context, value float64
+        recv: h *memHistogram
+      - doc: "setClock implements setClocker: an exemplar's time is the meter's."
+        name: setClock
+        params: clk clock.Clock
+        recv: h *memHistogram
+      - doc: |-
+          record observes value into its bucket, updates the running sum/count and
+          returns the bucket's index.
+        name: record
+        params: value float64
+        recv: h *memHistogram
+        results: int
       - doc: |-
           snapshot copies the histogram into the exportable point type, consuming the
           window when the meter is a delta reader.
@@ -1469,7 +2195,65 @@ types:
         name: RecordDuration
         params: d time.Duration
         recv: h *memHistogram
+      - doc: |-
+          observe takes one ABSOLUTE reading of the series: its layout, its counts,
+          its sum. A cumulative meter keeps the reading as it is; a delta meter
+          keeps its difference from the previous one, bucket by bucket, and takes a
+          reading whose layout changed or whose counts went down as a restart. It
+          runs inside Collect, which collectMu serialises, so the plain fields need
+          no atomics; the bucket counts stay atomic because snapshot reads them as
+          a synchronous histogram's.
+        name: observe
+        params: point coremetrics.HistogramValue, delta bool
+        recv: h *memHistogram
+      - doc: |-
+          relayout rebuilds the series on bounds when they are not its layout, and
+          reports whether it did — which a delta meter reads as a restart.
+        name: relayout
+        params: bounds []float64
+        recv: h *memHistogram
+        results: bool
+      - doc: |-
+          storeWindow writes each bucket's window — the reading, or its growth since
+          the previous one when differenced — keeps the reading as the previous, and
+          returns the window's total.
+        name: storeWindow
+        params: counts []uint64, differenced bool
+        recv: h *memHistogram
+        results: uint64
+      - doc: |-
+          observedSnapshot is snapshot for an observed series: the window observe
+          wrote, read, never swapped — the callback writes it afresh each
+          collection. A delta collection of a series the callback did not report is
+          an empty window.
+        name: observedSnapshot
+        params: delta bool
+        recv: h *memHistogram
+        results: coremetrics.HistogramValue
     name: memHistogram
+  - doc: |-
+      observedState is what an observed histogram series keeps between
+      readings. Touched only from Collect, which memMeter serialises with
+      collectMu.
+    fields:
+      - doc: |-
+          previous and previousSum are the last ABSOLUTE reading, which a delta
+          meter differences the next one against.
+        name: previous
+        type: "[]uint64"
+      - name: previousSum
+        type: float64
+      - doc: "noSum is the last reading's NoSum: the source keeps no total."
+        name: noSum
+        type: bool
+      - doc: |-
+          reported is whether the callback reported the series during the
+          collection in progress; a delta collection of an unreported series is
+          an empty window.
+        name: reported
+        type: bool
+    kind: struct
+    name: observedState
   - doc: |-
       memMeter is the in-memory Meter: one seriesStore per snapshot group, guarded
       by an RWMutex. A fetch of an EXISTING series takes only the read lock; the
@@ -1512,6 +2296,11 @@ types:
         type: seriesStore[*memGauge]
       - name: histograms
         type: seriesStore[*memHistogram]
+      - doc: |-
+          exponentials holds the exponential histogram series (ADR 0044,
+          resolved).
+        name: exponentials
+        type: seriesStore[*memExpHistogram]
       - name: names
         type: map[string]*nameState
       - doc: |-
@@ -1531,6 +2320,11 @@ types:
           force Describe to invent a kind for a name that may never mint an
           instrument.
         name: descriptions
+        type: map[string]string
+      - doc: |-
+          units maps an instrument NAME to its UCUM unit (ADR 0208), guarded by
+          mu and nil until the first Unit — the same economy as descriptions.
+        name: units
         type: map[string]string
     kind: struct
     methods:
@@ -1621,6 +2415,36 @@ types:
         name: Describe
         params: name, description string
         recv: m *memMeter
+      - doc: annotations returns the meter's two metadata maps. The caller holds mu.
+        name: annotations
+        recv: m *memMeter
+        results: annotations
+      - doc: |-
+          Unit binds unit to the instrument called name, satisfying
+          core/observe/metrics.UnitDescriber (ADR 0208). It is a WIRING-TIME call, as
+          Describe is: nothing on the fetch path reads it, and the map is nil until
+          the first Unit.
+
+          Two refusals, both panics, for the reasons Describe states: an EMPTY unit,
+          one past coremetrics.MaxUnitLen bytes or holding a byte outside printable ASCII panics with
+          InvalidUnit — UCUM's grammar is printable ASCII and case-sensitive, and a
+          unit outside it is a typo at the wiring site; a DIFFERENT unit for a name
+          that has one panics with UnitConflict. The same unit again is idempotent.
+        name: Unit
+        params: name, unit string
+        recv: m *memMeter
+      - doc: |-
+          ExponentialHistogram returns the exponential histogram series identified
+          by name and attrs, satisfying core/observe/metrics.ExponentialMeter: created
+          once with maxSize buckets per range — DefaultExponentialMaxSize for zero or
+          less, InvalidBuckets for one — at ExponentialMaxScale, and found again on
+          every later fetch, whose maxSize is ignored. The lookup is the other
+          instruments': a read lock, a stack key, no allocation once the series
+          exists.
+        name: ExponentialHistogram
+        params: name string, maxSize int, attrs ...coreotel.AttrValue
+        recv: m *memMeter
+        results: coremetrics.Histogram
       - doc: |-
           ObservableCounter registers a monotonic sum read at collection time. The
           callback reports the ABSOLUTE total; under delta temporality the meter
@@ -1686,6 +2510,21 @@ types:
         params: name string, value float64, attrs []coreotel.AttrValue
         recv: m *memMeter
       - doc: |-
+          ObservableHistogram registers an explicit-bucket histogram read at
+          collection time, satisfying core/observe/metrics.AsyncHistogramMeter: the
+          callback reports each series' ABSOLUTE reading — bounds, counts, sum — and
+          a delta meter differences successive readings bucket by bucket. The
+          source's bounds are the series' bounds; nothing is re-bucketed.
+        name: ObservableHistogram
+        params: name string, observe coremetrics.HistogramCallback
+        recv: m *memMeter
+      - doc: |-
+          observeHistogram resolves — or creates — the observed histogram series of
+          name and point.Attrs, then hands it the reading.
+        name: observeHistogram
+        params: name string, point coremetrics.HistogramValue, delta bool
+        recv: m *memMeter
+      - doc: |-
           bindName returns the per-name state, binding the name to want on first use
           and panicking with InstrumentKindConflict when it is already bound to a
           different kind. Caller holds mu for writing.
@@ -1703,6 +2542,18 @@ types:
         results: "*nameState"
     name: memMeter
   - doc: |-
+      annotations are the per-name metadata a snapshot carries beside the points:
+      the description (ADR 0067) and the unit (ADR 0208). Both maps may be nil.
+    fields:
+      - doc: descriptions maps a name to its docstring.
+        name: descriptions
+        type: map[string]string
+      - doc: units maps a name to its UCUM unit.
+        name: units
+        type: map[string]string
+    kind: struct
+    name: annotations
+  - doc: |-
       observer is one registered asynchronous instrument. Exactly one of the two
       callbacks is set, decided by kind: the two sum kinds report integers, the
       gauge kind reports a double.
@@ -1715,6 +2566,8 @@ types:
         type: coremetrics.Int64Callback
       - name: floatCb
         type: coremetrics.Float64Callback
+      - name: histCb
+        type: coremetrics.HistogramCallback
     kind: struct
     name: observer
   - doc: |-
@@ -1738,6 +2591,8 @@ types:
       - name: monotonicity
         type: string
       - name: description
+        type: string
+      - name: unit
         type: string
     kind: struct
     name: metricHeader
@@ -1807,6 +2662,188 @@ types:
         recv: s *nameState
         results: key string, attrs []coreotel.AttrValue
     name: nameState
+  - fields:
+      - doc: |-
+          Underscore spells every name with '_' instead of '.'
+          (kitsunium_cache_hits), for a meter a Prometheus scrape reads.
+        name: Underscore
+        type: bool
+    kind: struct
+    name: ObserverConfig
+  - doc: statPoint is one reported value of a statistic and its attributes.
+    fields:
+      - doc: value is the reported absolute value.
+        name: value
+        type: int64
+      - doc: attrs are the attributes the observer reported it with.
+        name: attrs
+        type: "[]coreotel.AttrValue"
+    kind: struct
+    name: statPoint
+  - doc: |-
+      statSeries is one statistic of an observer: its kind and the points the
+      collection in progress reported.
+    fields:
+      - doc: kind decides the instrument.
+        name: kind
+        type: coremetrics.StatKind
+      - doc: points is the current collection's reports, reused between collections.
+        name: points
+        type: "[]statPoint"
+    kind: struct
+    name: statSeries
+  - doc: |-
+      statReader reads one observer once per collection for all its
+      instruments: the first callback of a collection calls Observe, the others
+      read what it stored — the meter runs each callback once per Collect,
+      serialised, so counting the callbacks served marks where a collection
+      begins.
+    fields:
+      - doc: mu guards everything below against a meter collected from two goroutines.
+        name: mu
+        type: sync.Mutex
+      - doc: observer is the engine read.
+        name: observer
+        type: coremetrics.Observer
+      - doc: series maps a reported name to its statistic.
+        name: series
+        type: map[string]*statSeries
+      - doc: |-
+          served counts the callbacks of the current collection; callbacks is
+          how many one collection runs.
+        name: served
+        type: int
+      - doc: |-
+          served counts the callbacks of the current collection; callbacks is
+          how many one collection runs.
+        name: callbacks
+        type: int
+      - doc: record is r.store, bound once so Observe receives no fresh closure.
+        name: record
+        type: coremetrics.ReportStat
+    kind: struct
+    methods:
+      - doc: |-
+          emit reports name's points of the collection in progress, reading the
+          observer on the collection's first callback.
+        name: emit
+        params: name string, observe coremetrics.ObserveInt64
+        recv: r *statReader
+      - doc: |-
+          store keeps one reported point for its statistic; a name or a kind the
+          registration did not describe is dropped.
+        name: store
+        params: name string, kind coremetrics.StatKind, _ string, value int64, attrs ...coreotel.AttrValue
+        recv: r *statReader
+    name: statReader
+  - doc: describedStat is a statistic as the registration's Observe reported it.
+    fields:
+      - name: name
+        type: string
+      - name: kind
+        type: coremetrics.StatKind
+      - name: unit
+        type: string
+    kind: struct
+    name: describedStat
+  - doc: |-
+      otlpExemplar is metrics.proto's Exemplar, in field-number order:
+      timeUnixNano (2), asDouble (3), spanId (4), traceId (5), asInt (6) — the
+      identifiers in hex, as OTLP/JSON spells every trace identifier (ADR 0051
+      §Decision 6). filtered_attributes (7) is never set: see
+      coremetrics.ExemplarValue.
+    fields:
+      - name: TimeUnixNano
+        type: otlp.Uint64
+      - name: AsDouble
+        type: "*otlp.Double"
+      - name: SpanID
+        type: string
+      - name: TraceID
+        type: string
+      - name: AsInt
+        type: "*otlp.Int64"
+    kind: struct
+    methods:
+      - doc: appendJSON appends one Exemplar, in field-number order.
+        name: appendJSON
+        params: dst []byte
+        recv: e *otlpExemplar
+        results: "[]byte"
+    name: otlpExemplar
+  - doc: |-
+      otlpExponentialHistogram is metrics.proto's ExponentialHistogram: its
+      points (1) and their temporality (2).
+    fields:
+      - name: DataPoints
+        type: "[]otlpExponentialHistogramDataPoint"
+      - name: AggregationTemporality
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          appendJSON appends one ExponentialHistogram: its points, then its
+          temporality.
+        name: appendJSON
+        params: dst []byte
+        recv: h *otlpExponentialHistogram
+        results: "[]byte"
+    name: otlpExponentialHistogram
+  - doc: |-
+      otlpExponentialHistogramDataPoint is ExponentialHistogramDataPoint in the
+      order this encoder writes every point — the window, the totals, the
+      layout, the exemplars, the attributes —: startTimeUnixNano (2),
+      timeUnixNano (3), count (4), sum (5), scale (6), zeroCount (7), positive
+      (8), negative (9), zeroThreshold (14, omitted at 0), exemplars (11),
+      attributes (1).
+    fields:
+      - name: StartTimeUnixNano
+        type: otlp.Uint64
+      - name: TimeUnixNano
+        type: otlp.Uint64
+      - name: Count
+        type: otlp.Uint64
+      - name: Sum
+        type: "*otlp.Double"
+      - name: Scale
+        type: int32
+      - name: ZeroCount
+        type: otlp.Uint64
+      - name: Positive
+        type: otlpBuckets
+      - name: Negative
+        type: otlpBuckets
+      - name: ZeroThreshold
+        type: float64
+      - name: Exemplars
+        type: "[]otlpExemplar"
+      - name: Attributes
+        type: "[]otlp.KeyValue"
+    kind: struct
+    methods:
+      - doc: |-
+          appendJSON appends one ExponentialHistogramDataPoint in the order its type
+          documents; an empty run and a zero threshold are omitted.
+        name: appendJSON
+        params: dst []byte
+        recv: p *otlpExponentialHistogramDataPoint
+        results: "[]byte"
+    name: otlpExponentialHistogramDataPoint
+  - doc: |-
+      otlpBuckets is ExponentialHistogramDataPoint.Buckets: offset (1), a sint32
+      written as a JSON number, and bucketCounts (2), uint64 decimal strings.
+    fields:
+      - name: Offset
+        type: int32
+      - name: BucketCounts
+        type: "[]otlp.Uint64"
+    kind: struct
+    methods:
+      - doc: size is the number of buckets the run carries.
+        name: size
+        recv: b *otlpBuckets
+        results: int
+    name: otlpBuckets
   - doc: |-
       otlpPartialSuccess is ExportMetricsPartialSuccess. The shared sender decodes
       a 2xx body into it (otlp.DecodeRejected), and it is the only part of that
@@ -1898,12 +2935,15 @@ types:
       omitted, which is also what the proto3-JSON default mapping does with a
       default-valued field.
 
-      unit (3) is still absent: a Meter records none, and an empty string for it
-      would be a placeholder (rule 5).
+      unit (3) follows the same presence rule as description (ADR 0208): emitted
+      when a UnitDescriber bound one, omitted otherwise, so an undeclared unit
+      leaves the document byte for byte what it was before units existed.
     fields:
       - name: Name
         type: string
       - name: Description
+        type: string
+      - name: Unit
         type: string
       - name: Gauge
         type: "*otlpGauge"
@@ -1911,11 +2951,14 @@ types:
         type: "*otlpSum"
       - name: Histogram
         type: "*otlpHistogram"
+      - doc: ExponentialHistogram is metrics.proto's exponential_histogram (10).
+        name: ExponentialHistogram
+        type: "*otlpExponentialHistogram"
     kind: struct
     methods:
       - doc: |-
-          appendJSON appends one Metric: its name, its description when it has one,
-          and the one data case that is set.
+          appendJSON appends one Metric: its name, its description and its unit when
+          it has them, and the one data case that is set.
         name: appendJSON
         params: dst []byte
         recv: m *otlpMetric
@@ -1991,6 +3034,8 @@ types:
         type: "*otlp.Double"
       - name: AsInt
         type: "*otlp.Int64"
+      - name: Exemplars
+        type: "[]otlpExemplar"
       - name: Attributes
         type: "[]otlp.KeyValue"
     kind: struct
@@ -2028,13 +3073,15 @@ types:
         type: "[]otlp.Uint64"
       - name: ExplicitBounds
         type: "[]otlp.Double"
+      - name: Exemplars
+        type: "[]otlpExemplar"
       - name: Attributes
         type: "[]otlp.KeyValue"
     kind: struct
     methods:
       - doc: |-
           appendJSON appends one HistogramDataPoint, in field-number order; sum is
-          never omitted, and a nil one is null.
+          absent exactly when the point has none (HistogramValue.NoSum).
         name: appendJSON
         params: dst []byte
         recv: p *otlpHistogramDataPoint
@@ -2043,6 +3090,145 @@ types:
   - kind: named
     name: OTLPHTTPConfig
     underlying: otlp.HTTPConfig
+  - fields:
+      - doc: |-
+          Underscore spells every name with '_' instead of '.' (go_memory_used),
+          for a meter a Prometheus scrape reads.
+        name: Underscore
+        type: bool
+    kind: struct
+    name: RuntimeConfig
+  - doc: |-
+      runtimeInstrument is one instrument of the OpenTelemetry Go runtime
+      conventions: its name, kind, unit and description, and how its value is
+      derived from the Read.
+    fields:
+      - doc: name is the OpenTelemetry name, dotted.
+        name: name
+        type: string
+      - doc: counter is true for a monotonic sum, false for an up-down one.
+        name: counter
+        type: bool
+      - doc: unit is the UCUM unit.
+        name: unit
+        type: string
+      - doc: description is the convention's.
+        name: description
+        type: string
+      - doc: |-
+          value derives the instrument's value from the samples, and reports
+          false when there is nothing to observe (a limit that is not set).
+        name: value
+        type: func(s *runtimeSamples) (int64, bool)
+    kind: struct
+    name: runtimeInstrument
+  - doc: |-
+      runtimeHistogram is one histogram of the runtime: its name, the
+      runtime/metrics key it reads and its description; the unit is seconds.
+      bounds and counts are the conversion's buffers, allocated on the first
+      read and reused while the runtime's layout stays the same.
+    fields:
+      - doc: name is the OpenTelemetry name, dotted.
+        name: name
+        type: string
+      - doc: key is the runtime/metrics histogram read.
+        name: key
+        type: string
+      - doc: description is the convention's.
+        name: description
+        type: string
+      - doc: bounds and counts hold the converted reading, reused across reads.
+        name: bounds
+        type: "[]float64"
+      - name: counts
+        type: "[]uint64"
+    kind: struct
+    methods:
+      - doc: |-
+          convert writes the runtime's buckets — edges[i] to edges[i+1] holding
+          counts[i] — into h.bounds and h.counts, allocating only when the layout's
+          size changed.
+        name: convert
+        params: edges []float64, counts []uint64
+        recv: h *runtimeHistogram
+    name: runtimeHistogram
+  - doc: |-
+      runtimeSamples reads every key in one runtime/metrics.Read per collection:
+      the first callback of a collection reads, the others use what it read. The
+      meter runs each callback once per Collect, serialised, so counting the
+      callbacks served marks where a collection begins.
+    fields:
+      - doc: |-
+          mu guards samples and served against a meter collected concurrently by
+          two goroutines, which the meter serialises anyway.
+        name: mu
+        type: sync.Mutex
+      - doc: samples is the Read's buffer, allocated once.
+        name: samples
+        type: "[]metrics.Sample"
+      - doc: index maps a key to its slot in samples.
+        name: index
+        type: map[string]int
+      - doc: served counts the callbacks of the current collection.
+        name: served
+        type: int
+      - doc: callbacks is how many callbacks one collection runs.
+        name: callbacks
+        type: int
+    kind: struct
+    methods:
+      - doc: uint is the sample of key as an int64, 0 for a key this runtime lacks.
+        name: uint
+        params: key string
+        recv: s *runtimeSamples
+        results: int64
+      - doc: |-
+          observe runs one callback's read: a fresh Read on the first callback of a
+          collection, then the instrument's value.
+        name: observe
+        params: inst *runtimeInstrument
+        recv: s *runtimeSamples
+        results: int64, bool
+      - doc: |-
+          serve counts one callback of the collection in progress, reading every
+          key on its first. The caller holds s.mu.
+        name: serve
+        recv: s *runtimeSamples
+      - doc: |-
+          observeHistogram runs one histogram callback's read and converts the
+          runtime's histogram into an explicit-bucket reading: the runtime's inner
+          boundaries are the bounds, its -Inf and +Inf edges the implicit first and
+          overflow buckets — a missing edge an empty bucket of its own. NoSum: the
+          runtime keeps no total. It reports false for a key this runtime lacks.
+        name: observeHistogram
+        params: hist *runtimeHistogram
+        recv: s *runtimeSamples
+        results: point coremetrics.HistogramValue, ok bool
+    name: runtimeSamples
+  - doc: |-
+      runtimeNotes spells a runtime instrument's name and binds its annotations
+      where the meter keeps them.
+    fields:
+      - doc: units and docs are the meter's siblings, nil where it has none.
+        name: units
+        type: coremetrics.UnitDescriber
+      - name: docs
+        type: coremetrics.Describer
+      - doc: underscore spells the names with '_' (RuntimeConfig.Underscore).
+        name: underscore
+        type: bool
+    kind: struct
+    methods:
+      - doc: name is the OpenTelemetry name, underscored for a Prometheus meter.
+        name: name
+        params: dotted string
+        recv: n runtimeNotes
+        results: string
+      - doc: annotate binds unit and description to name, where the meter keeps them.
+        name: annotate
+        params: name, unit, description string
+        recv: n runtimeNotes
+    name: runtimeNotes
   - doc: |-
       seriesEntry binds one instrument instance to the identity it was created
       under. name and attrs are written once at creation and never mutated, which
@@ -2182,8 +3368,32 @@ types:
           collection time rather than accumulated by the caller.
         name: observed
         type: bool
+      - doc: |-
+          ex keeps the series' one exemplar: the last measurement AddContext was
+          handed under a sampled span (ADR 0051).
+        name: ex
+        type: exemplarSlots
     kind: struct
     methods:
+      - doc: |-
+          AddContext adds delta as Add does and, when ctx carries a sampled span and
+          the measurement counts, keeps it as the series' exemplar — the
+          core/observe/metrics.ContextCounter sibling. The span is read only after
+          the add, and a measurement nobody traced costs one context lookup.
+        name: AddContext
+        params: ctx context.Context, delta int64
+        recv: s *memSum
+      - doc: "setClock implements setClocker: the exemplar's time is the meter's."
+        name: setClock
+        params: clk clock.Clock
+        recv: s *memSum
+      - doc: |-
+          exemplars returns the series' exemplar, nil when it has none; a delta
+          collection consumes it.
+        name: exemplars
+        params: delta bool
+        recv: s *memSum
+        results: "[]coremetrics.ExemplarValue"
       - doc: |-
           Add adjusts the total by delta.
 
@@ -2246,6 +3456,24 @@ types:
         results: int64
     name: memSum
 vars:
+  - doc: |-
+      The instruments that keep exemplars take the meter's clock at admission
+      (#869).
+    grouped: true
+    items:
+      - name: _
+        type: setClocker
+        value: (*exemplarSlots)(nil)
+      - name: _
+        type: setClocker
+        value: (*memSum)(nil)
+      - name: _
+        type: setClocker
+        value: (*memHistogram)(nil)
+      - name: _
+        type: setClocker
+        value: (*memExpHistogram)(nil)
+    name: _
   - doc: |-
       otlpSignal is this signal's vocabulary for the shared OTLP/HTTP sender: its
       own codes (0.3.45.7-10) and its own wording, byte for byte what this
@@ -2336,6 +3564,59 @@ vars:
       - name: Text
         value: coremetrics.RegisterExporter(newTextExporter(textExporterName, os.Stderr))
     name: Text
+  - doc: The keys one Read samples, and the instruments derived from them.
+    grouped: true
+    items:
+      - doc: runtimeKeys is the Read's sample order; runtimeSamples.index maps it.
+        name: runtimeKeys
+        value: |-
+          []string{
+          		rtTotalBytes, rtReleasedBytes, rtMemLimit, rtAllocBytes, rtAllocObjects,
+          		rtHeapGoal, rtGoroutines, rtGOMAXPROCS, rtGOGC, rtSchedLatency, rtGCPauses,
+          	}
+      - doc: |-
+          runtimeHistograms is the pair RuntimeInstruments registers on a meter
+          that is also an AsyncHistogramMeter (#868): the runtime's own buckets
+          carried over as the explicit bounds, with no sum — runtime/metrics
+          keeps none for a histogram.
+        name: runtimeHistograms
+        value: |-
+          []runtimeHistogram{
+          		{name: "go.schedule.duration", key: rtSchedLatency, description: "The time goroutines have spent in the scheduler in a runnable state before actually running."},
+          		{name: "go.gc.duration", key: rtGCPauses, description: "The time the world has been stopped for garbage collection, per pause."},
+          	}
+      - doc: runtimeInstruments is the set RuntimeInstruments registers.
+        name: runtimeInstruments
+        value: |-
+          []runtimeInstrument{
+          		{"go.memory.used", false, "By", "Memory used by the Go runtime.", func(s *runtimeSamples) (int64, bool) {
+          			return s.uint(rtTotalBytes) - s.uint(rtReleasedBytes), true
+          		}},
+          		{"go.memory.limit", false, "By", "Go runtime memory limit configured by the user, if a limit exists.", func(s *runtimeSamples) (int64, bool) {
+          			limit := s.uint(rtMemLimit)
+          			//: math.MaxInt64 is "no limit": there is nothing to report.
+          			return limit, limit != math.MaxInt64
+          		}},
+          		{"go.memory.allocated", true, "By", "Memory allocated to the heap by the application.", func(s *runtimeSamples) (int64, bool) {
+          			return s.uint(rtAllocBytes), true
+          		}},
+          		{"go.memory.allocations", true, "{allocation}", "Count of allocations to the heap by the application.", func(s *runtimeSamples) (int64, bool) {
+          			return s.uint(rtAllocObjects), true
+          		}},
+          		{"go.memory.gc.goal", false, "By", "Heap size target for the end of the GC cycle.", func(s *runtimeSamples) (int64, bool) {
+          			return s.uint(rtHeapGoal), true
+          		}},
+          		{"go.goroutine.count", false, "{goroutine}", "Count of live goroutines.", func(s *runtimeSamples) (int64, bool) {
+          			return s.uint(rtGoroutines), true
+          		}},
+          		{"go.processor.limit", false, "{thread}", "The number of OS threads that can execute user-level Go code simultaneously.", func(s *runtimeSamples) (int64, bool) {
+          			return s.uint(rtGOMAXPROCS), true
+          		}},
+          		{"go.config.gogc", false, "%", "Heap size target percentage configured by the user, otherwise 100.", func(s *runtimeSamples) (int64, bool) {
+          			return s.uint(rtGOGC), true
+          		}},
+          	}
+    name: runtimeKeys
   - doc: |-
       overflowAttrs is the attribute set of the single aggregated series a name
       folds into once its cardinality bound is reached. Package-level and never

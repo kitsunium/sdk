@@ -574,8 +574,8 @@ func Test_readTag(t *testing.T) {
 	}
 }
 
-// Test_assembleRecord covers the record-rebuild helper.
-func Test_assembleRecord(t *testing.T) {
+// Test_recordFrame_readValue covers the value-rebuild helper.
+func Test_recordFrame_readValue(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name    string
@@ -589,7 +589,8 @@ func Test_assembleRecord(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		_, err := assembleRecord(bytes.NewReader(tc.body), 0x40, tc.length)
+		frame := recordFrame{r: bytes.NewReader(tc.body)}
+		err := frame.readValue(tc.length)
 		if (err != nil) != tc.wantErr {
 			t.Errorf("%s: err=%v wantErr=%v", tc.name, err, tc.wantErr)
 		}
@@ -1310,24 +1311,6 @@ func Test_nonStringFieldNameError(t *testing.T) {
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
 		if nonStringFieldNameError() == nil {
-			t.Errorf("%s: nil err", tc.name)
-		}
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
-	}
-}
-
-// Test_nonPointerTargetError surfaces the non-pointer-target sentinel.
-func Test_nonPointerTargetError(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-	}
-	tests := []tc{{"surfaces non-nil"}}
-	runCase := func(t *testing.T, tc tc) {
-		t.Helper()
-		if nonPointerTargetError() == nil {
 			t.Errorf("%s: nil err", tc.name)
 		}
 	}

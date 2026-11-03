@@ -29,6 +29,10 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - Fixed
+      - Fixed.Level
+    name: fixed.go
+  - decls:
       - Level
       - Debug
       - Info
@@ -66,6 +70,13 @@ package:
 types:
   - kind: named
     methods:
+      - name: Level
+        recv: f Fixed
+        results: Level
+    name: Fixed
+    underlying: Level
+  - kind: named
+    methods:
       - name: String
         recv: l Level
         results: string
@@ -87,11 +98,18 @@ types:
         results: Level
     name: Var
 vars:
-  - doc: |-
-      _ proves *Var satisfies the Leveler port at compile time; a drift in either
-      signature breaks the build here rather than at a distant call site.
+  - grouped: true
     items:
-      - name: _
+      - doc: |-
+          _ proves *Var satisfies the Leveler port at compile time; a drift in either
+          signature breaks the build here rather than at a distant call site.
+        name: _
         type: Leveler
         value: (*Var)(nil)
+      - doc: |-
+          _ proves Fixed satisfies the Leveler port: a constant floor goes where a
+          live one does.
+        name: _
+        type: Leveler
+        value: Fixed(0)
     name: _

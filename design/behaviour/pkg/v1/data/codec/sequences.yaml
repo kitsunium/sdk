@@ -9,10 +9,10 @@ sequences:
         kind: self
       - id: corecodec
         kind: package
-      - id: c.Marshal
-        kind: value
       - id: promoteMarshal
         kind: internal
+      - id: c.Marshal
+        kind: value
     steps:
       - bind: c, ok
         eval: corecodec.Lookup(f)
@@ -21,6 +21,11 @@ sequences:
           do:
             - return: nil, unknownFormat(f)
           when: "!ok"
+      - opt:
+          do:
+            - return: promoteMarshal(f, c, v)
+              to: promoteMarshal
+          when: refusesShape(f, v)
       - set: encoded, err
         to: c.Marshal
         value: c.Marshal(v)
@@ -114,11 +119,16 @@ sequences:
         kind: actor
       - id: encodeWithPromotion
         kind: self
-      - id: c.Marshal
-        kind: value
       - id: promoteMarshal
         kind: internal
+      - id: c.Marshal
+        kind: value
     steps:
+      - opt:
+          do:
+            - return: promoteMarshal(f, c, v)
+              to: promoteMarshal
+          when: refusesShape(f, v)
       - set: encoded, err
         to: c.Marshal
         value: c.Marshal(v)
@@ -168,6 +178,38 @@ sequences:
           when: rerr != nil
       - return: sc.NewDecoder(r), nil
         to: sc.NewDecoder
+  - of: NewBoundedDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewBoundedDecoder
+        kind: self
+      - id: corecodec
+        kind: package
+      - id: bounded.NewBoundedDecoder
+        kind: value
+    steps:
+      - bind: c, found
+        eval: corecodec.Lookup(f)
+        to: corecodec
+      - opt:
+          do:
+            - return: nil, unknownFormat(f)
+          when: "!found"
+      - bind: bounded, supports
+        eval: c.(corecodec.BoundedStreamingCodec)
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(nil, errs.WrapParams{
+                			Code:    CodeStreamingUnsupported,
+                			Reason:  "STREAMING_UNSUPPORTED",
+                			Public:  "codec does not support streaming",
+                			Private: "pkg/v1/data/codec: codec " + c.Name() + " does not implement core/data/codec.BoundedStreamingCodec",
+                		})
+          when: "!supports"
+      - return: bounded.NewBoundedDecoder(r, maxBytes)
+        to: bounded.NewBoundedDecoder
   - of: FromMIME
     participants:
       - id: caller
@@ -440,6 +482,52 @@ sequences:
             - return: Flate, true
           when: id == algFlate
       - return: "\"\", false"
+  - of: Detect
+    participants:
+      - id: caller
+        kind: actor
+      - id: Detect
+        kind: self
+      - id: corecodec
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: isFrame(prefix)
+      - return: corecodec.Detect(prefix)
+        to: corecodec
+  - of: DetectCompression
+    steps:
+      - switch:
+          cases:
+            - case: bytes.HasPrefix(prefix, gzipMagic)
+              do:
+                - return: compressionGzip, true
+            - case: bytes.HasPrefix(prefix, zstdMagic)
+              do:
+                - return: compressionZstd, true
+            - case: bytes.HasPrefix(prefix, s2StreamMagic), bytes.HasPrefix(prefix, snappyStreamMagic)
+              do:
+                - return: compressionS2, true
+            - case: zlibHeader(prefix)
+              do:
+                - return: compressionZlib, true
+            - default: true
+              do:
+                - return: "\"\", false"
+  - of: zlibHeader
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(p) < zlibHeaderLen || p[0] != zlibCMF || p[1]&zlibFDICT != 0
+      - return: (uint16(p[0])<<8|uint16(p[1]))%zlibCheckDivisor == 0
+  - of: isFrame
+    steps:
+      - return: |-
+          len(p) >= frameHeaderLen && p[0] == frameMagic && p[1] == frameVersion &&
+          		(p[algIDIndex] == algGzip || p[algIDIndex] == algFlate)
   - of: promoteMarshal
     participants:
       - id: caller
@@ -734,6 +822,84 @@ sequences:
               do:
                 - return: "false"
           "on": f
+  - of: refusesShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: refusesShape
+        kind: self
+      - id: isFormShape
+        kind: internal
+      - id: isPEMShape
+        kind: internal
+      - id: isRowsShape
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: Form
+              do:
+                - return: "!isFormShape(v)"
+                  to: isFormShape
+            - case: PEM
+              do:
+                - return: "!isPEMShape(v)"
+                  to: isPEMShape
+            - case: NDJSON, CSV
+              do:
+                - return: "!isRowsShape(v)"
+                  to: isRowsShape
+            - default: true
+              do:
+                - return: "false"
+          "on": f
+  - of: isPEMShape
+    steps:
+      - typeswitch:
+          cases:
+            - do:
+                - return: "true"
+              types: "*stdpem.Block"
+            - default: true
+              do:
+                - return: "false"
+          "on": v
+  - of: isFormShape
+    steps:
+      - typeswitch:
+          cases:
+            - do:
+                - return: "true"
+              types: url.Values, map[string][]string, map[string]string, *url.Values, *map[string][]string, *map[string]string
+            - default: true
+              do:
+                - return: "false"
+          "on": v
+  - of: isRowsShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: isRowsShape
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: t.Elem
+        kind: value
+    steps:
+      - bind: t
+        eval: reflect.TypeOf(v)
+        to: reflect
+      - opt:
+          do:
+            - return: "true"
+          when: t == nil
+      - opt:
+          do:
+            - set: t
+              to: t.Elem
+              value: t.Elem()
+          when: t.Kind() == reflect.Pointer
+      - return: t.Kind() == reflect.Slice || t.Kind() == reflect.Array
   - of: isValueShapeMismatch
     participants:
       - id: caller

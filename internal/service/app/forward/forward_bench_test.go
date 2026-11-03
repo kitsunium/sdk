@@ -2,6 +2,7 @@ package forward_test
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"testing"
 
@@ -96,5 +97,44 @@ func BenchmarkEnqueueDropOldest(b *testing.B) {
 		if err := forwarder.Enqueue(ctx, batch); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// BenchmarkEnqueueCompress prices Compress on the producer's path — the gzip
+// of a 16 KiB OTLP/JSON batch before its publication on the memory broker —
+// and reports the bytes kept per batch.
+func BenchmarkEnqueueCompress(b *testing.B) {
+	batch := []byte(otlpLike(100))
+	batch = batch[:min(len(batch), benchBatch)]
+	for _, compress := range []bool{false, true} {
+		b.Run(fmt.Sprintf("compress=%v", compress), func(b *testing.B) {
+			broker, err := svcqueue.NewMemory(svcqueue.MemoryConfig{Policy: corequeue.PolicyValue{
+				VisibilityTimeout: testLease, MaxDeliveries: 1, MaxMessageBytes: 1 << 20,
+			}})
+			if err != nil {
+				b.Fatal(err)
+			}
+			forwarder, err := svcforward.New(context.Background(), svcforward.Config{
+				Broker:      broker,
+				SendEncoded: func(context.Context, []byte, string) error { return nil },
+				Retryable:   retryable,
+				Compress:    compress,
+				MaxBatches:  1 << 30,
+				MaxBytes:    1 << 50,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			ctx := context.Background()
+			b.SetBytes(int64(len(batch)))
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := forwarder.Enqueue(ctx, batch); err != nil {
+					b.Fatal(err)
+				}
+			}
+			stats := forwarder.Stats()
+			b.ReportMetric(float64(stats.PendingBytes)/float64(max(stats.Pending, 1)), "stored-B/batch")
+		})
 	}
 }

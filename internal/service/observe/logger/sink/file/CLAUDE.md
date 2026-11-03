@@ -19,7 +19,7 @@ the SAME hardening on every reopen: both sinks open through
 
 | File | Role |
 |---|---|
-| `file.go`                  | `fileSink` + `New` + `Write` / `Flush` (`fsync`) / `Close` + `openRefusals`, this sink's `logfile.RefusalSpec` for the shared hardened open |
+| `file.go`                  | `fileSink` + `New` + `Write` / `WriteBatch` (one `write(2)` per batch, #807) / `Flush` (`fsync`, outside the write mutex, #815) / `Close` + `openRefusals`, this sink's `logfile.RefusalSpec` for the shared hardened open |
 | `internal/core/observe/logger/sink/file` | its sentinels — range 0.3.14.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 The hardened open itself — `refuseSymlink`, `explainOpenFailure`, `openFlags`
@@ -101,8 +101,18 @@ then be rejected (ADR 0082 §D2 measured both shapes for
   chains the close failure via `errs.Wrap` (CloseFailed).
 - `Write` is mutex-serialised; payload errors wrap as `WriteFailed`
   (EX_IOERR).
-- `Flush` calls `*os.File.Sync` (fsync) under the same mutex; failures
-  wrap as `SyncFailed` (EX_IOERR).
+- `WriteBatch` (the `corelogger.BatchSink` sibling, #807) concatenates the
+  batch into one reused buffer (let go past 1 MiB) and issues ONE `write(2)`
+  under the mutex; it reports the records that landed whole, so the async
+  drainer reports the rest through `OnError`.
+- `Flush` calls `*os.File.Sync` (fsync) WITHOUT the write mutex (#815): a
+  sync needs a stable descriptor, not the exclusion of writes, and this sink's
+  descriptor never changes — a Write is never held behind the disk. A `Close`
+  racing the sync makes `Sync` report the file closed (`SyncFailed`, correct
+  for a closing sink); `os.File` keeps the descriptor open until the in-flight
+  `Sync` returns, so a reused descriptor is never synced. Failures wrap as
+  `SyncFailed` (EX_IOERR). The `syncFile` field is the white-box seam the
+  tests block a sync with; nil in production.
 - `Close` releases the descriptor; failures wrap as `CloseFailed`
   (EX_IOERR). Subsequent `Write` calls surface the kernel's "file already
   closed" error wrapped as `WriteFailed`.

@@ -74,13 +74,16 @@ func (c *asn1Codec) Append(dst []byte, v any) (appended []byte, err error) {
 	return append(dst, encoded...), nil
 }
 
-// Unmarshal parses data as ASN.1 BER/DER into v. Trailing bytes past the
-// first decoded structure are accepted silently — this matches
-// encoding/asn1's own lenient contract and preserves compatibility with
-// callers that feed a known-sized prefix of a larger buffer. If strict
-// trailing-byte rejection becomes a requirement, add a dedicated
-// UnmarshalStrict helper rather than tightening this default.
+// Unmarshal parses data as ASN.1 DER — with the BER relaxations
+// encoding/asn1 reads — into v. Trailing bytes past the first decoded
+// structure are accepted silently — this matches encoding/asn1's own lenient
+// contract and preserves compatibility with callers that feed a known-sized
+// prefix of a larger buffer. NewStrict's instance refuses them.
 func (*asn1Codec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: encoding/asn1.Unmarshal returns the remaining bytes; we ignore them
 	//: per the contract documented on the function comment.
 	_, uerr := stdasn1.Unmarshal(data, v)
@@ -96,4 +99,54 @@ func (*asn1Codec) Unmarshal(data []byte, v any) error {
 		Public:  "ASN.1 DER decoding failed",
 		Private: "service/data/codec/asn1.Unmarshal: encoding/asn1 returned an error",
 	})
+}
+
+// strictCodec is the instance NewStrict returns: the registered codec's
+// encoding, and an Unmarshal that refuses bytes past the first structure.
+type strictCodec struct {
+	asn1Codec
+}
+
+// NewStrict returns a fresh ASN.1 DER codec, not registered, whose Unmarshal
+// refuses any byte past the first decoded structure with TRAILING_DATA
+// (0.3.9.3). The registered codec accepts them, as encoding/asn1 does, so a
+// signed blob with bytes appended decodes equal to the original; a caller
+// that hashes or verifies what it decoded, rather than what it received,
+// uses this instance. Marshal and Append are the registered codec's.
+func NewStrict() codec.Codec {
+	//: stateless; never added to the registry.
+	return &strictCodec{}
+}
+
+// Unmarshal parses data like the registered codec, then refuses a non-empty
+// rest: a signed blob with bytes appended must not decode equal to the
+// original. On that refusal v holds the structure encoding/asn1 decoded.
+func (*strictCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
+	rest, uerr := stdasn1.Unmarshal(data, v)
+	//: not DER, or not what the target holds.
+	if uerr != nil {
+		//: the registered codec's failure.
+		return errs.Wrap(uerr, errs.WrapParams{
+			Code:    coreasn1.CodeASN1UnmarshalFailed,
+			Reason:  "UNMARSHAL_FAILED",
+			Public:  "ASN.1 DER decoding failed",
+			Private: "service/data/codec/asn1.NewStrict.Unmarshal: encoding/asn1 returned an error",
+		})
+	}
+	//: bytes past the structure.
+	if len(rest) > 0 {
+		//: refused, naming how many — never what they hold.
+		return errs.Wrap(nil, errs.WrapParams{
+			Code:    coreasn1.CodeASN1TrailingData,
+			Reason:  "TRAILING_DATA",
+			Public:  "ASN.1 input carries trailing data",
+			Private: "service/data/codec/asn1.NewStrict.Unmarshal: bytes follow the first decoded structure",
+		}, errs.Int("trailing", len(rest)))
+	}
+	//: exactly one structure.
+	return nil
 }

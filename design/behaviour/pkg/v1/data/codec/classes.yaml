@@ -207,6 +207,49 @@ constants:
         type: CompressAlgorithm
         value: "\"flate\""
     name: Gzip
+  - doc: The names DetectCompression answers, as the transform registry spells them.
+    grouped: true
+    items:
+      - doc: compressionGzip is gzip, RFC 1952.
+        name: compressionGzip
+        type: CompressAlgorithm
+        value: "\"gzip\""
+      - doc: compressionZlib is zlib, RFC 1950.
+        name: compressionZlib
+        type: CompressAlgorithm
+        value: "\"zlib\""
+      - doc: compressionZstd is Zstandard, RFC 8878.
+        name: compressionZstd
+        type: CompressAlgorithm
+        value: "\"zstd\""
+      - doc: compressionS2 is S2, which also reads Snappy's framed stream.
+        name: compressionS2
+        type: CompressAlgorithm
+        value: "\"s2\""
+    name: compressionGzip
+  - doc: |-
+      The zlib header DetectCompression accepts: DEFLATE with a 32 KiB window —
+      the CMF every common encoder, compress/zlib included, writes — no preset
+      dictionary, and the check bits RFC 1950 §2.2 defines.
+    grouped: true
+    items:
+      - doc: zlibCMF is the compression method and window byte.
+        name: zlibCMF
+        type: byte
+        value: "0x78"
+      - doc: zlibFDICT is the preset-dictionary flag in FLG.
+        name: zlibFDICT
+        type: byte
+        value: "0x20"
+      - doc: zlibCheckDivisor divides CMF*256+FLG exactly.
+        name: zlibCheckDivisor
+        type: uint16
+        value: "31"
+      - doc: zlibHeaderLen is the two header bytes.
+        name: zlibHeaderLen
+        type: int
+        value: "2"
+    name: zlibCMF
   - doc: |-
       flatBuffersHeaderBytes is the synthetic 4-byte root-offset header
       the flatbuffers codec validates before accepting Marshal input. The
@@ -266,6 +309,7 @@ files:
       - encodeWithPromotion
       - NewEncoder
       - NewDecoder
+      - NewBoundedDecoder
       - FromMIME
       - FromExtension
       - resolveStreaming
@@ -284,6 +328,15 @@ files:
       - frameAlgID
       - algorithmForID
     name: compressed.go
+  - decls:
+      - compressionGzip
+      - zlibCMF
+      - gzipMagic
+      - Detect
+      - DetectCompression
+      - zlibHeader
+      - isFrame
+    name: detect.go
   - decls: []
     name: doc.go
   - decls:
@@ -307,6 +360,10 @@ files:
       - promoteJSONFailed
       - promoteContainerFailed
       - hasPromotionStrategy
+      - refusesShape
+      - isPEMShape
+      - isFormShape
+      - isRowsShape
       - isValueShapeMismatch
     name: promote.go
 functions:
@@ -332,6 +389,9 @@ functions:
     results: enc Encoder, err error
   - name: NewDecoder
     params: f Format, r io.Reader
+    results: dec Decoder, err error
+  - name: NewBoundedDecoder
+    params: f Format, r io.Reader, maxBytes int64
     results: dec Decoder, err error
   - name: FromMIME
     params: mime string
@@ -405,6 +465,24 @@ functions:
     name: algorithmForID
     params: id byte
     results: algo CompressAlgorithm, ok bool
+  - name: Detect
+    params: prefix []byte
+    results: f Format, ok bool
+  - name: DetectCompression
+    params: prefix []byte
+    results: algo CompressAlgorithm, ok bool
+  - doc: |-
+      zlibHeader reports whether p opens with the zlib header DetectCompression
+      accepts: CMF 0x78, no preset dictionary, and CMF*256+FLG a multiple of 31.
+    name: zlibHeader
+    params: p []byte
+    results: bool
+  - doc: |-
+      isFrame reports whether p opens with this package's compressed frame: the
+      magic, the version and an algorithm id the frame defines.
+    name: isFrame
+    params: p []byte
+    results: bool
   - doc: |-
       promoteMarshal handles a codec's value-shape rejection by
       serialising v with encoding/json and wrapping the JSON bytes in the
@@ -504,6 +582,36 @@ functions:
     params: f Format
     results: bool
   - doc: |-
+      refusesShape reports whether the codec registered under f refuses v's
+      shape for sure, read off v's type alone, so Marshal promotes v without
+      first building the codec's refusal to discard it (#910). It mirrors each
+      codec's shape gate exactly — form's six map types, pem's *pem.Block,
+      ndjson's and csv's slice or array, directly or through one pointer — and
+      answers false for any shape it cannot rule out, and for flatbuffers, tlv
+      and every unconstrained Format: there the codec's own refusal stays the
+      authority, and isValueShapeMismatch reads it.
+    name: refusesShape
+    params: f Format, v any
+    results: bool
+  - doc: |-
+      isPEMShape reports whether v is a *pem.Block, the one type pem's Marshal
+      takes.
+    name: isPEMShape
+    params: v any
+    results: bool
+  - doc: isFormShape reports whether v is one of the six types form's Marshal takes.
+    name: isFormShape
+    params: v any
+    results: bool
+  - doc: |-
+      isRowsShape reports whether v's type is a slice or an array, directly or
+      through one pointer — the only shapes ndjson's and csv's Marshal take. A
+      nil interface counts as rows: it has no type to rule out, so the codec
+      judges it.
+    name: isRowsShape
+    params: v any
+    results: bool
+  - doc: |-
       isValueShapeMismatch reports whether err, returned by the codec
       registered under f, indicates the codec rejected the caller's
       value/target shape, which is the only condition that triggers a
@@ -521,6 +629,7 @@ functions:
     results: bool
 imports:
   binary: encoding/binary
+  bytes: bytes
   cmp: cmp
   corecodec: github.com/kitsunium/sdk/internal/core/data/codec
   errors: errors
@@ -528,6 +637,7 @@ imports:
   fbcodec: github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers
   io: io
   kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  reflect: reflect
   stdjson: encoding/json
   stdpem: encoding/pem
   transform: github.com/kitsunium/sdk/pkg/v1/data/transform
@@ -538,3 +648,22 @@ package:
   name: codec
   purpose: Package codec is the universal encoder/decoder dispatch facade.
 types: []
+vars:
+  - doc: The magic numbers DetectCompression reads.
+    grouped: true
+    items:
+      - doc: gzipMagic is gzip's ID1, ID2 and its only compression method, DEFLATE.
+        name: gzipMagic
+        value: "[]byte{0x1f, 0x8b, 0x08}"
+      - doc: zstdMagic is a Zstandard frame's magic number, little-endian.
+        name: zstdMagic
+        value: "[]byte{0x28, 0xb5, 0x2f, 0xfd}"
+      - doc: s2StreamMagic is S2's framed stream identifier chunk.
+        name: s2StreamMagic
+        value: "[]byte(\"\\xff\\x06\\x00\\x00S2sTwO\")"
+      - doc: |-
+          snappyStreamMagic is Snappy's framed stream identifier chunk, which S2
+          reads.
+        name: snappyStreamMagic
+        value: "[]byte(\"\\xff\\x06\\x00\\x00sNaPpY\")"
+    name: gzipMagic

@@ -105,3 +105,58 @@ machine by `make bench`; it still shows the driver until that run.
 
 `TestAllocBudget` (race-off alloc lane) pins the ceilings: a struct marshals in
 1 allocation and appends in 0, a small map marshals in 1 and appends in 0.
+
+## omitzero (#1103)
+
+The omitzero option adds a nil check per field that does not carry it, and is
+decided once per field when the type's plan is built. Against 740e7c1e, six
+interleaved passes of the two test binaries (linux/amd64,
+4 vCPU VM, go1.27.3), benchstat finds no change on Marshal/record (1.635 → 1.713 µs, ~ p=0.18; 256 B and 1 alloc both sides), Marshal/batch1000 (852.1 Ki and 13 allocs both sides), Marshal/map16 and MarshalParallel: the B/op and
+allocs/op columns are identical.
+
+## #906: a document past 256 KiB reuses its buffer
+
+`Marshal` now asks `scratch.AcquireBufferSized` for the capacity the last
+document needed when the shared pool could not keep a buffer that large, and
+releases the buffer it grew with `ReleaseBufferSized` into the size class it
+belongs to. Against 740e7c1e, six interleaved passes (linux/amd64, 4 vCPU VM,
+go1.27.3):
+
+| row | before | after | delta | B/op | allocs/op |
+|---|---:|---:|---:|---|---|
+| Marshal/record | 1.575 µs | 1.713 µs | +8.8 % (p=0.026) | 256 → 256 | 1 → 1 |
+| Marshal/batch1000 | 1.638 ms | 1.463 ms | −10.7 % | **851.8 Ki → 256.0 Ki** | **11 → 1** |
+| Marshal/map16 | 6.609 µs | 6.736 µs | ~ (p=0.31) | 320 → 320 | 1 → 1 |
+
+The 258 KB document now costs its own copy and nothing else (1.0× the
+encoded size, where #906 asked for at most 1.5× and 3 allocations);
+`TestAllocBudget` holds it at one. The record row's +8.8 % sits inside the
+two columns' ±6–8 % spread; its allocations are unchanged.
+
+## #1100: the stream
+
+Three runs each, same machine, one document per op:
+
+| row | ns/op | B/op | allocs/op | against |
+|---|---:|---:|---:|---|
+| StreamEncode/record | 1 382 | 0 | 0 | Marshal 1 681 ns, 1 alloc |
+| StreamEncode/batch1000 | 1.199 ms | 0 | 0 | Marshal 1.446 ms, 1 alloc |
+| StreamEncode/map16 | 5 993 | 0 | 0 | Marshal 7 266 ns, 1 alloc |
+| StreamDecode/record | 3 567 | 608 | 14 | UnmarshalTyped 3 480 ns (+2.5 %) |
+| StreamDecode/batch1000 | 3.326 ms | 807.6 Ki | 10 008 | UnmarshalTyped 3.096 ms (+7.4 %) |
+
+Encode writes the pooled buffer to the stream and makes no copy for a
+caller, hence 0 allocations; Decode reads the document into a reservation
+that starts at 64 KiB and doubles with the bytes that arrive — the 258 KB
+document takes four such buffers — so a length prefix the peer never honours
+costs what it sent. Both stay within #1100's 10 % of the buffered path.
+
+## NewStrict (#1106)
+
+`BenchmarkUnmarshalStrict` (into a fresh `*T`) beside
+`BenchmarkUnmarshalTyped`, two runs each: record 3.99 µs, 336 B, 11 allocs
+(typed 3.38 µs, 528 B, 12); batch1000 3.81 ms, 332 464 B, 10 003 allocs (typed
+3.01 ms, 332 489 B, 10 004). The duplicate-name walk compares up to 32 names
+of a document in place and allocates nothing for documents that size; its
+cost is the second pass over the bytes, +18 to +27 %.
+

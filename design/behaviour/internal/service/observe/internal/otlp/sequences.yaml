@@ -419,25 +419,11 @@ sequences:
         kind: actor
       - id: Double.MarshalJSON
         kind: self
-      - id: strconv
-        kind: stdlib
+      - id: appendDouble
+        kind: internal
     steps:
-      - bind: value
-        eval: float64(v)
-      - opt:
-          do:
-            - return: "[]byte(jsonNaN), nil"
-          when: math.IsNaN(value)
-      - opt:
-          do:
-            - return: "[]byte(jsonPosInfinity), nil"
-          when: math.IsInf(value, 1)
-      - opt:
-          do:
-            - return: "[]byte(jsonNegInfinity), nil"
-          when: math.IsInf(value, -1)
-      - return: strconv.AppendFloat(nil, value, floatFmt, floatPrec, floatBitSize), nil
-        to: strconv
+      - return: appendDouble(nil, float64(v)), nil
+        to: appendDouble
   - forward: jsonenc.AppendInt
     of: appendInt
   - forward: jsonenc.AppendUint
@@ -448,9 +434,16 @@ sequences:
         kind: actor
       - id: appendDouble
         kind: self
-      - id: strconv
-        kind: stdlib
+      - id: jsonenc
+        kind: package
     steps:
+      - bind: out, ok
+        eval: jsonenc.AppendFloat(dst, value)
+        to: jsonenc
+      - opt:
+          do:
+            - return: out
+          when: ok
       - opt:
           do:
             - return: append(dst, jsonNaN...)
@@ -458,13 +451,8 @@ sequences:
       - opt:
           do:
             - return: append(dst, jsonPosInfinity...)
-          when: math.IsInf(value, 1)
-      - opt:
-          do:
-            - return: append(dst, jsonNegInfinity...)
-          when: math.IsInf(value, -1)
-      - return: strconv.AppendFloat(dst, value, floatFmt, floatPrec, floatBitSize)
-        to: strconv
+          when: value > 0
+      - return: append(dst, jsonNegInfinity...)
   - of: ScopeOf
     steps:
       - return: "ScopeMessage{Name: scope.Name, Version: scope.Version}"
@@ -516,6 +504,7 @@ sequences:
           		headers:     maps.Clone(cfg.Headers),
           		maxResponse: maxResponse,
           		signal:      signal,
+          		gzip:        cfg.Gzip,
           	}, nil
   - of: checkEndpoint
     participants:
@@ -596,6 +585,63 @@ sequences:
         kind: actor
       - id: (*Sender).PostContext
         kind: self
+      - id: gzipBuffers.Put
+        kind: value
+      - id: s.post
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: compressed, ok
+              eval: gzipBuffers.Get().(*bytes.Buffer)
+            - opt:
+                do:
+                  - set: compressed
+                    value: new(bytes.Buffer)
+                when: "!ok"
+            - defer: gzipBuffers.Put(compressed)
+              to: gzipBuffers.Put
+            - return: s.post(ctx, gzipInto(compressed, body), true)
+              to: s.post
+          when: s.gzip
+      - return: s.post(ctx, body, false)
+        to: s.post
+  - of: (*Sender).PostEncoded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Sender).PostEncoded
+        kind: self
+      - id: s.PostContext
+        kind: internal
+      - id: s.post
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - switch:
+          cases:
+            - case: "\"\""
+              do:
+                - return: s.PostContext(ctx, body)
+                  to: s.PostContext
+            - case: gzipEncoding
+              do:
+                - return: s.post(ctx, body, true)
+                  to: s.post
+            - default: true
+              do:
+                - return: |-
+                    errs.Wrap(nil, s.signal.RequestUnbuildable,
+                    			errs.String("content_encoding", encoding))
+                  to: errs
+          "on": encoding
+  - of: (*Sender).post
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Sender).post
+        kind: self
       - id: http
         kind: stdlib
       - id: errs
@@ -628,6 +674,11 @@ sequences:
           value: value
       - eval: request.Header.Set(contentTypeHeader, contentType)
         to: request.Header.Set
+      - opt:
+          do:
+            - eval: request.Header.Set(contentEncodingHeader, gzipEncoding)
+              to: request.Header.Set
+          when: gzipped
       - bind: response, doErr
         eval: s.client.Do(request)
         to: s.client.Do
@@ -648,6 +699,54 @@ sequences:
           when: readErr != nil
       - return: s.classify(response, payload)
         to: s.classify
+  - of: gzipInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: gzipInto
+        kind: self
+      - id: dst.Reset
+        kind: value
+      - id: gzip
+        kind: stdlib
+      - id: gzipWriters.Put
+        kind: value
+      - id: zw.Reset
+        kind: value
+      - id: zw.Write
+        kind: value
+      - id: swallowTeardown
+        kind: internal
+      - id: dst.Bytes
+        kind: value
+    steps:
+      - eval: dst.Reset()
+        to: dst.Reset
+      - bind: zw, ok
+        eval: gzipWriters.Get().(*gzip.Writer)
+      - opt:
+          do:
+            - set: zw
+              to: gzip
+              value: gzip.NewWriter(io.Discard)
+          when: "!ok"
+      - defer: gzipWriters.Put(zw)
+        to: gzipWriters.Put
+      - eval: zw.Reset(dst)
+        to: zw.Reset
+      - opt:
+          do:
+            - eval: swallowTeardown(werr)
+              to: swallowTeardown
+          init:
+            bind: _, werr
+            eval: zw.Write(body)
+            to: zw.Write
+          when: werr != nil
+      - eval: swallowTeardown(zw.Close())
+        to: swallowTeardown
+      - return: dst.Bytes()
+        to: dst.Bytes
   - of: closeResponse
     participants:
       - id: caller

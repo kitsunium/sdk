@@ -1,0 +1,64 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: wholeRecords
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i
+                when: int64(len(p)) > n
+            - op: "-="
+              set: "n"
+              value: int64(len(p))
+          key: i
+          range: payloads
+          value: p
+      - return: len(payloads)
+  - of: ndjsonBody
+    steps:
+      - bind: size
+        eval: "0"
+      - loop:
+          do:
+            - op: +=
+              set: size
+              value: len(p) + 1
+          key: _
+          range: payloads
+          value: p
+      - bind: body
+        eval: make([]byte, 0, size)
+      - loop:
+          do:
+            - set: body
+              value: append(body, p...)
+            - opt:
+                do:
+                  - set: body
+                    value: append(body, '\n')
+                when: len(p) == 0 || p[len(p)-1] != '\n'
+          key: _
+          range: payloads
+          value: p
+      - return: body
+  - of: (*netSink).sendAll
+    steps:
+      - opt:
+          do:
+            - return: s.sendBatch(ctx, payloads)
+          when: s.sendBatch != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i, serr
+                init:
+                  bind: serr
+                  eval: s.send(ctx, p)
+                when: serr != nil
+          key: i
+          range: payloads
+          value: p
+      - return: len(payloads), nil

@@ -170,6 +170,13 @@ func TestSyntaxErrorsAreLocated(t *testing.T) {
 		{name: "reserved indicator", doc: "a: @x\n", line: "1", column: "4"},
 		{name: "empty key", doc: ": x\n", line: "1", column: "1"},
 		{name: "block scalar zero indicator", doc: "a: |0\n  x\n", line: "1", column: "5"},
+		//: #1107, the yaml-test-suite's 9C9N, Y79Y/003, QB6E and DK95/01: a line of
+		//: a flow collection or a quoted scalar belongs to it only deeper than
+		//: the block holding it, and a tab is not indentation.
+		{name: "flow line at its block's column", doc: "flow: [a,\nb]\n", line: "2", column: "1"},
+		{name: "tab-indented flow line", doc: "- [\n\tfoo,\n foo\n ]\n", line: "2", column: "2"},
+		{name: "quoted line at its block's column", doc: "k: \"a\nb\"\n", line: "2", column: "1"},
+		{name: "tab-indented quoted line", doc: "foo: \"bar\n\tbaz\"\n", line: "2", column: "2"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

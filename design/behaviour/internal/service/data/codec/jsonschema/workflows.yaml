@@ -1,0 +1,87 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: matchesAny
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: p.re.MatchString(name)
+          key: _
+          range: patterns
+          value: p
+      - return: "false"
+  - of: isUUID
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(s) != len(uuidLayout)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!uuidByte(i, s[i])"
+          key: i
+          range: len(s)
+      - return: "true"
+  - of: stringList
+    steps:
+      - opt:
+          do:
+            - return: "[]string{kw.s}, nil"
+          when: kw.kind == kindString
+      - opt:
+          do:
+            - return: nil, keywordInvalid(name)
+          when: kw.kind != kindArray
+      - bind: out
+        eval: make([]string, 0, len(kw.arr))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, keywordInvalid(name)
+                when: item.kind != kindString
+            - set: out
+              value: append(out, item.s)
+          key: _
+          range: kw.arr
+          value: item
+      - return: out, nil
+  - of: equalArrays
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(a) != len(b)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!equal(a[i], b[i])"
+          key: i
+          range: a
+      - return: "true"
+  - of: equalObjects
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(a.obj) != len(b.obj)
+      - loop:
+          do:
+            - bind: bv, ok
+              eval: b.obj[name]
+            - opt:
+                do:
+                  - return: "false"
+                when: "!ok || !equal(av, bv)"
+          key: name
+          range: a.obj
+          value: av
+      - return: "true"

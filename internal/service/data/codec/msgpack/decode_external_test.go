@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	coremsgpack "github.com/kitsunium/sdk/internal/core/data/codec/msgpack"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/msgpack"
@@ -122,7 +123,6 @@ func TestUnmarshalHostile(t *testing.T) {
 		input  []byte
 		target any
 	}{
-		{"empty input", nil, &asAny},
 		{"never-used byte", []byte{0xc1}, &asAny},
 		{"fixstr longer than input", fromHex(t, "a5 61 62"), &asAny},
 		{"str 32 of 4 GiB", fromHex(t, "db ffffffff"), &asAny},
@@ -140,7 +140,7 @@ func TestUnmarshalHostile(t *testing.T) {
 		{"trailing byte", fromHex(t, "01 02"), &asAny},
 		{"timestamp nanoseconds past 999999999", fromHex(t, "d7 ff ee6b2800 00000000"), &asAny},
 		{"timestamp of length 2", fromHex(t, "d5 ff 0000"), &asAny},
-		{"unknown extension into any", fromHex(t, "d4 05 00"), &asAny},
+		{"an extension whose payload is cut short", fromHex(t, "c7 05 05 00"), &asAny},
 		{"non-string key into any", fromHex(t, "81 01 01"), &asAny},
 		{"300 into int8", fromHex(t, "cd 012c"), &asInt8},
 		{"-1 into uint8", fromHex(t, "ff"), &asUint8},
@@ -159,20 +159,44 @@ func TestUnmarshalHostile(t *testing.T) {
 		{"non-RFC 3339 string into time", fromHex(t, "a3 616263"), &asTime},
 		{"string into a non-empty interface", fromHex(t, "a1 61"), &asStr},
 		{"into a channel", fromHex(t, "c0"), &asChan},
-		{"into a non-pointer", fromHex(t, "01"), asInt},
-		{"into a nil pointer", fromHex(t, "01"), (*int)(nil)},
-		{"into nil", fromHex(t, "01"), nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			err := msgpack.New().Unmarshal(tc.input, tc.target)
-			if !errs.HasReason(err, "UNMARSHAL_FAILED") {
-				t.Fatalf("want UNMARSHAL_FAILED, got %v", err)
-			}
-			if code, ok := errs.CodeOf(err); !ok || code != coremsgpack.CodeMsgPackUnmarshalFailed {
+			//: UNMARSHAL_FAILED's code, as the origin or — for a bound, whose
+			//: reason is DEPTH_EXCEEDED (#894) — in the trail.
+			if !errs.HasCode(err, coremsgpack.CodeMsgPackUnmarshalFailed) {
 				t.Fatalf("want code %s, got %v", coremsgpack.CodeMsgPackUnmarshalFailed, err)
 			}
+			if !errs.HasReason(err, "UNMARSHAL_FAILED") && !errs.HasReason(err, "DEPTH_EXCEEDED") {
+				t.Fatalf("want UNMARSHAL_FAILED or DEPTH_EXCEEDED, got %v", err)
+			}
 		})
+	}
+}
+
+// TestUnmarshalMisuse: no bytes, and a target that is not a non-nil pointer,
+// are the family's EMPTY_INPUT and TARGET_INVALID (#1101), never a decoding
+// failure.
+func TestUnmarshalMisuse(t *testing.T) {
+	t.Parallel()
+	var asInt int
+	tests := []struct {
+		name   string
+		input  []byte
+		target any
+		code   errs.Code
+	}{
+		{"empty input", nil, &asInt, codec.CodeEmptyInput},
+		{"into a non-pointer", fromHex(t, "01"), asInt, codec.CodeTargetInvalid},
+		{"into a nil pointer", fromHex(t, "01"), (*int)(nil), codec.CodeTargetInvalid},
+		{"into nil", fromHex(t, "01"), nil, codec.CodeTargetInvalid},
+	}
+	for _, tc := range tests {
+		err := msgpack.New().Unmarshal(tc.input, tc.target)
+		if !errs.HasCode(err, tc.code) || errs.HasCode(err, coremsgpack.CodeMsgPackUnmarshalFailed) {
+			t.Errorf("%s: err = %v, want code %s alone", tc.name, err, tc.code)
+		}
 	}
 }
 

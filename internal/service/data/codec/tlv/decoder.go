@@ -1,7 +1,6 @@
 package tlv
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -9,6 +8,7 @@ import (
 	"reflect"
 	"strconv"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	coretlv "github.com/kitsunium/sdk/internal/core/data/codec/tlv"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -24,6 +24,10 @@ type tlvDecoder struct {
 // Decode reads one TLV record from the wrapped reader and unmarshals it
 // into v (which must be a non-nil pointer).
 func (d *tlvDecoder) Decode(v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: read one full record into a scratch buffer.
 	buf, rerr := readOneRecord(d.r)
 	//: EOF latches More() to false and propagates the stdlib sentinel.
@@ -57,6 +61,10 @@ func (d *tlvDecoder) More() bool {
 // map / struct) carry an element/pair/field COUNT in their length header,
 // not a byte length, so the body must be parsed by recursing into the
 // declared number of sub-records rather than copying length value bytes.
+// Every byte the record rebuilds — each header and each value of every
+// child — is charged against maxTLVBytes, the bound Unmarshal holds the same
+// bytes to, so the stream refuses what Unmarshal refuses before it reads the
+// child that would cross the ceiling (#1105).
 func readOneRecord(r io.Reader) (record []byte, err error) {
 	//: tag byte first; EOF here is a clean stream end.
 	tag, terr := readTag(r)
@@ -70,38 +78,213 @@ func readOneRecord(r io.Reader) (record []byte, err error) {
 		//: wrap as an unmarshal failure.
 		return nil, terr
 	}
+	frame := recordFrame{r: r}
+	//: the root tag is the record's first charged byte.
+	if aerr := frame.appendByte(tag); aerr != nil {
+		//: unreachable under a positive ceiling; surfaced all the same.
+		return nil, aerr
+	}
 	//: tag in hand; read the rest of this record (header + body) at depth 0.
-	return readRecordBody(r, tag, 0)
+	if berr := frame.readBody(tag, 0); berr != nil {
+		//: already wrapped.
+		return nil, berr
+	}
+	//: caller owns the rebuilt record.
+	return frame.join(), nil
 }
 
-// readRecordBody reads the LEB128 length header for an already-consumed tag
-// and the record body, returning the reassembled tag+length+value bytes.
-// depth bounds composite recursion against CWE-674 stack exhaustion.
-func readRecordBody(r io.Reader, tag byte, depth int) (record []byte, err error) {
+// recordFrame rebuilds one root record read from a stream, charging every
+// byte against maxTLVBytes. The bytes land in chunks, each no larger than
+// what was already rebuilt and never past what the ceiling leaves, and are
+// joined once at the end: a header declaring the ceiling against a reader
+// that delivers a handful of bytes reserves only those bytes (CWE-400), and
+// a record refused at the ceiling has reserved at most one ceiling.
+type recordFrame struct {
+	//: r is the stream the record is read from.
+	r io.Reader
+	//: chunks holds the filled chunks, in wire order.
+	chunks [][]byte
+	//: cur is the chunk being filled.
+	cur []byte
+	//: size counts the bytes rebuilt so far, across every chunk.
+	size int
+}
+
+// charge refuses n more bytes when they would carry the record past
+// maxTLVBytes; it reserves nothing.
+func (f *recordFrame) charge(n uint64) error {
+	//: compare against what the ceiling still leaves.
+	if n > uint64(maxTLVBytes-f.size) {
+		//: the record as a whole would exceed what Unmarshal accepts.
+		return sizeExceededError(uint64(f.size) + n)
+	}
+	//: within the ceiling.
+	return nil
+}
+
+// ensureRoom opens a new chunk when the current one is full: as large as
+// what the record already holds, at least frameMinChunk, and never past
+// what the ceiling leaves. Callers charge first, so the room is positive.
+func (f *recordFrame) ensureRoom() {
+	//: the current chunk still has room.
+	if len(f.cur) < cap(f.cur) {
+		//: nothing to open.
+		return
+	}
+	//: a filled chunk joins the list.
+	if f.cur != nil {
+		//: keep wire order.
+		f.chunks = append(f.chunks, f.cur)
+	}
+	//: geometric growth bounded by the delivered bytes and by the ceiling.
+	f.cur = make([]byte, 0, min(max(f.size, frameMinChunk), maxTLVBytes-f.size))
+}
+
+// appendByte charges and appends one header byte.
+func (f *recordFrame) appendByte(b byte) error {
+	//: a header byte counts against the ceiling like a value byte.
+	if cerr := f.charge(1); cerr != nil {
+		//: already wrapped.
+		return cerr
+	}
+	f.ensureRoom()
+	f.cur = append(f.cur, b)
+	f.size++
+	//: appended.
+	return nil
+}
+
+// appendUvarint charges and appends v as LEB128, the way the record carried it.
+func (f *recordFrame) appendUvarint(v uint64) error {
+	var buf [maxVarintBytes]byte
+	//: encode once, then append byte by byte across chunk boundaries.
+	for _, b := range binary.AppendUvarint(buf[:0], v) {
+		//: each byte is charged.
+		if aerr := f.appendByte(b); aerr != nil {
+			//: already wrapped.
+			return aerr
+		}
+	}
+	//: appended.
+	return nil
+}
+
+// readValue charges length value bytes, then reads them from the stream into
+// the chunks, so the reservation follows the bytes the reader delivers.
+func (f *recordFrame) readValue(length uint64) error {
+	//: refuse before reading a byte the ceiling would not admit.
+	if cerr := f.charge(length); cerr != nil {
+		//: already wrapped.
+		return cerr
+	}
+	//: length ≤ maxTLVBytes after the charge, so it fits an int.
+	remaining := int(length) //nolint:gosec // bounded by maxTLVBytes above
+	//: fill chunk after chunk until the value is complete.
+	for remaining > 0 {
+		f.ensureRoom()
+		n := min(remaining, cap(f.cur)-len(f.cur))
+		start := len(f.cur)
+		//: a short read is a truncated record.
+		if _, rerr := io.ReadFull(f.r, f.cur[start:start+n]); rerr != nil {
+			//: surface as TRUNCATED via the shared wrapper.
+			return wrapReadFailure(rerr)
+		}
+		f.cur = f.cur[:start+n]
+		f.size += n
+		remaining -= n
+	}
+	//: the value is complete.
+	return nil
+}
+
+// readBody reads the LEB128 length header for an already-consumed tag and
+// the record body. depth bounds composite recursion against CWE-674 stack
+// exhaustion.
+func (f *recordFrame) readBody(tag byte, depth int) error {
 	//: nesting guard — mirror the buffered decoder's maxTLVDepth cap.
 	if depth > maxTLVDepth {
 		//: surface the documented depth sentinel.
-		return nil, depthExceededError(depth)
+		return depthExceededError(depth)
 	}
 	//: read the LEB128 length one byte at a time.
-	length, lerr := readUvarint(r)
+	length, lerr := readUvarint(f.r)
 	//: surface any varint failure.
 	if lerr != nil {
 		//: already wrapped.
-		return nil, lerr
+		return lerr
 	}
 	//: bound the declared length before allocating or recursing.
 	if length > uint64(maxTLVBytes) {
 		//: surface the documented size sentinel.
-		return nil, sizeExceededError(length)
+		return sizeExceededError(length)
+	}
+	//: the header is part of the record — preserve the wire shape.
+	if aerr := f.appendUvarint(length); aerr != nil {
+		//: already wrapped.
+		return aerr
 	}
 	//: composite tags carry a sub-record COUNT; scalars carry a byte length.
 	if isCompositeTag(Tag(tag)) {
 		//: recurse into the declared number of sub-records.
-		return readCompositeRecord(r, tag, length, depth)
+		return f.readChildren(tag, length, depth)
 	}
 	//: scalar body is exactly length value bytes.
-	return assembleRecord(r, tag, length)
+	return f.readValue(length)
+}
+
+// readChildren reads a composite's declared sub-records recursively, so the
+// streaming reader frames the body identically to the buffered decoder (V59).
+func (f *recordFrame) readChildren(tag byte, length uint64, depth int) error {
+	//: each composite frames a fixed number of child records.
+	for range subRecordCount(Tag(tag), length) {
+		//: a child costs at least a tag and a length byte; refuse before
+		//: reading one the ceiling cannot hold.
+		if cerr := f.charge(uint64(minRecordBytes)); cerr != nil {
+			//: already wrapped.
+			return cerr
+		}
+		//: a child record opens with its own tag byte.
+		childTag, terr := readTag(f.r)
+		//: a mid-composite EOF is a truncated record, never a clean end.
+		if errors.Is(terr, io.EOF) {
+			//: surface as TRUNCATED.
+			return truncatedError()
+		}
+		//: any other read failure is wrapped already.
+		if terr != nil {
+			//: surface verbatim.
+			return terr
+		}
+		//: the child's tag is charged like any header byte.
+		if aerr := f.appendByte(childTag); aerr != nil {
+			//: already wrapped.
+			return aerr
+		}
+		//: recurse one level deeper to read the child body.
+		if berr := f.readBody(childTag, depth+1); berr != nil {
+			//: already wrapped.
+			return berr
+		}
+	}
+	//: every child read.
+	return nil
+}
+
+// join returns the rebuilt record as one slice: the single chunk itself
+// when the record fit in one, else one allocation of exactly its size.
+func (f *recordFrame) join() []byte {
+	//: the common case — one chunk, no copy.
+	if len(f.chunks) == 0 {
+		//: hand the chunk over.
+		return f.cur
+	}
+	out := make([]byte, 0, f.size)
+	//: concatenate in wire order.
+	for _, chunk := range f.chunks {
+		out = append(out, chunk...)
+	}
+	//: the last, partly filled chunk closes the record.
+	return append(out, f.cur...)
 }
 
 // isCompositeTag reports whether tag's length header is an element / pair /
@@ -124,44 +307,6 @@ func subRecordCount(tag Tag, length uint64) uint64 {
 	return length
 }
 
-// readCompositeRecord reassembles a composite record (slice / map / struct)
-// by reading its declared sub-records recursively, so the streaming reader
-// frames the body identically to the buffered decoder (V59). The rebuilt
-// bytes are tag + length-as-count + the concatenated child records, which
-// decodeRoot then parses exactly as the buffered path does.
-func readCompositeRecord(r io.Reader, tag byte, length uint64, depth int) (record []byte, err error) {
-	//: header carries the family count verbatim — preserve the wire shape.
-	out := make([]byte, 0, 1+maxVarintBytes)
-	out = append(out, tag)
-	out = binary.AppendUvarint(out, length)
-	//: each composite frames a fixed number of child records.
-	for range subRecordCount(Tag(tag), length) {
-		//: a child record opens with its own tag byte.
-		childTag, terr := readTag(r)
-		//: a mid-composite EOF is a truncated record, never a clean end.
-		if errors.Is(terr, io.EOF) {
-			//: surface as TRUNCATED.
-			return nil, truncatedError()
-		}
-		//: any other read failure is wrapped already.
-		if terr != nil {
-			//: surface verbatim.
-			return nil, terr
-		}
-		//: recurse one level deeper to read the child body.
-		child, cerr := readRecordBody(r, childTag, depth+1)
-		//: surface any child failure verbatim.
-		if cerr != nil {
-			//: already wrapped.
-			return nil, cerr
-		}
-		//: append the child record bytes.
-		out = append(out, child...)
-	}
-	//: caller owns the reassembled composite record.
-	return out, nil
-}
-
 // readTag reads exactly one byte (the TLV tag) from r and returns
 // io.EOF unchanged when the stream is empty.
 func readTag(r io.Reader) (tag byte, err error) {
@@ -181,37 +326,6 @@ func readTag(r io.Reader) (tag byte, err error) {
 	}
 	//: hand back the byte read.
 	return buf[0], nil
-}
-
-// assembleRecord reads length value-bytes from r and rebuilds the
-// original tag+length+value record byte sequence. The value buffer grows
-// in chunks so a crafted header declaring length≈maxTLVBytes against a
-// reader that delivers only a handful of bytes pays only the bytes
-// actually delivered, not the declared cap (CWE-400 defence).
-func assembleRecord(r io.Reader, tag byte, length uint64) (record []byte, err error) {
-	//: read the value bytes through a LimitReader so the read budget cannot
-	//: exceed the declared length, then drain incrementally so the buffer
-	//: only grows to the bytes the reader actually delivers.
-	limited := &io.LimitedReader{R: r, N: int64(length)} //nolint:gosec // length ≤ maxTLVBytes
-	//: streamReadBuffer grows naturally; ReadFrom uses 512-byte chunks.
-	var value bytes.Buffer
-	//: drain the limit-reader; short read surfaces as io.ErrUnexpectedEOF.
-	if _, verr := value.ReadFrom(limited); verr != nil {
-		//: surface as TRUNCATED via the shared wrapper.
-		return nil, wrapReadFailure(verr)
-	}
-	//: detect declared-but-undelivered bytes.
-	if uint64(value.Len()) != length {
-		//: short read maps to TRUNCATED.
-		return nil, wrapReadFailure(io.ErrUnexpectedEOF)
-	}
-	//: rebuild the original record: tag + length + value.
-	out := make([]byte, 0, 1+maxVarintBytes+value.Len())
-	out = append(out, tag)
-	out = binary.AppendUvarint(out, length)
-	out = append(out, value.Bytes()...)
-	//: caller now owns the record bytes.
-	return out, nil
 }
 
 // readUvarint reads a single LEB128 length from r one byte at a time so
@@ -272,13 +386,12 @@ func wrapReadFailure(rerr error) error {
 // decodeRoot validates the pointer-shape contract and decodes a single
 // TLV record from data into the pointee.
 func decodeRoot(data []byte, v any) error {
-	//: target must be a non-nil pointer.
-	rv := reflect.ValueOf(v)
-	//: shape rejection.
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		//: surface a value-invalid sentinel.
-		return nonPointerTargetError()
+	//: target must be a non-nil pointer: the family's refusal otherwise (#1101).
+	if err := codec.CheckTarget(v); err != nil {
+		//: refused before reading.
+		return err
 	}
+	rv := reflect.ValueOf(v)
 	//: target is the pointee; settability is required for Set to work.
 	target := rv.Elem()
 	//: target-aware fast path: if the target is a typed struct AND the
@@ -288,20 +401,20 @@ func decodeRoot(data []byte, v any) error {
 	//: when it took the typed path; the fallback below covers everything
 	//: else (interface targets, slices, maps, scalars).
 	if handled, err := tryDecodeRootInto(data, target); handled {
-		//: typed path consumed the full buffer; surface err verbatim.
-		return err
+		//: typed path consumed the full buffer; a wire refusal is placed.
+		return placeTyped(data, err)
 	}
 	//: decode one record at depth zero.
 	value, rest, derr := decodeValue(data, 0)
-	//: surface decode failure verbatim.
+	//: surface decode failure, placed where the walk stopped.
 	if derr != nil {
-		//: already wrapped.
-		return derr
+		//: already wrapped; the residual is a reslice of data.
+		return placed(derr, cap(data)-cap(rest))
 	}
 	//: reject trailing bytes — Unmarshal expects exactly one record.
 	if len(rest) != 0 {
-		//: surface as decode failure for callers that match by reason.
-		return trailingBytesError(len(rest))
+		//: surface as decode failure for callers that match by reason, at the first trailing byte.
+		return placed(trailingBytesError(len(rest)), len(data)-len(rest))
 	}
 	//: wrap the target in a local view so the helper signature avoids
 	//: an externally-named concrete type.
@@ -646,10 +759,10 @@ func decodeSlice(length uint64, rest []byte, depth int) (value any, residual []b
 	for range length {
 		//: decode the next element.
 		val, next, derr := decodeValue(rest, depth+1)
-		//: surface any per-element failure.
+		//: surface any per-element failure, at the residual it stopped on.
 		if derr != nil {
 			//: already wrapped.
-			return nil, rest, derr
+			return nil, next, derr
 		}
 		//: collect and advance.
 		out = append(out, val)
@@ -672,17 +785,17 @@ func decodeMap(length uint64, rest []byte, depth int) (value any, residual []byt
 	for range length {
 		//: decode the key.
 		key, next, kerr := decodeValue(rest, depth+1)
-		//: surface key failure.
+		//: surface key failure, at the residual it stopped on.
 		if kerr != nil {
 			//: already wrapped.
-			return nil, rest, kerr
+			return nil, next, kerr
 		}
 		//: decode the value into the residual buffer.
 		val, next2, verr := decodeValue(next, depth+1)
-		//: surface value failure.
+		//: surface value failure, at the residual it stopped on.
 		if verr != nil {
 			//: already wrapped.
-			return nil, rest, verr
+			return nil, next2, verr
 		}
 		//: map keys must be hashable.
 		if key != nil && !reflect.TypeOf(key).Comparable() {
@@ -713,17 +826,17 @@ func decodeStruct(length uint64, rest []byte, depth int) (value any, residual []
 		//: peek the name record header to enforce the maxFieldNameBytes
 		//: cap BEFORE the generic decoder would allocate the name buffer.
 		nameStr, next, nerr := decodeFieldName(rest, depth+1)
-		//: surface name failure.
+		//: surface name failure, at the residual it stopped on.
 		if nerr != nil {
 			//: already wrapped.
-			return nil, rest, nerr
+			return nil, next, nerr
 		}
 		//: decode the value.
 		val, next2, verr := decodeValue(next, depth+1)
-		//: surface value failure.
+		//: surface value failure, at the residual it stopped on.
 		if verr != nil {
 			//: already wrapped.
-			return nil, rest, verr
+			return nil, next2, verr
 		}
 		//: install the field.
 		out[nameStr] = val
@@ -1331,18 +1444,6 @@ func fieldNameTooLongDecodeError(length uint64) error {
 	}, errs.String("len", strconv.FormatUint(length, decimalBase)), errs.Int("cap", maxFieldNameBytes))
 }
 
-// nonPointerTargetError surfaces a Unmarshal call with a non-pointer or
-// nil-pointer target.
-func nonPointerTargetError() error {
-	//: surface as decode failure.
-	return errs.Wrap(nil, errs.WrapParams{
-		Code:    coretlv.CodeTLVUnmarshalFailed,
-		Reason:  "UNMARSHAL_FAILED",
-		Public:  "TLV codec requires a non-nil pointer target",
-		Private: "service/data/codec/tlv.Unmarshal: target is not a non-nil pointer",
-	})
-}
-
 // trailingBytesError surfaces an Unmarshal with bytes left after the
 // first record.
 func trailingBytesError(trailing int) error {
@@ -1351,7 +1452,7 @@ func trailingBytesError(trailing int) error {
 		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV decoding failed",
-		Private: "service/data/codec/tlv.Unmarshal: trailing bytes after the first record",
+		Private: privateTrailing,
 	}, errs.Int("trailing", trailing))
 }
 

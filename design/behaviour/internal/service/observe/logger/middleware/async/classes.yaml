@@ -68,6 +68,8 @@ files:
       - defaultBufferSize
       - asyncSink
       - New
+      - callbacksOf
+      - (*asyncSink).wireBatch
       - mustNewRing
       - noopOnError
       - noopOnDrop
@@ -77,6 +79,7 @@ files:
       - (*asyncSink).abandon
       - blockCancelled
       - (*asyncSink).retryBlocked
+      - (*asyncSink).wakeDrainer
       - (*asyncSink).signalSpace
       - (*asyncSink).handleFull
       - (*asyncSink).Flush
@@ -84,6 +87,10 @@ files:
       - (*asyncSink).Close
       - (*asyncSink).joinDrainer
     name: async_sink.go
+  - decls:
+      - recordEntry
+      - newRecordEntry
+    name: async_sink_entry.go
   - decls:
       - DefaultMaxBlock
       - DropPolicy
@@ -100,15 +107,17 @@ files:
       - maxSaneCap
       - (*asyncSink).drain
       - (*asyncSink).drainLoop
+      - (*asyncSink).park
+      - (*asyncSink).pending
+      - (*asyncSink).take
+      - (*asyncSink).deliver
+      - (*asyncSink).forwardBatch
       - (*asyncSink).forward
+      - (*asyncSink).settle
+      - (*asyncSink).recycle
       - (*asyncSink).drainRemaining
     name: drainer.go
   - decls:
-      - recordEntry
-      - newRecordEntry
-    name: entry.go
-  - decls:
-      - yieldOnce
       - isClosed
       - asyncCtx
       - (*asyncSink).forwardDownstreamError
@@ -118,6 +127,12 @@ functions:
   - name: New
     params: downstream corelogger.Sink, cfg Config
     results: corelogger.Sink
+  - doc: |-
+      callbacksOf resolves Config's two callbacks, substituting the documented
+      no-ops for nil ones so the drainer and Write call them unconditionally.
+    name: callbacksOf
+    params: cfg *Config
+    results: onDrop func(missed int), onError func(err error)
   - doc: |-
       mustNewRing wraps ring.New for the New constructor — the size is
       pre-validated so the error path is unreachable; the helper makes that
@@ -154,11 +169,6 @@ functions:
     name: newRecordEntry
     results: "*recordEntry"
   - doc: |-
-      yieldOnce is the cooperative yield primitive used by the drainer when the
-      queue is empty and by Flush while waiting for the queue to drain. Wraps
-      runtime.Gosched so the call site stays self-documenting.
-    name: yieldOnce
-  - doc: |-
       isClosed reports whether ch has been closed. Used by Write to refuse work
       after Close without forcing a sync.Mutex on the hot path.
     name: isClosed
@@ -178,6 +188,7 @@ functions:
     name: swallowRingError
     params: err error
 imports:
+  atomic: sync/atomic
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   coreasync: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async
@@ -185,7 +196,6 @@ imports:
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
   ring: github.com/kitsunium/sdk/internal/kernel/collections/ring
-  runtime: runtime
   sync: sync
   time: time
   worker: github.com/kitsunium/sdk/internal/kernel/concur/worker
@@ -263,6 +273,39 @@ types:
         name: daemon
         type: "*worker.LoopDaemon"
       - doc: |-
+          wake carries "the ring is no longer empty" from a producer to a parked
+          drainer (#806). One buffered slot: a Write that lands while the drainer
+          is parked leaves a token whether or not the drainer has reached its
+          select yet, and a second one finds the slot full and need not send.
+        name: wake
+        type: chan struct{}
+      - doc: |-
+          parked is set by the drainer before its last look at an empty ring and
+          cleared when it resumes; a producer sends on wake only while it is set,
+          so a busy drainer costs a producer one atomic load and no channel op.
+        name: parked
+        type: atomic.Bool
+      - doc: |-
+          batchSink is the downstream as a corelogger.BatchSink, nil when it is
+          not one or when batchMax is one: the drainer then writes record by record.
+        name: batchSink
+        type: corelogger.BatchSink
+      - doc: |-
+          batchMax is how many entries the drainer takes off the ring at once
+          (Config.BatchMax, at least one).
+        name: batchMax
+        type: int
+      - doc: |-
+          batch, recs and payloads are the drainer's scratch for one take: owned
+          by the single drainer goroutine (drain, then drainRemaining after stop),
+          so they need no lock and allocate once.
+        name: batch
+        type: "[]*recordEntry"
+      - name: recs
+        type: "[]corelogger.RecordEvent"
+      - name: payloads
+        type: "[][]byte"
+      - doc: |-
           flushSignal fires once after every drainer forward() so Flush can
           wait on progress instead of Gosched-spinning. Buffered by 1 so the
           drainer never blocks when nobody is flushing; Flush selects on it
@@ -301,6 +344,12 @@ types:
     kind: struct
     methods:
       - doc: |-
+          wireBatch keeps the downstream as a corelogger.BatchSink, with the scratch a
+          WriteBatch call is built in, when it is one and batchMax is above one (#807).
+          Otherwise batchSink stays nil and the drainer writes record by record.
+        name: wireBatch
+        recv: s *asyncSink
+      - doc: |-
           Write enqueues an encoded record for the drainer to deliver. Returns
           Stopped if Close has terminated the drainer.
         name: Write
@@ -332,6 +381,14 @@ types:
         params: ent *recordEntry
         recv: s *asyncSink
         results: n int, done bool, err error
+      - doc: |-
+          wakeDrainer tells a parked drainer that the ring holds an entry. It is
+          called after an entry was accepted and reads parked only after that, so
+          with the drainer's own order — parked set, then the ring looked at again —
+          one of the two always sees the other: the drainer finds the entry, or the
+          producer finds it parked and leaves a token on wake. Non-blocking.
+        name: wakeDrainer
+        recv: s *asyncSink
       - doc: |-
           signalSpace tells one Block waiter that a slot may be free. Non-blocking,
           and a no-op under the drop policies, where nobody waits.
@@ -390,13 +447,68 @@ types:
           contract). On stop it flushes the ring via drainRemaining so nothing the
           producer accepted is lost. No done close here; the caller (drain() or the
           worker.LoopDaemon) owns the join signal.
+
+          An empty ring parks the drainer on wake, the signal the next accepted Write
+          sends (#806): an idle sink costs no CPU, where a Gosched loop kept one P busy
+          with nobody to hand it to.
         name: drainLoop
         params: stop <-chan struct{}
+        recv: s *asyncSink
+      - doc: |-
+          park waits for a producer's wake-up or for stop, and reports false on stop.
+          parked is set BEFORE the ring is looked at once more under ringMu — the
+          Dekker step: a Write that landed before the flag was visible is found here,
+          and one that lands after it reads the flag (wakeDrainer) and sends. A stale
+          token left by a Write the second look already caught costs one empty pass.
+        name: park
+        params: stop <-chan struct{}
+        recv: s *asyncSink
+        results: bool
+      - doc: |-
+          pending reports whether the ring holds an entry, read under ringMu as every
+          ring access is.
+        name: pending
+        recv: s *asyncSink
+        results: bool
+      - doc: |-
+          take reads up to batchMax entries off the ring into the drainer's scratch,
+          under ringMu (async.Write under DropOldest also reads, so the SPSC ring never
+          sees a concurrent consumer), and counts them in flight before releasing it,
+          so a concurrent Flush never samples Len()==0 with inFlight==0 while they are
+          undelivered. The returned slice is the drainer's scratch: valid until the
+          next take.
+        name: take
+        recv: s *asyncSink
+        results: "[]*recordEntry"
+      - doc: |-
+          deliver hands batch to the downstream: in one WriteBatch when it is a
+          corelogger.BatchSink and the batch holds more than one entry, one Write per
+          entry otherwise — the record-at-a-time delivery a sink without the sibling
+          port receives (#807).
+        name: deliver
+        params: batch []*recordEntry
+        recv: s *asyncSink
+      - doc: |-
+          forwardBatch delivers batch through one WriteBatch, surfaces a failure
+          through OnError once per record the batch did not deliver, then releases the
+          entries as forward does for one.
+        name: forwardBatch
+        params: batch []*recordEntry
         recv: s *asyncSink
       - doc: |-
           forward delivers ent to the downstream sink and returns the entry to the
           recycler.
         name: forward
+        params: ent *recordEntry
+        recv: s *asyncSink
+      - doc: |-
+          settle records that n in-flight entries were delivered (written downstream
+          or surfaced via OnError) and wakes a Flush waiter.
+        name: settle
+        params: n int
+        recv: s *asyncSink
+      - doc: recycle clears ent and returns it to the pool.
+        name: recycle
         params: ent *recordEntry
         recv: s *asyncSink
       - doc: |-
@@ -412,6 +524,21 @@ types:
         params: bytes int, err error
         recv: s *asyncSink
     name: asyncSink
+  - doc: |-
+      recordEntry holds a single recycled Write payload. Producers populate
+      the rec + data fields, push the entry through the ring, and the drainer
+      recycles the entry once the downstream sink accepts it.
+    fields:
+      - doc: rec carries the originating record for the downstream sink.
+        name: rec
+        type: corelogger.RecordEvent
+      - doc: |-
+          data carries the encoded bytes; the entry owns the slice for the
+          duration of its trip through the ring.
+        name: data
+        type: "[]byte"
+    kind: struct
+    name: recordEntry
   - kind: named
     name: DropPolicy
     underlying: uint8
@@ -442,27 +569,23 @@ types:
         name: OnDrop
         type: func(missed int)
       - doc: |-
+          BatchMax is how many queued records the drainer hands the downstream
+          at once. When it is above one and the downstream implements
+          corelogger.BatchSink, the drainer takes up to BatchMax records off the
+          ring and delivers them with one WriteBatch — one write(2) for a file
+          sink instead of one per record; a downstream that does not implement
+          it still receives one Write per record. Non-positive means one, the
+          record-at-a-time delivery of a zero Config.
+        name: BatchMax
+        type: int
+      - doc: |-
           OnError is invoked for every downstream Write failure seen by the
           drainer goroutine. Async cannot block the producer on a failing
           downstream, so without this hook those errors are silently lost;
           the callback gives operators a path to emit a counter or log to a
-          fallback sink. nil disables the callback. Finding #24.
+          fallback sink. nil disables the callback. Finding #24. A failed
+          WriteBatch fires it once per record the batch did not deliver.
         name: OnError
         type: func(err error)
     kind: struct
     name: Config
-  - doc: |-
-      recordEntry holds a single recycled Write payload. Producers populate
-      the rec + data fields, push the entry through the ring, and the drainer
-      recycles the entry once the downstream sink accepts it.
-    fields:
-      - doc: rec carries the originating record for the downstream sink.
-        name: rec
-        type: corelogger.RecordEvent
-      - doc: |-
-          data carries the encoded bytes; the entry owns the slice for the
-          duration of its trip through the ring.
-        name: data
-        type: "[]byte"
-    kind: struct
-    name: recordEntry

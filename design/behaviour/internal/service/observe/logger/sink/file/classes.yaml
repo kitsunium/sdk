@@ -12,22 +12,51 @@ constants:
         type: os.FileMode
         value: "0o600"
     name: defaultFilePerm
+  - doc: |-
+      maxRetainedBatch is the largest concatenation buffer WriteBatch keeps for
+      the next batch: a burst of large records may grow it past this once, and
+      the sink then lets it go rather than hold the burst's size for its lifetime.
+    items:
+      - name: maxRetainedBatch
+        type: int
+        value: 1 << 20
+    name: maxRetainedBatch
 files:
   - decls: []
     name: doc.go
   - decls:
       - defaultFilePerm
+      - maxRetainedBatch
       - openRefusals
       - fileSink
       - New
       - (*fileSink).Write
+      - (*fileSink).WriteBatch
+      - retained
+      - wholeRecords
       - (*fileSink).Flush
+      - (*fileSink).fsync
       - (*fileSink).Close
     name: file.go
+  - decls:
+      - _
+    name: file_compliance.go
 functions:
   - name: New
     params: path string
     results: sink corelogger.Sink, err error
+  - doc: |-
+      retained is buf emptied for reuse, or nil when it grew past
+      maxRetainedBatch.
+    name: retained
+    params: buf []byte
+    results: "[]byte"
+  - doc: |-
+      wholeRecords counts the payloads, from the first, that lie entirely within
+      the first n bytes of their concatenation.
+    name: wholeRecords
+    params: payloads [][]byte, n int
+    results: int
 imports:
   context: context
   corefile: github.com/kitsunium/sdk/internal/core/observe/logger/sink/file
@@ -52,9 +81,20 @@ types:
         type: "*os.File"
       - doc: |-
           mu serialises Write calls so concurrent goroutines emit atomic lines
-          even when the payload exceeds PIPE_BUF.
+          even when the payload exceeds PIPE_BUF. Flush does NOT hold it across
+          the fsync (#815): a sync needs a stable descriptor, not the exclusion
+          of writes, and the descriptor of this sink never changes.
         name: mu
         type: sync.Mutex
+      - doc: batch is WriteBatch's concatenation buffer, reused under mu.
+        name: batch
+        type: "[]byte"
+      - doc: |-
+          syncFile, when set, replaces (*os.File).Sync as the fsync Flush runs: a
+          white-box test substitutes one that blocks, to prove a Write is not held
+          behind it. nil in production.
+        name: syncFile
+        type: func(f *os.File) error
     kind: struct
     methods:
       - doc: Write appends p onto the underlying file under the local mutex.
@@ -63,10 +103,23 @@ types:
         recv: s *fileSink
         results: n int, err error
       - doc: |-
+          WriteBatch appends every payload to the file in ONE write, under the
+          local mutex, and reports how many records landed whole (#807): the async
+          middleware hands a backlog over in one call, and the write(2) per record
+          that made a file sink cost four times a memory one is paid once per batch.
+        name: WriteBatch
+        params: ctx context.Context, recs []corelogger.RecordEvent, payloads [][]byte
+        recv: s *fileSink
+        results: written int, err error
+      - doc: |-
           Flush calls fsync on the underlying file so kernel page cache contents
           reach durable storage.
         name: Flush
         params: ctx context.Context
+        recv: s *fileSink
+        results: error
+      - doc: fsync is the descriptor's Sync, or the test's substitute.
+        name: fsync
         recv: s *fileSink
         results: error
       - doc: |-
@@ -101,3 +154,9 @@ vars:
           	},
           }
     name: openRefusals
+  - doc: fileSink takes a whole backlog in one write (#807).
+    items:
+      - name: _
+        type: corelogger.BatchSink
+        value: (*fileSink)(nil)
+    name: _

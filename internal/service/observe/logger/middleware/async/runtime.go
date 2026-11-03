@@ -1,17 +1,6 @@
 package async
 
-import (
-	"context"
-	"runtime"
-)
-
-// yieldOnce is the cooperative yield primitive used by the drainer when the
-// queue is empty and by Flush while waiting for the queue to drain. Wraps
-// runtime.Gosched so the call site stays self-documenting.
-func yieldOnce() {
-	//: scheduler hand-off so other goroutines (drainer or producer) progress.
-	runtime.Gosched()
-}
+import "context"
 
 // isClosed reports whether ch has been closed. Used by Write to refuse work
 // after Close without forcing a sync.Mutex on the hot path.

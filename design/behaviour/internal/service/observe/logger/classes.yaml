@@ -93,15 +93,23 @@ files:
   - decls:
       - genericHandler
       - NewHandler
+      - NewHandlerLeveled
+      - floorOrInfo
       - (*genericHandler).Enabled
       - (*genericHandler).Handle
+      - (*genericHandler).encode
+      - (*genericHandler).derive
       - (*genericHandler).WithAttrs
       - (*genericHandler).WithGroup
+      - (*genericHandler).withGroup
       - mergeAttrs
     name: handler.go
   - decls:
       - callerSkipDepth
       - loggerImpl
+      - over
+      - wantsSource
+      - (*loggerImpl).callerPC
       - New
       - NewWithTraceContext
       - (*loggerImpl).traceContext
@@ -130,6 +138,7 @@ files:
       - SourceFieldKey
       - sourceHandler
       - newSourceHandler
+      - (*sourceHandler).WantsSource
       - (*sourceHandler).Enabled
       - (*sourceHandler).Handle
       - (*sourceHandler).WithAttrs
@@ -148,6 +157,7 @@ files:
       - groupSeparator
       - TextHandler
       - NewTextHandler
+      - NewTextHandlerLeveled
       - (*TextHandler).Enabled
       - (*TextHandler).WithAttrs
       - (*TextHandler).WithGroup
@@ -163,6 +173,15 @@ functions:
   - name: NewHandler
     params: enc encoder.Encoder, sink corelogger.Sink, min level.Level
     results: h corelogger.Handler, err error
+  - name: NewHandlerLeveled
+    params: enc encoder.Encoder, sink corelogger.Sink, floor level.Leveler
+    results: h corelogger.Handler, err error
+  - doc: |-
+      floorOrInfo is floor, or the constant Info floor for a nil one — the zero
+      MinLevel's floor, so a nil Leveler is the default and not a panic.
+    name: floorOrInfo
+    params: floor level.Leveler
+    results: level.Leveler
   - doc: |-
       mergeAttrs returns a fresh slice combining parent and child attributes
       in order (parent first). Extracted so WithAttrs and Handle share a
@@ -170,6 +189,18 @@ functions:
     name: mergeAttrs
     params: parent, child []corelogger.AttrValue
     results: "[]corelogger.AttrValue"
+  - doc: |-
+      over builds a Logger over h with trace, asking h once whether its records
+      must carry the caller's program counter.
+    name: over
+    params: h corelogger.Handler, trace corelogger.TraceContextSource
+    results: "*loggerImpl"
+  - doc: |-
+      wantsSource reports h's answer to corelogger.SourceRequester; a Handler that
+      does not implement the port does not read RecordEvent.PC.
+    name: wantsSource
+    params: h corelogger.Handler
+    results: bool
   - name: New
     params: h corelogger.Handler
     results: lg corelogger.Logger, err error
@@ -228,6 +259,9 @@ functions:
     results: corelogger.Logger
   - name: NewTextHandler
     params: w io.Writer, min level.Level
+    results: h *TextHandler, err error
+  - name: NewTextHandlerLeveled
+    params: w io.Writer, floor level.Leveler
     results: h *TextHandler, err error
   - doc: |-
       appendTraceContext writes the two top-level correlation fields
@@ -417,12 +451,27 @@ types:
       - doc: attrs are prepended to every RecordEvent (handler-bound With*).
         name: attrs
         type: "[]corelogger.AttrValue"
+      - doc: |-
+          penc is enc as a corelogger.PrefixEncoder, nil when it is not one: the
+          bound attributes are then rendered with the record's on every emit.
+        name: penc
+        type: corelogger.PrefixEncoder
+      - doc: |-
+          prefix is attrs rendered once under groups by penc (#1016), spliced into
+          every line; nil with no bound attribute or no PrefixEncoder. WithAttrs
+          and WithGroup render it again, since the group stack prefixes every key.
+        name: prefix
+        type: "[]byte"
       - doc: groups is the active group prefix stack accumulated via WithGroup.
         name: groups
         type: "[]string"
-      - doc: min is the minimum level the handler emits; records below are dropped.
-        name: min
-        type: level.Level
+      - doc: |-
+          floor is the minimum level the handler emits, read on every record so a
+          level.Var retuned with Set takes effect on the next one (#1015); a
+          handler built from a plain Level holds level.Fixed. Derived handlers
+          share it, so one Set reaches every logger derived from this one.
+        name: floor
+        type: level.Leveler
       - doc: |-
           clk sources the timestamp when RecordEvent.Time is the zero value. The
           handler owns the Time fill so the encoded line and any downstream sink
@@ -448,6 +497,22 @@ types:
         recv: h *genericHandler
         results: error
       - doc: |-
+          encode renders r into dst and returns the line and r's attributes with the
+          bound ones first — the one allocation of an emit. With a PrefixEncoder the
+          bound attributes are the prefix rendered when they were bound, and only r's
+          own are rendered here (#1016); otherwise the encoder renders the merged set.
+        name: encode
+        params: dst []byte, r corelogger.RecordEvent
+        recv: h *genericHandler
+        results: line []byte, merged []corelogger.AttrValue
+      - doc: |-
+          derive returns a child of h bound to attrs under groups, its prefix
+          rendered once for the pair when the encoder is a PrefixEncoder.
+        name: derive
+        params: attrs []corelogger.AttrValue, groups []string
+        recv: h *genericHandler
+        results: "*genericHandler"
+      - doc: |-
           WithAttrs returns a derived genericHandler with the supplied attributes
           prepended onto every subsequent RecordEvent.
         name: WithAttrs
@@ -461,6 +526,15 @@ types:
         params: name string
         recv: h *genericHandler
         results: corelogger.Handler
+      - doc: |-
+          withGroup is WithGroup's derivation, kept out of it so WithGroup stays
+          within the inlining budget: the child owns a private groups slice
+          (copy-on-write — it must not alias the parent's) and the prefix rendered
+          under it.
+        name: withGroup
+        params: name string
+        recv: h *genericHandler
+        results: "*genericHandler"
     name: genericHandler
   - doc: |-
       loggerImpl is the default core.Logger wrapper over a core.Handler. It
@@ -483,8 +557,23 @@ types:
           With or WithGroup — they share the writers and own none of them.
         name: owned
         type: "*onceCloser"
+      - doc: |-
+          capturePC is whether the emission paths walk the stack for the caller's
+          program counter: the handler's answer to corelogger.SourceRequester,
+          asked once when the Logger is built (#1014). The walk was a fifth of an
+          emit, paid on every record for an attribute only WithCaller renders.
+        name: capturePC
+        type: bool
     kind: struct
     methods:
+      - doc: |-
+          callerPC is the application caller's program counter when this Logger's
+          handler reads it, zero otherwise. It is called directly by the three
+          emission paths (Log, LogAttrs, Builder.Send), so the caller is one frame
+          further up than callerSkipDepth counts from an emission path.
+        name: callerPC
+        recv: l *loggerImpl
+        results: uintptr
       - doc: |-
           traceContext reads the span identity for ctx, or the invalid zero value when
           this Logger carries no source. Kept as a method so the three emission paths
@@ -591,6 +680,13 @@ types:
         type: int
     kind: struct
     methods:
+      - doc: |-
+          WantsSource reports true: the decorator resolves RecordEvent.PC into the
+          "source" attribute, so a Logger over it walks the stack on every emit
+          (corelogger.SourceRequester, #1014).
+        name: WantsSource
+        recv: h *sourceHandler
+        results: bool
       - doc: Enabled delegates the level decision to the wrapped Handler unchanged.
         name: Enabled
         params: ctx context.Context, r corelogger.RecordEvent
@@ -633,9 +729,12 @@ types:
           emitted attribute key is rendered as "g1.g2.….key" in the line.
         name: groups
         type: "[]string"
-      - doc: min is the minimum level the handler emits; records below are dropped.
-        name: min
-        type: level.Level
+      - doc: |-
+          floor is the minimum level the handler emits, read on every record so a
+          level.Var retuned with Set takes effect on the next one (#1015); derived
+          handlers share it.
+        name: floor
+        type: level.Leveler
       - doc: clk sources the timestamp when RecordEvent.Time is the zero value.
         name: clk
         type: clock.Clock

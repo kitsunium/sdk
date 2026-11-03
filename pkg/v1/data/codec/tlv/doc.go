@@ -6,8 +6,9 @@
 // The codec is the SDK's self-describing Type-Length-Value binary: every
 // value carries its kind and its length, so a document decodes without a
 // schema, into a typed target or into an interface. Structs, maps, slices
-// and the scalar kinds are written by reflection. Input is bounded in size
-// and depth. It streams.
+// and the scalar kinds are written by reflection, a map's pairs in key
+// order, so equal values give equal bytes. Input is bounded in size and
+// depth. It streams.
 //
 // Everything that dispatches through the registry by format name then
 // reads and writes it: the codec package's Marshal and Unmarshal,
@@ -27,7 +28,7 @@
 //	CodeUnmarshalFailed  0.3.22.2  a malformed record, a type mismatch, or the reader failed
 //	CodeUnsupportedType  0.3.22.3  a channel, a function, a complex number, an unsafe pointer
 //	CodeDepthExceeded    0.3.22.4  nesting past 32 levels
-//	CodeSizeExceeded     0.3.22.5  an input past 10 MiB
+//	CodeSizeExceeded     0.3.22.5  an input, or one streamed record, past 10 MiB
 //	CodeTruncated        0.3.22.6  the input ends inside a record
 //
 // No error message quotes the input.

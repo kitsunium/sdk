@@ -29,8 +29,10 @@ const (
 	textKindSum       string = "sum"
 	textKindGauge     string = "gauge"
 	textKindHistogram string = "histogram"
-	textMonotonic     string = "monotonic"
-	textNonMonotonic  string = "non_monotonic"
+	// textKindExponential names an exponential (base-2) histogram.
+	textKindExponential string = "exponential_histogram"
+	textMonotonic       string = "monotonic"
+	textNonMonotonic    string = "non_monotonic"
 )
 
 // Text is the default text exporter, registered to write snapshots to stderr.
@@ -56,7 +58,7 @@ var Text = coremetrics.RegisterExporter(newTextExporter(textExporterName, os.Std
 //	# resource <k>=<v> …
 //	# scope name="…" [version="…"]
 //	# window start="…" end="…"
-//	# metric <name> <sum|gauge|histogram> [<temporality>] [monotonic|non_monotonic] [description="…"]
+//	# metric <name> <sum|gauge|histogram|exponential_histogram> [<temporality>] [monotonic|non_monotonic] [description="…"] [unit="…"]
 //	<name>{<k>=<v>,…} <value>
 //
 // with one "# metric" header per instrument name followed by that name's
@@ -109,6 +111,7 @@ func (e *textExporter) Export(snap coremetrics.SnapshotValue) error {
 	buf = appendSums(buf, snap.Sums)
 	buf = appendGauges(buf, snap.Gauges)
 	buf = appendHistograms(buf, snap.Histograms)
+	buf = appendExponentials(buf, snap.ExponentialHistograms)
 	//: single write — the only error surface — serialised so concurrent
 	//: Exports cannot interleave partial lines into a non-atomic dst.
 	e.mu.Lock()
@@ -193,6 +196,7 @@ func appendSums(buf []byte, metrics map[string]coremetrics.SumMetricValue) []byt
 			temporality:  metric.Temporality.String(),
 			monotonicity: monotonicity,
 			description:  metric.Description,
+			unit:         metric.Unit,
 		})
 		//: then each series, already ordered by attribute set by Collect.
 		for _, point := range metric.Points {
@@ -215,6 +219,7 @@ func appendGauges(buf []byte, metrics map[string]coremetrics.GaugeMetricValue) [
 			name:        name,
 			kind:        textKindGauge,
 			description: metrics[name].Description,
+			unit:        metrics[name].Unit,
 		})
 		//: one line per series.
 		for _, point := range metrics[name].Points {
@@ -240,6 +245,7 @@ func appendHistograms(buf []byte, metrics map[string]coremetrics.HistogramMetric
 			kind:        textKindHistogram,
 			temporality: metric.Temporality.String(),
 			description: metric.Description,
+			unit:        metric.Unit,
 		})
 		//: one line per series.
 		for _, point := range metric.Points {
@@ -249,6 +255,31 @@ func appendHistograms(buf []byte, metrics map[string]coremetrics.HistogramMetric
 		}
 	}
 	//: hand back the extended buffer.
+	return buf
+}
+
+// appendExponentials renders each exponential histogram series' observation
+// count, as appendHistograms does for the explicit ones; the scale and the
+// buckets — like an explicit ladder, and like every exemplar — are reachable
+// through the Snapshot API and carried by OTLP/JSON.
+func appendExponentials(buf []byte, metrics map[string]coremetrics.ExponentialHistogramMetricValue) []byte {
+	//: names in order, each header then its series.
+	for _, name := range sortedKeys(metrics) {
+		metric := metrics[name]
+		buf = appendMetricHeader(buf, metricHeader{
+			name:        name,
+			kind:        textKindExponential,
+			temporality: metric.Temporality.String(),
+			description: metric.Description,
+			unit:        metric.Unit,
+		})
+		//: one line per series: its count.
+		for _, point := range metric.Points {
+			buf = appendSeriesLine(buf, name, point.Attrs,
+				strconv.FormatUint(point.Count, decimalBase))
+		}
+	}
+	//: the extended buffer.
 	return buf
 }
 
@@ -287,6 +318,12 @@ func appendMetricHeader(buf []byte, header metricHeader) []byte {
 		//: quoted and escaped — a docstring is prose, and prose is data.
 		buf = append(buf, " description="...)
 		buf = appendQuoted(buf, header.description)
+	}
+	//: a unit after the description, absent when undeclared (ADR 0208).
+	if header.unit != "" {
+		//: quoted like the description, so the line parses the same way.
+		buf = append(buf, " unit="...)
+		buf = appendQuoted(buf, header.unit)
 	}
 	//: terminate the line.
 	return append(buf, '\n')

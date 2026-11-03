@@ -112,12 +112,18 @@ func (s *structDecoder) decodeMap(d *decodeState, v reflect.Value, h header) err
 
 // decodePair decodes one key and the value of the field it names.
 func (s *structDecoder) decodePair(d *decodeState, v reflect.Value) error {
+	at := d.off
 	key, err := d.readKey()
 	if err != nil {
 		//: not a string key, or truncated.
 		return err
 	}
 	f := s.byName[string(key)]
+	//: a strict decode refuses a key no field claims.
+	if f == nil && d.strict {
+		//: refused.
+		return unknownMember(at, v.Type())
+	}
 	//: a key no field claims is stepped over.
 	if f == nil {
 		//: consume its value.

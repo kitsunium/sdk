@@ -23,6 +23,7 @@ Failures carry the range 0.3.3.\*; match them with errs.HasCode, or the sentinel
 ```
 CodeMarshalFailed    0.3.3.1  encoding/xml could not encode the value
 CodeUnmarshalFailed  0.3.3.2  the input is not XML the target can hold
+CodeSizeExceeded     0.3.3.3  a value longer than NewBoundedDecoder's byte ceiling
 ```
 
 No error message quotes the input.
@@ -44,6 +45,17 @@ CodeMarshalFailed is 0.3.3.1: encoding/xml could not encode the value.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/xml.CodeXMLMarshalFailed`.
 
 Code `0.3.3.1`
+
+<a name="CodeSizeExceeded"></a>
+```go
+const CodeSizeExceeded errs.Code = 197379
+```
+
+CodeSizeExceeded is 0.3.3.3: a value longer than NewBoundedDecoder's byte ceiling (#891).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/xml.CodeXMLSizeExceeded`.
+
+Code `0.3.3.3`
 
 <a name="CodeUnmarshalFailed"></a>
 ```go
@@ -75,6 +87,17 @@ MarshalFailed is the sentinel of [CodeMarshalFailed](#CodeMarshalFailed).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/xml.MarshalFailed`.
 
 Code `0.3.3.1` · reason `MARSHAL_FAILED` · public "XML encoding failed"
+
+<a name="SizeExceeded"></a>
+```go
+var SizeExceeded *errs.Error
+```
+
+SizeExceeded is the sentinel of [CodeSizeExceeded](#CodeSizeExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/xml.SizeExceeded`.
+
+Code `0.3.3.3` · reason `SIZE_EXCEEDED` · public "XML input exceeds a size limit"
 
 <a name="UnmarshalFailed"></a>
 ```go

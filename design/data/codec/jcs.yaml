@@ -1,0 +1,198 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/jcs
+packages:
+  - codes:
+      - const:
+          - doc: |-
+              CodeJCSNotJSON identifies a document to canonicalize that is not exactly
+              one I-JSON value (RFC 7493): a syntax error, a truncation, trailing data,
+              a duplicated member name, invalid UTF-8, or nesting past the reader's
+              bound.
+            name: CodeJCSNotJSON
+            note: "range: 0.3.102.0 - 0.3.102.255"
+            value: "0x00_03_66_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeJCSNumberInvalid identifies a number no IEEE 754 double holds — one
+              past the largest finite double — which RFC 8785 §3.2.2.3 cannot write.
+            name: CodeJCSNumberInvalid
+            value: "0x00_03_66_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeJCSMarshalFailed identifies a Go value encoding/json/v2 refuses to
+              encode before it is canonicalized.
+            name: CodeJCSMarshalFailed
+            value: "0x00_03_66_03"
+        type: errs.Code
+    doc: |-
+      Package jcs declares the error codes and the sentinels of the RFC 8785
+      canonicalization package, internal/service/data/codec/jcs — range
+      0.3.102.* (ADR 0102 amendment of 2026-11-03).
+
+      The codes live in the core at the path that mirrors the package emitting
+      them (ADR 0160 §2). Nothing here encodes or decodes.
+
+      Package jcs — the sentinel *errs.Error values, one per code. No Public and
+      no Private below carries a byte of the document: what is signed is
+      routinely a record holding personal data.
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/jcs
+    sentinels:
+      - var:
+          - code: CodeJCSNotJSON
+            doc: |-
+              NotJSON refuses a document that is not exactly one I-JSON value. Its field
+              names the byte offset where reading stopped, never what the document held.
+            exit: DATAERR
+            http: 400
+            name: NotJSON
+            private: "service/data/codec/jcs: the document is not exactly one I-JSON value; the field names the offset, never its content"
+            public: The document is not a JSON value
+            reason: NOT_JSON
+          - code: CodeJCSNumberInvalid
+            doc: |-
+              NumberInvalid refuses a number past the largest finite IEEE 754 double.
+              Its field names the offset, never the number.
+            exit: DATAERR
+            http: 400
+            name: NumberInvalid
+            private: "service/data/codec/jcs: a number is past the largest finite double; the field names the offset"
+            public: A number of the document has no canonical form
+            reason: NUMBER_INVALID
+          - code: CodeJCSMarshalFailed
+            doc: MarshalFailed wraps encoding/json/v2's refusal of the value Marshal was given.
+            name: MarshalFailed
+            private: "service/data/codec/jcs: encoding/json/v2 refused the value"
+            public: The value has no JSON encoding
+            reason: MARSHAL_FAILED
+  - doc: |-
+      Package jcs writes the JSON Canonicalization Scheme of RFC 8785: one byte
+      form for a JSON document, whatever the order of its members or the spelling
+      of its numbers and strings, so it can be signed or hashed and checked by
+      anyone who canonicalizes the same document.
+
+      # The canonical form
+
+      The document must be one I-JSON value (RFC 7493): valid UTF-8, no
+      duplicated member name, no trailing data. It is then written with no
+      whitespace; object members sorted by their names' UTF-16 code units
+      (§3.2.3), recursively; strings with only '"', '\\' and the control
+      characters escaped — \b, \t, \n, \f and \r by name, the others as \u00XX
+      in lower case — and every other character as itself (§3.2.2.2); numbers as
+      ECMAScript writes an IEEE 754 double (§3.2.2.3): the shortest digits that
+      read back as the same double, in decimal notation from 1e-6 up to 1e21 and
+      in exponent notation outside, -0 as 0. A number past the largest finite
+      double is refused.
+
+      It is not a codec Format (ADR 0102's precedent): a canonical form is a
+      policy over JSON, not a wire format of its own. Nothing it returns in an
+      error comes from the document.
+    functions:
+      - doc: |-
+          Canonicalize returns the RFC 8785 canonical form of the JSON document doc.
+          It returns NotJSON — naming the offset, never a byte of the document — when
+          doc is not exactly one I-JSON value, and NumberInvalid for a number past
+          the largest finite double.
+        in:
+          - name: doc
+            type: "[]byte"
+        name: Canonicalize
+        out:
+          - type: "[]byte"
+          - type: error
+      - doc: |-
+          Marshal returns the canonical form of v: its encoding/json/v2 encoding —
+          the default options, which refuse invalid UTF-8 as I-JSON does — then
+          Canonicalize. A value json/v2 refuses is MarshalFailed.
+        in:
+          - name: v
+            type: any
+        name: Marshal
+        out:
+          - type: "[]byte"
+          - type: error
+    path: github.com/kitsunium/sdk/internal/service/data/codec/jcs
+  - doc: |-
+      Package jcs writes the JSON Canonicalization Scheme of RFC 8785: one byte
+      form for a JSON document — members sorted, no whitespace, numbers and
+      strings spelled one way — so it can be signed or hashed, and checked by
+      anyone who canonicalizes the same document.
+
+      	canonical, err := jcs.Canonicalize(document)
+      	digest := sha256.Sum256(canonical)
+
+      Marshal canonicalizes a Go value's encoding/json/v2 encoding. The document
+      must be one I-JSON value (RFC 7493) — valid UTF-8, no duplicated member
+      name — or Canonicalize returns [NotJSON], naming the offset and never a byte
+      of the document; a number past the largest finite double is
+      [NumberInvalid]. It is not a codec Format: a canonical form is a policy over
+      JSON, as strictjson is a policy over decoding.
+    facade:
+      - const:
+          - doc: CodeNotJSON is the code of [NotJSON] (0.3.102.1), for errs.HasCode.
+            name: CodeNotJSON
+            reexport: corejcs.CodeJCSNotJSON
+            type: errs.Code
+            typed: true
+            value: "0x00_03_66_01"
+          - doc: CodeNumberInvalid is the code of [NumberInvalid] (0.3.102.2).
+            name: CodeNumberInvalid
+            reexport: corejcs.CodeJCSNumberInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_66_02"
+          - doc: CodeMarshalFailed is the code of [MarshalFailed] (0.3.102.3).
+            name: CodeMarshalFailed
+            reexport: corejcs.CodeJCSMarshalFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_66_03"
+        doc: The error codes, range 0.3.102.*, declared in the core (ADR 0160).
+      - doc: "The sentinels, for errors.Is: each carries the code of the same name."
+        var:
+          - doc: |-
+              NotJSON refuses a document that is not exactly one I-JSON value; its field
+              names the offset, never its content.
+            name: NotJSON
+            reexport: corejcs.NotJSON
+            type: "*errs.Error"
+          - doc: NumberInvalid refuses a number past the largest finite double.
+            name: NumberInvalid
+            reexport: corejcs.NumberInvalid
+            type: "*errs.Error"
+          - doc: MarshalFailed wraps encoding/json/v2's refusal of a value.
+            name: MarshalFailed
+            reexport: corejcs.MarshalFailed
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            Canonicalize returns the RFC 8785 canonical form of the JSON document doc,
+            or NotJSON, or NumberInvalid.
+          forward: svcjcs.Canonicalize
+          in:
+            - name: doc
+              type: "[]byte"
+          name: Canonicalize
+          out:
+            - type: "[]byte"
+            - type: error
+      - func:
+          doc: |-
+            Marshal returns the RFC 8785 canonical form of v's encoding/json/v2
+            encoding, or MarshalFailed.
+          forward: svcjcs.Marshal
+          in:
+            - name: v
+              type: any
+          name: Marshal
+          out:
+            - type: "[]byte"
+            - type: error
+    imports:
+      corejcs: github.com/kitsunium/sdk/internal/core/data/codec/jcs
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcjcs: github.com/kitsunium/sdk/internal/service/data/codec/jcs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/jcs

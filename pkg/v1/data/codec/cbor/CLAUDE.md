@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-11-03T00:00:00Z -->
 # pkg/v1/data/codec/cbor/
 
 ## Purpose
@@ -17,6 +17,8 @@ by format name then reads and writes it: `codec.Marshal` / `codec.Unmarshal`,
 |---|---|
 | `Format` | the untyped constant `"cbor"` |
 | `Code*`, and the sentinels of the same names | the `0.3.6.*` codes, aliased from `internal/core/data/codec/cbor`, where they are declared (ADR 0160, ADR 0074) |
+| `NewStrict`, `NewDeterministic` | forwarders to the service package's opt-in instances: one reading (#1106), and RFC 8949 §4.2.1's core deterministic encoding for signed bytes (#896) |
+| `Tag` | alias of the service package's `Tag`: an application's own CBOR tag — COSE, CWT (#896) |
 
 ## Why-this-shape
 

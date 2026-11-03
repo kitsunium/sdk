@@ -340,3 +340,39 @@ BenchmarkGeneratedUnmarshal-8             	   10000	    108993 ns/op	   45936 B/
 PASS
 ok  	github.com/kitsunium/sdk/third-party/codec/protobuf
 ```
+
+## #905: the Appender writes in place, and the stream
+
+`Append` now goes through `proto.MarshalOptions.MarshalAppend` into the
+caller's buffer instead of `Marshal` and a copy; `Marshal` is `Append(nil, v)`.
+linux/amd64, 4 vCPU VM (`GOMAXPROCS=4`), go1.27.3, against 740e7c1e:
+
+| row | before | after |
+|---|---|---|
+| Append/protobuf/small | 144 B, 7 allocs | 96 B, **6** allocs |
+| Append/protobuf/medium | 1 664 B, 61 allocs | 960 B, 60 allocs |
+| Append/protobuf/large | 11 264 B, 401 allocs | 6 400 B, 400 allocs |
+| GeneratedAppend (new) | — | 0 B, **0** allocs, 38 µs |
+
+The `structpb` rows keep the allocations protobuf-go makes around a map
+field, which no Appender removes: #905's "one allocation" holds for a
+generated message, where `Append` into a destination with room allocates
+nothing. Deterministic marshalling, which #905 also proposed, measured +13 to
++26 % and up to four more allocations on these rows (it sorts the map
+entries) and was left out.
+
+The stream rows, three runs each (one varint-delimited message per op):
+
+| row | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| StreamEncode/protobuf/small | 1 645 | 48 | 3 |
+| StreamEncode/protobuf/medium | 14 536 | 480 | 30 |
+| StreamEncode/protobuf/large | 78 748 | 3 200 | 200 |
+| StreamDecode/protobuf/small | 3 519 | 656 | 19 |
+| StreamDecode/protobuf/medium | 37 103 | 6 368 | 201 |
+| StreamDecode/protobuf/large | 212 726 | 42 712 | 1 083 |
+
+`Encode` sizes the message once and appends prefix and body into a pooled
+buffer (`UseCachedSize`), which is why it beats `Marshal` (2 889 ns,
+7 allocs on small); `Decode` is `Unmarshal` (3 363 ns, 18 allocs) plus the
+frame.

@@ -1,0 +1,38 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "jsonschema",
+    srcs = [
+        "doc.go",
+        "gen_facade.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/jsonschema",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/codec/jsonschema",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/jsonschema",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":jsonschema",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "jsonschema_test",
+    srcs = [
+        "gen_api_test.go",
+        "jsonschema_external_test.go",
+    ],
+    deps = [
+        ":jsonschema",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/jsonschema",
+        "//pkg/v1/errs",
+    ],
+)

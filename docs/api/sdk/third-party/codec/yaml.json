@@ -22,10 +22,25 @@
       "name": "yaml",
       "dir": ".",
       "layer": "thirdparty",
-      "doc": "Package yaml wraps gopkg.in/yaml.v3 as a codec.Codec implementation\nregistered under the Format \"yaml-full\". It is the whole of YAML 1.2 as\nyaml.v3 reads it — anchors and aliases, tags, merge keys, complex keys,\nmulti-document streams — for the program that needs a construct the SDK's\nown codec refuses by name.\n\nIt is a module of its own under third-party/ (ADR 0157), NOT\ninternal/service/data/codec, because the SDK's own \"yaml\" Format is a native,\nstandard-library-only reader of a named subset (internal/service/data/codec/yaml)\nand the public module stays free of gopkg.in/yaml.v3. It is opt-in: a consumer blank-imports this package\nto register \"yaml-full\"; pkg/v1/data/codec does NOT pull it.\n\nIt claims NO MIME type and NO file extension. \".yaml\", \".yml\" and\napplication/yaml stay the native codec's, whatever else a program imports, so\nimporting this package never changes what an extension lookup returns; a\ncaller reaches the full reader by naming \"yaml-full\".\n\nStreaming is supported: yaml.v3 exposes Encoder/Decoder types that serialise\na sequence of documents separated by `---` markers.\n\nPackage yaml — range 0.3.77.* (third-party/codec/yaml block).\n\nPackage yaml — adapts yaml.v3's *Decoder to codec.Decoder.\n\nPackage yaml — adapts yaml.v3's *Encoder to codec.Encoder.\n\nPackage yaml — declares the sentinel *errs.Error values for the full YAML codec.\n"
+      "doc": "Package yaml wraps gopkg.in/yaml.v3 as a codec.Codec implementation\nregistered under the Format \"yaml-full\". It is the whole of YAML 1.2 as\nyaml.v3 reads it — anchors and aliases, tags, merge keys, complex keys,\nmulti-document streams — for the program that needs a construct the SDK's\nown codec refuses by name.\n\nIt is a module of its own under third-party/ (ADR 0157), NOT\ninternal/service/data/codec, because the SDK's own \"yaml\" Format is a native,\nstandard-library-only reader of a named subset (internal/service/data/codec/yaml)\nand the public module stays free of gopkg.in/yaml.v3. It is opt-in: a consumer blank-imports this package\nto register \"yaml-full\"; pkg/v1/data/codec does NOT pull it.\n\nIt claims NO MIME type and NO file extension. \".yaml\", \".yml\" and\napplication/yaml stay the native codec's, whatever else a program imports, so\nimporting this package never changes what an extension lookup returns; a\ncaller reaches the full reader by naming \"yaml-full\".\n\nStreaming is supported: yaml.v3 exposes Encoder/Decoder types that serialise\na sequence of documents separated by `---` markers.\n\nNesting is bounded by yaml.v3 itself, at 10 000 flow levels and 10 000\nindentation levels; Unmarshal reports that refusal as DEPTH_EXCEEDED\n(0.3.77.3), read from the document's structure, not as a syntax error. The\nstreaming Decoder, which never holds a whole document, keeps\nYAML_FULL_UNMARSHAL_FAILED.\n\nPackage yaml — range 0.3.77.* (third-party/codec/yaml block).\n\nPackage yaml — adapts yaml.v3's *Decoder to codec.Decoder.\n\nPackage yaml — adapts yaml.v3's *Encoder to codec.Encoder.\n\nPackage yaml — declares the sentinel *errs.Error values for the full YAML codec.\n"
     }
   ],
   "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/yaml.CodeYAMLFullDepthExceeded",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/codec/yaml",
+      "name": "CodeYAMLFullDepthExceeded",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "216323",
+      "code": {
+        "value": "0.3.77.3"
+      },
+      "doc": "CodeYAMLFullDepthExceeded identifies a document nested past\ngopkg.in/yaml.v3's own bound — 10 000 flow levels or 10 000 indentation\nlevels — which the library refuses before it recurses further.\n",
+      "file": "gen_codes.go",
+      "layer": "thirdparty"
+    },
     {
       "id": "go:github.com/kitsunium/sdk/third-party/codec/yaml.CodeYAMLFullMarshalFailed",
       "kind": "const",
@@ -65,6 +80,22 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/codec.Codec",
       "doc": "Codec is the registered full-YAML singleton.\n",
       "file": "codec.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/yaml.DepthExceeded",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/codec/yaml",
+      "name": "DepthExceeded",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.77.3",
+        "reason": "DEPTH_EXCEEDED",
+        "public": "YAML document nested too deeply"
+      },
+      "doc": "DepthExceeded marks a document nested past gopkg.in/yaml.v3's bound of\n10 000 levels; its reason is the one every native reader's nesting\nrefusal carries.\n",
+      "file": "gen_codes.go",
       "layer": "thirdparty"
     },
     {

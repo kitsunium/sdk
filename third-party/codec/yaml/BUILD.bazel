@@ -13,6 +13,7 @@ go_library(
     srcs = [
         "codec.go",
         "decoder.go",
+        "depth.go",
         "doc.go",
         "encoder.go",
         "gen_codes.go",
@@ -41,6 +42,7 @@ go_test(
         "codec_integration_test.go",
         "codec_internal_test.go",
         "decoder_internal_test.go",
+        "depth_external_test.go",
         "differential_fuzz_external_test.go",
         "encoder_internal_test.go",
         "gen_api_test.go",

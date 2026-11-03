@@ -219,12 +219,16 @@ func marshalJSONPooled(v any) (jsonBytes []byte, buf *bytes.Buffer, err error) {
 
 // Unmarshal base-N decodes data, then parses the resulting JSON into v.
 func (c *baseencCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: cap the input before allocating the decode buffer.
 	if len(data) > maxBaseEncBytes {
 		//: CWE-400 defence — refuse oversized inputs at the boundary.
 		return errs.Wrap(nil, errs.WrapParams{
 			Code:    corebaseenc.CodeBaseEncSizeExceeded,
-			Reason:  "BASE_ENC_SIZE_EXCEEDED",
+			Reason:  "SIZE_EXCEEDED",
 			Public:  "base-N input exceeds size limit",
 			Private: "service/data/codec/baseenc.Unmarshal: len(data) > maxBaseEncBytes",
 		})
@@ -612,7 +616,7 @@ func convSizeExceeded(where string) error {
 	//: reuse the shared size sentinel — the cap differs, the reason does not.
 	return errs.Wrap(nil, errs.WrapParams{
 		Code:    corebaseenc.CodeBaseEncSizeExceeded,
-		Reason:  "BASE_ENC_SIZE_EXCEEDED",
+		Reason:  "SIZE_EXCEEDED",
 		Public:  "base-N input exceeds size limit",
 		Private: where,
 	})

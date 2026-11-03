@@ -20,8 +20,8 @@ Stdlib-only: this package imports `internal/kernel/errs` and nothing else.
 |---|---|---|---|
 | `0.3.36.1` | `CodeBSONMarshalFailed` | `MarshalFailed` | `BSON_MARSHAL_FAILED` |
 | `0.3.36.2` | `CodeBSONUnmarshalFailed` | `UnmarshalFailed` | `BSON_UNMARSHAL_FAILED` |
-| `0.3.36.3` | `CodeBSONSizeExceeded` | `SizeExceeded` | `BSON_SIZE_EXCEEDED` |
-| `0.3.36.4` | `CodeBSONDepthExceeded` | `DepthExceeded` | `BSON_DEPTH_EXCEEDED` |
+| `0.3.36.3` | `CodeBSONSizeExceeded` | `SizeExceeded` | `SIZE_EXCEEDED` |
+| `0.3.36.4` | `CodeBSONDepthExceeded` | `DepthExceeded` | `DEPTH_EXCEEDED` |
 | `0.3.36.5` | `CodeBSONValueInvalid` | `ValueInvalid` | `BSON_VALUE_INVALID` |
 
 A `pkg/v1` facade that names these aliases this package, never the service one (ADR 0074).

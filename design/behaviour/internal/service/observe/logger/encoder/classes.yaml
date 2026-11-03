@@ -32,28 +32,6 @@ constants:
         value: "10"
     name: jsonDecimalBase
   - doc: |-
-      jsonFloatPrec is the -1 sentinel asking strconv for the shortest
-      round-trippable float64 representation.
-    items:
-      - name: jsonFloatPrec
-        type: int
-        value: "-1"
-    name: jsonFloatPrec
-  - doc: jsonFloatBitSize tells strconv.AppendFloat we are formatting a 64-bit float.
-    items:
-      - name: jsonFloatBitSize
-        type: int
-        value: "64"
-    name: jsonFloatBitSize
-  - doc: |-
-      jsonFloatFormat is the byte verb ('g') selecting strconv's
-      exponent-or-decimal float64 mode.
-    items:
-      - name: jsonFloatFormat
-        type: byte
-        value: "'g'"
-    name: jsonFloatFormat
-  - doc: |-
       jsonTimestampOpen opens the object's first member, "ts", up to the opening
       quote of its value.
     items:
@@ -273,12 +251,12 @@ files:
       - ReservesKey
     name: encoder.go
   - decls:
+      - _
+    name: encoder_compliance.go
+  - decls:
       - jsonEncoderName
       - jsonGroupSeparator
       - jsonDecimalBase
-      - jsonFloatPrec
-      - jsonFloatBitSize
-      - jsonFloatFormat
       - jsonTimestampOpen
       - jsonLevelMember
       - jsonMessageMember
@@ -286,6 +264,8 @@ files:
       - NewJSON
       - (*jsonEncoder).Name
       - (*jsonEncoder).Append
+      - (*jsonEncoder).AppendAttrs
+      - (*jsonEncoder).AppendWithPrefix
       - appendJSONHeader
       - appendJSONTraceContext
       - appendJSONAttr
@@ -305,6 +285,8 @@ files:
       - NewText
       - (*textEncoder).Name
       - (*textEncoder).Append
+      - (*textEncoder).AppendAttrs
+      - (*textEncoder).AppendWithPrefix
       - appendHeader
       - appendTraceContext
       - AppendSanitized
@@ -364,8 +346,9 @@ functions:
     params: dst []byte, a corelogger.AttrValue
     results: "[]byte"
   - doc: |-
-      appendJSONFloat renders f as a bare JSON number, degrading NaN and ±Inf to
-      the null literal because the JSON grammar has no representation for them.
+      appendJSONFloat renders f as the bare JSON number encoding/json writes
+      (1000000, 1e-7), degrading NaN and ±Inf to the null literal because the
+      JSON grammar has no representation for them.
     name: appendJSONFloat
     params: dst []byte, f float64
     results: "[]byte"
@@ -509,7 +492,6 @@ imports:
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
   jsonenc: github.com/kitsunium/sdk/internal/kernel/jsonenc
-  math: math
   strconv: strconv
   strings: strings
   time: time
@@ -550,6 +532,23 @@ types:
         params: dst []byte, groups []string, r corelogger.RecordEvent
         recv: e *jsonEncoder
         results: "[]byte"
+      - doc: |-
+          AppendAttrs renders attrs as they appear in an object under groups — the
+          comma before each member, the dotted group prefix, the reserved-key rename
+          and the escaping included — for a handler to keep and splice into every
+          record with AppendWithPrefix (corelogger.PrefixEncoder, #1016).
+        name: AppendAttrs
+        params: dst []byte, groups []string, attrs []corelogger.AttrValue
+        recv: e *jsonEncoder
+        results: "[]byte"
+      - doc: |-
+          AppendWithPrefix serialises r as Append does, with prefix — the bound
+          attributes AppendAttrs rendered for the same groups — spliced after the
+          header and the trace-context members and before r's own attributes.
+        name: AppendWithPrefix
+        params: dst []byte, groups []string, prefix []byte, r corelogger.RecordEvent
+        recv: e *jsonEncoder
+        results: "[]byte"
     name: jsonEncoder
   - doc: |-
       textEncoder renders records as a single plain-text line. Unexported so the
@@ -572,4 +571,32 @@ types:
         params: dst []byte, groups []string, r corelogger.RecordEvent
         recv: e *textEncoder
         results: "[]byte"
+      - doc: |-
+          AppendAttrs renders attrs as they appear in a line under groups — the
+          space before each, the group prefix, the reserved-key rename and the
+          framing scrub included — for a handler to keep and splice into every
+          record with AppendWithPrefix (corelogger.PrefixEncoder, #1016).
+        name: AppendAttrs
+        params: dst []byte, groups []string, attrs []corelogger.AttrValue
+        recv: e *textEncoder
+        results: "[]byte"
+      - doc: |-
+          AppendWithPrefix serialises r as Append does, with prefix — the bound
+          attributes AppendAttrs rendered for the same groups — spliced after the
+          header and the trace context and before r's own attributes.
+        name: AppendWithPrefix
+        params: dst []byte, groups []string, prefix []byte, r corelogger.RecordEvent
+        recv: e *textEncoder
+        results: "[]byte"
     name: textEncoder
+vars:
+  - doc: Both encoders render bound attributes once (#1016).
+    grouped: true
+    items:
+      - name: _
+        type: corelogger.PrefixEncoder
+        value: (*textEncoder)(nil)
+      - name: _
+        type: corelogger.PrefixEncoder
+        value: (*jsonEncoder)(nil)
+    name: _

@@ -281,6 +281,8 @@ sequences:
         kind: actor
       - id: (*multipartCodec).Unmarshal
         kind: self
+      - id: codec
+        kind: package
       - id: Boundary
         kind: internal
       - id: c.decoderFor
@@ -290,6 +292,14 @@ sequences:
       - id: readJSONMediated
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - bind: boundary, berr
         eval: Boundary(data)
         to: Boundary
@@ -419,33 +429,51 @@ sequences:
         to: c.decoderFor
   - of: (*multipartCodec).encoderFor
     steps:
-      - return: "&multipartEncoder{inner: stdmp.NewWriter(w), count: counter{limits: c.limits}}"
+      - return: "&multipartEncoder{w: w, boundary: generateBoundary(), head: make([]byte, 0, headScratchBytes), count: counter{limits: c.limits}}"
   - of: (*multipartCodec).pinnedEncoder
     participants:
       - id: caller
         kind: actor
       - id: (*multipartCodec).pinnedEncoder
         kind: self
-      - id: c.encoderFor
+      - id: validateBoundary
         kind: internal
-      - id: built.inner.SetBoundary
-        kind: value
     steps:
-      - bind: built
-        eval: c.encoderFor(w)
-        to: c.encoderFor
       - opt:
           do:
-            - return: nil, boundaryInvalid("mime/multipart rejected the caller-supplied boundary")
+            - return: nil, verr
           init:
-            bind: serr
-            eval: built.inner.SetBoundary(boundary)
-            to: built.inner.SetBoundary
-          when: serr != nil
-      - return: built, nil
+            bind: verr
+            eval: validateBoundary(boundary)
+            to: validateBoundary
+          when: verr != nil
+      - return: "&multipartEncoder{w: w, boundary: boundary, head: make([]byte, 0, headScratchBytes), count: counter{limits: c.limits}}, nil"
   - of: (*multipartCodec).decoderFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartCodec).decoderFor
+        kind: self
+      - id: newDecoder
+        kind: internal
     steps:
-      - return: "&multipartDecoder{inner: stdmp.NewReader(r, boundary), count: counter{limits: c.limits}}"
+      - return: newDecoder(r, boundary, c.limits)
+        to: newDecoder
+  - of: newDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: newDecoder
+        kind: self
+      - id: stdmp
+        kind: stdlib
+    steps:
+      - bind: d
+        eval: "&multipartDecoder{wire: wireBudget{r: r, limit: limits.MaxTotalBytes}, count: counter{limits: limits}}"
+      - set: d.inner
+        to: stdmp
+        value: stdmp.NewReader(&d.wire, boundary)
+      - return: d
   - of: (*multipartCodec).encodeForm
     participants:
       - id: caller
@@ -645,12 +673,96 @@ sequences:
               to: limitExceeded
           when: c.total > c.limits.MaxTotalBytes
       - return: nil
+  - of: (*wireBudget).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*wireBudget).Read
+        kind: self
+      - id: w.r.Read
+        kind: value
+      - id: limitExceeded
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, w.err
+          when: w.err != nil
+      - opt:
+          do:
+            - set: p
+              value: p[:room]
+          init:
+            bind: room
+            eval: probeSize(w.limit) - w.read
+          when: int64(len(p)) > room
+      - bind: n, err
+        eval: w.r.Read(p)
+        to: w.r.Read
+      - op: +=
+        set: w.read
+        value: int64(n)
+      - opt:
+          do:
+            - set: w.err
+              to: limitExceeded
+              value: limitExceeded("MaxTotalBytes", w.limit, w.read)
+            - return: n, w.err
+          when: w.read > w.limit
+      - return: n, err
+  - of: (*counter).admitEncodedPart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*counter).admitEncodedPart
+        kind: self
+      - id: limitExceeded
+        kind: internal
+    steps:
+      - op: ++
+        set: c.parts
+      - opt:
+          do:
+            - return: limitExceeded("MaxParts", int64(c.limits.MaxParts), int64(c.parts))
+              to: limitExceeded
+          when: c.parts > c.limits.MaxParts
+      - opt:
+          do:
+            - return: limitExceeded("MaxPartBytes", c.limits.MaxPartBytes, body)
+              to: limitExceeded
+          when: body > c.limits.MaxPartBytes
+      - op: +=
+        set: c.total
+        value: wire
+      - opt:
+          do:
+            - return: limitExceeded("MaxTotalBytes", c.limits.MaxTotalBytes, c.total+closing)
+              to: limitExceeded
+          when: c.total+closing > c.limits.MaxTotalBytes
+      - return: nil
+  - of: (*counter).admitClosing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*counter).admitClosing
+        kind: self
+      - id: limitExceeded
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: limitExceeded("MaxTotalBytes", c.limits.MaxTotalBytes, c.total+closing)
+              to: limitExceeded
+          when: c.total+closing > c.limits.MaxTotalBytes
+      - return: nil
   - of: (*multipartDecoder).Decode
     participants:
       - id: caller
         kind: actor
       - id: (*multipartDecoder).Decode
         kind: self
+      - id: codec
+        kind: package
       - id: d.fetch
         kind: internal
       - id: publishPart
@@ -658,6 +770,14 @@ sequences:
       - id: assignPart
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - eval: d.fetch()
         to: d.fetch
       - opt:
@@ -708,7 +828,7 @@ sequences:
         kind: self
       - id: d.inner.NextPart
         kind: value
-      - id: unmarshalFailed
+      - id: d.readFailure
         kind: internal
       - id: d.readInto
         kind: internal
@@ -723,6 +843,12 @@ sequences:
               value: "true"
             - return: ""
           when: d.inner == nil
+      - opt:
+          do:
+            - set: d.pendErr
+              value: d.wire.err
+            - return: ""
+          when: d.wire.err != nil
       - bind: next, nerr
         eval: d.inner.NextPart()
         to: d.inner.NextPart
@@ -731,12 +857,12 @@ sequences:
             - set: d.done
               value: "true"
             - return: ""
-          when: errIsEOF(nerr)
+          when: errIsEOF(nerr) && d.wire.err == nil
       - opt:
           do:
             - set: d.pendErr
-              to: unmarshalFailed
-              value: "unmarshalFailed(nerr, \"Decoder: reading the next part failed\")"
+              to: d.readFailure
+              value: "d.readFailure(nerr, \"Decoder: reading the next part failed\")"
             - return: ""
           when: nerr != nil
       - eval: d.readInto(next)
@@ -802,7 +928,7 @@ sequences:
         to: readBounded
       - opt:
           do:
-            - return: "nil, unmarshalFailed(rerr, \"Decoder: reading a part body failed\")"
+            - return: "nil, d.readFailure(rerr, \"Decoder: reading a part body failed\")"
           when: rerr != nil
       - opt:
           do:
@@ -817,6 +943,21 @@ sequences:
             to: d.count.admitPart
           when: lerr != nil
       - return: read, nil
+  - of: (*multipartDecoder).readFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartDecoder).readFailure
+        kind: self
+      - id: unmarshalFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: d.wire.err
+          when: d.wire.err != nil
+      - return: unmarshalFailed(cause, detail)
+        to: unmarshalFailed
   - of: readBounded
     participants:
       - id: caller
@@ -1076,65 +1217,62 @@ sequences:
         kind: self
       - id: asPart
         kind: internal
-      - id: e.count.admitPart
-        kind: internal
       - id: e.writePart
         kind: internal
     steps:
-      - bind: part, perr
+      - bind: part, err
         eval: asPart(v)
         to: asPart
       - opt:
           do:
-            - return: perr
-          when: perr != nil
-      - opt:
-          do:
-            - return: lerr
-          init:
-            bind: lerr
-            eval: e.count.admitPart(int64(len(part.Data)))
-            to: e.count.admitPart
-          when: lerr != nil
-      - return: e.writePart(part)
-        to: e.writePart
+            - set: err
+              to: e.writePart
+              value: e.writePart(part)
+          when: err == nil
+      - return: err
   - of: (*multipartEncoder).Close
     participants:
       - id: caller
         kind: actor
       - id: (*multipartEncoder).Close
         kind: self
-      - id: e.inner.Close
+      - id: e.closingLen
+        kind: internal
+      - id: e.count.admitClosing
+        kind: internal
+      - id: e.w.Write
         kind: value
-      - id: errs
-        kind: package
+      - id: marshalFailed
+        kind: internal
     steps:
-      - bind: cerr
-        eval: e.inner.Close()
-        to: e.inner.Close
+      - bind: closing
+        eval: e.closingLen()
+        to: e.closingLen
       - opt:
           do:
-            - return: nil
-          when: cerr == nil
-      - return: |-
-          errs.Wrap(cerr, errs.WrapParams{
-          		Code:    coremultipart.CodeMultipartMarshalFailed,
-          		Reason:  "MARSHAL_FAILED",
-          		Public:  "multipart encoding failed",
-          		Private: "service/data/codec/multipart.Encoder.Close: mime/multipart returned an error",
-          	})
-        to: errs
+            - return: lerr
+          init:
+            bind: lerr
+            eval: e.count.admitClosing(closing)
+            to: e.count.admitClosing
+          when: lerr != nil
+      - set: e.head
+        value: append(append(append(append(e.head[:0], crlf...), delimiterPrefix...), e.boundary...), delimiterPrefix+crlf...)
+      - set: e.open
+        value: "false"
+      - opt:
+          do:
+            - return: "marshalFailed(werr, \"Encoder.Close: writing the closing delimiter failed\")"
+              to: marshalFailed
+          init:
+            bind: _, werr
+            eval: e.w.Write(e.head)
+            to: e.w.Write
+          when: werr != nil
+      - return: nil
   - of: (*multipartEncoder).Boundary
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*multipartEncoder).Boundary
-        kind: self
-      - id: e.inner.Boundary
-        kind: value
     steps:
-      - return: e.inner.Boundary()
-        to: e.inner.Boundary
+      - return: e.boundary
   - of: (*multipartEncoder).writePart
     participants:
       - id: caller
@@ -1145,12 +1283,14 @@ sequences:
         kind: internal
       - id: injectedHeaderField
         kind: internal
-      - id: e.inner.CreatePart
+      - id: e.appendHead
+        kind: internal
+      - id: e.count.admitEncodedPart
+        kind: internal
+      - id: e.w.Write
         kind: value
       - id: marshalFailed
         kind: internal
-      - id: body.Write
-        kind: value
     steps:
       - opt:
           do:
@@ -1168,24 +1308,95 @@ sequences:
             eval: injectedHeaderField(part)
             to: injectedHeaderField
           when: found
-      - bind: body, cerr
-        eval: e.inner.CreatePart(partHeader(part))
-        to: e.inner.CreatePart
+      - set: e.head
+        to: e.appendHead
+        value: e.appendHead(e.head[:0], part)
+      - bind: wire
+        eval: int64(len(e.head)) + int64(len(part.Data))
       - opt:
           do:
-            - return: "marshalFailed(cerr, \"Encoder.Encode: CreatePart returned an error\")"
+            - return: lerr
+          init:
+            bind: lerr
+            eval: e.count.admitEncodedPart(int64(len(part.Data)), wire, e.closingLen())
+            to: e.count.admitEncodedPart
+          when: lerr != nil
+      - set: e.open
+        value: "true"
+      - opt:
+          do:
+            - return: "marshalFailed(werr, \"Encoder.Encode: writing the part header failed\")"
               to: marshalFailed
-          when: cerr != nil
+          init:
+            bind: _, werr
+            eval: e.w.Write(e.head)
+            to: e.w.Write
+          when: werr != nil
       - opt:
           do:
             - return: "marshalFailed(werr, \"Encoder.Encode: writing the part body failed\")"
               to: marshalFailed
           init:
             bind: _, werr
-            eval: body.Write(part.Data)
-            to: body.Write
+            eval: e.w.Write(part.Data)
+            to: e.w.Write
           when: werr != nil
       - return: nil
+  - of: (*multipartEncoder).appendHead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multipartEncoder).appendHead
+        kind: self
+      - id: appendQuoted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: b
+              value: append(b, crlf...)
+          when: e.open
+      - set: b
+        value: append(append(append(b, delimiterPrefix...), e.boundary...), crlf...)
+      - set: b
+        to: appendQuoted
+        value: appendQuoted(append(b, dispositionOpen...), part.Name)
+      - opt:
+          do:
+            - set: b
+              to: appendQuoted
+              value: appendQuoted(append(append(b, '"'), filenameOpen...), part.FileName)
+          when: part.FileName != ""
+      - set: b
+        value: append(append(b, '"'), crlf...)
+      - opt:
+          do:
+            - set: b
+              value: append(append(append(b, contentTypeOpen...), part.ContentType...), crlf...)
+          when: part.ContentType != ""
+      - return: append(b, crlf...)
+  - of: (*multipartEncoder).closingLen
+    steps:
+      - return: int64(len(crlf) + 2*len(delimiterPrefix) + len(e.boundary) + len(crlf))
+  - of: generateBoundary
+    participants:
+      - id: caller
+        kind: actor
+      - id: generateBoundary
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: hex
+        kind: stdlib
+    steps:
+      - var:
+          name: raw
+          type: "[generatedBoundaryBytes]byte"
+      - set: _, _
+        to: rand
+        value: rand.Read(raw[:])
+      - return: hex.EncodeToString(raw[:])
+        to: hex
   - of: injectedHeaderField
     steps:
       - opt:
@@ -1201,33 +1412,6 @@ sequences:
             - return: "\"ContentType\", true"
           when: strings.ContainsAny(part.ContentType, forbiddenHeaderOctets)
       - return: "\"\", false"
-  - of: partHeader
-    participants:
-      - id: caller
-        kind: actor
-      - id: partHeader
-        kind: self
-      - id: header.Set
-        kind: value
-    steps:
-      - bind: disposition
-        eval: "`form-data; name=\"` + quoteEscaper.Replace(part.Name) + `\"`"
-      - opt:
-          do:
-            - op: +=
-              set: disposition
-              value: "`; filename=\"` + quoteEscaper.Replace(part.FileName) + `\"`"
-          when: part.FileName != ""
-      - bind: header
-        eval: make(textproto.MIMEHeader, partHeaderFields)
-      - eval: header.Set("Content-Disposition", disposition)
-        to: header.Set
-      - opt:
-          do:
-            - eval: header.Set("Content-Type", part.ContentType)
-              to: header.Set
-          when: part.ContentType != ""
-      - return: header
   - of: asPart
     participants:
       - id: caller

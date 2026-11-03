@@ -1,6 +1,11 @@
 <!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/observe/logger/sink/
 
+
+**Contract.** Every package here is a row of the family's conformance table,
+`internal/service/observe/logger/conformance_external_test.go` (#1149): a new
+one is added with its row, or `TestConformanceCoversEveryPackage` fails.
+
 ## Purpose
 
 Terminal `core/observe/logger.Sink` implementations — a sink chain ends in one of

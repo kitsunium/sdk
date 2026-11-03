@@ -267,3 +267,44 @@ BenchmarkUnmarshal/base64url-8          	  152077	      8439 ns/op	    2481 B/op
 BenchmarkUnmarshal/ascii85-8            	   79800	     14619 ns/op	    6563 B/op	      10 allocs/op
 BenchmarkMarshalJSONStep-8              	  807127	      1597 ns/op	      48 B/op	       2 allocs/op
 ```
+
+## #898: limb arithmetic, and the cap raised to 64 KiB
+
+The byte-wise long division — one division per output digit over every byte
+of the magnitude — is replaced by 32-bit limbs divided (encode) or multiplied
+(decode) by 58⁵ or 62⁵ per step through a uint64 accumulator, the divisor a
+constant the compiler turns into a multiplication. Same quadratic class, about
+twenty-five times fewer steps; the output is byte-identical
+(`TestLimbConversionMatchesLongDivision`, `FuzzBaseConvRoundTrip` against the
+long division kept in the tests). Against 740e7c1e, the two test binaries run
+interleaved, six passes, linux/amd64, 4 vCPU VM (`GOMAXPROCS=4`), go1.27.3:
+
+| row | before | after | delta | B/op | allocs/op |
+|---|---:|---:|---:|---|---|
+| EncodeScaling/base58/64 | 17.84 µs | 1.314 µs | −93 % | 288 → 304 | 3 → 3 |
+| EncodeScaling/base58/256 | 282.0 µs | 12.25 µs | −96 % | 1.09 Ki → 1.16 Ki | 3 → 3 |
+| EncodeScaling/base58/1024 | 4.459 ms | 168.8 µs | −96 % | 4.38 Ki → 4.63 Ki | 3 → 3 |
+| EncodeScaling/base58/4096 | **71.93 ms** | **2.527 ms** | −96.5 % | 18.0 Ki → 19.3 Ki | 3 → 3 |
+| DecodeScaling/base58/64 | 6.016 µs | 579.7 ns | −90 % | 160 → 144 | 2 → 2 |
+| DecodeScaling/base58/256 | 93.28 µs | 3.926 µs | −96 % | 608 → 544 | 2 → 2 |
+| DecodeScaling/base58/1024 | 1.430 ms | 39.87 µs | −97 % | 2.38 Ki → 2.13 Ki | 2 → 2 |
+| DecodeScaling/base58/4096 | **23.15 ms** | **559.8 µs** | −97.6 % | 10.0 Ki → 8.75 Ki | 2 → 2 |
+
+4 KiB now encodes under the 3 ms #898 set as the condition for raising
+`maxConvBytes` to 64 KiB, so it was raised (`maxConvEncodedBytes` follows, at
+128 KiB). What the new cap admits, same machine, three runs of four
+iterations, after only (the old code refused these inputs):
+
+| row | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| EncodeScaling/base58/16384 | 39.2 ms | 80 Ki | 3 |
+| EncodeScaling/base58/65536 | **658 ms** | 288 Ki | 3 |
+| DecodeScaling/base58/16384 | 8.59 ms | 34 Ki | 2 |
+| DecodeScaling/base58/65536 | **144 ms** | 136 Ki | 2 |
+
+The work is still quadratic, so the cap still matters: the decode — the side
+that faces untrusted text — of the largest admitted input costs 144 ms, about
+1.6 µs per byte received, where the old cap's 5.5 KiB cost 22 ms, 4 µs per
+byte. The encode of a 64 KiB value takes two thirds of a second; base64 stays
+the codec for bulk data.
+

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/flatbuffers/
 
 ## Purpose
@@ -58,6 +58,8 @@ word (giving `FLATBUFFERS_*`) and the second-noun is `BadType`/`BadTarget`
 rather than `UnsupportedType`/`UnsupportedTarget` (the latter would exceed
 the `KTN-CONST-MAXLEN` 30-char cap on the const identifier).
 
+**Position (#1125).** The two length refusals carry a byte `offset`: where a buffer shorter than the root offset ends, and the first byte past `maxFlatBuffersBytes`. `codec.PositionOf` reads it back.
+
 ## Conventions
 
 - **Size cap**: `maxFlatBuffersBytes = 64 << 20` (64 MiB). FlatBuffers
@@ -79,3 +81,7 @@ the `KTN-CONST-MAXLEN` 30-char cap on the const identifier).
 ```shell
 bazel test --config=race //internal/service/data/codec/flatbuffers:flatbuffers_test
 ```
+
+## Fuzz (#897)
+
+`fuzz_external_test.go` — `FuzzUnmarshal`: `validateBuffer` is the parser: any input is accepted or refused without a panic, an accepted buffer is handed over byte for byte and `Marshal` takes it back unchanged. The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.

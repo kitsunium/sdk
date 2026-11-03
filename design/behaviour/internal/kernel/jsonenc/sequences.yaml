@@ -1,6 +1,54 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: AppendFloat
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendFloat
+        kind: self
+      - id: math
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+      - id: trimExponentZero
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst, false
+          when: math.IsNaN(f) || math.IsInf(f, 0)
+      - bind: verb
+        eval: byte('f')
+      - bind: abs
+        eval: math.Abs(f)
+        to: math
+      - opt:
+          do:
+            - set: verb
+              value: "'e'"
+          when: abs != 0 && (abs < plainMin || abs >= plainMax)
+      - set: number
+        to: strconv
+        value: strconv.AppendFloat(dst, f, verb, shortest, float64Bits)
+      - opt:
+          do:
+            - set: number
+              to: trimExponentZero
+              value: trimExponentZero(number)
+          when: verb == 'e'
+      - return: number, true
+  - of: trimExponentZero
+    steps:
+      - bind: "n"
+        eval: len(b)
+      - opt:
+          do:
+            - set: b[n-2]
+              value: b[n-1]
+            - return: b[:n-1]
+          when: n >= shortExponent && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0'
+      - return: b
   - of: BeginObject
     steps:
       - return: "Object{dst: append(dst, '{')}"
@@ -79,6 +127,32 @@ sequences:
       - set: o.dst
         to: AppendUint
         value: AppendUint(o.dst, v)
+      - return: o
+  - of: Object.Float
+    participants:
+      - id: caller
+        kind: actor
+      - id: Object.Float
+        kind: self
+      - id: o.key
+        kind: internal
+      - id: AppendFloat
+        kind: internal
+    steps:
+      - set: o
+        to: o.key
+        value: o.key(key)
+      - var:
+          name: ok
+          type: bool
+      - set: o.dst, ok
+        to: AppendFloat
+        value: AppendFloat(o.dst, f)
+      - opt:
+          do:
+            - set: o.dst
+              value: append(o.dst, "null"...)
+          when: "!ok"
       - return: o
   - of: Object.Bool
     participants:

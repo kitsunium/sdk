@@ -3,6 +3,8 @@ package cbor
 import (
 	"math"
 	"unicode/utf8"
+
+	corecbor "github.com/kitsunium/sdk/internal/core/data/codec/cbor"
 )
 
 // The bounds every decode enforces before it allocates anything. They are
@@ -302,8 +304,8 @@ func (v *validator) bounded(count uint64, bound int, detail string) error {
 		//: nothing to refuse.
 		return nil
 	}
-	//: over it.
-	return malformed(v.off, detail)
+	//: over it: the family's SIZE_EXCEEDED (#894).
+	return exceeded(corecbor.SizeExceeded, v.off, detail)
 }
 
 // place records the item whose head h was just consumed: an indefinite
@@ -392,8 +394,8 @@ func (v *validator) push(f validFrame, counted bool) error {
 
 // tooDeep is the refusal of an item nesting past the limit.
 func (v *validator) tooDeep() error {
-	//: one message for every kind of level.
-	return malformed(v.off, "arrays, maps and tags nested more than 32 levels deep")
+	//: one message for every kind of level: the family's DEPTH_EXCEEDED (#894).
+	return exceeded(corecbor.DepthExceeded, v.off, "arrays, maps and tags nested more than 32 levels deep")
 }
 
 // finishChild records that one item has been read to its end, closing every

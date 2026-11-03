@@ -22,7 +22,7 @@
       "name": "protobuf",
       "dir": ".",
       "layer": "thirdparty",
-      "doc": "Package protobuf wraps google.golang.org/protobuf as a codec.Codec\nimplementation. It lives under third-party/codec/, in a module of its own\n(ADR 0157), and is OPT-IN: a consumer blank-imports it to register the\n\"protobuf\" Format — pkg/v1/data/codec does NOT pull it. The reason is the\nschema-bound contract, not dep weight: Protobuf only encodes proto.Message\nvalues, so it cannot honour the universal \"every registered codec\nround-trips any Go struct\" guarantee the default registry enforces. A\nnon-message value surfaces PROTOBUF_MARSHAL_FAILED /\nPROTOBUF_UNMARSHAL_FAILED. Non-streaming (the wire format is length-unframed;\nframing is a caller concern); implements Appender. ADR 0023.\n\nPackage protobuf — range 0.3.38.* (ADR 0023 third-party/codec/protobuf block).\n\nPackage protobuf — declares the sentinel *errs.Error values for Protobuf.\n"
+      "doc": "Package protobuf wraps google.golang.org/protobuf as a codec.Codec\nimplementation. It lives under third-party/codec/, in a module of its own\n(ADR 0157), and is OPT-IN: a consumer blank-imports it to register the\n\"protobuf\" Format — pkg/v1/data/codec does NOT pull it. The reason is the\nschema-bound contract, not dep weight: Protobuf only encodes proto.Message\nvalues, so it cannot honour the universal \"every registered codec\nround-trips any Go struct\" guarantee the default registry enforces. A\nnon-message value surfaces PROTOBUF_MARSHAL_FAILED /\nPROTOBUF_UNMARSHAL_FAILED. Append writes through\nproto.MarshalOptions.MarshalAppend, so a destination with room costs no\nallocation of its own, and Marshal is Append onto nil. It streams in\nencoding/protodelim's layout, one varint-delimited message per Encode and\nper Decode — a file of records, a gRPC-style frame sequence — with a\ndeclared length past 10 MiB refused (SIZE_EXCEEDED) before the body\nis read. ADR 0023.\n\nPackage protobuf — range 0.3.38.* (ADR 0023 third-party/codec/protobuf block).\n\nPackage protobuf — declares the sentinel *errs.Error values for Protobuf.\n"
     }
   ],
   "symbols": [
@@ -118,7 +118,7 @@
       "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
       "code": {
         "value": "0.3.38.3",
-        "reason": "PROTOBUF_SIZE_EXCEEDED",
+        "reason": "SIZE_EXCEEDED",
         "public": "Protobuf input exceeds size limit"
       },
       "doc": "SizeExceeded marks an Unmarshal input over the 10 MiB hard cap.\n",

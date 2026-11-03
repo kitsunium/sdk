@@ -2,6 +2,14 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      maxEmptiableDepth bounds the structs emptiableV2 looks into: a struct
+      nested deeper is taken as able to be empty, which only widens Optional.
+    items:
+      - name: maxEmptiableDepth
+        type: int
+        value: "32"
+    name: maxEmptiableDepth
+  - doc: |-
       jsontextPackage is the import path of the package json/v2's streaming
       methods take their encoder and decoder from.
     items:
@@ -63,6 +71,7 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - maxEmptiableDepth
       - member
       - level
       - fieldWalk
@@ -80,6 +89,16 @@ files:
       - emptiable
       - throughPointer
       - indirect
+      - (*walker).optional
+      - (*walker).quoted
+      - quotableV2
+      - refusesQuoting
+      - emptiableV2
+      - kindEmptiableV2
+      - structEmptiableV2
+      - structRefusedV2
+      - embeddingRefusedV2
+      - tagRefusedV2
     name: fields.go
   - decls:
       - jsontextPackage
@@ -104,6 +123,8 @@ files:
       - FieldValue
       - Of
       - For
+      - OfV2
+      - ForV2
     name: shape.go
   - decls:
       - reservedInName
@@ -126,10 +147,11 @@ files:
       - (*walker).byKind
       - scalar
       - (*walker).slice
+      - (*walker).array
       - (*walker).mapOf
       - (*walker).object
       - (*walker).extraValues
-      - knownShape
+      - (*walker).knownShape
       - keyWritable
       - refKind
       - named
@@ -203,6 +225,62 @@ functions:
     params: t reflect.Type
     results: reflect.Type
   - doc: |-
+      quotableV2 reports whether json/v2's string option applies to t: a number
+      that writes nothing of its own, through one unnamed pointer, or
+      json.Number.
+    name: quotableV2
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      refusesQuoting reports whether json/v2 refuses a value of t carrying the
+      string option: anything that is not a number and writes nothing of its own.
+    name: refusesQuoting
+    params: t reflect.Type
+    results: bool
+  - doc: |-
+      emptiableV2 reports whether a value of t can encode, under json/v2's own
+      options, as null, "", {} or []: a pointer, an interface, a string, a slice,
+      a map, a zero-length array, a type writing its own JSON or text — except
+      time.Time, whose text is never empty —, or a struct whose fields can all be
+      left out.
+    name: emptiableV2
+    params: t reflect.Type, depth int
+    results: bool
+  - doc: kindEmptiableV2 is emptiableV2 for a type laid out by its kind.
+    name: kindEmptiableV2
+    params: t reflect.Type, depth int
+    results: bool
+  - doc: |-
+      structEmptiableV2 reports whether every member of the struct t can be left
+      out under json/v2's own options, so its value can encode as {}.
+    name: structEmptiableV2
+    params: t reflect.Type, depth int
+    results: bool
+  - doc: |-
+      structRefusedV2 reports whether json/v2's own options refuse the struct t
+      whole, where encoding/json's legacy options ignore the fault: a json tag
+      whose unquoted name runs into a quote or a backslash, or that ends with a
+      comma; an embedded field with no name of its own carrying options other
+      than embed; or an exported embedded field of a type that is not a struct.
+      The structs it inlines are looked into, once each.
+    name: structRefusedV2
+    params: t reflect.Type, seen map[reflect.Type]bool
+    results: bool
+  - doc: |-
+      embeddingRefusedV2 reports whether json/v2 refuses the embedded field: one
+      with no name of its own is inlined, so it may carry no option but embed and
+      must be a struct — an exported non-struct needs a name.
+    name: embeddingRefusedV2
+    params: field reflect.StructField, seen map[reflect.Type]bool
+    results: bool
+  - doc: |-
+      tagRefusedV2 reports whether json/v2 refuses the json tag: an unquoted
+      name followed by a reserved character other than a comma, or a trailing
+      comma.
+    name: tagRefusedV2
+    params: tag string
+    results: bool
+  - doc: |-
       receives reports whether encoding/json calls iface's method on a value of t:
       a value receiver's always, a pointer receiver's only when the value is
       addressable — the v1 semantics Go 1.27's encoding/json keeps, under which a
@@ -260,6 +338,12 @@ functions:
     params: t reflect.Type
     results: "*ShapeValue"
   - name: For
+    results: "*ShapeValue"
+    typeParams: T any
+  - name: OfV2
+    params: t reflect.Type
+    results: "*ShapeValue"
+  - name: ForV2
     results: "*ShapeValue"
     typeParams: T any
   - doc: |-
@@ -321,13 +405,6 @@ functions:
   - doc: scalar fills shape for a kind that holds no other value.
     name: scalar
     params: shape *ShapeValue, t reflect.Type
-  - doc: |-
-      knownShape describes the types whose kind would mislead: time.Time writes a
-      date-time string through its own method, time.Duration an integer count of
-      nanoseconds, json.Number a number from a string.
-    name: knownShape
-    params: t reflect.Type
-    results: "*ShapeValue, bool"
   - doc: |-
       keyWritable reports whether encoding/json writes t as an object member name:
       a string, an integer or a float — written as text — a type that writes
@@ -589,12 +666,32 @@ types:
   - doc: |-
       walker describes one type. path holds the named types being described on
       the way down, so a type that reaches itself is described once and then
-      referenced.
+      referenced. v2 describes what encoding/json/v2 writes under its own
+      default options instead of encoding/json's (OfV2, #893).
     fields:
       - name: path
         type: map[reflect.Type]bool
+      - name: v2
+        type: bool
     kind: struct
     methods:
+      - doc: |-
+          optional is member.optional under the walker's semantics: json/v2's own
+          omitempty omits a member whose value encodes as null, "", {} or [] —
+          never a number or a boolean, and a struct when its fields all can be left
+          out (OfV2, #893).
+        name: optional
+        params: m *member, root reflect.Type
+        recv: w *walker
+        results: bool
+      - doc: |-
+          quoted is member.quoted under the walker's semantics: json/v2's string
+          option quotes a number — an integer, a float, json.Number — and nothing
+          else.
+        name: quoted
+        params: m *member, addressable bool
+        recv: w *walker
+        results: bool
       - doc: |-
           shape describes t, for a value that is addressable where encoding/json
           meets it or not: only an addressable value has its pointer methods called.
@@ -620,6 +717,12 @@ types:
         params: shape *ShapeValue, t reflect.Type
         recv: w *walker
       - doc: |-
+          array describes an array: its elements, or — under json/v2, which writes
+          a byte array as a byte slice is written — a base64 string.
+        name: array
+        params: shape *ShapeValue, t reflect.Type, addressable bool
+        recv: w *walker
+      - doc: |-
           mapOf fills shape for a map: an object whose values are the map's, or
           Unsupported when encoding/json cannot write the key as a member name.
         name: mapOf
@@ -638,6 +741,14 @@ types:
         params: extra reflect.Type
         recv: w *walker
         results: "*ShapeValue"
+      - doc: |-
+          knownShape describes the types whose kind would mislead: time.Time writes a
+          date-time string through its own method, time.Duration an integer count of
+          nanoseconds, json.Number a number from a string.
+        name: knownShape
+        params: t reflect.Type
+        recv: w *walker
+        results: "*ShapeValue, bool"
     name: walker
 vars:
   - doc: The interfaces encoding/json consults, by their reflect.Type.

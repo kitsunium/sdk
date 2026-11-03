@@ -59,6 +59,16 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
+              CodeStreamingUnsupported identifies a NewReader or NewWriter call naming a
+              registered Algorithm whose Compressor does not implement
+              StreamingCompressor — a consumer's own scheme, say. It is distinct from
+              CodeUnknownCompressor: the scheme exists and compresses whole buffers; it
+              has no stream form to hand back.
+            name: CodeStreamingUnsupported
+            value: "0x00_02_05_07"
+        type: errs.Code
+      - const:
+          - doc: |-
               CodeGzipFailed identifies a failure inside compress/gzip during either a
               Compress (writer) or Decompress (reader) operation; the wrap trail and the
               COMPRESSION_FAILED / DECOMPRESSION_FAILED sentinels distinguish the
@@ -155,6 +165,7 @@ packages:
           - type: "[]Algorithm"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      io: io
     path: github.com/kitsunium/sdk/internal/core/data/transform
     ports:
       - doc: |-
@@ -239,6 +250,60 @@ packages:
               - name: err
                 type: error
         name: BoundedDecompressor
+      - doc: |-
+          StreamingCompressor is the optional extension for schemes that compress and
+          decompress a stream: an io.Reader or an io.Writer of any length, never held
+          whole (ADR 0213). Consumers detect support with a type assertion, as for
+          BoundedDecompressor; a scheme without it still serves whole buffers.
+
+          NewReader returns a reader of r's decompressed stream that yields at most
+          max bytes: the read that would deliver the byte past max fails with
+          DecompressedTooLarge, after max bytes and never instead of them, and every
+          read after it fails the same way. A ceiling of zero admits an empty stream
+          and nothing else, and a negative one is read as zero, as in
+          DecompressBounded. A malformed stream fails with the scheme's own sentinel;
+          io.EOF comes only once the stream's end has been read and, where the
+          format has one, its checksum verified. Close releases the decoder and
+          does not close r.
+
+          NewWriter returns a writer that compresses into w. Close flushes the
+          stream's end — its trailer, where the format has one — into w and
+          releases the encoder; it does not close w, and a stream not closed is
+          incomplete. A write after Close fails.
+
+          What NewWriter writes is the scheme's stream form, which NewReader reads.
+          For every scheme but s2 it is the same bytes Compress writes; s2's block
+          format declares its length in a header and has no stream form, so its
+          streams are the s2 framing format, which Decompress refuses and Compress
+          does not write.
+
+          The reader and the writer serve one goroutine each, like any io.Reader and
+          io.Writer; the StreamingCompressor that made them stays safe for
+          concurrent use.
+        embeds:
+          - Compressor
+        methods:
+          - in:
+              - name: r
+                type: io.Reader
+              - name: max
+                type: int64
+            name: NewReader
+            out:
+              - name: rc
+                type: io.ReadCloser
+              - name: err
+                type: error
+          - in:
+              - name: w
+                type: io.Writer
+            name: NewWriter
+            out:
+              - name: wc
+                type: io.WriteCloser
+              - name: err
+                type: error
+        name: StreamingCompressor
     sentinels:
       - var:
           - code: CodeUnknownCompressor
@@ -291,6 +356,15 @@ packages:
             private: "core/data/transform.DecompressBounded: plaintext exceeded the caller-supplied max"
             public: Decompressed payload exceeds the caller's ceiling
             reason: DECOMPRESSED_TOO_LARGE
+          - code: CodeStreamingUnsupported
+            doc: |-
+              StreamingUnsupported is returned when the Algorithm a stream is asked of
+              is registered by a Compressor with no stream form (no
+              StreamingCompressor). Compress and Decompress still serve it.
+            name: StreamingUnsupported
+            private: "core/data/transform: the registered scheme does not implement StreamingCompressor"
+            public: The compressor has no streaming form
+            reason: STREAMING_UNSUPPORTED
           - code: CodeDuplicateRegistration
             doc: |-
               DuplicateRegistration is the boot-time panic sentinel for the Compressor
@@ -343,8 +417,10 @@ packages:
         underlying: string
   - doc: |-
       Package transform — shared decompression bound for the stdlib gzip, flate and
-      zlib schemes. Each Decompress reads through an io.LimitReader so a malformed or
-      hostile stream cannot drive an unbounded allocation at this layer. The full
+      zlib schemes. Each Decompress counts what it reads and stops one byte past
+      the ceiling, so a malformed or hostile stream cannot drive an unbounded
+      allocation at this layer. The plaintext lands in dst's spare capacity first
+      and in pooled chunks after it, so dst grows once, to its final length. The full
       self-describing decompression-bomb guard (max output size + max expansion
       ratio keyed to the frame header) lives in the pkg/v1/data/codec frame layer (a
       later commit, CodeCompressedFrameInvalid); this is the conservative
@@ -407,6 +483,36 @@ packages:
       the package with the gzip and flate schemes; all three self-register at
       import.
     functions:
+      - doc: |-
+          NewFlateCompressor returns a raw-DEFLATE Compressor encoding at level, which
+          may be flate.DefaultCompression, flate.HuffmanOnly, or any value from
+          flate.BestSpeed to flate.BestCompression. Anything else — including
+          flate.NoCompression, which the stdlib accepts but which stores the payload
+          verbatim — is clamped to flate.DefaultCompression, so no configuration can
+          hand back a compressor that silently does not compress (ADR 0031). The result
+          is NOT registered; the registry entry is the default-level FlateCompressor
+          singleton, which NewFlateCompressor(flate.DefaultCompression) equals.
+        in:
+          - name: level
+            type: int
+        name: NewFlateCompressor
+        out:
+          - type: coretransform.Compressor
+      - doc: |-
+          NewGzipCompressor returns a gzip Compressor encoding at level, which may be
+          gzip.DefaultCompression, gzip.HuffmanOnly, or any value from gzip.BestSpeed to
+          gzip.BestCompression. Anything else — including gzip.NoCompression, which the
+          stdlib accepts but which stores the payload verbatim — is clamped to
+          gzip.DefaultCompression, so no configuration can hand back a compressor that
+          silently does not compress (ADR 0031). The result is NOT registered; the
+          registry entry is the default-level GzipCompressor singleton, which
+          NewGzipCompressor(gzip.DefaultCompression) equals.
+        in:
+          - name: level
+            type: int
+        name: NewGzipCompressor
+        out:
+          - type: coretransform.Compressor
       - doc: |-
           NewZlibCompressor returns a zlib Compressor encoding at level, which may be
           zlib.DefaultCompression, zlib.HuffmanOnly, or any value from zlib.BestSpeed to
@@ -495,13 +601,28 @@ packages:
       [DecompressedTooLarge] rather than cut short — a truncated success would
       turn a bomb into a parsing bug further up.
 
+      # Streams
+
+      [NewReader] and [NewWriter] take an io.Reader or an io.Writer of any length
+      and never hold it whole, through a scheme implementing
+      [StreamingCompressor] — the three registered here, and the third-party
+      module's zstd and s2:
+
+      	w, err := transform.NewWriter(transform.Gzip, conn)
+      	r, err := transform.NewReader(transform.Gzip, body, 64<<20)
+
+      The reader's limit is the stream's ceiling: it yields at most limit bytes,
+      and the read past them fails with [DecompressedTooLarge]. Close the writer,
+      or the stream has no end; close the reader, or its decoder is not reused.
+
       # Errors
 
       Match them with errs.HasCode, or the sentinels with errors.Is:
 
       	CodeUnknownCompressor       0.2.5.1   no compressor is registered under the Algorithm
       	CodeCompressedFrameInvalid  0.2.5.4   the codec package's compressed frame is malformed, or its bomb guard tripped
-      	CodeDecompressedTooLarge    0.2.5.6   the plaintext would exceed DecompressBounded's ceiling
+      	CodeDecompressedTooLarge    0.2.5.6   the plaintext would exceed DecompressBounded's or NewReader's ceiling
+      	CodeStreamingUnsupported    0.2.5.7   the registered scheme has no stream form
       	CodeGzipFailed              0.3.26.1  compress/gzip refused the stream, compressing or decompressing
       	CodeFlateFailed             0.3.26.2  compress/flate refused the stream
       	CodeZlibFailed              0.3.26.3  compress/zlib refused the stream
@@ -535,6 +656,14 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_02_05_06"
+          - doc: |-
+              CodeStreamingUnsupported identifies a stream asked of a registered scheme
+              that has no stream form (0.2.5.7).
+            name: CodeStreamingUnsupported
+            reexport: coretransform.CodeStreamingUnsupported
+            type: errs.Code
+            typed: true
+            value: "0x00_02_05_07"
           - doc: |-
               CodeGzipFailed identifies a stream compress/gzip refused, compressing or
               decompressing (0.3.26.1).
@@ -578,6 +707,12 @@ packages:
             reexport: coretransform.DecompressedTooLarge
             type: "*errs.Error"
           - doc: |-
+              StreamingUnsupported is the sentinel of [CodeStreamingUnsupported],
+              returned as is.
+            name: StreamingUnsupported
+            reexport: coretransform.StreamingUnsupported
+            type: "*errs.Error"
+          - doc: |-
               GzipFailed is the sentinel of [CodeGzipFailed]; the stdlib's error is
               kept beneath it.
             name: GzipFailed
@@ -610,6 +745,12 @@ packages:
               scheme has it.
             name: BoundedDecompressor
             target: coretransform.BoundedDecompressor
+      - alias:
+          - doc: |-
+              StreamingCompressor is the optional extension of a Compressor that
+              compresses and decompresses streams; NewReader and NewWriter use it.
+            name: StreamingCompressor
+            target: coretransform.StreamingCompressor
       - func:
           doc: Lookup returns the Compressor registered under algo.
           forward: coretransform.Lookup
@@ -628,6 +769,44 @@ packages:
           name: Available
           out:
             - type: "[]Algorithm"
+      - func:
+          doc: |-
+            NewGzipCompressor returns a gzip Compressor encoding at level — a
+            compress/gzip constant, BestSpeed to BestCompression, HuffmanOnly or
+            DefaultCompression. Any other level, NoCompression included, is read as
+            DefaultCompression: no level gives a compressor that does not compress.
+            The result is not registered; pass it where a Compressor is taken.
+          forward: svctransform.NewGzipCompressor
+          in:
+            - name: level
+              type: int
+          name: NewGzipCompressor
+          out:
+            - type: Compressor
+      - func:
+          doc: |-
+            NewFlateCompressor returns a raw-DEFLATE Compressor encoding at level, a
+            compress/flate constant, clamped as NewGzipCompressor's is. The result is
+            not registered.
+          forward: svctransform.NewFlateCompressor
+          in:
+            - name: level
+              type: int
+          name: NewFlateCompressor
+          out:
+            - type: Compressor
+      - func:
+          doc: |-
+            NewZlibCompressor returns a zlib Compressor encoding at level, a
+            compress/zlib constant, clamped as NewGzipCompressor's is. The result is
+            not registered.
+          forward: svctransform.NewZlibCompressor
+          in:
+            - name: level
+              type: int
+          name: NewZlibCompressor
+          out:
+            - type: Compressor
     functions:
       - doc: |-
           Compress compresses src with the scheme registered under algo and appends
@@ -689,7 +868,55 @@ packages:
             type: "[]byte"
           - name: err
             type: error
+      - doc: |-
+          NewReader returns a reader of r's stream decompressed by the scheme
+          registered under algo, yielding at most limit bytes: the read that would
+          deliver the byte past limit fails with DecompressedTooLarge, after limit
+          bytes and never instead of them. A limit of zero admits an empty stream and
+          a negative one is read as zero, as in DecompressBounded. Nothing is held
+          whole — an HTTP body, a file or a log shipment is read through the
+          decoder's window — so the limit bounds what the caller receives, and the
+          decoder's own memory is its window. Close the reader to release the
+          decoder; it does not close r.
+
+          An unregistered algo is refused with UnknownCompressor, a registered one
+          with no stream form with StreamingUnsupported.
+        in:
+          - name: algo
+            type: Algorithm
+          - name: r
+            type: io.Reader
+          - name: limit
+            type: int64
+        name: NewReader
+        out:
+          - name: rc
+            type: io.ReadCloser
+          - name: err
+            type: error
+      - doc: |-
+          NewWriter returns a writer that compresses into w with the scheme registered
+          under algo. Close it to write the stream's end — a stream not closed is
+          incomplete — and release the encoder; it does not close w. What it writes
+          NewReader reads back; for every scheme but s2 it is also what Compress
+          writes and Decompress reads.
+
+          An unregistered algo is refused with UnknownCompressor, a registered one
+          with no stream form with StreamingUnsupported.
+        in:
+          - name: algo
+            type: Algorithm
+          - name: w
+            type: io.Writer
+        name: NewWriter
+        out:
+          - name: wc
+            type: io.WriteCloser
+          - name: err
+            type: error
     imports:
       coretransform: github.com/kitsunium/sdk/internal/core/data/transform
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      io: io
+      svctransform: github.com/kitsunium/sdk/internal/service/data/transform
     path: github.com/kitsunium/sdk/pkg/v1/data/transform

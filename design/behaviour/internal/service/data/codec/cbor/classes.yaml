@@ -59,6 +59,50 @@ constants:
         type: int
         value: "100"
     name: minReadSize
+  - doc: The IEEE 754 single-precision layout a float is narrowed through.
+    grouped: true
+    items:
+      - doc: singleExponentBias is the bias of a single's eight exponent bits.
+        name: singleExponentBias
+        type: int
+        value: "127"
+      - doc: singleMantissaBits is the width of a single's mantissa.
+        name: singleMantissaBits
+        type: uint
+        value: "23"
+      - doc: singleExponentMask selects the exponent once shifted down.
+        name: singleExponentMask
+        type: uint32
+        value: "0xff"
+      - doc: singleMantissaMask selects a single's mantissa.
+        name: singleMantissaMask
+        type: uint32
+        value: "0x7fffff"
+      - doc: singleHiddenBit is the leading 1 of a normal single's significand.
+        name: singleHiddenBit
+        type: uint32
+        value: 1 << singleMantissaBits
+      - doc: singleMagnitudeMask clears a single's sign bit.
+        name: singleMagnitudeMask
+        type: uint32
+        value: "0x7fffffff"
+      - doc: singleToHalfDrop is how many low mantissa bits a half has not.
+        name: singleToHalfDrop
+        type: uint
+        value: singleMantissaBits - halfMantissaBits
+      - doc: singleSignShift moves a single's sign bit to a half's.
+        name: singleSignShift
+        type: uint
+        value: "16"
+      - doc: halfMinNormalExponent and halfMaxExponent bound a normal half.
+        name: halfMinNormalExponent
+        type: int
+        value: "-14"
+      - doc: halfMaxExponent is the largest exponent of a finite half.
+        name: halfMaxExponent
+        type: int
+        value: "15"
+    name: singleExponentBias
   - doc: |-
       maxIndirections bounds the pointers and interfaces followed between two
       containers. A chain that long is a cycle — an interface holding a pointer
@@ -68,6 +112,18 @@ constants:
         type: int
         value: "32"
     name: maxIndirections
+  - doc: |-
+      deterministicMode is the bit of walkDepth.hops that writes RFC 8949
+      §4.2.1's core deterministic encoding (NewDeterministic): every float in the
+      shortest of half, single and double that holds it exactly, and a struct's
+      fields in the bytewise order of their encoded keys. It rides in hops, far
+      above the 32 indirections the count reaches, so the value copied at every
+      call keeps the two words it had.
+    items:
+      - name: deterministicMode
+        type: int
+        value: 1 << 16
+    name: deterministicMode
   - doc: The bookkeeping of a map's order.
     grouped: true
     items:
@@ -150,7 +206,59 @@ constants:
         name: flagOmitEmpty
       - doc: flagOmitZero is the omitzero option.
         name: flagOmitZero
+      - doc: flagTimeTag1 is the time=tag1 option.
+        name: flagTimeTag1
+      - doc: flagTimeTag0 is the time=tag0 option.
+        name: flagTimeTag0
     name: flagKeyAsInt
+  - doc: |-
+      strictLinearKeys is how many keys of one map the duplicate check compares
+      pairwise before it switches to a set.
+    items:
+      - name: strictLinearKeys
+        type: int
+        value: "32"
+    name: strictLinearKeys
+  - doc: |-
+      Key classes of the duplicate check: two keys that decode to the same Go
+      key compare equal whatever head or chunking each was written with.
+    grouped: true
+    items:
+      - doc: keyClassText is a text string, by its content.
+        name: keyClassText
+        type: byte
+        value: "'t'"
+      - doc: keyClassBytes is a byte string, by its content.
+        name: keyClassBytes
+        type: byte
+        value: "'b'"
+      - doc: keyClassUnsigned is an unsigned integer, by its value.
+        name: keyClassUnsigned
+        type: byte
+        value: "'u'"
+      - doc: keyClassNegative is a negative integer, by its argument.
+        name: keyClassNegative
+        type: byte
+        value: "'n'"
+      - doc: keyClassRaw is any other key, by its encoding.
+        name: keyClassRaw
+        type: byte
+        value: "'r'"
+    name: keyClassText
+  - doc: The struct tag options that write a time.Time field as a tagged time.
+    grouped: true
+    items:
+      - doc: |-
+          optionTimeTag1 writes the field as tag 1, epoch seconds, falling back
+          to tag 0 when a double cannot carry the instant to the nanosecond.
+        name: optionTimeTag1
+        type: string
+        value: "\"time=tag1\""
+      - doc: optionTimeTag0 writes the field as tag 0, its RFC 3339 text.
+        name: optionTimeTag0
+        type: string
+        value: "\"time=tag0\""
+    name: optionTimeTag1
   - doc: |-
       The bounds every decode enforces before it allocates anything. They are
       the values the codec has always enforced: an array or a map may hold a
@@ -414,12 +522,16 @@ files:
       - (*cborCodec).NewEncoder
       - (*cborCodec).NewDecoder
       - keepScratch
+      - (*cborCodec).NewBoundedDecoder
     name: codec.go
   - decls:
       - decodeStates
       - decodeState
+      - decodeMode
       - sequence
       - unmarshalItem
+      - unmarshalItemMode
+      - checkMode
       - (*decodeState).decodeTarget
       - pointerTarget
       - (*decodeState).peek
@@ -591,18 +703,45 @@ files:
   - decls:
       - minReadSize
       - cborDecoder
+      - newBoundedDecoder
       - (*cborDecoder).Decode
       - (*cborDecoder).More
       - (*cborDecoder).nextItem
       - (*cborDecoder).fill
       - (*cborDecoder).compact
+      - (*cborDecoder).growth
       - (*cborDecoder).read
     name: decoder.go
+  - decls:
+      - singleExponentBias
+      - deterministicCodec
+      - NewDeterministic
+      - (*deterministicCodec).Marshal
+      - (*deterministicCodec).Append
+      - (*deterministicCodec).Unmarshal
+      - (*deterministicCodec).NewEncoder
+      - (*deterministicCodec).NewDecoder
+      - appendShortestFloat
+      - halfOf
+      - normalHalf
+      - subnormalHalf
+      - (*decodeState).checkDeterministic
+      - (*decodeState).checkEnclosed
+      - (*decodeState).checkPairs
+      - shortestHead
+      - checkSimple
+      - shortestFloatWidth
+      - notDeterministic
+      - (*deterministicCodec).NewBoundedDecoder
+    name: deterministic.go
   - decls: []
     name: doc.go
   - decls:
       - maxIndirections
+      - deterministicMode
       - walkDepth
+      - deterministicWalk
+      - walkDepth.deterministic
       - walkDepth.enter
       - walkDepth.follow
       - appendValue
@@ -717,8 +856,11 @@ files:
       - structArrayEncoder
       - (*encodePlanner).fillStruct
       - (*encodePlanner).encodeFieldOf
+      - timeOptionPlan
+      - keyOrder
       - fieldKey
       - structEncoder.encode
+      - appendFieldsInOrder
       - structEncoder.empty
       - appendField
       - rewriteMapHead
@@ -745,6 +887,7 @@ files:
       - encodeFailure
       - encodeCause
       - malformed
+      - exceeded
       - decodeCause
     name: errors.go
   - decls:
@@ -776,6 +919,44 @@ files:
   - decls:
       - _
     name: kinds_compliance.go
+  - decls:
+      - strictLinearKeys
+      - keyClassText
+      - strictCodec
+      - NewStrict
+      - (*strictCodec).Unmarshal
+      - (*strictCodec).NewDecoder
+      - (*decodeState).checkKeys
+      - (*decodeState).checkEntries
+      - (*decodeState).consumeBreak
+      - (*decodeState).checkPairKey
+      - addKey
+      - indexKey
+      - normKey
+      - (*normKey).equal
+      - (*normKey).setKey
+      - (*decodeState).normalKey
+      - (*decodeState).stringContent
+      - duplicateKey
+      - unknownMember
+      - (*strictCodec).NewBoundedDecoder
+    name: strict.go
+  - decls:
+      - optionTimeTag1
+      - tagType
+      - TagValue
+      - tagEncoder
+      - tagDecoder
+      - timeTagEncoder
+      - tagEncoder.encode
+      - tagEncoder.empty
+      - appendTag
+      - tagDecoder.decode
+      - timeTagEncoder.encode
+      - timeTagEncoder.empty
+      - appendEpochTime
+      - appendDateTime
+    name: tag.go
   - decls:
       - maxCBORArrayElements
       - frameArray
@@ -833,8 +1014,23 @@ functions:
     params: data []byte, v any
     results: error
   - doc: |-
+      unmarshalItemMode is unmarshalItem under mode. Strictly, a map that repeats
+      a key is refused before anything is decoded, a member no struct field
+      claims while it is (NewStrict, #1106); deterministically, a document not in
+      core deterministic encoding is refused before anything is decoded, and its
+      tags are kept (NewDeterministic, #896).
+    name: unmarshalItemMode
+    params: data []byte, v any, mode decodeMode
+    results: error
+  - doc: |-
+      checkMode runs the whole-document checks mode asks for, before anything is
+      decoded: the repeated keys of NewStrict, the encoding of NewDeterministic.
+    name: checkMode
+    params: data []byte, mode decodeMode
+    results: error
+  - doc: |-
       pointerTarget returns the value v points to, refusing anything but a
-      non-nil pointer.
+      non-nil pointer with the family's TARGET_INVALID (#1101).
     name: pointerTarget
     params: v any
     results: reflect.Value, error
@@ -874,7 +1070,7 @@ functions:
     results: iter.Seq2[any, any]
   - doc: |-
       hashableAny reports whether a default Go value can be a map key: every
-      one can except the slices, the maps and big.Int.
+      one can except the slices, the maps and big.Int, and a Tag holding one.
     name: hashableAny
     params: key any
     results: bool
@@ -988,6 +1184,69 @@ functions:
     name: fieldTarget
     params: v reflect.Value, index []int
     results: field reflect.Value, ok bool
+  - doc: |-
+      newBoundedDecoder is NewBoundedDecoder of every instance (#891): a decoder
+      in mode whose items are at most maxBytes long, refused with SIZE_EXCEEDED
+      once maxBytes of an unfinished item are buffered — never more read. A
+      ceiling of zero or below is refused: no bound means unlimited (ADR 0031).
+    name: newBoundedDecoder
+    params: r io.Reader, maxBytes int64, mode decodeMode
+    results: codec.Decoder, error
+  - name: NewDeterministic
+    results: codec.Codec
+  - doc: |-
+      appendShortestFloat appends f in the shortest of half, single and double
+      that holds it exactly — RFC 8949 §4.1's preferred serialization, which
+      §4.2.1 requires; NaN is 0xf97e00 and the infinities halves, as always.
+    name: appendShortestFloat
+    params: b []byte, f float64
+    results: "[]byte"
+  - doc: |-
+      halfOf returns the half-precision bits of the finite single f when a half
+      holds it exactly — a normal half, a subnormal one, or a signed zero.
+    name: halfOf
+    params: f float32
+    results: half uint16, ok bool
+  - doc: |-
+      normalHalf narrows a single of a normal half's exponent: exact when the
+      thirteen low mantissa bits are zero.
+    name: normalHalf
+    params: sign uint16, exponent int, mantissa uint32
+    results: uint16, bool
+  - doc: |-
+      subnormalHalf narrows a single below a half's smallest normal: the
+      significand, hidden bit included, counted in units of 2^-24.
+    name: subnormalHalf
+    params: sign uint16, exponent int, mantissa uint32
+    results: uint16, bool
+  - doc: |-
+      shortestHead reports whether h's argument takes no more bytes than it
+      needs.
+    name: shortestHead
+    params: h itemHead
+    results: bool
+  - doc: |-
+      checkSimple checks a float or simple-value item: a float in the shortest
+      form that holds it, NaN only as 0xf97e00; simple values have one encoding
+      already.
+    name: checkSimple
+    params: h itemHead, at int
+    results: error
+  - doc: |-
+      shortestFloatWidth is the head size appendShortestFloat gives the finite
+      or infinite f: 3, 5 or 9 bytes.
+    name: shortestFloatWidth
+    params: f float64
+    results: int
+  - doc: |-
+      notDeterministic is NewDeterministic's refusal of a document not in core
+      deterministic encoding, at offset at.
+    name: notDeterministic
+    params: at int, detail string
+    results: error
+  - doc: deterministicWalk is the starting depth of NewDeterministic's encoder.
+    name: deterministicWalk
+    results: walkDepth
   - doc: |-
       appendValue appends the encoding of x to b. The dynamic types an untyped
       document is made of are encoded without reflection.
@@ -1180,9 +1439,30 @@ functions:
     name: marshalBinary
     params: v reflect.Value, p *encodePlan
     results: "[]byte, error"
+  - doc: |-
+      timeOptionPlan is the plan of a field carrying the time option: its own,
+      writing the tag the option names, since the type's shared plan writes
+      untagged seconds. A field without the option keeps plan.
+    name: timeOptionPlan
+    params: f *structField, plan *encodePlan
+    results: "*encodePlan, string"
+  - doc: |-
+      keyOrder returns the indexes of fields in the bytewise order of their
+      encoded keys (RFC 8949 §4.2.1), or nil when the declaration order is it.
+    name: keyOrder
+    params: fields []encodeField
+    results: "[]int"
   - doc: fieldKey encodes a field's key once, when the plan is built.
     name: fieldKey
     params: f *structField
+    results: "[]byte, error"
+  - doc: |-
+      appendFieldsInOrder appends the struct as a map whose pairs follow order,
+      the indexes of p.fields in the bytewise order of their keys: the
+      deterministic walk's struct, kept apart so the registered codec's loop is
+      the one it always ran.
+    name: appendFieldsInOrder
+    params: b []byte, v reflect.Value, p *encodePlan, at walkDepth, order []int
     results: "[]byte, error"
   - doc: |-
       appendField appends one key/value pair, unless the field is omitted or
@@ -1259,6 +1539,14 @@ functions:
       not well-formed, not valid, or past a bound.
     name: malformed
     params: off int, detail string
+    results: error
+  - doc: |-
+      exceeded is input refused at offset off for a size or a depth bound (#894):
+      sentinel — SizeExceeded or DepthExceeded — is the origin, so its family
+      reason is what codec.IsTooLarge and codec.IsTooDeep find, UNMARSHAL_FAILED
+      joins the trail, and detail says which bound, never what was read.
+    name: exceeded
+    params: sentinel *errs.Error, off int, detail string
     results: error
   - doc: |-
       decodeCause is the UNMARSHAL_FAILED error wrapping cause — a reader's,
@@ -1357,6 +1645,50 @@ functions:
     name: hasToArray
     params: t reflect.Type
     results: bool
+  - name: NewStrict
+    results: codec.Codec
+  - doc: |-
+      addKey records key among the keys one map has shown — seen while they are
+      at most strictLinearKeys, compared pairwise on the caller's stack, many once
+      indexed by their setKey — and reports whether the map already held it. It
+      takes and returns the two by value, so seen's array stays the caller's
+      stack array.
+    name: addKey
+    params: seen []normKey, many map[string]struct{}, key normKey
+    results: kept []normKey, indexed map[string]struct{}, dup bool
+  - doc: indexKey inserts key into many and reports whether it was there already.
+    name: indexKey
+    params: many map[string]struct{}, key *normKey
+    results: bool
+  - doc: duplicateKey is the strict refusal of a repeated map key.
+    name: duplicateKey
+    params: at int
+    results: error
+  - doc: unknownMember is the strict refusal of a key no struct field claims.
+    name: unknownMember
+    params: at int, t reflect.Type
+    results: error
+  - doc: |-
+      appendTag appends tag's number and its content, one level deeper. A tag
+      0 to 3 whose content is not of the type RFC 8949 gives it is refused,
+      since the decoder would refuse it.
+    name: appendTag
+    params: b []byte, tag TagValue, at walkDepth
+    results: "[]byte, error"
+  - doc: |-
+      appendEpochTime appends t as tag 1: integer seconds when t holds no
+      fraction, float seconds when a double carries it to the nanosecond as the
+      decoder reads one back, and otherwise tag 0, so the instant is never
+      rounded (RFC 8949 §3.4.2 allows tag 1 nothing finer than a double).
+    name: appendEpochTime
+    params: b []byte, t time.Time
+    results: "[]byte"
+  - doc: |-
+      appendDateTime appends t as tag 0: its RFC 3339 text to the nanosecond,
+      in its own offset.
+    name: appendDateTime
+    params: b []byte, t time.Time
+    results: "[]byte"
   - doc: |-
       validateItem checks that data opens with one complete, well-formed and
       valid data item nesting at most limit levels, and returns its length.
@@ -1495,6 +1827,14 @@ types:
         params: r io.Reader
         recv: "*cborCodec"
         results: codec.Decoder
+      - doc: |-
+          NewBoundedDecoder implements codec.BoundedStreamingCodec (#891): items at
+          most maxBytes long, a longer one refused with SIZE_EXCEEDED once maxBytes of
+          it are buffered.
+        name: NewBoundedDecoder
+        params: r io.Reader, maxBytes int64
+        recv: "*cborCodec"
+        results: codec.Decoder, error
     name: cborCodec
   - doc: decodeState is one decode pass over a validated data item.
     fields:
@@ -1515,6 +1855,14 @@ types:
       - doc: field names the struct field being filled, for the failure message.
         name: field
         type: string
+      - doc: "strict refuses a member no struct field claims (NewStrict, #1106)."
+        name: strict
+        type: bool
+      - doc: |-
+          tags decodes every tag but a bignum into an interface as a Tag
+          (NewDeterministic, #896).
+        name: tags
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -1673,7 +2021,8 @@ types:
         results: error
       - doc: |-
           tagAny decodes a tag: 0 and 1 to a time.Time, 2 and 3 to a big.Int, and
-          any other tag to its content.
+          any other tag to its content — or, for NewDeterministic, every tag but a
+          bignum to a Tag, so the document encodes back to its bytes.
         name: tagAny
         params: h itemHead
         recv: d *decodeState
@@ -1919,7 +2268,78 @@ types:
         params: v reflect.Value, p *decodePlan, h itemHead
         recv: d *decodeState
         results: error
+      - doc: |-
+          checkDeterministic walks the validated item at the cursor and refuses the
+          first departure from RFC 8949 §4.2.1's core deterministic encoding.
+        name: checkDeterministic
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          checkEnclosed checks what the head h, already consumed, opens: a string's
+          bytes, an array's elements, a map's pairs, a tag's content.
+        name: checkEnclosed
+        params: h itemHead
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          checkPairs checks a map's pairs: each key and value deterministic, and
+          every key's encoding bytewise greater than the one before — which also
+          refuses a repeated key.
+        name: checkPairs
+        params: pairs uint64
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          checkKeys walks the validated item at the cursor and refuses a map holding
+          two keys that decode to the same Go key. It decodes nothing.
+        name: checkKeys
+        recv: d *decodeState
+        results: error
+      - doc: checkEntries walks an array's elements or a map's pairs, definite or not.
+        name: checkEntries
+        params: h itemHead, pairs bool
+        recv: d *decodeState
+        results: error
+      - doc: |-
+          consumeBreak consumes the break that ends an indefinite container, and
+          reports whether the next byte was one.
+        name: consumeBreak
+        recv: d *decodeState
+        results: bool
+      - doc: |-
+          checkPairKey consumes a map pair's key and refuses it when the map already
+          holds it, naming where — never the key. It returns seen and many as addKey
+          leaves them.
+        name: checkPairKey
+        params: seen []normKey, many map[string]struct{}
+        recv: d *decodeState
+        results: kept []normKey, indexed map[string]struct{}, err error
+      - doc: normalKey consumes a key and returns it in its normal form.
+        name: normalKey
+        recv: d *decodeState
+        results: normKey, error
+      - doc: |-
+          stringContent consumes a string whose head is h and returns its content in
+          place when definite, the chunks of an indefinite one joined.
+        name: stringContent
+        params: h itemHead, class byte
+        recv: d *decodeState
+        results: normKey, error
     name: decodeState
+  - doc: |-
+      decodeMode is how an instance reads a document beyond the registered
+      codec's rules.
+    fields:
+      - doc: strict refuses a repeated key and a member no field claims (NewStrict).
+        name: strict
+        type: bool
+      - doc: |-
+          deterministic refuses a document not in core deterministic encoding and
+          keeps its tags (NewDeterministic).
+        name: deterministic
+        type: bool
+    kind: struct
+    name: decodeMode
   - doc: sequence iterates the entries of an array or a map whose head was read.
     fields:
       - doc: left is how many entries a definite container still holds.
@@ -2315,6 +2735,16 @@ types:
       - doc: walk validates the next item, keeping its place across reads.
         name: walk
         type: validator
+      - doc: |-
+          mode decodes every item as the instance's Unmarshal does: NewStrict's,
+          NewDeterministic's or the registered codec's.
+        name: mode
+        type: decodeMode
+      - doc: |-
+          limit is the longest item NewBoundedDecoder's decoder reads, and how
+          many bytes its buffer ever holds; 0 for NewDecoder's, which has none.
+        name: limit
+        type: int
     kind: struct
     methods:
       - doc: |-
@@ -2348,6 +2778,12 @@ types:
         name: compact
         recv: d *cborDecoder
       - doc: |-
+          growth is how many bytes the buffer grows by: its capacity again, at least
+          minReadSize, and for a bounded decoder never past its ceiling.
+        name: growth
+        recv: d *cborDecoder
+        results: int
+      - doc: |-
           read reads once into the buffer's free space, which it doubles when it
           runs short. A reader returning no byte and no error is retried, then
           reported as stuck.
@@ -2355,16 +2791,66 @@ types:
         recv: d *cborDecoder
         results: int, error
     name: cborDecoder
+  - doc: |-
+      deterministicCodec is NewDeterministic's instance: the registered codec,
+      writing the shortest floats and reading only core deterministic encoding.
+    fields:
+      - name: ""
+        role: embedded
+        type: cborCodec
+    kind: struct
+    methods:
+      - doc: Marshal encodes v in core deterministic encoding.
+        name: Marshal
+        params: v any
+        recv: "*deterministicCodec"
+        results: encoded []byte, err error
+      - doc: Append appends the deterministic encoding of v to dst.
+        name: Append
+        params: dst []byte, v any
+        recv: "*deterministicCodec"
+        results: appended []byte, err error
+      - doc: Unmarshal decodes one data item in core deterministic encoding into v.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: c *deterministicCodec
+        results: error
+      - doc: NewEncoder writes one deterministic data item per Encode.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*deterministicCodec"
+        results: codec.Encoder
+      - doc: |-
+          NewDecoder reads one data item per Decode, each in core deterministic
+          encoding.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*deterministicCodec"
+        results: codec.Decoder
+      - doc: |-
+          NewBoundedDecoder implements codec.BoundedStreamingCodec (#891): the
+          deterministic stream decoder under a byte ceiling per item.
+        name: NewBoundedDecoder
+        params: r io.Reader, maxBytes int64
+        recv: "*deterministicCodec"
+        results: codec.Decoder, error
+    name: deterministicCodec
   - doc: walkDepth is where the encoder stands in the value it walks.
     fields:
       - doc: nest counts the arrays, maps and tags open around the current item.
         name: nest
         type: int
-      - doc: hops counts the pointers and interfaces followed since the last one.
+      - doc: |-
+          hops counts the pointers and interfaces followed since the last one,
+          with deterministicMode set for NewDeterministic.
         name: hops
         type: int
     kind: struct
     methods:
+      - doc: deterministic reports whether the walk writes core deterministic encoding.
+        name: deterministic
+        recv: w walkDepth
+        results: bool
       - doc: |-
           enter is the depth inside one more array, map or tag, refused past the
           nesting the decoder accepts.
@@ -2541,6 +3027,12 @@ types:
       - doc: fields are a struct's fields on the wire.
         name: fields
         type: "[]encodeField"
+      - doc: |-
+          order lists a struct's fields in the bytewise order of their encoded
+          keys, which core deterministic encoding writes them in; nil when the
+          declaration order is that order already.
+        name: order
+        type: "[]int"
       - doc: refusal says why no value of the type can be encoded.
         name: refusal
         type: string
@@ -2686,7 +3178,7 @@ types:
     methods:
       - doc: encode appends a single for a float32 and a double for a float64.
         name: encode
-        params: b []byte, v reflect.Value, _ *encodePlan, _ walkDepth
+        params: b []byte, v reflect.Value, _ *encodePlan, at walkDepth
         recv: floatEncoder
         results: "[]byte, error"
       - doc: empty is true for 0 and −0.
@@ -2793,6 +3285,11 @@ types:
       - doc: w receives each encoded item.
         name: w
         type: io.Writer
+      - doc: |-
+          start is the depth each item's walk starts at: carrying the
+          deterministic mode for NewDeterministic.
+        name: start
+        type: walkDepth
     kind: struct
     methods:
       - doc: Encode encodes v and writes it as one data item.
@@ -2862,6 +3359,118 @@ types:
     kind: named
     name: embedded
     underlying: map[reflect.Type][][]int
+  - doc: |-
+      strictCodec is the instance NewStrict returns: the registered codec's
+      encoding, and a decode that reads one document one way or not at all.
+    fields:
+      - name: ""
+        role: embedded
+        type: cborCodec
+    kind: struct
+    methods:
+      - doc: |-
+          Unmarshal validates data like the registered codec, then refuses a
+          repeated key, then decodes refusing an unknown member.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: c *strictCodec
+        results: error
+      - doc: NewDecoder wraps r in a strict streaming codec.Decoder.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*strictCodec"
+        results: codec.Decoder
+      - doc: |-
+          NewBoundedDecoder implements codec.BoundedStreamingCodec (#891): the strict
+          stream decoder under a byte ceiling per item.
+        name: NewBoundedDecoder
+        params: r io.Reader, maxBytes int64
+        recv: "*strictCodec"
+        results: codec.Decoder, error
+    name: strictCodec
+  - doc: |-
+      normKey is a key in the form two keys that decode to the same Go key
+      share: a string by its content, an integer by its argument, anything else
+      by its encoding. A definite string's content is read in place.
+    fields:
+      - doc: content is a string's content, or the encoding of a raw key.
+        name: content
+        type: "[]byte"
+      - doc: arg is an integer key's argument.
+        name: arg
+        type: uint64
+      - doc: class is the key's class.
+        name: class
+        type: byte
+    kind: struct
+    methods:
+      - doc: equal reports whether two keys decode to the same Go key.
+        name: equal
+        params: o *normKey
+        recv: k *normKey
+        results: bool
+      - doc: setKey is k as a map key, for the indexed set of a large map.
+        name: setKey
+        recv: k *normKey
+        results: string
+    name: normKey
+  - fields:
+      - doc: Number is the tag number.
+        name: Number
+        type: uint64
+      - doc: Content is the enclosed data item.
+        name: Content
+        type: any
+    kind: struct
+    name: TagValue
+  - doc: tagEncoder writes a Tag.
+    kind: struct
+    methods:
+      - doc: encode appends the tag head and its content.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, at walkDepth
+        recv: tagEncoder
+        results: "[]byte, error"
+      - doc: "empty is false: omitempty never omits a tag."
+        name: empty
+        params: _ reflect.Value, _ *encodePlan
+        recv: tagEncoder
+        results: bool, error
+    name: tagEncoder
+  - doc: tagDecoder reads a tag into a Tag.
+    kind: struct
+    methods:
+      - doc: |-
+          decode reads a tag into a Tag: its number, and its content decoded as into
+          an interface. Null leaves the Tag as it is; an untagged item is recorded as
+          not fitting.
+        name: decode
+        params: d *decodeState, v reflect.Value, p *decodePlan
+        recv: tagDecoder
+        results: error
+    name: tagDecoder
+  - doc: |-
+      timeTagEncoder writes a time.Time field carrying the time option as the
+      tag it names: tagEpoch or tagDateTime.
+    fields:
+      - doc: tag is tagEpoch for time=tag1, tagDateTime for time=tag0.
+        name: tag
+        type: uint64
+    kind: struct
+    methods:
+      - doc: |-
+          encode appends the time as the tag the option names; the zero time is
+          null, as it is without the option.
+        name: encode
+        params: b []byte, v reflect.Value, _ *encodePlan, _ walkDepth
+        recv: e timeTagEncoder
+        results: "[]byte, error"
+      - doc: empty is false, as it is for a time.Time without the option.
+        name: empty
+        params: _ reflect.Value, _ *encodePlan
+        recv: timeTagEncoder
+        results: bool, error
+    name: timeTagEncoder
   - doc: frameKind says what a validator frame holds open.
     kind: named
     methods:
@@ -3275,3 +3884,8 @@ vars:
         type: decoder
         value: structDecoder{}
     name: _
+  - doc: tagType is the reflect.Type of TagValue, which both plans recognise.
+    items:
+      - name: tagType
+        value: reflect.TypeFor[TagValue]()
+    name: tagType

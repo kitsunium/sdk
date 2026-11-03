@@ -5,6 +5,7 @@ import (
 	"math"
 	"reflect"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 )
 
@@ -28,6 +29,21 @@ type decodeState struct {
 	failures int
 	// field names the struct field being filled, for the failure message.
 	field string
+	// strict refuses a member no struct field claims (NewStrict, #1106).
+	strict bool
+	// tags decodes every tag but a bignum into an interface as a Tag
+	// (NewDeterministic, #896).
+	tags bool
+}
+
+// decodeMode is how an instance reads a document beyond the registered
+// codec's rules.
+type decodeMode struct {
+	// strict refuses a repeated key and a member no field claims (NewStrict).
+	strict bool
+	// deterministic refuses a document not in core deterministic encoding and
+	// keeps its tags (NewDeterministic).
+	deterministic bool
 }
 
 // sequence iterates the entries of an array or a map whose head was read.
@@ -40,20 +56,58 @@ type sequence struct {
 
 // unmarshalItem decodes the validated data item data into v.
 func unmarshalItem(data []byte, v any) error {
+	//: the registered codec's reading.
+	return unmarshalItemMode(data, v, decodeMode{})
+}
+
+// unmarshalItemMode is unmarshalItem under mode. Strictly, a map that repeats
+// a key is refused before anything is decoded, a member no struct field
+// claims while it is (NewStrict, #1106); deterministically, a document not in
+// core deterministic encoding is refused before anything is decoded, and its
+// tags are kept (NewDeterministic, #896).
+func unmarshalItemMode(data []byte, v any, mode decodeMode) error {
 	target, err := pointerTarget(v)
 	//: Unmarshal writes through a pointer or not at all.
 	if err != nil {
 		//: refused before the walk.
 		return err
 	}
+	//: one reading of the document, checked whole first.
+	if err := checkMode(data, mode); err != nil {
+		//: nothing decoded.
+		return err
+	}
 	d := decodeStates.Get()
 	d.data = data
+	d.strict, d.tags = mode.strict, mode.deterministic
 	walkErr := d.decodeTarget(target)
 	err = cmp.Or(walkErr, d.first)
 	*d = decodeState{}
 	decodeStates.Put(d)
 	//: a walk inconsistency first, then the first item not stored.
 	return err
+}
+
+// checkMode runs the whole-document checks mode asks for, before anything is
+// decoded: the repeated keys of NewStrict, the encoding of NewDeterministic.
+func checkMode(data []byte, mode decodeMode) error {
+	//: a repeated key.
+	if mode.strict {
+		walk := decodeState{data: data}
+		//: refused, or checked.
+		if err := walk.checkKeys(); err != nil {
+			//: the repeat.
+			return err
+		}
+	}
+	//: a head, a float or a key order that is not the deterministic one.
+	if mode.deterministic {
+		walk := decodeState{data: data}
+		//: the first departure.
+		return walk.checkDeterministic()
+	}
+	//: nothing else to check.
+	return nil
 }
 
 // decodeTarget decodes the whole item into target, the value Unmarshal's
@@ -72,21 +126,15 @@ func (d *decodeState) decodeTarget(target reflect.Value) error {
 }
 
 // pointerTarget returns the value v points to, refusing anything but a
-// non-nil pointer.
+// non-nil pointer with the family's TARGET_INVALID (#1101).
 func pointerTarget(v any) (reflect.Value, error) {
-	//: a nil interface has no type to report.
-	if v == nil {
-		//: refused.
-		return reflect.Value{}, decodeCause(nil, "Unmarshal needs a non-nil pointer, got nil")
-	}
-	rv := reflect.ValueOf(v)
 	//: only a non-nil pointer can be written through.
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+	if err := codec.CheckTarget(v); err != nil {
 		//: refused, naming the type.
-		return reflect.Value{}, decodeCause(nil, "Unmarshal needs a non-nil pointer, got "+rv.Type().String())
+		return reflect.Value{}, err
 	}
 	//: the pointed-to value, settable.
-	return rv.Elem(), nil
+	return reflect.ValueOf(v).Elem(), nil
 }
 
 // peek reads the head at the cursor without consuming it.

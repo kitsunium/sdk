@@ -7,6 +7,7 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"io"
+	"math"
 	"math/rand/v2"
 	"strconv"
 	"testing"
@@ -144,7 +145,7 @@ func benchRepetitive(size int) []byte {
 // benchStealGzip empties the gzip writer and reader pools.
 func benchStealGzip() {
 	//: the encoder the next Compress would have reused.
-	benchSinkGzipWriter = gzipWriterPool.Get()
+	benchSinkGzipWriter = gzipWriterPoolFor(gzip.DefaultCompression).Get()
 	//: the box the next Decompress would have reused.
 	benchSinkBox = gzipReaderPool.Get()
 }
@@ -152,7 +153,7 @@ func benchStealGzip() {
 // benchStealFlate empties the flate writer and reader pools.
 func benchStealFlate() {
 	//: the encoder the next Compress would have reused.
-	benchSinkFlateWriter = flateWriterPool.Get()
+	benchSinkFlateWriter = flateWriterPoolFor(flate.DefaultCompression).Get()
 	//: the box the next Decompress would have reused.
 	benchSinkBox = flateReaderPool.Get()
 }
@@ -166,49 +167,58 @@ func benchStealZlib() {
 	benchSinkBox = zlibReaderPool.Get()
 }
 
-// benchDecompressAppending is the production decompression tail, replicated
-// here so the refused fast path below can be measured against a function that
-// differs from it in exactly one branch and nothing else. Its numbers are
-// checked against BenchmarkDecompress/gzip in the report; a divergence means
-// the replica has drifted and the comparison is void.
-func benchDecompressAppending(dst, src []byte) (decoded []byte, err error) {
-	box, rerr := takeGzipReader(bytes.NewReader(src))
-	//: a refused header is the caller's stream, exactly as in production.
+// benchReadAllBounded is the decompression tail this package shipped before
+// kitsunium/sdk#1102 — io.ReadAll over an io.LimitReader into a fresh buffer —
+// kept here, unexported and unreachable from production, so the before/after
+// rows of BENCH.md §12 stay reproducible from the code that measured them.
+func benchReadAllBounded(r io.Reader, max int64) (plain []byte, overflow bool, err error) {
+	//: the same saturating +1 the production helper keeps.
+	limit := max
+	//: only widen when the increment still fits.
+	if limit < math.MaxInt64 {
+		//: the ordinary detector width.
+		limit++
+	}
+	buf, rerr := io.ReadAll(io.LimitReader(r, limit))
+	//: a read fault is the caller's to wrap.
 	if rerr != nil {
-		//: hand the fault back unwrapped; this replica is not the error path.
-		return dst, rerr
+		//: no buffer escapes a fault.
+		return nil, false, rerr
 	}
-	//: return the decoder on every exit below.
-	defer releaseGzipReader(box)
-	plain, overflow, derr := readAllBounded(box.rc, maxDecompressedBytes)
-	//: fold a Close fault into the result, as production does.
-	if cerr := box.rc.Close(); cerr != nil && derr == nil {
-		derr = cerr
+	//: the detector byte made it in.
+	if int64(len(buf)) > max {
+		//: no buffer escapes an over-cap stream.
+		return nil, true, nil
 	}
-	//: a read/close fault is a failure.
-	if derr != nil {
-		//: hand the fault back unwrapped.
-		return dst, derr
-	}
-	//: an over-cap stream is a failure, never an OOM.
-	if overflow {
-		//: the sentinel production returns here.
-		return dst, coretransform.GzipFailed
-	}
-	//: the append-to-dst contract, honoured.
-	return append(dst, plain...), nil
+	//: within bounds.
+	return buf, false, nil
 }
 
-// benchDecompressRefusedFastPath is benchDecompressAppending plus the one
-// branch that was proposed and then REMOVED: when dst has no capacity there is
+// benchDecompressReadAll is gzip's decompression as it was before #1102: the
+// plaintext built by io.ReadAll, then appended onto dst. With the refused
+// fast path below it is the "before" of BENCH.md §9 and §12; the "after" is
+// production Decompress itself.
+func benchDecompressReadAll(dst, src []byte) (decoded []byte, err error) {
+	return benchDecompressOld(dst, src, false)
+}
+
+// benchDecompressRefusedFastPath is benchDecompressReadAll plus the one branch
+// that was proposed and then REMOVED: when dst has no capacity there is
 // nothing to append to, so the freshly-read buffer could be returned as-is.
 // It was refused because it abandons the append-to-dst contract the port
 // documents in three places, no test was sensitive to it (every call site
 // passes dst=nil), and it makes the append branch dead code. It is kept here,
 // unexported and unreachable from production, so the refusal ships with its
-// number instead of with an assertion.
+// number instead of with an assertion — and so §12 can show that the decode
+// into dst's capacity buys what it bought without leaving the contract.
 func benchDecompressRefusedFastPath(dst, src []byte) (decoded []byte, err error) {
-	box, rerr := takeGzipReader(bytes.NewReader(src))
+	return benchDecompressOld(dst, src, true)
+}
+
+// benchDecompressOld is the shared body of the two replicas above; fastPath
+// switches on the refused branch and nothing else.
+func benchDecompressOld(dst, src []byte, fastPath bool) (decoded []byte, err error) {
+	box, rerr := takeGzipReader(src)
 	//: a refused header is the caller's stream, exactly as in production.
 	if rerr != nil {
 		//: hand the fault back unwrapped; this replica is not the error path.
@@ -216,7 +226,7 @@ func benchDecompressRefusedFastPath(dst, src []byte) (decoded []byte, err error)
 	}
 	//: return the decoder on every exit below.
 	defer releaseGzipReader(box)
-	plain, overflow, derr := readAllBounded(box.rc, maxDecompressedBytes)
+	plain, overflow, derr := benchReadAllBounded(box.rc, maxDecompressedBytes)
 	//: fold a Close fault into the result, as production does.
 	if cerr := box.rc.Close(); cerr != nil && derr == nil {
 		derr = cerr
@@ -232,7 +242,7 @@ func benchDecompressRefusedFastPath(dst, src []byte) (decoded []byte, err error)
 		return dst, coretransform.GzipFailed
 	}
 	//: THE REFUSED BRANCH — nothing to append to, so skip the copy entirely.
-	if cap(dst) == 0 {
+	if fastPath && cap(dst) == 0 {
 		//: hand the reader's own buffer straight out.
 		return plain, nil
 	}
@@ -300,6 +310,30 @@ func BenchmarkDecompress(b *testing.B) {
 	})
 }
 
+// BenchmarkDecompressSized is BenchmarkDecompress with a dst whose spare
+// capacity holds the plaintext — the buffer-reuse call the port's
+// append-to-dst convention exists for. Since kitsunium/sdk#1102 the decode
+// lands in that capacity, so these rows are the zero-allocation ones.
+func BenchmarkDecompressSized(b *testing.B) {
+	benchEach(b, func(b *testing.B, comp coretransform.Compressor, payload []byte) {
+		encoded, err := comp.Compress(nil, payload)
+		if err != nil {
+			b.Fatalf("Compress: %v", err)
+		}
+		dst := make([]byte, 0, len(payload))
+		var out []byte
+		b.ResetTimer()
+		for range b.N {
+			out, err = comp.Decompress(dst, encoded)
+			if err != nil {
+				b.Fatalf("Decompress: %v", err)
+			}
+		}
+		b.StopTimer()
+		benchSinkBytes = out
+	})
+}
+
 // BenchmarkRoundTrip measures compress-then-decompress at one size, so the
 // report can check its own arithmetic: a round trip must cost the sum of the
 // two one-way rows, and a row that does not is noise.
@@ -352,6 +386,138 @@ func BenchmarkZlibLevel(b *testing.B) {
 				b.ReportMetric(float64(len(out))/float64(benchLevelSize), "ratio")
 			})
 		}
+	}
+}
+
+// benchLevelJSONSize is the payload BenchmarkLevel runs at: the 4 MiB of
+// kitsunium/sdk#900, large enough that every level's search depth shows.
+const benchLevelJSONSize int = 4 << 20
+
+// benchJSONLog returns size bytes of newline-delimited JSON log records — the
+// payload an HTTP response or a log shipment carries: repeated keys, a small
+// vocabulary, high-entropy identifiers. Seeded, so runs compare like with like.
+func benchJSONLog(size int) []byte {
+	r := rand.New(rand.NewPCG(0x5EED, 0xC0FFEE))
+	levels := []string{"debug", "info", "warn", "error"}
+	routes := []string{"/v1/orders", "/v1/billing", "/v1/auth/token", "/v1/search", "/healthz"}
+	var b bytes.Buffer
+	for b.Len() < size {
+		b.WriteString(`{"ts":`)
+		b.WriteString(strconv.FormatUint(1_756_000_000_000+r.Uint64N(1<<20), 10))
+		b.WriteString(`,"level":"` + levels[r.IntN(len(levels))] + `","route":"` + routes[r.IntN(len(routes))])
+		b.WriteString(`","trace_id":"` + strconv.FormatUint(r.Uint64(), 16) + `","status":`)
+		b.WriteString(strconv.Itoa(200+r.IntN(4)*100) + `,"dur_ms":` + strconv.Itoa(r.IntN(2500)) + "}\n")
+	}
+	return b.Bytes()[:size]
+}
+
+// BenchmarkLevel prices the level knob of the three schemes — gzip and flate
+// since kitsunium/sdk#900, zlib before them — on 4 MiB of JSON log records at
+// the three levels a caller picks between, and reports the ratio each buys, so
+// the CPU column and the size column come from the same run.
+func BenchmarkLevel(b *testing.B) {
+	payload := benchJSONLog(benchLevelJSONSize)
+	for _, sc := range []struct {
+		name  string
+		build func(level int) coretransform.Compressor
+	}{{"gzip", NewGzipCompressor}, {"flate", NewFlateCompressor}, {"zlib", NewZlibCompressor}} {
+		for _, lvl := range []benchLevel{
+			{"best-speed", flate.BestSpeed},
+			{"default", flate.DefaultCompression},
+			{"best-compression", flate.BestCompression},
+		} {
+			b.Run(sc.name+"/"+lvl.name+"/json", func(b *testing.B) {
+				comp := sc.build(lvl.level)
+				var out []byte
+				var err error
+				b.SetBytes(int64(len(payload)))
+				b.ReportAllocs()
+				b.ResetTimer()
+				for range b.N {
+					out, err = comp.Compress(nil, payload)
+					if err != nil {
+						b.Fatalf("Compress: %v", err)
+					}
+				}
+				b.StopTimer()
+				benchSinkBytes = out
+				b.ReportMetric(float64(len(payload))/float64(len(out)), "ratio")
+			})
+		}
+	}
+}
+
+// BenchmarkStream prices the stream form of the three schemes (ADR 0213,
+// kitsunium/sdk#892) against their block form on the 4 MiB JSON corpus: a
+// compress through NewWriter into a buffer against Compress, and a decompress
+// through NewReader drained to io.Discard against Decompress into nil. The
+// stream never holds the plaintext whole; the rows say what that costs.
+func BenchmarkStream(b *testing.B) {
+	payload := benchJSONLog(benchLevelJSONSize)
+	for _, scheme := range benchSchemes {
+		streaming := scheme.comp.(coretransform.StreamingCompressor)
+		encoded, err := scheme.comp.Compress(nil, payload)
+		if err != nil {
+			b.Fatalf("Compress: %v", err)
+		}
+		b.Run(scheme.name+"/compress/block", func(b *testing.B) {
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			for range b.N {
+				out, cerr := scheme.comp.Compress(nil, payload)
+				if cerr != nil {
+					b.Fatalf("Compress: %v", cerr)
+				}
+				benchSinkBytes = out
+			}
+		})
+		b.Run(scheme.name+"/compress/stream", func(b *testing.B) {
+			var sink bytes.Buffer
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			for range b.N {
+				sink.Reset()
+				w, werr := streaming.NewWriter(&sink)
+				if werr != nil {
+					b.Fatalf("NewWriter: %v", werr)
+				}
+				if _, werr = w.Write(payload); werr != nil {
+					b.Fatalf("Write: %v", werr)
+				}
+				if werr = w.Close(); werr != nil {
+					b.Fatalf("Close: %v", werr)
+				}
+			}
+		})
+		b.Run(scheme.name+"/decompress/block", func(b *testing.B) {
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			for range b.N {
+				out, derr := scheme.comp.Decompress(nil, encoded)
+				if derr != nil {
+					b.Fatalf("Decompress: %v", derr)
+				}
+				benchSinkBytes = out
+			}
+		})
+		b.Run(scheme.name+"/decompress/stream", func(b *testing.B) {
+			src := bytes.NewReader(encoded)
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			for range b.N {
+				src.Reset(encoded)
+				r, rerr := streaming.NewReader(src, int64(len(payload)))
+				if rerr != nil {
+					b.Fatalf("NewReader: %v", rerr)
+				}
+				if _, rerr = io.Copy(io.Discard, r); rerr != nil {
+					b.Fatalf("read: %v", rerr)
+				}
+				if rerr = r.Close(); rerr != nil {
+					b.Fatalf("Close: %v", rerr)
+				}
+			}
+		})
 	}
 }
 
@@ -474,15 +640,17 @@ func BenchmarkPoolSteal(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		benchSinkGzipWriter = gzipWriterPool.Get()
-		gzipWriterPool.Put(benchSinkGzipWriter)
+		pool := gzipWriterPoolFor(gzip.DefaultCompression)
+		benchSinkGzipWriter = pool.Get()
+		pool.Put(benchSinkGzipWriter)
 	}
 }
 
 // BenchmarkBoundedRead isolates what the decompression bound costs against an
-// unbounded io.ReadAll over the same bytes: the difference is one
-// io.LimitReader and one length comparison, and the report states it as a
-// percentage of a decompress rather than in the abstract.
+// unbounded io.ReadAll over the same bytes. Since kitsunium/sdk#1102 the
+// bounded arm is appendAllBounded into a nil dst — pooled chunks and one
+// allocation of the payload — so the row prices the bound AND the tail, and
+// the report states both as a share of a decompress.
 func BenchmarkBoundedRead(b *testing.B) {
 	for _, size := range benchSizes {
 		b.Run("bounded/"+strconv.Itoa(size), func(b *testing.B) {
@@ -491,9 +659,9 @@ func BenchmarkBoundedRead(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				plain, overflow, err := readAllBounded(bytes.NewReader(payload), maxDecompressedBytes)
+				plain, overflow, err := appendAllBounded(nil, bytes.NewReader(payload), maxDecompressedBytes)
 				if err != nil || overflow {
-					b.Fatalf("readAllBounded: err=%v overflow=%v", err, overflow)
+					b.Fatalf("appendAllBounded: err=%v overflow=%v", err, overflow)
 				}
 				benchSinkBytes = plain
 			}
@@ -539,43 +707,52 @@ func BenchmarkDecompressOverflowRefusal(b *testing.B) {
 	}
 }
 
-// BenchmarkDecompressTail prices the refused fast path against the production
-// tail it would have replaced, at four sizes chosen to straddle io.ReadAll's
-// 512-byte allocation floor. Both arms run the same reader, the same bound and
-// the same Close; they differ in one branch.
+// BenchmarkDecompressTail prices the decompression tail three ways at four
+// sizes chosen to straddle io.ReadAll's 512-byte allocation floor: the tail
+// before kitsunium/sdk#1102 (ReadAll, then append onto dst), the fast path that
+// was refused for leaving the append-to-dst contract, and production since
+// #1102 (dst's capacity, then pooled chunks and one allocation). All three run
+// the same pooled reader, the same bound and the same Close. The "sized" rows
+// hand a dst whose capacity holds the plaintext, the call a caller reusing one
+// buffer makes.
 func BenchmarkDecompressTail(b *testing.B) {
+	arms := []struct {
+		name string
+		run  func(dst, src []byte) ([]byte, error)
+	}{
+		{"readall-append", benchDecompressReadAll},
+		{"refused-fastpath", benchDecompressRefusedFastPath},
+		{"production", GzipCompressor.Decompress},
+	}
 	for _, size := range benchTailSizes {
-		b.Run("appending/"+strconv.Itoa(size), func(b *testing.B) {
-			encoded, err := GzipCompressor.Compress(nil, benchRepetitive(size))
-			if err != nil {
-				b.Fatalf("Compress: %v", err)
-			}
-			b.SetBytes(int64(size))
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				plain, derr := benchDecompressAppending(nil, encoded)
-				if derr != nil {
-					b.Fatalf("decompress: %v", derr)
+		encoded, err := GzipCompressor.Compress(nil, benchRepetitive(size))
+		if err != nil {
+			b.Fatalf("Compress: %v", err)
+		}
+		for _, arm := range arms {
+			for _, sized := range []bool{false, true} {
+				name := arm.name + "/nil/" + strconv.Itoa(size)
+				if sized {
+					name = arm.name + "/sized/" + strconv.Itoa(size)
 				}
-				benchSinkBytes = plain
+				b.Run(name, func(b *testing.B) {
+					var dst []byte
+					//: a dst whose spare capacity holds the payload.
+					if sized {
+						dst = make([]byte, 0, size)
+					}
+					b.SetBytes(int64(size))
+					b.ReportAllocs()
+					b.ResetTimer()
+					for range b.N {
+						plain, derr := arm.run(dst, encoded)
+						if derr != nil {
+							b.Fatalf("decompress: %v", derr)
+						}
+						benchSinkBytes = plain
+					}
+				})
 			}
-		})
-		b.Run("refused-fastpath/"+strconv.Itoa(size), func(b *testing.B) {
-			encoded, err := GzipCompressor.Compress(nil, benchRepetitive(size))
-			if err != nil {
-				b.Fatalf("Compress: %v", err)
-			}
-			b.SetBytes(int64(size))
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				plain, derr := benchDecompressRefusedFastPath(nil, encoded)
-				if derr != nil {
-					b.Fatalf("decompress: %v", derr)
-				}
-				benchSinkBytes = plain
-			}
-		})
+		}
 	}
 }

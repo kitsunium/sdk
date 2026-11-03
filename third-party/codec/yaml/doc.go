@@ -18,6 +18,12 @@
 // Streaming is supported: yaml.v3 exposes Encoder/Decoder types that serialise
 // a sequence of documents separated by `---` markers.
 //
+// Nesting is bounded by yaml.v3 itself, at 10 000 flow levels and 10 000
+// indentation levels; Unmarshal reports that refusal as DEPTH_EXCEEDED
+// (0.3.77.3), read from the document's structure, not as a syntax error. The
+// streaming Decoder, which never holds a whole document, keeps
+// YAML_FULL_UNMARSHAL_FAILED.
+//
 // Package yaml — range 0.3.77.* (third-party/codec/yaml block).
 //
 // Package yaml — adapts yaml.v3's *Decoder to codec.Decoder.

@@ -24,6 +24,7 @@ Failures carry the range 0.3.10.\*; match them with errs.HasCode, or the sentine
 CodeMarshalFailed    0.3.10.1  encoding/pem refused to write the block
 CodeUnmarshalFailed  0.3.10.2  no PEM block in the input
 CodeValueInvalid     0.3.10.3  the value is not a *pem.Block, or the target a **pem.Block
+CodeSizeExceeded     0.3.10.4  a block of a stream past the 10 MiB a block may take
 ```
 
 No error message quotes the input.
@@ -45,6 +46,17 @@ CodeMarshalFailed is 0.3.10.1: encoding/pem refused to write the block.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/pem.CodePEMMarshalFailed`.
 
 Code `0.3.10.1`
+
+<a name="CodeSizeExceeded"></a>
+```go
+const CodeSizeExceeded errs.Code = 199172
+```
+
+CodeSizeExceeded is 0.3.10.4: a block of a stream past the 10 MiB a block may take.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/pem.CodePEMSizeExceeded`.
+
+Code `0.3.10.4`
 
 <a name="CodeUnmarshalFailed"></a>
 ```go
@@ -87,6 +99,17 @@ MarshalFailed is the sentinel of [CodeMarshalFailed](#CodeMarshalFailed).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/pem.MarshalFailed`.
 
 Code `0.3.10.1` · reason `MARSHAL_FAILED` · public "PEM encoding failed"
+
+<a name="SizeExceeded"></a>
+```go
+var SizeExceeded *errs.Error
+```
+
+SizeExceeded is the sentinel of [CodeSizeExceeded](#CodeSizeExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/pem.SizeExceeded`.
+
+Code `0.3.10.4` · reason `SIZE_EXCEEDED` · public "PEM block exceeds size limit"
 
 <a name="UnmarshalFailed"></a>
 ```go

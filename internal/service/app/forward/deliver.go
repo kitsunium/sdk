@@ -116,6 +116,11 @@ func (f *Forwarder) attempt(ctx context.Context, payload []byte) error {
 		case <-done:
 		}
 	}()
-	//: the caller's sender.
+	//: the caller's sender, told the encoding the batch rests in when it asks.
+	if f.cfg.SendEncoded != nil {
+		//: a gzip batch is posted as it rests, labelled so.
+		return f.cfg.SendEncoded(sendCtx, payload, encodingOf(payload))
+	}
+	//: the batch as it rests.
 	return f.cfg.Send(sendCtx, payload)
 }

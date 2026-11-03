@@ -24,6 +24,8 @@ type decodeState struct {
 	off int
 	// depth counts the containers currently open.
 	depth int
+	// strict refuses a struct member no field claims (NewStrict, #1106).
+	strict bool
 }
 
 // truncated is the failure for an input that ends inside a value.

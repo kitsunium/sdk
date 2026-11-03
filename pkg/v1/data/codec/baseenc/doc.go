@@ -26,7 +26,7 @@
 //	CodeMarshalFailed    0.3.24.1  the value has no JSON encoding
 //	CodeUnmarshalFailed  0.3.24.2  the decoded text is not JSON the target can hold
 //	CodeDecodeFailed     0.3.24.3  the input is not text of the Format's alphabet
-//	CodeSizeExceeded     0.3.24.4  an input past its bound — 10 MiB, 4 KiB for base58 and base62
+//	CodeSizeExceeded     0.3.24.4  an input past its bound — 10 MiB, 64 KiB for base58 and base62
 //
 // No error message quotes the input.
 package baseenc

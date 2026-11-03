@@ -27,6 +27,12 @@ const (
 	kindObservableUpDownCounter
 	// kindObservableGauge marks a name bound to an asynchronous gauge.
 	kindObservableGauge
+	// kindObservableHistogram marks a name bound to an asynchronous
+	// explicit-bucket histogram.
+	kindObservableHistogram
+	// kindExponentialHistogram marks a name bound to an exponential
+	// histogram.
+	kindExponentialHistogram
 )
 
 // outputGroup is the snapshot map a kind's series land in. Four instrument
@@ -42,11 +48,13 @@ const (
 	groupGauge
 	// groupHistogram is SnapshotValue.Histograms.
 	groupHistogram
+	// groupExponential is SnapshotValue.ExponentialHistograms.
+	groupExponential
 )
 
 // group reports which snapshot map this kind's series are collected into.
 func (k instrumentKind) group() outputGroup {
-	//: the four sums, then the two gauges, then the histogram.
+	//: the four sums, the two gauges, the exponential, then the histograms.
 	switch k {
 	//: every additive instrument, synchronous or not, is a Sum.
 	case kindCounter, kindUpDownCounter, kindObservableCounter, kindObservableUpDownCounter:
@@ -56,7 +64,11 @@ func (k instrumentKind) group() outputGroup {
 	case kindGauge, kindObservableGauge:
 		//: SnapshotValue.Gauges.
 		return groupGauge
-	//: the only remaining kind.
+	//: the exponential histogram, its own point type.
+	case kindExponentialHistogram:
+		//: SnapshotValue.ExponentialHistograms.
+		return groupExponential
+	//: the explicit-bucket histogram, synchronous or not.
 	default:
 		//: SnapshotValue.Histograms.
 		return groupHistogram

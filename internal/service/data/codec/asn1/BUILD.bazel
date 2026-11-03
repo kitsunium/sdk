@@ -30,11 +30,13 @@ go_test(
         "codec_external_test.go",
         "codec_integration_test.go",
         "codec_internal_test.go",
+        "fuzz_external_test.go",
         "gen_api_test.go",
     ],
     embed = [":asn1"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/asn1",
         "//internal/kernel/errs",
     ],
 )

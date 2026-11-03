@@ -64,6 +64,28 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
+              CodeInvalidUnit identifies a Unit call carrying an empty unit, one longer
+              than MaxUnitLen bytes, or one holding a byte outside printable ASCII — the
+              UCUM grammar OTLP's Metric.unit is written in (ADR 0208).
+            name: CodeInvalidUnit
+            value: "0x00_02_09_09"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeUnitConflict identifies a second, DIFFERENT unit bound to an instrument
+              name that already has one: a unit belongs to the name (ADR 0208).
+            name: CodeUnitConflict
+            value: "0x00_02_09_0A"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeInvalidBuckets identifies a histogram created with a bucket layout that
+              holds NaN, +Inf, -Inf or a repeated bound (#1135).
+            name: CodeInvalidBuckets
+            value: "0x00_02_09_0B"
+        type: errs.Code
+      - const:
+          - doc: |-
               CodeInvalidMetricName identifies an instrument name the Prometheus text
               exposition format cannot carry: it does not match [a-zA-Z_:][a-zA-Z0-9_:]*.
             name: CodeInvalidMetricName
@@ -150,7 +172,43 @@ packages:
             name: CodeOTLPPartialSuccess
             value: "0x00_03_2D_0A"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeCollectorNil identifies a NewPrometheusHandler call made with a nil
+              collect function: a scrape endpoint with no meter behind it (#1020).
+            name: CodeCollectorNil
+            value: "0x00_03_2D_0B"
+        type: errs.Code
     constants:
+      - doc: |-
+          ExponentialMinScale is the lowest scale an exponential histogram falls to:
+          base 2^1024, three buckets cover every finite double. The OpenTelemetry
+          specification's floor.
+        name: ExponentialMinScale
+        type: int32
+        value: "-10"
+      - doc: |-
+          ExponentialMaxScale is the scale an exponential histogram starts at — base
+          2^(2^-20), a relative error under 1e-6 — and the specification's ceiling.
+          The histogram only ever lowers it, when the range it holds needs more
+          buckets than its maximum.
+        name: ExponentialMaxScale
+        type: int32
+        value: "20"
+      - doc: |-
+          DefaultExponentialMaxSize is the bucket count per range — positive and
+          negative each — an exponential histogram created with a maxSize of zero or
+          less holds: the OpenTelemetry SDKs' default, 160, which keeps a 1 µs to
+          100 s latency range at scale 3, a relative error under 4.5 %.
+        name: DefaultExponentialMaxSize
+        type: int
+        value: "160"
+      - doc: |-
+          MaxUnitLen is the longest unit UnitDescriber accepts, in bytes: a UCUM unit
+          is a short label a backend reads, never a document (ADR 0208).
+        name: MaxUnitLen
+        type: int
+        value: "63"
       - doc: |-
           DefaultExportTimeout bounds one export when the caller's context carries no
           deadline of its own: 30 s, the OpenTelemetry metrics SDK specification's
@@ -208,6 +266,20 @@ packages:
           total and a reader differences successive collections itself.
         name: TemporalityCumulative
         type: Temporality
+        value: "2"
+      - blockDoc: The two kinds of engine statistic an Observer reports (#871).
+        doc: |-
+          StatCounter is a count that only grows while the engine lives — hits,
+          batches sent —, carried as an observable counter.
+        name: StatCounter
+        type: StatKind
+        value: "1"
+      - blockDoc: The two kinds of engine statistic an Observer reports (#871).
+        doc: |-
+          StatGauge is a level read now — entries held, a backlog —, carried as an
+          observable up-down counter.
+        name: StatGauge
+        type: StatKind
         value: "2"
     doc: |-
       Package metrics — the sibling port that registers asynchronous instruments.
@@ -267,6 +339,45 @@ packages:
       Package metrics — aggregation temporality, the OTel concept that says which
       window a reported number covers.
     functions:
+      - doc: |-
+          DefaultBuckets returns a fresh copy of the explicit bucket boundaries a
+          histogram created with no buckets uses — the OpenTelemetry SDK's default
+          (0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000).
+          A copy each call, so no caller can change another's layout. They suit
+          milliseconds; a histogram recording seconds (RecordDuration) passes its
+          own.
+        name: DefaultBuckets
+        out:
+          - type: "[]float64"
+      - doc: |-
+          ExponentialIndex is the bucket index of magnitude at scale — the
+          OpenTelemetry specification's MapToIndex: the k such that magnitude lies in
+          (base^k, base^(k+1)], base = 2^(2^-scale), upper bound inclusive. At a scale
+          of zero or less it reads the exponent math.Frexp returns, exact for every
+          double, subnormals included; above zero it multiplies the natural logarithm
+          by the scale factor, an exact power of two answered from the exponent. The
+          caller passes a positive, finite magnitude and a scale from
+          ExponentialMinScale to ExponentialMaxScale.
+        in:
+          - name: magnitude
+            type: float64
+          - name: scale
+            type: int32
+        name: ExponentialIndex
+        out:
+          - type: int32
+      - doc: |-
+          ExponentialLowerBound is the exclusive lower bound of bucket index at scale,
+          base^index — the specification's LowerBoundary, computed as 2^(index·2^-scale)
+          split into an exponent and a fraction so that it neither overflows nor
+          underflows inside the range a finite double can reach.
+        in:
+          - name: index
+          - name: scale
+            type: int32
+        name: ExponentialLowerBound
+        out:
+          - type: float64
       - doc: |-
           ValidateAttrs panics with InvalidAttribute (0.2.9.4) when sorted cannot name
           a series: an empty Key, a value no constructor ever set, or the same Key
@@ -410,6 +521,103 @@ packages:
             name: ObservableGauge
         name: AsyncMeter
       - doc: |-
+          AsyncHistogramMeter registers an OBSERVABLE HISTOGRAM: a distribution read
+          once per Collect from a source that keeps its own buckets — the Go
+          runtime's /sched/latencies:seconds — and carried over without re-bucketing:
+          the source's bounds are the explicit bounds. Registrations accumulate as
+          AsyncMeter's do. A sibling of AsyncMeter, reached by type assertion and not
+          folded into FullMeter (ADR 0039).
+        methods:
+          - doc: |-
+              ObservableHistogram registers a histogram read at collection time. The
+              callback reports each series' ABSOLUTE counts.
+            in:
+              - name: name
+                type: string
+              - name: observe
+                type: HistogramCallback
+            name: ObservableHistogram
+        name: AsyncHistogramMeter
+      - doc: |-
+          ExponentialMeter mints EXPONENTIAL (base-2) histograms: a distribution with
+          no bucket ladder to choose, whose buckets hold a relative error bound at
+          every magnitude — what the OpenTelemetry SDKs default to for latency and
+          what Prometheus native histograms ingest. A sibling of Meter, reached by
+          type assertion and not folded into FullMeter (ADR 0039); its points land in
+          SnapshotValue.ExponentialHistograms.
+        methods:
+          - doc: |-
+              ExponentialHistogram returns the exponential histogram series identified
+              by name and attrs, created once holding at most maxSize buckets per
+              range (positive, negative) and starting at ExponentialMaxScale. A
+              maxSize of zero or less takes DefaultExponentialMaxSize; a maxSize of
+              one holds no range a scale change can work with and panics with
+              InvalidBuckets. maxSize is fixed at creation and ignored on every later
+              fetch. Record drops NaN and the infinities — they have no bucket — and
+              counts zero in the zero bucket; RecordDuration records seconds.
+            in:
+              - name: name
+                type: string
+              - name: maxSize
+                type: int
+              - name: attrs
+                type: coreotel.AttrValue
+            name: ExponentialHistogram
+            out:
+              - type: Histogram
+            variadic: true
+        name: ExponentialMeter
+      - doc: |-
+          ContextCounter is the sibling of Counter and UpDownCounter whose Add reads
+          the context it is recorded under: when ctx carries a SAMPLED span, the
+          measurement is kept as the series' exemplar — its value, time, trace and
+          span — and leaves on the next point (ADR 0051 §Deferred, resolved). An
+          unsampled or absent span keeps nothing: an exemplar into a trace nobody
+          stored is a dead link. Reached by type assertion on the instrument.
+        methods:
+          - doc: |-
+              AddContext adds delta as Add does, and offers it as the series' exemplar
+              when ctx carries a sampled span.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: delta
+                type: int64
+            name: AddContext
+        name: ContextCounter
+      - doc: |-
+          ContextHistogram is the sibling of Histogram whose Record reads the context
+          it is recorded under: when ctx carries a SAMPLED span, the measurement is
+          kept as the exemplar of the bucket it fell in — one per bucket on an
+          explicit-bucket histogram, one per series on an exponential one. Reached by
+          type assertion on the instrument.
+        methods:
+          - doc: |-
+              RecordContext records value as Record does, and offers it as an exemplar
+              when ctx carries a sampled span.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: value
+                type: float64
+            name: RecordContext
+        name: ContextHistogram
+      - doc: |-
+          Observer is an engine whose statistics a meter can read (#871): Observe
+          reports each of them once, with a name, a kind, a unit and its current
+          value — read from the engine's own Stats value, never kept twice. Every
+          call reports the same names with the same kinds and units; the
+          registration reads them once to create the instruments, and every
+          collection after that reads the values. Observe MUST NOT block, as an
+          observable callback must not.
+        methods:
+          - doc: Observe reports every statistic of the engine through report.
+            in:
+              - name: report
+                type: ReportStat
+            name: Observe
+        name: Observer
+      - doc: |-
           Counter is a MONOTONIC sum: it only ever increases. In the OTel data model
           its points land in a Sum carrying Monotonic = true, which is what tells a
           backend that a decrease is a restart rather than a measurement.
@@ -488,6 +696,28 @@ packages:
                 type: string
             name: Describe
         name: Describer
+      - doc: |-
+          UnitDescriber is the sibling port (ADR 0039) that binds a UNIT to an
+          instrument name — OTLP's Metric.unit, in UCUM ("s", "ms", "By", "{request}")
+          — as Describer binds a description: wiring-time, non-identifying, the
+          absence of the sibling is the answer (ADR 0208). Binding the same unit twice
+          is idempotent; an implementation is expected to refuse LOUDLY an empty unit,
+          one longer than MaxUnitLen bytes or holding a byte outside printable ASCII, and a
+          second, different unit for one name — programmer errors at a wiring site,
+          like a conflicting description.
+
+          The Prometheus text exposition carries no unit and the SDK's connector adds
+          no suffix (its no-rewrite rule): the unit is lost there, and said so.
+        methods:
+          - doc: |-
+              Unit binds unit to the instrument called name. It is idempotent for an
+              identical unit and refused for a conflicting one.
+            in:
+              - name: name
+              - name: unit
+                type: string
+            name: Unit
+        name: UnitDescriber
       - doc: |-
           UpDownMeter mints the non-monotonic sum Meter cannot — the instrument for a
           total that goes down as well as up.
@@ -594,6 +824,31 @@ packages:
             out:
               - type: error
         name: DocumentExporter
+      - doc: |-
+          EncodedDocumentExporter is the sibling of DocumentExporter an exporter
+          implements when it can ship a wire document already ENCODED for the
+          transport: ExportEncodedDocument sends doc as it is, labelled with
+          encoding — "gzip", the Content-Encoding a store-and-forward queue that
+          compresses what it keeps (forward's Compress) rests a document in, or ""
+          for the identity encoding, which is ExportDocument —, with the verdicts of
+          ExportContext. A gzip document is never decompressed on the way; an
+          encoding the exporter cannot label is refused before any request, as a
+          permanent rejection. An empty doc sends nothing.
+
+          A caller holding a ContextExporter asks for it with a type assertion
+          (ADR 0039). Implementations MUST be safe for concurrent use.
+        methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: doc
+                type: "[]byte"
+              - name: encoding
+                type: string
+            name: ExportEncodedDocument
+            out:
+              - type: error
+        name: EncodedDocumentExporter
       - doc: Gauge is an instantaneous value that can go up or down.
         methods:
           - doc: Set replaces the gauge's current value.
@@ -663,7 +918,15 @@ packages:
             out:
               - type: Gauge
             variadic: true
-          - in:
+          - doc: |-
+              Histogram returns the histogram series identified by name and attrs,
+              created once with buckets, the explicit upper bounds (+Inf is the
+              implicit overflow bucket). An empty layout — nil or none — takes
+              DefaultBuckets; a layout holding NaN, +Inf, -Inf or a repeated bound is
+              refused LOUDLY at creation, before the series is admitted
+              (InvalidBuckets); a valid unsorted layout is sorted. The buckets are
+              fixed at creation and ignored on every later fetch of the series.
+            in:
               - name: name
                 type: string
               - name: buckets
@@ -749,6 +1012,30 @@ packages:
             private: "service/observe/metrics: a description belongs to the name; re-describing with identical text is idempotent, differing text is a wiring defect"
             public: That instrument name already carries a different description
             reason: DESCRIPTION_CONFLICT
+          - code: CodeInvalidUnit
+            doc: |-
+              InvalidUnit is the panic sentinel for a unit that is empty, longer than
+              MaxUnitLen bytes, or holds a byte outside printable ASCII.
+            name: InvalidUnit
+            private: "service/observe/metrics: UnitDescriber.Unit takes a UCUM unit, printable ASCII, 1 to 63 bytes (ADR 0208)"
+            public: An instrument unit must be printable ASCII, 1 to 63 bytes
+            reason: INVALID_UNIT
+          - code: CodeUnitConflict
+            doc: |-
+              UnitConflict is the panic sentinel for two different units bound to one
+              instrument name.
+            name: UnitConflict
+            private: "service/observe/metrics: a unit belongs to the name; re-binding the same unit is idempotent, a different one is a wiring defect (ADR 0208)"
+            public: That instrument name already carries a different unit
+            reason: UNIT_CONFLICT
+          - code: CodeInvalidBuckets
+            doc: |-
+              InvalidBuckets is the panic sentinel for a histogram bucket layout holding
+              NaN, an infinity or a repeated bound.
+            name: InvalidBuckets
+            private: "service/observe/metrics: explicit bucket bounds must be finite and distinct; +Inf is the implicit overflow bucket (#1135)"
+            public: A histogram bucket layout must hold finite, distinct bounds
+            reason: INVALID_BUCKETS
           - code: CodeInvalidMetricName
             doc: |-
               InvalidMetricName is returned when an instrument name cannot be spelled
@@ -828,7 +1115,27 @@ packages:
             private: "service/observe/metrics: the response carried partialSuccess.rejectedDataPoints; the specification forbids retrying it, so the rejected points are lost and the cause is at the collector"
             public: The OTLP collector accepted the request but rejected some data points
             reason: OTLP_PARTIAL_SUCCESS
+          - code: CodeCollectorNil
+            doc: CollectorNil is returned by NewPrometheusHandler given a nil collect function.
+            name: CollectorNil
+            private: "service/observe/metrics: NewPrometheusHandler needs the meter's Collect, bound — a handler with nothing to scrape answers nothing"
+            public: The metrics handler needs a collect function
+            reason: COLLECTOR_NIL
     types:
+      - doc: |-
+          StatKind says how one of an engine's statistics reaches a meter: a
+          StatCounter as an observable counter, a StatGauge as an observable up-down
+          counter. The zero value is no kind, and a statistic reported with it is
+          dropped.
+        name: StatKind
+        underlying: uint8
+      - doc: |-
+          ReportStat reports one of an engine's statistics from inside an Observer's
+          Observe: its name, its kind, its UCUM unit, its current ABSOLUTE value and
+          the attributes that tell its series apart. Valid only for the duration of
+          the Observe call it was handed to.
+        name: ReportStat
+        underlying: func(name string, kind StatKind, unit string, value int64, attrs ...coreotel.AttrValue)
       - doc: |-
           ExporterName is the typed key under which an Exporter registers (e.g. "text",
           "prometheus"). The zero value ExporterName("") is reserved invalid.
@@ -878,12 +1185,164 @@ packages:
                 cumulative ladder (Prometheus) builds it as it walks.
               name: Counts
               type: "[]uint64"
-            - doc: Sum is the total of every observed value in the window.
+            - doc: |-
+                Sum is the total of every observed value in the window; 0 and
+                meaningless when NoSum is true.
               name: Sum
               type: float64
             - doc: Count is how many observations the window holds.
               name: Count
               type: uint64
+            - doc: |-
+                NoSum is true when the source keeps no total of what it counted — an
+                observable histogram read off runtime/metrics, whose histograms carry
+                counts and no sum. Sum is then not a reading, and every exporter says
+                so rather than print it: OTLP/JSON writes the optional sum as absent,
+                the Prometheus connector writes no _sum line, the text exporter is
+                unchanged (it prints the count). The zero value is a histogram that
+                knows its sum, which every synchronous histogram does.
+              name: NoSum
+              type: bool
+            - doc: |-
+                Exemplars holds at most one exemplar per bucket, in bucket order: the
+                last measurement of the window recorded with RecordContext under a
+                SAMPLED span (ADR 0051). Nil when none was.
+              name: Exemplars
+              type: "[]ExemplarValue"
+      - doc: |-
+          ExemplarValue is one measurement kept beside a data point as a link into
+          the trace that produced it: metrics.proto's Exemplar — the time, the value,
+          and the span and trace identifiers as raw arrays, never core/observe/trace's
+          types, which this package must not import (ADR 0051 §Deferred).
+
+          filtered_attributes is absent rather than always empty: a series is keyed
+          by EVERY attribute of its measurement (no view drops any), so an exemplar
+          has none the point does not already carry.
+        name: ExemplarValue
+        struct:
+          fields:
+            - doc: Time is when the measurement was recorded, on the meter's clock.
+              name: Time
+              type: time.Time
+            - doc: |-
+                Value is the measurement. On a sum point it holds the integer the
+                instrument was handed — exact below 2^53 — and OTLP/JSON writes it as
+                asInt; on a histogram point it is the recorded double, asDouble.
+              name: Value
+              type: float64
+            - doc: TraceID is the trace the measurement was recorded in.
+              name: TraceID
+              type: "[16]byte"
+            - doc: SpanID is the span the measurement was recorded in.
+              name: SpanID
+              type: "[8]byte"
+      - doc: |-
+          ExponentialBucketsValue is one range — positive or negative — of an
+          exponential histogram point: Counts[i] counts the values whose bucket index
+          is Offset+i, a bucket at index k holding the magnitudes in
+          (base^k, base^(k+1)], base = 2^(2^-scale). Empty Counts is an empty range.
+        name: ExponentialBucketsValue
+        struct:
+          fields:
+            - doc: Offset is the bucket index of Counts[0].
+              name: Offset
+              type: int32
+            - doc: Counts holds one count per bucket, PER BUCKET (not cumulative).
+              name: Counts
+              type: "[]uint64"
+      - doc: |-
+          ExponentialHistogramValue is one series of an exponential (base-2)
+          histogram metric: OTLP's ExponentialHistogramDataPoint. Its buckets are not
+          chosen by hand — the scale sets a relative error bound at every magnitude,
+          and the histogram lowers the scale on its own when the range it holds would
+          need more than its maximum number of buckets (ADR 0044, resolved).
+        name: ExponentialHistogramValue
+        struct:
+          fields:
+            - doc: |-
+                Attrs is the series' attribute set, sorted by Key; nil for the
+                dimensionless series. See SumValue.Attrs for the aliasing rule.
+              name: Attrs
+              type: "[]coreotel.AttrValue"
+            - doc: |-
+                Scale sets the resolution: base = 2^(2^-Scale), so each bucket's upper
+                bound is base times its lower. ExponentialMinScale to
+                ExponentialMaxScale.
+              name: Scale
+              type: int32
+            - doc: |-
+                ZeroCount counts the observations whose magnitude is at most
+                ZeroThreshold — zero itself, since this SDK's threshold is 0.
+              name: ZeroCount
+              type: uint64
+            - doc: ZeroThreshold is the magnitude ZeroCount covers; 0 in this SDK.
+              name: ZeroThreshold
+              type: float64
+            - doc: Positive holds the buckets of the positive observations.
+              name: Positive
+              type: ExponentialBucketsValue
+            - doc: Negative holds the buckets of the negative observations, by magnitude.
+              name: Negative
+              type: ExponentialBucketsValue
+            - doc: Sum is the total of every observed value in the window.
+              name: Sum
+              type: float64
+            - doc: Count is how many observations the window holds, ZeroCount included.
+              name: Count
+              type: uint64
+            - doc: |-
+                Exemplars holds at most one exemplar: the last measurement of the
+                window recorded with RecordContext under a sampled span. Its buckets
+                move when the scale drops, so one per bucket would point at a bucket
+                that no longer exists.
+              name: Exemplars
+              type: "[]ExemplarValue"
+      - doc: |-
+          ExponentialHistogramMetricValue is every series of ONE exponential histogram
+          instrument name, plus its temporality.
+        name: ExponentialHistogramMetricValue
+        struct:
+          fields:
+            - doc: |-
+                Temporality says which window Points cover. Never
+                TemporalityUnspecified.
+              name: Temporality
+              type: Temporality
+            - doc: |-
+                Description is the instrument's human-readable docstring, or "" when
+                nobody described it. See SumMetricValue.Description.
+              name: Description
+              type: string
+            - doc: |-
+                Unit is the instrument's unit in UCUM, or "" when nobody declared one
+                (ADR 0208). See UnitDescriber.
+              name: Unit
+              type: string
+            - doc: Points holds the name's series, sorted by attribute set.
+              name: Points
+              type: "[]ExponentialHistogramValue"
+      - doc: |-
+          ObserveHistogram reports ONE histogram reading, with its own attribute set,
+          from inside a HistogramCallback: point.Attrs names the series, point.Bounds
+          the explicit upper bounds, point.Counts one count per bucket plus the +Inf
+          overflow (len == len(Bounds)+1), point.Sum the total unless point.NoSum.
+          point.Count and point.Exemplars are ignored: the count is the sum of Counts,
+          and an observed reading has no measurement to link. The meter copies what
+          it keeps, so the callback may reuse its slices. A layout the meter refuses
+          at Histogram's creation — NaN, an infinity, a repeated bound, or Counts of
+          the wrong length — panics with InvalidBuckets. Valid only for the duration
+          of the callback, as ObserveInt64 is.
+        name: ObserveHistogram
+        underlying: func(point HistogramValue)
+      - doc: |-
+          HistogramCallback is read ONCE PER COLLECTION and reports each series'
+          current ABSOLUTE histogram — the counts since the source started, as
+          runtime/metrics keeps them. A delta meter differences successive readings
+          bucket by bucket itself, and takes a reading whose layout changed or whose
+          counts went down as a restart. The rules of Int64Callback hold: never Collect
+          the collecting meter, never block.
+        name: HistogramCallback
+        underlying: func(observe ObserveHistogram)
       - doc: |-
           ObserveInt64 reports ONE integer measurement, with its own attribute set,
           from inside an Int64Callback. It is valid only for the duration of that call;
@@ -943,6 +1402,13 @@ packages:
                 cannot carry it loses nothing but the prose. See Describer.
               name: Description
               type: string
+            - doc: |-
+                Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+                when nobody declared one. Like Description it belongs to the name, is
+                non-identifying, and an exporter that cannot carry it loses only the
+                annotation (ADR 0208). See UnitDescriber.
+              name: Unit
+              type: string
             - doc: Points holds the name's series, sorted by attribute set.
               name: Points
               type: "[]SumValue"
@@ -962,17 +1428,23 @@ packages:
                 nobody described it. See SumMetricValue.Description.
               name: Description
               type: string
+            - doc: |-
+                Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+                when nobody declared one. Like Description it belongs to the name, is
+                non-identifying, and an exporter that cannot carry it loses only the
+                annotation (ADR 0208). See UnitDescriber.
+              name: Unit
+              type: string
             - doc: Points holds the name's series, sorted by attribute set.
               name: Points
               type: "[]GaugeValue"
       - doc: |-
-          HistogramMetricValue is every series of ONE histogram instrument name, plus
-          its temporality.
+          HistogramMetricValue is every series of ONE explicit-bucket histogram
+          instrument name, plus its temporality.
 
-          Exponential (base-2) histograms, which the OTel model also defines, are not
-          implemented: they are a different bucketing scheme with their own scale /
-          offset / zero-count fields, and adding them is a second point type rather
-          than a field on this one. Deferred by ADR 0044 §Deferred.
+          Exponential (base-2) histograms, which the OTel model also defines, are a
+          second point type rather than a field on this one: see
+          ExponentialHistogramMetricValue (ADR 0044 §Deferred, resolved).
         name: HistogramMetricValue
         struct:
           fields:
@@ -985,6 +1457,13 @@ packages:
                 Description is the instrument's human-readable docstring, or "" when
                 nobody described it. See SumMetricValue.Description.
               name: Description
+              type: string
+            - doc: |-
+                Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+                when nobody declared one. Like Description it belongs to the name, is
+                non-identifying, and an exporter that cannot carry it loses only the
+                annotation (ADR 0208). See UnitDescriber.
+              name: Unit
               type: string
             - doc: Points holds the name's series, sorted by attribute set.
               name: Points
@@ -1048,6 +1527,11 @@ packages:
             - doc: Histograms maps an instrument name to its histogram metric.
               name: Histograms
               type: map[string]HistogramMetricValue
+            - doc: |-
+                ExponentialHistograms maps an instrument name to its exponential
+                histogram metric. Nil from a meter that holds none.
+              name: ExponentialHistograms
+              type: map[string]ExponentialHistogramMetricValue
       - doc: |-
           SumValue is one series of a sum metric: the attribute set that identifies it
           plus its value. Monotonicity and temporality are NOT here — they belong to
@@ -1073,6 +1557,12 @@ packages:
                 SumMetricValue.Temporality.
               name: Value
               type: int64
+            - doc: |-
+                Exemplars holds at most one exemplar: the last measurement of the
+                window recorded with AddContext under a SAMPLED span (ADR 0051). Nil
+                when none was.
+              name: Exemplars
+              type: "[]ExemplarValue"
       - doc: |-
           Temporality says which time window a metric's reported value covers. It is
           the single most load-bearing concept in the OpenTelemetry metrics data model,
@@ -1106,6 +1596,12 @@ packages:
         name: Temporality
         underlying: uint8
   - constants:
+      - doc: |-
+          PrometheusContentType is the Content-Type of the Prometheus text exposition
+          format, version 0.0.4 — what NewPrometheusHandler answers a scrape with.
+        name: PrometheusContentType
+        type: string
+        value: "\"text/plain; version=0.0.4; charset=utf-8\""
       - doc: |-
           DefaultMaxSeriesPerInstrument is the bound a Meter uses when MeterConfig
           leaves the knob unset. 2000 distinct attribute sets per instrument name is
@@ -1222,6 +1718,75 @@ packages:
       folds the excess into one aggregated overflow series. ADR 0027 / ADR 0044.
       Cross-OS: 100% portable.
     functions:
+      - doc: |-
+          RuntimeInstruments registers the Go runtime's instruments on meter as
+          observable instruments with the OpenTelemetry Go runtime semantic
+          conventions' names, kinds and units (#868): go.memory.used,
+          go.memory.limit (only while a limit is set), go.memory.allocated,
+          go.memory.allocations, go.memory.gc.goal, go.goroutine.count,
+          go.processor.limit and go.config.gogc; and, when meter is also an
+          AsyncHistogramMeter, the two histograms go.schedule.duration
+          (/sched/latencies:seconds) and go.gc.duration (/sched/pauses/total/gc:seconds),
+          carried over without re-bucketing — the runtime's buckets are the explicit
+          bounds — and marked NoSum, since the runtime keeps no total. Every value is
+          read at Collect from ONE runtime/metrics.Read into samples allocated here,
+          and the histograms' bounds and counts are converted into slices allocated
+          once, so a collection allocates nothing for the readings after the first.
+          The units and descriptions
+          are bound when meter is a UnitDescriber and a Describer. Opt-in, with no
+          attributes: the Resource carries the service. cfg.Underscore spells the
+          names with '_' for a meter a Prometheus scrape reads, whose grammar has
+          no '.'. Registering twice on one meter panics as any duplicate
+          registration does.
+        in:
+          - name: meter
+            type: coremetrics.AsyncMeter
+          - name: cfg
+            type: RuntimeConfig
+        name: RuntimeInstruments
+      - doc: |-
+          RegisterObservers registers every statistic each observer reports as an
+          observable instrument on meter (#871): Observe is called once here to read
+          the names, kinds and units — a StatCounter becomes an observable counter, a
+          StatGauge an observable up-down counter, the unit bound where meter is a
+          UnitDescriber —, then ONCE per collection, its values feeding all of that
+          observer's instruments, so an engine's Stats is read once per scrape
+          whatever it reports. cfg.Underscore spells the names with '_' for a meter a
+          Prometheus scrape reads. A statistic reported with no kind is dropped;
+          registering one observer twice panics as any duplicate registration does.
+        in:
+          - name: meter
+            type: coremetrics.AsyncMeter
+          - name: cfg
+            type: ObserverConfig
+          - name: observers
+            type: coremetrics.Observer
+        name: RegisterObservers
+        variadic: true
+      - doc: |-
+          NewPrometheusHandler returns the /metrics scrape endpoint over collect — the
+          meter's Collect, bound. It answers GET with the snapshot rendered by the
+          Prometheus exporter into a buffer and written once, with
+          PrometheusContentType and a Content-Length, so a refused document
+          (INVALID_METRIC_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY) writes
+          nothing of itself and answers 500 with the refusal's Public text alone —
+          never a 200 with an empty body, which a scraper reads as every series gone.
+          HEAD answers the headers without collecting, so a probe never consumes a
+          delta window; any other method is 405 with Allow: GET, HEAD. One scrape
+          runs at a time: a concurrent one answers 503 with Retry-After: 1, so a delta
+          meter keeps one reader. An Accept for OpenMetrics is answered in 0.0.4, the
+          one format the connector writes. A nil collect is refused with CollectorNil.
+        in:
+          - name: collect
+            type: func() coremetrics.SnapshotValue
+          - name: cfg
+            type: PrometheusHandlerConfig
+        name: NewPrometheusHandler
+        out:
+          - name: handler
+            type: http.Handler
+          - name: err
+            type: error
       - doc: |-
           NewOTLPHTTPExporter returns a ContextExporter that encodes each snapshot as
           OTLP/JSON and POSTs it to cfg.Endpoint. ExportContext bounds the POST by its
@@ -1384,9 +1949,47 @@ packages:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
       coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+      http: net/http
       otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
     path: github.com/kitsunium/sdk/internal/service/observe/metrics
     types:
+      - doc: |-
+          ObserverConfig tunes RegisterObservers. The zero value registers the names
+          as the observers spell them.
+        name: ObserverConfig
+        struct:
+          fields:
+            - doc: |-
+                Underscore spells every name with '_' instead of '.'
+                (kitsunium_cache_hits), for a meter a Prometheus scrape reads.
+              name: Underscore
+              type: bool
+      - doc: |-
+          RuntimeConfig tunes RuntimeInstruments. The zero value registers the
+          OpenTelemetry names.
+        name: RuntimeConfig
+        struct:
+          fields:
+            - doc: |-
+                Underscore spells every name with '_' instead of '.' (go_memory_used),
+                for a meter a Prometheus scrape reads.
+              name: Underscore
+              type: bool
+      - doc: |-
+          PrometheusHandlerConfig tunes NewPrometheusHandler. The zero value is
+          usable: the exporter is named "prometheus".
+        name: PrometheusHandlerConfig
+        struct:
+          fields:
+            - doc: Name is the exporter name the handler renders under; empty is "prometheus".
+              name: Name
+              type: coremetrics.ExporterName
+            - doc: |-
+                OnError, when non-nil, is called with a failed write of a response — a
+                scraper that hung up mid-document, the one failure left once the status
+                line is out. nil drops it: the handler has nowhere else to report it.
+              name: OnError
+              type: func(err error)
       - doc: |-
           MeterConfig configures a Meter. Every field has a resolved meaning when left
           unset — none of them is inert (ADR 0031).
@@ -1501,6 +2104,92 @@ packages:
           with NewTextExporter(name, os.Stdout). ADR 0030.
         name: Text
         type: coremetrics.Exporter
+  - constants:
+      - doc: |-
+          InstanceKey is the attribute each adapter stamps its statistics with when
+          given a name, so two caches — two queues — are two series of one metric.
+          It is spelled with '_' so the Prometheus connector, which refuses a dotted
+          label name, carries it as OTLP does.
+        name: InstanceKey
+        type: string
+        value: "\"kitsunium_instance\""
+    doc: |-
+      Package statsbridge turns the Stats value of each SDK engine that has one
+      into a metrics Observer (#871), so its counters reach an exporter through
+      RegisterObservers without the product copying them by hand. It adapts a
+      Stats FUNCTION — the engine's own method value — rather than the engine
+      itself, so no engine imports the metrics domain and the kernel cache, which
+      may import nothing of the core, is covered too. Covered: the kernel cache
+      (and the data/cache engines built on it), the docstore, the store-and-forward
+      queue (app/forward) and the queue brokers (core/data/queue Counter). Every
+      name is kitsunium.<engine>.<statistic>.
+    functions:
+      - doc: |-
+          Cache adapts a kernel cache's Stats — Cache.Stats or Striped.Stats, bound —:
+          kitsunium.cache.hits, .misses and .evictions (counters, {lookup} and
+          {entry}) and kitsunium.cache.weight (a gauge, {weight}), stamped
+          InstanceKey=name when name is not empty.
+        in:
+          - name: name
+            type: string
+          - name: stats
+            type: func() kcache.StatsValue
+        name: Cache
+        out:
+          - type: coremetrics.Observer
+      - doc: |-
+          Docstore adapts a docstore's Stats — Store.Stats, bound —:
+          kitsunium.docstore.documents and .pending (gauges, {document} and
+          {entry}), .folds (a counter, {fold}), .versions.former, .versions.trashed
+          (gauges, {version} and {document}) and .versions.bytes (a gauge, By),
+          stamped InstanceKey=name when name is not empty.
+        in:
+          - name: name
+            type: string
+          - name: stats
+            type: func() svcdocstore.StatsValue
+        name: Docstore
+        out:
+          - type: coremetrics.Observer
+      - doc: |-
+          Forward adapts a forwarder's Stats — Forwarder.Stats, bound —:
+          kitsunium.forward.pending ({batch}) and .pending_bytes (By), gauges; and
+          .enqueued, .sent, .retries, .dropped, .expired and .dead_lettered, counters
+          of {batch} — stamped InstanceKey=name when name is not empty.
+        in:
+          - name: name
+            type: string
+          - name: stats
+            type: func() svcforward.StatsValue
+        name: Forward
+        out:
+          - type: coremetrics.Observer
+      - doc: |-
+          Queue adapts a broker's Counter: kitsunium.queue.queued, .leased and .dead
+          (gauges, {message}) and .oldest_age (a gauge in ms, 0 when the queue is
+          empty), stamped InstanceKey=name when name is not empty. Counter.Stats is
+          the broker's own read — a query on SQL, a directory walk on file — paid
+          once per collection and bounded by timeout; zero or less reads under no
+          deadline, which a memory broker needs and which allocates nothing, where
+          a deadline costs the context's few allocations per collection. A read
+          that fails or runs out reports nothing for that collection.
+        in:
+          - name: name
+            type: string
+          - name: counter
+            type: corequeue.Counter
+          - name: timeout
+            type: time.Duration
+        name: Queue
+        out:
+          - type: coremetrics.Observer
+    imports:
+      coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
+      corequeue: github.com/kitsunium/sdk/internal/core/data/queue
+      kcache: github.com/kitsunium/sdk/internal/kernel/collections/cache
+      svcdocstore: github.com/kitsunium/sdk/internal/service/data/docstore
+      svcforward: github.com/kitsunium/sdk/internal/service/app/forward
+    path: github.com/kitsunium/sdk/internal/service/observe/metrics/statsbridge
   - doc: |-
       Package metrics is the public facade for the SDK's observability domain — the
       natural twin of the logger, shaped on the OpenTelemetry metrics DATA MODEL.
@@ -1689,13 +2378,18 @@ packages:
       [InvalidLabelName], [ReservedLabelName]) and leaves the writer untouched,
       because a truncated exposition parses as a complete one.
 
-      A scrape endpoint binds its own exporter with [NewPrometheusExporter] and
-      hands it the response writer:
+      A scrape endpoint is [NewPrometheusHandler] over the meter's Collect: it
+      renders the document whole before a byte leaves, answers a refusal with 500
+      and its Public text rather than a 200 with an empty body (which a scraper
+      reads as every series gone), sets [PrometheusContentType] and the
+      Content-Length, and lets one scrape run at a time (503 for a concurrent one,
+      so a delta meter keeps one reader):
 
-      	http.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
-      	    w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-      	    _ = metrics.NewPrometheusExporter("scrape", w).Export(m.Collect())
-      	})
+      	h, err := metrics.NewPrometheusHandler(m.Collect, metrics.PrometheusHandlerConfig{})
+      	if err != nil {
+      	    return err
+      	}
+      	mux.Handle("/metrics", h)
 
       A non-monotonic sum is typed `gauge` there, not `counter`, because `rate()`
       on a counter re-extrapolates from zero every time the value falls.
@@ -1868,6 +2562,22 @@ packages:
             target: coremetrics.Describer
       - alias:
           - doc: |-
+              UnitDescriber is the public alias for the sibling port that binds a UCUM
+              unit to an instrument NAME (ADR 0208). Like Describer it is not part of
+              FullMeter: reach it by type assertion.
+            name: UnitDescriber
+            target: coremetrics.UnitDescriber
+      - func:
+          doc: |-
+            DefaultBuckets returns a fresh copy of the bounds a histogram created with
+            no buckets uses — the OpenTelemetry SDK's default (0 to 10000, suited to
+            milliseconds).
+          forward: coremetrics.DefaultBuckets
+          name: DefaultBuckets
+          out:
+            - type: "[]float64"
+      - alias:
+          - doc: |-
               FullMeter is the public alias for the union of all three — what NewMeter
               returns.
             name: FullMeter
@@ -2004,6 +2714,111 @@ packages:
             target: coremetrics.HistogramValue
       - alias:
           - doc: |-
+              Exemplar is the public alias for one measurement kept beside a data point
+              as a link into its trace: time, value, trace and span identifiers.
+            name: Exemplar
+            target: coremetrics.ExemplarValue
+      - alias:
+          - doc: |-
+              ExponentialBuckets is the public alias for one range — positive or
+              negative — of an exponential histogram point: an offset and its counts.
+            name: ExponentialBuckets
+            target: coremetrics.ExponentialBucketsValue
+      - alias:
+          - doc: ExponentialHistogramPoint is the public alias for one exponential histogram series.
+            name: ExponentialHistogramPoint
+            target: coremetrics.ExponentialHistogramValue
+      - alias:
+          - doc: |-
+              ExponentialHistogramMetric is the public alias for every series of one
+              exponential histogram name, with its temporality.
+            name: ExponentialHistogramMetric
+            target: coremetrics.ExponentialHistogramMetricValue
+      - alias:
+          - doc: |-
+              ExponentialMeter is the public alias for the sibling port that mints
+              exponential (base-2) histograms. Not part of FullMeter: reach it by type
+              assertion.
+            name: ExponentialMeter
+            target: coremetrics.ExponentialMeter
+      - alias:
+          - doc: |-
+              AsyncHistogramMeter is the public alias for the sibling port that
+              registers observable histograms. Not part of FullMeter: reach it by type
+              assertion.
+            name: AsyncHistogramMeter
+            target: coremetrics.AsyncHistogramMeter
+      - alias:
+          - doc: |-
+              ContextCounter is the public alias for the sibling of Counter and
+              UpDownCounter whose AddContext keeps a sampled span's measurement as the
+              series' exemplar.
+            name: ContextCounter
+            target: coremetrics.ContextCounter
+      - alias:
+          - doc: |-
+              ContextHistogram is the public alias for the sibling of Histogram whose
+              RecordContext keeps a sampled span's measurement as an exemplar.
+            name: ContextHistogram
+            target: coremetrics.ContextHistogram
+      - alias:
+          - doc: |-
+              ObserveHistogram is the public alias for the reporting function an
+              observable histogram callback is handed.
+            name: ObserveHistogram
+            target: coremetrics.ObserveHistogram
+      - alias:
+          - doc: HistogramCallback is the public alias for an observable histogram's callback.
+            name: HistogramCallback
+            target: coremetrics.HistogramCallback
+      - const:
+          - doc: ExponentialMinScale is the lowest scale an exponential histogram falls to.
+            name: ExponentialMinScale
+            reexport: coremetrics.ExponentialMinScale
+            type: int32
+            typed: true
+            value: "-10"
+          - doc: ExponentialMaxScale is the scale an exponential histogram starts at.
+            name: ExponentialMaxScale
+            reexport: coremetrics.ExponentialMaxScale
+            type: int32
+            typed: true
+            value: "20"
+          - doc: |-
+              DefaultExponentialMaxSize is the bucket count per range an exponential
+              histogram created with a maxSize of zero or less holds.
+            name: DefaultExponentialMaxSize
+            reexport: coremetrics.DefaultExponentialMaxSize
+            type: int
+            typed: true
+            value: "160"
+      - func:
+          doc: |-
+            ExponentialIndex is the bucket index of a positive, finite magnitude at
+            scale: the k with magnitude in (base^k, base^(k+1)], base = 2^(2^-scale).
+          forward: coremetrics.ExponentialIndex
+          in:
+            - name: magnitude
+              type: float64
+            - name: scale
+              type: int32
+          name: ExponentialIndex
+          out:
+            - type: int32
+      - func:
+          doc: |-
+            ExponentialLowerBound is the exclusive lower bound of bucket index at
+            scale, base^index.
+          forward: coremetrics.ExponentialLowerBound
+          in:
+            - name: index
+            - name: scale
+              type: int32
+          name: ExponentialLowerBound
+          out:
+            - type: float64
+      - alias:
+          - doc: |-
               ObserveInt64 is the public alias for the reporting function an integer
               observable callback is handed.
             name: ObserveInt64
@@ -2045,6 +2860,15 @@ packages:
             name: DocumentExporter
             target: coremetrics.DocumentExporter
       - alias:
+          - doc: |-
+              EncodedDocumentExporter is the public alias for the sibling of
+              DocumentExporter an exporter implements to ship a document already
+              encoded for the transport — the OTLP/HTTP exporter's
+              ExportEncodedDocument posts a gzip document as it rests, with
+              Content-Encoding: gzip (#1051).
+            name: EncodedDocumentExporter
+            target: coremetrics.EncodedDocumentExporter
+      - alias:
           - doc: ExporterName is the public alias for an exporter's registry key.
             name: ExporterName
             target: coremetrics.ExporterName
@@ -2078,6 +2902,24 @@ packages:
               description, which would document nothing.
             name: InvalidDescription
             reexport: coremetrics.InvalidDescription
+            type: "*errs.Error"
+          - doc: InvalidUnit is raised when Unit is handed an empty, over-long or non-ASCII unit.
+            name: InvalidUnit
+            reexport: coremetrics.InvalidUnit
+            type: "*errs.Error"
+          - doc: UnitConflict is raised when a second, DIFFERENT unit is bound to one name.
+            name: UnitConflict
+            reexport: coremetrics.UnitConflict
+            type: "*errs.Error"
+          - doc: |-
+              InvalidBuckets is raised when a histogram is created with NaN, an infinity
+              or a repeated bound in its layout.
+            name: InvalidBuckets
+            reexport: coremetrics.InvalidBuckets
+            type: "*errs.Error"
+          - doc: CollectorNil is returned by NewPrometheusHandler given a nil collect function.
+            name: CollectorNil
+            reexport: coremetrics.CollectorNil
             type: "*errs.Error"
           - doc: |-
               DescriptionConflict is raised when a second, DIFFERENT description is
@@ -2247,6 +3089,103 @@ packages:
             - type: Exporter
       - func:
           doc: |-
+            RuntimeInstruments registers the Go runtime's instruments on meter with the
+            OpenTelemetry Go runtime conventions' names, kinds and units (go.memory.used,
+            go.goroutine.count, …, and on an AsyncHistogramMeter the histograms
+            go.schedule.duration and go.gc.duration), read at Collect from one
+            runtime/metrics.Read. Underscore names them for a Prometheus meter.
+          forward: svcmetrics.RuntimeInstruments
+          in:
+            - name: meter
+              type: AsyncMeter
+            - name: cfg
+              type: RuntimeConfig
+          name: RuntimeInstruments
+      - alias:
+          - doc: RuntimeConfig is the public alias for RuntimeInstruments' configuration.
+            name: RuntimeConfig
+            target: svcmetrics.RuntimeConfig
+      - alias:
+          - doc: |-
+              Observer is the public alias for an engine whose statistics a meter can
+              read: Observe reports each once (#871).
+            name: Observer
+            target: coremetrics.Observer
+      - alias:
+          - doc: ReportStat is the public alias for the function an Observer reports through.
+            name: ReportStat
+            target: coremetrics.ReportStat
+      - alias:
+          - doc: StatKind is the public alias for a statistic's kind, StatCounter or StatGauge.
+            name: StatKind
+            target: coremetrics.StatKind
+      - const:
+          - doc: StatCounter is a count that only grows, carried as an observable counter.
+            name: StatCounter
+            reexport: coremetrics.StatCounter
+            type: StatKind
+            typed: true
+            value: "1"
+          - doc: StatGauge is a level read now, carried as an observable up-down counter.
+            name: StatGauge
+            reexport: coremetrics.StatGauge
+            type: StatKind
+            typed: true
+            value: "2"
+      - alias:
+          - doc: ObserverConfig is the public alias for RegisterObservers' configuration.
+            name: ObserverConfig
+            target: svcmetrics.ObserverConfig
+      - func:
+          doc: |-
+            RegisterObservers registers every statistic each observer reports as an
+            observable instrument on meter, read once per collection (#871); the
+            engines' adapters are in the statsbridge package.
+          forward: svcmetrics.RegisterObservers
+          in:
+            - name: meter
+              type: AsyncMeter
+            - name: cfg
+              type: ObserverConfig
+            - name: observers
+              type: Observer
+          name: RegisterObservers
+          variadic: true
+      - func:
+          doc: |-
+            NewPrometheusHandler returns the /metrics scrape endpoint over collect (the
+            meter's Collect, bound): GET renders the snapshot once into a buffer and
+            answers PrometheusContentType with a Content-Length, a refused document
+            answers 500 with its Public text, HEAD answers the headers without
+            collecting, other methods 405, and a scrape concurrent with another 503
+            with Retry-After: 1. A nil collect is CollectorNil.
+
+            	h, err := metrics.NewPrometheusHandler(meter.Collect, metrics.PrometheusHandlerConfig{})
+            	mux.Handle("/metrics", h)
+          forward: svcmetrics.NewPrometheusHandler
+          in:
+            - name: collect
+              type: func() Snapshot
+            - name: cfg
+              type: PrometheusHandlerConfig
+          name: NewPrometheusHandler
+          out:
+            - name: handler
+              type: http.Handler
+            - name: err
+              type: error
+      - alias:
+          - doc: PrometheusHandlerConfig is the public alias for NewPrometheusHandler's configuration.
+            name: PrometheusHandlerConfig
+            target: svcmetrics.PrometheusHandlerConfig
+      - const:
+          - doc: PrometheusContentType is the Content-Type a scrape of NewPrometheusHandler answers with.
+            name: PrometheusContentType
+            reexport: svcmetrics.PrometheusContentType
+            type: string
+            value: "\"text/plain; version=0.0.4; charset=utf-8\""
+      - func:
+          doc: |-
             EncodeOTLPJSON renders snap as ONE OTLP/JSON ExportMetricsServiceRequest:
             exactly the bytes that go in the body of a POST to /v1/metrics under
             Content-Type: application/json.
@@ -2354,8 +3293,78 @@ packages:
           out:
             - type: "[]ExporterName"
     imports:
+      http: net/http
       coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
       coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcmetrics: github.com/kitsunium/sdk/internal/service/observe/metrics
     path: github.com/kitsunium/sdk/pkg/v1/observe/metrics
+  - doc: |-
+      Package statsbridge turns each SDK engine's Stats value into a metrics
+      Observer, for metrics.RegisterObservers (#871): Cache (the kernel cache and
+      the data/cache engines on it), Docstore, Forward (app/forward) and Queue (a
+      queue broker's Counter). Each adapts the engine's Stats method value, so the
+      engines know nothing of metrics; every name is kitsunium.<engine>.<statistic>,
+      stamped InstanceKey=name when a name is given.
+    facade:
+      - const:
+          - doc: InstanceKey is the attribute an adapter stamps its statistics with when given a name.
+            name: InstanceKey
+            reexport: statsbridge.InstanceKey
+            type: string
+            typed: true
+            value: "\"kitsunium_instance\""
+      - func:
+          doc: Cache adapts a cache's Stats method value — hits, misses, evictions, weight.
+          forward: statsbridge.Cache
+          in:
+            - name: name
+              type: string
+            - name: stats
+              type: func() kcache.StatsValue
+          name: Cache
+          out:
+            - type: coremetrics.Observer
+      - func:
+          doc: Docstore adapts a docstore's Stats method value — documents, pending, folds, versions.
+          forward: statsbridge.Docstore
+          in:
+            - name: name
+              type: string
+            - name: stats
+              type: func() svcdocstore.StatsValue
+          name: Docstore
+          out:
+            - type: coremetrics.Observer
+      - func:
+          doc: Forward adapts a forwarder's Stats method value — pending, sent, retries, lost.
+          forward: statsbridge.Forward
+          in:
+            - name: name
+              type: string
+            - name: stats
+              type: func() svcforward.StatsValue
+          name: Forward
+          out:
+            - type: coremetrics.Observer
+      - func:
+          doc: Queue adapts a queue broker's Counter — queued, leased, dead, oldest age.
+          forward: statsbridge.Queue
+          in:
+            - name: name
+              type: string
+            - name: counter
+              type: corequeue.Counter
+            - name: timeout
+              type: time.Duration
+          name: Queue
+          out:
+            - type: coremetrics.Observer
+    imports:
+      coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
+      corequeue: github.com/kitsunium/sdk/internal/core/data/queue
+      kcache: github.com/kitsunium/sdk/internal/kernel/collections/cache
+      statsbridge: github.com/kitsunium/sdk/internal/service/observe/metrics/statsbridge
+      svcdocstore: github.com/kitsunium/sdk/internal/service/data/docstore
+      svcforward: github.com/kitsunium/sdk/internal/service/app/forward
+    path: github.com/kitsunium/sdk/pkg/v1/observe/metrics/statsbridge

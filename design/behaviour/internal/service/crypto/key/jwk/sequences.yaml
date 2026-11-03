@@ -868,30 +868,50 @@ sequences:
                 - return: nil, corejwk.UnsupportedKeyType
           "on": k.kty
   - of: KeyValue.thumbprintEC
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.thumbprintEC
+        kind: self
+      - id: jcs
+        kind: package
     steps:
       - opt:
           do:
             - return: nil, corejwk.MissingMember
           when: len(k.x) == 0 || len(k.y) == 0
-      - return: |-
-          []byte(`{"crv":"` + string(k.crv) + `","kty":"EC","x":"` +
-          		b64Encode(k.x) + `","y":"` + b64Encode(k.y) + `"}`), nil
+      - return: "jcs.Marshal(map[string]string{\"crv\": string(k.crv), \"kty\": \"EC\", \"x\": b64Encode(k.x), \"y\": b64Encode(k.y)})"
+        to: jcs
   - of: KeyValue.thumbprintOKP
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.thumbprintOKP
+        kind: self
+      - id: jcs
+        kind: package
     steps:
       - opt:
           do:
             - return: nil, corejwk.MissingMember
           when: len(k.x) == 0
-      - return: |-
-          []byte(`{"crv":"` + string(k.crv) + `","kty":"OKP","x":"` +
-          		b64Encode(k.x) + `"}`), nil
+      - return: "jcs.Marshal(map[string]string{\"crv\": string(k.crv), \"kty\": \"OKP\", \"x\": b64Encode(k.x)})"
+        to: jcs
   - of: KeyValue.thumbprintOct
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.thumbprintOct
+        kind: self
+      - id: jcs
+        kind: package
     steps:
       - opt:
           do:
             - return: nil, corejwk.NoPrivateMaterial
           when: "!k.IsPrivate()"
-      - return: "[]byte(`{\"k\":\"` + b64Encode(k.secret()) + `\",\"kty\":\"oct\"}`), nil"
+      - return: "jcs.Marshal(map[string]string{\"k\": b64Encode(k.secret()), \"kty\": \"oct\"})"
+        to: jcs
   - of: Parse
     participants:
       - id: caller

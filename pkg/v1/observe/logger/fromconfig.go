@@ -23,6 +23,22 @@ import (
 // Like NewMulti's, the returned Logger owns the writers it opened — the caller
 // never held them — and implements io.Closer to release them, once.
 func FromConfig(format Format, raw []byte) (lg Logger, err error) {
+	//: no live floor: the topology's level, fixed.
+	return fromConfig(format, raw, nil)
+}
+
+// FromConfigWithLevel is FromConfig gated on floor, a LevelVar the caller
+// keeps: the topology's level, when it names one, is set into floor, and
+// every record is checked against floor's current value, so the caller
+// retunes the whole topology with floor.Set and rebuilds nothing. A nil
+// floor is FromConfig.
+func FromConfigWithLevel(format Format, raw []byte, floor *LevelVar) (lg Logger, err error) {
+	//: the caller's live floor; fromConfig reads a nil one as FromConfig.
+	return fromConfig(format, raw, floor)
+}
+
+// fromConfig is FromConfig's body, gated on floor when it is non-nil.
+func fromConfig(format Format, raw []byte, floor *LevelVar) (lg Logger, err error) {
 	//: decode the blob into a TopologyConfig via the consumer-registered codec.
 	topo, dErr := decodeTopology(format, raw)
 	//: a malformed blob or missing codec aborts before any sink opens.
@@ -43,11 +59,7 @@ func FromConfig(format Format, raw []byte) (lg Logger, err error) {
 		return nil, rErr
 	}
 	//: route through NewWithSink so the same encoder + version stamping applies.
-	built, bErr := NewWithSink(SinkConfig{
-		Sink:     sink,
-		Encoder:  TextEncoder(),
-		MinLevel: parseLevel(topo.Level),
-	})
+	built, bErr := NewWithSink(topologySinkConfig(sink, topo.Level, floor))
 	//: the only failure left is NewWithSink's own validation.
 	if bErr != nil {
 		//: forwarded unchanged.
@@ -55,6 +67,22 @@ func FromConfig(format Format, raw []byte) (lg Logger, err error) {
 	}
 	//: the Logger owns what resolveSinks opened: nobody else holds it.
 	return svclogger.Owning(built, sink), nil
+}
+
+// topologySinkConfig is the SinkConfig a topology builds its Logger with: the
+// text encoder, and the topology's level fixed — or, with a caller's floor, set
+// into that floor (when the topology names a level) and read live.
+func topologySinkConfig(sink Sink, name string, floor *LevelVar) SinkConfig {
+	//: the fixed floor FromConfig has always applied.
+	if floor == nil {
+		return SinkConfig{Sink: sink, Encoder: TextEncoder(), MinLevel: parseLevel(name)}
+	}
+	//: the topology seeds the caller's floor only when it names a level.
+	if name != "" {
+		floor.Set(parseLevel(name))
+	}
+	//: the caller's floor, read on every record.
+	return SinkConfig{Sink: sink, Encoder: TextEncoder(), Level: floor}
 }
 
 // decodeTopology unmarshals raw into a Topology using the codec registered under

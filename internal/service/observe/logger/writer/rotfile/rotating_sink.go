@@ -19,6 +19,10 @@ import (
 // rather than inheriting gzip's default.
 const defaultFilePerm os.FileMode = 0o600
 
+// maxRetainedBatch is the largest concatenation buffer WriteBatch keeps for
+// the next batch; a burst that grew it past this is let go.
+const maxRetainedBatch int = 1 << 20
+
 // openRefusals is this sink's vocabulary for the hardened open both file sinks
 // share (internal/service/observe/logger/internal/logfile): one sentinel,
 // CodeRotFileOpenFailed, for the policy refusal of a planted link and for every
@@ -46,10 +50,22 @@ type rotatingSink struct {
 	// cfg is the immutable rotation policy (path, cap, backups, compress).
 	cfg Config
 	// mu serialises Write + rotation so the size accounting, rename shift, and
-	// reopen are atomic against concurrent producers.
+	// reopen are atomic against concurrent producers. Flush holds it only to
+	// read f, never across the fsync (#815).
 	mu sync.Mutex
+	// pin keeps the descriptor a Flush is syncing open against a rotation:
+	// Flush read-locks it while it still holds mu, and rotate write-locks it
+	// (under mu) before closing the active file, so a rotation waits for an
+	// fsync in progress — rotations are rare — while a Write never does.
+	pin sync.RWMutex
 	// f is the currently open active file at cfg.Path.
 	f *os.File
+	// batch is WriteBatch's concatenation buffer, reused under mu.
+	batch []byte
+	// syncFile, when set, replaces (*os.File).Sync as the fsync Flush runs: a
+	// white-box test substitutes one that blocks, to prove a Write is not held
+	// behind it. nil in production.
+	syncFile func(f *os.File) error
 	// size tracks bytes written to the active file since the last open, so the
 	// threshold check needs no per-write stat syscall.
 	size int64
@@ -147,6 +163,50 @@ func (s *rotatingSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 	//: size accounting stays consistent against concurrent producers.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	//: the record's level rides on a write failure, as it always has.
+	return s.writeLocked(p, errs.Int("level", int(r.Level)))
+}
+
+// WriteBatch appends every payload to the active file in ONE write, under
+// the local mutex, rotating first when the batch would push the file past
+// MaxBytes — the threshold is checked once per batch, as a single record is
+// once per write (#807). It reports how many records landed whole.
+func (s *rotatingSink) WriteBatch(ctx context.Context, recs []corelogger.RecordEvent, payloads [][]byte) (written int, err error) {
+	//: honour context cancellation: cancelled contexts skip the write entirely.
+	if ctx != nil && ctx.Err() != nil {
+		//: wrap ctx.Err() so consumers get both our reason and stdlib Is().
+		return 0, errs.Wrap(ctx.Err(), errs.WrapParams{
+			Code:    corerotfile.CodeRotFileWriteFailed,
+			Reason:  "ROT_FILE_WRITE_FAILED",
+			Public:  "Rotating file write failed",
+			Private: "service/observe/logger/writer/rotfile.WriteBatch saw a cancelled context",
+		}, errs.Int("records", len(recs)))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	//: one buffer, so one write(2), one threshold check and one size update.
+	buf := s.batch[:0]
+	for _, p := range payloads {
+		buf = append(buf, p...)
+	}
+	//: keep the buffer for the next batch unless a burst grew it too far.
+	defer func() { s.batch = retained(buf) }()
+	n, werr := s.writeLocked(buf, errs.Int("records", len(recs)))
+	written = wholeRecords(payloads, n)
+	//: the rotation, reopen or write error, as Write surfaces it.
+	if werr != nil {
+		//: recs[written:] were not delivered.
+		return written, werr
+	}
+	//: every record landed.
+	return len(payloads), nil
+}
+
+// writeLocked is Write's body after the context check: the stashed interval
+// error reported, the descriptor reopened when the last reopen failed, the
+// rotation when p would cross MaxBytes, then the write, whose failure carries
+// the caller's field beside the byte count. The caller holds s.mu.
+func (s *rotatingSink) writeLocked(p []byte, field errs.FieldValue) (n int, err error) {
 	//: surface a stashed interval-rotation failure exactly once via the OnError
 	//: hook: a failing "archive every 24h" policy must reach the operator, not
 	//: vanish on the daemon goroutine. Clearing it after read makes this genuine
@@ -186,10 +246,37 @@ func (s *rotatingSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 			Reason:  "ROT_FILE_WRITE_FAILED",
 			Public:  "Rotating file write failed",
 			Private: "service/observe/logger/writer/rotfile.Write underlying *os.File returned an error",
-		}, errs.Int("bytes", len(p)), errs.Int("level", int(r.Level)))
+		}, errs.Int("bytes", len(p)), field)
 	}
 	//: happy path — return the byte count.
 	return written, nil
+}
+
+// retained is buf emptied for reuse, or nil when it grew past
+// maxRetainedBatch.
+func retained(buf []byte) []byte {
+	//: a burst's buffer is not kept for the sink's lifetime.
+	if cap(buf) > maxRetainedBatch {
+		//: the next batch allocates a fresh one.
+		return nil
+	}
+	//: reuse the backing array.
+	return buf[:0]
+}
+
+// wholeRecords counts the payloads, from the first, that lie entirely within
+// the first n bytes of their concatenation.
+func wholeRecords(payloads [][]byte, n int) int {
+	//: walk the payloads until one does not fit in what was written.
+	for i, p := range payloads {
+		//: this record was cut, or never started.
+		if len(p) > n {
+			return i
+		}
+		n -= len(p)
+	}
+	//: all of them.
+	return len(payloads)
 }
 
 // Flush calls fsync on the active file so kernel page cache contents reach
@@ -207,10 +294,14 @@ func (s *rotatingSink) Flush(ctx context.Context) error {
 			Private: "service/observe/logger/writer/rotfile.Flush saw a cancelled context",
 		})
 	}
-	//: serialise the sync against in-flight writes via the same mutex.
+	//: read the active descriptor under mu and pin it against a rotation, then
+	//: fsync OUTSIDE mu, so a Write is never held behind the disk (#815).
 	s.mu.Lock()
-	serr := s.syncOpen()
+	f := s.f
+	s.pin.RLock()
 	s.mu.Unlock()
+	serr := s.syncOpen(f)
+	s.pin.RUnlock()
 	//: wrap any sync error with the WriteFailed sentinel semantics.
 	if serr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
@@ -255,16 +346,23 @@ func (s *rotatingSink) Close() error {
 	return nil
 }
 
-// syncOpen syncs the active descriptor; a sink whose last reopen failed holds
-// none, and there is nothing it wrote to sync. The caller holds s.mu.
-func (s *rotatingSink) syncOpen() error {
+// syncOpen syncs f, the descriptor Flush read under mu; a sink whose last
+// reopen failed holds none, and there is nothing it wrote to sync. A Close
+// racing the sync makes Sync report the file closed — correct for a closing
+// sink — and never touches a reused descriptor: os.File keeps it open until
+// the in-flight Sync returns. The caller holds s.pin, not s.mu.
+func (s *rotatingSink) syncOpen(f *os.File) error {
 	//: no descriptor since a failed reopen: nothing unsynced.
-	if s.f == nil {
+	if f == nil {
 		//: nothing to sync.
 		return nil
 	}
+	//: a white-box test's blocking sync.
+	if s.syncFile != nil {
+		return s.syncFile(f)
+	}
 	//: the active file's fsync.
-	return s.f.Sync()
+	return f.Sync()
 }
 
 // closeOpen closes the active descriptor; a sink whose last reopen failed

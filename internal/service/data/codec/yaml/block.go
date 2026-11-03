@@ -364,12 +364,12 @@ func (p *parser) scanBlockKey(line, off int) (string, scalarStyle, error) {
 	switch p.peek() {
 	//: a double-quoted key.
 	case '"':
-		value, err := p.scanDoubleQuoted(true)
+		value, err := p.scanDoubleQuoted(-1, true)
 		//: the key.
 		return value, styleDouble, err
 	//: a single-quoted key.
 	case '\'':
-		value, err := p.scanSingleQuoted(true)
+		value, err := p.scanSingleQuoted(-1, true)
 		//: the key.
 		return value, styleSingle, err
 	//: a flow collection as a key.
@@ -411,7 +411,7 @@ func (p *parser) checkKey(line, off, end int, style scalarStyle, value string) e
 	//: YAML's bound on an implicit key.
 	if utf8.RuneCountInString(p.src[off:end]) > maxKeyRunes {
 		//: refused where the key starts.
-		return p.errAt(line, off, "a mapping key is longer than 1024 characters")
+		return bounded(coreyaml.SizeExceeded, "a mapping key is longer than 1024 characters", at(line, p.columnOf(off))...)
 	}
 	//: the merge key.
 	if style == stylePlain && value == mergeKey {
@@ -487,12 +487,12 @@ func (p *parser) parseInlineValue(parent int) (int32, error) {
 		return p.parseInlineFlow(parent, line, off)
 	//: a double-quoted scalar.
 	case '"':
-		value, err := p.scanDoubleQuoted(false)
+		value, err := p.scanDoubleQuoted(parent, false)
 		//: the node.
 		return p.scalarOrError(value, styleDouble, line, off, err)
 	//: a single-quoted scalar.
 	case '\'':
-		value, err := p.scanSingleQuoted(false)
+		value, err := p.scanSingleQuoted(parent, false)
 		//: the node.
 		return p.scalarOrError(value, styleSingle, line, off, err)
 	//: a flow indicator out of a flow collection.

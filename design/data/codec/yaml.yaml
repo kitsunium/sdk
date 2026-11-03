@@ -77,6 +77,20 @@ packages:
             name: CodeYAMLLeadingZeroRefused
             value: "0x00_03_04_0B"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeYAMLSizeExceeded identifies input refused for a size bound: a document past maxYAMLBytes, more than maxNodes nodes, or an implicit key past maxKeyRunes.
+              Its reason is the family's SIZE_EXCEEDED (#894).
+            name: CodeYAMLSizeExceeded
+            value: "0x00_03_04_0C"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeYAMLDepthExceeded identifies input refused for a depth bound: collections nested past maxDepth, or UnmarshalYAML re-entered past it.
+              Its reason is the family's DEPTH_EXCEEDED (#894).
+            name: CodeYAMLDepthExceeded
+            value: "0x00_03_04_0D"
+        type: errs.Code
     doc: |-
       Package yaml declares the error codes and the sentinels of the YAML codec,
       internal/service/data/codec/yaml — range 0.3.4.* (ADR 0005
@@ -166,6 +180,18 @@ packages:
             private: "service/data/codec/yaml: write 0o644 for octal, 644 for decimal, or quote the text"
             public: YAML integer with a leading zero is octal in YAML 1.1 and decimal in 1.2
             reason: LEADING_ZERO_REFUSED
+          - code: CodeYAMLSizeExceeded
+            doc: "SizeExceeded is the refusal of input past a size bound: a document past maxYAMLBytes, more than maxNodes nodes, or an implicit key past maxKeyRunes."
+            name: SizeExceeded
+            private: "service/data/codec/yaml: the input exceeds a size bound"
+            public: YAML input exceeds a size limit
+            reason: SIZE_EXCEEDED
+          - code: CodeYAMLDepthExceeded
+            doc: "DepthExceeded is the refusal of input past a depth bound: collections nested past maxDepth, or UnmarshalYAML re-entered past it."
+            name: DepthExceeded
+            private: "service/data/codec/yaml: the input exceeds a depth bound"
+            public: YAML input nests too deeply
+            reason: DEPTH_EXCEEDED
   - doc: |-
       Package yaml — the block structure: mappings, sequences, keys and values.
 
@@ -203,9 +229,11 @@ packages:
 
       Struct fields use the yaml tag as gopkg.in/yaml.v3 does: a field's key is
       its tag's name or its own name in lower case, "-" leaves it out, and the
-      flags are omitempty, flow (write the collection inline) and inline (merge a
-      struct's fields, or collect the remaining keys into a map with string
-      keys). An unknown key is ignored. A type may implement MarshalYAML() (any,
+      flags are omitempty, omitzero (leave the field out when it holds its type's
+      zero value, as encoding/json decides it: the type's IsZero() when it
+      declares one, else every bit at zero), flow (write the collection inline)
+      and inline (merge a struct's fields, or collect the remaining keys into a
+      map with string keys). An unknown key is ignored. A type may implement MarshalYAML() (any,
       error), UnmarshalYAML(func(any) error) error, encoding.TextMarshaler and
       encoding.TextUnmarshaler; time.Time and time.Duration are written and read
       as text. An untyped target receives nil, bool, int, int64 or uint64,
@@ -425,6 +453,18 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_04_0B"
+          - doc: "CodeSizeExceeded is 0.3.4.12: a document past maxYAMLBytes, more than maxNodes nodes, or an implicit key past maxKeyRunes."
+            name: CodeSizeExceeded
+            reexport: coreyaml.CodeYAMLSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_0C"
+          - doc: "CodeDepthExceeded is 0.3.4.13: collections nested past maxDepth, or UnmarshalYAML re-entered past it."
+            name: CodeDepthExceeded
+            reexport: coreyaml.CodeYAMLDepthExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_04_0D"
         doc: The error codes, range 0.3.4.*, declared in the core (ADR 0160).
       - doc: "The sentinels, for errors.Is: each carries the code of the same name."
         var:
@@ -471,6 +511,14 @@ packages:
           - doc: LeadingZeroRefused is the sentinel of [CodeLeadingZeroRefused].
             name: LeadingZeroRefused
             reexport: coreyaml.LeadingZeroRefused
+            type: "*errs.Error"
+          - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
+            name: SizeExceeded
+            reexport: coreyaml.SizeExceeded
+            type: "*errs.Error"
+          - doc: DepthExceeded is the sentinel of [CodeDepthExceeded].
+            name: DepthExceeded
+            reexport: coreyaml.DepthExceeded
             type: "*errs.Error"
     imports:
       coreyaml: github.com/kitsunium/sdk/internal/core/data/codec/yaml

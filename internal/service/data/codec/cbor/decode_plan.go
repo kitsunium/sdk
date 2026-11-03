@@ -217,6 +217,9 @@ func (pl *decodePlanner) fill(p *decodePlan) {
 	case t == bigIntType:
 		//: an integer or a bignum.
 		p.kind = bigIntDecoder{}
+	case t == tagType:
+		//: a tag's number and its content.
+		p.kind = tagDecoder{}
 	case reflect.PointerTo(t).Implements(cborUnmarshalerType):
 		//: the type reads its own CBOR.
 		p.kind = rawDecoder{}

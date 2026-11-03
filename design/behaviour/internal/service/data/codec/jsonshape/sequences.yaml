@@ -323,6 +323,211 @@ sequences:
               to: t.Elem
           when: t.Kind() == reflect.Pointer && t.Name() == ""
       - return: t
+  - of: (*walker).optional
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*walker).optional
+        kind: self
+      - id: m.optional
+        kind: internal
+      - id: throughPointer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: m.optional(root)
+              to: m.optional
+          when: "!w.v2"
+      - opt:
+          do:
+            - return: "true"
+          when: m.opts.omitZero || (m.opts.omitEmpty && emptiableV2(m.typ, 0))
+      - return: throughPointer(root, m.index)
+        to: throughPointer
+  - of: (*walker).quoted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*walker).quoted
+        kind: self
+      - id: m.quoted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: m.quoted(addressable)
+              to: m.quoted
+          when: "!w.v2"
+      - return: m.opts.quoted && quotableV2(m.typ)
+  - of: quotableV2
+    participants:
+      - id: caller
+        kind: actor
+      - id: quotableV2
+        kind: self
+      - id: t.Elem
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: t
+              to: t.Elem
+              value: t.Elem()
+          when: t.Name() == "" && t.Kind() == reflect.Pointer
+      - opt:
+          do:
+            - return: "true"
+          when: t == numberType
+      - opt:
+          do:
+            - return: "false"
+          when: writesJSON(t, true) || writesText(t, true)
+      - switch:
+          cases:
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float32, reflect.Float64
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": t.Kind()
+  - of: refusesQuoting
+    participants:
+      - id: caller
+        kind: actor
+      - id: refusesQuoting
+        kind: self
+      - id: target.Elem
+        kind: value
+    steps:
+      - bind: target
+        eval: t
+      - opt:
+          do:
+            - set: target
+              to: target.Elem
+              value: target.Elem()
+          when: target.Name() == "" && target.Kind() == reflect.Pointer
+      - return: "!quotableV2(t) && !writesJSON(target, true) && !writesText(target, true)"
+  - of: emptiableV2
+    participants:
+      - id: caller
+        kind: actor
+      - id: emptiableV2
+        kind: self
+      - id: kindEmptiableV2
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: t == timeType || t == durationType || t == numberType
+      - opt:
+          do:
+            - return: "true"
+          when: writesJSON(t, true) || writesText(t, true)
+      - return: kindEmptiableV2(t, depth)
+        to: kindEmptiableV2
+  - of: kindEmptiableV2
+    steps:
+      - switch:
+          cases:
+            - case: reflect.Pointer, reflect.Interface, reflect.String, reflect.Slice, reflect.Map
+              do:
+                - return: "true"
+            - case: reflect.Array
+              do:
+                - return: t.Len() == 0
+            - case: reflect.Struct
+              do:
+                - return: depth >= maxEmptiableDepth || structEmptiableV2(t, depth)
+            - default: true
+              do:
+                - return: "false"
+          "on": t.Kind()
+  - of: structEmptiableV2
+    participants:
+      - id: caller
+        kind: actor
+      - id: structEmptiableV2
+        kind: self
+      - id: members
+        kind: internal
+    steps:
+      - bind: written, _
+        eval: members(t)
+        to: members
+      - loop:
+          do:
+            - bind: leftOut
+              eval: m.opts.omitZero || (m.opts.omitEmpty && emptiableV2(m.typ, depth+1)) || throughPointer(t, m.index)
+            - opt:
+                do:
+                  - return: "false"
+                when: "!leftOut"
+          key: _
+          range: written
+          value: m
+      - return: "true"
+  - of: embeddingRefusedV2
+    participants:
+      - id: caller
+        kind: actor
+      - id: embeddingRefusedV2
+        kind: self
+      - id: parseTag
+        kind: internal
+      - id: indirect
+        kind: internal
+      - id: field.IsExported
+        kind: value
+    steps:
+      - bind: opts, ignored
+        eval: parseTag(field)
+        to: parseTag
+      - opt:
+          do:
+            - return: "false"
+          when: ignored || opts.hasName
+      - opt:
+          do:
+            - return: "true"
+          when: opts.hasOthers()
+      - bind: inner
+        eval: indirect(field.Type)
+        to: indirect
+      - opt:
+          do:
+            - return: field.IsExported()
+              to: field.IsExported
+          when: inner.Kind() != reflect.Struct
+      - return: "!seen[inner] && structRefusedV2(inner, seen)"
+  - of: tagRefusedV2
+    participants:
+      - id: caller
+        kind: actor
+      - id: tagRefusedV2
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: tag == "" || tag == "-"
+      - opt:
+          do:
+            - return: "true"
+          when: strings.HasSuffix(tag, ",")
+      - opt:
+          do:
+            - return: "false"
+          when: strings.HasPrefix(tag, "'")
+      - bind: end
+        eval: strings.IndexAny(tag, reservedInName)
+        to: strings
+      - return: end >= 0 && tag[end] != ','
   - of: receives
     steps:
       - return: t.Implements(iface) || (addressable && reflect.PointerTo(t).Implements(iface))
@@ -425,6 +630,35 @@ sequences:
     steps:
       - return: Of(reflect.TypeFor[T]())
         to: Of
+  - of: OfV2
+    participants:
+      - id: caller
+        kind: actor
+      - id: OfV2
+        kind: self
+      - id: newWalker
+        kind: internal
+      - id: w.shape
+        kind: internal
+    steps:
+      - bind: w
+        eval: newWalker()
+        to: newWalker
+      - set: w.v2
+        value: "true"
+      - return: w.shape(t, false)
+        to: w.shape
+  - of: ForV2
+    participants:
+      - id: caller
+        kind: actor
+      - id: ForV2
+        kind: self
+      - id: OfV2
+        kind: internal
+    steps:
+      - return: OfV2(reflect.TypeFor[T]())
+        to: OfV2
   - of: tagOptions.hasOthers
     steps:
       - return: o.hasName || o.omitEmpty || o.omitZero || o.quoted || o.cased || o.formatted
@@ -693,7 +927,7 @@ sequences:
         kind: self
       - id: named
         kind: internal
-      - id: knownShape
+      - id: w.knownShape
         kind: internal
       - id: w.byKind
         kind: internal
@@ -730,19 +964,21 @@ sequences:
             - return: known
           init:
             bind: known, isKnown
-            eval: knownShape(t)
-            to: knownShape
+            eval: w.knownShape(t)
+            to: w.knownShape
           when: isKnown
+      - bind: methodsReach
+        eval: addressable || w.v2
       - opt:
           do:
             - return: named(t, Any)
               to: named
-          when: t.Kind() != reflect.Interface && writesJSON(t, addressable)
+          when: t.Kind() != reflect.Interface && writesJSON(t, methodsReach)
       - opt:
           do:
             - return: named(t, String)
               to: named
-          when: t.Kind() != reflect.Interface && writesText(t, addressable)
+          when: t.Kind() != reflect.Interface && writesText(t, methodsReach)
       - return: w.byKind(t, addressable)
         to: w.byKind
   - of: (*walker).byKind
@@ -754,6 +990,8 @@ sequences:
       - id: named
         kind: internal
       - id: w.slice
+        kind: internal
+      - id: w.array
         kind: internal
       - id: w.mapOf
         kind: internal
@@ -773,8 +1011,8 @@ sequences:
                   to: w.slice
             - case: reflect.Array
               do:
-                - set: shape.Kind, shape.Items
-                  value: Array, w.shape(t.Elem(), addressable)
+                - eval: w.array(shape, t, addressable)
+                  to: w.array
             - case: reflect.Map
               do:
                 - eval: w.mapOf(shape, t)
@@ -828,7 +1066,7 @@ sequences:
         kind: value
     steps:
       - set: shape.Nullable
-        value: "true"
+        value: "!w.v2"
       - bind: element
         eval: t.Elem()
         to: t.Elem
@@ -840,6 +1078,16 @@ sequences:
           when: element.Kind() == reflect.Uint8 && !hasAnyMethod(element)
       - set: shape.Kind, shape.Items
         value: Array, w.shape(element, true)
+  - of: (*walker).array
+    steps:
+      - opt:
+          do:
+            - set: shape.Kind, shape.Format
+              value: String, "base64"
+            - return: ""
+          when: w.v2 && t.Elem().Kind() == reflect.Uint8 && !hasAnyMethod(t.Elem())
+      - set: shape.Kind, shape.Items
+        value: Array, w.shape(t.Elem(), addressable)
   - of: (*walker).mapOf
     steps:
       - opt:
@@ -849,7 +1097,7 @@ sequences:
             - return: ""
           when: "!keyWritable(t.Key())"
       - set: shape.Kind, shape.Nullable, shape.Values
-        value: Map, true, w.shape(t.Elem(), false)
+        value: Map, !w.v2, w.shape(t.Elem(), false)
   - of: (*walker).object
     participants:
       - id: caller
@@ -858,9 +1106,19 @@ sequences:
         kind: self
       - id: members
         kind: internal
+      - id: w.shape
+        kind: internal
+      - id: named
+        kind: internal
       - id: w.extraValues
         kind: internal
     steps:
+      - opt:
+          do:
+            - set: shape.Kind
+              value: Unsupported
+            - return: ""
+          when: w.v2 && structRefusedV2(t, map[reflect.Type]bool{})
       - set: shape.Kind
         value: Object
       - bind: written, extra
@@ -870,13 +1128,22 @@ sequences:
           do:
             - bind: fieldAddressable
               eval: addressable || throughPointer(t, member.index)
+            - bind: memberShape
+              eval: w.shape(member.typ, fieldAddressable)
+              to: w.shape
+            - opt:
+                do:
+                  - set: memberShape
+                    to: named
+                    value: named(member.typ, Unsupported)
+                when: w.v2 && member.opts.quoted && refusesQuoting(member.typ)
             - set: shape.Fields
               value: |-
                 append(shape.Fields, FieldValue{
                 			Name:     member.name,
-                			Shape:    w.shape(member.typ, fieldAddressable),
-                			Optional: member.optional(t),
-                			Quoted:   member.quoted(fieldAddressable),
+                			Shape:    memberShape,
+                			Optional: w.optional(member, t),
+                			Quoted:   w.quoted(member, fieldAddressable),
                 			Rules:    member.tag.Get("validate"),
                 			GoName:   member.goName,
                 			Tag:      member.tag,
@@ -906,15 +1173,20 @@ sequences:
               to: w.shape
           when: extra.Kind() == reflect.Map
       - return: "&ShapeValue{Kind: Any}"
-  - of: knownShape
+  - of: (*walker).knownShape
     participants:
       - id: caller
         kind: actor
-      - id: knownShape
+      - id: (*walker).knownShape
         kind: self
       - id: named
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: named(t, Unsupported), true
+              to: named
+          when: w.v2 && t == durationType
       - switch:
           cases:
             - case: timeType

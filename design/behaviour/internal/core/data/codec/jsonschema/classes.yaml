@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/codec/jsonschema
+  name: jsonschema
+  purpose: Package jsonschema declares the error codes and the sentinels of the JSON Schema 2020-12 validator, internal/service/data/codec/jsonschema — range 0.3.103.* (ADR 0210).
+types: []

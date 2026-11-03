@@ -169,6 +169,33 @@ func BenchmarkAppendRecord(b *testing.B) {
 	}
 }
 
+// BenchmarkMarshalRecordDeterministic encodes one realistic record through
+// NewDeterministic: the registered codec's walk, every float shortest (#896).
+func BenchmarkMarshalRecordDeterministic(b *testing.B) {
+	c := cbor.NewDeterministic()
+	v := newBenchRecord(42)
+	b.ReportAllocs()
+	for b.Loop() {
+		benchSinkBytes, benchSinkErr = c.Marshal(v)
+	}
+}
+
+// BenchmarkUnmarshalRecordDeterministic decodes one realistic record through
+// NewDeterministic: validation, the deterministic walk, then the decode.
+func BenchmarkUnmarshalRecordDeterministic(b *testing.B) {
+	c := cbor.NewDeterministic()
+	data, err := c.Marshal(newBenchRecord(42))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		var out benchRecord
+		benchSinkErr = c.Unmarshal(data, &out)
+		benchSinkAny = out
+	}
+}
+
 // BenchmarkUnmarshalRecord decodes one realistic record.
 func BenchmarkUnmarshalRecord(b *testing.B) {
 	c := cbor.New()

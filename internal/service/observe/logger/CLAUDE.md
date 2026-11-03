@@ -67,10 +67,11 @@ Logger ── Handler (genericHandler / TextHandler)
 | `logger.go`       | `loggerImpl` + `New` / `NewWithTraceContext` + `Build`/`LogAttrs` package entries |
 | `owning.go`       | `Owning` + `loggerImpl.Close` — a Logger that owns the writers a constructor opened for it, and releases them once |
 | `builder.go`      | `Builder` interface + `chainBuilder` impl (recycled via `recordPool`) |
-| `handler.go`      | `genericHandler` (Encoder × Sink composition) + `NewHandler` |
-| `text_handler.go` | `TextHandler` legacy fused handler (`NewTextHandler`) |
-| `source.go`       | `WithCaller` + `sourceHandler` — an opt-in Handler decorator appending a `source` attribute (`SourceFieldKey`, `file:line:function`) resolved from the captured `RecordEvent.PC`; a foreign `Logger` (not a `*loggerImpl`) comes back unchanged |
+| `handler.go`      | `genericHandler` (Encoder × Sink composition) + `NewHandler` / `NewHandlerLeveled` (a live `level.Leveler` floor, #1015) + `floorOrInfo`; `encode` / `derive` / `withGroup` — the bound attributes rendered once into `prefix` when the encoder is a `corelogger.PrefixEncoder` (#1016) |
+| `text_handler.go` | `TextHandler` legacy fused handler (`NewTextHandler` / `NewTextHandlerLeveled`) |
+| `source.go`       | `WithCaller` + `sourceHandler` — an opt-in Handler decorator appending a `source` attribute (`SourceFieldKey`, `file:line:function`) resolved from the captured `RecordEvent.PC`; the derived Logger keeps the receiver's trace source, as `With` and `WithGroup` do (it used to rebuild with none, and every record after it lost `trace_id`/`span_id` — `trace_rebuild_external_test.go` holds every rebuilder to it); a foreign `Logger` (not a `*loggerImpl`) comes back unchanged |
 | `pool.go`         | `recordPool` — `recycler.Pool[*chainBuilder]` with pre-sized attrs |
+| `conformance_external_test.go` | the family's conformance table (#1149) — see the section below |
 | `internal/core/observe/logger` | the codes (ADR 0005 range **0.3.1.\***) and sentinels — `WriterNil`, `HandlerNil`, `EncoderNil`, `SinkRequired`, `CtxCancelled`, `WriteFailed` — declared in the core since ADR 0160; this package declares none |
 
 ## Conventions
@@ -83,9 +84,32 @@ Logger ── Handler (genericHandler / TextHandler)
   recycled concrete type — see ktn-linter `KTN-IFACE-PLUGIN`.
 - **Origin wins on wrap.** `WriteFailed` / `CtxCancelled` wrap their cause
   via `errs.Wrap`; `errors.Is(err, context.Canceled)` still holds.
-- **Caller PC capture.** Both `Log` and `Builder.Send` call
-  `runtime.Callers(callerSkipDepth, …)` so handlers that resolve frames
-  lazily see the application caller, not the logger plumbing.
+- **Caller PC capture, only when asked (#1014).** A `loggerImpl` asks its
+  handler ONCE, when it is built (`over`, also on `With` / `WithGroup`),
+  whether it implements `corelogger.SourceRequester` and answers true; the
+  three emission paths (`Log`, `LogAttrs`, `Builder.Send`) then call
+  `callerPC`, which walks the stack (`runtime.Callers(callerSkipDepth+1, …)`)
+  only for such a logger and returns 0 otherwise. `sourceHandler` (installed by
+  `WithCaller`) answers true; `genericHandler` and `TextHandler` do not
+  implement the port — they never read `PC` — and a foreign Handler that reads
+  `PC` must implement it. The walk was 22.5 % of every emit, paid for an
+  attribute nothing rendered (`pkg/v1/observe/logger/BENCH.md`: static emit
+  764–815 ns → 471–498 ns).
+- **Bound attributes are rendered once (#1016).** When the encoder implements
+  `corelogger.PrefixEncoder` (both in-tree encoders do), `WithAttrs` and
+  `WithGroup` render the bound set under the current group stack into
+  `prefix` — again on `WithGroup`, because the stack prefixes every key, bound
+  ones included — and `Handle` passes it to `AppendWithPrefix` with the
+  record's own attributes. The record handed to the sink still carries the
+  merged attributes (`mergeAttrs`, the one allocation), since route predicates
+  and the memory sink read them; that copy is what is left of a bound
+  attribute's cost (BENCH.md §6). A foreign encoder takes the old path.
+- **A live floor (#1015).** `genericHandler` and `TextHandler` hold a
+  `level.Leveler` and `Enabled` reads it per record: `NewHandler` /
+  `NewTextHandler` wrap their `level.Level` in `level.Fixed`, the `…Leveled`
+  siblings take the caller's (a `level.Var` moved with `Set`), a nil one is
+  `level.Info`. Derived handlers share the Leveler, so one `Set` reaches every
+  logger derived from the one it was built with.
 - **Swallow on emit.** `Logger.Log` MUST NOT propagate handler errors —
   see `swallowHandlerError` in `logger.go`. A future commit may swap this
   for a configurable `OnError` hook.
@@ -133,6 +157,7 @@ they refuse on: this engine returns them as `corelogger.X` and declares none.
 | 0.3.1.2   | `HandlerNil`   | `New(nil)` |
 | 0.3.1.3   | `EncoderNil`   | `NewHandler(nil, sink, …)` |
 | 0.3.1.4   | `SinkRequired` | `NewHandler(enc, nil, …)` |
+| 0.3.1.5   | `LevelAmbiguous` | not returned here: `pkg/v1/observe/logger.NewWithSink` with both `SinkConfig.Level` and a non-zero `MinLevel` (#1015) |
 | 0.3.1.10  | `CtxCancelled` | `Handle(ctx, …)` with a cancelled `ctx` (wraps `context.Canceled`) |
 | 0.3.1.20  | `WriteFailed`  | `io.Writer.Write` returned an error (EX_IOERR / exit 74) |
 
@@ -140,6 +165,8 @@ they refuse on: this engine returns them as `corelogger.X` and declares none.
 
 - Call `Handle` directly from application code — go through a `Logger` so
   `Enabled` can short-circuit and so caller-PC capture sees the right frame.
+- Read `RecordEvent.PC` in a Handler without implementing
+  `corelogger.SourceRequester` and answering true: the Logger will hand it 0.
 - Reuse a `RecordEvent` after handing it to `Handle` — the handler may set
   `Time` in place.
 - Restamp a non-zero `RecordEvent.Time` from a sink or encoder. **Time is
@@ -173,10 +200,28 @@ depth and width. `TestPerfAllocsBuildSend` and
 `TestT34TraceCorrelationAddsNoAllocation` were not touched and still pass.
 
 The report also splits where an emit's time actually goes: the encoder was
-46 %, `runtime.Callers` (the caller-PC capture in `Send`) is 22.5 %,
+46 %, `runtime.Callers` (the caller-PC capture in `Send`) was 22.5 % — gone
+since #1014 for every logger whose handler does not ask for it —
 `mergeAttrs` — the one allocation — is 6.2 %, and the sink chain is under 1 %.
 The middleware costs matter for their allocation behaviour far more than for
 their nanoseconds.
+
+## The family's contract — the conformance table (#1149)
+
+`conformance_external_test.go` is THE contract every sink, middleware and
+writer of the family keeps: one row per package under `sink/`, `middleware/`
+and `writer/`, and the same checks for each — Flush twice (both nil), 8
+goroutines × 50 records all delivered after Flush and Close, a Write after
+Close refused with the package's documented refusal, a record past the
+package's bound refused and counted (async: `BUFFER_FULL` + `OnDrop`; the
+keyed sampler: `Dropped`) — plus the failover chain switching and healing on a
+`ManualClock` (`TestConformanceFailoverSwitchesAndHeals`). A row that does not
+run a check says why IN the row (`skipClose`, `skipCount`, `skipBound`): a
+console sink owns no writer and has nothing to refuse after Close; a writer
+whose bound is the async ring in front of it points at the async row.
+`TestConformanceCoversEveryPackage` reads the three directories and fails on a
+package with production Go code and no row — a new sink is added with its row.
+The per-package suites test what is particular to each.
 
 ## Verification
 
@@ -197,5 +242,5 @@ cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtim
 - `encoder/` — `core/observe/logger.Encoder` adapters (text and JSON)
 - `middleware/` — chainable `Sink` decorators (multi, async, route, failover, sample, recover, encwrite, tee)
 - `sink/` — terminal `Sink` implementations (console, file, syslog, memory)
-- `writer/` — the log-transport writers behind the `core/observe/logger/writer` registry (console, dbsink, file, journald, levelgate, nettransport, rotfile), each a package with its own `CLAUDE.md`; beneath the logger since ADR 0155, as their registry is in the core
+- `writer/` — the log-transport writers behind the `core/observe/logger/writer` registry (console, dbsink, file, journald, levelgate, nettransport, otlpjson, rotfile), each a package with its own `CLAUDE.md`; beneath the logger since ADR 0155, as their registry is in the core
 - `internal/logfile/` — the hardened open `sink/file` and `writer/rotfile` share; Go's `internal/` rule confines it to this subtree, where both its importers sit

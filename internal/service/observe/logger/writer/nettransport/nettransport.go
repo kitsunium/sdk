@@ -54,27 +54,37 @@ func (f *netFactory) Open(cfg writer.Config) (sink corelogger.Sink, err error) {
 		return nil, wrapDial(nil, f.proto)
 	}
 	//: build the protocol-specific seam and compose the chain.
-	return f.build(c)
+	return f.build(&c)
 }
 
 // build wires the protocol seam (http client or a dialed conn) and composes the
 // levelgate(async(netSink)) chain around it.
-func (f *netFactory) build(c NetConfig) (sink corelogger.Sink, err error) {
+func (f *netFactory) build(c *NetConfig) (sink corelogger.Sink, err error) {
 	//: http uses a client seam — no dial here, keep-alive connections pooled.
 	if f.proto == protoHTTP {
 		//: the http seam allocates per send; its closer drops the idle
 		//: connections of the pool it owns (never a supplied client's).
-		send, closer := newHTTPSeam(c.Address, c.HTTPClient)
-		//: compose the non-blocking + level-gated chain over the http seam.
-		return compose(f.proto, send, closer, c), nil
+		send, sendBatch, closer := newHTTPSeams(c.Address, c.HTTPClient, c.HTTPBatchNDJSON)
+		//: record by record unless the caller opted into the NDJSON wire.
+		if sendBatch == nil {
+			//: compose the non-blocking + level-gated chain over the http seam.
+			return compose(f.proto, send, closer, c), nil
+		}
+		base := newNetSink(f.proto, send, closer)
+		base.sendBatch = sendBatch
+		//: one NDJSON POST per backlog.
+		return composeSink(base, c, streamBatchMax), nil
 	}
 	//: tcp/udp dial once; a dial failure surfaces the dial sentinel.
-	send, closer, derr := newConnSeam(f.proto, c.Address, c.Dialer)
+	send, sendBatch, closer, derr := newConnSeam(f.proto, c.Address, c.Dialer)
 	//: forward the dial failure unchanged (origin wins).
 	if derr != nil {
 		//: NetTransportDialFailed already carries the right code/reason.
 		return nil, derr
 	}
-	//: compose the non-blocking + level-gated chain over the conn seam.
-	return compose(f.proto, send, closer, c), nil
+	//: tcp: the stream takes a backlog in one writev(2); udp: one
+	//: sendmmsg(2), a datagram per record.
+	base := newNetSink(f.proto, send, closer)
+	base.sendBatch = sendBatch
+	return composeSink(base, c, streamBatchMax), nil
 }

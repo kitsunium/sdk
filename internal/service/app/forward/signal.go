@@ -3,6 +3,7 @@ package forward
 import (
 	"context"
 
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	coremetrics "github.com/kitsunium/sdk/internal/core/observe/metrics"
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/observe/metrics"
@@ -107,5 +108,36 @@ func (e *metricExporter) ExportContext(ctx context.Context, snap coremetrics.Sna
 		return err
 	}
 	//: kept, or refused by the bounds.
+	return e.forwarder.Enqueue(ctx, doc)
+}
+
+// logExporter is the producer half for the logs signal: the "otlpjson"
+// writer has encoded the batch already, so the document is kept as it is.
+type logExporter struct {
+	// forwarder keeps the documents.
+	forwarder *Forwarder
+}
+
+// NewLogExporter returns a logger DocumentExporter that keeps each
+// OTLP/JSON logs document the "otlpjson" writer hands it in forwarder,
+// returning once it is durable — the logs signal's adapter, as
+// NewSpanExporter and NewMetricExporter are the other two's; the writer
+// has encoded the batch already. The forwarder's Send is the OTLP/HTTP logs
+// exporter's ExportDocument. A nil forwarder is refused with
+// ForwardMisconfigured (#867).
+func NewLogExporter(forwarder *Forwarder) (corelogger.DocumentExporter, error) {
+	//: nothing to keep the documents in.
+	if forwarder == nil {
+		//: named by argument.
+		return nil, misconfigured("forwarder", "missing")
+	}
+	//: bound.
+	return &logExporter{forwarder: forwarder}, nil
+}
+
+// ExportDocument keeps doc, or refuses it by the forwarder's bounds; an
+// empty document keeps nothing.
+func (e *logExporter) ExportDocument(ctx context.Context, doc []byte) error {
+	//: Enqueue copies what it publishes, so doc is not retained.
 	return e.forwarder.Enqueue(ctx, doc)
 }

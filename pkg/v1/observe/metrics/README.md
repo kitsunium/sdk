@@ -108,13 +108,14 @@ A [Snapshot](#Snapshot) maps each instrument name to its metric, and each metric
 
 It REFUSES, rather than rewrites, a name the format cannot spell: an instrument name must match \[a-zA-Z\_:]\[a-zA-Z0-9\_:]\* and an attribute key \[a-zA-Z\_]\[a-zA-Z0-9\_]\*, which means an OTel-conventional dotted key is refused too. Mapping the offending characters to "\_" would silently merge two distinct instruments into one family, and a metrics pipeline cannot detect that afterwards. The refusal is typed ([InvalidMetricName](#InvalidMetricName), [InvalidLabelName](#InvalidLabelName), [ReservedLabelName](#ReservedLabelName)) and leaves the writer untouched, because a truncated exposition parses as a complete one.
 
-A scrape endpoint binds its own exporter with [NewPrometheusExporter](#NewPrometheusExporter) and hands it the response writer:
+A scrape endpoint is [NewPrometheusHandler](#NewPrometheusHandler) over the meter's Collect: it renders the document whole before a byte leaves, answers a refusal with 500 and its Public text rather than a 200 with an empty body (which a scraper reads as every series gone), sets [PrometheusContentType](#PrometheusContentType) and the Content-Length, and lets one scrape run at a time (503 for a concurrent one, so a delta meter keeps one reader):
 
 ```
-http.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
-    w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-    _ = metrics.NewPrometheusExporter("scrape", w).Export(m.Collect())
-})
+h, err := metrics.NewPrometheusHandler(m.Collect, metrics.PrometheusHandlerConfig{})
+if err != nil {
+    return err
+}
+mux.Handle("/metrics", h)
 ```
 
 A non-monotonic sum is typed \`gauge\` there, not \`counter\`, because \`rate()\` on a counter re-extrapolates from zero every time the value falls.
@@ -160,7 +161,10 @@ Two things the encoder REFUSES rather than mis-encodes, both structural and ther
 - [Variables](<#variables>)
 - [func AvailableExporters\(\) \[\]ExporterName](<#AvailableExporters>)
 - [func Bool\(key string, value bool\) Attr](<#Bool>)
+- [func DefaultBuckets\(\) \[\]float64](<#DefaultBuckets>)
 - [func EncodeOTLPJSON\(snap Snapshot\) \(doc \[\]byte, err error\)](<#EncodeOTLPJSON>)
+- [func ExponentialIndex\(magnitude float64, scale int32\) int32](<#ExponentialIndex>)
+- [func ExponentialLowerBound\(index int32, scale int32\) float64](<#ExponentialLowerBound>)
 - [func Export\(name ExporterName, snap Snapshot\) error](<#Export>)
 - [func ExportContext\(ctx context.Context, name ExporterName, snap Snapshot\) error](<#ExportContext>)
 - [func Float64\(key string, value float64\) Attr](<#Float64>)
@@ -170,10 +174,15 @@ Two things the encoder REFUSES rather than mis-encodes, both structural and ther
 - [func NewOTLPHTTPExporter\(name ExporterName, cfg OTLPHTTPConfig\) \(exporter ContextExporter, err error\)](<#NewOTLPHTTPExporter>)
 - [func NewOTLPJSONExporter\(name ExporterName, dst io.Writer\) Exporter](<#NewOTLPJSONExporter>)
 - [func NewPrometheusExporter\(name ExporterName, dst io.Writer\) Exporter](<#NewPrometheusExporter>)
+- [func NewPrometheusHandler\(collect func\(\) Snapshot, cfg PrometheusHandlerConfig\) \(handler http.Handler, err error\)](<#NewPrometheusHandler>)
 - [func NewTextExporter\(name ExporterName, dst io.Writer\) Exporter](<#NewTextExporter>)
 - [func OTLPRetryable\(err error\) bool](<#OTLPRetryable>)
 - [func RegisterExporter\(e Exporter\) Exporter](<#RegisterExporter>)
+- [func RegisterObservers\(meter AsyncMeter, cfg ObserverConfig, observers ...Observer\)](<#RegisterObservers>)
+- [func RuntimeInstruments\(meter AsyncMeter, cfg RuntimeConfig\)](<#RuntimeInstruments>)
 - [func String\(key string, value string\) Attr](<#String>)
+- [type AsyncHistogramMeter](<#AsyncHistogramMeter>)
+  - [func \(AsyncHistogramMeter\) ObservableHistogram\(name string, observe HistogramCallback\)](<#AsyncHistogramMeter.ObservableHistogram>)
 - [type AsyncMeter](<#AsyncMeter>)
   - [func \(AsyncMeter\) ObservableCounter\(name string, observe Int64Callback\)](<#AsyncMeter.ObservableCounter>)
   - [func \(AsyncMeter\) ObservableGauge\(name string, observe Float64Callback\)](<#AsyncMeter.ObservableGauge>)
@@ -187,8 +196,12 @@ Two things the encoder REFUSES rather than mis-encodes, both structural and ther
   - [func \(Attr\) Kind\(\) AttrKind](<#Attr.Kind>)
   - [func \(Attr\) Str\(\) string](<#Attr.Str>)
 - [type AttrKind](<#AttrKind>)
+- [type ContextCounter](<#ContextCounter>)
+  - [func \(ContextCounter\) AddContext\(ctx context.Context, delta int64\)](<#ContextCounter.AddContext>)
 - [type ContextExporter](<#ContextExporter>)
   - [func \(ContextExporter\) ExportContext\(ctx context.Context, snap SnapshotValue\) error](<#ContextExporter.ExportContext>)
+- [type ContextHistogram](<#ContextHistogram>)
+  - [func \(ContextHistogram\) RecordContext\(ctx context.Context, value float64\)](<#ContextHistogram.RecordContext>)
 - [type Counter](<#Counter>)
   - [func \(Counter\) Add\(delta int64\)](<#Counter.Add>)
   - [func \(Counter\) Inc\(\)](<#Counter.Inc>)
@@ -196,6 +209,14 @@ Two things the encoder REFUSES rather than mis-encodes, both structural and ther
   - [func \(Describer\) Describe\(name string, description string\)](<#Describer.Describe>)
 - [type DocumentExporter](<#DocumentExporter>)
   - [func \(DocumentExporter\) ExportDocument\(ctx context.Context, doc \[\]byte\) error](<#DocumentExporter.ExportDocument>)
+- [type EncodedDocumentExporter](<#EncodedDocumentExporter>)
+  - [func \(EncodedDocumentExporter\) ExportEncodedDocument\(ctx context.Context, doc \[\]byte, encoding string\) error](<#EncodedDocumentExporter.ExportEncodedDocument>)
+- [type Exemplar](<#Exemplar>)
+- [type ExponentialBuckets](<#ExponentialBuckets>)
+- [type ExponentialHistogramMetric](<#ExponentialHistogramMetric>)
+- [type ExponentialHistogramPoint](<#ExponentialHistogramPoint>)
+- [type ExponentialMeter](<#ExponentialMeter>)
+  - [func \(ExponentialMeter\) ExponentialHistogram\(name string, maxSize int, attrs ...coreotel.AttrValue\) Histogram](<#ExponentialMeter.ExponentialHistogram>)
 - [type Exporter](<#Exporter>)
   - [func \(Exporter\) Export\(snap SnapshotValue\) error](<#Exporter.Export>)
   - [func \(Exporter\) Name\(\) ExporterName](<#Exporter.Name>)
@@ -211,6 +232,7 @@ Two things the encoder REFUSES rather than mis-encodes, both structural and ther
 - [type Histogram](<#Histogram>)
   - [func \(Histogram\) Record\(value float64\)](<#Histogram.Record>)
   - [func \(Histogram\) RecordDuration\(d time.Duration\)](<#Histogram.RecordDuration>)
+- [type HistogramCallback](<#HistogramCallback>)
 - [type HistogramMetric](<#HistogramMetric>)
 - [type HistogramPoint](<#HistogramPoint>)
 - [type Int64Callback](<#Int64Callback>)
@@ -222,15 +244,25 @@ Two things the encoder REFUSES rather than mis-encodes, both structural and ther
 - [type MeterConfig](<#MeterConfig>)
 - [type OTLPHTTPConfig](<#OTLPHTTPConfig>)
 - [type ObserveFloat64](<#ObserveFloat64>)
+- [type ObserveHistogram](<#ObserveHistogram>)
 - [type ObserveInt64](<#ObserveInt64>)
+- [type Observer](<#Observer>)
+  - [func \(Observer\) Observe\(report ReportStat\)](<#Observer.Observe>)
+- [type ObserverConfig](<#ObserverConfig>)
+- [type PrometheusHandlerConfig](<#PrometheusHandlerConfig>)
+- [type ReportStat](<#ReportStat>)
 - [type Resource](<#Resource>)
+- [type RuntimeConfig](<#RuntimeConfig>)
 - [type Scope](<#Scope>)
 - [type Snapshot](<#Snapshot>)
+- [type StatKind](<#StatKind>)
 - [type SumMetric](<#SumMetric>)
 - [type SumPoint](<#SumPoint>)
 - [type Temporality](<#Temporality>)
   - [func \(Temporality\) Resolved\(\) Temporality](<#Temporality.Resolved>)
   - [func \(Temporality\) String\(\) string](<#Temporality.String>)
+- [type UnitDescriber](<#UnitDescriber>)
+  - [func \(UnitDescriber\) Unit\(name string, unit string\)](<#UnitDescriber.Unit>)
 - [type UpDownCounter](<#UpDownCounter>)
   - [func \(UpDownCounter\) Add\(delta int64\)](<#UpDownCounter.Add>)
   - [func \(UpDownCounter\) Dec\(\)](<#UpDownCounter.Dec>)
@@ -285,6 +317,15 @@ AttrKindString marks a string-valued attribute.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindString`.
 
+<a name="DefaultExponentialMaxSize"></a>
+```go
+const DefaultExponentialMaxSize int = 160
+```
+
+DefaultExponentialMaxSize is the bucket count per range an exponential histogram created with a maxSize of zero or less holds.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.DefaultExponentialMaxSize`.
+
 <a name="DefaultExportTimeout"></a>
 ```go
 const DefaultExportTimeout time.Duration = 30000000000
@@ -330,6 +371,24 @@ DefaultScopeName names this SDK as the instrumenting library when a caller decla
 
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.DefaultScopeName`.
 
+<a name="ExponentialMaxScale"></a>
+```go
+const ExponentialMaxScale int32 = 20
+```
+
+ExponentialMaxScale is the scale an exponential histogram starts at.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.ExponentialMaxScale`.
+
+<a name="ExponentialMinScale"></a>
+```go
+const ExponentialMinScale int32 = -10
+```
+
+ExponentialMinScale is the lowest scale an exponential histogram falls to.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.ExponentialMinScale`.
+
 <a name="OTLPMetricsPath"></a>
 ```go
 const OTLPMetricsPath string = "/v1/metrics"
@@ -348,6 +407,15 @@ OverflowAttrKey is the reserved attribute naming a meter's aggregated overflow s
 
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.OverflowAttrKey`.
 
+<a name="PrometheusContentType"></a>
+```go
+const PrometheusContentType string = "text/plain; version=0.0.4; charset=utf-8"
+```
+
+PrometheusContentType is the Content-Type a scrape of NewPrometheusHandler answers with.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/observe/metrics.PrometheusContentType`.
+
 <a name="ServiceNameKey"></a>
 ```go
 const ServiceNameKey string = "service.name"
@@ -356,6 +424,24 @@ const ServiceNameKey string = "service.name"
 ServiceNameKey is the attribute key the OTel resource semantic conventions reserve for the logical name of the service.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/otel.ServiceNameKey`.
+
+<a name="StatCounter"></a>
+```go
+const StatCounter StatKind = 1
+```
+
+StatCounter is a count that only grows, carried as an observable counter.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.StatCounter`.
+
+<a name="StatGauge"></a>
+```go
+const StatGauge StatKind = 2
+```
+
+StatGauge is a level read now, carried as an observable up-down counter.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.StatGauge`.
 
 <a name="TemporalityCumulative"></a>
 ```go
@@ -394,6 +480,17 @@ UnknownService is the service.name the specification mandates when a producer su
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/otel.UnknownService`.
 
 ## Variables
+
+<a name="CollectorNil"></a>
+```go
+var CollectorNil *errs.Error
+```
+
+CollectorNil is returned by NewPrometheusHandler given a nil collect function.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.CollectorNil`.
+
+Code `0.3.45.11` · reason `COLLECTOR_NIL` · public "The metrics handler needs a collect function"
 
 <a name="DescriptionConflict"></a>
 ```go
@@ -439,6 +536,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.Invalid
 
 Code `0.2.9.4` · reason `INVALID_ATTRIBUTE` · public "An attribute key is empty or repeated, or its value was never set"
 
+<a name="InvalidBuckets"></a>
+```go
+var InvalidBuckets *errs.Error
+```
+
+InvalidBuckets is raised when a histogram is created with NaN, an infinity or a repeated bound in its layout.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.InvalidBuckets`.
+
+Code `0.2.9.11` · reason `INVALID_BUCKETS` · public "A histogram bucket layout must hold finite, distinct bounds"
+
 <a name="InvalidDescription"></a>
 ```go
 var InvalidDescription *errs.Error
@@ -482,6 +590,17 @@ InvalidTemporality is raised when a MeterConfig carries a Temporality that is no
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.InvalidTemporality`.
 
 Code `0.2.9.6` · reason `INVALID_TEMPORALITY` · public "That aggregation temporality is not one this SDK declares"
+
+<a name="InvalidUnit"></a>
+```go
+var InvalidUnit *errs.Error
+```
+
+InvalidUnit is raised when Unit is handed an empty, over-long or non-ASCII unit.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.InvalidUnit`.
+
+Code `0.2.9.9` · reason `INVALID_UNIT` · public "An instrument unit must be printable ASCII, 1 to 63 bytes"
 
 <a name="OTLPEndpointInvalid"></a>
 ```go
@@ -560,6 +679,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.Reserve
 
 Code `0.3.45.3` · reason `RESERVED_LABEL_NAME` · public "An attribute key is reserved by the Prometheus exposition format"
 
+<a name="UnitConflict"></a>
+```go
+var UnitConflict *errs.Error
+```
+
+UnitConflict is raised when a second, DIFFERENT unit is bound to one name.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.UnitConflict`.
+
+Code `0.2.9.10` · reason `UNIT_CONFLICT` · public "That instrument name already carries a different unit"
+
 <a name="UnknownExporter"></a>
 ```go
 var UnknownExporter *errs.Error
@@ -600,6 +730,15 @@ func Bool(key string, value bool) Attr
 
 Bool returns a bool-valued attribute.
 
+<a name="DefaultBuckets"></a>
+## func [DefaultBuckets](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+```go
+func DefaultBuckets() []float64
+```
+
+DefaultBuckets returns a fresh copy of the bounds a histogram created with no buckets uses — the OpenTelemetry SDK's default (0 to 10000, suited to milliseconds).
+
 <a name="EncodeOTLPJSON"></a>
 ## func [EncodeOTLPJSON](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
 
@@ -610,6 +749,24 @@ func EncodeOTLPJSON(snap Snapshot) (doc []byte, err error)
 EncodeOTLPJSON renders snap as ONE OTLP/JSON ExportMetricsServiceRequest: exactly the bytes that go in the body of a POST to /v1/metrics under Content-Type: application/json.
 
 It does no I/O, so it is the half of OTLP support that is testable on its own — and the half NewOTLPHTTPExporter calls before it touches a socket.
+
+<a name="ExponentialIndex"></a>
+## func [ExponentialIndex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+```go
+func ExponentialIndex(magnitude float64, scale int32) int32
+```
+
+ExponentialIndex is the bucket index of a positive, finite magnitude at scale: the k with magnitude in (base^k, base^(k+1)], base = 2^(2^-scale).
+
+<a name="ExponentialLowerBound"></a>
+## func [ExponentialLowerBound](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+```go
+func ExponentialLowerBound(index int32, scale int32) float64
+```
+
+ExponentialLowerBound is the exclusive lower bound of bucket index at scale, base^index.
 
 <a name="Export"></a>
 ## func [Export](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
@@ -694,6 +851,20 @@ func NewPrometheusExporter(name ExporterName, dst io.Writer) Exporter
 
 NewPrometheusExporter returns an Exporter rendering the Prometheus text exposition format to dst under name (not auto-registered). Hand it the http.ResponseWriter of a /metrics handler; the registered "prometheus" exporter targets stderr and is a diagnostic, not a scrape endpoint.
 
+<a name="NewPrometheusHandler"></a>
+## func [NewPrometheusHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+```go
+func NewPrometheusHandler(collect func() Snapshot, cfg PrometheusHandlerConfig) (handler http.Handler, err error)
+```
+
+NewPrometheusHandler returns the /metrics scrape endpoint over collect (the meter's Collect, bound): GET renders the snapshot once into a buffer and answers PrometheusContentType with a Content-Length, a refused document answers 500 with its Public text, HEAD answers the headers without collecting, other methods 405, and a scrape concurrent with another 503 with Retry-After: 1. A nil collect is CollectorNil.
+
+```
+h, err := metrics.NewPrometheusHandler(meter.Collect, metrics.PrometheusHandlerConfig{})
+mux.Handle("/metrics", h)
+```
+
 <a name="NewTextExporter"></a>
 ## func [NewTextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
 
@@ -721,6 +892,24 @@ func RegisterExporter(e Exporter) Exporter
 
 RegisterExporter adds e to the process-wide exporter registry.
 
+<a name="RegisterObservers"></a>
+## func [RegisterObservers](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+```go
+func RegisterObservers(meter AsyncMeter, cfg ObserverConfig, observers ...Observer)
+```
+
+RegisterObservers registers every statistic each observer reports as an observable instrument on meter, read once per collection (#871); the engines' adapters are in the statsbridge package.
+
+<a name="RuntimeInstruments"></a>
+## func [RuntimeInstruments](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+```go
+func RuntimeInstruments(meter AsyncMeter, cfg RuntimeConfig)
+```
+
+RuntimeInstruments registers the Go runtime's instruments on meter with the OpenTelemetry Go runtime conventions' names, kinds and units (go.memory.used, go.goroutine.count, …, and on an AsyncHistogramMeter the histograms go.schedule.duration and go.gc.duration), read at Collect from one runtime/metrics.Read. Underscore names them for a Prometheus meter.
+
 <a name="String"></a>
 ## func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
 
@@ -729,6 +918,34 @@ func String(key string, value string) Attr
 ```
 
 String returns a string-valued attribute. It is the shortest of the four constructors to write because a string dimension is the common one.
+
+<a name="AsyncHistogramMeter"></a>
+## type [AsyncHistogramMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+AsyncHistogramMeter is the public alias for the sibling port that registers observable histograms. Not part of FullMeter: reach it by type assertion.
+
+```go
+type AsyncHistogramMeter = coremetrics.AsyncHistogramMeter
+```
+
+AsyncHistogramMeter is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.AsyncHistogramMeter`, declared as:
+
+```go
+type AsyncHistogramMeter interface {
+	// ObservableHistogram registers a histogram read at collection time. The
+	// callback reports each series' ABSOLUTE counts.
+	ObservableHistogram(name string, observe HistogramCallback)
+}
+```
+
+<a name="AsyncHistogramMeter.ObservableHistogram"></a>
+### func \(AsyncHistogramMeter\) [ObservableHistogram](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/gen_ports.go>)
+
+```go
+func (AsyncHistogramMeter) ObservableHistogram(name string, observe HistogramCallback)
+```
+
+ObservableHistogram registers a histogram read at collection time. The callback reports each series' ABSOLUTE counts.
 
 <a name="AsyncMeter"></a>
 ## type [AsyncMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
@@ -882,6 +1099,34 @@ AttrKind is an alias of `github.com/kitsunium/sdk/internal/core/observe/otel.Att
 type AttrKind uint8
 ```
 
+<a name="ContextCounter"></a>
+## type [ContextCounter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+ContextCounter is the public alias for the sibling of Counter and UpDownCounter whose AddContext keeps a sampled span's measurement as the series' exemplar.
+
+```go
+type ContextCounter = coremetrics.ContextCounter
+```
+
+ContextCounter is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.ContextCounter`, declared as:
+
+```go
+type ContextCounter interface {
+	// AddContext adds delta as Add does, and offers it as the series' exemplar
+	// when ctx carries a sampled span.
+	AddContext(ctx context.Context, delta int64)
+}
+```
+
+<a name="ContextCounter.AddContext"></a>
+### func \(ContextCounter\) [AddContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/gen_ports.go>)
+
+```go
+func (ContextCounter) AddContext(ctx context.Context, delta int64)
+```
+
+AddContext adds delta as Add does, and offers it as the series' exemplar when ctx carries a sampled span.
+
 <a name="ContextExporter"></a>
 ## type [ContextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
 
@@ -906,6 +1151,34 @@ type ContextExporter interface {
 ```go
 func (ContextExporter) ExportContext(ctx context.Context, snap SnapshotValue) error
 ```
+
+<a name="ContextHistogram"></a>
+## type [ContextHistogram](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+ContextHistogram is the public alias for the sibling of Histogram whose RecordContext keeps a sampled span's measurement as an exemplar.
+
+```go
+type ContextHistogram = coremetrics.ContextHistogram
+```
+
+ContextHistogram is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.ContextHistogram`, declared as:
+
+```go
+type ContextHistogram interface {
+	// RecordContext records value as Record does, and offers it as an exemplar
+	// when ctx carries a sampled span.
+	RecordContext(ctx context.Context, value float64)
+}
+```
+
+<a name="ContextHistogram.RecordContext"></a>
+### func \(ContextHistogram\) [RecordContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/gen_ports.go>)
+
+```go
+func (ContextHistogram) RecordContext(ctx context.Context, value float64)
+```
+
+RecordContext records value as Record does, and offers it as an exemplar when ctx carries a sampled span.
 
 <a name="Counter"></a>
 ## type [Counter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
@@ -998,6 +1271,178 @@ type DocumentExporter interface {
 ```go
 func (DocumentExporter) ExportDocument(ctx context.Context, doc []byte) error
 ```
+
+<a name="EncodedDocumentExporter"></a>
+## type [EncodedDocumentExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+EncodedDocumentExporter is the public alias for the sibling of DocumentExporter an exporter implements to ship a document already encoded for the transport — the OTLP/HTTP exporter's ExportEncodedDocument posts a gzip document as it rests, with Content-Encoding: gzip (#1051).
+
+```go
+type EncodedDocumentExporter = coremetrics.EncodedDocumentExporter
+```
+
+EncodedDocumentExporter is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.EncodedDocumentExporter`, declared as:
+
+```go
+type EncodedDocumentExporter interface {
+	ExportEncodedDocument(ctx context.Context, doc []byte, encoding string) error
+}
+```
+
+<a name="EncodedDocumentExporter.ExportEncodedDocument"></a>
+### func \(EncodedDocumentExporter\) [ExportEncodedDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/gen_ports.go>)
+
+```go
+func (EncodedDocumentExporter) ExportEncodedDocument(ctx context.Context, doc []byte, encoding string) error
+```
+
+<a name="Exemplar"></a>
+## type [Exemplar](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+Exemplar is the public alias for one measurement kept beside a data point as a link into its trace: time, value, trace and span identifiers.
+
+```go
+type Exemplar = coremetrics.ExemplarValue
+```
+
+Exemplar is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.ExemplarValue`, declared as:
+
+```go
+type Exemplar struct {
+	// Time is when the measurement was recorded, on the meter's clock.
+	Time    time.Time
+	// Value is the measurement. On a sum point it holds the integer the
+	// instrument was handed — exact below 2^53 — and OTLP/JSON writes it as
+	// asInt; on a histogram point it is the recorded double, asDouble.
+	Value   float64
+	// TraceID is the trace the measurement was recorded in.
+	TraceID [16]byte
+	// SpanID is the span the measurement was recorded in.
+	SpanID  [8]byte
+}
+```
+
+<a name="ExponentialBuckets"></a>
+## type [ExponentialBuckets](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+ExponentialBuckets is the public alias for one range — positive or negative — of an exponential histogram point: an offset and its counts.
+
+```go
+type ExponentialBuckets = coremetrics.ExponentialBucketsValue
+```
+
+ExponentialBuckets is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.ExponentialBucketsValue`, declared as:
+
+```go
+type ExponentialBuckets struct {
+	// Offset is the bucket index of Counts[0].
+	Offset int32
+	// Counts holds one count per bucket, PER BUCKET (not cumulative).
+	Counts []uint64
+}
+```
+
+<a name="ExponentialHistogramMetric"></a>
+## type [ExponentialHistogramMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+ExponentialHistogramMetric is the public alias for every series of one exponential histogram name, with its temporality.
+
+```go
+type ExponentialHistogramMetric = coremetrics.ExponentialHistogramMetricValue
+```
+
+ExponentialHistogramMetric is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.ExponentialHistogramMetricValue`, declared as:
+
+```go
+type ExponentialHistogramMetric struct {
+	// Temporality says which window Points cover. Never
+	// TemporalityUnspecified.
+	Temporality Temporality
+	// Description is the instrument's human-readable docstring, or "" when
+	// nobody described it. See SumMetricValue.Description.
+	Description string
+	// Unit is the instrument's unit in UCUM, or "" when nobody declared one
+	// (ADR 0208). See UnitDescriber.
+	Unit        string
+	// Points holds the name's series, sorted by attribute set.
+	Points      []ExponentialHistogramValue
+}
+```
+
+<a name="ExponentialHistogramPoint"></a>
+## type [ExponentialHistogramPoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+ExponentialHistogramPoint is the public alias for one exponential histogram series.
+
+```go
+type ExponentialHistogramPoint = coremetrics.ExponentialHistogramValue
+```
+
+ExponentialHistogramPoint is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.ExponentialHistogramValue`, declared as:
+
+```go
+type ExponentialHistogramPoint struct {
+	// Attrs is the series' attribute set, sorted by Key; nil for the
+	// dimensionless series. See SumValue.Attrs for the aliasing rule.
+	Attrs         []coreotel.AttrValue
+	// Scale sets the resolution: base = 2^(2^-Scale), so each bucket's upper
+	// bound is base times its lower. ExponentialMinScale to
+	// ExponentialMaxScale.
+	Scale         int32
+	// ZeroCount counts the observations whose magnitude is at most
+	// ZeroThreshold — zero itself, since this SDK's threshold is 0.
+	ZeroCount     uint64
+	// ZeroThreshold is the magnitude ZeroCount covers; 0 in this SDK.
+	ZeroThreshold float64
+	// Positive holds the buckets of the positive observations.
+	Positive      ExponentialBucketsValue
+	// Negative holds the buckets of the negative observations, by magnitude.
+	Negative      ExponentialBucketsValue
+	// Sum is the total of every observed value in the window.
+	Sum           float64
+	// Count is how many observations the window holds, ZeroCount included.
+	Count         uint64
+	// Exemplars holds at most one exemplar: the last measurement of the
+	// window recorded with RecordContext under a sampled span. Its buckets
+	// move when the scale drops, so one per bucket would point at a bucket
+	// that no longer exists.
+	Exemplars     []ExemplarValue
+}
+```
+
+<a name="ExponentialMeter"></a>
+## type [ExponentialMeter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+ExponentialMeter is the public alias for the sibling port that mints exponential (base-2) histograms. Not part of FullMeter: reach it by type assertion.
+
+```go
+type ExponentialMeter = coremetrics.ExponentialMeter
+```
+
+ExponentialMeter is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.ExponentialMeter`, declared as:
+
+```go
+type ExponentialMeter interface {
+	// ExponentialHistogram returns the exponential histogram series identified
+	// by name and attrs, created once holding at most maxSize buckets per
+	// range (positive, negative) and starting at ExponentialMaxScale. A
+	// maxSize of zero or less takes DefaultExponentialMaxSize; a maxSize of
+	// one holds no range a scale change can work with and panics with
+	// InvalidBuckets. maxSize is fixed at creation and ignored on every later
+	// fetch. Record drops NaN and the infinities — they have no bucket — and
+	// counts zero in the zero bucket; RecordDuration records seconds.
+	ExponentialHistogram(name string, maxSize int, attrs ...coreotel.AttrValue) Histogram
+}
+```
+
+<a name="ExponentialMeter.ExponentialHistogram"></a>
+### func \(ExponentialMeter\) [ExponentialHistogram](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/gen_ports.go>)
+
+```go
+func (ExponentialMeter) ExponentialHistogram(name string, maxSize int, attrs ...coreotel.AttrValue) Histogram
+```
+
+ExponentialHistogram returns the exponential histogram series identified by name and attrs, created once holding at most maxSize buckets per range (positive, negative) and starting at ExponentialMaxScale. A maxSize of zero or less takes DefaultExponentialMaxSize; a maxSize of one holds no range a scale change can work with and panics with InvalidBuckets. maxSize is fixed at creation and ignored on every later fetch. Record drops NaN and the infinities — they have no bucket — and counts zero in the zero bucket; RecordDuration records seconds.
 
 <a name="Exporter"></a>
 ## type [Exporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
@@ -1143,6 +1588,11 @@ type GaugeMetric struct {
 	// Description is the instrument's human-readable docstring, or "" when
 	// nobody described it. See SumMetricValue.Description.
 	Description string
+	// Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+	// when nobody declared one. Like Description it belongs to the name, is
+	// non-identifying, and an exporter that cannot carry it loses only the
+	// annotation (ADR 0208). See UnitDescriber.
+	Unit        string
 	// Points holds the name's series, sorted by attribute set.
 	Points      []GaugeValue
 }
@@ -1207,6 +1657,21 @@ func (Histogram) RecordDuration(d time.Duration)
 
 RecordDuration observes d as seconds (latency-histogram convenience).
 
+<a name="HistogramCallback"></a>
+## type [HistogramCallback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+HistogramCallback is the public alias for an observable histogram's callback.
+
+```go
+type HistogramCallback = coremetrics.HistogramCallback
+```
+
+HistogramCallback is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.HistogramCallback`, declared as:
+
+```go
+type HistogramCallback func(observe ObserveHistogram)
+```
+
 <a name="HistogramMetric"></a>
 ## type [HistogramMetric](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
 
@@ -1226,6 +1691,11 @@ type HistogramMetric struct {
 	// Description is the instrument's human-readable docstring, or "" when
 	// nobody described it. See SumMetricValue.Description.
 	Description string
+	// Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+	// when nobody declared one. Like Description it belongs to the name, is
+	// non-identifying, and an exporter that cannot carry it loses only the
+	// annotation (ADR 0208). See UnitDescriber.
+	Unit        string
 	// Points holds the name's series, sorted by attribute set.
 	Points      []HistogramValue
 }
@@ -1246,18 +1716,31 @@ HistogramPoint is an alias of `github.com/kitsunium/sdk/internal/core/observe/me
 type HistogramPoint struct {
 	// Attrs is the series' attribute set, sorted by Key; nil for the
 	// dimensionless series. See SumValue.Attrs for the aliasing rule.
-	Attrs  []coreotel.AttrValue
+	Attrs     []coreotel.AttrValue
 	// Bounds holds the histogram's explicit upper bounds, ascending. OTLP
 	// calls this field explicit_bounds.
-	Bounds []float64
+	Bounds    []float64
 	// Counts holds one count per bucket plus the +Inf overflow slot. The
 	// counts are PER BUCKET, not cumulative — a format that wants a
 	// cumulative ladder (Prometheus) builds it as it walks.
-	Counts []uint64
-	// Sum is the total of every observed value in the window.
-	Sum    float64
+	Counts    []uint64
+	// Sum is the total of every observed value in the window; 0 and
+	// meaningless when NoSum is true.
+	Sum       float64
 	// Count is how many observations the window holds.
-	Count  uint64
+	Count     uint64
+	// NoSum is true when the source keeps no total of what it counted — an
+	// observable histogram read off runtime/metrics, whose histograms carry
+	// counts and no sum. Sum is then not a reading, and every exporter says
+	// so rather than print it: OTLP/JSON writes the optional sum as absent,
+	// the Prometheus connector writes no _sum line, the text exporter is
+	// unchanged (it prints the count). The zero value is a histogram that
+	// knows its sum, which every synchronous histogram does.
+	NoSum     bool
+	// Exemplars holds at most one exemplar per bucket, in bucket order: the
+	// last measurement of the window recorded with RecordContext under a
+	// SAMPLED span (ADR 0051). Nil when none was.
+	Exemplars []ExemplarValue
 }
 ```
 
@@ -1297,6 +1780,13 @@ type Meter interface {
 	Collect() SnapshotValue
 	Counter(name string, attrs ...coreotel.AttrValue) Counter
 	Gauge(name string, attrs ...coreotel.AttrValue) Gauge
+	// Histogram returns the histogram series identified by name and attrs,
+	// created once with buckets, the explicit upper bounds (+Inf is the
+	// implicit overflow bucket). An empty layout — nil or none — takes
+	// DefaultBuckets; a layout holding NaN, +Inf, -Inf or a repeated bound is
+	// refused LOUDLY at creation, before the series is admitted
+	// (InvalidBuckets); a valid unsorted layout is sorted. The buckets are
+	// fixed at creation and ignored on every later fetch of the series.
 	Histogram(name string, buckets []float64, attrs ...coreotel.AttrValue) Histogram
 }
 ```
@@ -1332,6 +1822,8 @@ func (Meter) Gauge(name string, attrs ...coreotel.AttrValue) Gauge
 ```go
 func (Meter) Histogram(name string, buckets []float64, attrs ...coreotel.AttrValue) Histogram
 ```
+
+Histogram returns the histogram series identified by name and attrs, created once with buckets, the explicit upper bounds (+Inf is the implicit overflow bucket). An empty layout — nil or none — takes DefaultBuckets; a layout holding NaN, +Inf, -Inf or a repeated bound is refused LOUDLY at creation, before the series is admitted (InvalidBuckets); a valid unsorted layout is sorted. The buckets are fixed at creation and ignored on every later fetch of the series.
 
 <a name="MeterConfig"></a>
 ## type [MeterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
@@ -1410,6 +1902,7 @@ type OTLPHTTPConfig struct {
 	Headers          map[string]string
 	Timeout          time.Duration
 	MaxResponseBytes int64
+	Gzip             bool
 }
 ```
 
@@ -1428,6 +1921,21 @@ ObserveFloat64 is an alias of `github.com/kitsunium/sdk/internal/core/observe/me
 type ObserveFloat64 func(value float64, attrs ...coreotel.AttrValue)
 ```
 
+<a name="ObserveHistogram"></a>
+## type [ObserveHistogram](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+ObserveHistogram is the public alias for the reporting function an observable histogram callback is handed.
+
+```go
+type ObserveHistogram = coremetrics.ObserveHistogram
+```
+
+ObserveHistogram is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.ObserveHistogram`, declared as:
+
+```go
+type ObserveHistogram func(point HistogramValue)
+```
+
 <a name="ObserveInt64"></a>
 ## type [ObserveInt64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
 
@@ -1441,6 +1949,89 @@ ObserveInt64 is an alias of `github.com/kitsunium/sdk/internal/core/observe/metr
 
 ```go
 type ObserveInt64 func(value int64, attrs ...coreotel.AttrValue)
+```
+
+<a name="Observer"></a>
+## type [Observer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+Observer is the public alias for an engine whose statistics a meter can read: Observe reports each once (#871).
+
+```go
+type Observer = coremetrics.Observer
+```
+
+Observer is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.Observer`, declared as:
+
+```go
+type Observer interface {
+	// Observe reports every statistic of the engine through report.
+	Observe(report ReportStat)
+}
+```
+
+<a name="Observer.Observe"></a>
+### func \(Observer\) [Observe](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/gen_ports.go>)
+
+```go
+func (Observer) Observe(report ReportStat)
+```
+
+Observe reports every statistic of the engine through report.
+
+<a name="ObserverConfig"></a>
+## type [ObserverConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+ObserverConfig is the public alias for RegisterObservers' configuration.
+
+```go
+type ObserverConfig = svcmetrics.ObserverConfig
+```
+
+ObserverConfig is an alias of `github.com/kitsunium/sdk/internal/service/observe/metrics.ObserverConfig`, declared as:
+
+```go
+type ObserverConfig struct {
+	// Underscore spells every name with '_' instead of '.'
+	// (kitsunium_cache_hits), for a meter a Prometheus scrape reads.
+	Underscore bool
+}
+```
+
+<a name="PrometheusHandlerConfig"></a>
+## type [PrometheusHandlerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+PrometheusHandlerConfig is the public alias for NewPrometheusHandler's configuration.
+
+```go
+type PrometheusHandlerConfig = svcmetrics.PrometheusHandlerConfig
+```
+
+PrometheusHandlerConfig is an alias of `github.com/kitsunium/sdk/internal/service/observe/metrics.PrometheusHandlerConfig`, declared as:
+
+```go
+type PrometheusHandlerConfig struct {
+	// Name is the exporter name the handler renders under; empty is "prometheus".
+	Name    coremetrics.ExporterName
+	// OnError, when non-nil, is called with a failed write of a response — a
+	// scraper that hung up mid-document, the one failure left once the status
+	// line is out. nil drops it: the handler has nowhere else to report it.
+	OnError func(err error)
+}
+```
+
+<a name="ReportStat"></a>
+## type [ReportStat](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+ReportStat is the public alias for the function an Observer reports through.
+
+```go
+type ReportStat = coremetrics.ReportStat
+```
+
+ReportStat is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.ReportStat`, declared as:
+
+```go
+type ReportStat func(name string, kind StatKind, unit string, value int64, attrs ...coreotel.AttrValue)
 ```
 
 <a name="Resource"></a>
@@ -1459,6 +2050,25 @@ type Resource struct {
 	// Attrs are the producer's attributes, sorted by Key. A ResourceValue
 	// normalised by NormalizeResource always carries ServiceNameKey.
 	Attrs []AttrValue
+}
+```
+
+<a name="RuntimeConfig"></a>
+## type [RuntimeConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+RuntimeConfig is the public alias for RuntimeInstruments' configuration.
+
+```go
+type RuntimeConfig = svcmetrics.RuntimeConfig
+```
+
+RuntimeConfig is an alias of `github.com/kitsunium/sdk/internal/service/observe/metrics.RuntimeConfig`, declared as:
+
+```go
+type RuntimeConfig struct {
+	// Underscore spells every name with '_' instead of '.' (go_memory_used),
+	// for a meter a Prometheus scrape reads.
+	Underscore bool
 }
 ```
 
@@ -1499,10 +2109,10 @@ Snapshot is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.
 ```go
 type Snapshot struct {
 	// Resource identifies the producer, carried once for the whole payload.
-	Resource   coreotel.ResourceValue
+	Resource              coreotel.ResourceValue
 	// Scope identifies the instrumentation, carried once for the whole
 	// payload.
-	Scope      coreotel.ScopeValue
+	Scope                 coreotel.ScopeValue
 	// StartTime opens the window every point covers. Under
 	// TemporalityCumulative it is the meter's own start and repeats across
 	// collections; under TemporalityDelta it advances to the previous
@@ -1511,17 +2121,35 @@ type Snapshot struct {
 	// It is one value for the whole snapshot rather than one per point
 	// because every point in one Collect covers the same window. An encoder
 	// that needs it per point (OTLP does) copies this one down.
-	StartTime  time.Time
+	StartTime             time.Time
 	// Time closes the window: the instant the collection was taken.
-	Time       time.Time
+	Time                  time.Time
 	// Sums maps an instrument name to its sum metric — Counters and
 	// UpDownCounters together, told apart by SumMetricValue.Monotonic.
-	Sums       map[string]SumMetricValue
+	Sums                  map[string]SumMetricValue
 	// Gauges maps an instrument name to its gauge metric.
-	Gauges     map[string]GaugeMetricValue
+	Gauges                map[string]GaugeMetricValue
 	// Histograms maps an instrument name to its histogram metric.
-	Histograms map[string]HistogramMetricValue
+	Histograms            map[string]HistogramMetricValue
+	// ExponentialHistograms maps an instrument name to its exponential
+	// histogram metric. Nil from a meter that holds none.
+	ExponentialHistograms map[string]ExponentialHistogramMetricValue
 }
+```
+
+<a name="StatKind"></a>
+## type [StatKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+StatKind is the public alias for a statistic's kind, StatCounter or StatGauge.
+
+```go
+type StatKind = coremetrics.StatKind
+```
+
+StatKind is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.StatKind`, declared as:
+
+```go
+type StatKind uint8
 ```
 
 <a name="SumMetric"></a>
@@ -1548,6 +2176,11 @@ type SumMetric struct {
 	// outright — so it never joins the series identity and an exporter that
 	// cannot carry it loses nothing but the prose. See Describer.
 	Description string
+	// Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+	// when nobody declared one. Like Description it belongs to the name, is
+	// non-identifying, and an exporter that cannot carry it loses only the
+	// annotation (ADR 0208). See UnitDescriber.
+	Unit        string
 	// Points holds the name's series, sorted by attribute set.
 	Points      []SumValue
 }
@@ -1575,11 +2208,15 @@ type SumPoint struct {
 	// Cloning instead would cost one allocation per series per collection,
 	// i.e. it would scale the cost of scraping with cardinality, which is
 	// the exact axis the cardinality bound exists to contain.
-	Attrs []coreotel.AttrValue
+	Attrs     []coreotel.AttrValue
 	// Value is the series' total: cumulative since the meter started, or the
 	// delta since the previous collection, according to
 	// SumMetricValue.Temporality.
-	Value int64
+	Value     int64
+	// Exemplars holds at most one exemplar: the last measurement of the
+	// window recorded with AddContext under a SAMPLED span (ADR 0051). Nil
+	// when none was.
+	Exemplars []ExemplarValue
 }
 ```
 
@@ -1619,6 +2256,34 @@ func (Temporality) String() string
 ```
 
 String returns the spelling used in diagnostics and in the text exporter.
+
+<a name="UnitDescriber"></a>
+## type [UnitDescriber](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+UnitDescriber is the public alias for the sibling port that binds a UCUM unit to an instrument NAME (ADR 0208). Like Describer it is not part of FullMeter: reach it by type assertion.
+
+```go
+type UnitDescriber = coremetrics.UnitDescriber
+```
+
+UnitDescriber is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.UnitDescriber`, declared as:
+
+```go
+type UnitDescriber interface {
+	// Unit binds unit to the instrument called name. It is idempotent for an
+	// identical unit and refused for a conflicting one.
+	Unit(name string, unit string)
+}
+```
+
+<a name="UnitDescriber.Unit"></a>
+### func \(UnitDescriber\) [Unit](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/gen_ports.go>)
+
+```go
+func (UnitDescriber) Unit(name string, unit string)
+```
+
+Unit binds unit to the instrument called name. It is idempotent for an identical unit and refused for a conflicting one.
 
 <a name="UpDownCounter"></a>
 ## type [UpDownCounter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)

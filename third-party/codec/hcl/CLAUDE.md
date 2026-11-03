@@ -37,6 +37,25 @@ module stays dep-light.
 - **Unmarshal** uses `hclsimple.Decode` with a nil `EvalContext` (no variables
   or functions) into a pointer to a struct/map.
 - **Hard cap on Unmarshal**: 10 MiB (`maxHCLBytes`, CWE-400).
+- **Depth ceiling on Unmarshal** (#1099, `depth.go`): 100 levels
+  (`maxHCLDepth`, the native YAML reader's). hclsyntax's parser is recursive
+  descent with no guard: `a = ` and a million `[` overflowed the goroutine
+  stack — `fatal error: stack overflow`, which no `recover()` catches and which
+  kills the consumer's process. A lexical pre-scan, one pass and no
+  allocation (its frame stack is an array the ceiling sizes), counts what the
+  parser recurses through — tuples, objects, parentheses, quoted strings,
+  `${…}` / `%{…}` sequences, open `%{ if }` / `%{ for }` directives, a run of
+  unary `!` / `-`, a chain of `?` conditionals — skipping comments and heredoc
+  text, and refuses past the ceiling with `DEPTH_EXCEEDED` (`0.3.37.4`) before
+  the parser runs. It is an upper bound: a document it lets through cannot
+  nest deeper; one it refuses might, for a bizarre reason (a run of 101 `-`),
+  have parsed. `TestUnmarshalRefusesNestingPastTheCeiling` holds each shape,
+  the ceiling exactly, and brackets in strings, comments and heredocs.
+- **A parser panic is recovered** (#1159): `Unmarshal` defers a `recover()`
+  that turns a panic of `hclsimple.Decode` into `HCL_UNMARSHAL_FAILED`, as
+  `Marshal` recovers gohcl's — `TestUnmarshalRecoversADecodePanic` triggers one
+  through a target tag gohcl cannot read. `FuzzUnmarshalNeverPanics` holds any
+  input to nil or a typed refusal, and a decoded document to its round trip.
 - **Errors** carry the dotted-quad codes via `errs.Wrap`; no `fmt.Errorf`.
 
 ## Error codes (range `0.3.37.*`)
@@ -46,6 +65,7 @@ module stays dep-light.
 | `0.3.37.1` | `MarshalFailed` | non-struct top level, or gohcl encode panic |
 | `0.3.37.2` | `UnmarshalFailed` | `hclsimple.Decode` diagnostics (syntax/schema) |
 | `0.3.37.3` | `SizeExceeded` | `len(data)` exceeds `maxHCLBytes` (10 MiB) |
+| `0.3.37.4` | `DepthExceeded` | the pre-scan finds nesting past `maxHCLDepth` (100); reason `DEPTH_EXCEEDED` |
 
 ## Cost
 

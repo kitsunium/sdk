@@ -6,6 +6,7 @@ go_library(
     name = "jsonenc",
     srcs = [
         "doc.go",
+        "float.go",
         "object.go",
         "string.go",
     ],
@@ -31,6 +32,7 @@ go_test(
     size = "small",
     srcs = [
         "bench_test.go",
+        "float_external_test.go",
         "gen_api_test.go",
         "gen_perf_test.go",
         "jsonenc_external_test.go",

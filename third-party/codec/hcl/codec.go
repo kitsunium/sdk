@@ -103,18 +103,48 @@ func (*hclCodec) Marshal(v any) (encoded []byte, err error) {
 }
 
 // Unmarshal parses+decodes HCL into v (a non-nil pointer to a struct/map) after
-// the size cap.
-func (*hclCodec) Unmarshal(data []byte, v any) error {
+// the size cap and the depth pre-scan. A panic of the parser on a crafted
+// document is recovered into HCL_UNMARSHAL_FAILED, as Marshal recovers
+// gohcl's (#1159).
+func (*hclCodec) Unmarshal(data []byte, v any) (err error) {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: CWE-400 defence — refuse oversized inputs before the parser allocates.
 	if len(data) > maxHCLBytes {
 		//: surface the size sentinel.
 		return errs.Wrap(nil, errs.WrapParams{
 			Code:    CodeHCLSizeExceeded,
-			Reason:  "HCL_SIZE_EXCEEDED",
+			Reason:  "SIZE_EXCEEDED",
 			Public:  "HCL input exceeds size limit",
 			Private: "third-party/codec/hcl.Unmarshal: len(data) > maxHCLBytes",
 		})
 	}
+	//: CWE-674 defence — refuse nesting the recursive-descent parser would
+	//: follow off the end of the goroutine stack, a fatal error (#1099).
+	if exceedsDepth(data) {
+		//: surface the depth sentinel.
+		return errs.Wrap(nil, errs.WrapParams{
+			Code:    CodeHCLDepthExceeded,
+			Reason:  "DEPTH_EXCEEDED",
+			Public:  "HCL input nested too deeply",
+			Private: "third-party/codec/hcl.Unmarshal: the pre-scan found nesting past maxHCLDepth",
+		}, errs.Int("cap", maxHCLDepth))
+	}
+	//: a parser panic on untrusted bytes must not take the caller down.
+	defer func() {
+		//: convert a library panic into the unmarshal sentinel.
+		if r := recover(); r != nil {
+			//: never the panic value: it may quote the input.
+			err = errs.Wrap(nil, errs.WrapParams{
+				Code:    CodeHCLUnmarshalFailed,
+				Reason:  "HCL_UNMARSHAL_FAILED",
+				Public:  "HCL decoding failed",
+				Private: "third-party/codec/hcl.Unmarshal: hclsimple.Decode panicked",
+			})
+		}
+	}()
 	//: parse + decode in one step; nil EvalContext = no variables/functions.
 	derr := hclsimple.Decode(decodeFilename, data, nil, v)
 	//: success fast-path.

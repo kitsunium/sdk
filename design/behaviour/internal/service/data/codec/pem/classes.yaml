@@ -2,26 +2,55 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
-      Package-level constants: promotion-shape parameters + the cap-discard
-      threshold for the Marshal-buffer pool. Grouped per KTN-CONST-ORDER.
+      Package-level constants: the framing encoding/pem writes. Grouped per
+      KTN-CONST-ORDER.
     grouped: true
     items:
-      - doc: |-
-          promotionBlockType is the Type label the facade promotion path stamps
-          when wrapping a non-PEM value (matches pkg/v1/data/codec/promote.go
-          pemPromotionBlockType).
-        name: promotionBlockType
-        value: "\"JSON\""
       - doc: |-
           promotionLineLength is the base64 line width pem.Encode uses (each
           line of base64 content within a PEM block is wrapped at this width).
         name: promotionLineLength
         type: int
         value: "64"
-    name: promotionBlockType
+      - doc: pemBegin opens the BEGIN line, before the block's type.
+        name: pemBegin
+        value: "\"-----BEGIN \""
+      - doc: pemEnd opens the END line, before the block's type.
+        name: pemEnd
+        value: "\"-----END \""
+      - doc: pemDashes closes the BEGIN and END lines, with their newline.
+        name: pemDashes
+        value: "\"-----\\n\""
+      - doc: |-
+          procTypeHeader is the header encoding/pem writes before the others
+          (RFC 1421 §4.6.1.1).
+        name: procTypeHeader
+        value: "\"Proc-Type\""
+    name: promotionLineLength
+  - doc: Stream decoder bounds.
+    grouped: true
+    items:
+      - doc: |-
+          maxStreamBlockBytes caps the bytes the stream decoder holds before it
+          can decode a block: past it the block is refused, SIZE_EXCEEDED, and
+          the stream read no further.
+        name: maxStreamBlockBytes
+        type: int
+        value: 10 << 20
+      - doc: streamReadSize is the most one Read is asked for.
+        name: streamReadSize
+        type: int
+        value: 32 << 10
+      - doc: |-
+          maxEmptyReads is how many Reads may return no byte and no error before
+          the reader is treated as stuck, as bufio treats one.
+        name: maxEmptyReads
+        type: int
+        value: "100"
+    name: maxStreamBlockBytes
 files:
   - decls:
-      - promotionBlockType
+      - promotionLineLength
       - Codec
       - pemCodec
       - Block
@@ -30,34 +59,87 @@ files:
       - (*pemCodec).MIMETypes
       - (*pemCodec).Extensions
       - (*pemCodec).Marshal
-      - marshalPromotionBlock
-      - insertNewlinesEvery64
       - (*pemCodec).Append
+      - appendValue
+      - checkBlock
+      - appendBlock
+      - appendHeader
+      - sortedHeaderKeys
+      - appendBody
+      - blockLen
       - (*pemCodec).Unmarshal
+      - insertNewlinesEvery64
     name: codec.go
+  - decls:
+      - maxStreamBlockBytes
+      - pemDecoder
+      - (*pemCodec).NewDecoder
+      - (*pemDecoder).Decode
+      - (*pemDecoder).More
+      - (*pemDecoder).advance
+      - (*pemDecoder).decodeHeld
+      - (*pemDecoder).drop
+      - (*pemDecoder).lastWholeEnd
+      - (*pemDecoder).finish
+      - (*pemDecoder).fill
+      - readFailed
+    name: decoder.go
   - decls: []
     name: doc.go
+  - decls:
+      - pemEncoder
+      - (*pemCodec).NewEncoder
+      - (*pemEncoder).Encode
+      - (*pemEncoder).Close
+    name: encoder.go
+  - decls:
+      - beginHead
+      - (*pemCodec).Sniff
+    name: sniff.go
 functions:
   - name: New
     results: codec.Codec
+  - doc: "appendValue is Append's body: the gate, then the block written in place."
+    name: appendValue
+    params: dst []byte, block *stdpem.Block
+    results: appended []byte, err error
   - doc: |-
-      marshalPromotionBlock emits the wire bytes for a "JSON"-typed PEM
-      block with no headers — the exact shape pkg/v1/data/codec/promote.go
-      stamps. The output is byte-identical to pem.Encode for this shape
-      (BEGIN marker, base64-encoded payload split into 64-char lines,
-      END marker, trailing newline). Saves pem.Encode's intermediate
-      bytes.Buffer + lineBreaker + base64.NewEncoder allocations.
-
-      Implementation: one-shot base64.Encode into the output buffer's
-      tail, then a forward walk that inserts '\n' every 64 bytes. The
-      earlier per-chunk loop called base64.StdEncoding.Encode N times
-      (one per 48-byte input chunk) — each call paid function-call
-      overhead + reset internal state. The single-encode + insert
-      approach makes one call total then memmove's lines into their
-      final slots.
-    name: marshalPromotionBlock
-    params: payload []byte
+      checkBlock is the gate Marshal, Append and the stream encoder share: the
+      value must have been a non-nil *pem.Block — block is nil when it was
+      anything else — and no header key may hold a colon, the one block
+      encoding/pem.Encode refuses, checked as it checks it, before any output.
+    name: checkBlock
+    params: block *stdpem.Block, caller string
+    results: error
+  - doc: |-
+      appendBlock appends block as encoding/pem.Encode writes it: the BEGIN line,
+      the headers — Proc-Type first (RFC 1421 §4.6.1.1), the others sorted by
+      key — and a blank line when there are any, the body in base64 lines of 64
+      characters, the END line.
+    name: appendBlock
+    params: dst []byte, block *stdpem.Block
     results: "[]byte"
+  - doc: "appendHeader appends the header line \"k: v\\n\"."
+    name: appendHeader
+    params: dst []byte, k, v string
+    results: "[]byte"
+  - doc: |-
+      sortedHeaderKeys returns the header keys but Proc-Type, sorted — the order
+      encoding/pem.Encode writes them in.
+    name: sortedHeaderKeys
+    params: headers map[string]string
+    results: "[]string"
+  - doc: |-
+      appendBody appends payload in base64, broken into lines of 64 characters,
+      each ended by '\n' — encoding/pem's lineBreaker. An empty payload writes
+      nothing. One base64 encode into the tail, then the lines moved into place.
+    name: appendBody
+    params: dst, payload []byte
+    results: "[]byte"
+  - doc: blockLen is the exact length appendBlock writes for block.
+    name: blockLen
+    params: block *stdpem.Block
+    results: int
   - doc: |-
       insertNewlinesEvery64 walks the base64 body region in `body` (which
       already has lineCount extra bytes reserved at the tail) and inserts
@@ -67,14 +149,21 @@ functions:
       internally, except in one pass without per-byte function calls.
     name: insertNewlinesEvery64
     params: body []byte, bodyLen, lineCount int
+  - doc: readFailed wraps a reader's failure as UNMARSHAL_FAILED.
+    name: readFailed
+    params: err error
+    results: error
 imports:
   base64: encoding/base64
+  bytes: bytes
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   corepem: github.com/kitsunium/sdk/internal/core/data/codec/pem
+  errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
-  scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  io: io
   slices: slices
   stdpem: encoding/pem
+  strings: strings
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/codec/pem
@@ -102,7 +191,9 @@ types:
         name: Extensions
         recv: c *pemCodec
         results: "[]string"
-      - doc: Marshal encodes a *pem.Block into PEM bytes.
+      - doc: |-
+          Marshal encodes a *pem.Block into PEM bytes: encoding/pem.Encode's bytes,
+          written into one allocation of their exact size.
         name: Marshal
         params: v any
         recv: "*pemCodec"
@@ -111,16 +202,40 @@ types:
           Append encodes a *pem.Block as PEM bytes and appends them to dst.
           Implements the optional codec.Appender interface so hot-path callers
           can stitch PEM blocks into a larger framed buffer (multi-block cert
-          chain construction) without an intermediate allocation per block.
+          chain construction): the block is written into dst itself, grown once to
+          the exact size when it lacks the room. On a refusal dst is returned as it
+          was given — the header check runs before a byte is written.
         name: Append
         params: dst []byte, v any
-        recv: c *pemCodec
+        recv: "*pemCodec"
         results: appended []byte, err error
       - doc: Unmarshal parses the first PEM block from data into v.
         name: Unmarshal
         params: data []byte, v any
         recv: "*pemCodec"
         results: error
+      - doc: |-
+          NewDecoder wraps r in a streaming codec.Decoder handing one *pem.Block per
+          Decode into a **pem.Block target.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*pemCodec"
+        results: codec.Decoder
+      - doc: |-
+          NewEncoder wraps w in a streaming codec.Encoder writing one block per
+          Encode.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*pemCodec"
+        results: codec.Encoder
+      - doc: |-
+          Sniff implements codec.Sniffer (#909): prefix is PEM when, after leading
+          whitespace, it opens with "-----BEGIN ", the pre-encapsulation boundary.
+          It reads only prefix and allocates nothing.
+        name: Sniff
+        params: prefix []byte
+        recv: "*pemCodec"
+        results: bool
     name: pemCodec
   - alias: true
     doc: |-
@@ -129,12 +244,126 @@ types:
     kind: alias
     name: Block
     underlying: stdpem.Block
+  - doc: |-
+      pemDecoder reads one *pem.Block per Decode (#901): the blocks a loop of
+      encoding/pem.Decode over the whole stream finds, in order, without holding
+      the whole stream. pem.Decode decides a block at its END line — the first
+      "\n-----END " after the last BEGIN line — so the decoder reads until a
+      whole END line is held, hands what it holds to pem.Decode, and keeps only
+      what follows: the block's rest, or what follows the END lines that decoded
+      nothing, which pem.Decode itself would skip.
+    fields:
+      - doc: r is the stream.
+        name: r
+        type: io.Reader
+      - doc: buf holds the bytes read and not yet decoded or skipped.
+        name: buf
+        type: "[]byte"
+      - doc: searchFrom is where the search for an END line resumes in buf.
+        name: searchFrom
+        type: int
+      - doc: eof is set once r has returned io.EOF.
+        name: eof
+        type: bool
+      - doc: next is the block More or Decode read ahead, not yet handed out.
+        name: next
+        type: "*stdpem.Block"
+      - doc: |-
+          err ends the stream: io.EOF, a failing reader, a truncated or
+          oversized block. Decode returns it from then on.
+        name: err
+        type: error
+      - doc: reported is set once Decode has returned err, so More reports false.
+        name: reported
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Decode stores the next block of the stream in *v, a non-nil **pem.Block. It
+          returns io.EOF, unwrapped, once no block is left; UNMARSHAL_FAILED for a
+          block the stream ends inside of or a failing reader, SIZE_EXCEEDED for a
+          block past 10 MiB — both end the stream; VALUE_INVALID for another target,
+          which reads nothing.
+        name: Decode
+        params: v any
+        recv: d *pemDecoder
+        results: error
+      - doc: |-
+          More reports whether Decode has something to return: a block, or a failure
+          the caller has not been told of yet. It reads ahead to the next block, so
+          a stream's last block is followed by false.
+        name: More
+        recv: d *pemDecoder
+        results: bool
+      - doc: |-
+          advance reads until the next block decodes, unless one is already waiting
+          or the stream has ended.
+        name: advance
+        recv: d *pemDecoder
+      - doc: |-
+          decodeHeld hands what is held up to the end of its last whole END line to
+          pem.Decode — end is just past that line's marker: a block is kept for
+          Decode and the bytes before its rest dropped; no block drops the bytes up
+          to that END marker, which pem.Decode would skip. pem.Decode never sees a
+          line it could read differently once more of the stream arrives.
+        name: decodeHeld
+        params: end int
+        recv: d *pemDecoder
+      - doc: drop forgets the first n bytes held.
+        name: drop
+        params: n int
+        recv: d *pemDecoder
+      - doc: |-
+          lastWholeEnd returns the offset just past the "\n-----END " of the last END
+          line held whole — followed by a '\n', or by the end of the stream — or -1.
+          pem.Decode reads an END line to its end, so a block is decided only once
+          its END line is whole. The search resumes where an earlier one stopped.
+        name: lastWholeEnd
+        recv: d *pemDecoder
+        results: int
+      - doc: |-
+          finish ends the stream once the reader is drained and no whole END line is
+          held: io.EOF, or a truncated block when a BEGIN line is still held.
+        name: finish
+        recv: d *pemDecoder
+      - doc: |-
+          fill reads more of the stream onto buf: io.EOF sets eof, a failure ends
+          the stream as UNMARSHAL_FAILED, a reader returning nothing too often as
+          io.ErrNoProgress.
+        name: fill
+        recv: d *pemDecoder
+    name: pemDecoder
+  - doc: |-
+      pemEncoder writes one *pem.Block per Encode (#901): Marshal's bytes, built
+      in a buffer the encoder reuses, then written in one Write.
+    fields:
+      - doc: w is the stream; the encoder does not own it.
+        name: w
+        type: io.Writer
+      - doc: buf is the block being written, reused across Encode calls.
+        name: buf
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: |-
+          Encode writes v, a non-nil *pem.Block, as Marshal writes it. A block
+          Marshal refuses writes nothing; a failing writer is MARSHAL_FAILED.
+        name: Encode
+        params: v any
+        recv: e *pemEncoder
+        results: error
+      - doc: |-
+          Close is a no-op: the encoder buffers nothing between calls and does not
+          own the writer.
+        name: Close
+        recv: "*pemEncoder"
+        results: error
+    name: pemEncoder
 vars:
   - doc: |-
       Package-level state: the codec singleton, built with its hoisted extension
       table — the initialiser names the table, which is what orders it before
-      Register reads it (see core/data/codec.Register) —, the cached promotion
-      fast-path markers, and the Marshal-buffer pool.
+      Register reads it (see core/data/codec.Register).
     grouped: true
     items:
       - doc: ": register the singleton and expose it as a typed package var."
@@ -148,12 +377,9 @@ vars:
           : reads it, whatever the declaration order (see core/data/codec.Register).
         name: extensions
         value: "[]string{\".pem\", \".crt\", \".key\"}"
-      - doc: |-
-          : pemJSONBegin is the BEGIN marker for a "JSON"-typed PEM block.
-          : Cached so the promotion fast-path never re-builds it.
-        name: pemJSONBegin
-        value: "[]byte(\"-----BEGIN \" + promotionBlockType + \"-----\\n\")"
-      - doc: ": pemJSONEnd is the END marker for a \"JSON\"-typed PEM block."
-        name: pemJSONEnd
-        value: "[]byte(\"-----END \" + promotionBlockType + \"-----\\n\")"
     name: Codec
+  - doc: beginHead opens every PEM block's encapsulation boundary (RFC 7468 §2).
+    items:
+      - name: beginHead
+        value: "[]byte(\"-----BEGIN \")"
+    name: beginHead

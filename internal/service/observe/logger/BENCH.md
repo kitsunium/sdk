@@ -406,6 +406,115 @@ is recorded here for whoever measures that.
 - `runtime.Callers` is 22.5 % of an emit (core, not this group).
 - Both encoders render an `error` attribute as `?` (see `encoder/BENCH.md` §2).
 
+## 5. The drainer parks, a backlog is one write, a Flush holds no writer (#806, #807, #815)
+
+Taken on a different machine from the sections above — AMD EPYC 7351P, 4 Ps
+(`GOMAXPROCS=4`), linux/amd64, go1.27.3, ext4 on a shared VM disk, other
+agents compiling — `-benchtime=100ms` to `300ms`, 3 to 4 rounds. The base is
+`origin/main` 740e7c1e in a second worktree, run alternately with this branch.
+
+**An idle async sink costs no CPU (#806).** The drainer parked on `Gosched`
+when its ring was empty and, with nothing else runnable, came straight back:
+`TestAnIdleAsyncSinkCostsNoCPU` measured **690 ms of process CPU over an idle
+500 ms on the base** — one P flat out — and under 25 ms (the test's bound) on
+this branch, where the drainer parks on a wake-up the next accepted `Write`
+sends (the pending-flag-and-recheck shape `net/loop`'s post queue uses).
+
+```
+                                        base        this branch
+MW_Async_PublishPaced    ns/op        182–196        154–167
+MW_Async_PublishSaturated drop ratio  83–90 %        91–93 %
+```
+
+The paced hand-off is ~15 % cheaper: the producer no longer competes for
+`ringMu` with a drainer polling an empty ring. **The unpaced producer still
+starves its drainer**, within noise of the base: that collapse is the
+`ringMu` handshake (§1 `async`), which parking does not change — the MPSC ring
+of #805 is the fix for it.
+
+**A backlog is one write(2) (#807).** `Sink_File_Batch16` is one `WriteBatch`
+of 16 records against `Sink_File`'s one `Write` per record:
+
+```
+Sink_File            1059–1150 ns/op per record     0 allocs
+Sink_File_Batch16     228–582  ns/record (16/op)    0 allocs
+```
+
+The minimum meets the issue's 300 ns per record; the spread is the shared
+disk. The async drainer reaches it only with `Config.BatchMax` above one and
+a downstream that implements `BatchSink` (file, rotfile, the level gate, the
+tcp writer); the zero Config delivers record by record, as before.
+
+The udp writer and journald joined them later the same day: a backlog of 16
+leaves in one `sendmmsg(2)` on Linux, each record still its own datagram —
+3.0–3.1 µs per record against 3.3 µs for one `sendto(2)` each on this VM, the
+kernel's per-datagram work being most of it (`internal/datagram/BENCH.md`).
+The http writer posts one NDJSON body per backlog only under
+`NetConfig.HTTPBatchNDJSON`, the opt-in its wire change needs.
+
+**A Flush no longer holds the writers (#815).** `Sink_File_WriteDuringFlush`
+runs parallel writers while one goroutine flushes in a loop:
+
+```
+                           base               this branch
+ns/op (4 writers)        22 786–69 197         1 742–1 779
+max-ns/write             6.1–29.8 ms           3.3–8.6 ms
+```
+
+On the base every writer waited for the fsync under the write mutex; now the
+throughput is a write's own. The worst write is still milliseconds: ext4
+itself serialises a `write(2)` behind a journal commit an fsync started, which
+no lock in this package can remove.
+
+## 6. Bound attributes rendered once (#1016)
+
+Same machine and method as §5. `Emit_Bound` is one static emit through a
+Logger bound (`With`) with 0, 8 and 32 short string attributes; the base renders
+the bound set with the record's on every emit, this branch renders it once at
+`With` (`corelogger.PrefixEncoder`) and splices the bytes.
+
+```
+                      base (ns/op)       this branch (ns/op)    allocs
+text  0 bound          502 – 569           294 – 317              0
+text  8 bound         1233 – 1321          539 – 574              1
+text 32 bound         3037 – 3638         1054 – 1164             1
+json  0 bound          530 – 602           313 – 325              0
+json  8 bound         1280 – 1445          584 – 652              1
+json 32 bound         2975 – 3546         1110 – 1373             1
+```
+
+(The 0-bound rows moved too: they include #1014's removal of the stack walk.)
+**The rendering is gone; the growth that is left is the merged slice.** A
+bound attribute cost ~78 ns per emit on the base and costs ~25 ns now — what
+remains is `mergeAttrs`, the copy of the bound attributes into the record the
+SINK receives (route predicates and the memory sink read them), which #1016
+keeps by design as the one allocation of an emit. So the issue's bound — the 8-
+and 32-bound rows within 10 % of the 0-bound one — is **not met**: 8 bound is
+~1.8x, 32 bound ~3.6x the 0-bound row. Meeting it means not handing the sink
+the bound attributes, a change of what a sink sees. **The owner accepted the
+gap on 2026-11-03**: the sink keeps its copy of the bound attributes, and the
+bound stays unmet by that one allocation, by decision.
+
+## 7. The keyed sampler (#1017)
+
+Same machine and method as §5, `-benchtime=200ms`, 3 rounds, beside the 1-in-N
+sampler measured in the same run:
+
+```
+MW_Sample_Kept             20.1 – 20.8 ns/op    0 allocs
+MW_Sample_Dropped          12.5 – 13.0 ns/op    0 allocs
+MW_SampleKeyed_Kept        99.4 – 105.8 ns/op   0 allocs
+MW_SampleKeyed_Dropped    101.6 – 114.0 ns/op   0 allocs
+```
+
+The keyed sampler costs ~100 ns a record, kept or dropped: the clock read, a
+mutex, and one hash of the record's message (the default key is the level and
+the message, as a struct, so nothing is concatenated). That is five to eight
+times the global counter's, and the price of a sampler that thins a burst per
+message and lets the rare line through — the 1-in-N one drops it 99 % of the
+time. Both paths allocate nothing once the key is in the table; the budget
+`allocs: 0` on `(*Keyed).Write` (design/sdk.yaml, alloc lane) holds it.
+
 ## Reproducibility envelope
 
 > **Numbers vary across machines.** `ns/op` is load-sensitive; `allocs/op` is

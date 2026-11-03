@@ -1,6 +1,8 @@
 package transform
 
 import (
+	"io"
+
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 
 	// The stdlib schemes register themselves — gzip, flate and zlib — as Go
@@ -95,4 +97,59 @@ func judgeAfter(c Compressor, dst, src []byte, limit int64) (decoded []byte, err
 	}
 	//: within the caller's ceiling.
 	return decoded, nil
+}
+
+// NewReader returns a reader of r's stream decompressed by the scheme
+// registered under algo, yielding at most limit bytes: the read that would
+// deliver the byte past limit fails with DecompressedTooLarge, after limit
+// bytes and never instead of them. A limit of zero admits an empty stream and
+// a negative one is read as zero, as in DecompressBounded. Nothing is held
+// whole — an HTTP body, a file or a log shipment is read through the
+// decoder's window — so the limit bounds what the caller receives, and the
+// decoder's own memory is its window. Close the reader to release the
+// decoder; it does not close r.
+//
+// An unregistered algo is refused with UnknownCompressor, a registered one
+// with no stream form with StreamingUnsupported.
+func NewReader(algo Algorithm, r io.Reader, limit int64) (rc io.ReadCloser, err error) {
+	streaming, serr := streamingFor(algo)
+	//: no scheme, or one without a stream form.
+	if serr != nil {
+		return nil, serr
+	}
+	//: the scheme bounds its own stream by the caller's limit.
+	return streaming.NewReader(r, limit)
+}
+
+// NewWriter returns a writer that compresses into w with the scheme registered
+// under algo. Close it to write the stream's end — a stream not closed is
+// incomplete — and release the encoder; it does not close w. What it writes
+// NewReader reads back; for every scheme but s2 it is also what Compress
+// writes and Decompress reads.
+//
+// An unregistered algo is refused with UnknownCompressor, a registered one
+// with no stream form with StreamingUnsupported.
+func NewWriter(algo Algorithm, w io.Writer) (wc io.WriteCloser, err error) {
+	streaming, serr := streamingFor(algo)
+	//: no scheme, or one without a stream form.
+	if serr != nil {
+		return nil, serr
+	}
+	return streaming.NewWriter(w)
+}
+
+// streamingFor resolves algo to a scheme with a stream form, or the refusal
+// that names why there is none.
+func streamingFor(algo Algorithm) (streaming StreamingCompressor, err error) {
+	c, ok := coretransform.Lookup(algo)
+	//: no scheme under that name: a missing import, named as such.
+	if !ok {
+		return nil, coretransform.UnknownCompressor
+	}
+	streaming, ok = c.(StreamingCompressor)
+	//: a scheme that compresses whole buffers only.
+	if !ok {
+		return nil, coretransform.StreamingUnsupported
+	}
+	return streaming, nil
 }

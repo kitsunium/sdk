@@ -73,7 +73,7 @@ func Test_gateSink_Write(t *testing.T) {
 		t.Helper()
 		inner := &countSink{}
 		//: white-box: build the gate directly to exercise the drop branch.
-		gate := &gateSink{inner: inner, min: c.min}
+		gate := &gateSink{inner: inner, floor: level.Fixed(c.min)}
 		rec := corelogger.RecordEvent{Level: c.recordLvl}
 		//: Write always succeeds; drops are a silent no-op.
 		if n, err := gate.Write(t.Context(), rec, []byte("z")); err != nil || n != 1 {
@@ -101,7 +101,7 @@ func Test_gateSink_Flush(t *testing.T) {
 	runCase := func(t *testing.T, _ tc) {
 		t.Helper()
 		inner := &countSink{}
-		gate := &gateSink{inner: inner, min: level.Error}
+		gate := &gateSink{inner: inner, floor: level.Fixed(level.Error)}
 		//: the flush must reach the wrapped sink exactly once.
 		if err := gate.Flush(t.Context()); err != nil || inner.flushes != 1 {
 			t.Errorf("Flush: err=%v flushes=%d want nil,1", err, inner.flushes)
@@ -124,7 +124,7 @@ func Test_gateSink_Close(t *testing.T) {
 	runCase := func(t *testing.T, _ tc) {
 		t.Helper()
 		inner := &countSink{}
-		gate := &gateSink{inner: inner, min: level.Error}
+		gate := &gateSink{inner: inner, floor: level.Fixed(level.Error)}
 		//: the close must reach the wrapped sink exactly once.
 		if err := gate.Close(); err != nil || inner.closes != 1 {
 			t.Errorf("Close: err=%v closes=%d want nil,1", err, inner.closes)
@@ -188,7 +188,7 @@ func Test_gateSink_Write_errorPassthrough(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		//: white-box: build the gate directly to exercise the drop branch.
-		gate := &gateSink{inner: c.inner, min: c.min}
+		gate := &gateSink{inner: c.inner, floor: level.Fixed(c.min)}
 		rec := corelogger.RecordEvent{Level: c.recordLvl}
 		n, err := gate.Write(t.Context(), rec, c.payload)
 		//: the relayed byte count must match inner (or len(p) on the drop path).
@@ -225,7 +225,7 @@ func Test_gateSink_Flush_errorPassthrough(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		inner := &errorSink{flushErr: c.wantErr}
-		gate := &gateSink{inner: inner, min: level.Error}
+		gate := &gateSink{inner: inner, floor: level.Fixed(level.Error)}
 		//: identity check proves the gate relays inner's flush error verbatim.
 		if err := gate.Flush(t.Context()); !errors.Is(err, c.wantErr) {
 			t.Errorf("%s: Flush=%v want %v", c.name, err, c.wantErr)
@@ -252,7 +252,7 @@ func Test_gateSink_Close_errorPassthrough(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		inner := &errorSink{closeErr: c.wantErr}
-		gate := &gateSink{inner: inner, min: level.Error}
+		gate := &gateSink{inner: inner, floor: level.Fixed(level.Error)}
 		//: identity check proves the gate relays inner's close error verbatim.
 		if err := gate.Close(); !errors.Is(err, c.wantErr) {
 			t.Errorf("%s: Close=%v want %v", c.name, err, c.wantErr)
@@ -282,7 +282,7 @@ func Test_gateSink_Write_debugFloor(t *testing.T) {
 		t.Helper()
 		inner := &errorSink{writeN: 2}
 		//: min=Debug is below Info, so New wraps and the gate is exercised live.
-		gate := &gateSink{inner: inner, min: level.Debug}
+		gate := &gateSink{inner: inner, floor: level.Fixed(level.Debug)}
 		rec := corelogger.RecordEvent{Level: c.recordLvl}
 		//: the record clears the Debug floor, so inner must receive it once.
 		if _, err := gate.Write(t.Context(), rec, []byte("xy")); err != nil {

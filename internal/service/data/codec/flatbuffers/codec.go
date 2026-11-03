@@ -2,6 +2,7 @@ package flatbuffers
 
 import (
 	"encoding/binary"
+	"reflect"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
 	coreflatbuffers "github.com/kitsunium/sdk/internal/core/data/codec/flatbuffers"
@@ -107,6 +108,10 @@ func (*flatbuffersCodec) Marshal(v any) (encoded []byte, err error) {
 // caller passes a `*[]byte` (zero-copy reference) or a value implementing
 // BytesAcceptor (the codec hands the slice off via SetBytes).
 func (*flatbuffersCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := checkTarget(v); terr != nil {
+		return terr
+	}
 	//: validate the buffer shape before touching the target.
 	if verr := validateBuffer(data); verr != nil {
 		//: surface the FLATBUFFERS_TRUNCATED sentinel directly.
@@ -174,9 +179,31 @@ func resolveSourceBytes(v any) (src []byte, err error) {
 	})
 }
 
+// checkTarget is core/data/codec.CheckTarget, except that a BytesAcceptor
+// that is not a pointer is a target too: SetBytes is how it receives the
+// buffer (#1101).
+func checkTarget(v any) error {
+	//: an acceptor, or any other target.
+	switch acc := v.(type) {
+	//: by value — a map or a func type, say — it needs no pointer.
+	case BytesAcceptor:
+		//: a pointer acceptor is checked like any pointer.
+		if reflect.TypeOf(acc).Kind() != reflect.Pointer {
+			return nil
+		}
+		//: anything else must be a non-nil pointer.
+		return codec.CheckTarget(v)
+	//: not an acceptor.
+	default:
+		//: it must be a non-nil pointer.
+		return codec.CheckTarget(v)
+	}
+}
+
 // validateBuffer enforces the minimum FlatBuffer wire-format shape: the
 // 4-byte root offset header must be present, and the buffer MUST NOT exceed
-// the codec's CWE-400 ceiling.
+// the codec's CWE-400 ceiling. Each refusal is placed at the byte offset it
+// concerns (#1125): where a short buffer ends, the first byte past the cap.
 func validateBuffer(data []byte) error {
 	//: minimum size — a FlatBuffer without the root offset is unparseable.
 	if len(data) < flatBuffersHeaderBytes {
@@ -186,7 +213,8 @@ func validateBuffer(data []byte) error {
 			Reason:  "FLATBUFFERS_TRUNCATED",
 			Public:  "FlatBuffers buffer is truncated",
 			Private: "service/data/codec/flatbuffers.validateBuffer: len(data) < flatBuffersHeaderBytes",
-		}, errs.Int("len", len(data)), errs.Int("min", flatBuffersHeaderBytes))
+		}, append(codec.PositionFields(codec.PositionValue{Offset: len(data)}),
+			errs.Int("len", len(data)), errs.Int("min", flatBuffersHeaderBytes))...)
 	}
 	//: maximum size — bound the memory-exhaustion blast radius.
 	if len(data) > maxFlatBuffersBytes {
@@ -196,7 +224,8 @@ func validateBuffer(data []byte) error {
 			Reason:  "FLATBUFFERS_TRUNCATED",
 			Public:  "FlatBuffers buffer exceeds size limit",
 			Private: "service/data/codec/flatbuffers.validateBuffer: len(data) > maxFlatBuffersBytes",
-		}, errs.Int("len", len(data)), errs.Int("max", maxFlatBuffersBytes))
+		}, append(codec.PositionFields(codec.PositionValue{Offset: maxFlatBuffersBytes}),
+			errs.Int("len", len(data)), errs.Int("max", maxFlatBuffersBytes))...)
 	}
 	//: buffer is acceptable — caller may proceed.
 	return nil

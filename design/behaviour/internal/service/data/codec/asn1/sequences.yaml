@@ -59,11 +59,21 @@ sequences:
         kind: actor
       - id: (*asn1Codec).Unmarshal
         kind: self
+      - id: codec
+        kind: package
       - id: stdasn1
         kind: stdlib
       - id: errs
         kind: package
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - bind: _, uerr
         eval: stdasn1.Unmarshal(data, v)
         to: stdasn1
@@ -79,3 +89,53 @@ sequences:
           		Private: "service/data/codec/asn1.Unmarshal: encoding/asn1 returned an error",
           	})
         to: errs
+  - of: NewStrict
+    steps:
+      - return: "&strictCodec{}"
+  - of: (*strictCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*strictCodec).Unmarshal
+        kind: self
+      - id: codec
+        kind: package
+      - id: stdasn1
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - bind: rest, uerr
+        eval: stdasn1.Unmarshal(data, v)
+        to: stdasn1
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(uerr, errs.WrapParams{
+                			Code:    coreasn1.CodeASN1UnmarshalFailed,
+                			Reason:  "UNMARSHAL_FAILED",
+                			Public:  "ASN.1 DER decoding failed",
+                			Private: "service/data/codec/asn1.NewStrict.Unmarshal: encoding/asn1 returned an error",
+                		})
+              to: errs
+          when: uerr != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    coreasn1.CodeASN1TrailingData,
+                			Reason:  "TRAILING_DATA",
+                			Public:  "ASN.1 input carries trailing data",
+                			Private: "service/data/codec/asn1.NewStrict.Unmarshal: bytes follow the first decoded structure",
+                		}, errs.Int("trailing", len(rest)))
+              to: errs
+          when: len(rest) > 0
+      - return: nil

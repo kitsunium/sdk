@@ -44,6 +44,14 @@ func newSourceHandler(next corelogger.Handler, skip int) (h corelogger.Handler, 
 	return &sourceHandler{next: next, skip: skip}, nil
 }
 
+// WantsSource reports true: the decorator resolves RecordEvent.PC into the
+// "source" attribute, so a Logger over it walks the stack on every emit
+// (corelogger.SourceRequester, #1014).
+func (h *sourceHandler) WantsSource() bool {
+	//: the one in-tree reader of PC.
+	return true
+}
+
 // Enabled delegates the level decision to the wrapped Handler unchanged.
 func (h *sourceHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) bool {
 	//: the decorator adds no gating of its own — defer to the inner handler.
@@ -119,9 +127,11 @@ func renderFrame(frame runtime.Frame) string {
 // WithCaller returns a derived Logger whose emitted records carry a "source"
 // attribute resolving the captured call-site program counter into
 // file:line:function. The skip argument is the extra stack-frame offset
-// reserved for wrapper layers; pass 0 for direct callers. Foreign Logger
-// implementations (not produced by New) are returned unchanged so callers fail
-// safe rather than losing their logger. A nil Logger is returned as-is.
+// reserved for wrapper layers; pass 0 for direct callers. The derived Logger
+// keeps lg's trace source, so a record emitted under a traced context still
+// carries trace_id and span_id. Foreign Logger implementations (not produced
+// by New) are returned unchanged so callers fail safe rather than losing their
+// logger. A nil Logger is returned as-is.
 func WithCaller(lg corelogger.Logger, skip int) corelogger.Logger {
 	//: a nil logger has nothing to wrap — hand it straight back.
 	if lg == nil {
@@ -142,6 +152,8 @@ func WithCaller(lg corelogger.Logger, skip int) corelogger.Logger {
 		//: never strand the caller — return the original logger.
 		return lg
 	}
-	//: hand back a fresh loggerImpl over the source-resolving handler.
-	return &loggerImpl{h: wrapped}
+	//: hand back a fresh loggerImpl over the source-resolving handler, which
+	//: asks for the caller PC (WantsSource), so every emit captures it — and
+	//: the receiver's trace source, so its records keep trace_id and span_id.
+	return over(wrapped, impl.trace)
 }

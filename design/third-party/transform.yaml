@@ -45,6 +45,28 @@ packages:
             name: CodeLimitMisconfigured
             value: "0x00_03_3F_04"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeDictionaryMismatch identifies a zstd frame that names a dictionary the
+              compressor does not hold — a frame compressed with a dictionary read by a
+              compressor built without it, or with another. It is refused before a byte
+              is decoded, and never decoded into a corrupt payload: a dictionary frame
+              read without its dictionary is not malformed, it is unreadable here, and
+              the dictionary IDs in the error say which one it needs.
+            name: CodeDictionaryMismatch
+            value: "0x00_03_3F_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeDictionaryInvalid identifies a NewZstdCompressorWithDictionary call
+              whose dictionary is empty or is not a zstd dictionary — the format
+              "zstd --train" and zstd.BuildDict write: a magic number, a non-zero ID
+              and the entropy tables. It is a construction-time refusal, so a
+              compressor that would encode with no dictionary while claiming one never
+              exists.
+            name: CodeDictionaryInvalid
+            value: "0x00_03_3F_06"
+        type: errs.Code
     constants:
       - doc: |-
           S2Algorithm is the canonical registry key for the s2 scheme.
@@ -194,9 +216,47 @@ packages:
             type: "*ZstdCompressor"
           - name: err
             type: error
+      - doc: |-
+          NewZstdCompressorWithDictionary builds a zstd compressor at the given level
+          that encodes with dict and decodes the frames that name it, refusing to
+          decompress more than maxDecompressedBytes of plaintext in one call.
+
+          dict is a zstd dictionary in the format "zstd --train" and zstd.BuildDict
+          write — a magic number, a non-zero ID and the entropy tables trained on
+          samples of the payloads it serves. It is copied, so the caller's slice may
+          change afterwards. An empty or malformed dictionary returns
+          DictionaryInvalid and no compressor; a non-positive ceiling
+          LimitMisconfigured, as NewZstdCompressor does.
+
+          Every frame the compressor writes names the dictionary's ID, and a frame
+          naming an ID the reader does not hold is refused with DictionaryMismatch —
+          by this compressor, by one built with another dictionary, and by the
+          registered Zstd — never decoded into a corrupt payload. A frame without a
+          dictionary still decodes. The ID is how a dictionary is versioned: train a
+          new one under a new ID, and a reader that meets an old frame learns from
+          the error which dictionary it needs.
+
+          The result is not registered: a dictionary is the caller's artefact, trained
+          on the caller's data, and the registry's "zstd" is the dictionary-less
+          singleton. The decoder's window is bounded by maxDecompressedBytes, as
+          NewZstdCompressor's is. Close it when done.
+        in:
+          - name: level
+            type: ZstdLevel
+          - name: maxDecompressedBytes
+            type: int64
+          - name: dict
+            type: "[]byte"
+        name: NewZstdCompressorWithDictionary
+        out:
+          - name: compressor
+            type: "*ZstdCompressor"
+          - name: err
+            type: error
     imports:
       coretransform: github.com/kitsunium/sdk/internal/core/data/transform
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      io: io
     path: github.com/kitsunium/sdk/third-party/transform
     sentinels:
       - var:
@@ -234,6 +294,25 @@ packages:
             private: "third-party/transform: a non-positive decompression ceiling is refused, never defaulted (ADR 0031)"
             public: maxDecompressedBytes must be a positive byte count
             reason: LIMIT_MISCONFIGURED
+          - code: CodeDictionaryMismatch
+            doc: |-
+              DictionaryMismatch is returned when a zstd frame names a dictionary the
+              compressor does not hold. dst is handed back at its original length; the
+              fields name the frame's dictionary ID and the compressor's, 0 for none.
+            exit: DATAERR
+            name: DictionaryMismatch
+            private: "third-party/transform: the zstd frame names a dictionary this compressor does not hold"
+            public: The payload needs a compression dictionary this reader does not hold
+            reason: DICTIONARY_MISMATCH
+          - code: CodeDictionaryInvalid
+            doc: |-
+              DictionaryInvalid is returned by NewZstdCompressorWithDictionary for an
+              empty dictionary or one that is not in the zstd dictionary format. No
+              compressor is returned with it.
+            name: DictionaryInvalid
+            private: "third-party/transform: the dictionary is empty or not a zstd dictionary"
+            public: The compression dictionary is empty or malformed
+            reason: DICTIONARY_INVALID
     types:
       - doc: |-
           S2Compressor is the concrete core/data/transform.Compressor for the s2 block
@@ -294,6 +373,41 @@ packages:
               - name: err
                 type: error
             recv: pointer
+          - doc: |-
+              NewReader implements core/data/transform.StreamingCompressor for s2: r's
+              stream in the s2 FRAMING format — the one NewWriter writes — decoded under
+              limit, a negative limit read as zero. It is not the block format Compress
+              writes and Decompress reads: a block declares its length in a header and has
+              no stream form, so an s2 stream is a different wire format, refused here as
+              a malformed stream when handed a block, and refused by Decompress the other
+              way. Its memory is one stream block, at most the framing format's 4 MiB.
+            in:
+              - name: r
+                type: io.Reader
+              - name: limit
+                type: int64
+            name: NewReader
+            out:
+              - name: rc
+                type: io.ReadCloser
+              - name: err
+                type: error
+            recv: pointer
+          - doc: |-
+              NewWriter implements core/data/transform.StreamingCompressor for s2: a
+              stream in the s2 framing format into w, which NewReader reads and
+              Decompress does not (see NewReader). The encoder runs synchronously in the
+              caller's goroutine (s2.WriterConcurrency(1)).
+            in:
+              - name: w
+                type: io.Writer
+            name: NewWriter
+            out:
+              - name: wc
+                type: io.WriteCloser
+              - name: err
+                type: error
+            recv: pointer
         name: S2Compressor
         struct:
           unexported: true
@@ -346,11 +460,12 @@ packages:
 
               The ceiling counts the DECODED payload only, never len(dst)+payload, so a
               caller reusing a large dst does not silently shrink its own decompression
-              budget. That takes two paths: an empty dst is handed straight to DecodeAll
-              (where the library's own budget already means exactly the payload), and a
-              non-empty one decodes into a fresh buffer that is then appended. The split is
-              an allocation, not a semantic — both paths bound the same thing. See
-              BENCH.md §"Why decompression takes the empty-dst fast path".
+              budget: the library counts len(dst) into its budget, so the decode is handed
+              dst's TAIL — a zero-length slice over its spare capacity — where the budget
+              means exactly the payload. When the payload fits that capacity the decode
+              lands in it, with no allocation and no copy; when it does not, the library
+              grows its own buffer and that is appended onto dst once. See BENCH.md
+              §"Decompression decodes into the tail".
 
               A refusal returns dst at its original length — never a partial payload.
             in:
@@ -371,6 +486,53 @@ packages:
             name: Close
             out:
               - type: error
+            recv: pointer
+          - doc: |-
+              DictionaryID returns the ID of the dictionary the compressor encodes with,
+              and the frames it writes name — 0 when it has none. Store it beside the
+              payloads to know which dictionary reads them back.
+            name: DictionaryID
+            out:
+              - type: uint32
+            recv: pointer
+          - doc: |-
+              NewReader implements core/data/transform.StreamingCompressor for zstd: r's
+              stream of zstd frames, decoded under limit, a negative limit read as zero.
+
+              The decoder runs synchronously in the caller's goroutine
+              (WithDecoderConcurrency(1)): a stream spawns no goroutine. Its memory is its
+              window, which WithDecoderMaxMemory bounds by the compressor's own ceiling —
+              a frame declaring a larger one is refused with DecompressionLimitExceeded at
+              its header — while limit bounds what the caller receives. A compressor built
+              with a dictionary reads the frames that name it, and a frame naming another
+              is DictionaryMismatch.
+            in:
+              - name: r
+                type: io.Reader
+              - name: limit
+                type: int64
+            name: NewReader
+            out:
+              - name: rc
+                type: io.ReadCloser
+              - name: err
+                type: error
+            recv: pointer
+          - doc: |-
+              NewWriter implements core/data/transform.StreamingCompressor for zstd: a
+              stream of zstd frames into w, at the compressor's level and with its
+              dictionary. The encoder runs synchronously in the caller's goroutine
+              (WithEncoderConcurrency(1)). What it writes, Decompress reads too: a zstd
+              stream is a sequence of frames, as a block is.
+            in:
+              - name: w
+                type: io.Writer
+            name: NewWriter
+            out:
+              - name: wc
+                type: io.WriteCloser
+              - name: err
+                type: error
             recv: pointer
         name: ZstdCompressor
         struct:

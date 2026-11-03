@@ -12,7 +12,7 @@ Package cbor registers the CBOR codec with the SDK's codec registry — and no o
 import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/cbor"
 ```
 
-The codec is RFC 8949 written on the standard library: maps, arrays, the integers and floats, text and byte strings, tags 0 to 3 for times and big numbers, struct fields by their cbor tag or their json tag. Map pairs are written sorted by their encoded key, the deterministic encoding of RFC 8949 §4.2.1, so one value always encodes to the same bytes. Input is checked whole — well-formed, valid, within its bounds — before the target is written. It streams.
+The codec is RFC 8949 written on the standard library: maps, arrays, the integers and floats, text and byte strings, tags 0 to 3 for times and big numbers and any other as a Tag, struct fields by their cbor tag or their json tag. Map pairs are written sorted by their encoded key, the deterministic encoding of RFC 8949 §4.2.1, so one value always encodes to the same bytes; NewDeterministic adds the shortest floats and reads only that encoding, for bytes that are signed. A time.Duration is an integer of int64 nanoseconds, the rule of every binary format (#1126): no standard tag carries a duration. Input is checked whole — well-formed, valid, within its bounds — before the target is written. It streams.
 
 Everything that dispatches through the registry by format name then reads and writes it: the codec package's Marshal and Unmarshal, config.FSSource and i18n.LoadFS. Importing github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK ships; this package links this one codec, the core package declaring its codes and the standard library, and nothing else. Importing both is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
 
@@ -23,6 +23,9 @@ Failures carry the range 0.3.6.\*; match them with errs.HasCode, or the sentinel
 ```
 CodeMarshalFailed    0.3.6.1  a value CBOR cannot carry, invalid UTF-8, nesting past the bound
 CodeUnmarshalFailed  0.3.6.2  input that is not one well-formed item, or an item the target cannot hold
+CodeDuplicateKey     0.3.6.3  NewStrict: a map repeats a key
+CodeUnknownMember    0.3.6.4  NewStrict: a member no struct field claims
+CodeNotDeterministic 0.3.6.5  NewDeterministic: a document not in core deterministic encoding
 ```
 
 No error message quotes the input.
@@ -31,8 +34,33 @@ No error message quotes the input.
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func NewDeterministic\(\) codec.Codec](<#NewDeterministic>)
+- [func NewStrict\(\) codec.Codec](<#NewStrict>)
+- [type Tag](<#Tag>)
 
 ## Constants
+
+<a name="CodeDepthExceeded"></a>
+```go
+const CodeDepthExceeded errs.Code = 198151
+```
+
+CodeDepthExceeded is 0.3.6.7: arrays, maps and tags nested past 32 levels.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.CodeCBORDepthExceeded`.
+
+Code `0.3.6.7`
+
+<a name="CodeDuplicateKey"></a>
+```go
+const CodeDuplicateKey errs.Code = 198147
+```
+
+CodeDuplicateKey is 0.3.6.3: NewStrict's instance found a map that repeats a key.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.CodeCBORDuplicateKey`.
+
+Code `0.3.6.3`
 
 <a name="CodeMarshalFailed"></a>
 ```go
@@ -44,6 +72,39 @@ CodeMarshalFailed is 0.3.6.1: a value CBOR cannot carry, invalid UTF-8, nesting 
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.CodeCBORMarshalFailed`.
 
 Code `0.3.6.1`
+
+<a name="CodeNotDeterministic"></a>
+```go
+const CodeNotDeterministic errs.Code = 198149
+```
+
+CodeNotDeterministic is 0.3.6.5: NewDeterministic's instance found a document not in core deterministic encoding.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.CodeCBORNotDeterministic`.
+
+Code `0.3.6.5`
+
+<a name="CodeSizeExceeded"></a>
+```go
+const CodeSizeExceeded errs.Code = 198150
+```
+
+CodeSizeExceeded is 0.3.6.6: an array, map or chunked string past its 1 048 576-entry bound, or an item past NewBoundedDecoder's ceiling.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.CodeCBORSizeExceeded`.
+
+Code `0.3.6.6`
+
+<a name="CodeUnknownMember"></a>
+```go
+const CodeUnknownMember errs.Code = 198148
+```
+
+CodeUnknownMember is 0.3.6.4: NewStrict's instance found a member no struct field claims.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.CodeCBORUnknownMember`.
+
+Code `0.3.6.4`
 
 <a name="CodeUnmarshalFailed"></a>
 ```go
@@ -65,6 +126,28 @@ Format is the name CBOR is registered under. It is an untyped constant, so it go
 
 ## Variables
 
+<a name="DepthExceeded"></a>
+```go
+var DepthExceeded *errs.Error
+```
+
+DepthExceeded is the sentinel of [CodeDepthExceeded](#CodeDepthExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.DepthExceeded`.
+
+Code `0.3.6.7` · reason `DEPTH_EXCEEDED` · public "CBOR input nests too deeply"
+
+<a name="DuplicateKey"></a>
+```go
+var DuplicateKey *errs.Error
+```
+
+DuplicateKey is the sentinel of [CodeDuplicateKey](#CodeDuplicateKey).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.DuplicateKey`.
+
+Code `0.3.6.3` · reason `DUPLICATE_KEY` · public "CBOR document repeats a map key"
+
 <a name="MarshalFailed"></a>
 ```go
 var MarshalFailed *errs.Error
@@ -76,6 +159,39 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.Marshal
 
 Code `0.3.6.1` · reason `MARSHAL_FAILED` · public "CBOR encoding failed"
 
+<a name="NotDeterministic"></a>
+```go
+var NotDeterministic *errs.Error
+```
+
+NotDeterministic is the sentinel of [CodeNotDeterministic](#CodeNotDeterministic).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.NotDeterministic`.
+
+Code `0.3.6.5` · reason `NOT_DETERMINISTIC` · public "CBOR document is not in deterministic encoding"
+
+<a name="SizeExceeded"></a>
+```go
+var SizeExceeded *errs.Error
+```
+
+SizeExceeded is the sentinel of [CodeSizeExceeded](#CodeSizeExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.SizeExceeded`.
+
+Code `0.3.6.6` · reason `SIZE_EXCEEDED` · public "CBOR input exceeds a size limit"
+
+<a name="UnknownMember"></a>
+```go
+var UnknownMember *errs.Error
+```
+
+UnknownMember is the sentinel of [CodeUnknownMember](#CodeUnknownMember).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.UnknownMember`.
+
+Code `0.3.6.4` · reason `UNKNOWN_MEMBER` · public "CBOR document carries an unknown member"
+
 <a name="UnmarshalFailed"></a>
 ```go
 var UnmarshalFailed *errs.Error
@@ -86,5 +202,43 @@ UnmarshalFailed is the sentinel of [CodeUnmarshalFailed](#CodeUnmarshalFailed).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/cbor.UnmarshalFailed`.
 
 Code `0.3.6.2` · reason `UNMARSHAL_FAILED` · public "CBOR decoding failed"
+
+<a name="NewDeterministic"></a>
+## func [NewDeterministic](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/cbor/gen_facade.go>)
+
+```go
+func NewDeterministic() codec.Codec
+```
+
+NewDeterministic returns a fresh CBOR codec, not registered, for bytes that are signed or hashed: it writes RFC 8949's core deterministic encoding — every float in its shortest exact form — and refuses with CodeNotDeterministic a document not in it. Into an interface it decodes every tag but a bignum as a Tag, so a document round-trips to its bytes.
+
+<a name="NewStrict"></a>
+## func [NewStrict](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/cbor/gen_facade.go>)
+
+```go
+func NewStrict() codec.Codec
+```
+
+NewStrict returns a fresh CBOR codec, not registered, that reads a document one way or not at all: a map repeating a key is refused with CodeDuplicateKey, a member no struct field claims with CodeUnknownMember. The registered format keeps last-wins and skips unknown members.
+
+<a name="Tag"></a>
+## type [Tag](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/cbor/gen_facade.go>)
+
+Tag is a CBOR tag: a number and the item it encloses, for an application's own tags — COSE, CWT.
+
+```go
+type Tag = svccbor.TagValue
+```
+
+Tag is an alias of `github.com/kitsunium/sdk/internal/service/data/codec/cbor.TagValue`, declared as:
+
+```go
+type Tag struct {
+	// Number is the tag number.
+	Number  uint64
+	// Content is the enclosed data item.
+	Content any
+}
+```
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

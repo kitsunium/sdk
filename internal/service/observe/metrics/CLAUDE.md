@@ -24,17 +24,23 @@ the excess into a single aggregated overflow series.
 | File | Surface |
 |---|---|
 | `meter.go` | `memMeter` + `NewMeter` / `NewMeterWithConfig` / `newMemMeter` + `Collect` (observables, delta consumption, arena layout, per-name sort) |
-| `meter_observable.go` | `observer` + the three `Observable*` registrations + `runObservers` + `observeSum`/`observeGauge` |
-| `meter_describe.go` | `Describe` — the `core/observe/metrics.Describer` half: the lazily-created `descriptions` map, the idempotent path, and the two panics |
+| `meter_observable.go` | `observer` + the four `Observable*` registrations (`ObservableHistogram`, #868, and its `observeHistogram`) + `runObservers` + `observeSum`/`observeGauge` |
+| `meter_describe.go` | `Describe` — the `core/observe/metrics.Describer` half: the lazily-created `descriptions` map, the idempotent path, and the two panics; `Unit` + `validUnit` — the `UnitDescriber` half, its `units` map and its two panics (ADR 0208); `annotations`, the two maps a snapshot reads |
 | `carved.go` | `carved[V]` — one instrument name's slot in a collection arena |
 | `series.go` | series identity: `sortAttrs`, `appendSeriesKey`, `cloneAttrs`, `compareAttrs` |
 | `series_store.go` | `seriesStore[T]` — one snapshot group's series map, `lookup` (read lock) + `admit`/`overflow` (write lock) |
 | `series_entry.go` | `seriesEntry[T]` — one live series: name, owned attribute set, instrument |
-| `name_state.go` | `instrumentKind` (7) + `outputGroup` (3) + `nameState` (kind binding, series tally, cached overflow key) + `bindName` |
+| `name_state.go` | `instrumentKind` (9, the observable and the exponential histogram since #868/#869) + `outputGroup` (4) + `nameState` (kind binding, series tally, cached overflow key) + `bindName` |
 | `config.go` | `MeterConfig` (bound, temporality, resource, scope, clock) + `resolve` + `DefaultMaxSeriesPerInstrument` |
 | `sum.go` | `memSum` — the storage behind BOTH counter kinds (atomic.Int64 + monotonic/observed flags + delta bookkeeping) |
 | `gauge.go` | `memGauge` (atomic float64 bits, CAS) |
-| `histogram.go` | `memHistogram` (sorted bounds + atomic counts/sum, delta-consuming snapshot) |
+| `observer.go` | #871: `ObserverConfig`, `RegisterObservers` (a describing `Observe` at registration — a counter or an up-down counter per statistic, its unit bound — then `statReader`: one `Observe` per collection feeding every instrument of the observer, the first callback of a collection reading), `describeStats`, `spellStat`; the engines' adapters are `statsbridge/` |
+| `exemplar.go` | #869: `clocked` + `stampClock` (the series store hands the meter's clock to an instrument at admission), `sampledSpan` (a valid, SAMPLED span off the context, `core/observe/trace.SpanContextFromContext`), `exemplarSlots` (the reservoir allocated on a series' first sampled measurement, CAS-published) and `exemplarReservoir` (one exemplar per slot, the last offered, under one mutex; a delta collection empties it, a cumulative one keeps each until replaced) |
+| `exponential_histogram.go` | #869: `memExpHistogram` — the specification's mapping (`coremetrics.ExponentialIndex`), two `expRange`s in backing arrays of `maxSize` allocated at creation (`add` slides or grows within them), `downscaleFor` / `downscale` / `merge` (one ascending in-place pass), a subnormal counted as the smallest normal, NaN and the infinities dropped, a mutex, one exemplar; a delta snapshot resets to `ExponentialMaxScale` |
+| `meter_exponential.go` | #869: `ExponentialHistogram` (the `ExponentialMeter` sibling) and `collectExponentials` (nil map when none) |
+| `histogram_observed.go` | #868: `newObservedHistogram`, `observe` (an absolute reading; the delta meter's bucket-by-bucket growth, a changed layout or a count gone down read as a restart), `validateObserved` (INVALID_BUCKETS), `observedSnapshot` (an unreported series is an empty delta window; NoSum carried) |
+| `otlp_exponential.go` | #869: `otlpExemplar` (time, asDouble, spanId, traceId, asInt — hex ids), `otlpExponentialHistogram` / `otlpExponentialHistogramDataPoint` / `otlpBuckets`, `appendOTLPExponentials`, `otlpOptionalSum` (absent under NoSum), `otlpExemplars`, and their `appendJSON` |
+| `histogram.go` | `memHistogram` (sorted bounds + atomic counts/sum, delta-consuming snapshot); `newHistogram` takes `DefaultBuckets()` for an empty layout and `validateBuckets` panics `InvalidBuckets` on NaN, ±Inf or a repeated bound (#1135) |
 | `exporter_text.go` / `metric_header.go` | `textExporter` + default **stderr** `Text` + `NewTextExporter`; `metricHeader`, what one `# metric` line says about a name |
 | `exporter_otlpjson.go` | `EncodeOTLPJSON` (the ENCODER — snapshot to bytes, no I/O) + the two refusals + `otlpJSONExporter` over the shared `otlp.Stream` + default **stderr** `OTLPJSON` + `NewOTLPJSONExporter`; the `EXPORT_FAILED` wrap the shared stream leaves under (rendering cannot fail, so it has none) |
 | `otlp_request.go` | the OTLP payload TREE — a Go mirror of `collector/metrics` and `metrics/v1`, in schema field-number order, restricted to the fields this SDK produces; the `common`/`resource` messages and the proto3-JSON scalars it embeds are the shared package's |
@@ -43,6 +49,8 @@ the excess into a single aggregated overflow series.
 | `otlphttp_config.go` | `OTLPHTTPConfig`, a DEFINED type over the shared `otlp.HTTPConfig` (endpoint, client, headers, timeout, response cap — documented there once) |
 | `otlp_export_response.go` | `ExportMetricsPartialSuccess` reduced to `rejectedDataPoints` + `decodeRejected`, the one member of the answer that is this signal's own |
 | `exporter_prometheus.go` | `prometheusExporter` + default **stderr** `Prometheus` + `NewPrometheusExporter` + the two name grammars |
+| `runtime.go` | `RuntimeInstruments` + `RuntimeConfig` (#868) — the OpenTelemetry Go runtime instruments (`go.memory.used`, `go.memory.limit` while a limit is set, `go.memory.allocated`, `go.memory.allocations`, `go.memory.gc.goal`, `go.goroutine.count`, `go.processor.limit`, `go.config.gogc`) as observable sums with their units and descriptions; ONE `runtime/metrics.Read` per collection into samples allocated once (the first callback of a collection reads, the meter runs each once per Collect); `Underscore` names them for a Prometheus meter; on an `AsyncHistogramMeter` also `go.schedule.duration` (`/sched/latencies:seconds`) and `go.gc.duration` (`/sched/pauses/total/gc:seconds`) as observable histograms in seconds, the runtime's 161 inner edges as the explicit bounds (its -Inf and +Inf edges the implicit first and overflow buckets), `NoSum` — `runtimeHistogram.convert` writes into buffers allocated on the first read |
+| `handler_prometheus.go` | `NewPrometheusHandler` (#1020) — the `/metrics` `http.Handler` over `Meter.Collect`: GET renders the whole document into a pooled buffer before a byte leaves (a refusal answers 500 with its Public text, never a 200 with an empty body), `PrometheusContentType` + `Content-Length`; HEAD answers the headers WITHOUT collecting (a probe never consumes a delta window); other methods 405 + `Allow: GET, HEAD`; `sync.Mutex.TryLock` lets one scrape run, a concurrent one 503 + `Retry-After: 1`; an OpenMetrics `Accept` is answered in 0.0.4; a nil collect is `COLLECTOR_NIL` 0.3.45.11 |
 | `internal/core/observe/metrics` | its sentinels — `0.3.45.*`, declared in the core since ADR 0160 (INVALID_METRIC_NAME, INVALID_LABEL_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY, OTLP_UNRESOLVED_TEMPORALITY, OTLP_INVALID_BUCKET_LAYOUT, OTLP_ENDPOINT_INVALID, OTLP_EXPORT_REJECTED, OTLP_EXPORT_UNAVAILABLE, OTLP_PARTIAL_SUCCESS) |
 
 ## Series identity
@@ -350,7 +358,9 @@ Each row below has an executable test.
 | **`Resource`** | dropped entirely; no `target_info` metric is emitted | `service.name` cannot even be SPELLED — a Prometheus label name is `[a-zA-Z_][a-zA-Z0-9_]*` and the dot is outside it. The interoperability spec answers this by mangling the key; this connector refuses non-injective name rewriting everywhere else in this very file, and consistency with our own rule beats consistency with theirs. Whatever producer identity a Prometheus deployment has comes from the scrape target's own labels (`job`, `instance`), which the server attaches |
 | **`InstrumentationScope`** | dropped entirely | same wall: the format has no place for a second identity, and `otel_scope_name` would be an invented label the caller never wrote |
 | **OTel-conventional attribute KEYS** | `http.request.method` is **REFUSED** by name (`INVALID_LABEL_NAME`) | the sharpest consequence of adopting the model: the dotted spelling is what the semantic conventions specify, and this wire cannot carry it. The refusal is loud and deterministic — a key is a literal at the call site — which is the whole reason refusing beats mangling |
-| **Exemplars** | none | the SDK produces none at all (ADR 0044 §Deferred); the trace domain (ADR 0051) now gives one a trace id to hold, and they remain unimplemented |
+| **Exemplars** | dropped: the exposition is byte-identical with and without them (`TestOTLPCarriesASumExemplarAsWritten`) | the text format has no field for one — exemplars are OpenMetrics' and the protobuf exposition's; OTLP/JSON carries every one (#869) |
+| **An exponential histogram's buckets** | the family keeps `le="+Inf"`, `_sum` and `_count` (`TestExponentialHistogramOnEveryExporter`) | they are a native histogram's, which only the protobuf exposition carries; spelled as classic `le` buckets they would mint a series per bucket and move the `le` set at every scale change. The Prometheus client exposes a native-only histogram in text the same way |
+| **The `_sum` of a source that keeps none** | a `NoSum` histogram — the runtime's — gets no `_sum` line | there is no reading to print; a forged 0 would make `rate(_sum)/rate(_count)` a mean of zero |
 
 ## The transport is shared, the vocabulary is not
 
@@ -562,7 +572,9 @@ the caller's context into the request, so a done context ends the POST with the
 transient `OTLP_EXPORT_UNAVAILABLE` (#479). It is also a `DocumentExporter`
 (ADR 0185): `ExportDocument` posts a document `EncodeOTLPJSON` wrote earlier —
 what a store-and-forward queue keeps — through the same sender and verdicts,
-an empty one posting nothing. The exporter supplies the **classification** instead,
+an empty one posting nothing; and an `EncodedDocumentExporter` (#1051):
+`ExportEncodedDocument` posts a document the queue kept gzipped as it rests,
+labelled `Content-Encoding: gzip`, through the sender's `PostEncoded`. The exporter supplies the **classification** instead,
 in exactly the shape `resilience.RetryConfig.Retryable` wants: a caller passes
 `metrics.OTLPRetryable` there and keeps the attempts and the delay its own.
 
@@ -603,6 +615,30 @@ rendered message: a transport cause is wrapped (reachable through
 **Headers are set before `Content-Type`**, so `application/json` always wins.
 Header values are secrets — written, never read back or echoed — and the map is
 cloned at construction so a later caller mutation cannot change the wire.
+
+## The exporters' conformance table
+
+`exporter_conformance_external_test.go` (#1123) holds what the four exporters —
+text, Prometheus, OTLP/JSON over a writer, OTLP/HTTP through a collector stub —
+must share, one row each, run over every exporter with its name in the subtest:
+a description rendered for every kind (the exponential histogram included), an
+absent one not written, an adversarial one escaped (no forged line), a dead
+sink reported typed with its cause, a refusal writing nothing, a real meter's
+snapshot accepted; a unit (ADR 0208) rendered after the description for every
+kind — or, in the Prometheus exposition that has no field for one, the same
+bytes with and without it — an absent unit not written, a hand-built unit
+unable to forge a line; an exponential histogram written whole or as the
+totals the grammar can carry (#869); exemplars carried with their trace and
+span, or the same bytes with and without them (#869); a `NoSum` histogram
+writing no sum (#868); a histogram created with no buckets written with the
+whole default ladder (#1135). Each exporter's grammar is its entry in
+`everyExporter` — how it writes a description and a unit, opens an
+undescribed metric, escapes a quote, writes an exponential point, a sum and
+the default ladder, whether it carries an exemplar, the code a dead sink is
+reported under. What one grammar alone requires stays in its file
+(Prometheus' HELP before TYPE and once per name, OTLP's field order). A rule
+added here reaches the four exporters at once; an exporter added later is one
+entry.
 
 ## Conventions
 

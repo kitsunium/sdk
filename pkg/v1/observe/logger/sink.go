@@ -20,6 +20,12 @@ type SinkConfig struct {
 	Encoder Encoder
 	// MinLevel is the minimum severity emitted; zero value is LevelInfo.
 	MinLevel Level
+	// Level, when non-nil, is the live floor: every record is checked
+	// against Level.Level(), so a LevelVar retuned with Set takes effect on
+	// the next record of this Logger and of every Logger derived from it,
+	// with nothing rebuilt. Setting both Level and a non-zero MinLevel is
+	// refused with LevelAmbiguous (0.3.1.5).
+	Level Leveler
 }
 
 // NewWithSink builds a Logger forwarding records through cfg.Sink and
@@ -39,8 +45,8 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error) {
 		//: reuse the same encoder NewText uses so semantics stay consistent.
 		enc = encoder.NewText(clock.System)
 	}
-	//: wire encoder + sink into the generic handler with the minimum level.
-	handler, hErr := svclogger.NewHandler(enc, cfg.Sink, cfg.MinLevel)
+	//: wire encoder + sink into the generic handler with the floor.
+	handler, hErr := handlerFor(enc, &cfg)
 	//: forward any svclogger-level error unchanged (origin wins).
 	if hErr != nil {
 		//: service-layer rejection already carries the right code/reason.
@@ -56,6 +62,22 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error) {
 	}
 	//: decorate every emitted record with the SDK version for observability.
 	return base.With(corelogger.AttrValue{Key: "framework_version", Value: corelogger.StringValue(FrameworkVersion())}), nil
+}
+
+// handlerFor builds the generic handler cfg describes: gated on cfg.Level when
+// it is set — a live floor (#1015) — else on the fixed cfg.MinLevel. Both set
+// is LevelAmbiguous: the two floors would disagree the moment Level moves.
+func handlerFor(enc Encoder, cfg *SinkConfig) (h corelogger.Handler, err error) {
+	//: no live floor: the fixed one, as before.
+	if cfg.Level == nil {
+		return svclogger.NewHandler(enc, cfg.Sink, cfg.MinLevel)
+	}
+	//: two floors for one handler.
+	if cfg.MinLevel != LevelInfo {
+		return nil, corelogger.LevelAmbiguous
+	}
+	//: the live floor.
+	return svclogger.NewHandlerLeveled(enc, cfg.Sink, cfg.Level)
 }
 
 // NewWriterSink wraps an arbitrary [io.Writer] in a [Sink] so callers can

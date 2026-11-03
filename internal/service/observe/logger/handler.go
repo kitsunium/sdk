@@ -22,10 +22,20 @@ type genericHandler struct {
 	sink corelogger.Sink
 	// attrs are prepended to every RecordEvent (handler-bound With*).
 	attrs []corelogger.AttrValue
+	// penc is enc as a corelogger.PrefixEncoder, nil when it is not one: the
+	// bound attributes are then rendered with the record's on every emit.
+	penc corelogger.PrefixEncoder
+	// prefix is attrs rendered once under groups by penc (#1016), spliced into
+	// every line; nil with no bound attribute or no PrefixEncoder. WithAttrs
+	// and WithGroup render it again, since the group stack prefixes every key.
+	prefix []byte
 	// groups is the active group prefix stack accumulated via WithGroup.
 	groups []string
-	// min is the minimum level the handler emits; records below are dropped.
-	min level.Level
+	// floor is the minimum level the handler emits, read on every record so a
+	// level.Var retuned with Set takes effect on the next one (#1015); a
+	// handler built from a plain Level holds level.Fixed. Derived handlers
+	// share it, so one Set reaches every logger derived from this one.
+	floor level.Leveler
 	// clk sources the timestamp when RecordEvent.Time is the zero value. The
 	// handler owns the Time fill so the encoded line and any downstream sink
 	// share one coherent instant (V25).
@@ -36,6 +46,16 @@ type genericHandler struct {
 // minimum level. A nil enc OR sink is rejected so callers cannot
 // accidentally construct a dead handler.
 func NewHandler(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h corelogger.Handler, err error) {
+	//: a constant floor: the same gate a live one is, through one interface call.
+	return NewHandlerLeveled(enc, sink, level.Fixed(min))
+}
+
+// NewHandlerLeveled is NewHandler gated on a live floor: Enabled reads
+// floor.Level on every record, so a level.Var retuned with Set takes effect on
+// the next record, for this handler and every handler derived from it with
+// WithAttrs or WithGroup. A nil floor gates at level.Info, the zero
+// MinLevel. A nil enc OR sink is rejected as NewHandler rejects it.
+func NewHandlerLeveled(enc encoder.Encoder, sink corelogger.Sink, floor level.Leveler) (h corelogger.Handler, err error) {
 	//: reject nil encoder so the format step never panics on the hot path.
 	if enc == nil {
 		//: caller supplied no encoder — return the documented sentinel.
@@ -46,8 +66,21 @@ func NewHandler(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h c
 		//: caller supplied no sink — return the documented sentinel.
 		return nil, corelogger.SinkRequired
 	}
+	//: an encoder that renders bound attributes once is kept as one (#1016).
+	penc, _ := enc.(corelogger.PrefixEncoder)
 	//: hand back the configured handler bound to the real wall clock.
-	return &genericHandler{enc: enc, sink: sink, min: min, clk: clock.System}, nil
+	return &genericHandler{enc: enc, penc: penc, sink: sink, floor: floorOrInfo(floor), clk: clock.System}, nil
+}
+
+// floorOrInfo is floor, or the constant Info floor for a nil one — the zero
+// MinLevel's floor, so a nil Leveler is the default and not a panic.
+func floorOrInfo(floor level.Leveler) level.Leveler {
+	//: the documented default.
+	if floor == nil {
+		return level.Fixed(level.Info)
+	}
+	//: the caller's floor, live or constant.
+	return floor
 }
 
 // Enabled reports whether the handler would emit a record at r.Level, taking
@@ -58,8 +91,8 @@ func (h *genericHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) 
 		//: caller's context is already done; skip emission entirely.
 		return false
 	}
-	//: threshold check; handlers below min are expected to skip formatting.
-	return r.Level >= h.min
+	//: threshold check against the floor's current value (#1015).
+	return r.Level >= h.floor.Level()
 }
 
 // Handle encodes r through the configured encoder and forwards the bytes to
@@ -87,16 +120,43 @@ func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) e
 	//: borrow a buffer so the encoder writes into a recycled scratchpad.
 	bp := buffer.Get()
 	defer buffer.Put(bp)
-	//: prepend handler-bound attrs onto the record before encoding.
-	bound := mergeAttrs(h.attrs, r.Attrs)
-	r.Attrs = bound
-	//: format the record into the borrowed buffer.
-	line := h.enc.Append(*bp, h.groups, r)
+	//: format the record into the borrowed buffer, then hand the sink the
+	//: record with the bound attrs prepended — route predicates and the memory
+	//: sink read them.
+	line, merged := h.encode(*bp, r)
 	*bp = line
+	r.Attrs = merged
 	//: hand the encoded bytes to the sink for delivery.
 	_, werr := h.sink.Write(ctx, r, line)
 	//: return the sink's error verbatim (already wrapped by the sink).
 	return werr
+}
+
+// encode renders r into dst and returns the line and r's attributes with the
+// bound ones first — the one allocation of an emit. With a PrefixEncoder the
+// bound attributes are the prefix rendered when they were bound, and only r's
+// own are rendered here (#1016); otherwise the encoder renders the merged set.
+func (h *genericHandler) encode(dst []byte, r corelogger.RecordEvent) (line []byte, merged []corelogger.AttrValue) {
+	merged = mergeAttrs(h.attrs, r.Attrs)
+	//: nothing rendered ahead of time: the encoder renders everything.
+	if h.prefix == nil {
+		r.Attrs = merged
+		return h.enc.Append(dst, h.groups, r), merged
+	}
+	//: the prefix, then the record's own attributes.
+	return h.penc.AppendWithPrefix(dst, h.groups, h.prefix, r), merged
+}
+
+// derive returns a child of h bound to attrs under groups, its prefix
+// rendered once for the pair when the encoder is a PrefixEncoder.
+func (h *genericHandler) derive(attrs []corelogger.AttrValue, groups []string) *genericHandler {
+	//: share encoder/sink/floor/clk; attrs, groups and prefix are the child's.
+	child := &genericHandler{enc: h.enc, penc: h.penc, sink: h.sink, attrs: attrs, groups: groups, floor: h.floor, clk: h.clk}
+	//: render once what every record of the child would render again.
+	if h.penc != nil && len(attrs) > 0 {
+		child.prefix = h.penc.AppendAttrs(nil, groups, attrs)
+	}
+	return child
 }
 
 // WithAttrs returns a derived genericHandler with the supplied attributes
@@ -104,8 +164,8 @@ func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) e
 func (h *genericHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Handler {
 	//: copy-on-write — child must not alias the parent's attrs slice.
 	cp := mergeAttrs(h.attrs, attrs)
-	//: share encoder/sink/min/groups/clk, own a private attrs slice.
-	return &genericHandler{enc: h.enc, sink: h.sink, attrs: cp, groups: h.groups, min: h.min, clk: h.clk}
+	//: the child owns a private attrs slice and the prefix rendered from it.
+	return h.derive(cp, h.groups)
 }
 
 // WithGroup returns a derived genericHandler with the supplied group name
@@ -116,12 +176,20 @@ func (h *genericHandler) WithGroup(name string) corelogger.Handler {
 		//: return the receiver unchanged — no extra wrapping.
 		return h
 	}
-	//: copy-on-write — child must not alias the parent's groups slice.
+	//: the child, its bound attrs rendered again under the longer stack.
+	return h.withGroup(name)
+}
+
+// withGroup is WithGroup's derivation, kept out of it so WithGroup stays
+// within the inlining budget: the child owns a private groups slice
+// (copy-on-write — it must not alias the parent's) and the prefix rendered
+// under it.
+func (h *genericHandler) withGroup(name string) *genericHandler {
 	cp := make([]string, len(h.groups)+1)
 	copy(cp, h.groups)
 	cp[len(h.groups)] = name
-	//: share encoder/sink/min/attrs/clk, own a private groups slice.
-	return &genericHandler{enc: h.enc, sink: h.sink, attrs: h.attrs, groups: cp, min: h.min, clk: h.clk}
+	//: the bound attrs are the parent's; the stack and the prefix are new.
+	return h.derive(h.attrs, cp)
 }
 
 // mergeAttrs returns a fresh slice combining parent and child attributes

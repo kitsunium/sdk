@@ -374,3 +374,28 @@ func TestAnUnsupportedFieldIsDescribedWhereItIs(t *testing.T) {
 		t.Errorf("fields = %+v", shape.Fields)
 	}
 }
+
+// TestOfV2DiffersFromOfWhereJSONv2Does pins the rules OfV2 adds, on one
+// struct, against Of on the same struct — which they leave unchanged.
+func TestOfV2DiffersFromOfWhereJSONv2Does(t *testing.T) {
+	t.Parallel()
+	type sample struct {
+		Slice []int         `json:"slice"`
+		Bytes [4]byte       `json:"bytes"`
+		Wait  time.Duration `json:"wait"`
+		Count int           `json:"count,omitempty"`
+	}
+	v1, v2 := jsonshape.For[sample](), jsonshape.ForV2[sample]()
+	if !v1.Fields[0].Shape.Nullable || v2.Fields[0].Shape.Nullable {
+		t.Errorf("slice Nullable: Of %v, OfV2 %v; want true, false", v1.Fields[0].Shape.Nullable, v2.Fields[0].Shape.Nullable)
+	}
+	if v1.Fields[1].Shape.Kind != jsonshape.Array || v2.Fields[1].Shape.Kind != jsonshape.String {
+		t.Errorf("byte array: Of %v, OfV2 %v; want array, string", v1.Fields[1].Shape.Kind, v2.Fields[1].Shape.Kind)
+	}
+	if v1.Fields[2].Shape.Kind != jsonshape.Integer || v2.Fields[2].Shape.Kind != jsonshape.Unsupported {
+		t.Errorf("duration: Of %v, OfV2 %v; want integer, unsupported", v1.Fields[2].Shape.Kind, v2.Fields[2].Shape.Kind)
+	}
+	if !v1.Fields[3].Optional || v2.Fields[3].Optional {
+		t.Errorf("omitempty int: Of %v, OfV2 %v; want true, false", v1.Fields[3].Optional, v2.Fields[3].Optional)
+	}
+}

@@ -124,3 +124,26 @@ func For[T any]() *ShapeValue {
 	//: the type argument's reflect.Type.
 	return Of(reflect.TypeFor[T]())
 }
+
+// OfV2 describes the values of t on the wire under encoding/json/v2's own
+// default options — what jsonv2.Marshal writes without the v1 options: a
+// nil slice or map written [] or {} and so not Nullable, a byte array as
+// base64, a time.Duration refused (Unsupported) for want of a format,
+// omitempty leaving out a member whose value encodes as null, "", {} or []
+// — never a number or a boolean —, the string option on numbers only (a
+// member carrying it on anything else is Unsupported), and a pointer
+// method called on every value. The members and their names are Of's. Of
+// is unchanged.
+func OfV2(t reflect.Type) *ShapeValue {
+	w := newWalker()
+	w.v2 = true
+	//: a fresh walk under the v2 rules.
+	return w.shape(t, false)
+}
+
+// ForV2 describes the values of T under encoding/json/v2's own default
+// options: OfV2(reflect.TypeFor[T]()).
+func ForV2[T any]() *ShapeValue {
+	//: the type argument's reflect.Type.
+	return OfV2(reflect.TypeFor[T]())
+}

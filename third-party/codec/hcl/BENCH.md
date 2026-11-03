@@ -313,3 +313,9 @@ BenchmarkAppend/cbor/large-8         	   80656	     14893 ns/op	       0 B/op	  
 PASS
 ok  	github.com/kitsunium/sdk/third-party/codec/hcl	96.110s
 ```
+
+## #1099: what the depth bound costs
+
+Against 740e7c1e, six interleaved passes of the two test binaries
+(linux/amd64, 4 vCPU VM, go1.27.3), the depth pre-scan (#1099) — one pass, no allocation — moves no row: benchstat finds no
+change on Unmarshal/hcl small, medium and large (18.85 → 19.04 µs, 106.7 → 105.7 µs, 2.781 → 2.840 ms, every one ~ at p ≥ 0.31; 80, 372 and 7 917 allocs both sides).

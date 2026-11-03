@@ -4,8 +4,10 @@
 // without the route middleware's NoMatch error — a below-threshold record is a
 // successful no-op, not a failure, so it never pollutes a multi fan-out.
 //
-// Two constructors share the one gate. New is the writer configuration's: its
+// Three constructors share the one gate. New is the writer configuration's: its
 // Info is the zero value of MinLevel and means "inherit the handler's level",
 // so New returns the sink unwrapped there. Floor is everyone else's: the floor
-// it is given is the floor it applies, Info included (ADR 0132).
+// it is given is the floor it applies, Info included (ADR 0132). NewLeveled
+// takes a live floor, a level.Leveler read on every record, so a level.Var
+// retuned at runtime moves the gate (#1015).
 package levelgate

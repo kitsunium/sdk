@@ -13,6 +13,7 @@ type observer struct {
 	kind    instrumentKind
 	int64Cb coremetrics.Int64Callback
 	floatCb coremetrics.Float64Callback
+	histCb  coremetrics.HistogramCallback
 }
 
 // ObservableCounter registers a monotonic sum read at collection time. The
@@ -53,7 +54,7 @@ func (m *memMeter) register(obs observer) {
 	//: claim the name for this kind, or panic on a cross-kind reuse.
 	m.bindName(obs.name, obs.kind)
 	//: a callback that does not exist is not registered.
-	if obs.int64Cb == nil && obs.floatCb == nil {
+	if obs.int64Cb == nil && obs.floatCb == nil && obs.histCb == nil {
 		//: name bound, nothing to run.
 		return
 	}
@@ -83,6 +84,16 @@ func (m *memMeter) runObservers(delta bool) {
 	}
 	//: one callback at a time, in registration order.
 	for _, obs := range regs {
+		//: a histogram reports a whole reading.
+		if obs.kind == kindObservableHistogram {
+			//: the closure lives for exactly this call.
+			obs.histCb(func(point coremetrics.HistogramValue) {
+				//: resolve or create, then take the reading.
+				m.observeHistogram(obs.name, point, delta)
+			})
+			//: next observer.
+			continue
+		}
 		//: a gauge reports a double, the two sum kinds an integer.
 		if obs.kind == kindObservableGauge {
 			//: the closure lives for exactly this call.
@@ -165,4 +176,31 @@ func observableBuilder(kind instrumentKind) func() *memSum {
 	}
 	//: non-monotonic and observed.
 	return newObservableUpDownCounter
+}
+
+// ObservableHistogram registers an explicit-bucket histogram read at
+// collection time, satisfying core/observe/metrics.AsyncHistogramMeter: the
+// callback reports each series' ABSOLUTE reading — bounds, counts, sum — and
+// a delta meter differences successive readings bucket by bucket. The
+// source's bounds are the series' bounds; nothing is re-bucketed.
+func (m *memMeter) ObservableHistogram(name string, observe coremetrics.HistogramCallback) {
+	//: registered beside the other observables, under the same binding rules.
+	m.register(observer{name: name, kind: kindObservableHistogram, histCb: observe})
+}
+
+// observeHistogram resolves — or creates — the observed histogram series of
+// name and point.Attrs, then hands it the reading.
+func (m *memMeter) observeHistogram(name string, point coremetrics.HistogramValue, delta bool) {
+	var sortBuf [maxStackAttrs]coreotel.AttrValue
+	var keyBuf [seriesKeyCap]byte
+	sorted := sortAttrs(sortBuf[:0], point.Attrs)
+	coremetrics.ValidateAttrs(sorted)
+	key := appendSeriesKey(keyBuf[:0], kindObservableHistogram, name, sorted)
+
+	hist, ok := m.histograms.lookup(key)
+	//: the first reading of the series creates it.
+	if !ok {
+		hist = m.histograms.admit(name, kindObservableHistogram, key, sorted, newObservedHistogram)
+	}
+	hist.observe(point, delta)
 }

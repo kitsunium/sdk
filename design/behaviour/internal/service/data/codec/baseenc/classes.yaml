@@ -72,16 +72,18 @@ constants:
         value: "58"
       - doc: |-
           maxConvBytes caps the RAW (pre-encode) input of the O(n²) base-conversion
-          variants (Base58/Base62) at 4 KiB. base-conversion is quadratic, so even a
-          few KiB bounds the work to the low-millisecond range; bulk data belongs in
-          a block codec (base64). Enforced on the raw bytes at Marshal/Append.
+          variants (Base58/Base62) at 64 KiB. base-conversion is quadratic; since the
+          limb arithmetic (#898) 4 KiB encodes in about 2.5 ms and decodes in
+          0.6 ms, so 64 KiB — a certificate chain, a multibase CID of a block —
+          stays bounded while bulk data still belongs in a block codec (base64).
+          Enforced on the raw bytes at Marshal/Append.
         name: maxConvBytes
         type: int
-        value: 4 * 1024
+        value: 64 * 1024
       - doc: |-
           maxConvEncodedBytes caps the ENCODED text at Unmarshal. Base58/Base62
           EXPAND raw→encoded by ~1.37× (log(256)/log(58|62)), so a maxConvBytes raw
-          input encodes to ~5.5 KiB; capping the encoded side at the raw cap would
+          input encodes to ~88 KiB; capping the encoded side at the raw cap would
           make a freshly-Marshalled value un-Unmarshalable. 2× covers the expansion
           with margin while still bounding the quadratic decode work.
         name: maxConvEncodedBytes
@@ -102,12 +104,49 @@ constants:
         type: int
         value: "62"
     name: base62Radix
-  - doc: byteBase is the radix of the input/output byte stream (one byte = base 256).
+  - doc: |-
+      Limb arithmetic (#898). The magnitude is held in 32-bit limbs and divided
+      or multiplied by a power of the radix below 2^32 per step — five digits of
+      base58 (58^5 = 656 356 768) or base62 (62^5 = 916 132 832) at once, through
+      a uint64 accumulator — instead of by the radix one byte at a time: the same
+      quadratic class, about twenty times fewer steps, and the division of the
+      two shipped radices is by a constant, which the compiler turns into a
+      multiplication. Bitcoin Core and the multiformats libraries do the same.
+    grouped: true
     items:
-      - name: byteBase
+      - doc: limbBits is the width of one magnitude limb.
+        name: limbBits
+        type: uint
+        value: "32"
+      - doc: limbBytes is limbBits in bytes.
+        name: limbBytes
         type: int
-        value: "256"
-    name: byteBase
+        value: "4"
+      - doc: |-
+          byteBits is the width of one byte of the magnitude, the step a limb is
+          written out by.
+        name: byteBits
+        type: int
+        value: "8"
+      - doc: limbMask keeps the low limb of a uint64 accumulator.
+        name: limbMask
+        type: uint64
+        value: 1<<limbBits - 1
+      - doc: base58Chunk is 58^5, the divisor of one base58 encode step.
+        name: base58Chunk
+        type: uint64
+        value: 58 * 58 * 58 * 58 * 58
+      - doc: base62Chunk is 62^5, the divisor of one base62 encode step.
+        name: base62Chunk
+        type: uint64
+        value: 62 * 62 * 62 * 62 * 62
+      - doc: |-
+          maxDigitBits bounds log2 of any radix below 64, which sizes the decode
+          accumulator: radix^n < 2^(6n).
+        name: maxDigitBits
+        type: int
+        value: "6"
+    name: limbBits
   - doc: |-
       maxBaseEncBytes caps Unmarshal input at 10 MiB; bigger inputs surface
       CodeBaseEncSizeExceeded so memory-exhaustion attacks via huge base-N
@@ -192,14 +231,20 @@ files:
       - base62Reverse
     name: base62.go
   - decls:
-      - byteBase
+      - limbBits
       - buildReverseTable
-      - divmodInPlace
-      - trimLeadingZeros
-      - mulAddWindow
+      - chunkOf
+      - divmodLimbs
+      - divmodLimbsBy58
+      - divmodLimbsBy62
+      - divmodLimbsBy
+      - bytesToLimbs
+      - trimLeadingZeroLimbs
       - encodeBaseN
       - assembleBaseN
       - decodeBaseN
+      - chunkValue
+      - mulAddLimbs
       - assembleDecoded
     name: base_convert.go
   - decls:
@@ -310,38 +355,45 @@ functions:
     params: alphabet string
     results: "[base45TableSize]int"
   - doc: |-
-      divmodInPlace divides the big-endian magnitude buf by radix in place and
-      returns the remainder. buf keeps its length (leading zeros appear); the
-      caller trims them between divisions.
-    name: divmodInPlace
-    params: buf []byte, radix int
-    results: int
-  - doc: trimLeadingZeros returns b without its leading zero bytes.
-    name: trimLeadingZeros
-    params: b []byte
-    results: "[]byte"
+      chunkOf returns the radix power one limb step divides or multiplies by, and
+      how many digits it spans, for any radix in [2, 256).
+    name: chunkOf
+    params: radix int
+    results: power uint64, digits int
   - doc: |-
-      mulAddWindow computes mag[start:] = mag[start:]*radix + add over the
-      big-endian magnitude held in the TAIL of mag, and returns the new start
-      index. A multiply that overflows the live window extends it leftwards
-      into mag's reserved prefix instead of allocating a wider slice.
-
-      The window can never run past index 0: an n-digit base-radix number is
-      strictly below 256^n for every radix below 256, so len(s) bytes always
-      hold the magnitude of an len(s)-digit input — which is exactly how
-      decodeBaseN sizes mag.
-
-      Growing by moving start rather than by prepending is what makes the
-      decode path allocate once per call instead of once per new
-      most-significant byte; a memory profile attributed 97.85 % of the
-      package's allocated objects to the prepend this replaced. See BENCH.md.
-    name: mulAddWindow
-    params: mag []byte, start, radix, add int
-    results: int
+      divmodLimbs divides the big-endian limbs by power in place and returns the
+      remainder. The two shipped radices divide by a constant.
+    name: divmodLimbs
+    params: limbs []uint32, power uint64
+    results: uint64
+  - doc: divmodLimbsBy58 is divmodLimbs by 58^5, a constant.
+    name: divmodLimbsBy58
+    params: limbs []uint32
+    results: uint64
+  - doc: divmodLimbsBy62 is divmodLimbs by 62^5, a constant.
+    name: divmodLimbsBy62
+    params: limbs []uint32
+    results: uint64
+  - doc: divmodLimbsBy is divmodLimbs by any power below 2^32.
+    name: divmodLimbsBy
+    params: limbs []uint32, power uint64
+    results: uint64
+  - doc: |-
+      bytesToLimbs packs the big-endian magnitude b into big-endian 32-bit limbs,
+      the first holding the len(b) mod 4 most-significant bytes.
+    name: bytesToLimbs
+    params: b []byte
+    results: "[]uint32"
+  - doc: |-
+      trimLeadingZeroLimbs returns limbs without its leading zero limbs. An
+      all-zero magnitude comes back empty, which is what ends the encode loop.
+    name: trimLeadingZeroLimbs
+    params: limbs []uint32
+    results: "[]uint32"
   - doc: |-
       encodeBaseN encodes raw as a big-endian base-conversion over alphabet
       (radix == len(alphabet)). Leading zero bytes become leading alphabet[0]
-      chars. O(len(raw)²) — caller must cap input at maxConvBytes.
+      chars. O(len(raw)²) in limb steps — caller must cap input at maxConvBytes.
     name: encodeBaseN
     params: raw []byte, alphabet string, radix int
     results: "[]byte"
@@ -354,13 +406,27 @@ functions:
   - doc: |-
       decodeBaseN reverses encodeBaseN for alphabet/radix. ok is false when a
       char is outside the alphabet. Leading zero-chars restore leading zero
-      bytes. O(len(s)²) — caller must cap input at maxConvBytes.
+      bytes. O(len(s)²) in limb steps — caller must cap input at maxConvBytes.
     name: decodeBaseN
     params: s []byte, reverse *[base45TableSize]int, radix int
     results: raw []byte, ok bool
-  - doc: assembleDecoded prepends zeros zero-bytes to buf (the decoded magnitude).
+  - doc: |-
+      chunkValue reads up to one chunk of digits: their value, and the radix
+      power the magnitude is multiplied by to make room for them.
+    name: chunkValue
+    params: digits []byte, reverse *[base45TableSize]int, radix int
+    results: value, scale uint64, valid bool
+  - doc: |-
+      mulAddLimbs computes limbs = limbs*scale + add over little-endian limbs,
+      scale and add below 2^32, growing by one limb when the carry needs it.
+    name: mulAddLimbs
+    params: limbs []uint32, scale, add uint64
+    results: "[]uint32"
+  - doc: |-
+      assembleDecoded writes zeros zero-bytes, then the magnitude held in the
+      little-endian limbs as big-endian bytes without leading zeros.
     name: assembleDecoded
-    params: zeros int, buf []byte
+    params: zeros int, limbs []uint32
     results: "[]byte"
   - doc: |-
       isBaseConversion reports whether v is one of the O(n²) base-conversion

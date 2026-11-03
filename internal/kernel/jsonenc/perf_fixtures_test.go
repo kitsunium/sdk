@@ -16,6 +16,7 @@
 package jsonenc_test
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -24,6 +25,9 @@ import (
 
 // perfSink keeps each call's result alive.
 var perfSink []byte
+
+// perfNaN is the value AppendFloat refuses, built once outside the window.
+var perfNaN = math.NaN()
 
 // perfStrings are the three paths a string takes: plain, escaped, and one with
 // non-ASCII text, a bad byte and a line separator.
@@ -69,6 +73,22 @@ func perfAppendUint(tb testing.TB) func() {
 	}
 }
 
+// perfFloats are the three spellings of a float: plain, a cleaned exponent,
+// and a value with no JSON number.
+var perfFloats = []float64{1234.5678, 1e-7, 1e300}
+
+// perfAppendFloat is AppendFloat's fixture: the plain range, both exponent
+// forms, and the refusal of NaN.
+func perfAppendFloat(tb testing.TB) func() {
+	dst := make([]byte, 0, 64)
+	return func() {
+		for _, f := range perfFloats {
+			perfSink, _ = jsonenc.AppendFloat(dst[:0], f)
+		}
+		perfSink, _ = jsonenc.AppendFloat(dst[:0], perfNaN)
+	}
+}
+
 // perfBeginObject is BeginObject's fixture: a whole object, every member kind,
 // since the object is the thing that must not reach the heap.
 func perfBeginObject(tb testing.TB) func() {
@@ -81,6 +101,7 @@ func perfBeginObject(tb testing.TB) func() {
 			Int("n", -7).
 			Uint("u", 7).
 			Bool("ok", true).
+			Float("f", 1e-7).
 			Null("err").
 			Raw("nested", raw).
 			End()

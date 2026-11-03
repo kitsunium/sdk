@@ -6,6 +6,7 @@ import (
 	"io"
 	"slices"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -24,6 +25,8 @@ type msgpackDecoder struct {
 	err error
 	// done latches once the stream has ended, cleanly or not.
 	done bool
+	// strict decodes every value as NewStrict's Unmarshal does.
+	strict bool
 }
 
 // framer reads the bytes of exactly one value.
@@ -51,6 +54,10 @@ func newDecoder(r io.Reader) *msgpackDecoder {
 // Decode reads the next value into the value v points at. It returns io.EOF,
 // untouched, once the stream ends cleanly between two values.
 func (d *msgpackDecoder) Decode(v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: an ended stream keeps saying how it ended.
 	if d.done {
 		//: io.EOF, or the failure that ended it.
@@ -118,7 +125,7 @@ func (d *msgpackDecoder) bufferedValue() ([]byte, bool) {
 // decodeBuffered decodes a value lying in the read-ahead, then consumes it.
 // The decode copies everything it keeps, so the read-ahead may be reused.
 func (d *msgpackDecoder) decodeBuffered(frame []byte, v any) error {
-	err := unmarshalInto(frame, v)
+	err := unmarshalIntoMode(frame, v, d.strict)
 	//: the value is consumed whatever the decode said, as on the framed path.
 	if _, derr := d.r.Discard(len(frame)); derr != nil {
 		//: unreachable: the bytes are buffered.
@@ -135,7 +142,7 @@ func (d *msgpackDecoder) decodeFramed(v any) error {
 	err := f.run()
 	//: a complete frame decodes exactly as Unmarshal would decode it.
 	if err == nil {
-		err = unmarshalInto(f.out, v)
+		err = unmarshalIntoMode(f.out, v, d.strict)
 	}
 	retain(buf, f.out)
 	scratch.ReleaseBuffer(buf)

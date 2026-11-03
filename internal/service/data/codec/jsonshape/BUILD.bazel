@@ -32,6 +32,7 @@ go_test(
     name = "jsonshape_test",
     srcs = [
         "differential_external_test.go",
+        "fuzz_external_test.go",
         "gen_api_test.go",
         "shape_external_test.go",
         "tag_internal_test.go",

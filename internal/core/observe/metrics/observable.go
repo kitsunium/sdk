@@ -30,3 +30,23 @@ type Int64Callback func(observe ObserveInt64)
 // observable gauge, whose reported value is a sampled reading and therefore has
 // no temporality at all.
 type Float64Callback func(observe ObserveFloat64)
+
+// ObserveHistogram reports ONE histogram reading, with its own attribute set,
+// from inside a HistogramCallback: point.Attrs names the series, point.Bounds
+// the explicit upper bounds, point.Counts one count per bucket plus the +Inf
+// overflow (len == len(Bounds)+1), point.Sum the total unless point.NoSum.
+// point.Count and point.Exemplars are ignored: the count is the sum of Counts,
+// and an observed reading has no measurement to link. The meter copies what
+// it keeps, so the callback may reuse its slices. A layout the meter refuses
+// at Histogram's creation — NaN, an infinity, a repeated bound, or Counts of
+// the wrong length — panics with InvalidBuckets. Valid only for the duration
+// of the callback, as ObserveInt64 is.
+type ObserveHistogram func(point HistogramValue)
+
+// HistogramCallback is read ONCE PER COLLECTION and reports each series'
+// current ABSOLUTE histogram — the counts since the source started, as
+// runtime/metrics keeps them. A delta meter differences successive readings
+// bucket by bucket itself, and takes a reading whose layout changed or whose
+// counts went down as a restart. The rules of Int64Callback hold: never Collect
+// the collecting meter, never block.
+type HistogramCallback func(observe ObserveHistogram)

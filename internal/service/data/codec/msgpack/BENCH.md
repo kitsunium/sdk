@@ -151,3 +151,56 @@ columns are identical.
 | UnmarshalAny/large | 1.15 ms | 1 526 299 | 35 619 |
 | StreamEncode (64 × small) | 276 µs | 33 945 | 772 |
 | StreamDecode (64 × small) | 349 µs | 221 385 | 3 976 |
+
+## Map order and omitzero (#1104, #1103)
+
+Map pairs used to follow Go's iteration order; they are now written in key
+order, so equal values give equal bytes. omitzero (#1103) adds one nil check
+per field without the option. Both measured together against 740e7c1e — the two test binaries built once
+and run interleaved, six passes, `-test.benchtime 1s`, linux/amd64, 4 vCPU VM (`GOMAXPROCS=4`),
+go1.27.3:
+
+| row | before | after | delta | B/op | allocs/op |
+|---|---:|---:|---:|---|---|
+| Marshal/small | 4.753 µs | 4.944 µs | ~ (p=0.49) | 1 040 → 1 040 | 4 → 4 |
+| Append/small | 4.032 µs | 4.285 µs | ~ (p=0.18) | 400 → 400 | 3 → 3 |
+| Marshal/medium | 95.53 µs | 136.45 µs | +43 % | 12.4 Ki → 18.3 Ki | 4 → 6 |
+| Append/medium | 85.24 µs | 124.50 µs | +46 % | 400 → 6 302 | 3 → 5 |
+| Marshal/large | 937.0 µs | 1 490.8 µs | +59 % | 120.6 Ki → 188.4 Ki | 4 → 6 |
+| Append/large | 860.4 µs | 1 369.9 µs | +59 % | 400 → 58 644 | 3 → 5 |
+
+The small record's maps hold one to three pairs: they are ordered on the
+stack and the row does not move. The medium and large records carry two maps
+of 100 and 1 000 pairs, and the sort is what those rows now pay: a profile of
+Marshal/large puts a quarter of the time in the two sorts (the direct path's
+`slices.Sort` of the keys, the reflective path's sort of pair spans compared by
+an 8-byte key prefix) and the map lookups that follow the sorted keys. The two
+new allocations are that bookkeeping — the key slice and the span slice,
+each reserved once at the map's length; the reflective path reorders its pairs
+in place through a pooled scratch buffer, so the destination never grows for
+it. cbor pays the same price for the same property (its Map16 row, ~55 %).
+
+## Ext (#903)
+
+Decoding an application extension into an interface is one more case in the
+extension switch. Against 740e7c1e, six interleaved passes, benchstat finds no
+change on Unmarshal and UnmarshalAny, small, medium and large (every row ~ at
+p ≥ 0.13; allocs identical).
+
+## NewStrict (#1106)
+
+`BenchmarkUnmarshalStrict` beside `BenchmarkUnmarshal`, two runs each, same
+machine (the registered rows are unchanged by the strict code: 53, 1 347 and
+13 051 allocs/op, as before):
+
+| row | Unmarshal | UnmarshalStrict |
+|---|---|---|
+| small | 11.4 µs, 3 152 B, 53 allocs | 16.4 µs, 3 152 B, 53 allocs |
+| medium | 246 µs, 68 544 B, 1 347 allocs | 383 µs, 88 304 B, 1 763 allocs |
+| large | 2.63 ms, 754 084 B, 13 051 allocs | 4.13 ms, 1 022 440 B, 17 085 allocs |
+
+The walk that refuses a repeated key compares up to 32 keys of a map in
+place, on the stack, which is the small record; the medium and large records
+carry maps of 100 and 1 000 pairs, checked through an indexed set whose keys
+are the added allocations.
+

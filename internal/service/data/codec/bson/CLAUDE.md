@@ -16,9 +16,10 @@ linked.
 The mapping between Go values and BSON is the driver's v1 default registry's,
 checked against it before it left the module graph: a differential test and
 two differential fuzzers (encode and decode, ~10 M executions) agreed on
-every case except the deviations listed below, and all 718 valid cases of the
-specification's corpus round-trip byte for byte while all 75 of its
-decode-error cases are refused.
+every case except the deviations listed below. The specification's own
+corpus runs in the ordinary test lane (#1107, see Conformance below): all 731
+valid cases round-trip byte for byte and all 75 decode-error cases are
+refused.
 
 ## Surface
 
@@ -27,7 +28,7 @@ decode-error cases are refused.
 | Format name | `"bson"` |
 | MIME types | `application/bson` |
 | Extensions | `.bson` |
-| Streaming | **no** — a document is length-prefixed, so the writer must hold it whole |
+| Streaming | **yes** (#1100, `stream.go`) — one document per `Encode` (one `Write`, nothing written on a refusal) and per `Decode` (the int32 prefix read first, a length past `maxBSONBytes` refused with `SIZE_EXCEEDED` before anything is reserved, the body read in a reservation that grows from 64 KiB with what the reader delivers, then validated whole); the sticky-EOF latch of the other decoders. StreamEncode costs 0 allocations, StreamDecode at most 7.4 % more than UnmarshalTyped (`BENCH.md` §#1100). ADR 0021 §3, amended. |
 | Appender | yes — the encoder writes straight into `dst`; a destination with room allocates nothing |
 | Code range | `0.3.36.*` (ADR 0021) |
 | Value types | `D`, `E`, `M`, `A`, `ObjectID` (+ `NilObjectID`, `ObjectIDFromHex`), `DateTime` (+ `NewDateTimeFromTime`), `Decimal128` (+ `NewDecimal128`, `ParseDecimal128`), `Binary` (+ the `Binary*` subtype constants), `Regex`, `Timestamp`, `DBPointer`, `JavaScript`, `Symbol`, `CodeWithScope`, `MinKey`, `MaxKey`, `Undefined`, `Null` |
@@ -72,10 +73,16 @@ Encode — exact types first, then a type's own `MarshalBSON`, then its kind:
 | structs | document of their fields, declaration order, `",inline"` flattened, `",inline"` map last |
 | pointers, interfaces | their target; nil → null |
 | `time.Time` | datetime, UTC milliseconds (truncated) |
+| `time.Duration` | int64 **nanoseconds** — the binary formats' rule (#1126); the text formats write its `String()` |
 | `url.URL` | string; `json.Number` → int64 when it parses as one, else double |
 | the value types | their BSON type; `Regex` options written sorted |
 
-Struct tags: `bson:"name,omitempty,minsize,truncate,inline"`, `bson:"-"` skips.
+Struct tags: `bson:"name,omitempty,omitzero,minsize,truncate,inline"`, `bson:"-"` skips.
+`omitzero` (#1103) is encoding/json's since Go 1.24 — the field type's `IsZero()`
+when it declares one (through the field's address, or an addressable copy, when
+only the pointer does; a nil pointer or interface is zero without being asked),
+else `reflect.Value.IsZero` — decided once per field when the plan is built
+(`omitzero.go`); with `omitempty` too, either one leaves the field out.
 No tag → the field name lower-cased. A tag with no key and no colon (`` `name` ``)
 is read as a bson tag. Every comma part, the first included, is matched as an
 option. An embedded struct WITHOUT `",inline"` is a sub-document named after
@@ -114,13 +121,23 @@ through an addressable value, as the driver reached it.
   strings, keys and regexes — so a malformed document is refused whole and the
   target is never half-written. The decoder still bounds-checks every slice.
 - **Depth**: 100 levels, the top level counting as the first — refused with
-  `BSON_DEPTH_EXCEEDED` on decode before recursing, and on encode, where it is
+  `DEPTH_EXCEEDED` on decode before recursing, and on encode, where it is
   also what a cyclic value runs into; a pointer chain that opens no container
   is bounded by `maxIndirections`.
 - **No panic** on any input: `FuzzUnmarshal` (validity is target-independent;
   re-encoding is a fixed point).
 - **Amplification** is bounded by the input cap, not removed: a typed slice
   decodes n × sizeof(T) for n elements of at least two bytes each.
+
+## Detection (#909, `sniff.go`)
+
+`Sniff` implements `core/data/codec.Sniffer`, which `codec.Detect` asks about
+an input's first 512 bytes: an int32 length between 5 and `maxBSONBytes`, the
+closing NUL where it says when the document fits the prefix, a known first
+element type and a NUL-terminated UTF-8 name without control bytes; the empty
+document is its five bytes. It reads only the prefix and allocates nothing.
+The facade's compressed frame can pass those checks on a flate payload, which
+is why `codec.Detect` refuses the frame before asking any sniffer.
 
 ## Differences from the MongoDB driver
 
@@ -160,6 +177,8 @@ package always emitted; only the declaration moved.
 `Private` names offsets, BSON types, Go types and declared field names — never
 a key or a value read from the input.
 
+**Position (#1125).** A malformed document's refusal carries the validator's byte `offset` as the family's field (`malformedAt`), no longer inside its Private sentence, which keeps only the rule broken; the strict instance's refusals carry theirs too. In a stream, the offset is in the document refused. `codec.PositionOf` reads it back; an offset of zero is the first byte.
+
 ## Do NOT
 
 - Add an `init()` — registration is the package-level `var Codec = codec.Register(...)`.
@@ -179,3 +198,38 @@ go test -run '^$' -fuzz FuzzUnmarshal -fuzztime 60s ./internal/service/data/code
 ```
 
 Benchmarks and the comparison with the driver: `BENCH.md`.
+
+## Conformance (#1107)
+
+`testdata/bson-corpus/` is the MongoDB specifications' BSON corpus — the 31
+per-type `*.json` files of `source/bson-corpus/tests/` at commit `775c4bce`,
+copied byte for byte — under **CC BY-NC-SA 3.0 US**, not Apache-2.0 as the
+issue assumed: `LICENSE` beside the files is the upstream licence and
+`README.md` there the attribution (source, commit, licensor, licence, no
+change made). The licence covers those files only; the owner accepted it for
+`testdata/` (the SDK is not sold). `conformance_external_test.go` runs them
+with no network: every `valid` case's `canonical_bson` decodes into a `D` and
+encodes back to the same bytes, and its `degenerate_bson`, when it has one, to
+the canonical bytes (4 cases); a decimal128 decodes to the `Decimal128` whose
+`String` is the canonical extended JSON's `$numberDecimal` (unless `lossy`);
+every `decodeErrors` document is refused with a `0.3.36.*` code; every
+decimal128 `parseErrors` string is refused by `ParseDecimal128` (131). Groups
+it sets aside, by name: the other `parseErrors` (49 — extended JSON, not
+ported), the extended-JSON forms, and `converted_bson`. The relaxations map
+is empty and must stay so unless this file names a case; the test asserts the
+counts 731 / 75 / 131, so a refresh that loses a case fails. To refresh: copy
+the same files from a newer commit, update `README.md` there and the counts.
+
+## Strict instance (#1106, `strict.go`)
+
+`NewStrict()` returns a fresh, unregistered codec — the `csv.NewWithEscape`
+shape — reading a document somebody else wrote one way or not at all (ADR
+0102, amended). Before anything is decoded, a walk over the validated bytes
+refuses a BSON document, at any depth, repeating a key with `DUPLICATE_KEY`
+(`0.3.36.6`); the
+decode then refuses a member no field of the target struct claims with
+`UNKNOWN_MEMBER` (`0.3.36.7`), unless an `,inline` map collects it. Up to 32 keys
+of one map are compared in place, on the stack; past that an indexed set
+takes over. The stream `Decoder` of the strict instance applies both to
+every item. The registered codec is unchanged: last-wins, unknown members
+skipped. `TestNewStrict` holds each refusal and the exact match.

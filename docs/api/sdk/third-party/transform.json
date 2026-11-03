@@ -42,6 +42,36 @@
       "layer": "thirdparty"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.CodeDictionaryInvalid",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "CodeDictionaryInvalid",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "212742",
+      "code": {
+        "value": "0.3.63.6"
+      },
+      "doc": "CodeDictionaryInvalid identifies a NewZstdCompressorWithDictionary call\nwhose dictionary is empty or is not a zstd dictionary — the format\n\"zstd --train\" and zstd.BuildDict write: a magic number, a non-zero ID\nand the entropy tables. It is a construction-time refusal, so a\ncompressor that would encode with no dictionary while claiming one never\nexists.\n",
+      "file": "gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.CodeDictionaryMismatch",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "CodeDictionaryMismatch",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "212741",
+      "code": {
+        "value": "0.3.63.5"
+      },
+      "doc": "CodeDictionaryMismatch identifies a zstd frame that names a dictionary the\ncompressor does not hold — a frame compressed with a dictionary read by a\ncompressor built without it, or with another. It is refused before a byte\nis decoded, and never decoded into a corrupt payload: a dictionary frame\nread without its dictionary is not malformed, it is unreadable here, and\nthe dictionary IDs in the error say which one it needs.\n",
+      "file": "gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/third-party/transform.CodeLimitMisconfigured",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/third-party/transform",
@@ -115,6 +145,38 @@
       "layer": "thirdparty"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.DictionaryInvalid",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "DictionaryInvalid",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.63.6",
+        "reason": "DICTIONARY_INVALID",
+        "public": "The compression dictionary is empty or malformed"
+      },
+      "doc": "DictionaryInvalid is returned by NewZstdCompressorWithDictionary for an\nempty dictionary or one that is not in the zstd dictionary format. No\ncompressor is returned with it.\n",
+      "file": "gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.DictionaryMismatch",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "DictionaryMismatch",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.63.5",
+        "reason": "DICTIONARY_MISMATCH",
+        "public": "The payload needs a compression dictionary this reader does not hold"
+      },
+      "doc": "DictionaryMismatch is returned when a zstd frame names a dictionary the\ncompressor does not hold. dst is handed back at its original length; the\nfields name the frame's dictionary ID and the compressor's, 0 for none.\n",
+      "file": "gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/third-party/transform.LimitMisconfigured",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/third-party/transform",
@@ -149,6 +211,17 @@
       "spelled": "func(level ZstdLevel, maxDecompressedBytes int64) (compressor *ZstdCompressor, err error)",
       "canonical": "func(level github.com/kitsunium/sdk/third-party/transform.ZstdLevel, maxDecompressedBytes int64) (compressor *github.com/kitsunium/sdk/third-party/transform.ZstdCompressor, err error)",
       "doc": "NewZstdCompressor builds a zstd compressor at the given level, refusing to\ndecompress more than maxDecompressedBytes of plaintext in one call.\n\nmaxDecompressedBytes is positional and mandatory: see the package doc. A\nnon-positive value returns LimitMisconfigured and no compressor. An\nunrecognised level clamps to ZstdDefault.\n\nThe returned compressor owns a shared encoder and decoder. A caller that\nbuilds one per request must Close it; the package singleton is never closed\nbecause it lives as long as the process.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.NewZstdCompressorWithDictionary",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "NewZstdCompressorWithDictionary",
+      "spelled": "func(level ZstdLevel, maxDecompressedBytes int64, dict []byte) (compressor *ZstdCompressor, err error)",
+      "canonical": "func(level github.com/kitsunium/sdk/third-party/transform.ZstdLevel, maxDecompressedBytes int64, dict []byte) (compressor *github.com/kitsunium/sdk/third-party/transform.ZstdCompressor, err error)",
+      "doc": "NewZstdCompressorWithDictionary builds a zstd compressor at the given level\nthat encodes with dict and decodes the frames that name it, refusing to\ndecompress more than maxDecompressedBytes of plaintext in one call.\n\ndict is a zstd dictionary in the format \"zstd --train\" and zstd.BuildDict\nwrite — a magic number, a non-zero ID and the entropy tables trained on\nsamples of the payloads it serves. It is copied, so the caller's slice may\nchange afterwards. An empty or malformed dictionary returns\nDictionaryInvalid and no compressor; a non-positive ceiling\nLimitMisconfigured, as NewZstdCompressor does.\n\nEvery frame the compressor writes names the dictionary's ID, and a frame\nnaming an ID the reader does not hold is refused with DictionaryMismatch —\nby this compressor, by one built with another dictionary, and by the\nregistered Zstd — never decoded into a corrupt payload. A frame without a\ndictionary still decodes. The ID is how a dictionary is versioned: train a\nnew one under a new ID, and a reader that meets an old frame learns from\nthe error which dictionary it needs.\n\nThe result is not registered: a dictionary is the caller's artefact, trained\non the caller's data, and the registry's \"zstd\" is the dictionary-less\nsingleton. The decoder's window is bounded by maxDecompressedBytes, as\nNewZstdCompressor's is. Close it when done.\n",
       "file": "zstd.go",
       "layer": "thirdparty"
     },
@@ -220,6 +293,30 @@
       "canonical": "func(dst []byte, src []byte) (decoded []byte, err error)",
       "doc": "Decompress s2-decodes src and appends the result to dst, refusing any payload\nwhose declared plaintext length exceeds the configured ceiling.\n\nThe refusal happens BEFORE any decode and before any allocation: the s2 block\nformat carries its decoded length in a varint header, so DecodedLen answers\nthe bomb question by reading a handful of bytes. A refused payload costs the\nvarint read and nothing else.\n",
       "file": "s2.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*S2Compressor).NewReader",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "NewReader",
+      "recv": "S2Compressor",
+      "spelled": "func(r io.Reader, limit int64) (rc io.ReadCloser, err error)",
+      "canonical": "func(r io.Reader, limit int64) (rc io.ReadCloser, err error)",
+      "doc": "NewReader implements core/data/transform.StreamingCompressor for s2: r's\nstream in the s2 FRAMING format — the one NewWriter writes — decoded under\nlimit, a negative limit read as zero. It is not the block format Compress\nwrites and Decompress reads: a block declares its length in a header and has\nno stream form, so an s2 stream is a different wire format, refused here as\na malformed stream when handed a block, and refused by Decompress the other\nway. Its memory is one stream block, at most the framing format's 4 MiB.\n",
+      "file": "stream.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*S2Compressor).NewWriter",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "NewWriter",
+      "recv": "S2Compressor",
+      "spelled": "func(w io.Writer) (wc io.WriteCloser, err error)",
+      "canonical": "func(w io.Writer) (wc io.WriteCloser, err error)",
+      "doc": "NewWriter implements core/data/transform.StreamingCompressor for s2: a\nstream in the s2 framing format into w, which NewReader reads and\nDecompress does not (see NewReader). The encoder runs synchronously in the\ncaller's goroutine (s2.WriterConcurrency(1)).\n",
+      "file": "stream.go",
       "layer": "thirdparty"
     },
     {
@@ -340,8 +437,44 @@
       "recv": "ZstdCompressor",
       "spelled": "func(dst []byte, src []byte) (decoded []byte, err error)",
       "canonical": "func(dst []byte, src []byte) (decoded []byte, err error)",
-      "doc": "Decompress zstd-decodes src and appends the result to dst, refusing any\npayload whose plaintext would exceed the configured ceiling.\n\nThe ceiling counts the DECODED payload only, never len(dst)+payload, so a\ncaller reusing a large dst does not silently shrink its own decompression\nbudget. That takes two paths: an empty dst is handed straight to DecodeAll\n(where the library's own budget already means exactly the payload), and a\nnon-empty one decodes into a fresh buffer that is then appended. The split is\nan allocation, not a semantic — both paths bound the same thing. See\nBENCH.md §\"Why decompression takes the empty-dst fast path\".\n\nA refusal returns dst at its original length — never a partial payload.\n",
+      "doc": "Decompress zstd-decodes src and appends the result to dst, refusing any\npayload whose plaintext would exceed the configured ceiling.\n\nThe ceiling counts the DECODED payload only, never len(dst)+payload, so a\ncaller reusing a large dst does not silently shrink its own decompression\nbudget: the library counts len(dst) into its budget, so the decode is handed\ndst's TAIL — a zero-length slice over its spare capacity — where the budget\nmeans exactly the payload. When the payload fits that capacity the decode\nlands in it, with no allocation and no copy; when it does not, the library\ngrows its own buffer and that is appended onto dst once. See BENCH.md\n§\"Decompression decodes into the tail\".\n\nA refusal returns dst at its original length — never a partial payload.\n",
       "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*ZstdCompressor).DictionaryID",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "DictionaryID",
+      "recv": "ZstdCompressor",
+      "spelled": "func() uint32",
+      "canonical": "func() uint32",
+      "doc": "DictionaryID returns the ID of the dictionary the compressor encodes with,\nand the frames it writes name — 0 when it has none. Store it beside the\npayloads to know which dictionary reads them back.\n",
+      "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*ZstdCompressor).NewReader",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "NewReader",
+      "recv": "ZstdCompressor",
+      "spelled": "func(r io.Reader, limit int64) (rc io.ReadCloser, err error)",
+      "canonical": "func(r io.Reader, limit int64) (rc io.ReadCloser, err error)",
+      "doc": "NewReader implements core/data/transform.StreamingCompressor for zstd: r's\nstream of zstd frames, decoded under limit, a negative limit read as zero.\n\nThe decoder runs synchronously in the caller's goroutine\n(WithDecoderConcurrency(1)): a stream spawns no goroutine. Its memory is its\nwindow, which WithDecoderMaxMemory bounds by the compressor's own ceiling —\na frame declaring a larger one is refused with DecompressionLimitExceeded at\nits header — while limit bounds what the caller receives. A compressor built\nwith a dictionary reads the frames that name it, and a frame naming another\nis DictionaryMismatch.\n",
+      "file": "stream.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*ZstdCompressor).NewWriter",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "NewWriter",
+      "recv": "ZstdCompressor",
+      "spelled": "func(w io.Writer) (wc io.WriteCloser, err error)",
+      "canonical": "func(w io.Writer) (wc io.WriteCloser, err error)",
+      "doc": "NewWriter implements core/data/transform.StreamingCompressor for zstd: a\nstream of zstd frames into w, at the compressor's level and with its\ndictionary. The encoder runs synchronously in the caller's goroutine\n(WithEncoderConcurrency(1)). What it writes, Decompress reads too: a zstd\nstream is a sequence of frames, as a block is.\n",
+      "file": "stream.go",
       "layer": "thirdparty"
     },
     {

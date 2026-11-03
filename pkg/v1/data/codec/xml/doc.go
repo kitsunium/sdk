@@ -24,6 +24,7 @@
 //
 //	CodeMarshalFailed    0.3.3.1  encoding/xml could not encode the value
 //	CodeUnmarshalFailed  0.3.3.2  the input is not XML the target can hold
+//	CodeSizeExceeded     0.3.3.3  a value longer than NewBoundedDecoder's byte ceiling
 //
 // No error message quotes the input.
 package xml

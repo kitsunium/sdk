@@ -17,8 +17,21 @@ type HistogramValue struct {
 	// counts are PER BUCKET, not cumulative — a format that wants a
 	// cumulative ladder (Prometheus) builds it as it walks.
 	Counts []uint64
-	// Sum is the total of every observed value in the window.
+	// Sum is the total of every observed value in the window; 0 and
+	// meaningless when NoSum is true.
 	Sum float64
 	// Count is how many observations the window holds.
 	Count uint64
+	// NoSum is true when the source keeps no total of what it counted — an
+	// observable histogram read off runtime/metrics, whose histograms carry
+	// counts and no sum. Sum is then not a reading, and every exporter says
+	// so rather than print it: OTLP/JSON writes the optional sum as absent,
+	// the Prometheus connector writes no _sum line, the text exporter is
+	// unchanged (it prints the count). The zero value is a histogram that
+	// knows its sum, which every synchronous histogram does.
+	NoSum bool
+	// Exemplars holds at most one exemplar per bucket, in bucket order: the
+	// last measurement of the window recorded with RecordContext under a
+	// SAMPLED span (ADR 0051). Nil when none was.
+	Exemplars []ExemplarValue
 }

@@ -16,8 +16,9 @@
 //
 // Package codec — range 0.2.2.* (ADR 0005 core/data/codec block).
 //
-// Package codec — declares the registry's boot-time sentinel. Its var name
-// equals its errs.Define Reason in SCREAMING_SNAKE form.
+// Package codec — declares the registry's boot-time sentinel and the family's
+// three misuse refusals, EmptyInput, TargetInvalid and ValueInvalid (#1101).
+// Each var name equals its Reason in SCREAMING_SNAKE form.
 //
 // Package codec — declares the typed Format string and its helpers.
 // The zero Format ("") is invalid — consumers obtain a Format via the

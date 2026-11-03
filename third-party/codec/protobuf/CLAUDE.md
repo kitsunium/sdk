@@ -20,8 +20,8 @@ enforces. Schema codecs are therefore opt-in: a consumer blank-imports
 | Format name | `"protobuf"` |
 | MIME types | `application/protobuf`, `application/x-protobuf` |
 | Extensions | `.pb` |
-| Streaming | **no** (wire format is length-unframed) |
-| Appender | yes (`Marshal` + `append`) |
+| Streaming | **yes** (#905) — `encoding/protodelim`'s layout: one varint-delimited message per `Encode` / `Decode` (`stream.go`) |
+| Appender | yes — `proto.MarshalOptions{}.MarshalAppend` into `dst`, no allocation of its own when `dst` has room; `Marshal` is `Append(nil, v)` |
 | Code range | `0.3.38.*` (ADR 0023) |
 
 ## Conventions
@@ -30,7 +30,24 @@ enforces. Schema codecs are therefore opt-in: a consumer blank-imports
   `PROTOBUF_MARSHAL_FAILED` (Marshal) / `PROTOBUF_UNMARSHAL_FAILED` (Unmarshal).
   Round-trip a generated message or a well-known type such as `structpb.Struct`
   (the test fixture — no codegen required).
-- **Hard cap on Unmarshal**: 10 MiB (`maxProtobufBytes`, CWE-400).
+- **Hard cap on Unmarshal**: 10 MiB (`maxProtobufBytes`, CWE-400) — and on
+  every streamed message: `Decode` passes it to `protodelim` as `MaxSize`, so a
+  declared length past it is refused with `SIZE_EXCEEDED` before the
+  body is read; `Encode` refuses to write a message the decoder would refuse.
+- **Not deterministic, deliberately** (#905): the issue proposed
+  `MarshalOptions{Deterministic: true}`; measured on the `structpb` rows it cost
+  +13 to +26 % and up to four allocations a call (the map entries sorted), so
+  `Marshal`, `Append` and `Encode` keep proto's default options and write the
+  bytes `proto.Marshal` always wrote.
+- **The stream** (#905): `Encode` sizes the message, appends the varint prefix
+  and the message into one pooled scratch buffer and issues ONE `Write`, so a
+  message that fails to encode writes nothing; `Decode` reads through a
+  `bufio.Reader` (the caller's own when it passes one), keeps the sticky-EOF
+  latch of the other decoders, and returns `io.EOF` verbatim at a clean end.
+  `More` peeks one byte.
+- **Fuzzed** (#1159): `FuzzUnmarshalStructpb` — any input into a
+  `structpb.Struct` is nil or a typed refusal, and what decodes re-marshals and
+  decodes back equal.
 - **Stateless singleton**; `MIMETypes`/`Extensions` return `slices.Clone` copies.
 - **Errors** carry the dotted-quad codes via `errs.Wrap`; no `fmt.Errorf`.
 

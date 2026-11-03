@@ -73,6 +73,11 @@ func (d *decoder) scalar(n int32, v reflect.Value) error {
 		//: assigned, or refused.
 		return d.temporal(n, v)
 	}
+	//: a time.Duration reads its text, or the integer it was once written as.
+	if info.is(typeDuration) && node.kind == kindString {
+		//: parsed, or refused.
+		return d.duration(n, v)
+	}
 	//: a kind that holds the value: assigned, or refused for its range.
 	if held, err := d.native(n, v); held {
 		//: nil, or the range refusal.
@@ -85,6 +90,23 @@ func (d *decoder) scalar(n int32, v reflect.Value) error {
 	}
 	//: nothing else holds it.
 	return d.fail(n, problemMismatch, v.Type())
+}
+
+// duration decodes a string into a time.Duration with time.ParseDuration: the
+// form yaml writes and the encoder writes since #1126. A string without its
+// unit, or any other text ParseDuration refuses, is a mismatch. An integer
+// never reaches here: it is the nanoseconds the encoder wrote before #1126,
+// and native still assigns it, so a document written then reads the same.
+func (d *decoder) duration(n int32, v reflect.Value) error {
+	parsed, err := time.ParseDuration(string(d.p.textBytes(&d.p.nodes[n])))
+	//: not a duration with its unit.
+	if err != nil {
+		//: refused, naming the form.
+		return d.fail(n, problemDuration, v.Type())
+	}
+	v.SetInt(int64(parsed))
+	//: decoded.
+	return nil
 }
 
 // native assigns a string, an integer, a float or a boolean to v when v's
@@ -246,7 +268,7 @@ func localTypeOf(k kind) reflect.Type {
 // wrapFail returns UNMARSHAL_FAILED for node n with the error a target's own
 // UnmarshalText returned underneath.
 func (d *decoder) wrapFail(n int32, cause error, target reflect.Type) error {
-	line, _ := position(d.p.data, int(d.p.nodes[n].at))
+	line, column := position(d.p.data, int(d.p.nodes[n].at))
 	//: the sentinel's code and messages over the cause.
 	return errs.Wrap(cause, errs.WrapParams{
 		Code:    coretoml.CodeTOMLUnmarshalFailed,
@@ -254,5 +276,5 @@ func (d *decoder) wrapFail(n int32, cause error, target reflect.Type) error {
 		Public:  coretoml.UnmarshalFailed.Public(),
 		Private: privateTextRefused,
 	}, errs.String(fieldProblem, problemText), errs.String(fieldKey, d.keyPath(n)),
-		errs.Int(fieldLine, line), errs.String(fieldType, target.String()))
+		errs.Int(fieldLine, line), errs.Int(fieldColumn, column), errs.String(fieldType, target.String()))
 }

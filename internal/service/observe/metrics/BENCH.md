@@ -275,3 +275,86 @@ Measured on: AMD EPYC 7351P 16-Core, 8 vCPU visible, 11 GiB RAM, Linux
 6.12.101+deb13-amd64 (Debian 13), go1.27.3 linux/amd64, base d91642be, branch
 `perf/otlp-json`, 2026-10-23, benchtime 1s. Reproduce with
 `cd internal && GOWORK=off go test -run '^$' -bench EncodeOTLPJSON -benchmem -count=10 ./service/observe/metrics/`.
+
+## The /metrics handler (#1020)
+
+`BenchmarkHandler_1000Series` is one GET through `NewPrometheusHandler` over a
+cumulative meter of 1000 counter series (50 names × 20 routes); its control,
+`BenchmarkHandler_1000Series_ExportOnly`, collects the same meter and renders
+it into a buffer with no handler.
+
+```
+Handler_1000Series              448 – 466 µs/op   196 856 B/op   946 allocs/op
+Handler_1000Series_ExportOnly   434 – 473 µs/op   196 700 B/op   943 allocs/op
+```
+
+The handler costs **three allocations** over the collection and the render —
+the Content-Length's digits, the header values, the exporter it builds per
+scrape — and no time outside the noise: the document buffer is pooled, so a
+steady scrape reuses it. The issue asked one allocation beyond the buffer; the
+other two are `net/http`'s header map and the exporter value, and the 943 of
+the control are `Collect`'s copy of the series and the exporter's sort, which
+the handler does not own.
+
+Measured on: AMD EPYC 7351P, 4 Ps (`GOMAXPROCS=4`), linux/amd64, go1.27.3,
+shared VM, 2026-11-03, `-benchtime=200ms -count=3`. Reproduce with
+`cd internal && go test -run '^$' -bench Handler_1000Series -benchmem ./service/observe/metrics/`.
+
+## The runtime instruments (#868)
+
+`BenchmarkCollect_Runtime` collects a meter holding only the eight
+`RuntimeInstruments`: 5.4 µs/op, 1 584 B/op, 13 allocs/op, every one of them
+`Collect`'s own (the snapshot's maps and point slices): the
+`runtime/metrics.Read` behind the eight callbacks reads into samples allocated
+at registration, once per collection. Same machine and method as the handler
+section above.
+
+**The two runtime histograms (2026-11-03).** On a meter that takes an
+observable histogram — the in-memory one does — `RuntimeInstruments` adds
+`go.schedule.duration` and `go.gc.duration`: 161 bounds and 162 counts each,
+copied from the same `runtime/metrics.Read` into buffers allocated on the
+first read. The collection of all ten instruments, three runs:
+
+```
+BenchmarkCollect_Runtime-4   73876   15494 ns/op   8640 B/op   21 allocs/op
+BenchmarkCollect_Runtime-4   70491   16848 ns/op   8640 B/op   21 allocs/op
+BenchmarkCollect_Runtime-4   77353   16225 ns/op   8640 B/op   21 allocs/op
+```
+
+The eight added allocations are `Collect`'s, not the readings': the
+histograms map and its window, the two points' `Bounds` and `Counts` copies
+a snapshot hands out (as every histogram's), and the two callbacks' closures
+`runObservers` builds per collection. The read and the conversion allocate
+nothing after the first collection — #868's claim for the readings; a
+snapshot that shares no memory with the meter costs what it copies.
+
+## Exponential histograms and exemplars (#869), 2026-11-03
+
+Hoisted instruments, the cost of the record alone; same machine and method
+as above (`exponential_bench_test.go`, `-count=3`):
+
+```
+BenchmarkExponentialRecord-4                20109385    59.53 ns/op   0 B/op   0 allocs/op
+BenchmarkExponentialRecord-4                17601441    60.03 ns/op   0 B/op   0 allocs/op
+BenchmarkExponentialRecord-4                19045344    62.40 ns/op   0 B/op   0 allocs/op
+BenchmarkHistogramRecordContext_Sampled-4    7381165   158.0  ns/op   0 B/op   0 allocs/op
+BenchmarkHistogramRecordContext_Sampled-4    7502952   161.7  ns/op   0 B/op   0 allocs/op
+BenchmarkHistogramRecordContext_Sampled-4    7654928   156.5  ns/op   0 B/op   0 allocs/op
+BenchmarkCounterAddContext_Unsampled-4      50820742    23.33 ns/op   0 B/op   0 allocs/op
+BenchmarkCounterAddContext_Unsampled-4      46446573    22.69 ns/op   0 B/op   0 allocs/op
+BenchmarkCounterAddContext_Unsampled-4      47510962    22.26 ns/op   0 B/op   0 allocs/op
+BenchmarkCounterAdd_Hoisted-4              120247314     9.99 ns/op   0 B/op   0 allocs/op
+BenchmarkHistogramRecord-4                  40893225    29.29 ns/op   0 B/op   0 allocs/op
+```
+
+- **An exponential record is ~60 ns**, twice an explicit one's 29 ns: a
+  `math.Log` per value above scale 0 and a mutex, where the explicit
+  histogram walks its ladder lock-free. A scale change rewrites both ranges
+  in place, inside the backing arrays allocated at creation: zero
+  allocations, held by `TestRecordingIsAllocationFree` in the race-off lane.
+- **An exemplar costs ~130 ns over the record** when the span is sampled —
+  the context lookup, a clock read and the reservoir's lock — and **~13 ns
+  when it is not**: `AddContext` without a span is the add plus one
+  `ctx.Value`. The reservoir is allocated on a series' first sampled
+  measurement, once; every later one allocates nothing (same gate).
+

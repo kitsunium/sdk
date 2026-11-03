@@ -12,6 +12,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/app/forward",
+        "//internal/core/observe/logger",
         "//internal/core/observe/metrics",
         "//internal/core/observe/trace",
         "//internal/kernel/errs",
@@ -33,6 +34,7 @@ go_test(
     ],
     deps = [
         ":forward",
+        "//internal/core/observe/logger",
         "//internal/core/observe/metrics",
         "//internal/core/observe/trace",
         "//internal/kernel/errs",

@@ -15,6 +15,10 @@ import (
 // and lets tests inject a recording closure with no real network.
 type sendFunc func(ctx context.Context, p []byte) error
 
+// batchSendFunc ships several formatted records in one transport call and
+// reports how many of them, counted from the first, landed whole (#807).
+type batchSendFunc func(ctx context.Context, payloads [][]byte) (written int, err error)
+
 // netSink is the unexported per-record sink behind core/observe/logger.Sink. It owns the
 // transport's send + close seams and serialises both under mu so a Close never
 // races an in-flight send.
@@ -24,6 +28,8 @@ type netSink struct {
 	network string
 	// send ships one record over the transport; captured at construction.
 	send sendFunc
+	// sendBatch ships a backlog in one call (tcp); nil sends record by record.
+	sendBatch batchSendFunc
 	// closer releases the transport: net.Conn.Close for tcp/udp; for http, the
 	// idle connections of the pool the sink owns — the default client's — and
 	// nothing of a caller-supplied client's.
@@ -65,6 +71,49 @@ func (s *netSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte)
 	}
 	//: happy path — the whole payload was accepted.
 	return len(p), nil
+}
+
+// WriteBatch ships the backlog in one transport call when the seam has one —
+// one writev(2) on a tcp connection — and record by record otherwise, under
+// the mutex either way. It reports how many records landed whole; the first
+// failure ends the batch.
+func (s *netSink) WriteBatch(ctx context.Context, _ []corelogger.RecordEvent, payloads [][]byte) (written int, err error) {
+	//: honour cancellation so a doomed batch does not waste a packet.
+	if ctx != nil && ctx.Err() != nil {
+		//: surface the cancellation under the write sentinel (typed-errors rule).
+		return 0, wrapWrite(ctx.Err(), s.network, 0)
+	}
+	s.mu.Lock()
+	written, serr := s.sendAll(ctx, payloads)
+	s.mu.Unlock()
+	//: wrap any transport error with the write sentinel semantics.
+	if serr != nil {
+		//: payloads[written:] were not delivered; the field counts their bytes.
+		undelivered := 0
+		for _, p := range payloads[min(max(written, 0), len(payloads)):] {
+			undelivered += len(p)
+		}
+		return written, wrapWrite(serr, s.network, undelivered)
+	}
+	//: every record was accepted.
+	return len(payloads), nil
+}
+
+// sendAll is WriteBatch's transport step. The caller holds s.mu.
+func (s *netSink) sendAll(ctx context.Context, payloads [][]byte) (written int, err error) {
+	//: one call for the backlog.
+	if s.sendBatch != nil {
+		return s.sendBatch(ctx, payloads)
+	}
+	//: record by record, stopping at the first refusal.
+	for i, p := range payloads {
+		//: the records before it landed.
+		if serr := s.send(ctx, p); serr != nil {
+			return i, serr
+		}
+	}
+	//: all of them.
+	return len(payloads), nil
 }
 
 // Flush is a no-op: each record is shipped synchronously by Write, so nothing is

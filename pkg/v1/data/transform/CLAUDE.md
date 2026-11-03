@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-11-03T12:00:00Z -->
 # pkg/v1/data/transform/
 
 ## Purpose
@@ -19,6 +19,9 @@ frame now goes through this package too.
 | `Algorithm`, `Compressor`, `BoundedDecompressor` | aliases of `internal/core/data/transform`'s port and its optional extension (ADR 0074) |
 | `Lookup(algo)`, `Available()` | the registry, which a `third-party/transform` import (zstd, s2) fills too |
 | `Compress(algo, dst, src)`, `Decompress(algo, dst, src)` | resolve and delegate; an unregistered `algo` is `UnknownCompressor`, returned as is, `dst` untouched |
+| `NewReader(algo, r, limit)`, `NewWriter(algo, w)` | the stream form (ADR 0213): a reader of at most `limit` bytes, then `DecompressedTooLarge`; a writer whose `Close` ends the stream; `UnknownCompressor` for an unregistered `algo`, `StreamingUnsupported` (0.2.5.7) for one with no stream form |
+| `StreamingCompressor`, `CodeStreamingUnsupported`, `StreamingUnsupported` | the stream port's alias and its refusal, re-exported from the core |
+| `NewGzipCompressor(level)`, `NewFlateCompressor(level)`, `NewZlibCompressor(level)` | the three schemes at a level of the caller's — a `compress/*` constant, anything that would not compress clamped to the default (ADR 0031); not registered, passed where a `Compressor` is taken (#900) |
 | `DecompressBounded(algo, dst, src, limit)` | at most `limit` bytes of plaintext or `DecompressedTooLarge`: a `BoundedDecompressor` stops at the ceiling; any other scheme is decompressed under its own backstop and judged after |
 | `CodeUnknownCompressor`, `CodeCompressedFrameInvalid`, `CodeDecompressedTooLarge` and the sentinels of the same names | the `0.2.5.*` codes the facade and the codec frame return, aliased from the core |
 

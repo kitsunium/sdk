@@ -21,6 +21,9 @@ maintainer's half.
 | `FullPolicy`, `DropOldest` (the zero), `DropNewest`, `Block` | alias, constants | what `Enqueue` does at the bound |
 | `Stats` | alias | onto `StatsValue`: pending, sent, retries, dropped, expired, dead-lettered, the last `Retry-After` |
 | `Sender` | alias | `func(ctx, batch []byte) error` — a `DocumentExporter`'s `ExportDocument` |
+| `EncodedSender` | alias | `func(ctx, batch []byte, encoding string) error` — an `EncodedDocumentExporter`'s `ExportEncodedDocument`; `Config.Compress` needs it (#1051) |
+| `NewLogExporter` | func | a logger `DocumentExporter` keeping each OTLP/JSON logs document — the "otlpjson" writer's `Exporter` (#867) |
+| `EncodingGzip` | const | `"gzip"`, the encoding a batch `Compress` kept is handed with |
 | `DefaultMaxBatches`, `DefaultMaxBytes`, `DefaultBlockTimeout`, `DefaultSendTimeout`, `DefaultMaxAge`, `DefaultRetryBase`, `DefaultRetryMax`, `DefaultRecountInterval` | constants | the clamps of a zero field |
 | `Misconfigured`, `Full`, `BatchTooLarge` | vars | the sentinels (`0.3.93.*`), aliased from the core |
 | `New`, `NewSpanExporter`, `NewMetricExporter` | funcs | the constructor and the two producer adapters |

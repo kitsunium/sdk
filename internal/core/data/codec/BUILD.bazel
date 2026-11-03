@@ -5,16 +5,21 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "codec",
     srcs = [
+        "bounds.go",
+        "detect.go",
         "doc.go",
         "errors.go",
         "format.go",
         "gen_codes.go",
         "gen_ports.go",
+        "misuse.go",
+        "position.go",
         "registry.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/data/codec",
     visibility = ["//internal/core:core_consumers"],
     deps = [
+        "//internal/kernel/concur/snapshot",
         "//internal/kernel/errs",
         "//internal/kernel/plugin",
     ],
@@ -31,8 +36,10 @@ go_test(
     size = "small",
     srcs = [
         "appender_external_test.go",
+        "detect_internal_test.go",
         "format_external_test.go",
         "gen_api_test.go",
+        "position_external_test.go",
         "registration_order_external_test.go",
         "registry_external_test.go",
         "registry_guard_external_test.go",

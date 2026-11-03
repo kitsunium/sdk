@@ -3,11 +3,14 @@ package transform_test
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/klauspost/compress/s2"
+	"github.com/klauspost/compress/zstd"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	_ "github.com/kitsunium/sdk/internal/service/data/transform" // registers the stdlib gzip reference
@@ -167,6 +170,239 @@ func BenchmarkDecompress(b *testing.B) {
 			benchDecompress(b, corpus.name+"/"+scheme.name, scheme.c, encoded, len(corpus.data))
 		}
 	}
+}
+
+// BenchmarkDecompressSized is BenchmarkDecompress into a NON-EMPTY dst — a
+// prefix already written, the call a loop appending several payloads into one
+// buffer makes — whose spare capacity holds the payload (kitsunium/sdk#1163).
+// It runs at 4 KiB and 4 MiB of the JSON corpus and at 4 MiB of the random
+// one, for zstd and s2: the rows the tail decode makes allocation-free.
+func BenchmarkDecompressSized(b *testing.B) {
+	zstdFastest, err := tptransform.NewZstdCompressor(tptransform.ZstdFastest, tptransform.DefaultMaxDecompressedBytes)
+	if err != nil {
+		b.Fatalf("zstd fastest: %v", err)
+	}
+	b.Cleanup(func() { closeChecked(b, zstdFastest) })
+	corpora := []struct {
+		name string
+		data []byte
+	}{{"json-4KiB", benchJSON[:4<<10]}, {"json", benchJSON}, {"random", benchRandom}}
+	for _, corpus := range corpora {
+		for _, scheme := range []struct {
+			name string
+			c    coretransform.Compressor
+		}{{"zstd-fastest", zstdFastest}, {"s2", tptransform.S2}} {
+			encoded, cerr := scheme.c.Compress(nil, corpus.data)
+			if cerr != nil {
+				b.Fatal(cerr)
+			}
+			benchDecompressInto(b, corpus.name+"/"+scheme.name, scheme.c, encoded, len(corpus.data))
+		}
+	}
+}
+
+// benchDecompressInto drives one sized row: a 64-byte prefix and spare
+// capacity for the payload, reused across iterations.
+func benchDecompressInto(b *testing.B, name string, c coretransform.Compressor, encoded []byte, plainLen int) {
+	b.Helper()
+	b.Run(name, func(b *testing.B) {
+		dst := make([]byte, 64, 64+plainLen)
+		b.SetBytes(int64(plainLen))
+		b.ReportAllocs()
+		for b.Loop() {
+			out, derr := c.Decompress(dst, encoded)
+			if derr != nil {
+				b.Fatal(derr)
+			}
+			benchSink = out
+		}
+	})
+}
+
+// benchDictionaryRecordSizes are the record sizes the dictionary rows run at
+// (kitsunium/sdk#900): a log line, a small RPC frame, a page of either — the
+// payloads where a generic encoder has too little history to find matches.
+var benchDictionaryRecordSizes = []int{256, 1 << 10, 4 << 10}
+
+// benchRecords cuts n records of size bytes out of the JSON corpus, starting
+// at offset, so the training records and the measured ones never overlap.
+func benchRecords(offset, size, n int) [][]byte {
+	records := make([][]byte, 0, n)
+	for i := range n {
+		start := offset + i*size
+		records = append(records, benchJSON[start:start+size])
+	}
+	return records
+}
+
+// BenchmarkZstdDictionary prices a dictionary trained on the JSON corpus
+// (kitsunium/sdk#900) against the generic encoder, both at ZstdFastest, on
+// records of 256 B, 1 KiB and 4 KiB. Each iteration compresses, or
+// decompresses, one record of a rotating set of 64; the ratio is the set's
+// plaintext over its compressed bytes.
+func BenchmarkZstdDictionary(b *testing.B) {
+	for _, size := range benchDictionaryRecordSizes {
+		train := benchRecords(0, size, 600)
+		cut := len(train) / 3
+		dict, err := zstd.BuildDict(zstd.BuildDictOptions{
+			ID: 0x0001_0900, Contents: train[cut:], History: bytes.Join(train[:cut], nil),
+			Offsets: [3]int{1, 4, 8}, Level: zstd.SpeedFastest,
+		})
+		if err != nil {
+			b.Fatalf("BuildDict: %v", err)
+		}
+		withDict, err := tptransform.NewZstdCompressorWithDictionary(tptransform.ZstdFastest, tptransform.DefaultMaxDecompressedBytes, dict)
+		if err != nil {
+			b.Fatalf("NewZstdCompressorWithDictionary: %v", err)
+		}
+		plain, err := tptransform.NewZstdCompressor(tptransform.ZstdFastest, tptransform.DefaultMaxDecompressedBytes)
+		if err != nil {
+			b.Fatalf("NewZstdCompressor: %v", err)
+		}
+		b.Cleanup(func() {
+			closeChecked(b, withDict)
+			closeChecked(b, plain)
+		})
+		records := benchRecords(600*size, size, 64)
+		for _, arm := range []struct {
+			name string
+			c    *tptransform.ZstdCompressor
+		}{{"plain", plain}, {"dictionary", withDict}} {
+			frames := make([][]byte, len(records))
+			total := 0
+			for i, record := range records {
+				frames[i], err = arm.c.Compress(nil, record)
+				if err != nil {
+					b.Fatal(err)
+				}
+				total += len(frames[i])
+			}
+			ratio := float64(len(records)*size) / float64(total)
+			b.Run("compress/"+strconv.Itoa(size)+"/"+arm.name, func(b *testing.B) {
+				b.SetBytes(int64(size))
+				b.ReportAllocs()
+				i := 0
+				for b.Loop() {
+					out, cerr := arm.c.Compress(benchSink[:0], records[i%len(records)])
+					if cerr != nil {
+						b.Fatal(cerr)
+					}
+					benchSink = out
+					i++
+				}
+				b.ReportMetric(ratio, "ratio")
+			})
+			b.Run("decompress/"+strconv.Itoa(size)+"/"+arm.name, func(b *testing.B) {
+				b.SetBytes(int64(size))
+				b.ReportAllocs()
+				i := 0
+				for b.Loop() {
+					out, derr := arm.c.Decompress(benchSink[:0], frames[i%len(frames)])
+					if derr != nil {
+						b.Fatal(derr)
+					}
+					benchSink = out
+					i++
+				}
+			})
+		}
+	}
+}
+
+// BenchmarkStream prices the stream form of zstd and s2 (ADR 0213,
+// kitsunium/sdk#892) against their block form on both 4 MiB corpora: a
+// compress through NewWriter into a buffer against Compress, and a decompress
+// through NewReader drained to io.Discard against Decompress into nil.
+func BenchmarkStream(b *testing.B) {
+	for _, corpus := range benchCorpora() {
+		for _, scheme := range []struct {
+			name string
+			c    coretransform.Compressor
+		}{{"zstd-fastest", tptransform.Zstd}, {"s2", tptransform.S2}} {
+			streaming := scheme.c.(coretransform.StreamingCompressor)
+			block, err := scheme.c.Compress(nil, corpus.data)
+			if err != nil {
+				b.Fatal(err)
+			}
+			var framed bytes.Buffer
+			w, err := streaming.NewWriter(&framed)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err = w.Write(corpus.data); err != nil {
+				b.Fatal(err)
+			}
+			if err = w.Close(); err != nil {
+				b.Fatal(err)
+			}
+			benchStreamRows(b, corpus.name+"/"+scheme.name, scheme.c, streaming, corpus.data, block, framed.Bytes())
+		}
+	}
+}
+
+// benchStreamRows runs the four rows of one scheme on one corpus. The inputs
+// are parameters rather than captured loop variables, so they do not escape
+// through the closures into the measurement.
+func benchStreamRows(b *testing.B, name string, c coretransform.Compressor, streaming coretransform.StreamingCompressor, plain, block, framed []byte) {
+	b.Helper()
+	b.Run(name+"/compress/block", func(b *testing.B) {
+		b.SetBytes(int64(len(plain)))
+		b.ReportAllocs()
+		for b.Loop() {
+			out, err := c.Compress(nil, plain)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchSink = out
+		}
+	})
+	b.Run(name+"/compress/stream", func(b *testing.B) {
+		var sink bytes.Buffer
+		b.SetBytes(int64(len(plain)))
+		b.ReportAllocs()
+		for b.Loop() {
+			sink.Reset()
+			w, err := streaming.NewWriter(&sink)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err = w.Write(plain); err != nil {
+				b.Fatal(err)
+			}
+			if err = w.Close(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run(name+"/decompress/block", func(b *testing.B) {
+		b.SetBytes(int64(len(plain)))
+		b.ReportAllocs()
+		for b.Loop() {
+			out, err := c.Decompress(nil, block)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchSink = out
+		}
+	})
+	b.Run(name+"/decompress/stream", func(b *testing.B) {
+		src := bytes.NewReader(framed)
+		b.SetBytes(int64(len(plain)))
+		b.ReportAllocs()
+		for b.Loop() {
+			src.Reset(framed)
+			r, err := streaming.NewReader(src, int64(len(plain)))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err = io.Copy(io.Discard, r); err != nil {
+				b.Fatal(err)
+			}
+			if err = r.Close(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 // BenchmarkS2CompressIntoTail versus BenchmarkS2CompressThenCopy is the

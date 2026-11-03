@@ -54,7 +54,12 @@ func (uintEncoder) empty(v reflect.Value, _ *encodePlan) (bool, error) {
 }
 
 // encode appends a single for a float32 and a double for a float64.
-func (floatEncoder) encode(b []byte, v reflect.Value, _ *encodePlan, _ walkDepth) ([]byte, error) {
+func (floatEncoder) encode(b []byte, v reflect.Value, _ *encodePlan, at walkDepth) ([]byte, error) {
+	//: NewDeterministic: a float32 widens exactly, then takes its shortest form.
+	if at.deterministic() {
+		//: half, single or double.
+		return appendShortestFloat(b, v.Float()), nil
+	}
 	//: the width follows the Go type.
 	if v.Kind() == reflect.Float32 {
 		//: a single.

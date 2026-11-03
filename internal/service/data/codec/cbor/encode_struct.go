@@ -1,6 +1,10 @@
 package cbor
 
-import "reflect"
+import (
+	"bytes"
+	"reflect"
+	"slices"
+)
 
 // maxHeadBytes is the longest head: an initial byte and eight argument bytes.
 const maxHeadBytes int = 9
@@ -37,6 +41,7 @@ func (pl *encodePlanner) fillStruct(p *encodePlan) {
 			p.omittable++
 		}
 	}
+	p.order = keyOrder(p.fields)
 	//: toarray ignores omitempty and omitzero: every element is written.
 	if layout.toArray {
 		p.kind, p.zero = structArrayEncoder{}, zeroNoFields
@@ -54,6 +59,12 @@ func (pl *encodePlanner) encodeFieldOf(f *structField) (field encodeField, refus
 		//: the type's refusal.
 		return encodeField{}, plan.refusal
 	}
+	plan, refusal = timeOptionPlan(f, plan)
+	//: the time option on a field that is not a time.Time.
+	if refusal != "" {
+		//: refused.
+		return encodeField{}, refusal
+	}
 	key, err := fieldKey(f)
 	//: a tag can spell a name that is not UTF-8.
 	if err != nil {
@@ -62,6 +73,48 @@ func (pl *encodePlanner) encodeFieldOf(f *structField) (field encodeField, refus
 	}
 	//: ready to write.
 	return encodeField{key: key, index: f.index, plan: plan, flags: f.flags}, ""
+}
+
+// timeOptionPlan is the plan of a field carrying the time option: its own,
+// writing the tag the option names, since the type's shared plan writes
+// untagged seconds. A field without the option keeps plan.
+func timeOptionPlan(f *structField, plan *encodePlan) (*encodePlan, string) {
+	tag := tagEpoch
+	//: which option, if any.
+	switch {
+	case f.has(flagTimeTag1):
+		//: tag 1.
+	case f.has(flagTimeTag0):
+		tag = tagDateTime
+	default:
+		//: no option: the type's plan.
+		return plan, ""
+	}
+	//: the option names how a time.Time is written, and nothing else.
+	if f.typ != timeType {
+		//: refused, as an untaggable field is.
+		return plan, "the time option on a field that is not a time.Time: " + f.typ.String()
+	}
+	//: a plan of the field's own.
+	return &encodePlan{kind: timeTagEncoder{tag: tag}, typ: f.typ, zero: plan.zero}, ""
+}
+
+// keyOrder returns the indexes of fields in the bytewise order of their
+// encoded keys (RFC 8949 §4.2.1), or nil when the declaration order is it.
+func keyOrder(fields []encodeField) []int {
+	//: already sorted: the registered and the deterministic orders agree.
+	if slices.IsSortedFunc(fields, func(x, y encodeField) int { return bytes.Compare(x.key, y.key) }) {
+		//: no permutation.
+		return nil
+	}
+	order := make([]int, len(fields))
+	//: the identity, then sorted by key.
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortFunc(order, func(x, y int) int { return bytes.Compare(fields[x].key, fields[y].key) })
+	//: the permutation.
+	return order
 }
 
 // fieldKey encodes a field's key once, when the plan is built.
@@ -79,6 +132,11 @@ func fieldKey(f *structField) ([]byte, error) {
 // when omitempty, omitzero or a nil embedded pointer leaves some out, it is
 // rewritten — shorter when the count crosses a head width.
 func (structEncoder) encode(b []byte, v reflect.Value, p *encodePlan, at walkDepth) ([]byte, error) {
+	//: core deterministic encoding writes the keys sorted.
+	if p.order != nil && at.deterministic() {
+		//: in key order.
+		return appendFieldsInOrder(b, v, p, at, p.order)
+	}
 	inner, err := at.enter()
 	//: a map is one level of nesting.
 	if err != nil {
@@ -93,6 +151,39 @@ func (structEncoder) encode(b []byte, v reflect.Value, p *encodePlan, at walkDep
 	for i := range p.fields {
 		var wrote bool
 		b, wrote, err = appendField(b, v, &p.fields[i], inner)
+		//: the first failure ends the encoding.
+		if err != nil {
+			//: refused.
+			return b, err
+		}
+		//: counted for the head.
+		if wrote {
+			written++
+		}
+	}
+	//: the head says how many pairs were written.
+	return rewriteMapHead(b, start, headLen, written, len(p.fields)), nil
+}
+
+// appendFieldsInOrder appends the struct as a map whose pairs follow order,
+// the indexes of p.fields in the bytewise order of their keys: the
+// deterministic walk's struct, kept apart so the registered codec's loop is
+// the one it always ran.
+func appendFieldsInOrder(b []byte, v reflect.Value, p *encodePlan, at walkDepth, order []int) ([]byte, error) {
+	inner, err := at.enter()
+	//: a map is one level of nesting.
+	if err != nil {
+		//: too deep.
+		return b, err
+	}
+	start := len(b)
+	b = appendHead(b, majorMap, uint64(len(p.fields)))
+	headLen := len(b) - start
+	written := 0
+	//: each field, in key order.
+	for _, index := range order {
+		var wrote bool
+		b, wrote, err = appendField(b, v, &p.fields[index], inner)
 		//: the first failure ends the encoding.
 		if err != nil {
 			//: refused.

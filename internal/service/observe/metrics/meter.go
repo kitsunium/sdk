@@ -42,7 +42,10 @@ type memMeter struct {
 	sums       seriesStore[*memSum]
 	gauges     seriesStore[*memGauge]
 	histograms seriesStore[*memHistogram]
-	names      map[string]*nameState
+	// exponentials holds the exponential histogram series (ADR 0044,
+	// resolved).
+	exponentials seriesStore[*memExpHistogram]
+	names        map[string]*nameState
 	// observers holds every registered asynchronous instrument, read once per
 	// Collect. Guarded by mu.
 	observers []observer
@@ -57,6 +60,9 @@ type memMeter struct {
 	// force Describe to invent a kind for a name that may never mint an
 	// instrument.
 	descriptions map[string]string
+	// units maps an instrument NAME to its UCUM unit (ADR 0208), guarded by
+	// mu and nil until the first Unit — the same economy as descriptions.
+	units map[string]string
 }
 
 // NewMeter returns a fresh in-memory Meter with every MeterConfig knob at its
@@ -102,6 +108,7 @@ func newMemMeter(cfg MeterConfig) *memMeter {
 	meter.sums = newSeriesStore[*memSum](meter)
 	meter.gauges = newSeriesStore[*memGauge](meter)
 	meter.histograms = newSeriesStore[*memHistogram](meter)
+	meter.exponentials = newSeriesStore[*memExpHistogram](meter)
 	//: hand back the wide view; every caller may narrow it to a Meter.
 	return meter
 }
@@ -214,13 +221,14 @@ func (m *memMeter) Collect() coremetrics.SnapshotValue {
 	m.mu.RLock()
 	//: group each kind by instrument name; empty maps, never nil.
 	snap := coremetrics.SnapshotValue{
-		Resource:   m.resource,
-		Scope:      m.scope,
-		StartTime:  m.startTime,
-		Time:       now,
-		Sums:       collectSums(m.sums.byKey, m.names, m.descriptions, m.temporality, delta),
-		Gauges:     collectGauges(m.gauges.byKey, m.names, m.descriptions),
-		Histograms: collectHistograms(m.histograms.byKey, m.names, m.descriptions, m.temporality, delta),
+		Resource:              m.resource,
+		Scope:                 m.scope,
+		StartTime:             m.startTime,
+		Time:                  now,
+		Sums:                  collectSums(m.sums.byKey, m.names, m.annotations(), m.temporality, delta),
+		Gauges:                collectGauges(m.gauges.byKey, m.names, m.annotations()),
+		Histograms:            collectHistograms(m.histograms.byKey, m.names, m.annotations(), m.temporality, delta),
+		ExponentialHistograms: collectExponentials(m.exponentials.byKey, m.names, m.annotations(), m.temporality, delta),
 	}
 	m.mu.RUnlock()
 
@@ -239,7 +247,7 @@ func (m *memMeter) Collect() coremetrics.SnapshotValue {
 // meter's temporality and each name's monotonicity onto the metric.
 func collectSums(
 	store map[string]*seriesEntry[*memSum], names map[string]*nameState,
-	descriptions map[string]string, temporality coremetrics.Temporality, delta bool,
+	notes annotations, temporality coremetrics.Temporality, delta bool,
 ) map[string]coremetrics.SumMetricValue {
 	//: one arena for every sum series, carved per name.
 	out := make(map[string]coremetrics.SumMetricValue, sizeGroups(names, len(store)))
@@ -251,7 +259,8 @@ func collectSums(
 		out[name] = coremetrics.SumMetricValue{
 			Temporality: temporality,
 			Monotonic:   slot.kind.monotonic(),
-			Description: descriptions[name],
+			Description: notes.descriptions[name],
+			Unit:        notes.units[name],
 			Points:      slot.window,
 		}
 	}
@@ -260,8 +269,9 @@ func collectSums(
 		//: attrs alias the meter's copy — documented on SumValue.
 		metric := out[entry.name]
 		metric.Points = append(metric.Points, coremetrics.SumValue{
-			Attrs: entry.attrs,
-			Value: entry.inst.collect(delta),
+			Attrs:     entry.attrs,
+			Value:     entry.inst.collect(delta),
+			Exemplars: entry.inst.exemplars(delta),
 		})
 		out[entry.name] = metric
 	}
@@ -278,7 +288,7 @@ func collectSums(
 // carries no temporality, so neither does this walk.
 func collectGauges(
 	store map[string]*seriesEntry[*memGauge], names map[string]*nameState,
-	descriptions map[string]string,
+	notes annotations,
 ) map[string]coremetrics.GaugeMetricValue {
 	//: same grouping as sums.
 	out := make(map[string]coremetrics.GaugeMetricValue, sizeGroups(names, len(store)))
@@ -287,7 +297,8 @@ func collectGauges(
 	for name, slot := range carve[coremetrics.GaugeValue](len(store), names, groupGauge) {
 		//: the envelope is the window.
 		out[name] = coremetrics.GaugeMetricValue{
-			Description: descriptions[name],
+			Description: notes.descriptions[name],
+			Unit:        notes.units[name],
 			Points:      slot.window,
 		}
 	}
@@ -313,7 +324,7 @@ func collectGauges(
 // collectHistograms groups every histogram series under its instrument name.
 func collectHistograms(
 	store map[string]*seriesEntry[*memHistogram], names map[string]*nameState,
-	descriptions map[string]string, temporality coremetrics.Temporality, delta bool,
+	notes annotations, temporality coremetrics.Temporality, delta bool,
 ) map[string]coremetrics.HistogramMetricValue {
 	//: same grouping as sums.
 	out := make(map[string]coremetrics.HistogramMetricValue, sizeGroups(names, len(store)))
@@ -322,7 +333,8 @@ func collectHistograms(
 		//: the envelope carries the window it covers.
 		out[name] = coremetrics.HistogramMetricValue{
 			Temporality: temporality,
-			Description: descriptions[name],
+			Description: notes.descriptions[name],
+			Unit:        notes.units[name],
 			Points:      slot.window,
 		}
 	}

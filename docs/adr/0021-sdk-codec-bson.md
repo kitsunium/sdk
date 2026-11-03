@@ -34,6 +34,14 @@ added transitive surface is small, verified at `v1.17.4`).
    in-place API). `StreamingCodec` **no** — mongo-driver does not expose a
    stable incremental `io` Encoder/Decoder, so BSON is non-streaming like
    `csv`/`asn1`/`pem`.
+   *Amended 2026-11-03 (sdk#1100):* that reason died with the native encoder
+   of ADR 0156, which writes straight into a buffer and validates a
+   length-prefixed document whole. `bson` now implements `StreamingCodec` in
+   msgpack's shape: each `Encode` writes one document in one `Write`, each
+   `Decode` reads the int32 prefix, refuses a length past `maxBSONBytes` with
+   `BSON_SIZE_EXCEEDED` before reserving it, reads the document growing with
+   what the reader delivers, validates it whole and decodes it — the layout of
+   a mongodump file and of a socket of concatenated documents.
 4. **Error block `0.3.36.*`** (next free `PP` octet — 0.3.25..0.3.35 are taken
    by the third-party AWS/DB writers; verified against `//:audit_sources`).
    Codes: `BSON_MARSHAL_FAILED` (`.1`), `BSON_UNMARSHAL_FAILED` (`.2`),

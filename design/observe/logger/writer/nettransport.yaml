@@ -67,7 +67,7 @@ packages:
 
       Package nettransport — the config Decoder making tcp/udp/http reachable from a
       config file via pkg/v1/observe/logger.FromConfig. Only the plain-data keys are
-      decodable (address / min_level / buffer_size); the Dialer and HTTPClient SSRF
+      decodable (address / min_level / buffer_size / http_batch_ndjson); the Dialer and HTTPClient SSRF
       seams are code-only and never come from a config blob. A malformed shape
       yields the shared core/observe/logger/writer.WriterConfigInvalid (no per-package code), tagged
       with the protocol only — never the offending value (secret gate).
@@ -162,6 +162,16 @@ packages:
                 Code-only, like Dialer/HTTPClient — never decoded from a config blob.
               name: OnError
               type: func(err error)
+            - doc: |-
+                HTTPBatchNDJSON, when true, has the http writer post the records its
+                drainer holds — up to sixteen at a time — as ONE application/x-ndjson
+                body, one record per line, instead of one application/json POST per
+                record (#807). It changes the wire: the collector must read NDJSON
+                (Vector's and Fluent Bit's http sources do, Elasticsearch's _bulk does
+                not without action lines). A refused POST fails every record of its
+                batch. Ignored by tcp and udp. The zero value posts record by record.
+              name: HTTPBatchNDJSON
+              type: bool
     variables:
       - blockDoc: |-
           WriterTCP / WriterUDP / WriterHTTP are the registered factory singletons. The

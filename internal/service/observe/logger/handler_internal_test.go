@@ -211,10 +211,10 @@ func runTimeOwnershipCase(tb testing.TB, clockInstant, recorder, wantInSink time
 	tb.Helper()
 	sink := &timeCaptureSink{}
 	h := &genericHandler{
-		enc:  encoder.NewText(frozenClock{at: clockInstant}),
-		sink: sink,
-		min:  level.Debug,
-		clk:  frozenClock{at: clockInstant},
+		enc:   encoder.NewText(frozenClock{at: clockInstant}),
+		sink:  sink,
+		floor: level.Fixed(level.Debug),
+		clk:   frozenClock{at: clockInstant},
 	}
 	if err := h.Handle(context.Background(), corelogger.RecordEvent{Time: recorder, Level: level.Info, Message: "m"}); err != nil {
 		tb.Fatalf("Handle err = %v", err)

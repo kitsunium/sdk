@@ -50,7 +50,13 @@ visible aggregated overflow series.
 | `OverflowAttrKey` | how a consumer RECOGNISES the folded series (its value is the bool `true`) |
 | `Exporter` / `ExporterName` | exporter aliases |
 | `NewMeter()` / `NewMeterWithConfig(cfg)` | in-memory `FullMeter` |
-| `Export` / `ExportContext` (bounded; `DefaultExportTimeout`, 30 s, when the context carries no deadline; `ContextExporter` the sibling port, `DocumentExporter` the second — the OTLP/HTTP exporter posts a stored document, ADR 0185) / `RegisterExporter` / `NewTextExporter` / `NewPrometheusExporter` / `NewOTLPJSONExporter` / `AvailableExporters` | registry verbs |
+| `Export` / `ExportContext` (bounded; `DefaultExportTimeout`, 30 s, when the context carries no deadline; `ContextExporter` the sibling port, `DocumentExporter` the second — the OTLP/HTTP exporter posts a stored document, ADR 0185 —, `EncodedDocumentExporter` the third — a stored gzip document posted as it rests, #1051) / `RegisterExporter` / `NewTextExporter` / `NewPrometheusExporter` / `NewOTLPJSONExporter` / `AvailableExporters` | registry verbs |
+| `NewPrometheusHandler` / `PrometheusHandlerConfig` / `PrometheusContentType` / `CollectorNil` (#1020); `UnitDescriber` / `InvalidUnit` / `UnitConflict` (ADR 0208); `DefaultBuckets` / `InvalidBuckets` (#1135) | the scrape endpoint, the unit and the bucket rules |
+| `RuntimeInstruments` / `RuntimeConfig` (#868) | the Go runtime's instruments, OpenTelemetry names (or `Underscore` for Prometheus), the two histograms `go.schedule.duration` / `go.gc.duration` on an `AsyncHistogramMeter` |
+| `ExponentialMeter` / `ExponentialHistogramPoint` / `ExponentialHistogramMetric` / `ExponentialBuckets` / `ExponentialIndex` / `ExponentialLowerBound` / `ExponentialMinScale` / `ExponentialMaxScale` / `DefaultExponentialMaxSize` (#869) | exponential (base-2) histograms — `Snapshot.ExponentialHistograms` |
+| `Exemplar` / `ContextCounter` / `ContextHistogram` (#869) | a sampled span's measurement kept beside the point — `SumPoint.Exemplars`, `HistogramPoint.Exemplars` |
+| `Observer` / `ReportStat` / `StatKind` / `StatCounter` / `StatGauge` / `ObserverConfig` / `RegisterObservers` (#871) | an engine's Stats as observable instruments; the adapters are `statsbridge/` |
+| `AsyncHistogramMeter` / `HistogramCallback` / `ObserveHistogram` (#868) | an observable histogram, a source's own buckets; `HistogramPoint.NoSum` for a source that keeps no total |
 | `EncodeOTLPJSON` | the OTLP/JSON ENCODER — snapshot to the exact bytes of one `ExportMetricsServiceRequest`, no I/O (ADR 0048) |
 | `NewOTLPHTTPExporter` / `OTLPHTTPConfig` / `OTLPMetricsPath` / `DefaultOTLPTimeout` / `DefaultOTLPMaxResponseBytes` | the EMITTER and its knobs; never registered, and the endpoint is a full URL used as-is |
 | `OTLPRetryable` | classifies an export failure; its signature IS `resilience.RetryConfig.Retryable`'s |
@@ -105,7 +111,8 @@ visible aggregated overflow series.
   transliterating, which would merge distinct instruments silently. Full list of
   losses: `internal/service/observe/metrics/CLAUDE.md` §What the Prometheus connector
   loses.
-- **`NewPrometheusExporter` is the scrape path**; the registered `prometheus`
+- **`NewPrometheusHandler` is the scrape endpoint** (#1020): the document rendered whole, a refusal answered 500, one scrape at a time; it builds on
+- **`NewPrometheusExporter`, the scrape path**; the registered `prometheus`
   name is a stderr diagnostic, like `text` (ADR 0030).
 - **OTLP/JSON is the native wire and loses nothing** (ADR 0048) — temporality
   travels, an attribute keeps its type, Resource and Scope reach the payload.

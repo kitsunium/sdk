@@ -109,6 +109,26 @@ func (e *textEncoder) Name() string {
 // active group stack ("g1.g2.key=val"). Returns the (possibly re-allocated)
 // buffer with the encoded line including the trailing newline.
 func (e *textEncoder) Append(dst []byte, groups []string, r corelogger.RecordEvent) []byte {
+	//: the line with nothing bound ahead of the record's own attributes.
+	return e.AppendWithPrefix(dst, groups, nil, r)
+}
+
+// AppendAttrs renders attrs as they appear in a line under groups — the
+// space before each, the group prefix, the reserved-key rename and the
+// framing scrub included — for a handler to keep and splice into every
+// record with AppendWithPrefix (corelogger.PrefixEncoder, #1016).
+func (e *textEncoder) AppendAttrs(dst []byte, groups []string, attrs []corelogger.AttrValue) []byte {
+	//: each attribute exactly as Append renders it.
+	for _, a := range attrs {
+		dst = appendAttrWithGroups(dst, groups, a)
+	}
+	return dst
+}
+
+// AppendWithPrefix serialises r as Append does, with prefix — the bound
+// attributes AppendAttrs rendered for the same groups — spliced after the
+// header and the trace context and before r's own attributes.
+func (e *textEncoder) AppendWithPrefix(dst []byte, groups []string, prefix []byte, r corelogger.RecordEvent) []byte {
 	//: fall back to the encoder clock when the caller did not timestamp.
 	if r.Time.IsZero() {
 		//: use injected clock so tests can freeze time deterministically.
@@ -119,6 +139,8 @@ func (e *textEncoder) Append(dst []byte, groups []string, r corelogger.RecordEve
 	//: the trace context is a TOP-LEVEL field, so it lands between the header
 	//: and the attributes and is never touched by the group prefix stack.
 	dst = appendTraceContext(dst, r)
+	//: the bound attributes, rendered once when they were bound.
+	dst = append(dst, prefix...)
 	//: append every record-bound attribute prefixed by the group stack.
 	for _, a := range r.Attrs {
 		//: render each record-local attr using the same encoding rules.

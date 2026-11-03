@@ -272,3 +272,24 @@ func BenchmarkStreamDecode(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkUnmarshalStrict is BenchmarkUnmarshal through NewStrict (#1106):
+// the duplicate-key walk before the decode, and the unknown-member check in
+// it. The gap to BenchmarkUnmarshal is what one reading costs.
+func BenchmarkUnmarshalStrict(b *testing.B) {
+	c := msgpack.NewStrict()
+	for _, sz := range benchSizes() {
+		b.Run(sz.name, func(b *testing.B) {
+			data := benchEncoded(b, sz.rec)
+			b.SetBytes(int64(len(data)))
+			b.ReportAllocs()
+			for b.Loop() {
+				var out benchRecord
+				if err := c.Unmarshal(data, &out); err != nil {
+					b.Fatal(err)
+				}
+				benchSinkRecord = out
+			}
+		})
+	}
+}

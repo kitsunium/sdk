@@ -6,6 +6,7 @@ go_library(
     name = "level",
     srcs = [
         "doc.go",
+        "fixed.go",
         "gen_codes.go",
         "gen_ports.go",
         "level.go",

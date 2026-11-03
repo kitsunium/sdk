@@ -3,8 +3,9 @@
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/multipart"
 //
-// The codec is RFC 7578's multipart/form-data on the standard library's
-// mime/multipart. Its native value is a [Form] of [Part]s — a file upload is a
+// The codec is RFC 7578's multipart/form-data: the standard library's
+// mime/multipart reads it, and the codec frames what it writes itself, byte
+// for byte as mime/multipart would. Its native value is a [Form] of [Part]s — a file upload is a
 // part with a FileName and a ContentType; any other value travels as one
 // JSON-mediated part. The boundary belongs in the Content-Type header, which a
 // codec has nowhere to return, so [ContentType] recovers the header value from

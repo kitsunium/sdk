@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/toml"
 )
@@ -504,15 +505,16 @@ func TestRefusalNeverQuotesTheDocument(t *testing.T) {
 	}
 }
 
-// TestTargetMustBeAPointer refuses a target the decoder cannot write to.
+// TestTargetMustBeAPointer refuses a target the decoder cannot write to with
+// the family's TARGET_INVALID (#1101), its type in the target field.
 func TestTargetMustBeAPointer(t *testing.T) {
 	t.Parallel()
 	var nilMap *map[string]any
 	//: a value, a nil pointer and nil.
 	for _, target := range []any{map[string]any{}, nilMap, nil} {
 		err := toml.New().Unmarshal([]byte("a = 1\n"), target)
-		//: refused, naming the problem.
-		if fieldOf(err, "problem") != "the target is not a non-nil pointer" {
+		//: refused, naming the type.
+		if !errs.HasCode(err, codec.CodeTargetInvalid) || fieldOf(err, "target") == "" {
 			t.Errorf("target %T: err = %v", target, err)
 		}
 	}
@@ -626,9 +628,9 @@ func TestSizeCap(t *testing.T) {
 	if fieldOf(err, "problem") != "the document is larger than the limit" || fieldOf(err, "limit") != "10485760" {
 		t.Errorf("err = %v %v", err, errs.FieldsOf(err))
 	}
-	//: one byte under the cap passes the size check: what refuses it is the missing target.
-	if err := toml.New().Unmarshal(doc[:10<<20], nil); fieldOf(err, "problem") != "the target is not a non-nil pointer" {
-		t.Errorf("at the cap, with no target: err = %v %v", err, errs.FieldsOf(err))
+	//: the target is checked first (#1101): a missing one is refused before the size.
+	if err := toml.New().Unmarshal(doc, nil); !errs.HasCode(err, codec.CodeTargetInvalid) {
+		t.Errorf("past the cap, with no target: err = %v %v", err, errs.FieldsOf(err))
 	}
 	//: and it decodes, wherever a 10 MiB decode fits the budget.
 	if testing.CoverMode() == "" {
@@ -704,5 +706,45 @@ func TestFloatsAndSpecials(t *testing.T) {
 	//: underscores in a float.
 	if got["j"] != 1000.5e10 {
 		t.Errorf("float with underscores: %v", got["j"])
+	}
+}
+
+// TestDurationReadsItsTextAndTheOldIntegers pins #1126's reading side: a
+// Duration target takes the text time.ParseDuration reads; a string without
+// its unit is refused as a mismatch, located; and a bare integer — the
+// nanoseconds the encoder wrote before #1126 — still reads as nanoseconds, so
+// a document written then loads unchanged.
+func TestDurationReadsItsTextAndTheOldIntegers(t *testing.T) {
+	t.Parallel()
+	type target struct {
+		D time.Duration `toml:"d"`
+	}
+	for _, tc := range []struct {
+		doc  string
+		want time.Duration
+	}{
+		{"d = '30m'\n", 30 * time.Minute},
+		{"d = \"1h30m0s\"\n", 90 * time.Minute},
+		{"d = '-1.5s'\n", -1500 * time.Millisecond},
+		{"d = 1800000000000\n", 30 * time.Minute},
+	} {
+		var got target
+		//: accepted.
+		if err := toml.New().Unmarshal([]byte(tc.doc), &got); err != nil {
+			t.Errorf("Unmarshal(%q) = %v", tc.doc, err)
+			continue
+		}
+		//: the duration written.
+		if got.D != tc.want {
+			t.Errorf("Unmarshal(%q) = %v, want %v", tc.doc, got.D, tc.want)
+		}
+	}
+	for _, doc := range []string{"d = '30'\n", "d = 'soon'\n", "d = ''\n", "d = 1.5\n", "d = true\n"} {
+		var got target
+		err := toml.New().Unmarshal([]byte(doc), &got)
+		//: refused as UNMARSHAL_FAILED, at the key.
+		if !errs.HasReason(err, "UNMARSHAL_FAILED") || fieldOf(err, "key") != "d" || fieldOf(err, "line") != "1" {
+			t.Errorf("Unmarshal(%q) = %v %v, want a located UNMARSHAL_FAILED", doc, err, errs.FieldsOf(err))
+		}
 	}
 }

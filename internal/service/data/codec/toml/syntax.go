@@ -1,5 +1,7 @@
 package toml
 
+import "github.com/kitsunium/sdk/internal/core/data/codec"
+
 // Byte classes, one bit each: a byte may belong to several.
 const (
 	// classPrintable is the tab and printable ASCII, 0x20 to 0x7E: what a
@@ -43,10 +45,12 @@ const byteValues int = 256
 const (
 	// fieldProblem names what is wrong, in a fixed sentence.
 	fieldProblem string = "problem"
-	// fieldLine is the 1-based line of the problem.
-	fieldLine string = "line"
-	// fieldColumn is the 1-based column of the problem, in characters.
-	fieldColumn string = "column"
+	// fieldLine is the 1-based line of the problem, under the family's key
+	// codec.PositionOf reads (#1125).
+	fieldLine string = codec.FieldLine
+	// fieldColumn is the 1-based column of the problem, in characters, under
+	// the family's key.
+	fieldColumn string = codec.FieldColumn
 	// fieldKey is the dotted key of the value a target could not hold.
 	fieldKey string = "key"
 	// fieldType is the Go type that could not hold a value, or that has no

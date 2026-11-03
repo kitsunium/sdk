@@ -23,6 +23,14 @@ public. Keyed integrity belongs to the MAC / AEAD / signature ports.
 | `digest_writer.go` | `DigestWriter` — tees `Write` into a destination + a running hash; `Sum` / `SumHex` over everything written (`NewDigestWriter`) |
 | `verifying_reader.go` | `VerifyingReader` — hashes a stream and verifies it against an expected hex digest on the final (EOF) read only, surfacing the core `DigestMismatch` sentinel; never fails mid-stream (`NewVerifyingReader`) |
 
+`conformance_internal_test.go` is the hashers' conformance table (#1123): one
+row set — registered under its own key, `Size` and the length of `Sum`, the
+known answer for `"abc"`, a fresh state per `New` — over every hasher
+`corecrypto.AvailableHashers` lists, the per-hasher facts in `hasherFacts`. A
+hasher registered later fails the table until its size and known answer are
+stated there; it replaced five per-hasher test files that differed by two
+words.
+
 No `codes.go` / `errors.go` — dispatch errors (`UnknownHashAlgorithm`) and the
 `DigestMismatch` sentinel are minted by `core/crypto`; the `Hasher` schemes only
 construct stdlib `hash.Hash` values, which do not fail. `DigestWriter` /

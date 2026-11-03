@@ -18,6 +18,10 @@ const (
 	// maxVarintBytes is the worst-case LEB128 length for a uint64.
 	maxVarintBytes int = 10
 
+	// frameMinChunk is the first chunk a streamed record is rebuilt into;
+	// later chunks grow with the record, up to what the ceiling leaves.
+	frameMinChunk int = 512
+
 	// sliceHintCap clamps an attacker-declared length to a sane initial
 	// capacity hint so a malformed buffer cannot trigger a multi-million
 	// entry pre-allocation. The decode loop still grows on demand.

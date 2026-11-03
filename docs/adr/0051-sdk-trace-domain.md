@@ -471,6 +471,14 @@ Named here so a future reader finds the reason rather than the gap.
      `NumberDataPoint`, 8 on `HistogramDataPoint`) with the identifiers in **hex**,
      per §Decision 6; the Prometheus connector cannot carry one at all in the text
      exposition format and adds it to its enumerated losses (ADR 0044 §Decision 8).
+
+  *Resolved 2026-11-03 (#869)*, point by point: (1) `ExemplarValue` holds the
+  raw arrays; (2) the instrument siblings `ContextCounter.AddContext` and
+  `ContextHistogram.RecordContext` take the context — no ambient span — and the
+  engine reads it with `SpanContextFromContext`, `service/metrics` importing
+  `core/trace` while `core/metrics` still does not; (3) `IsSampled` (and
+  `IsValid`) is the filter; (4) OTLP/JSON writes `exemplars`, the ids in hex;
+  Prometheus lists the loss. See ADR 0044 §Deferred.
 - **Batching / a span processor.** A `SpanSink` receives one span at a time
   precisely so a batching processor is a sink that buffers and forwards, where its
   cost is visible. The current `Recorder` accumulates and hands out on `Collect`,

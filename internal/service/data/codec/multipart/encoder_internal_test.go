@@ -88,43 +88,46 @@ func successfulBodyLen(t *testing.T) int {
 	return buf.Len()
 }
 
-// TestPartHeader pins the RFC 7578 header block: the field name is always
-// present, filename and Content-Type are emitted only when set, and both
-// quoted parameters escape the backslash and the double quote.
-func TestPartHeader(t *testing.T) {
+// TestAppendHead pins the RFC 7578 header block: the field name is always
+// present, filename and Content-Type are written only when set, both quoted
+// parameters escape the backslash and the double quote, and a delimiter after
+// a part starts on a new line.
+func TestAppendHead(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name            string
-		part            PartValue
-		wantDisposition string
-		wantType        string
+		name string
+		part PartValue
+		open bool
+		want string
 	}
 	tests := []tc{
 		{
-			name:            "plain field",
-			part:            PartValue{Name: "field"},
-			wantDisposition: `form-data; name="field"`,
+			name: "plain field",
+			part: PartValue{Name: "field"},
+			want: "--b\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\n",
 		},
 		{
-			name:            "file part",
-			part:            PartValue{Name: "upload", FileName: "a.txt", ContentType: "text/plain"},
-			wantDisposition: `form-data; name="upload"; filename="a.txt"`,
-			wantType:        "text/plain",
+			name: "file part",
+			part: PartValue{Name: "upload", FileName: "a.txt", ContentType: "text/plain"},
+			want: "--b\r\nContent-Disposition: form-data; name=\"upload\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\n",
 		},
 		{
-			name:            "quotes and backslashes are escaped",
-			part:            PartValue{Name: `a"b`, FileName: `c\d`},
-			wantDisposition: `form-data; name="a\"b"; filename="c\\d"`,
+			name: "quotes and backslashes are escaped",
+			part: PartValue{Name: `a"b`, FileName: `c\d`},
+			want: "--b\r\nContent-Disposition: form-data; name=\"a\\\"b\"; filename=\"c\\\\d\"\r\n\r\n",
+		},
+		{
+			name: "after a part",
+			part: PartValue{Name: "next"},
+			open: true,
+			want: "\r\n--b\r\nContent-Disposition: form-data; name=\"next\"\r\n\r\n",
 		},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		header := partHeader(&tc.part)
-		if got := header.Get("Content-Disposition"); got != tc.wantDisposition {
-			t.Errorf("%s: disposition %q want %q", tc.name, got, tc.wantDisposition)
-		}
-		if got := header.Get("Content-Type"); got != tc.wantType {
-			t.Errorf("%s: content-type %q want %q", tc.name, got, tc.wantType)
+		e := &multipartEncoder{boundary: "b", open: tc.open}
+		if got := string(e.appendHead(nil, &tc.part)); got != tc.want {
+			t.Errorf("%s: got %q want %q", tc.name, got, tc.want)
 		}
 	}
 	for _, tc := range tests {

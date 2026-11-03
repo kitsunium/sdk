@@ -76,3 +76,11 @@ collection and its arena allocated again.
 `codec_integration_test.go` (`//go:build !race`, run by the alloc lane) pins
 the per-call ceilings over a three-entry `map[string]int`: Marshal 8, Unmarshal
 9, Append 7 — measured at 6, 7 and 5, where yaml.v3 needed 32, 60 and 31.
+
+## omitzero (#1103)
+
+The omitzero option adds a nil check per field that does not carry it, and is
+decided once per field when the type's plan is built. Against 740e7c1e, six
+interleaved passes of the two test binaries (linux/amd64,
+4 vCPU VM, go1.27.3), benchstat finds no change on Marshal/small, medium and large (1.616 → 1.571 µs, 15.88 → 15.80 µs, 1.566 → 1.612 ms, every one ~ at p ≥ 0.29; 1, 6 and 1 allocs both sides): the B/op and
+allocs/op columns are identical.

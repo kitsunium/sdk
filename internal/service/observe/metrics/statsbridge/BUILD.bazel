@@ -1,0 +1,54 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "statsbridge",
+    srcs = [
+        "doc.go",
+        "statsbridge.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/observe/metrics/statsbridge",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/data/queue",
+        "//internal/core/observe/metrics",
+        "//internal/core/observe/otel",
+        "//internal/kernel/clock",
+        "//internal/kernel/collections/cache",
+        "//internal/service/app/forward",
+        "//internal/service/data/docstore",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":statsbridge",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "statsbridge_test",
+    srcs = [
+        "gen_api_test.go",
+        "statsbridge_alloc_test.go",
+        "statsbridge_external_test.go",
+    ],
+    deps = [
+        ":statsbridge",
+        "//internal/core/data/queue",
+        "//internal/core/observe/metrics",
+        "//internal/core/observe/otel",
+        "//internal/kernel/collections/cache",
+        "//internal/service/app/forward",
+        "//internal/service/data/docstore",
+        "//internal/service/data/queue",
+        "//internal/service/observe/metrics",
+    ],
+)

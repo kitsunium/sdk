@@ -13,6 +13,7 @@ go_library(
         "rotate_interval.go",
         "rotate_manual.go",
         "rotating_sink.go",
+        "rotating_sink_compliance.go",
         "rotating_sink_config.go",
         "rotfile.go",
         "wrap.go",
@@ -49,6 +50,7 @@ go_test(
     srcs = [
         "backups_internal_test.go",
         "decode_internal_test.go",
+        "flush_batch_internal_test.go",
         "gen_api_test.go",
         "link_internal_test.go",
         "prune_internal_test.go",

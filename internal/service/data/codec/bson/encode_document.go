@@ -165,8 +165,8 @@ func (e *encoder) encodeStructElements(rv reflect.Value, p *typePlan, st encodeS
 func (e *encoder) encodeField(rv reflect.Value, f *fieldPlan, st encodeState) error {
 	fv, ok := fieldByIndex(rv, f.index)
 	//: an inline pointer on the path is nil, or the field is empty under
-	//: omitempty.
-	if !ok || (f.flags.has(flagOmitEmpty) && isEmptyField(fv, f.plan)) {
+	//: omitempty, or zero under omitzero — either option leaves it out.
+	if !ok || (f.flags.has(flagOmitEmpty) && isEmptyField(fv, f.plan)) || (f.zero != nil && f.zero(fv)) {
 		//: left out.
 		return nil
 	}

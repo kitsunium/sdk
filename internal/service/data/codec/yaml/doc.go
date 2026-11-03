@@ -34,9 +34,11 @@
 //
 // Struct fields use the yaml tag as gopkg.in/yaml.v3 does: a field's key is
 // its tag's name or its own name in lower case, "-" leaves it out, and the
-// flags are omitempty, flow (write the collection inline) and inline (merge a
-// struct's fields, or collect the remaining keys into a map with string
-// keys). An unknown key is ignored. A type may implement MarshalYAML() (any,
+// flags are omitempty, omitzero (leave the field out when it holds its type's
+// zero value, as encoding/json decides it: the type's IsZero() when it
+// declares one, else every bit at zero), flow (write the collection inline)
+// and inline (merge a struct's fields, or collect the remaining keys into a
+// map with string keys). An unknown key is ignored. A type may implement MarshalYAML() (any,
 // error), UnmarshalYAML(func(any) error) error, encoding.TextMarshaler and
 // encoding.TextUnmarshaler; time.Time and time.Duration are written and read
 // as text. An untyped target receives nil, bool, int, int64 or uint64,

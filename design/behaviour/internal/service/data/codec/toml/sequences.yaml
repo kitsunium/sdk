@@ -19,6 +19,8 @@ sequences:
         kind: actor
       - id: (*tomlCodec).Marshal
         kind: self
+      - id: codec
+        kind: package
       - id: scratch
         kind: package
       - id: encodeDocument
@@ -28,6 +30,14 @@ sequences:
       - id: buf.Write
         kind: value
     steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: codec.CheckValue(v)
+            to: codec
+          when: verr != nil
       - bind: buf
         eval: scratch.AcquireBuffer()
         to: scratch
@@ -85,6 +95,8 @@ sequences:
         kind: actor
       - id: unmarshal
         kind: self
+      - id: codec
+        kind: package
       - id: errs
         kind: package
       - id: reflect
@@ -100,21 +112,22 @@ sequences:
     steps:
       - opt:
           do:
+            - return: err
+          init:
+            bind: err
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: err != nil
+      - opt:
+          do:
             - return: |-
-                errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
+                errs.Wrap(coretoml.SizeExceeded, errs.WrapParams{Code: coretoml.CodeTOMLUnmarshalFailed},
                 			errs.String(fieldProblem, problemTooLarge), errs.Int(fieldLimit, maxDocumentBytes))
               to: errs
           when: len(data) > maxDocumentBytes
       - bind: rv
         eval: reflect.ValueOf(v)
         to: reflect
-      - opt:
-          do:
-            - return: |-
-                errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
-                			errs.String(fieldProblem, problemTarget), errs.String(fieldType, typeName(rv)))
-              to: errs
-          when: rv.Kind() != reflect.Pointer || rv.IsNil()
       - bind: p
         eval: parserPool.Get()
         to: parserPool.Get
@@ -132,21 +145,6 @@ sequences:
         eval: "decoder{p: p}"
       - return: d.root(v, rv.Elem())
         to: d.root
-  - of: typeName
-    participants:
-      - id: caller
-        kind: actor
-      - id: typeName
-        kind: self
-      - id: v.Type().String
-        kind: value
-    steps:
-      - opt:
-          do:
-            - return: "\"nil\""
-          when: "!v.IsValid()"
-      - return: v.Type().String()
-        to: v.Type().String
   - of: (*decoder).root
     participants:
       - id: caller
@@ -340,7 +338,7 @@ sequences:
       - id: errs
         kind: package
     steps:
-      - bind: line, _
+      - bind: line, column
         eval: position(d.p.data, int(d.p.nodes[n].at))
         to: position
       - bind: fields
@@ -349,6 +347,7 @@ sequences:
           		errs.String(fieldProblem, problem),
           		errs.String(fieldKey, d.keyPath(n)),
           		errs.Int(fieldLine, line),
+          		errs.Int(fieldColumn, column),
           		errs.String(fieldTOML, kindNames[d.p.nodes[n].kind]),
           	}
       - opt:
@@ -503,6 +502,8 @@ sequences:
         kind: internal
       - id: d.temporal
         kind: internal
+      - id: d.duration
+        kind: internal
       - id: d.native
         kind: internal
       - id: d.unmarshalText
@@ -522,6 +523,11 @@ sequences:
           when: node.kind >= kindDateTime
       - opt:
           do:
+            - return: d.duration(n, v)
+              to: d.duration
+          when: info.is(typeDuration) && node.kind == kindString
+      - opt:
+          do:
             - return: err
           init:
             bind: held, err
@@ -535,6 +541,30 @@ sequences:
           when: info.is(typeTextUnmarshaler)
       - return: d.fail(n, problemMismatch, v.Type())
         to: d.fail
+  - of: (*decoder).duration
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).duration
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: d.fail
+        kind: internal
+      - id: v.SetInt
+        kind: value
+    steps:
+      - bind: parsed, err
+        eval: time.ParseDuration(string(d.p.textBytes(&d.p.nodes[n])))
+        to: time
+      - opt:
+          do:
+            - return: d.fail(n, problemDuration, v.Type())
+              to: d.fail
+          when: err != nil
+      - eval: v.SetInt(int64(parsed))
+        to: v.SetInt
+      - return: nil
   - of: (*decoder).native
     participants:
       - id: caller
@@ -766,7 +796,7 @@ sequences:
       - id: errs
         kind: package
     steps:
-      - bind: line, _
+      - bind: line, column
         eval: position(d.p.data, int(d.p.nodes[n].at))
         to: position
       - return: |-
@@ -776,7 +806,7 @@ sequences:
           		Public:  coretoml.UnmarshalFailed.Public(),
           		Private: privateTextRefused,
           	}, errs.String(fieldProblem, problemText), errs.String(fieldKey, d.keyPath(n)),
-          		errs.Int(fieldLine, line), errs.String(fieldType, target.String()))
+          		errs.Int(fieldLine, line), errs.Int(fieldColumn, column), errs.String(fieldType, target.String()))
         to: errs
   - of: (*decoder).value
     participants:
@@ -1422,6 +1452,8 @@ sequences:
         kind: actor
       - id: (*tomlDecoder).Decode
         kind: self
+      - id: codec
+        kind: package
       - id: io
         kind: stdlib
       - id: errs
@@ -1429,6 +1461,14 @@ sequences:
       - id: unmarshal
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - opt:
           do:
             - return: io.EOF
@@ -2367,11 +2407,11 @@ sequences:
         kind: internal
       - id: appendSpecial
         kind: internal
+      - id: appendStringValue
+        kind: internal
       - id: appendMarshaledText
         kind: internal
       - id: e.appendIndirect
-        kind: internal
-      - id: appendStringValue
         kind: internal
       - id: e.appendArray
         kind: internal
@@ -2388,6 +2428,11 @@ sequences:
             - return: appendSpecial(b, v), nil
               to: appendSpecial
           when: info.is(typeSpecial)
+      - opt:
+          do:
+            - return: appendStringValue(b, time.Duration(v.Int()).String(), false)
+              to: appendStringValue
+          when: info.is(typeDuration)
       - opt:
           do:
             - return: appendMarshaledText(b, v, info)
@@ -5434,9 +5479,14 @@ sequences:
       - bind: line, column
         eval: position(p.data, at)
         to: position
-      - return: |-
-          errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
-          		errs.String(fieldProblem, problem), errs.Int(fieldLine, line), errs.Int(fieldColumn, column))
+      - bind: fields
+        eval: "[]errs.FieldValue{errs.String(fieldProblem, problem), errs.Int(fieldLine, line), errs.Int(fieldColumn, column)}"
+      - opt:
+          do:
+            - return: "errs.Wrap(coretoml.DepthExceeded, errs.WrapParams{Code: coretoml.CodeTOMLUnmarshalFailed}, fields...)"
+              to: errs
+          when: problem == problemTooDeep
+      - return: errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{}, fields...)
         to: errs
   - of: (*parser).newTable
     participants:
@@ -5716,6 +5766,12 @@ sequences:
               set: flags
               value: typeSpecial
           when: t == timeType || t == localDateType || t == localTimeType || t == localDateTimeType
+      - opt:
+          do:
+            - op: "|="
+              set: flags
+              value: typeDuration
+          when: t == durationType
       - return: flags
   - of: flagIf
     steps:

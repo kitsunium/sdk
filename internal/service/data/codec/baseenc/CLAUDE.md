@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-11-03T12:00:00Z -->
 # internal/service/data/codec/baseenc/
 
 ## Purpose
@@ -33,28 +33,30 @@ initialisers, no `init()` function.
   10 MiB `maxBaseEncBytes` cap; decode errors reuse `BaseEncDecodeFailed`.
 - **Base58 / Base62** are big-endian **base-conversion** encodings (whole input
   treated as one integer, divided down by the radix) — inherently **O(n²)**, so
-  they carry a tight cap enforced on **every** path: `maxConvBytes` (4 KiB) on
+  they carry a cap enforced on **every** path: `maxConvBytes` (64 KiB) on
   the raw bytes at Marshal/Append and at the streaming encode (`bufferingWriter`
-  Close), and `maxConvEncodedBytes` (8 KiB — the ~1.37× raw→encoded expansion)
+  Close), and `maxConvEncodedBytes` (128 KiB — the ~1.37× raw→encoded expansion)
   on the encoded text at Unmarshal and at the streaming decode
-  (`decodeAllReader`); all surface `BaseEncSizeExceeded`. They are for **short
-  identifiers** (keys, hashes, IDs); use base64 for bulk data and they are
+  (`decodeAllReader`); all surface `BaseEncSizeExceeded`. They are for
+  identifiers, keys, hashes and CIDs; use base64 for bulk data — they are
   excluded from the bulk streaming round-trip test for that reason. Decode
   errors reuse `BaseEncDecodeFailed`. Leading zero bytes map to leading
   `alphabet[0]` chars.
-  **What the cap actually admits is now measured** (`BENCH.md` §2): 1 KiB
-  encodes in 4.3 ms and 4 KiB — the cap itself — in **69 ms**, decoding in
-  22 ms. An earlier revision of this file said "a few KiB bounds the work to
-  the low-millisecond range"; that was wrong by more than an order of
-  magnitude, and since the cap is a CWE-400 defence, anyone considering
-  raising it needs the real exponent rather than that estimate. For contrast,
-  base64 encodes the same 4 KiB in 6.5 µs — a factor of 10 594.
+  **The arithmetic is limb-wise** (#898, `base_convert.go`): the magnitude is
+  held in 32-bit limbs and divided — on encode — or multiplied — on decode — by
+  58⁵ or 62⁵ per step through a uint64 accumulator, five digits at once, the
+  Bitcoin Core / multiformats approach; the two shipped radices divide by a
+  constant, which the compiler turns into a multiplication. Still quadratic,
+  about twenty-five times fewer steps: 4 KiB encodes in 2.5 ms (was 69 ms) and
+  decodes in 0.56 ms (was 22 ms) (`BENCH.md` §#898), which is what let the cap
+  rise from 4 KiB to 64 KiB, as #898 set it. Per byte of input an attacker
+  sends, the decode at the new cap costs less than at the old one.
+  `TestLimbConversionMatchesLongDivision` and `FuzzBaseConvRoundTrip` hold the
+  output byte for byte to the byte-wise long division it replaced, kept in the
+  tests as `referenceEncodeBaseN` / `referenceDecodeBaseN`.
   The base-conversion **decode** allocates twice per call regardless of size:
-  `decodeBaseN` sizes the magnitude buffer once (`len(s)` bytes always hold an
-  `len(s)`-digit base-radix number for any radix under 256) and `mulAddWindow`
-  grows the live window leftwards into that reserve. It must stay that way —
-  the previous shape prepended a fresh slice per new high byte and cost 2 049
-  allocations for a 1 KiB decode, 97.85 % of the package's allocated objects.
+  the limb accumulator is reserved once (radix^n < 2^(6n) for every radix below
+  64) and the output once.
 
 ## Marshal/Unmarshal pipeline
 

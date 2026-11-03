@@ -105,6 +105,28 @@ stack buffer, on a string no claim reaches today. `redact` and the logger's
 other rows are noise-bounded: the loaded machine moved Attrs4 and EscapePlain,
 whose strings are plain, by 30 % between two runs of the same binary.
 
+## Results — `AppendFloat`, ns/op (#1039)
+
+Taken on a different machine from the tables above — AMD EPYC 7351P, 4 Ps
+(`GOMAXPROCS=4`), linux/amd64, go1.27.3, other agents compiling — minimum of 4
+rounds at `-benchtime=50ms`. Read the ratios in a row, not across tables.
+`strconv-g` is `strconv.AppendFloat(dst, f, 'g', -1, 64)`, what the logger's
+JSON encoder and the OTLP transport called before (and whose spelling is not
+encoding/json's: `1e+06`, `1e-07`); `stdlib` is `json.Marshal(f)`.
+
+```
+                 jsonenc   strconv-g   stdlib            allocs (jsonenc / stdlib)
+plain 1234.5678     66.1        65.7    442.7            0 / 3
+million 1e6         65.0        59.0    398.1            0 / 3
+small 1.5e-8        74.5        62.3    424.5            0 / 3
+large 1e300         75.1        61.6    392.7            0 / 3
+```
+
+The spelling costs the cut-off comparison and, in exponent notation, the
+two-byte fix-up of a short exponent: 0 to 13 ns over `'g'`, inside this
+machine's noise on the plain row. Against `json.Marshal` it is five to six
+times faster and allocates nothing.
+
 ## What the figures do not settle
 
 - **x86-64.** Only the SWAR form of `swar` was measured, on arm64. The first

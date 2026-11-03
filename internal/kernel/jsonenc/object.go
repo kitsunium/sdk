@@ -52,6 +52,20 @@ func (o Object) Uint(key string, v uint64) Object {
 	return o
 }
 
+// Float writes the member key with f as [AppendFloat] writes it, or with
+// the literal null when f is NaN or infinite, which JSON cannot write
+// as a number.
+func (o Object) Float(key string, f float64) Object {
+	o = o.key(key)
+	var ok bool
+	o.dst, ok = AppendFloat(o.dst, f)
+	//: not a number JSON can write: the member still holds a value.
+	if !ok {
+		o.dst = append(o.dst, "null"...)
+	}
+	return o
+}
+
 // Bool writes the member key with the literal true or false.
 func (o Object) Bool(key string, v bool) Object {
 	o = o.key(key)

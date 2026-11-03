@@ -15,9 +15,11 @@ var (
 
 // walker describes one type. path holds the named types being described on
 // the way down, so a type that reaches itself is described once and then
-// referenced.
+// referenced. v2 describes what encoding/json/v2 writes under its own
+// default options instead of encoding/json's (OfV2, #893).
 type walker struct {
 	path map[reflect.Type]bool
+	v2   bool
 }
 
 // newWalker returns a walker with nothing on its path.
@@ -51,15 +53,18 @@ func (w *walker) shape(t reflect.Type, addressable bool) *ShapeValue {
 		return element
 	}
 	//: a type described by what it writes.
-	if known, isKnown := knownShape(t); isKnown {
+	if known, isKnown := w.knownShape(t); isKnown {
 		return known
 	}
+	//: json/v2's own options call a pointer method on every value: the
+	//: encoder makes a copy addressable when it must.
+	methodsReach := addressable || w.v2
 	//: a type that writes itself: the kind is its own business.
-	if t.Kind() != reflect.Interface && writesJSON(t, addressable) {
+	if t.Kind() != reflect.Interface && writesJSON(t, methodsReach) {
 		return named(t, Any)
 	}
 	//: a type that writes itself as text: a string.
-	if t.Kind() != reflect.Interface && writesText(t, addressable) {
+	if t.Kind() != reflect.Interface && writesText(t, methodsReach) {
 		return named(t, String)
 	}
 	//: laid out by reflection.
@@ -81,7 +86,7 @@ func (w *walker) byKind(t reflect.Type, addressable bool) *ShapeValue {
 		w.slice(shape, t)
 	//: always an array — even of bytes — never null.
 	case reflect.Array:
-		shape.Kind, shape.Items = Array, w.shape(t.Elem(), addressable)
+		w.array(shape, t, addressable)
 	//: an object keyed by the map's keys, or refused for a key it cannot write.
 	case reflect.Map:
 		w.mapOf(shape, t)
@@ -124,7 +129,8 @@ func scalar(shape *ShapeValue, t reflect.Type) {
 // slice fills shape for a slice: a base64 string for bytes that write nothing
 // of their own, an array otherwise; either may be null.
 func (w *walker) slice(shape *ShapeValue, t reflect.Type) {
-	shape.Nullable = true
+	//: json/v2 writes a nil slice as [] — a nil []byte as "".
+	shape.Nullable = !w.v2
 	element := t.Elem()
 	//: bytes — named or not — unless each byte encodes itself.
 	if element.Kind() == reflect.Uint8 && !hasAnyMethod(element) {
@@ -132,6 +138,18 @@ func (w *walker) slice(shape *ShapeValue, t reflect.Type) {
 		return
 	}
 	shape.Kind, shape.Items = Array, w.shape(element, true)
+}
+
+// array describes an array: its elements, or — under json/v2, which writes
+// a byte array as a byte slice is written — a base64 string.
+func (w *walker) array(shape *ShapeValue, t reflect.Type, addressable bool) {
+	//: [N]byte under json/v2.
+	if w.v2 && t.Elem().Kind() == reflect.Uint8 && !hasAnyMethod(t.Elem()) {
+		shape.Kind, shape.Format = String, "base64"
+		//: a string.
+		return
+	}
+	shape.Kind, shape.Items = Array, w.shape(t.Elem(), addressable)
 }
 
 // mapOf fills shape for a map: an object whose values are the map's, or
@@ -142,12 +160,19 @@ func (w *walker) mapOf(shape *ShapeValue, t reflect.Type) {
 		shape.Kind = Unsupported
 		return
 	}
-	shape.Kind, shape.Nullable, shape.Values = Map, true, w.shape(t.Elem(), false)
+	//: json/v2 writes a nil map as {}.
+	shape.Kind, shape.Nullable, shape.Values = Map, !w.v2, w.shape(t.Elem(), false)
 }
 
 // object fills shape for a struct with its members and, when an embedded map
 // collects extra members, their value shape.
 func (w *walker) object(shape *ShapeValue, t reflect.Type, addressable bool) {
+	//: json/v2 refuses a struct whose fields its own options cannot read.
+	if w.v2 && structRefusedV2(t, map[reflect.Type]bool{}) {
+		shape.Kind = Unsupported
+		//: refused whole.
+		return
+	}
 	shape.Kind = Object
 	written, extra := members(t)
 	//: in the order encoding/json writes them.
@@ -155,11 +180,16 @@ func (w *walker) object(shape *ShapeValue, t reflect.Type, addressable bool) {
 		//: a field inherits the struct's addressability, unless an embedded
 		//: pointer on its path makes it addressable.
 		fieldAddressable := addressable || throughPointer(t, member.index)
+		memberShape := w.shape(member.typ, fieldAddressable)
+		//: json/v2 refuses the string option on what is not a number.
+		if w.v2 && member.opts.quoted && refusesQuoting(member.typ) {
+			memberShape = named(member.typ, Unsupported)
+		}
 		shape.Fields = append(shape.Fields, FieldValue{
 			Name:     member.name,
-			Shape:    w.shape(member.typ, fieldAddressable),
-			Optional: member.optional(t),
-			Quoted:   member.quoted(fieldAddressable),
+			Shape:    memberShape,
+			Optional: w.optional(member, t),
+			Quoted:   w.quoted(member, fieldAddressable),
 			Rules:    member.tag.Get("validate"),
 			GoName:   member.goName,
 			Tag:      member.tag,
@@ -186,7 +216,12 @@ func (w *walker) extraValues(extra reflect.Type) *ShapeValue {
 // knownShape describes the types whose kind would mislead: time.Time writes a
 // date-time string through its own method, time.Duration an integer count of
 // nanoseconds, json.Number a number from a string.
-func knownShape(t reflect.Type) (*ShapeValue, bool) {
+func (w *walker) knownShape(t reflect.Type) (*ShapeValue, bool) {
+	//: json/v2 gives a time.Duration no default representation: it refuses it.
+	if w.v2 && t == durationType {
+		//: refused whole.
+		return named(t, Unsupported), true
+	}
 	//: the three types whose kind would mislead.
 	switch t {
 	//: RFC 3339, through its MarshalJSON.

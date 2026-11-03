@@ -36,16 +36,24 @@
 //
 // This is the ONLY read path in the package: Unmarshal drives this decoder
 // over a bytes.Reader, so a body parsed from memory and a body streamed off a
-// socket go through identical code and identical bounds.
+// socket go through identical code and identical bounds. mime/multipart reads
+// the body through a counter that charges every byte it pulls — delimiters
+// and the header blocks it parses itself included — against MaxTotalBytes,
+// so no header block is bounded only by the GODEBUG multipartmaxheaders
+// defaults a process can lift at run time.
 //
 // Package multipart — reading a part's Content-Disposition, and the one rule
 // its filename is reduced by on every operating system.
 //
-// Package multipart — adapts mime/multipart.Writer to codec.Encoder.
+// Package multipart — the codec.Encoder.
 //
 // This is the ONLY write path in the package: Marshal and Append both drive
 // this encoder over a scratch buffer, so a body built in memory and a body
-// streamed to a socket go through identical code and identical bounds.
+// streamed to a socket go through identical code and identical bounds. It
+// writes each part's delimiter and header block itself, the bytes
+// mime/multipart.Writer.CreatePart writes for the same header, into one
+// reused buffer, and charges every byte it writes against MaxTotalBytes,
+// keeping room for the closing delimiter.
 //
 // Package multipart — the two value types that model a body: one section
 // (PartValue) and the container that frames them (FormValue). They live in one
@@ -56,8 +64,9 @@
 // is the SDK surface most exposed to a hostile stream: unbounded, a single
 // crafted part drives io.ReadAll to an OOM, and a boundary flood does the same
 // with a very large number of empty parts. Three bounds close both doors
-// (per-part bytes, part count, aggregate bytes); the encoder enforces the
-// identical set so the codec never emits a body it would refuse to read back.
+// (per-part bytes, part count, whole-body bytes — delimiters and headers
+// included); the encoder enforces the identical set so the codec never emits
+// a body it would refuse to read back.
 //
 // Package multipart — compile-time proof that the concrete types satisfy the
 // contracts this package advertises. Kept in its own *_compliance.go file so

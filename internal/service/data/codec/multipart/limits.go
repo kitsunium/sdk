@@ -17,9 +17,10 @@ const DefaultMaxPartBytes int64 = 32 << 20 // 32 MiB
 // bounds alone do not constrain it on a streaming reader.
 const DefaultMaxParts int = 1024
 
-// DefaultMaxTotalBytes caps the sum of every part body at 64 MiB. Without it
-// the real ceiling would be DefaultMaxPartBytes × DefaultMaxParts, which is
-// not a bound anybody chose.
+// DefaultMaxTotalBytes caps a whole body at 64 MiB — every byte of it,
+// delimiters and part headers included. Without it the real ceiling would
+// be DefaultMaxPartBytes × DefaultMaxParts, which is not a bound anybody
+// chose.
 const DefaultMaxTotalBytes int64 = 64 << 20 // 64 MiB
 
 // LimitsConfig bounds what a multipart body may materialise. Every field is a
@@ -39,7 +40,9 @@ type LimitsConfig struct {
 	MaxPartBytes int64
 	// MaxParts caps the number of parts; 0 selects DefaultMaxParts.
 	MaxParts int
-	// MaxTotalBytes caps the sum of part bodies; 0 selects DefaultMaxTotalBytes.
+	// MaxTotalBytes caps the whole body — every byte read or written,
+	// delimiters and part headers included, not only the part bodies; 0
+	// selects DefaultMaxTotalBytes.
 	MaxTotalBytes int64
 }
 
