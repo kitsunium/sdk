@@ -1,0 +1,158 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - batch
+      - newBatch
+      - (*batch).markFull
+      - (*batch).settle
+    name: batch.go
+  - decls:
+      - Group
+      - New
+      - (*Group).Do
+      - (*Group).join
+      - (*Group).lead
+      - (*Group).seal
+      - (*Group).Close
+    name: commit.go
+  - decls:
+      - Config
+    name: config.go
+  - decls: []
+    name: doc.go
+functions:
+  - doc: |-
+      newBatch returns an empty batch that flushes after the batch whose done is
+      after, nil for the first.
+    name: newBatch
+    params: after <-chan struct{}
+    results: "*batch[T]"
+    typeParams: T any
+  - name: New
+    params: flush func(ctx context.Context, items []T) error, cfg Config
+    results: "*Group[T]"
+    typeParams: T any
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/concur/commit
+  name: commit
+  purpose: "Package commit provides Group, a group commit: concurrent callers each contribute an item, one goroutine runs a flush over all of them, and every caller receives that flush's verdict."
+types:
+  - doc: |-
+      batch is one flush's worth of items, and the verdict every participant
+      waits for.
+
+      items is appended to under Group.mu until the batch is sealed, and read by
+      the flush only after: the seal is the hand-off. err and panicked are
+      written by the leading goroutine before done is closed, which is the
+      happens-before edge every waiter reads them after.
+    fields:
+      - name: items
+        type: "[]T"
+      - doc: full is closed when the batch reaches MaxItems, cutting the wait short.
+        name: full
+        type: chan struct{}
+      - doc: filled closes full once, however many callers find the batch full.
+        name: filled
+        type: sync.Once
+      - doc: "after is the previous batch's done: flushes run one at a time, in order."
+        name: after
+        type: <-chan struct{}
+      - doc: done is closed once err and panicked are final.
+        name: done
+        type: chan struct{}
+      - doc: settled closes done once.
+        name: settled
+        type: sync.Once
+      - name: err
+        type: error
+      - name: panicked
+        type: any
+    kind: struct
+    methods:
+      - doc: markFull closes full once. Caller holds Group.mu.
+        name: markFull
+        recv: b *batch[T]
+      - doc: |-
+          settle closes done once: err and panicked are final, every waiter may read
+          them.
+        name: settle
+        recv: b *batch[T]
+    name: batch
+    typeParams: T any
+  - fields:
+      - name: flush
+        type: func(ctx context.Context, items []T) error
+      - name: cfg
+        type: Config
+      - name: clk
+        type: clock.Waiter
+      - doc: mu guards pending, tail and closed.
+        name: mu
+        type: sync.Mutex
+      - doc: pending is the batch accepting items; nil when none is.
+        name: pending
+        type: "*batch[T]"
+      - doc: |-
+          tail is the most recent batch's done, which the next batch flushes
+          after; nil before the first.
+        name: tail
+        type: <-chan struct{}
+      - doc: closed is set by Close.
+        name: closed
+        type: bool
+    kind: struct
+    methods:
+      - name: Do
+        params: ctx context.Context, item T
+        recv: g *Group[T]
+        results: error
+      - doc: |-
+          join appends item to the pending batch, starting one — and the goroutine
+          that will flush it — when none is pending.
+        name: join
+        params: ctx context.Context, item T
+        recv: g *Group[T]
+        results: "*batch[T], error"
+      - doc: |-
+          lead gathers the batch for MaxWait or until it is full, waits for the flush
+          before it, seals it and flushes it, then publishes the verdict.
+        name: lead
+        params: ctx context.Context, current *batch[T]
+        recv: g *Group[T]
+      - doc: seal stops current from taking items and returns them.
+        name: seal
+        params: current *batch[T]
+        recv: g *Group[T]
+        results: "[]T"
+      - name: Close
+        recv: g *Group[T]
+    name: Group
+    typeParams: T any
+  - fields:
+      - doc: |-
+          MaxItems seals a batch once it holds this many items: a full batch is
+          flushed without waiting out MaxWait, and the next caller starts another.
+          Zero or negative means no cap.
+        name: MaxItems
+        type: int
+      - doc: |-
+          MaxWait is how long a batch gathers followers after its first item before
+          it is flushed. Zero means no wait: the batch is flushed as soon as the
+          one before it has been — coalescing then comes from the flushes' own
+          duration. Negative is read as zero.
+        name: MaxWait
+        type: time.Duration
+      - doc: |-
+          Clock is what MaxWait is waited on. nil means clock.System; a
+          clock.ManualClock makes the gathering deterministic in a test.
+        name: Clock
+        type: clock.Waiter
+    kind: struct
+    name: Config

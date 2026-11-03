@@ -349,3 +349,50 @@ func countOf(roles []string, role string) int {
 	}
 	return n
 }
+
+// TestAWriteIsReadBackByItsOwnTransaction pins the SQL engine's half of the
+// consistency the ports state (#836): a write is visible to its own
+// transaction at once — a Get, a Lookup and a Revision under the context that
+// carries it read what it wrote, before the commit — on every dialect.
+func TestAWriteIsReadBackByItsOwnTransaction(t *testing.T) {
+	t.Parallel()
+	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
+		fx := openSQL(t, dialect)
+		must(t, fx.tm.Transact(t.Context(), coresql.TxOptionsValue{}, func(ctx context.Context, _ coresql.Executor) error {
+			must(t, fx.store.Put(ctx, account{ID: "acc_1", Email: "ada@x.dev"}))
+			if got, err := fx.store.Get(ctx, "acc_1"); err != nil || got.Email != "ada@x.dev" {
+				t.Fatalf("Get inside the writing transaction = %+v, %v, want the write", got, err)
+			}
+			if got, err := fx.store.Lookup(ctx, "email", "ada@x.dev"); err != nil || got.ID != "acc_1" {
+				t.Fatalf("Lookup inside the writing transaction = %+v, %v, want the write", got, err)
+			}
+			if _, rev, err := fx.store.Revision(ctx, "acc_1"); err != nil || rev == "" {
+				t.Fatalf("Revision inside the writing transaction = %q, %v", rev, err)
+			}
+			return nil
+		}))
+	})
+}
+
+// TestAnUncommittedWriteIsInvisibleToAnotherTransaction pins the other half
+// (#836): until its transaction commits, a write is invisible to a read that
+// runs elsewhere — on the pool, under a context carrying no transaction — and
+// visible to it after, on every dialect.
+func TestAnUncommittedWriteIsInvisibleToAnotherTransaction(t *testing.T) {
+	t.Parallel()
+	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
+		fx := openSQL(t, dialect)
+		outside := t.Context()
+		must(t, fx.tm.Transact(t.Context(), coresql.TxOptionsValue{}, func(ctx context.Context, _ coresql.Executor) error {
+			must(t, fx.store.Put(ctx, account{ID: "acc_1", Email: "ada@x.dev"}))
+			_, err := fx.store.Get(outside, "acc_1")
+			requireCode(t, err, coredocstore.CodeDocumentNotFound, "Get of an uncommitted write from another transaction")
+			_, err = fx.store.Lookup(outside, "email", "ada@x.dev")
+			requireCode(t, err, coredocstore.CodeDocumentNotFound, "Lookup of an uncommitted write from another transaction")
+			return nil
+		}))
+		if got, err := fx.store.Get(outside, "acc_1"); err != nil || got.Email != "ada@x.dev" {
+			t.Fatalf("Get after the commit = %+v, %v, want the write", got, err)
+		}
+	})
+}

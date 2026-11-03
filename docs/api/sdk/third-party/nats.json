@@ -1,0 +1,297 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/third-party/nats",
+  "dir": "third-party/nats",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "queue",
+      "dir": "queue",
+      "layer": "thirdparty",
+      "doc": "Package queue is a core/data/queue Broker over a NATS JetStream stream and\none durable pull consumer (ADR 0054's deferred connector, ADR 0211), in the\nthird-party/nats vendor module.\n\n# Mapping\n\nPublish is a JetStream publication the stream acknowledges (PubAck); the\nstream sequence is the message's ID, and the enqueue instant, read from\nConfig.Clock, travels in a header. Receive is a Fetch of up to max\nmessages that waits for none; the delivery count is the server's\nNumDelivered. Ack is an acknowledgement the server confirms (a double\nacknowledgement); Nack is a NakWithDelay by the retry delay, or, once the\nmessage has been delivered MaxDeliveries times, a publication on the\ndead-letter subject with its cause followed by Term — two requests, so a\ncrash between them dead-letters the message twice and never loses it. The\nconsumer has no MaxDeliver of its own: the broker owns the decision to\ndead-letter (ADR 0054), and a message whose leases all lapsed is\ndead-lettered by the Receive that finds it past its budget, its Reason\nLEASE_EXPIRED. Kafka is not this port — it has no per-message\nacknowledgement — and belongs to data/stream.\n\n# Whose clock is the lease\n\nThe server redelivers on its own clock once AckWait passes. The broker\nreads Config.Clock before each Fetch, so the deadline it hands out never\nfalls after the server's, and the lease is the policy's visibility timeout\nor the consumer's AckWait, whichever is shorter. It refuses an Ack, Nack,\nExtend or Reject at or past that deadline with\ncore/data/queue.LeaseExpired before anything is sent, so a consumer that\nlost its lease learns it whatever the server did meanwhile. A receipt is\ngood with the broker that issued it, whose table holds the delivery that\nacknowledges it; one another broker minted is\ncore/data/queue.UnknownReceipt.\n\n# The stream\n\nConfig.CreateStream creates a work-queue stream over Subject and\nDeadLetterSubject, so an acknowledged message leaves it and a dead letter,\nwhich no consumer reads, stays; and the durable consumer, filtered on\nSubject, its AckWait the policy's visibility timeout. A stream made by\nhand must capture both subjects too: DeadLetters reads the dead-letter\nsubject back from the same stream by direct get, without consuming it.\n\n# Capabilities\n\nWaker (a publication or hand-back by this process, and the next deadline\nit knows of), LeaseExtender (InProgress resets AckWait, so a renewal lasts\nthe shorter of the asked duration and AckWait), Rejecter, DelayedNacker\n(NakWithDelay), OncePublisher (Nats-Msg-Id; JetStream deduplicates over\nthe stream's duplicate window and no other, so the window asked for must\nbe that one) and DeadLetterReader. Not Releaser: the server's delivery\ncount cannot be given back. Every failed request is the package's\nsentinel, core/data/queue.QueueBackendFailed in its trail.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.CodeJetStreamConsumerMissing",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "CodeJetStreamConsumerMissing",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221443",
+      "code": {
+        "value": "0.3.97.3"
+      },
+      "doc": "CodeJetStreamConsumerMissing identifies a durable consumer the stream does not have.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.CodeJetStreamMisconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "CodeJetStreamMisconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221441",
+      "code": {
+        "value": "0.3.97.1"
+      },
+      "doc": "CodeJetStreamMisconfigured identifies a Config NewJetStream refuses\nbefore any request: no connection, an empty stream, subject or consumer\nname, a policy JetStream cannot honour.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.CodeJetStreamPublishUnacked",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "CodeJetStreamPublishUnacked",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221445",
+      "code": {
+        "value": "0.3.97.5"
+      },
+      "doc": "CodeJetStreamPublishUnacked identifies a publication the stream did not\nacknowledge: it may or may not be stored.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.CodeJetStreamRequestFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "CodeJetStreamRequestFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221446",
+      "code": {
+        "value": "0.3.97.6"
+      },
+      "doc": "CodeJetStreamRequestFailed identifies any other JetStream failure, the cause kept in the chain.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.CodeJetStreamServerUnreachable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "CodeJetStreamServerUnreachable",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221444",
+      "code": {
+        "value": "0.3.97.4"
+      },
+      "doc": "CodeJetStreamServerUnreachable identifies a connection that is closed or a request that timed out.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.CodeJetStreamStreamMissing",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "CodeJetStreamStreamMissing",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221442",
+      "code": {
+        "value": "0.3.97.2"
+      },
+      "doc": "CodeJetStreamStreamMissing identifies a stream the server does not have\nwhile Config.CreateStream is false.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.Config",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "Config",
+      "spelled": "struct{Conn *nats.Conn; Clock clock.Clock; Stream string; Subject string; DeadLetterSubject string; Consumer string; Policy corequeue.PolicyValue; Timeout time.Duration; CreateStream bool}",
+      "canonical": "struct{Conn *github.com/nats-io/nats.go.Conn; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; Stream string; Subject string; DeadLetterSubject string; Consumer string; Policy github.com/kitsunium/sdk/internal/core/data/queue.PolicyValue; Timeout time.Duration; CreateStream bool}",
+      "fields": [
+        {
+          "name": "Conn",
+          "type": "*nats.Conn",
+          "doc": "Conn is the caller's connection; the broker never closes it. Required.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Clock",
+          "doc": "Clock stamps the enqueue instant and the lease deadlines a receipt\ncarries, and judges them. Nil means clock.System.\n"
+        },
+        {
+          "name": "Stream",
+          "type": "string",
+          "doc": "Stream names the JetStream stream that holds the queue. Required.\n"
+        },
+        {
+          "name": "Subject",
+          "type": "string",
+          "doc": "Subject is the subject messages are published on; the stream must\ncapture it. Required.\n"
+        },
+        {
+          "name": "DeadLetterSubject",
+          "type": "string",
+          "doc": "DeadLetterSubject is the subject a message is published on, with its\ncause, once it is dead-lettered; the stream must capture it too, and\nthe consumer never reads it. Required.\n"
+        },
+        {
+          "name": "Consumer",
+          "type": "string",
+          "doc": "Consumer is the durable pull consumer every broker of the queue shares. Required.\n"
+        },
+        {
+          "name": "Policy",
+          "type": "corequeue.PolicyValue",
+          "doc": "Policy is the delivery discipline: VisibilityTimeout is AckWait. Its\nzero value is refused, as for every broker.\n"
+        },
+        {
+          "name": "Timeout",
+          "type": "time.Duration",
+          "doc": "Timeout bounds every request that waits on the server — a publication's\nPubAck, an acknowledgement's confirmation. Zero is refused (ADR 0031).\n"
+        },
+        {
+          "name": "CreateStream",
+          "type": "bool",
+          "doc": "CreateStream creates the stream, over Subject and DeadLetterSubject,\nand the consumer, when first use finds them missing. False answers\nStreamMissing or ConsumerMissing instead.\n"
+        }
+      ],
+      "doc": "Config configures NewJetStream: the connection, the stream, its subject and\ndead-letter subject, the durable consumer, and the delivery discipline.\n",
+      "file": "queue/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.ConsumerMissing",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "ConsumerMissing",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.97.3",
+        "reason": "CONSUMER_MISSING",
+        "public": "The queue's consumer does not exist"
+      },
+      "doc": "ConsumerMissing reports a durable consumer the stream does not have.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.DefaultDuplicateWindow",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "DefaultDuplicateWindow",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "120000000000",
+      "doc": "DefaultDuplicateWindow is the duplicate window of a stream\nConfig.CreateStream creates — JetStream's own default — and so the one\nwindow PublishOnce accepts on such a stream.\n",
+      "file": "queue/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.JetStreamMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "JetStreamMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.97.1",
+        "reason": "JET_STREAM_MISCONFIGURED",
+        "public": "The JetStream queue broker is misconfigured"
+      },
+      "doc": "JetStreamMisconfigured refuses a Config NewJetStream cannot build a broker from.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.NewJetStream",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "NewJetStream",
+      "spelled": "func(cfg Config) (broker corequeue.Broker, err error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/third-party/nats/queue.Config) (broker github.com/kitsunium/sdk/internal/core/data/queue.Broker, err error)",
+      "doc": "NewJetStream returns a broker over cfg.Stream and its durable consumer\ncfg.Consumer. It sends no request: the stream and the consumer are looked\nup, or created when cfg.CreateStream asks, on first use. A policy the\nbroker cannot honour is core/data/queue.QueueMisconfigured; a missing\nconnection or name is JetStreamMisconfigured.\n",
+      "file": "queue/broker.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.PublishUnacked",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "PublishUnacked",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.97.5",
+        "reason": "PUBLISH_UNACKED",
+        "public": "The queue did not confirm the message"
+      },
+      "doc": "PublishUnacked reports a publication the stream did not acknowledge.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.RequestFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "RequestFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.97.6",
+        "reason": "REQUEST_FAILED",
+        "public": "The queue request failed"
+      },
+      "doc": "RequestFailed wraps any other JetStream failure.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.ServerUnreachable",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "ServerUnreachable",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.97.4",
+        "reason": "SERVER_UNREACHABLE",
+        "public": "The queue server could not be reached"
+      },
+      "doc": "ServerUnreachable wraps a closed connection or a timed-out request.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/nats/queue.StreamMissing",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/nats/queue",
+      "name": "StreamMissing",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.97.2",
+        "reason": "STREAM_MISSING",
+        "public": "The queue's stream does not exist"
+      },
+      "doc": "StreamMissing reports a stream the server does not have.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    }
+  ]
+}

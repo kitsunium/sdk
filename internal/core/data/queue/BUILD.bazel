@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "queue",
     srcs = [
+        "bulk.go",
         "capability.go",
         "doc.go",
         "errors.go",
@@ -12,6 +13,7 @@ go_library(
         "gen_ports.go",
         "message.go",
         "policy.go",
+        "priority.go",
         "queue.go",
         "retry.go",
         "wake.go",
@@ -21,7 +23,10 @@ go_library(
         "//:__subpackages__",
         "//internal/core:core_consumers",
     ],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/kernel/backoff",
+        "//internal/kernel/errs",
+    ],
 )
 
 alias(
@@ -44,6 +49,7 @@ go_test(
     ],
     deps = [
         ":queue",
+        "//internal/kernel/backoff",
         "//internal/kernel/errs",
     ],
 )

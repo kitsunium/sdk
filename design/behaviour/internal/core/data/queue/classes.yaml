@@ -2,6 +2,33 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      The four outcomes [Acker.AckMany] reports for one receipt. The zero is
+      the one a broker never reached, so a result cut short by a failure says
+      which receipts it did not try rather than reading as acknowledged.
+    grouped: true
+    items:
+      - doc: |-
+          AckNotAttempted is the zero AckOutcome: the broker returned an error
+          before it reached this receipt, which is still held — or lapsed — as it
+          was before the call.
+        name: AckNotAttempted
+        type: AckOutcome
+        value: iota
+      - doc: |-
+          AckAcknowledged is a receipt whose message was removed for good, as
+          [Broker.Ack] removes it.
+        name: AckAcknowledged
+      - doc: |-
+          AckLeaseExpired is a receipt whose lease had lapsed, or whose message
+          another call already removed or moved: nothing was removed, as
+          [Broker.Ack] answers [LeaseExpired].
+        name: AckLeaseExpired
+      - doc: |-
+          AckUnknownReceipt is a receipt this broker never issued or cannot parse:
+          nothing was removed, as [Broker.Ack] answers [UnknownReceipt].
+        name: AckUnknownReceipt
+    name: AckNotAttempted
+  - doc: |-
       exitDataErr matches sysexits EX_DATAERR (65). A failure a handler declares
       no retry can fix is almost always the message itself — a payload that does
       not decode, a reference to something since deleted — and the same bytes are
@@ -60,6 +87,37 @@ constants:
         value: 100 * 365 * 24 * time.Hour
     name: MaxDeadlineOffset
   - doc: |-
+      The five levels a message is published at ([PriorityPublisher]), a
+      closed set: a Receive hands out the visible messages of the highest
+      level first, then by visibility, then by identifier — strict, with no
+      ageing, so a lower level is starved for as long as a higher one has a
+      visible message.
+    grouped: true
+    items:
+      - doc: |-
+          PriorityLowest is the lowest level: received only when no other level has a
+          visible message.
+        name: PriorityLowest
+        type: Priority
+        value: iota - 2
+      - doc: |-
+          PriorityLow is below the normal level: bulk work that may wait behind the
+          normal stream.
+        name: PriorityLow
+      - doc: |-
+          PriorityNormal is the zero Priority, the level [Broker.Publish] publishes at
+          and every message written before priorities existed reads as.
+        name: PriorityNormal
+      - doc: |-
+          PriorityHigh is above the normal level: received before any visible normal
+          message.
+        name: PriorityHigh
+      - doc: |-
+          PriorityHighest is the highest level: received before any other visible
+          message.
+        name: PriorityHighest
+    name: PriorityLowest
+  - doc: |-
       retryAfterField names the field RetryAfter carries its delay in, as integer
       nanoseconds. RetryAfterOf is its one reader, so the spelling is this
       package's alone.
@@ -82,6 +140,13 @@ constants:
     name: delayBase
 files:
   - decls:
+      - AckOutcome
+      - AckNotAttempted
+      - AckResultValue
+      - PurgeValue
+      - StatsValue
+    name: bulk.go
+  - decls:
       - DeadLetterValue
     name: capability.go
   - decls: []
@@ -102,9 +167,18 @@ files:
       - MaxDeadlineOffset
       - PolicyValue
       - PolicyValue.Validate
+      - PolicyValue.validateLifetimes
+      - lifetimeRefused
+      - PolicyValue.validateRetryJitter
+      - PolicyValue.validateJitterShape
+      - jitterRefused
       - PolicyValue.validateRetryGrowth
       - PolicyValue.Normalized
     name: policy.go
+  - decls:
+      - Priority
+      - PriorityLowest
+    name: priority.go
   - decls:
       - Handler
       - NackValue
@@ -121,6 +195,16 @@ files:
       - WakeValue
     name: wake.go
 functions:
+  - doc: |-
+      lifetimeRefused is QueueMisconfigured naming field when value is negative
+      or past MaxDeadlineOffset, and nil when it lies in [0, MaxDeadlineOffset].
+    name: lifetimeRefused
+    params: field string, value time.Duration
+    results: error
+  - doc: jitterRefused is QueueMisconfigured naming field and what is wrong with it.
+    name: jitterRefused
+    params: field, problem string
+    results: error
   - name: DoNotRetry
     params: cause error
     results: error
@@ -133,6 +217,8 @@ functions:
 imports:
   context: context
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+  math: math
   slices: slices
   strconv: strconv
   time: time
@@ -142,6 +228,56 @@ package:
   name: queue
   purpose: Package queue — the ADR 0039 capability siblings of the frozen [Broker] port, and the dead-letter record one of them returns.
 types:
+  - kind: named
+    name: AckOutcome
+    underlying: uint8
+  - fields:
+      - doc: |-
+          Outcomes holds the outcome of each receipt, Outcomes[i] for the i-th;
+          it is as long as the batch, even beside an error.
+        name: Outcomes
+        type: "[]AckOutcome"
+    kind: struct
+    name: AckResultValue
+  - fields:
+      - doc: Queued is how many waiting messages were removed, visible or not yet.
+        name: Queued
+        type: int
+      - doc: |-
+          Leased is how many leased messages were removed — a lapsed lease
+          nobody had reclaimed yet among them.
+        name: Leased
+        type: int
+    kind: struct
+    name: PurgeValue
+  - fields:
+      - doc: |-
+          OldestEnqueuedAt is the enqueue instant of the oldest live message —
+          waiting or leased —, the zero time.Time when there is none. Its age
+          is how long the queue has been behind.
+        name: OldestEnqueuedAt
+        type: time.Time
+      - doc: |-
+          NextDueAt is the earliest instant a waiting message becomes visible —
+          an instant already past when one is visible now —, the zero
+          time.Time when nothing waits.
+        name: NextDueAt
+        type: time.Time
+      - doc: |-
+          Queued counts the messages waiting for a consumer, visible now or
+          held until a later instant.
+        name: Queued
+        type: int64
+      - doc: |-
+          Leased counts the messages a consumer leases, a lapsed lease nobody
+          reclaimed yet among them.
+        name: Leased
+        type: int64
+      - doc: Dead counts the dead letters.
+        name: Dead
+        type: int64
+    kind: struct
+    name: StatsValue
   - fields:
       - doc: FailedAt is when the last attempt failed and the message was moved.
         name: FailedAt
@@ -194,6 +330,13 @@ types:
           the message had for one a handler rejected ([Rejecter]).
         name: Deliveries
         type: int
+      - doc: |-
+          Priority is the level the message was published at
+          ([PriorityPublisher]); a replay queues it at that level again.
+          [PriorityNormal] for one written before priorities existed, and on
+          an SQL broker whose SQLConfig.Priority is not set.
+        name: Priority
+        type: Priority
     kind: struct
     name: DeadLetterValue
   - fields:
@@ -218,6 +361,11 @@ types:
           acknowledged.
         name: Leased
         type: bool
+      - doc: |-
+          Priority is the level the message is delivered at
+          ([PriorityPublisher]), kept across a retry and a copy.
+        name: Priority
+        type: Priority
     kind: struct
     name: LiveMessageValue
   - fields:
@@ -368,9 +516,92 @@ types:
           is not a bound at all and the caller who wrote it meant something.
         name: MaxMessageBytes
         type: int
+      - doc: |-
+          MaxAge is how long a message may wait for a consumer, measured from
+          its [MessageValue.EnqueuedAt]. A message whose age has reached it is
+          never handed to a consumer: the next [Broker.Receive] that reaches it
+          moves it to the dead-letter store with [MessageExpired] as its reason
+          — evidence of what expired, never a message silently gone. A message
+          a consumer already leases is not taken from it: its acknowledgement
+          still lands, and only a delivery after its age is refused.
+
+          It is for work that is worthless late — a notification an hour
+          stale, a cache warm-up for a deployment already replaced —, the
+          lifetime SQS and RabbitMQ call a message's retention and TTL.
+
+          Zero means a message never expires, which is what every policy did
+          before the field existed: that is its one reading. A negative value
+          is refused, and so is one above [MaxDeadlineOffset]
+          ([QueueMisconfigured], naming the field).
+        name: MaxAge
+        type: time.Duration
+      - doc: |-
+          DeadLetterRetention is how long a dead letter is kept, measured from
+          its [DeadLetterValue.FailedAt]. A dead letter older than it is removed
+          by a later [Broker.Receive] — at most one sweep a minute on the
+          broker's clock —, so a queue that dead-letters steadily stops growing
+          its store until somebody deletes by hand.
+
+          Zero keeps every dead letter for good, which is what every policy did
+          before the field existed. A negative value is refused, and so is one
+          above [MaxDeadlineOffset] ([QueueMisconfigured], naming the field).
+        name: DeadLetterRetention
+        type: time.Duration
+      - doc: |-
+          RetryJitter widens each policy retry delay by a random fraction of
+          itself, drawn from [0, RetryJitter) and added, so messages nacked in
+          the same instant — every message of every consumer during a
+          downstream's outage — come back spread over a window instead of in
+          one burst aimed at a dependency already failing to keep up. A delay
+          held at MaxRetryDelay may reach MaxRetryDelay × (1 + RetryJitter).
+          It is read only under the zero [PolicyValue.RetryJitterMode].
+
+          Zero is no jitter: the exact instant every retry waited before the
+          field existed. A value outside [0, 1], NaN included, is refused, and
+          so is a jitter with no MaxRetryDelay — a growing delay is what it
+          spreads ([QueueMisconfigured], naming the field). A delay a caller
+          names through [DelayedNacker] is the caller's, and never jittered.
+        name: RetryJitter
+        type: float64
+      - doc: |-
+          RetryJitterMode is how the retry delay is randomised, as
+          kernel/backoff's curve is (ADR 0184): the zero, additive, widens it
+          by [PolicyValue.RetryJitter]; full draws the whole delay from
+          [0, grown]; decorrelated draws it from [RetryDelay, 3 × the delay
+          before], held at MaxRetryDelay. The last two ignore RetryJitter, and
+          setting one beside them is refused rather than ignored.
+
+          A mode other than the zero needs a MaxRetryDelay, as RetryJitter
+          does, and a mode the package does not define is refused
+          ([QueueMisconfigured], naming the field).
+        name: RetryJitterMode
+        type: kbackoff.JitterMode
     kind: struct
     methods:
       - name: Validate
+        recv: p PolicyValue
+        results: error
+      - doc: |-
+          validateLifetimes refuses a MaxAge or a DeadLetterRetention that is
+          negative — not a lifetime, and the caller who wrote it meant something — or
+          past MaxDeadlineOffset, an instant no durable broker records. Zero keeps a
+          message, or a dead letter, for good and is accepted.
+        name: validateLifetimes
+        recv: p PolicyValue
+        results: error
+      - doc: |-
+          validateRetryJitter refuses a RetryJitter or a RetryJitterMode no broker can
+          lay on the retry delay: a fraction outside [0, 1] or NaN, a mode the backoff
+          curve does not define, a fraction beside a mode that ignores it, and either
+          with no MaxRetryDelay — the growing delay a jitter spreads. The zeros ask for
+          no jitter and are accepted.
+        name: validateRetryJitter
+        recv: p PolicyValue
+        results: error
+      - doc: |-
+          validateJitterShape refuses a fraction outside [0, 1] or NaN, a mode the
+          backoff curve does not define, and a fraction beside a mode that ignores it.
+        name: validateJitterShape
         recv: p PolicyValue
         results: error
       - doc: |-
@@ -383,6 +614,9 @@ types:
         recv: p PolicyValue
         results: PolicyValue
     name: PolicyValue
+  - kind: named
+    name: Priority
+    underlying: int8
   - kind: named
     name: Handler
     underlying: func(ctx context.Context, delivery DeliveryValue) error

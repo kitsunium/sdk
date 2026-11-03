@@ -1,6 +1,9 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: (*plan).scheduled
+    steps:
+      - return: p.entry != heap.Handle{}
   - of: newAgenda
     participants:
       - id: caller
@@ -18,7 +21,7 @@ sequences:
             steps:
               - return: cmp.Or(a.due.Compare(b.due), cmp.Compare(a.seq, b.seq))
                 to: cmp
-      - return: "&agenda{heap: heap.New(byDue), plans: make(map[string]*plan), dirty: make(map[string]struct{}), wake: make(chan struct{}, 1)}"
+      - return: "&agenda{heap: heap.NewIndexed(byDue), plans: make(map[string]*plan), dirty: make(map[string]struct{}), wake: make(chan struct{}, 1)}"
   - of: (*agenda).signal
     steps:
       - select:
@@ -81,10 +84,10 @@ sequences:
         kind: actor
       - id: (*agenda).scheduleLocked
         kind: self
+      - id: a.heap.Update
+        kind: value
       - id: a.heap.Push
         kind: value
-      - id: a.compact
-        kind: internal
     steps:
       - bind: p
         eval: a.plans[key]
@@ -100,20 +103,27 @@ sequences:
             - set: due
               value: p.notBefore
           when: due.Before(p.notBefore)
-      - opt:
-          do:
-            - op: ++
-              set: a.live
-          when: p.seq == 0
       - op: ++
         set: a.seq
-      - set: p.seq
-        value: a.seq
-      - eval: "a.heap.Push(slot{due: due, key: key, seq: p.seq})"
+      - bind: next
+        eval: "slot{due: due, key: key, seq: a.seq}"
+      - opt:
+          do:
+            - eval: a.heap.Update(p.entry, next)
+              to: a.heap.Update
+            - return: ""
+          when: p.scheduled()
+      - set: p.entry
         to: a.heap.Push
-      - eval: a.compact()
-        to: a.compact
+        value: a.heap.Push(next)
   - of: (*agenda).unschedule
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*agenda).unschedule
+        kind: self
+      - id: a.heap.Remove
+        kind: value
     steps:
       - lock:
           mutex: a.mu
@@ -125,28 +135,35 @@ sequences:
           when: p == nil
       - opt:
           do:
-            - set: p.seq
-              value: "0"
-            - op: "--"
-              set: a.live
-          when: p.seq != 0
+            - eval: a.heap.Remove(p.entry)
+              to: a.heap.Remove
+            - set: p.entry
+              value: heap.Handle{}
+          when: p.scheduled()
       - opt:
           do:
             - eval: delete(a.plans, key)
           when: p.failures == 0
   - of: (*agenda).forget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*agenda).forget
+        kind: self
+      - id: a.heap.Remove
+        kind: value
     steps:
       - lock:
           mutex: a.mu
       - eval: delete(a.dirty, key)
       - opt:
           do:
-            - op: "--"
-              set: a.live
+            - eval: a.heap.Remove(p.entry)
+              to: a.heap.Remove
           init:
             bind: p
             eval: a.plans[key]
-          when: p != nil && p.seq != 0
+          when: p != nil && p.scheduled()
       - eval: delete(a.plans, key)
   - of: (*agenda).restart
     steps:
@@ -229,23 +246,17 @@ sequences:
         eval: make(map[string]struct{}, len(a.dirty))
       - loop:
           do:
-            - bind: top, ok
+            - bind: top, _, ok
               eval: a.heap.Peek()
               to: a.heap.Peek
             - opt:
                 do:
                   - break: true
-                when: "!ok || top.due.After(now) && a.isLive(top)"
+                when: "!ok || top.due.After(now)"
             - eval: a.heap.Pop()
               to: a.heap.Pop
-            - opt:
-                do:
-                  - continue: true
-                when: "!a.isLive(top)"
-            - set: a.plans[top.key].seq
-              value: "0"
-            - op: "--"
-              set: a.live
+            - set: a.plans[top.key].entry
+              value: heap.Handle{}
             - set: keys
               value: append(keys, top.key)
             - set: seen[top.key]
@@ -277,8 +288,6 @@ sequences:
         kind: self
       - id: a.heap.Peek
         kind: value
-      - id: a.heap.Pop
-        kind: value
     steps:
       - lock:
           mutex: a.mu
@@ -286,66 +295,14 @@ sequences:
           do:
             - return: now
           when: len(a.dirty) > 0
-      - loop:
-          do:
-            - bind: top, ok
-              eval: a.heap.Peek()
-              to: a.heap.Peek
-            - opt:
-                do:
-                  - return: time.Time{}
-                when: "!ok"
-            - opt:
-                do:
-                  - return: top.due
-                when: a.isLive(top)
-            - eval: a.heap.Pop()
-              to: a.heap.Pop
-          forever: true
-  - of: (*agenda).isLive
-    steps:
-      - bind: p
-        eval: a.plans[s.key]
-      - return: p != nil && p.seq == s.seq
-  - of: (*agenda).compact
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*agenda).compact
-        kind: self
-      - id: a.heap.Pop
-        kind: value
-      - id: a.heap.Push
-        kind: value
-    steps:
+      - bind: top, _, ok
+        eval: a.heap.Peek()
+        to: a.heap.Peek
       - opt:
           do:
-            - return: ""
-          when: a.heap.Len() <= staleFactor*a.live+compactSlack
-      - bind: kept
-        eval: make([]slot, 0, a.live)
-      - loop:
-          do:
-            - bind: s, ok
-              eval: a.heap.Pop()
-              to: a.heap.Pop
-            - opt:
-                do:
-                  - break: true
-                when: "!ok"
-            - opt:
-                do:
-                  - set: kept
-                    value: append(kept, s)
-                when: a.isLive(s)
-          forever: true
-      - loop:
-          do:
-            - eval: a.heap.Push(s)
-              to: a.heap.Push
-          key: _
-          range: kept
-          value: s
+            - return: time.Time{}
+          when: "!ok"
+      - return: top.due
   - of: freeze
     participants:
       - id: caller

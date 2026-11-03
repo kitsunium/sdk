@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
+- **Amended**: 2026-11-02 — the directories Open creates are flushed, and a refusal names no key on a decoding path (see the dated section at the end)
 - **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — §D1: `docstore` gains a core
 - **Related**: [ADR 0056](0056-sdk-vfs-domain.md) (the atomic publication every write is), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (no port, so the values are the engine's), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the clamps), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md)
 
@@ -196,7 +197,7 @@ facade `pkg/v1/docstore`.
 - **Durability of the directories Open creates.** The snapshot's publication
   flushes its own directory, which makes the overlay directory durable. The
   first creation of a PARENT directory is not flushed, because `vfs` has no
-  verb for it.
+  verb for it. *Resolved 2026-11-02: `vfs.DirSyncer` (see the amendment).*
 - **Queries beyond the indexes, and ordered iteration without a sort.** `List`
   sorts the keys each time.
 
@@ -228,3 +229,34 @@ facade `pkg/v1/docstore`.
 - `internal/service/docstore/`, `internal/service/docstore/BENCH.md`
 - kitsunium/platform `docs/adr/0001-the-sdk-holds-the-mechanisms-kit-is-the-framework.md`
   (the map, wave 3)
+
+## Amendment (2026-11-02): the directories Open creates are flushed, and the loader is fuzzed
+
+**The directories (kitsunium/sdk#1060).** `vfs` gained `DirSyncer` (ADR 0056,
+amended 2026-11-02). `load` records every directory its two `MkdirAll` create
+— the snapshot's and the overlay's, each missing component — and, once both
+exist, calls `SyncDir` on the parent of each, deepest first, so a store opened
+at `members/accounts.json` flushes `members` (the overlay's entry), then `.`
+(`members`'s). A store reopened over directories that exist flushes none. A
+flush that fails is `LOAD_FAILED` naming the directory: a store whose
+directory may not survive a crash is not opened. On a third-party filesystem
+without the sibling the store does what it did. `syncdir_external_test.go`.
+
+**The loader is fuzzed (#1061).** `fuzz_external_test.go` holds three targets
+over the memory filesystem — `FuzzOpenSnapshot`, `FuzzOpenVersions`,
+`FuzzReplayEntry` (under the digest of a key the store holds, and of
+another) — seeded with a real store's files, plain, versioned, trashed,
+deleted and folded, and the refusals the persist tests hand-write. The
+invariant: `Open` never panics; it opens, or refuses with exactly one of
+`LOAD_FAILED`, `INDEX_BROKEN`, `DOCUMENT_UNDECODABLE`, whose rendering and
+fields — the `file` field excepted — quote no string the file held; and a
+store that opened folds to files that reopen serving the same entries,
+versions and tombstones. Thirty seconds of each found no panic. The seeds
+found a leak: `encoding/json`'s `UnmarshalTypeError.Field` is the path from
+the root through every MAP KEY — a store key in the versions file, a
+metadata key — and the `cause` field quoted it. `jsonCause` now resolves the
+path against the decoded type and writes every map key as `[key]`, keeping
+the struct fields' JSON names, which are the program's; a path the type does
+not explain is `…`. The input is committed under
+`testdata/fuzz/FuzzOpenVersions/`.
+

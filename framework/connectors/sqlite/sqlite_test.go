@@ -78,6 +78,15 @@ func TestTheFileIsOpenedForWriters(t *testing.T) {
 	if err := db.QueryRowContext(t.Context(), "PRAGMA busy_timeout").Scan(&busy); err != nil || busy != 5000 {
 		t.Fatalf("busy timeout %d: %v", busy, err)
 	}
+	// #999: under WAL a commit syncs at the checkpoint (NORMAL, 1), and a WAL
+	// a burst grew is truncated to 64 MiB after it.
+	var synchronous, journalLimit int64
+	if err := db.QueryRowContext(t.Context(), "PRAGMA synchronous").Scan(&synchronous); err != nil || synchronous != 1 {
+		t.Fatalf("synchronous %d, want 1 (NORMAL): %v", synchronous, err)
+	}
+	if err := db.QueryRowContext(t.Context(), "PRAGMA journal_size_limit").Scan(&journalLimit); err != nil || journalLimit != 67108864 {
+		t.Fatalf("journal_size_limit %d, want 67108864: %v", journalLimit, err)
+	}
 	if _, err := db.ExecContext(t.Context(), "CREATE TABLE entries (id TEXT PRIMARY KEY, n INTEGER)"); err != nil {
 		t.Fatal(err)
 	}

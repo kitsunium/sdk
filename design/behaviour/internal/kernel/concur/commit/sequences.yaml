@@ -1,0 +1,197 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: newBatch
+    steps:
+      - return: "&batch[T]{full: make(chan struct{}), after: after, done: make(chan struct{})}"
+  - of: (*batch).markFull
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*batch).markFull
+        kind: self
+      - id: b.filled.Do
+        kind: value
+    steps:
+      - eval: b.filled.Do(func() { close(b.full) })
+        to: b.filled.Do
+  - of: (*batch).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*batch).settle
+        kind: self
+      - id: b.settled.Do
+        kind: value
+    steps:
+      - eval: b.settled.Do(func() { close(b.done) })
+        to: b.settled.Do
+  - of: New
+    steps:
+      - opt:
+          do:
+            - panic: "\"kernel/concur/commit: New requires a flush function\""
+          when: flush == nil
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: "&Group[T]{flush: flush, cfg: cfg, clk: clk}"
+  - of: (*Group).Do
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).Do
+        kind: self
+      - id: g.join
+        kind: internal
+      - id: ctx.Err
+        kind: value
+    steps:
+      - bind: joined, refusal
+        eval: g.join(ctx, item)
+        to: g.join
+      - opt:
+          do:
+            - return: refusal
+          when: refusal != nil
+      - select:
+          cases:
+            - comm: <-joined.done
+              do:
+                - opt:
+                    do:
+                      - panic: joined.panicked
+                    when: joined.panicked != nil
+                - return: joined.err
+            - comm: <-ctx.Done()
+              do:
+                - select:
+                    cases:
+                      - comm: <-joined.done
+                        do:
+                          - opt:
+                              do:
+                                - panic: joined.panicked
+                              when: joined.panicked != nil
+                          - return: joined.err
+                      - default: true
+                - return: ctx.Err()
+                  to: ctx.Err
+  - of: (*Group).join
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).join
+        kind: self
+      - id: newBatch
+        kind: internal
+      - id: g.lead
+        kind: internal
+      - id: current.markFull
+        kind: internal
+    steps:
+      - lock:
+          mutex: g.mu
+      - opt:
+          do:
+            - return: nil, Closed
+          when: g.closed
+      - bind: current
+        eval: g.pending
+      - opt:
+          do:
+            - set: current
+              to: newBatch
+              value: newBatch[T](g.tail)
+            - set: g.pending, g.tail
+              value: current, current.done
+            - go: g.lead(context.WithoutCancel(ctx), current)
+              to: g.lead
+          when: current == nil
+      - set: current.items
+        value: append(current.items, item)
+      - opt:
+          do:
+            - eval: current.markFull()
+              to: current.markFull
+            - set: g.pending
+              value: nil
+          when: g.cfg.MaxItems > 0 && len(current.items) >= g.cfg.MaxItems
+      - return: current, nil
+  - of: (*Group).lead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).lead
+        kind: self
+      - id: current.settle
+        kind: internal
+      - id: g.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: g.seal
+        kind: internal
+    steps:
+      - defer: current.settle()
+        to: current.settle
+      - defer: func() { current.panicked = recover() }()
+      - opt:
+          do:
+            - bind: timer
+              eval: g.clk.NewTimer(g.cfg.MaxWait)
+              to: g.clk.NewTimer
+            - select:
+                cases:
+                  - comm: <-timer.C()
+                  - comm: <-current.full
+                    do:
+                      - eval: timer.Stop()
+                        to: timer.Stop
+          when: g.cfg.MaxWait > 0
+      - opt:
+          do:
+            - eval: <-current.after
+          when: current.after != nil
+      - bind: items
+        eval: g.seal(current)
+        to: g.seal
+      - set: current.err
+        value: g.flush(ctx, items)
+  - of: (*Group).seal
+    steps:
+      - lock:
+          mutex: g.mu
+      - opt:
+          do:
+            - set: g.pending
+              value: nil
+          when: g.pending == current
+      - return: current.items
+  - of: (*Group).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).Close
+        kind: self
+      - id: g.mu.Lock
+        kind: value
+      - id: g.mu.Unlock
+        kind: value
+    steps:
+      - eval: g.mu.Lock()
+        to: g.mu.Lock
+      - set: g.closed
+        value: "true"
+      - bind: last
+        eval: g.tail
+      - eval: g.mu.Unlock()
+        to: g.mu.Unlock
+      - opt:
+          do:
+            - eval: <-last
+          when: last != nil

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
@@ -15,6 +17,9 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// redactedKey stands for a map key in a rendered path: the key is data.
+const redactedKey string = "[key]"
 
 // Store is a typed, keyed collection of JSON documents with secondary
 // indexes. Build one with [Open]. It is safe for concurrent use.
@@ -46,6 +51,10 @@ type Store[T any] struct {
 	held func(key string) bool
 	// foldErr is the last automatic fold's failure, until a fold succeeds.
 	foldErr error
+	// lingering is a batch whose keys' entries are not all written, or whose
+	// group entry is not removed: it is completed before anything else is
+	// published, or folded. Guarded by the writers' lock.
+	lingering *batchPlan
 	// path is the snapshot's name, overlay the overlay directory's, and
 	// versionsPath the versions file's.
 	path, overlay, versionsPath string
@@ -342,7 +351,7 @@ func decodeAs[T any](store string, raw []byte) (T, error) {
 		//: DocumentUndecodable; what failed, never the document and never
 		//: the key.
 		return zero, kerrs.Wrap(coredocstore.DocumentUndecodable, kerrs.WrapParams{},
-			kerrs.String("store", store), kerrs.String("cause", jsonCause(err)))
+			kerrs.String("store", store), kerrs.String("cause", jsonCause(err, reflect.TypeFor[T]())))
 	}
 	//: the caller's own copy.
 	return v, nil
@@ -365,10 +374,12 @@ func (s *Store[T]) decodeAll(entries []coredocstore.EntryValue) ([]T, error) {
 	return out, nil
 }
 
-// jsonCause describes a decoding failure without a byte of the document:
-// encoding/json quotes the offending character of a syntax error, and a
-// stored document is exactly what must not travel in an error.
-func jsonCause(err error) string {
+// jsonCause describes a failure to decode a value of type root without a
+// byte of it: encoding/json quotes the offending character of a syntax error,
+// and its path to a value that does not fit runs through every map key on the
+// way — a store key, a metadata key — which is data that must not travel in an
+// error either (#1061).
+func jsonCause(err error, root reflect.Type) string {
 	//: a value that does not fit its field: the field and the Go type only —
 	//: Value is left out, because encoding/json writes a number's digits there.
 	if typeErr, isTypeErr := errors.AsType[*json.UnmarshalTypeError](err); isTypeErr {
@@ -377,8 +388,13 @@ func jsonCause(err error) string {
 		if typeErr.Type != nil {
 			typeName = typeErr.Type.String()
 		}
-		//: the path and the type, which are the program's, not the data's.
-		return "the stored value of field " + typeErr.Field + " does not fit " + typeName
+		//: the value itself, at the root.
+		if typeErr.Field == "" {
+			//: the type, which is the program's.
+			return "the stored value does not fit " + typeName
+		}
+		//: the path with every map key redacted, and the type: the program's.
+		return "the stored value of field " + fieldPath(root, typeErr.Field) + " does not fit " + typeName
 	}
 	//: malformed JSON: where, never what.
 	if syntaxErr, isSyntaxErr := errors.AsType[*json.SyntaxError](err); isSyntaxErr {
@@ -387,6 +403,165 @@ func jsonCause(err error) string {
 	}
 	//: anything else, by kind.
 	return fmt.Sprintf("%T", err)
+}
+
+// fieldPath renders dotted — encoding/json's path from a value of type root to
+// the one that did not fit, struct field names and map keys joined by dots —
+// keeping each struct field's JSON name, which is the program's, and writing
+// every map key as [key]. It resolves the path against root's type, so a key
+// holding a dot is still one key; a path it cannot resolve is "…", and never
+// the path itself.
+func fieldPath(root reflect.Type, dotted string) string {
+	rendered, resolved := resolvePath(root, strings.Split(dotted, "."))
+	//: a path the type does not explain says nothing at all.
+	if !resolved {
+		//: no segment of it.
+		return "…"
+	}
+	//: field names and [key], nothing else.
+	return rendered
+}
+
+// resolvePath renders segments under t and reports whether they resolve to a
+// value of t exactly — every segment a struct field's JSON name or part of a
+// map key, none left over. Pointers, slices and arrays add no segment.
+func resolvePath(t reflect.Type, segments []string) (rendered string, resolved bool) {
+	//: encoding/json names no element of a slice and no pointer.
+	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
+		t = t.Elem()
+	}
+	//: the whole path consumed.
+	if len(segments) == 0 {
+		//: nothing more to render.
+		return "", true
+	}
+	switch t.Kind() {
+	//: a struct field, by its JSON name — which may itself hold a dot.
+	case reflect.Struct:
+		//: the field the next segments name.
+		return resolveField(t, segments)
+	//: a map key, data, over as many segments as leave a path the element
+	//: type resolves.
+	case reflect.Map:
+		//: the key, redacted.
+		return resolveMapKey(t, segments)
+	//: below an interface, every segment is a key of decoded data.
+	case reflect.Interface:
+		//: none of them.
+		return "…", true
+	//: a leaf with segments left: not this type's path.
+	default:
+		//: unresolved.
+		return "", false
+	}
+}
+
+// resolveField renders segments under the struct type t: the field whose JSON
+// name the next segments spell, then the rest under the field's type.
+func resolveField(t reflect.Type, segments []string) (rendered string, resolved bool) {
+	//: every field the decoder could have descended into.
+	for _, field := range jsonFields(t) {
+		n := strings.Count(field.name, ".") + 1
+		//: the field's name is the next segments.
+		if n > len(segments) || strings.Join(segments[:n], ".") != field.name {
+			continue
+		}
+		//: the rest resolved under the field's type.
+		if rest, ok := resolvePath(field.typ, segments[n:]); ok {
+			//: the field's name, the program's.
+			return joinPath(field.name, rest), true
+		}
+	}
+	//: no field explains the path.
+	return "", false
+}
+
+// resolveMapKey renders segments under the map type t: a key, over as many
+// segments as leave a path the element type resolves, shortest first.
+func resolveMapKey(t reflect.Type, segments []string) (rendered string, resolved bool) {
+	//: the key's shortest reading first.
+	for taken := 1; taken <= len(segments); taken++ {
+		//: the rest resolved under the element type.
+		if rest, ok := resolvePath(t.Elem(), segments[taken:]); ok {
+			//: the key, redacted.
+			return joinPath(redactedKey, rest), true
+		}
+	}
+	//: no reading of the key explains the path.
+	return "", false
+}
+
+// joinPath joins a rendered segment and the rendering of the rest.
+func joinPath(head, rest string) string {
+	//: the last segment.
+	if rest == "" {
+		//: alone.
+		return head
+	}
+	//: dotted, as encoding/json writes it.
+	return head + "." + rest
+}
+
+// jsonField is a struct field as encoding/json names it.
+type jsonField struct {
+	// typ is the field's type.
+	typ reflect.Type
+	// name is its JSON name.
+	name string
+}
+
+// jsonFields lists the fields encoding/json decodes into t — exported or
+// embedded, under their tag's name or their own, "-" skipped — an untagged
+// embedded struct's fields promoted.
+func jsonFields(t reflect.Type) []jsonField {
+	var out []jsonField
+	//: in declaration order.
+	for field := range t.Fields() {
+		//: an untagged embedded struct: its fields are this struct's.
+		if promoted, isPromoted := promotedStruct(field); isPromoted {
+			out = append(out, jsonFields(promoted)...)
+			continue
+		}
+		//: a field the decoder fills, under its JSON name.
+		if name, decoded := jsonNameOf(field); decoded {
+			out = append(out, jsonField{name: name, typ: field.Type})
+		}
+	}
+	//: every field.
+	return out
+}
+
+// promotedStruct returns the struct whose fields an untagged embedded field
+// promotes — through a pointer too —, and whether field is one.
+func promotedStruct(field reflect.StructField) (promoted reflect.Type, isPromoted bool) {
+	tag := field.Tag.Get("json")
+	name, _, _ := strings.Cut(tag, ",")
+	promoted = field.Type
+	//: a pointer to an embedded struct promotes the same way.
+	if promoted.Kind() == reflect.Pointer {
+		promoted = promoted.Elem()
+	}
+	//: embedded, neither excluded nor renamed, and a struct.
+	return promoted, field.Anonymous && tag != "-" && name == "" && promoted.Kind() == reflect.Struct
+}
+
+// jsonNameOf returns the name encoding/json decodes field under — its tag's,
+// else its Go name — and whether it decodes into it at all: an unexported
+// field, embedded or not, and one tagged "-" are never decoded into.
+func jsonNameOf(field reflect.StructField) (name string, decoded bool) {
+	tag := field.Tag.Get("json")
+	//: unexported, or excluded: never decoded into.
+	if !field.IsExported() || tag == "-" {
+		//: not a field of the document.
+		return "", false
+	}
+	name, _, _ = strings.Cut(tag, ",")
+	//: the Go name, when the tag gives none.
+	if name == "" {
+		name = field.Name
+	}
+	//: decoded under name.
+	return name, true
 }
 
 // sortedKeys returns m's keys in order.

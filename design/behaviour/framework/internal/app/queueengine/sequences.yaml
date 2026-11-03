@@ -122,6 +122,47 @@ sequences:
           key: i
           range: dead
       - return: out, nil
+  - of: (*broker).Replay
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).Replay
+        kind: self
+      - id: deadLetterFound
+        kind: internal
+    steps:
+      - bind: manager, ok
+        eval: b.q.(queue.DeadLetterManager)
+      - opt:
+          do:
+            - return: false, lacks("DeadLetterManager")
+          when: "!ok"
+      - return: deadLetterFound(manager.ReplayDeadLetter(ctx, id))
+        to: deadLetterFound
+  - of: (*broker).Drop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).Drop
+        kind: self
+      - id: deadLetterFound
+        kind: internal
+    steps:
+      - bind: manager, ok
+        eval: b.q.(queue.DeadLetterManager)
+      - opt:
+          do:
+            - return: false, lacks("DeadLetterManager")
+          when: "!ok"
+      - return: deadLetterFound(manager.DeleteDeadLetter(ctx, id))
+        to: deadLetterFound
+  - of: deadLetterFound
+    steps:
+      - opt:
+          do:
+            - return: false, nil
+          when: errors.Is(err, queue.DeadLetterNotFound)
+      - return: err == nil, err
   - of: (*broker).Messages
     participants:
       - id: caller

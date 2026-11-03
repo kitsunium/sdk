@@ -101,6 +101,66 @@ func (m *memFS) Stat(name string) (info fs.FileInfo, err error) {
 	return infoOf(name, node), nil
 }
 
+// Lstat implements fs.ReadLinkFS's half that describes a name without
+// following it. The memory filesystem holds no symbolic link, so it is Stat:
+// the double answers the same optional interface as the disk filesystem, whose
+// os.Root reads links (#1053).
+func (m *memFS) Lstat(name string) (info fs.FileInfo, err error) {
+	//: nothing here is a link, so describing one without following it is
+	//: describing it.
+	return m.Stat(name)
+}
+
+// ReadLink implements fs.ReadLinkFS. No name here is a symbolic link, so an
+// existing name answers what the operating system answers for a name that is
+// not one — fs.ErrInvalid — and an absent one fs.ErrNotExist, both
+// READ_FAILED.
+func (m *memFS) ReadLink(name string) (target string, err error) {
+	//: same grammar as Open.
+	if pathErr := corevfs.ValidatePath(name); pathErr != nil {
+		//: InvalidPath.
+		return "", pathErr
+	}
+	m.mu.RLock()
+	_, found := m.nodes[name]
+	m.mu.RUnlock()
+	//: ReadFailed, wrapping fs.ErrNotExist.
+	if !found {
+		//: absent.
+		return "", failRead(notExist("readlink", name), kerrs.String("path", name))
+	}
+	//: ReadFailed, wrapping fs.ErrInvalid: a file or a directory, never a link.
+	return "", failRead(&fs.PathError{Op: "readlink", Path: name, Err: fs.ErrInvalid},
+		kerrs.String("path", name))
+}
+
+// SyncDir implements [corevfs.DirSyncer]. There is no device to flush, so it
+// answers the refusals the disk filesystem answers and flushes nothing: a file
+// is NotRegularFile, an absent name DirectorySyncFailed wrapping
+// fs.ErrNotExist (#1060).
+func (m *memFS) SyncDir(name string) error {
+	//: the read grammar: the root is the directory flushed most.
+	if pathErr := corevfs.ValidatePath(name); pathErr != nil {
+		//: InvalidPath.
+		return pathErr
+	}
+	m.mu.RLock()
+	node, found := m.nodes[name]
+	m.mu.RUnlock()
+	//: an absent directory cannot be flushed, on a device or not.
+	if !found {
+		//: DirectorySyncFailed, wrapping fs.ErrNotExist.
+		return failDirSync(notExist("open", name), name)
+	}
+	//: a file is not what the call needs.
+	if !node.mode.IsDir() {
+		//: NotRegularFile.
+		return verdict(corevfs.NotRegularFile, kerrs.String("path", name))
+	}
+	//: nothing to flush.
+	return nil
+}
+
 // ReadDir implements fs.ReadDirFS, sorted by filename as io/fs requires.
 func (m *memFS) ReadDir(name string) (entries []fs.DirEntry, err error) {
 	//: same grammar as Open.

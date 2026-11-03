@@ -1,0 +1,58 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "cache",
+    srcs = [
+        "config.go",
+        "doc.go",
+        "errors.go",
+        "gen_codes.go",
+        "keys.go",
+        "load.go",
+        "scripts.go",
+        "store.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/db/redis/cache",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/cache",
+        "//internal/core/data/codec",
+        "//internal/kernel/clock",
+        "//internal/kernel/concur/singleflight",
+        "//internal/kernel/errs",
+        "@com_github_redis_go_redis_v9//:go-redis",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":cache",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "cache_test",
+    srcs = [
+        "config_internal_test.go",
+        "gen_api_test.go",
+    ],
+    embed = [":cache"],
+    deps = [
+        "//internal/core/data/cache",
+        "//internal/core/data/codec",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/json",
+        "@com_github_redis_go_redis_v9//:go-redis",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (//:audit_sources) so its errs.Define call sites are scanned under Bazel.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

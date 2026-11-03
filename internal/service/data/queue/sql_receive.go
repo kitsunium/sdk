@@ -1,10 +1,12 @@
 package queue
 
 import (
+	"cmp"
 	"context"
 	stdsql "database/sql"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
@@ -63,38 +65,87 @@ func (b *sqlBroker) Receive(
 		//: the caller's deadline.
 		return nil, ctx.Err()
 	}
+	at, instantsErr := b.receiveInstants(ctx)
+	//: a clock this broker cannot write down, or a sweep the database refused.
+	if instantsErr != nil {
+		//: QueueMisconfigured, or QueueBackendFailed.
+		return nil, instantsErr
+	}
+	ex, inTx := b.tx.join.Join(ctx)
+	//: outside a transaction, the probe decides whether there is anything to
+	//: lease at all. Inside one it is skipped: on MySQL a plain read answers
+	//: from the transaction's snapshot, where the locking read does not.
+	if !inTx {
+		probed, answered, probeErr := b.probeOutside(ctx, ex, at, max)
+		//: nothing due, a lease in one statement, or the database refused.
+		if answered {
+			//: the batch, empty or not, or QueueBackendFailed.
+			return probed, probeErr
+		}
+	}
+	//: the lease in a transaction: the broker's own, or the caller's.
+	return b.leaseInTransaction(ctx, at, max)
+}
+
+// receiveInstants reads the clock once for a Receive — the instant a lease is
+// judged against and the deadline one taken now gets — refusing a clock this
+// broker could not write down, and sweeps the dead letters past their
+// retention on the same look, at most once a minute, in a statement of its
+// own.
+func (b *sqlBroker) receiveInstants(ctx context.Context) (sqlInstants, error) {
 	clockNow := b.clk.Now()
 	deadline := clockNow.Add(b.policy.VisibilityTimeout)
 	//: a lease this broker could not write down — a clock outside what 64-bit
 	//: Unix nanoseconds carry — is refused before any statement is sent.
 	if !nameable(clockNow) || !nameable(deadline) {
 		//: QueueMisconfigured, naming the clock.
-		return nil, clockRefused(clockNow)
+		return sqlInstants{}, clockRefused(clockNow)
 	}
-	now := clockNow.UnixNano()
-	ex, inTx := b.tx.join.Join(ctx)
-	//: outside a transaction, the probe decides whether there is anything to
-	//: lease at all. Inside one it is skipped: on MySQL a plain read answers
-	//: from the transaction's snapshot, where the locking read does not.
-	if !inTx {
-		due, probeErr := b.minDue(ctx, ex, b.stmts.probe, "probe the queue")
-		//: the database refused.
-		if probeErr != nil {
-			//: QueueBackendFailed.
-			return nil, probeErr
-		}
-		//: nothing live — NULL, never a zero instant — or nothing due yet:
-		//: the record is the wake.
-		if !due.Valid || due.Int64 > now {
-			b.wake.record(due.Int64)
-			//: an empty queue is not an error.
-			return nil, nil
-		}
+	at := sqlInstants{now: clockNow.UnixNano(), deadline: deadline.UnixNano()}
+	//: QueueBackendFailed when the sweep's statement was refused.
+	return at, b.sweepRetention(ctx, at.now)
+}
+
+// probeOutside asks, outside any transaction, whether anything is due, and
+// answers the Receive when it can: nothing due — the probe's record is the
+// wake —, or, on PostgreSQL, the lease taken in one statement with no
+// transaction of the broker's own (issue #1042). answered is false when the
+// lease must run in a transaction.
+func (b *sqlBroker) probeOutside(
+	ctx context.Context, ex coresql.Executor, at sqlInstants, max int,
+) (batch []corequeue.DeliveryValue, answered bool, err error) {
+	due, probeErr := b.minDue(ctx, ex, b.stmts.probe, "probe the queue")
+	//: the database refused.
+	if probeErr != nil {
+		//: QueueBackendFailed.
+		return nil, true, probeErr
 	}
+	//: nothing live — NULL, never a zero instant — or nothing due yet:
+	//: the record is the wake.
+	if !due.Valid || due.Int64 > at.now {
+		b.wake.record(due.Int64)
+		//: an empty queue is not an error.
+		return nil, true, nil
+	}
+	//: PostgreSQL leases in one statement.
+	if b.stmts.leaseReturning != "" {
+		batch, err = b.receiveReturning(ctx, ex, at, max)
+		//: whatever was due, oldest enqueued first.
+		return batch, true, err
+	}
+	//: the other engines lease in a transaction.
+	return nil, false, nil
+}
+
+// leaseInTransaction leases up to max due rows in a transaction — the
+// broker's own, or a savepoint of the caller's — and records when the next
+// row becomes due once the leases stand.
+func (b *sqlBroker) leaseInTransaction(ctx context.Context, at sqlInstants, max int) ([]corequeue.DeliveryValue, error) {
+	var batch []corequeue.DeliveryValue
 	var next int64
 	leaseErr := b.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
 		var err error
-		batch, next, err = b.leaseDue(txCtx, ex, sqlInstants{now: now, deadline: deadline.UnixNano()}, max)
+		batch, next, err = b.leaseDue(txCtx, ex, at, max)
 		//: nil, or QueueBackendFailed.
 		return err
 	})
@@ -130,6 +181,12 @@ func (b *sqlBroker) leaseDue(
 			//: QueueBackendFailed.
 			return nil, 0, b.failed("lock the queue", lockErr)
 		}
+	}
+	//: a message past MaxAge is buried before any is picked, so none is
+	//: delivered; a policy with no MaxAge sends nothing more.
+	if expireErr := b.expireDue(ctx, ex, at.now); expireErr != nil {
+		//: QueueBackendFailed.
+		return nil, 0, expireErr
 	}
 	//: until the batch is full, or the read found nothing more.
 	for len(batch) < max {
@@ -324,4 +381,113 @@ func idArgs(rows []sqlPicked) []any {
 	}
 	//: one per row.
 	return args
+}
+
+// receiveReturning leases up to max due messages outside the caller's
+// transaction in ONE statement — leaseReturning, atomic by itself, so it runs
+// on the pool with no BEGIN and no COMMIT (issue #1042). A batch it did not
+// fill buries the lapsed leases with no attempt left, which the statement
+// skips, and asks when the next message is due. A policy with a MaxAge buries
+// the expired messages first, in a statement of its own.
+//
+// RETURNING promises no order, so the batch is sorted by the instant each row
+// was due, then its identifier: pick's order, the queue's visibility order.
+func (b *sqlBroker) receiveReturning(
+	ctx context.Context, ex coresql.Executor, at sqlInstants, max int,
+) (batch []corequeue.DeliveryValue, err error) {
+	//: a message past MaxAge is buried before any is leased.
+	if expireErr := b.expireDue(ctx, ex, at.now); expireErr != nil {
+		//: QueueBackendFailed.
+		return nil, expireErr
+	}
+	batch, err = b.leaseReturning(ctx, ex, at, max)
+	//: the database refused.
+	if err != nil {
+		//: QueueBackendFailed.
+		return nil, err
+	}
+	//: a full batch may have more behind it: look again at once.
+	if len(batch) == max {
+		b.wake.record(at.now)
+		//: the batch.
+		return batch, nil
+	}
+	args := append(b.stmts.causeArgs(at.now, causeValue{reason: reasonLeaseExpired}), at.now, int64(b.policy.MaxDeliveries))
+	//: the lapsed leases the lease skipped, which only a burial moves.
+	if _, buryErr := ex.ExecContext(ctx, b.stmts.buryExhausted, args...); buryErr != nil {
+		//: QueueBackendFailed.
+		return nil, b.failed("dead-letter lapsed leases", buryErr)
+	}
+	due, nextErr := b.minDue(ctx, ex, b.stmts.next, "read the next due instant", at.now)
+	//: the database refused.
+	if nextErr != nil {
+		//: QueueBackendFailed.
+		return nil, nextErr
+	}
+	b.wake.record(earliest(due.Int64, at.deadline))
+	//: whatever was due, oldest enqueued first.
+	return batch, nil
+}
+
+// leaseReturning sends the one statement that leases, and reads the rows it
+// leased into deliveries under one lease, in identifier order.
+func (b *sqlBroker) leaseReturning(
+	ctx context.Context, ex coresql.Executor, at sqlInstants, max int,
+) (batch []corequeue.DeliveryValue, err error) {
+	lease, entropyErr := randomHex(sqlLeaseEntropyBytes)
+	//: one random half for the whole batch, as leaseRows takes one.
+	if entropyErr != nil {
+		//: QueueBackendFailed — nothing leased.
+		return nil, backendFailed("rand", "", entropyErr)
+	}
+	rows, err := ex.QueryContext(ctx, b.stmts.leaseReturning,
+		at.deadline, []byte(lease), at.now, int64(b.policy.MaxDeliveries), int64(max))
+	//: the database refused.
+	if err != nil {
+		//: QueueBackendFailed.
+		return nil, b.failed("lease the due messages", err)
+	}
+	defer func() { err = b.finishRows(rows, "lease the due messages", err) }()
+	var wasDue []int64
+	//: every row the statement leased; its count is the one it moved on.
+	for rows.Next() {
+		var id string
+		var payload []byte
+		var enqueuedAt, deliveries, due int64
+		//: a row the scan refused.
+		if scanErr := rows.Scan(&id, &enqueuedAt, &deliveries, &payload, &due); scanErr != nil {
+			//: QueueBackendFailed.
+			return nil, b.failed("lease the due messages", scanErr)
+		}
+		wasDue = append(wasDue, due)
+		batch = append(batch, corequeue.DeliveryValue{
+			Message: corequeue.MessageValue{ID: id, Payload: payload, EnqueuedAt: time.Unix(0, enqueuedAt)},
+			Lease: corequeue.LeaseValue{
+				Receipt: sqlReceiptValue(id, int(deliveries), lease), ExpiresAt: time.Unix(0, at.deadline),
+			},
+			Deliveries: int(deliveries),
+		})
+	}
+	//: in the order pick reads them: the instant due, then the identifier.
+	return sortedByDue(batch, wasDue), nil
+}
+
+// sortedByDue orders batch by the instant each delivery was due — due[i] for
+// batch[i] — then by identifier.
+func sortedByDue(batch []corequeue.DeliveryValue, due []int64) []corequeue.DeliveryValue {
+	order := make([]int, len(batch))
+	//: the positions, sorted, then the deliveries laid out in their order.
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortFunc(order, func(x, y int) int {
+		//: visibility first, the identifier on a tie.
+		return cmp.Or(cmp.Compare(due[x], due[y]), strings.Compare(batch[x].Message.ID, batch[y].Message.ID))
+	})
+	sorted := make([]corequeue.DeliveryValue, len(batch))
+	//: each delivery at its place.
+	for at, from := range order {
+		sorted[at] = batch[from]
+	}
+	return sorted
 }

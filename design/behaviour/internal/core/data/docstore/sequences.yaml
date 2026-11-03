@@ -20,3 +20,19 @@ sequences:
   - of: Index
     steps:
       - return: "IndexSpec[T]{Name: name, Keys: keys}"
+  - of: Ordered
+    steps:
+      - opt:
+          do:
+            - return: "IndexSpec[T]{Name: name, Ordered: true}"
+          when: key == nil
+      - return: |-
+          IndexSpec[T]{Name: name, Ordered: true, Keys: func(v T) []string {
+          		//: the empty key is not a key.
+          		if k := key(v); k != "" {
+          			//: the one key.
+          			return []string{k}
+          		}
+          		//: nothing to file.
+          		return nil
+          	}}

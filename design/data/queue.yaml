@@ -82,6 +82,23 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
+              CodeMessageExpired identifies a message a broker dead-lettered without
+              delivering it, because it outlived [PolicyValue.MaxAge] before any
+              consumer could lease it (ADR 0054, amended 2026-11-02).
+            name: CodeMessageExpired
+            value: "0x00_02_17_0B"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeAcknowledged identifies a handler's report that it acknowledged its
+              delivery itself, inside its own transaction, so the consumer engine
+              must neither acknowledge nor hand it back (ADR 0054, amended
+              2026-11-02).
+            name: CodeAcknowledged
+            value: "0x00_02_17_0C"
+        type: errs.Code
+      - const:
+          - doc: |-
               CodeQueueBackendFailed identifies an operation a durable broker depends on
               that its storage refused: a filesystem call the operating system refused,
               or a statement the SQL broker's database did not complete.
@@ -130,6 +147,108 @@ packages:
             value: "0x00_03_35_05"
         type: errs.Code
     constants:
+      - blockDoc: |-
+          The four outcomes [Acker.AckMany] reports for one receipt. The zero is
+          the one a broker never reached, so a result cut short by a failure says
+          which receipts it did not try rather than reading as acknowledged.
+        doc: |-
+          AckNotAttempted is the zero AckOutcome: the broker returned an error
+          before it reached this receipt, which is still held — or lapsed — as it
+          was before the call.
+        name: AckNotAttempted
+        type: AckOutcome
+        value: "0"
+      - blockDoc: |-
+          The four outcomes [Acker.AckMany] reports for one receipt. The zero is
+          the one a broker never reached, so a result cut short by a failure says
+          which receipts it did not try rather than reading as acknowledged.
+        doc: |-
+          AckAcknowledged is a receipt whose message was removed for good, as
+          [Broker.Ack] removes it.
+        name: AckAcknowledged
+        type: AckOutcome
+        value: "1"
+      - blockDoc: |-
+          The four outcomes [Acker.AckMany] reports for one receipt. The zero is
+          the one a broker never reached, so a result cut short by a failure says
+          which receipts it did not try rather than reading as acknowledged.
+        doc: |-
+          AckLeaseExpired is a receipt whose lease had lapsed, or whose message
+          another call already removed or moved: nothing was removed, as
+          [Broker.Ack] answers [LeaseExpired].
+        name: AckLeaseExpired
+        type: AckOutcome
+        value: "2"
+      - blockDoc: |-
+          The four outcomes [Acker.AckMany] reports for one receipt. The zero is
+          the one a broker never reached, so a result cut short by a failure says
+          which receipts it did not try rather than reading as acknowledged.
+        doc: |-
+          AckUnknownReceipt is a receipt this broker never issued or cannot parse:
+          nothing was removed, as [Broker.Ack] answers [UnknownReceipt].
+        name: AckUnknownReceipt
+        type: AckOutcome
+        value: "3"
+      - blockDoc: |-
+          The five levels a message is published at ([PriorityPublisher]), a
+          closed set: a Receive hands out the visible messages of the highest
+          level first, then by visibility, then by identifier — strict, with no
+          ageing, so a lower level is starved for as long as a higher one has a
+          visible message.
+        doc: |-
+          PriorityLowest is the lowest level: received only when no other level has a
+          visible message.
+        name: PriorityLowest
+        type: Priority
+        value: "-2"
+      - blockDoc: |-
+          The five levels a message is published at ([PriorityPublisher]), a
+          closed set: a Receive hands out the visible messages of the highest
+          level first, then by visibility, then by identifier — strict, with no
+          ageing, so a lower level is starved for as long as a higher one has a
+          visible message.
+        doc: |-
+          PriorityLow is below the normal level: bulk work that may wait behind the
+          normal stream.
+        name: PriorityLow
+        type: Priority
+        value: "-1"
+      - blockDoc: |-
+          The five levels a message is published at ([PriorityPublisher]), a
+          closed set: a Receive hands out the visible messages of the highest
+          level first, then by visibility, then by identifier — strict, with no
+          ageing, so a lower level is starved for as long as a higher one has a
+          visible message.
+        doc: |-
+          PriorityNormal is the zero Priority, the level [Broker.Publish] publishes at
+          and every message written before priorities existed reads as.
+        name: PriorityNormal
+        type: Priority
+        value: "0"
+      - blockDoc: |-
+          The five levels a message is published at ([PriorityPublisher]), a
+          closed set: a Receive hands out the visible messages of the highest
+          level first, then by visibility, then by identifier — strict, with no
+          ageing, so a lower level is starved for as long as a higher one has a
+          visible message.
+        doc: |-
+          PriorityHigh is above the normal level: received before any visible normal
+          message.
+        name: PriorityHigh
+        type: Priority
+        value: "1"
+      - blockDoc: |-
+          The five levels a message is published at ([PriorityPublisher]), a
+          closed set: a Receive hands out the visible messages of the highest
+          level first, then by visibility, then by identifier — strict, with no
+          ageing, so a lower level is starved for as long as a higher one has a
+          visible message.
+        doc: |-
+          PriorityHighest is the highest level: received before any other visible
+          message.
+        name: PriorityHighest
+        type: Priority
+        value: "2"
       - doc: |-
           DefaultMaxMessageBytes bounds a payload when [PolicyValue.MaxMessageBytes]
           is left at zero. One mebibyte is the value the industry converged on —
@@ -281,6 +400,12 @@ packages:
 
       Package queue — the ADR 0039 sibling that lets a consumer sleep until there
       may be work, and the value it answers with (ADR 0104).
+
+      Package queue — the siblings that act on a whole queue rather than one
+      message (ADR 0054 and ADR 0151, amended 2026-11-02): a backlog counted
+      without its payloads, the live messages purged or listed through an
+      iterator, a batch published or acknowledged in one call, and the dead
+      letters paged after a cursor, replayed or purged in bulk.
     functions:
       - doc: |-
           DoNotRetry marks cause as a failure no retry can fix, so the consumer engine
@@ -369,6 +494,7 @@ packages:
             type: bool
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
     path: github.com/kitsunium/sdk/internal/core/data/queue
     ports:
       - doc: |-
@@ -888,6 +1014,311 @@ packages:
               - type: error
         name: MessageWriter
       - doc: |-
+          MessageLister walks the live messages a broker holds through an iterator,
+          where [MessageReader] hands them out a page at a time.
+
+          It reads what Messages reads, in the same order and with the same promise
+          — nothing leased, no delivery counted, no lapsed lease reclaimed, a
+          message published, acknowledged or dead-lettered meanwhile listed or not
+          — but the caller ranges over it instead of threading the last identifier
+          of each page into the next call. A sibling of [Broker] for the reason
+          [DeadLetterReader] is. The three brokers in internal/service/data/queue
+          implement it (ADR 0054, amended 2026-11-02).
+
+          	if lister, ok := source.(queue.MessageLister); ok {
+          		for live, err := range lister.AllMessages(ctx, "") {
+          			if err != nil {
+          				return err
+          			}
+          			copyOne(live)
+          		}
+          	}
+        methods:
+          - doc: |-
+              AllMessages yields every live message whose identifier sorts after
+              after — from the first when after is empty —, in the byte order of
+              their identifiers, as [MessageReader.Messages] lists them.
+
+              A failure of the broker's storage, or ctx ending, is yielded once as
+              the error of a zero [LiveMessageValue], and the iteration stops there;
+              the identifier of the last message yielded before it is where a later
+              call resumes. A loop that breaks early stops the reading: nothing is
+              held open past the break.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: after
+                type: string
+            name: AllMessages
+            out:
+              - type: iter.Seq2[LiveMessageValue, error]
+        name: MessageLister
+      - doc: |-
+          Counter reports how much a queue holds without reading what it holds: the
+          messages waiting, the messages leased, the dead letters, and the two
+          instants an operator asks about — the oldest message still alive and the
+          next one due.
+
+          [MessageReader] can answer the same questions only by reading every live
+          message with its payload; a consumer autoscaled on its backlog, or an
+          alert on an ageing one, needs three integers and two instants. A sibling
+          of [Broker] for the reason [DeadLetterReader] is. The three brokers in
+          internal/service/data/queue implement it (ADR 0054, amended 2026-11-02).
+
+          	if counter, ok := broker.(queue.Counter); ok {
+          		stats, err := counter.Stats(ctx)
+          	}
+        methods:
+          - doc: |-
+              Stats counts the queue as the broker records it now: no payload is
+              read, nothing is leased and no lapsed lease is reclaimed, so a lease
+              that ran out and nobody reclaimed yet still counts as leased. It is a
+              snapshot that races the queue, as [MessageReader.Messages] is.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Stats
+            out:
+              - type: StatsValue
+              - type: error
+        name: Counter
+      - doc: |-
+          Purger empties a queue of its live messages in one call — every message
+          waiting and every message leased — and never touches a dead letter.
+
+          It is what an operator needs after a producer published what nobody
+          should handle: a bad deployment's garbage, a test's traffic against the
+          wrong queue. The only alternative is to receive and acknowledge each
+          message, which runs the handlers it was meant to spare. A sibling of
+          [Broker] for the reason [DeadLetterReader] is. The three brokers in
+          internal/service/data/queue implement it (ADR 0054, amended 2026-11-02).
+
+          	if purger, ok := broker.(queue.Purger); ok {
+          		purged, err := purger.Purge(ctx)
+          	}
+        methods:
+          - doc: |-
+              Purge removes every live message and reports how many were waiting
+              and how many were leased. It is, beside
+              [DeadLetterManager.DeleteDeadLetter] and
+              [DeadLetterBulkManager.PurgeDeadLetters], a call that destroys messages
+              without their consumers' acknowledgement, and it is never made by the
+              SDK itself.
+
+              A consumer still working under a lease it held finds the message gone
+              at its acknowledgement, which then answers [LeaseExpired]. A message
+              published while Purge runs may survive it. Idle consumers are woken,
+              so they read the emptied queue at once. A broker that joins the
+              transaction ctx carries (ADR 0151) purges in that transaction.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Purge
+            out:
+              - type: PurgeValue
+              - type: error
+        name: Purger
+      - doc: |-
+          DeadLetterPager pages through the dead-letter store after a cursor, where
+          [DeadLetterReader] can only read its first page.
+
+          Both list the dead letters in the one order the store keeps: the byte
+          order of their identifiers, which every broker mints from the message's
+          enqueue instant, so the oldest enqueued comes first whatever order the
+          messages died in. A sibling of [Broker] for the reason [DeadLetterReader]
+          is. The three brokers in internal/service/data/queue implement it (ADR
+          0054, amended 2026-11-02).
+
+          	for after := ""; ; {
+          		page, err := pager.DeadLettersAfter(ctx, after, 100)
+          		if err != nil || len(page) == 0 {
+          			break
+          		}
+          		after = page[len(page)-1].Message.ID
+          	}
+        methods:
+          - doc: |-
+              DeadLettersAfter returns up to max dead letters whose identifier sorts
+              after after — from the first when after is empty —, in the byte order
+              of their identifiers. Like [DeadLetterReader.DeadLetters] it removes
+              nothing. A dead letter written, replayed or deleted meanwhile may be
+              listed or not.
+
+              max must be positive ([InvalidBatchSize]).
+            in:
+              - name: ctx
+                type: context.Context
+              - name: after
+                type: string
+              - name: max
+                type: int
+            name: DeadLettersAfter
+            out:
+              - type: "[]DeadLetterValue"
+              - type: error
+        name: DeadLetterPager
+      - doc: |-
+          DeadLetterBulkManager takes [DeadLetterManager]'s two decisions on many
+          dead letters at once: replay the oldest, or delete those that failed
+          before an instant.
+
+          It is what an operator needs after the bug that killed a thousand
+          messages is fixed, or when a store that dead-letters steadily has to be
+          trimmed: one call per batch, where DeadLetterManager would take one per
+          dead letter, each paying its own read of the store. A sibling of [Broker]
+          for the reason [DeadLetterReader] is. The three brokers in
+          internal/service/data/queue implement it (ADR 0151, amended 2026-11-02).
+        methods:
+          - doc: |-
+              ReplayDeadLetters replays up to max dead letters, the oldest first in
+              [DeadLetterPager]'s order, each as [DeadLetterManager.ReplayDeadLetter]
+              replays one, and returns how many it replayed. Called again, it
+              replays the next ones; it returns 0 once the store is empty.
+
+              max must be positive ([InvalidBatchSize]). A failure part-way returns
+              the number replayed so far with the error, and every dead letter not
+              counted is still a dead letter, so the caller resumes by calling
+              again. Idle consumers are woken.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: max
+                type: int
+            name: ReplayDeadLetters
+            out:
+              - name: replayed
+                type: int
+              - name: err
+                type: error
+          - doc: |-
+              PurgeDeadLetters deletes up to max dead letters whose
+              [DeadLetterValue.FailedAt] lies before before, the oldest first in
+              [DeadLetterPager]'s order, and returns how many it deleted. It never
+              touches a live message.
+
+              max must be positive ([InvalidBatchSize]). A failure part-way returns
+              the number deleted so far with the error, as ReplayDeadLetters does.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: before
+                type: time.Time
+              - name: max
+                type: int
+            name: PurgeDeadLetters
+            out:
+              - name: removed
+                type: int
+              - name: err
+                type: error
+        name: DeadLetterBulkManager
+      - doc: |-
+          BatchPublisher publishes several messages in one call, so a producer with
+          a batch pays the broker's fixed cost once where it can rather than once
+          per message.
+
+          It is a sibling of [Broker] for the reason [DeadLetterReader] is. The
+          three brokers in internal/service/data/queue implement it (ADR 0054,
+          amended 2026-11-02); each states what a failure part-way leaves behind.
+        methods:
+          - doc: |-
+              PublishMany appends every payload to the queue, in order, as
+              [Broker.Publish] appends one, and returns the messages the broker
+              minted, one per payload and in the same order.
+
+              Every payload is checked against [PolicyValue.MaxMessageBytes] before
+              anything is written: one above it is [MessageTooLarge], and nothing is
+              published. An empty batch publishes nothing and returns no error.
+
+              A broker that joins the transaction ctx carries (ADR 0151) publishes
+              the batch in that transaction, so it exists entirely or not at all. A
+              broker that writes message by message says so: on a failure at the
+              k-th payload, the messages it returns beside the error — the first
+              k−1 — are durable, and the rest were not published.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: payloads
+                type: "[][]byte"
+            name: PublishMany
+            out:
+              - type: "[]MessageValue"
+              - type: error
+        name: BatchPublisher
+      - doc: |-
+          PriorityPublisher publishes a message at a level: among the messages
+          visible at a Receive, those of the highest level are handed out first,
+          then by visibility, then by identifier (ADR 0054, amended 2026-11-03).
+
+          The order is STRICT and ages nothing: a lower level waits for as long as
+          a higher one has a visible message, so a steady stream at one level
+          starves every level below it — the policy every broker this port would
+          wrap chose, stated rather than discovered. A message not yet visible
+          holds back nobody. Its level is kept across a nack, a release, a lapsed
+          lease, a dead letter's replay and a copy ([LiveMessageValue.Priority],
+          [DeadLetterValue.Priority]).
+
+          It is a sibling of [Broker] for the reason [DeadLetterReader] is. The
+          three brokers in internal/service/data/queue implement it; the SQL
+          broker keeps a level other than [PriorityNormal] only in the column its
+          SQLConfig.Priority names.
+        methods:
+          - doc: |-
+              PublishPriority appends payload to the queue at level, as
+              [Broker.Publish] appends one at [PriorityNormal], and returns the
+              message the broker minted.
+
+              A level outside the five [PriorityLowest] to [PriorityHighest] is
+              [QueueMisconfigured], and nothing is published — so is one a broker
+              cannot keep. A payload above [PolicyValue.MaxMessageBytes] is
+              [MessageTooLarge].
+            in:
+              - name: ctx
+                type: context.Context
+              - name: payload
+                type: "[]byte"
+              - name: level
+                type: Priority
+            name: PublishPriority
+            out:
+              - type: MessageValue
+              - type: error
+        name: PriorityPublisher
+      - doc: |-
+          Acker acknowledges several leased messages in one call, and says for each
+          receipt what became of it.
+
+          It is the batch acknowledgement ADR 0054 deferred until a partial failure
+          had a meaning, and the meaning is the result: one [AckOutcome] per
+          receipt, so a caller never guesses which half of a batch landed. A
+          sibling of [Broker] for the reason [DeadLetterReader] is. The three
+          brokers in internal/service/data/queue implement it (ADR 0054, amended
+          2026-11-02).
+        methods:
+          - doc: |-
+              AckMany acknowledges every receipt as [Broker.Ack] acknowledges one,
+              and returns one outcome per receipt, in the same order: acknowledged,
+              a lapsed lease, or a receipt the broker never issued. A refused
+              receipt is an outcome, never the call's error: the others are still
+              acknowledged.
+
+              The error is the broker's storage failing, or ctx ending; the result
+              beside it still holds an outcome per receipt, [AckNotAttempted] for
+              the ones the broker did not reach, which are as they were before the
+              call. An empty batch acknowledges nothing and returns no error. A
+              broker that joins the transaction ctx carries (ADR 0151) acknowledges
+              in that transaction.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: receipts
+                type: "[]ReceiptValue"
+            name: AckMany
+            out:
+              - type: AckResultValue
+              - type: error
+        name: Acker
+      - doc: |-
           Broker is one named queue: producers publish into it, consumers lease from
           it, and it — not the consumer — owns the delivery count and the decision to
           dead-letter. Implementations MUST be safe for concurrent use by multiple
@@ -902,8 +1333,10 @@ packages:
           capability arrives as a sibling interface reached by type assertion —
           [DeadLetterReader], [LeaseExtender], [Waker], [Rejecter], [Releaser],
           [DelayedNacker], [DelayedPublisher], [OncePublisher],
-          [DeadLetterManager], [DeadLetterWriter], [MessageReader] and
-          [MessageWriter] are the ones that ship.
+          [DeadLetterManager], [DeadLetterWriter], [MessageReader],
+          [MessageWriter], [MessageLister], [Counter], [Purger],
+          [DeadLetterPager], [DeadLetterBulkManager], [BatchPublisher] and
+          [Acker] are the ones that ship.
 
           # Why the BROKER owns the delivery count
 
@@ -1202,6 +1635,39 @@ packages:
             private: "core/data/queue: a handler asked for a retry after a delay of its own; the delay rides as the retry_after_ns field"
             public: The message was handed back to be retried after a delay
             reason: RETRY_REQUESTED
+          - code: CodeMessageExpired
+            doc: |-
+              MessageExpired is what a dead letter records of a message that outlived
+              [PolicyValue.MaxAge] while it waited: no consumer was handed it once
+              its age passed, and the broker moved it to the dead-letter store at
+              the next Receive that reached it, with this as its reason. Its
+              Deliveries is the count the message had, 0 for one never delivered.
+
+              It is evidence, never returned by a call: the message is a dead letter
+              rather than silently gone, so an operator sees what expired and when.
+            exit: TEMPFAIL
+            name: MessageExpired
+            private: "core/data/queue: a message outlived PolicyValue.MaxAge before a consumer leased it, and was dead-lettered undelivered"
+            public: The message expired before it could be delivered
+            reason: MESSAGE_EXPIRED
+          - code: CodeAcknowledged
+            doc: |-
+              Acknowledged is what a handler returns once it has acknowledged its
+              delivery itself — [Broker.Ack] on the receipt, inside the transaction
+              that holds its own effects, so the effects and the acknowledgement
+              commit together or not at all. The consumer engine recognises it with
+              errs.HasCode and sends nothing for the delivery: no acknowledgement,
+              which would find no message, and no nack, which would hand back work
+              that is done.
+
+              A handler that returns it without having acknowledged leaves the
+              message leased until its lease lapses; the message is then delivered
+              again, as after a crash. It is a report, never a failure: no dead
+              letter records it.
+            name: Acknowledged
+            private: "core/data/queue: the handler acknowledged its delivery itself, in its own transaction; the engine sends no acknowledgement and no nack for it"
+            public: The handler acknowledged the message itself
+            reason: ACKNOWLEDGED
           - code: CodeQueueBackendFailed
             doc: |-
               QueueBackendFailed reports a refusal from a durable broker's storage:
@@ -1296,6 +1762,74 @@ packages:
             reason: HANDLER_PANICKED
     types:
       - doc: |-
+          AckOutcome is what [Acker.AckMany] did with one receipt:
+          [AckAcknowledged], [AckLeaseExpired], [AckUnknownReceipt], or
+          [AckNotAttempted] — the zero — when a failure stopped the call before it.
+        name: AckOutcome
+        underlying: uint8
+      - doc: |-
+          AckResultValue is what [Acker.AckMany] reports: one [AckOutcome] per
+          receipt it was given, in the same order.
+        name: AckResultValue
+        struct:
+          fields:
+            - doc: |-
+                Outcomes holds the outcome of each receipt, Outcomes[i] for the i-th;
+                it is as long as the batch, even beside an error.
+              name: Outcomes
+              type: "[]AckOutcome"
+      - doc: |-
+          Priority is the level a message is delivered at, one of five from
+          [PriorityLowest] to [PriorityHighest]; the zero is [PriorityNormal]
+          (ADR 0054, amended 2026-11-03).
+        name: Priority
+        underlying: int8
+      - doc: |-
+          PurgeValue is what [Purger.Purge] removed: how many live messages were
+          waiting, and how many were leased.
+        name: PurgeValue
+        struct:
+          fields:
+            - doc: Queued is how many waiting messages were removed, visible or not yet.
+              name: Queued
+              type: int
+            - doc: |-
+                Leased is how many leased messages were removed — a lapsed lease
+                nobody had reclaimed yet among them.
+              name: Leased
+              type: int
+      - doc: |-
+          StatsValue is a queue's backlog as [Counter.Stats] reads it: three counts
+          and two instants, and no payload.
+        name: StatsValue
+        struct:
+          fields:
+            - doc: |-
+                OldestEnqueuedAt is the enqueue instant of the oldest live message —
+                waiting or leased —, the zero time.Time when there is none. Its age
+                is how long the queue has been behind.
+              name: OldestEnqueuedAt
+              type: time.Time
+            - doc: |-
+                NextDueAt is the earliest instant a waiting message becomes visible —
+                an instant already past when one is visible now —, the zero
+                time.Time when nothing waits.
+              name: NextDueAt
+              type: time.Time
+            - doc: |-
+                Queued counts the messages waiting for a consumer, visible now or
+                held until a later instant.
+              name: Queued
+              type: int64
+            - doc: |-
+                Leased counts the messages a consumer leases, a lapsed lease nobody
+                reclaimed yet among them.
+              name: Leased
+              type: int64
+            - doc: Dead counts the dead letters.
+              name: Dead
+              type: int64
+      - doc: |-
           DeadLetterValue is one message the broker gave up on, together with why.
 
           A dead letter without its cause is an investigation nobody can run, so the
@@ -1361,6 +1895,13 @@ packages:
                 the message had for one a handler rejected ([Rejecter]).
               name: Deliveries
               type: int
+            - doc: |-
+                Priority is the level the message was published at
+                ([PriorityPublisher]); a replay queues it at that level again.
+                [PriorityNormal] for one written before priorities existed, and on
+                an SQL broker whose SQLConfig.Priority is not set.
+              name: Priority
+              type: Priority
       - doc: |-
           LiveMessageValue is one message a broker holds alive, as it records it:
           what [MessageReader.Messages] lists and [MessageWriter.PutMessage]
@@ -1389,6 +1930,11 @@ packages:
                 acknowledged.
               name: Leased
               type: bool
+            - doc: |-
+                Priority is the level the message is delivered at
+                ([PriorityPublisher]), kept across a retry and a copy.
+              name: Priority
+              type: Priority
       - doc: |-
           MessageValue is one unit of work as the broker minted it. Every field is
           assigned by [Broker.Publish]; a caller never fills one in, which is why
@@ -1523,7 +2069,11 @@ packages:
               backoff wants. A zero size bound means [DefaultMaxMessageBytes].
             - [PolicyValue.MaxRetryDelay] is neither: its zero is the behaviour the
               struct had before the field existed — a retry delay that does not grow —
-              which is one reading and the only backward-compatible one.
+              which is one reading and the only backward-compatible one. So are
+              [PolicyValue.RetryJitter] and [PolicyValue.RetryJitterMode], whose zero
+              is the exact instant every retry waited before, and
+              [PolicyValue.MaxAge] and [PolicyValue.DeadLetterRetention], whose zero
+              keeps a message, and a dead letter, for as long as it always was kept.
 
           Both branches in one struct is the point. A domain in which every zero is
           refused teaches a reader nothing except that the author was nervous.
@@ -1630,6 +2180,66 @@ packages:
                 is not a bound at all and the caller who wrote it meant something.
               name: MaxMessageBytes
               type: int
+            - doc: |-
+                MaxAge is how long a message may wait for a consumer, measured from
+                its [MessageValue.EnqueuedAt]. A message whose age has reached it is
+                never handed to a consumer: the next [Broker.Receive] that reaches it
+                moves it to the dead-letter store with [MessageExpired] as its reason
+                — evidence of what expired, never a message silently gone. A message
+                a consumer already leases is not taken from it: its acknowledgement
+                still lands, and only a delivery after its age is refused.
+
+                It is for work that is worthless late — a notification an hour
+                stale, a cache warm-up for a deployment already replaced —, the
+                lifetime SQS and RabbitMQ call a message's retention and TTL.
+
+                Zero means a message never expires, which is what every policy did
+                before the field existed: that is its one reading. A negative value
+                is refused, and so is one above [MaxDeadlineOffset]
+                ([QueueMisconfigured], naming the field).
+              name: MaxAge
+              type: time.Duration
+            - doc: |-
+                DeadLetterRetention is how long a dead letter is kept, measured from
+                its [DeadLetterValue.FailedAt]. A dead letter older than it is removed
+                by a later [Broker.Receive] — at most one sweep a minute on the
+                broker's clock —, so a queue that dead-letters steadily stops growing
+                its store until somebody deletes by hand.
+
+                Zero keeps every dead letter for good, which is what every policy did
+                before the field existed. A negative value is refused, and so is one
+                above [MaxDeadlineOffset] ([QueueMisconfigured], naming the field).
+              name: DeadLetterRetention
+              type: time.Duration
+            - doc: |-
+                RetryJitter widens each policy retry delay by a random fraction of
+                itself, drawn from [0, RetryJitter) and added, so messages nacked in
+                the same instant — every message of every consumer during a
+                downstream's outage — come back spread over a window instead of in
+                one burst aimed at a dependency already failing to keep up. A delay
+                held at MaxRetryDelay may reach MaxRetryDelay × (1 + RetryJitter).
+                It is read only under the zero [PolicyValue.RetryJitterMode].
+
+                Zero is no jitter: the exact instant every retry waited before the
+                field existed. A value outside [0, 1], NaN included, is refused, and
+                so is a jitter with no MaxRetryDelay — a growing delay is what it
+                spreads ([QueueMisconfigured], naming the field). A delay a caller
+                names through [DelayedNacker] is the caller's, and never jittered.
+              name: RetryJitter
+              type: float64
+            - doc: |-
+                RetryJitterMode is how the retry delay is randomised, as
+                kernel/backoff's curve is (ADR 0184): the zero, additive, widens it
+                by [PolicyValue.RetryJitter]; full draws the whole delay from
+                [0, grown]; decorrelated draws it from [RetryDelay, 3 × the delay
+                before], held at MaxRetryDelay. The last two ignore RetryJitter, and
+                setting one beside them is refused rather than ignored.
+
+                A mode other than the zero needs a MaxRetryDelay, as RetryJitter
+                does, and a mode the package does not define is refused
+                ([QueueMisconfigured], naming the field).
+              name: RetryJitterMode
+              type: kbackoff.JitterMode
       - doc: |-
           Handler processes one delivery. It is the port a consumer implements, and
           it is a FUNCTION type rather than an interface — the shape
@@ -1724,8 +2334,9 @@ packages:
           It is a CLAMP and not a refusal (ADR 0031): its zero has one reading — "you
           did not think about polling" — and 100 ms is defensible for every queue,
           because it bounds idle latency at a tenth of a second while costing one
-          directory read per worker per tenth of a second. A caller who cares picks
-          their own.
+          probe per tenth of a second — on the file broker a stat of each state
+          directory while the queue is quiet, a read of them once it moves. A caller
+          who cares picks their own.
 
           Every broker in this package is a [corequeue.Waker], so for them it bounds
           only what a wake cannot see — a publication made by ANOTHER process into a
@@ -1885,6 +2496,19 @@ packages:
       with no lock, no lease and no polling — and it resolves the same way for
       two goroutines in one process as for two processes, which ADR 0052
       measured that flock(2) emphatically does not.
+
+      # Five levels, and where each broker keeps them
+
+      Every broker serves the visible messages of the highest
+      [corequeue.Priority] first, strictly (ADR 0054, amended 2026-11-03). The
+      file broker names a normal message exactly as it did before levels
+      existed, byte for byte, so a queue on disk keeps working, and opens the
+      names of every other level with one digit — the highest level 0, the
+      lowest 4 — which its listing sorts first; a name without one is the
+      normal level. The SQL broker keeps a level only in the column
+      [SQLPriorityMigration] adds, when [SQLConfig] Priority is set; without it
+      every statement is the one it always sent. The memory broker keeps one
+      list per level.
 
       Package queue — how long a nacked message waits, the same way in all three
       brokers.
@@ -2071,6 +2695,13 @@ packages:
           deployment made changes nothing (ADR 0151). The table it creates has the
           trail column SQLConfig.Trail writes; one an earlier release created gets
           it from [SQLTrailMigration].
+
+          Its Checksum fingerprints the statements Up runs (ADR 0055, amended
+          2026-11-02): a version table that recorded it refuses a build whose
+          statements differ, MIGRATION_CHANGED, and one that recorded the version
+          without a checksum is given this one by the next locked run. The
+          statements are therefore never edited: a later column comes as a
+          migration of its own.
         in:
           - name: dialect
             type: coresql.Dialect
@@ -2103,6 +2734,32 @@ packages:
           - name: version
             type: uint64
         name: SQLTrailMigration
+        out:
+          - type: coresql.MigrationValue
+          - type: error
+      - doc: |-
+          SQLPriorityMigration returns the migration that adds the priority
+          column — a small integer, NOT NULL, 0 by default, where a broker with
+          SQLConfig.Priority keeps a message's level — and the index over
+          (dead, priority, due, id) its lease reads, to the table an SQL queue
+          named table keeps on dialect, as a core/data/sql MigrationValue
+          numbered version, beside the one [SQLMigration] returns. The rows
+          already there read as core/data/queue.PriorityNormal.
+
+          It is a migration of its own because SQLMigration's statements are
+          never edited (ADR 0055, amended 2026-11-02). It does nothing when the
+          table has the column or when there is no table, so it may run twice
+          over one table. Its Down drops the index and the column, and every
+          level in it: unset SQLConfig.Priority before running it. SQLite drops
+          a column from version 3.35 on.
+        in:
+          - name: dialect
+            type: coresql.Dialect
+          - name: table
+            type: string
+          - name: version
+            type: uint64
+        name: SQLPriorityMigration
         out:
           - type: coresql.MigrationValue
           - type: error
@@ -2219,6 +2876,23 @@ packages:
               name: DrainTimeout
               type: time.Duration
             - doc: |-
+                AckedWindow is how many message identifiers the engine remembers
+                having handled: the last AckedWindow messages whose handler returned
+                nil or [corequeue.Acknowledged] in this process. A delivery of one of
+                them — its lease lapsed before the acknowledgement landed, and the
+                broker delivered it again — is acknowledged without running the
+                handler a second time.
+
+                It narrows the duplicates at-least-once delivery leaves, as the mail
+                spool's memory of what it delivered does, for every broker; it does
+                not remove them. The window is this process's and is lost when it
+                stops: a redelivery to another consumer, or after a restart, still
+                runs the handler, which is still idempotent. Zero, or negative,
+                remembers nothing — every delivery runs the handler, what Consume
+                always did.
+              name: AckedWindow
+              type: int
+            - doc: |-
                 AutoExtend renews the lease of the message a handler is running, a
                 third of the lease after it was granted or last renewed, for as long
                 as the handler runs — the heartbeat of SQS, JetStream's in-progress
@@ -2289,6 +2963,15 @@ packages:
               name: Clock
               type: clock.Clock
             - doc: |-
+                Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+                for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+                math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+                retry instant to the nanosecond, as it does without a jitter; the
+                three brokers draw from it identically, so the memory broker stays an
+                exact double. It may be called by several goroutines at once.
+              name: Random
+              type: func() float64
+            - doc: |-
                 Dir is the queue directory. It is created owner-only when absent, and
                 refused when it exists and any account outside the owner and group
                 could replace its entries. Its three state directories are held to the
@@ -2329,6 +3012,15 @@ packages:
               name: Clock
               type: clock.Clock
             - doc: |-
+                Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+                for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+                math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+                retry instant to the nanosecond, as it does without a jitter; the
+                three brokers draw from it identically, so the memory broker stays an
+                exact double. It may be called by several goroutines at once.
+              name: Random
+              type: func() float64
+            - doc: |-
                 Policy is the delivery discipline. Its zero value is refused; see
                 core/data/queue.PolicyValue.
               name: Policy
@@ -2363,6 +3055,15 @@ packages:
               name: Clock
               type: clock.Clock
             - doc: |-
+                Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+                for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+                math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+                retry instant to the nanosecond, as it does without a jitter; the
+                three brokers draw from it identically, so the memory broker stays an
+                exact double. It may be called by several goroutines at once.
+              name: Random
+              type: func() float64
+            - doc: |-
                 Table names the queue's one table, which [SQLMigration] creates. It is
                 a lower-case SQL identifier of at most [MaxSQLTableLen] bytes, holds no
                 three underscores in a row — docstore's derived tables do — and does
@@ -2390,6 +3091,16 @@ packages:
                 Unset, the broker sends the statements it sent before the column
                 existed, and a dead letter it buries or reads has no trail.
               name: Trail
+              type: bool
+            - doc: |-
+                Priority makes the broker keep a message's level
+                (core/data/queue.PriorityPublisher) in the table's priority column,
+                which [SQLPriorityMigration] adds, and hand out the visible rows of
+                the highest level first: run that migration before setting it.
+                Unset, the broker sends the statements it sent before the column
+                existed, reads every message as core/data/queue.PriorityNormal, and
+                refuses to publish or write one at any other level.
+              name: Priority
               type: bool
   - doc: |-
       Package queue is the public facade for the SDK's ASYNCHRONOUS, DURABLE
@@ -2804,14 +3515,98 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_02_17_0A"
+      - const:
+          - doc: |-
+              CodeMessageExpired is [MessageExpired]'s code: the reason and code a
+              dead letter records for a message that outlived [Policy].MaxAge.
+            name: CodeMessageExpired
+            reexport: corequeue.CodeMessageExpired
+            type: errs.Code
+            typed: true
+            value: "0x00_02_17_0B"
+          - doc: |-
+              CodeAcknowledged is [Acknowledged]'s code: errs.HasCode(err,
+              CodeAcknowledged) recognises a handler's report that it acknowledged
+              its delivery itself.
+            name: CodeAcknowledged
+            reexport: corequeue.CodeAcknowledged
+            type: errs.Code
+            typed: true
+            value: "0x00_02_17_0C"
+        doc: The codes of the two sentinels ADR 0054's 2026-11-02 amendment added, for errs.HasCode.
+      - const:
+          - doc: |-
+              AckNotAttempted is the zero [AckOutcome]: [Acker].AckMany returned an
+              error before it reached the receipt.
+            name: AckNotAttempted
+            reexport: corequeue.AckNotAttempted
+            type: AckOutcome
+            typed: true
+            value: "0"
+          - doc: AckAcknowledged is a receipt whose message was removed for good.
+            name: AckAcknowledged
+            reexport: corequeue.AckAcknowledged
+            type: AckOutcome
+            typed: true
+            value: "1"
+          - doc: |-
+              AckLeaseExpired is a receipt whose lease had lapsed: nothing was
+              removed, as [Broker].Ack answers [LeaseExpired].
+            name: AckLeaseExpired
+            reexport: corequeue.AckLeaseExpired
+            type: AckOutcome
+            typed: true
+            value: "2"
+          - doc: |-
+              AckUnknownReceipt is a receipt the broker never issued: nothing was
+              removed, as [Broker].Ack answers [UnknownReceipt].
+            name: AckUnknownReceipt
+            reexport: corequeue.AckUnknownReceipt
+            type: AckOutcome
+            typed: true
+            value: "3"
+        doc: The four outcomes [Acker].AckMany reports for one receipt.
+      - const:
+          - doc: PriorityLowest is the lowest of the five levels.
+            name: PriorityLowest
+            reexport: corequeue.PriorityLowest
+            type: Priority
+            typed: true
+            value: "-2"
+          - doc: PriorityLow is below the normal level.
+            name: PriorityLow
+            reexport: corequeue.PriorityLow
+            type: Priority
+            typed: true
+            value: "-1"
+          - doc: PriorityNormal is the zero [Priority], the level [Broker].Publish publishes at.
+            name: PriorityNormal
+            reexport: corequeue.PriorityNormal
+            type: Priority
+            typed: true
+            value: "0"
+          - doc: PriorityHigh is above the normal level.
+            name: PriorityHigh
+            reexport: corequeue.PriorityHigh
+            type: Priority
+            typed: true
+            value: "1"
+          - doc: PriorityHighest is the highest of the five levels.
+            name: PriorityHighest
+            reexport: corequeue.PriorityHighest
+            type: Priority
+            typed: true
+            value: "2"
+        doc: The five levels a [PriorityPublisher] publishes at, highest received first.
       - alias:
           - doc: |-
               Broker is the public alias for the queue contract. It is FROZEN at four
               methods; capabilities arrive as siblings ([DeadLetterReader],
               [LeaseExtender], [Waker], [Rejecter], [Releaser], [DelayedNacker],
               [DelayedPublisher], [OncePublisher], [DeadLetterManager],
-              [DeadLetterWriter], [MessageReader], [MessageWriter]) reached by type
-              assertion.
+              [DeadLetterWriter], [MessageReader], [MessageWriter], [MessageLister],
+              [Counter], [Purger], [DeadLetterPager], [DeadLetterBulkManager],
+              [BatchPublisher], [Acker]) reached by type assertion.
             name: Broker
             target: corequeue.Broker
       - alias:
@@ -2943,14 +3738,91 @@ packages:
             name: MessageWriter
             target: corequeue.MessageWriter
       - alias:
+          - doc: |-
+              MessageLister is the public alias for the capability of ranging over the
+              live messages through an iterator, as [MessageReader] lists them a page
+              at a time. Every broker here implements it.
+            name: MessageLister
+            target: corequeue.MessageLister
+      - alias:
+          - doc: |-
+              Counter is the public alias for the capability of counting a queue's
+              backlog — waiting, leased, dead, the oldest and the next due — without
+              reading a payload. Every broker here implements it.
+            name: Counter
+            target: corequeue.Counter
+      - alias:
+          - doc: Stats is the public alias for a queue's backlog as [Counter] reads it.
+            name: Stats
+            target: corequeue.StatsValue
+      - alias:
+          - doc: |-
+              Purger is the public alias for the capability of removing every live
+              message of a queue, never a dead letter. Every broker here implements it.
+            name: Purger
+            target: corequeue.Purger
+      - alias:
+          - doc: Purged is the public alias for what [Purger].Purge removed.
+            name: Purged
+            target: corequeue.PurgeValue
+      - alias:
+          - doc: |-
+              DeadLetterPager is the public alias for the capability of paging through
+              the dead letters after an identifier, oldest enqueued first. Every broker
+              here implements it.
+            name: DeadLetterPager
+            target: corequeue.DeadLetterPager
+      - alias:
+          - doc: |-
+              DeadLetterBulkManager is the public alias for the capability of
+              replaying the oldest dead letters, or deleting those that failed before
+              an instant, in one call. Every broker here implements it.
+            name: DeadLetterBulkManager
+            target: corequeue.DeadLetterBulkManager
+      - alias:
+          - doc: |-
+              BatchPublisher is the public alias for the capability of publishing
+              several messages in one call. Every broker here implements it.
+            name: BatchPublisher
+            target: corequeue.BatchPublisher
+      - alias:
+          - doc: |-
+              PriorityPublisher is the public alias for the capability of publishing
+              a message at a level, the visible messages of the highest level
+              received first, strictly. Every broker here implements it; the SQL
+              broker keeps a level once [SQLPriorityMigration] has run and
+              [SQLConfig].Priority is set.
+            name: PriorityPublisher
+            target: corequeue.PriorityPublisher
+      - alias:
+          - doc: Priority is the public alias for the level a message is delivered at.
+            name: Priority
+            target: corequeue.Priority
+      - alias:
+          - doc: |-
+              Acker is the public alias for the capability of acknowledging several
+              leased messages in one call, with one outcome per receipt. Every broker
+              here implements it.
+            name: Acker
+            target: corequeue.Acker
+      - alias:
+          - doc: AckResult is the public alias for what [Acker].AckMany reports.
+            name: AckResult
+            target: corequeue.AckResultValue
+      - alias:
+          - doc: AckOutcome is the public alias for what [Acker].AckMany did with one receipt.
+            name: AckOutcome
+            target: corequeue.AckOutcome
+      - alias:
           - doc: LiveMessage is the public alias for one live message as a broker records it.
             name: LiveMessage
             target: corequeue.LiveMessageValue
       - alias:
           - doc: |-
               SQLConfig is the public alias for [NewSQL]'s configuration: Transactor,
-              Dialect and Table (required), Policy, Clock, and Trail, which keeps a
-              dead letter's trail once [SQLTrailMigration] has run.
+              Dialect and Table (required), Policy, Clock, Trail, which keeps a
+              dead letter's trail once [SQLTrailMigration] has run, and Priority,
+              which keeps a message's level once [SQLPriorityMigration] has run.
             name: SQLConfig
             target: svcqueue.SQLConfig
       - alias:
@@ -3023,6 +3895,19 @@ packages:
               ran out of attempts.
             name: RetryRequested
             reexport: corequeue.RetryRequested
+            type: "*errs.Error"
+          - doc: |-
+              MessageExpired is what a dead letter records of a message that outlived
+              [Policy].MaxAge before any consumer was handed it.
+            name: MessageExpired
+            reexport: corequeue.MessageExpired
+            type: "*errs.Error"
+          - doc: |-
+              Acknowledged is what a [Handler] returns once it has acknowledged its
+              delivery itself, inside the transaction that holds its effects:
+              [Consume] then neither acknowledges nor hands the message back.
+            name: Acknowledged
+            reexport: corequeue.Acknowledged
             type: "*errs.Error"
           - doc: |-
               SQLQueueMisconfigured refuses an SQLConfig no SQL broker could run: no
@@ -3117,7 +4002,9 @@ packages:
             SQLMigration returns the migration that creates the one table an SQL queue
             named table keeps on dialect, numbered version for the caller's own version
             table. Its Down drops the table, and every message in it. Its statement does
-            nothing when the table exists.
+            nothing when the table exists. Its
+            Checksum fingerprints Up's statements, so a version table that recorded
+            it refuses a build whose statements differ.
           forward: svcqueue.SQLMigration
           in:
             - name: dialect
@@ -3145,6 +4032,25 @@ packages:
             - name: version
               type: uint64
           name: SQLTrailMigration
+          out:
+            - type: sql.Migration
+            - type: error
+      - func:
+          doc: |-
+            SQLPriorityMigration returns the migration that adds the priority column
+            and its index a broker with [SQLConfig].Priority reads to a table
+            [SQLMigration] created, numbered version for the caller's own version
+            table. It does nothing when the table has the column or does not exist;
+            its Down drops the index and the column.
+          forward: svcqueue.SQLPriorityMigration
+          in:
+            - name: dialect
+              type: sql.Dialect
+            - name: table
+              type: string
+            - name: version
+              type: uint64
+          name: SQLPriorityMigration
           out:
             - type: sql.Migration
             - type: error

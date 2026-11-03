@@ -9,17 +9,8 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/collections/heap"
 )
 
-// compactSlack is how many stale entries the heap may hold beyond its live
-// ones before it is rebuilt: below it, a rebuild costs more than it frees.
-const compactSlack int = 64
-
-// staleFactor is how many times the live entries the heap may hold before it
-// is rebuilt. With it, a rebuild is paid for by at least as many updates as
-// it drops, so an update stays O(log N) amortised.
-const staleFactor int = 2
-
-// slot is one heap entry: key is due at due. seq identifies the entry, so an
-// entry replaced by a later schedule is recognised as stale when it surfaces.
+// slot is one heap entry: key is due at due. seq orders equal instants in the
+// order they were scheduled.
 type slot struct {
 	due time.Time
 	key string
@@ -31,33 +22,38 @@ type plan struct {
 	// notBefore holds back an entity whose transition failed: no automatic
 	// transition of it before this instant.
 	notBefore time.Time
-	// seq is the live heap entry's; zero when the key is not scheduled.
-	seq uint64
+	// entry names the key's heap entry; the zero Handle when the key is not
+	// scheduled.
+	entry heap.Handle
 	// failures counts the consecutive failed transitions.
 	failures int
 }
 
-// agenda is a min-heap of due instants with ONE live entry per entity — its
-// earliest — and lazy deletion: rescheduling pushes a fresh entry and leaves
-// the old one to be recognised as stale and dropped when it reaches the top.
-// Finding the next transition due is therefore O(log N), where a sweep that
-// re-reads every entity is O(N). mu guards every field.
+// scheduled reports whether p holds a heap entry.
+func (p *plan) scheduled() bool {
+	//: the zero Handle names nothing.
+	return p.entry != heap.Handle{}
+}
+
+// agenda is a min-heap of due instants with exactly ONE entry per scheduled
+// entity — its earliest. A reschedule re-keys that entry in place and an
+// unschedule removes it (kernel/collections/heap's IndexedHeap, #1036), so the
+// heap never holds a stale entry and never needs rebuilding. Finding the next
+// transition due is O(log N), where a sweep that re-reads every entity is
+// O(N). mu guards every field.
 //
 // dirty holds the entities written since the loop last looked: their next due
 // instant is computed on the loop's goroutine, never on the writer's, because
 // computing it runs the caller's guards and instant functions.
 type agenda struct {
-	heap  *heap.Heap[slot]
+	heap  *heap.IndexedHeap[slot]
 	plans map[string]*plan
 	dirty map[string]struct{}
 	// wake holds one token when the loop should look again: a write arrived.
 	wake chan struct{}
-	// seq numbers the entries; it never repeats, so a forgotten key's stale
-	// entries can never match a plan made later.
+	// seq numbers the schedules, so equal instants keep their order.
 	seq uint64
-	// live counts the entries that are not stale.
-	live int
-	mu   sync.Mutex
+	mu  sync.Mutex
 }
 
 // newAgenda returns an empty agenda.
@@ -65,7 +61,7 @@ func newAgenda() *agenda {
 	//: earliest first; equal instants in the order they were scheduled.
 	byDue := func(a, b slot) int { return cmp.Or(a.due.Compare(b.due), cmp.Compare(a.seq, b.seq)) }
 	//: the wake channel holds one token: a burst of writes is one wake.
-	return &agenda{heap: heap.New(byDue), plans: make(map[string]*plan), dirty: make(map[string]struct{}), wake: make(chan struct{}, 1)}
+	return &agenda{heap: heap.NewIndexed(byDue), plans: make(map[string]*plan), dirty: make(map[string]struct{}), wake: make(chan struct{}, 1)}
 }
 
 // signal wakes the loop, without blocking when a wake is already pending.
@@ -126,14 +122,15 @@ func (a *agenda) scheduleLocked(key string, due time.Time) {
 	if due.Before(p.notBefore) {
 		due = p.notBefore
 	}
-	//: the previous entry, if any, becomes stale rather than removed.
-	if p.seq == 0 {
-		a.live++
-	}
 	a.seq++
-	p.seq = a.seq
-	a.heap.Push(slot{due: due, key: key, seq: p.seq})
-	a.compact()
+	next := slot{due: due, key: key, seq: a.seq}
+	//: a scheduled key's entry is re-keyed in place: one entry per key.
+	if p.scheduled() {
+		a.heap.Update(p.entry, next)
+		//: rescheduled.
+		return
+	}
+	p.entry = a.heap.Push(next)
 }
 
 // unschedule takes key off the agenda: nothing it could do is due by itself.
@@ -146,10 +143,10 @@ func (a *agenda) unschedule(key string) {
 		//: nothing to take off.
 		return
 	}
-	//: its live entry becomes stale.
-	if p.seq != 0 {
-		p.seq = 0
-		a.live--
+	//: its entry leaves the heap now, not when it would have surfaced.
+	if p.scheduled() {
+		a.heap.Remove(p.entry)
+		p.entry = heap.Handle{}
 	}
 	//: a plan with no entry and no failure to remember is dropped.
 	if p.failures == 0 {
@@ -162,9 +159,9 @@ func (a *agenda) forget(key string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	delete(a.dirty, key)
-	//: its live entry, if any, becomes stale.
-	if p := a.plans[key]; p != nil && p.seq != 0 {
-		a.live--
+	//: its entry, if any, leaves the heap with it.
+	if p := a.plans[key]; p != nil && p.scheduled() {
+		a.heap.Remove(p.entry)
 	}
 	delete(a.plans, key)
 }
@@ -223,22 +220,16 @@ func (a *agenda) take(now time.Time) []string {
 	defer a.mu.Unlock()
 	var keys []string
 	seen := make(map[string]struct{}, len(a.dirty))
-	//: pop while the top is due; stale tops are dropped on the way.
+	//: pop while the top is due; every entry is a live one.
 	for {
-		top, ok := a.heap.Peek()
+		top, _, ok := a.heap.Peek()
 		//: nothing is left, or nothing left is due.
-		if !ok || top.due.After(now) && a.isLive(top) {
+		if !ok || top.due.After(now) {
 			//: done popping.
 			break
 		}
 		a.heap.Pop()
-		//: a replaced or cancelled entry is just dropped.
-		if !a.isLive(top) {
-			//: the next top.
-			continue
-		}
-		a.plans[top.key].seq = 0
-		a.live--
+		a.plans[top.key].entry = heap.Handle{}
 		keys = append(keys, top.key)
 		seen[top.key] = struct{}{}
 	}
@@ -267,55 +258,12 @@ func (a *agenda) next(now time.Time) time.Time {
 		//: at once, subject to the loop's pace.
 		return now
 	}
-	//: drop stale tops so the answer is a live entry's.
-	for {
-		top, ok := a.heap.Peek()
-		//: nothing scheduled at all.
-		if !ok {
-			//: only a write can wake the loop.
-			return time.Time{}
-		}
-		//: the earliest live entry.
-		if a.isLive(top) {
-			//: the loop sleeps until then.
-			return top.due
-		}
-		a.heap.Pop()
+	top, _, ok := a.heap.Peek()
+	//: nothing scheduled at all.
+	if !ok {
+		//: only a write can wake the loop.
+		return time.Time{}
 	}
-}
-
-// isLive reports whether s is its key's current entry. The caller holds mu.
-func (a *agenda) isLive(s slot) bool {
-	p := a.plans[s.key]
-	//: the key's plan names this very entry.
-	return p != nil && p.seq == s.seq
-}
-
-// compact rebuilds the heap once stale entries outnumber live ones by
-// staleFactor, so memory stays proportional to the entities scheduled. The
-// caller holds mu.
-func (a *agenda) compact() {
-	//: below the threshold a rebuild would cost more than it frees.
-	if a.heap.Len() <= staleFactor*a.live+compactSlack {
-		//: keep the stale entries until they surface.
-		return
-	}
-	kept := make([]slot, 0, a.live)
-	//: drain, keeping only the live entries.
-	for {
-		s, ok := a.heap.Pop()
-		//: drained.
-		if !ok {
-			//: rebuild from what was kept.
-			break
-		}
-		//: stale entries are dropped here once and for all.
-		if a.isLive(s) {
-			kept = append(kept, s)
-		}
-	}
-	//: push back in order; a sorted push never sifts.
-	for _, s := range kept {
-		a.heap.Push(s)
-	}
+	//: the earliest entry; the loop sleeps until then.
+	return top.due
 }

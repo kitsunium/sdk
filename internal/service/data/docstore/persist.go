@@ -92,6 +92,19 @@ func (s *Store[T]) markPending(key string) {
 // its deletion — before the write is applied. A memory store persists
 // nothing.
 func (s *Store[T]) persist(key string, raw json.RawMessage, deleted bool, versions *versionsRecord) error {
+	//: a batch not yet complete comes first: its group entry must never hold
+	//: an older state of a key than that key's entry.
+	if settleErr := s.settleGroup(); settleErr != nil {
+		//: PersistFailed: this write changes nothing.
+		return settleErr
+	}
+	//: the entry itself.
+	return s.persistEntry(key, raw, deleted, versions)
+}
+
+// persistEntry publishes key's overlay entry: persist, without the batch that
+// comes first.
+func (s *Store[T]) persistEntry(key string, raw json.RawMessage, deleted bool, versions *versionsRecord) error {
 	//: nothing to persist to.
 	if s.fs == nil {
 		//: a memory write is done once it is applied.
@@ -245,6 +258,11 @@ func (s *Store[T]) fold() error {
 	}
 	removed, removeErr := s.removeFolded()
 	s.recordFold(removeErr, removed)
+	//: every entry removed, a batch's group entry among them: the snapshot
+	//: holds what it held.
+	if removeErr == nil {
+		s.lingering = nil
+	}
 	//: nil, or the entries that are still there to be removed next time.
 	return removeErr
 }

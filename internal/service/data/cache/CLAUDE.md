@@ -12,7 +12,8 @@ The concrete cache stores implementing `internal/core/data/cache` (ADR 0049):
   far hit into every nearer tier with its **remaining** TTL and its tags.
 
 Stdlib-only, cross-OS. Code range `0.3.48.*` — `CACHE_CHAIN_MISCONFIGURED` and
-`CACHE_TIER_FAILED`, which the chain emits — declared since ADR 0160 with the
+`CACHE_TIER_FAILED`, which the chain emits, and `CACHE_LEASE_FAILED`, which
+both stores' `LoadLeased` emits (#830) — declared since ADR 0160 with the
 port's `0.2.18.*` in `internal/core/data/cache`, under the values this package
 allocated. This package declares no code.
 
@@ -21,14 +22,18 @@ allocated. This package declares no code.
 | File | Surface |
 |---|---|
 | `config.go` | `MemoryConfig` + its ADR 0031 validation |
-| `chain_config.go` | `ChainConfig` — the `OnPromoteError` hook and why it should be wired |
-| `memory.go` | `NewMemory` + `memoryStore[V]` — the store, its lock discipline, and `Load` |
-| `record.go` | `record[V]` — what the primitive actually stores, and why `expireAt` is duplicated |
+| `chain_config.go` | `ChainConfig` — the `OnPromoteError` hook and why it should be wired; the `Clock` and `LeasePoll` `LoadLeased` waits on (#830) |
+| `lease.go` | `LoadLeased` on both stores — the cross-process lease from a `lock.Locker`, the waiting loop, `CACHE_LEASE_FAILED` (#830) |
+| `memory.go` | `NewMemory` / `NewWeighedMemory` + `memoryStore[V]` and its `memoryStripe[V]`s — the store, its lock discipline, `Expire`, and `Load` with negative entries |
+| `memory_bulk.go` | `FetchMany` / `SetMany` on the memory store — one lock per stripe per batch (#840) |
+| `memory_refresh.go` | `LoadRefreshing` on the memory store — refresh-ahead, one background fill per key (#838) |
+| `chain_bulk.go` | `Expire`, `FetchMany`, `SetMany` and `LoadRefreshing` on the chain (#1059, #840, #838) |
+| `record.go` | `record[V]` — what the primitive actually stores, why `expireAt` is duplicated, the negative entry's `absent` and the measured `weight` |
 | `tagindex.go` | `tagIndex` — `byKey` / `byTag`, and why both exist |
 | `chain.go` | `NewChain` + `chainStore[V]` — promotion, write order, delete order, and the guard that keeps a promotion from undoing a write (`announce` / `finish`, #460) |
 | `tier.go` | `tier[V]` — one level, with its three capabilities resolved once |
 | `refuse.go` | `validateEntry` / `primitiveTTL` / the `CACHE_ENTRY_REJECTED` and fill-error wrapping |
-| `cache_compliance.go` | the compile-time assertions that both stores still answer all four contracts |
+| `cache_compliance.go` | the compile-time assertions that both stores still answer all nine contracts |
 
 ## One process, and only one
 
@@ -42,10 +47,50 @@ origin wrong by a factor of N.
 
 Cross-process collapsing needs a shared lease or lock, which is a distributed
 system with its own failure modes (a lease holder that dies mid-fill, a clock
-skew that lets two holders coexist). This package does not have one and does
-not pretend to. It is stated here, in the port's doc comment, in the `pkg/v1`
+skew that lets two holders coexist). `Load` does not take one and does not
+pretend to. It is stated here, in the port's doc comment, in the `pkg/v1`
 package documentation and in ADR 0049, because a limit that only appears in one
 of four places is a limit most readers will miss.
+
+### `LoadLeased` takes the lease, from the lock domain (#830)
+
+`corecache.Leaser` is the sibling that crosses the boundary, on BOTH stores
+(`lease.go`). On a miss, after the in-process collapse, it takes a lease named
+`"cache:" + key` from a `lock.Locker` the processes share — the lock domain's
+file locker on one machine, whose `flock(2)` dies with the process holding it.
+The holder reads the store again, fills, stores and releases (on a context
+that cannot be cancelled: a lease left behind keeps every other process
+waiting until it dies). A process that finds the lease held fills NOTHING: it
+reads the store again every `LeasePoll` (25 ms by default, the file locker's
+own) on the store's clock, and tries the lease again, until the holder's value
+lands, its own ctx ends, or the lease comes free without a value — the holder
+failed, was killed, or let a lease that can expire (`lock.Deadliner`) lapse —
+when it takes it and reads once more before filling.
+
+What the waiting process gets is decided by what the processes SHARE, and is
+said wherever the sibling is:
+
+- **A chain whose far tier every process reaches** answers the waiter with the
+  holder's value: the origin sees one fill. Proved across a real process
+  boundary by `TestTwoProcessesOverOneFileLockerFillOnce` (a child re-executing
+  the test binary, a directory tier both share, a fills file both append to),
+  and the SIGKILLed holder by `TestAKilledLeaseHolderLetsTheWaiterFillOnce`.
+  Both skip, after asserting the refusal, where the lock domain's file locker
+  refuses the platform (`proc.UnsupportedPlatform`: solaris, illumos).
+- **A memory store alone** shares no value: the lease only takes TURNS, one
+  fill at a time, each process filling its own copy once the holder is done
+  (`TestAMemoryStoreAloneTakesTurns`). That still spares the origin a burst —
+  N processes fill one after another, never together — but it is not one fill.
+- **A lease that can expire is not renewed** during the fill: its lifetime must
+  outlast the fill, or a second process fills beside the first.
+- A nil locker makes `LoadLeased` `Load`; a locker that cannot answer is
+  `CACHE_LEASE_FAILED` (`0.3.48.3`), its own error kept on the trail. `Load`
+  and `LoadLeased` on one key share the in-process collapse: a `LoadLeased`
+  joining a `Load` already filling takes no lease.
+- The memory store waits on `MemoryConfig.Clock` when it can wait and on
+  `clock.System` otherwise (a `clock.CoarseClock` only reads time); the chain
+  on `ChainConfig.Clock`. The config's `Clock` type is NOT widened to
+  `clock.Timed`: that would break every caller passing a reading-only clock.
 
 ## The lock discipline, and why `onEvict` must never lock
 
@@ -79,6 +124,7 @@ they do not share a mechanism:
 |---|---|
 | capacity eviction | `OnEvict` → `drainEvicted` |
 | TTL expiry (lazy, on `Fetch`) | `OnEvict` → `drainEvicted` |
+| TTL expiry swept by `Expire` (#1059) | `OnEvict` → `drainEvicted` |
 | overwrite (`Set` on an existing key) | `tagIndex.add` calls `remove` first |
 | explicit `Delete` / `InvalidateTag` | direct `tagIndex.remove` |
 
@@ -185,6 +231,67 @@ Error **fields** carry the key (log-only; ADR 0002 §Semantics keeps `Fields` ou
 `Error()` and off the wire). A caller who puts a secret in a cache key has put
 that secret in their logs. Stated here because it is the kind of thing nobody
 discovers until an incident.
+
+## Stripes, bytes, policy (#808, #839, #834)
+
+- **Stripes.** `MemoryConfig.Stripes` (0 = 1; held at `MaxEntries` and at 1024;
+  negative refused) splits the store into `memoryStripe`s, each a primitive, a
+  tag index, an `evicted` scratch and the mutex over the three — the lock
+  discipline above holds per stripe, because a key lives in exactly one
+  (`maphash.String` over a per-store seed). `MaxEntries` and `MaxBytes` are
+  divided between the stripes, the remainder to the first ones, so the bounds
+  are exact in total and the eviction order exact within a stripe only.
+  `InvalidateTag` and `Expire` walk the stripes one lock at a time; `Load`'s
+  singleflight group stays one per store. `TestTagIndexNeverNamesAKeyTheStoreNoLongerHolds`
+  and `TestEvictionUnderTheStoreLockDoesNotDeadlock` run at 1 and 8 stripes.
+- **Bytes.** `MemoryConfig.MaxBytes` needs a weigher, and `MemoryConfig` is not
+  generic, so the weigher comes through `NewWeighedMemory[V](cfg, weigh func(V) int64)`;
+  `NewMemory` refuses a positive `MaxBytes` (`CACHE_MISCONFIGURED`), and so does
+  `NewWeighedMemory` a nil weigher or a non-positive bound — two half-stated
+  bounds. The weigher runs once per write, in `validate`, and the weight rides
+  in the record for the primitive's `WeightOf`. An entry heavier than one
+  stripe's share of `MaxBytes` is refused with `CACHE_ENTRY_REJECTED` — the
+  primitive would store it alone and overrun the bound.
+- **Policy.** `MemoryConfig.Policy` is forwarded to every stripe's primitive
+  (`kcache.PolicyLRU`, the zero, or `PolicyS3FIFO`). Every external table of
+  this package runs under both (`forEachPolicy`; `newStore` and `policyConfig`
+  read the policy off the subtest's name).
+- **Clock.** A `clock.CoarseClock` (#814) as `MemoryConfig.Clock` makes a TTL'd
+  hit's clock read an atomic load; every expiry is then late by up to its
+  resolution.
+
+## Sweeps, batches, refresh-ahead, negative entries (#1059, #840, #838)
+
+- **`Expirer`.** `Expire(ctx)` sweeps every stripe through the primitive's
+  `Expire` (an expiry heap, O(k log n)); each removal comes back through
+  `onEvict` and is unlinked from the tag index like an eviction. The store
+  starts no goroutine: the caller schedules the sweep — the cadence ADR 0049
+  left to the caller. The chain sweeps every tier implementing `Expirer`, far
+  to near, and reports the total of removals, as `InvalidateTag` counts them.
+  A full store also evicts a dead entry before a live one (the primitive's
+  eviction loop tries the expiry heap's top first).
+- **`BulkFetcher` / `BulkSetter`.** The memory store groups the keys by stripe
+  and locks each stripe once per batch. `SetMany` validates every entry before
+  storing any (all or nothing on one store). The chain's `FetchMany` makes ONE
+  pass per tier over the keys every nearer tier missed, and promotes a tier's
+  hits into the nearer tiers as a batch (through a tier's `BulkSetter` when it
+  has one) under the same `announce`/generation guard as a single promotion
+  (#460); `SetMany` writes far to near after validating every entry.
+- **`Refresher`.** `LoadRefreshing(ctx, key, fill, before)`: a hit whose
+  remaining lifetime is below `before` is returned at once and ONE background
+  fill per key starts — claimed under the stripe's lock in `refreshing`, so N
+  hits in the window start one — on `context.WithoutCancel(ctx)` bounded by the
+  remaining lifetime (a real-time deadline: the store's clock only reads time).
+  Its answer is stored as `Load` stores one; a plain failure leaves the old
+  entry to expire. A miss is `Load`. `before <= 0` is refused
+  (`CACHE_MISCONFIGURED`).
+- **Negative entries.** A fill returning `corecache.Absent(cause, ttl)` (ttl > 0)
+  makes the memory store keep a record with `absent` set, carrying the error the
+  fill returned: `Load` and `LoadRefreshing` answer with it — `errors.Is` still
+  finds the cause — without calling a fill, `Fetch`/`FetchEntry`/`FetchMany`
+  report a miss, a `Set` replaces it, and it counts in capacity, tags, expiry
+  and (one unit) bytes. The chain keeps no negative entry: a tier has no port to
+  store one, so `Absent` passes through it.
 
 ## Do NOT
 

@@ -298,3 +298,44 @@ func TestTheOSFilesystemClosesItsRoot(t *testing.T) {
 		t.Fatalf("ReadDir after Close = %v, want READ_FAILED", rerr)
 	}
 }
+
+// TestTheDiskFilesystemReadsALinkWithoutFollowingIt pins the two read
+// shortcuts os.Root's FS already answers and the disk engine forwards (#1053):
+// fs.ReadLink returns a link's target as written, and fs.Lstat reports the
+// link itself, both confined to the root like every other read.
+func TestTheDiskFilesystemReadsALinkWithoutFollowingIt(t *testing.T) {
+	t.Parallel()
+	if !nativePlatforms[runtime.GOOS] {
+		t.Skipf("%s has no NewOS to test", runtime.GOOS)
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "target.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("preparing the target: %v", err)
+	}
+	if err := os.Symlink("target.txt", filepath.Join(root, "link")); err != nil {
+		t.Skipf("this platform will not create a symbolic link: %v", err)
+	}
+	filesystem, newErr := svcvfs.NewOS(root)
+	if newErr != nil {
+		t.Fatalf("NewOS = %v, want a filesystem", newErr)
+	}
+	target, readErr := fs.ReadLink(filesystem, "link")
+	if readErr != nil || target != "target.txt" {
+		t.Fatalf("fs.ReadLink = (%q, %v), want (%q, nil)", target, readErr, "target.txt")
+	}
+	info, statErr := fs.Lstat(filesystem, "link")
+	if statErr != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Fatalf("fs.Lstat = (%v, %v), want a symbolic link", info, statErr)
+	}
+	//: a regular file is no link: the operating system's EINVAL, kept.
+	if _, notLink := fs.ReadLink(filesystem, "target.txt"); !kerrs.HasCode(notLink, corevfs.CodeReadFailed) {
+		t.Fatalf("fs.ReadLink of a file = %v, want READ_FAILED", notLink)
+	}
+	//: the lexical grammar first, as on every read.
+	if _, badErr := fs.ReadLink(filesystem, "../escape"); !kerrs.HasCode(badErr, corevfs.CodeInvalidPath) {
+		t.Fatalf("fs.ReadLink(../escape) = %v, want INVALID_PATH", badErr)
+	}
+	if _, badErr := fs.Lstat(filesystem, "../escape"); !kerrs.HasCode(badErr, corevfs.CodeInvalidPath) {
+		t.Fatalf("fs.Lstat(../escape) = %v, want INVALID_PATH", badErr)
+	}
+}

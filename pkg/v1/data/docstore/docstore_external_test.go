@@ -322,6 +322,56 @@ func TestFacadeVersionWeight(t *testing.T) {
 	var _ docstore.VersionWeigherContext = (*docstore.SQLStore[member])(nil)
 }
 
+// TestFacadeRevision replaces a document on its revision through public names
+// only — Revisioned, Revision, ReplaceIf, RevisionMismatch and its code.
+func TestFacadeRevision(t *testing.T) {
+	t.Parallel()
+	store := open(t, vfs.NewMem())
+	defer func() { _ = store.Close() }()
+	if err := store.Insert(member{ID: "m1", Email: "a@example.com"}); err != nil {
+		t.Fatalf("Insert() = %v", err)
+	}
+	var revisioned docstore.Revisioned[member] = store
+	_, rev, err := revisioned.Revision("m1")
+	if err != nil {
+		t.Fatalf("Revision() = %v", err)
+	}
+	var token docstore.Revision = rev
+	if err := revisioned.ReplaceIf(member{ID: "m1", Email: "b@example.com"}, token); err != nil {
+		t.Fatalf("ReplaceIf() = %v", err)
+	}
+	if err := revisioned.ReplaceIf(member{ID: "m1", Email: "c@example.com"}, token); !errs.HasCode(err, docstore.CodeRevisionMismatch) ||
+		!errors.Is(err, docstore.RevisionMismatch) {
+		t.Fatalf("ReplaceIf() on a spent revision = %v, want RevisionMismatch", err)
+	}
+	var _ docstore.RevisionedContext[member] = (*docstore.SQLStore[member])(nil)
+}
+
+// TestFacadeBatch writes several documents as one through public names only —
+// Batcher, BatchWriter, and a refusal that leaves nothing written.
+func TestFacadeBatch(t *testing.T) {
+	t.Parallel()
+	store := open(t, vfs.NewMem())
+	defer func() { _ = store.Close() }()
+	var batcher docstore.Batcher[member] = store
+	err := batcher.Batch(func(w docstore.BatchWriter[member]) error {
+		if err := w.Insert(member{ID: "m1", Email: "a@example.com"}); err != nil {
+			return err
+		}
+		return w.Insert(member{ID: "m2", Email: "a@example.com"})
+	})
+	if !errs.HasCode(err, docstore.CodeUniqueKeyTaken) {
+		t.Fatalf("Batch() over a unique key taken by its own write = %v, want UniqueKeyTaken", err)
+	}
+	if all, listErr := store.List(); listErr != nil || len(all) != 0 {
+		t.Fatalf("List() after a refused batch = %v, %v, want nothing", all, listErr)
+	}
+	if err := batcher.Batch(func(w docstore.BatchWriter[member]) error { return w.Put(member{ID: "m1"}) }); err != nil {
+		t.Fatalf("Batch() = %v", err)
+	}
+	var _ docstore.BatcherContext[member] = (*docstore.SQLStore[member])(nil)
+}
+
 func TestAStoreServesThroughItsPort(t *testing.T) {
 	t.Parallel()
 	store := open(t, vfs.NewMem())

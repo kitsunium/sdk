@@ -1,6 +1,7 @@
 package ring
 
 import (
+	"iter"
 	"sync/atomic"
 )
 
@@ -130,4 +131,29 @@ func (b *queueRing[T]) TryRead() (value T, err error) {
 	b.head.Store((head + 1) % (b.cap + 1))
 	//: happy path — return the item to the caller.
 	return value, nil
+}
+
+// Drain yields the items q holds, oldest first, reading each with TryRead
+// until q reports [Empty]: the consumer's loop over the ring, as an
+// iterator.
+//
+// It is the consumer's side, so it is bound by the same rule as TryRead:
+// only the one consumer goroutine ranges over it. An item the producer
+// writes while the loop runs is yielded too; a loop that breaks early
+// leaves the rest in q. Nothing is allocated.
+func Drain[T any](q Queue[T]) iter.Seq[T] {
+	return func(yield func(T) bool) {
+		//: one TryRead per item, until the ring answers Empty or the loop breaks.
+		for {
+			item, err := q.TryRead()
+			//: Empty is the only error TryRead returns: the ring is drained.
+			if err != nil {
+				return
+			}
+			//: a loop that breaks leaves the rest in the ring.
+			if !yield(item) {
+				return
+			}
+		}
+	}
 }

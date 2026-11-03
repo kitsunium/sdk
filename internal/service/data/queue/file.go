@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"sync/atomic"
@@ -65,11 +64,20 @@ type fileBroker struct {
 	// process — they are one queue — so a publication through any of them
 	// wakes the consumers of all. A publication from another process closes
 	// nothing; the consumer's poll finds it.
-	wake   *wakeSignal
+	wake *wakeSignal
+	// random draws the retry jitter (FileConfig.Random).
+	random func() float64
 	policy corequeue.PolicyValue
 	// onceSwept is when this broker last swept the passed PublishOnce
 	// reservations, in Unix nanoseconds on its clock; zero before the first.
 	onceSwept atomic.Int64
+	// deadSwept is when this broker last swept the dead letters past the
+	// policy's DeadLetterRetention, in Unix nanoseconds on its clock; zero
+	// before the first.
+	deadSwept atomic.Int64
+	// listed is the last listing of each state directory, reused while the
+	// directory's mtime says nothing changed (file_listing.go, issue #811).
+	listed listings
 }
 
 // NewFile returns a broker whose messages survive the process that published
@@ -129,7 +137,8 @@ func NewFile(cfg FileConfig) (broker corequeue.Broker, err error) {
 	//: usable.
 	return &fileBroker{
 		root: root, publisher: publisher, wake: forDir(cfg.Dir),
-		policy: cfg.Policy.Normalized(), clk: clockOrSystem(cfg.Clock),
+		policy: cfg.Policy.Normalized(), clk: clockOrSystem(cfg.Clock), random: randomOrDefault(cfg.Random),
+		listed: listings{wall: time.Now},
 	}, nil
 }
 
@@ -202,7 +211,7 @@ func (b *fileBroker) Publish(
 		return corequeue.MessageValue{}, tooLarge
 	}
 	now := b.clk.Now()
-	name, writeErr := b.write(payload, now, now)
+	name, writeErr := b.write(payload, now, now, corequeue.PriorityNormal)
 	//: nothing was published.
 	if writeErr != nil {
 		//: QueueBackendFailed.
@@ -216,10 +225,10 @@ func (b *fileBroker) Publish(
 	return corequeue.MessageValue{ID: name.ID(), Payload: payload, EnqueuedAt: now}, nil
 }
 
-// write publishes payload durably as a queued message enqueued at now and
-// visible at visibleAt, and returns its name. It wakes nobody: the caller
-// does, once the message is one it keeps.
-func (b *fileBroker) write(payload []byte, now, visibleAt time.Time) (nameValue, error) {
+// write publishes payload durably as a queued message at level, enqueued at
+// now and visible at visibleAt, and returns its name. It wakes nobody: the
+// caller does, once the message is one it keeps.
+func (b *fileBroker) write(payload []byte, now, visibleAt time.Time, level corequeue.Priority) (nameValue, error) {
 	entropy, entropyErr := randomHex(idEntropyBytes)
 	//: two processes publishing in the same nanosecond have no shared counter
 	//: to break the tie with, so the tie is broken by randomness.
@@ -227,7 +236,7 @@ func (b *fileBroker) write(payload []byte, now, visibleAt time.Time) (nameValue,
 		//: QueueBackendFailed — nothing was written.
 		return nameValue{}, backendFailed("rand", "", entropyErr)
 	}
-	name := nameValue{At: visibleAt.UnixNano(), EnqueuedAt: now.UnixNano(), Entropy: entropy}
+	name := nameValue{At: visibleAt.UnixNano(), EnqueuedAt: now.UnixNano(), Entropy: entropy, Priority: level}
 	//: THE durable step: temporary beside the target, write, fsync the file,
 	//: rename, fsync the directory. Five steps, one call, tested in ADR 0056.
 	if writeErr := b.publisher.WriteAtomic(
@@ -238,6 +247,42 @@ func (b *fileBroker) write(payload []byte, now, visibleAt time.Time) (nameValue,
 	}
 	//: on the device, under its queued name.
 	return name, nil
+}
+
+// PublishPriority publishes payload as Publish does, at level
+// (core/data/queue.PriorityPublisher): a level other than the normal one
+// opens the queued name with its digit, so the listing sorts the levels,
+// highest first, before visibility, and a Receive empties a level of its
+// visible messages before it looks at the next.
+func (b *fileBroker) PublishPriority(
+	ctx context.Context, payload []byte, level corequeue.Priority,
+) (message corequeue.MessageValue, err error) {
+	//: a cancelled producer.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return corequeue.MessageValue{}, ctx.Err()
+	}
+	//: one of the five levels, before a byte reaches the device.
+	if invalid := checkPriority(level); invalid != nil {
+		//: QueueMisconfigured, and nothing is written.
+		return corequeue.MessageValue{}, invalid
+	}
+	//: the bound Publish enforces.
+	if tooLarge := checkSize(len(payload), b.policy.MaxMessageBytes); tooLarge != nil {
+		//: MessageTooLarge, carrying the two sizes and never the bytes.
+		return corequeue.MessageValue{}, tooLarge
+	}
+	now := b.clk.Now()
+	name, writeErr := b.write(payload, now, now, level)
+	//: nothing was published.
+	if writeErr != nil {
+		//: QueueBackendFailed.
+		return corequeue.MessageValue{}, writeErr
+	}
+	//: every idle consumer over this directory in this process looks again.
+	b.wake.fire()
+	//: accepted, on the device, at its level.
+	return corequeue.MessageValue{ID: name.ID(), Payload: payload, EnqueuedAt: now}, nil
 }
 
 // PublishAt publishes payload as Publish does, under a queued name whose
@@ -263,7 +308,7 @@ func (b *fileBroker) PublishAt(
 		//: QueueMisconfigured, and nothing is written.
 		return corequeue.MessageValue{}, invalid
 	}
-	name, writeErr := b.write(payload, now, visibleAt)
+	name, writeErr := b.write(payload, now, visibleAt, corequeue.PriorityNormal)
 	//: nothing was published.
 	if writeErr != nil {
 		//: QueueBackendFailed.
@@ -365,23 +410,4 @@ func backendFailed(op, name string, cause error) error {
 		Private:  "service/data/queue: a filesystem call failed; the fields name the operation and the path",
 		ExitCode: exitIOErr,
 	}, kerrs.String("op", op), kerrs.String("path", name))
-}
-
-// entriesOf lists one state directory, sorted by name — which, because of the
-// zero-padded instant that opens every name, is sorted by TIME.
-//
-// It reads the whole directory. That is O(entries) per call and it is the
-// broker's known scaling limit, measured in BENCH.md rather than asserted:
-// this is a durable queue for a backlog of hundreds to thousands, and a
-// caller with millions in flight wants a broker over a system built for that,
-// behind this same port.
-func (b *fileBroker) entriesOf(state string) (entries []fs.DirEntry, err error) {
-	read, readErr := fs.ReadDir(b.root.FS(), state)
-	//: a state directory that vanished under a live broker is a real fault.
-	if readErr != nil {
-		//: QueueBackendFailed.
-		return nil, backendFailed("readdir", state, readErr)
-	}
-	//: fs.ReadDir sorts, so this is chronological.
-	return read, nil
 }

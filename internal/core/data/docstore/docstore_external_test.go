@@ -170,6 +170,48 @@ func (versionWeigherContextDouble) VersionWeight(context.Context) (coredocstore.
 	return coredocstore.VersionWeightValue{Trashed: 1, Bytes: 2}, nil
 }
 
+// revisionedDouble carries exactly the methods Revisioned declares.
+type revisionedDouble struct{}
+
+func (revisionedDouble) Revision(string) (doc, coredocstore.RevisionValue, error) {
+	return doc{}, "r1", nil
+}
+func (revisionedDouble) ReplaceIf(doc, coredocstore.RevisionValue) error { return nil }
+
+// revisionedContextDouble carries exactly the methods RevisionedContext
+// declares.
+type revisionedContextDouble struct{}
+
+func (revisionedContextDouble) Revision(context.Context, string) (doc, coredocstore.RevisionValue, error) {
+	return doc{}, "r2", nil
+}
+
+func (revisionedContextDouble) ReplaceIf(context.Context, doc, coredocstore.RevisionValue) error {
+	return nil
+}
+
+// batchWriterDouble carries exactly the methods BatchWriter declares.
+type batchWriterDouble struct{}
+
+func (batchWriterDouble) Put(doc) error       { return nil }
+func (batchWriterDouble) Insert(doc) error    { return nil }
+func (batchWriterDouble) Replace(doc) error   { return nil }
+func (batchWriterDouble) Delete(string) error { return nil }
+
+// batcherDouble carries exactly the methods Batcher declares.
+type batcherDouble struct{}
+
+func (batcherDouble) Batch(fn func(w coredocstore.BatchWriter[doc]) error) error {
+	return fn(batchWriterDouble{})
+}
+
+// batcherContextDouble carries exactly the methods BatcherContext declares.
+type batcherContextDouble struct{}
+
+func (batcherContextDouble) Batch(_ context.Context, fn func(w coredocstore.BatchWriter[doc]) error) error {
+	return fn(batchWriterDouble{})
+}
+
 // TestDoublesStillSatisfyThePorts is the ADR 0039 guard, executable rather
 // than documentary: each double above holds exactly its port's methods, so a
 // method added to a port fails this file's compilation before review.
@@ -187,6 +229,10 @@ func TestDoublesStillSatisfyThePorts(t *testing.T) {
 	var writerWithContext coredocstore.VersionWriterContext = versionWriterContextDouble{}
 	var weigher coredocstore.VersionWeigher = versionWeigherDouble{}
 	var weigherWithContext coredocstore.VersionWeigherContext = versionWeigherContextDouble{}
+	var revisioned coredocstore.Revisioned[doc] = revisionedDouble{}
+	var revisionedWithContext coredocstore.RevisionedContext[doc] = revisionedContextDouble{}
+	var batcher coredocstore.Batcher[doc] = batcherDouble{}
+	var batcherWithContext coredocstore.BatcherContext[doc] = batcherContextDouble{}
 	announcers := []coredocstore.Announcer{collection, withContext}
 	if _, err := collection.Get("k"); err != nil {
 		t.Fatalf("Collection.Get = %v, want nil", err)
@@ -223,6 +269,25 @@ func TestDoublesStillSatisfyThePorts(t *testing.T) {
 	}
 	if w, err := weigherWithContext.VersionWeight(t.Context()); err != nil || w.Trashed != 1 || w.Bytes != 2 {
 		t.Fatalf("VersionWeigherContext.VersionWeight = %+v, %v, want one trashed document of two bytes", w, err)
+	}
+	if _, rev, err := revisioned.Revision("k"); err != nil || rev != "r1" {
+		t.Fatalf("Revisioned.Revision = %q, %v, want r1", rev, err)
+	}
+	if err := revisioned.ReplaceIf(doc{}, "r1"); err != nil {
+		t.Fatalf("Revisioned.ReplaceIf = %v, want nil", err)
+	}
+	if _, rev, err := revisionedWithContext.Revision(t.Context(), "k"); err != nil || rev != "r2" {
+		t.Fatalf("RevisionedContext.Revision = %q, %v, want r2", rev, err)
+	}
+	if err := revisionedWithContext.ReplaceIf(t.Context(), doc{}, "r2"); err != nil {
+		t.Fatalf("RevisionedContext.ReplaceIf = %v, want nil", err)
+	}
+	put := func(w coredocstore.BatchWriter[doc]) error { return w.Put(doc{}) }
+	if err := batcher.Batch(put); err != nil {
+		t.Fatalf("Batcher.Batch = %v, want nil", err)
+	}
+	if err := batcherWithContext.Batch(t.Context(), put); err != nil {
+		t.Fatalf("BatcherContext.Batch = %v, want nil", err)
 	}
 	for _, announcer := range announcers {
 		announcer.OnWrite(func(string) {})()
@@ -264,6 +329,7 @@ func TestSentinelsCarryTheirDocumentedCodes(t *testing.T) {
 		{coredocstore.VersionsRewriteRefused, "VERSIONS_REWRITE_REFUSED", 0x00_03_50_14, 70, 400},
 		{coredocstore.DocumentNotTrashed, "DOCUMENT_NOT_TRASHED", 0x00_03_50_15, 70, 404},
 		{coredocstore.VersionsInvalid, "VERSIONS_INVALID", 0x00_03_50_16, 70, 400},
+		{coredocstore.RevisionMismatch, "REVISION_MISMATCH", 0x00_03_50_17, 70, 409},
 	}
 	for _, tc := range cases {
 		t.Run(tc.reason, func(t *testing.T) {

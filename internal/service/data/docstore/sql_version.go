@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"reflect"
 	"slices"
 	"time"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	svcsql "github.com/kitsunium/sdk/internal/service/data/sql"
 )
 
 // versionRowsPerStatement bounds how many version rows one INSERT carries. At
@@ -417,19 +419,17 @@ func (s *SQLStore[T]) prune(ctx context.Context, ex coresql.Executor, key string
 // insertVersionRows inserts version rows of the document stored under key, a
 // bounded number per statement.
 func (s *SQLStore[T]) insertVersionRows(ctx context.Context, ex coresql.Executor, key string, rows []versionRow) error {
+	args, err := s.versionArgs(key, rows)
+	//: unreachable: a map of strings always encodes.
+	if err != nil {
+		//: the write rolls back.
+		return err
+	}
 	//: a bounded number of rows per statement.
-	for batch := range slices.Chunk(rows, versionRowsPerStatement) {
-		args, err := s.versionArgs(key, batch)
-		//: unreachable: a map of strings always encodes.
-		if err != nil {
-			//: the write rolls back.
-			return err
-		}
-		//: the batch.
-		if _, execErr := ex.ExecContext(ctx, s.stmts.insertVersions(len(batch)), args...); execErr != nil {
-			//: StatementFailed.
-			return s.failed("keep a version", execErr)
-		}
+	if _, execErr := svcsql.InsertRows(ctx, ex, s.stmts.dialect, s.stmts.versionInsert(),
+		rowsOf(args, versionRowArgs)); execErr != nil {
+		//: StatementFailed.
+		return s.failed("keep a version", execErr)
 	}
 	//: every row inserted.
 	return nil
@@ -441,7 +441,7 @@ func (s *SQLStore[T]) insertVersionRows(ctx context.Context, ex coresql.Executor
 // document, NULL where there is none.
 func (s *SQLStore[T]) versionArgs(key string, batch []versionRow) ([]any, error) {
 	args := make([]any, 0, versionRowArgs*len(batch))
-	//: in the order insertVersions numbers them.
+	//: in the order of versionColumns.
 	for _, row := range batch {
 		var at, ns, meta, doc any
 		//: an instant nobody recorded is NULL; any other is exact, since two
@@ -504,7 +504,7 @@ func (s *SQLStore[T]) versionOf(row *scannedVersion) (coredocstore.VersionValue,
 		if err := json.Unmarshal(row.meta, &v.Meta); err != nil {
 			//: DocumentUndecodable, naming what failed and never the value.
 			return coredocstore.VersionValue{}, kerrs.Wrap(coredocstore.DocumentUndecodable, kerrs.WrapParams{},
-				kerrs.String("store", s.table), kerrs.String("cause", "the metadata of a version: "+jsonCause(err)))
+				kerrs.String("store", s.table), kerrs.String("cause", "the metadata of a version: "+jsonCause(err, reflect.TypeOf(v.Meta))))
 		}
 	}
 	//: the version.

@@ -9547,35 +9547,19 @@ sequences:
         kind: actor
       - id: (*database).declareSettings
         kind: self
-      - id: say
+      - id: judged
         kind: internal
       - id: databaseSetting
         kind: internal
     steps:
       - bind: positive
-        eval:
-          closure:
-            params: v any
-            results: phrase
-            steps:
-              - opt:
-                  do:
-                    - return: say("database.positive")
-                      to: say
-                  init:
-                    bind: t, ok
-                    eval: v.(time.Duration)
-                  when: ok && t <= 0
-              - return: phrase{}
+        eval: judged(func(t time.Duration) bool { return t > 0 }, func() phrase { return say("database.positive") })
+        to: judged
       - set: d.maxOpen
         to: databaseSetting
         value: |-
-          databaseSetting(d, dbMaxOpen, 10, func(v any) phrase {
-          		if n, ok := v.(int); ok && n <= 0 {
-          			return say("database.max-open")
-          		}
-          		return phrase{}
-          	})
+          databaseSetting(d, dbMaxOpen, 10,
+          		judged(func(n int) bool { return n > 0 }, func() phrase { return say("database.max-open") }))
       - set: d.maxIdle
         to: databaseSetting
         value: databaseSetting(d, dbMaxIdle, 2, nil)
@@ -9591,15 +9575,23 @@ sequences:
       - set: d.checkTimeout
         to: databaseSetting
         value: databaseSetting(d, dbCheckTimeout, 5*time.Second, positive)
+      - set: d.txRetries
+        to: databaseSetting
+        value: |-
+          databaseSetting(d, dbTxRetries, 3,
+          		judged(func(n int) bool { return n >= 0 }, func() phrase { return say("database.tx-retries") }))
+      - set: d.txRetryDelay
+        to: databaseSetting
+        value: databaseSetting(d, dbTxRetryDelay, 50*time.Millisecond, positive)
       - set: d.migrate
         to: databaseSetting
         value: |-
-          databaseSetting(d, dbMigrate, migrateAtStart, func(v any) phrase {
-          		if s, ok := v.(string); ok && s != migrateAtStart && s != migrateManual {
-          			return say("database.migrate-mode", "start", migrateAtStart, "manual", migrateManual)
-          		}
-          		return phrase{}
-          	})
+          databaseSetting(d, dbMigrate, migrateAtStart, judged(isMigrateMode, func() phrase {
+          		return say("database.migrate-mode", "start", migrateAtStart, "manual", migrateManual)
+          	}))
+  - of: isMigrateMode
+    steps:
+      - return: mode == migrateAtStart || mode == migrateManual
   - of: databaseSetting
     participants:
       - id: caller
@@ -9619,7 +9611,7 @@ sequences:
       - return: s
   - of: (*database).settingDecls
     steps:
-      - return: "[]settingDecl{d.maxOpen, d.maxIdle, d.maxLifetime, d.maxIdleTime, d.timeout, d.checkTimeout, d.migrate}"
+      - return: "[]settingDecl{d.maxOpen, d.maxIdle, d.maxLifetime, d.maxIdleTime, d.timeout, d.checkTimeout, d.txRetries, d.txRetryDelay, d.migrate}"
   - of: (*database).urlSecret
     steps:
       - return: d.name + "-" + dbURL
@@ -11362,12 +11354,23 @@ sequences:
           		MaxOpen: resolvedSetting(a, d.maxOpen), MaxIdle: resolvedSetting(a, d.maxIdle),
           		MaxLifetime: resolvedSetting(a, d.maxLifetime), MaxIdleTime: resolvedSetting(a, d.maxIdleTime),
           		CheckTimeout: resolvedSetting(a, d.checkTimeout),
+          		Transient:    engineTransient(d.engine),
           	})
       - opt:
           do:
             - return: "nil, dbFailure(CodeDatabaseConfig, \"DATABASE_POOL\", fmt.Sprintf(\"the pool of database %q cannot be set up: %s\", d.name, errs.PublicOf(err)), a.dbFields(d, desc)...)"
           when: err != nil
       - return: db, nil
+  - of: engineTransient
+    steps:
+      - opt:
+          do:
+            - return: c.Transient
+          init:
+            bind: c, ok
+            eval: e.(Classifier)
+          when: ok
+      - return: nil
   - of: (*App).startDatabase
     participants:
       - id: caller
@@ -12124,7 +12127,7 @@ sequences:
       - set: err
         to: r.database().Transact
         value: |-
-          r.database().Transact(ctx, func(ctx context.Context) error {
+          r.database().Transact(ctx, plug.TxOptionsValue{}, func(ctx context.Context) error {
           		if err := c.copyAll(ctx, counts); err != nil {
           			return err
           		}
@@ -18907,7 +18910,7 @@ sequences:
         kind: internal
       - id: a.begin
         kind: internal
-      - id: s.all
+      - id: s.filter
         kind: internal
       - id: sp.end
         kind: internal
@@ -18922,30 +18925,64 @@ sequences:
       - bind: ctx, sp
         eval: "a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: model.EdgeReads, op: model.OpRead, name: \"Filter\"})"
         to: a.begin
-      - bind: all, err
-        eval: s.all(ctx)
-        to: s.all
-      - var:
-          name: out
-          type: "[]any"
-      - opt:
-          do:
-            - set: out
-              value: all[:0]
-            - loop:
-                do:
-                  - opt:
-                      do:
-                        - set: out
-                          value: append(out, v)
-                      when: keep(v)
-                key: _
-                range: all
-                value: v
-          when: err == nil
+      - bind: out, err
+        eval: s.filter(ctx, keep)
+        to: s.filter
       - eval: sp.end(err)
         to: sp.end
       - return: out, err
+  - of: (*storeCore).filter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*storeCore).filter
+        kind: self
+      - id: s.engine
+        kind: internal
+      - id: eng.Filter
+        kind: value
+    steps:
+      - bind: eng
+        eval: s.engine()
+        to: s.engine
+      - opt:
+          do:
+            - return: nil, notRunning(&s.nodeBase)
+          when: eng == nil
+      - bind: out
+        eval: make([]any, 0, filterHint)
+      - var:
+          name: undecoded
+          type: error
+      - bind: _, err
+        eval: |-
+          eng.Filter(ctx, func(d plug.DocumentValue) bool {
+          		if undecoded != nil {
+          			return false
+          		}
+          		v, decodeErr := s.valueOf(d)
+          		if decodeErr != nil {
+          			undecoded = decodeErr
+          			return false
+          		}
+          		if keep(v) {
+          			out = append(out, v)
+          		}
+          		// The engine keeps nothing: the entities are kept here, decoded
+          		// once.
+          		return false
+          	})
+        to: eng.Filter
+      - opt:
+          do:
+            - set: err
+              value: undecoded
+          when: err == nil
+      - opt:
+          do:
+            - return: nil, s.said(err, "", "")
+          when: err != nil
+      - return: out, nil
   - of: (*StoreService).declareIndexes
     participants:
       - id: caller
@@ -23945,6 +23982,8 @@ sequences:
         kind: internal
       - id: a.otlpCLI
         kind: internal
+      - id: a.queueCLI
+        kind: internal
     steps:
       - bind: help
         eval:
@@ -23993,6 +24032,15 @@ sequences:
             eval: a.otlpCLI()
             to: a.otlpCLI
           when: run != nil
+      - opt:
+          do:
+            - set: cmds["queue"]
+              value: run
+          init:
+            bind: run
+            eval: a.queueCLI()
+            to: a.queueCLI
+          when: run != nil
       - return: cmds
   - of: (*App).breakerCLI
     participants:
@@ -24036,6 +24084,11 @@ sequences:
             - eval: fmt.Fprintf(w, "  %[1]s otlp migrate [traces|metrics]\n%[2]s the OTLP export's batches left under the data directory, moved onto otlp-database\n", a.name, strings.Repeat(" ", 37))
               to: fmt
           when: a.otlpCLI() != nil
+      - opt:
+          do:
+            - eval: fmt.Fprintf(w, "  %[1]s queue dead-letters [NODE] | queue replay|drop NODE ID...\n%[2]s a consumer's dead letters, listed, replayed or dropped\n", a.name, strings.Repeat(" ", 37))
+              to: fmt
+          when: a.queueCLI() != nil
   - of: (*App).onStores
     participants:
       - id: caller
@@ -28122,7 +28175,7 @@ sequences:
       - set: err
         to: cfg.Database.Transact
         value: |-
-          cfg.Database.Transact(ctx, func(ctx context.Context) error {
+          cfg.Database.Transact(ctx, plug.TxOptionsValue{}, func(ctx context.Context) error {
           		var copyErr error
           		if n, copyErr = p.copy(ctx); copyErr != nil {
           			return copyErr
@@ -29360,42 +29413,65 @@ sequences:
         kind: actor
       - id: otlpDeadLetterLine
         kind: self
-      - id: errs.Code(d.Code).String
+      - id: |-
+          deadLetterRow{
+          		where: signal, id: d.ID, failedAt: d.FailedAt, code: d.Code, reason: d.Reason,
+          		attempts: d.Deliveries, size: d.Size, cause: d.Cause, trail: d.Trail,
+          	}.line
+        kind: internal
+    steps:
+      - return: |-
+          deadLetterRow{
+          		where: signal, id: d.ID, failedAt: d.FailedAt, code: d.Code, reason: d.Reason,
+          		attempts: d.Deliveries, size: d.Size, cause: d.Cause, trail: d.Trail,
+          	}.line()
+        to: |-
+          deadLetterRow{
+          		where: signal, id: d.ID, failedAt: d.FailedAt, code: d.Code, reason: d.Reason,
+          		attempts: d.Deliveries, size: d.Size, cause: d.Cause, trail: d.Trail,
+          	}.line
+  - of: deadLetterRow.line
+    participants:
+      - id: caller
+        kind: actor
+      - id: deadLetterRow.line
+        kind: self
+      - id: errs.Code(r.code).String
         kind: value
     steps:
-      - bind: code
+      - bind: codeText
         eval: "\"-\""
       - opt:
           do:
-            - set: code
-              to: errs.Code(d.Code).String
-              value: errs.Code(d.Code).String()
-          when: d.Code != 0
+            - set: codeText
+              to: errs.Code(r.code).String
+              value: errs.Code(r.code).String()
+          when: r.code != 0
       - bind: line
         eval: |-
-          signal + "\t" + d.ID + "\t" + d.FailedAt.UTC().Format(time.RFC3339) + "\t" + code + "\t" + d.Reason +
-          		"\t" + strconv.Itoa(d.Deliveries) + " attempts\t" + strconv.Itoa(d.Size) + " bytes"
+          r.where + "\t" + r.id + "\t" + r.failedAt.UTC().Format(time.RFC3339) + "\t" + codeText + "\t" + r.reason +
+          		"\t" + strconv.Itoa(r.attempts) + " attempts\t" + strconv.Itoa(r.size) + " bytes"
       - opt:
           do:
             - op: +=
               set: line
-              value: "\"\\t\" + d.Cause"
-          when: d.Cause != ""
+              value: "\"\\t\" + r.cause"
+          when: r.cause != ""
       - opt:
           do:
-            - bind: trail
-              eval: make([]string, 0, len(d.Trail))
+            - bind: codes
+              eval: make([]string, 0, len(r.trail))
             - loop:
                 do:
-                  - set: trail
-                    value: append(trail, errs.Code(c).String())
+                  - set: codes
+                    value: append(codes, errs.Code(c).String())
                 key: _
-                range: d.Trail
+                range: r.trail
                 value: c
             - op: +=
               set: line
-              value: "\"\\ttrail \" + strings.Join(trail, \" <- \")"
-          when: len(d.Trail) > 0
+              value: "\"\\ttrail \" + strings.Join(codes, \" <- \")"
+          when: len(r.trail) > 0
       - return: line
   - of: (*App).replayOTLPDeadLetters
     participants:
@@ -36452,9 +36528,37 @@ sequences:
           when: a == nil
       - return: |-
           inProcess(ctx, &callSpec{app: a, node: q, edge: model.EdgeAsks, op: model.OpAsk, name: q.name, auth: q.authMode(), payloads: true}, in, func(ctx context.Context) (R, error) {
-          		return q.pipe.invoke(ctx, a, q, in, q.steps(a))
+          		return q.invoke(ctx, a, in)
           	})
         to: inProcess
+  - of: (*Query).invoke
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Query).invoke
+        kind: self
+      - id: q.pipe.invoke
+        kind: internal
+      - id: transactWith
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: q.pipe.invoke(ctx, a, q, in, q.steps(a))
+              to: q.pipe.invoke
+          when: q.opts.tx == (plug.TxOptionsValue{}) || unitOf(ctx) != nil
+      - var:
+          name: out
+          type: R
+      - bind: err
+        eval: |-
+          transactWith(ctx, a, func(ctx context.Context) error {
+          		var err error
+          		out, err = q.pipe.invoke(ctx, a, q, in, q.steps(a))
+          		return err
+          	}, q.opts.tx)
+        to: transactWith
+      - return: out, err
   - of: (*Query).steps
     participants:
       - id: caller
@@ -36726,6 +36830,562 @@ sequences:
     steps:
       - return: c.Timed.NewTicker(d)
         to: c.Timed.NewTicker
+  - of: (*App).queueCLI
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).queueCLI
+        kind: self
+      - id: a.queueCommand
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!queuesLinked()"
+      - return:
+          closure:
+            params: ctx context.Context, args []string
+            results: int
+            steps:
+              - return: a.queueCommand(ctx, args, os.Stdout, os.Stderr)
+                to: a.queueCommand
+  - of: (*App).queueCommand
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).queueCommand
+        kind: self
+      - id: parseQueueArgs
+        kind: internal
+      - id: fmt
+        kind: stdlib
+      - id: a.resolve
+        kind: internal
+      - id: a.mount
+        kind: internal
+      - id: a.unmount
+        kind: internal
+      - id: a.queueOwnersNamed
+        kind: internal
+      - id: a.sayQueueOwners
+        kind: internal
+      - id: a.withConsumerQueues
+        kind: internal
+    steps:
+      - bind: parsed, ok
+        eval: parseQueueArgs(args)
+        to: parseQueueArgs
+      - opt:
+          do:
+            - eval: fmt.Fprintf(stderr, queueUsageText, a.name)
+              to: fmt
+            - return: "2"
+          when: "!ok"
+      - opt:
+          do:
+            - eval: fmt.Fprintln(stderr, err)
+              to: fmt
+            - return: "1"
+          init:
+            bind: err
+            eval: a.resolve()
+            to: a.resolve
+          when: err != nil
+      - opt:
+          do:
+            - return: exitConfig
+          when: a.queueSettingsRefused(stderr)
+      - opt:
+          do:
+            - eval: fmt.Fprintln(stderr, err)
+              to: fmt
+            - return: "1"
+          init:
+            bind: err
+            eval: a.mount()
+            to: a.mount
+          when: err != nil
+      - defer: a.unmount()
+        to: a.unmount
+      - bind: owners, known
+        eval: a.queueOwnersNamed(parsed.node)
+        to: a.queueOwnersNamed
+      - opt:
+          do:
+            - eval: a.sayQueueOwners(stderr, parsed.node)
+              to: a.sayQueueOwners
+            - return: "2"
+          when: "!known"
+      - bind: err
+        eval: |-
+          a.withConsumerQueues(ctx, owners, func(queues []consumerQueue) error {
+          		if parsed.verb == "dead-letters" {
+          			return listQueueDeadLetters(ctx, queues, stdout)
+          		}
+          		return actOnQueueDeadLetters(ctx, queues[0], &parsed, stdout, stderr)
+          	})
+        to: a.withConsumerQueues
+      - switch:
+          cases:
+            - case: err == nil
+              do:
+                - return: "0"
+            - case: errs.PublicOf(err) != ""
+              do:
+                - eval: fmt.Fprintln(stderr, errs.PublicOf(err))
+                  to: fmt
+            - default: true
+              do:
+                - eval: fmt.Fprintln(stderr, describeText(err))
+                  to: fmt
+      - return: "1"
+  - of: (*App).queueSettingsRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).queueSettingsRefused
+        kind: self
+      - id: a.resolveSettings
+        kind: internal
+      - id: a.settingValues.Store
+        kind: value
+      - id: fmt
+        kind: stdlib
+    steps:
+      - bind: resolved
+        eval: a.resolveSettings()
+        to: a.resolveSettings
+      - eval: a.settingValues.Store(&resolved.values)
+        to: a.settingValues.Store
+      - bind: refused
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: "fmt.Fprintf(stderr, \"error: %s\\n\", d.Message)"
+                    to: fmt
+                  - set: refused
+                    value: "true"
+                when: d.Severity == "error"
+          key: _
+          range: resolved.problems
+          value: d
+      - return: refused
+  - of: (*App).queueOwners
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).queueOwners
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - var:
+          name: out
+          type: "[]queueOwner"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, q)
+                init:
+                  bind: q, ok
+                  eval: n.(queueOwner)
+                when: ok && q.queueUnder() != ""
+          key: _
+          range: a.mountedNodes()
+          value: "n"
+      - eval: slices.SortFunc(out, func(x, y queueOwner) int { return strings.Compare(x.base().id, y.base().id) })
+        to: slices
+      - return: out
+  - of: (*App).queueOwnersNamed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).queueOwnersNamed
+        kind: self
+      - id: a.queueOwners
+        kind: internal
+    steps:
+      - bind: all
+        eval: a.queueOwners()
+        to: a.queueOwners
+      - opt:
+          do:
+            - return: all, true
+          when: node == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "[]queueOwner{q}, true"
+                when: q.base().id == node
+          key: _
+          range: all
+          value: q
+      - return: nil, false
+  - of: (*App).sayQueueOwners
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).sayQueueOwners
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - bind: ids
+        eval: make([]string, 0, len(a.queueOwners()))
+      - loop:
+          do:
+            - set: ids
+              value: append(ids, q.base().id)
+          key: _
+          range: a.queueOwners()
+          value: q
+      - opt:
+          do:
+            - eval: fmt.Fprintln(stderr, say("queue.no-consumer", "node", clip(node)))
+              to: fmt
+            - return: ""
+          when: len(ids) == 0
+      - eval: fmt.Fprintln(stderr, say("queue.unknown-consumer", "node", clip(node), "consumers", strings.Join(ids, ", ")))
+        to: fmt
+  - of: (*App).withConsumerQueues
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).withConsumerQueues
+        kind: self
+      - id: failure
+        kind: internal
+      - id: stores
+        kind: internal
+      - id: storesMissing
+        kind: internal
+      - id: a.openConsumerQueueForCommand
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                failure(CodeQueueOpen, "QUEUE_IN_MEMORY",
+                			"the product keeps its queues in memory: no dead letter outlives its process; set <PRODUCT>_DATA_DIR", nil)
+              to: failure
+          when: a.opts.memory || a.dataDir == ""
+      - opt:
+          do:
+            - bind: h
+              eval: stores()
+              to: stores
+            - opt:
+                do:
+                  - return: storesMissing()
+                    to: storesMissing
+                when: h == nil
+            - bind: closeAll, openErr
+              eval: h.openDatabases(a, ctx)
+            - opt:
+                do:
+                  - return: openErr
+                when: openErr != nil
+            - defer: func() { err = errors.Join(err, closeAll()) }()
+          when: a.anyQueueOnDatabase(owners)
+      - bind: queues
+        eval: make([]consumerQueue, 0, len(owners))
+      - defer: |-
+          func() {
+          		for _, q := range queues {
+          			err = errors.Join(err, closeQueue(q.broker))
+          		}
+          	}()
+      - loop:
+          do:
+            - bind: broker, openErr
+              eval: a.openConsumerQueueForCommand(q)
+              to: a.openConsumerQueueForCommand
+            - opt:
+                do:
+                  - return: openErr
+                when: openErr != nil
+            - set: queues
+              value: "append(queues, consumerQueue{broker: broker, node: q.base().id})"
+          key: _
+          range: owners
+          value: q
+      - return: fn(queues)
+  - of: (*App).anyQueueOnDatabase
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).anyQueueOnDatabase
+        kind: self
+      - id: a.queueKeeper
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: d
+                  eval: a.queueKeeper(q.base())
+                  to: a.queueKeeper
+                when: d != nil && a.queueKeptOn(q.base(), d)
+          key: _
+          range: owners
+          value: q
+      - return: "false"
+  - of: (*App).openConsumerQueueForCommand
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).openConsumerQueueForCommand
+        kind: self
+      - id: m.outboxPolicy
+        kind: internal
+      - id: a.placeConsumerQueue
+        kind: internal
+      - id: a.openQueueWith
+        kind: internal
+    steps:
+      - bind: b, under
+        eval: q.base(), q.queueUnder()
+      - bind: cfg
+        eval: "plug.QueueConfig{Name: b.id, Policy: consumerPolicy(defaultMaxDeliveries)}"
+      - opt:
+          do:
+            - set: cfg.Policy
+              to: m.outboxPolicy
+              value: m.outboxPolicy()
+          init:
+            bind: m, mailer
+            eval: q.(*Mailer)
+          when: mailer
+      - bind: exists, err
+        eval: a.placeConsumerQueue(&cfg, b, under)
+        to: a.placeConsumerQueue
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil || !exists
+      - bind: broker, err
+        eval: a.openQueueWith(cfg)
+        to: a.openQueueWith
+      - opt:
+          do:
+            - return: nil, failure(CodeQueueOpen, "QUEUE_OPEN", "a consumer's queue cannot be opened", err, errs.String("node", b.id))
+          when: err != nil
+      - return: broker, nil
+  - of: (*App).placeConsumerQueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).placeConsumerQueue
+        kind: self
+      - id: a.queueKeeper
+        kind: internal
+      - id: a.runOf
+        kind: internal
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - bind: r
+              eval: a.runOf(d)
+              to: a.runOf
+            - opt:
+                do:
+                  - return: false, Unavailable(fmt.Sprintf("database %q is not open", d.name))
+                when: r == nil || !r.open()
+            - return: true, sqlQueueConfig(cfg, b, r, queueTable(b, under))
+          init:
+            bind: d
+            eval: a.queueKeeper(b)
+            to: a.queueKeeper
+          when: d != nil && a.queueKeptOn(b, d)
+      - bind: dir
+        eval: filepath.Join(a.dataDir, b.svc.name, under, b.name)
+        to: filepath
+      - opt:
+          do:
+            - return: false, nil
+          init:
+            bind: info, statErr
+            eval: os.Stat(dir)
+            to: os
+          when: statErr != nil || !info.IsDir()
+      - set: cfg.Dir
+        value: dir
+      - return: true, nil
+  - of: closeQueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeQueue
+        kind: self
+      - id: c.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: c.Close()
+              to: c.Close
+          init:
+            bind: c, ok
+            eval: broker.(io.Closer)
+          when: ok
+      - return: nil
+  - of: listQueueDeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: listQueueDeadLetters
+        kind: self
+      - id: q.broker.DeadLetters
+        kind: value
+      - id: fmt
+        kind: stdlib
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: q.broker == nil
+            - bind: dead, err
+              eval: q.broker.DeadLetters(ctx, queueMaxDeadLetters)
+              to: q.broker.DeadLetters
+            - loop:
+                do:
+                  - bind: d
+                    eval: "&dead[i]"
+                  - eval: |-
+                      fmt.Fprintln(stdout, deadLetterRow{
+                      				where: q.node, id: d.Message.ID, failedAt: d.FailedAt, code: d.Code, reason: d.Reason,
+                      				attempts: d.Deliveries, size: len(d.Message.Payload), cause: d.Cause, trail: d.Trail,
+                      			}.line())
+                    to: fmt
+                key: i
+                range: dead
+            - op: +=
+              set: "n"
+              value: len(dead)
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+          key: _
+          range: queues
+          value: q
+      - opt:
+          do:
+            - bind: nodes
+              eval: make([]string, 0, len(queues))
+            - loop:
+                do:
+                  - set: nodes
+                    value: append(nodes, q.node)
+                key: _
+                range: queues
+                value: q
+            - eval: fmt.Fprintln(stdout, say("queue.no-dead-letter", "consumers", strings.Join(nodes, ", ")))
+              to: fmt
+          when: n == 0
+      - return: nil
+  - of: actOnQueueDeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: actOnQueueDeadLetters
+        kind: self
+      - id: actOnDeadLetter
+        kind: internal
+      - id: fmt
+        kind: stdlib
+      - id: failure
+        kind: internal
+    steps:
+      - bind: manager, ok
+        eval: q.broker.(plug.DeadLetterManager)
+      - bind: "n"
+        eval: "0"
+      - var:
+          name: missing
+          type: "[]string"
+      - loop:
+          do:
+            - bind: found
+              eval: "false"
+            - opt:
+                do:
+                  - var:
+                      name: err
+                      type: error
+                  - set: found, err
+                    to: actOnDeadLetter
+                    value: actOnDeadLetter(ctx, manager, id, p.verb == "drop")
+                  - opt:
+                      do:
+                        - return: err
+                      when: err != nil
+                when: ok
+            - opt:
+                do:
+                  - eval: fmt.Fprintln(stderr, say("queue.dead-letter-unknown", "id", clip(id), "node", q.node))
+                    to: fmt
+                  - set: missing
+                    value: append(missing, clip(id))
+                  - continue: true
+                when: "!found"
+            - op: ++
+              set: "n"
+          key: _
+          range: p.ids
+          value: id
+      - alt:
+          - do:
+              - eval: fmt.Fprintln(stdout, say("queue.dropped", "count", n, "node", q.node))
+                to: fmt
+            when: p.verb == "drop"
+          - do:
+              - eval: fmt.Fprintln(stdout, say("queue.replayed", "count", n, "node", q.node))
+                to: fmt
+            else: true
+      - opt:
+          do:
+            - return: |-
+                failure(CodeQueueOpen, "QUEUE_DEAD_LETTER_UNKNOWN", "no such dead letter", nil,
+                			errs.String("node", q.node), errs.String("ids", strings.Join(missing, ",")))
+              to: failure
+          when: len(missing) > 0
+      - return: nil
+  - of: actOnDeadLetter
+    participants:
+      - id: caller
+        kind: actor
+      - id: actOnDeadLetter
+        kind: self
+      - id: manager.Drop
+        kind: value
+      - id: manager.Replay
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: manager.Drop(ctx, id)
+              to: manager.Drop
+          when: drop
+      - return: manager.Replay(ctx, id)
+        to: manager.Replay
   - of: (*commandQueue).claim
     steps:
       - lock:
@@ -59117,7 +59777,7 @@ sequences:
         kind: self
       - id: Invalid
         kind: internal
-      - id: transact
+      - id: transactWith
         kind: internal
     steps:
       - opt:
@@ -59125,22 +59785,117 @@ sequences:
             - return: Invalid("app.Transact needs a function to run")
               to: Invalid
           when: fn == nil
-      - return: transact(ctx, appOf(ctx), fn)
-        to: transact
+      - return: transactWith(ctx, appOf(ctx), fn, txOptionsOf(opts))
+        to: transactWith
+  - of: Serializable
+    steps:
+      - return: "TransactOption{isolation: stdsql.LevelSerializable}"
+  - of: RepeatableRead
+    steps:
+      - return: "TransactOption{isolation: stdsql.LevelRepeatableRead}"
+  - of: ReadOnly
+    steps:
+      - return: "TransactOption{readOnly: true}"
+  - of: TransactOption.queryConfigure
+    steps:
+      - opt:
+          do:
+            - set: q.tx.Isolation
+              value: o.isolation
+          when: o.isolation != stdsql.LevelDefault
+      - set: q.tx.ReadOnly
+        value: q.tx.ReadOnly || o.readOnly
   - of: transact
     participants:
       - id: caller
         kind: actor
       - id: transact
         kind: self
+      - id: transactWith
+        kind: internal
+    steps:
+      - return: transactWith(ctx, a, fn, plug.TxOptionsValue{})
+        to: transactWith
+  - of: transactWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: transactWith
+        kind: self
+      - id: nestedRefusal
+        kind: internal
+      - id: transactOnce
+        kind: internal
+      - id: t.retryAfter
+        kind: internal
+      - id: t.reportRetry
+        kind: internal
+      - id: t.waitRetry
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: nested
+        eval: unitOf(ctx) != nil
+      - opt:
+          do:
+            - return: nestedRefusal()
+              to: nestedRefusal
+          when: opts != (plug.TxOptionsValue{}) && nested
+      - loop:
+          do:
+            - bind: t, err
+              eval: transactOnce(ctx, a, fn, opts, attempt)
+              to: transactOnce
+            - opt:
+                do:
+                  - return: err
+                when: nested
+            - bind: wait, again
+              eval: t.retryAfter(ctx, err, attempt)
+              to: t.retryAfter
+            - opt:
+                do:
+                  - return: err
+                when: "!again"
+            - eval: t.reportRetry(ctx, err, wait)
+              to: t.reportRetry
+            - opt:
+                do:
+                  - return: errors.Join(err, werr)
+                    to: errors
+                init:
+                  bind: werr
+                  eval: t.waitRetry(ctx, wait)
+                  to: t.waitRetry
+                when: werr != nil
+          init: attempt := 0
+          post: attempt++
+  - of: transactOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: transactOnce
+        kind: self
       - id: beginTransaction
         kind: internal
-      - id: l.finish
+      - id: ran.setOptions
+        kind: internal
+      - id: l.sp.attr
         kind: internal
     steps:
       - bind: ctx, l
         eval: beginTransaction(ctx, a)
         to: beginTransaction
+      - set: ran
+        value: l.u.tx
+      - eval: ran.setOptions(opts)
+        to: ran.setOptions
+      - opt:
+          do:
+            - eval: l.sp.attr("retries", strconv.Itoa(attempt))
+              to: l.sp.attr
+          when: attempt > 0 && l.sp != nil
       - defer: |-
           func() {
           		if p := recover(); p != nil {
@@ -59150,8 +59905,133 @@ sequences:
           			panic(p)
           		}
           	}()
-      - return: l.finish(ctx, fn(ctx))
-        to: l.finish
+      - return: ran, l.finish(ctx, fn(ctx))
+  - of: (*txn).retryAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*txn).retryAfter
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+      - id: curve.Delay
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: err == nil || ctx.Err() != nil
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: db, a
+        eval: t.db, t.app
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - return: 0, false
+          when: db == nil || a == nil || attempt >= resolvedSetting(a, db.d.txRetries) || a.inRoutine(ctx)
+      - bind: c, ok
+        eval: db.database().(plug.Classifier)
+      - opt:
+          do:
+            - return: 0, false
+          when: "!ok || !c.Transient(err)"
+      - bind: curve
+        eval: "resilience.Backoff{BaseDelay: resolvedSetting(a, db.d.txRetryDelay), JitterMode: resilience.JitterFull}"
+      - return: curve.Delay(attempt + 1), true
+        to: curve.Delay
+  - of: (*App).inRoutine
+    steps:
+      - bind: _, ok
+        eval: a.findNode(currentNode(ctx)).(*Routine)
+      - return: ok
+  - of: (*txn).reportRetry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*txn).reportRetry
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+      - id: a.tel.Load
+        kind: value
+      - id: errs
+        kind: package
+      - id: ex.Emit
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: a
+        eval: t.app
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - bind: ex
+        eval: a.tel.Load()
+        to: a.tel.Load
+      - opt:
+          do:
+            - return: ""
+          when: ex == nil
+      - bind: ev
+        eval: |-
+          telemetry.Event{
+          		Kind: telemetry.KindRetry, Op: telemetry.OpCall, Outcome: telemetry.OutcomeError,
+          		Node: ex.Ref(currentNode(ctx)), Start: a.clock.Now().UnixNano(), Duration: int64(wait),
+          	}
+      - opt:
+          do:
+            - set: ev.Code
+              value: uint32(code)
+          init:
+            bind: code, ok
+            eval: errs.CodeOf(err)
+            to: errs
+          when: ok
+      - eval: ex.Emit(&ev)
+        to: ex.Emit
+  - of: (*txn).waitRetry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*txn).waitRetry
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+      - id: a.clock.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: ctx.Err
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: a
+        eval: t.app
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - bind: timer
+        eval: a.clock.NewTimer(d)
+        to: a.clock.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-timer.C()
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
   - of: beginTransaction
     participants:
       - id: caller
@@ -59219,6 +60099,50 @@ sequences:
           when: ctx.Value(unitKey{}) == nil
       - return: context.WithValue(ctx, unitKey{}, (*unit)(nil))
         to: context
+  - of: (*txn).setOptions
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: opts == (plug.TxOptionsValue{})
+      - lock:
+          mutex: t.mu
+      - set: t.opts
+        value: opts
+  - of: nestedRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: nestedRefusal
+        kind: self
+      - id: failure
+        kind: internal
+      - id: "Invalid(\"a Transact inside another is a savepoint, which can change neither the isolation level nor read-only: give the options to the outermost Transact\").Wrap"
+        kind: internal
+    steps:
+      - bind: cause
+        eval: failure(CodeTransactionNested, "TRANSACTION_NESTED", "a nested transaction cannot change isolation or read-only", nil)
+        to: failure
+      - return: "Invalid(\"a Transact inside another is a savepoint, which can change neither the isolation level nor read-only: give the options to the outermost Transact\").Wrap(cause)"
+        to: "Invalid(\"a Transact inside another is a savepoint, which can change neither the isolation level nor read-only: give the options to the outermost Transact\").Wrap"
+  - of: readOnlyRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: readOnlyRefusal
+        kind: self
+      - id: failure
+        kind: internal
+      - id: "Invalid(fmt.Sprintf(\"%s cannot be written: the transaction was opened read-only\", store)).Wrap"
+        kind: internal
+    steps:
+      - bind: cause
+        eval: |-
+          failure(CodeTransactionReadOnly, "TRANSACTION_READ_ONLY", "a read-only transaction cannot write", nil,
+          		errs.String("store", store))
+        to: failure
+      - return: "Invalid(fmt.Sprintf(\"%s cannot be written: the transaction was opened read-only\", store)).Wrap(cause)"
+        to: "Invalid(fmt.Sprintf(\"%s cannot be written: the transaction was opened read-only\", store)).Wrap"
   - of: (*txn).ended
     steps:
       - lock:
@@ -59512,6 +60436,8 @@ sequences:
         kind: value
       - id: t.mu.Unlock
         kind: value
+      - id: readOnlyRefusal
+        kind: internal
       - id: spanRefusal
         kind: internal
       - id: a.turn.take
@@ -59526,6 +60452,13 @@ sequences:
             - set: t.app
               value: a
           when: t.app == nil
+      - opt:
+          do:
+            - eval: t.mu.Unlock()
+              to: t.mu.Unlock
+            - return: readOnlyRefusal(store)
+              to: readOnlyRefusal
+          when: t.opts.ReadOnly
       - switch:
           cases:
             - case: t.db != nil
@@ -59857,7 +60790,7 @@ sequences:
       - go: |-
           func() {
           		defer cancel()
-          		s.done <- s.run(began, db, ready)
+          		s.done <- s.run(began, db, at.opts, ready)
           	}()
       - select:
           cases:
@@ -59892,7 +60825,7 @@ sequences:
           		}
           	}()
       - return: |-
-          db.Transact(ctx, func(ctx context.Context) error {
+          db.Transact(ctx, opts, func(ctx context.Context) error {
           		s.ctx = ctx
           		close(ready)
           		return <-s.end
@@ -59941,6 +60874,12 @@ sequences:
             - set: t.app
               value: a
           when: t.app == nil
+      - opt:
+          do:
+            - eval: t.mu.Unlock()
+              to: t.mu.Unlock
+            - return: nil, readOnlyRefusal(store)
+          when: write && t.opts.ReadOnly
       - switch:
           cases:
             - case: t.db == nil && !t.local
@@ -59992,10 +60931,12 @@ sequences:
           do:
             - return: u.scope, nil
           when: u.scope != nil
-      - bind: base
-        eval: u.tx.base
+      - bind: base, opts
+        eval: u.tx.base, u.tx.opts
       - opt:
           do:
+            - set: opts
+              value: plug.TxOptionsValue{}
             - bind: outer, err
               eval: u.parent.sqlScope(wait, r)
             - opt:
@@ -60013,7 +60954,7 @@ sequences:
             - return: nil, Unavailable(fmt.Sprintf("database %q is not open", r.d.name))
           when: db == nil
       - bind: s, err
-        eval: "openScope(wait, scopeBase{ctx: base, db: db})"
+        eval: "openScope(wait, scopeBase{ctx: base, db: db, opts: opts})"
         to: openScope
       - opt:
           do:

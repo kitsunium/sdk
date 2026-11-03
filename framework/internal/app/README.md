@@ -404,8 +404,10 @@ Package app — the ports the workflow engine reaches a store through.
 - [func RateLimit\(perSecond float64, burst int, opts ...RateLimitConfigurer\) OperationOption](<#RateLimit>)
 - [func RateLimitPerClient\(perSecond float64, burst int\) OperationOption](<#RateLimitPerClient>)
 - [func ReadModel\(\) StoreConfigurer](<#ReadModel>)
+- [func ReadOnly\(\) TransactOption](<#ReadOnly>)
 - [func RecordsOf\(ctx context.Context, store string\) \(RecordsService, error\)](<#RecordsOf>)
 - [func RegisterConfigFormat\(ext string, format string\)](<#RegisterConfigFormat>)
+- [func RepeatableRead\(\) TransactOption](<#RepeatableRead>)
 - [func Replace\[Req, Resp any\]\(op Operation\[Req, Resp\], fn func\(context.Context, Req\) \(Resp, error\)\) AppConfigurer](<#Replace>)
 - [func Required\(\) SettingConfigurer](<#Required>)
 - [func Requires\(other \*Module\) ModuleConfigurer](<#Requires>)
@@ -418,6 +420,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func RotateEvery\(d time.Duration\) SecretConfigurer](<#RotateEvery>)
 - [func ScopeKey\(scopes ...ScopeValue\) \(string, error\)](<#ScopeKey>)
 - [func SecretStore\(store secret.Store\) AppConfigurer](<#SecretStore>)
+- [func Serializable\(\) TransactOption](<#Serializable>)
 - [func Set\(name string, value any\) AppConfigurer](<#Set>)
 - [func SetCookie\(ctx context.Context, c \*http.Cookie\)](<#SetCookie>)
 - [func Settle\(d time.Duration\) DeliveryOption](<#Settle>)
@@ -433,7 +436,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func Telemetry\(path string, gids ...int\) AppConfigurer](<#Telemetry>)
 - [func Throttle\(k float64\) PortPolicyConfigurer](<#Throttle>)
 - [func Timeout\(d time.Duration\) TimeoutConfigurer](<#Timeout>)
-- [func Transact\(ctx context.Context, fn func\(context.Context\) error\) error](<#Transact>)
+- [func Transact\(ctx context.Context, fn func\(context.Context\) error, opts ...TransactOption\) error](<#Transact>)
 - [func Unauthenticated\(message string\) \*Error](<#Unauthenticated>)
 - [func Unavailable\(message string\) \*Error](<#Unavailable>)
 - [func Unique\[T any\]\(name string, key func\(T\) string\) StoreConfigurer](<#Unique>)
@@ -471,6 +474,8 @@ Package app — the ports the workflow engine reaches a store through.
 - [type CLI](<#CLI>)
 - [type CLIFunc](<#CLIFunc>)
 - [type ChangeEvent](<#ChangeEvent>)
+- [type Classifier](<#Classifier>)
+  - [func \(Classifier\) Transient\(err error\) bool](<#Classifier.Transient>)
 - [type Command](<#Command>)
   - [func \(\*Command\) Allow\(policy authz.Policy, action string, resource string\) \*Command\[C, R\]](<#Command.Allow>)
   - [func \(\*Command\) Authorize\(fn func\(context.Context, C\) error\) \*Command\[C, R\]](<#Command.Authorize>)
@@ -642,6 +647,7 @@ Package app — the ports the workflow engine reaches a store through.
   - [func \(\*TopicService\) Once\(key func\(T\) string, window time.Duration\) \*TopicService\[T\]](<#TopicService.Once>)
   - [func \(\*TopicService\) Publish\(ctx context.Context, msg T\) error](<#TopicService.Publish>)
   - [func \(\*TopicService\) PublishAt\(ctx context.Context, msg T, at time.Time\) error](<#TopicService.PublishAt>)
+- [type TransactOption](<#TransactOption>)
 - [type UID](<#UID>)
 - [type ViolationMessage](<#ViolationMessage>)
 - [type WaitConfigurer](<#WaitConfigurer>)
@@ -1365,6 +1371,15 @@ The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is th
 
 Code `0.4.2.7`
 
+<a name="CodeTransactionNested"></a>
+```go
+const CodeTransactionNested errs.Code = 262747
+```
+
+CodeTransactionNested refuses a Transact inside another that asks for an isolation level or read-only ([Serializable](#Serializable), [RepeatableRead](#RepeatableRead), [ReadOnly](#ReadOnly)): the inner level is a savepoint of the outer transaction, which can change neither.
+
+Code `0.4.2.91`
+
 <a name="CodeTransactionPanic"></a>
 ```go
 const CodeTransactionPanic errs.Code = 262731
@@ -1373,6 +1388,15 @@ const CodeTransactionPanic errs.Code = 262731
 The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework's, PP 2 this package (ADR 0147 §3) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
 
 Code `0.4.2.75`
+
+<a name="CodeTransactionReadOnly"></a>
+```go
+const CodeTransactionReadOnly errs.Code = 262748
+```
+
+CodeTransactionReadOnly refuses a store's write inside a transaction opened with [ReadOnly](#ReadOnly), on every backend, before it reaches the database.
+
+Code `0.4.2.92`
 
 <a name="CodeTransactionSpan"></a>
 ```go
@@ -2006,7 +2030,7 @@ var App = app.NewApp("vigie", intake.Service, desk.Service, audit.Service).With(
 )
 ```
 
-name is 1 to 49 lower-case letters, digits and dashes, not starting with "app-" nor "kit-", unique among the app's databases. It names the database's URL, the secret \<name>-url — the variable \<APP>\_\<NAME>\_URL, or \<APP>\_\<NAME>\_URL\_FILE naming a file that holds it, then the environment's secret store —, and its settings: \<name>-max-open (10), \<name>-max-idle (2), \<name>-max-lifetime (30m), \<name>-max-idle-time (0: none), \<name>-timeout (5s), \<name>-check-timeout (5s) and \<name>-migrate (start, or manual). Outside dev the URL is required and writes its TLS mode; in dev a database without one leaves its stores in the data directory, and a SQLite database without one is the file \<data>/\<name>.sqlite. [InMemory](#InMemory) on the app opens none.
+name is 1 to 49 lower-case letters, digits and dashes, not starting with "app-" nor "kit-", unique among the app's databases. It names the database's URL, the secret \<name>-url — the variable \<APP>\_\<NAME>\_URL, or \<APP>\_\<NAME>\_URL\_FILE naming a file that holds it, then the environment's secret store —, and its settings: \<name>-max-open (10), \<name>-max-idle (2), \<name>-max-lifetime (30m), \<name>-max-idle-time (0: none), \<name>-timeout (5s), \<name>-check-timeout (5s), \<name>-tx-retries (3: how many times a transaction the database asks to run again runs again, 0 for never — [Classifier](#Classifier)), \<name>-tx-retry-delay (50ms: the first wait before it does) and \<name>-migrate (start, or manual). Outside dev the URL is required and writes its TLS mode; in dev a database without one leaves its stores in the data directory, and a SQLite database without one is the file \<data>/\<name>.sqlite. [InMemory](#InMemory) on the app opens none.
 
 <a name="DefaultCommand"></a>
 ## func [DefaultCommand](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/cli.go>)
@@ -3017,6 +3041,15 @@ ReadModel marks a store as derived from others (ADR 0005): written by projection
 var Summaries = Service.Store("summaries", Summary.Key, app.ReadModel())
 ```
 
+<a name="ReadOnly"></a>
+## func [ReadOnly](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/transact.go>)
+
+```go
+func ReadOnly() TransactOption
+```
+
+ReadOnly opens the transaction read-only: the database is told it only reads, and a store's write inside it is refused ([Invalid](#Invalid), [CodeTransactionReadOnly](#CodeTransactionReadOnly)) on every backend, before it reaches one. Given to a query's declaration, it runs the query's Ask in such a transaction — the caller's own, when the Ask runs inside one.
+
 <a name="RecordsOf"></a>
 ## func [RecordsOf](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/records.go>)
 
@@ -3041,6 +3074,15 @@ func RegisterConfigFormat(ext string, format string)
 ```
 
 RegisterConfigFormat lets configuration files of extension ext be read with the SDK codec format. framework/app/config/yaml and config/toml call it as they are imported; a product never does.
+
+<a name="RepeatableRead"></a>
+## func [RepeatableRead](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/transact.go>)
+
+```go
+func RepeatableRead() TransactOption
+```
+
+RepeatableRead opens the transaction at the REPEATABLE READ isolation level: a row it read reads the same until it ends. On the data directory and in memory it changes nothing.
 
 <a name="Replace"></a>
 ## func [Replace](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/replace.go>)
@@ -3192,6 +3234,15 @@ func SecretStore(store secret.Store) AppConfigurer
 ```
 
 SecretStore keeps the secrets in store instead of the environment's: a test gives a store holding what its provided secrets hold. The environment's variables are still read first.
+
+<a name="Serializable"></a>
+## func [Serializable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/transact.go>)
+
+```go
+func Serializable() TransactOption
+```
+
+Serializable opens the transaction at the SERIALIZABLE isolation level: it commits only if running it alone would have given the same result, and a concurrent transaction that would break that fails instead — on PostgreSQL with SQLSTATE 40001, which the database asks to run again. On the data directory and in memory, whose transactions already take one writer at a time, it changes nothing.
 
 <a name="Set"></a>
 ## func [Set](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/setting.go>)
@@ -3356,7 +3407,7 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 ## func [Transact](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/transact.go>)
 
 ```go
-func Transact(ctx context.Context, fn func(context.Context) error) error
+func Transact(ctx context.Context, fn func(context.Context) error, opts ...TransactOption) error
 ```
 
 Transact runs fn in one transaction and returns fn's error: nil commits what fn wrote, an error undoes it — a panic too, which then continues.
@@ -3377,7 +3428,7 @@ A transaction belongs to one database: the one its first store call reaches — 
 
 What leaves the process waits for the outermost commit: a topic's publish, a queued command's dispatch, a mail — whose outbox ID [Mailer.Send](#Mailer.Send) returns at once —, a watch's notice, the store's write hooks that wake workflows and loops, a workflow's OnTransition hooks. Each is checked when it is made, so a caller's mistake returns to the caller; a rollback drops them, and a savepoint's rollback its own. A publish, a dispatch, a mail or a notice whose queue lives on the transaction's database — the one that keeps the service of its subscription, command, mailer or watch, by a store's rules — is written in the transaction, just before it commits, a mail sealed under the framework's data-key: a queue that refuses it fails the transaction, every write undone, and Transact returns the refusal. Every other one leaves after the commit: one a queue refuses then is logged and reported, and the commit stands; a process that dies between the commit and the release loses what was held.
 
-On a database the transaction is the database's own, at its default isolation. On the data directory and in memory the framework keeps its own: it takes the data's writer turn — one transaction at a time; a write outside any waits for it, and such writes share the turn among themselves —, its writes land at once, and an error writes each entity's previous value back, newest first. It is atomic against an error, not against a crash, and a reader may see a write before its commit. A store kept in memory by [InMemory](#InMemory) — a cache — is in no transaction: its writes land and stay.
+On a database the transaction is the database's own, at its default isolation unless opts ask for another: [Serializable](#Serializable) or [RepeatableRead](#RepeatableRead) opens it at that level, [ReadOnly](#ReadOnly) tells the database it only reads, and a store's write inside it is refused ([Invalid](#Invalid), [CodeTransactionReadOnly](#CodeTransactionReadOnly)) on every backend. Options go on the outermost Transact: a nested one given any is refused ([Invalid](#Invalid), [CodeTransactionNested](#CodeTransactionNested)), its savepoint able to change neither. On the data directory and in memory the framework keeps its own: it takes the data's writer turn — one transaction at a time; a write outside any waits for it, and such writes share the turn among themselves —, its writes land at once, and an error writes each entity's previous value back, newest first. It is atomic against an error, not against a crash, and a reader may see a write before its commit. A store kept in memory by [InMemory](#InMemory) — a cache — is in no transaction: its writes land and stay.
 
 A command's handler runs in one already ([NoTransaction](#NoTransaction) opts out), and so does a workflow's transition.
 
@@ -3819,6 +3870,24 @@ type ChangeEvent[E any, S comparable] struct {
 	// At is when it happened.
 	At      time.Time
 }
+```
+
+<a name="Classifier"></a>
+## type [Classifier](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/database_interface.go>)
+
+Classifier is an [Engine](#Engine) that reads its driver's errors: Transient says whether a failed transaction is one the database asks to run again — on PostgreSQL SQLSTATE 40001 and 40P01, on MySQL errors 1213 and 1205, on SQLite a busy or locked database —, a sibling of Engine. The framework runs such a transaction again, the outermost level only, up to \<name>-tx-retries times, waiting \<name>-tx-retry-delay grown by 2 with full jitter on the app's clock, each retry a retries attribute on the transaction's span and a retry on the telemetry port. A transaction a [Service.Go](#Service.Go) body opens runs once: the framework cannot know the body may run its function twice. An engine that does not implement it still has the SDK's own reading of SQLSTATE and SQLite result codes.
+
+```go
+type Classifier interface {
+	Transient(err error) bool
+}
+```
+
+<a name="Classifier.Transient"></a>
+### func \(Classifier\) [Transient](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/database_interface.go>)
+
+```go
+func (Classifier) Transient(err error) bool
 ```
 
 <a name="Command"></a>
@@ -4835,7 +4904,7 @@ An exposed query says who may ask it: a permission ([Query.Allow](#Query.Allow))
 <a name="QueryConfigurer"></a>
 ## type [QueryConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/query.go>)
 
-QueryConfigurer configures a query: the options every operation takes — [Auth](#Auth), [AuthOptional](#AuthOptional), [RateLimit](#RateLimit), [RateLimitPerClient](#RateLimitPerClient), [Timeout](#Timeout), [Bulkhead](#Bulkhead).
+QueryConfigurer configures a query: the options every operation takes — [Auth](#Auth), [AuthOptional](#AuthOptional), [RateLimit](#RateLimit), [RateLimitPerClient](#RateLimitPerClient), [Timeout](#Timeout), [Bulkhead](#Bulkhead) — and a transaction's — [ReadOnly](#ReadOnly), [Serializable](#Serializable), [RepeatableRead](#RepeatableRead) —, which run its Ask in a transaction opened with them.
 
 ```go
 type QueryConfigurer interface {
@@ -5687,6 +5756,15 @@ func (*TopicService) PublishAt(ctx context.Context, msg T, at time.Time) error
 ```
 
 PublishAt sends msg to every subscription as [TopicService.Publish](#TopicService.Publish) does, but no subscription receives it before at: a reminder, a trial that ends, an order cancelled if still unpaid. It is as durable as any message, held to the commit inside a transaction as a publication is; an instant already past is now. It does not recur — a job does. A topic that publishes once refuses it: the SDK has no publication once for later yet. It is the SDK's queue.PublishAt.
+
+<a name="TransactOption"></a>
+## type [TransactOption](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/transact.go>)
+
+TransactOption asks a transaction for an isolation level or for read-only: [Serializable](#Serializable), [RepeatableRead](#RepeatableRead), [ReadOnly](#ReadOnly). None given is the database's default, as always.
+
+```go
+type TransactOption struct{}
+```
 
 <a name="UID"></a>
 ## type [UID](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/auth.go>)

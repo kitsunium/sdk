@@ -1,0 +1,59 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "queue",
+    srcs = [
+        "broker.go",
+        "cause.go",
+        "config.go",
+        "deadletter.go",
+        "doc.go",
+        "errors.go",
+        "gen_codes.go",
+        "lease.go",
+        "settle.go",
+        "wake.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/nats/queue",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/queue",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "@com_github_nats_io_nats_go//:nats_go",
+        "@com_github_nats_io_nats_go//jetstream",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":queue",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "queue_test",
+    srcs = [
+        "config_internal_test.go",
+        "gen_api_test.go",
+    ],
+    embed = [":queue"],
+    deps = [
+        "//internal/core/data/queue",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "@com_github_nats_io_nats_go//:nats_go",
+        "@com_github_nats_io_nats_go//jetstream",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (//:audit_sources) so its errs.Define call sites are scanned under Bazel.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -55,6 +55,12 @@
 // cache can promise. Size the origin against the number of replicas, not
 // against the number of requests.
 //
+// [Leaser].LoadLeased takes that lease, from a lock.Locker the processes
+// share — the lock domain's file locker on one machine. Over a chain whose far
+// tier every process reaches, the origin then sees one fill per key; over a
+// memory store alone, which shares no value, the processes only take turns,
+// one fill at a time.
+//
 // # Nothing across tiers is atomic
 //
 // [NewChain] is two independent stores, and there is no transaction between

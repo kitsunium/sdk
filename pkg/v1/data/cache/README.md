@@ -48,6 +48,8 @@ A hit promotes the entry in the recency order and moves the counters, so a read 
 
 [Loader](#Loader).Load guarantees ONE fill per key across every goroutine in THIS process. It does not coordinate across replicas. Ten instances of a service each running this still send ten concurrent requests to the origin when a hot key expires — so a fleet's worst-case origin load falls by the concurrency factor within an instance, not to one. Cross-process collapsing needs a shared lease, which is a distributed system and not something a cache can promise. Size the origin against the number of replicas, not against the number of requests.
 
+[Leaser](#Leaser).LoadLeased takes that lease, from a lock.Locker the processes share — the lock domain's file locker on one machine. Over a chain whose far tier every process reaches, the origin then sees one fill per key; over a memory store alone, which shares no value, the processes only take turns, one fill at a time.
+
 ### Nothing across tiers is atomic
 
 [NewChain](#NewChain) is two independent stores, and there is no transaction between them. Every multi-tier operation has a window in which they disagree; the package chooses which side of that window is safer and says so, rather than implying a consistency it cannot deliver. See internal/service/data/cache's CLAUDE.md for each choice and its reason.
@@ -56,12 +58,22 @@ A hit promotes the entry in the recency order and moves the counters, so a read 
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func Absent\(cause error, ttl time.Duration\) error](<#Absent>)
+- [func AbsentTTLOf\(err error\) \(ttl time.Duration, marked bool\)](<#AbsentTTLOf>)
 - [func New\[K comparable, V any\]\(cfg Config\[K, V\]\) \*Cache\[K, V\]](<#New>)
 - [func NewChain\[V any\]\(cfg ChainConfig, tiers ...Store\[V\]\) \(store Store\[V\], err error\)](<#NewChain>)
 - [func NewMemory\[V any\]\(cfg MemoryConfig\) \(store Store\[V\], err error\)](<#NewMemory>)
+- [func NewStriped\[K comparable, V any\]\(cfg Config\[K, V\], stripes int, hash func\(key K\) uint64\) \*Striped\[K, V\]](<#NewStriped>)
+- [func NewWeighedMemory\[V any\]\(cfg MemoryConfig, weigh func\(value V\) int64\) \(store Store\[V\], err error\)](<#NewWeighedMemory>)
+- [type BulkFetcher](<#BulkFetcher>)
+  - [func \(BulkFetcher\) FetchMany\(ctx context.Context, keys \[\]string\) \(map\[string\]V, error\)](<#BulkFetcher.FetchMany>)
+- [type BulkSetter](<#BulkSetter>)
+  - [func \(BulkSetter\) SetMany\(ctx context.Context, entries map\[string\]EntryValue\[V\]\) error](<#BulkSetter.SetMany>)
 - [type Cache](<#Cache>)
   - [func \(\*Cache\) Delete\(key K\)](<#Cache.Delete>)
+  - [func \(\*Cache\) Expire\(\) int](<#Cache.Expire>)
   - [func \(\*Cache\) Fetch\(key K\) \(value V, ok bool\)](<#Cache.Fetch>)
+  - [func \(\*Cache\) Keys\(\) iter.Seq\[K\]](<#Cache.Keys>)
   - [func \(\*Cache\) Len\(\) int](<#Cache.Len>)
   - [func \(\*Cache\) Purge\(\)](<#Cache.Purge>)
   - [func \(\*Cache\) Set\(key K, val V\)](<#Cache.Set>)
@@ -72,15 +84,33 @@ A hit promotes the entry in the recency order and moves the counters, so a read 
 - [type Entry](<#Entry>)
 - [type EntryFetcher](<#EntryFetcher>)
   - [func \(EntryFetcher\) FetchEntry\(ctx context.Context, key string\) \(EntryValue\[V\], bool, error\)](<#EntryFetcher.FetchEntry>)
+- [type Expirer](<#Expirer>)
+  - [func \(Expirer\) Expire\(ctx context.Context\) \(removed int, err error\)](<#Expirer.Expire>)
 - [type Fill](<#Fill>)
+- [type Leaser](<#Leaser>)
+  - [func \(Leaser\) LoadLeased\(ctx context.Context, key string, fill Fill\[V\], locker lock.Locker\) \(V, error\)](<#Leaser.LoadLeased>)
 - [type Loader](<#Loader>)
   - [func \(Loader\) Load\(ctx context.Context, key string, fill Fill\[V\]\) \(V, error\)](<#Loader.Load>)
 - [type MemoryConfig](<#MemoryConfig>)
+- [type Policy](<#Policy>)
+- [type Refresher](<#Refresher>)
+  - [func \(Refresher\) LoadRefreshing\(ctx context.Context, key string, fill Fill\[V\], before time.Duration\) \(V, error\)](<#Refresher.LoadRefreshing>)
 - [type Stats](<#Stats>)
 - [type Store](<#Store>)
   - [func \(Store\) Delete\(ctx context.Context, key string\) error](<#Store.Delete>)
   - [func \(Store\) Fetch\(ctx context.Context, key string\) \(V, bool, error\)](<#Store.Fetch>)
   - [func \(Store\) Set\(ctx context.Context, key string, entry EntryValue\[V\]\) error](<#Store.Set>)
+- [type Striped](<#Striped>)
+  - [func \(\*Striped\) Delete\(key K\)](<#Striped.Delete>)
+  - [func \(\*Striped\) Expire\(\) int](<#Striped.Expire>)
+  - [func \(\*Striped\) Fetch\(key K\) \(value V, ok bool\)](<#Striped.Fetch>)
+  - [func \(\*Striped\) Keys\(\) iter.Seq\[K\]](<#Striped.Keys>)
+  - [func \(\*Striped\) Len\(\) int](<#Striped.Len>)
+  - [func \(\*Striped\) Purge\(\)](<#Striped.Purge>)
+  - [func \(\*Striped\) Set\(key K, val V\)](<#Striped.Set>)
+  - [func \(\*Striped\) SetTTL\(key K, val V, ttl time.Duration\)](<#Striped.SetTTL>)
+  - [func \(\*Striped\) Stats\(\) StatsValue](<#Striped.Stats>)
+  - [func \(\*Striped\) Stripes\(\) int](<#Striped.Stripes>)
 - [type Tagger](<#Tagger>)
   - [func \(Tagger\) InvalidateTag\(ctx context.Context, tag string\) \(removed int, err error\)](<#Tagger.InvalidateTag>)
 
@@ -96,6 +126,24 @@ NoExpiry is the [Entry](#Entry).TTL that stores an entry with no deadline.
 It is deliberately distinct from the zero TTL, which means "use the store's default". A store with a one-minute default holding one entry that must never expire is a real combination, and reading both meanings out of 0 would make the second one unsayable.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/data/cache.NoExpiry`.
+
+<a name="PolicyLRU"></a>
+```go
+const PolicyLRU Policy = 0
+```
+
+PolicyLRU evicts the least-recently-used entry. It is the zero Policy.
+
+Initialised with `github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyLRU`.
+
+<a name="PolicyS3FIFO"></a>
+```go
+const PolicyS3FIFO Policy = 1
+```
+
+PolicyS3FIFO admits new keys into a small probationary queue and keeps the ones hit there in a main one, so a one-time scan does not flush the hot set.
+
+Initialised with `github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyS3FIFO`.
 
 ## Variables
 
@@ -143,6 +191,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/cache.CacheFillFai
 
 Code `0.2.18.3` · reason `CACHE_FILL_FAILED` · public "The cache fill function failed and nothing was stored"
 
+<a name="LeaseFailed"></a>
+```go
+var LeaseFailed *errs.Error
+```
+
+LeaseFailed is returned by LoadLeased when its locker could not answer: the lease on the key could be neither taken nor given up.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/cache.CacheLeaseFailed`.
+
+Code `0.3.48.3` · reason `CACHE_LEASE_FAILED` · public "The cache could not coordinate the fill with other processes"
+
 <a name="Misconfigured"></a>
 ```go
 var Misconfigured *errs.Error
@@ -164,6 +223,24 @@ TierFailed is returned when a chained operation failed inside one tier. Its fiel
 Initialised with `github.com/kitsunium/sdk/internal/core/data/cache.CacheTierFailed`.
 
 Code `0.3.48.2` · reason `CACHE_TIER_FAILED` · public "A tier of the cache chain could not serve the operation"
+
+<a name="Absent"></a>
+## func [Absent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+```go
+func Absent(cause error, ttl time.Duration) error
+```
+
+Absent marks a fill's failure as an answer to cache: the key does not exist at the origin. A store's Load keeps a negative entry for ttl and returns the same error — errors.Is still finds cause — without calling the fill again. A ttl that is not positive caches nothing.
+
+<a name="AbsentTTLOf"></a>
+## func [AbsentTTLOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+```go
+func AbsentTTLOf(err error) (ttl time.Duration, marked bool)
+```
+
+AbsentTTLOf returns the lifetime [Absent](#Absent) put on err, and whether it put one.
 
 <a name="New"></a>
 ## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
@@ -198,6 +275,76 @@ The returned [Store](#Store) also implements [EntryFetcher](#EntryFetcher), [Tag
 
 A non-positive MaxEntries is REFUSED, not defaulted. A capacity is the whole statement of how much memory you are willing to spend, so any number chosen for you would be arbitrary — and the value a zero would naturally mean, unbounded, is the dangerous one.
 
+<a name="NewStriped"></a>
+## func [NewStriped](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+```go
+func NewStriped[K comparable, V any](cfg Config[K, V], stripes int, hash func(key K) uint64) *Striped[K, V]
+```
+
+NewStriped builds a [Striped](#Striped) of the given number of stripes (below 1 is 1) from cfg, whose bounds it divides between them. A nil hash uses hash/maphash over a seed of its own.
+
+<a name="NewWeighedMemory"></a>
+## func [NewWeighedMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+```go
+func NewWeighedMemory[V any](cfg MemoryConfig, weigh func(value V) int64) (store Store[V], err error)
+```
+
+NewWeighedMemory builds an in-process store bounded by MaxBytes as well as MaxEntries, each value measured by weigh when it is stored. An entry heavier than a stripe's share of MaxBytes is refused at Set.
+
+<a name="BulkFetcher"></a>
+## type [BulkFetcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+BulkFetcher is the sibling that reads many keys in one call — one lock per stripe, one pass per tier.
+
+```go
+type BulkFetcher[V any] = corecache.BulkFetcher[V]
+```
+
+BulkFetcher is an alias of `github.com/kitsunium/sdk/internal/core/data/cache.BulkFetcher`, declared as:
+
+```go
+type BulkFetcher[V any] interface {
+	FetchMany(ctx context.Context, keys []string) (map[string]V, error)
+}
+```
+
+<a name="BulkFetcher.FetchMany"></a>
+### func \(BulkFetcher\) [FetchMany](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
+
+```go
+func (BulkFetcher) FetchMany(ctx context.Context, keys []string) (map[string]V, error)
+```
+
+FetchMany returns the values of the keys the store holds, and no entry for a key it does not. It mutates the store as Fetch does. Duplicate keys are read once.
+
+<a name="BulkSetter"></a>
+## type [BulkSetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+BulkSetter is the sibling that stores many entries in one call, validating every entry before storing any.
+
+```go
+type BulkSetter[V any] = corecache.BulkSetter[V]
+```
+
+BulkSetter is an alias of `github.com/kitsunium/sdk/internal/core/data/cache.BulkSetter`, declared as:
+
+```go
+type BulkSetter[V any] interface {
+	SetMany(ctx context.Context, entries map[string]EntryValue[V]) error
+}
+```
+
+<a name="BulkSetter.SetMany"></a>
+### func \(BulkSetter\) [SetMany](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
+
+```go
+func (BulkSetter) SetMany(ctx context.Context, entries map[string]EntryValue[V]) error
+```
+
+SetMany stores every entry under its key. Every entry is validated before any is stored: one a store refuses — an empty key or tag, a TTL Set would refuse — fails the call with \[CacheEntryRejected] and stores nothing.
+
 <a name="Cache"></a>
 ## type [Cache](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
@@ -222,6 +369,15 @@ func (*Cache) Delete(key K)
 
 Delete removes key if present. An explicit Delete does NOT fire OnEvict (that hook is for capacity/expiry removals only).
 
+<a name="Cache.Expire"></a>
+### func \(Cache\) [Expire](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/cache.go>)
+
+```go
+func (*Cache) Expire() int
+```
+
+Expire removes every entry whose deadline has passed and reports how many it removed. Each counts as an eviction and reaches OnEvict after the lock is released, as a lazy expiry does. The cache starts no goroutine: the caller decides when, and how often, to call it — on a ticker of its own, or on its scheduler. It costs O(k log n) for k expired entries; an entry without a deadline costs nothing, and a cache without any reads no clock.
+
 <a name="Cache.Fetch"></a>
 ### func \(Cache\) [Fetch](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/cache.go>)
 
@@ -231,6 +387,15 @@ func (*Cache) Fetch(key K) (value V, ok bool)
 
 Fetch returns the value for key and whether it was present and unexpired. A hit promotes the entry to most-recently-used (hence Fetch, not a pure Get).
 
+<a name="Cache.Keys"></a>
+### func \(Cache\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/cache.go>)
+
+```go
+func (*Cache) Keys() iter.Seq[K]
+```
+
+Keys yields the keys present and unexpired when the loop starts, in no particular order. They are copied under the read lock and yielded after it is released, so the loop's body may call the cache — Set, Delete, Fetch — without deadlocking; what the body changes is not seen by the loop. A walk is not a read: no entry is promoted and no counter moves. Each loop allocates one slice of the keys.
+
 <a name="Cache.Len"></a>
 ### func \(Cache\) [Len](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/cache.go>)
 
@@ -238,7 +403,7 @@ Fetch returns the value for key and whether it was present and unexpired. A hit 
 func (*Cache) Len() int
 ```
 
-Len returns the current live entry count (including not-yet-reaped expired entries — expiry is lazy).
+Len returns the current live entry count (including not-yet-reaped expired entries — expiry is lazy unless Expire runs).
 
 <a name="Cache.Purge"></a>
 ### func \(Cache\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/cache.go>)
@@ -298,6 +463,14 @@ type ChainConfig struct {
 	// promotion is a tier that will never be used again, and with this hook nil
 	// that is completely invisible. Wire it.
 	OnPromoteError func(key string, err error)
+	// Clock is what LoadLeased waits on between two reads while another
+	// process holds a key's lease. nil means clock.System. Nothing else in
+	// the chain reads time: every tier keeps its own clock.
+	Clock          clock.Timed
+	// LeasePoll is how often LoadLeased reads the chain again while another
+	// process holds a key's lease. 0 means 25ms, the file locker's own poll;
+	// negative is refused.
+	LeasePoll      time.Duration
 }
 ```
 
@@ -323,6 +496,18 @@ type Config[K comparable, V any] struct {
 	// OnEvict, if non-nil, is called with the key+value of every entry removed by
 	// capacity eviction or expiry (not by an explicit Delete/Set-overwrite).
 	OnEvict    func(key K, val V)
+	// MaxWeight caps the summed weight of the live entries, evicting above it as
+	// MaxEntries does; both apply when both are set. 0 = unbounded. An entry
+	// heavier than MaxWeight alone is stored and evicts every other entry: the
+	// primitive has no error to refuse it with.
+	MaxWeight  int64
+	// WeightOf, if non-nil, weighs an entry when it is stored; a negative answer
+	// counts as 0, and one above math.MaxInt32 as math.MaxInt32. nil = every
+	// entry weighs 1, so MaxWeight is then a count.
+	WeightOf   func(key K, val V) int64
+	// Policy chooses the victim when the cache is full. The zero value is
+	// PolicyLRU.
+	Policy     Policy
 }
 ```
 
@@ -390,6 +575,35 @@ FetchEntry is [Store.Fetch](#Store.Fetch) returning the stored entry — value, 
 
 The TTL it reports is the REMAINING time, not the one originally supplied: promoting an entry with its original TTL would extend its life every time it moved between tiers.
 
+<a name="Expirer"></a>
+## type [Expirer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+Expirer is the sibling that removes a store's expired entries on demand. Expiry is otherwise lazy; the store starts no goroutine, so call Expire on your own ticker or scheduler.
+
+```go
+type Expirer = corecache.Expirer
+```
+
+Expirer is an alias of `github.com/kitsunium/sdk/internal/core/data/cache.Expirer`, declared as:
+
+```go
+type Expirer interface {
+	// Expire removes every entry whose deadline has passed and reports how many
+	// it removed. A chain sweeps every tier that can, far to near, and reports
+	// the total of removals, as InvalidateTag counts them.
+	Expire(ctx context.Context) (removed int, err error)
+}
+```
+
+<a name="Expirer.Expire"></a>
+### func \(Expirer\) [Expire](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
+
+```go
+func (Expirer) Expire(ctx context.Context) (removed int, err error)
+```
+
+Expire removes every entry whose deadline has passed and reports how many it removed. A chain sweeps every tier that can, far to near, and reports the total of removals, as InvalidateTag counts them.
+
 <a name="Fill"></a>
 ## type [Fill](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
@@ -404,6 +618,32 @@ Fill is an alias of `github.com/kitsunium/sdk/internal/core/data/cache.Fill`, de
 ```go
 type Fill[V any] func(ctx context.Context) (EntryValue[V], error)
 ```
+
+<a name="Leaser"></a>
+## type [Leaser](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+Leaser is the sibling that carries stampede protection across processes: on a miss it takes a lease named after the key from a lock.Locker the processes share, so one of them fills while the others wait for its value. A memory store alone shares no value: there the lease only takes turns, one fill at a time.
+
+```go
+type Leaser[V any] = corecache.Leaser[V]
+```
+
+Leaser is an alias of `github.com/kitsunium/sdk/internal/core/data/cache.Leaser`, declared as:
+
+```go
+type Leaser[V any] interface {
+	LoadLeased(ctx context.Context, key string, fill Fill[V], locker lock.Locker) (V, error)
+}
+```
+
+<a name="Leaser.LoadLeased"></a>
+### func \(Leaser\) [LoadLeased](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
+
+```go
+func (Leaser) LoadLeased(ctx context.Context, key string, fill Fill[V], locker lock.Locker) (V, error)
+```
+
+LoadLeased is Load with a lease named "cache:" + key taken from locker on a miss, after the in-process collapse. The holder reads the store again, fills, stores and releases. A process that finds the lease held fills nothing: it reads the store again every poll step of the store's clock until the holder's value lands or its own ctx ends — or until the lease comes free without a value (the holder failed, died, or let a lease that can expire lapse), when it takes the lease and reads once more before filling. A nil locker makes it Load. A locker that cannot answer fails the call with \[CacheLeaseFailed]. A lease that can expire is not renewed during the fill: its lifetime must outlast the fill.
 
 <a name="Loader"></a>
 ## type [Loader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
@@ -454,11 +694,75 @@ type MemoryConfig struct {
 	// or by tag invalidation. Negative is refused.
 	DefaultTTL time.Duration
 	// Clock is the time source, injectable so TTL is testable. nil means
-	// clock.System. Only the reading half of the port is used — a cache reads
-	// time, it never waits for it (ADR 0039).
+	// clock.System. Only the reading half of the port is required — a cache
+	// reads time (ADR 0039); LoadLeased alone waits, on Clock when it can wait
+	// (clock.System, a clock.ManualClock) and on clock.System otherwise. A
+	// clock.CoarseClock makes a TTL'd hit's clock read an atomic load, and
+	// every expiry late by up to its resolution.
 	Clock      clock.Clock
+	// Stripes splits the store into independent stripes, each with its own
+	// lock, its own share of MaxEntries and MaxBytes and its own tag index, so
+	// goroutines working on keys of different stripes never wait for one
+	// another. 0 means 1, one store as before; above MaxEntries (or a positive
+	// MaxBytes) it is held there, and above 1024 at 1024. Negative is refused.
+	Stripes    int
+	// MaxBytes bounds the summed weight of the live values, as measured by the
+	// weigher handed to [NewWeighedMemory]; entries are evicted above it as
+	// above MaxEntries, both bounds applying. 0 means no byte bound. An entry
+	// heavier than one stripe's share of it is refused with
+	// CACHE_ENTRY_REJECTED at Set. Negative is refused, and so is a positive
+	// MaxBytes given to [NewMemory], which has no weigher to measure it with.
+	MaxBytes   int64
+	// Policy is the eviction policy: least recently used (the zero), or
+	// S3-FIFO, which keeps a hot set through a scan.
+	Policy     kcache.Policy
+	// LeasePoll is how often LoadLeased reads the store again while another
+	// process holds a key's lease. 0 means 25ms, the file locker's own poll;
+	// negative is refused.
+	LeasePoll  time.Duration
 }
 ```
+
+<a name="Policy"></a>
+## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+Policy chooses the entry a full cache evicts: [PolicyLRU](#PolicyLRU), the zero, or [PolicyS3FIFO](#PolicyS3FIFO).
+
+```go
+type Policy = kcache.Policy
+```
+
+Policy is an alias of `github.com/kitsunium/sdk/internal/kernel/collections/cache.Policy`, declared as:
+
+```go
+type Policy uint8
+```
+
+<a name="Refresher"></a>
+## type [Refresher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+Refresher is the sibling that refreshes a hot entry before it expires: the value is served from the cache while one background fill replaces it.
+
+```go
+type Refresher[V any] = corecache.Refresher[V]
+```
+
+Refresher is an alias of `github.com/kitsunium/sdk/internal/core/data/cache.Refresher`, declared as:
+
+```go
+type Refresher[V any] interface {
+	LoadRefreshing(ctx context.Context, key string, fill Fill[V], before time.Duration) (V, error)
+}
+```
+
+<a name="Refresher.LoadRefreshing"></a>
+### func \(Refresher\) [LoadRefreshing](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
+
+```go
+func (Refresher) LoadRefreshing(ctx context.Context, key string, fill Fill[V], before time.Duration) (V, error)
+```
+
+LoadRefreshing is Load, except on a hit whose remaining lifetime is below before: the value is returned at once and ONE background fill per key starts, on the caller's context values without its cancellation, bounded by the entry's remaining lifetime; what it returns replaces the entry, and a failure leaves the entry to expire. A hit outside that window starts nothing. A before that is not positive is refused with \[CacheMisconfigured].
 
 <a name="Stats"></a>
 ## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
@@ -476,6 +780,12 @@ type Stats struct {
 	Hits      uint64
 	Misses    uint64
 	Evictions uint64
+	// Weight is the summed weight of the live entries when the cache weighs
+	// them — Config.MaxWeight or Config.WeightOf set — and 0 when it does not.
+	Weight    int64
+	// Policy is the eviction policy that runs: Config.Policy, or PolicyLRU
+	// for a value the cache does not know.
+	Policy    Policy
 }
 ```
 
@@ -526,6 +836,111 @@ func (Store) Set(ctx context.Context, key string, entry EntryValue[V]) error
 ```
 
 Set stores entry under key, replacing whatever was there. An empty key, an empty tag, or a negative TTL that is not [NoExpiry](#NoExpiry) is refused with \[CacheEntryRejected] rather than stored.
+
+<a name="Striped"></a>
+## type [Striped](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
+
+Striped spreads keys over independent \[Cache]s, each behind its own lock, dividing the bounds between them.
+
+```go
+type Striped[K comparable, V any] = kcache.Striped[K, V]
+```
+
+Striped is an alias of `github.com/kitsunium/sdk/internal/kernel/collections/cache.Striped`, declared as:
+
+```go
+type Striped[K comparable, V any] struct{}
+```
+
+<a name="Striped.Delete"></a>
+### func \(Striped\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/striped.go>)
+
+```go
+func (*Striped) Delete(key K)
+```
+
+Delete removes key from its stripe, without firing OnEvict.
+
+<a name="Striped.Expire"></a>
+### func \(Striped\) [Expire](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/striped.go>)
+
+```go
+func (*Striped) Expire() int
+```
+
+Expire sweeps every stripe, one lock at a time, and reports how many entries it removed in total.
+
+<a name="Striped.Fetch"></a>
+### func \(Striped\) [Fetch](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/striped.go>)
+
+```go
+func (*Striped) Fetch(key K) (value V, ok bool)
+```
+
+Fetch returns the value for key and whether it was present and unexpired, from key's stripe, recording the hit as that stripe's policy does.
+
+<a name="Striped.Keys"></a>
+### func \(Striped\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/striped.go>)
+
+```go
+func (*Striped) Keys() iter.Seq[K]
+```
+
+Keys yields the keys of every stripe, a stripe at a time, each stripe's copied under its read lock and yielded after it is released, as Cache.Keys does, so the loop's body may call s. The stripes are read one after another, so under concurrent writes the walk is no single instant's.
+
+<a name="Striped.Len"></a>
+### func \(Striped\) [Len](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/striped.go>)
+
+```go
+func (*Striped) Len() int
+```
+
+Len returns the live entry count summed over the stripes. The stripes are read one after another, so under concurrent writes the sum is no single instant's.
+
+<a name="Striped.Purge"></a>
+### func \(Striped\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/striped.go>)
+
+```go
+func (*Striped) Purge()
+```
+
+Purge drops every entry of every stripe without firing OnEvict.
+
+<a name="Striped.Set"></a>
+### func \(Striped\) [Set](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/striped.go>)
+
+```go
+func (*Striped) Set(key K, val V)
+```
+
+Set stores key=val in key's stripe with the default TTL.
+
+<a name="Striped.SetTTL"></a>
+### func \(Striped\) [SetTTL](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/striped.go>)
+
+```go
+func (*Striped) SetTTL(key K, val V, ttl time.Duration)
+```
+
+SetTTL stores key=val in key's stripe with an explicit ttl (0 = no expiry).
+
+<a name="Striped.Stats"></a>
+### func \(Striped\) [Stats](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/striped.go>)
+
+```go
+func (*Striped) Stats() StatsValue
+```
+
+Stats returns the counters summed over the stripes, read one after another.
+
+<a name="Striped.Stripes"></a>
+### func \(Striped\) [Stripes](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/striped.go>)
+
+```go
+func (*Striped) Stripes() int
+```
+
+Stripes reports how many stripes s spreads its keys over.
 
 <a name="Tagger"></a>
 ## type [Tagger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)

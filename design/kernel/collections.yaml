@@ -17,6 +17,39 @@ packages:
       OnEvict observer never runs while the cache mutex is held.
 
       Package cache — the read-only counters snapshot.
+
+      Package cache — the S3-FIFO side of the policy: admission into the small
+      or main queue, the hit counter, and the walk that picks a victim.
+
+      Package cache — the S3-FIFO ghost: the hashes of the keys probation
+      evicted, bounded.
+
+      Package cache — the intrusive list each queue is.
+
+      Package cache — the eviction policies a Cache runs.
+
+      Package cache — Striped: independent Caches behind one hash, each with
+      its own lock.
+    constants:
+      - blockDoc: ""
+        doc: |-
+          PolicyLRU evicts the least-recently-used entry: every hit moves its entry
+          to the front. A scan of cold keys longer than the capacity flushes the
+          whole hot set.
+        name: PolicyLRU
+        type: Policy
+        value: "0"
+      - blockDoc: ""
+        doc: |-
+          PolicyS3FIFO is S3-FIFO (Yang et al., SOSP 2023): a new key enters a small
+          probationary FIFO holding a tenth of the capacity; one hit there promotes
+          it to the main FIFO when it reaches the tail, none sends its key to a
+          bounded ghost set, and a key the ghost remembers is admitted straight into
+          main. A one-time scan therefore churns the small queue and leaves the hot
+          set in main. A hit only sets a counter — it moves nothing.
+        name: PolicyS3FIFO
+        type: Policy
+        value: "1"
     functions:
       - doc: NewCache builds a Cache from cfg. A nil cfg.Clock defaults to clock.System.
         in:
@@ -25,6 +58,25 @@ packages:
         name: NewCache
         out:
           - type: "*Cache[K, V]"
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+      - doc: |-
+          NewStriped builds a Striped of the given number of stripes from cfg, whose
+          bounds it divides between them. A stripe count below 1 is 1. A nil hash
+          uses hash/maphash over a seed drawn for this Striped alone.
+        in:
+          - name: cfg
+            type: Config[K, V]
+          - name: stripes
+            type: int
+          - name: hash
+            type: func(key K) uint64
+        name: NewStriped
+        out:
+          - type: "*Striped[K, V]"
         typeParams:
           - constraint: comparable
             name: K
@@ -80,8 +132,30 @@ packages:
             name: Delete
             recv: pointer
           - doc: |-
+              Expire removes every entry whose deadline has passed and reports how many
+              it removed. Each counts as an eviction and reaches OnEvict after the lock is
+              released, as a lazy expiry does. The cache starts no goroutine: the caller
+              decides when, and how often, to call it — on a ticker of its own, or on its
+              scheduler. It costs O(k log n) for k expired entries; an entry without a
+              deadline costs nothing, and a cache without any reads no clock.
+            name: Expire
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              Keys yields the keys present and unexpired when the loop starts, in no
+              particular order. They are copied under the read lock and yielded after it
+              is released, so the loop's body may call the cache — Set, Delete, Fetch —
+              without deadlocking; what the body changes is not seen by the loop. A walk
+              is not a read: no entry is promoted and no counter moves. Each loop
+              allocates one slice of the keys.
+            name: Keys
+            out:
+              - type: iter.Seq[K]
+            recv: pointer
+          - doc: |-
               Len returns the current live entry count (including not-yet-reaped expired
-              entries — expiry is lazy).
+              entries — expiry is lazy unless Expire runs).
             name: Len
             out:
               - type: int
@@ -122,6 +196,24 @@ packages:
                 capacity eviction or expiry (not by an explicit Delete/Set-overwrite).
               name: OnEvict
               type: func(key K, val V)
+            - doc: |-
+                MaxWeight caps the summed weight of the live entries, evicting above it as
+                MaxEntries does; both apply when both are set. 0 = unbounded. An entry
+                heavier than MaxWeight alone is stored and evicts every other entry: the
+                primitive has no error to refuse it with.
+              name: MaxWeight
+              type: int64
+            - doc: |-
+                WeightOf, if non-nil, weighs an entry when it is stored; a negative answer
+                counts as 0, and one above math.MaxInt32 as math.MaxInt32. nil = every
+                entry weighs 1, so MaxWeight is then a count.
+              name: WeightOf
+              type: func(key K, val V) int64
+            - doc: |-
+                Policy chooses the victim when the cache is full. The zero value is
+                PolicyLRU.
+              name: Policy
+              type: Policy
         typeParams:
           - constraint: comparable
             name: K
@@ -140,6 +232,119 @@ packages:
               type: uint64
             - name: Evictions
               type: uint64
+            - doc: |-
+                Weight is the summed weight of the live entries when the cache weighs
+                them — Config.MaxWeight or Config.WeightOf set — and 0 when it does not.
+              name: Weight
+              type: int64
+            - doc: |-
+                Policy is the eviction policy that runs: Config.Policy, or PolicyLRU
+                for a value the cache does not know.
+              name: Policy
+              type: Policy
+      - doc: |-
+          Policy chooses which entry a full Cache evicts. The zero value is
+          PolicyLRU, today's behaviour; an unknown value runs as PolicyLRU, and
+          Stats says which policy runs.
+        name: Policy
+        underlying: uint8
+      - doc: |-
+          Striped spreads its keys over independent Caches — stripes — each behind
+          its own lock, so goroutines working on keys of different stripes never
+          wait for one another. A key always lands in the same stripe, chosen by a
+          hash of the key.
+
+          Each stripe holds an equal share of MaxEntries and MaxWeight, at least one
+          unit when the bound is set: the policy is exact within a stripe and
+          approximate across them — the victim is the least-recently-used entry of
+          the stripe that overflowed, not of the whole cache. OnEvict fires per
+          stripe, outside that stripe's lock, as a Cache fires it. With one stripe a
+          Striped behaves exactly as one Cache.
+
+          The zero value is NOT usable — construct with NewStriped.
+        methods:
+          - doc: |-
+              Fetch returns the value for key and whether it was present and unexpired,
+              from key's stripe, recording the hit as that stripe's policy does.
+            in:
+              - name: key
+                type: K
+            name: Fetch
+            out:
+              - name: value
+                type: V
+              - name: ok
+                type: bool
+            recv: pointer
+          - doc: Set stores key=val in key's stripe with the default TTL.
+            in:
+              - name: key
+                type: K
+              - name: val
+                type: V
+            name: Set
+            recv: pointer
+          - doc: SetTTL stores key=val in key's stripe with an explicit ttl (0 = no expiry).
+            in:
+              - name: key
+                type: K
+              - name: val
+                type: V
+              - name: ttl
+                type: time.Duration
+            name: SetTTL
+            recv: pointer
+          - doc: Delete removes key from its stripe, without firing OnEvict.
+            in:
+              - name: key
+                type: K
+            name: Delete
+            recv: pointer
+          - doc: |-
+              Expire sweeps every stripe, one lock at a time, and reports how many entries
+              it removed in total.
+            name: Expire
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              Keys yields the keys of every stripe, a stripe at a time, each stripe's
+              copied under its read lock and yielded after it is released, as
+              Cache.Keys does, so the loop's body may call s. The stripes are read one
+              after another, so under concurrent writes the walk is no single instant's.
+            name: Keys
+            out:
+              - type: iter.Seq[K]
+            recv: pointer
+          - doc: |-
+              Len returns the live entry count summed over the stripes. The stripes are
+              read one after another, so under concurrent writes the sum is no single
+              instant's.
+            name: Len
+            out:
+              - type: int
+            recv: pointer
+          - doc: Purge drops every entry of every stripe without firing OnEvict.
+            name: Purge
+            recv: pointer
+          - doc: Stats returns the counters summed over the stripes, read one after another.
+            name: Stats
+            out:
+              - type: StatsValue
+            recv: pointer
+          - doc: Stripes reports how many stripes s spreads its keys over.
+            name: Stripes
+            out:
+              - type: int
+            recv: pointer
+        name: Striped
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
   - doc: |-
       Package heap provides Heap[T], a binary heap ordered by a comparison
       function the caller supplies. It is a kernel primitive: stdlib-only, and
@@ -194,8 +399,103 @@ packages:
         typeParams:
           - constraint: any
             name: T
+      - doc: |-
+          NewIndexed builds an empty IndexedHeap ordered by cmp. A nil cmp panics,
+          for the reason New gives.
+        in:
+          - name: cmp
+            type: func(a, b T) int
+        name: NewIndexed
+        out:
+          - type: "*IndexedHeap[T]"
+        typeParams:
+          - constraint: any
+            name: T
     path: github.com/kitsunium/sdk/internal/kernel/collections/heap
     types:
+      - doc: |-
+          Handle names one element of an IndexedHeap from the Push that returned it to
+          the Pop or Remove that takes it out.
+
+          The zero Handle names nothing. A Handle outlives its element harmlessly:
+          once the element left, Update and Remove report false for it, even after
+          its slot was handed to a later Push — the generation it carries no longer
+          matches.
+        name: Handle
+        struct:
+          unexported: true
+      - doc: |-
+          IndexedHeap is a binary heap ordered by the comparison given to [NewIndexed],
+          whose every element is named by the [Handle] its Push returned: Update
+          re-orders one element after its key changed, and Remove takes one out from
+          anywhere, both in O(log n).
+
+          The zero value is NOT usable — construct with [NewIndexed]. Not safe for
+          concurrent use.
+        methods:
+          - doc: Len reports how many elements the heap holds.
+            name: Len
+            out:
+              - type: int
+            recv: pointer
+          - doc: Push adds v, in O(log n), and returns the Handle that names it.
+            in:
+              - name: v
+                type: T
+            name: Push
+            out:
+              - type: Handle
+            recv: pointer
+          - doc: |-
+              Peek returns the top element and its Handle without removing it, and
+              reports whether there was one.
+            name: Peek
+            out:
+              - type: T
+              - type: Handle
+              - type: bool
+            recv: pointer
+          - doc: |-
+              Pop removes and returns the top element and the Handle that named it, in
+              O(log n), and reports whether there was one. The Handle names nothing
+              afterwards.
+            name: Pop
+            out:
+              - type: T
+              - type: Handle
+              - type: bool
+            recv: pointer
+          - doc: |-
+              Update replaces the element handle names with v and restores the order, in
+              O(log n). It reports false, and changes nothing, when handle names no
+              element of this heap.
+            in:
+              - name: handle
+                type: Handle
+              - name: v
+                type: T
+            name: Update
+            out:
+              - type: bool
+            recv: pointer
+          - doc: |-
+              Remove takes the element handle names out of the heap, from wherever it
+              sits, in O(log n), and returns it. It reports (zero, false) when handle
+              names no element of this heap.
+            in:
+              - name: handle
+                type: Handle
+            name: Remove
+            out:
+              - type: T
+              - type: bool
+            recv: pointer
+        name: IndexedHeap
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
       - doc: |-
           Heap is a binary heap ordered by the comparison given to [New].
 
@@ -233,6 +533,15 @@ packages:
             out:
               - type: T
               - type: bool
+            recv: pointer
+          - doc: |-
+              Drain yields the elements in order, popping each before it is yielded,
+              until the heap is empty: Pop's loop, as an iterator. A loop that stops
+              early leaves the rest in h, and an element the loop's body pushes is
+              yielded in its turn. Nothing is allocated.
+            name: Drain
+            out:
+              - type: iter.Seq[T]
             recv: pointer
         name: Heap
         struct:
@@ -278,6 +587,24 @@ packages:
       serialisation route (see internal/service/observe/logger/middleware/async); other
       domains pick whichever coordination fits their topology.
     functions:
+      - doc: |-
+          Drain yields the items q holds, oldest first, reading each with TryRead
+          until q reports [Empty]: the consumer's loop over the ring, as an
+          iterator.
+
+          It is the consumer's side, so it is bound by the same rule as TryRead:
+          only the one consumer goroutine ranges over it. An item the producer
+          writes while the loop runs is yielded too; a loop that breaks early
+          leaves the rest in q. Nothing is allocated.
+        in:
+          - name: q
+            type: Queue[T]
+        name: Drain
+        out:
+          - type: iter.Seq[T]
+        typeParams:
+          - constraint: any
+            name: T
       - doc: |-
           New constructs a Queue with the supplied logical capacity.
 
@@ -411,7 +738,8 @@ packages:
 
               [Heap].Push adds an element in O(log n); [Heap].Pop removes and returns the
               top one in O(log n), and [Heap].Peek returns it without removing it, both
-              reporting false on an empty heap; [Heap].Len counts the elements.
+              reporting false on an empty heap; [Heap].Drain pops them all, in order, as
+              an iterator; [Heap].Len counts the elements.
 
               The zero value is NOT usable — a heap with no comparison has no order — and
               a Heap is not safe for concurrent use.
@@ -503,6 +831,21 @@ packages:
             typeParams:
               - constraint: any
                 name: T
+      - func:
+          doc: |-
+            Drain yields the items q holds, oldest first, until it is empty — the
+            consumer's TryRead loop as an iterator. Only the one consumer goroutine
+            may range over it; a loop that breaks early leaves the rest in q.
+          forward: kring.Drain[T]
+          in:
+            - name: q
+              type: Queue[T]
+          name: Drain
+          out:
+            - type: iter.Seq[T]
+          typeParams:
+            - constraint: any
+              name: T
       - func:
           doc: |-
             New returns an empty [Queue] holding at most capacity items, or [CapZero]

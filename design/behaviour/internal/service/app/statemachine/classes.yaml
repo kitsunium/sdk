@@ -1,23 +1,6 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
-  - doc: |-
-      compactSlack is how many stale entries the heap may hold beyond its live
-      ones before it is rebuilt: below it, a rebuild costs more than it frees.
-    items:
-      - name: compactSlack
-        type: int
-        value: "64"
-    name: compactSlack
-  - doc: |-
-      staleFactor is how many times the live entries the heap may hold before it
-      is rebuilt. With it, a rebuild is paid for by at least as many updates as
-      it drops, so an update stays O(log N) amortised.
-    items:
-      - name: staleFactor
-        type: int
-        value: "2"
-    name: staleFactor
   - doc: What holds an entity during a flight.
     grouped: true
     items:
@@ -110,10 +93,9 @@ constants:
     name: hookOnEnter
 files:
   - decls:
-      - compactSlack
-      - staleFactor
       - slot
       - plan
+      - (*plan).scheduled
       - agenda
       - newAgenda
       - (*agenda).signal
@@ -130,8 +112,6 @@ files:
       - (*agenda).succeeded
       - (*agenda).take
       - (*agenda).next
-      - (*agenda).isLive
-      - (*agenda).compact
     name: agenda.go
   - decls:
       - eventKey
@@ -400,8 +380,8 @@ package:
   purpose: "Package statemachine — hosts the agenda: when each entity's next automatic transition falls due, the entities written since the loop last looked, and the backoff of those whose transition failed."
 types:
   - doc: |-
-      slot is one heap entry: key is due at due. seq identifies the entry, so an
-      entry replaced by a later schedule is recognised as stale when it surfaces.
+      slot is one heap entry: key is due at due. seq orders equal instants in the
+      order they were scheduled.
     fields:
       - name: due
         type: time.Time
@@ -418,27 +398,35 @@ types:
           transition of it before this instant.
         name: notBefore
         type: time.Time
-      - doc: seq is the live heap entry's; zero when the key is not scheduled.
-        name: seq
-        type: uint64
+      - doc: |-
+          entry names the key's heap entry; the zero Handle when the key is not
+          scheduled.
+        name: entry
+        type: heap.Handle
       - doc: failures counts the consecutive failed transitions.
         name: failures
         type: int
     kind: struct
+    methods:
+      - doc: scheduled reports whether p holds a heap entry.
+        name: scheduled
+        recv: p *plan
+        results: bool
     name: plan
   - doc: |-
-      agenda is a min-heap of due instants with ONE live entry per entity — its
-      earliest — and lazy deletion: rescheduling pushes a fresh entry and leaves
-      the old one to be recognised as stale and dropped when it reaches the top.
-      Finding the next transition due is therefore O(log N), where a sweep that
-      re-reads every entity is O(N). mu guards every field.
+      agenda is a min-heap of due instants with exactly ONE entry per scheduled
+      entity — its earliest. A reschedule re-keys that entry in place and an
+      unschedule removes it (kernel/collections/heap's IndexedHeap, #1036), so the
+      heap never holds a stale entry and never needs rebuilding. Finding the next
+      transition due is O(log N), where a sweep that re-reads every entity is
+      O(N). mu guards every field.
 
       dirty holds the entities written since the loop last looked: their next due
       instant is computed on the loop's goroutine, never on the writer's, because
       computing it runs the caller's guards and instant functions.
     fields:
       - name: heap
-        type: "*heap.Heap[slot]"
+        type: "*heap.IndexedHeap[slot]"
       - name: plans
         type: map[string]*plan
       - name: dirty
@@ -446,14 +434,9 @@ types:
       - doc: "wake holds one token when the loop should look again: a write arrived."
         name: wake
         type: chan struct{}
-      - doc: |-
-          seq numbers the entries; it never repeats, so a forgotten key's stale
-          entries can never match a plan made later.
+      - doc: seq numbers the schedules, so equal instants keep their order.
         name: seq
         type: uint64
-      - doc: live counts the entries that are not stale.
-        name: live
-        type: int
       - name: mu
         type: sync.Mutex
     kind: struct
@@ -535,17 +518,6 @@ types:
         params: now time.Time
         recv: a *agenda
         results: time.Time
-      - doc: isLive reports whether s is its key's current entry. The caller holds mu.
-        name: isLive
-        params: s slot
-        recv: a *agenda
-        results: bool
-      - doc: |-
-          compact rebuilds the heap once stale entries outnumber live ones by
-          staleFactor, so memory stays proportional to the entities scheduled. The
-          caller holds mu.
-        name: compact
-        recv: a *agenda
     name: agenda
   - doc: "eventKey addresses an event transition: its name and the state it leaves."
     fields:

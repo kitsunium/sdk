@@ -21,13 +21,14 @@ const exitSoftware int = 70
 const cliStopTimeout time.Duration = 10 * time.Second
 
 // reservedCommands are Main's own: a product's CLI command may not take one
-// — breaker and otlp included, which are Main's only in an app whose port
-// declares a breaker and in one that declares an OTLP export, so that adding
-// one never hides it behind the product's command.
+// — breaker, otlp and queue included, which are Main's only in an app whose
+// port declares a breaker, in one that declares an OTLP export and in one
+// that imports the queue subsystem, so that adding one never hides it behind
+// the product's command.
 var reservedCommands = map[string]bool{
 	"serve": true, "graph": true, "healthcheck": true, "config": true, "secrets": true,
 	"migrate": true, "privacy": true, "revisions": true, "watch": true, "data": true, "help": true,
-	"breaker": true, "otlp": true,
+	"breaker": true, "otlp": true, "queue": true,
 }
 
 // StdioValue is where a CLI command reads and writes: the process's own streams

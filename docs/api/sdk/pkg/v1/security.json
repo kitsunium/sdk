@@ -1594,7 +1594,7 @@
       "spelled": "svcsecret.SubjectKeys",
       "canonical": "github.com/kitsunium/sdk/internal/service/security/secret.SubjectKeys",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/secret.SubjectKeys",
-      "doc": "SubjectKeys keeps one data key per subject, wrapped by a root [Keyring]:\nSeal and Open under a subject's key, Destroy to erase everything it sealed,\nRewrap after the root rotates.\n",
+      "doc": "SubjectKeys keeps one data key per subject, wrapped by a root [Keyring]:\nSeal and Open under a subject's key, Destroy to erase everything it sealed,\nRewrap after the root rotates, Expire to wipe the opened keys past their\nTTL.\n",
       "file": "secret/gen_facade.go",
       "layer": "public",
       "family": "security"

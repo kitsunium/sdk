@@ -36,6 +36,21 @@ type LockWaiter interface {
 	OpenWaiting(url secret.Value, current func(context.Context) (secret.Value, error), wait time.Duration) (*stdsql.DB, error)
 }
 
+// Classifier is an [Engine] that reads its driver's errors: Transient says
+// whether a failed transaction is one the database asks to run again — on
+// PostgreSQL SQLSTATE 40001 and 40P01, on MySQL errors 1213 and 1205, on
+// SQLite a busy or locked database —, a sibling of Engine. The framework
+// runs such a transaction again, the outermost level only, up to
+// <name>-tx-retries times, waiting <name>-tx-retry-delay grown by 2 with
+// full jitter on the app's clock, each retry a retries attribute on the
+// transaction's span and a retry on the telemetry port. A transaction a
+// [Service.Go] body opens runs once: the framework cannot know the body
+// may run its function twice. An engine that does not implement it
+// still has the SDK's own reading of SQLSTATE and SQLite result codes.
+type Classifier interface {
+	Transient(err error) bool
+}
+
 // DatabaseConfigurer configures a database: [Keeps], [Migrations].
 type DatabaseConfigurer interface {
 	databaseConfigure(o *databaseOptions)

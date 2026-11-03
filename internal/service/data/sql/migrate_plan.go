@@ -16,4 +16,9 @@ type migratePlan struct {
 	lockBudget time.Duration
 	// retry is the interval between acquisition attempts.
 	retry time.Duration
+	// checksums reports whether any migration of the set declares a
+	// checksum: only then does the runner read, write and add the version
+	// table's checksum column, so a set that declares none sends exactly the
+	// statements it always sent.
+	checksums bool
 }

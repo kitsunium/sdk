@@ -1,6 +1,6 @@
 # ADR 0025 — Generic LRU+TTL cache as a kernel primitive (`cache`)
 
-- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**
+- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock)
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0010 (recycler), ADR 0011 (snapshot), ADR 0006 (ring) — the kernel-primitive precedents; ADR 0024 (Phase-B wave)
@@ -69,3 +69,45 @@ hot-reloaded config all reach for the same mechanism. By the kernel gate
 
 - Impl: `internal/kernel/cache/`, `pkg/v1/cache/`.
 - ADR 0010/0011/0006 (kernel primitives), ADR 0024 (Phase-B wave).
+
+## Amendment — 2026-11-02: a sweep the caller drives, weights, a second policy, stripes, and a coarse clock ([#1038](https://github.com/kitsunium/sdk/issues/1038), [#1059](https://github.com/kitsunium/sdk/issues/1059), [#839](https://github.com/kitsunium/sdk/issues/839), [#834](https://github.com/kitsunium/sdk/issues/834), [#808](https://github.com/kitsunium/sdk/issues/808), [#814](https://github.com/kitsunium/sdk/issues/814))
+
+The placement stands: `Cache[K,V]` is a kernel primitive, stdlib-only, with no
+error surface and **no goroutine of its own**. Every addition below keeps
+those three properties, and every one is opt-in — a `Config` that names none
+of them builds the cache this ADR described, entry for entry.
+
+- **`Expire() int` — the count reaped — resolves the deferred "active TTL sweeper"
+  without a sweeper.** Expiry stayed lazy, and an idle key outlived its TTL
+  for good (#1038): in a secret store, an opened key unwiped long after it
+  should have been. The sweep is a method the CALLER drives on its own clock
+  and cadence; the primitive still owns no cadence, which was the objection
+  to `worker.Every` inside it. It runs over an expiry heap — the indexed
+  sibling of `kernel/collections/heap` (#1036): `SetTTL` updates an entry's
+  handle, `Delete` removes it — so a sweep costs O(k log N) for k due entries,
+  reads the clock at most once, and costs nothing for an entry without a
+  deadline. The capacity eviction looks at the heap's top before the LRU
+  tail, so a dead entry never costs a live one its slot (#1059).
+- **`MaxWeight` and `WeightOf` (#839)** bound what the entries weigh, beside
+  `MaxEntries`; a nil `WeightOf` weighs every entry 1. An entry heavier than
+  `MaxWeight` on its own is stored and evicts everything else — stated,
+  because the primitive has no error to refuse it with; the domain store,
+  which has one, refuses it.
+- **`Policy` (#834)**: `PolicyLRU` is the zero and today's behaviour;
+  `PolicyS3FIFO` keeps a hot set through a scan (small, main and ghost FIFO
+  queues, the ghost a bounded set of `hash/maphash.Comparable` hashes). An
+  unknown value runs as LRU and `Stats` says which policy runs. W-TinyLFU is
+  left to its own issue, as #834 proposed.
+- **`Striped[K,V]` (#808)** is the shard this ADR's BENCH told callers to
+  build: N `Cache`s behind their own locks, the bounds divided between them,
+  LRU exact within a stripe and approximate across them. The stripe count
+  stays the caller's: it is a property of their key distribution.
+- **`clock.NewCoarse` (#814)** is the coarse clock this package's BENCH
+  "rejected rather than overlooked": it lives in `kernel/clock`, which owns
+  its ticker, and a caller passes it as the cache's `Clock`. The trade —
+  every expiry late by up to one resolution — is the caller's to make.
+
+The measured price on the paths that use none of it is in `BENCH.md`: hits
+unchanged within noise, a new key and an insert at capacity ~14 % and ~22 %
+dearer (the node carries its heap handle, weight and policy counter). #1038
+asked for 5 %; the gap is stated there, not hidden.

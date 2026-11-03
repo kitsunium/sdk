@@ -1,3 +1,54 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
-sequences: []
+sequences:
+  - of: Absent
+    participants:
+      - id: caller
+        kind: actor
+      - id: Absent
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    CacheAbsent.Code(),
+          		Reason:  CacheAbsent.Reason(),
+          		Public:  CacheAbsent.Public(),
+          		Private: CacheAbsent.Private(),
+          	}, errs.Int64(absentTTLField, int64(ttl)))
+        to: errs
+  - of: AbsentTTLOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: AbsentTTLOf
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: time
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: "!errs.HasCode(err, CodeCacheAbsent)"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: field.Key() != absentTTLField
+            - bind: nanos, parseErr
+              eval: strconv.ParseInt(field.StringValue(), ttlBase, ttlBits)
+              to: strconv
+            - opt:
+                do:
+                  - return: 0, true
+                when: parseErr != nil
+            - return: time.Duration(nanos), true
+              to: time
+          key: _
+          range: slices.Backward(errs.FieldsOf(err))
+          value: field
+      - return: 0, true

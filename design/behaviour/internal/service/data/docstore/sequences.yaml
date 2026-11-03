@@ -1,6 +1,484 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: (*batchWriter).Put
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*batchWriter).Put
+        kind: self
+      - id: w.record
+        kind: internal
+    steps:
+      - return: w.record(v, upsert)
+        to: w.record
+  - of: (*batchWriter).Insert
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*batchWriter).Insert
+        kind: self
+      - id: w.record
+        kind: internal
+    steps:
+      - return: w.record(v, insertOnly)
+        to: w.record
+  - of: (*batchWriter).Replace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*batchWriter).Replace
+        kind: self
+      - id: w.record
+        kind: internal
+    steps:
+      - return: w.record(v, replaceOnly)
+        to: w.record
+  - of: (*batchWriter).Delete
+    steps:
+      - set: w.ops
+        value: "append(w.ops, batchOp{p: prepared{key: key}, deleted: true})"
+      - return: nil
+  - of: (*batchWriter).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*batchWriter).record
+        kind: self
+      - id: w.store.prepare
+        kind: internal
+    steps:
+      - bind: p, err
+        eval: w.store.prepare(v)
+        to: w.store.prepare
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: w.ops
+        value: "append(w.ops, batchOp{p: p, mode: mode})"
+      - return: nil
+  - of: (*Store).Batch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).Batch
+        kind: self
+      - id: s.commitBatch
+        kind: internal
+      - id: s.onDelete.call
+        kind: internal
+      - id: s.onWrite.call
+        kind: internal
+    steps:
+      - bind: w
+        eval: "&batchWriter[T]{store: s}"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: fn(w)
+          when: err != nil
+      - opt:
+          do:
+            - return: nil
+          when: len(w.ops) == 0
+      - bind: applied, err
+        eval: s.commitBatch(w.ops)
+        to: s.commitBatch
+      - opt:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - eval: s.onDelete.call(op.p.key)
+                          to: s.onDelete.call
+                        - continue: true
+                      when: op.deleted
+                  - eval: s.onWrite.call(op.p.key)
+                    to: s.onWrite.call
+                key: _
+                range: w.ops
+                value: op
+          when: applied
+      - return: err
+  - of: (*Store).commitBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).commitBatch
+        kind: self
+      - id: s.settleGroup
+        kind: internal
+      - id: s.planBatch
+        kind: internal
+      - id: s.publishGroup
+        kind: internal
+      - id: s.mu.Lock
+        kind: value
+      - id: s.applyBatch
+        kind: internal
+      - id: s.mu.Unlock
+        kind: value
+      - id: s.completeGroup
+        kind: internal
+      - id: s.maybeFold
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.writing
+      - opt:
+          do:
+            - return: false, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
+          when: s.closed
+      - opt:
+          do:
+            - return: false, settleErr
+          init:
+            bind: settleErr
+            eval: s.settleGroup()
+            to: s.settleGroup
+          when: settleErr != nil
+      - bind: plan, planErr
+        eval: s.planBatch(ops)
+        to: s.planBatch
+      - opt:
+          do:
+            - return: false, planErr
+          when: planErr != nil
+      - bind: groupErr
+        eval: s.publishGroup(plan)
+        to: s.publishGroup
+      - opt:
+          do:
+            - return: false, groupErr
+          when: groupErr != nil && !kerrs.HasCode(groupErr, coredocstore.CodeWriteUnconfirmed)
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - eval: s.applyBatch(plan)
+        to: s.applyBatch
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - set: s.lingering
+              value: plan
+          init:
+            bind: completeErr
+            eval: s.completeGroup(plan)
+            to: s.completeGroup
+          when: completeErr != nil
+      - eval: s.maybeFold()
+        to: s.maybeFold
+      - return: true, groupErr
+  - of: (*Store).planBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).planBatch
+        kind: self
+      - id: view.apply
+        kind: internal
+    steps:
+      - bind: view
+        eval: "&batchView[T]{store: s, written: map[string]*batchedKey{}, claimed: map[claimKey]string{}}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: err
+                  eval: view.apply(op)
+                  to: view.apply
+                when: err != nil
+          key: _
+          range: ops
+          value: op
+      - bind: plan
+        eval: "&batchPlan{keys: make([]*batchedKey, 0, len(view.order))}"
+      - loop:
+          do:
+            - set: plan.keys
+              value: append(plan.keys, view.written[key])
+          key: _
+          range: view.order
+          value: key
+      - return: plan, nil
+  - of: (*batchView).state
+    steps:
+      - opt:
+          do:
+            - return: written.raw, !written.deleted, written.versions, written.keys
+          init:
+            bind: written, ok
+            eval: v.written[key]
+          when: ok
+      - bind: s
+        eval: v.store
+      - set: raw, found
+        value: s.docs[key]
+      - set: keys
+        value: make([][]string, len(s.indexes))
+      - loop:
+          do:
+            - set: keys[i]
+              value: ix.owned[key]
+          key: i
+          range: s.indexes
+          value: ix
+      - return: raw, found, s.versions[key], keys
+  - of: (*batchView).apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*batchView).apply
+        kind: self
+      - id: v.state
+        kind: internal
+      - id: v.refused
+        kind: internal
+      - id: v.release
+        kind: internal
+      - id: v.remember
+        kind: internal
+      - id: v.taken
+        kind: internal
+      - id: kerrs
+        kind: package
+      - id: s.nextVersionsFrom
+        kind: internal
+      - id: v.claim
+        kind: internal
+    steps:
+      - bind: s, key
+        eval: v.store, op.p.key
+      - bind: old, found, record, oldKeys
+        eval: v.state(key)
+        to: v.state
+      - opt:
+          do:
+            - return: refusal
+          init:
+            bind: refusal
+            eval: v.refused(op, found)
+            to: v.refused
+          when: refusal != nil
+      - eval: v.release(oldKeys)
+        to: v.release
+      - opt:
+          do:
+            - eval: "v.remember(&batchedKey{key: key, deleted: true, keys: make([][]string, len(s.indexes))})"
+              to: v.remember
+            - return: nil
+          when: op.deleted
+      - opt:
+          do:
+            - return: kerrs.Wrap(coredocstore.UniqueKeyTaken, kerrs.WrapParams{}, kerrs.String("store", s.path), kerrs.String("index", name))
+              to: kerrs
+          init:
+            bind: name, taken
+            eval: v.taken(key, op.p.keys)
+            to: v.taken
+          when: taken
+      - bind: versions
+        eval: "s.nextVersionsFrom(key, priorState{raw: old, existed: found, record: record}, op.p.raw, coredocstore.StampValue{})"
+        to: s.nextVersionsFrom
+      - eval: v.claim(key, op.p.keys)
+        to: v.claim
+      - eval: "v.remember(&batchedKey{key: key, raw: op.p.raw, keys: op.p.keys, versions: versions})"
+        to: v.remember
+      - return: nil
+  - of: (*batchView).refused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*batchView).refused
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - switch:
+          cases:
+            - case: "!found && (op.deleted || op.mode == replaceOnly)"
+              do:
+                - return: kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", v.store.path))
+                  to: kerrs
+            - case: found && op.mode == insertOnly && !op.deleted
+              do:
+                - return: kerrs.Wrap(coredocstore.DocumentExists, kerrs.WrapParams{}, kerrs.String("store", v.store.path))
+                  to: kerrs
+            - default: true
+              do:
+                - return: nil
+  - of: (*batchView).remember
+    steps:
+      - opt:
+          do:
+            - set: v.order
+              value: append(v.order, state.key)
+          init:
+            bind: _, seen
+            eval: v.written[state.key]
+          when: "!seen"
+      - set: v.written[state.key]
+        value: state
+  - of: (*Store).publishGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).publishGroup
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: kerrs
+        kind: package
+      - id: s.publish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.fs == nil
+      - bind: records
+        eval: make([]entryRecord, 0, len(plan.keys))
+      - loop:
+          do:
+            - set: records
+              value: "append(records, entryRecord{Versions: k.versions, Document: k.raw, Key: k.key, Deleted: k.deleted})"
+          key: _
+          range: plan.keys
+          value: k
+      - bind: group, encodeErr
+        eval: json.Marshal(records)
+        to: json
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coredocstore.PersistFailed, kerrs.WrapParams{},
+                			kerrs.String("store", s.path), kerrs.String("step", "group"), kerrs.String("cause", encodeCause(encodeErr)))
+              to: kerrs
+          when: encodeErr != nil
+      - return: s.publish(path.Join(s.overlay, groupEntryName), group, "group")
+        to: s.publish
+  - of: (*Store).applyBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).applyBatch
+        kind: self
+      - id: s.setVersions
+        kind: internal
+      - id: s.unfile
+        kind: internal
+      - id: s.file
+        kind: internal
+      - id: s.markPending
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - alt:
+                - do:
+                    - eval: delete(s.docs, k.key)
+                    - eval: s.setVersions(k.key, nil)
+                      to: s.setVersions
+                    - eval: s.unfile(k.key)
+                      to: s.unfile
+                  when: k.deleted
+                - do:
+                    - set: s.docs[k.key]
+                      value: k.raw
+                    - eval: s.setVersions(k.key, k.versions)
+                      to: s.setVersions
+                    - eval: s.file(k.key, k.keys)
+                      to: s.file
+                  else: true
+            - eval: s.markPending(k.key)
+              to: s.markPending
+          key: _
+          range: plan.keys
+          value: k
+      - opt:
+          do:
+            - set: s.pending[groupEntryName]
+              value: struct{}{}
+          when: s.fs != nil
+  - of: (*Store).completeGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).completeGroup
+        kind: self
+      - id: s.persistEntry
+        kind: internal
+      - id: s.fs.Remove
+        kind: value
+      - id: kerrs
+        kind: package
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.fs == nil
+      - loop:
+          do:
+            - bind: entryErr
+              eval: s.persistEntry(k.key, k.raw, k.deleted, k.versions)
+              to: s.persistEntry
+            - opt:
+                do:
+                  - return: entryErr
+                when: entryErr != nil && !kerrs.HasCode(entryErr, coredocstore.CodeWriteUnconfirmed)
+          key: _
+          range: plan.keys
+          value: k
+      - bind: removeErr
+        eval: s.fs.Remove(path.Join(s.overlay, groupEntryName))
+        to: s.fs.Remove
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coredocstore.PersistFailed, kerrs.WrapParams{},
+                			kerrs.String("store", s.path), kerrs.String("step", "remove the group entry"), kerrs.String("cause", removeErr.Error()))
+              to: kerrs
+          when: removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist)
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - eval: delete(s.pending, groupEntryName)
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - return: nil
+  - of: (*Store).settleGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).settleGroup
+        kind: self
+      - id: s.completeGroup
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s.lingering == nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.completeGroup(s.lingering)
+            to: s.completeGroup
+          when: err != nil
+      - set: s.lingering
+        value: nil
+      - return: nil
   - of: (*Config).validate
     participants:
       - id: caller
@@ -465,7 +943,7 @@ sequences:
                 type: T
             - return: |-
                 zero, kerrs.Wrap(coredocstore.DocumentUndecodable, kerrs.WrapParams{},
-                			kerrs.String("store", store), kerrs.String("cause", jsonCause(err)))
+                			kerrs.String("store", store), kerrs.String("cause", jsonCause(err, reflect.TypeFor[T]())))
           init:
             bind: err
             eval: json.Unmarshal(raw, &v)
@@ -519,7 +997,11 @@ sequences:
                     to: typeErr.Type.String
                     value: typeErr.Type.String()
                 when: typeErr.Type != nil
-            - return: "\"the stored value of field \" + typeErr.Field + \" does not fit \" + typeName"
+            - opt:
+                do:
+                  - return: "\"the stored value does not fit \" + typeName"
+                when: typeErr.Field == ""
+            - return: "\"the stored value of field \" + fieldPath(root, typeErr.Field) + \" does not fit \" + typeName"
           init:
             bind: typeErr, isTypeErr
             eval: errors.AsType[*json.UnmarshalTypeError](err)
@@ -533,6 +1015,221 @@ sequences:
           when: isSyntaxErr
       - return: fmt.Sprintf("%T", err)
         to: fmt
+  - of: fieldPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: fieldPath
+        kind: self
+      - id: resolvePath
+        kind: internal
+    steps:
+      - bind: rendered, resolved
+        eval: resolvePath(root, strings.Split(dotted, "."))
+        to: resolvePath
+      - opt:
+          do:
+            - return: "\"…\""
+          when: "!resolved"
+      - return: rendered
+  - of: resolvePath
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolvePath
+        kind: self
+      - id: t.Elem
+        kind: value
+      - id: resolveField
+        kind: internal
+      - id: resolveMapKey
+        kind: internal
+    steps:
+      - loop:
+          cond: t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Array
+          do:
+            - set: t
+              to: t.Elem
+              value: t.Elem()
+      - opt:
+          do:
+            - return: "\"\", true"
+          when: len(segments) == 0
+      - switch:
+          cases:
+            - case: reflect.Struct
+              do:
+                - return: resolveField(t, segments)
+                  to: resolveField
+            - case: reflect.Map
+              do:
+                - return: resolveMapKey(t, segments)
+                  to: resolveMapKey
+            - case: reflect.Interface
+              do:
+                - return: "\"…\", true"
+            - default: true
+              do:
+                - return: "\"\", false"
+          "on": t.Kind()
+  - of: resolveField
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveField
+        kind: self
+      - id: resolvePath
+        kind: internal
+      - id: joinPath
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: "n"
+              eval: strings.Count(field.name, ".") + 1
+            - opt:
+                do:
+                  - continue: true
+                when: n > len(segments) || strings.Join(segments[:n], ".") != field.name
+            - opt:
+                do:
+                  - return: joinPath(field.name, rest), true
+                    to: joinPath
+                init:
+                  bind: rest, ok
+                  eval: resolvePath(field.typ, segments[n:])
+                  to: resolvePath
+                when: ok
+          key: _
+          range: jsonFields(t)
+          value: field
+      - return: "\"\", false"
+  - of: resolveMapKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveMapKey
+        kind: self
+      - id: resolvePath
+        kind: internal
+      - id: joinPath
+        kind: internal
+    steps:
+      - loop:
+          cond: taken <= len(segments)
+          do:
+            - opt:
+                do:
+                  - return: joinPath(redactedKey, rest), true
+                    to: joinPath
+                init:
+                  bind: rest, ok
+                  eval: resolvePath(t.Elem(), segments[taken:])
+                  to: resolvePath
+                when: ok
+          init: taken := 1
+          post: taken++
+      - return: "\"\", false"
+  - of: joinPath
+    steps:
+      - opt:
+          do:
+            - return: head
+          when: rest == ""
+      - return: head + "." + rest
+  - of: jsonFields
+    participants:
+      - id: caller
+        kind: actor
+      - id: jsonFields
+        kind: self
+      - id: promotedStruct
+        kind: internal
+      - id: jsonNameOf
+        kind: internal
+    steps:
+      - var:
+          name: out
+          type: "[]jsonField"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, jsonFields(promoted)...)
+                  - continue: true
+                init:
+                  bind: promoted, isPromoted
+                  eval: promotedStruct(field)
+                  to: promotedStruct
+                when: isPromoted
+            - opt:
+                do:
+                  - set: out
+                    value: "append(out, jsonField{name: name, typ: field.Type})"
+                init:
+                  bind: name, decoded
+                  eval: jsonNameOf(field)
+                  to: jsonNameOf
+                when: decoded
+          key: field
+          range: t.Fields()
+      - return: out
+  - of: promotedStruct
+    participants:
+      - id: caller
+        kind: actor
+      - id: promotedStruct
+        kind: self
+      - id: field.Tag.Get
+        kind: value
+      - id: strings
+        kind: stdlib
+      - id: promoted.Elem
+        kind: value
+    steps:
+      - bind: tag
+        eval: field.Tag.Get("json")
+        to: field.Tag.Get
+      - bind: name, _, _
+        eval: strings.Cut(tag, ",")
+        to: strings
+      - set: promoted
+        value: field.Type
+      - opt:
+          do:
+            - set: promoted
+              to: promoted.Elem
+              value: promoted.Elem()
+          when: promoted.Kind() == reflect.Pointer
+      - return: promoted, field.Anonymous && tag != "-" && name == "" && promoted.Kind() == reflect.Struct
+  - of: jsonNameOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: jsonNameOf
+        kind: self
+      - id: field.Tag.Get
+        kind: value
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: tag
+        eval: field.Tag.Get("json")
+        to: field.Tag.Get
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!field.IsExported() || tag == \"-\""
+      - set: name, _, _
+        to: strings
+        value: strings.Cut(tag, ",")
+      - opt:
+          do:
+            - set: name
+              value: field.Name
+          when: name == ""
+      - return: name, true
   - of: sortedKeys
     participants:
       - id: caller
@@ -623,6 +1320,25 @@ sequences:
     steps:
       - return: s.onDelete.add(fn)
         to: s.onDelete.add
+  - of: compareEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareEntries
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: c
+          init:
+            bind: c
+            eval: strings.Compare(a.key, b.key)
+            to: strings
+          when: c != 0
+      - return: strings.Compare(a.owner, b.owner)
+        to: strings
   - of: newIndex
     steps:
       - return: |-
@@ -632,7 +1348,15 @@ sequences:
           		owned:   map[string][]string{},
           		name:    spec.Name,
           		unique:  spec.Unique,
+          		order:   orderOf(spec),
           	}
+  - of: orderOf
+    steps:
+      - opt:
+          do:
+            - return: ordered
+          when: spec.Ordered
+      - return: unordered
   - of: (*index).keysOf
     participants:
       - id: caller
@@ -672,6 +1396,8 @@ sequences:
         kind: self
       - id: ix.drop
         kind: internal
+      - id: slices
+        kind: stdlib
     steps:
       - eval: ix.drop(owner)
         to: ix.drop
@@ -696,6 +1422,130 @@ sequences:
             - set: ix.owned[owner]
               value: keys
           when: len(keys) > 0
+      - opt:
+          do:
+            - loop:
+                do:
+                  - bind: entry
+                    eval: "indexEntry{key: k, owner: owner}"
+                  - bind: at, _
+                    eval: slices.BinarySearchFunc(ix.sorted, entry, compareEntries)
+                    to: slices
+                  - set: ix.sorted
+                    to: slices
+                    value: slices.Insert(ix.sorted, at, entry)
+                key: _
+                range: keys
+                value: k
+          when: ix.order == ordered
+  - of: (*index).drop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*index).drop
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - set: ix.sorted
+                          to: slices
+                          value: slices.Delete(ix.sorted, at, at+1)
+                      init:
+                        bind: at, found
+                        eval: "slices.BinarySearchFunc(ix.sorted, indexEntry{key: k, owner: owner}, compareEntries)"
+                        to: slices
+                      when: found
+                when: ix.order == ordered
+            - opt:
+                do:
+                  - eval: delete(holders, owner)
+                  - opt:
+                      do:
+                        - eval: delete(ix.entries, k)
+                      when: len(holders) == 0
+                init:
+                  bind: holders
+                  eval: ix.entries[k]
+                when: holders != nil
+          key: _
+          range: ix.owned[owner]
+          value: k
+      - eval: delete(ix.owned, owner)
+  - of: (*index).resort
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*index).resort
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: ix.order == unordered
+      - set: ix.order
+        value: ordered
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - op: +=
+              set: "n"
+              value: len(keys)
+          key: _
+          range: ix.owned
+          value: keys
+      - set: ix.sorted
+        value: make([]indexEntry, 0, n)
+      - loop:
+          do:
+            - loop:
+                do:
+                  - set: ix.sorted
+                    value: "append(ix.sorted, indexEntry{key: k, owner: owner})"
+                key: _
+                range: keys
+                value: k
+          key: owner
+          range: ix.owned
+          value: keys
+      - eval: slices.SortFunc(ix.sorted, compareEntries)
+        to: slices
+  - of: (*index).between
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*index).between
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: at, _
+        eval: "slices.BinarySearchFunc(ix.sorted, indexEntry{key: lo}, compareEntries)"
+        to: slices
+      - bind: end
+        eval: len(ix.sorted)
+      - opt:
+          do:
+            - bind: stop, _
+              eval: "slices.BinarySearchFunc(ix.sorted[at:], indexEntry{key: hi}, compareEntries)"
+              to: slices
+            - set: end
+              value: at + stop
+          when: hi != ""
+      - opt:
+          do:
+            - set: end
+              value: at + limit
+          when: limit > 0 && end-at > limit
+      - return: ix.sorted[at:end]
   - of: (*index).holders
     participants:
       - id: caller
@@ -769,6 +1619,8 @@ sequences:
         kind: actor
       - id: (*Store).rebuild
         kind: self
+      - id: s.deferOrders
+        kind: internal
       - id: s.decode
         kind: internal
       - id: loadFailed
@@ -781,7 +1633,11 @@ sequences:
         kind: package
       - id: s.file
         kind: internal
+      - id: ix.resort
+        kind: internal
     steps:
+      - eval: s.deferOrders()
+        to: s.deferOrders
       - defer: |-
           func() {
           		recovered := recover()
@@ -827,6 +1683,13 @@ sequences:
           key: _
           range: sortedKeys(s.docs)
           value: key
+      - loop:
+          do:
+            - eval: ix.resort()
+              to: ix.resort
+          key: _
+          range: s.indexes
+          value: ix
       - return: nil
   - of: (*Store).load
     participants:
@@ -836,25 +1699,31 @@ sequences:
         kind: self
       - id: path
         kind: stdlib
-      - id: s.fs.MkdirAll
-        kind: value
+      - id: s.makeDir
+        kind: internal
       - id: fs
         kind: stdlib
+      - id: s.syncCreated
+        kind: internal
       - id: s.readSnapshot
         kind: internal
       - id: s.replayOverSnapshot
         kind: internal
     steps:
+      - var:
+          name: created
+          type: "[]string"
       - opt:
           do:
+            - bind: made, mkErr
+              eval: s.makeDir(dir)
+              to: s.makeDir
             - opt:
                 do:
-                  - return: false, loadFailed(dir, "cannot be created", mkErr)
-                init:
-                  bind: mkErr
-                  eval: s.fs.MkdirAll(dir, dirPerm)
-                  to: s.fs.MkdirAll
+                  - return: false, mkErr
                 when: mkErr != nil
+            - set: created
+              value: append(created, made...)
           init:
             bind: dir
             eval: path.Dir(s.path)
@@ -865,14 +1734,21 @@ sequences:
         to: fs
       - bind: overlayExisted
         eval: statErr == nil
+      - bind: made, mkErr
+        eval: s.makeDir(s.overlay)
+        to: s.makeDir
       - opt:
           do:
-            - return: false, loadFailed(s.overlay, "cannot be created", mkErr)
-          init:
-            bind: mkErr
-            eval: s.fs.MkdirAll(s.overlay, dirPerm)
-            to: s.fs.MkdirAll
+            - return: false, mkErr
           when: mkErr != nil
+      - opt:
+          do:
+            - return: false, syncErr
+          init:
+            bind: syncErr
+            eval: s.syncCreated(append(created, made...))
+            to: s.syncCreated
+          when: syncErr != nil
       - bind: snapshotFound, readErr
         eval: s.readSnapshot()
         to: s.readSnapshot
@@ -889,6 +1765,84 @@ sequences:
             to: s.replayOverSnapshot
           when: replayErr != nil
       - return: "!snapshotFound || !overlayExisted || len(s.pending) > 0, nil"
+  - of: (*Store).makeDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).makeDir
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: fs
+        kind: stdlib
+      - id: s.fs.MkdirAll
+        kind: value
+    steps:
+      - bind: parts
+        eval: strings.Split(dir, "/")
+        to: strings
+      - loop:
+          do:
+            - bind: prefix
+              eval: strings.Join(parts[:i+1], "/")
+              to: strings
+            - opt:
+                do:
+                  - set: created
+                    value: append(created, prefix)
+                init:
+                  bind: _, statErr
+                  eval: fs.Stat(s.fs, prefix)
+                  to: fs
+                when: statErr != nil
+          key: i
+          range: parts
+      - opt:
+          do:
+            - return: nil, loadFailed(dir, "cannot be created", mkErr)
+          init:
+            bind: mkErr
+            eval: s.fs.MkdirAll(dir, dirPerm)
+            to: s.fs.MkdirAll
+          when: mkErr != nil
+      - return: created, nil
+  - of: (*Store).syncCreated
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).syncCreated
+        kind: self
+      - id: path
+        kind: stdlib
+      - id: syncer.SyncDir
+        kind: value
+      - id: loadFailed
+        kind: internal
+    steps:
+      - bind: syncer, ok
+        eval: s.fs.(corevfs.DirSyncer)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - loop:
+          do:
+            - bind: parent
+              eval: path.Dir(dir)
+              to: path
+            - opt:
+                do:
+                  - return: loadFailed(parent, "cannot be flushed", syncErr)
+                    to: loadFailed
+                init:
+                  bind: syncErr
+                  eval: syncer.SyncDir(parent)
+                  to: syncer.SyncDir
+                when: syncErr != nil
+          key: _
+          range: slices.Backward(created)
+          value: dir
+      - return: nil
   - of: (*Store).replayOverSnapshot
     participants:
       - id: caller
@@ -949,7 +1903,7 @@ sequences:
           do:
             - return: |-
                 false, kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
-                			kerrs.String("file", s.path), kerrs.String("problem", "not a snapshot"), kerrs.String("cause", jsonCause(decodeErr)))
+                			kerrs.String("file", s.path), kerrs.String("problem", "not a snapshot"), kerrs.String("cause", jsonCause(decodeErr, reflect.TypeOf(object))))
           init:
             bind: decodeErr
             eval: json.Unmarshal(raw, &object)
@@ -987,6 +1941,8 @@ sequences:
         kind: internal
       - id: swallowLeftover
         kind: internal
+      - id: s.replayGroup
+        kind: internal
     steps:
       - bind: entries, listErr
         eval: fs.ReadDir(s.fs, s.overlay)
@@ -996,6 +1952,8 @@ sequences:
             - return: loadFailed(s.overlay, "unreadable", listErr)
               to: loadFailed
           when: listErr != nil
+      - bind: group
+        eval: "false"
       - loop:
           do:
             - bind: name
@@ -1003,6 +1961,10 @@ sequences:
               to: entry.Name
             - switch:
                 cases:
+                  - case: name == groupEntryName
+                    do:
+                      - set: group
+                        value: "true"
                   - case: isEntryName(name)
                     do:
                       - opt:
@@ -1021,6 +1983,73 @@ sequences:
           key: _
           range: entries
           value: entry
+      - opt:
+          do:
+            - return: s.replayGroup()
+              to: s.replayGroup
+          when: group
+      - return: nil
+  - of: (*Store).replayGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).replayGroup
+        kind: self
+      - id: path
+        kind: stdlib
+      - id: fs
+        kind: stdlib
+      - id: loadFailed
+        kind: internal
+      - id: json
+        kind: stdlib
+      - id: kerrs
+        kind: package
+      - id: s.applyRecord
+        kind: internal
+    steps:
+      - bind: file
+        eval: path.Join(s.overlay, groupEntryName)
+        to: path
+      - bind: raw, readErr
+        eval: fs.ReadFile(s.fs, file)
+        to: fs
+      - opt:
+          do:
+            - return: loadFailed(file, "unreadable", readErr)
+              to: loadFailed
+          when: readErr != nil
+      - var:
+          name: records
+          type: "[]entryRecord"
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
+                			kerrs.String("file", file), kerrs.String("problem", "not a group entry"), kerrs.String("cause", jsonCause(decodeErr, reflect.TypeOf(records))))
+              to: kerrs
+          init:
+            bind: decodeErr
+            eval: json.Unmarshal(raw, &records)
+            to: json
+          when: decodeErr != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: applyErr
+                init:
+                  bind: applyErr
+                  eval: s.applyRecord(file, record)
+                  to: s.applyRecord
+                when: applyErr != nil
+            - set: s.pending[entryName(record.Key)]
+              value: struct{}{}
+          key: _
+          range: records
+          value: record
+      - set: s.pending[groupEntryName]
+        value: struct{}{}
       - return: nil
   - of: (*Store).replay
     participants:
@@ -1038,9 +2067,7 @@ sequences:
         kind: stdlib
       - id: kerrs
         kind: package
-      - id: s.checkEntryVersions
-        kind: internal
-      - id: s.setVersions
+      - id: s.applyRecord
         kind: internal
     steps:
       - bind: file
@@ -1061,7 +2088,7 @@ sequences:
           do:
             - return: |-
                 kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
-                			kerrs.String("file", file), kerrs.String("problem", "not an overlay entry"), kerrs.String("cause", jsonCause(decodeErr)))
+                			kerrs.String("file", file), kerrs.String("problem", "not an overlay entry"), kerrs.String("cause", jsonCause(decodeErr, reflect.TypeOf(record))))
               to: kerrs
           init:
             bind: decodeErr
@@ -1073,6 +2100,35 @@ sequences:
             - return: loadFailed(file, "names another key than its file", nil)
               to: loadFailed
           when: record.Key == "" || entryName(record.Key) != name
+      - opt:
+          do:
+            - return: applyErr
+          init:
+            bind: applyErr
+            eval: s.applyRecord(file, record)
+            to: s.applyRecord
+          when: applyErr != nil
+      - set: s.pending[name]
+        value: struct{}{}
+      - return: nil
+  - of: (*Store).applyRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).applyRecord
+        kind: self
+      - id: loadFailed
+        kind: internal
+      - id: s.checkEntryVersions
+        kind: internal
+      - id: s.setVersions
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: loadFailed(file, "holds a record under the empty key", nil)
+              to: loadFailed
+          when: record.Key == ""
       - opt:
           do:
             - return: versionsErr
@@ -1098,8 +2154,6 @@ sequences:
                   value: record.Document
                 - eval: s.setVersions(record.Key, compacted(record.Versions))
                   to: s.setVersions
-      - set: s.pending[name]
-        value: struct{}{}
       - return: nil
   - of: (*Store).checkEntryVersions
     participants:
@@ -1188,7 +2242,7 @@ sequences:
           do:
             - return: |-
                 kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
-                			kerrs.String("file", s.versionsPath), kerrs.String("problem", "not a versions file"), kerrs.String("cause", jsonCause(decodeErr)))
+                			kerrs.String("file", s.versionsPath), kerrs.String("problem", "not a versions file"), kerrs.String("cause", jsonCause(decodeErr, reflect.TypeOf(records))))
               to: kerrs
           init:
             bind: decodeErr
@@ -1489,6 +2543,311 @@ sequences:
           when: "!needsFold"
       - return: s.fold()
         to: s.fold
+  - of: (*Store).Documents
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).Documents
+        kind: self
+      - id: pages.next
+        kind: internal
+      - id: s.documentsPage
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(coredocstore.EntryValue, error) bool
+            steps:
+              - bind: pages
+                eval: "pager{limit: limit}"
+              - loop:
+                  do:
+                    - bind: want
+                      eval: pages.next()
+                      to: pages.next
+                    - bind: page, err
+                      eval: s.documentsPage(after, want)
+                      to: s.documentsPage
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yieldEntries(yield, page, err) || !pages.read(len(page), want)"
+                    - set: after
+                      value: page[len(page)-1].Key
+                  forever: true
+  - of: (*pager).next
+    steps:
+      - opt:
+          do:
+            - return: documentsPageLen
+          when: p.limit <= 0 || p.limit-p.done >= documentsPageLen
+      - return: p.limit - p.done
+  - of: (*pager).read
+    steps:
+      - op: +=
+        set: p.done
+        value: got
+      - return: got == want && (p.limit <= 0 || p.done < p.limit)
+  - of: (*Store).documentsPage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).documentsPage
+        kind: self
+      - id: s.mu.RLock
+        kind: value
+      - id: s.mu.RUnlock
+        kind: value
+      - id: smallestAfter
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - eval: s.mu.RLock()
+        to: s.mu.RLock
+      - opt:
+          do:
+            - eval: s.mu.RUnlock()
+              to: s.mu.RUnlock
+            - return: nil, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
+          when: s.closed
+      - bind: keys
+        eval: smallestAfter(s.docs, after, n)
+        to: smallestAfter
+      - bind: page
+        eval: make([]coredocstore.EntryValue, len(keys))
+      - loop:
+          do:
+            - set: page[i]
+              value: "coredocstore.EntryValue{Key: key, JSON: s.docs[key]}"
+          key: i
+          range: keys
+          value: key
+      - eval: s.mu.RUnlock()
+        to: s.mu.RUnlock
+      - loop:
+          do:
+            - set: page[i].JSON
+              to: slices
+              value: slices.Clone(page[i].JSON)
+          key: i
+          range: page
+      - return: page, nil
+  - of: smallestAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: smallestAfter
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: make([]string, 0, 2*n)
+      - bind: ceiling, bounded
+        eval: "\"\", false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: key <= after || (bounded && key >= ceiling)
+            - set: out
+              value: append(out, key)
+            - opt:
+                do:
+                  - eval: slices.Sort(out)
+                    to: slices
+                  - set: out
+                    value: out[:n]
+                  - set: ceiling, bounded
+                    value: out[n-1], true
+                when: len(out) == 2*n
+          key: key
+          range: m
+      - eval: slices.Sort(out)
+        to: slices
+      - opt:
+          do:
+            - set: out
+              value: out[:n]
+          when: len(out) > n
+      - return: out
+  - of: (*Store).FindAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).FindAfter
+        kind: self
+      - id: yieldFailure
+        kind: internal
+      - id: s.mu.RLock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: s.mu.RUnlock
+        kind: value
+      - id: s.yieldDecoded
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(T, error) bool
+            steps:
+              - bind: ix, found
+                eval: s.byName[index]
+              - opt:
+                  do:
+                    - eval: yieldFailure(yield, kerrs.Wrap(coredocstore.IndexUnknown, kerrs.WrapParams{}, kerrs.String("index", index)))
+                      to: yieldFailure
+                    - return: ""
+                  when: "!found"
+              - eval: s.mu.RLock()
+                to: s.mu.RLock
+              - bind: owners, closed
+                eval: ix.holders(key), s.closed
+              - bind: start, _
+                eval: slices.BinarySearch(owners, after)
+                to: slices
+              - opt:
+                  do:
+                    - op: ++
+                      set: start
+                  when: start < len(owners) && owners[start] == after
+              - set: owners
+                value: owners[start:]
+              - opt:
+                  do:
+                    - set: owners
+                      value: owners[:limit]
+                  when: limit > 0 && len(owners) > limit
+              - bind: entries
+                eval: make([]coredocstore.EntryValue, len(owners))
+              - loop:
+                  do:
+                    - set: entries[i]
+                      value: "coredocstore.EntryValue{Key: owner, JSON: s.docs[owner]}"
+                  key: i
+                  range: owners
+                  value: owner
+              - eval: s.mu.RUnlock()
+                to: s.mu.RUnlock
+              - eval: s.yieldDecoded(yield, entries, closed)
+                to: s.yieldDecoded
+  - of: (*Store).Range
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).Range
+        kind: self
+      - id: yieldFailure
+        kind: internal
+      - id: s.mu.RLock
+        kind: value
+      - id: ix.between
+        kind: internal
+      - id: s.mu.RUnlock
+        kind: value
+      - id: s.yieldDecoded
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(T, error) bool
+            steps:
+              - bind: ix, found
+                eval: s.byName[index]
+              - opt:
+                  do:
+                    - eval: yieldFailure(yield, notOrdered(index, found))
+                      to: yieldFailure
+                    - return: ""
+                  when: "!found || ix.order == unordered"
+              - eval: s.mu.RLock()
+                to: s.mu.RLock
+              - bind: closed
+                eval: s.closed
+              - var:
+                  name: entries
+                  type: "[]coredocstore.EntryValue"
+              - opt:
+                  do:
+                    - bind: between
+                      eval: ix.between(lo, hi, limit)
+                      to: ix.between
+                    - set: entries
+                      value: make([]coredocstore.EntryValue, len(between))
+                    - loop:
+                        do:
+                          - set: entries[i]
+                            value: "coredocstore.EntryValue{Key: entry.owner, JSON: s.docs[entry.owner]}"
+                        key: i
+                        range: between
+                        value: entry
+                  when: "!closed"
+              - eval: s.mu.RUnlock()
+                to: s.mu.RUnlock
+              - eval: s.yieldDecoded(yield, entries, closed)
+                to: s.yieldDecoded
+  - of: yieldFailure
+    steps:
+      - var:
+          name: zero
+          type: V
+      - opt:
+          do:
+            - return: ""
+          when: "!yield(zero, err)"
+  - of: notOrdered
+    participants:
+      - id: caller
+        kind: actor
+      - id: notOrdered
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: kerrs.Wrap(coredocstore.IndexUnknown, kerrs.WrapParams{}, kerrs.String("index", index))
+              to: kerrs
+          when: "!declared"
+      - return: kerrs.Wrap(coredocstore.IndexNotOrdered, kerrs.WrapParams{}, kerrs.String("index", index))
+        to: kerrs
+  - of: (*Store).yieldDecoded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).yieldDecoded
+        kind: self
+      - id: s.decode
+        kind: internal
+    steps:
+      - var:
+          name: zero
+          type: T
+      - opt:
+          do:
+            - eval: yield(zero, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{}))
+            - return: ""
+          when: closed
+      - loop:
+          do:
+            - bind: v, err
+              eval: s.decode(entry.JSON)
+              to: s.decode
+            - opt:
+                do:
+                  - eval: yield(zero, err)
+                  - return: ""
+                when: err != nil
+            - opt:
+                do:
+                  - return: ""
+                when: "!yield(v, nil)"
+          key: _
+          range: entries
+          value: entry
   - of: entryName
     participants:
       - id: caller
@@ -1514,6 +2873,27 @@ sequences:
       - id: caller
         kind: actor
       - id: (*Store).persist
+        kind: self
+      - id: s.settleGroup
+        kind: internal
+      - id: s.persistEntry
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: settleErr
+          init:
+            bind: settleErr
+            eval: s.settleGroup()
+            to: s.settleGroup
+          when: settleErr != nil
+      - return: s.persistEntry(key, raw, deleted, versions)
+        to: s.persistEntry
+  - of: (*Store).persistEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).persistEntry
         kind: self
       - id: json
         kind: stdlib
@@ -1717,6 +3097,11 @@ sequences:
         to: s.removeFolded
       - eval: s.recordFold(removeErr, removed)
         to: s.recordFold
+      - opt:
+          do:
+            - set: s.lingering
+              value: nil
+          when: removeErr == nil
       - return: removeErr
   - of: (*Store).removeFolded
     participants:
@@ -1812,6 +3197,265 @@ sequences:
           when: encodeErr != nil
       - return: s.publish(s.versionsPath, versions, "versions")
         to: s.publish
+  - of: (*Store).Revision
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).Revision
+        kind: self
+      - id: s.mu.RLock
+        kind: value
+      - id: s.mu.RUnlock
+        kind: value
+      - id: s.decode
+        kind: internal
+    steps:
+      - var:
+          name: zero
+          type: T
+      - eval: s.mu.RLock()
+        to: s.mu.RLock
+      - bind: raw, found
+        eval: s.docs[key]
+      - bind: closed
+        eval: s.closed
+      - eval: s.mu.RUnlock()
+        to: s.mu.RUnlock
+      - opt:
+          do:
+            - return: zero, "", kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
+          when: closed
+      - opt:
+          do:
+            - return: zero, "", kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+          when: "!found"
+      - bind: v, err
+        eval: s.decode(raw)
+        to: s.decode
+      - opt:
+          do:
+            - return: zero, "", err
+          when: err != nil
+      - return: v, revisionOf(raw), nil
+  - of: (*Store).ReplaceIf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).ReplaceIf
+        kind: self
+      - id: s.prepare
+        kind: internal
+      - id: s.commitIf
+        kind: internal
+      - id: s.onWrite.call
+        kind: internal
+    steps:
+      - bind: p, prepErr
+        eval: s.prepare(v)
+        to: s.prepare
+      - opt:
+          do:
+            - return: prepErr
+          when: prepErr != nil
+      - bind: applied, err
+        eval: s.commitIf(p, rev)
+        to: s.commitIf
+      - opt:
+          do:
+            - eval: s.onWrite.call(p.key)
+              to: s.onWrite.call
+          when: applied
+      - return: err
+  - of: (*Store).commitIf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).commitIf
+        kind: self
+      - id: s.persistAndApply
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.writing
+      - opt:
+          do:
+            - return: false, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
+          when: s.closed
+      - bind: stored, found
+        eval: s.docs[p.key]
+      - opt:
+          do:
+            - return: false, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+          when: "!found"
+      - opt:
+          do:
+            - return: false, kerrs.Wrap(coredocstore.RevisionMismatch, kerrs.WrapParams{}, kerrs.String("store", s.path))
+          when: revisionOf(stored) != rev
+      - return: s.persistAndApply(p, coredocstore.StampValue{})
+        to: s.persistAndApply
+  - of: revisionOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: revisionOf
+        kind: self
+      - id: compact.Reset
+        kind: value
+      - id: compact.Write
+        kind: value
+      - id: json
+        kind: stdlib
+      - id: sha256
+        kind: stdlib
+      - id: coredocstore
+        kind: package
+    steps:
+      - var:
+          name: compact
+          type: bytes.Buffer
+      - opt:
+          do:
+            - eval: compact.Reset()
+              to: compact.Reset
+            - eval: compact.Write(raw)
+              to: compact.Write
+          when: json.Compact(&compact, raw) != nil
+      - var:
+          name: marshalled
+          type: bytes.Buffer
+      - eval: json.HTMLEscape(&marshalled, compact.Bytes())
+        to: json
+      - bind: sum
+        eval: sha256.Sum256(marshalled.Bytes())
+        to: sha256
+      - return: coredocstore.RevisionValue(hex.EncodeToString(sum[:]))
+        to: coredocstore
+  - of: (*sqlBatchWriter).Put
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBatchWriter).Put
+        kind: self
+      - id: w.record
+        kind: internal
+    steps:
+      - return: w.record(v, upsert)
+        to: w.record
+  - of: (*sqlBatchWriter).Insert
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBatchWriter).Insert
+        kind: self
+      - id: w.record
+        kind: internal
+    steps:
+      - return: w.record(v, insertOnly)
+        to: w.record
+  - of: (*sqlBatchWriter).Replace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBatchWriter).Replace
+        kind: self
+      - id: w.record
+        kind: internal
+    steps:
+      - return: w.record(v, replaceOnly)
+        to: w.record
+  - of: (*sqlBatchWriter).Delete
+    steps:
+      - set: w.ops
+        value: "append(w.ops, sqlBatchOp{key: key})"
+      - return: nil
+  - of: (*sqlBatchWriter).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBatchWriter).record
+        kind: self
+      - id: w.store.prepare
+        kind: internal
+    steps:
+      - bind: p, err
+        eval: w.store.prepare(v)
+        to: w.store.prepare
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: w.ops
+        value: "append(w.ops, sqlBatchOp{p: p, key: p.key, mode: mode})"
+      - return: nil
+  - of: (*SQLStore).Batch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).Batch
+        kind: self
+      - id: s.run
+        kind: internal
+      - id: s.settle
+        kind: internal
+      - id: s.announce
+        kind: internal
+    steps:
+      - bind: w
+        eval: "&sqlBatchWriter[T]{store: s}"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: fn(w)
+          when: err != nil
+      - opt:
+          do:
+            - return: nil
+          when: len(w.ops) == 0
+      - bind: err
+        eval: |-
+          s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
+          		//: in order, each write seeing the ones before it in the transaction.
+          		for _, op := range w.ops {
+          			//: a deletion, or a write.
+          			if op.p == nil {
+          				//: DocumentNotFound, or a failure: the batch rolls back.
+          				if removeErr := s.remove(txCtx, ex, op.key); removeErr != nil {
+          					//: the first refusal refuses the batch.
+          					return removeErr
+          				}
+          				continue
+          			}
+          			//: DocumentExists, DocumentNotFound, a collision, or a failure.
+          			if writeErr := s.writeIn(txCtx, ex, op.p, op.mode, coredocstore.StampValue{}); writeErr != nil {
+          				//: the first refusal refuses the batch.
+          				return writeErr
+          			}
+          		}
+          		//: every write sent.
+          		return nil
+          	})
+        to: s.run
+      - opt:
+          do:
+            - return: s.settle(ctx, err)
+              to: s.settle
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: s.announce(ctx, &s.onDelete, op.key)
+                    to: s.announce
+                  - continue: true
+                when: op.p == nil
+            - eval: s.announce(ctx, &s.onWrite, op.key)
+              to: s.announce
+          key: _
+          range: w.ops
+          value: op
+      - return: nil
   - of: (*SQLConfig).validate
     participants:
       - id: caller
@@ -1960,6 +3604,9 @@ sequences:
   - of: versionsTable
     steps:
       - return: table + derivedSeparator + versionsTableTag
+  - of: trashIndex
+    steps:
+      - return: table + derivedSeparator + trashIndexTag
   - of: renderStatements
     participants:
       - id: caller
@@ -1972,10 +3619,14 @@ sequences:
         kind: internal
       - id: updateStatements
         kind: internal
+      - id: revisionStatements
+        kind: internal
       - id: trashStatements
         kind: internal
+      - id: pageStatements
+        kind: internal
     steps:
-      - bind: docs, ix, vs
+      - bind: docs, ixName, vs
         eval: dialect.QuoteIdent(table), dialect.QuoteIdent(indexTable(table)), dialect.QuoteIdent(versionsTable(table))
       - bind: p1, p2, p3
         eval: dialect.Placeholder(1), dialect.Placeholder(2), dialect.Placeholder(3)
@@ -1984,9 +3635,9 @@ sequences:
         to: dialect.ForUpdate
       - bind: join
         eval: |-
-          "SELECT d.doc FROM " + ix + " i JOIN " + docs + " d ON d.doc_key = i.doc_key" +
+          "SELECT d.doc FROM " + ixName + " i JOIN " + docs + " d ON d.doc_key = i.doc_key" +
           		" WHERE i.index_name = " + p1 + " AND i.index_key = " + p2
-      - bind: s
+      - bind: stmts
         eval: |-
           sqlStatements{
           		getDoc:       "SELECT doc FROM " + docs + " WHERE doc_key = " + p1,
@@ -1996,8 +3647,8 @@ sequences:
           		count:        "SELECT COUNT(*) FROM " + docs,
           		replace:      "UPDATE " + docs + " SET rev = rev + 1, doc = " + p1 + " WHERE doc_key = " + p2,
           		deleteDoc:    "DELETE FROM " + docs + " WHERE doc_key = " + p1,
-          		deleteIndex:  "DELETE FROM " + ix + " WHERE doc_key = " + p1,
-          		clearIndex:   "DELETE FROM " + ix,
+          		deleteIndex:  "DELETE FROM " + ixName + " WHERE doc_key = " + p1,
+          		clearIndex:   "DELETE FROM " + ixName,
           		pageAfter:    "SELECT doc_key, doc FROM " + docs + " WHERE doc_key > " + p1 + " ORDER BY doc_key LIMIT " + p2,
           		keysAfter:    "SELECT doc_key FROM " + docs + " WHERE doc_key > " + p1 + " ORDER BY doc_key LIMIT " + p2,
           		lookup:       join,
@@ -2017,23 +3668,44 @@ sequences:
           			"COALESCE(SUM(LENGTH(doc)), 0) FROM " + vs,
           		claim:     claimStatement(dialect, docs),
           		docTable:  docs,
-          		ixTable:   ix,
+          		ixTable:   ixName,
           		vsTable:   vs,
           		shareLock: shareLockClause(dialect),
           		dialect:   dialect,
           	}
-      - set: s.exists
-        value: "\"SELECT 1 FROM \" + docs + \" WHERE doc_key = \" + dialect.Placeholder(1) + s.shareLock"
-      - set: s.upsert, s.insert
+      - set: stmts.exists
+        value: "\"SELECT 1 FROM \" + docs + \" WHERE doc_key = \" + dialect.Placeholder(1) + stmts.shareLock"
+      - set: stmts.upsert, stmts.insert
         to: writeModes
         value: writeModes(dialect, docs)
-      - set: s.lockDoc, s.writeLocked
+      - set: stmts.lockDoc, stmts.writeLocked
         to: updateStatements
-        value: updateStatements(dialect, docs, s.replace)
-      - set: s.firstVersion, s.dropTombstone, s.readTrashed, s.tombstones
+        value: updateStatements(dialect, docs, stmts.replace)
+      - set: stmts.revision, stmts.replaceIf, stmts.lockDocIf
+        to: revisionStatements
+        value: revisionStatements(dialect, docs)
+      - set: stmts.firstVersion, stmts.dropTombstone, stmts.readTrashed, stmts.tombstones
         to: trashStatements
         value: trashStatements(dialect, table)
-      - return: s
+      - set: stmts.findAfter, stmts.rangeFrom, stmts.rangeBelow
+        to: pageStatements
+        value: pageStatements(dialect, docs, ixName)
+      - return: stmts
+  - of: pageStatements
+    steps:
+      - bind: p
+        eval: dialect.Placeholder
+      - bind: join
+        eval: "\" i JOIN \" + docs + \" d ON d.doc_key = i.doc_key WHERE i.index_name = \" + p(1)"
+      - bind: head
+        eval: |-
+          "SELECT i.index_key, i.doc_key, d.doc FROM " + ix + join + " AND i.index_key >= " + p(2) +
+          		" AND (i.index_key > " + p(3) + " OR (i.index_key = " + p(4) + " AND i.doc_key > " + p(5) + "))"
+      - bind: order
+        eval: "\" ORDER BY i.index_key, i.doc_key LIMIT \""
+      - return: |-
+          "SELECT i.doc_key, d.doc FROM " + ix + join + " AND i.index_key = " + p(2) + " AND i.doc_key > " + p(3) +
+          			" ORDER BY i.doc_key LIMIT " + p(4), head + order + p(6), head + " AND i.index_key < " + p(6) + order + p(7)
   - of: trashStatements
     steps:
       - bind: versions, key
@@ -2066,6 +3738,19 @@ sequences:
             - return: "\"UPDATE \" + docs + \" SET rev = rev + 1 WHERE doc_key = \" + dialect.Placeholder(1) + \" RETURNING doc\", \"UPDATE \" + docs + \" SET doc = \" + dialect.Placeholder(1) + \" WHERE doc_key = \" + dialect.Placeholder(2)"
           when: dialect == coresql.DialectSQLite
       - return: "\"SELECT doc FROM \" + docs + \" WHERE doc_key = \" + dialect.Placeholder(1) + dialect.ForUpdate(), replace"
+  - of: revisionStatements
+    steps:
+      - bind: p1, p2, p3
+        eval: dialect.Placeholder(1), dialect.Placeholder(2), dialect.Placeholder(3)
+      - set: revision
+        value: "\"SELECT rev, doc FROM \" + docs + \" WHERE doc_key = \" + p1"
+      - set: replaceIf
+        value: "\"UPDATE \" + docs + \" SET rev = rev + 1, doc = \" + p1 + \" WHERE doc_key = \" + p2 + \" AND rev = \" + p3"
+      - opt:
+          do:
+            - return: revision, replaceIf, "UPDATE " + docs + " SET rev = rev + 1 WHERE doc_key = " + p1 + " AND rev = " + p2 + " RETURNING doc"
+          when: dialect == coresql.DialectSQLite
+      - return: revision, replaceIf, "SELECT doc FROM " + docs + " WHERE doc_key = " + p1 + " AND rev = " + p2 + dialect.ForUpdate()
   - of: claimStatement
     steps:
       - bind: p1, p2
@@ -2087,49 +3772,6 @@ sequences:
   - of: (*sqlStatements).claimReturnsRow
     steps:
       - return: s.dialect != coresql.DialectMySQL
-  - of: (*sqlStatements).insertVersions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*sqlStatements).insertVersions
-        kind: self
-      - id: b.WriteString
-        kind: value
-      - id: b.String
-        kind: value
-    steps:
-      - var:
-          name: b
-          type: strings.Builder
-      - eval: b.WriteString("INSERT INTO " + s.vsTable + " (doc_key, num, made_at, made_ns, meta, doc) VALUES ")
-        to: b.WriteString
-      - loop:
-          do:
-            - opt:
-                do:
-                  - eval: b.WriteString(", ")
-                    to: b.WriteString
-                when: row > 0
-            - eval: b.WriteString("(")
-              to: b.WriteString
-            - loop:
-                cond: col <= versionRowArgs
-                do:
-                  - opt:
-                      do:
-                        - eval: b.WriteString(", ")
-                          to: b.WriteString
-                      when: col > 1
-                  - eval: b.WriteString(s.dialect.Placeholder(row*versionRowArgs + col))
-                    to: b.WriteString
-                init: col := 1
-                post: col++
-            - eval: b.WriteString(")")
-              to: b.WriteString
-          key: row
-          range: "n"
-      - return: b.String()
-        to: b.String
   - of: (*sqlStatements).upsertArgs
     steps:
       - opt:
@@ -2143,49 +3785,18 @@ sequences:
   - of: (*sqlStatements).insertConflictIsZeroRows
     steps:
       - return: s.dialect != coresql.DialectMySQL
-  - of: (*sqlStatements).insertIndexRows
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*sqlStatements).insertIndexRows
-        kind: self
-      - id: b.WriteString
-        kind: value
-      - id: b.String
-        kind: value
+  - of: rowsOf
     steps:
-      - var:
-          name: b
-          type: strings.Builder
-      - eval: b.WriteString("INSERT INTO " + s.ixTable + " (index_name, index_key, doc_key, uniq) VALUES ")
-        to: b.WriteString
+      - bind: rows
+        eval: make([][]any, 0, len(args)/width)
       - loop:
+          cond: start+width <= len(args)
           do:
-            - opt:
-                do:
-                  - eval: b.WriteString(", ")
-                    to: b.WriteString
-                when: row > 0
-            - eval: b.WriteString("(")
-              to: b.WriteString
-            - loop:
-                cond: col <= indexRowArgs
-                do:
-                  - opt:
-                      do:
-                        - eval: b.WriteString(", ")
-                          to: b.WriteString
-                      when: col > 1
-                  - eval: b.WriteString(s.dialect.Placeholder(row*indexRowArgs + col))
-                    to: b.WriteString
-                init: col := 1
-                post: col++
-            - eval: b.WriteString(")")
-              to: b.WriteString
-          key: row
-          range: "n"
-      - return: b.String()
-        to: b.String
+            - set: rows
+              value: append(rows, args[start:start+width:start+width])
+          init: start := 0
+          post: start += width
+      - return: rows
   - of: (*sqlStatements).uniqueTaken
     participants:
       - id: caller
@@ -2232,6 +3843,12 @@ sequences:
   - of: (*sqlStatements).markUnique
     steps:
       - return: "\"UPDATE \" + s.ixTable + \" SET uniq = 1 WHERE index_name IN (\" + s.list(n) + \")\""
+  - of: (*sqlStatements).indexInsert
+    steps:
+      - return: "svcsql.InsertSpec{Table: s.ixTable, Columns: indexColumns, PerStatement: indexRowsPerStatement}"
+  - of: (*sqlStatements).versionInsert
+    steps:
+      - return: "svcsql.InsertSpec{Table: s.vsTable, Columns: versionColumns, PerStatement: versionRowsPerStatement}"
   - of: (*sqlStatements).list
     participants:
       - id: caller
@@ -2328,6 +3945,15 @@ sequences:
                     []string{"CREATE TABLE IF NOT EXISTS " + vs + " (doc_key BLOB NOT NULL, num INTEGER NOT NULL, made_at INTEGER," +
                     			" made_ns INTEGER, meta BLOB, doc BLOB, PRIMARY KEY (doc_key, num))"}
           "on": dialect
+  - of: trashIndexStatements
+    steps:
+      - bind: vs, name
+        eval: dialect.QuoteIdent(versionsTable(table)), dialect.QuoteIdent(trashIndex(table))
+      - opt:
+          do:
+            - return: "\"ALTER TABLE \" + vs + \" ADD KEY \" + name + \" (num, doc_key)\", \"ALTER TABLE \" + vs + \" DROP KEY \" + name"
+          when: dialect == coresql.DialectMySQL
+      - return: "\"CREATE INDEX IF NOT EXISTS \" + name + \" ON \" + vs + \" (doc_key) WHERE num = 0\", \"DROP INDEX IF EXISTS \" + name"
   - of: dropVersionsTableStatements
     steps:
       - return: "[]string{\"DROP TABLE IF EXISTS \" + dialect.QuoteIdent(versionsTable(table))}"
@@ -2346,6 +3972,8 @@ sequences:
         kind: self
       - id: validateTable
         kind: internal
+      - id: createTableStatements
+        kind: internal
       - id: migration.Validate
         kind: value
     steps:
@@ -2361,13 +3989,19 @@ sequences:
             eval: validateTable(table)
             to: validateTable
           when: err != nil
+      - bind: up
+        eval: createTableStatements(dialect, table)
+        to: createTableStatements
       - bind: migration
         eval: |-
           coresql.MigrationValue{
           		Version: version,
           		Name:    sqlMigrationPrefix + table,
-          		Up:      svcsql.Statements(createTableStatements(dialect, table)...),
+          		Up:      svcsql.Statements(up...),
           		Down:    svcsql.Statements(dropTableStatements(dialect, table)...),
+          		//: what Up runs, fingerprinted: an install that recorded it refuses a
+          		//: build whose statements differ (#1056).
+          		Checksum: svcsql.ChecksumOf(up...),
           	}
       - opt:
           do:
@@ -2386,6 +4020,8 @@ sequences:
         kind: self
       - id: validateTable
         kind: internal
+      - id: createVersionsTableStatements
+        kind: internal
       - id: migration.Validate
         kind: value
     steps:
@@ -2401,13 +4037,18 @@ sequences:
             eval: validateTable(table)
             to: validateTable
           when: err != nil
+      - bind: up
+        eval: createVersionsTableStatements(dialect, table)
+        to: createVersionsTableStatements
       - bind: migration
         eval: |-
           coresql.MigrationValue{
           		Version: version,
           		Name:    sqlVersionsMigrationPrefix + table,
-          		Up:      svcsql.Statements(createVersionsTableStatements(dialect, table)...),
+          		Up:      svcsql.Statements(up...),
           		Down:    svcsql.Statements(dropVersionsTableStatements(dialect, table)...),
+          		//: what Up runs, fingerprinted, as SQLMigration's (#1056).
+          		Checksum: svcsql.ChecksumOf(up...),
           	}
       - opt:
           do:
@@ -2418,6 +4059,372 @@ sequences:
             to: migration.Validate
           when: err != nil
       - return: migration, nil
+  - of: SQLVersionsTrashIndexMigration
+    participants:
+      - id: caller
+        kind: actor
+      - id: SQLVersionsTrashIndexMigration
+        kind: self
+      - id: validateTable
+        kind: internal
+      - id: trashIndexStatements
+        kind: internal
+      - id: whenTrashIndex
+        kind: internal
+      - id: migration.Validate
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "coresql.MigrationValue{}, misconfigured(\"Dialect\", \"not one the SDK speaks: \"+dialect.String())"
+          when: "!dialect.Valid()"
+      - opt:
+          do:
+            - return: coresql.MigrationValue{}, err
+          init:
+            bind: err
+            eval: validateTable(table)
+            to: validateTable
+          when: err != nil
+      - bind: create, drop
+        eval: trashIndexStatements(dialect, table)
+        to: trashIndexStatements
+      - bind: migration
+        eval: |-
+          coresql.MigrationValue{
+          		Version: version,
+          		Name:    sqlTrashIndexMigrationPrefix + table,
+          		Up:      svcsql.Statements(create),
+          		Down:    svcsql.Statements(drop),
+          	}
+      - opt:
+          do:
+            - set: migration.Up
+              to: whenTrashIndex
+              value: whenTrashIndex(table, false, create)
+            - set: migration.Down
+              to: whenTrashIndex
+              value: whenTrashIndex(table, true, drop)
+          when: dialect == coresql.DialectMySQL
+      - opt:
+          do:
+            - return: coresql.MigrationValue{}, err
+          init:
+            bind: err
+            eval: migration.Validate()
+            to: migration.Validate
+          when: err != nil
+      - return: migration, nil
+  - of: whenTrashIndex
+    participants:
+      - id: caller
+        kind: actor
+      - id: whenTrashIndex
+        kind: self
+      - id: ex.QueryRowContext(ctx, trashIndexExistsStatement, versionsTable(table), trashIndex(table)).Scan
+        kind: value
+      - id: ex.ExecContext
+        kind: value
+    steps:
+      - return:
+          closure:
+            params: ctx context.Context, ex coresql.Executor
+            results: error
+            steps:
+              - var:
+                  name: "n"
+                  type: int64
+              - opt:
+                  do:
+                    - return: err
+                  init:
+                    bind: err
+                    eval: ex.QueryRowContext(ctx, trashIndexExistsStatement, versionsTable(table), trashIndex(table)).Scan(&n)
+                    to: ex.QueryRowContext(ctx, trashIndexExistsStatement, versionsTable(table), trashIndex(table)).Scan
+                  when: err != nil
+              - opt:
+                  do:
+                    - return: nil
+                  when: (n > 0) != present
+              - bind: _, err
+                eval: ex.ExecContext(ctx, stmt)
+                to: ex.ExecContext
+              - return: err
+  - of: (*SQLStore).Documents
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).Documents
+        kind: self
+      - id: pages.next
+        kind: internal
+      - id: s.entriesPage
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(coredocstore.EntryValue, error) bool
+            steps:
+              - bind: pages
+                eval: "pager{limit: limit}"
+              - loop:
+                  do:
+                    - bind: want
+                      eval: pages.next()
+                      to: pages.next
+                    - bind: page, err
+                      eval: s.entriesPage(ctx, "page the documents", s.stmts.pageAfter, []byte(after), int64(want))
+                      to: s.entriesPage
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yieldEntries(yield, page, err) || !pages.read(len(page), want)"
+                    - set: after
+                      value: page[len(page)-1].Key
+                  forever: true
+  - of: (*SQLStore).FindAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).FindAfter
+        kind: self
+      - id: s.declared
+        kind: internal
+      - id: yieldFailure
+        kind: internal
+      - id: s.fileKey
+        kind: internal
+      - id: pages.next
+        kind: internal
+      - id: s.entriesPage
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(T, error) bool
+            steps:
+              - opt:
+                  do:
+                    - eval: yieldFailure(yield, err)
+                      to: yieldFailure
+                    - return: ""
+                  init:
+                    bind: _, err
+                    eval: s.declared(index)
+                    to: s.declared
+                  when: err != nil
+              - bind: indexed
+                eval: s.fileKey(index, key)
+                to: s.fileKey
+              - opt:
+                  do:
+                    - return: ""
+                  when: len(indexed) == 0
+              - bind: pages
+                eval: "pager{limit: limit}"
+              - loop:
+                  do:
+                    - bind: want
+                      eval: pages.next()
+                      to: pages.next
+                    - bind: page, err
+                      eval: s.entriesPage(ctx, "find a page of documents", s.stmts.findAfter, []byte(index), indexed, []byte(after), int64(want))
+                      to: s.entriesPage
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!s.yieldPage(yield, page, err) || !pages.read(len(page), want)"
+                    - set: after
+                      value: page[len(page)-1].Key
+                  forever: true
+  - of: (*SQLStore).Range
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).Range
+        kind: self
+      - id: yieldFailure
+        kind: internal
+      - id: pages.next
+        kind: internal
+      - id: s.rangePage
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(T, error) bool
+            steps:
+              - bind: spec, found
+                eval: s.byName[index]
+              - opt:
+                  do:
+                    - eval: yieldFailure(yield, notOrdered(index, found))
+                      to: yieldFailure
+                    - return: ""
+                  when: "!found || !spec.Ordered"
+              - bind: cur
+                eval: "rangeCursor{key: bound(s.fileKey(index, lo))}"
+              - bind: query, upper
+                eval: s.stmts.rangeFrom, []any(nil)
+              - opt:
+                  do:
+                    - set: query, upper
+                      value: s.stmts.rangeBelow, []any{bound(s.fileKey(index, hi))}
+                  when: hi != ""
+              - bind: pages
+                eval: "pager{limit: limit}"
+              - loop:
+                  do:
+                    - bind: want
+                      eval: pages.next()
+                      to: pages.next
+                    - bind: page, next, err
+                      eval: s.rangePage(ctx, query, []byte(index), cur, upper, want)
+                      to: s.rangePage
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!s.yieldPage(yield, page, err) || !pages.read(len(page), want)"
+                    - set: cur
+                      value: next
+                  forever: true
+  - of: bound
+    steps:
+      - opt:
+          do:
+            - return: "[]byte{}"
+          when: key == nil
+      - return: key
+  - of: (*SQLStore).rangePage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).rangePage
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryContext
+        kind: value
+      - id: rows.Scan
+        kind: value
+    steps:
+      - bind: args
+        eval: append([]any{index, cur.key, cur.key, cur.key, []byte(cur.owner)}, upper...)
+      - set: args
+        value: append(args, int64(n))
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, query, args...)
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, cur, s.failed("read a range of an index", err)
+          when: err != nil
+      - defer: func() { err = s.finishRows(rows, "read a range of an index", err) }()
+      - set: page, next
+        value: make([]coredocstore.EntryValue, 0, min(n, rowsHint)), cur
+      - loop:
+          cond: rows.Next()
+          do:
+            - var:
+                name: key
+                type: "[]byte"
+            - var:
+                name: entry
+                type: coredocstore.EntryValue
+            - opt:
+                do:
+                  - return: nil, cur, s.failed("read a range of an index", scanErr)
+                init:
+                  bind: scanErr
+                  eval: rows.Scan(&key, &entry.Key, &entry.JSON)
+                  to: rows.Scan
+                when: scanErr != nil
+            - set: page
+              value: append(page, entry)
+            - set: next
+              value: "rangeCursor{key: key, owner: entry.Key}"
+      - return: page, next, nil
+  - of: (*SQLStore).entriesPage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).entriesPage
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryContext
+        kind: value
+      - id: rows.Scan
+        kind: value
+    steps:
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, query, args...)
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, s.failed(step, err)
+          when: err != nil
+      - defer: func() { err = s.finishRows(rows, step, err) }()
+      - set: page
+        value: make([]coredocstore.EntryValue, 0, rowsHint)
+      - loop:
+          cond: rows.Next()
+          do:
+            - var:
+                name: entry
+                type: coredocstore.EntryValue
+            - opt:
+                do:
+                  - return: nil, s.failed(step, scanErr)
+                init:
+                  bind: scanErr
+                  eval: rows.Scan(&entry.Key, &entry.JSON)
+                  to: rows.Scan
+                when: scanErr != nil
+            - set: page
+              value: append(page, entry)
+      - return: page, nil
+  - of: (*SQLStore).yieldPage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).yieldPage
+        kind: self
+      - id: decodeAs
+        kind: internal
+    steps:
+      - var:
+          name: zero
+          type: T
+      - loop:
+          do:
+            - bind: v, err
+              eval: decodeAs[T](s.table, entry.JSON)
+              to: decodeAs
+            - opt:
+                do:
+                  - eval: yield(zero, err)
+                  - return: "false"
+                when: err != nil
+            - opt:
+                do:
+                  - return: "false"
+                when: "!yield(v, nil)"
+          key: _
+          range: page
+          value: entry
+      - opt:
+          do:
+            - return: "true"
+          when: failure == nil
+      - eval: yield(zero, failure)
+      - return: "false"
   - of: (*SQLStore).Reindex
     participants:
       - id: caller
@@ -2537,8 +4544,8 @@ sequences:
         kind: internal
       - id: s.keysForRebuild
         kind: internal
-      - id: ex.ExecContext
-        kind: value
+      - id: svcsql
+        kind: package
       - id: s.failed
         kind: internal
     steps:
@@ -2564,19 +4571,17 @@ sequences:
                     value: "false"
                 key: i
                 range: rows
-            - loop:
+            - opt:
                 do:
-                  - opt:
-                      do:
-                        - return: s.failed("file a document's index rows", execErr)
-                          to: s.failed
-                      init:
-                        bind: _, execErr
-                        eval: ex.ExecContext(ctx, s.stmts.insertIndexRows(len(batch)), rowArgs(doc.key, batch)...)
-                        to: ex.ExecContext
-                      when: execErr != nil
-                key: batch
-                range: slices.Chunk(rows, indexRowsPerStatement)
+                  - return: s.failed("file a document's index rows", execErr)
+                    to: s.failed
+                init:
+                  bind: _, execErr
+                  eval: |-
+                    svcsql.InsertRows(ctx, ex, s.stmts.dialect, s.stmts.indexInsert(),
+                    			rowsOf(rowArgs(doc.key, rows), indexRowArgs))
+                  to: svcsql
+                when: execErr != nil
           key: _
           range: page
           value: doc
@@ -2664,6 +4669,166 @@ sequences:
             to: ex.ExecContext
           when: err != nil
       - return: nil
+  - of: (*SQLStore).Revision
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).Revision
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.revision, []byte(key)).Scan
+        kind: value
+      - id: decodeAs
+        kind: internal
+    steps:
+      - var:
+          name: zero
+          type: T
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - var:
+          name: rev
+          type: int64
+      - var:
+          name: raw
+          type: "[]byte"
+      - bind: err
+        eval: ex.QueryRowContext(ctx, s.stmts.revision, []byte(key)).Scan(&rev, &raw)
+        to: ex.QueryRowContext(ctx, s.stmts.revision, []byte(key)).Scan
+      - opt:
+          do:
+            - return: zero, "", kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+          when: errors.Is(err, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: zero, "", s.failed("read a revision", err)
+          when: err != nil
+      - bind: v, decodeErr
+        eval: decodeAs[T](s.table, raw)
+        to: decodeAs
+      - opt:
+          do:
+            - return: zero, "", decodeErr
+          when: decodeErr != nil
+      - return: v, coredocstore.RevisionValue(strconv.FormatInt(rev, 10)), nil
+  - of: (*SQLStore).ReplaceIf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).ReplaceIf
+        kind: self
+      - id: s.prepare
+        kind: internal
+      - id: strconv
+        kind: stdlib
+      - id: s.write
+        kind: internal
+    steps:
+      - bind: p, err
+        eval: s.prepare(v)
+        to: s.prepare
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: expected, parseErr
+        eval: strconv.ParseInt(string(rev), 10, 64)
+        to: strconv
+      - opt:
+          do:
+            - set: expected
+              value: noRevision
+          when: parseErr != nil || expected < 1
+      - set: p.ifRev
+        value: expected
+      - return: s.write(ctx, p, replaceOnRevision, coredocstore.StampValue{})
+        to: s.write
+  - of: (*SQLStore).replaceOnRevision
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).replaceOnRevision
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: rowsAffected
+        kind: internal
+      - id: s.failed
+        kind: internal
+      - id: s.revisionRefused
+        kind: internal
+    steps:
+      - bind: result, execErr
+        eval: ex.ExecContext(ctx, s.stmts.replaceIf, []byte(p.raw), []byte(p.key), p.ifRev)
+        to: ex.ExecContext
+      - bind: n, err
+        eval: rowsAffected(result, execErr)
+        to: rowsAffected
+      - opt:
+          do:
+            - return: s.failed("replace a document on its revision", err)
+              to: s.failed
+          when: err != nil
+      - opt:
+          do:
+            - return: s.revisionRefused(ctx, ex, p.key)
+              to: s.revisionRefused
+          when: n == 0
+      - return: nil
+  - of: (*SQLStore).lockedReplaceIf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).lockedReplaceIf
+        kind: self
+      - id: ex.QueryRowContext(ctx, s.stmts.lockDocIf, []byte(p.key), p.ifRev).Scan
+        kind: value
+    steps:
+      - set: err
+        to: ex.QueryRowContext(ctx, s.stmts.lockDocIf, []byte(p.key), p.ifRev).Scan
+        value: ex.QueryRowContext(ctx, s.stmts.lockDocIf, []byte(p.key), p.ifRev).Scan(&old)
+      - opt:
+          do:
+            - return: nil, s.revisionRefused(ctx, ex, p.key)
+          when: errors.Is(err, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: nil, s.failed("lock a document on its revision", err)
+          when: err != nil
+      - return: old, s.writeLockedRow(ctx, ex, p)
+  - of: (*SQLStore).revisionRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).revisionRefused
+        kind: self
+      - id: ex.QueryRowContext(ctx, s.stmts.exists, []byte(key)).Scan
+        kind: value
+      - id: kerrs
+        kind: package
+      - id: s.failed
+        kind: internal
+    steps:
+      - var:
+          name: one
+          type: int64
+      - bind: err
+        eval: ex.QueryRowContext(ctx, s.stmts.exists, []byte(key)).Scan(&one)
+        to: ex.QueryRowContext(ctx, s.stmts.exists, []byte(key)).Scan
+      - opt:
+          do:
+            - return: kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+              to: kerrs
+          when: errors.Is(err, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: s.failed("read a revision", err)
+              to: s.failed
+          when: err != nil
+      - return: kerrs.Wrap(coredocstore.RevisionMismatch, kerrs.WrapParams{}, kerrs.String("store", s.table))
+        to: kerrs
   - of: OpenSQL
     participants:
       - id: caller
@@ -3996,31 +6161,29 @@ sequences:
         kind: self
       - id: s.versionArgs
         kind: internal
-      - id: ex.ExecContext
-        kind: value
+      - id: svcsql
+        kind: package
       - id: s.failed
         kind: internal
     steps:
-      - loop:
+      - bind: args, err
+        eval: s.versionArgs(key, rows)
+        to: s.versionArgs
+      - opt:
           do:
-            - bind: args, err
-              eval: s.versionArgs(key, batch)
-              to: s.versionArgs
-            - opt:
-                do:
-                  - return: err
-                when: err != nil
-            - opt:
-                do:
-                  - return: s.failed("keep a version", execErr)
-                    to: s.failed
-                init:
-                  bind: _, execErr
-                  eval: ex.ExecContext(ctx, s.stmts.insertVersions(len(batch)), args...)
-                  to: ex.ExecContext
-                when: execErr != nil
-          key: batch
-          range: slices.Chunk(rows, versionRowsPerStatement)
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: s.failed("keep a version", execErr)
+              to: s.failed
+          init:
+            bind: _, execErr
+            eval: |-
+              svcsql.InsertRows(ctx, ex, s.stmts.dialect, s.stmts.versionInsert(),
+              		rowsOf(args, versionRowArgs))
+            to: svcsql
+          when: execErr != nil
       - return: nil
   - of: (*SQLStore).versionArgs
     participants:
@@ -4097,7 +6260,7 @@ sequences:
                 do:
                   - return: |-
                       coredocstore.VersionValue{}, kerrs.Wrap(coredocstore.DocumentUndecodable, kerrs.WrapParams{},
-                      				kerrs.String("store", s.table), kerrs.String("cause", "the metadata of a version: "+jsonCause(err)))
+                      				kerrs.String("store", s.table), kerrs.String("cause", "the metadata of a version: "+jsonCause(err, reflect.TypeOf(v.Meta))))
                 init:
                   bind: err
                   eval: json.Unmarshal(row.meta, &v.Meta)
@@ -4445,11 +6608,7 @@ sequences:
         kind: self
       - id: s.prepare
         kind: internal
-      - id: s.run
-        kind: internal
-      - id: s.settle
-        kind: internal
-      - id: s.announce
+      - id: s.write
         kind: internal
     steps:
       - bind: p, err
@@ -4459,23 +6618,28 @@ sequences:
           do:
             - return: err
           when: err != nil
-      - set: err
-        to: s.run
-        value: |-
+      - return: s.write(ctx, p, mode, stamp)
+        to: s.write
+  - of: (*SQLStore).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).write
+        kind: self
+      - id: s.run
+        kind: internal
+      - id: s.settle
+        kind: internal
+      - id: s.announce
+        kind: internal
+    steps:
+      - bind: err
+        eval: |-
           s.run(ctx, s.several(), func(txCtx context.Context, ex coresql.Executor) error {
-          		existed, old, writeErr := s.writeDocument(txCtx, ex, p, mode)
-          		//: the document's rows, replacing its previous ones, once its own row
-          		//: is written; a refusal or a failure rolls the write back.
-          		if writeErr == nil {
-          			writeErr = s.fileIndexes(txCtx, ex, p, existed)
-          		}
-          		//: its versions, in the same transaction, once nothing refused it.
-          		if writeErr == nil {
-          			writeErr = s.keepVersions(txCtx, ex, &storedWrite{meta: stamp.Meta, old: old, raw: p.raw, key: p.key, existed: existed, inPlace: stamp.InPlace})
-          		}
           		//: nil, DocumentExists, DocumentNotFound, a failure, or a collision.
-          		return writeErr
+          		return s.writeIn(txCtx, ex, p, mode, stamp)
           	})
+        to: s.run
       - opt:
           do:
             - return: s.settle(ctx, err)
@@ -4484,6 +6648,35 @@ sequences:
       - eval: s.announce(ctx, &s.onWrite, p.key)
         to: s.announce
       - return: nil
+  - of: (*SQLStore).writeIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).writeIn
+        kind: self
+      - id: s.writeDocument
+        kind: internal
+      - id: s.fileIndexes
+        kind: internal
+      - id: s.keepVersions
+        kind: internal
+    steps:
+      - bind: existed, old, writeErr
+        eval: s.writeDocument(ctx, ex, p, mode)
+        to: s.writeDocument
+      - opt:
+          do:
+            - set: writeErr
+              to: s.fileIndexes
+              value: s.fileIndexes(ctx, ex, p, existed)
+          when: writeErr == nil
+      - opt:
+          do:
+            - set: writeErr
+              to: s.keepVersions
+              value: "s.keepVersions(ctx, ex, &storedWrite{meta: stamp.Meta, old: old, raw: p.raw, key: p.key, existed: existed, inPlace: stamp.InPlace})"
+          when: writeErr == nil
+      - return: writeErr
   - of: (*SQLStore).run
     participants:
       - id: caller
@@ -4637,6 +6830,8 @@ sequences:
         kind: internal
       - id: s.upsertRow
         kind: internal
+      - id: s.lockedReplaceIf
+        kind: internal
       - id: s.lockedReplace
         kind: internal
       - id: ex.ExecContext
@@ -4660,6 +6855,16 @@ sequences:
             - case: insertOnly
               do:
                 - return: false, nil, s.insertRow(ctx, ex, p)
+            - case: replaceOnRevision
+              do:
+                - opt:
+                    do:
+                      - set: old, err
+                        to: s.lockedReplaceIf
+                        value: s.lockedReplaceIf(ctx, ex, p)
+                      - return: true, old, err
+                    when: s.keep > 0
+                - return: true, nil, s.replaceOnRevision(ctx, ex, p)
             - default: true
               do:
                 - opt:
@@ -4996,6 +7201,8 @@ sequences:
         kind: value
       - id: s.failed
         kind: internal
+      - id: svcsql
+        kind: package
     steps:
       - opt:
           do:
@@ -5023,18 +7230,16 @@ sequences:
                   to: ex.ExecContext
                 when: err != nil
           when: existed
-      - loop:
+      - opt:
           do:
-            - opt:
-                do:
-                  - return: "&mayConflict{cause: err, step: \"file a document's index rows\", written: p, kind: uniqueConflict}"
-                init:
-                  bind: _, err
-                  eval: ex.ExecContext(ctx, s.stmts.insertIndexRows(len(batch)), rowArgs(key, batch)...)
-                  to: ex.ExecContext
-                when: err != nil
-          key: batch
-          range: slices.Chunk(p.rows, indexRowsPerStatement)
+            - return: "&mayConflict{cause: err, step: \"file a document's index rows\", written: p, kind: uniqueConflict}"
+          init:
+            bind: _, err
+            eval: |-
+              svcsql.InsertRows(ctx, ex, s.stmts.dialect, s.stmts.indexInsert(),
+              		rowsOf(rowArgs(key, p.rows), indexRowArgs))
+            to: svcsql
+          when: err != nil
       - return: nil
   - of: (*SQLStore).checkUnique
     participants:
@@ -5762,19 +7967,30 @@ sequences:
         kind: actor
       - id: (*Store).nextVersions
         kind: self
+      - id: s.nextVersionsFrom
+        kind: internal
+    steps:
+      - bind: old, existed
+        eval: s.docs[key]
+      - return: "s.nextVersionsFrom(key, priorState{raw: old, existed: existed, record: s.versions[key]}, raw, stamp)"
+        to: s.nextVersionsFrom
+  - of: (*Store).nextVersionsFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).nextVersionsFrom
+        kind: self
       - id: s.pruned
         kind: internal
       - id: compactJSON
         kind: internal
     steps:
+      - bind: old, existed, record
+        eval: prior.raw, prior.existed, prior.record
       - opt:
           do:
             - return: nil
           when: s.keep == 0
-      - bind: old, existed
-        eval: s.docs[key]
-      - bind: record
-        eval: s.versions[key]
       - opt:
           do:
             - set: old, existed

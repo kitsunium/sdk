@@ -98,3 +98,30 @@ sequences:
       - eval: b.head.Store((head + 1) % (b.cap + 1))
         to: b.head.Store
       - return: value, nil
+  - of: Drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: Drain
+        kind: self
+      - id: q.TryRead
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(T) bool
+            steps:
+              - loop:
+                  do:
+                    - bind: item, err
+                      eval: q.TryRead()
+                      to: q.TryRead
+                    - opt:
+                        do:
+                          - return: ""
+                        when: err != nil
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yield(item)"
+                  forever: true

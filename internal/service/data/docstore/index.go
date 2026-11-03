@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -20,10 +21,52 @@ type index[T any] struct {
 	// owned maps a store key to its document's index keys: what a rewrite or
 	// a deletion takes out.
 	owned map[string][]string
+	// sorted is an ordered index's entries in (key, owner) order, which Range
+	// searches; nil for an index declared without an order. It holds what
+	// owned holds, except while Open files the loaded documents (deferred).
+	sorted []indexEntry
 	// name reads the index.
 	name string
 	// unique refuses a second holder of a key.
 	unique bool
+	// order says whether sorted is kept: never, at every write, or not yet
+	// while Open files the loaded documents.
+	order orderMode
+}
+
+// orderMode is how an index keeps its sorted entries.
+type orderMode uint8
+
+const (
+	// unordered keeps no sorted entries: an index declared without Ordered.
+	unordered orderMode = iota
+	// ordered keeps sorted in step with every write.
+	ordered
+	// deferred skips sorted while Open files every loaded document, which
+	// resort then sorts once: one insertion per document would move the
+	// whole list each time.
+	deferred
+)
+
+// indexEntry is one entry of an ordered index: an index key and the store
+// key of a document filed under it.
+type indexEntry struct {
+	// key is the index key.
+	key string
+	// owner is the store key of the document filed under it.
+	owner string
+}
+
+// compareEntries orders an ordered index's entries: by index key, then by
+// store key, both as bytes.
+func compareEntries(a, b indexEntry) int {
+	//: the index key first.
+	if c := strings.Compare(a.key, b.key); c != 0 {
+		//: different keys.
+		return c
+	}
+	//: then the document.
+	return strings.Compare(a.owner, b.owner)
 }
 
 // newIndex builds the empty index a spec declares.
@@ -35,7 +78,19 @@ func newIndex[T any](spec coredocstore.IndexSpec[T]) *index[T] {
 		owned:   map[string][]string{},
 		name:    spec.Name,
 		unique:  spec.Unique,
+		order:   orderOf(spec),
 	}
+}
+
+// orderOf is the order mode an index declared by spec starts in.
+func orderOf[T any](spec coredocstore.IndexSpec[T]) orderMode {
+	//: an index declared Ordered.
+	if spec.Ordered {
+		//: kept at every write.
+		return ordered
+	}
+	//: none.
+	return unordered
 }
 
 // keysOf returns v's keys in the index: the declared function's answer
@@ -103,12 +158,28 @@ func (ix *index[T]) set(owner string, keys []string) {
 	if len(keys) > 0 {
 		ix.owned[owner] = keys
 	}
+	//: an ordered index files each key in its place.
+	if ix.order == ordered {
+		//: one entry per key, by binary search.
+		for _, k := range keys {
+			entry := indexEntry{key: k, owner: owner}
+			at, _ := slices.BinarySearchFunc(ix.sorted, entry, compareEntries)
+			ix.sorted = slices.Insert(ix.sorted, at, entry)
+		}
+	}
 }
 
 // drop takes the document stored under owner out of the index.
 func (ix *index[T]) drop(owner string) {
 	//: every key it was filed under.
 	for _, k := range ix.owned[owner] {
+		//: an ordered index forgets the entry where it sits.
+		if ix.order == ordered {
+			//: found by binary search; always there, filed by set.
+			if at, found := slices.BinarySearchFunc(ix.sorted, indexEntry{key: k, owner: owner}, compareEntries); found {
+				ix.sorted = slices.Delete(ix.sorted, at, at+1)
+			}
+		}
 		//: the key may be shared with other documents.
 		if holders := ix.entries[k]; holders != nil {
 			delete(holders, owner)
@@ -119,6 +190,51 @@ func (ix *index[T]) drop(owner string) {
 		}
 	}
 	delete(ix.owned, owner)
+}
+
+// resort builds an ordered index's sorted entries from what it owns, once,
+// and ends the deferral Open filed the loaded documents under.
+func (ix *index[T]) resort() {
+	//: an index without an order keeps no list.
+	if ix.order == unordered {
+		//: nothing to sort.
+		return
+	}
+	ix.order = ordered
+	n := 0
+	//: how many entries.
+	for _, keys := range ix.owned {
+		n += len(keys)
+	}
+	ix.sorted = make([]indexEntry, 0, n)
+	//: every document's keys.
+	for owner, keys := range ix.owned {
+		//: one entry per key.
+		for _, k := range keys {
+			ix.sorted = append(ix.sorted, indexEntry{key: k, owner: owner})
+		}
+	}
+	slices.SortFunc(ix.sorted, compareEntries)
+}
+
+// between returns the entries of an ordered index under a key from lo,
+// included, to hi, excluded — no upper bound when hi is empty —, at most
+// limit of them when limit is positive. The caller holds a lock.
+func (ix *index[T]) between(lo, hi string, limit int) []indexEntry {
+	//: the first entry at or above lo; an empty owner sorts first.
+	at, _ := slices.BinarySearchFunc(ix.sorted, indexEntry{key: lo}, compareEntries)
+	end := len(ix.sorted)
+	//: an upper bound ends the walk at the first key at or above it.
+	if hi != "" {
+		stop, _ := slices.BinarySearchFunc(ix.sorted[at:], indexEntry{key: hi}, compareEntries)
+		end = at + stop
+	}
+	//: a positive limit caps the answer.
+	if limit > 0 && end-at > limit {
+		end = at + limit
+	}
+	//: the entries in range, in order; the caller copies what it hands out.
+	return ix.sorted[at:end]
 }
 
 // holders returns the store keys filed under key, in store-key order.
@@ -186,6 +302,7 @@ func (s *Store[T]) unfile(owner string) {
 // that panics (IndexBroken: a unique index that does not hold would be a lie
 // every Lookup tells).
 func (s *Store[T]) rebuild() (err error) {
+	s.deferOrders()
 	defer func() {
 		recovered := recover()
 		//: the ordinary path.
@@ -220,6 +337,23 @@ func (s *Store[T]) rebuild() (err error) {
 		}
 		s.file(key, keys)
 	}
+	//: the ordered indexes sorted once, now that every document is filed.
+	for _, ix := range s.indexes {
+		ix.resort()
+	}
 	//: every index holds.
 	return nil
+}
+
+// deferOrders makes every ordered index skip its sorted list while Open
+// files the loaded documents, so that list is sorted once at the end rather
+// than moved by one insertion per document.
+func (s *Store[T]) deferOrders() {
+	//: every index.
+	for _, ix := range s.indexes {
+		//: only an ordered index has a list to defer.
+		if ix.order == ordered {
+			ix.order = deferred
+		}
+	}
 }

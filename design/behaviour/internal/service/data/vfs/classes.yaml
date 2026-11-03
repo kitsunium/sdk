@@ -74,6 +74,9 @@ files:
       - NewMem
       - (*memFS).Open
       - (*memFS).Stat
+      - (*memFS).Lstat
+      - (*memFS).ReadLink
+      - (*memFS).SyncDir
       - (*memFS).ReadDir
       - (*memFS).ReadFile
       - (*memFS).entriesLocked
@@ -111,6 +114,7 @@ files:
   - decls:
       - (*memFS).WriteFile
       - (*memFS).WriteAtomic
+      - (*memFS).WriteAtomicAll
       - (*memFS).checkFileTargetLocked
       - (*memFS).storeLocked
       - (*memFS).MkdirAll
@@ -126,6 +130,8 @@ files:
       - (*osFS).Open
       - (*osFS).Stat
       - (*osFS).ReadDir
+      - (*osFS).Lstat
+      - (*osFS).ReadLink
       - (*osFS).ReadFile
       - (*osFS).guardFileTarget
       - (*osFS).guardDirTarget
@@ -135,14 +141,28 @@ files:
       - refuseKind
     name: os.go
   - decls:
+      - dirFlushes
+      - dirFlush
+      - newDirFlushes
+      - (*dirFlushes).sync
+      - (*dirFlushes).join
+      - (*dirFlushes).leave
+    name: os_dirflush.go
+  - decls:
       - tempPrefix
       - tempNameBytes
       - tempFile
       - atomicOps
       - (*osFS).WriteAtomic
       - publish
+      - (*osFS).WriteAtomicAll
+      - publishAll
+      - syncDirs
+      - stage
       - writeAndSync
       - syncPublished
+      - (*osFS).SyncDir
+      - failDirSync
       - discard
       - tempPath
       - (*osFS).nativeOps
@@ -200,11 +220,35 @@ functions:
     name: refuseKind
     params: name string, mode fs.FileMode, acceptable bool
     results: error
+  - doc: newDirFlushes shares flush between the publications into one directory.
+    name: newDirFlushes
+    params: flush func(dir string) error
+    results: "*dirFlushes"
   - doc: |-
       publish runs the five steps over ops. It is deliberately free of any
       reference to os.Root, so the test that proves its guarantee can substitute
       mechanics that fail.
     name: publish
+    params: ops atomicOps, name string, data []byte, perm fs.FileMode
+    results: error
+  - doc: |-
+      publishAll runs steps 1 to 4 for every file over ops, then step 5 once per
+      directory renamed into, and returns how many files were renamed into place.
+    name: publishAll
+    params: ops atomicOps, files []corevfs.FileValue, perm fs.FileMode
+    results: published int, err error
+  - doc: |-
+      syncDirs flushes every directory of dirs — all of them, a failure
+      included, so as much of a batch as the device accepts is durable — and
+      reports the first failure as DirectorySyncFailed.
+    name: syncDirs
+    params: ops atomicOps, dirs []string
+    results: error
+  - doc: |-
+      stage runs steps 1 to 4 of a publication over ops: the temporary, the
+      payload, the file's flush and the rename. On any failure the temporary is
+      removed and nothing was published.
+    name: stage
     params: ops atomicOps, name string, data []byte, perm fs.FileMode
     results: error
   - doc: |-
@@ -216,6 +260,13 @@ functions:
   - doc: syncPublished performs step 5 and reports its distinct verdict.
     name: syncPublished
     params: ops atomicOps, dir, name string
+    results: error
+  - doc: |-
+      failDirSync wraps a directory flush's cause onto
+      [corevfs.DirectorySyncFailed] by restating it, so the operating-system
+      error survives in the chain — the shape of failRead / failWrite.
+    name: failDirSync
+    params: cause error, name string
     results: error
   - doc: |-
       discard removes an abandoned temporary and returns the failure that caused
@@ -298,6 +349,8 @@ functions:
     results: error
 imports:
   cmp: cmp
+  commit: github.com/kitsunium/sdk/internal/kernel/concur/commit
+  context: context
   coreproc: github.com/kitsunium/sdk/internal/core/proc
   corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
   errors: errors
@@ -356,6 +409,33 @@ types:
         params: name string
         recv: m *memFS
         results: info fs.FileInfo, err error
+      - doc: |-
+          Lstat implements fs.ReadLinkFS's half that describes a name without
+          following it. The memory filesystem holds no symbolic link, so it is Stat:
+          the double answers the same optional interface as the disk filesystem, whose
+          os.Root reads links (#1053).
+        name: Lstat
+        params: name string
+        recv: m *memFS
+        results: info fs.FileInfo, err error
+      - doc: |-
+          ReadLink implements fs.ReadLinkFS. No name here is a symbolic link, so an
+          existing name answers what the operating system answers for a name that is
+          not one — fs.ErrInvalid — and an absent one fs.ErrNotExist, both
+          READ_FAILED.
+        name: ReadLink
+        params: name string
+        recv: m *memFS
+        results: target string, err error
+      - doc: |-
+          SyncDir implements [corevfs.DirSyncer]. There is no device to flush, so it
+          answers the refusals the disk filesystem answers and flushes nothing: a file
+          is NotRegularFile, an absent name DirectorySyncFailed wrapping
+          fs.ErrNotExist (#1060).
+        name: SyncDir
+        params: name string
+        recv: m *memFS
+        results: error
       - doc: ReadDir implements fs.ReadDirFS, sorted by filename as io/fs requires.
         name: ReadDir
         params: name string
@@ -419,6 +499,16 @@ types:
         recv: m *memFS
         results: error
       - doc: |-
+          WriteAtomicAll publishes every file of files in one step
+          ([corevfs.AtomicBatchWriter], issue #827): every target is checked under
+          the exclusive lock first, then every file is assigned, so a reader sees
+          the whole batch or none of it, and a refusal publishes nothing. Like
+          WriteAtomic it makes no durability claim.
+        name: WriteAtomicAll
+        params: files []corevfs.FileValue, perm fs.FileMode
+        recv: m *memFS
+        results: published int, err error
+      - doc: |-
           checkFileTargetLocked rejects every reason a file write cannot proceed. The
           caller MUST hold the write lock.
         name: checkFileTargetLocked
@@ -426,8 +516,9 @@ types:
         recv: m *memFS
         results: error
       - doc: |-
-          storeLocked performs the mutation. The caller MUST hold the write lock and
-          MUST have run [memFS.checkFileTargetLocked] first.
+          storeLocked performs WriteFile's mutation. The caller MUST hold the write
+          lock and MUST have run [memFS.checkFileTargetLocked] first. WriteAtomic does
+          not come here: a publication applies its mode every time.
         name: storeLocked
         params: name string, data []byte, perm fs.FileMode
         recv: m *memFS
@@ -602,6 +693,11 @@ types:
           what lets the internal test provoke a failure at each step.
         name: ops
         type: atomicOps
+      - doc: |-
+          flushes shares step 5 between the publications into one directory
+          (#803); ops.syncDir goes through it.
+        name: flushes
+        type: "*dirFlushes"
     kind: struct
     methods:
       - doc: |-
@@ -637,6 +733,22 @@ types:
         params: name string
         recv: o *osFS
         results: entries []fs.DirEntry, err error
+      - doc: |-
+          Lstat implements the half of fs.ReadLinkFS that describes a name without
+          following a final symbolic link. It forwards to os.Root, confined like every
+          other read (#1053).
+        name: Lstat
+        params: name string
+        recv: o *osFS
+        results: info fs.FileInfo, err error
+      - doc: |-
+          ReadLink implements fs.ReadLinkFS: the target of the symbolic link name, as
+          written, never followed. os.Root's FS already answers it; the wrapper used
+          to hide it behind a plain fs.FS (#1053).
+        name: ReadLink
+        params: name string
+        recv: o *osFS
+        results: target string, err error
       - doc: ReadFile implements fs.ReadFileFS.
         name: ReadFile
         params: name string
@@ -704,12 +816,45 @@ types:
               new one and never a partial file.
            5. flush the DIRECTORY. Without it the entry naming the new inode may not
               survive a crash, and the file would come back with content and no name.
+              Publications into one directory that reach this step while a flush of it
+              runs share the next flush (#803): each still waits for a flush BEGUN
+              after its own rename, and gets that flush's verdict.
 
           Steps 1–4 failing means nothing was published: the temporary is removed and
           the previous bytes are untouched. Step 5 failing means the opposite and gets
           its own code, [corevfs.DirectorySyncFailed].
         name: WriteAtomic
         params: name string, data []byte, perm fs.FileMode
+        recv: o *osFS
+        results: error
+      - doc: |-
+          WriteAtomicAll publishes every file of files, in order, and flushes each
+          directory they land in once, after the last rename into it
+          ([corevfs.AtomicBatchWriter], issue #827).
+
+          Each file runs steps 1 to 4 of [osFS.WriteAtomic] — a temporary beside it,
+          the payload, the FILE's flush, the rename —, so each is atomic exactly as a
+          publication is. Step 5 is the one a batch shares: a directory flush makes
+          every rename into that directory before it durable, so one per directory
+          after the last of them gives every file of the batch the guarantee a flush
+          per file gave each, at half the device round trips.
+
+          Every target is checked before any is written, so a refusal publishes
+          nothing. A failure at a file's steps 1 to 4 leaves that file and the rest
+          unpublished and their previous bytes untouched; the files already renamed
+          are flushed with their directories first, so the count returned beside
+          PublishFailed is a count of durable files.
+        name: WriteAtomicAll
+        params: files []corevfs.FileValue, perm fs.FileMode
+        recv: o *osFS
+        results: published int, err error
+      - doc: |-
+          SyncDir implements [corevfs.DirSyncer]: it opens the directory name through
+          the root — "." included — and flushes its entries, the step WriteAtomic
+          takes for the directory naming the file it publishes, offered for the
+          directory naming a directory just created (#1060, ADR 0110's deferral).
+        name: SyncDir
+        params: name string
         recv: o *osFS
         results: error
       - doc: |-
@@ -765,6 +910,61 @@ types:
         recv: o *osFS
         results: error
     name: osFS
+  - doc: |-
+      dirFlushes routes step 5 of every publication — the flush of the directory
+      naming the file — through one commit group per directory, so publications
+      into one directory that reach step 5 while a flush of it runs share the
+      next flush instead of each paying its own (#803, ADR 0207).
+
+      The guarantee each publication needs is unchanged: a directory flush that
+      BEGINS after its rename. A publication joins the batch still gathering —
+      never one already flushing, which the group has sealed — and that batch's
+      flush begins only after every one of its publications has joined, so after
+      each of their renames. Every participant receives that flush's verdict.
+
+      A directory's group lives while a publication waits on it and is dropped
+      with the last one, so the map holds the directories in use and no others.
+    fields:
+      - doc: "flush is the mechanic one batch runs: the directory's fsync."
+        name: flush
+        type: func(dir string) error
+      - doc: groups holds one group per directory a publication is waiting on.
+        name: groups
+        type: map[string]*dirFlush
+      - name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: |-
+          sync flushes dir for one publication whose rename has returned, sharing the
+          flush with the publications into dir that join the same batch, and returns
+          that flush's error.
+        name: sync
+        params: dir string
+        recv: d *dirFlushes
+        results: error
+      - doc: |-
+          join returns dir's group, creating it when no publication waits on it,
+          with this publication counted.
+        name: join
+        params: dir string
+        recv: d *dirFlushes
+        results: "*dirFlush"
+      - doc: |-
+          leave uncounts one publication and drops dir's group with the last one: no
+          batch of it is left, since every participant has had its verdict.
+        name: leave
+        params: dir string, entry *dirFlush
+        recv: d *dirFlushes
+    name: dirFlushes
+  - doc: dirFlush is one directory's group and how many publications wait on it.
+    fields:
+      - name: group
+        type: "*commit.Group[struct{}]"
+      - name: waiting
+        type: int
+    kind: struct
+    name: dirFlush
   - doc: |-
       tempFile is the narrow view of a freshly created temporary that [publish]
       drives. *os.File satisfies it; nothing else in the SDK does.

@@ -47,7 +47,7 @@ type gatedTier struct {
 // newGatedTier returns a gatedTier over a fresh memory store.
 func newGatedTier(t *testing.T) *gatedTier {
 	t.Helper()
-	inner, err := svccache.NewMemory[string](svccache.MemoryConfig{MaxEntries: 16})
+	inner, err := svccache.NewMemory[string](policyConfig(t, svccache.MemoryConfig{MaxEntries: 16}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,9 +147,16 @@ func heldInTier(t *testing.T, tier *gatedTier, key string) (string, bool) {
 // reads v1 in the far tier, and a write that runs to completion on every tier
 // before the promotion starts must not be overwritten by v1 in a nearer tier
 // — on a chain of two tiers and of three, for a Delete, a Set, and an
-// InvalidateTag, through Fetch and through Load.
+// InvalidateTag, through Fetch, through Load and through FetchMany's batched
+// promotion.
 func TestAPromotionNeverUndoesAWriteThatRanDuringItsFarRead(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testAPromotionNeverUndoesAWriteThatRanDuringItsFarRead)
+}
+
+// testAPromotionNeverUndoesAWriteThatRanDuringItsFarRead is TestAPromotionNeverUndoesAWriteThatRanDuringItsFarRead under the policy its subtest names.
+func testAPromotionNeverUndoesAWriteThatRanDuringItsFarRead(t *testing.T) {
+	t.Helper()
 	ctx := context.Background()
 	writes := map[string]struct {
 		write func(chain corecache.Store[string]) error
@@ -168,6 +175,10 @@ func TestAPromotionNeverUndoesAWriteThatRanDuringItsFarRead(t *testing.T) {
 			_, _ = c.(corecache.Loader[string]).Load(ctx, "k", func(context.Context) (corecache.EntryValue[string], error) {
 				return forever("filled"), nil
 			})
+		},
+		//: a batched promotion (#840) takes the same guard as a single one.
+		"fetchmany": func(c corecache.Store[string]) {
+			_, _ = c.(corecache.BulkFetcher[string]).FetchMany(ctx, []string{"k"})
 		},
 	}
 	for _, tiers := range []int{2, 3} {
@@ -215,6 +226,12 @@ func TestAPromotionNeverUndoesAWriteThatRanDuringItsFarRead(t *testing.T) {
 // overwritten by it.
 func TestAWriteWaitsForAPromotionAlreadyWriting(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testAWriteWaitsForAPromotionAlreadyWriting)
+}
+
+// testAWriteWaitsForAPromotionAlreadyWriting is TestAWriteWaitsForAPromotionAlreadyWriting under the policy its subtest names.
+func testAWriteWaitsForAPromotionAlreadyWriting(t *testing.T) {
+	t.Helper()
 	ctx := context.Background()
 	chain, gated := raceChain(t, 2)
 	near, far := gated[0], gated[1]
@@ -245,6 +262,12 @@ func TestAWriteWaitsForAPromotionAlreadyWriting(t *testing.T) {
 // and a second read is answered by the nearest.
 func TestAPromotionWithNoWriteAroundItStillPromotes(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testAPromotionWithNoWriteAroundItStillPromotes)
+}
+
+// testAPromotionWithNoWriteAroundItStillPromotes is TestAPromotionWithNoWriteAroundItStillPromotes under the policy its subtest names.
+func testAPromotionWithNoWriteAroundItStillPromotes(t *testing.T) {
+	t.Helper()
 	ctx := context.Background()
 	chain, gated := raceChain(t, 3)
 	if err := chain.Set(ctx, "other", forever("x")); err != nil {
@@ -270,6 +293,12 @@ func TestAPromotionWithNoWriteAroundItStillPromotes(t *testing.T) {
 // write it over the new one the Set left in the near tier.
 func TestAPromotionNeverUndoesAWriteAnnouncedBeforeItsWalk(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testAPromotionNeverUndoesAWriteAnnouncedBeforeItsWalk)
+}
+
+// testAPromotionNeverUndoesAWriteAnnouncedBeforeItsWalk is TestAPromotionNeverUndoesAWriteAnnouncedBeforeItsWalk under the policy its subtest names.
+func testAPromotionNeverUndoesAWriteAnnouncedBeforeItsWalk(t *testing.T) {
+	t.Helper()
 	ctx := context.Background()
 	chain, gated := raceChain(t, 2)
 	near, far := gated[0], gated[1]

@@ -101,6 +101,28 @@ func queueStatement(d *fakeData, query, table string, args []driver.NamedValue) 
 		}
 		q[id] = m
 		return nil, 1, nil
+	case strings.HasPrefix(query, "INSERT") && strings.Contains(query, "(id, dead, due, enqueued_at, deliveries) VALUES"):
+		// PublishOnce's claim of a key (ADR 0183): a reservation, state 2,
+		// unless the key's row exists — then no row, and no failure.
+		id := string(a.bytes(0))
+		if _, taken := q[id]; taken {
+			return nil, 0, nil
+		}
+		q[id] = fakeMessage{id: id, dead: 2, due: a.int(1), enqueued: a.int(2)}
+		return nil, 1, nil
+	case strings.HasPrefix(query, "DELETE FROM ") && strings.Contains(query, "dead = 2"):
+		return nil, fakeQDropReservations(q, query, a), nil
+	case strings.HasPrefix(query, "SELECT id FROM ") && strings.Contains(query, "dead = 2"):
+		// The passed reservations, oldest first, at most the limit bound.
+		out := &fakeRows{cols: []string{"id"}}
+		for _, m := range slices.SortedFunc(maps.Values(q), func(x, y fakeMessage) int {
+			return cmpDueID(x, y)
+		}) {
+			if m.dead == 2 && m.due <= a.int(0) && len(out.rows) < int(a.int(1)) {
+				out.rows = append(out.rows, []driver.Value{[]byte(m.id)})
+			}
+		}
+		return out, 0, nil
 	case strings.HasPrefix(query, "INSERT INTO ") && len(a) == 5:
 		id := string(a.bytes(0))
 		q[id] = fakeMessage{id: id, due: a.int(1), enqueued: a.int(2), deliveries: a.int(3), payload: a.bytes(4)}
@@ -118,7 +140,7 @@ func queueStatement(d *fakeData, query, table string, args []driver.NamedValue) 
 	case strings.HasPrefix(query, "SELECT id, enqueued_at, deliveries, due, lease, payload"):
 		return fakeQLive(q, string(a.bytes(0)), a.int(1)), 0, nil
 	case strings.HasPrefix(query, "SELECT id, enqueued_at, deliveries, due"):
-		return fakeQDeadLetters(q, a.int(0), strings.Contains(query, "trail")), 0, nil
+		return fakeQDeadLetters(q, string(a.bytes(0)), a.int(1), strings.Contains(query, "trail")), 0, nil
 	}
 	return queueWrite(q, query, a)
 }
@@ -127,6 +149,24 @@ func queueStatement(d *fakeData, query, table string, args []driver.NamedValue) 
 // holds, by a batch of ids, or by a dead letter's id.
 func queueWrite(q map[string]fakeMessage, query string, a fakeArgs) (driver.Rows, int64, error) {
 	switch {
+	case strings.Contains(query, " RETURNING ") && strings.Contains(query, "deliveries = deliveries + 1"):
+		// PostgreSQL's lease in one statement (kitsunium/sdk#1042), read
+		// before the lease of a batch of ids, whose SET it shares.
+		return fakeQLeaseReturning(q, a), 0, nil
+	case strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "lease IS NOT NULL AND due <= "):
+		// The burial of the lapsed leases with no attempt left that the
+		// lease in one statement skips (kitsunium/sdk#1042).
+		n := fakeQCauseArgs(query)
+		now, limit := a.int(n), a.int(n+1)
+		var buried int64
+		for id, m := range q {
+			if m.dead == 0 && m.lease != nil && m.due <= now && m.deliveries >= limit {
+				fakeQBury(&m, a)
+				q[id] = m
+				buried++
+			}
+		}
+		return nil, buried, nil
 	case strings.Contains(query, "deliveries = deliveries + 1"):
 		return nil, fakeQBatch(q, a, 2, func(m *fakeMessage) { m.due, m.lease, m.deliveries = a.int(0), a.bytes(1), m.deliveries+1 }), nil
 	case strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "dead = 1") && strings.Contains(query, "id IN ("):
@@ -220,14 +260,39 @@ func fakeQPickDue(q map[string]fakeMessage, now, limit int64) driver.Rows {
 	return out
 }
 
-// fakeQDeadLetters are the dead messages, at most limit of them, their trail
-// before their payload when the read names it.
-func fakeQDeadLetters(q map[string]fakeMessage, limit int64, trail bool) driver.Rows {
+// fakeQLeaseReturning leases the due messages with an attempt left —
+// deadline, lease, now, the attempt bound, the batch bound —, by due then id,
+// and answers each with the instant it was due, as PostgreSQL's RETURNING.
+func fakeQLeaseReturning(q map[string]fakeMessage, a fakeArgs) driver.Rows {
+	out := &fakeRows{cols: []string{"id", "enqueued_at", "deliveries", "payload", "due"}}
+	now, attempts, limit := a.int(2), a.int(3), a.int(4)
+	for _, m := range fakeQSortedMessages(q, func(m fakeMessage) bool {
+		return m.dead == 0 && m.due <= now && (m.lease == nil || m.deliveries < attempts)
+	}) {
+		if int64(len(out.rows)) == limit {
+			break
+		}
+		due := m.due
+		m.due, m.lease, m.deliveries = a.int(0), a.bytes(1), m.deliveries+1
+		q[m.id] = m
+		out.rows = append(out.rows, []driver.Value{[]byte(m.id), m.enqueued, m.deliveries, m.payload, due})
+	}
+	return out
+}
+
+// fakeQDeadLetters is the dead letters whose id sorts after after, by id —
+// the enqueue order every broker lists them in (kitsunium/sdk#1043) —, at
+// most limit, their trail before their payload when trail is set.
+func fakeQDeadLetters(q map[string]fakeMessage, after string, limit int64, trail bool) driver.Rows {
 	out := &fakeRows{cols: []string{"id", "enqueued_at", "deliveries", "due", "reason", "cause", "code", "payload"}}
 	if trail {
 		out.cols = []string{"id", "enqueued_at", "deliveries", "due", "reason", "cause", "code", "trail", "payload"}
 	}
-	for _, m := range fakeQSortedMessages(q, func(m fakeMessage) bool { return m.dead == 1 }) {
+	dead := slices.SortedFunc(maps.Values(q), func(a, b fakeMessage) int { return strings.Compare(a.id, b.id) })
+	for _, m := range dead {
+		if m.dead != 1 || m.id <= after {
+			continue
+		}
 		if int64(len(out.rows)) == limit {
 			break
 		}
@@ -314,4 +379,37 @@ func (a fakeArgs) bytes(i int) []byte { return bound(a[i].Value) }
 func (a fakeArgs) int(i int) int64 {
 	n, _ := a[i].Value.(int64)
 	return n
+}
+
+// fakeQDropReservations removes passed reservations of PublishOnce: one key's
+// (WHERE id = …) or a swept batch (AND id IN (…)), each still a reservation
+// and still passed at the instant bound.
+func fakeQDropReservations(q map[string]fakeMessage, query string, a fakeArgs) int64 {
+	ids, now := []string{}, a.int(0)
+	if strings.Contains(query, "WHERE id = ") {
+		ids, now = []string{string(a.bytes(0))}, a.int(1)
+	} else {
+		for i := 1; i < len(a); i++ {
+			ids = append(ids, string(a.bytes(i)))
+		}
+	}
+	n := int64(0)
+	for _, id := range ids {
+		if m, ok := q[id]; ok && m.dead == 2 && m.due <= now {
+			delete(q, id)
+			n++
+		}
+	}
+	return n
+}
+
+// cmpDueID orders messages by due, then id.
+func cmpDueID(x, y fakeMessage) int {
+	if x.due != y.due {
+		if x.due < y.due {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(x.id, y.id)
 }

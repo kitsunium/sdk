@@ -55,10 +55,47 @@ constants:
         name: rewrittenN
         type: int
         value: "7"
+      - doc: |-
+          askedN is the N a read-only query writes inside the caller's
+          transaction, which the query's own read-only option does not bind.
+        name: askedN
+        type: int
+        value: "3"
     name: App
+  - doc: |-
+      keyedMemos is how many memos the records-keys case lists: more than one
+      chunk of the keys a SQL store reads per call (256, storeengine/sql.go).
+    items:
+      - name: keyedMemos
+        type: int
+        value: "300"
+    name: keyedMemos
+  - doc: listKey is the memo whose notice makes the watch list its store's keys.
+    items:
+      - name: listKey
+        type: string
+        value: "\"list\""
+    name: listKey
 files:
   - decls: []
     name: doc.go
+  - decls:
+      - (*suite).backend
+      - (*suite).onDatabase
+      - durable
+      - (*suite).again
+      - watchCatchUp
+      - declareTimers
+      - workflowJournal
+      - copyArgs
+      - dataCopy
+      - expectCopied
+      - (*suite).otlpPlace
+      - exports
+      - (*exports).refuse
+      - (*exports).accept
+      - otlpTables
+    name: durable.go
   - decls:
       - App
       - errRolled
@@ -68,9 +105,13 @@ files:
       - heard
       - doc.key
       - (*heard).add
+      - (*heard).count
       - (*heard).has
       - Run
       - open
+      - build
+      - (*suite).start
+      - (*suite).stop
       - stateOf
       - isReady
       - code
@@ -90,6 +131,10 @@ files:
       - transactions
       - rolledBack
       - savepoint
+      - transactionOptions
+      - isolatedTransactions
+      - readOnlyTransaction
+      - nestedTransactionOptions
       - heldPublish
       - ready
       - hooksAfterTheCommit
@@ -107,8 +152,71 @@ files:
       - trashPurges
       - trashNeedsRevisions
       - expectTrash
+      - declareQueues
+      - ticking
+      - queuedCommand
+      - topicLater
+      - queryReadOnly
     name: storetest.go
+  - decls:
+      - keyedMemos
+      - listKey
+      - memo
+      - memo.key
+      - listing
+      - (*listing).notice
+      - (*listing).has
+      - (*listing).listed
+      - declareMemoStore
+      - declareMemos
+      - (*listing).screen
+      - (*suite).settle
+      - recordsKeys
+      - declareOutbox
+      - letterAbout
+      - (*suite).mailed
+      - outbox
+    name: subsystems.go
 functions:
+  - doc: durable skips the case on a backend that keeps nothing past a stop.
+    name: durable
+    params: t *testing.T, s *suite
+  - doc: |-
+      watchCatchUp checks a watch's replay on the backend (ADR 0178 C6): memos
+      written while no watch heard them — a run that mounted none and stopped
+      cleanly — are queued again by `watch replay` and heard at the next start;
+      after a clean stop, the start after it hears nothing again.
+    name: watchCatchUp
+    params: t *testing.T, s *suite
+  - doc: |-
+      declareTimers declares a store a workflow runs over whose one transition
+      is a timer: an hour after it enters "new", an entity expires.
+    name: declareTimers
+    params: svc *app.Service, s *suite
+  - doc: |-
+      workflowJournal checks a workflow's timer on the backend's journal: a
+      timer armed before a stop fires after the next start, at its instant on
+      the app's clock and not a second before.
+    name: workflowJournal
+    params: t *testing.T, s *suite
+  - doc: |-
+      dataCopy checks `data copy --to` (ADR 0178 C7) into the backend's
+      database: a product that kept its memos in its data directory declares the
+      database and copies them — the copy verifies their fingerprints —, reads
+      them back from it, and a second copy into a database that holds them is
+      refused.
+    name: dataCopy
+    params: t *testing.T, s *suite
+  - doc: expectCopied checks that the copied memos read back from the database.
+    name: expectCopied
+    params: t *testing.T, s *suite
+  - doc: |-
+      otlpTables checks the OTLP export's queues on the backend's database
+      (otlp-database, #537): a batch a collector that is down refused waits in
+      the export's table — the export's runtime state says its queues lie there,
+      durably —, and outlives a stop: the next start sends it.
+    name: otlpTables
+    params: t *testing.T, s *suite
   - name: Run
     params: t *testing.T, b BackendConfig
   - doc: |-
@@ -116,6 +224,12 @@ functions:
       subscription, a workflow — and runs it on b until the test ends.
     name: open
     params: t *testing.T, b BackendConfig, name string, clocked bool
+    results: "*suite"
+  - doc: |-
+      build declares the case's service on a product placed by place — on clk
+      when it is not nil —, without starting it.
+    name: build
+    params: name string, place []app.AppOption, clk *clock.ManualClock, declare func(*app.Service, *suite)
     results: "*suite"
   - doc: stateOf is where a document keeps its workflow's state.
     name: stateOf
@@ -202,6 +316,29 @@ functions:
     name: savepoint
     params: t *testing.T, s *suite
   - doc: |-
+      transactionOptions checks app.Transact's options (#1140) on the backend:
+      a SERIALIZABLE and a REPEATABLE READ transaction commit what they wrote; a
+      read-only one reads and refuses a store's write with
+      CodeTransactionReadOnly, writing nothing; and a nested Transact given an
+      option is refused with CodeTransactionNested, the outer one going on.
+    name: transactionOptions
+    params: t *testing.T, s *suite
+  - doc: |-
+      isolatedTransactions checks that a SERIALIZABLE and a REPEATABLE READ
+      transaction commit what they wrote.
+    name: isolatedTransactions
+    params: t *testing.T, s *suite
+  - doc: |-
+      readOnlyTransaction checks that a read-only transaction reads and refuses
+      a store's write with CodeTransactionReadOnly, writing nothing.
+    name: readOnlyTransaction
+    params: t *testing.T, s *suite
+  - doc: |-
+      nestedTransactionOptions checks that a nested Transact given an option is
+      refused with CodeTransactionNested, the outer one going on.
+    name: nestedTransactionOptions
+    params: t *testing.T, s *suite
+  - doc: |-
       heldPublish checks that a publish waits for its transaction's commit, and
       that a rollback drops it.
     name: heldPublish
@@ -286,8 +423,76 @@ functions:
   - doc: expectTrash checks what the pages' trash holds.
     name: expectTrash
     params: t *testing.T, s *suite, what string, want []app.Tombstone
+  - doc: |-
+      declareQueues declares what the queues' cases read: a queued command, keyed
+      by the document's ID — a dispatch whose key waits is not queued again —,
+      a topic published later, and one that publishes a key once an hour (ADR
+      0178 C1, #998). On a database each is a table of the SQL broker, leased
+      with SKIP LOCKED where the engine has it.
+    name: declareQueues
+    params: svc *app.Service, s *suite
+  - doc: |-
+      ticking waits, as eventually does, for cond, moving the case's manual
+      clock a second at each look: what a consumer waits on — its poll, a
+      message's instant — is the app's clock.
+    name: ticking
+    params: t *testing.T, s *suite, what string, cond func() bool
+  - doc: |-
+      queuedCommand checks a queued command on the backend: a dispatch inside a
+      transaction exists if and only if it commits; one queued for later is not
+      handled before its instant and is once after it; a second dispatch of a
+      key that waits is not queued again.
+    name: queuedCommand
+    params: t *testing.T, s *suite
+  - doc: |-
+      topicLater checks a topic's publication for later and once on the
+      backend: a message published for later is not delivered before its
+      instant and is after it; a key published twice within its window is
+      delivered once.
+    name: topicLater
+    params: t *testing.T, s *suite
+  - doc: |-
+      queryReadOnly checks a query declared with app.ReadOnly (#1140): its Ask
+      runs in a read-only transaction — a read answers, a store's write is
+      refused before it reaches the backend, nothing written —, and an Ask
+      inside the caller's transaction runs in that one, whose options stand.
+    name: queryReadOnly
+    params: t *testing.T, s *suite
+  - doc: declareMemoStore declares the memos, with no watch over them.
+    name: declareMemoStore
+    params: svc *app.Service, s *suite
+  - doc: |-
+      declareMemos declares the memos and a watch over the service's own
+      stores: it keeps the key every notice names, and, told of listKey, lists
+      its store's keys through the records port first.
+    name: declareMemos
+    params: svc *app.Service, s *suite
+  - doc: |-
+      recordsKeys checks Records.Keys on the backend (ADR 0178 C6) over more
+      keys than one chunk reads: a watch lists the keyedMemos memos of its store
+      — and the one that asked —, in key order, each once, under the database's
+      timeout.
+    name: recordsKeys
+    params: t *testing.T, s *suite
+  - doc: |-
+      declareOutbox declares a mailer: on a database its outbox is a table there
+      (ADR 0178 C7), elsewhere the spool's queue; in dev, with no relay, the
+      capture transport delivers.
+    name: declareOutbox
+    params: svc *app.Service, s *suite
+  - doc: letterAbout is the mail the outbox case sends about id.
+    name: letterAbout
+    params: id string
+    results: mail.Message
+  - doc: |-
+      outbox checks a mailer's outbox on the backend: a mail sent in a
+      transaction that rolls back never is delivered, one sent in a transaction
+      that commits is; on a database the outbox is its table.
+    name: outbox
+    params: t *testing.T, s *suite
 imports:
   app: github.com/kitsunium/sdk/framework/app
+  atomic: sync/atomic
   bytes: bytes
   clock: github.com/kitsunium/sdk/pkg/v1/clock
   context: context
@@ -295,6 +500,7 @@ imports:
   errs: github.com/kitsunium/sdk/pkg/v1/errs
   io: io
   json: encoding/json
+  mail: github.com/kitsunium/sdk/pkg/v1/app/mail
   slices: slices
   strconv: strconv
   strings: strings
@@ -307,6 +513,25 @@ package:
   name: storetest
   purpose: "Package storetest is the conformance suite of the framework's stores (ADR 0004): what a store does on every backend — in memory, in the data directory, on each database engine —, run by the framework's tests on memory, files and the framework's fake database, and by each engine module's tests on its engine."
 types:
+  - doc: exports counts the batches an OTLP sender was handed, by outcome.
+    fields:
+      - name: refused
+        type: atomic.Int64
+      - name: sent
+        type: atomic.Int64
+    kind: struct
+    methods:
+      - doc: "refuse is a collector that is down: every batch waits for the next try."
+        name: refuse
+        params: _ context.Context, _ app.OTLPBatch
+        recv: e *exports
+        results: error
+      - doc: accept is a collector that takes every batch.
+        name: accept
+        params: _ context.Context, _ app.OTLPBatch
+        recv: e *exports
+        results: error
+    name: exports
   - fields:
       - doc: Name names the backend in the subtests.
         name: Name
@@ -366,7 +591,102 @@ types:
           it; nil for the others, which run on the wall clock.
         name: clock
         type: "*clock.ManualClock"
+      - doc: |-
+          file is a queued command keyed by the document's ID, and filed what
+          it handled; delayed is a topic, onced one that publishes a key once
+          an hour, and later what their subscriptions heard — the queues'
+          cases' (declareQueues).
+        name: file
+        type: "*app.Command[doc, app.Empty]"
+      - doc: |-
+          reader is a query declared read-only (#1140): it reads a document,
+          or, given an N, tries to write it.
+        name: reader
+        type: "*app.Query[doc, doc]"
+      - name: delayed
+        type: "*app.Topic[doc]"
+      - name: onced
+        type: "*app.Topic[doc]"
+      - name: filed
+        type: "*heard"
+      - name: later
+        type: "*heard"
+      - doc: |-
+          memos is a store whose text a watch hears, timers one a workflow with
+          a timer runs over, and mailer a mailer — the cases of what ADR 0178
+          placed beside the stores (#998, durable.go, subsystems.go).
+        name: memos
+        type: "*app.Store[memo]"
+      - name: timers
+        type: "*app.Store[doc]"
+      - name: expiry
+        type: "*app.Workflow[doc, string]"
+      - name: mailer
+        type: "*app.Mailer"
+      - doc: listed is what the memos' watch heard and listed.
+        name: listed
+        type: "*listing"
+      - doc: |-
+          running is the case's product; name names its service, place is the
+          backend's options it runs on, and stopped says it was stopped.
+        name: running
+        type: "*app.App"
+      - name: name
+        type: string
+      - name: place
+        type: "[]app.AppOption"
+      - name: stopped
+        type: bool
     kind: struct
+    methods:
+      - doc: |-
+          backend is where the case's documents are kept: "memory", "file", or the
+          database's engine.
+        name: backend
+        recv: s *suite
+        results: string
+      - doc: onDatabase reports whether the case's stores are on a database.
+        name: onDatabase
+        recv: s *suite
+        results: bool
+      - doc: |-
+          again stops s's product and builds the case's service again, declared by
+          declare, on the same placement and the same clock: the product a restart
+          finds.
+        name: again
+        params: t *testing.T, declare func(*app.Service, *suite)
+        recv: s *suite
+        results: "*suite"
+      - doc: |-
+          otlpPlace is the case's placement with an OTLP export whose queues lie on
+          the database — a table per signal the framework's own migrations make
+          (#537) —, sent by send, an export a second on the app's clock.
+        name: otlpPlace
+        params: send func(context.Context, app.OTLPBatch) error
+        recv: s *suite
+        results: "[]app.AppOption"
+      - doc: |-
+          start starts the case's product, and stops it when the test ends unless
+          the case stopped it first.
+        name: start
+        params: t *testing.T
+        recv: s *suite
+      - doc: stop stops the case's product, once.
+        name: stop
+        params: t *testing.T
+        recv: s *suite
+      - doc: |-
+          settle writes the memo id and waits for its notice: one watch hears its
+          notices in the order they were queued, so whatever was queued before it
+          was heard.
+        name: settle
+        params: t *testing.T, id string
+        recv: s *suite
+      - doc: mailed reports whether the capture transport kept the mail about id.
+        name: mailed
+        params: id string
+        recv: s *suite
+        results: bool
     name: suite
   - doc: heard are the messages a subscription was delivered.
     fields:
@@ -381,13 +701,84 @@ types:
         name: add
         params: id string
         recv: h *heard
+      - doc: count is how many times id was delivered.
+        name: count
+        params: id string
+        recv: h *heard
+        results: int
       - doc: has reports whether id was delivered.
         name: has
         params: id string
         recv: h *heard
         results: bool
     name: heard
+  - doc: |-
+      memo is what the cases' watch hears: its text is a field a moderation
+      reads (app.Moderated).
+    fields:
+      - name: ID
+        type: string
+      - name: Text
+        type: string
+    kind: struct
+    methods:
+      - doc: key is the memo's key.
+        name: key
+        recv: m memo
+        results: string
+    name: memo
+  - doc: |-
+      listing is what the memos' watch heard, and the keys it listed when told
+      to.
+    fields:
+      - name: ""
+        role: embedded
+        type: sync.Mutex
+      - name: heard
+        type: "[]string"
+      - name: keys
+        type: "[]string"
+      - name: err
+        type: error
+    kind: struct
+    methods:
+      - doc: notice keeps the key a notice named.
+        name: notice
+        params: key string
+        recv: l *listing
+      - doc: has reports whether a notice named key.
+        name: has
+        params: key string
+        recv: l *listing
+        results: bool
+      - doc: |-
+          listed returns the keys the watch listed, and the failure that ended the
+          listing.
+        name: listed
+        recv: l *listing
+        results: "[]string, error"
+      - doc: |-
+          screen keeps the key a notice names; told of listKey, it lists the
+          store's keys first, and keeps the key once the listing is done.
+        name: screen
+        params: ctx context.Context, w app.Written
+        recv: l *listing
+        results: error
+    name: listing
 vars:
+  - grouped: true
+    items:
+      - doc: |-
+          copyArgs is the command line of a copy of the data directory into the
+          case's database.
+        name: copyArgs
+        value: "[]string{\"data\", \"copy\", \"--to\", \"database\"}"
+      - doc: |-
+          copiedMemos are the memos the data-copy case keeps in files, then
+          copies.
+        name: copiedMemos
+        value: "[]string{\"c1\", \"c2\"}"
+    name: copyArgs
   - grouped: true
     items:
       - doc: errRolled rolls a transaction back.
@@ -414,11 +805,43 @@ vars:
           		{"keys-are-bytes", keysAreBytes, false},
           		{"document-as-written", documentAsWritten, false},
           		{"transactions", transactions, false},
+          		{"transaction-options", transactionOptions, false},
           		{"held-publish", heldPublish, false},
           		{"hooks-after-the-commit", hooksAfterTheCommit, false},
           		{"revisions", revisions, false},
           		{"revisions-restore", revisionsRestore, false},
           		{"revisions-rollback", revisionsRollback, false},
+          		{"queued-command", queuedCommand, true},
+          		{"topic-later", topicLater, true},
+          		{"query-read-only", queryReadOnly, false},
+          		{"records-keys", recordsKeys, false},
+          		{"outbox", outbox, false},
+          		{"watch-catch-up", watchCatchUp, false},
+          		{"workflow-journal", workflowJournal, true},
+          		{"data-copy", dataCopy, false},
+          		{"otlp-tables", otlpTables, true},
+          	}
+      - doc: |-
+          declarations add, on a case's service, the nodes only that case reads:
+          the queues' cases a queued command and two more topics (#998).
+        name: declarations
+        value: |-
+          map[string]func(svc *app.Service, s *suite){
+          		"queued-command": declareQueues,
+          		"topic-later":    declareQueues,
+          		"query-read-only": func(svc *app.Service, s *suite) {
+          			s.reader = svc.Query("reader", func(ctx context.Context, d doc) (doc, error) {
+          				if d.N > 0 {
+          					return d, s.docs.Put(ctx, d)
+          				}
+          				return s.docs.Get(ctx, d.ID)
+          			}, app.ReadOnly())
+          		},
+          		"records-keys":     declareMemos,
+          		"outbox":           declareOutbox,
+          		"watch-catch-up":   declareMemoStore,
+          		"workflow-journal": declareTimers,
+          		"data-copy":        declareMemoStore,
           	}
       - doc: unorderedKeys are written out of order.
         name: unorderedKeys

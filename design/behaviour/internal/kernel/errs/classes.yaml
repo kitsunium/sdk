@@ -453,6 +453,7 @@ files:
       - (*Error).Unwrap
       - (*Error).HTTPStatus
       - (*Error).ExitCode
+      - (*Error).Params
       - HasCode
       - errCodeMatches
       - hasCodeInSingleUnwrap
@@ -925,6 +926,9 @@ types:
       - name: ExitCode
         recv: e *Error
         results: int
+      - name: Params
+        recv: e *Error
+        results: WrapParams
     name: Error
   - kind: named
     name: DefineOption

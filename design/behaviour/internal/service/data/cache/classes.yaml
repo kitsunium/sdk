@@ -11,6 +11,31 @@ constants:
         value: "2"
     name: minChainTiers
   - doc: |-
+      maxStripes caps MemoryConfig.Stripes: past it, the stripes cost more memory
+      and walk time (InvalidateTag, Expire) than any core count can win back.
+    items:
+      - name: maxStripes
+        type: int
+        value: "1024"
+    name: maxStripes
+  - doc: |-
+      defaultLeasePoll is the step a process waiting on another's lease reads the
+      store again at when the configuration says nothing: the file locker's own
+      poll, so waiting for a lease and waiting for its value keep one cadence.
+    items:
+      - name: defaultLeasePoll
+        type: time.Duration
+        value: 25 * time.Millisecond
+    name: defaultLeasePoll
+  - doc: |-
+      leasePrefix opens every lock name a fill is leased under, so a cache's
+      leases never share a name with another user of the same locker.
+    items:
+      - name: leasePrefix
+        type: string
+        value: "\"cache:\""
+    name: leasePrefix
+  - doc: |-
       initialIndexCapacity pre-sizes both index maps and each tag bucket. It is a
       hint, not a bound: a store with no tagged entry must not pay for a large
       allocation, and one with many grows past it in a handful of doublings.
@@ -40,33 +65,98 @@ files:
       - (*chainStore).InvalidateTag
       - (*chainStore).Load
       - (*chainStore).fillOnce
+      - (*chainStore).fillAndSet
       - tierFailure
     name: chain.go
+  - decls:
+      - (*chainStore).Expire
+      - (*chainStore).FetchMany
+      - fetchPass
+      - (*chainStore).promoteMany
+      - setBatch
+      - (*chainStore).SetMany
+      - (*chainStore).LoadRefreshing
+      - (*chainStore).claimRefresh
+      - (*chainStore).refresh
+      - (*chainStore).releaseRefresh
+      - distinct
+    name: chain_bulk.go
   - decls:
       - ChainConfig
     name: chain_config.go
   - decls:
+      - maxStripes
       - MemoryConfig
       - MemoryConfig.validate
+      - misconfigured
+      - MemoryConfig.stripeCount
       - MemoryConfig.clockOrSystem
+      - shareOf
+      - shareOf64
     name: config.go
   - decls: []
     name: doc.go
   - decls:
+      - defaultLeasePoll
+      - leasePrefix
+      - leased
+      - leased.run
+      - leased.read
+      - leased.holding
+      - leased.wait
+      - waiterOf
+      - pollOrDefault
+      - (*memoryStore).LoadLeased
+      - (*chainStore).LoadLeased
+      - leaseFailure
+    name: lease.go
+  - decls:
       - memoryStore
+      - memoryStripe
       - NewMemory
-      - (*memoryStore).onEvict
-      - (*memoryStore).drainEvicted
+      - NewWeighedMemory
+      - newMemory
+      - (*memoryStore).newStripe
+      - (*memoryStore).absentWeight
+      - (*memoryStore).weightOf
+      - (*memoryStore).stripeOf
+      - maphashString
+      - (*memoryStripe).onEvict
+      - (*memoryStripe).drainEvicted
+      - (*memoryStripe).fetch
       - (*memoryStore).Fetch
       - (*memoryStore).FetchEntry
+      - (*memoryStore).entryOf
       - (*memoryStore).remaining
       - (*memoryStore).fetchRecord
       - (*memoryStore).Set
+      - (*memoryStore).validate
+      - (*memoryStore).store
       - (*memoryStore).Delete
       - (*memoryStore).InvalidateTag
+      - (*memoryStripe).invalidate
+      - (*memoryStore).Expire
+      - (*memoryStripe).expire
       - (*memoryStore).Load
       - (*memoryStore).fillOnce
+      - (*memoryStore).fillAndStore
     name: memory.go
+  - decls:
+      - (*memoryStore).FetchMany
+      - (*memoryStripe).fetchInto
+      - (*memoryStore).groupByStripe
+      - (*memoryStore).SetMany
+      - (*memoryStore).setInto
+      - (*memoryStore).stripeIndex
+      - remainingOf
+    name: memory_bulk.go
+  - decls:
+      - (*memoryStore).LoadRefreshing
+      - (*memoryStripe).claimRefresh
+      - (*memoryStore).refresh
+      - (*memoryStripe).releaseRefresh
+      - refusedWindow
+    name: memory_refresh.go
   - decls:
       - record
     name: record.go
@@ -116,10 +206,84 @@ functions:
     name: tierFailure
     params: position int, operation, key string, cause error
     results: error
+  - doc: |-
+      fetchPass is one tier's pass over the missing keys: the entries it holds,
+      and the keys it does not.
+    name: fetchPass
+    params: ctx context.Context, position int, level tier[V], missing []string
+    results: hits map[string]corecache.EntryValue[V], still []string, err error
+    typeParams: V any
+  - doc: |-
+      setBatch stores entries into store — through its BulkSetter when it has
+      one, one Set per entry otherwise — and returns the failures by key.
+    name: setBatch
+    params: ctx context.Context, store corecache.Store[V], entries map[string]corecache.EntryValue[V]
+    results: map[string]error
+    typeParams: V any
+  - doc: distinct returns keys without duplicates, in their first order.
+    name: distinct
+    params: keys []string
+    results: "[]string"
+  - doc: misconfigured builds the CACHE_MISCONFIGURED refusal naming option.
+    name: misconfigured
+    params: option string, fields ...kerrs.FieldValue
+    results: error
+  - doc: |-
+      shareOf returns stripe at's share of bound over count stripes, the
+      remainder to the first stripes; 0 stays 0 (no bound).
+    name: shareOf
+    params: bound, count, at int
+    results: int
+  - doc: shareOf64 is shareOf for a byte bound.
+    name: shareOf64
+    params: bound int64, count, at int
+    results: int64
+  - doc: |-
+      waiterOf returns what clk waits with: itself when it can wait, the system
+      clock when it only reads time (a clock.CoarseClock).
+    name: waiterOf
+    params: clk clock.Clock
+    results: clock.Waiter
+  - doc: "pollOrDefault resolves a configured lease poll: zero is defaultLeasePoll."
+    name: pollOrDefault
+    params: poll time.Duration
+    results: time.Duration
+  - doc: |-
+      leaseFailure labels a locker's error with the operation and the key, the
+      rule tierFailure follows: an untyped cause stays on the chain so errors.Is
+      still finds it; a typed one, which wrapping would let take over the code,
+      travels as fields.
+    name: leaseFailure
+    params: operation, key string, cause error
+    results: error
   - name: NewMemory
     params: cfg MemoryConfig
     results: store corecache.Store[V], err error
     typeParams: V any
+  - name: NewWeighedMemory
+    params: cfg MemoryConfig, weigh func(value V) int64
+    results: store corecache.Store[V], err error
+    typeParams: V any
+  - doc: newMemory builds the store; weigh is nil when no byte bound applies.
+    name: newMemory
+    params: cfg MemoryConfig, weigh func(value V) int64
+    results: store corecache.Store[V], err error
+    typeParams: V any
+  - doc: maphashString hashes key with the store's seed.
+    name: maphashString
+    params: s *memoryStore[V], key string
+    results: uint64
+    typeParams: V any
+  - doc: |-
+      remainingOf is the entry's remaining lifetime at now: 0 for an entry with
+      no deadline, and never negative.
+    name: remainingOf
+    params: expireAt, now time.Time
+    results: time.Duration
+  - doc: refusedWindow is the CACHE_MISCONFIGURED refusal of a refresh window.
+    name: refusedWindow
+    params: before time.Duration
+    results: error
   - doc: |-
       validateEntry rejects an entry no store can represent and returns the TTL to
       hand the underlying primitive (0 = no deadline).
@@ -174,12 +338,15 @@ imports:
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   corecache: github.com/kitsunium/sdk/internal/core/data/cache
+  corelock: github.com/kitsunium/sdk/internal/core/app/lock
   errors: errors
   kcache: github.com/kitsunium/sdk/internal/kernel/collections/cache
   kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  maphash: hash/maphash
   maps: maps
   singleflight: github.com/kitsunium/sdk/internal/kernel/concur/singleflight
   slices: slices
+  strconv: strconv
   sync: sync
   time: time
 package:
@@ -242,6 +409,17 @@ types:
       - doc: writing counts the writes announced and not finished.
         name: writing
         type: atomic.Int64
+      - doc: refreshMu guards refreshing, the keys a background refresh runs for.
+        name: refreshMu
+        type: sync.Mutex
+      - name: refreshing
+        type: map[string]struct{}
+      - doc: waiter is what LoadLeased waits on between two reads (#830).
+        name: waiter
+        type: clock.Waiter
+      - doc: leasePoll is LoadLeased's step while another process holds the lease.
+        name: leasePoll
+        type: time.Duration
     kind: struct
     methods:
       - doc: Fetch reads near-to-far and promotes a far hit into every nearer tier.
@@ -319,6 +497,84 @@ types:
         params: ctx context.Context, key string, fill corecache.Fill[V]
         recv: c *chainStore[V]
         results: value V, err error
+      - doc: |-
+          fillAndSet runs fill and writes its entry through every tier. A failed
+          fill stores nothing, in any tier.
+        name: fillAndSet
+        params: ctx context.Context, key string, fill corecache.Fill[V]
+        recv: c *chainStore[V]
+        results: value V, err error
+      - doc: |-
+          Expire sweeps every tier that implements [corecache.Expirer], far to near,
+          and reports the total of removals — an entry expired in two tiers counts
+          twice, as InvalidateTag counts it (#1059). A tier without the sibling is
+          skipped: its expiry stays lazy. Every tier is attempted even after a
+          failure.
+        name: Expire
+        params: ctx context.Context
+        recv: c *chainStore[V]
+        results: removed int, err error
+      - doc: |-
+          FetchMany reads near to far with the missing set shrinking (#840): each
+          tier gets ONE pass, over the keys no nearer tier held, and the hits of a far
+          tier are promoted into every nearer one as a batch, under the same write
+          guard a single promotion takes (#460). A broken tier stops the walk, as it
+          stops Fetch's.
+        name: FetchMany
+        params: ctx context.Context, keys []string
+        recv: c *chainStore[V]
+        results: map[string]V, error
+      - doc: |-
+          promoteMany writes a far tier's hits into every nearer tier, as promote
+          writes one: nothing when a write is running or began since seen was read.
+        name: promoteMany
+        params: ctx context.Context, hits map[string]corecache.EntryValue[V], found int, seen uint64
+        recv: c *chainStore[V]
+      - doc: |-
+          SetMany writes every entry far to near (#840). Every entry is validated
+          first: one any store would refuse fails the call and nothing is written. A
+          tier's failure stops the walk, as Set's does, and the nearer tiers keep
+          what they had.
+        name: SetMany
+        params: ctx context.Context, entries map[string]corecache.EntryValue[V]
+        recv: c *chainStore[V]
+        results: error
+      - doc: |-
+          LoadRefreshing is Load with refresh-ahead (#838): a hit whose remaining
+          lifetime is below before is returned at once and ONE background fill per
+          key writes through every tier. A chain keeps no negative entry — a tier has
+          no way to store one — so a fill answering corecache.Absent is returned and
+          nothing is stored.
+        name: LoadRefreshing
+        params: ctx context.Context, key string, fill corecache.Fill[V], before time.Duration
+        recv: c *chainStore[V]
+        results: value V, err error
+      - doc: |-
+          claimRefresh records that a refresh of key is starting and reports whether
+          none was running.
+        name: claimRefresh
+        params: key string
+        recv: c *chainStore[V]
+        results: bool
+      - doc: |-
+          refresh is the chain's background fill: bounded by the entry's remaining
+          lifetime, written through every tier as Set writes, nothing stored on a
+          failure.
+        name: refresh
+        params: ctx context.Context, key string, fill corecache.Fill[V], left time.Duration
+        recv: c *chainStore[V]
+      - doc: releaseRefresh forgets the running refresh of key.
+        name: releaseRefresh
+        params: key string
+        recv: c *chainStore[V]
+      - doc: |-
+          LoadLeased is Load with a cross-process lease (#830): a process waiting on
+          another's lease reads the chain again every step, so a tier both reach
+          answers it with the holder's value. See [corecache.Leaser].
+        name: LoadLeased
+        params: ctx context.Context, key string, fill corecache.Fill[V], locker corelock.Locker
+        recv: c *chainStore[V]
+        results: value V, err error
     name: chainStore
     typeParams: V any
   - fields:
@@ -333,6 +589,18 @@ types:
           that is completely invisible. Wire it.
         name: OnPromoteError
         type: func(key string, err error)
+      - doc: |-
+          Clock is what LoadLeased waits on between two reads while another
+          process holds a key's lease. nil means clock.System. Nothing else in
+          the chain reads time: every tier keeps its own clock.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          LeasePoll is how often LoadLeased reads the chain again while another
+          process holds a key's lease. 0 means 25ms, the file locker's own poll;
+          negative is refused.
+        name: LeasePoll
+        type: time.Duration
     kind: struct
     name: ChainConfig
   - fields:
@@ -349,10 +617,41 @@ types:
         type: time.Duration
       - doc: |-
           Clock is the time source, injectable so TTL is testable. nil means
-          clock.System. Only the reading half of the port is used — a cache reads
-          time, it never waits for it (ADR 0039).
+          clock.System. Only the reading half of the port is required — a cache
+          reads time (ADR 0039); LoadLeased alone waits, on Clock when it can wait
+          (clock.System, a clock.ManualClock) and on clock.System otherwise. A
+          clock.CoarseClock makes a TTL'd hit's clock read an atomic load, and
+          every expiry late by up to its resolution.
         name: Clock
         type: clock.Clock
+      - doc: |-
+          Stripes splits the store into independent stripes, each with its own
+          lock, its own share of MaxEntries and MaxBytes and its own tag index, so
+          goroutines working on keys of different stripes never wait for one
+          another. 0 means 1, one store as before; above MaxEntries (or a positive
+          MaxBytes) it is held there, and above 1024 at 1024. Negative is refused.
+        name: Stripes
+        type: int
+      - doc: |-
+          MaxBytes bounds the summed weight of the live values, as measured by the
+          weigher handed to [NewWeighedMemory]; entries are evicted above it as
+          above MaxEntries, both bounds applying. 0 means no byte bound. An entry
+          heavier than one stripe's share of it is refused with
+          CACHE_ENTRY_REJECTED at Set. Negative is refused, and so is a positive
+          MaxBytes given to [NewMemory], which has no weigher to measure it with.
+        name: MaxBytes
+        type: int64
+      - doc: |-
+          Policy is the eviction policy: least recently used (the zero), or
+          S3-FIFO, which keeps a hot set through a scan.
+        name: Policy
+        type: kcache.Policy
+      - doc: |-
+          LeasePoll is how often LoadLeased reads the store again while another
+          process holds a key's lease. 0 means 25ms, the file locker's own poll;
+          negative is refused.
+        name: LeasePoll
+        type: time.Duration
     kind: struct
     methods:
       - doc: |-
@@ -361,68 +660,161 @@ types:
         name: validate
         recv: c MemoryConfig
         results: error
+      - doc: |-
+          stripeCount resolves Stripes: 0 is 1, and the count never exceeds the
+          entries nor the bytes — every stripe holds at least one of each bound, a
+          zero share reading as no bound — nor maxStripes.
+        name: stripeCount
+        recv: c MemoryConfig
+        results: int
       - doc: clockOrSystem resolves the configured time source.
         name: clockOrSystem
         recv: c MemoryConfig
         results: clock.Clock
     name: MemoryConfig
   - doc: |-
-      memoryStore is the in-process store: the kernel LRU+TTL primitive, a tag
-      index beside it, and a singleflight group in front of the fill path.
+      leased is one LoadLeased miss, after the in-process collapse: what to read,
+      how to fill, and how to wait between two reads (#830).
+    fields:
+      - name: locker
+        type: corelock.Locker
+      - name: waiter
+        type: clock.Waiter
+      - name: poll
+        type: time.Duration
+      - doc: |-
+          lookup reads the store: found is a hit, err a hit's own answer (a
+          negative entry) or a read that failed.
+        name: lookup
+        type: func(ctx context.Context) (value V, found bool, err error)
+      - doc: fill runs the caller's fill and stores what it answered.
+        name: fill
+        type: func(ctx context.Context) (value V, err error)
+    kind: struct
+    methods:
+      - doc: |-
+          run takes the key's lease, or waits for whoever holds it.
 
-      # One mutex, taken for reads too
+          A process that finds the lease held fills nothing: it waits one step, reads
+          the store again — the holder's value may have landed in a tier both share —
+          and tries the lease once more, which succeeds only once the holder released
+          it, died, or let an expiring lease lapse. Whoever takes the lease reads
+          again before filling, so a value stored just before the release is never
+          filled twice.
+        name: run
+        params: ctx context.Context, key string
+        recv: l leased[V]
+        results: value V, err error
+      - doc: read is lookup with its results ordered for run's test.
+        name: read
+        params: ctx context.Context
+        recv: l leased[V]
+        results: found bool, value V, err error
+      - doc: |-
+          holding runs under the lease: one more read, then the fill. The lease is
+          released whatever happens — a failed fill, a panic, a ctx already ended —
+          on a context that cannot be cancelled, since a lease left behind keeps
+          every other process waiting until it dies.
+        name: holding
+        params: ctx context.Context, key string, lease corelock.Lease
+        recv: l leased[V]
+        results: value V, err error
+      - doc: wait blocks one poll step on the waiter, or until ctx ends.
+        name: wait
+        params: ctx context.Context
+        recv: l leased[V]
+        results: error
+    name: leased
+    typeParams: V any
+  - doc: |-
+      memoryStore is the in-process store: one or more stripes, each the kernel
+      primitive and a tag index under a mutex of its own, and a singleflight group
+      in front of the fill path.
 
-      Everything is under a single sync.Mutex, and Fetch takes it exclusively.
-      That is not an oversight: the primitive's own Fetch already takes a WRITE
-      lock, because a hit promotes the entry and moves counters, so there was
-      never a shared-read path to lose. Serialising the tag index on the SAME lock
-      is what makes the index and the entries agree at every observable moment —
-      with two locks, a key would be briefly live but unindexed, and an
+      # One mutex per stripe, taken for reads too
+
+      A key lives in exactly one stripe, picked by a seeded hash of the key, and
+      everything that stripe holds is under its own sync.Mutex, which Fetch takes
+      exclusively. That is not an oversight: the primitive's own Fetch already
+      takes a WRITE lock, because a hit moves the entry and counters, so there was
+      never a shared-read path to lose. Serialising the stripe's tag index on the
+      SAME lock is what makes the index and the entries agree at every observable
+      moment — with two locks, a key would be briefly live but unindexed, and an
       InvalidateTag crossing that window would report success while leaving the
-      entry fetchable.
+      entry fetchable. The argument holds per stripe because a key is in one.
+      Operations on keys of different stripes never wait for each other (#808).
 
       # onEvict must never lock
 
       The primitive calls OnEvict after releasing its own lock, but still on the
       caller's goroutine — the goroutine that is inside one of the methods below,
-      holding s.mu. A callback that took s.mu would deadlock outright, sync.Mutex
-      not being reentrant. So onEvict only APPENDS to s.evicted, a field that is
-      by construction reachable solely while s.mu is held, and the surrounding
-      method drains it. The invariant is short and must stay that way: no path
-      into the primitive runs without s.mu, and onEvict takes no lock.
+      holding the stripe's mutex. A callback that took it would deadlock outright,
+      sync.Mutex not being reentrant. So onEvict only APPENDS to the stripe's
+      evicted, a field that is by construction reachable solely while that mutex
+      is held, and the surrounding method drains it. The invariant is short and
+      must stay that way: no path into a primitive runs without its stripe's
+      mutex, and onEvict takes no lock.
     fields:
-      - name: mu
-        type: sync.Mutex
-      - name: lru
-        type: "*kcache.Cache[string, record[V]]"
-      - name: tags
-        type: "*tagIndex"
+      - name: stripes
+        type: "[]*memoryStripe[V]"
+      - doc: seed keys the hash that picks a key's stripe.
+        name: seed
+        type: maphash.Seed
       - name: clk
         type: clock.Clock
       - doc: ": defaultTTL is applied to an entry whose own TTL is zero."
         name: defaultTTL
         type: time.Duration
       - doc: |-
-          : evicted collects the keys the primitive dropped during the call in
-          : progress. Guarded by mu; see the type comment.
-        name: evicted
-        type: "[]string"
+          weigh measures a value against MaxBytes; nil when the store bounds no
+          bytes.
+        name: weigh
+        type: func(value V) int64
+      - doc: "maxWeight is one stripe's share of MaxBytes: an entry heavier is refused."
+        name: maxWeight
+        type: int64
       - doc: ": group collapses concurrent Load misses on one key into one fill."
         name: group
         type: singleflight.Group[string, V]
+      - doc: |-
+          waiter is what LoadLeased waits on between two reads (#830): clk when
+          it can wait, the system clock otherwise.
+        name: waiter
+        type: clock.Waiter
+      - doc: leasePoll is LoadLeased's step while another process holds the lease.
+        name: leasePoll
+        type: time.Duration
     kind: struct
     methods:
       - doc: |-
-          onEvict records a key the primitive dropped by capacity or expiry. It takes
-          NO lock — see the memoryStore type comment.
-        name: onEvict
-        params: key string, _ record[V]
+          LoadLeased is Load with a cross-process lease (#830). See
+          [corecache.Leaser]: on a memory store alone, another process never sees
+          this one's value, so the lease only takes turns.
+        name: LoadLeased
+        params: ctx context.Context, key string, fill corecache.Fill[V], locker corelock.Locker
         recv: s *memoryStore[V]
+        results: value V, err error
+      - doc: newStripe builds one stripe over a primitive bounded by entries and bytes.
+        name: newStripe
+        params: cfg MemoryConfig, entries int, bytes int64
+        recv: s *memoryStore[V]
+        results: "*memoryStripe[V]"
       - doc: |-
-          drainEvicted unlinks every key the primitive just dropped from the tag
-          index. Caller holds mu.
-        name: drainEvicted
+          absentWeight is what a negative entry counts against MaxBytes: one unit,
+          the least that still counts it, when the store bounds bytes.
+        name: absentWeight
         recv: s *memoryStore[V]
+        results: int64
+      - doc: "weightOf is the primitive's WeightOf: the weight Set measured, once."
+        name: weightOf
+        params: _ string, rec record[V]
+        recv: s *memoryStore[V]
+        results: int64
+      - doc: stripeOf returns the stripe key lives in.
+        name: stripeOf
+        params: key string
+        recv: s *memoryStore[V]
+        results: "*memoryStripe[V]"
       - doc: |-
           Fetch returns the value under key. It MUTATES the store — recency, counters,
           lazy expiry — which is why the verb is Fetch.
@@ -442,6 +834,11 @@ types:
         params: _ context.Context, key string
         recv: s *memoryStore[V]
         results: entry corecache.EntryValue[V], found bool, err error
+      - doc: entryOf turns a record into the entry a caller may hand back to Set.
+        name: entryOf
+        params: rec record[V]
+        recv: s *memoryStore[V]
+        results: corecache.EntryValue[V]
       - doc: |-
           remaining converts a stored deadline into a TTL a caller can hand back to
           Set. Caller holds nothing — it only reads the clock.
@@ -449,18 +846,37 @@ types:
         params: rec record[V]
         recv: s *memoryStore[V]
         results: time.Duration
-      - doc: fetchRecord is the one place that touches the primitive on a read path.
+      - doc: |-
+          fetchRecord reads one key under its stripe's lock. The lock is released
+          by hand rather than deferred: this is every read's path, and nothing
+          between the two calls can panic short of a broken primitive.
         name: fetchRecord
         params: key string
         recv: s *memoryStore[V]
         results: rec record[V], found bool
       - doc: |-
           Set stores entry under key. An entry the store cannot represent is REFUSED
-          rather than reinterpreted — see [validateEntry].
+          rather than reinterpreted — see [validateEntry] — and so is one heavier than
+          a stripe's share of MaxBytes.
         name: Set
         params: _ context.Context, key string, entry corecache.EntryValue[V]
         recv: s *memoryStore[V]
         results: error
+      - doc: |-
+          validate is validateEntry plus the byte bound, and returns the entry's
+          weight: an entry heavier than one stripe's share of MaxBytes would evict
+          every other entry of its stripe and still overrun the bound, so it is
+          refused. The weigher runs once per write, here.
+        name: validate
+        params: key string, entry corecache.EntryValue[V]
+        recv: s *memoryStore[V]
+        results: weight int64, err error
+      - doc: |-
+          store writes rec under key into stripe, its deadline from ttl. Caller holds
+          stripe.mu and has validated the entry; rec.tags is the caller's slice.
+        name: store
+        params: stripe *memoryStripe[V], key string, rec record[V], ttl time.Duration
+        recv: s *memoryStore[V]
       - doc: "Delete removes key. Idempotent: a key that names nothing reports nil."
         name: Delete
         params: _ context.Context, key string
@@ -472,6 +888,7 @@ types:
           The cost is O(k) in the entries carrying the tag plus O(T) per entry in that
           entry's own tags — NOT O(N) in the store. See `tagindex.go` for why the
           reverse index exists and `BENCH.md` for the measurement at two store sizes.
+          A striped store walks every stripe, one lock at a time.
 
           removed counts entries dropped from the store. An entry whose TTL had passed
           but which nothing had yet touched is counted: expiry is lazy, so such an
@@ -481,9 +898,20 @@ types:
         recv: s *memoryStore[V]
         results: removed int, err error
       - doc: |-
+          Expire removes every entry whose deadline has passed, negative entries
+          included, from every stripe, one lock at a time, and reports how many
+          (#1059). The store starts no goroutine: a caller schedules it on its own
+          ticker or scheduler. The tag index is drained of each removed key as
+          eviction drains it.
+        name: Expire
+        params: _ context.Context
+        recv: s *memoryStore[V]
+        results: removed int, err error
+      - doc: |-
           Load returns the value for key, running fill at most once across all
           concurrent callers of this key IN THIS PROCESS. It does NOT coordinate
-          across replicas — see [corecache.Loader].
+          across replicas — see [corecache.Loader]. A negative entry (#838) answers
+          with the error its fill marked [corecache.Absent], and no fill runs.
         name: Load
         params: ctx context.Context, key string, fill corecache.Fill[V]
         recv: s *memoryStore[V]
@@ -493,11 +921,133 @@ types:
         params: ctx context.Context, key string, fill corecache.Fill[V]
         recv: s *memoryStore[V]
         results: value V, err error
+      - doc: |-
+          fillAndStore runs fill and stores what it answered: a value, or — for a
+          failure marked corecache.Absent with a positive lifetime — a negative
+          entry. Any other failure stores NOTHING: caching a failure turns one bad
+          minute at the origin into a full TTL of confident wrong answers.
+        name: fillAndStore
+        params: ctx context.Context, key string, fill corecache.Fill[V]
+        recv: s *memoryStore[V]
+        results: value V, err error
+      - doc: |-
+          FetchMany returns the values of the keys the store holds (#840): the keys
+          are grouped by stripe and each stripe is locked once for all of its keys,
+          where N Fetches lock N times. It mutates the store as Fetch does; a
+          negative entry is a miss; a duplicate key is read once.
+        name: FetchMany
+        params: _ context.Context, keys []string
+        recv: s *memoryStore[V]
+        results: map[string]V, error
+      - doc: |-
+          groupByStripe splits keys by the stripe each lands in, indexed like
+          s.stripes.
+        name: groupByStripe
+        params: keys []string
+        recv: s *memoryStore[V]
+        results: "[][]string"
+      - doc: |-
+          SetMany stores every entry under its key (#840). Every entry is validated
+          first: one the store refuses fails the call and stores nothing. Each stripe
+          is then locked once for all of its entries.
+        name: SetMany
+        params: _ context.Context, entries map[string]corecache.EntryValue[V]
+        recv: s *memoryStore[V]
+        results: error
+      - doc: setInto stores keys' entries into stripe under one acquisition of its lock.
+        name: setInto
+        params: stripe *memoryStripe[V], keys []string, entries map[string]corecache.EntryValue[V], weights map[string]int64
+        recv: s *memoryStore[V]
+      - doc: stripeIndex returns the index of the stripe key lands in.
+        name: stripeIndex
+        params: key string
+        recv: s *memoryStore[V]
+        results: int
+      - doc: |-
+          LoadRefreshing is Load with refresh-ahead (#838): a hit whose remaining
+          lifetime is below before is returned at once, and ONE background fill per
+          key replaces it while it is still valid. See [corecache.Refresher].
+        name: LoadRefreshing
+        params: ctx context.Context, key string, fill corecache.Fill[V], before time.Duration
+        recv: s *memoryStore[V]
+        results: value V, err error
+      - doc: |-
+          refresh is the background fill: on the caller's context values without its
+          cancellation, bounded by the entry's remaining lifetime, its answer stored
+          as Load stores one. A failure that is not an answer stores nothing: the old
+          entry is served until it expires.
+        name: refresh
+        params: ctx context.Context, stripe *memoryStripe[V], key string, fill corecache.Fill[V], left time.Duration
+        recv: s *memoryStore[V]
     name: memoryStore
+    typeParams: V any
+  - doc: "memoryStripe is one stripe: a primitive, its tag index, and their mutex."
+    fields:
+      - name: mu
+        type: sync.Mutex
+      - name: lru
+        type: "*kcache.Cache[string, record[V]]"
+      - name: tags
+        type: "*tagIndex"
+      - doc: |-
+          : evicted collects the keys the primitive dropped during the call in
+          : progress. Guarded by mu; see the memoryStore type comment.
+        name: evicted
+        type: "[]string"
+      - doc: |-
+          : refreshing holds the keys a background refresh is running for (#838).
+          : Guarded by mu.
+        name: refreshing
+        type: map[string]struct{}
+    kind: struct
+    methods:
+      - doc: |-
+          onEvict records a key the primitive dropped by capacity or expiry. It takes
+          NO lock — see the memoryStore type comment.
+        name: onEvict
+        params: key string, _ record[V]
+        recv: m *memoryStripe[V]
+      - doc: |-
+          drainEvicted unlinks every key the primitive just dropped from the tag
+          index. Caller holds mu.
+        name: drainEvicted
+        recv: m *memoryStripe[V]
+      - doc: fetch is the one place a stripe's primitive is read. Caller holds mu.
+        name: fetch
+        params: key string
+        recv: m *memoryStripe[V]
+        results: rec record[V], found bool
+      - doc: invalidate drops the stripe's keys carrying tag and reports how many.
+        name: invalidate
+        params: tag string
+        recv: m *memoryStripe[V]
+        results: int
+      - doc: expire sweeps one stripe.
+        name: expire
+        recv: m *memoryStripe[V]
+        results: int
+      - doc: |-
+          fetchInto reads keys under one acquisition of the stripe's lock, adding each
+          live value to found.
+        name: fetchInto
+        params: found map[string]V, keys []string
+        recv: m *memoryStripe[V]
+      - doc: |-
+          claimRefresh records that a refresh of key is starting and reports whether
+          none was running. Caller holds mu.
+        name: claimRefresh
+        params: key string
+        recv: m *memoryStripe[V]
+        results: bool
+      - doc: releaseRefresh forgets the running refresh of key.
+        name: releaseRefresh
+        params: key string
+        recv: m *memoryStripe[V]
+    name: memoryStripe
     typeParams: V any
   - doc: |-
       record is the value the kernel primitive holds: the caller's payload plus the
-      two things the primitive has no concept of.
+      things the primitive has no concept of.
 
       expireAt is duplicated here even though the primitive tracks its own TTL,
       because FetchEntry must report the REMAINING lifetime and the primitive does
@@ -508,6 +1058,10 @@ types:
       tags is the SAME slice the tag index owns, not a copy: one slice means the
       entry and its index entry can never disagree, and the caller's own slice
       never reaches in.
+
+      absent is non-nil for a NEGATIVE entry (#838): a fill answered with
+      corecache.Absent, and the store keeps that answer instead of a value. Fetch
+      reports it as a miss; Load returns it without calling a fill.
     fields:
       - name: value
         type: V
@@ -515,6 +1069,13 @@ types:
         type: time.Time
       - name: tags
         type: "[]string"
+      - name: absent
+        type: error
+      - doc: |-
+          weight is what the record counts against MaxBytes, measured once at
+          Set; 0 when the store bounds no bytes.
+        name: weight
+        type: int64
     kind: struct
     name: record
     typeParams: V any
@@ -640,5 +1201,35 @@ vars:
         value: (*chainStore[struct{}])(nil)
       - name: _
         type: corecache.Loader[struct{}]
+        value: (*chainStore[struct{}])(nil)
+      - name: _
+        type: corecache.Expirer
+        value: (*memoryStore[struct{}])(nil)
+      - name: _
+        type: corecache.BulkFetcher[struct{}]
+        value: (*memoryStore[struct{}])(nil)
+      - name: _
+        type: corecache.BulkSetter[struct{}]
+        value: (*memoryStore[struct{}])(nil)
+      - name: _
+        type: corecache.Refresher[struct{}]
+        value: (*memoryStore[struct{}])(nil)
+      - name: _
+        type: corecache.Expirer
+        value: (*chainStore[struct{}])(nil)
+      - name: _
+        type: corecache.BulkFetcher[struct{}]
+        value: (*chainStore[struct{}])(nil)
+      - name: _
+        type: corecache.BulkSetter[struct{}]
+        value: (*chainStore[struct{}])(nil)
+      - name: _
+        type: corecache.Refresher[struct{}]
+        value: (*chainStore[struct{}])(nil)
+      - name: _
+        type: corecache.Leaser[struct{}]
+        value: (*memoryStore[struct{}])(nil)
+      - name: _
+        type: corecache.Leaser[struct{}]
         value: (*chainStore[struct{}])(nil)
     name: _

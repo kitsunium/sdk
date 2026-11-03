@@ -12,6 +12,7 @@ import (
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	svcsql "github.com/kitsunium/sdk/internal/service/data/sql"
 )
 
 // uniqueKeysPerStatement bounds how many unique keys one unique check asks
@@ -78,6 +79,8 @@ type sqlPrepared struct {
 	raw json.RawMessage
 	// rows are its index rows, in declaration order.
 	rows []indexRow
+	// ifRev is the revision a ReplaceIf requires of the stored row.
+	ifRev int64
 }
 
 // Put stores v under its key, creating it or replacing whatever was there.
@@ -162,19 +165,16 @@ func (s *SQLStore[T]) store(ctx context.Context, v T, mode writeMode, stamp core
 		//: nothing changed.
 		return err
 	}
-	err = s.run(ctx, s.several(), func(txCtx context.Context, ex coresql.Executor) error {
-		existed, old, writeErr := s.writeDocument(txCtx, ex, p, mode)
-		//: the document's rows, replacing its previous ones, once its own row
-		//: is written; a refusal or a failure rolls the write back.
-		if writeErr == nil {
-			writeErr = s.fileIndexes(txCtx, ex, p, existed)
-		}
-		//: its versions, in the same transaction, once nothing refused it.
-		if writeErr == nil {
-			writeErr = s.keepVersions(txCtx, ex, &storedWrite{meta: stamp.Meta, old: old, raw: p.raw, key: p.key, existed: existed, inPlace: stamp.InPlace})
-		}
+	//: written the way mode asks, then announced.
+	return s.write(ctx, p, mode, stamp)
+}
+
+// write writes a prepared document the way mode asks — its row, its index
+// rows, its versions, in one transaction or savepoint — and announces it.
+func (s *SQLStore[T]) write(ctx context.Context, p *sqlPrepared, mode writeMode, stamp coredocstore.StampValue) error {
+	err := s.run(ctx, s.several(), func(txCtx context.Context, ex coresql.Executor) error {
 		//: nil, DocumentExists, DocumentNotFound, a failure, or a collision.
-		return writeErr
+		return s.writeIn(txCtx, ex, p, mode, stamp)
 	})
 	//: nothing changed.
 	if err != nil {
@@ -184,6 +184,25 @@ func (s *SQLStore[T]) store(ctx context.Context, v T, mode writeMode, stamp core
 	s.announce(ctx, &s.onWrite, p.key)
 	//: stored.
 	return nil
+}
+
+// writeIn sends one write's statements on ex, inside the transaction or
+// savepoint the caller runs: the document's row, then its index rows,
+// replacing its previous ones, then its versions — each once nothing before
+// it refused the write.
+func (s *SQLStore[T]) writeIn(ctx context.Context, ex coresql.Executor, p *sqlPrepared, mode writeMode, stamp coredocstore.StampValue) error {
+	existed, old, writeErr := s.writeDocument(ctx, ex, p, mode)
+	//: the document's rows, replacing its previous ones, once its own row
+	//: is written; a refusal or a failure rolls the write back.
+	if writeErr == nil {
+		writeErr = s.fileIndexes(ctx, ex, p, existed)
+	}
+	//: its versions, in the same transaction, once nothing refused it.
+	if writeErr == nil {
+		writeErr = s.keepVersions(ctx, ex, &storedWrite{meta: stamp.Meta, old: old, raw: p.raw, key: p.key, existed: existed, inPlace: stamp.InPlace})
+	}
+	//: nil, DocumentExists, DocumentNotFound, a failure, or a collision.
+	return writeErr
 }
 
 // run runs a write's statements where they belong.
@@ -328,6 +347,16 @@ func (s *SQLStore[T]) writeDocument(
 	case insertOnly:
 		//: never an existing document.
 		return false, nil, s.insertRow(ctx, ex, p)
+	//: replace only, on the revision the caller read.
+	case replaceOnRevision:
+		//: a store that keeps versions reads what it replaces first.
+		if s.keep > 0 {
+			old, err = s.lockedReplaceIf(ctx, ex, p)
+			//: a replacement, and what it replaced.
+			return true, old, err
+		}
+		//: the comparison and the write, one statement.
+		return true, nil, s.replaceOnRevision(ctx, ex, p)
 	//: replace only.
 	default:
 		//: a store that keeps versions reads what it replaces first.
@@ -575,13 +604,12 @@ func (s *SQLStore[T]) fileIndexes(ctx context.Context, ex coresql.Executor, p *s
 			return s.failed("delete a document's index rows", err)
 		}
 	}
-	//: the rows of what it is now, a bounded number per statement.
-	for batch := range slices.Chunk(p.rows, indexRowsPerStatement) {
-		//: a unique key raced in since the check collides here.
-		if _, err := ex.ExecContext(ctx, s.stmts.insertIndexRows(len(batch)), rowArgs(key, batch)...); err != nil {
-			//: classified once the write has rolled back.
-			return &mayConflict{cause: err, step: "file a document's index rows", written: p, kind: uniqueConflict}
-		}
+	//: the rows of what it is now, a bounded number per statement; a unique
+	//: key raced in since the check collides here.
+	if _, err := svcsql.InsertRows(ctx, ex, s.stmts.dialect, s.stmts.indexInsert(),
+		rowsOf(rowArgs(key, p.rows), indexRowArgs)); err != nil {
+		//: classified once the write has rolled back.
+		return &mayConflict{cause: err, step: "file a document's index rows", written: p, kind: uniqueConflict}
 	}
 	//: filed.
 	return nil
@@ -729,6 +757,6 @@ func rowArgs(key []byte, batch []indexRow) []any {
 		}
 		args = append(args, []byte(row.name), row.key, key, uniq)
 	}
-	//: in the order insertIndexRows numbers them.
+	//: in the order of indexColumns.
 	return args
 }

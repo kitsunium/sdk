@@ -627,6 +627,9 @@ sequences:
             - return: e.exitOverride
           when: e.exitOverride != 0
       - return: defaultExitCode
+  - of: (*Error).Params
+    steps:
+      - return: "WrapParams{Code: e.code, Reason: e.reason, Public: e.public, Private: e.private, ExitCode: e.ExitCode()}"
   - of: HasCode
     steps:
       - opt:

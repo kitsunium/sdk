@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T11:00:00Z -->
+<!-- updated: 2026-11-02T12:00:00Z -->
 # internal/kernel/collections/ring/
 
 ## Purpose
@@ -19,6 +19,11 @@ type Queue[T any] interface {
 
 // IFACE-PLUGIN: concrete struct (queueRing[T]) is unexported.
 func New[T any](capacity int) (q Queue[T], err error)
+
+// The consumer's TryRead loop as an iterator: oldest first, until Empty or a
+// break; the one consumer goroutine only; nothing allocated (issue #816). A
+// FUNCTION and not a fifth method: Queue is a published interface (ADR 0039).
+func Drain[T any](q Queue[T]) iter.Seq[T]
 
 // Sentinels (errs.Define-backed, kernel-range codes).
 var Full    *errs.Error // 0.1.3.1 RING_FULL
@@ -62,4 +67,4 @@ cd internal/kernel && GOWORK=off go test -race -cover ./collections/ring
 # coverage target: 90%
 ```
 
-Tests: `ring_external_test.go` (public contract: TryWrite/TryRead happy paths, full / empty sentinels, capacity reporting, Len snapshot, FIFO order, single-producer/single-consumer race coverage), `ring_internal_test.go` (cursor arithmetic, slot-clear-on-read, wrap-around at `cap+1`), `ring_bench_test.go` (the numbers in `BENCH.md`), `perf_fixtures_test.go` (race off: the fixtures of the design's budgets on `Queue.TryWrite` and `Queue.TryRead`, both paths of each allocating nothing — ADR 0165) and `gen_perf_test.go` (kit gen's, run by the alloc lane).
+Tests: `ring_external_test.go` (public contract: TryWrite/TryRead happy paths, `Drain` — every item oldest first, a break leaving the rest, full / empty sentinels, capacity reporting, Len snapshot, FIFO order, single-producer/single-consumer race coverage), `ring_internal_test.go` (cursor arithmetic, slot-clear-on-read, wrap-around at `cap+1`), `ring_bench_test.go` (the numbers in `BENCH.md`), `perf_fixtures_test.go` (race off: the fixtures of the design's budgets on `Queue.TryWrite` and `Queue.TryRead`, both paths of each allocating nothing — ADR 0165) and `gen_perf_test.go` (kit gen's, run by the alloc lane).

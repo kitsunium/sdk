@@ -24,11 +24,10 @@ import (
 )
 
 // weightEngine is one engine's accounts store seen through what the weight
-// contract needs: the trash contract's calls, a stamped Put, PutDocument and
+// contract needs: the conformance rows' calls, PutDocument and
 // VersionWeight, with the SQL store's context supplied.
 type weightEngine struct {
-	trashEngine
-	putStamped  func(v account, stamp coredocstore.StampValue) error
+	storeEngine
 	putDocument func(key string, versions []coredocstore.VersionValue, trashedAt time.Time) error
 	weight      func() (coredocstore.VersionWeightValue, error)
 }
@@ -42,7 +41,7 @@ func eachWeightEngine(t *testing.T, versions int, fn func(t *testing.T, e weight
 		clk := clock.NewManualClock(epoch)
 		store := openVersioned(t, versionedConfig(fsys, versions, clk))
 		fn(t, weightEngine{
-			trashEngine: fileTrashEngine(t, store), putStamped: store.PutStamped,
+			storeEngine: fileStoreEngine(t, store),
 			putDocument: store.PutDocument, weight: store.VersionWeight,
 		}, clk)
 	})
@@ -50,8 +49,7 @@ func eachWeightEngine(t *testing.T, versions int, fn func(t *testing.T, e weight
 		clk := clock.NewManualClock(epoch)
 		ctx, store := t.Context(), openSQLVersioned(t, dialect, keeping(versions, clk)).store
 		fn(t, weightEngine{
-			trashEngine: sqlTrashEngine(ctx, store),
-			putStamped:  func(v account, stamp coredocstore.StampValue) error { return store.PutStamped(ctx, v, stamp) },
+			storeEngine: sqlStoreEngine(ctx, store),
 			putDocument: func(key string, versions []coredocstore.VersionValue, trashedAt time.Time) error {
 				return store.PutDocument(ctx, key, versions, trashedAt)
 			},
@@ -69,14 +67,14 @@ func recount(t *testing.T, e weightEngine) coredocstore.VersionWeightValue {
 	stored, err := e.list()
 	must(t, err)
 	for _, a := range stored {
-		all := engineVersionsOf(t, e.trashEngine, a.ID)
+		all := engineVersionsOf(t, e.storeEngine, a.ID)
 		w.Former += len(all) - 1
 		for _, v := range all[1:] {
 			w.Bytes += int64(len(v.JSON))
 		}
 	}
-	for _, tomb := range tombstonesOf(t, e.trashEngine) {
-		all := engineVersionsOf(t, e.trashEngine, tomb.Key)
+	for _, tomb := range tombstonesOf(t, e.storeEngine) {
+		all := engineVersionsOf(t, e.storeEngine, tomb.Key)
 		w.Former += len(all) - 1
 		w.Trashed++
 		for _, v := range all {
@@ -278,7 +276,7 @@ func TestVersionWeightFollowsConcurrentWriters(t *testing.T) {
 			})
 		}
 		wg.Wait()
-		e := weightEngine{trashEngine: fileTrashEngine(t, store), weight: store.VersionWeight}
+		e := weightEngine{storeEngine: fileStoreEngine(t, store), weight: store.VersionWeight}
 		got, err := store.VersionWeight()
 		must(t, err)
 		requireWeight(t, e, got, "after the writers")

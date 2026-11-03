@@ -31,10 +31,23 @@ type Timed interface { Clock; Waiter }      // the union
 type Timer  interface { C() <-chan time.Time; Stop() bool; Reset(time.Duration) bool }
 type Ticker interface { C() <-chan time.Time; Stop();      Reset(time.Duration) }
 
-// The two implementations.
+// The two implementations, and a coarse reader over either.
 var System Timed                            // delegates to package time
 func NewManualClock(start time.Time) *ManualClock
+func NewCoarse(base Timed, resolution time.Duration) *CoarseClock // Now = one atomic load
 ```
+
+`*CoarseClock` (#814) is a `Clock` whose `Now` is an atomic load: a goroutine
+of its own reads its base every `resolution` and publishes the `time.Time`
+through an `atomic.Pointer` (one 24-byte allocation per tick, none per read;
+the monotonic reading travels with it). A reading is at most one
+resolution behind the base; `Stop` ends the goroutine and joins it, and a
+stopped clock reads its base directly, so a component that outlives it never
+sees time stand still. A `ManualClock` base makes it deterministic
+(`TestCoarseLagsByAtMostOneResolution`); `TestCoarseStopJoinsItsGoroutine`
+runs in a synctest bubble, which fails on a goroutine left behind. It does not
+implement `Waiter`: waiting on a coarse clock would make every timer late by
+the resolution, and a caller that waits keeps its own `Timed`.
 
 `*ManualClock` adds the driving surface on top of `Timed`:
 
@@ -58,6 +71,7 @@ only producer of — splitting them left three files nothing else referenced.
 | `gen_decls.go` | written by kit gen from the design (ADR 0168): the `Clock`, `Timed`, `Waiter`, `Timer` and `Ticker` contracts, the `ManualClock` struct with every field, `NewManualClock`, `ManualClock.NewTimer` and `ManualClock.Sleep` as one call of their unexported bodies, and `ManualClock`'s assertions against `Clock`, `Waiter` and `Timed` |
 | `waiter.go` | `requirePositivePeriod` (the shared refusal) |
 | `system.go` | `systemClock` + the `System` singleton, and the `*time.Timer` / `*time.Ticker` adapters |
+| `coarse.go` | `CoarseClock` + `NewCoarse` / `Now` / `Since` / `Stop` — the publishing goroutine and its atomic reading (#814) |
 | `manual.go` | the bodies `newManualClock`, `newTimer` and `sleep`, and every other `ManualClock` method whole — `Now`, `Since`, `After`, `NewTicker`, `Advance`, `Set`, `Pending` and `BlockUntil` keep their bodies because theirs do not inline (a lock and its `defer`): `ManualClock` is reached through `Clock` and `Timed`, where a wrapper over a body that does not inline would be a call more (ADR 0168) |
 | `manual_wait.go` | `manualWait` + `fireWait` / `drainWait` / `rearmWait`, and the `maxDuration` bound the rearm stays under |
 | `manual_timer.go` / `manual_ticker.go` | the handles `ManualClock` hands out |
