@@ -22,6 +22,7 @@ files:
     name: perm.go
   - decls:
       - FS
+      - FileValue
     name: vfs.go
 functions:
   - name: ValidatePath
@@ -54,3 +55,16 @@ types:
     kind: alias
     name: FS
     underlying: fs.FS
+  - fields:
+      - doc: |-
+          Name is where the file is published, a slash-separated path
+          [ValidateWritePath] accepts, its directory already existing.
+        name: Name
+        type: string
+      - doc: |-
+          Data is the file's content, written as given. The slice is read
+          during the call and never kept.
+        name: Data
+        type: "[]byte"
+    kind: struct
+    name: FileValue

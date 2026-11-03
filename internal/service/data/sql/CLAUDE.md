@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-11-02T00:00:00Z -->
 # internal/service/data/sql/
 
 ## Purpose
@@ -8,13 +8,17 @@ Implements the **ADR 0055** relational-database ports declared in
 savepoints) with its `Joiner`, `Deferrer` and `Aborter` siblings (ADR 0139), the
 connection-pool policy, the bounded health check, and the migration runner
 with its version table and its lock — the session's advisory lock, or SQLite's
-database-file write lock (ADR 0140).
+database-file write lock (ADR 0140). Since ADR 0055's 2026-11-02 amendment
+also: a retrying root transactor over a `Transient` classifier, migration
+checksums, a per-statement budget, read-only transactions routed to a read
+replica, the `Each` and `InsertRows` helpers, and a statement observer
+installed under the pool by a `driver.Connector` wrapper.
 
 It ships **no driver** and imports none. `database/sql` is the stdlib's driver
 interface; a *driver* is a vendor connector and lives under `third-party/`
 (ADR 0012 / ADR 0055 §D2).
 
-Code range: `0.3.54.*` (ADR 0055) — the 17 run outcomes this package emits,
+Code range: `0.3.54.*` (ADR 0055) — the 20 run outcomes this package emits,
 declared since ADR 0160 with the port's `0.2.24.*` in `internal/core/data/sql`,
 under the values this package allocated. This package declares no code.
 
@@ -32,7 +36,7 @@ under the values this package allocated. This package declares no code.
 | `txscope.go` | `txScope` — the per-context transaction chain and its walk; each link carries the executor its scope lent and its id (0 for the root, the savepoint counter otherwise) |
 | `scope_key_type.go` | the single unexported context key |
 | `executor.go` | `scopedExecutor` — the retiring guard handed to a `TxFunc` |
-| `statements.go` | `Statements(...string) coresql.Step` |
+| `statements.go` | `Statements(...string) coresql.Step`, `ChecksumOf(...string) string` — SHA-256 over the length-prefixed statements (#1056) |
 | `dialect_sql.go` | **the only place this package renders dialect-specific SQL** — savepoints, advisory lock, and `FileLockSQL`, the write that writes nothing and takes SQLite's file lock (ADR 0140), exported because the queue's SQL broker takes the same lock with it before a lease's first read; the bind markers are `core/data/sql`'s `Dialect.Placeholder` |
 | `health.go` | `NewChecker`, `checker` — bounded ping on the injected clock |
 | `migrate.go` | `NewMigrator`, `migrator`, `Plan` / `Up` / `Down`, `serialised` — the work under whichever lock the dialect has |
@@ -40,8 +44,13 @@ under the values this package allocated. This package declares no code.
 | `migrate_plan.go` | `migratePlan` — the validated, sorted, clamped migration set |
 | `migrate_lock.go` | `advisoryLock` — acquisition, retry loop, release |
 | `migrate_filelock.go` | SQLite's run: ONE transaction holding the file's write lock, `lockBusy`, the retry on the injected clock — ADR 0140 |
-| `migrate_table.go` | version-table DDL, reads, `record` / `forget`, `scanVersions` |
+| `migrate_table.go` | version-table DDL (three columns, and a nullable `checksum TEXT` for a set that declares a checksum), the checksum probe and `ALTER` under the lock, reads, the `MIGRATION_CHANGED` comparison and the backfill, `record` / `forget`, `scanVersions` |
 | `savepoint_stmts.go` | `savepointStmts` — one savepoint's three rendered statements |
+| `retry.go` | `NewRetrying`, `RetryConfig`, `Default{RetryAttempts,RetryDelay}`, `Classify` — the retrying root transactor (#1058): each attempt a whole transaction of the inner one, a nested call (context mark, or the inner `Joiner`) never re-run alone, `TX_RETRIES_EXHAUSTED` beside the last error; the three ADR 0139 siblings forwarded exactly when the inner transactor offers all three |
+| `budget.go` | `stmtBudget` — `Config.StatementTimeout` on the injected clock: a watcher goroutine per bounded statement, `STATEMENT_TIMED_OUT` with the operation named; `timedPool`, the pool `Join` and `Reader` hand out under a budget; the unbounded path is the one measured and allocates nothing more |
+| `budget_compliance.go` | the compile-time assertions that `timedPool` and `scopedExecutor` are the `statementRunner` a budget takes |
+| `rows.go` | `Each` (the Next/Scan/Err/Close loop as an `iter.Seq2` that closes its rows) and `InsertRows` / `InsertSpec` (a multi-row `INSERT` into `InsertSpec`'s table and columns, `PerStatement` rows at most, chunked under 999 parameters on SQLite, 65535 on the servers; table and columns interpolated as given), `firstFailure` and `yieldFailure` (one failure said, the first) — #837 |
+| `observe.go` | `Observe` — the `driver.Connector` wrapper telling a `StatementObserver` every exec, query, prepare, BEGIN, COMMIT and ROLLBACK, the SQL cut to `MaxObservedQuery` and never an argument; the optional interfaces database/sql reads forwarded or declined as its defaults would; `SlowQueries` and `Traced` — #1122 |
 | `withheld.go` | `Withheld` + `NewWithheld` — a driver's error kept for `errors.Is` / `errors.As` and out of every rendering, which `docstore` and `queue` join beside their own verdicts (pinned by `withheld_external_test.go`) |
 | `sql_bench_test.go` + `BENCH.md` | the measurements (rule 9) |
 
@@ -157,8 +166,37 @@ under the values this package allocated. This package declares no code.
   port and often the user; a failed statement names the statement. Every
   `Public` is a fixed literal naming the *class* of failure, pinned by
   `pkg/v1/data/sql`'s `TestNoPublicMessageReachesTheConsumerWithInfrastructure`,
-  which scans these seventeen beside `core/data/sql`'s five (`core/data/sql`'s own
+  which scans these twenty beside `core/data/sql`'s five (`core/data/sql`'s own
   `TestNoPublicMessageDescribesInfrastructure` scans only those five).
+
+- **A retry re-opens; it never re-runs a savepoint.** `NewRetrying` runs
+  the WHOLE root transaction again — a new BEGIN, the unit of work from its
+  start — and only a root: a context marked by its own root, or one the inner
+  transactor's `Joiner` says is inside a transaction, joins as the inner
+  transactor decides, once. Each attempt's `Defer` functions are dropped with
+  its rollback; its `OnAbort` ones run after it. `Classify` reads only what a
+  driver exposes through a method — never a driver import, never a message —
+  and a context's end is never transient (ADR 0055, 2026-11-02).
+- **A checksum is compared only where both sides have one.** An empty
+  `MigrationValue.Checksum` is never compared; a NULL recorded one is
+  backfilled under the lock. A set that declares none sends exactly the
+  statements it sent before #1056 — the version table's definition, its read,
+  the record — and the checksum column is added only under the lock, never
+  by `Plan`.
+- **The statement budget never touches the unbounded path.** Every executor
+  method checks `budget.limit > 0` and takes the slow path only then, so
+  `TransactCommit` keeps its allocations (`BENCH.md`). A query's cut context
+  is never released early: its rows read through it, so its watcher ends with
+  the budget or the caller's context. The migration runner's copy of the
+  configuration carries no budget.
+- **The replica is chosen by the caller, never by parsing.** A root
+  transaction with `ReadOnly` opens on `Config.ReadReplica`; nothing else
+  does. `Join` outside a transaction stays on the primary; `Reader` is the
+  routed read.
+- **An observer sees text, never values.** `Observe` hands the observer the
+  SQL as written, cut at a UTF-8 boundary to `MaxObservedQuery`, and never an
+  argument or a row; `SlowQueries` and `Traced` render a failure only as
+  `Withheld` does.
 
 ## A partially applied migration — what is guaranteed on which engine
 

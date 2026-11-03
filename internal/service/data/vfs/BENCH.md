@@ -145,3 +145,48 @@ The `MB/s` column is reported because `b.SetBytes` makes it free, but at 256 B
 it is measuring the fixed cost, not the device: 0.08 MB/s for `WriteAtomic/os`
 does not describe a slow disk, it describes 3 ms of flush divided by 256 bytes.
 Read the `ns/op` column for anything under a few KiB.
+
+## Step 5 shared per directory (#803, 2026-11-02)
+
+Measured 2026-11-02 on the 4-CPU lane of the same 8-core AMD EPYC 7351P VM,
+go1.27.3, branch `wip/sdk-lot-6-int`, `-benchtime=2s -count=4`, before → after
+the directory flush went through a `kernel/concur/commit` group per directory
+(benchstat, p = 0.029 where a delta is given). `WriteAtomic_Parallel` is 16
+goroutines (`SetParallelism(4)` × 4), each replacing its own file in ONE
+directory:
+
+| Benchmark | before | after |
+|---|---|---|
+| `WriteAtomic/os/256` | 3.110 ms, 1 280 B, 24 allocs | 3.019 ms (~, p = 0.49), 1 812 B, 32 allocs |
+| `WriteAtomic/os/65536` | 3.545 ms, 1 280 B, 24 allocs | 3.414 ms (~, p = 0.06), 1 809 B, 32 allocs |
+| `WriteAtomic_Parallel` | 563 µs, 1 282 B, 24 allocs | 450 µs (−20 %), 1 172 B, 20 allocs |
+
+- **One publisher pays the group's floor and nothing else**: eight allocations
+  (the batch, its channels, the flush's goroutine — `concur/commit`'s
+  `Do_Uncontended`, ~2 µs) beside a 3 ms flush, inside the noise of the time
+  column.
+- **Concurrent publishers into one directory share flushes**: the ones that
+  reach step 5 while a flush runs share the next. The gain is 20 % here, not
+  the 16× a count of flushes would suggest: ext4 already merges concurrent
+  fsyncs of one directory at the journal, the caveat #803 named, so what is
+  saved is the syscalls and the waits that the device did not merge.
+
+## A batch under one directory flush (#827, 2026-11-03)
+
+`WriteAtomicAll` publishes a batch file by file — each its own temporary,
+file flush and rename — and flushes each directory once, after its last
+rename. Measured 2026-11-03 on the same VM, go1.27.3, branch
+`wip/sdk-lot-6-cq`, `-benchtime=1s -count=3`, sixteen 256-byte files into one
+directory per call (`BenchmarkWriteAtomicAll`, `ns/file` its time divided by
+the files):
+
+| Benchmark | per file | allocations |
+|---|---|---|
+| `WriteAtomic/os/256` | 2.88–3.10 ms | 1 794 B, 32 |
+| `WriteAtomicAll/os/1` | 2.77–2.97 ms | 1 809 B, 32 |
+| `WriteAtomicAll/os/16` | **1.74–1.83 ms** (≈ 61 % of `WriteAtomic`) | 18 050 B, 317 a batch |
+| `WriteAtomicAll/mem/16` | 340–370 ns | 4 864 B, 48 a batch |
+
+The directory flush is shared; the sixteen file flushes are not, and they are
+what is left: each must reach the device before its own rename. A batch of one
+costs what `WriteAtomic` costs.

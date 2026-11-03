@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"runtime"
 	"strconv"
+	"sync/atomic"
 	"testing"
 
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
@@ -124,6 +125,66 @@ func BenchmarkWriteAtomic(b *testing.B) {
 		}
 		benchErrSink = err
 	})
+}
+
+// BenchmarkWriteAtomic_Parallel measures publication from many goroutines
+// into ONE directory on the disk engine, each replacing its own file: the
+// shape whose directory flush is shared (#803, ADR 0207). Without the sharing
+// every publication pays its own flush of the directory; with it, those that
+// reach step 5 while a flush runs share the next one.
+func BenchmarkWriteAtomic_Parallel(b *testing.B) {
+	filesystem := newBenchOS(b, 256)
+	payload := bytes.Repeat([]byte{'y'}, 256)
+	var next atomic.Int64
+	b.SetParallelism(4)
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		name := "parallel-" + strconv.FormatInt(next.Add(1), 10) + ".bin"
+		for pb.Next() {
+			//: a failed publication fails the benchmark, whichever goroutine.
+			if err := filesystem.WriteAtomic(name, payload, 0o644); err != nil {
+				b.Error(err)
+				return
+			}
+		}
+	})
+}
+
+// BenchmarkWriteAtomicAll measures a batch of n 256-byte files published in
+// one call into one directory (issue #827): n file flushes and ONE directory
+// flush, against WriteAtomic's two flushes per file. ns/file is the figure to
+// set beside BenchmarkWriteAtomic's ns/op.
+func BenchmarkWriteAtomicAll(b *testing.B) {
+	builders := []struct {
+		name  string
+		build func(b *testing.B, size int) corevfs.FullFS
+	}{
+		{"mem", newBenchMem},
+		{"os", newBenchOS},
+	}
+	for _, builder := range builders {
+		for _, n := range []int{1, 16} {
+			b.Run(builder.name+"/"+strconv.Itoa(n), func(b *testing.B) {
+				batcher, ok := builder.build(b, 256).(corevfs.AtomicBatchWriter)
+				if !ok {
+					b.Fatal("does not implement vfs.AtomicBatchWriter")
+				}
+				files := make([]corevfs.FileValue, n)
+				for index := range files {
+					files[index] = corevfs.FileValue{Name: "batch-" + strconv.Itoa(index) + ".bin", Data: bytes.Repeat([]byte{'y'}, 256)}
+				}
+				b.ReportAllocs()
+				var err error
+				for b.Loop() {
+					_, err = batcher.WriteAtomicAll(files, 0o644)
+				}
+				benchErrSink = err
+				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*n), "ns/file")
+			})
+		}
+	}
 }
 
 // BenchmarkStat measures metadata resolution on its own, with no bytes moving,

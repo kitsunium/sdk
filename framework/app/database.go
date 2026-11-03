@@ -115,7 +115,9 @@ func Irreversible(ctx context.Context, ex MigrationExecutor) error {
 // naming a file that holds it, then the environment's secret store —, and
 // its settings: <name>-max-open (10), <name>-max-idle (2), <name>-max-lifetime
 // (30m), <name>-max-idle-time (0: none), <name>-timeout (5s), <name>-check-timeout
-// (5s) and <name>-migrate (start, or manual). Outside dev the URL is
+// (5s), <name>-tx-retries (3: how many times a transaction the database asks
+// to run again runs again, 0 for never — [Classifier]), <name>-tx-retry-delay
+// (50ms: the first wait before it does) and <name>-migrate (start, or manual). Outside dev the URL is
 // required and writes its TLS mode; in dev a database without one leaves its
 // stores in the data directory, and a SQLite database without one is the
 // file <data>/<name>.sqlite. [InMemory] on the app opens none.

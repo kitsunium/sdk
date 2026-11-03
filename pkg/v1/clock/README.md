@@ -71,10 +71,15 @@ The stdlib's testing/synctest replaces package time inside a bubble, so [System]
 ## Index
 
 - [Variables](<#variables>)
+- [func NewCoarse\(base Timed, resolution time.Duration\) \*CoarseClock](<#NewCoarse>)
 - [func NewManualClock\(start time.Time\) \*ManualClock](<#NewManualClock>)
 - [type Clock](<#Clock>)
   - [func \(Clock\) Now\(\) time.Time](<#Clock.Now>)
   - [func \(Clock\) Since\(t time.Time\) time.Duration](<#Clock.Since>)
+- [type CoarseClock](<#CoarseClock>)
+  - [func \(\*CoarseClock\) Now\(\) time.Time](<#CoarseClock.Now>)
+  - [func \(\*CoarseClock\) Since\(t time.Time\) time.Duration](<#CoarseClock.Since>)
+  - [func \(\*CoarseClock\) Stop\(\)](<#CoarseClock.Stop>)
 - [type ManualClock](<#ManualClock>)
   - [func \(\*ManualClock\) Advance\(d time.Duration\)](<#ManualClock.Advance>)
   - [func \(\*ManualClock\) After\(d time.Duration\) \<-chan time.Time](<#ManualClock.After>)
@@ -115,6 +120,15 @@ It is the value every SDK configuration falls back to when its Clock field is ni
 System is a VALUE, not a hook: assigning to this variable rebinds this package's name and changes nothing inside the SDK, which reads its own default directly. To give a component a different clock, set that component's Clock field.
 
 Initialised with `github.com/kitsunium/sdk/internal/kernel/clock.System`.
+
+<a name="NewCoarse"></a>
+## func [NewCoarse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/gen_facade.go>)
+
+```go
+func NewCoarse(base Timed, resolution time.Duration) *CoarseClock
+```
+
+NewCoarse returns a [CoarseClock](#CoarseClock) publishing base's reading every resolution, on a ticker of base — a [ManualClock](#ManualClock) base makes it deterministic. A nil base is [System](#System); a resolution that is not positive panics. Call Stop when done.
 
 <a name="NewManualClock"></a>
 ## func [NewManualClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/gen_facade.go>)
@@ -164,6 +178,48 @@ func (Clock) Since(t time.Time) time.Duration
 ```
 
 Since returns the elapsed duration between the given instant and Now.
+
+<a name="CoarseClock"></a>
+## type [CoarseClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/gen_facade.go>)
+
+CoarseClock is a [Clock](#Clock) whose Now is one atomic load: a goroutine of its own re-reads a base clock every resolution and publishes the instant, so a reading is at most one resolution behind and every deadline it measures is late by up to the resolution. Stop ends the goroutine; a stopped CoarseClock reads its base directly.
+
+```go
+type CoarseClock = kclock.CoarseClock
+```
+
+CoarseClock is an alias of `github.com/kitsunium/sdk/internal/kernel/clock.CoarseClock`, declared as:
+
+```go
+type CoarseClock struct{}
+```
+
+<a name="CoarseClock.Now"></a>
+### func \(CoarseClock\) [Now](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/coarse.go>)
+
+```go
+func (*CoarseClock) Now() time.Time
+```
+
+Now returns the last published reading, at most one resolution behind the base; after Stop, the base's own reading.
+
+<a name="CoarseClock.Since"></a>
+### func \(CoarseClock\) [Since](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/coarse.go>)
+
+```go
+func (*CoarseClock) Since(t time.Time) time.Duration
+```
+
+Since returns the time elapsed since t by this clock's reading.
+
+<a name="CoarseClock.Stop"></a>
+### func \(CoarseClock\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/clock/coarse.go>)
+
+```go
+func (*CoarseClock) Stop()
+```
+
+Stop ends the publishing goroutine and returns once it has exited. It is idempotent; after it, Now reads the base directly.
 
 <a name="ManualClock"></a>
 ## type [ManualClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/clock/gen_facade.go>)

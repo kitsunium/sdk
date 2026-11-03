@@ -112,15 +112,25 @@ The sentinels above are the matchable values; their Code() is the ADR 0005 dotte
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func ChecksumOf\(stmts ...string\) string](<#ChecksumOf>)
+- [func Classify\(err error\) bool](<#Classify>)
+- [func Each\[T any\]\(rows \*stdsql.Rows, scan func\(\*stdsql.Rows\) \(T, error\)\) iter.Seq2\[T, error\]](<#Each>)
+- [func InsertRows\(ctx context.Context, ex Executor, d Dialect, into InsertSpec, rows \[\]\[\]any\) \(inserted int64, err error\)](<#InsertRows>)
 - [func Irreversible\(ctx context.Context, ex Executor\) error](<#Irreversible>)
 - [func NewChecker\(cfg Config\) \(probe Checker, err error\)](<#NewChecker>)
 - [func NewMigrator\(cfg Config, mig MigrateConfig\) \(runner Migrator, err error\)](<#NewMigrator>)
+- [func NewRetrying\(tm Transactor, cfg RetryConfig\) \(manager Transactor, err error\)](<#NewRetrying>)
 - [func NewTransactor\(cfg Config\) \(manager Transactor, err error\)](<#NewTransactor>)
+- [func Observe\(c driver.Connector, obs StatementObserver\) driver.Connector](<#Observe>)
 - [func ParseDialect\(name string\) \(dialect Dialect, err error\)](<#ParseDialect>)
+- [func SlowQueries\(threshold time.Duration, log corelogger.Logger, clk clock.Clock\) StatementObserver](<#SlowQueries>)
 - [func Statements\(stmts ...string\) Step](<#Statements>)
+- [func Traced\(tracer coretrace.Tracer\) StatementObserver](<#Traced>)
 - [func Transact\(ctx context.Context, tm Transactor, fn TxFunc\) error](<#Transact>)
 - [type Aborter](<#Aborter>)
   - [func \(Aborter\) OnAbort\(ctx context.Context, fn func\(ctx context.Context\)\) \(held bool\)](<#Aborter.OnAbort>)
+- [type Backoff](<#Backoff>)
+  - [func \(Backoff\) Delay\(attempt int\) time.Duration](<#Backoff.Delay>)
 - [type Checker](<#Checker>)
   - [func \(Checker\) Check\(ctx context.Context\) error](<#Checker.Check>)
 - [type Config](<#Config>)
@@ -138,6 +148,7 @@ The sentinels above are the matchable values; their Code() is the ADR 0005 dotte
   - [func \(Executor\) ExecContext\(ctx context.Context, query string, args ...any\) \(stdsql.Result, error\)](<#Executor.ExecContext>)
   - [func \(Executor\) QueryContext\(ctx context.Context, query string, args ...any\) \(\*stdsql.Rows, error\)](<#Executor.QueryContext>)
   - [func \(Executor\) QueryRowContext\(ctx context.Context, query string, args ...any\) \*stdsql.Row](<#Executor.QueryRowContext>)
+- [type InsertSpec](<#InsertSpec>)
 - [type Joiner](<#Joiner>)
   - [func \(Joiner\) Join\(ctx context.Context\) \(ex Executor, inTx bool\)](<#Joiner.Join>)
 - [type MigrateConfig](<#MigrateConfig>)
@@ -150,9 +161,17 @@ The sentinels above are the matchable values; their Code() is the ADR 0005 dotte
 - [type PoolConfig](<#PoolConfig>)
 - [type Preparer](<#Preparer>)
   - [func \(Preparer\) PrepareContext\(ctx context.Context, query string\) \(\*stdsql.Stmt, error\)](<#Preparer.PrepareContext>)
+- [type RetryConfig](<#RetryConfig>)
+- [type Router](<#Router>)
+  - [func \(Router\) Reader\(ctx context.Context\) Executor](<#Router.Reader>)
+- [type StatementKind](<#StatementKind>)
+  - [func \(StatementKind\) String\(\) string](<#StatementKind.String>)
+- [type StatementObserver](<#StatementObserver>)
+  - [func \(StatementObserver\) Begin\(ctx context.Context, kind StatementKind, query string\) \(end func\(rows int64, err error\)\)](<#StatementObserver.Begin>)
 - [type Step](<#Step>)
 - [type Transactor](<#Transactor>)
   - [func \(Transactor\) Transact\(ctx context.Context, opts TxOptionsValue, fn TxFunc\) error](<#Transactor.Transact>)
+- [type Transient](<#Transient>)
 - [type TxFunc](<#TxFunc>)
 - [type TxOptions](<#TxOptions>)
   - [func \(TxOptions\) IsZero\(\) bool](<#TxOptions.IsZero>)
@@ -186,6 +205,60 @@ const DialectSQLite Dialect = 3
 DialectSQLite is SQLite 3.6.8+. It has no advisory lock, so [NewMigrator](#NewMigrator) serialises a run on the database file's write lock instead (ADR 0140).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.DialectSQLite`.
+
+<a name="StatementBegin"></a>
+```go
+const StatementBegin StatementKind = 4
+```
+
+StatementBegin is a transaction opened.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.StatementBegin`.
+
+<a name="StatementCommit"></a>
+```go
+const StatementCommit StatementKind = 5
+```
+
+StatementCommit is a transaction committed.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.StatementCommit`.
+
+<a name="StatementExec"></a>
+```go
+const StatementExec StatementKind = 1
+```
+
+StatementExec is a statement that returns no rows.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.StatementExec`.
+
+<a name="StatementPrepare"></a>
+```go
+const StatementPrepare StatementKind = 3
+```
+
+StatementPrepare is a statement compiled for repeated execution.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.StatementPrepare`.
+
+<a name="StatementQuery"></a>
+```go
+const StatementQuery StatementKind = 2
+```
+
+StatementQuery is a statement that returns rows.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.StatementQuery`.
+
+<a name="StatementRollback"></a>
+```go
+const StatementRollback StatementKind = 6
+```
+
+StatementRollback is a transaction rolled back.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.StatementRollback`.
 
 ## Variables
 
@@ -276,6 +349,17 @@ InvalidMigration is returned for a migration with version 0, an empty name, a ni
 Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.InvalidMigration`.
 
 Code `0.2.24.4` · reason `INVALID_MIGRATION` · public "The migration is not runnable and was refused"
+
+<a name="MigrationChanged"></a>
+```go
+var MigrationChanged *errs.Error
+```
+
+MigrationChanged refuses a run over an applied migration whose statements were edited after they ran. Nothing was applied.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.MigrationChanged`.
+
+Code `0.3.54.18` · reason `MIGRATION_CHANGED` · public "A migration already applied was edited after it ran"
 
 <a name="MigrationFailed"></a>
 ```go
@@ -387,6 +471,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.SavepointFaile
 
 Code `0.3.54.6` · reason `SAVEPOINT_FAILED` · public "A savepoint statement was rejected by the database"
 
+<a name="StatementTimedOut"></a>
+```go
+var StatementTimedOut *errs.Error
+```
+
+StatementTimedOut is joined with the driver's error when a statement outlived the transactor's statement budget.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.StatementTimedOut`.
+
+Code `0.3.54.20` · reason `STATEMENT_TIMED_OUT` · public "A database statement did not complete within its time budget"
+
 <a name="TxClosed"></a>
 ```go
 var TxClosed *errs.Error
@@ -409,6 +504,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.TxPoisoned`.
 
 Code `0.3.54.7` · reason `TX_POISONED` · public "The transaction is no longer usable and will not be committed"
 
+<a name="TxRetriesExhausted"></a>
+```go
+var TxRetriesExhausted *errs.Error
+```
+
+TxRetriesExhausted is joined with the last attempt's error when every attempt of a retrying transactor failed on a transient error.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.TxRetriesExhausted`.
+
+Code `0.3.54.19` · reason `TX_RETRIES_EXHAUSTED` · public "The transaction kept conflicting with others and was given up"
+
 <a name="UnknownDialect"></a>
 ```go
 var UnknownDialect *errs.Error
@@ -430,6 +536,42 @@ VersionTableInvalid refuses a version-table name that is not a plain SQL identif
 Initialised with `github.com/kitsunium/sdk/internal/core/data/sql.VersionTableInvalid`.
 
 Code `0.3.54.16` · reason `VERSION_TABLE_INVALID` · public "The version-table name is not a plain SQL identifier"
+
+<a name="ChecksumOf"></a>
+## func [ChecksumOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+```go
+func ChecksumOf(stmts ...string) string
+```
+
+ChecksumOf is the fingerprint a [Migration](#Migration) built from stmts records in its Checksum: SHA-256 over the statements, each length-prefixed, in lowercase hex. Set it from the same statements Up runs, and an applied migration edited afterwards is refused with [MigrationChanged](#MigrationChanged) instead of being called applied by its number alone.
+
+<a name="Classify"></a>
+## func [Classify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+```go
+func Classify(err error) bool
+```
+
+Classify reports whether err is a failure the database documents as "run the transaction again": SQLSTATE 40001 or 40P01, or SQLite's BUSY or LOCKED. A context's end never is.
+
+<a name="Each"></a>
+## func [Each](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+```go
+func Each[T any](rows *stdsql.Rows, scan func(*stdsql.Rows) (T, error)) iter.Seq2[T, error]
+```
+
+Each iterates rows with scan and closes them when the iteration ends; a failure is yielded once, last. It is the Next/Scan/Err/Close loop, written once.
+
+<a name="InsertRows"></a>
+## func [InsertRows](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+```go
+func InsertRows(ctx context.Context, ex Executor, d Dialect, into InsertSpec, rows [][]any) (inserted int64, err error)
+```
+
+InsertRows inserts rows into into.Table in multi-row statements of at most into.PerStatement rows, clamped to the engine's bound-parameter ceiling, and returns how many rows were inserted. into.Table and into.Columns are interpolated as given: validate them first.
 
 <a name="Irreversible"></a>
 ## func [Irreversible](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
@@ -458,6 +600,15 @@ func NewMigrator(cfg Config, mig MigrateConfig) (runner Migrator, err error)
 
 NewMigrator returns the migration runner. Every migration execution is serialised: on the session's advisory lock where the engine has one (PostgreSQL, MySQL), and on the database file's write lock on SQLite, which has none (ADR 0140). No dialect the SDK speaks is refused for the lock.
 
+<a name="NewRetrying"></a>
+## func [NewRetrying](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+```go
+func NewRetrying(tm Transactor, cfg RetryConfig) (manager Transactor, err error)
+```
+
+NewRetrying returns a transactor that runs a root transaction of tm again on a failure cfg.Transient calls transient, up to cfg.Attempts runs, on cfg.Backoff's curve. A nested call is never run again on its own. The unit of work must be safe to run more than once.
+
 <a name="NewTransactor"></a>
 ## func [NewTransactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
@@ -467,6 +618,15 @@ func NewTransactor(cfg Config) (manager Transactor, err error)
 
 NewTransactor returns the transaction manager for cfg.DB, applying cfg.Pool to it.
 
+<a name="Observe"></a>
+## func [Observe](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+```go
+func Observe(c driver.Connector, obs StatementObserver) driver.Connector
+```
+
+Observe returns c with obs told about every statement its connections send — exec, query, prepare, BEGIN, COMMIT, ROLLBACK —, the SQL text bounded and never an argument. Open the pool over it: stdsql.OpenDB(sql.Observe(connector, obs)). A nil obs returns c.
+
 <a name="ParseDialect"></a>
 ## func [ParseDialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
@@ -475,6 +635,15 @@ func ParseDialect(name string) (dialect Dialect, err error)
 ```
 
 ParseDialect resolves a dialect name and never guesses. A recognised but unsupported engine returns [DialectRefused](#DialectRefused) carrying why; an unrecognised one returns [UnknownDialect](#UnknownDialect).
+
+<a name="SlowQueries"></a>
+## func [SlowQueries](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+```go
+func SlowQueries(threshold time.Duration, log corelogger.Logger, clk clock.Clock) StatementObserver
+```
+
+SlowQueries returns an observer that logs at Warn each statement that took threshold or longer on clk — its SQL text, duration and rows, never an argument.
 
 <a name="Statements"></a>
 ## func [Statements](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
@@ -486,6 +655,15 @@ func Statements(stmts ...string) Step
 Statements returns a [Step](#Step) that runs the given statements in order on the transaction's executor.
 
 It is the smallest useful helper and deliberately not a file loader: it invents no directory layout, no naming convention and no parser. Where the text comes from — a literal, an embed.FS, a generator — stays yours.
+
+<a name="Traced"></a>
+## func [Traced](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+```go
+func Traced(tracer coretrace.Tracer) StatementObserver
+```
+
+Traced returns an observer that opens one client span per statement, its status following the statement's error.
 
 <a name="Transact"></a>
 ## func [Transact](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/sql.go>)
@@ -558,6 +736,59 @@ For a function held with OnAbort and another with Defer under the same scope, ex
 
 OnAbort reports false and holds nothing when ctx carries no open transaction of this transactor. There is nothing to undo, so fn is the caller's again. A nil fn holds nothing and gets the same answer.
 
+<a name="Backoff"></a>
+## type [Backoff](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+Backoff is the public alias for the exponential curve a retrying transactor waits on between two attempts (the SDK's one backoff curve, ADR 0103).
+
+```go
+type Backoff = kbackoff.Value
+```
+
+Backoff is an alias of `github.com/kitsunium/sdk/internal/kernel/backoff.Value`, declared as:
+
+```go
+type Backoff struct {
+	// BaseDelay is the wait after the first failure. Zero or negative waits
+	// nothing.
+	BaseDelay  time.Duration
+	// MaxDelay is the ceiling on the grown delay. Zero means no ceiling.
+	MaxDelay   time.Duration
+	// Multiplier is the growth factor between consecutive waits. 1 or below,
+	// and NaN, mean 2.
+	Multiplier float64
+	// Jitter widens each wait by a uniform random fraction of itself, drawn
+	// from [0, Jitter) and ADDED, after the MaxDelay ceiling — so when a
+	// ceiling is set a wait may reach MaxDelay × (1 + Jitter). Zero is the
+	// deterministic backoff.
+	//
+	// It exists because a deterministic backoff SYNCHRONISES the very callers
+	// it is meant to spread: N clients that fail against one dependency at the
+	// same instant retry at the same instant, N times over. Jitter turns those
+	// bursts back into a distribution.
+	//
+	// It is read only under JitterAdditive.
+	Jitter     float64
+	// JitterMode is how the randomisation is laid on the curve. The zero,
+	// JitterAdditive, is the Jitter above — what Value has always done;
+	// JitterFull and JitterDecorrelated are the Builders' Library's two
+	// other variants, which randomise the whole wait and ignore Jitter. A
+	// value outside the three is read as JitterAdditive.
+	JitterMode JitterMode
+}
+```
+
+<a name="Backoff.Delay"></a>
+### func \(Backoff\) [Delay](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/backoff/backoff.go>)
+
+```go
+func (Backoff) Delay(attempt int) time.Duration
+```
+
+Delay returns the wait after the attempt-th consecutive failure: \[Grow] for the curve, then the randomisation JitterMode names — \[Widen] by Jitter for JitterAdditive, \[Full] for JitterFull, and for JitterDecorrelated \[Decorrelate], reading the curve's wait for the attempt before as the previous wait (a loop that keeps its own calls Decorrelate). attempt counts from 1; a smaller value is read as 1, so a loop that has not failed yet and asks anyway waits BaseDelay rather than nothing.
+
+It never returns a negative duration, and it costs at most as many multiplications as it takes the delay to reach its ceiling, however large attempt is.
+
 <a name="Checker"></a>
 ## type [Checker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
@@ -602,14 +833,14 @@ Config is an alias of `github.com/kitsunium/sdk/internal/service/data/sql.Config
 type Config struct {
 	// DB is the caller's pool. REQUIRED — this package never opens one,
 	// because opening one means importing a driver (ADR 0055 §D2).
-	DB           *stdsql.DB
+	DB               *stdsql.DB
 	// Dialect selects the SQL grammar. REQUIRED and must be a dialect this
 	// SDK can spell; resolve a configuration string through
 	// core/data/sql.ParseDialect, which refuses the engines it cannot support BY
 	// NAME instead of guessing.
-	Dialect      coresql.Dialect
+	Dialect          coresql.Dialect
 	// Pool is the connection-pool policy, applied to DB at construction.
-	Pool         PoolConfig
+	Pool             PoolConfig
 	// Clock is the time source every budget in this package is read from. A
 	// nil Clock falls back to clock.System.
 	//
@@ -617,10 +848,31 @@ type Config struct {
 	// (the version table's applied_at) and WAITS (the probe budget, the lock
 	// retry). Reading package time instead would make every budget assertion
 	// a sleep, and a sleep a tolerance, and a tolerance a flake.
-	Clock        clock.Timed
+	Clock            clock.Timed
 	// CheckTimeout is the budget one [core/data/sql.Checker.Check] gets. A
 	// non-positive value clamps to [DefaultCheckTimeout].
-	CheckTimeout time.Duration
+	CheckTimeout     time.Duration
+	// StatementTimeout bounds each statement the transactor's executors run —
+	// inside a transaction, and through Join or Reader on a pool — measured
+	// on Clock. Zero, or negative, is none: a statement then runs until the
+	// caller's context ends, as database/sql runs it.
+	//
+	// An Exec or a Prepare is bounded until it returns; a Query until its
+	// rows are read and closed, or the budget elapses, whichever comes first
+	// — the cut context lives until then, one timer per statement in
+	// flight. A cut answered by the call itself is joined with
+	// [core/data/sql.StatementTimedOut], its "operation" field naming exec,
+	// query or prepare; a cut met while reading rows surfaces from Next,
+	// Err or Scan as the context's own end. The migration runner never
+	// applies it: a migration's DDL runs as long as it takes, under the
+	// caller's context.
+	StatementTimeout time.Duration
+	// ReadReplica is a second pool, on a replica of DB, that a read-only
+	// transaction and [core/data/sql.Router]'s Reader run on. Nil is none:
+	// every transaction opens on DB. Pool is applied to it as to DB, and the
+	// health probe pings both. It is the caller's, opened with its own
+	// driver, and this package never closes it.
+	ReadReplica      *stdsql.DB
 }
 ```
 
@@ -808,6 +1060,33 @@ func (Executor) QueryRowContext(ctx context.Context, query string, args ...any) 
 
 QueryRowContext runs a statement expected to return at most one row.
 
+<a name="InsertSpec"></a>
+## type [InsertSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+InsertSpec is the public alias for the statement InsertRows writes: the table, its columns, and how many rows one statement carries at most.
+
+```go
+type InsertSpec = svcsql.InsertSpec
+```
+
+InsertSpec is an alias of `github.com/kitsunium/sdk/internal/service/data/sql.InsertSpec`, declared as:
+
+```go
+type InsertSpec struct {
+	// Table is the table the rows go into, interpolated as given — bare,
+	// or already quoted with [coresql.Dialect].QuoteIdent. Validate it
+	// first.
+	Table        string
+	// Columns are the table's columns each row gives a value for, in that
+	// order, interpolated as given like Table.
+	Columns      []string
+	// PerStatement is how many rows one statement carries at most,
+	// clamped to the engine's bound-parameter ceiling divided by the
+	// number of columns; a non-positive one takes that ceiling.
+	PerStatement int
+}
+```
+
 <a name="Joiner"></a>
 ## type [Joiner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
@@ -903,13 +1182,13 @@ type Migration struct {
 	// Any strictly-increasing scheme works; a UTC timestamp (20260910143000)
 	// is the conventional one because two branches developed in parallel then
 	// merge without colliding.
-	Version uint64
+	Version  uint64
 	// Name is the human label recorded in the version table. It must be
 	// non-empty: a schema history whose rows say only "42" is a schema
 	// history nobody can read during an incident.
-	Name    string
+	Name     string
 	// Up applies the change. Required.
-	Up      Step
+	Up       Step
 	// Down reverses it. Required — and [Irreversible] is how a caller says
 	// "this one cannot be reversed" OUT LOUD.
 	//
@@ -917,7 +1196,21 @@ type Migration struct {
 	// "I forgot the reversal" and "there is no reversal" are the same nil and
 	// only one of them is a defect. The same rule core/app/lifecycle applies to a
 	// nil Stop, for the same reason.
-	Down    Step
+	Down     Step
+	// Checksum is the fingerprint of the statements Up runs, recorded in the
+	// version table beside the version when the migration applies, so a
+	// later run notices that an applied migration's text was edited — the
+	// merge that rewrote a column type, the branch that renumbered — and
+	// refuses with [MigrationChanged] before applying anything, instead of
+	// calling it applied by its number alone.
+	//
+	// Empty means unverified: the migration is never compared, which is what
+	// a [Step] written as code rather than as statements must be, since a
+	// func is opaque (ADR 0055 §D12). A migration built with
+	// internal/service/data/sql's Statements sets it from the same
+	// statements with ChecksumOf. A version recorded before checksums
+	// existed is given this one by the next run that declares it.
+	Checksum string
 }
 ```
 
@@ -1057,6 +1350,126 @@ func (Preparer) PrepareContext(ctx context.Context, query string) (*stdsql.Stmt,
 
 PrepareContext compiles a statement. The caller closes it.
 
+<a name="RetryConfig"></a>
+## type [RetryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+RetryConfig is the public alias for a retrying transactor's parameters: its attempts, its backoff curve, its classifier and its clock.
+
+```go
+type RetryConfig = svcsql.RetryConfig
+```
+
+RetryConfig is an alias of `github.com/kitsunium/sdk/internal/service/data/sql.RetryConfig`, declared as:
+
+```go
+type RetryConfig struct {
+	// Attempts is how many times a root transaction may run in all, the
+	// first included: 1 runs it once and never again. A non-positive value
+	// clamps to [DefaultRetryAttempts].
+	Attempts  int
+	// Backoff is the curve of the waits between two attempts: the wait
+	// after the n-th failed attempt is Backoff.Delay(n). The zero value
+	// clamps to [DefaultRetryDelay] grown by 2 per attempt with full jitter;
+	// any other value is the caller's curve, as given — a BaseDelay of zero
+	// with a ceiling or a jitter is a caller's choice to retry at once.
+	Backoff   kbackoff.Value
+	// Transient decides which failures earn another attempt. A nil value
+	// clamps to [Classify]. A context's end never does, whatever Transient
+	// answers.
+	Transient coresql.Transient
+	// Clock is the time source the waits are read from. A nil Clock falls
+	// back to clock.System; a test hands a ManualClock and advances it
+	// rather than sleeping.
+	Clock     clock.Timed
+}
+```
+
+<a name="Router"></a>
+## type [Router](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+Router is the public alias for the transactor's ADR 0039 sibling that routes a read — a read-only transaction, or a read outside one — to the read replica [Config](#Config).ReadReplica names.
+
+```go
+type Router = coresql.Router
+```
+
+Router is an alias of `github.com/kitsunium/sdk/internal/core/data/sql.Router`, declared as:
+
+```go
+type Router interface {
+	// Reader returns the executor a read issued under ctx runs on: the
+	// innermost scope of the transaction ctx carries for THIS transactor, as
+	// [Joiner].Join answers it — on the replica when that transaction is
+	// read-only —, else the replica's pool, else the primary's when no replica
+	// is configured.
+	Reader(ctx context.Context) Executor
+}
+```
+
+<a name="Router.Reader"></a>
+### func \(Router\) [Reader](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
+
+```go
+func (Router) Reader(ctx context.Context) Executor
+```
+
+Reader returns the executor a read issued under ctx runs on: the innermost scope of the transaction ctx carries for THIS transactor, as [Joiner](#Joiner).Join answers it — on the replica when that transaction is read-only —, else the replica's pool, else the primary's when no replica is configured.
+
+<a name="StatementKind"></a>
+## type [StatementKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+StatementKind is the public alias for what a StatementObserver is told about.
+
+```go
+type StatementKind = coresql.StatementKind
+```
+
+StatementKind is an alias of `github.com/kitsunium/sdk/internal/core/data/sql.StatementKind`, declared as:
+
+```go
+type StatementKind uint8
+```
+
+<a name="StatementKind.String"></a>
+### func \(StatementKind\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/sql_statement.go>)
+
+```go
+func (StatementKind) String() string
+```
+
+String returns the kind's lowercase name, "unknown" for none.
+
+<a name="StatementObserver"></a>
+## type [StatementObserver](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+StatementObserver is the public alias for what watches the statements a pool sends: told when each begins, it answers the function told when it ends. It sees the SQL text, bounded, and never an argument or a row.
+
+```go
+type StatementObserver = coresql.StatementObserver
+```
+
+StatementObserver is an alias of `github.com/kitsunium/sdk/internal/core/data/sql.StatementObserver`, declared as:
+
+```go
+type StatementObserver interface {
+	// Begin is told that a statement of kind is about to run under ctx, and
+	// returns end, which is told exactly once when it ended: rows is the
+	// count a query's rows read before they closed, or an exec's rows
+	// affected when the driver reports it, else 0; err is the driver's own
+	// error, nil on success. end is never nil.
+	Begin(ctx context.Context, kind StatementKind, query string) (end func(rows int64, err error))
+}
+```
+
+<a name="StatementObserver.Begin"></a>
+### func \(StatementObserver\) [Begin](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/gen_ports.go>)
+
+```go
+func (StatementObserver) Begin(ctx context.Context, kind StatementKind, query string) (end func(rows int64, err error))
+```
+
+Begin is told that a statement of kind is about to run under ctx, and returns end, which is told exactly once when it ended: rows is the count a query's rows read before they closed, or an exec's rows affected when the driver reports it, else 0; err is the driver's own error, nil on success. end is never nil.
+
 <a name="Step"></a>
 ## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
 
@@ -1111,6 +1524,21 @@ Transact runs fn inside a transaction and commits when fn returns nil.
 If ctx already carries a transaction opened by THIS Transactor, fn runs inside a SAVEPOINT of that transaction instead of a new one, and opts must be the zero value — a savepoint cannot change isolation or read-only-ness, so asking for either is refused with [NestedIsolation](#NestedIsolation) rather than silently ignored (ADR 0055 §D5).
 
 A panic inside fn is NOT recovered: the deferred rollback still runs, and the panic reaches the caller with its original stack.
+
+<a name="Transient"></a>
+## type [Transient](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)
+
+Transient is the public alias for the verdict on a failed transaction: true when the database asks for the whole transaction to run again.
+
+```go
+type Transient = coresql.Transient
+```
+
+Transient is an alias of `github.com/kitsunium/sdk/internal/core/data/sql.Transient`, declared as:
+
+```go
+type Transient func(err error) bool
+```
 
 <a name="TxFunc"></a>
 ## type [TxFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/gen_facade.go>)

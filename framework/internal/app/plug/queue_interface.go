@@ -87,3 +87,16 @@ type Ticker interface {
 	// Reset makes the ticker fire every d.
 	Reset(d time.Duration)
 }
+
+// DeadLetterManager is a Broker whose dead letters an operator replays
+// into the live queue or drops for good, from the product's CLI
+// (issue #1138). A sibling of [Broker].
+type DeadLetterManager interface {
+	// Replay moves the dead letter id back into the live queue, its
+	// attempts counted afresh: its consumer handles it again. found is
+	// false when the queue holds no dead letter id.
+	Replay(ctx context.Context, id string) (found bool, err error)
+	// Drop deletes the dead letter id for good. found is false when the
+	// queue holds no dead letter id.
+	Drop(ctx context.Context, id string) (found bool, err error)
+}

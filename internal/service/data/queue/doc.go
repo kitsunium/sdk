@@ -126,6 +126,19 @@
 // two goroutines in one process as for two processes, which ADR 0052
 // measured that flock(2) emphatically does not.
 //
+// # Five levels, and where each broker keeps them
+//
+// Every broker serves the visible messages of the highest
+// [corequeue.Priority] first, strictly (ADR 0054, amended 2026-11-03). The
+// file broker names a normal message exactly as it did before levels
+// existed, byte for byte, so a queue on disk keeps working, and opens the
+// names of every other level with one digit — the highest level 0, the
+// lowest 4 — which its listing sorts first; a name without one is the
+// normal level. The SQL broker keeps a level only in the column
+// [SQLPriorityMigration] adds, when [SQLConfig] Priority is set; without it
+// every statement is the one it always sent. The memory broker keeps one
+// list per level.
+//
 // Package queue — how long a nacked message waits, the same way in all three
 // brokers.
 //

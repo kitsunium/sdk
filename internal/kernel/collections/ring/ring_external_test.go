@@ -184,3 +184,39 @@ func swallowQueueErr(err error) {
 		return
 	}
 }
+
+// TestDrainYieldsEveryItemOldestFirstAndStopsWhenAskedTo pins Drain: every
+// item in the order it was written, the ring empty after, and a loop that
+// breaks leaving the rest in it.
+func TestDrainYieldsEveryItemOldestFirstAndStopsWhenAskedTo(t *testing.T) {
+	t.Parallel()
+	q, err := ring.New[int](8)
+	if err != nil {
+		t.Fatalf("New(8) = %v", err)
+	}
+	for i := range 5 {
+		if writeErr := q.TryWrite(i); writeErr != nil {
+			t.Fatalf("TryWrite(%d) = %v", i, writeErr)
+		}
+	}
+	var first []int
+	for item := range ring.Drain(q) {
+		first = append(first, item)
+		if len(first) == 2 {
+			break
+		}
+	}
+	if len(first) != 2 || first[0] != 0 || first[1] != 1 || q.Len() != 3 {
+		t.Fatalf("a loop broken after two read %v and left %d, want [0 1] and 3", first, q.Len())
+	}
+	var rest []int
+	for item := range ring.Drain(q) {
+		rest = append(rest, item)
+	}
+	if len(rest) != 3 || rest[0] != 2 || rest[2] != 4 || q.Len() != 0 {
+		t.Fatalf("the drain read %v and left %d, want [2 3 4] and none", rest, q.Len())
+	}
+	for range ring.Drain(q) {
+		t.Fatal("an empty ring yielded an item")
+	}
+}

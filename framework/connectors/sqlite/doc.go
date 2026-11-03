@@ -21,7 +21,12 @@
 // database in <data>/<name>.sqlite. The engine opens the file in WAL mode
 // with a busy timeout, and its transactions take the write lock when they
 // begin (_txlock=immediate), so two writers queue rather than fail; a
-// parameter the URL writes itself wins. It is an app.LockWaiter: kit gives
+// parameter the URL writes itself wins. Under WAL it syncs at the
+// checkpoint rather than at every commit (_synchronous=NORMAL): a power cut
+// may lose the last commits, never the database — write ?_synchronous=FULL
+// for every commit on disk. It caps the WAL a burst grew at 64 MiB after
+// its checkpoint (_pragma=journal_size_limit(67108864)), unless the URL
+// writes a _pragma of its own. It is an app.LockWaiter: kit gives
 // it a busy timeout under <name>-timeout, T − max(250ms, T/10), and refuses
 // at start a T under 500ms or a URL whose own busy timeout reaches T.
 //

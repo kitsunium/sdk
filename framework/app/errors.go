@@ -320,6 +320,13 @@ const (
 	// product's own sender refused for good, and refuses the otlp command
 	// a queue it cannot read or a dead letter it does not hold.
 	CodeOTLPExport errs.Code = iapp.CodeOTLPExport
+	// CodeTransactionNested refuses a Transact inside another that asks for an
+	// isolation level or read-only ([Serializable], [RepeatableRead],
+	// [ReadOnly]): the inner level is a savepoint, which can change neither.
+	CodeTransactionNested errs.Code = iapp.CodeTransactionNested
+	// CodeTransactionReadOnly refuses a store's write inside a transaction
+	// opened with [ReadOnly], on every backend.
+	CodeTransactionReadOnly errs.Code = iapp.CodeTransactionReadOnly
 
 	// The signals the framework ends one of its own steps with and catches itself — a
 	// caller never receives one —, typed when the SDK made rule 2 a gate.

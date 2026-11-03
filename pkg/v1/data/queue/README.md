@@ -225,17 +225,31 @@ Idle consumers are woken once the publication's transaction commits, never for o
 - [func NewSQL\(cfg SQLConfig\) \(broker Broker, err error\)](<#NewSQL>)
 - [func RetryAfter\(cause error, delay time.Duration\) error](<#RetryAfter>)
 - [func SQLMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLMigration>)
+- [func SQLPriorityMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLPriorityMigration>)
 - [func SQLTrailMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLTrailMigration>)
+- [type AckOutcome](<#AckOutcome>)
+- [type AckResult](<#AckResult>)
+- [type Acker](<#Acker>)
+  - [func \(Acker\) AckMany\(ctx context.Context, receipts \[\]ReceiptValue\) \(AckResultValue, error\)](<#Acker.AckMany>)
+- [type BatchPublisher](<#BatchPublisher>)
+  - [func \(BatchPublisher\) PublishMany\(ctx context.Context, payloads \[\]\[\]byte\) \(\[\]MessageValue, error\)](<#BatchPublisher.PublishMany>)
 - [type Broker](<#Broker>)
   - [func \(Broker\) Ack\(ctx context.Context, receipt ReceiptValue\) error](<#Broker.Ack>)
   - [func \(Broker\) Nack\(ctx context.Context, receipt ReceiptValue, cause error\) \(NackValue, error\)](<#Broker.Nack>)
   - [func \(Broker\) Publish\(ctx context.Context, payload \[\]byte\) \(MessageValue, error\)](<#Broker.Publish>)
   - [func \(Broker\) Receive\(ctx context.Context, max int\) \(\[\]DeliveryValue, error\)](<#Broker.Receive>)
 - [type ConsumerConfig](<#ConsumerConfig>)
+- [type Counter](<#Counter>)
+  - [func \(Counter\) Stats\(ctx context.Context\) \(StatsValue, error\)](<#Counter.Stats>)
 - [type DeadLetter](<#DeadLetter>)
+- [type DeadLetterBulkManager](<#DeadLetterBulkManager>)
+  - [func \(DeadLetterBulkManager\) PurgeDeadLetters\(ctx context.Context, before time.Time, max int\) \(removed int, err error\)](<#DeadLetterBulkManager.PurgeDeadLetters>)
+  - [func \(DeadLetterBulkManager\) ReplayDeadLetters\(ctx context.Context, max int\) \(replayed int, err error\)](<#DeadLetterBulkManager.ReplayDeadLetters>)
 - [type DeadLetterManager](<#DeadLetterManager>)
   - [func \(DeadLetterManager\) DeleteDeadLetter\(ctx context.Context, id string\) error](<#DeadLetterManager.DeleteDeadLetter>)
   - [func \(DeadLetterManager\) ReplayDeadLetter\(ctx context.Context, id string\) error](<#DeadLetterManager.ReplayDeadLetter>)
+- [type DeadLetterPager](<#DeadLetterPager>)
+  - [func \(DeadLetterPager\) DeadLettersAfter\(ctx context.Context, after string, max int\) \(\[\]DeadLetterValue, error\)](<#DeadLetterPager.DeadLettersAfter>)
 - [type DeadLetterReader](<#DeadLetterReader>)
   - [func \(DeadLetterReader\) DeadLetters\(ctx context.Context, max int\) \(\[\]DeadLetterValue, error\)](<#DeadLetterReader.DeadLetters>)
 - [type DeadLetterWriter](<#DeadLetterWriter>)
@@ -253,6 +267,8 @@ Idle consumers are woken once the publication's transaction commits, never for o
 - [type LiveMessage](<#LiveMessage>)
 - [type MemoryConfig](<#MemoryConfig>)
 - [type Message](<#Message>)
+- [type MessageLister](<#MessageLister>)
+  - [func \(MessageLister\) AllMessages\(ctx context.Context, after string\) iter.Seq2\[LiveMessageValue, error\]](<#MessageLister.AllMessages>)
 - [type MessageReader](<#MessageReader>)
   - [func \(MessageReader\) Messages\(ctx context.Context, after string, max int\) \(\[\]LiveMessageValue, error\)](<#MessageReader.Messages>)
 - [type MessageWriter](<#MessageWriter>)
@@ -263,17 +279,71 @@ Idle consumers are woken once the publication's transaction commits, never for o
 - [type Policy](<#Policy>)
   - [func \(Policy\) Normalized\(\) PolicyValue](<#Policy.Normalized>)
   - [func \(Policy\) Validate\(\) error](<#Policy.Validate>)
+- [type Priority](<#Priority>)
+- [type PriorityPublisher](<#PriorityPublisher>)
+  - [func \(PriorityPublisher\) PublishPriority\(ctx context.Context, payload \[\]byte, level Priority\) \(MessageValue, error\)](<#PriorityPublisher.PublishPriority>)
+- [type Purged](<#Purged>)
+- [type Purger](<#Purger>)
+  - [func \(Purger\) Purge\(ctx context.Context\) \(PurgeValue, error\)](<#Purger.Purge>)
 - [type Receipt](<#Receipt>)
 - [type Rejecter](<#Rejecter>)
   - [func \(Rejecter\) Reject\(ctx context.Context, receipt ReceiptValue, cause error\) error](<#Rejecter.Reject>)
 - [type Releaser](<#Releaser>)
   - [func \(Releaser\) Release\(ctx context.Context, receipt ReceiptValue\) error](<#Releaser.Release>)
 - [type SQLConfig](<#SQLConfig>)
+- [type Stats](<#Stats>)
 - [type Wake](<#Wake>)
 - [type Waker](<#Waker>)
   - [func \(Waker\) Wake\(\) WakeValue](<#Waker.Wake>)
 
 ## Constants
+
+<a name="AckAcknowledged"></a>
+```go
+const AckAcknowledged AckOutcome = 1
+```
+
+AckAcknowledged is a receipt whose message was removed for good.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.AckAcknowledged`.
+
+<a name="AckLeaseExpired"></a>
+```go
+const AckLeaseExpired AckOutcome = 2
+```
+
+AckLeaseExpired is a receipt whose lease had lapsed: nothing was removed, as [Broker](#Broker).Ack answers [LeaseExpired](#LeaseExpired).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.AckLeaseExpired`.
+
+<a name="AckNotAttempted"></a>
+```go
+const AckNotAttempted AckOutcome = 0
+```
+
+AckNotAttempted is the zero [AckOutcome](#AckOutcome): [Acker](#Acker).AckMany returned an error before it reached the receipt.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.AckNotAttempted`.
+
+<a name="AckUnknownReceipt"></a>
+```go
+const AckUnknownReceipt AckOutcome = 3
+```
+
+AckUnknownReceipt is a receipt the broker never issued: nothing was removed, as [Broker](#Broker).Ack answers [UnknownReceipt](#UnknownReceipt).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.AckUnknownReceipt`.
+
+<a name="CodeAcknowledged"></a>
+```go
+const CodeAcknowledged errs.Code = 136972
+```
+
+CodeAcknowledged is [Acknowledged](#Acknowledged)'s code: errs.HasCode(err, CodeAcknowledged) recognises a handler's report that it acknowledged its delivery itself.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.CodeAcknowledged`.
+
+Code `0.2.23.12`
 
 <a name="CodeDeadLetterNotFound"></a>
 ```go
@@ -307,6 +377,17 @@ CodeInvalidMessage is [InvalidMessage](#InvalidMessage)'s code, for errs.HasCode
 Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.CodeInvalidMessage`.
 
 Code `0.2.23.9`
+
+<a name="CodeMessageExpired"></a>
+```go
+const CodeMessageExpired errs.Code = 136971
+```
+
+CodeMessageExpired is [MessageExpired](#MessageExpired)'s code: the reason and code a dead letter records for a message that outlived [Policy](#Policy).MaxAge.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.CodeMessageExpired`.
+
+Code `0.2.23.11`
 
 <a name="CodeNotRetryable"></a>
 ```go
@@ -386,7 +467,63 @@ MaxSQLTableLen is the longest table name [NewSQL](#NewSQL) and [SQLMigration](#S
 
 Initialised with `github.com/kitsunium/sdk/internal/service/data/queue.MaxSQLTableLen`.
 
+<a name="PriorityHigh"></a>
+```go
+const PriorityHigh Priority = 1
+```
+
+PriorityHigh is above the normal level.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.PriorityHigh`.
+
+<a name="PriorityHighest"></a>
+```go
+const PriorityHighest Priority = 2
+```
+
+PriorityHighest is the highest of the five levels.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.PriorityHighest`.
+
+<a name="PriorityLow"></a>
+```go
+const PriorityLow Priority = -1
+```
+
+PriorityLow is below the normal level.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.PriorityLow`.
+
+<a name="PriorityLowest"></a>
+```go
+const PriorityLowest Priority = -2
+```
+
+PriorityLowest is the lowest of the five levels.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.PriorityLowest`.
+
+<a name="PriorityNormal"></a>
+```go
+const PriorityNormal Priority = 0
+```
+
+PriorityNormal is the zero [Priority](#Priority), the level [Broker](#Broker).Publish publishes at.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.PriorityNormal`.
+
 ## Variables
+
+<a name="Acknowledged"></a>
+```go
+var Acknowledged *errs.Error
+```
+
+Acknowledged is what a [Handler](#Handler) returns once it has acknowledged its delivery itself, inside the transaction that holds its effects: [Consume](#Consume) then neither acknowledges nor hands the message back.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.Acknowledged`.
+
+Code `0.2.23.12` · reason `ACKNOWLEDGED` · public "The handler acknowledged the message itself"
 
 <a name="ConsumerMisconfigured"></a>
 ```go
@@ -466,6 +603,17 @@ LeaseExpired reports an acknowledgement whose lease had already lapsed. Nothing 
 Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.LeaseExpired`.
 
 Code `0.2.23.4` · reason `LEASE_EXPIRED` · public "The lease on that message has expired and the acknowledgement was ignored"
+
+<a name="MessageExpired"></a>
+```go
+var MessageExpired *errs.Error
+```
+
+MessageExpired is what a dead letter records of a message that outlived [Policy](#Policy).MaxAge before any consumer was handed it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.MessageExpired`.
+
+Code `0.2.23.11` · reason `MESSAGE_EXPIRED` · public "The message expired before it could be delivered"
 
 <a name="MessageTooLarge"></a>
 ```go
@@ -636,7 +784,16 @@ RetryAfter marks cause as a failure to retry no sooner than delay from now: retu
 func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
 ```
 
-SQLMigration returns the migration that creates the one table an SQL queue named table keeps on dialect, numbered version for the caller's own version table. Its Down drops the table, and every message in it. Its statement does nothing when the table exists.
+SQLMigration returns the migration that creates the one table an SQL queue named table keeps on dialect, numbered version for the caller's own version table. Its Down drops the table, and every message in it. Its statement does nothing when the table exists. Its Checksum fingerprints Up's statements, so a version table that recorded it refuses a build whose statements differ.
+
+<a name="SQLPriorityMigration"></a>
+## func [SQLPriorityMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+```go
+func SQLPriorityMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
+```
+
+SQLPriorityMigration returns the migration that adds the priority column and its index a broker with [SQLConfig](#SQLConfig).Priority reads to a table [SQLMigration](#SQLMigration) created, numbered version for the caller's own version table. It does nothing when the table has the column or does not exist; its Down drops the index and the column.
 
 <a name="SQLTrailMigration"></a>
 ## func [SQLTrailMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
@@ -647,10 +804,127 @@ func SQLTrailMigration(dialect sql.Dialect, table string, version uint64) (sql.M
 
 SQLTrailMigration returns the migration that adds the trail column a broker with [SQLConfig](#SQLConfig).Trail writes to a table an earlier [SQLMigration](#SQLMigration) created, numbered version for the caller's own version table. It does nothing when the table has the column or does not exist; its Down drops the column.
 
+<a name="AckOutcome"></a>
+## type [AckOutcome](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+AckOutcome is the public alias for what [Acker](#Acker).AckMany did with one receipt.
+
+```go
+type AckOutcome = corequeue.AckOutcome
+```
+
+AckOutcome is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.AckOutcome`, declared as:
+
+```go
+type AckOutcome uint8
+```
+
+<a name="AckResult"></a>
+## type [AckResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+AckResult is the public alias for what [Acker](#Acker).AckMany reports.
+
+```go
+type AckResult = corequeue.AckResultValue
+```
+
+AckResult is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.AckResultValue`, declared as:
+
+```go
+type AckResult struct {
+	// Outcomes holds the outcome of each receipt, Outcomes[i] for the i-th;
+	// it is as long as the batch, even beside an error.
+	Outcomes []AckOutcome
+}
+```
+
+<a name="Acker"></a>
+## type [Acker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+Acker is the public alias for the capability of acknowledging several leased messages in one call, with one outcome per receipt. Every broker here implements it.
+
+```go
+type Acker = corequeue.Acker
+```
+
+Acker is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.Acker`, declared as:
+
+```go
+type Acker interface {
+	// AckMany acknowledges every receipt as [Broker.Ack] acknowledges one,
+	// and returns one outcome per receipt, in the same order: acknowledged,
+	// a lapsed lease, or a receipt the broker never issued. A refused
+	// receipt is an outcome, never the call's error: the others are still
+	// acknowledged.
+	//
+	// The error is the broker's storage failing, or ctx ending; the result
+	// beside it still holds an outcome per receipt, [AckNotAttempted] for
+	// the ones the broker did not reach, which are as they were before the
+	// call. An empty batch acknowledges nothing and returns no error. A
+	// broker that joins the transaction ctx carries (ADR 0151) acknowledges
+	// in that transaction.
+	AckMany(ctx context.Context, receipts []ReceiptValue) (AckResultValue, error)
+}
+```
+
+<a name="Acker.AckMany"></a>
+### func \(Acker\) [AckMany](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (Acker) AckMany(ctx context.Context, receipts []ReceiptValue) (AckResultValue, error)
+```
+
+AckMany acknowledges every receipt as [Broker.Ack](#Broker.Ack) acknowledges one, and returns one outcome per receipt, in the same order: acknowledged, a lapsed lease, or a receipt the broker never issued. A refused receipt is an outcome, never the call's error: the others are still acknowledged.
+
+The error is the broker's storage failing, or ctx ending; the result beside it still holds an outcome per receipt, [AckNotAttempted](#AckNotAttempted) for the ones the broker did not reach, which are as they were before the call. An empty batch acknowledges nothing and returns no error. A broker that joins the transaction ctx carries (ADR 0151) acknowledges in that transaction.
+
+<a name="BatchPublisher"></a>
+## type [BatchPublisher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+BatchPublisher is the public alias for the capability of publishing several messages in one call. Every broker here implements it.
+
+```go
+type BatchPublisher = corequeue.BatchPublisher
+```
+
+BatchPublisher is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.BatchPublisher`, declared as:
+
+```go
+type BatchPublisher interface {
+	// PublishMany appends every payload to the queue, in order, as
+	// [Broker.Publish] appends one, and returns the messages the broker
+	// minted, one per payload and in the same order.
+	//
+	// Every payload is checked against [PolicyValue.MaxMessageBytes] before
+	// anything is written: one above it is [MessageTooLarge], and nothing is
+	// published. An empty batch publishes nothing and returns no error.
+	//
+	// A broker that joins the transaction ctx carries (ADR 0151) publishes
+	// the batch in that transaction, so it exists entirely or not at all. A
+	// broker that writes message by message says so: on a failure at the
+	// k-th payload, the messages it returns beside the error — the first
+	// k−1 — are durable, and the rest were not published.
+	PublishMany(ctx context.Context, payloads [][]byte) ([]MessageValue, error)
+}
+```
+
+<a name="BatchPublisher.PublishMany"></a>
+### func \(BatchPublisher\) [PublishMany](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (BatchPublisher) PublishMany(ctx context.Context, payloads [][]byte) ([]MessageValue, error)
+```
+
+PublishMany appends every payload to the queue, in order, as [Broker.Publish](#Broker.Publish) appends one, and returns the messages the broker minted, one per payload and in the same order.
+
+Every payload is checked against \[PolicyValue.MaxMessageBytes] before anything is written: one above it is [MessageTooLarge](#MessageTooLarge), and nothing is published. An empty batch publishes nothing and returns no error.
+
+A broker that joins the transaction ctx carries (ADR 0151) publishes the batch in that transaction, so it exists entirely or not at all. A broker that writes message by message says so: on a failure at the k-th payload, the messages it returns beside the error — the first k−1 — are durable, and the rest were not published.
+
 <a name="Broker"></a>
 ## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
-Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [Releaser](#Releaser), [DelayedNacker](#DelayedNacker), [DelayedPublisher](#DelayedPublisher), [OncePublisher](#OncePublisher), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter), [MessageReader](#MessageReader), [MessageWriter](#MessageWriter)) reached by type assertion.
+Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [Releaser](#Releaser), [DelayedNacker](#DelayedNacker), [DelayedPublisher](#DelayedPublisher), [OncePublisher](#OncePublisher), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter), [MessageReader](#MessageReader), [MessageWriter](#MessageWriter), [MessageLister](#MessageLister), [Counter](#Counter), [Purger](#Purger), [DeadLetterPager](#DeadLetterPager), [DeadLetterBulkManager](#DeadLetterBulkManager), [BatchPublisher](#BatchPublisher), [Acker](#Acker)) reached by type assertion.
 
 ```go
 type Broker = corequeue.Broker
@@ -881,6 +1155,21 @@ type ConsumerConfig struct {
 	// the margin before its lease ends. Measured on Clock. A caller's stop
 	// budget — a lifecycle component's — must cover it plus SettleTimeout.
 	DrainTimeout        time.Duration
+	// AckedWindow is how many message identifiers the engine remembers
+	// having handled: the last AckedWindow messages whose handler returned
+	// nil or [corequeue.Acknowledged] in this process. A delivery of one of
+	// them — its lease lapsed before the acknowledgement landed, and the
+	// broker delivered it again — is acknowledged without running the
+	// handler a second time.
+	//
+	// It narrows the duplicates at-least-once delivery leaves, as the mail
+	// spool's memory of what it delivered does, for every broker; it does
+	// not remove them. The window is this process's and is lost when it
+	// stops: a redelivery to another consumer, or after a restart, still
+	// runs the handler, which is still idempotent. Zero, or negative,
+	// remembers nothing — every delivery runs the handler, what Consume
+	// always did.
+	AckedWindow         int
 	// AutoExtend renews the lease of the message a handler is running, a
 	// third of the lease after it was granted or last renewed, for as long
 	// as the handler runs — the heartbeat of SQS, JetStream's in-progress
@@ -924,6 +1213,36 @@ type ConsumerConfig struct {
 	HandlerIsIdempotent bool
 }
 ```
+
+<a name="Counter"></a>
+## type [Counter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+Counter is the public alias for the capability of counting a queue's backlog — waiting, leased, dead, the oldest and the next due — without reading a payload. Every broker here implements it.
+
+```go
+type Counter = corequeue.Counter
+```
+
+Counter is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.Counter`, declared as:
+
+```go
+type Counter interface {
+	// Stats counts the queue as the broker records it now: no payload is
+	// read, nothing is leased and no lapsed lease is reclaimed, so a lease
+	// that ran out and nobody reclaimed yet still counts as leased. It is a
+	// snapshot that races the queue, as [MessageReader.Messages] is.
+	Stats(ctx context.Context) (StatsValue, error)
+}
+```
+
+<a name="Counter.Stats"></a>
+### func \(Counter\) [Stats](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (Counter) Stats(ctx context.Context) (StatsValue, error)
+```
+
+Stats counts the queue as the broker records it now: no payload is read, nothing is leased and no lapsed lease is reclaimed, so a lease that ran out and nobody reclaimed yet still counts as leased. It is a snapshot that races the queue, as [MessageReader.Messages](#MessageReader.Messages) is.
 
 <a name="DeadLetter"></a>
 ## type [DeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
@@ -976,8 +1295,69 @@ type DeadLetter struct {
 	// this SDK's brokers produce by running out of attempts, and is the count
 	// the message had for one a handler rejected ([Rejecter]).
 	Deliveries int
+	// Priority is the level the message was published at
+	// ([PriorityPublisher]); a replay queues it at that level again.
+	// [PriorityNormal] for one written before priorities existed, and on
+	// an SQL broker whose SQLConfig.Priority is not set.
+	Priority   Priority
 }
 ```
+
+<a name="DeadLetterBulkManager"></a>
+## type [DeadLetterBulkManager](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+DeadLetterBulkManager is the public alias for the capability of replaying the oldest dead letters, or deleting those that failed before an instant, in one call. Every broker here implements it.
+
+```go
+type DeadLetterBulkManager = corequeue.DeadLetterBulkManager
+```
+
+DeadLetterBulkManager is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterBulkManager`, declared as:
+
+```go
+type DeadLetterBulkManager interface {
+	// PurgeDeadLetters deletes up to max dead letters whose
+	// [DeadLetterValue.FailedAt] lies before before, the oldest first in
+	// [DeadLetterPager]'s order, and returns how many it deleted. It never
+	// touches a live message.
+	//
+	// max must be positive ([InvalidBatchSize]). A failure part-way returns
+	// the number deleted so far with the error, as ReplayDeadLetters does.
+	PurgeDeadLetters(ctx context.Context, before time.Time, max int) (removed int, err error)
+	// ReplayDeadLetters replays up to max dead letters, the oldest first in
+	// [DeadLetterPager]'s order, each as [DeadLetterManager.ReplayDeadLetter]
+	// replays one, and returns how many it replayed. Called again, it
+	// replays the next ones; it returns 0 once the store is empty.
+	//
+	// max must be positive ([InvalidBatchSize]). A failure part-way returns
+	// the number replayed so far with the error, and every dead letter not
+	// counted is still a dead letter, so the caller resumes by calling
+	// again. Idle consumers are woken.
+	ReplayDeadLetters(ctx context.Context, max int) (replayed int, err error)
+}
+```
+
+<a name="DeadLetterBulkManager.PurgeDeadLetters"></a>
+### func \(DeadLetterBulkManager\) [PurgeDeadLetters](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (DeadLetterBulkManager) PurgeDeadLetters(ctx context.Context, before time.Time, max int) (removed int, err error)
+```
+
+PurgeDeadLetters deletes up to max dead letters whose \[DeadLetterValue.FailedAt] lies before before, the oldest first in [DeadLetterPager](#DeadLetterPager)'s order, and returns how many it deleted. It never touches a live message.
+
+max must be positive ([InvalidBatchSize](#InvalidBatchSize)). A failure part-way returns the number deleted so far with the error, as ReplayDeadLetters does.
+
+<a name="DeadLetterBulkManager.ReplayDeadLetters"></a>
+### func \(DeadLetterBulkManager\) [ReplayDeadLetters](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (DeadLetterBulkManager) ReplayDeadLetters(ctx context.Context, max int) (replayed int, err error)
+```
+
+ReplayDeadLetters replays up to max dead letters, the oldest first in [DeadLetterPager](#DeadLetterPager)'s order, each as [DeadLetterManager.ReplayDeadLetter](#DeadLetterManager.ReplayDeadLetter) replays one, and returns how many it replayed. Called again, it replays the next ones; it returns 0 once the store is empty.
+
+max must be positive ([InvalidBatchSize](#InvalidBatchSize)). A failure part-way returns the number replayed so far with the error, and every dead letter not counted is still a dead letter, so the caller resumes by calling again. Idle consumers are woken.
 
 <a name="DeadLetterManager"></a>
 ## type [DeadLetterManager](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
@@ -1032,6 +1412,41 @@ func (DeadLetterManager) ReplayDeadLetter(ctx context.Context, id string) error
 ReplayDeadLetter moves the dead letter id back into the queue, visible at once, with its delivery count reset: its next delivery counts 1 and it gets \[PolicyValue.MaxDeliveries] attempts again. It keeps its ID, its payload and its EnqueuedAt, so the log lines of both its lives join on one identifier; the dead-letter record, its cause included, is gone once the message is queued again — log it first if it matters.
 
 An id the store does not hold is [DeadLetterNotFound](#DeadLetterNotFound), and nothing is queued. Two replays of one dead letter racing each other may both queue it on a broker that cannot tell them apart, which is a duplicate the at-least-once guarantee already permits; the brokers say which they are.
+
+<a name="DeadLetterPager"></a>
+## type [DeadLetterPager](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+DeadLetterPager is the public alias for the capability of paging through the dead letters after an identifier, oldest enqueued first. Every broker here implements it.
+
+```go
+type DeadLetterPager = corequeue.DeadLetterPager
+```
+
+DeadLetterPager is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterPager`, declared as:
+
+```go
+type DeadLetterPager interface {
+	// DeadLettersAfter returns up to max dead letters whose identifier sorts
+	// after after — from the first when after is empty —, in the byte order
+	// of their identifiers. Like [DeadLetterReader.DeadLetters] it removes
+	// nothing. A dead letter written, replayed or deleted meanwhile may be
+	// listed or not.
+	//
+	// max must be positive ([InvalidBatchSize]).
+	DeadLettersAfter(ctx context.Context, after string, max int) ([]DeadLetterValue, error)
+}
+```
+
+<a name="DeadLetterPager.DeadLettersAfter"></a>
+### func \(DeadLetterPager\) [DeadLettersAfter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (DeadLetterPager) DeadLettersAfter(ctx context.Context, after string, max int) ([]DeadLetterValue, error)
+```
+
+DeadLettersAfter returns up to max dead letters whose identifier sorts after after — from the first when after is empty —, in the byte order of their identifiers. Like [DeadLetterReader.DeadLetters](#DeadLetterReader.DeadLetters) it removes nothing. A dead letter written, replayed or deleted meanwhile may be listed or not.
+
+max must be positive ([InvalidBatchSize](#InvalidBatchSize)).
 
 <a name="DeadLetterReader"></a>
 ## type [DeadLetterReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
@@ -1269,6 +1684,13 @@ type FileConfig struct {
 	//
 	// Nil means clock.System.
 	Clock  clock.Clock
+	// Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+	// for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+	// math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+	// retry instant to the nanosecond, as it does without a jitter; the
+	// three brokers draw from it identically, so the memory broker stays an
+	// exact double. It may be called by several goroutines at once.
+	Random func() float64
 	// Dir is the queue directory. It is created owner-only when absent, and
 	// refused when it exists and any account outside the owner and group
 	// could replace its entries. Its three state directories are held to the
@@ -1412,6 +1834,9 @@ type LiveMessage struct {
 	// message is still alive: it comes back at VisibleAt unless it is
 	// acknowledged.
 	Leased     bool
+	// Priority is the level the message is delivered at
+	// ([PriorityPublisher]), kept across a retry and a copy.
+	Priority   Priority
 }
 ```
 
@@ -1435,6 +1860,13 @@ type MemoryConfig struct {
 	//
 	// Nil means clock.System.
 	Clock  clock.Clock
+	// Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+	// for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+	// math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+	// retry instant to the nanosecond, as it does without a jitter; the
+	// three brokers draw from it identically, so the memory broker stays an
+	// exact double. It may be called by several goroutines at once.
+	Random func() float64
 	// Policy is the delivery discipline. Its zero value is refused; see
 	// core/data/queue.PolicyValue.
 	Policy corequeue.PolicyValue
@@ -1476,6 +1908,43 @@ type Message struct {
 	Payload    []byte
 }
 ```
+
+<a name="MessageLister"></a>
+## type [MessageLister](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+MessageLister is the public alias for the capability of ranging over the live messages through an iterator, as [MessageReader](#MessageReader) lists them a page at a time. Every broker here implements it.
+
+```go
+type MessageLister = corequeue.MessageLister
+```
+
+MessageLister is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.MessageLister`, declared as:
+
+```go
+type MessageLister interface {
+	// AllMessages yields every live message whose identifier sorts after
+	// after — from the first when after is empty —, in the byte order of
+	// their identifiers, as [MessageReader.Messages] lists them.
+	//
+	// A failure of the broker's storage, or ctx ending, is yielded once as
+	// the error of a zero [LiveMessageValue], and the iteration stops there;
+	// the identifier of the last message yielded before it is where a later
+	// call resumes. A loop that breaks early stops the reading: nothing is
+	// held open past the break.
+	AllMessages(ctx context.Context, after string) iter.Seq2[LiveMessageValue, error]
+}
+```
+
+<a name="MessageLister.AllMessages"></a>
+### func \(MessageLister\) [AllMessages](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (MessageLister) AllMessages(ctx context.Context, after string) iter.Seq2[LiveMessageValue, error]
+```
+
+AllMessages yields every live message whose identifier sorts after after — from the first when after is empty —, in the byte order of their identifiers, as [MessageReader.Messages](#MessageReader.Messages) lists them.
+
+A failure of the broker's storage, or ctx ending, is yielded once as the error of a zero \[LiveMessageValue], and the iteration stops there; the identifier of the last message yielded before it is where a later call resumes. A loop that breaks early stops the reading: nothing is held open past the break.
 
 <a name="MessageReader"></a>
 ## type [MessageReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
@@ -1680,7 +2149,7 @@ type Policy struct {
 	//
 	// A non-positive value is refused ([QueueMisconfigured]), and so is one
 	// above [MaxDeadlineOffset].
-	VisibilityTimeout time.Duration
+	VisibilityTimeout   time.Duration
 	// RetryDelay is how long a NACKED message stays invisible before it
 	// becomes eligible again, measured from the nack.
 	//
@@ -1694,7 +2163,7 @@ type Policy struct {
 	//
 	// It is the same wait after every failure unless [PolicyValue]
 	// .MaxRetryDelay makes it grow.
-	RetryDelay        time.Duration
+	RetryDelay          time.Duration
 	// MaxRetryDelay makes the retry delay GROW, and is where the growth
 	// stops. When it is positive, a message nacked on its n-th delivery waits
 	// RetryDelay × 2^(n−1), held at MaxRetryDelay — the SDK's one backoff
@@ -1714,7 +2183,7 @@ type Policy struct {
 	// reading like a backoff; and so is a ceiling below RetryDelay, which
 	// would silently shorten every wait the caller asked for
 	// ([QueueMisconfigured], naming the field).
-	MaxRetryDelay     time.Duration
+	MaxRetryDelay       time.Duration
 	// MaxDeliveries is how many times one message may be handed to a
 	// consumer before the broker gives up and dead-letters it. It is
 	// compared against [DeliveryValue.Deliveries], which counts from 1, so a
@@ -1722,7 +2191,7 @@ type Policy struct {
 	// legitimate configuration rather than an off-by-one.
 	//
 	// A non-positive value is refused ([QueueMisconfigured]).
-	MaxDeliveries     int
+	MaxDeliveries       int
 	// MaxMessageBytes bounds one payload. A larger payload is refused at
 	// [Broker.Publish] with [MessageTooLarge], at the call site that built
 	// it, rather than accepted and discovered by a consumer that cannot read
@@ -1730,7 +2199,59 @@ type Policy struct {
 	//
 	// Zero means [DefaultMaxMessageBytes]. Negative is refused, because it
 	// is not a bound at all and the caller who wrote it meant something.
-	MaxMessageBytes   int
+	MaxMessageBytes     int
+	// MaxAge is how long a message may wait for a consumer, measured from
+	// its [MessageValue.EnqueuedAt]. A message whose age has reached it is
+	// never handed to a consumer: the next [Broker.Receive] that reaches it
+	// moves it to the dead-letter store with [MessageExpired] as its reason
+	// — evidence of what expired, never a message silently gone. A message
+	// a consumer already leases is not taken from it: its acknowledgement
+	// still lands, and only a delivery after its age is refused.
+	//
+	// It is for work that is worthless late — a notification an hour
+	// stale, a cache warm-up for a deployment already replaced —, the
+	// lifetime SQS and RabbitMQ call a message's retention and TTL.
+	//
+	// Zero means a message never expires, which is what every policy did
+	// before the field existed: that is its one reading. A negative value
+	// is refused, and so is one above [MaxDeadlineOffset]
+	// ([QueueMisconfigured], naming the field).
+	MaxAge              time.Duration
+	// DeadLetterRetention is how long a dead letter is kept, measured from
+	// its [DeadLetterValue.FailedAt]. A dead letter older than it is removed
+	// by a later [Broker.Receive] — at most one sweep a minute on the
+	// broker's clock —, so a queue that dead-letters steadily stops growing
+	// its store until somebody deletes by hand.
+	//
+	// Zero keeps every dead letter for good, which is what every policy did
+	// before the field existed. A negative value is refused, and so is one
+	// above [MaxDeadlineOffset] ([QueueMisconfigured], naming the field).
+	DeadLetterRetention time.Duration
+	// RetryJitter widens each policy retry delay by a random fraction of
+	// itself, drawn from [0, RetryJitter) and added, so messages nacked in
+	// the same instant — every message of every consumer during a
+	// downstream's outage — come back spread over a window instead of in
+	// one burst aimed at a dependency already failing to keep up. A delay
+	// held at MaxRetryDelay may reach MaxRetryDelay × (1 + RetryJitter).
+	// It is read only under the zero [PolicyValue.RetryJitterMode].
+	//
+	// Zero is no jitter: the exact instant every retry waited before the
+	// field existed. A value outside [0, 1], NaN included, is refused, and
+	// so is a jitter with no MaxRetryDelay — a growing delay is what it
+	// spreads ([QueueMisconfigured], naming the field). A delay a caller
+	// names through [DelayedNacker] is the caller's, and never jittered.
+	RetryJitter         float64
+	// RetryJitterMode is how the retry delay is randomised, as
+	// kernel/backoff's curve is (ADR 0184): the zero, additive, widens it
+	// by [PolicyValue.RetryJitter]; full draws the whole delay from
+	// [0, grown]; decorrelated draws it from [RetryDelay, 3 × the delay
+	// before], held at MaxRetryDelay. The last two ignore RetryJitter, and
+	// setting one beside them is refused rather than ignored.
+	//
+	// A mode other than the zero needs a MaxRetryDelay, as RetryJitter
+	// does, and a mode the package does not define is refused
+	// ([QueueMisconfigured], naming the field).
+	RetryJitterMode     kbackoff.JitterMode
 }
 ```
 
@@ -1755,6 +2276,118 @@ func (Policy) Validate() error
 Validate reports whether the policy is one a broker can honour, and refuses it BY FIELD when it is not.
 
 It lives in core so that the memory, file and SQL brokers refuse identical inputs identically — the property that makes the first usable as a test double for the other two. It is the same instrument core/data/vfs's ValidatePath and ValidatePerm are, for the same reason.
+
+<a name="Priority"></a>
+## type [Priority](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+Priority is the public alias for the level a message is delivered at.
+
+```go
+type Priority = corequeue.Priority
+```
+
+Priority is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.Priority`, declared as:
+
+```go
+type Priority int8
+```
+
+<a name="PriorityPublisher"></a>
+## type [PriorityPublisher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+PriorityPublisher is the public alias for the capability of publishing a message at a level, the visible messages of the highest level received first, strictly. Every broker here implements it; the SQL broker keeps a level once [SQLPriorityMigration](#SQLPriorityMigration) has run and [SQLConfig](#SQLConfig).Priority is set.
+
+```go
+type PriorityPublisher = corequeue.PriorityPublisher
+```
+
+PriorityPublisher is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.PriorityPublisher`, declared as:
+
+```go
+type PriorityPublisher interface {
+	// PublishPriority appends payload to the queue at level, as
+	// [Broker.Publish] appends one at [PriorityNormal], and returns the
+	// message the broker minted.
+	//
+	// A level outside the five [PriorityLowest] to [PriorityHighest] is
+	// [QueueMisconfigured], and nothing is published — so is one a broker
+	// cannot keep. A payload above [PolicyValue.MaxMessageBytes] is
+	// [MessageTooLarge].
+	PublishPriority(ctx context.Context, payload []byte, level Priority) (MessageValue, error)
+}
+```
+
+<a name="PriorityPublisher.PublishPriority"></a>
+### func \(PriorityPublisher\) [PublishPriority](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (PriorityPublisher) PublishPriority(ctx context.Context, payload []byte, level Priority) (MessageValue, error)
+```
+
+PublishPriority appends payload to the queue at level, as [Broker.Publish](#Broker.Publish) appends one at [PriorityNormal](#PriorityNormal), and returns the message the broker minted.
+
+A level outside the five [PriorityLowest](#PriorityLowest) to [PriorityHighest](#PriorityHighest) is [QueueMisconfigured](#QueueMisconfigured), and nothing is published — so is one a broker cannot keep. A payload above \[PolicyValue.MaxMessageBytes] is [MessageTooLarge](#MessageTooLarge).
+
+<a name="Purged"></a>
+## type [Purged](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+Purged is the public alias for what [Purger](#Purger).Purge removed.
+
+```go
+type Purged = corequeue.PurgeValue
+```
+
+Purged is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.PurgeValue`, declared as:
+
+```go
+type Purged struct {
+	// Queued is how many waiting messages were removed, visible or not yet.
+	Queued int
+	// Leased is how many leased messages were removed — a lapsed lease
+	// nobody had reclaimed yet among them.
+	Leased int
+}
+```
+
+<a name="Purger"></a>
+## type [Purger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+Purger is the public alias for the capability of removing every live message of a queue, never a dead letter. Every broker here implements it.
+
+```go
+type Purger = corequeue.Purger
+```
+
+Purger is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.Purger`, declared as:
+
+```go
+type Purger interface {
+	// Purge removes every live message and reports how many were waiting
+	// and how many were leased. It is, beside
+	// [DeadLetterManager.DeleteDeadLetter] and
+	// [DeadLetterBulkManager.PurgeDeadLetters], a call that destroys messages
+	// without their consumers' acknowledgement, and it is never made by the
+	// SDK itself.
+	//
+	// A consumer still working under a lease it held finds the message gone
+	// at its acknowledgement, which then answers [LeaseExpired]. A message
+	// published while Purge runs may survive it. Idle consumers are woken,
+	// so they read the emptied queue at once. A broker that joins the
+	// transaction ctx carries (ADR 0151) purges in that transaction.
+	Purge(ctx context.Context) (PurgeValue, error)
+}
+```
+
+<a name="Purger.Purge"></a>
+### func \(Purger\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (Purger) Purge(ctx context.Context) (PurgeValue, error)
+```
+
+Purge removes every live message and reports how many were waiting and how many were leased. It is, beside [DeadLetterManager.DeleteDeadLetter](#DeadLetterManager.DeleteDeadLetter) and [DeadLetterBulkManager.PurgeDeadLetters](#DeadLetterBulkManager.PurgeDeadLetters), a call that destroys messages without their consumers' acknowledgement, and it is never made by the SDK itself.
+
+A consumer still working under a lease it held finds the message gone at its acknowledgement, which then answers [LeaseExpired](#LeaseExpired). A message published while Purge runs may survive it. Idle consumers are woken, so they read the emptied queue at once. A broker that joins the transaction ctx carries (ADR 0151) purges in that transaction.
 
 <a name="Receipt"></a>
 ## type [Receipt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
@@ -1850,7 +2483,7 @@ A lapsed receipt is [LeaseExpired](#LeaseExpired) and one this broker cannot rea
 <a name="SQLConfig"></a>
 ## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
-SQLConfig is the public alias for [NewSQL](#NewSQL)'s configuration: Transactor, Dialect and Table (required), Policy, Clock, and Trail, which keeps a dead letter's trail once [SQLTrailMigration](#SQLTrailMigration) has run.
+SQLConfig is the public alias for [NewSQL](#NewSQL)'s configuration: Transactor, Dialect and Table (required), Policy, Clock, Trail, which keeps a dead letter's trail once [SQLTrailMigration](#SQLTrailMigration) has run, and Priority, which keeps a message's level once [SQLPriorityMigration](#SQLPriorityMigration) has run.
 
 ```go
 type SQLConfig = svcqueue.SQLConfig
@@ -1877,6 +2510,13 @@ type SQLConfig struct {
 	// instants their own clocks wrote, so those clocks must agree to within
 	// the precision a lease needs — as they must for the file broker.
 	Clock      clock.Clock
+	// Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+	// for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+	// math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+	// retry instant to the nanosecond, as it does without a jitter; the
+	// three brokers draw from it identically, so the memory broker stays an
+	// exact double. It may be called by several goroutines at once.
+	Random     func() float64
 	// Table names the queue's one table, which [SQLMigration] creates. It is
 	// a lower-case SQL identifier of at most [MaxSQLTableLen] bytes, holds no
 	// three underscores in a row — docstore's derived tables do — and does
@@ -1898,6 +2538,46 @@ type SQLConfig struct {
 	// Unset, the broker sends the statements it sent before the column
 	// existed, and a dead letter it buries or reads has no trail.
 	Trail      bool
+	// Priority makes the broker keep a message's level
+	// (core/data/queue.PriorityPublisher) in the table's priority column,
+	// which [SQLPriorityMigration] adds, and hand out the visible rows of
+	// the highest level first: run that migration before setting it.
+	// Unset, the broker sends the statements it sent before the column
+	// existed, reads every message as core/data/queue.PriorityNormal, and
+	// refuses to publish or write one at any other level.
+	Priority   bool
+}
+```
+
+<a name="Stats"></a>
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+Stats is the public alias for a queue's backlog as [Counter](#Counter) reads it.
+
+```go
+type Stats = corequeue.StatsValue
+```
+
+Stats is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.StatsValue`, declared as:
+
+```go
+type Stats struct {
+	// OldestEnqueuedAt is the enqueue instant of the oldest live message —
+	// waiting or leased —, the zero time.Time when there is none. Its age
+	// is how long the queue has been behind.
+	OldestEnqueuedAt time.Time
+	// NextDueAt is the earliest instant a waiting message becomes visible —
+	// an instant already past when one is visible now —, the zero
+	// time.Time when nothing waits.
+	NextDueAt        time.Time
+	// Queued counts the messages waiting for a consumer, visible now or
+	// held until a later instant.
+	Queued           int64
+	// Leased counts the messages a consumer leases, a lapsed lease nobody
+	// reclaimed yet among them.
+	Leased           int64
+	// Dead counts the dead letters.
+	Dead             int64
 }
 ```
 

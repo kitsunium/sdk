@@ -2,24 +2,58 @@ package singleflight
 
 import (
 	"context"
+	"hash/maphash"
 	"sync"
 )
 
-// initialCallsCapacity pre-sizes the in-flight map on first use. It is a hint,
-// not a bound: a Group is a deduplication window, and the number of DISTINCT
-// keys in flight at one instant is small even when the call rate is not —
-// that is the whole premise of the primitive.
+// initialCallsCapacity pre-sizes a shard's in-flight map on first use. It is a
+// hint, not a bound: a Group is a deduplication window, and the number of
+// DISTINCT keys in flight at one instant is small even when the call rate is
+// not — that is the whole premise of the primitive.
 const initialCallsCapacity int = 8
+
+// shardCount is how many independent maps a Group spreads its keys over (a
+// power of two, so a mask picks one): distinct keys contend only when they
+// hash to the same shard, where one map under one lock serialised them all.
+const shardCount int = 16
+
+// cacheLine is the 64 bytes a shard is padded to, so two shards never share a
+// cache line and one shard's lock traffic does not slow its neighbour's.
+const cacheLine int = 64
+
+// shardHeld is what a shard holds before its padding: a mutex and a map
+// pointer, 16 bytes.
+const shardHeld int = 16
+
+// shardPad fills a shard to cacheLine, derived from cacheLine and shardHeld.
+const shardPad int = cacheLine - shardHeld
+
+// shardSeed keys the hash that picks a key's shard. One seed per process:
+// drawn at start, so no input can be crafted to land every key in one shard.
+var shardSeed = maphash.MakeSeed()
+
+// shard is one of a Group's maps and the mutex guarding it, with every call's
+// refs and retired.
+type shard[K comparable, V any] struct {
+	mu    sync.Mutex
+	calls map[K]*call[V]
+	_     [shardPad]byte
+}
 
 // Group deduplicates concurrent [Group.Do] calls that name the same key. The
 // zero value is ready to use; a Group must not be copied after first use.
 //
 // Safe for concurrent use by any number of goroutines.
 type Group[K comparable, V any] struct {
-	//: RWMutex rather than Mutex only for InFlight, the one read-only path;
-	//: every other method mutates the map or a refcount and takes Lock.
-	mu    sync.RWMutex
-	calls map[K]*call[V]
+	//: a fixed array so the zero Group needs no constructor; each shard builds
+	//: its map on first use.
+	shards [shardCount]shard[K, V]
+}
+
+// shardOf returns the shard key lives in.
+func (g *Group[K, V]) shardOf(key K) *shard[K, V] {
+	//: the low bits of a seeded hash; shardCount is a power of two.
+	return &g.shards[maphash.Comparable(shardSeed, key)&uint64(shardCount-1)]
 }
 
 // Do runs fn for key unless an identical key is already in flight, in which
@@ -38,10 +72,11 @@ type Group[K comparable, V any] struct {
 // If fn panics, Do panics with a [PanicValue] carrying the original value and
 // fn's stack.
 func (g *Group[K, V]) Do(ctx context.Context, key K, fn func(ctx context.Context) (V, error)) (value V, shared bool, err error) {
+	held := g.shardOf(key)
 	//: join the in-flight call for this key, or become the one that runs it.
-	entry, joined := g.join(ctx, key, fn)
+	entry, joined := held.join(ctx, key, fn)
 	//: wait for the result, for this caller's cancellation, or for a panic.
-	return g.await(ctx, key, entry, joined)
+	return held.await(ctx, key, entry, joined)
 }
 
 // Forget retires key so the NEXT Do starts a fresh call. Callers already
@@ -53,10 +88,11 @@ func (g *Group[K, V]) Do(ctx context.Context, key K, fn func(ctx context.Context
 // microsecond later would be handed a result computed from stale inputs and
 // would have no way to tell.
 func (g *Group[K, V]) Forget(key K) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	held := g.shardOf(key)
+	held.mu.Lock()
+	defer held.mu.Unlock()
 	//: a key that names nothing is already forgotten.
-	delete(g.calls, key)
+	delete(held.calls, key)
 }
 
 // InFlight reports how many keys a [Group.Do] arriving now would JOIN rather
@@ -70,53 +106,102 @@ func (g *Group[K, V]) Forget(key K) {
 // not a kill — so a forgotten key that a later Do re-issued counts ONCE while
 // two calls for it run.
 func (g *Group[K, V]) InFlight() int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	//: the map holds exactly the keys a new Do would join; a retired call
-	//: that is still running is no longer in it.
-	return len(g.calls)
+	total := 0
+	//: one shard at a time; each map holds exactly the keys a new Do would
+	//: join there, and a retired call that is still running is in none.
+	for at := range g.shards {
+		held := &g.shards[at]
+		held.mu.Lock()
+		total += len(held.calls)
+		held.mu.Unlock()
+	}
+	//: the sum, no single instant's under concurrent calls.
+	return total
 }
 
 // join registers this goroutine as a waiter on key's call, starting one if
 // none is in flight. joined reports whether the call was already running.
-func (g *Group[K, V]) join(ctx context.Context, key K, fn func(ctx context.Context) (V, error)) (entry *call[V], joined bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	//: an in-flight call is joined rather than duplicated — the whole point.
-	if existing, found := g.calls[key]; found {
-		//: one more waiter; the count is what keeps the call alive.
-		existing.refs++
+//
+// The critical section holds the map and nothing else (#1035): a follower
+// finds the call and counts itself in one acquisition; a leader looks, builds
+// its call record and context with the lock released, and takes it again to
+// insert — and a candidate that lost the key to another leader in between
+// cancels the context it built and joins the winner instead.
+func (s *shard[K, V]) join(ctx context.Context, key K, fn func(ctx context.Context) (V, error)) (entry *call[V], joined bool) {
+	//: the follower's path, and the leader's first look.
+	if existing := s.joinExisting(key); existing != nil {
 		//: the caller learns its result was shared.
 		return existing, true
 	}
 	//: the shared call keeps this caller's VALUES and none of its
 	//: cancellation; the cancel below is the Group's own, fired when the last
-	//: waiter leaves rather than when this one does.
+	//: waiter leaves rather than when this one does. Built outside the lock.
 	callCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	//: one waiter (this goroutine) and one goroutine about to run fn.
-	fresh := &call[V]{done: make(chan struct{}), cancel: cancel, refs: 1}
-	//: the map is built lazily so the zero Group is usable.
-	if g.calls == nil {
-		//: first call on this Group — see initialCallsCapacity for the hint.
-		g.calls = make(map[K]*call[V], initialCallsCapacity)
+	candidate := &call[V]{done: make(chan struct{}), cancel: cancel, refs: 1}
+	//: insert, unless another leader got there since the first look.
+	if winner, inserted := s.insertOrJoin(key, candidate); !inserted {
+		//: the candidate never runs: its context goes, the winner is joined.
+		cancel()
+		//: the caller learns its result was shared.
+		return winner, true
 	}
-	g.calls[key] = fresh
-	//: fn runs on its own goroutine so no caller's departure can stop it.
-	go g.run(callCtx, key, fresh, fn)
+	//: fn runs on its own goroutine so no caller's departure can stop it; the
+	//: goroutine starts with no lock held.
+	go s.run(callCtx, key, candidate, fn)
 	//: this goroutine started the call, so its result is not shared.
-	return fresh, false
+	return candidate, false
+}
+
+// joinExisting counts the caller in key's in-flight call and returns it, or
+// returns nil when none is in flight.
+func (s *shard[K, V]) joinExisting(key K) *call[V] {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, found := s.calls[key]
+	//: nothing in flight: the caller leads.
+	if !found {
+		//: no call to join.
+		return nil
+	}
+	//: one more waiter; the count is what keeps the call alive.
+	existing.refs++
+	//: the call joined.
+	return existing
+}
+
+// insertOrJoin registers candidate under key and reports true, or — when a
+// call for key is already in flight — counts the caller in that call and
+// returns it with false. One acquisition decides both.
+func (s *shard[K, V]) insertOrJoin(key K, candidate *call[V]) (winner *call[V], inserted bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	//: another leader inserted since this caller's first look: join it.
+	if existing, found := s.calls[key]; found {
+		existing.refs++
+		//: the winner, joined.
+		return existing, false
+	}
+	//: the map is built lazily so the zero Group is usable.
+	if s.calls == nil {
+		//: first call on this shard — see initialCallsCapacity for the hint.
+		s.calls = make(map[K]*call[V], initialCallsCapacity)
+	}
+	s.calls[key] = candidate
+	//: this caller leads.
+	return candidate, true
 }
 
 // run executes fn, publishes its outcome on entry, and retires key. It runs on
 // its own goroutine: that is what makes a caller's departure a departure
 // rather than a kill.
-func (g *Group[K, V]) run(ctx context.Context, key K, entry *call[V], fn func(ctx context.Context) (V, error)) {
+func (s *shard[K, V]) run(ctx context.Context, key K, entry *call[V], fn func(ctx context.Context) (V, error)) {
 	//: releases the context regardless of how fn ends; cancelling an already
 	//: cancelled context is a no-op, so the abandonment path may beat us here.
 	defer entry.cancel()
 	//: publish exactly once, whether fn returned or panicked — a waiter
 	//: blocked on a channel that never closes is the worst outcome available.
-	defer g.publish(key, entry)
+	defer s.publish(key, entry)
 	//: a panic is captured here and re-raised in every waiter by await.
 	defer entry.capturePanic()
 	//: the single execution every caller of this key is sharing.
@@ -126,16 +211,16 @@ func (g *Group[K, V]) run(ctx context.Context, key K, entry *call[V], fn func(ct
 // publish retires key (so the next Do starts fresh) and wakes every waiter.
 // The map entry is dropped BEFORE done is closed so a goroutine arriving in
 // between starts a new call instead of joining a finished one.
-func (g *Group[K, V]) publish(key K, entry *call[V]) {
-	g.mu.Lock()
+func (s *shard[K, V]) publish(key K, entry *call[V]) {
+	s.mu.Lock()
 	//: only retire the entry still under this key — Forget, or an abandoned
 	//: predecessor, may already have replaced it.
-	if g.calls[key] == entry {
+	if s.calls[key] == entry {
 		//: the call is over; the key is free again.
-		delete(g.calls, key)
+		delete(s.calls, key)
 	}
 	entry.retired = true
-	g.mu.Unlock()
+	s.mu.Unlock()
 	//: every waiter wakes here, and the close is the happens-before edge that
 	//: makes entry.val / entry.err / entry.panicked safe to read. The Once
 	//: makes "published exactly once" a property of the TYPE rather than of
@@ -146,12 +231,12 @@ func (g *Group[K, V]) publish(key K, entry *call[V]) {
 
 // await blocks until the result lands or ctx is done.
 //
-// A served caller does NOT touch the group mutex: publish already retired the
+// A served caller does NOT touch the shard's mutex: publish already retired the
 // entry under it, and refs is read only to decide whether an ABANDONING caller
 // was the last one — a decision that is moot once the call is retired. Skipping
 // the bookkeeping keeps the deduplicated path at one mutex acquisition per
 // caller (the join) instead of two.
-func (g *Group[K, V]) await(ctx context.Context, key K, entry *call[V], shared bool) (value V, isShared bool, err error) {
+func (s *shard[K, V]) await(ctx context.Context, key K, entry *call[V], shared bool) (value V, isShared bool, err error) {
 	select {
 	case <-entry.done:
 		//: a panic in fn is re-raised here so no waiter returns a zero value
@@ -171,7 +256,7 @@ func (g *Group[K, V]) await(ctx context.Context, key K, entry *call[V], shared b
 		default:
 		}
 		//: this caller gives up; the call survives unless it was the last one.
-		g.abandon(key, entry)
+		s.abandon(key, entry)
 		var zero V
 		//: the caller's own cancellation, never another caller's.
 		return zero, shared, ctx.Err()
@@ -181,8 +266,8 @@ func (g *Group[K, V]) await(ctx context.Context, key K, entry *call[V], shared b
 // abandon drops the claim of a caller that gave up. When the LAST such caller
 // leaves, the key is retired and the shared context is cancelled: a call whose
 // every caller has gone is computing a result nobody will read.
-func (g *Group[K, V]) abandon(key K, entry *call[V]) {
-	g.mu.Lock()
+func (s *shard[K, V]) abandon(key K, entry *call[V]) {
+	s.mu.Lock()
 	entry.refs--
 	//: retire under the lock so a newcomer cannot join a call that is about to
 	//: be cancelled — it would receive a cancellation it never asked for.
@@ -194,12 +279,12 @@ func (g *Group[K, V]) abandon(key K, entry *call[V]) {
 		entry.retired = true
 		//: only remove the entry still under this key — Forget may have
 		//: replaced it already.
-		if g.calls[key] == entry {
+		if s.calls[key] == entry {
 			//: the next Do on this key starts a new call.
-			delete(g.calls, key)
+			delete(s.calls, key)
 		}
 	}
-	g.mu.Unlock()
+	s.mu.Unlock()
 	//: cancel outside the lock; fn may observe it and return immediately.
 	if orphaned {
 		//: the audience is empty — stop paying for the answer.

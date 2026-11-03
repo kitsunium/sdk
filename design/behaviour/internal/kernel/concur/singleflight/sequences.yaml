@@ -82,122 +82,198 @@ sequences:
               types: interface{ String() string }
           "on": raised
       - return: "\"non-textual panic value (see PanicValue.Raised)\""
+  - of: (*Group).shardOf
+    steps:
+      - return: "&g.shards[maphash.Comparable(shardSeed, key)&uint64(shardCount-1)]"
   - of: (*Group).Do
     participants:
       - id: caller
         kind: actor
       - id: (*Group).Do
         kind: self
-      - id: g.join
+      - id: g.shardOf
         kind: internal
-      - id: g.await
+      - id: held.join
+        kind: internal
+      - id: held.await
         kind: internal
     steps:
+      - bind: held
+        eval: g.shardOf(key)
+        to: g.shardOf
       - bind: entry, joined
-        eval: g.join(ctx, key, fn)
-        to: g.join
-      - return: g.await(ctx, key, entry, joined)
-        to: g.await
+        eval: held.join(ctx, key, fn)
+        to: held.join
+      - return: held.await(ctx, key, entry, joined)
+        to: held.await
   - of: (*Group).Forget
-    steps:
-      - lock:
-          mutex: g.mu
-      - eval: delete(g.calls, key)
-  - of: (*Group).InFlight
-    steps:
-      - lock:
-          mutex: g.mu
-          read: true
-      - return: len(g.calls)
-  - of: (*Group).join
     participants:
       - id: caller
         kind: actor
-      - id: (*Group).join
+      - id: (*Group).Forget
         kind: self
-      - id: context
-        kind: stdlib
-      - id: g.run
+      - id: g.shardOf
         kind: internal
     steps:
+      - bind: held
+        eval: g.shardOf(key)
+        to: g.shardOf
       - lock:
-          mutex: g.mu
+          mutex: held.mu
+      - eval: delete(held.calls, key)
+  - of: (*Group).InFlight
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).InFlight
+        kind: self
+      - id: held.mu.Lock
+        kind: value
+      - id: held.mu.Unlock
+        kind: value
+    steps:
+      - bind: total
+        eval: "0"
+      - loop:
+          do:
+            - bind: held
+              eval: "&g.shards[at]"
+            - eval: held.mu.Lock()
+              to: held.mu.Lock
+            - op: +=
+              set: total
+              value: len(held.calls)
+            - eval: held.mu.Unlock()
+              to: held.mu.Unlock
+          key: at
+          range: g.shards
+      - return: total
+  - of: (*shard).join
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*shard).join
+        kind: self
+      - id: s.joinExisting
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: s.insertOrJoin
+        kind: internal
+      - id: s.run
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: existing, true
+          init:
+            bind: existing
+            eval: s.joinExisting(key)
+            to: s.joinExisting
+          when: existing != nil
+      - bind: callCtx, cancel
+        eval: context.WithCancel(context.WithoutCancel(ctx))
+        to: context
+      - bind: candidate
+        eval: "&call[V]{done: make(chan struct{}), cancel: cancel, refs: 1}"
+      - opt:
+          do:
+            - eval: cancel()
+            - return: winner, true
+          init:
+            bind: winner, inserted
+            eval: s.insertOrJoin(key, candidate)
+            to: s.insertOrJoin
+          when: "!inserted"
+      - go: s.run(callCtx, key, candidate, fn)
+        to: s.run
+      - return: candidate, false
+  - of: (*shard).joinExisting
+    steps:
+      - lock:
+          mutex: s.mu
+      - bind: existing, found
+        eval: s.calls[key]
+      - opt:
+          do:
+            - return: nil
+          when: "!found"
+      - op: ++
+        set: existing.refs
+      - return: existing
+  - of: (*shard).insertOrJoin
+    steps:
+      - lock:
+          mutex: s.mu
       - opt:
           do:
             - op: ++
               set: existing.refs
-            - return: existing, true
+            - return: existing, false
           init:
             bind: existing, found
-            eval: g.calls[key]
+            eval: s.calls[key]
           when: found
-      - bind: callCtx, cancel
-        eval: context.WithCancel(context.WithoutCancel(ctx))
-        to: context
-      - bind: fresh
-        eval: "&call[V]{done: make(chan struct{}), cancel: cancel, refs: 1}"
       - opt:
           do:
-            - set: g.calls
+            - set: s.calls
               value: make(map[K]*call[V], initialCallsCapacity)
-          when: g.calls == nil
-      - set: g.calls[key]
-        value: fresh
-      - go: g.run(callCtx, key, fresh, fn)
-        to: g.run
-      - return: fresh, false
-  - of: (*Group).run
+          when: s.calls == nil
+      - set: s.calls[key]
+        value: candidate
+      - return: candidate, true
+  - of: (*shard).run
     participants:
       - id: caller
         kind: actor
-      - id: (*Group).run
+      - id: (*shard).run
         kind: self
-      - id: g.publish
+      - id: s.publish
         kind: internal
       - id: entry.capturePanic
         kind: internal
     steps:
       - defer: entry.cancel()
-      - defer: g.publish(key, entry)
-        to: g.publish
+      - defer: s.publish(key, entry)
+        to: s.publish
       - defer: entry.capturePanic()
         to: entry.capturePanic
       - set: entry.val, entry.err
         value: fn(ctx)
-  - of: (*Group).publish
+  - of: (*shard).publish
     participants:
       - id: caller
         kind: actor
-      - id: (*Group).publish
+      - id: (*shard).publish
         kind: self
-      - id: g.mu.Lock
+      - id: s.mu.Lock
         kind: value
-      - id: g.mu.Unlock
+      - id: s.mu.Unlock
         kind: value
       - id: entry.publishOnce.Do
         kind: value
     steps:
-      - eval: g.mu.Lock()
-        to: g.mu.Lock
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
       - opt:
           do:
-            - eval: delete(g.calls, key)
-          when: g.calls[key] == entry
+            - eval: delete(s.calls, key)
+          when: s.calls[key] == entry
       - set: entry.retired
         value: "true"
-      - eval: g.mu.Unlock()
-        to: g.mu.Unlock
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
       - eval: entry.publishOnce.Do(func() { close(entry.done) })
         to: entry.publishOnce.Do
-  - of: (*Group).await
+  - of: (*shard).await
     participants:
       - id: caller
         kind: actor
-      - id: (*Group).await
+      - id: (*shard).await
         kind: self
       - id: entry.repanic
         kind: internal
-      - id: g.abandon
+      - id: s.abandon
         kind: internal
     steps:
       - select:
@@ -217,25 +293,25 @@ sequences:
                             to: entry.repanic
                           - return: entry.val, shared, entry.err
                       - default: true
-                - eval: g.abandon(key, entry)
-                  to: g.abandon
+                - eval: s.abandon(key, entry)
+                  to: s.abandon
                 - var:
                     name: zero
                     type: V
                 - return: zero, shared, ctx.Err()
-  - of: (*Group).abandon
+  - of: (*shard).abandon
     participants:
       - id: caller
         kind: actor
-      - id: (*Group).abandon
+      - id: (*shard).abandon
         kind: self
-      - id: g.mu.Lock
+      - id: s.mu.Lock
         kind: value
-      - id: g.mu.Unlock
+      - id: s.mu.Unlock
         kind: value
     steps:
-      - eval: g.mu.Lock()
-        to: g.mu.Lock
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
       - op: "--"
         set: entry.refs
       - bind: orphaned
@@ -246,11 +322,11 @@ sequences:
               value: "true"
             - opt:
                 do:
-                  - eval: delete(g.calls, key)
-                when: g.calls[key] == entry
+                  - eval: delete(s.calls, key)
+                when: s.calls[key] == entry
           when: orphaned
-      - eval: g.mu.Unlock()
-        to: g.mu.Unlock
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
       - opt:
           do:
             - eval: entry.cancel()

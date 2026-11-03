@@ -18,10 +18,41 @@ programmer error it can detect panics.
 
 | File | Surface |
 |---|---|
-| `heap.go` | `Heap[T]` + `New` / `Len` / `Push` / `Peek` / `Pop`, and the `up` / `down` sifts |
+| `heap.go` | `Heap[T]` + `New` / `Len` / `Push` / `Peek` / `Pop` / `Drain` (Pop's loop as an `iter.Seq[T]`, #816), and the `up` / `down` sifts |
+| `indexed.go` | `IndexedHeap[T]` + `NewIndexed` / `Len` / `Push` / `Peek` / `Pop` / `Update` / `Remove`, and `Handle` — the sibling with a position table (#1036) |
 
-One file, on purpose: a binary heap is ~80 lines of algorithm and splitting it
-would put the two halves of one invariant in two places.
+One file per type, on purpose: a binary heap is ~80 lines of algorithm and
+splitting one would put the two halves of one invariant in two places.
+
+## `IndexedHeap` — the sibling with handles (#1036)
+
+`Heap[T]` is published (`pkg/v1/collections/heap`) and FROZEN at Push, Pop,
+Peek and Len (ADR 0159 §4, ADR 0040), so re-keying and removal arrive as a
+SIBLING type rather than as methods on it — they would change what Push
+returns and what every element costs. `Drain` (#816) is additive: Pop's loop
+as an iterator, no field and no signature changed, 0 allocations. `IndexedHeap[T]` returns a `Handle`
+from every `Push`; `Update(h, v)` replaces the element and sifts it whichever
+way the order asks, `Remove(h)` takes it out from anywhere — both O(log n),
+what `container/heap`'s `Fix` and `Remove` do. Without them every consumer
+that reschedules or cancels re-implemented lazy deletion (the statemachine's
+agenda, the memory queue broker's lease expiries).
+
+- **A position table, ids recycled.** Each array cell carries its handle's id;
+  `slots[id]` holds where the cell sits, kept in step by every swap. A popped
+  or removed id goes on a free list and the next `Push` takes it, so a heap in
+  steady state allocates nothing — a design budget (`design/sdk.yaml`,
+  `perf_fixtures_test.go`, race off: the alloc lane).
+- **A generation per id.** A `Handle` is `(id, gen)`; `Push` bumps the slot's
+  generation, so a handle whose element left names nothing even after its id
+  is reissued — `Update` reports false and `Remove` reports `(zero, false)`
+  (`TestIndexedStaleHandleNamesNothing`). Generations start at 1, so the zero
+  `Handle` never names anything: a caller stores one in a struct and reads
+  "not scheduled" from it.
+- **The vacated cell is cleared** on `Pop` and `Remove`, as `Heap.Pop` does —
+  `TestIndexedRemoveFromTheMiddleKeepsTheInvariant` reads the array beyond
+  `len`.
+- **Kernel only.** It is not aliased into `pkg/v1/collections/heap`; publishing
+  it is a separate decision.
 
 ## Why not `container/heap`
 

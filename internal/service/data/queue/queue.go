@@ -48,6 +48,10 @@ const maxDeadTrail int = 16
 // file broker's header line and the SQL broker's column.
 const trailSeparator string = ","
 
+// priorityLevels is how many levels a broker orders: PriorityLowest to
+// PriorityHighest.
+const priorityLevels int = int(corequeue.PriorityHighest-corequeue.PriorityLowest) + 1
+
 // causeValue is what a dead letter keeps of the failure that produced it:
 // the SCREAMING_SNAKE reason, the wire-safe Public half, the dotted-quad
 // code, and the codes its wraps added — the trail, where a sentinel a wrapper
@@ -253,6 +257,10 @@ func messageField(dead corequeue.DeadLetterValue) (field string, refused bool) {
 	case dead.Deliveries < 1 || dead.Deliveries > maxDeadDeliveries:
 		//: the count.
 		return "Deliveries", true
+	//: a level outside the closed set is one no broker orders.
+	case !priorityKnown(dead.Priority):
+		//: the level.
+		return "Priority", true
 	//: an instant outside int64 Unix nanoseconds — the zero time.Time
 	//: included — is one no name and no column carries back.
 	case !nameable(dead.Message.EnqueuedAt):
@@ -306,6 +314,9 @@ func checkLiveMessage(live corequeue.LiveMessageValue, maxBytes int) error {
 	//: a count a durable broker cannot record would come back as another.
 	case live.Deliveries < 0 || live.Deliveries > maxDeadDeliveries:
 		field = "Deliveries"
+	//: a level outside the closed set is one no broker orders.
+	case !priorityKnown(live.Priority):
+		field = "Priority"
 	//: an instant outside int64 Unix nanoseconds is one no name and no
 	//: column carries back.
 	case !nameable(live.Message.EnqueuedAt):
@@ -401,4 +412,29 @@ func onceDigest(key string) string {
 func keptAsWritten(value string) bool {
 	//: what oneLine would rewrite is refused instead of rewritten.
 	return !strings.ContainsAny(value, "\r\n") && utf8.RuneCountInString(value) <= publicMaxRunes
+}
+
+// priorityKnown reports whether level is one of the five levels a broker
+// orders (core/data/queue.Priority).
+func priorityKnown(level corequeue.Priority) bool {
+	//: the closed set, both ends included.
+	return level >= corequeue.PriorityLowest && level <= corequeue.PriorityHighest
+}
+
+// checkPriority refuses a level a PublishPriority cannot publish at, as every
+// broker refuses it: outside the closed set (ADR 0054, amended 2026-11-03).
+func checkPriority(level corequeue.Priority) error {
+	//: one of the five.
+	if priorityKnown(level) {
+		return nil
+	}
+	//: QueueMisconfigured, naming the argument and its value.
+	return kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+		kerrs.String("field", "PublishPriority.level"), kerrs.Int("level", int(level)))
+}
+
+// readyIndex is a level's index among priorityLevels, the lowest at 0.
+func readyIndex(level corequeue.Priority) int {
+	//: shifted so the lowest is 0.
+	return int(level - corequeue.PriorityLowest)
 }

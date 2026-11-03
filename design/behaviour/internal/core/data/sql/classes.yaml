@@ -26,11 +26,29 @@ constants:
         type: int
         value: "10"
     name: decimalBase
+  - grouped: true
+    items:
+      - doc: StatementExec is a statement that returns no rows.
+        name: StatementExec
+        type: StatementKind
+        value: iota + 1
+      - doc: StatementQuery is a statement that returns rows; its rows are counted.
+        name: StatementQuery
+      - doc: StatementPrepare is a statement compiled for repeated execution.
+        name: StatementPrepare
+      - doc: StatementBegin is a transaction opened.
+        name: StatementBegin
+      - doc: StatementCommit is a transaction committed.
+        name: StatementCommit
+      - doc: StatementRollback is a transaction rolled back.
+        name: StatementRollback
+    name: StatementExec
 files:
   - decls: []
     name: doc.go
   - decls:
       - TxFunc
+      - Transient
     name: sql.go
   - decls:
       - Dialect
@@ -52,6 +70,11 @@ files:
       - Irreversible
       - MigrationValue.Validate
     name: sql_migration.go
+  - decls:
+      - StatementKind
+      - StatementExec
+      - StatementKind.String
+    name: sql_statement.go
   - decls:
       - TxOptionsValue
       - TxOptionsValue.IsZero
@@ -80,6 +103,9 @@ types:
   - kind: named
     name: TxFunc
     underlying: func(ctx context.Context, ex Executor) error
+  - kind: named
+    name: Transient
+    underlying: func(err error) bool
   - kind: named
     methods:
       - name: String
@@ -140,12 +166,35 @@ types:
           nil Stop, for the same reason.
         name: Down
         type: Step
+      - doc: |-
+          Checksum is the fingerprint of the statements Up runs, recorded in the
+          version table beside the version when the migration applies, so a
+          later run notices that an applied migration's text was edited — the
+          merge that rewrote a column type, the branch that renumbered — and
+          refuses with [MigrationChanged] before applying anything, instead of
+          calling it applied by its number alone.
+
+          Empty means unverified: the migration is never compared, which is what
+          a [Step] written as code rather than as statements must be, since a
+          func is opaque (ADR 0055 §D12). A migration built with
+          internal/service/data/sql's Statements sets it from the same
+          statements with ChecksumOf. A version recorded before checksums
+          existed is given this one by the next run that declares it.
+        name: Checksum
+        type: string
     kind: struct
     methods:
       - name: Validate
         recv: m MigrationValue
         results: error
     name: MigrationValue
+  - kind: named
+    methods:
+      - name: String
+        recv: k StatementKind
+        results: string
+    name: StatementKind
+    underlying: uint8
   - fields:
       - doc: |-
           Isolation is the transaction isolation level. The zero value

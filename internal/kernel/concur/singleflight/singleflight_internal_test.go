@@ -15,10 +15,11 @@ import (
 // it — a caller that branches on the waiter count is racing the number it just
 // read.
 func (g *Group[K, V]) waiters(key K) int {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
+	held := g.shardOf(key)
+	held.mu.Lock()
+	defer held.mu.Unlock()
 	//: an absent key has no waiters.
-	entry, found := g.calls[key]
+	entry, found := held.calls[key]
 	if !found {
 		//: no call in flight for this key.
 		return 0
@@ -222,7 +223,7 @@ func TestAwaitPrefersAnAvailableResultOverACancelledContext(t *testing.T) {
 	//: one pass would be green half the time even with the branch removed.
 	for attempt := range 1000 {
 		entry.refs = 1
-		val, shared, err := group.await(ctx, "k", entry, true)
+		val, shared, err := group.shardOf("k").await(ctx, "k", entry, true)
 		if err != nil {
 			t.Fatalf("attempt %d returned %v, want the available result", attempt, err)
 		}
@@ -239,11 +240,12 @@ func TestPublishRetiresTheKeyBeforeWakingWaiters(t *testing.T) {
 	t.Parallel()
 	group := &Group[string, int]{}
 	entry := &call[int]{done: make(chan struct{}), cancel: func() {}, refs: 1}
-	group.calls = map[string]*call[int]{"k": entry}
+	held := group.shardOf("k")
+	held.calls = map[string]*call[int]{"k": entry}
 
-	group.publish("k", entry)
+	held.publish("k", entry)
 
-	if _, found := group.calls["k"]; found {
+	if _, found := held.calls["k"]; found {
 		t.Fatal("publish left the key in the map — a newcomer could join a finished call")
 	}
 	if !entry.retired {
@@ -253,5 +255,67 @@ func TestPublishRetiresTheKeyBeforeWakingWaiters(t *testing.T) {
 	case <-entry.done:
 	default:
 		t.Fatal("publish did not wake the waiters")
+	}
+}
+
+// TestALosingLeaderCandidateIsCancelledAndNeverRuns pins #1035's race: a
+// leader builds its call and context with the lock released, so another leader
+// may insert the key in between. The loser must cancel the context it built,
+// never start its fn, and join the winner — one execution, as before.
+func TestALosingLeaderCandidateIsCancelledAndNeverRuns(t *testing.T) {
+	t.Parallel()
+	group := &Group[string, int]{}
+	held := group.shardOf("k")
+	winner := &call[int]{done: make(chan struct{}), cancel: func() {}, refs: 1}
+	held.calls = map[string]*call[int]{"k": winner}
+	candidateCtx, cancel := context.WithCancel(context.Background())
+	candidate := &call[int]{done: make(chan struct{}), cancel: cancel, refs: 1}
+
+	got, inserted := held.insertOrJoin("k", candidate)
+	if inserted || got != winner {
+		t.Fatalf("insertOrJoin = (%p, %t), want the winner and false", got, inserted)
+	}
+	if winner.refs != 2 {
+		t.Fatalf("winner refs = %d, want 2: the loser must be counted in", winner.refs)
+	}
+
+	//: the same race through join: the winner is in the map before the
+	//: candidate is built, so fn must never run.
+	var ran atomic.Int64
+	entry, joined := held.join(candidateCtx, "k", func(context.Context) (int, error) {
+		ran.Add(1)
+		return 0, nil
+	})
+	if !joined || entry != winner {
+		t.Fatalf("join = (%p, %t), want the winner joined", entry, joined)
+	}
+	if ran.Load() != 0 {
+		t.Fatal("the losing candidate's fn ran")
+	}
+}
+
+// TestManyLeadersRacingOnOneKeyRunFnOnce drives the window itself: 64
+// goroutines start together on one key, so several build a candidate before
+// any inserts; exactly one fn runs and every other caller joins it.
+func TestManyLeadersRacingOnOneKeyRunFnOnce(t *testing.T) {
+	t.Parallel()
+	group := &Group[string, int]{}
+	release := make(chan struct{})
+	var runs atomic.Int64
+	var wg sync.WaitGroup
+	for range 64 {
+		wg.Go(func() {
+			_, _, _ = group.Do(context.Background(), "k", func(context.Context) (int, error) {
+				runs.Add(1)
+				<-release
+				return 1, nil
+			})
+		})
+	}
+	awaitJoined(t, group, "k", 64)
+	close(release)
+	wg.Wait()
+	if got := runs.Load(); got != 1 {
+		t.Fatalf("fn ran %d times for one key, want 1", got)
 	}
 }

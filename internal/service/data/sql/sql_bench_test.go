@@ -75,6 +75,62 @@ func BenchmarkTransactCommit(b *testing.B) {
 	}
 }
 
+// quietObserver is a StatementObserver that does nothing, its end a shared
+// value: what Observe's own wrapping costs, with no observer's work in it.
+type quietObserver struct{}
+
+// quietEnd is the end every Begin of quietObserver answers.
+var quietEnd = func(int64, error) {}
+
+// Begin answers the shared end.
+func (quietObserver) Begin(context.Context, coresql.StatementKind, string) func(int64, error) {
+	return quietEnd
+}
+
+// BenchmarkTransactCommitObserved is TransactCommit over a pool opened through
+// Observe with an observer that does nothing (#1122): the difference is the
+// wrapping's own price — the observed transaction, per transaction.
+func BenchmarkTransactCommitObserved(b *testing.B) {
+	f := newFakeDB().silent()
+	db := closeOnCleanup(b, stdsql.OpenDB(svcsql.Observe(fakeConnector{d: &fakeDriver{db: f}}, quietObserver{})))
+	tm, err := svcsql.NewTransactor(svcsql.Config{DB: db, Dialect: coresql.DialectPostgres, Pool: svcsql.PoolConfig{MaxOpen: 8}})
+	if err != nil {
+		b.Fatalf("NewTransactor: %v", err)
+	}
+	ctx := b.Context()
+	b.ReportAllocs()
+	for b.Loop() {
+		err := tm.Transact(ctx, coresql.TxOptionsValue{}, func(c context.Context, ex coresql.Executor) error {
+			_, execErr := ex.ExecContext(c, benchStmt)
+			return execErr
+		})
+		if err != nil {
+			b.Fatalf("Transact: %v", err)
+		}
+	}
+}
+
+// BenchmarkTransactCommitRetrying is TransactCommit through NewRetrying with
+// nothing to retry (#1058): the price of the wrapper on the path that
+// commits at once — the root's context mark.
+func BenchmarkTransactCommitRetrying(b *testing.B) {
+	tm, err := svcsql.NewRetrying(benchTransactor(b), svcsql.RetryConfig{})
+	if err != nil {
+		b.Fatalf("NewRetrying: %v", err)
+	}
+	ctx := b.Context()
+	b.ReportAllocs()
+	for b.Loop() {
+		err := tm.Transact(ctx, coresql.TxOptionsValue{}, func(c context.Context, ex coresql.Executor) error {
+			_, execErr := ex.ExecContext(c, benchStmt)
+			return execErr
+		})
+		if err != nil {
+			b.Fatalf("Transact: %v", err)
+		}
+	}
+}
+
 // BenchmarkStdTransactCommit is the baseline: the SAME three driver calls
 // straight through database/sql, with no manager, no scope and no guard.
 // BenchmarkTransactCommit minus this is what transaction ownership costs.

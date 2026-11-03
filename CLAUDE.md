@@ -24,11 +24,11 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `profiling` | observe | The process's own CPU, heap and goroutine profiles, decoded with the standard library and folded onto owners the caller names | 0121 |
 | `codec` | data | 24 wire formats behind one `Marshal` / `Unmarshal` dispatch with per-format facades, strict JSON decoding, a type's wire shape and JSON patch | 0003, 0021, 0022, 0023, 0036, 0037, 0102, 0133, 0134, 0143, 0156 |
 | `transform` | data | Compression: stdlib gzip, raw DEFLATE and zlib; zstd and s2 opt-in under `third-party/`, with a ceiling that cannot be omitted | 0014, 0066 |
-| `sql` | data | Ports over `database/sql`, never an ORM or a driver: structural transaction ownership, savepoints, migrations under a lock that dies with its holder | 0055, 0139, 0140 |
-| `docstore` | data | Typed keyed JSON documents with indexes, versions and a trash — one overlay entry per write through `vfs`, or tables of the caller's database | 0110, 0139, 0143, 0178 |
-| `queue` | data | Durable at-least-once queue over a directory, a SQL table joined to the caller's transaction, or memory; retried and dead-lettered with its cause's codes, its trail's included, a dead letter and a live message movable between brokers as they lie; a message held until one instant, a retry after the handler's delay, a publication once per key over a window | 0054, 0104, 0151, 0178, 0183 |
-| `cache` | data | The kernel LRU+TTL primitive and the domain above it: tag invalidation, in-process stampede protection, L1/L2 chaining | 0025, 0049 |
-| `vfs` | data | `io/fs` reading unchanged and atomic publication, with how far "atomic" reaches stated | 0056 |
+| `sql` | data | Ports over `database/sql`, never an ORM or a driver: structural transaction ownership, savepoints, migrations under a lock that dies with its holder, checksummed when built from statements; a retrying root transactor, a statement budget, read-only transactions on a replica, a statement observer under the pool | 0055, 0139, 0140 |
+| `docstore` | data | Typed keyed JSON documents with indexes, versions and a trash, replaced on the revision they were read at — one overlay entry per write through `vfs`, or tables of the caller's database | 0110, 0139, 0143, 0178, 0209 |
+| `queue` | data | Durable at-least-once queue over a directory, a SQL table joined to the caller's transaction, or memory; retried — with a jitter on request — and dead-lettered with its cause's codes, its trail's included, a dead letter and a live message movable between brokers as they lie; a message held until one instant, a retry after the handler's delay, a publication once per key over a window; a message's age bounded, a backlog counted, purged, published and acknowledged in batches, dead letters paged, replayed and purged in bulk and kept for a retention, a handler that acknowledges in its own transaction, five priority levels served strictly | 0054, 0104, 0151, 0178, 0183 |
+| `cache` | data | The kernel LRU+TTL primitive and the domain above it: tag invalidation, in-process stampede protection, L1/L2 chaining; a Valkey far tier under `third-party/` | 0025, 0049, 0211 |
+| `vfs` | data | `io/fs` reading unchanged and atomic publication, with how far "atomic" reaches stated, a batch under one directory flush; an S3 filesystem under `third-party/` | 0056, 0211 |
 | `config` | app | Environment, file and `fs.FS` layering, typed decode, a schema (required keys, defaults, unknown keys refused), provenance, a poll watcher | 0028, 0061, 0097 |
 | `cli` | app | Command lines on the stdlib `flag`: sub-commands, generated help, a typed exit status, a seam to `config` | 0065 |
 | `i18n` | app | Message translation over a named 13-language CLDR subset; every other language refused by name | 0063 |
@@ -58,8 +58,8 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 internal/
 ├── kernel/        stdlib-only AND generic primitives, by family (ADR 0155)
 │                  backoff, clock, errs, jsonenc, plugin, semver, swar,
-│                  concur/{batcher, buffer, group, recycler, singleflight,
-│                          snapshot, worker},
+│                  concur/{batcher, buffer, commit, group, recycler,
+│                          singleflight, snapshot, worker},
 │                  collections/{cache, heap, ring},
 │                  fs/{flock, pathchain, winacl}
 ├── core/          domain interfaces + domain values — each package by its path
@@ -209,7 +209,7 @@ internal/
                              ADR 0185)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
-    ├── clock/     (the time port: Clock/Waiter/Timed + System + ManualClock — ADR 0090)
+    ├── clock/     (the time port: Clock/Waiter/Timed + System + ManualClock + CoarseClock — ADR 0090)
     ├── concur/    (a family directory, no Go code — ADR 0159 §4: group/, singleflight/,
     │                 worker/, batcher/, snapshot/, recycler/ — pure aliases of the
     │                 kernel's concurrency primitives)
@@ -657,5 +657,8 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0204 — an io_uring ring's buffers are consumed incrementally where the kernel allows, accepted on 2026-11-01, revisable while v0 (ADR 0040): amends ADR 0189 and 0201 — `IOU_PBUF_RING_INC` on every buffer group, a buffer returned only after its completion without `BUF_MORE`, `EINVAL` falls back; `uring-pbuf-inc` class A-kernel, `KITSUNIUM_NET_DISABLE=uring-pbuf-inc` restores a buffer a recv — `docs/adr/0204-an-io-uring-rings-buffers-are-consumed-incrementally-where-the-kernel-allows.md`
 - ADR 0205 — an io_uring recv may fill several buffers, and only on request, accepted on 2026-11-02, revisable while v0 (ADR 0040): amends ADR 0189 — `IORING_RECVSEND_BUNDLE` behind the class A-code `uring-recv-bundle` (`server.CapabilityURingRecvBundle`), a probe bundle recv must fill two buffers (none with incremental consumption before 6.15), a completion walked buffer by buffer in ring order; measured no gain, 25 % slower on 8 KiB, so opt-in — `docs/adr/0205-an-io-uring-recv-may-fill-several-buffers-and-only-on-request.md`
 - ADR 0206 — an io_uring batch may be bounded in time, accepted on 2026-11-02, revisable while v0 (ADR 0040): `LoopValue.BatchBudget` stops a batch's reaping once spent (reaps of 16), the next batch starts at the cut ring without waiting, a batch past half its budget submits its answers at once, `BatchesCut` in State; zero changes nothing — `docs/adr/0206-an-io-uring-batch-may-be-bounded-in-time.md`
+- ADR 0207 — concurrent callers share one flush, and each gets its verdict, accepted on 2026-11-02: the kernel primitive `concur/commit` (`Group[T]`, `New(flush, Config{MaxItems, MaxWait, Clock})`, `Do`, `Close`, `COMMIT_CLOSED` `0.1.4.1`) — flushes one at a time in batch order, on a goroutine of their own, a departed caller's item still flushed, a panic re-raised in every participant; its first adopter is vfs `WriteAtomic`'s directory flush, shared per directory with no API change; the others (vfs `WriteAtomicAll`, queue `PublishAll`, docstore, mail spool, logger flush) are siblings of their domains — `docs/adr/0207-concurrent-callers-share-one-flush-and-each-gets-its-verdict.md`
+- ADR 0209 — a document is replaced on the revision it was read at, accepted on 2026-11-02 (kitsunium/sdk#1055): `core/data/docstore`'s `Revisioned[T]` / `RevisionedContext[T]` (`Revision`, `ReplaceIf`), the opaque `RevisionValue` and `REVISION_MISMATCH` `0.3.80.23`; amended the same day for several writes as one, `Batcher[T]` / `BatcherContext[T]` (#1057), and on 2026-11-03 for the documents a page at a time and an ordered index, `Pager[T]` / `Ranged[T]` and `Ordered` (#836) — `docs/adr/0209-a-document-is-replaced-on-the-revision-it-was-read-at.md`
+- ADR 0211 — the data ports' vendor adapters, accepted on 2026-11-02: a Valkey cache tier and stream broker in `third-party/db/redis` (named by its vendor, #984), a JetStream broker in `third-party/nats`, an S3 `FullFS` and an SQS broker in `third-party/aws`; Valkey leases on the broker's clock, JetStream and SQS leases on the server's, refused at their deadline before anything is sent; the broker dead-letters with the cause — `docs/adr/0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

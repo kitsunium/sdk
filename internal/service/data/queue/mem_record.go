@@ -4,6 +4,7 @@ import (
 	"time"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
+	"github.com/kitsunium/sdk/internal/kernel/collections/heap"
 )
 
 // memRecord is one message and everything the in-memory broker keeps about
@@ -20,6 +21,12 @@ type memRecord struct {
 	id         string
 	receipt    corequeue.ReceiptValue
 	payload    []byte
+	// lapse names the lease's entry in the broker's expiry heap; the zero
+	// Handle while the record is not in flight.
+	lapse      heap.Handle
 	seq        uint64
 	deliveries int
+	// priority is the level the message is delivered at; it picks the
+	// ready list the record waits in.
+	priority corequeue.Priority
 }

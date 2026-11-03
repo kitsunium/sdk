@@ -36,10 +36,28 @@ const sqlTrailColumnLen int = maxDeadTrail*11 - 1
 // sqlTrailColumn is the column SQLConfig.Trail keeps a dead letter's trail in.
 const sqlTrailColumn string = "trail"
 
+// sqlPriorityColumn is the column SQLConfig.Priority keeps a message's level
+// in (ADR 0054, amended 2026-11-03).
+const sqlPriorityColumn string = "priority"
+
+// sqlPutDeadArgs is how many arguments PutDeadLetter's insertion binds
+// before the optional columns': the identifier, the two instants, the count,
+// the payload and the three of the cause.
+const sqlPutDeadArgs int = 8
+
 // sqlCauseColumnLen is the width of MySQL's reason and cause columns. What a
 // dead letter keeps of a failure is bounded to publicMaxRunes runes, at most
 // four bytes each.
 const sqlCauseColumnLen int = 4 * publicMaxRunes
+
+// sqlColumns are the optional columns a broker's statements name: each one
+// an SQLConfig option, and each one absent from every statement without it.
+type sqlColumns struct {
+	// trail is SQLConfig.Trail.
+	trail bool
+	// priority is SQLConfig.Priority.
+	priority bool
+}
 
 // sqlStatements are the statements one SQL broker sends, rendered for its
 // dialect and table.
@@ -71,6 +89,18 @@ type sqlStatements struct {
 	pick string
 	// next reads the earliest instant a live row becomes due after now.
 	next string
+	// leaseReturning leases up to a bound of the due rows in ONE statement —
+	// an UPDATE … FROM a locked, skipping sub-select, RETURNING what a
+	// delivery needs and the instant each row was due — on PostgreSQL, for a
+	// Receive outside the caller's transaction (issue #1042). Empty on MySQL,
+	// which has no UPDATE … RETURNING, and on SQLite, whose RETURNING cannot
+	// name the sub-select's due and so cannot keep a batch in visibility
+	// order: both keep the transaction of pick and leaseRows. It skips a
+	// lapsed lease with no attempt left, which buryExhausted buries.
+	leaseReturning string
+	// buryExhausted buries, with LEASE_EXPIRED, every lapsed lease with no
+	// attempt left: what leaseReturning skips.
+	buryExhausted string
 	// ack, retry, bury and extend end or renew one lease, matching the
 	// receipt's identifier, lease and delivery count, and a deadline still
 	// ahead.
@@ -78,7 +108,8 @@ type sqlStatements struct {
 	// release hands one lease back as retry does, visible at once, with the
 	// delivery count it moved on moved back, under the same condition.
 	release string
-	// deadList reads the dead letters, in the order they died.
+	// deadList reads the dead letters after an identifier, in identifier
+	// order — the enqueue order every broker lists them in (issue #1043).
 	deadList string
 	// replay and deleteDead act on one dead letter.
 	replay, deleteDead string
@@ -93,36 +124,46 @@ type sqlStatements struct {
 	putLive string
 	// once are PublishOnce's fixed statements.
 	once sqlOnceStatements
+	// bulk are the statements of the siblings that act on a whole queue.
+	bulk sqlBulkStatements
 	// table is the table's quoted name.
 	table string
 	// dialect selects the placeholder grammar of the per-call ones.
 	dialect coresql.Dialect
+	// insertPriority publishes a message at a level other than the normal
+	// one; empty without SQLConfig.Priority.
+	insertPriority string
 	// trail is SQLConfig.Trail: every burial writes the trail column, the
 	// dead-letter read returns it, a replay clears it.
 	trail bool
+	// priority is SQLConfig.Priority: the lease's read takes the highest
+	// level first, a copy writes and the listings read the priority column.
+	priority bool
 }
 
 // renderSQLStatements renders every fixed statement of the broker keeping its
-// queue in table, on dialect; with trail, the statements that write, read and
-// clear a dead letter's cause name the trail column too, and without it they
-// are the statements the broker sent before the column existed. The table
-// name was validated at NewSQL.
-func renderSQLStatements(dialect coresql.Dialect, table string, trail bool) sqlStatements {
+// queue in table, on dialect; with cols.trail, the statements that write, read
+// and clear a dead letter's cause name the trail column too, with
+// cols.priority those that pick, copy and list a message name the priority
+// column, and without them they are the statements the broker sent before
+// the columns existed. The table name was validated at NewSQL.
+func renderSQLStatements(dialect coresql.Dialect, table string, cols sqlColumns) sqlStatements {
+	trail := cols.trail
 	quoted := dialect.QuoteIdent(table)
-	p := dialect.Placeholder
-	causeSet := "dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) + ", code = " + p(4)
+	place := dialect.Placeholder
+	causeSet := "dead = 1, due = " + place(1) + ", lease = NULL, reason = " + place(2) + ", cause = " + place(3) + ", code = " + place(4)
 	heldFrom, deadColumns, cleared := sqlCauseArgs+1, "reason, cause, code", "reason = NULL, cause = NULL, code = NULL"
-	putColumns, putValues := "reason, cause, code", p(6)+", "+p(7)+", "+p(8)
+	putColumns, putValues := "reason, cause, code", place(6)+", "+place(7)+", "+place(8)
 	//: one more column in every statement a cause goes through.
 	if trail {
-		causeSet += ", " + sqlTrailColumn + " = " + p(sqlCauseArgs+1)
+		causeSet += ", " + sqlTrailColumn + " = " + place(sqlCauseArgs+1)
 		heldFrom, deadColumns = sqlCauseArgs+2, deadColumns+", "+sqlTrailColumn
 		cleared += ", " + sqlTrailColumn + " = NULL"
-		putColumns, putValues = putColumns+", "+sqlTrailColumn, putValues+", "+p(9)
+		putColumns, putValues = putColumns+", "+sqlTrailColumn, putValues+", "+place(9)
 	}
-	s := sqlStatements{
+	stmts := sqlStatements{
 		insert: "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
-			p(1) + ", 0, " + p(2) + ", " + p(3) + ", 0, " + p(4) + ")",
+			place(1) + ", 0, " + place(2) + ", " + place(3) + ", 0, " + place(4) + ")",
 		probe: "SELECT MIN(due) FROM " + quoted + " WHERE dead = 0",
 		//: the lease's read locks the rows it returns and skips those another
 		//: transaction holds, so two consumers never wait on each other's
@@ -130,37 +171,95 @@ func renderSQLStatements(dialect coresql.Dialect, table string, trail bool) sqlS
 		//: MariaDB 10.6, and an older server's refusal is QUEUE_BACKEND_FAILED.
 		//: SQLite has no such clause and needs none: its writer holds the
 		//: database's only write lock.
-		pick: "SELECT id, enqueued_at, deliveries, lease, payload FROM " + quoted + " WHERE dead = 0 AND due <= " + p(1) +
-			" ORDER BY due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked(),
-		next:       "SELECT MIN(due) FROM " + quoted + " WHERE dead = 0 AND due > " + p(1),
-		ack:        "DELETE FROM " + quoted + " WHERE " + sqlHeldBy(dialect, 1),
-		retry:      "UPDATE " + quoted + " SET due = " + p(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
-		bury:       "UPDATE " + quoted + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, heldFrom),
-		extend:     "UPDATE " + quoted + " SET due = " + p(1) + ", lease = " + p(2) + " WHERE " + sqlHeldBy(dialect, 3),
-		release:    "UPDATE " + quoted + " SET due = " + p(1) + ", lease = NULL, deliveries = deliveries - 1 WHERE " + sqlHeldBy(dialect, 2),
-		deadList:   "SELECT id, enqueued_at, deliveries, due, " + deadColumns + ", payload FROM " + quoted + " WHERE dead = 1 ORDER BY due, id LIMIT " + p(1),
-		replay:     "UPDATE " + quoted + " SET dead = 0, due = " + p(1) + ", deliveries = 0, " + cleared + " WHERE id = " + p(2) + " AND dead = 1",
-		deleteDead: "DELETE FROM " + quoted + " WHERE id = " + p(1) + " AND dead = 1",
+		pick: "SELECT id, enqueued_at, deliveries, lease, payload FROM " + quoted + " WHERE dead = 0 AND due <= " + place(1) +
+			" ORDER BY due, id LIMIT " + place(2) + dialect.ForUpdateSkipLocked(),
+		next:    "SELECT MIN(due) FROM " + quoted + " WHERE dead = 0 AND due > " + place(1),
+		ack:     "DELETE FROM " + quoted + " WHERE " + sqlHeldBy(dialect, 1),
+		retry:   "UPDATE " + quoted + " SET due = " + place(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
+		bury:    "UPDATE " + quoted + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, heldFrom),
+		extend:  "UPDATE " + quoted + " SET due = " + place(1) + ", lease = " + place(2) + " WHERE " + sqlHeldBy(dialect, 3),
+		release: "UPDATE " + quoted + " SET due = " + place(1) + ", lease = NULL, deliveries = deliveries - 1 WHERE " + sqlHeldBy(dialect, 2),
+		deadList: "SELECT id, enqueued_at, deliveries, due, " + deadColumns + ", payload FROM " + quoted +
+			" WHERE dead = 1 AND id > " + place(1) + " ORDER BY id LIMIT " + place(2),
+		replay:     "UPDATE " + quoted + " SET dead = 0, due = " + place(1) + ", deliveries = 0, " + cleared + " WHERE id = " + place(2) + " AND dead = 1",
+		deleteDead: "DELETE FROM " + quoted + " WHERE id = " + place(1) + " AND dead = 1",
 		table:      quoted,
 		dialect:    dialect,
 		trail:      trail,
 		putDead: "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload, " + putColumns + ") VALUES (" +
-			p(1) + ", 1, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + putValues + ")",
-		liveList: "SELECT id, enqueued_at, deliveries, due, lease, payload FROM " + quoted + " WHERE dead = 0 AND id > " + p(1) +
-			" ORDER BY id LIMIT " + p(2),
+			place(1) + ", 1, " + place(2) + ", " + place(3) + ", " + place(4) + ", " + place(5) + ", " + putValues + ")",
+		liveList: "SELECT id, enqueued_at, deliveries, due, lease, payload FROM " + quoted + " WHERE dead = 0 AND id > " + place(1) +
+			" ORDER BY id LIMIT " + place(2),
 		putLive: "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
-			p(1) + ", 0, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ")",
+			place(1) + ", 0, " + place(2) + ", " + place(3) + ", " + place(4) + ", " + place(5) + ")",
 		once: renderSQLOnceStatements(dialect, quoted),
+		bulk: renderSQLBulkStatements(dialect, quoted, causeSet, cleared, trail),
+		buryExhausted: "UPDATE " + quoted + " SET " + causeSet + " WHERE dead = 0 AND lease IS NOT NULL AND due <= " +
+			place(heldFrom) + " AND deliveries >= " + place(heldFrom+1),
+	}
+	//: the level, where the table keeps one.
+	if cols.priority {
+		stmts.withPriority(dialect, quoted)
 	}
 	//: SQLite's lock is the database's, taken by a transaction's first
 	//: WRITE: a lease that read first could be refused busy at its update,
 	//: its snapshot stale, so it writes first — with ADR 0140's statement,
 	//: the one the migration runner takes the same lock with.
 	if dialect == coresql.DialectSQLite {
-		s.lock = svcsql.FileLockSQL(quoted)
+		stmts.lock = svcsql.FileLockSQL(quoted)
+	}
+	//: PostgreSQL alone returns a column of the sub-select — the instant
+	//: each row was due, which orders the batch as pick does. With levels the
+	//: batch would need the level too: PostgreSQL then leases as the other
+	//: engines do, through pick.
+	if dialect == coresql.DialectPostgres && !cols.priority {
+		stmts.leaseReturning = "UPDATE " + quoted + " SET due = " + place(1) + ", lease = " + place(2) +
+			", deliveries = deliveries + 1 FROM (SELECT id, due FROM " + quoted +
+			" WHERE dead = 0 AND due <= " + place(3) + " AND (lease IS NULL OR deliveries < " + place(4) + ")" +
+			" ORDER BY due, id LIMIT " + place(5) + dialect.ForUpdateSkipLocked() + ") AS picked WHERE " + quoted + ".id = picked.id" +
+			" RETURNING " + quoted + ".id, " + quoted + ".enqueued_at, " + quoted + ".deliveries, " + quoted + ".payload, picked.due"
 	}
 	//: rendered once, sent many times.
-	return s
+	return stmts
+}
+
+// withPriority renders the statements SQLConfig.Priority changes: the
+// lease's read takes the highest level first — the index SQLPriorityMigration
+// creates over (dead, priority, due, id) serves it —, a copy writes the
+// level, the listings read it, and insertPriority publishes at a level.
+func (s *sqlStatements) withPriority(dialect coresql.Dialect, quoted string) {
+	p := dialect.Placeholder
+	s.priority = true
+	s.pick = "SELECT id, enqueued_at, deliveries, lease, payload FROM " + quoted + " WHERE dead = 0 AND due <= " + p(1) +
+		" ORDER BY " + sqlPriorityColumn + " DESC, due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked()
+	s.insertPriority = "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload, " + sqlPriorityColumn +
+		") VALUES (" + p(1) + ", 0, " + p(2) + ", " + p(3) + ", 0, " + p(4) + ", " + p(5) + ")"
+	s.putLive = "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload, " + sqlPriorityColumn +
+		") VALUES (" + p(1) + ", 0, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + p(6) + ")"
+	//: the column after the cause's, its placeholder after theirs — and
+	//: after the trail's, with Trail.
+	putColumns, putValues, last := "reason, cause, code", p(6)+", "+p(7)+", "+p(8), sqlPutDeadArgs+1
+	//: the trail's column and placeholder come first.
+	if s.trail {
+		putColumns, putValues, last = putColumns+", "+sqlTrailColumn, putValues+", "+p(sqlPutDeadArgs+1), sqlPutDeadArgs+2
+	}
+	s.putDead = "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload, " + putColumns + ", " + sqlPriorityColumn +
+		") VALUES (" + p(1) + ", 1, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + putValues + ", " + p(last) + ")"
+	s.deadList = strings.Replace(s.deadList, ", payload FROM ", ", payload, "+sqlPriorityColumn+" FROM ", 1)
+	s.liveList = strings.Replace(s.liveList, ", payload FROM ", ", payload, "+sqlPriorityColumn+" FROM ", 1)
+}
+
+// insertAt is the statement and arguments of a publication at level: the
+// insertion every broker sends at the normal level, insertPriority with the
+// level last at any other.
+func (s *sqlStatements) insertAt(level corequeue.Priority, id []byte, due, enqueued int64, payload []byte) (string, []any) {
+	//: the normal level's row is the one the table always held — its column,
+	//: when there is one, defaults to it.
+	if level == corequeue.PriorityNormal {
+		return s.insert, []any{id, due, enqueued, payload}
+	}
+	//: the level written.
+	return s.insertPriority, []any{id, due, enqueued, payload, int64(level)}
 }
 
 // sqlHeldBy renders the condition that says a receipt still holds its lease:
@@ -222,6 +321,10 @@ func (s *sqlStatements) putDeadArgs(id string, dead corequeue.DeadLetterValue) [
 	//: the statement names the column only with Trail.
 	if s.trail {
 		args = append(args, trailArg(dead.Trail))
+	}
+	//: and the level only with Priority, last.
+	if s.priority {
+		args = append(args, int64(dead.Priority))
 	}
 	//: in the order the placeholders are numbered.
 	return args

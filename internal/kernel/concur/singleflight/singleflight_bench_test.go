@@ -85,3 +85,23 @@ func BenchmarkBaseline_DirectCall(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkDo_DistinctKeysParallel16 is DistinctKeysParallel with sixteen
+// goroutines per P: the shape of a cache under a miss storm, where every
+// missed key leads its own call (#1035).
+func BenchmarkDo_DistinctKeysParallel16(b *testing.B) {
+	var group singleflight.Group[string, int]
+	var next atomic.Int64
+	ctx := b.Context()
+	b.SetParallelism(16)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			key := strconv.FormatInt(next.Add(1), 10)
+			if _, _, err := group.Do(ctx, key, func(context.Context) (int, error) { return 1, nil }); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}

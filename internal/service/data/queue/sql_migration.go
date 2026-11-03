@@ -26,6 +26,13 @@ const sqlTrailMigrationPrefix string = "queue trail "
 // deployment made changes nothing (ADR 0151). The table it creates has the
 // trail column SQLConfig.Trail writes; one an earlier release created gets
 // it from [SQLTrailMigration].
+//
+// Its Checksum fingerprints the statements Up runs (ADR 0055, amended
+// 2026-11-02): a version table that recorded it refuses a build whose
+// statements differ, MIGRATION_CHANGED, and one that recorded the version
+// without a checksum is given this one by the next locked run. The
+// statements are therefore never edited: a later column comes as a
+// migration of its own.
 func SQLMigration(dialect coresql.Dialect, table string, version uint64) (coresql.MigrationValue, error) {
 	//: a dialect the broker can spell.
 	if !dialect.Valid() {
@@ -37,11 +44,15 @@ func SQLMigration(dialect coresql.Dialect, table string, version uint64) (coresq
 		//: SQLQueueMisconfigured, naming the problem.
 		return coresql.MigrationValue{}, err
 	}
+	up := createQueueTableStatements(dialect, table)
 	migration := coresql.MigrationValue{
 		Version: version,
 		Name:    sqlMigrationPrefix + table,
-		Up:      svcsql.Statements(createQueueTableStatements(dialect, table)...),
+		Up:      svcsql.Statements(up...),
 		Down:    svcsql.Statements(dropQueueTableStatements(dialect, table)...),
+		//: what Up runs, fingerprinted: an install that recorded it refuses a
+		//: build whose statement differs (#1056).
+		Checksum: svcsql.ChecksumOf(up...),
 	}
 	//: a version the version table can hold.
 	if err := migration.Validate(); err != nil {

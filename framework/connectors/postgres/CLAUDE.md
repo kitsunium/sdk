@@ -9,6 +9,9 @@ that links a PostgreSQL driver — pgx v5, through `database/sql` (`stdlib`).
 
 | File | Holds |
 |---|---|
+| `transient.go` | `Transient` — SQLSTATE 40001 and 40P01 from `pgconn.PgError`; `transient_internal_test.go` is its table (#1000) |
+| `engine_compliance.go` | the compile-time assertion that the engine is an `app.Classifier` (#1000) |
+| `transact_test.go` | on a server (`server(t)`): the connector's pool behind a pgx tracer that records every statement — `begin isolation level serializable` and `begin read only` for `app.Serializable` / `app.ReadOnly` (#1140); two transactions crossing two rows deadlock, PostgreSQL ends one with 40P01, and the framework runs it again: both commit (#1000) |
 | `postgres.go` | `Engine()`: `Dialect` (`app.DialectPostgres`, kit's own type — ADR 0179 Q5); the blank import of `framework/app/store`, the stores a database keeps (ADR 0179 §4); `Describe` — host:port or a socket's directory, the database, and the `sslmode` as the URL writes it (`sslmode` reads a URL's query or libpq's `key=value` form), never a user or a password —; `Open` — pgx's `stdlib.OpenDB`, with a before-connect hook that reads the URL again (`current`) —; `errMalformed`, the one error for a URL pgx cannot read, which quotes nothing |
 | `credentials.go` | `withCredentials`: the user and the password of the URL as it is now, given to the connection pgx is about to make |
 

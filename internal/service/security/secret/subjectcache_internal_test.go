@@ -94,3 +94,22 @@ func TestKeyCacheDisabledHoldsNothing(t *testing.T) {
 	}
 	cache.forget("a")
 }
+
+// TestAnIdleSubjectsKeyIsWipedByTheNextLookupOfAnyOther pins #1038's secret
+// half as far as a cache without a goroutine can take it: an opened key whose
+// TTL passed is wiped by the next lookup of ANY subject, not kept in memory
+// until its own subject is read again or a capacity eviction reaches it.
+func TestAnIdleSubjectsKeyIsWipedByTheNextLookupOfAnyOther(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewManualClock(time.Date(2026, time.November, 2, 0, 0, 0, 0, time.UTC))
+	cache := newKeyCache(8, time.Minute, clk)
+	idle := openedFor(8)
+	cache.offer("idle", cache.current(), idle)
+	clk.Advance(61 * time.Second)
+	if _, found := cache.fetch("another"); found {
+		t.Fatal("a subject never offered was served")
+	}
+	if _, _, live := idle.take(); live {
+		t.Fatal("the idle subject's key outlived its TTL in memory, unwiped, after a lookup of another subject")
+	}
+}

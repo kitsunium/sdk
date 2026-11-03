@@ -256,21 +256,41 @@ func (a *App) listOTLPDeadLetters(ctx context.Context, cfg *plug.OTLPConfig, sig
 // its ID, when it failed, its code, reason and attempts, its size, the
 // failure's public text, and the codes it gathered as it was wrapped (#500).
 func otlpDeadLetterLine(signal string, d *plug.OTLPDeadLetterValue) string {
-	code := "-"
-	if d.Code != 0 {
-		code = errs.Code(d.Code).String()
+	return deadLetterRow{
+		where: signal, id: d.ID, failedAt: d.FailedAt, code: d.Code, reason: d.Reason,
+		attempts: d.Deliveries, size: d.Size, cause: d.Cause, trail: d.Trail,
+	}.line()
+}
+
+// deadLetterRow is one dead letter as `otlp` and `queue` list it: where it
+// waits — a signal, a consumer —, its ID, when it failed, its code, reason and
+// attempts, its size, the failure's public text, and the codes it gathered
+// as it was wrapped (#500). Never its payload.
+type deadLetterRow struct {
+	failedAt                 time.Time
+	where, id, reason, cause string
+	trail                    []uint32
+	attempts, size           int
+	code                     uint32
+}
+
+// line is the row as the commands print it, tab-separated.
+func (r deadLetterRow) line() string {
+	codeText := "-"
+	if r.code != 0 {
+		codeText = errs.Code(r.code).String()
 	}
-	line := signal + "\t" + d.ID + "\t" + d.FailedAt.UTC().Format(time.RFC3339) + "\t" + code + "\t" + d.Reason +
-		"\t" + strconv.Itoa(d.Deliveries) + " attempts\t" + strconv.Itoa(d.Size) + " bytes"
-	if d.Cause != "" {
-		line += "\t" + d.Cause
+	line := r.where + "\t" + r.id + "\t" + r.failedAt.UTC().Format(time.RFC3339) + "\t" + codeText + "\t" + r.reason +
+		"\t" + strconv.Itoa(r.attempts) + " attempts\t" + strconv.Itoa(r.size) + " bytes"
+	if r.cause != "" {
+		line += "\t" + r.cause
 	}
-	if len(d.Trail) > 0 {
-		trail := make([]string, 0, len(d.Trail))
-		for _, c := range d.Trail {
-			trail = append(trail, errs.Code(c).String())
+	if len(r.trail) > 0 {
+		codes := make([]string, 0, len(r.trail))
+		for _, c := range r.trail {
+			codes = append(codes, errs.Code(c).String())
 		}
-		line += "\ttrail " + strings.Join(trail, " <- ")
+		line += "\ttrail " + strings.Join(codes, " <- ")
 	}
 	return line
 }

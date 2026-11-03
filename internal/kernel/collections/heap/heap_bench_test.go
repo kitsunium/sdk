@@ -136,3 +136,86 @@ func BenchmarkPeek(b *testing.B) {
 		}
 	}
 }
+
+// indexedFilled is an IndexedHeap holding the shared input, with the handle of
+// every element, for the steady-state benchmarks below.
+func indexedFilled(input []int) (*heap.IndexedHeap[int], []heap.Handle) {
+	h := heap.NewIndexed(cmp.Compare[int])
+	handles := make([]heap.Handle, len(input))
+	for i, v := range input {
+		handles[i] = h.Push(v)
+	}
+	return h, handles
+}
+
+// BenchmarkIndexed_PushPop_SteadyState is PushPop_SteadyState on the indexed
+// sibling: the delta is what keeping the position table in step costs a sift.
+func BenchmarkIndexed_PushPop_SteadyState(b *testing.B) {
+	input := values()
+	h, _ := indexedFilled(input)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		h.Push(input[i%benchSize])
+		if _, _, ok := h.Pop(); !ok {
+			b.Fatal("Pop() on a populated heap reported empty")
+		}
+	}
+}
+
+// BenchmarkIndexed_Update_SteadyState re-keys one element in place — what a
+// reschedule costs, against the Push of a fresh entry plus the later Pop of
+// the stale one that lazy deletion pays.
+func BenchmarkIndexed_Update_SteadyState(b *testing.B) {
+	input := values()
+	h, handles := indexedFilled(input)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		if !h.Update(handles[i%benchSize], input[(i*7)%benchSize]) {
+			b.Fatal("Update of a live handle reported false")
+		}
+	}
+}
+
+// BenchmarkIndexed_Remove_SteadyState removes one element from anywhere and
+// pushes it back, so the population stays at benchSize: a cancellation, which
+// lazy deletion cannot do at all.
+func BenchmarkIndexed_Remove_SteadyState(b *testing.B) {
+	input := values()
+	h, handles := indexedFilled(input)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		at := i % benchSize
+		if _, ok := h.Remove(handles[at]); !ok {
+			b.Fatal("Remove of a live handle reported false")
+		}
+		handles[at] = h.Push(input[at])
+	}
+}
+
+// BenchmarkDrain measures Drain over benchSize elements (#816): one reported
+// operation is one whole drain, the refill done with the timer stopped. The
+// refill reuses the backing array, so the timed window holds the drain alone
+// and its allocations — none.
+func BenchmarkDrain(b *testing.B) {
+	input := values()
+	h := heap.New(cmp.Compare[int])
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		b.StopTimer()
+		for _, v := range input {
+			h.Push(v)
+		}
+		b.StartTimer()
+		drained := 0
+		for range h.Drain() {
+			drained++
+		}
+		if drained != benchSize {
+			b.Fatalf("Drain() yielded %d elements, want %d", drained, benchSize)
+		}
+	}
+}

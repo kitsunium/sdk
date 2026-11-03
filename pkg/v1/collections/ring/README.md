@@ -42,6 +42,7 @@ EXACTLY ONE goroutine may call TryWrite at a time, and EXACTLY ONE may call TryR
 ## Index
 
 - [Variables](<#variables>)
+- [func Drain\[T any\]\(q Queue\[T\]\) iter.Seq\[T\]](<#Drain>)
 - [func New\[T any\]\(capacity int\) \(Queue\[T\], error\)](<#New>)
 - [type Queue](<#Queue>)
   - [func \(Queue\) Capacity\(\) \(n int\)](<#Queue.Capacity>)
@@ -83,6 +84,15 @@ Full is returned by TryWrite when every slot is taken; the caller decides whethe
 Initialised with `github.com/kitsunium/sdk/internal/kernel/collections/ring.Full`.
 
 Code `0.1.3.1` · reason `RING_FULL` · public "Ring buffer is at capacity"
+
+<a name="Drain"></a>
+## func [Drain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/gen_facade.go>)
+
+```go
+func Drain[T any](q Queue[T]) iter.Seq[T]
+```
+
+Drain yields the items q holds, oldest first, until it is empty — the consumer's TryRead loop as an iterator. Only the one consumer goroutine may range over it; a loop that breaks early leaves the rest in q.
 
 <a name="New"></a>
 ## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/gen_facade.go>)

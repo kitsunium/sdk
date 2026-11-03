@@ -97,6 +97,12 @@ func (f *flakyStore) InvalidateTag(ctx context.Context, tag string) (int, error)
 
 func TestNewChainRefusesAnIncompleteTierSet(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testNewChainRefusesAnIncompleteTierSet)
+}
+
+// testNewChainRefusesAnIncompleteTierSet is TestNewChainRefusesAnIncompleteTierSet under the policy its subtest names.
+func testNewChainRefusesAnIncompleteTierSet(t *testing.T) {
+	t.Helper()
 	full := newStore(t, svccache.MemoryConfig{MaxEntries: 4})
 	cases := []struct {
 		name   string
@@ -126,6 +132,12 @@ func TestNewChainRefusesAnIncompleteTierSet(t *testing.T) {
 
 func TestChainPromotesAFarHitWithItsTTLAndTags(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testChainPromotesAFarHitWithItsTTLAndTags)
+}
+
+// testChainPromotesAFarHitWithItsTTLAndTags is TestChainPromotesAFarHitWithItsTTLAndTags under the policy its subtest names.
+func testChainPromotesAFarHitWithItsTTLAndTags(t *testing.T) {
+	t.Helper()
 	manual := clock.NewManualClock(time.Unix(0, 0))
 	near := newStore(t, svccache.MemoryConfig{MaxEntries: 8, Clock: manual})
 	far := newStore(t, svccache.MemoryConfig{MaxEntries: 8, Clock: manual})
@@ -160,6 +172,12 @@ func TestChainPromotesAFarHitWithItsTTLAndTags(t *testing.T) {
 
 func TestChainWritesEveryTierAndReadsTheNearest(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testChainWritesEveryTierAndReadsTheNearest)
+}
+
+// testChainWritesEveryTierAndReadsTheNearest is TestChainWritesEveryTierAndReadsTheNearest under the policy its subtest names.
+func testChainWritesEveryTierAndReadsTheNearest(t *testing.T) {
+	t.Helper()
 	near := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	far := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	chain, err := svccache.NewChain(svccache.ChainConfig{}, near, far)
@@ -190,6 +208,12 @@ func TestChainWritesEveryTierAndReadsTheNearest(t *testing.T) {
 // holding a value the far tier refused is a lie that outlives the error.
 func TestChainSetWritesTheAuthorityFirst(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testChainSetWritesTheAuthorityFirst)
+}
+
+// testChainSetWritesTheAuthorityFirst is TestChainSetWritesTheAuthorityFirst under the policy its subtest names.
+func testChainSetWritesTheAuthorityFirst(t *testing.T) {
+	t.Helper()
 	near := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	far := newFlaky(t)
 	far.fails = failSet
@@ -211,6 +235,12 @@ func TestChainSetWritesTheAuthorityFirst(t *testing.T) {
 // tiers after one failure leaves the value fetchable from a tier nothing tried.
 func TestChainDeleteAttemptsEveryTier(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testChainDeleteAttemptsEveryTier)
+}
+
+// testChainDeleteAttemptsEveryTier is TestChainDeleteAttemptsEveryTier under the policy its subtest names.
+func testChainDeleteAttemptsEveryTier(t *testing.T) {
+	t.Helper()
 	near := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	far := newFlaky(t)
 	chain, err := svccache.NewChain(svccache.ChainConfig{}, near, far)
@@ -234,6 +264,12 @@ func TestChainDeleteAttemptsEveryTier(t *testing.T) {
 // reported, through the hook.
 func TestAFailedPromotionDoesNotFailTheRead(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testAFailedPromotionDoesNotFailTheRead)
+}
+
+// testAFailedPromotionDoesNotFailTheRead is TestAFailedPromotionDoesNotFailTheRead under the policy its subtest names.
+func testAFailedPromotionDoesNotFailTheRead(t *testing.T) {
+	t.Helper()
 	near := newFlaky(t)
 	far := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	var reported []string
@@ -260,6 +296,12 @@ func TestAFailedPromotionDoesNotFailTheRead(t *testing.T) {
 // staler answer from behind it and call that a hit.
 func TestAFailedTierStopsTheWalk(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testAFailedTierStopsTheWalk)
+}
+
+// testAFailedTierStopsTheWalk is TestAFailedTierStopsTheWalk under the policy its subtest names.
+func testAFailedTierStopsTheWalk(t *testing.T) {
+	t.Helper()
 	near := newFlaky(t)
 	far := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	chain, err := svccache.NewChain(svccache.ChainConfig{}, near, far)
@@ -285,6 +327,12 @@ func TestAFailedTierStopsTheWalk(t *testing.T) {
 // removed: "errors.Is(err, the tier's own error) = false".
 func TestAnUntypedTierErrorKeepsItsIdentity(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testAnUntypedTierErrorKeepsItsIdentity)
+}
+
+// testAnUntypedTierErrorKeepsItsIdentity is TestAnUntypedTierErrorKeepsItsIdentity under the policy its subtest names.
+func testAnUntypedTierErrorKeepsItsIdentity(t *testing.T) {
+	t.Helper()
 	reset := errors.New("backend: connection reset")
 	near := newFlaky(t)
 	near.fails, near.cause = failGet, reset
@@ -311,6 +359,12 @@ func TestAnUntypedTierErrorKeepsItsIdentity(t *testing.T) {
 // CACHE_BACKEND_FAILED.
 func TestATypedTierErrorBehindAWrapperKeepsTheTierVerdict(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testATypedTierErrorBehindAWrapperKeepsTheTierVerdict)
+}
+
+// testATypedTierErrorBehindAWrapperKeepsTheTierVerdict is TestATypedTierErrorBehindAWrapperKeepsTheTierVerdict under the policy its subtest names.
+func testATypedTierErrorBehindAWrapperKeepsTheTierVerdict(t *testing.T) {
+	t.Helper()
 	near := newFlaky(t)
 	near.fails, near.cause = failGet, fmt.Errorf("backend: %w", corecache.CacheBackendFailed)
 	far := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
@@ -326,6 +380,12 @@ func TestATypedTierErrorBehindAWrapperKeepsTheTierVerdict(t *testing.T) {
 
 func TestChainInvalidateTagReachesEveryTier(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testChainInvalidateTagReachesEveryTier)
+}
+
+// testChainInvalidateTagReachesEveryTier is TestChainInvalidateTagReachesEveryTier under the policy its subtest names.
+func testChainInvalidateTagReachesEveryTier(t *testing.T) {
+	t.Helper()
 	near := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	far := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	chain, err := svccache.NewChain(svccache.ChainConfig{}, near, far)
@@ -353,6 +413,12 @@ func TestChainInvalidateTagReachesEveryTier(t *testing.T) {
 
 func TestChainLoadWritesThroughEveryTier(t *testing.T) {
 	t.Parallel()
+	forEachPolicy(t, testChainLoadWritesThroughEveryTier)
+}
+
+// testChainLoadWritesThroughEveryTier is TestChainLoadWritesThroughEveryTier under the policy its subtest names.
+func testChainLoadWritesThroughEveryTier(t *testing.T) {
+	t.Helper()
 	near := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	far := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
 	chain, err := svccache.NewChain(svccache.ChainConfig{}, near, far)

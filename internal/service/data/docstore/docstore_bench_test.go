@@ -1,5 +1,7 @@
 // Package docstore_test — what a write costs as the store grows, against the
-// whole-file rewrite it replaces; what a read and an open cost.
+// whole-file rewrite it replaces; what a read and an open cost; what a page
+// of Documents costs (#836); what a batch of writes costs against the same
+// writes one by one (#1057).
 package docstore_test
 
 import (
@@ -8,6 +10,7 @@ import (
 	"runtime"
 	"testing"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	"github.com/kitsunium/sdk/internal/service/data/docstore"
 	svcvfs "github.com/kitsunium/sdk/internal/service/data/vfs"
@@ -248,6 +251,114 @@ func BenchmarkOpen(b *testing.B) {
 				}
 				benchSink = store
 			}
+		})
+	}
+}
+
+// BenchmarkDocumentsPage measures one page of 100 documents read by
+// Documents, resuming after a key in the store's first half, as the store
+// grows (#836): a page costs its own documents and a pass over the keys —
+// its allocations are the page's, the same at every size.
+func BenchmarkDocumentsPage(b *testing.B) {
+	for _, n := range []int{1_000, 10_000} {
+		b.Run(fmt.Sprintf("docs=%d", n), func(b *testing.B) {
+			store := filledStore(b, nil, n)
+			after := benchDoc(n / 3).ID
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				for entry, err := range store.Documents(after, 100) {
+					if err != nil {
+						b.Fatalf("Documents() = %v", err)
+					}
+					benchSink = entry
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkDocumentsPass measures a pass over 10 000 documents paged by
+// Documents(after, 100) from the last key read, every document once,
+// against List, which copies them all at once (#836).
+func BenchmarkDocumentsPass(b *testing.B) {
+	store := filledStore(b, nil, 10_000)
+	b.Run("paged=100", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			for after, more := "", true; more; {
+				read := 0
+				for entry, err := range store.Documents(after, 100) {
+					if err != nil {
+						b.Fatalf("Documents() = %v", err)
+					}
+					after, read = entry.Key, read+1
+				}
+				more = read == 100
+			}
+		}
+	})
+	b.Run("entries", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			all, err := store.Entries(0)
+			if err != nil {
+				b.Fatalf("Entries() = %v", err)
+			}
+			benchSink = all
+		}
+	})
+}
+
+// BenchmarkBatch measures 100 writes of existing documents as one Batch
+// against the same 100 as Puts, over the in-memory filesystem and on the
+// operating system's (#1057): on disk a batch pays its group entry, then
+// each key's entry, then the group entry's removal — atomicity, not speed,
+// as ADR 0209's amendment says.
+func BenchmarkBatch(b *testing.B) {
+	for _, where := range []string{"mem", "disk"} {
+		b.Run("fs="+where, func(b *testing.B) {
+			fsys := corevfs.FullFS(svcvfs.NewMem())
+			if where == "disk" {
+				if diskRefused() {
+					b.Skipf("vfs.NewOS refuses %s by design", runtime.GOOS)
+				}
+				var err error
+				if fsys, err = svcvfs.NewOS(b.TempDir()); err != nil {
+					b.Fatalf("NewOS() = %v", err)
+				}
+			}
+			store := filledStore(b, fsys, 1_000)
+			b.Run("batch=100", func(b *testing.B) {
+				b.ReportAllocs()
+				for round := 0; b.Loop(); round++ {
+					err := store.Batch(func(w coredocstore.BatchWriter[account]) error {
+						for i := range 100 {
+							doc := benchDoc(i)
+							doc.Name = fmt.Sprintf("batch %d", round)
+							if err := w.Put(doc); err != nil {
+								return err
+							}
+						}
+						return nil
+					})
+					if err != nil {
+						b.Fatalf("Batch() = %v", err)
+					}
+				}
+			})
+			b.Run("puts=100", func(b *testing.B) {
+				b.ReportAllocs()
+				for round := 0; b.Loop(); round++ {
+					for i := range 100 {
+						doc := benchDoc(i)
+						doc.Name = fmt.Sprintf("puts %d", round)
+						if err := store.Put(doc); err != nil {
+							b.Fatalf("Put() = %v", err)
+						}
+					}
+				}
+			})
 		})
 	}
 }

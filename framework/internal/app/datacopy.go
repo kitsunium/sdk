@@ -12,6 +12,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -202,7 +203,7 @@ func (a *App) copyInto(ctx context.Context, r *databaseRun, stdout io.Writer) (e
 		return err
 	}
 	counts := map[string]int{}
-	err = r.database().Transact(ctx, func(ctx context.Context) error {
+	err = r.database().Transact(ctx, plug.TxOptionsValue{}, func(ctx context.Context) error {
 		if err := c.copyAll(ctx, counts); err != nil {
 			return err
 		}

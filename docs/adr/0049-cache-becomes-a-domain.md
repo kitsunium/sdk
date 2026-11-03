@@ -1,8 +1,9 @@
 # ADR 0049 — `cache` becomes a domain, and gains the kernel primitive it needed to
 
-- **Status**: Accepted
+- **Status**: Accepted — amended 2026-11-02 (the L6 wave: `Expirer`, `BulkFetcher` / `BulkSetter`, `Refresher` and `Absent`, stripes, bytes and policy, and `Leaser` — a lease across processes)
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — the distributed backend this ADR defers to `third-party/`: a Valkey store implementing the four ports (`third-party/db/redis/cache`), the far tier of a chain, its cross-replica fill lease unfenced and said so
 - **Amends**: [ADR 0025](0025-sdk-cache-kernel.md) — which placed `Cache[K,V]` in the kernel and left it there. That placement stands; this ADR adds a layer above it rather than moving it.
 - **Related**: [ADR 0010](0010-kernel-recycler-primitive.md) (kernel-primitive precedent), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (a published shape may change while v0), [ADR 0045](0045-sdk-session-domain.md) / [ADR 0046](0046-sdk-validation-domain.md) (the two most recent core siblings, and the no-registry precedent)
 
@@ -303,7 +304,7 @@ stops being true the day the default changes.
 
 ## Deferred, by name
 
-- **Redis, memcached, and every distributed backend.** Exception 4 of the
+- **Redis, memcached, and every distributed backend.** (Valkey and Redis since [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md).) Exception 4 of the
   third-party doctrine: they belong under `third-party/`, with their own
   dependency budget, in their own change. The chain is the seam they will
   attach to, and `EntryFetcher` is the method they will have to implement.
@@ -352,3 +353,62 @@ stops being true the day the default changes.
 - Measurements: `internal/kernel/singleflight/BENCH.md` (the ~2 µs threshold),
   `internal/service/cache/BENCH.md` (invalidation at two store sizes).
 - [ADR 0025](0025-sdk-cache-kernel.md) (amended), [ADR 0031](0031-policy-zero-values-are-never-inert.md), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md), [ADR 0040](0040-changing-a-published-shape-while-v0.md), [ADR 0045](0045-sdk-session-domain.md), [ADR 0046](0046-sdk-validation-domain.md).
+
+## Amendment — 2026-11-02: the sweep, the batch, refresh-ahead, negative answers, stripes, and a lease across processes ([#1059](https://github.com/kitsunium/sdk/issues/1059), [#840](https://github.com/kitsunium/sdk/issues/840), [#838](https://github.com/kitsunium/sdk/issues/838), [#808](https://github.com/kitsunium/sdk/issues/808), [#839](https://github.com/kitsunium/sdk/issues/839), [#834](https://github.com/kitsunium/sdk/issues/834), [#830](https://github.com/kitsunium/sdk/issues/830))
+
+`Store[V]` stays FROZEN at three methods. Every capability below is an ADR
+0039 sibling a store advertises by type assertion, implemented by both the
+memory store and the chain; no published shape changed.
+
+- **`Expirer` (#1059).** "An active TTL sweeper" was deferred because a store
+  that ran its own goroutine would own a cadence the caller never asked for.
+  `Expire(ctx) (removed int, err error)` owns none: the caller sweeps on its
+  own ticker or scheduler, and the store removes every due entry — the tag
+  index drained as eviction drains it — over the primitive's expiry heap
+  (ADR 0025, amended the same day). A chain sweeps every tier, far to near,
+  and counts removals as `InvalidateTag` does.
+- **`BulkFetcher` / `BulkSetter` (#840).** One lock per stripe on the memory
+  store, one pass per tier on the chain, a batched promotion under the same
+  generation guard as one (#460); `SetMany` validates every entry before it
+  stores any.
+- **`Refresher` and `Absent` (#838).** `LoadRefreshing` serves a hit inside
+  its `before` window at once and starts ONE background fill per key, bounded
+  by the entry's remaining lifetime; a non-positive window is refused. §7's
+  rule that "a failed fill stores nothing" stands for every failure the fill
+  did not mark: `cache.Absent(cause, ttl)` (`CACHE_ABSENT`, `0.2.18.5`) is the
+  fill saying "this key does not exist, ask again after ttl", and only that
+  answer is kept, as a negative entry that `Load` returns as the original
+  error and `Fetch` reports as a miss.
+- **`MemoryConfig.Stripes`, `MaxBytes` and `Policy` (#808, #839, #834)**, and
+  `NewWeighedMemory`, which alone takes the weigher a byte bound needs. A key
+  lives in one stripe, so §6's argument — one mutex over the primitive and the
+  tag index — holds per stripe. An entry heavier than a stripe's share of
+  `MaxBytes` is refused with `CACHE_ENTRY_REJECTED`, the error surface the
+  primitive lacks.
+- **`Leaser` (#830) answers §7's deferral, and leaves §7's limit standing.**
+  `Load` still collapses within one process only, and says so in its four
+  places. `LoadLeased(ctx, key, fill, locker)` is the separate sibling that
+  takes the "shared lease" §7 said this package did not have — from the lock
+  domain (ADR 0052), a `lock.Locker` the processes share; on one machine its
+  file locker, whose `flock(2)` dies with its holder. The holder reads again,
+  fills, stores and releases; a process that finds the lease held fills
+  nothing and reads the store again every `LeasePoll` until the value lands,
+  its ctx ends, or the lease comes free, when it takes the lease and reads
+  once more before filling. §7's two failure modes, answered by name: a
+  holder that dies mid-fill loses the lease with its process (or when a
+  `lock.Deadliner` lease lapses), and the waiter fills; two holders coexisting
+  is possible only with a lease that can expire mid-fill, which `LoadLeased`
+  does not renew — its lifetime must outlast the fill, stated rather than
+  solved. What the waiters get depends on what the processes share: through a
+  chain whose far tier all of them reach, the holder's value and ONE fill;
+  over a memory store alone, no shared value, so the lease only takes turns.
+  A locker that cannot answer is `CACHE_LEASE_FAILED` (`0.3.48.3`).
+  `MemoryConfig.Clock` is NOT widened to `clock.Timed` for the wait: that
+  would break every caller passing a reading-only clock; the store waits on
+  its clock when it can and on `clock.System` otherwise, and `ChainConfig`
+  gains its own `Clock`.
+
+The prices — a hit ~15–25 % dearer on the memory store, `FetchMany` above the
+40 % #840 asked for — are measured and stated in
+`internal/service/data/cache/BENCH.md`.
+

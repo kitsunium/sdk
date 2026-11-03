@@ -124,7 +124,7 @@ func TestTheDocumentedCodeMatchingActuallyCompiles(t *testing.T) {
 func TestNoPublicMessageReachesTheConsumerWithInfrastructure(t *testing.T) {
 	t.Parallel()
 	//: a slice, so the report walks the facade's sentinels in DECLARATION
-	//: order — core's five first, then service's seventeen — and a failure
+	//: order — core's five first, then service's twenty — and a failure
 	//: points at the block the offending Public was written in.
 	sentinels := []struct {
 		name     string
@@ -152,6 +152,9 @@ func TestNoPublicMessageReachesTheConsumerWithInfrastructure(t *testing.T) {
 		{"MigrationUnknownVersion", sql.MigrationUnknownVersion},
 		{"VersionTableInvalid", sql.VersionTableInvalid},
 		{"DuplicateMigration", sql.DuplicateMigration},
+		{"MigrationChanged", sql.MigrationChanged},
+		{"TxRetriesExhausted", sql.TxRetriesExhausted},
+		{"StatementTimedOut", sql.StatementTimedOut},
 	}
 	//: the maximum a Public may be, per CLAUDE.md rule 4.
 	const maxPublic int = 120

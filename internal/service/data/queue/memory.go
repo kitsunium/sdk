@@ -22,6 +22,10 @@ import (
 // never ours.
 const instanceNonceBytes int = 8
 
+// memIDHalfWidth is how many base-36 digits the widest uint64 takes: each
+// half of a memory identifier is padded to it, so identifiers sort by value.
+const memIDHalfWidth int = 13
+
 // memoryBroker is a queue that lives entirely in one process's heap.
 //
 // # What it is for, and what it is emphatically not
@@ -57,12 +61,13 @@ type memoryBroker struct {
 	// of actual work. The file broker never had the problem, because its
 	// in-flight directory sorts by deadline and its scan breaks. See BENCH.md.
 	//
-	// Entries are removed LAZILY: an Ack, a Nack or an Extend drops the
-	// record from the map and leaves the heap entry to be popped and
-	// discarded when its deadline arrives. That keeps every acknowledgement
-	// O(1) and bounds the heap by the leases taken within one visibility
-	// timeout rather than by the queue's depth.
-	expiry *heap.Heap[leaseExpiry]
+	// Each entry is named by the Handle its record keeps (memRecord.lapse):
+	// an Extend re-keys it in place and an Ack, a Nack, a Reject or a
+	// Release removes it, each in O(log n), so the heap holds exactly the
+	// leases in flight and every entry it pops is live (#1036). Before, the
+	// entries were removed lazily — an acknowledgement left its entry to be
+	// discarded when popped, and every Extend left one more behind.
+	expiry *heap.IndexedHeap[leaseExpiry]
 	// once holds each PublishOnce key still reserved, by the end of its
 	// window; onceEnds orders those ends so a passed one is dropped at the
 	// next PublishOnce without a scan (core/data/queue.OncePublisher).
@@ -73,10 +78,19 @@ type memoryBroker struct {
 	wake *wakeSignal
 	// nonce prefixes every receipt this broker mints.
 	nonce string
-	// ready holds the queued records, ordered by visibleAt then seq.
-	ready []*memRecord
-	// dead holds what the broker gave up on, oldest first.
-	dead   []corequeue.DeadLetterValue
+	// ready holds the queued records, one list per level — the lowest at
+	// index 0, readyIndex — each ordered by visibleAt then seq (ADR 0054,
+	// amended 2026-11-03).
+	ready [priorityLevels][]*memRecord
+	// dead holds what the broker gave up on, in the byte order of their
+	// identifiers — the order DeadLetters and DeadLettersAfter list, the
+	// durable brokers' (ADR 0054, amended 2026-11-02) —, kept at insertion.
+	dead []corequeue.DeadLetterValue
+	// random draws the retry jitter (MemoryConfig.Random).
+	random func() float64
+	// swept is when the last dead-letter retention sweep ran, in Unix
+	// nanoseconds; zero for never.
+	swept  int64
 	policy corequeue.PolicyValue
 	// mu is an RWMutex because DeadLetters is a genuine read: an
 	// investigation must not serialise against the consumers it is
@@ -108,12 +122,13 @@ func NewMemory(cfg MemoryConfig) (broker corequeue.Broker, err error) {
 	return &memoryBroker{
 		policy:   cfg.Policy.Normalized(),
 		clk:      clockOrSystem(cfg.Clock),
+		random:   randomOrDefault(cfg.Random),
 		nonce:    nonce,
 		wake:     newWakeSignal(),
 		inflight: map[corequeue.ReceiptValue]*memRecord{},
 		//: earliest deadline first, so the reclaim scan meets the most
 		//: overdue lease and stops at the first one still held.
-		expiry: heap.New(func(a, b leaseExpiry) int { return a.at.Compare(b.at) }),
+		expiry: newLeaseExpiries(),
 		//: the earliest window's end first, for the same early stop.
 		once:     map[string]time.Time{},
 		onceEnds: heap.New(func(a, b onceEnd) int { return a.at.Compare(b.at) }),
@@ -141,30 +156,66 @@ func (b *memoryBroker) Publish(
 	now := b.clk.Now()
 	//: accepted; in this broker "accepted" means "in a map", which is the
 	//: whole difference from NewFile.
-	return b.enqueue(payload, now, now), nil
+	return b.enqueue(payload, now, now, corequeue.PriorityNormal), nil
 }
 
-// enqueue queues payload, enqueued at now and visible at visibleAt, wakes
-// every idle consumer, and returns the message it minted. The caller holds the
-// write lock and has checked the payload's size.
-func (b *memoryBroker) enqueue(payload []byte, now, visibleAt time.Time) corequeue.MessageValue {
+// enqueue queues payload at level, enqueued at now and visible at visibleAt,
+// wakes every idle consumer, and returns the message it minted. The caller
+// holds the write lock and has checked the payload's size.
+func (b *memoryBroker) enqueue(payload []byte, now, visibleAt time.Time, level corequeue.Priority) corequeue.MessageValue {
+	message := b.enqueueQuiet(payload, now, visibleAt, level)
+	//: every idle consumer of this broker looks again now, rather than at its
+	//: next poll — and one whose message lies ahead learns when.
+	b.wake.fire()
+	//: the message as minted.
+	return message
+}
+
+// enqueueQuiet is enqueue without the wake, for a batch that wakes once. The
+// caller holds mu.
+func (b *memoryBroker) enqueueQuiet(payload []byte, now, visibleAt time.Time, level corequeue.Priority) corequeue.MessageValue {
 	b.seq++
 	record := &memRecord{
 		//: the caller's slice is copied, so a producer that reuses its buffer
 		//: cannot rewrite a message the queue has already accepted.
 		payload: slices.Clone(payload), id: memID(now, b.seq),
-		enqueuedAt: now, visibleAt: visibleAt, seq: b.seq,
+		enqueuedAt: now, visibleAt: visibleAt, seq: b.seq, priority: level,
 	}
 	b.insertReady(record)
-	//: every idle consumer of this broker looks again now, rather than at its
-	//: next poll — and one whose message lies ahead learns when.
-	b.wake.fire()
 	//: the returned Payload is the CALLER'S slice, not a second copy. The
 	//: caller already holds those bytes — they just passed them — so cloning
 	//: again would have doubled the verb's allocation for no reader: measured
 	//: at 131 284 B/op for a 64 KiB payload before, 65 762 B/op after, with
 	//: slices.Clone accounting for 99.78 % of the bytes in the profile.
 	return corequeue.MessageValue{ID: record.id, Payload: payload, EnqueuedAt: now}
+}
+
+// PublishPriority queues payload at level (core/data/queue.PriorityPublisher):
+// a record in that level's ready list, which a Receive empties of its visible
+// records before it looks at a lower level.
+func (b *memoryBroker) PublishPriority(
+	ctx context.Context, payload []byte, level corequeue.Priority,
+) (message corequeue.MessageValue, err error) {
+	//: a cancelled producer.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return corequeue.MessageValue{}, ctx.Err()
+	}
+	//: one of the five levels.
+	if invalid := checkPriority(level); invalid != nil {
+		//: QueueMisconfigured, and nothing is queued.
+		return corequeue.MessageValue{}, invalid
+	}
+	//: the bound Publish enforces.
+	if tooLarge := checkSize(len(payload), b.policy.MaxMessageBytes); tooLarge != nil {
+		//: MessageTooLarge, carrying the two sizes and never the bytes.
+		return corequeue.MessageValue{}, tooLarge
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.clk.Now()
+	//: accepted at its level, visible now.
+	return b.enqueue(payload, now, now, level), nil
 }
 
 // PublishAt queues payload, received by no consumer before at
@@ -193,7 +244,7 @@ func (b *memoryBroker) PublishAt(
 		return corequeue.MessageValue{}, invalid
 	}
 	//: queued, held back until visibleAt.
-	return b.enqueue(payload, now, visibleAt), nil
+	return b.enqueue(payload, now, visibleAt, corequeue.PriorityNormal), nil
 }
 
 // PublishOnce queues payload unless key is still reserved, and reserves it
@@ -231,7 +282,7 @@ func (b *memoryBroker) PublishOnce(
 	b.once[key] = until
 	b.onceEnds.Push(onceEnd{at: until, key: key})
 	//: queued, and the key reserved until the window ends.
-	return b.enqueue(payload, now, now), true, nil
+	return b.enqueue(payload, now, now, corequeue.PriorityNormal), true, nil
 }
 
 // dropPassedOnce removes every reservation whose window has ended by now. The
@@ -273,6 +324,9 @@ func (b *memoryBroker) Receive(
 	//: BEFORE anything is handed out: a lease whose holder died is only ever
 	//: noticed by whoever looks next, and this is that look.
 	b.reclaimExpired(now)
+	//: a dead letter past its retention goes on the same look, at most once
+	//: a minute.
+	b.sweepRetention(now)
 	//: nil until something is eligible, so an empty poll allocates nothing.
 	var out []corequeue.DeliveryValue
 	//: until the batch is full or nothing else is visible.
@@ -288,17 +342,41 @@ func (b *memoryBroker) Receive(
 	return out, nil
 }
 
-// takeEligible removes and returns the oldest visible record, or nil.
+// takeEligible removes and returns the oldest visible record of the highest
+// level that has one, or nil: a level whose head is not yet visible holds
+// back nobody below it.
 func (b *memoryBroker) takeEligible(now time.Time) *memRecord {
-	//: the slice is ordered by visibleAt, so the head is the only candidate.
-	if len(b.ready) == 0 || b.ready[0].visibleAt.After(now) {
-		//: nothing eligible.
+	//: the highest level first — strict, with no ageing.
+	for level := priorityLevels - 1; level >= 0; level-- {
+		//: this level's oldest visible record, if any.
+		if head := b.takeVisible(level, now); head != nil {
+			//: the caller moves it into flight.
+			return head
+		}
+	}
+	//: nothing eligible at any level.
+	return nil
+}
+
+// takeVisible removes and returns the head of one level's ready list when it
+// is visible, burying first every visible head past its MaxAge.
+func (b *memoryBroker) takeVisible(level int, now time.Time) *memRecord {
+	list := b.ready[level]
+	//: a visible head past its MaxAge is never delivered: it is buried, and
+	//: the next one is looked at.
+	for len(list) > 0 && !list[0].visibleAt.After(now) && b.expired(list[0].enqueuedAt, now) {
+		b.bury(list[0], now, expiredCause())
+		list = list[1:]
+	}
+	b.ready[level] = list
+	//: the list is ordered by visibleAt, so the head is the only candidate.
+	if len(list) == 0 || list[0].visibleAt.After(now) {
+		//: nothing eligible at this level.
 		return nil
 	}
-	head := b.ready[0]
-	b.ready = b.ready[1:]
-	//: the caller moves it into flight.
-	return head
+	b.ready[level] = list[1:]
+	//: the oldest visible record of the level.
+	return list[0]
 }
 
 // lease moves record into flight and builds the delivery for it.
@@ -308,7 +386,7 @@ func (b *memoryBroker) lease(record *memRecord, now time.Time) corequeue.Deliver
 	record.expiresAt = now.Add(b.policy.VisibilityTimeout)
 	record.receipt = b.mintReceipt()
 	b.inflight[record.receipt] = record
-	b.expiry.Push(leaseExpiry{at: record.expiresAt, receipt: record.receipt})
+	record.lapse = b.expiry.Push(leaseExpiry{at: record.expiresAt, receipt: record.receipt})
 	//: the payload is copied out, so a handler may keep or mutate it without
 	//: corrupting the redelivery this queue is allowed to make.
 	return corequeue.DeliveryValue{
@@ -342,7 +420,7 @@ func (b *memoryBroker) Ack(ctx context.Context, receipt corequeue.ReceiptValue) 
 		//: UnknownReceipt or LeaseExpired.
 		return resolveErr
 	}
-	delete(b.inflight, record.receipt)
+	b.unlease(record)
 	//: gone. This is the only call in the domain that removes a message.
 	return nil
 }
@@ -354,7 +432,7 @@ func (b *memoryBroker) Nack(
 	//: the policy's delay, grown with the deliveries when it asks for that.
 	return b.nackWith(ctx, receipt, cause, func(deliveries int) time.Duration {
 		//: the curve every broker waits on.
-		return retryDelay(b.policy, deliveries)
+		return retryDelay(b.policy, deliveries, b.random)
 	})
 }
 
@@ -395,7 +473,7 @@ func (b *memoryBroker) nackWith(
 		//: UnknownReceipt or LeaseExpired.
 		return corequeue.NackValue{}, resolveErr
 	}
-	delete(b.inflight, record.receipt)
+	b.unlease(record)
 	now := b.clk.Now()
 	//: the BROKER owns this decision, because the consumer is the thing that
 	//: dies and a count it held would be lost by exactly that event.
@@ -428,7 +506,7 @@ func (b *memoryBroker) Reject(ctx context.Context, receipt corequeue.ReceiptValu
 		//: UnknownReceipt or LeaseExpired.
 		return resolveErr
 	}
-	delete(b.inflight, record.receipt)
+	b.unlease(record)
 	b.bury(record, b.clk.Now(), describeCause(cause))
 	//: abandoned with the handler's cause, at the count it had.
 	return nil
@@ -450,7 +528,7 @@ func (b *memoryBroker) Release(ctx context.Context, receipt corequeue.ReceiptVal
 		//: UnknownReceipt or LeaseExpired.
 		return resolveErr
 	}
-	delete(b.inflight, record.receipt)
+	b.unlease(record)
 	//: this lease never became an attempt, so it is not one.
 	record.deliveries = max(record.deliveries-1, 0)
 	record.visibleAt = b.clk.Now()
@@ -478,13 +556,8 @@ func (b *memoryBroker) ReplayDeadLetter(ctx context.Context, id string) error {
 		//: DeadLetterNotFound, and nothing is queued.
 		return deadLetterNotFound("memory", id)
 	}
-	now := b.clk.Now()
-	b.seq++
 	//: the payload the store kept is its own copy, so it moves as it is.
-	b.insertReady(&memRecord{
-		payload: dead.Message.Payload, id: dead.Message.ID,
-		enqueuedAt: dead.Message.EnqueuedAt, visibleAt: now, seq: b.seq,
-	})
+	b.requeueDead(dead, b.clk.Now())
 	//: an idle consumer looks again now.
 	b.wake.fire()
 	//: queued; its next delivery counts 1.
@@ -531,7 +604,7 @@ func (b *memoryBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLet
 	dead.Message.ID = memID(dead.Message.EnqueuedAt, b.seq)
 	dead.Message.Payload = slices.Clone(dead.Message.Payload)
 	dead.Trail = cloneTrail(dead.Trail)
-	b.dead = append(b.dead, dead)
+	b.insertDead(dead)
 	//: dead, as it was given, after every record the store already holds.
 	return dead.Message.ID, nil
 }
@@ -553,27 +626,34 @@ func (b *memoryBroker) Messages(ctx context.Context, after string, max int) ([]c
 	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	var live []corequeue.LiveMessageValue
-	//: the queued ones, visible at their instant.
-	for _, record := range b.ready {
-		//: before where the listing resumes.
-		if record.id > after {
-			live = append(live, liveOf(record, record.visibleAt, false))
-		}
-	}
-	//: the leased ones, back at their lease's deadline.
+	//: the queued ones, then the leased ones, after where the listing
+	//: resumes; their payloads are copied only for the page handed out.
+	found := b.readyAfter(after)
+	//: a map has no order; the sort below gives one.
 	for _, record := range b.inflight {
 		//: before where the listing resumes.
 		if record.id > after {
-			live = append(live, liveOf(record, record.expiresAt, true))
+			found = append(found, record)
 		}
 	}
-	slices.SortFunc(live, func(x, y corequeue.LiveMessageValue) int {
+	slices.SortFunc(found, func(x, y *memRecord) int {
 		//: byte order of the identifiers, as the durable brokers list them.
-		return strings.Compare(x.Message.ID, y.Message.ID)
+		return strings.Compare(x.id, y.id)
 	})
-	//: a bounded batch.
-	return live[:min(max, len(live))], nil
+	var live []corequeue.LiveMessageValue
+	//: a bounded batch: a queued one visible at its instant, a leased one
+	//: back at its lease's deadline.
+	for _, record := range found[:min(max, len(found))] {
+		_, leased := b.inflight[record.receipt]
+		visibleAt := record.visibleAt
+		//: a leased record's instant is its deadline.
+		if leased && record.receipt != "" {
+			visibleAt = record.expiresAt
+		}
+		live = append(live, liveOf(record, visibleAt, leased && record.receipt != ""))
+	}
+	//: the page.
+	return live, nil
 }
 
 // liveOf is record as MessageReader lists it, visible at visibleAt, its
@@ -583,7 +663,7 @@ func liveOf(record *memRecord, visibleAt time.Time, leased bool) corequeue.LiveM
 	return corequeue.LiveMessageValue{
 		VisibleAt:  visibleAt,
 		Message:    corequeue.MessageValue{ID: record.id, Payload: slices.Clone(record.payload), EnqueuedAt: record.enqueuedAt},
-		Deliveries: record.deliveries, Leased: leased,
+		Deliveries: record.deliveries, Leased: leased, Priority: record.priority,
 	}
 }
 
@@ -608,6 +688,7 @@ func (b *memoryBroker) PutMessage(ctx context.Context, live corequeue.LiveMessag
 	record := &memRecord{
 		payload: slices.Clone(live.Message.Payload), id: memID(live.Message.EnqueuedAt, b.seq),
 		enqueuedAt: live.Message.EnqueuedAt, visibleAt: live.VisibleAt, seq: b.seq, deliveries: live.Deliveries,
+		priority: live.Priority,
 	}
 	b.insertReady(record)
 	b.wake.fire()
@@ -665,9 +746,9 @@ func (b *memoryBroker) Extend(
 	record.expiresAt = deadline
 	record.receipt = b.mintReceipt()
 	b.inflight[record.receipt] = record
-	//: the previous heap entry is deliberately left where it is: it will be
-	//: popped at its own deadline, find no matching record, and be discarded.
-	b.expiry.Push(leaseExpiry{at: record.expiresAt, receipt: record.receipt})
+	//: the lease's own entry, re-keyed in place: the heap keeps one entry per
+	//: lease however often it is extended.
+	b.expiry.Update(record.lapse, leaseExpiry{at: record.expiresAt, receipt: record.receipt})
 	//: a NEW receipt; the old one names nothing from here on.
 	return corequeue.LeaseValue{Receipt: record.receipt, ExpiresAt: record.expiresAt}, nil
 }
@@ -678,61 +759,28 @@ func (b *memoryBroker) Extend(
 // retry delay is ending, or the earliest lease, whose holder may have died.
 //
 // Both are read from the structures Receive itself uses, under the same lock,
-// so the answer is never staler than the call. The expiry heap may still hold
-// an entry an Ack has made stale; that only wakes a consumer early, to a
-// Receive that discards it.
+// so the answer is never staler than the call. The expiry heap holds exactly
+// the leases in flight, so its top is a lease that can still lapse.
 func (b *memoryBroker) Wake() corequeue.WakeValue {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	signal, _ := b.wake.current()
-	var due time.Time
-	//: the ready list is in visibility order, so its head is the earliest.
-	if len(b.ready) > 0 {
-		due = b.ready[0].visibleAt
-	}
+	due := b.earliestReady()
 	//: a min-heap's top is the earliest lease deadline.
-	if lapse, held := b.expiry.Peek(); held && (due.IsZero() || lapse.at.Before(due)) {
+	if lapse, _, held := b.expiry.Peek(); held && (due.IsZero() || lapse.at.Before(due)) {
 		due = lapse.at
 	}
 	//: measured on this broker's clock, now.
 	return wakeValue(signal, due, b.clk.Now())
 }
 
-// DeadLetters returns up to max abandoned messages, oldest first, and removes
-// none of them.
+// DeadLetters returns up to max abandoned messages, oldest enqueued first,
+// and removes none of them: DeadLettersAfter's first page.
 func (b *memoryBroker) DeadLetters(
 	ctx context.Context, max int,
 ) (dead []corequeue.DeadLetterValue, err error) {
-	//: the same refusal Receive makes.
-	if invalid := checkBatch(max); invalid != nil {
-		//: InvalidBatchSize.
-		return nil, invalid
-	}
-	//: a cancelled caller.
-	if ctx.Err() != nil {
-		//: the caller's deadline.
-		return nil, ctx.Err()
-	}
-	//: a genuine READ, and the only one in this broker: an investigation must
-	//: not serialise against the consumers it is investigating.
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	//: a dead letter is evidence; reading it must not consume it. The outer
-	//: copy keeps the order and the nil an empty store has always returned.
-	dead = slices.Clone(b.dead[:min(max, len(b.dead))])
-	//: and it must not let the reader REWRITE it either: a DeadLetterValue
-	//: holds two slices — the payload and the trail —, so the outer copy
-	//: alone hands every caller the very bytes this store keeps, and one that
-	//: edits what it was given changes what the next investigator reads. The port says the payload
-	//: belongs to the receiver; Receive copies for the same reason, and the
-	//: file broker re-reads the record from disk. Only the copy is written,
-	//: so the read lock is still the right one.
-	for index := range dead {
-		dead[index].Message.Payload = slices.Clone(dead[index].Message.Payload)
-		dead[index].Trail = cloneTrail(dead[index].Trail)
-	}
-	//: the caller's own, in the order the store holds them.
-	return dead, nil
+	//: the first page, from the first identifier.
+	return b.DeadLettersAfter(ctx, "", max)
 }
 
 // resolve returns the record a receipt names, or the reason it names none.
@@ -773,7 +821,7 @@ func (b *memoryBroker) resolve(receipt corequeue.ReceiptValue) (record *memRecor
 func (b *memoryBroker) reclaimExpired(now time.Time) {
 	//: until the heap is empty or its earliest deadline is in the future.
 	for {
-		due, pending := b.expiry.Peek()
+		due, _, pending := b.expiry.Peek()
 		//: nothing left, or the earliest deadline is still ahead — which, on
 		//: a min-heap, means every remaining one is too. This is the early
 		//: stop the map could not provide.
@@ -781,19 +829,35 @@ func (b *memoryBroker) reclaimExpired(now time.Time) {
 			//: every lapsed lease has been dealt with.
 			return
 		}
-		//: taken off the heap exactly once, whatever it turns out to be.
+		//: taken off the heap exactly once; the entry is the lease's own, so
+		//: its handle names nothing from here on.
 		b.expiry.Pop() //nolint:errcheck // Peek already reported the entry is there.
 		record, leased := b.inflight[due.receipt]
-		//: a stale entry: the lease was acknowledged, nacked or extended, so
-		//: this deadline no longer names anything. Extend leaves the old entry
-		//: behind on purpose, and comparing the deadlines is how it is
-		//: recognised without ever having to search the heap for it.
-		if !leased || !record.expiresAt.Equal(due.at) {
+		//: unreachable: every call that ends a lease removes its entry, so a
+		//: popped entry names a lease in flight. Kept so a broken invariant
+		//: loses a reclaim rather than the process.
+		if !leased {
 			continue
 		}
+		record.lapse = heap.Handle{}
 		delete(b.inflight, due.receipt)
 		b.recoverExpired(record, now)
 	}
+}
+
+// unlease takes record out of flight: out of the in-flight map, and its
+// deadline out of the expiry heap. The caller holds the write lock.
+func (b *memoryBroker) unlease(record *memRecord) {
+	delete(b.inflight, record.receipt)
+	//: the lease's own entry, wherever it sits in the heap.
+	b.expiry.Remove(record.lapse) //nolint:errcheck // a record in flight always holds a live handle.
+	record.lapse = heap.Handle{}
+}
+
+// newLeaseExpiries returns an empty expiry heap, earliest deadline first.
+func newLeaseExpiries() *heap.IndexedHeap[leaseExpiry] {
+	//: time.Time's own order.
+	return heap.NewIndexed(func(a, b leaseExpiry) int { return a.at.Compare(b.at) })
 }
 
 // recoverExpired decides what becomes of one lapsed lease.
@@ -815,28 +879,92 @@ func (b *memoryBroker) recoverExpired(record *memRecord, now time.Time) {
 
 // bury moves a record into the dead-letter store with its cause.
 func (b *memoryBroker) bury(record *memRecord, now time.Time, cause causeValue) {
-	b.dead = append(b.dead, corequeue.DeadLetterValue{
+	b.insertDead(corequeue.DeadLetterValue{
 		Message: corequeue.MessageValue{
 			ID: record.id, Payload: slices.Clone(record.payload), EnqueuedAt: record.enqueuedAt,
 		},
 		Deliveries: record.deliveries, FailedAt: now,
 		Reason: cause.reason, Cause: cause.public, Code: cause.code, Trail: cause.trail,
+		Priority: record.priority,
 	})
 }
 
-// insertReady places record in visibility order, ties broken by seq.
+// insertDead keeps the dead list in the byte order of the identifiers, so the
+// memory broker lists its dead letters as the durable ones do — by enqueue
+// instant, whatever order they died in — and a cursor resumes by a binary
+// search.
+func (b *memoryBroker) insertDead(dead corequeue.DeadLetterValue) {
+	at, _ := slices.BinarySearchFunc(b.dead, dead.Message.ID, compareDeadID)
+	b.dead = slices.Insert(b.dead, at, dead)
+}
+
+// compareDeadID orders a dead letter against an identifier, by bytes.
+func compareDeadID(held corequeue.DeadLetterValue, id string) int {
+	//: the order every broker lists its dead letters in.
+	return strings.Compare(held.Message.ID, id)
+}
+
+// insertReady places record in its level's list, in visibility order, ties
+// broken by seq.
 //
 // The list is kept ordered at INSERTION rather than sorted at Receive: a
 // consumer polls far more often than a producer publishes, so sorting on the
 // read path would re-derive on every poll an order the insert already knows.
 func (b *memoryBroker) insertReady(record *memRecord) {
-	at := len(b.ready)
+	level := readyIndex(record.priority)
+	list := b.ready[level]
+	at := len(list)
 	//: walk from the end: a fresh publish belongs at the tail, which is the
 	//: overwhelmingly common case.
-	for at > 0 && laterThan(b.ready[at-1], record) {
+	for at > 0 && laterThan(list[at-1], record) {
 		at--
 	}
-	b.ready = slices.Insert(b.ready, at, record)
+	b.ready[level] = slices.Insert(list, at, record)
+}
+
+// earliestReady is the earliest instant a queued record becomes visible: the
+// earliest head of the levels' lists, each in visibility order; the zero
+// time.Time when nothing waits.
+func (b *memoryBroker) earliestReady() time.Time {
+	var due time.Time
+	//: every level's head.
+	for _, list := range b.ready {
+		//: the earliest of them.
+		if len(list) > 0 && (due.IsZero() || list[0].visibleAt.Before(due)) {
+			due = list[0].visibleAt
+		}
+	}
+	//: zero when every list is empty.
+	return due
+}
+
+// readyAfter is every queued record, every level's, whose identifier sorts
+// after after, in no order.
+func (b *memoryBroker) readyAfter(after string) []*memRecord {
+	var found []*memRecord
+	//: every level's list.
+	for _, list := range b.ready {
+		//: after where the listing resumes.
+		for _, record := range list {
+			//: before it is not listed.
+			if record.id > after {
+				found = append(found, record)
+			}
+		}
+	}
+	//: possibly none.
+	return found
+}
+
+// readyCount is how many records wait, every level together.
+func (b *memoryBroker) readyCount() int {
+	count := 0
+	//: every level.
+	for _, list := range b.ready {
+		count += len(list)
+	}
+	//: the total.
+	return count
 }
 
 // laterThan reports whether first sorts after second in the ready order.
@@ -857,7 +985,27 @@ func laterThan(first, second *memRecord) bool {
 // queue does — but it is documented as opaque, and nothing outside this file
 // reads it back.
 func memID(now time.Time, seq uint64) string {
-	//: base 36 keeps it short without needing a second alphabet.
-	return strconv.FormatInt(now.UnixNano(), receiptRadix) + "-" +
-		strconv.FormatUint(seq, receiptRadix)
+	//: base 36 keeps it short without needing a second alphabet; each half
+	//: is zero-padded to its widest, so the byte order of two identifiers is
+	//: the order of their instants, then of their sequence — what a dead
+	//: letter's place in the list and a cursor compare (issue #1043). Built
+	//: in one buffer, so the identifier is the verb's one allocation.
+	var id [2*memIDHalfWidth + 1]byte
+	padBase36(id[:memIDHalfWidth], uint64(max(now.UnixNano(), 0)))
+	id[memIDHalfWidth] = '-'
+	padBase36(id[memIDHalfWidth+1:], seq)
+	return string(id[:])
+}
+
+// padBase36 writes n in base 36 into into, right-aligned and zero-padded;
+// into is memIDHalfWidth long, the widest a uint64 takes.
+func padBase36(into []byte, n uint64) {
+	var scratch [memIDHalfWidth]byte
+	digits := strconv.AppendUint(scratch[:0], n, receiptRadix)
+	pad := len(into) - len(digits)
+	//: the leading zeros, then the digits.
+	for index := range pad {
+		into[index] = '0'
+	}
+	copy(into[pad:], digits)
 }

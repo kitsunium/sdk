@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
+	svcsql "github.com/kitsunium/sdk/internal/service/data/sql"
 )
 
 // indexRowArgs is how many arguments one index row binds: its index's name,
@@ -16,10 +17,27 @@ const indexRowArgs int = 4
 // document.
 const versionRowArgs int = 6
 
+// trashIndexExistsStatement asks MySQL whether the versions table vs holds the
+// index named name: MySQL has no IF NOT EXISTS for an index, so the trash
+// index's migration asks before it adds or drops one. Both names are bound.
+const trashIndexExistsStatement string = "SELECT COUNT(*) FROM information_schema.statistics" +
+	" WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?"
+
+// The columns data/sql's InsertRows inserts the store's rows into (#837).
+var (
+	// indexColumns are the columns an index row binds, in the order rowArgs
+	// binds them — indexRowArgs of them.
+	indexColumns = []string{"index_name", "index_key", "doc_key", "uniq"}
+	// versionColumns are the columns a version row binds, in the order
+	// versionArgs binds them — versionRowArgs of them.
+	versionColumns = []string{"doc_key", "num", "made_at", "made_ns", "meta", "doc"}
+)
+
 // sqlStatements are the statements one SQL store sends, rendered for its
-// dialect and tables. The fixed ones are rendered at OpenSQL; the two whose
-// length depends on a document — its index rows, and its unique keys — are
-// rendered by the methods below, from the same parts.
+// dialect and tables. The fixed ones are rendered at OpenSQL; the unique-key
+// check, whose length depends on a document, is rendered by the methods
+// below, from the same parts; the index and version rows are inserted by
+// data/sql's InsertRows over indexColumns and versionColumns (#837).
 type sqlStatements struct {
 	// getDoc reads one document.
 	getDoc string
@@ -38,6 +56,11 @@ type sqlStatements struct {
 	// lockDoc reads a document for Update and takes its lock; writeLocked
 	// writes the result under that lock.
 	lockDoc, writeLocked string
+	// revision reads a document and the row's revision, for Revision;
+	// replaceIf replaces a document while its row's revision is the one
+	// bound, and lockDocIf reads and locks it on that condition — ReplaceIf's
+	// two shapes, without and with versions (ADR 0209).
+	revision, replaceIf, lockDocIf string
 	// deleteDoc removes a document; deleteIndex removes its index rows.
 	deleteDoc, deleteIndex string
 	// clearIndex removes every index row, for Reindex.
@@ -52,6 +75,17 @@ type sqlStatements struct {
 	// lookup reads the document one index key files; find reads every one,
 	// in key order.
 	lookup, find string
+	// findAfter reads the next page of what find reads, with each document's
+	// key: the holders above the third argument, at most the fourth of them
+	// (Pager.FindAfter).
+	findAfter string
+	// rangeFrom reads the next page of an ordered index's entries from a key
+	// on, with each one's index key, document key and document, in that
+	// order; rangeBelow is the same under an upper bound. Both resume after
+	// the (index key, document key) last read, bounded below on the index key
+	// alone too, so the primary key's range scan starts at the cursor
+	// (Ranged.Range).
+	rangeFrom, rangeBelow string
 	// claim creates a document, or locks the one stored and leaves it as it
 	// is, for a Put on a store that keeps versions: it answers the revision it
 	// wrote and the document the row holds — PostgreSQL, SQLite — or its
@@ -106,7 +140,7 @@ type sqlStatements struct {
 // renderStatements renders every fixed statement of the store keeping its
 // documents in table, on dialect. The table name was validated at OpenSQL.
 func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
-	docs, ix, vs := dialect.QuoteIdent(table), dialect.QuoteIdent(indexTable(table)), dialect.QuoteIdent(versionsTable(table))
+	docs, ixName, vs := dialect.QuoteIdent(table), dialect.QuoteIdent(indexTable(table)), dialect.QuoteIdent(versionsTable(table))
 	p1, p2, p3 := dialect.Placeholder(1), dialect.Placeholder(2), dialect.Placeholder(3)
 	//: ends a read of version rows made inside a write: it locks them where
 	//: the engine locks rows and — what matters on MySQL inside a caller's
@@ -114,9 +148,9 @@ func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
 	//: than the transaction's snapshot. SQLite needs nothing: its writer
 	//: holds the database's only write lock.
 	lock := dialect.ForUpdate()
-	join := "SELECT d.doc FROM " + ix + " i JOIN " + docs + " d ON d.doc_key = i.doc_key" +
+	join := "SELECT d.doc FROM " + ixName + " i JOIN " + docs + " d ON d.doc_key = i.doc_key" +
 		" WHERE i.index_name = " + p1 + " AND i.index_key = " + p2
-	s := sqlStatements{
+	stmts := sqlStatements{
 		getDoc:       "SELECT doc FROM " + docs + " WHERE doc_key = " + p1,
 		listDocs:     "SELECT doc FROM " + docs + " ORDER BY doc_key",
 		entries:      "SELECT doc_key, doc FROM " + docs + " ORDER BY doc_key",
@@ -124,8 +158,8 @@ func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
 		count:        "SELECT COUNT(*) FROM " + docs,
 		replace:      "UPDATE " + docs + " SET rev = rev + 1, doc = " + p1 + " WHERE doc_key = " + p2,
 		deleteDoc:    "DELETE FROM " + docs + " WHERE doc_key = " + p1,
-		deleteIndex:  "DELETE FROM " + ix + " WHERE doc_key = " + p1,
-		clearIndex:   "DELETE FROM " + ix,
+		deleteIndex:  "DELETE FROM " + ixName + " WHERE doc_key = " + p1,
+		clearIndex:   "DELETE FROM " + ixName,
 		pageAfter:    "SELECT doc_key, doc FROM " + docs + " WHERE doc_key > " + p1 + " ORDER BY doc_key LIMIT " + p2,
 		keysAfter:    "SELECT doc_key FROM " + docs + " WHERE doc_key > " + p1 + " ORDER BY doc_key LIMIT " + p2,
 		lookup:       join,
@@ -145,17 +179,41 @@ func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
 			"COALESCE(SUM(LENGTH(doc)), 0) FROM " + vs,
 		claim:     claimStatement(dialect, docs),
 		docTable:  docs,
-		ixTable:   ix,
+		ixTable:   ixName,
 		vsTable:   vs,
 		shareLock: shareLockClause(dialect),
 		dialect:   dialect,
 	}
-	s.exists = "SELECT 1 FROM " + docs + " WHERE doc_key = " + dialect.Placeholder(1) + s.shareLock
-	s.upsert, s.insert = writeModes(dialect, docs)
-	s.lockDoc, s.writeLocked = updateStatements(dialect, docs, s.replace)
-	s.firstVersion, s.dropTombstone, s.readTrashed, s.tombstones = trashStatements(dialect, table)
+	stmts.exists = "SELECT 1 FROM " + docs + " WHERE doc_key = " + dialect.Placeholder(1) + stmts.shareLock
+	stmts.upsert, stmts.insert = writeModes(dialect, docs)
+	stmts.lockDoc, stmts.writeLocked = updateStatements(dialect, docs, stmts.replace)
+	stmts.revision, stmts.replaceIf, stmts.lockDocIf = revisionStatements(dialect, docs)
+	stmts.firstVersion, stmts.dropTombstone, stmts.readTrashed, stmts.tombstones = trashStatements(dialect, table)
+	stmts.findAfter, stmts.rangeFrom, stmts.rangeBelow = pageStatements(dialect, docs, ixName)
 	//: rendered once, sent many times.
-	return s
+	return stmts
+}
+
+// pageStatements renders FindAfter's statement and Range's two over the
+// quoted tables docs and ix. FindAfter's reads the holders of one index key
+// above a document key, with their keys. Range's read from a cursor on, and
+// from a cursor to an upper bound. The cursor is an (index key, document
+// key) pair written without a row value, which every engine reads alike: the
+// index key above the cursor's, or the cursor's own with a document key
+// above it — and the index key at or above the cursor's once more, alone, so
+// the primary key (index_name, index_key, doc_key) answers the range from
+// its first row. Every placeholder appears once, in order — MySQL's are
+// positional —, so the cursor's index key is bound three times.
+func pageStatements(dialect coresql.Dialect, docs, ix string) (findAfter, from, below string) {
+	p := dialect.Placeholder
+	join := " i JOIN " + docs + " d ON d.doc_key = i.doc_key WHERE i.index_name = " + p(1)
+	head := "SELECT i.index_key, i.doc_key, d.doc FROM " + ix + join + " AND i.index_key >= " + p(2) +
+		" AND (i.index_key > " + p(3) + " OR (i.index_key = " + p(4) + " AND i.doc_key > " + p(5) + "))"
+	order := " ORDER BY i.index_key, i.doc_key LIMIT "
+	//: rendered once, sent many times.
+	return "SELECT i.doc_key, d.doc FROM " + ix + join + " AND i.index_key = " + p(2) + " AND i.doc_key > " + p(3) +
+			" ORDER BY i.doc_key LIMIT " + p(4),
+		head + order + p(6), head + " AND i.index_key < " + p(6) + order + p(7)
 }
 
 // trashStatements renders the four statements of the trash, all on the
@@ -230,6 +288,29 @@ func updateStatements(dialect coresql.Dialect, docs, replace string) (lockDoc, w
 	return "SELECT doc FROM " + docs + " WHERE doc_key = " + dialect.Placeholder(1) + dialect.ForUpdate(), replace
 }
 
+// revisionStatements renders ReplaceIf's statements and Revision's read. The
+// revision is the row's rev, which every write moves.
+//
+// replaceIf is Replace's UPDATE conditioned on the revision: on a store that
+// keeps no versions the comparison and the write are one statement, and no
+// row affected says the condition failed — MySQL's count is exact since the
+// revision always changes. lockDocIf is lockDoc on the same condition, for a
+// store that keeps versions and reads what it replaces: FOR UPDATE where the
+// engine locks rows, and on SQLite a write that moves the revision and
+// returns the document, as lockDoc is there.
+func revisionStatements(dialect coresql.Dialect, docs string) (revision, replaceIf, lockDocIf string) {
+	p1, p2, p3 := dialect.Placeholder(1), dialect.Placeholder(2), dialect.Placeholder(3)
+	revision = "SELECT rev, doc FROM " + docs + " WHERE doc_key = " + p1
+	replaceIf = "UPDATE " + docs + " SET rev = rev + 1, doc = " + p1 + " WHERE doc_key = " + p2 + " AND rev = " + p3
+	//: SQLite: lock by writing, read what the write kept.
+	if dialect == coresql.DialectSQLite {
+		//: the revision moved once, by the locking read.
+		return revision, replaceIf, "UPDATE " + docs + " SET rev = rev + 1 WHERE doc_key = " + p1 + " AND rev = " + p2 + " RETURNING doc"
+	}
+	//: the row lock both engines take on a locking read.
+	return revision, replaceIf, "SELECT doc FROM " + docs + " WHERE doc_key = " + p1 + " AND rev = " + p2 + dialect.ForUpdate()
+}
+
 // claimStatement renders the first statement of a Put on a store that keeps
 // versions: it must know the document it replaces before replacing it, and
 // must not let another writer create the key between its read and its write.
@@ -267,32 +348,6 @@ func (s *sqlStatements) claimReturnsRow() bool {
 	return s.dialect != coresql.DialectMySQL
 }
 
-// insertVersions renders the insertion of n version rows, each binding
-// versionRowArgs arguments, in one statement.
-func (s *sqlStatements) insertVersions(n int) string {
-	var b strings.Builder
-	b.WriteString("INSERT INTO " + s.vsTable + " (doc_key, num, made_at, made_ns, meta, doc) VALUES ")
-	//: one tuple per row, placeholders numbered across the whole statement.
-	for row := range n {
-		//: rows are comma-separated.
-		if row > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("(")
-		//: the row's six columns.
-		for col := 1; col <= versionRowArgs; col++ {
-			//: columns are comma-separated.
-			if col > 1 {
-				b.WriteString(", ")
-			}
-			b.WriteString(s.dialect.Placeholder(row*versionRowArgs + col))
-		}
-		b.WriteString(")")
-	}
-	//: n rows in one round trip.
-	return b.String()
-}
-
 // upsertArgs binds the upsert's arguments: the key and the document, and on
 // MySQL the document again — see writeModes.
 func (s *sqlStatements) upsertArgs(key, doc []byte) []any {
@@ -319,30 +374,17 @@ func (s *sqlStatements) insertConflictIsZeroRows() bool {
 	return s.dialect != coresql.DialectMySQL
 }
 
-// insertIndexRows renders the insertion of n index rows, each binding
-// indexRowArgs arguments, in one statement.
-func (s *sqlStatements) insertIndexRows(n int) string {
-	var b strings.Builder
-	b.WriteString("INSERT INTO " + s.ixTable + " (index_name, index_key, doc_key, uniq) VALUES ")
-	//: one tuple per row, placeholders numbered across the whole statement.
-	for row := range n {
-		//: rows are comma-separated.
-		if row > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("(")
-		//: the row's four columns.
-		for col := 1; col <= indexRowArgs; col++ {
-			//: columns are comma-separated.
-			if col > 1 {
-				b.WriteString(", ")
-			}
-			b.WriteString(s.dialect.Placeholder(row*indexRowArgs + col))
-		}
-		b.WriteString(")")
+// rowsOf cuts args, width values a row, into the rows data/sql's InsertRows
+// binds: each row a window of args, capped at its width, so nothing is
+// copied and no row can grow into the next.
+func rowsOf(args []any, width int) [][]any {
+	rows := make([][]any, 0, len(args)/width)
+	//: one window per row, in order.
+	for start := 0; start+width <= len(args); start += width {
+		rows = append(rows, args[start:start+width:start+width])
 	}
-	//: n rows in one round trip.
-	return b.String()
+	//: the rows, sharing args.
+	return rows
 }
 
 // uniqueTaken renders the question a write asks before it files a document's
@@ -384,6 +426,20 @@ func (s *sqlStatements) sharedKeys(n int) string {
 func (s *sqlStatements) markUnique(n int) string {
 	//: 1 on every row of the named indexes.
 	return "UPDATE " + s.ixTable + " SET uniq = 1 WHERE index_name IN (" + s.list(n) + ")"
+}
+
+// indexInsert is the statement data/sql's InsertRows files index rows with:
+// the index table, indexColumns, indexRowsPerStatement rows at most.
+func (s *sqlStatements) indexInsert() svcsql.InsertSpec {
+	//: bounded per statement, as the parameter ceiling asks.
+	return svcsql.InsertSpec{Table: s.ixTable, Columns: indexColumns, PerStatement: indexRowsPerStatement}
+}
+
+// versionInsert is the statement data/sql's InsertRows keeps versions with:
+// the versions table, versionColumns, versionRowsPerStatement rows at most.
+func (s *sqlStatements) versionInsert() svcsql.InsertSpec {
+	//: bounded per statement, as the parameter ceiling asks.
+	return svcsql.InsertSpec{Table: s.vsTable, Columns: versionColumns, PerStatement: versionRowsPerStatement}
 }
 
 // list renders n comma-separated placeholders, numbered from 1.
@@ -484,8 +540,10 @@ func createTableStatements(dialect coresql.Dialect, table string) []string {
 // integers that hold any instant a time.Time does, to the nanosecond — both
 // NULL when unknown; meta is the stamp's metadata as a JSON object, NULL when
 // there is none. The key is binary, as in the two other tables, and the table
-// has no index but its primary key: versions are read by document, never
-// looked up by what they hold.
+// has no index but its primary key: versions are read by document. The trash
+// is the one thing looked up by what it holds — its rows numbered 0 — and
+// its index is a migration of its own, SQLVersionsTrashIndexMigration, which a
+// table created before it existed needs as much as a new one.
 //
 // The trash lives in the same table, so it needs no migration of its own: a
 // trashed document is a row numbered 0 — a number no version is given — that
@@ -512,6 +570,23 @@ func createVersionsTableStatements(dialect coresql.Dialect, table string) []stri
 		return []string{"CREATE TABLE IF NOT EXISTS " + vs + " (doc_key BLOB NOT NULL, num INTEGER NOT NULL, made_at INTEGER," +
 			" made_ns INTEGER, meta BLOB, doc BLOB, PRIMARY KEY (doc_key, num))"}
 	}
+}
+
+// trashIndexStatements renders the DDL that adds and drops the index of the
+// trash — the rows numbered 0 of the versions table, which Tombstones reads in
+// key order. PostgreSQL and SQLite index them alone, a partial index over
+// doc_key; MySQL has no partial index and keys (num, doc_key), whose prefix
+// num = 0 is the trash in key order. PostgreSQL and SQLite spell both
+// directions idempotently; MySQL's are guarded by trashIndexExistsStatement.
+func trashIndexStatements(dialect coresql.Dialect, table string) (create, drop string) {
+	vs, name := dialect.QuoteIdent(versionsTable(table)), dialect.QuoteIdent(trashIndex(table))
+	//: MySQL and MariaDB: a key of the table.
+	if dialect == coresql.DialectMySQL {
+		//: added and dropped by ALTER TABLE.
+		return "ALTER TABLE " + vs + " ADD KEY " + name + " (num, doc_key)", "ALTER TABLE " + vs + " DROP KEY " + name
+	}
+	//: PostgreSQL and SQLite: a partial index, in the table's schema.
+	return "CREATE INDEX IF NOT EXISTS " + name + " ON " + vs + " (doc_key) WHERE num = 0", "DROP INDEX IF EXISTS " + name
 }
 
 // dropVersionsTableStatements renders the reversal of

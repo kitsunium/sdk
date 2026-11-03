@@ -37,6 +37,7 @@ A Heap is NOT safe for concurrent use. That is deliberate: a lock inside would b
 
 - [func New\[T any\]\(cmp func\(a T, b T\) int\) \*Heap\[T\]](<#New>)
 - [type Heap](<#Heap>)
+  - [func \(\*Heap\) Drain\(\) iter.Seq\[T\]](<#Heap.Drain>)
   - [func \(\*Heap\) Len\(\) int](<#Heap.Len>)
   - [func \(\*Heap\) Peek\(\) \(T, bool\)](<#Heap.Peek>)
   - [func \(\*Heap\) Pop\(\) \(T, bool\)](<#Heap.Pop>)
@@ -89,7 +90,7 @@ write report
 
 Heap is a binary heap ordered by the comparison given to [New](#New).
 
-[Heap](#Heap).Push adds an element in O(log n); [Heap](#Heap).Pop removes and returns the top one in O(log n), and [Heap](#Heap).Peek returns it without removing it, both reporting false on an empty heap; [Heap](#Heap).Len counts the elements.
+[Heap](#Heap).Push adds an element in O(log n); [Heap](#Heap).Pop removes and returns the top one in O(log n), and [Heap](#Heap).Peek returns it without removing it, both reporting false on an empty heap; [Heap](#Heap).Drain pops them all, in order, as an iterator; [Heap](#Heap).Len counts the elements.
 
 The zero value is NOT usable — a heap with no comparison has no order — and a Heap is not safe for concurrent use.
 
@@ -102,6 +103,15 @@ Heap is an alias of `github.com/kitsunium/sdk/internal/kernel/collections/heap.H
 ```go
 type Heap[T any] struct{}
 ```
+
+<a name="Heap.Drain"></a>
+### func \(Heap\) [Drain](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/heap/heap.go>)
+
+```go
+func (*Heap) Drain() iter.Seq[T]
+```
+
+Drain yields the elements in order, popping each before it is yielded, until the heap is empty: Pop's loop, as an iterator. A loop that stops early leaves the rest in h, and an element the loop's body pushes is yielded in its turn. Nothing is allocated.
 
 <a name="Heap.Len"></a>
 ### func \(Heap\) [Len](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/heap/heap.go>)

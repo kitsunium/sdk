@@ -103,6 +103,7 @@ func (m MigrateConfig) resolve() (plan migratePlan, err error) {
 	return migratePlan{
 		migrations: sorted, table: table,
 		lockBudget: m.lockBudget(), retry: m.retryInterval(),
+		checksums: slices.ContainsFunc(sorted, func(mv coresql.MigrationValue) bool { return mv.Checksum != "" }),
 	}, nil
 }
 

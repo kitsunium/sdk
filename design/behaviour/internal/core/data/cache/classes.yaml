@@ -1,6 +1,22 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: absentTTLField names the field the negative lifetime rides on.
+    items:
+      - name: absentTTLField
+        type: string
+        value: "\"absent_ttl_ns\""
+    name: absentTTLField
+  - doc: "ttlBase and ttlBits parse the field back: a decimal int64."
+    grouped: true
+    items:
+      - name: ttlBase
+        type: int
+        value: "10"
+      - name: ttlBits
+        type: int
+        value: "64"
+    name: ttlBase
   - doc: |-
       NoExpiry is the [EntryValue.TTL] that stores an entry with no deadline.
 
@@ -16,6 +32,12 @@ constants:
     name: NoExpiry
 files:
   - decls:
+      - absentTTLField
+      - ttlBase
+      - Absent
+      - AbsentTTLOf
+    name: absent.go
+  - decls:
       - Fill
     name: cache_interface.go
   - decls: []
@@ -24,8 +46,18 @@ files:
       - NoExpiry
       - EntryValue
     name: entry.go
+functions:
+  - name: Absent
+    params: cause error, ttl time.Duration
+    results: error
+  - name: AbsentTTLOf
+    params: err error
+    results: ttl time.Duration, marked bool
 imports:
   context: context
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  slices: slices
+  strconv: strconv
   time: time
 package:
   docFile: doc.go

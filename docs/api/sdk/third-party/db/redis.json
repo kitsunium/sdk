@@ -1,0 +1,341 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/third-party/db/redis",
+  "dir": "third-party/db/redis",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/third-party/db/redis/cache",
+      "name": "cache",
+      "dir": "cache",
+      "layer": "thirdparty",
+      "doc": "Package cache is the remote tier of the cache domain: a core/data/cache\nStore over Valkey or Redis through go-redis, implementing the four ports —\nStore, EntryFetcher, Tagger and Loader — so internal/service/data/cache's\nNewChain accepts it as its far tier behind a memory store (ADR 0049,\nADR 0211). It lives in the go-redis vendor module, third-party/db/redis,\nnamed by its vendor rather than by one package (#984).\n\n# Keys\n\nEvery key of one store shares the hash tag of Config.Prefix, so the store\nlives on one slot of a cluster and every write is one atomic script: the\nvalue under {prefix}:v:<key>, the entry's tags under {prefix}:t:<key>, and\neach tag's members under {prefix}:g:<tag>. A store therefore does not shard\nacross a cluster; two stores with two prefixes do.\n\n# What the server owns\n\nAn entry's deadline is the server's: Set writes it with PX, FetchEntry reads\nthe remaining TTL with PTTL, so promotion carries the time left, never the\ntime first asked for. Values are encoded with Config.Codec; a value that\ndoes not decode is ValueUndecodable, never a silent miss.\n\n# Loader across replicas\n\nLoad collapses concurrent misses on one key within the process, as the\nport promises, and, when Config.FillLease is positive, across processes:\nthe first caller takes {prefix}:l:<key> with SET NX PX FillLease and fills,\nthe others poll every FillPoll on the injected clock until the value\nappears or the lease is gone. The lease is not fenced — a filler that\noutlives it may race a second one, and the later Set wins — the\nnon-guarantee the lock domain states for its own leases (ADR 0052).\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "queue",
+      "dir": "queue",
+      "layer": "thirdparty",
+      "doc": "Package queue is a core/data/queue Broker over a Valkey or Redis stream and\none consumer group (ADR 0054's deferred connector, ADR 0211), in the\ngo-redis vendor module named by its vendor (#984).\n\n# Mapping\n\nPublish is XADD, the entry id the message's ID. Receive first reclaims what\nlapsed — a lease past its deadline, dead-lettered when its deliveries are\nspent —, leases again the hand-backs whose instant has come (XCLAIM), then\nreads new entries with XREADGROUP; the pending-entries list holds every\nmessage from its first lease to its XACK. Ack is XACK and XDEL, so one\nstream is one queue. A message that runs out of attempts moves to the\ndead-letter stream, its cause beside it, in the same script that removes\nit. Receive and every settlement are one Lua script, atomic on the\nserver, and every key of one broker shares the stream's hash tag, so a\nbroker lives on one slot of a cluster. A failed command is\nStreamUnreachable or CommandRefused, core/data/queue.QueueBackendFailed\nin its trail.\n\n# Whose clock is the lease\n\nThe lease deadlines are the broker's, read from StreamConfig.Clock and kept\nin a sorted set beside the stream, to the microsecond — not the server's idle\ntime, which XAUTOCLAIM would read: a test drives every deadline with a\nManualClock, as for the SQL broker, and replicas agree as far as their\nclocks do. The broker computes every instant and passes it to the script\nas text. A receipt names the entry, the token of its lease and its\ndelivery, so a lapsed or replaced lease is LeaseExpired and one this\npackage never minted UnknownReceipt.\n\n# Capabilities\n\nWaker (a publication or hand-back by this process, and the next deadline\nit knows of), LeaseExtender, Rejecter, Releaser, DelayedNacker and\nDeadLetterReader. Out of scope: hash-slot placement across a cluster (one\nstream is one slot), and a partitioned log, which is data/stream's.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/cache.CodeRedisCacheCommandFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/cache",
+      "name": "CodeRedisCacheCommandFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "220929",
+      "code": {
+        "value": "0.3.95.1"
+      },
+      "doc": "CodeRedisCacheCommandFailed identifies a command Valkey or Redis refused,\nor a connection that failed under it. It rides with\ncore/data/cache.CacheBackendFailed in the error's trail.\n",
+      "file": "cache/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/cache.CodeRedisCacheValueUndecodable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/cache",
+      "name": "CodeRedisCacheValueUndecodable",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "220930",
+      "code": {
+        "value": "0.3.95.2"
+      },
+      "doc": "CodeRedisCacheValueUndecodable identifies a stored value the configured\ncodec cannot decode into the store's type: another writer, another\ntype, another codec under the same prefix.\n",
+      "file": "cache/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/cache.CommandFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/cache",
+      "name": "CommandFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.95.1",
+        "reason": "COMMAND_FAILED",
+        "public": "The cache server could not complete the request"
+      },
+      "doc": "CommandFailed wraps a failed command; nothing is assumed stored.\n",
+      "file": "cache/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/cache.Config",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/cache",
+      "name": "Config",
+      "spelled": "struct{Client goredis.UniversalClient; Codec codec.Codec; Clock clock.Timed; Prefix string; DefaultTTL time.Duration; FillLease time.Duration; FillPoll time.Duration}",
+      "canonical": "struct{Client github.com/redis/go-redis/v9.UniversalClient; Codec github.com/kitsunium/sdk/internal/core/data/codec.Codec; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Prefix string; DefaultTTL time.Duration; FillLease time.Duration; FillPoll time.Duration}",
+      "fields": [
+        {
+          "name": "Client",
+          "type": "goredis.UniversalClient",
+          "doc": "Client is the caller's go-redis client — a single node, a sentinel\nfailover or a cluster. The store never closes it. Required.\n"
+        },
+        {
+          "name": "Codec",
+          "type": "codec.Codec",
+          "doc": "Codec encodes and decodes the values. Required.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock times the pollers' waits. Nil means clock.System. An entry's\ndeadline is the server's, never this clock's.\n"
+        },
+        {
+          "name": "Prefix",
+          "type": "string",
+          "doc": "Prefix namespaces every key and is their hash tag, so it must be\nnon-empty and hold no brace. Required.\n"
+        },
+        {
+          "name": "DefaultTTL",
+          "type": "time.Duration",
+          "doc": "DefaultTTL applies to an entry whose own TTL is zero; zero means no\ndeadline, as for the memory store. Negative is refused.\n"
+        },
+        {
+          "name": "FillLease",
+          "type": "time.Duration",
+          "doc": "FillLease is how long the cross-replica fill lease of Load lasts. Zero\nkeeps Load's collapsing within the process, the port's own promise;\nnegative is refused.\n"
+        },
+        {
+          "name": "FillPoll",
+          "type": "time.Duration",
+          "doc": "FillPoll is how often a caller that lost the fill lease looks for the\nwinner's value. Required, positive and shorter than FillLease, when\nFillLease is positive.\n"
+        }
+      ],
+      "doc": "Config configures NewStore: the client, the namespace, the default\nlifetime, the codec values travel in, and the cross-replica fill lease.\n",
+      "file": "cache/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/cache.NewStore[...]",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/cache",
+      "name": "NewStore",
+      "spelled": "func[V any](cfg Config) (store corecache.Store[V], err error)",
+      "canonical": "func[V any](cfg github.com/kitsunium/sdk/third-party/db/redis/cache.Config) (store github.com/kitsunium/sdk/internal/core/data/cache.Store[V], err error)",
+      "doc": "NewStore returns the store over cfg.Client under cfg.Prefix. It sends no\ncommand. A missing client or codec, an empty prefix or one holding a\nbrace, a negative DefaultTTL, and a FillPoll that is not positive and\nshorter than a positive FillLease are core/data/cache.CacheMisconfigured.\n",
+      "file": "cache/store.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/cache.ValueUndecodable",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/cache",
+      "name": "ValueUndecodable",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.95.2",
+        "reason": "VALUE_UNDECODABLE",
+        "public": "A cached value could not be decoded"
+      },
+      "doc": "ValueUndecodable reports a stored value the codec cannot decode.\n",
+      "file": "cache/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/queue.CodeRedisQueueCommandRefused",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "CodeRedisQueueCommandRefused",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221188",
+      "code": {
+        "value": "0.3.96.4"
+      },
+      "doc": "CodeRedisQueueCommandRefused identifies a command the server answered with an error.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/queue.CodeRedisQueueGroupMissing",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "CodeRedisQueueGroupMissing",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221187",
+      "code": {
+        "value": "0.3.96.3"
+      },
+      "doc": "CodeRedisQueueGroupMissing identifies a consumer group the stream does not\nhave (NOGROUP) while StreamConfig.CreateGroup is false.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/queue.CodeRedisQueueMisconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "CodeRedisQueueMisconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221185",
+      "code": {
+        "value": "0.3.96.1"
+      },
+      "doc": "CodeRedisQueueMisconfigured identifies a StreamConfig NewStream refuses\nbefore any command: a missing client, an empty or brace-holding stream,\ngroup or consumer name.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/queue.CodeRedisQueueUnreachable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "CodeRedisQueueUnreachable",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "221186",
+      "code": {
+        "value": "0.3.96.2"
+      },
+      "doc": "CodeRedisQueueUnreachable identifies a connection to the server\nthat failed or timed out; nothing is assumed done.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/queue.CommandRefused",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "CommandRefused",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.96.4",
+        "reason": "COMMAND_REFUSED",
+        "public": "The queue server refused the request"
+      },
+      "doc": "CommandRefused wraps a command the server answered with an error.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/queue.GroupMissing",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "GroupMissing",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.96.3",
+        "reason": "GROUP_MISSING",
+        "public": "The queue's consumer group does not exist"
+      },
+      "doc": "GroupMissing reports a consumer group the stream does not have.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/queue.NewStream",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "NewStream",
+      "spelled": "func(cfg StreamConfig) (broker corequeue.Broker, err error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/third-party/db/redis/queue.StreamConfig) (broker github.com/kitsunium/sdk/internal/core/data/queue.Broker, err error)",
+      "doc": "NewStream returns a broker over cfg.Stream and cfg.Group. It sends no\ncommand: the group is checked, or created when cfg.CreateGroup asks, on\nthe first Receive. A policy the broker cannot honour is\ncore/data/queue.QueueMisconfigured; a missing client or name is\nStreamMisconfigured.\n",
+      "file": "queue/broker.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/queue.StreamConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "StreamConfig",
+      "spelled": "struct{Client goredis.UniversalClient; Clock clock.Clock; Stream string; Group string; Consumer string; Policy corequeue.PolicyValue; CreateGroup bool}",
+      "canonical": "struct{Client github.com/redis/go-redis/v9.UniversalClient; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; Stream string; Group string; Consumer string; Policy github.com/kitsunium/sdk/internal/core/data/queue.PolicyValue; CreateGroup bool}",
+      "fields": [
+        {
+          "name": "Client",
+          "type": "goredis.UniversalClient",
+          "doc": "Client is the caller's go-redis client; the broker never closes it.\nRequired.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Clock",
+          "doc": "Clock stamps every instant the broker writes and judges the lease\ndeadlines. Nil means clock.System.\n"
+        },
+        {
+          "name": "Stream",
+          "type": "string",
+          "doc": "Stream names the queue; it is the hash tag of every key the broker\nwrites, so it must be non-empty and hold no brace. Required.\n"
+        },
+        {
+          "name": "Group",
+          "type": "string",
+          "doc": "Group is the consumer group every consumer of the queue reads through. Required.\n"
+        },
+        {
+          "name": "Consumer",
+          "type": "string",
+          "doc": "Consumer names this broker in the group's pending-entries list. Empty\nmints one per broker; two live brokers must not share one.\n"
+        },
+        {
+          "name": "Policy",
+          "type": "corequeue.PolicyValue",
+          "doc": "Policy is the delivery discipline. Its zero value is refused, as for\nevery broker.\n"
+        },
+        {
+          "name": "CreateGroup",
+          "type": "bool",
+          "doc": "CreateGroup creates the group, and the stream with it (XGROUP CREATE\nMKSTREAM), when the first Receive finds it missing. False answers\nGroupMissing instead.\n"
+        }
+      ],
+      "doc": "StreamConfig configures NewStream: the client, the stream and group, this\nprocess's consumer name, and the delivery discipline.\n",
+      "file": "queue/config.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/queue.StreamMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "StreamMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.96.1",
+        "reason": "STREAM_MISCONFIGURED",
+        "public": "The stream queue broker is misconfigured"
+      },
+      "doc": "StreamMisconfigured refuses a StreamConfig NewStream cannot build a broker from.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/db/redis/queue.StreamUnreachable",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/db/redis/queue",
+      "name": "StreamUnreachable",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.96.2",
+        "reason": "STREAM_UNREACHABLE",
+        "public": "The queue server could not be reached"
+      },
+      "doc": "StreamUnreachable wraps a connection failure; nothing is assumed done.\n",
+      "file": "queue/gen_codes.go",
+      "layer": "thirdparty"
+    }
+  ]
+}

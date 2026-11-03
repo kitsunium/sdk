@@ -317,3 +317,9 @@ sequences:
     of: OwnStores
   - forward: iapp.Transact
     of: Transact
+  - forward: iapp.Serializable
+    of: Serializable
+  - forward: iapp.RepeatableRead
+    of: RepeatableRead
+  - forward: iapp.ReadOnly
+    of: ReadOnly

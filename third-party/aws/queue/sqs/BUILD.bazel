@@ -1,0 +1,68 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "sqs",
+    srcs = [
+        "broker.go",
+        "cause.go",
+        "client.go",
+        "config.go",
+        "cred_adapter.go",
+        "deadletter.go",
+        "doc.go",
+        "encoding.go",
+        "errors.go",
+        "gen_codes.go",
+        "lease.go",
+        "settle.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/aws/queue/sqs",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/queue",
+        "//internal/core/observe/logger/writer",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "@com_github_aws_aws_sdk_go_v2//aws",
+        "@com_github_aws_aws_sdk_go_v2_service_sqs//:sqs",
+        "@com_github_aws_aws_sdk_go_v2_service_sqs//types",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":sqs",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "sqs_test",
+    srcs = [
+        "config_internal_test.go",
+        "conformance_internal_test.go",
+        "fakesqs_internal_test.go",
+        "gen_api_test.go",
+    ],
+    embed = [":sqs"],
+    deps = [
+        "//internal/core/data/queue",
+        "//internal/core/observe/logger/writer",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "@com_github_aws_aws_sdk_go_v2//aws",
+        "@com_github_aws_aws_sdk_go_v2_service_sqs//:sqs",
+        "@com_github_aws_aws_sdk_go_v2_service_sqs//types",
+        "@com_github_aws_smithy_go//:smithy-go",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (//:audit_sources) so its errs.Define call sites are scanned under Bazel.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

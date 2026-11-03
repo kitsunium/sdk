@@ -210,6 +210,11 @@ type DatabaseConfig struct {
 	MaxLifetime, MaxIdleTime time.Duration
 	// CheckTimeout bounds a check of the database.
 	CheckTimeout time.Duration
+	// Transient is the engine's own reading of a failed transaction — true
+	// when the database asks for it to run again —, nil when the engine
+	// offers none (app.Classifier). The store subsystem reads the SDK's
+	// Classify beside it.
+	Transient func(err error) bool
 }
 
 // TableSpec is one of the framework's tables on a database, as the store subsystem's

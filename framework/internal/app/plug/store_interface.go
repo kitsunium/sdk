@@ -8,6 +8,16 @@ import (
 	"time"
 )
 
+// TxOptionsValue is what app.Transact asks of a database transaction: an
+// isolation level — the zero value the database's default — and whether it
+// only reads. A savepoint is given the zero value.
+type TxOptionsValue struct {
+	// Isolation is the transaction's isolation level; zero is the database's default.
+	Isolation sql.IsolationLevel
+	// ReadOnly tells the database the transaction only reads.
+	ReadOnly bool
+}
+
 // The store subsystem's engine and its siblings (ADR 0179 §2, §3), which
 // framework/internal/app/storeengine implements over the SDK's document store,
 // and the core's engines that wrap one hand on; kit's scope on a database and
@@ -21,8 +31,9 @@ import (
 type Database interface {
 	// Transact runs fn in a transaction of the database, or in a savepoint
 	// of the one ctx carries for it: nil commits or releases, an error
-	// rolls back.
-	Transact(ctx context.Context, fn func(ctx context.Context) error) error
+	// rolls back. opts are the transaction's: its isolation level and
+	// whether it only reads; a savepoint is given none.
+	Transact(ctx context.Context, opts TxOptionsValue, fn func(ctx context.Context) error) error
 	// InTransaction reports whether ctx carries a transaction of this
 	// database.
 	InTransaction(ctx context.Context) bool
@@ -34,6 +45,15 @@ type Database interface {
 	// database is undone, and reports true; outside one it holds nothing
 	// and reports false.
 	OnAbort(ctx context.Context, fn func(ctx context.Context)) bool
+}
+
+// Classifier is a [Database] that says whether a failed transaction is one
+// the database asks to run again: a serialization failure, a deadlock, a
+// lock wait that timed out. app.Transact runs such a transaction again, at
+// its outermost level. A sibling of [Database].
+type Classifier interface {
+	// Transient reports whether err asks for the transaction to run again.
+	Transient(err error) bool
 }
 
 // Checker is a Database that says whether it answers. A sibling of

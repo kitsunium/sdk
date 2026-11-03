@@ -20,9 +20,10 @@ import (
 // database is the source of truth. Index keys reach the table as keyed
 // hashes: an e-mail, a token's hash, a subject never does.
 
-// sqlKeysChunk is how many keys one call of a database's engine lists, each
-// under its own <name>-timeout: a long listing is many short calls, never one
-// call the timeout ends halfway.
+// sqlKeysChunk is how many keys — or records, for Filter — one call of a
+// database's engine lists, each under its own <name>-timeout: a long listing
+// is many short calls, never one call the timeout ends halfway, and never the
+// whole table in memory at once.
 const sqlKeysChunk int = 256
 
 // sqlEngine is a store on a database: the SDK's document store over SQL,
@@ -101,13 +102,46 @@ func (e *sqlEngine) List(ctx context.Context) ([]plug.DocumentValue, error) {
 	return values(rs), nil
 }
 
-// Filter reads the records keep keeps.
+// Filter reads the records keep keeps, a page of sqlKeysChunk records at a
+// time (#1153): each page one call — one statement on the table's primary
+// key, resuming after the last key read, through the SDK's Pager — and keep
+// asked of its records once the call is done, so what Filter holds is the
+// records it keeps and one page, never the table.
 func (e *sqlEngine) Filter(ctx context.Context, keep func(d plug.DocumentValue) bool) ([]plug.DocumentValue, error) {
-	all, err := e.List(ctx)
+	kept := make([]plug.DocumentValue, 0, sqlKeysChunk)
+	for after := ""; ; {
+		page, err := e.recordsChunk(ctx, after)
+		if err != nil {
+			return nil, err
+		}
+		for _, en := range page {
+			if d := rawRecord(en.JSON).value(); keep(d) {
+				kept = append(kept, d)
+			}
+		}
+		if len(page) < sqlKeysChunk {
+			return kept, nil
+		}
+		after = page[len(page)-1].Key
+	}
+}
+
+// recordsChunk is at most sqlKeysChunk records above after, with their keys,
+// read in one call.
+func (e *sqlEngine) recordsChunk(ctx context.Context, after string) ([]docstore.Entry, error) {
+	c, done, err := e.call(ctx, false)
 	if err != nil {
 		return nil, err
 	}
-	return filtered(all, keep), nil
+	defer done()
+	page := make([]docstore.Entry, 0, sqlKeysChunk)
+	for en, err := range e.ds.Documents(c, after, sqlKeysChunk) {
+		if err != nil {
+			return nil, said(err)
+		}
+		page = append(page, en)
+	}
+	return page, nil
 }
 
 // Lookup reads the record whose unique index holds key.

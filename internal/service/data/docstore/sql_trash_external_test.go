@@ -14,6 +14,7 @@ import (
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/service/data/docstore"
 )
 
 // TestSQLATrashedDocumentIsARowNumberedZero pins what the trash leaves in the
@@ -97,5 +98,49 @@ func TestSQLTheTrashIsOneTransaction(t *testing.T) {
 			t.Fatalf("a failed Purge left versions %v", got)
 		}
 		must(t, fx.store.Restore(ctx, "acc_1"))
+	})
+}
+
+// TestSQLTheTrashIndexMigrationRunsTwiceAndKeepsTheTrash runs the trash
+// index's migration (ADR 0143, amended 2026-11-02) on each dialect over the
+// fake engine, after a store an earlier release left — trashed documents and
+// versions already there: Up adds the index, and again does nothing — MySQL
+// asks information_schema first, its ALTER TABLE being refused twice —, the
+// trash reads the same, and Down drops it, twice as safely.
+func TestSQLTheTrashIndexMigrationRunsTwiceAndKeepsTheTrash(t *testing.T) {
+	t.Parallel()
+	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
+		fx := openSQLVersioned(t, dialect, keeping(2, clock.NewManualClock(epoch)))
+		ctx := t.Context()
+		for _, id := range []string{"acc_2", "acc_1", "acc_3"} {
+			must(t, fx.store.Put(ctx, account{ID: id}))
+		}
+		must(t, fx.store.Trash(ctx, "acc_2"))
+		must(t, fx.store.Trash(ctx, "acc_1"))
+		before, err := fx.store.Tombstones(ctx)
+		must(t, err)
+		migration, err := docstore.SQLVersionsTrashIndexMigration(dialect, accountsTable, 20261102120000)
+		must(t, err)
+		if migration.Name != "docstore trash index members__accounts" {
+			t.Fatalf("migration name %q", migration.Name)
+		}
+		db := fx.engine.open(t)
+		for range 2 {
+			must(t, migration.Up(ctx, db))
+			if !fx.engine.snapshot().trashIndexed {
+				t.Fatal("Up left the versions table without the trash index")
+			}
+		}
+		after, err := fx.store.Tombstones(ctx)
+		must(t, err)
+		if !slices.Equal(trashedKeys(after), trashedKeys(before)) || len(after) != 2 {
+			t.Fatalf("Tombstones after the migration = %v, want %v", trashedKeys(after), trashedKeys(before))
+		}
+		for range 2 {
+			must(t, migration.Down(ctx, db))
+			if fx.engine.snapshot().trashIndexed {
+				t.Fatal("Down left the trash index")
+			}
+		}
 	})
 }

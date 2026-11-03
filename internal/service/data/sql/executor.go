@@ -94,6 +94,11 @@ func (e *scopedExecutor) ExecContext(
 		//: nothing ran.
 		return nil, err
 	}
+	//: a statement budget is the slow path; none is the one measured.
+	if e.state.budget.limit > 0 {
+		//: bounded, the cut named.
+		return e.state.budget.exec(ctx, e.state.tx, query, args)
+	}
 	//: the transaction is the caller's; database/sql owns the retry policy.
 	return e.state.tx.ExecContext(ctx, query, args...)
 }
@@ -106,6 +111,11 @@ func (e *scopedExecutor) QueryContext(
 	if err := e.usable(); err != nil {
 		//: nothing ran.
 		return nil, err
+	}
+	//: a statement budget is the slow path; none is the one measured.
+	if e.state.budget.limit > 0 {
+		//: bounded until the rows close or the budget elapses.
+		return e.state.budget.query(ctx, e.state.tx, query, args)
 	}
 	//: rows belong to the caller, who closes them.
 	return e.state.tx.QueryContext(ctx, query, args...)
@@ -130,8 +140,10 @@ func (e *scopedExecutor) QueryContext(
 func (e *scopedExecutor) QueryRowContext(ctx context.Context, query string, args ...any) *stdsql.Row {
 	//: the ordinary path — a usable handle runs the statement as given.
 	if err := e.usable(); err == nil {
+		//: the row reads through the cut context until Scan, under a budget.
+		cut, _ := e.state.budget.bound(ctx)
 		//: at most one row, scanned by the caller.
-		return e.state.tx.QueryRowContext(ctx, query, args...)
+		return e.state.tx.QueryRowContext(cut, query, args...)
 	}
 	//: same call shape, guaranteed not to reach the driver.
 	return e.state.tx.QueryRowContext(deadContext, query, args...)
@@ -147,6 +159,11 @@ func (e *scopedExecutor) PrepareContext(
 	if err := e.usable(); err != nil {
 		//: nothing was compiled.
 		return nil, err
+	}
+	//: a statement budget is the slow path.
+	if e.state.budget.limit > 0 {
+		//: bounded, the cut named.
+		return e.state.budget.prepare(ctx, e.state.tx, query)
 	}
 	//: the statement is the caller's, who closes it.
 	return e.state.tx.PrepareContext(ctx, query)

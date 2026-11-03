@@ -13,6 +13,7 @@ go_library(
         "mem_node.go",
         "mem_write.go",
         "os.go",
+        "os_dirflush.go",
         "os_publish.go",
         "os_write.go",
         "osguard_other.go",
@@ -27,6 +28,7 @@ go_library(
     deps = [
         "//internal/core/data/vfs",
         "//internal/core/proc",
+        "//internal/kernel/concur/commit",
         "//internal/kernel/errs",
     ],
 )
@@ -47,6 +49,7 @@ go_test(
         "conformance_external_test.go",
         "gen_api_test.go",
         "mem_external_test.go",
+        "os_dirflush_internal_test.go",
         "os_external_test.go",
         "publish_internal_test.go",
         "torn_external_test.go",

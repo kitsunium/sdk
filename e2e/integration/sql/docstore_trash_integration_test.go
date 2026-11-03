@@ -10,7 +10,9 @@ package sql_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,6 +88,101 @@ func TestTheTrashOnEveryEngine(t *testing.T) {
 		}
 		if tombs, err = store.Tombstones(ctx); err != nil || len(tombs) != 0 {
 			t.Fatalf("a rolled-back Trash left Tombstones() = %+v, %v", tombs, err)
+		}
+	})
+}
+
+// tombstonesPlan returns the plan the engine chooses for the statement
+// Tombstones sends, spelled by hand for the store's table: EXPLAIN QUERY PLAN
+// on SQLite, EXPLAIN with sequential scans discouraged on PostgreSQL — a
+// table of a few rows is cheaper to scan, which says nothing about one of
+// 110 000 — and EXPLAIN on MySQL.
+func tombstonesPlan(t *testing.T, e *engine, table string) string {
+	t.Helper()
+	vs := table + "___vs"
+	query := "SELECT doc_key, made_at, made_ns FROM " + vs + " WHERE num = 0 ORDER BY doc_key"
+	ctx := t.Context()
+	conn, err := e.db.Conn(ctx)
+	must(t, err)
+	defer func() { must(t, conn.Close()) }()
+	explain := "EXPLAIN "
+	switch e.dialect {
+	case sql.DialectSQLite:
+		explain = "EXPLAIN QUERY PLAN "
+	case sql.DialectPostgres:
+		_, setErr := conn.ExecContext(ctx, "SET enable_seqscan = off")
+		must(t, setErr)
+		defer func() { _, _ = conn.ExecContext(context.Background(), "RESET enable_seqscan") }()
+	}
+	rows, err := conn.QueryContext(ctx, explain+query)
+	must(t, err)
+	defer func() { must(t, rows.Close()) }()
+	cols, err := rows.Columns()
+	must(t, err)
+	var plan strings.Builder
+	for rows.Next() {
+		cells := make([]any, len(cols))
+		for i := range cells {
+			cells[i] = new(any)
+		}
+		must(t, rows.Scan(cells...))
+		for _, cell := range cells {
+			fmt.Fprintf(&plan, "%s ", *cell.(*any))
+		}
+		plan.WriteString("\n")
+	}
+	must(t, rows.Err())
+	return plan.String()
+}
+
+// TestTheTrashIndexServesTombstonesOnEveryEngine runs the trash index's
+// migration over a versions table an earlier release created — trashed
+// documents and versions already in it — and asserts, from the engine's own
+// plan, that Tombstones reads the index <table>___tr where it used to scan
+// the versions table; the trash reads the same, and Up runs twice (ADR 0143,
+// amended 2026-11-02).
+func TestTheTrashIndexServesTombstonesOnEveryEngine(t *testing.T) {
+	t.Parallel()
+	eachEngine(t, func(t *testing.T, e *engine) {
+		fx := openVersioned(t, e, 2)
+		ctx, store := t.Context(), fx.store
+		for _, id := range []string{"m3", "m1", "m2", "m4"} {
+			must(t, store.Put(ctx, member{ID: id, Name: "v1"}))
+			must(t, store.Put(ctx, member{ID: id, Name: "v2"}))
+		}
+		must(t, store.Trash(ctx, "m3"))
+		must(t, store.Trash(ctx, "m1"))
+		before, err := store.Tombstones(ctx)
+		must(t, err)
+		index := fx.table + "___tr"
+		plan := tombstonesPlan(t, e, fx.table)
+		t.Logf("Tombstones' plan without the trash index:\n%s", plan)
+		if strings.Contains(plan, index) {
+			t.Fatalf("the plan names %s before its migration:\n%s", index, plan)
+		}
+
+		migration, err := docstore.SQLVersionsTrashIndexMigration(e.dialect, fx.table, 3)
+		must(t, err)
+		runner, err := sql.NewMigrator(sql.Config{DB: e.db, Dialect: e.dialect, Pool: sql.PoolConfig{MaxOpen: 16}},
+			sql.MigrateConfig{Migrations: []sql.Migration{migration}, VersionTable: uniqueName("trash_")})
+		must(t, err)
+		must(t, runner.Up(ctx))
+		must(t, migration.Up(ctx, e.db))
+
+		plan = tombstonesPlan(t, e, fx.table)
+		t.Logf("Tombstones' plan with the trash index:\n%s", plan)
+		if !strings.Contains(plan, index) {
+			t.Fatalf("Tombstones does not read %s:\n%s", index, plan)
+		}
+		after, err := store.Tombstones(ctx)
+		must(t, err)
+		if len(after) != 2 || after[0].Key != "m1" || after[1].Key != "m3" || len(before) != len(after) {
+			t.Fatalf("Tombstones() after the index = %+v, before %+v", after, before)
+		}
+		must(t, migration.Down(ctx, e.db))
+		must(t, migration.Down(ctx, e.db))
+		if plan := tombstonesPlan(t, e, fx.table); strings.Contains(plan, index) {
+			t.Fatalf("the plan still names %s after Down:\n%s", index, plan)
 		}
 	})
 }

@@ -23,7 +23,7 @@
       "dir": "cache",
       "layer": "public",
       "family": "data",
-      "doc": "Package cache is the public facade for the SDK's caching, and it offers two\nsurfaces because there are two different jobs.\n\n# The primitive: Cache[K,V]\n\n[Cache] is a generic LRU + TTL map — construct it, Set, Fetch, done. No\nport, no error surface, no vocabulary. Reach for it when you want a bounded\nmap with expiry inside one component.\n\n\tc := cache.New[string, int](cache.Config[string, int]{MaxEntries: 1024, DefaultTTL: time.Minute})\n\tc.Set(\"answer\", 42)\n\tv, ok := c.Fetch(\"answer\") // 42, true\n\n# The domain: Store[V]\n\n[Store] is the cache as an INTERFACE, with the three things a primitive\ndeliberately does not have: invalidation by tag, protection against a\nstampede of concurrent misses, and the ability to put one store in front of\nanother. Reach for it when a cache is part of your architecture rather than\nan implementation detail — when something else has to be able to invalidate\nwhat you cached, or when the thing behind the cache must not be hit N times\nthe instant a hot key expires.\n\n\tstore, err := cache.NewMemory[Profile](cache.MemoryConfig{\n\t    MaxEntries: 10_000,       // refused if zero — a capacity is your decision\n\t    DefaultTTL: time.Minute,\n\t})\n\n\tloader, _ := store.(cache.Loader[Profile])\n\tprofile, err := loader.Load(ctx, key, func(ctx context.Context) (cache.Entry[Profile], error) {\n\t    p, err := db.Profile(ctx, id)\n\t    return cache.Entry[Profile]{Value: p, TTL: time.Minute, Tags: []string{\"user:\" + id}}, err\n\t})\n\n\ttagger, _ := store.(cache.Tagger)\n\tremoved, err := tagger.InvalidateTag(ctx, \"user:\"+id) // every entry derived from that user\n\nThe two do not compete: the domain store is BUILT on the primitive, and\n[Cache] stays exactly what it was.\n\n# Fetch, not Get — on both surfaces\n\nA hit promotes the entry in the recency order and moves the counters, so a\nread MUTATES. Naming it Get would promise a purity neither surface offers,\nand in the domain store it takes a write lock for precisely that reason.\n\n# Stampede protection stops at the process boundary\n\n[Loader].Load guarantees ONE fill per key across every goroutine in THIS\nprocess. It does not coordinate across replicas. Ten instances of a service\neach running this still send ten concurrent requests to the origin when a\nhot key expires — so a fleet's worst-case origin load falls by the\nconcurrency factor within an instance, not to one. Cross-process collapsing\nneeds a shared lease, which is a distributed system and not something a\ncache can promise. Size the origin against the number of replicas, not\nagainst the number of requests.\n\n# Nothing across tiers is atomic\n\n[NewChain] is two independent stores, and there is no transaction between\nthem. Every multi-tier operation has a window in which they disagree; the\npackage chooses which side of that window is safer and says so, rather than\nimplying a consistency it cannot deliver. See internal/service/data/cache's\nCLAUDE.md for each choice and its reason.\n"
+      "doc": "Package cache is the public facade for the SDK's caching, and it offers two\nsurfaces because there are two different jobs.\n\n# The primitive: Cache[K,V]\n\n[Cache] is a generic LRU + TTL map — construct it, Set, Fetch, done. No\nport, no error surface, no vocabulary. Reach for it when you want a bounded\nmap with expiry inside one component.\n\n\tc := cache.New[string, int](cache.Config[string, int]{MaxEntries: 1024, DefaultTTL: time.Minute})\n\tc.Set(\"answer\", 42)\n\tv, ok := c.Fetch(\"answer\") // 42, true\n\n# The domain: Store[V]\n\n[Store] is the cache as an INTERFACE, with the three things a primitive\ndeliberately does not have: invalidation by tag, protection against a\nstampede of concurrent misses, and the ability to put one store in front of\nanother. Reach for it when a cache is part of your architecture rather than\nan implementation detail — when something else has to be able to invalidate\nwhat you cached, or when the thing behind the cache must not be hit N times\nthe instant a hot key expires.\n\n\tstore, err := cache.NewMemory[Profile](cache.MemoryConfig{\n\t    MaxEntries: 10_000,       // refused if zero — a capacity is your decision\n\t    DefaultTTL: time.Minute,\n\t})\n\n\tloader, _ := store.(cache.Loader[Profile])\n\tprofile, err := loader.Load(ctx, key, func(ctx context.Context) (cache.Entry[Profile], error) {\n\t    p, err := db.Profile(ctx, id)\n\t    return cache.Entry[Profile]{Value: p, TTL: time.Minute, Tags: []string{\"user:\" + id}}, err\n\t})\n\n\ttagger, _ := store.(cache.Tagger)\n\tremoved, err := tagger.InvalidateTag(ctx, \"user:\"+id) // every entry derived from that user\n\nThe two do not compete: the domain store is BUILT on the primitive, and\n[Cache] stays exactly what it was.\n\n# Fetch, not Get — on both surfaces\n\nA hit promotes the entry in the recency order and moves the counters, so a\nread MUTATES. Naming it Get would promise a purity neither surface offers,\nand in the domain store it takes a write lock for precisely that reason.\n\n# Stampede protection stops at the process boundary\n\n[Loader].Load guarantees ONE fill per key across every goroutine in THIS\nprocess. It does not coordinate across replicas. Ten instances of a service\neach running this still send ten concurrent requests to the origin when a\nhot key expires — so a fleet's worst-case origin load falls by the\nconcurrency factor within an instance, not to one. Cross-process collapsing\nneeds a shared lease, which is a distributed system and not something a\ncache can promise. Size the origin against the number of replicas, not\nagainst the number of requests.\n\n[Leaser].LoadLeased takes that lease, from a lock.Locker the processes\nshare — the lock domain's file locker on one machine. Over a chain whose far\ntier every process reaches, the origin then sees one fill per key; over a\nmemory store alone, which shares no value, the processes only take turns,\none fill at a time.\n\n# Nothing across tiers is atomic\n\n[NewChain] is two independent stores, and there is no transaction between\nthem. Every multi-tier operation has a window in which they disagree; the\npackage chooses which side of that window is safer and says so, rather than\nimplying a consistency it cannot deliver. See internal/service/data/cache's\nCLAUDE.md for each choice and its reason.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/data/codec",
@@ -199,7 +199,7 @@
       "dir": "docstore",
       "layer": "public",
       "family": "data",
-      "doc": "Package docstore is the public facade for the SDK's document store: typed,\nkeyed JSON documents with unique and multi-valued secondary indexes, kept in\nmemory or persisted to a filesystem, every write durable before it returns.\n\n\ttype Account struct {\n\t    ID    string   `json:\"id\"`\n\t    Email string   `json:\"email\"`\n\t    Teams []string `json:\"teams\"`\n\t}\n\n\tdata, err := vfs.NewOS(\"/var/lib/app\") // or vfs.NewMem(), or nil FS for memory\n\taccounts, err := docstore.Open(\n\t    docstore.Config[Account]{\n\t        Key:  func(a Account) string { return a.ID },\n\t        FS:   data,\n\t        Path: \"members/accounts.json\",\n\t    },\n\t    docstore.Unique(\"email\", func(a Account) string { return a.Email }),\n\t    docstore.Index(\"team\", func(a Account) []string { return a.Teams }),\n\t)\n\tdefer accounts.Close()\n\n\terr = accounts.Insert(Account{ID: \"acc_1\", Email: \"ada@example.com\"})\n\tada, err := accounts.Lookup(\"email\", \"ada@example.com\")\n\tred, err := accounts.Find(\"team\", \"red\")\n\n# Documents, keys and the write modes\n\nA document is kept as its JSON encoding, so every read returns a copy and a\ncaller can never alias what the store holds. Its key is what [Config].Key\nreturns; an empty key is refused. Put creates or replaces; Insert refuses a\nkey that is taken (DocumentExists); Replace refuses a key that is not\n(DocumentNotFound), so a document deleted meanwhile is never brought back.\nUpdate applies a function to a copy and stores the result atomically with\nrespect to every other write — its function may read the store, and must not\nwrite to it. Delete removes.\n\n# Indexes\n\n[Unique] files at most one document per key: a write that would file a\nsecond is refused with UniqueKeyTaken and changes nothing. [Index] files any\nnumber. Empty keys are not indexed. Lookup reads a unique index; Find reads\nany index, in store-key order, and answers an empty slice rather than an\nerror; Filter reads every document. The indexes are rebuilt when the store\nopens, and documents that break a unique index refuse the open\n(IndexBroken) rather than answer lies.\n\nNo refusal ever quotes a key: a store key is routinely an e-mail address, an\nindex key the hash of a token.\n\n# How it persists, and what a write costs\n\nAt rest the store is ONE file, the snapshot — a JSON object from key to\ndocument, the file a person can open. A write publishes one small file\nbeside it, in the directory Path + \".d\", atomically, before it returns — so\na write costs one document, whatever the store holds. When that overlay\nholds as many entries as the store holds documents (at least\n[DefaultFoldAt]), the write that got it there folds it back into the\nsnapshot: one rewrite per N writes, a constant on average. Close folds too.\nOpening replays the overlay over the snapshot, and a crash at any point of a\nfold loads the same documents. BENCH.md in internal/service/data/docstore has the\nnumbers: a write at 100 000 documents costs what it costs at 100, where\nrewriting the whole file costs 70 ms.\n\nA publication that fails is PersistFailed and changes nothing. One whose\nrename happened but whose directory flush failed is WriteUnconfirmed: the\nwrite stands — the file shows it, and so does the store — and only its\nsurvival across a power loss is in doubt.\n\n# Concurrency, and what it is not\n\nA Store is safe for concurrent use, and a reader never waits for a disk:\nwriters are serialised among themselves and do their filesystem work alone,\nand the documents change only once a write is durable. OnWrite and OnDelete\ntell a caller about each write once it is durable, outside every lock.\n\nIt is one process's store: a second process opening the same files is not\ndetected. It keeps every document in memory. It has no transaction across\ndocuments. It is a store for the documents a service owns, not a database.\n\n# The same store over SQL\n\n[OpenSQL] keeps the same documents — the same keys, indexes, write modes,\nhooks and refusals, the same codes — in two tables of a PostgreSQL, MySQL or\nSQLite database the caller opened and hands over as a [sql.Transactor].\nNothing is held in memory: the database is the source of truth, and every\ncall is a round trip that takes a context (ADR 0139).\n\n\ttm, err := sql.NewTransactor(sql.Config{DB: pool, Dialect: sql.DialectPostgres, Pool: sql.PoolConfig{MaxOpen: 10}})\n\tcreate, err := docstore.SQLMigration(sql.DialectPostgres, \"members__accounts\", 20260927120000) // run by your Migrator\n\taccounts, err := docstore.OpenSQL(\n\t    docstore.SQLConfig[Account]{Key: func(a Account) string { return a.ID },\n\t        Transactor: tm, Dialect: sql.DialectPostgres, Table: \"members__accounts\"},\n\t    docstore.Unique(\"email\", func(a Account) string { return a.Email }),\n\t)\n\terr = sql.Transact(ctx, tm, func(ctx context.Context, _ sql.Executor) error {\n\t    return accounts.Insert(ctx, Account{ID: \"acc_1\", Email: \"ada@example.com\"}) // joins this transaction\n\t})\n\nA call runs on the transaction its context carries for that transactor, and\non the pool otherwise. A write runs in a savepoint of the caller's\ntransaction — or a transaction of its own — so it is atomic on its own, and\na refused or failed one leaves the caller's transaction usable. Its hooks run\nonce the transaction that holds it has committed, and never for one rolled\nback.\n\nThe document is kept as the bytes the store encoded, never as the engine's\nJSON type, which reorders members and respells numbers, so it reads back\nbyte for byte. Keys are compared as bytes — binary key columns, no\ncollation — so \"a\", \"A\" and \"a \" are three keys, as they are in Go. A key\nlonger than [MaxSQLKeyLen] bytes is refused with KeyTooLong. Index keys may\nreach the table hashed: [SQLConfig].IndexKey transforms every one at a write\nand at every Lookup and Find, and an index is an equality lookup, which a\nkeyed hash keeps. Index rows are kept, not rebuilt at every open: after a\ndeclaration changes, [SQLStore].Reindex files the stored documents again.\n\nA failure of the database is StatementFailed, which a caller answers with a\n503: the driver's error is joined beside it for errors.Is and errors.As,\nand withheld from its text, because a driver quotes the row a constraint\nrefused and that row holds a key.\n\n# The ports, for a double\n\n[Store] and [SQLStore] are engines. A caller that must stand a double in for\none depends instead on the port it implements: [Collection], [Versioned],\n[Trashable], [KeyLister], [VersionWriter] and [VersionWeigher] for a\n[Store], whose calls take no context, [CollectionContext],\n[VersionedContext], [TrashableContext], [KeyListerContext],\n[VersionWriterContext] and [VersionWeigherContext] for a [SQLStore], whose\nevery call takes one, and\n[Announcer] — OnWrite and OnDelete — for either. Each pair carries the same\nmethods, the same documents and the same refusals; there is no single port\nover both, because the file engine waits on nothing a context could abandon\nwhile the SQL engine waits on a database (ADR 0160).\n\n# Versions\n\nA store opened with [Config].Versions — or [SQLConfig].Versions — keeps the\nlast versions of each document, as a content system keeps a page's\nrevisions (ADR 0143):\n\n\tpages, err := docstore.Open(docstore.Config[Page]{Key: Page.Key, FS: data, Path: \"cms/pages.json\", Versions: 20})\n\terr = pages.PutStamped(page, docstore.Stamp{Meta: map[string]string{\"by\": userID, \"command\": \"pages.Edit\"}})\n\trevisions, err := pages.Versions(page.ID) // newest first: the page as it is, then the 20 before it\n\tthird, err := pages.Version(page.ID, revisions[3].Number)\n\nA creation is version 1, and every write that changes the document makes\nthe next one, stamped with the instant of [Config].Clock and the metadata\nthe Stamped writes carry — who, which command; the plain writes carry none.\nA number is never given twice while the document exists. A write storing\nthe JSON already stored makes no version, and neither does one stamped\nInPlace: the document changes and its current version keeps its number. The\nformer versions beyond Versions are pruned by the write that makes a newer\none, in the same durable write as the document — the same overlay entry, the\nsame transaction — so no crash ever leaves the versions ahead of or behind\ntheir document. [Config].Held keeps a document's versions from pruning, for\na legal hold, until a write finds it released. RewriteVersions rewrites a\ndocument's former versions under the writers' lock, for an erasure: it may\nclear or drop them, never renumber or add one. A deletion takes every\nversion with it. Versions are never indexed: Lookup and Find read the\ncurrent version.\n\nThe file store keeps them in memory, in each write's overlay entry and, at\nrest, in the file Path + \".versions\"; a store opened without versions over\nfiles that keep them is refused, rather than left to drop them. The SQL\nstore keeps them in a third table, which [SQLVersionsMigration] creates.\n[Version].JSON is compact JSON; a version predating a change of the type\nmay no longer decode into it, which is why it is JSON and not a T.\n\n# The trash\n\nA store that keeps versions has a trash (ADR 0143, amended for ADR 0178):\n\n\terr = pages.Trash(page.ID)            // gone from Get, List, Lookup and Find; its versions stay\n\ttrash, err := pages.Tombstones()      // every trashed key, with when it was trashed\n\terr = pages.Restore(page.ID)          // back as it was, filed again\n\terr = pages.Purge(page.ID)            // or gone for good, its versions with it\n\nA trashed document leaves every read and frees its unique keys, as a\nformer version does; Versions still reads what it kept, the trashed document\nfirst. Its number is kept: a creation under its key is a write over the\ntrashed document, which continues its versions. Restore brings it back\nexactly as it was, or refuses with UniqueKeyTaken when another document\ntook one of its unique keys meanwhile. Purge removes it and its versions.\nDelete never reaches the trash: it takes a document and its versions at\nonce, which is what an erasure needs, and finds no trashed document. How\nlong a document stays in the trash is the caller's to decide; the store\nempties nothing by itself.\n\n# What the versions weigh\n\nVersionWeight says what a store keeps beyond its documents — for a page\nthat shows what a history costs (ADR 0143):\n\n\tw, err := pages.VersionWeight() // w.Former versions and w.Trashed documents, w.Bytes of JSON\n\nA document's current version is the document itself and is not counted.\n[Store] keeps the weight as a counter every write moves — Stats reports it\ntoo — so asking reads no version; [SQLStore] asks its database one\naggregate statement over the versions table, which sends back one row. The\nsame writes weigh the same on both.\n\n# Keys\n\nKeys lists the keys of the documents a store holds, in key order, and\nreads no document — for a caller that must visit every record, a re-scan\nafter a crash, without paying for what the records weigh (ADR 0178):\n\n\tfor key, err := range pages.Keys(\"\") {\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\t…\n\t}\n\n[Store] sorts the keys it holds once, when the range starts; [SQLStore]\nreads them in pages on the primary key, each resuming after the last key\nread. Both resume after the key a caller names, so a listing stopped early\ncontinues where it stopped. A document in the trash is not listed: Keys\nlists what Get finds.\n"
+      "doc": "Package docstore is the public facade for the SDK's document store: typed,\nkeyed JSON documents with unique and multi-valued secondary indexes, kept in\nmemory or persisted to a filesystem, every write durable before it returns.\n\n\ttype Account struct {\n\t    ID    string   `json:\"id\"`\n\t    Email string   `json:\"email\"`\n\t    Teams []string `json:\"teams\"`\n\t}\n\n\tdata, err := vfs.NewOS(\"/var/lib/app\") // or vfs.NewMem(), or nil FS for memory\n\taccounts, err := docstore.Open(\n\t    docstore.Config[Account]{\n\t        Key:  func(a Account) string { return a.ID },\n\t        FS:   data,\n\t        Path: \"members/accounts.json\",\n\t    },\n\t    docstore.Unique(\"email\", func(a Account) string { return a.Email }),\n\t    docstore.Index(\"team\", func(a Account) []string { return a.Teams }),\n\t)\n\tdefer accounts.Close()\n\n\terr = accounts.Insert(Account{ID: \"acc_1\", Email: \"ada@example.com\"})\n\tada, err := accounts.Lookup(\"email\", \"ada@example.com\")\n\tred, err := accounts.Find(\"team\", \"red\")\n\n# Documents, keys and the write modes\n\nA document is kept as its JSON encoding, so every read returns a copy and a\ncaller can never alias what the store holds. Its key is what [Config].Key\nreturns; an empty key is refused. Put creates or replaces; Insert refuses a\nkey that is taken (DocumentExists); Replace refuses a key that is not\n(DocumentNotFound), so a document deleted meanwhile is never brought back.\nUpdate applies a function to a copy and stores the result atomically with\nrespect to every other write — its function may read the store, and must not\nwrite to it. Delete removes.\n\n# Indexes\n\n[Unique] files at most one document per key: a write that would file a\nsecond is refused with UniqueKeyTaken and changes nothing. [Index] files any\nnumber. Empty keys are not indexed. Lookup reads a unique index; Find reads\nany index, in store-key order, and answers an empty slice rather than an\nerror; Filter reads every document. The indexes are rebuilt when the store\nopens, and documents that break a unique index refuse the open\n(IndexBroken) rather than answer lies.\n\nNo refusal ever quotes a key: a store key is routinely an e-mail address, an\nindex key the hash of a token.\n\n# How it persists, and what a write costs\n\nAt rest the store is ONE file, the snapshot — a JSON object from key to\ndocument, the file a person can open. A write publishes one small file\nbeside it, in the directory Path + \".d\", atomically, before it returns — so\na write costs one document, whatever the store holds. When that overlay\nholds as many entries as the store holds documents (at least\n[DefaultFoldAt]), the write that got it there folds it back into the\nsnapshot: one rewrite per N writes, a constant on average. Close folds too.\nOpening replays the overlay over the snapshot, and a crash at any point of a\nfold loads the same documents. BENCH.md in internal/service/data/docstore has the\nnumbers: a write at 100 000 documents costs what it costs at 100, where\nrewriting the whole file costs 70 ms.\n\nA publication that fails is PersistFailed and changes nothing. One whose\nrename happened but whose directory flush failed is WriteUnconfirmed: the\nwrite stands — the file shows it, and so does the store — and only its\nsurvival across a power loss is in doubt.\n\n# Concurrency, and what it is not\n\nA Store is safe for concurrent use, and a reader never waits for a disk:\nwriters are serialised among themselves and do their filesystem work alone,\nand the documents change only once a write is durable. OnWrite and OnDelete\ntell a caller about each write once it is durable, outside every lock.\n\nIt is one process's store: a second process opening the same files is not\ndetected. It keeps every document in memory. It has no transaction across\ndocuments. It is a store for the documents a service owns, not a database.\n\n# Consistency\n\nThe two engines state what a read after a write returns, and it is not the\nsame. A [Store] is read-your-writes within the process: once a write has\nreturned, every call of the process reads it, and a reader never waits —\nit sees the store before a write or after it, never between. A [SQLStore]\nreads at the isolation of the transaction a call runs on: a write is\nvisible to its own transaction at once, and to every other one once it\ncommits — never before, never if it rolls back — and a caller inside a\nREPEATABLE READ transaction reads its snapshot. A call on the pool is a\ntransaction of its own and reads what is committed.\n\n# The same store over SQL\n\n[OpenSQL] keeps the same documents — the same keys, indexes, write modes,\nhooks and refusals, the same codes — in two tables of a PostgreSQL, MySQL or\nSQLite database the caller opened and hands over as a [sql.Transactor].\nNothing is held in memory: the database is the source of truth, and every\ncall is a round trip that takes a context (ADR 0139).\n\n\ttm, err := sql.NewTransactor(sql.Config{DB: pool, Dialect: sql.DialectPostgres, Pool: sql.PoolConfig{MaxOpen: 10}})\n\tcreate, err := docstore.SQLMigration(sql.DialectPostgres, \"members__accounts\", 20260927120000) // run by your Migrator\n\taccounts, err := docstore.OpenSQL(\n\t    docstore.SQLConfig[Account]{Key: func(a Account) string { return a.ID },\n\t        Transactor: tm, Dialect: sql.DialectPostgres, Table: \"members__accounts\"},\n\t    docstore.Unique(\"email\", func(a Account) string { return a.Email }),\n\t)\n\terr = sql.Transact(ctx, tm, func(ctx context.Context, _ sql.Executor) error {\n\t    return accounts.Insert(ctx, Account{ID: \"acc_1\", Email: \"ada@example.com\"}) // joins this transaction\n\t})\n\nA call runs on the transaction its context carries for that transactor, and\non the pool otherwise. A write runs in a savepoint of the caller's\ntransaction — or a transaction of its own — so it is atomic on its own, and\na refused or failed one leaves the caller's transaction usable. Its hooks run\nonce the transaction that holds it has committed, and never for one rolled\nback.\n\nThe document is kept as the bytes the store encoded, never as the engine's\nJSON type, which reorders members and respells numbers, so it reads back\nbyte for byte. Keys are compared as bytes — binary key columns, no\ncollation — so \"a\", \"A\" and \"a \" are three keys, as they are in Go. A key\nlonger than [MaxSQLKeyLen] bytes is refused with KeyTooLong. Index keys may\nreach the table hashed: [SQLConfig].IndexKey transforms every one at a write\nand at every Lookup and Find, and an index is an equality lookup, which a\nkeyed hash keeps. Index rows are kept, not rebuilt at every open: after a\ndeclaration changes, [SQLStore].Reindex files the stored documents again.\n\nA failure of the database is StatementFailed, which a caller answers with a\n503: the driver's error is joined beside it for errors.Is and errors.As,\nand withheld from its text, because a driver quotes the row a constraint\nrefused and that row holds a key.\n\n# The ports, for a double\n\n[Store] and [SQLStore] are engines. A caller that must stand a double in for\none depends instead on the port it implements: [Collection], [Versioned],\n[Trashable], [KeyLister], [VersionWriter] and [VersionWeigher] for a\n[Store], whose calls take no context, [CollectionContext],\n[VersionedContext], [TrashableContext], [KeyListerContext],\n[VersionWriterContext] and [VersionWeigherContext] for a [SQLStore], whose\nevery call takes one, and\n[Announcer] — OnWrite and OnDelete — for either. Each pair carries the same\nmethods, the same documents and the same refusals; there is no single port\nover both, because the file engine waits on nothing a context could abandon\nwhile the SQL engine waits on a database (ADR 0160).\n\n# Versions\n\nA store opened with [Config].Versions — or [SQLConfig].Versions — keeps the\nlast versions of each document, as a content system keeps a page's\nrevisions (ADR 0143):\n\n\tpages, err := docstore.Open(docstore.Config[Page]{Key: Page.Key, FS: data, Path: \"cms/pages.json\", Versions: 20})\n\terr = pages.PutStamped(page, docstore.Stamp{Meta: map[string]string{\"by\": userID, \"command\": \"pages.Edit\"}})\n\trevisions, err := pages.Versions(page.ID) // newest first: the page as it is, then the 20 before it\n\tthird, err := pages.Version(page.ID, revisions[3].Number)\n\nA creation is version 1, and every write that changes the document makes\nthe next one, stamped with the instant of [Config].Clock and the metadata\nthe Stamped writes carry — who, which command; the plain writes carry none.\nA number is never given twice while the document exists. A write storing\nthe JSON already stored makes no version, and neither does one stamped\nInPlace: the document changes and its current version keeps its number. The\nformer versions beyond Versions are pruned by the write that makes a newer\none, in the same durable write as the document — the same overlay entry, the\nsame transaction — so no crash ever leaves the versions ahead of or behind\ntheir document. [Config].Held keeps a document's versions from pruning, for\na legal hold, until a write finds it released. RewriteVersions rewrites a\ndocument's former versions under the writers' lock, for an erasure: it may\nclear or drop them, never renumber or add one. A deletion takes every\nversion with it. Versions are never indexed: Lookup and Find read the\ncurrent version.\n\nThe file store keeps them in memory, in each write's overlay entry and, at\nrest, in the file Path + \".versions\"; a store opened without versions over\nfiles that keep them is refused, rather than left to drop them. The SQL\nstore keeps them in a third table, which [SQLVersionsMigration] creates.\n[Version].JSON is compact JSON; a version predating a change of the type\nmay no longer decode into it, which is why it is JSON and not a T.\n\n# The trash\n\nA store that keeps versions has a trash (ADR 0143, amended for ADR 0178):\n\n\terr = pages.Trash(page.ID)            // gone from Get, List, Lookup and Find; its versions stay\n\ttrash, err := pages.Tombstones()      // every trashed key, with when it was trashed\n\terr = pages.Restore(page.ID)          // back as it was, filed again\n\terr = pages.Purge(page.ID)            // or gone for good, its versions with it\n\nA trashed document leaves every read and frees its unique keys, as a\nformer version does; Versions still reads what it kept, the trashed document\nfirst. Its number is kept: a creation under its key is a write over the\ntrashed document, which continues its versions. Restore brings it back\nexactly as it was, or refuses with UniqueKeyTaken when another document\ntook one of its unique keys meanwhile. Purge removes it and its versions.\nDelete never reaches the trash: it takes a document and its versions at\nonce, which is what an erasure needs, and finds no trashed document. How\nlong a document stays in the trash is the caller's to decide; the store\nempties nothing by itself.\n\n# What the versions weigh\n\nVersionWeight says what a store keeps beyond its documents — for a page\nthat shows what a history costs (ADR 0143):\n\n\tw, err := pages.VersionWeight() // w.Former versions and w.Trashed documents, w.Bytes of JSON\n\nA document's current version is the document itself and is not counted.\n[Store] keeps the weight as a counter every write moves — Stats reports it\ntoo — so asking reads no version; [SQLStore] asks its database one\naggregate statement over the versions table, which sends back one row. The\nsame writes weigh the same on both.\n\n# Keys\n\nKeys lists the keys of the documents a store holds, in key order, and\nreads no document — for a caller that must visit every record, a re-scan\nafter a crash, without paying for what the records weigh (ADR 0178):\n\n\tfor key, err := range pages.Keys(\"\") {\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\t…\n\t}\n\n[Store] sorts the keys it holds once, when the range starts; [SQLStore]\nreads them in pages on the primary key, each resuming after the last key\nread. Both resume after the key a caller names, so a listing stopped early\ncontinues where it stopped. A document in the trash is not listed: Keys\nlists what Get finds.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/data/queue",
@@ -244,6 +244,30 @@
   ],
   "symbols": [
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.Absent",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "Absent",
+      "spelled": "func(cause error, ttl time.Duration) error",
+      "canonical": "func(cause error, ttl time.Duration) error",
+      "doc": "Absent marks a fill's failure as an answer to cache: the key does not exist\nat the origin. A store's Load keeps a negative entry for ttl and returns the\nsame error — errors.Is still finds cause — without calling the fill again.\nA ttl that is not positive caches nothing.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.AbsentTTLOf",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "AbsentTTLOf",
+      "spelled": "func(err error) (ttl time.Duration, marked bool)",
+      "canonical": "func(err error) (ttl time.Duration, marked bool)",
+      "doc": "AbsentTTLOf returns the lifetime [Absent] put on err, and whether it put one.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.BackendFailed",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
@@ -257,6 +281,32 @@
         "public": "The cache backend could not serve the operation"
       },
       "doc": "BackendFailed is returned when a store could not serve an operation. A\nMISS is not this: a miss is (zero, false, nil).\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.BulkFetcher",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "BulkFetcher",
+      "spelled": "[V any] corecache.BulkFetcher[V]",
+      "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.BulkFetcher[V]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.BulkFetcher",
+      "doc": "BulkFetcher is the sibling that reads many keys in one call — one lock per\nstripe, one pass per tier.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.BulkSetter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "BulkSetter",
+      "spelled": "[V any] corecache.BulkSetter[V]",
+      "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.BulkSetter[V]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.BulkSetter",
+      "doc": "BulkSetter is the sibling that stores many entries in one call, validating\nevery entry before storing any.\n",
       "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -363,6 +413,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.Expirer",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "Expirer",
+      "spelled": "corecache.Expirer",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/cache.Expirer",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.Expirer",
+      "doc": "Expirer is the sibling that removes a store's expired entries on demand.\nExpiry is otherwise lazy; the store starts no goroutine, so call Expire on\nyour own ticker or scheduler.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.Fill",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
@@ -389,6 +452,37 @@
         "public": "The cache fill function failed and nothing was stored"
       },
       "doc": "FillFailed is returned by Load when your fill fails and its error\ncarries no SDK code of its own. Nothing is stored: caching a failure\nturns one bad minute at the origin into a full TTL of confident wrong\nanswers.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.LeaseFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "LeaseFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/cache.CacheLeaseFailed",
+      "code": {
+        "value": "0.3.48.3",
+        "reason": "CACHE_LEASE_FAILED",
+        "public": "The cache could not coordinate the fill with other processes"
+      },
+      "doc": "LeaseFailed is returned by LoadLeased when its locker could not answer:\nthe lease on the key could be neither taken nor given up.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.Leaser",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "Leaser",
+      "spelled": "[V any] corecache.Leaser[V]",
+      "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.Leaser[V]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.Leaser",
+      "doc": "Leaser is the sibling that carries stampede protection across\nprocesses: on a miss it takes a lease named after the key from a\nlock.Locker the processes share, so one of them fills while the others\nwait for its value. A memory store alone shares no value: there the\nlease only takes turns, one fill at a time.\n",
       "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -474,6 +568,30 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.NewStriped[...]",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "NewStriped",
+      "spelled": "func[K comparable, V any](cfg Config[K, V], stripes int, hash func(key K) uint64) *Striped[K, V]",
+      "canonical": "func[K comparable, V any](cfg github.com/kitsunium/sdk/pkg/v1/data/cache.Config[K, V], stripes int, hash func(key K) uint64) *github.com/kitsunium/sdk/pkg/v1/data/cache.Striped[K, V]",
+      "doc": "NewStriped builds a [Striped] of the given number of stripes (below 1 is\n1) from cfg, whose bounds it divides between them. A nil hash uses\nhash/maphash over a seed of its own.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.NewWeighedMemory[...]",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "NewWeighedMemory",
+      "spelled": "func[V any](cfg MemoryConfig, weigh func(value V) int64) (store Store[V], err error)",
+      "canonical": "func[V any](cfg github.com/kitsunium/sdk/pkg/v1/data/cache.MemoryConfig, weigh func(value V) int64) (store github.com/kitsunium/sdk/pkg/v1/data/cache.Store[V], err error)",
+      "doc": "NewWeighedMemory builds an in-process store bounded by MaxBytes as well as\nMaxEntries, each value measured by weigh when it is stored. An entry\nheavier than a stripe's share of MaxBytes is refused at Set.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.NoExpiry",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
@@ -483,6 +601,60 @@
       "value": "-1",
       "init": "go:github.com/kitsunium/sdk/internal/core/data/cache.NoExpiry",
       "doc": "NoExpiry is the [Entry].TTL that stores an entry with no deadline.\n\nIt is deliberately distinct from the zero TTL, which means \"use the store's\ndefault\". A store with a one-minute default holding one entry that must\nnever expire is a real combination, and reading both meanings out of 0 would\nmake the second one unsayable.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.Policy",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "Policy",
+      "spelled": "kcache.Policy",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/collections/cache.Policy",
+      "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.Policy",
+      "doc": "Policy chooses the entry a full cache evicts: [PolicyLRU], the zero, or\n[PolicyS3FIFO].\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.PolicyLRU",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "PolicyLRU",
+      "spelled": "Policy",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/cache.Policy",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyLRU",
+      "doc": "PolicyLRU evicts the least-recently-used entry. It is the zero Policy.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.PolicyS3FIFO",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "PolicyS3FIFO",
+      "spelled": "Policy",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/cache.Policy",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyS3FIFO",
+      "doc": "PolicyS3FIFO admits new keys into a small probationary queue and keeps\nthe ones hit there in a main one, so a one-time scan does not flush the\nhot set.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.Refresher",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "Refresher",
+      "spelled": "[V any] corecache.Refresher[V]",
+      "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.Refresher[V]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.Refresher",
+      "doc": "Refresher is the sibling that refreshes a hot entry before it expires:\nthe value is served from the cache while one background fill replaces it.\n",
       "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -509,6 +681,19 @@
       "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.Store[V]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.Store",
       "doc": "Store is the cache port: Fetch, Set, Delete.\n\nThe method set is FROZEN at three. New capabilities arrive as SIBLING\ninterfaces you reach by type assertion — [EntryFetcher], [Tagger] and\n[Loader] — because this alias publishes the interface, Go interfaces are\nstructural, and a fourth method would break every downstream implementer at\ncompile time with no deprecation window.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.Striped",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "Striped",
+      "spelled": "[K comparable, V any] kcache.Striped[K, V]",
+      "canonical": "[K comparable, V any] github.com/kitsunium/sdk/internal/kernel/collections/cache.Striped[K, V]",
+      "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.Striped",
+      "doc": "Striped spreads keys over independent [Cache]s, each behind its own lock,\ndividing the bounds between them.\n",
       "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -4922,6 +5107,45 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.BatchWriter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "BatchWriter",
+      "spelled": "[T any] coredocstore.BatchWriter[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.BatchWriter[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.BatchWriter",
+      "doc": "BatchWriter is the public alias for what a batch's function records its\nwrites on: Put, Insert, Replace and Delete, decided in order when the\nbatch commits.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.Batcher",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "Batcher",
+      "spelled": "[T any] coredocstore.Batcher[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.Batcher[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Batcher",
+      "doc": "Batcher is the public alias for the sibling of [Collection] that writes\nseveral documents as one without a context, which [Store] implements:\nBatch — every write, or none.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.BatcherContext",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "BatcherContext",
+      "spelled": "[T any] coredocstore.BatcherContext[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.BatcherContext[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.BatcherContext",
+      "doc": "BatcherContext is the public alias for [Batcher] with a context on every\ncall, which [SQLStore] implements: one transaction.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.CodeDocumentExists",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
@@ -5058,6 +5282,23 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.CodeIndexNotOrdered",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "CodeIndexNotOrdered",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "217112",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/docstore.CodeIndexNotOrdered",
+      "code": {
+        "value": "0.3.80.24"
+      },
+      "doc": "CodeIndexNotOrdered: Range on an index declared without Ordered.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.CodeIndexNotUnique",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
@@ -5138,6 +5379,23 @@
         "value": "0.3.80.10"
       },
       "doc": "CodePersistFailed: the filesystem refused the write; nothing changed.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.CodeRevisionMismatch",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "CodeRevisionMismatch",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "217111",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/docstore.CodeRevisionMismatch",
+      "code": {
+        "value": "0.3.80.23"
+      },
+      "doc": "CodeRevisionMismatch: a conditional replacement on a revision the document no longer has.\n",
       "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -5518,6 +5776,24 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.IndexNotOrdered",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "IndexNotOrdered",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/docstore.IndexNotOrdered",
+      "code": {
+        "value": "0.3.80.24",
+        "reason": "INDEX_NOT_ORDERED",
+        "public": "The index keeps no order: declare it with Ordered"
+      },
+      "doc": "IndexNotOrdered refuses a Range on an index declared without Ordered.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.IndexNotUnique",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
@@ -5543,7 +5819,7 @@
       "spelled": "[T any] coredocstore.IndexSpec[T]",
       "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.IndexSpec[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.IndexSpec",
-      "doc": "IndexSpec is the public alias for one secondary index's declaration, built\nby [Unique] or [Index] and given to [Open].\n",
+      "doc": "IndexSpec is the public alias for one secondary index's declaration, built\nby [Unique], [Index] or [Ordered] and given to [Open].\n",
       "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -5695,6 +5971,44 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.Ordered[...]",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "Ordered",
+      "spelled": "func[T any](name string, key func(T) string) IndexSpec[T]",
+      "canonical": "func[T any](name string, key func(T) string) github.com/kitsunium/sdk/pkg/v1/data/docstore.IndexSpec[T]",
+      "doc": "Ordered declares an index over the one key key returns that keeps its keys\nin order, for Range: keys compare as bytes, so pad a number and write an\ninstant in RFC 3339, in UTC. An empty key is not indexed.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.Pager",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "Pager",
+      "spelled": "[T any] coredocstore.Pager[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.Pager[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Pager",
+      "doc": "Pager is the public alias for the sibling of [Collection] that reads the\ndocuments a page at a time without a context, which [Store] implements:\nDocuments and FindAfter.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.PagerContext",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "PagerContext",
+      "spelled": "[T any] coredocstore.PagerContext[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.PagerContext[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.PagerContext",
+      "doc": "PagerContext is the public alias for [Pager] with a context on every\ncall, which [SQLStore] implements.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.PersistFailed",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
@@ -5708,6 +6022,89 @@
         "public": "The document could not be written to storage"
       },
       "doc": "PersistFailed reports a write the filesystem refused.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.Ranged",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "Ranged",
+      "spelled": "[T any] coredocstore.Ranged[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.Ranged[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Ranged",
+      "doc": "Ranged is the public alias for the sibling of [Collection] that reads an\nordered index between two keys without a context, which [Store]\nimplements: Range.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.RangedContext",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "RangedContext",
+      "spelled": "[T any] coredocstore.RangedContext[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.RangedContext[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.RangedContext",
+      "doc": "RangedContext is the public alias for [Ranged] with a context on every\ncall, which [SQLStore] implements.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.Revision",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "Revision",
+      "spelled": "coredocstore.RevisionValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.RevisionValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.RevisionValue",
+      "doc": "Revision is the public alias for the opaque token Revision returns and\nReplaceIf compares: an engine's own, compared only for equality.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.RevisionMismatch",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "RevisionMismatch",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/docstore.RevisionMismatch",
+      "code": {
+        "value": "0.3.80.23",
+        "reason": "REVISION_MISMATCH",
+        "public": "The document changed since it was read"
+      },
+      "doc": "RevisionMismatch refuses a conditional replacement on a revision the document no longer has.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.Revisioned",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "Revisioned",
+      "spelled": "[T any] coredocstore.Revisioned[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.Revisioned[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Revisioned",
+      "doc": "Revisioned is the public alias for the sibling of [Collection] that\nreplaces a document on the revision the caller read, without a context,\nwhich [Store] implements: Revision and ReplaceIf — optimistic\nconcurrency for a write that cannot hold a lock while a person decides.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.RevisionedContext",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "RevisionedContext",
+      "spelled": "[T any] coredocstore.RevisionedContext[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.RevisionedContext[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.RevisionedContext",
+      "doc": "RevisionedContext is the public alias for [Revisioned] with a context on\nevery call, which [SQLStore] implements.\n",
       "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -5732,7 +6129,7 @@
       "name": "SQLMigration",
       "spelled": "func(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)",
       "canonical": "func(dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/pkg/v1/data/sql.Migration, error)",
-      "doc": "SQLMigration returns the migration that creates the two tables a SQL store\nnamed table keeps on dialect, numbered version for the caller's own version\ntable. Its Down drops both, and every document in them. Every statement does\nnothing when its table exists, so a run MySQL's implicit commit stopped\nhalfway completes when it runs again.\n",
+      "doc": "SQLMigration returns the migration that creates the two tables a SQL store\nnamed table keeps on dialect, numbered version for the caller's own version\ntable. Its Down drops both, and every document in them. Every statement does\nnothing when its table exists, so a run MySQL's implicit commit stopped\nhalfway completes when it runs again. Its\nChecksum fingerprints Up's statements, so a version table that recorded\nit refuses a build whose statements differ.\n",
       "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -5745,7 +6142,7 @@
       "spelled": "[T any] svcdocstore.SQLStore[T]",
       "canonical": "[T any] github.com/kitsunium/sdk/internal/service/data/docstore.SQLStore[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/docstore.SQLStore",
-      "doc": "SQLStore is the public alias for the document store over SQL: Get, List,\nFilter, Entries, Keys, Count, Lookup and Find read; Put, Insert, Replace, Update\nand Delete write, and their Stamped forms say what the version they make\nrecords; Versions, Version, RewriteVersions and VersionWeight, Trash,\nRestore, Purge and Tombstones as for [Store]; OnWrite and OnDelete announce once the write's\ntransaction commits; Reindex files the stored documents again. Every call\ntakes a context.\n",
+      "doc": "SQLStore is the public alias for the document store over SQL: Get, List,\nFilter, Entries, Keys, Count, Lookup and Find read, and Documents,\nFindAfter and Range read a page at a time; Put, Insert, Replace, Update\nand Delete write, and their Stamped forms say what the version they make\nrecords; Versions, Version, RewriteVersions and VersionWeight, Trash,\nRestore, Purge and Tombstones as for [Store]; OnWrite and OnDelete announce once the write's\ntransaction commits; Reindex files the stored documents again. Every call\ntakes a context.\n",
       "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -5757,7 +6154,19 @@
       "name": "SQLVersionsMigration",
       "spelled": "func(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)",
       "canonical": "func(dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/pkg/v1/data/sql.Migration, error)",
-      "doc": "SQLVersionsMigration returns the migration that creates the table a SQL\nstore named table keeps its versions in on dialect, numbered version for the\ncaller's own version table, beside [SQLMigration]'s. A store opened with\n[SQLConfig].Versions needs it. Its Down drops the table, and every version\nin it: run it to turn versions off for good.\n",
+      "doc": "SQLVersionsMigration returns the migration that creates the table a SQL\nstore named table keeps its versions in on dialect, numbered version for the\ncaller's own version table, beside [SQLMigration]'s. A store opened with\n[SQLConfig].Versions needs it. Its Down drops the table, and every version\nin it: run it to turn versions off for good. Its\nChecksum fingerprints Up's statements, so a version table that recorded\nit refuses a build whose statements differ.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.SQLVersionsTrashIndexMigration",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "SQLVersionsTrashIndexMigration",
+      "spelled": "func(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)",
+      "canonical": "func(dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/pkg/v1/data/sql.Migration, error)",
+      "doc": "SQLVersionsTrashIndexMigration returns the migration that indexes the trash\nof a SQL store named table on dialect, numbered version for the caller's own\nversion table, after [SQLVersionsMigration]'s: Tombstones then reads the\ntrash alone instead of every version. Up and Down do nothing when there is\nnothing to do, and touch no version.\n",
       "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -5814,7 +6223,7 @@
       "spelled": "[T any] svcdocstore.Store[T]",
       "canonical": "[T any] github.com/kitsunium/sdk/internal/service/data/docstore.Store[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/docstore.Store",
-      "doc": "Store is the public alias for the document store: Get, List, Filter,\nEntries, Keys, Lookup, Find and Stats read; Put, Insert, Replace, Update and\nDelete write, and their Stamped forms say what the version they make\nrecords; Versions and Version read a document's versions, RewriteVersions\nrewrites its former ones, VersionWeight says what they weigh; Trash,\nRestore, Purge and Tombstones keep its trash; OnWrite and OnDelete\nannounce; Fold and Close bring it to rest.\n",
+      "doc": "Store is the public alias for the document store: Get, List, Filter,\nEntries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and\nRange read a page at a time; Put, Insert, Replace, Update and\nDelete write, and their Stamped forms say what the version they make\nrecords; Versions and Version read a document's versions, RewriteVersions\nrewrites its former ones, VersionWeight says what they weigh; Trash,\nRestore, Purge and Tombstones keep its trash; OnWrite and OnDelete\nannounce; Fold and Close bring it to rest.\n",
       "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -6119,6 +6528,132 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.AckAcknowledged",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "AckAcknowledged",
+      "spelled": "AckOutcome",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/queue.AckOutcome",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.AckAcknowledged",
+      "doc": "AckAcknowledged is a receipt whose message was removed for good.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.AckLeaseExpired",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "AckLeaseExpired",
+      "spelled": "AckOutcome",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/queue.AckOutcome",
+      "value": "2",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.AckLeaseExpired",
+      "doc": "AckLeaseExpired is a receipt whose lease had lapsed: nothing was\nremoved, as [Broker].Ack answers [LeaseExpired].\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.AckNotAttempted",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "AckNotAttempted",
+      "spelled": "AckOutcome",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/queue.AckOutcome",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.AckNotAttempted",
+      "doc": "AckNotAttempted is the zero [AckOutcome]: [Acker].AckMany returned an\nerror before it reached the receipt.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.AckOutcome",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "AckOutcome",
+      "spelled": "corequeue.AckOutcome",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.AckOutcome",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.AckOutcome",
+      "doc": "AckOutcome is the public alias for what [Acker].AckMany did with one receipt.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.AckResult",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "AckResult",
+      "spelled": "corequeue.AckResultValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.AckResultValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.AckResultValue",
+      "doc": "AckResult is the public alias for what [Acker].AckMany reports.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.AckUnknownReceipt",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "AckUnknownReceipt",
+      "spelled": "AckOutcome",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/queue.AckOutcome",
+      "value": "3",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.AckUnknownReceipt",
+      "doc": "AckUnknownReceipt is a receipt the broker never issued: nothing was\nremoved, as [Broker].Ack answers [UnknownReceipt].\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.Acker",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "Acker",
+      "spelled": "corequeue.Acker",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.Acker",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.Acker",
+      "doc": "Acker is the public alias for the capability of acknowledging several\nleased messages in one call, with one outcome per receipt. Every broker\nhere implements it.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.Acknowledged",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "Acknowledged",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.Acknowledged",
+      "code": {
+        "value": "0.2.23.12",
+        "reason": "ACKNOWLEDGED",
+        "public": "The handler acknowledged the message itself"
+      },
+      "doc": "Acknowledged is what a [Handler] returns once it has acknowledged its\ndelivery itself, inside the transaction that holds its effects:\n[Consume] then neither acknowledges nor hands the message back.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.BatchPublisher",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "BatchPublisher",
+      "spelled": "corequeue.BatchPublisher",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.BatchPublisher",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.BatchPublisher",
+      "doc": "BatchPublisher is the public alias for the capability of publishing\nseveral messages in one call. Every broker here implements it.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.Broker",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
@@ -6126,7 +6661,24 @@
       "spelled": "corequeue.Broker",
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.Broker",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.Broker",
-      "doc": "Broker is the public alias for the queue contract. It is FROZEN at four\nmethods; capabilities arrive as siblings ([DeadLetterReader],\n[LeaseExtender], [Waker], [Rejecter], [Releaser], [DelayedNacker],\n[DelayedPublisher], [OncePublisher], [DeadLetterManager],\n[DeadLetterWriter], [MessageReader], [MessageWriter]) reached by type\nassertion.\n",
+      "doc": "Broker is the public alias for the queue contract. It is FROZEN at four\nmethods; capabilities arrive as siblings ([DeadLetterReader],\n[LeaseExtender], [Waker], [Rejecter], [Releaser], [DelayedNacker],\n[DelayedPublisher], [OncePublisher], [DeadLetterManager],\n[DeadLetterWriter], [MessageReader], [MessageWriter], [MessageLister],\n[Counter], [Purger], [DeadLetterPager], [DeadLetterBulkManager],\n[BatchPublisher], [Acker]) reached by type assertion.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.CodeAcknowledged",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "CodeAcknowledged",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "136972",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.CodeAcknowledged",
+      "code": {
+        "value": "0.2.23.12"
+      },
+      "doc": "CodeAcknowledged is [Acknowledged]'s code: errs.HasCode(err,\nCodeAcknowledged) recognises a handler's report that it acknowledged\nits delivery itself.\n",
       "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -6178,6 +6730,23 @@
         "value": "0.2.23.9"
       },
       "doc": "CodeInvalidMessage is [InvalidMessage]'s code, for errs.HasCode.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.CodeMessageExpired",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "CodeMessageExpired",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "136971",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.CodeMessageExpired",
+      "code": {
+        "value": "0.2.23.11"
+      },
+      "doc": "CodeMessageExpired is [MessageExpired]'s code: the reason and code a\ndead letter records for a message that outlived [Policy].MaxAge.\n",
       "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -6277,6 +6846,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.Counter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "Counter",
+      "spelled": "corequeue.Counter",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.Counter",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.Counter",
+      "doc": "Counter is the public alias for the capability of counting a queue's\nbacklog — waiting, leased, dead, the oldest and the next due — without\nreading a payload. Every broker here implements it.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.DeadLetter",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
@@ -6285,6 +6867,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterValue",
       "doc": "DeadLetter is the public alias for one abandoned message and its cause.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.DeadLetterBulkManager",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "DeadLetterBulkManager",
+      "spelled": "corequeue.DeadLetterBulkManager",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterBulkManager",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterBulkManager",
+      "doc": "DeadLetterBulkManager is the public alias for the capability of\nreplaying the oldest dead letters, or deleting those that failed before\nan instant, in one call. Every broker here implements it.\n",
       "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -6316,6 +6911,19 @@
         "public": "No dead letter has that identifier"
       },
       "doc": "DeadLetterNotFound refuses a replay or a deletion naming a dead letter\nthe store does not hold.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.DeadLetterPager",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "DeadLetterPager",
+      "spelled": "corequeue.DeadLetterPager",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterPager",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterPager",
+      "doc": "DeadLetterPager is the public alias for the capability of paging through\nthe dead letters after an identifier, oldest enqueued first. Every broker\nhere implements it.\n",
       "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -6649,6 +7257,37 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.MessageExpired",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "MessageExpired",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.MessageExpired",
+      "code": {
+        "value": "0.2.23.11",
+        "reason": "MESSAGE_EXPIRED",
+        "public": "The message expired before it could be delivered"
+      },
+      "doc": "MessageExpired is what a dead letter records of a message that outlived\n[Policy].MaxAge before any consumer was handed it.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.MessageLister",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "MessageLister",
+      "spelled": "corequeue.MessageLister",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.MessageLister",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.MessageLister",
+      "doc": "MessageLister is the public alias for the capability of ranging over the\nlive messages through an iterator, as [MessageReader] lists them a page\nat a time. Every broker here implements it.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.MessageReader",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
@@ -6786,6 +7425,128 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.Priority",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "Priority",
+      "spelled": "corequeue.Priority",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.Priority",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.Priority",
+      "doc": "Priority is the public alias for the level a message is delivered at.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.PriorityHigh",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "PriorityHigh",
+      "spelled": "Priority",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/queue.Priority",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.PriorityHigh",
+      "doc": "PriorityHigh is above the normal level.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.PriorityHighest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "PriorityHighest",
+      "spelled": "Priority",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/queue.Priority",
+      "value": "2",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.PriorityHighest",
+      "doc": "PriorityHighest is the highest of the five levels.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.PriorityLow",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "PriorityLow",
+      "spelled": "Priority",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/queue.Priority",
+      "value": "-1",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.PriorityLow",
+      "doc": "PriorityLow is below the normal level.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.PriorityLowest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "PriorityLowest",
+      "spelled": "Priority",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/queue.Priority",
+      "value": "-2",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.PriorityLowest",
+      "doc": "PriorityLowest is the lowest of the five levels.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.PriorityNormal",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "PriorityNormal",
+      "spelled": "Priority",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/queue.Priority",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/queue.PriorityNormal",
+      "doc": "PriorityNormal is the zero [Priority], the level [Broker].Publish publishes at.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.PriorityPublisher",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "PriorityPublisher",
+      "spelled": "corequeue.PriorityPublisher",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.PriorityPublisher",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.PriorityPublisher",
+      "doc": "PriorityPublisher is the public alias for the capability of publishing\na message at a level, the visible messages of the highest level\nreceived first, strictly. Every broker here implements it; the SQL\nbroker keeps a level once [SQLPriorityMigration] has run and\n[SQLConfig].Priority is set.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.Purged",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "Purged",
+      "spelled": "corequeue.PurgeValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.PurgeValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.PurgeValue",
+      "doc": "Purged is the public alias for what [Purger].Purge removed.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.Purger",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "Purger",
+      "spelled": "corequeue.Purger",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.Purger",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.Purger",
+      "doc": "Purger is the public alias for the capability of removing every live\nmessage of a queue, never a dead letter. Every broker here implements it.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.QueueBackendFailed",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
@@ -6916,7 +7677,7 @@
       "spelled": "svcqueue.SQLConfig",
       "canonical": "github.com/kitsunium/sdk/internal/service/data/queue.SQLConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/queue.SQLConfig",
-      "doc": "SQLConfig is the public alias for [NewSQL]'s configuration: Transactor,\nDialect and Table (required), Policy, Clock, and Trail, which keeps a\ndead letter's trail once [SQLTrailMigration] has run.\n",
+      "doc": "SQLConfig is the public alias for [NewSQL]'s configuration: Transactor,\nDialect and Table (required), Policy, Clock, Trail, which keeps a\ndead letter's trail once [SQLTrailMigration] has run, and Priority,\nwhich keeps a message's level once [SQLPriorityMigration] has run.\n",
       "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -6928,7 +7689,19 @@
       "name": "SQLMigration",
       "spelled": "func(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)",
       "canonical": "func(dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/pkg/v1/data/sql.Migration, error)",
-      "doc": "SQLMigration returns the migration that creates the one table an SQL queue\nnamed table keeps on dialect, numbered version for the caller's own version\ntable. Its Down drops the table, and every message in it. Its statement does\nnothing when the table exists.\n",
+      "doc": "SQLMigration returns the migration that creates the one table an SQL queue\nnamed table keeps on dialect, numbered version for the caller's own version\ntable. Its Down drops the table, and every message in it. Its statement does\nnothing when the table exists. Its\nChecksum fingerprints Up's statements, so a version table that recorded\nit refuses a build whose statements differ.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.SQLPriorityMigration",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "SQLPriorityMigration",
+      "spelled": "func(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)",
+      "canonical": "func(dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/pkg/v1/data/sql.Migration, error)",
+      "doc": "SQLPriorityMigration returns the migration that adds the priority column\nand its index a broker with [SQLConfig].Priority reads to a table\n[SQLMigration] created, numbered version for the caller's own version\ntable. It does nothing when the table has the column or does not exist;\nits Down drops the index and the column.\n",
       "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -6959,6 +7732,19 @@
       "spelled": "func(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)",
       "canonical": "func(dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/pkg/v1/data/sql.Migration, error)",
       "doc": "SQLTrailMigration returns the migration that adds the trail column a broker\nwith [SQLConfig].Trail writes to a table an earlier [SQLMigration] created,\nnumbered version for the caller's own version table. It does nothing when\nthe table has the column or does not exist; its Down drops the column.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.Stats",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "Stats",
+      "spelled": "corequeue.StatsValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.StatsValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.StatsValue",
+      "doc": "Stats is the public alias for a queue's backlog as [Counter] reads it.\n",
       "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -7093,6 +7879,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.Backoff",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "Backoff",
+      "spelled": "kbackoff.Value",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/backoff.Value",
+      "owner": "go:github.com/kitsunium/sdk/internal/kernel/backoff.Value",
+      "doc": "Backoff is the public alias for the exponential curve a retrying\ntransactor waits on between two attempts (the SDK's one backoff curve,\nADR 0103).\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.BeginFailed",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
@@ -7119,6 +7918,30 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Checker",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Checker",
       "doc": "Checker is the public alias for the bounded liveness probe.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.ChecksumOf",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "ChecksumOf",
+      "spelled": "func(stmts ...string) string",
+      "canonical": "func(stmts ...string) string",
+      "doc": "ChecksumOf is the fingerprint a [Migration] built from stmts records in its\nChecksum: SHA-256 over the statements, each length-prefixed, in lowercase\nhex. Set it from the same statements Up runs, and an applied migration\nedited afterwards is refused with [MigrationChanged] instead of being\ncalled applied by its number alone.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.Classify",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "Classify",
+      "spelled": "func(err error) bool",
+      "canonical": "func(err error) bool",
+      "doc": "Classify reports whether err is a failure the database documents as \"run\nthe transaction again\": SQLSTATE 40001 or 40P01, or SQLite's BUSY or\nLOCKED. A context's end never is.\n",
       "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -7277,6 +8100,18 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.Each[...]",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "Each",
+      "spelled": "func[T any](rows *stdsql.Rows, scan func(*stdsql.Rows) (T, error)) iter.Seq2[T, error]",
+      "canonical": "func[T any](rows *database/sql.Rows, scan func(*database/sql.Rows) (T, error)) iter.Seq2[T, error]",
+      "doc": "Each iterates rows with scan and closes them when the iteration ends; a\nfailure is yielded once, last. It is the Next/Scan/Err/Close loop, written\nonce.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.Executor",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
@@ -7321,6 +8156,31 @@
         "public": "The database did not answer the health check in time"
       },
       "doc": "HealthCheckTimeout reports a database that did not answer in time.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.InsertRows",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "InsertRows",
+      "spelled": "func(ctx context.Context, ex Executor, d Dialect, into InsertSpec, rows [][]any) (inserted int64, err error)",
+      "canonical": "func(ctx context.Context, ex github.com/kitsunium/sdk/pkg/v1/data/sql.Executor, d github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, into github.com/kitsunium/sdk/pkg/v1/data/sql.InsertSpec, rows [][]any) (inserted int64, err error)",
+      "doc": "InsertRows inserts rows into into.Table in multi-row statements of at\nmost into.PerStatement rows, clamped to the engine's bound-parameter\nceiling, and returns how many rows were inserted. into.Table and\ninto.Columns are interpolated as given: validate them first.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.InsertSpec",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "InsertSpec",
+      "spelled": "svcsql.InsertSpec",
+      "canonical": "github.com/kitsunium/sdk/internal/service/data/sql.InsertSpec",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/data/sql.InsertSpec",
+      "doc": "InsertSpec is the public alias for the statement InsertRows writes: the\ntable, its columns, and how many rows one statement carries at most.\n",
       "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -7390,6 +8250,24 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.MigrationValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.MigrationValue",
       "doc": "Migration is the public alias for one versioned schema change and its\nreversal.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.MigrationChanged",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "MigrationChanged",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.MigrationChanged",
+      "code": {
+        "value": "0.3.54.18",
+        "reason": "MIGRATION_CHANGED",
+        "public": "A migration already applied was edited after it ran"
+      },
+      "doc": "MigrationChanged refuses a run over an applied migration whose\nstatements were edited after they ran. Nothing was applied.\n",
       "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -7558,6 +8436,18 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.NewRetrying",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "NewRetrying",
+      "spelled": "func(tm Transactor, cfg RetryConfig) (manager Transactor, err error)",
+      "canonical": "func(tm github.com/kitsunium/sdk/pkg/v1/data/sql.Transactor, cfg github.com/kitsunium/sdk/pkg/v1/data/sql.RetryConfig) (manager github.com/kitsunium/sdk/pkg/v1/data/sql.Transactor, err error)",
+      "doc": "NewRetrying returns a transactor that runs a root transaction of tm again\non a failure cfg.Transient calls transient, up to cfg.Attempts runs, on\ncfg.Backoff's curve. A nested call is never run again on its own. The\nunit of work must be safe to run more than once.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.NewTransactor",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
@@ -7565,6 +8455,18 @@
       "spelled": "func(cfg Config) (manager Transactor, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/data/sql.Config) (manager github.com/kitsunium/sdk/pkg/v1/data/sql.Transactor, err error)",
       "doc": "NewTransactor returns the transaction manager for cfg.DB, applying\ncfg.Pool to it.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.Observe",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "Observe",
+      "spelled": "func(c driver.Connector, obs StatementObserver) driver.Connector",
+      "canonical": "func(c database/sql/driver.Connector, obs github.com/kitsunium/sdk/pkg/v1/data/sql.StatementObserver) database/sql/driver.Connector",
+      "doc": "Observe returns c with obs told about every statement its connections\nsend — exec, query, prepare, BEGIN, COMMIT, ROLLBACK —, the SQL text\nbounded and never an argument. Open the pool over it:\nstdsql.OpenDB(sql.Observe(connector, obs)). A nil obs returns c.\n",
       "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -7626,6 +8528,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.RetryConfig",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "RetryConfig",
+      "spelled": "svcsql.RetryConfig",
+      "canonical": "github.com/kitsunium/sdk/internal/service/data/sql.RetryConfig",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/data/sql.RetryConfig",
+      "doc": "RetryConfig is the public alias for a retrying transactor's parameters:\nits attempts, its backoff curve, its classifier and its clock.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.RollbackFailed",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
@@ -7644,6 +8559,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.Router",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "Router",
+      "spelled": "coresql.Router",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Router",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Router",
+      "doc": "Router is the public alias for the transactor's ADR 0039 sibling that\nroutes a read — a read-only transaction, or a read outside one — to the\nread replica [Config].ReadReplica names.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.SavepointFailed",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
@@ -7657,6 +8585,146 @@
         "public": "A savepoint statement was rejected by the database"
       },
       "doc": "SavepointFailed reports a rejected savepoint statement; the \"statement\"\nfield names which of the three.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.SlowQueries",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "SlowQueries",
+      "spelled": "func(threshold time.Duration, log corelogger.Logger, clk clock.Clock) StatementObserver",
+      "canonical": "func(threshold time.Duration, log github.com/kitsunium/sdk/internal/core/observe/logger.Logger, clk github.com/kitsunium/sdk/internal/kernel/clock.Clock) github.com/kitsunium/sdk/pkg/v1/data/sql.StatementObserver",
+      "doc": "SlowQueries returns an observer that logs at Warn each statement that took\nthreshold or longer on clk — its SQL text, duration and rows, never an\nargument.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.StatementBegin",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "StatementBegin",
+      "spelled": "StatementKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/sql.StatementKind",
+      "value": "4",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.StatementBegin",
+      "doc": "StatementBegin is a transaction opened.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.StatementCommit",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "StatementCommit",
+      "spelled": "StatementKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/sql.StatementKind",
+      "value": "5",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.StatementCommit",
+      "doc": "StatementCommit is a transaction committed.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.StatementExec",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "StatementExec",
+      "spelled": "StatementKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/sql.StatementKind",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.StatementExec",
+      "doc": "StatementExec is a statement that returns no rows.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.StatementKind",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "StatementKind",
+      "spelled": "coresql.StatementKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.StatementKind",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.StatementKind",
+      "doc": "StatementKind is the public alias for what a StatementObserver is told about.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.StatementObserver",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "StatementObserver",
+      "spelled": "coresql.StatementObserver",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.StatementObserver",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.StatementObserver",
+      "doc": "StatementObserver is the public alias for what watches the statements a\npool sends: told when each begins, it answers the function told when it\nends. It sees the SQL text, bounded, and never an argument or a row.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.StatementPrepare",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "StatementPrepare",
+      "spelled": "StatementKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/sql.StatementKind",
+      "value": "3",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.StatementPrepare",
+      "doc": "StatementPrepare is a statement compiled for repeated execution.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.StatementQuery",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "StatementQuery",
+      "spelled": "StatementKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/sql.StatementKind",
+      "value": "2",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.StatementQuery",
+      "doc": "StatementQuery is a statement that returns rows.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.StatementRollback",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "StatementRollback",
+      "spelled": "StatementKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/sql.StatementKind",
+      "value": "6",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.StatementRollback",
+      "doc": "StatementRollback is a transaction rolled back.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.StatementTimedOut",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "StatementTimedOut",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.StatementTimedOut",
+      "code": {
+        "value": "0.3.54.20",
+        "reason": "STATEMENT_TIMED_OUT",
+        "public": "A database statement did not complete within its time budget"
+      },
+      "doc": "StatementTimedOut is joined with the driver's error when a statement\noutlived the transactor's statement budget.\n",
       "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -7687,6 +8755,18 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.Traced",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "Traced",
+      "spelled": "func(tracer coretrace.Tracer) StatementObserver",
+      "canonical": "func(tracer github.com/kitsunium/sdk/internal/core/observe/trace.Tracer) github.com/kitsunium/sdk/pkg/v1/data/sql.StatementObserver",
+      "doc": "Traced returns an observer that opens one client span per statement,\nits status following the statement's error.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.Transact",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
@@ -7707,6 +8787,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Transactor",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Transactor",
       "doc": "Transactor is the public alias for the transaction manager.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.Transient",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "Transient",
+      "spelled": "coresql.Transient",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/sql.Transient",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/sql.Transient",
+      "doc": "Transient is the public alias for the verdict on a failed transaction:\ntrue when the database asks for the whole transaction to run again.\n",
       "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -7769,6 +8862,24 @@
         "public": "The transaction is no longer usable and will not be committed"
       },
       "doc": "TxPoisoned refuses every operation on a transaction whose savepoint\nrollback failed. It is never committed.\n",
+      "file": "sql/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/sql.TxRetriesExhausted",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/sql",
+      "name": "TxRetriesExhausted",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/sql.TxRetriesExhausted",
+      "code": {
+        "value": "0.3.54.19",
+        "reason": "TX_RETRIES_EXHAUSTED",
+        "public": "The transaction kept conflicting with others and was given up"
+      },
+      "doc": "TxRetriesExhausted is joined with the last attempt's error when every\nattempt of a retrying transactor failed on a transient error.\n",
       "file": "sql/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -8158,6 +9269,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/vfs.AtomicBatchWriter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/vfs",
+      "name": "AtomicBatchWriter",
+      "spelled": "corevfs.AtomicBatchWriter",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/vfs.AtomicBatchWriter",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/vfs.AtomicBatchWriter",
+      "doc": "AtomicBatchWriter is the public alias for the batch publication\ncapability, reached by type assertion: several files published, each\ndirectory flushed once. Both constructors' filesystems implement it;\n[FullFS] does not embed it.\n",
+      "file": "vfs/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/vfs.AtomicWriter",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/vfs",
@@ -8166,6 +9290,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/vfs.AtomicWriter",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/vfs.AtomicWriter",
       "doc": "AtomicWriter is the public alias for the publication capability, reached by\ntype assertion on a filesystem this package did not build.\n",
+      "file": "vfs/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/vfs.DirSyncer",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/vfs",
+      "name": "DirSyncer",
+      "spelled": "corevfs.DirSyncer",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/vfs.DirSyncer",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/vfs.DirSyncer",
+      "doc": "DirSyncer is the public alias for the directory-flush capability, reached\nby type assertion: SyncDir on the parent of a directory just created\nmakes its entry survive a power loss. Both constructors' filesystems\nimplement it; [FullFS] does not embed it.\n",
       "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -8215,6 +9352,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/data/vfs.FS",
       "owner": "go:io/fs.FS",
       "doc": "FS is the public alias for the read half, which is io/fs.FS unchanged. It\nexists so a signature can say \"an SDK filesystem\" without implying that\nanything about reading is different here.\n",
+      "file": "vfs/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/vfs.FileValue",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/vfs",
+      "name": "FileValue",
+      "spelled": "corevfs.FileValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/vfs.FileValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/vfs.FileValue",
+      "doc": "FileValue is the public alias for one file of a batch\n[AtomicBatchWriter] publishes: its name and its content.\n",
       "file": "vfs/gen_facade.go",
       "layer": "public",
       "family": "data"

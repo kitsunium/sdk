@@ -17,6 +17,8 @@ import (
 	// The suite's cases declare stores, a topic and its subscription, and
 	// workflows: it imports their subsystems, as a product does (ADR 0179
 	// step 10) — the queues' and the workflows', which bring the stores'.
+	_ "github.com/kitsunium/sdk/framework/app/mail"
+	_ "github.com/kitsunium/sdk/framework/app/otlp"
 	_ "github.com/kitsunium/sdk/framework/app/queue"
 	_ "github.com/kitsunium/sdk/framework/app/workflow"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
@@ -51,6 +53,9 @@ const (
 	trashDays time.Duration = 30 * 24 * time.Hour
 	// rewrittenN is the N of a page written again after its purge.
 	rewrittenN int = 7
+	// askedN is the N a read-only query writes inside the caller's
+	// transaction, which the query's own read-only option does not bind.
+	askedN int = 3
 )
 
 var (
@@ -75,11 +80,41 @@ var (
 		{"keys-are-bytes", keysAreBytes, false},
 		{"document-as-written", documentAsWritten, false},
 		{"transactions", transactions, false},
+		{"transaction-options", transactionOptions, false},
 		{"held-publish", heldPublish, false},
 		{"hooks-after-the-commit", hooksAfterTheCommit, false},
 		{"revisions", revisions, false},
 		{"revisions-restore", revisionsRestore, false},
 		{"revisions-rollback", revisionsRollback, false},
+		{"queued-command", queuedCommand, true},
+		{"topic-later", topicLater, true},
+		{"query-read-only", queryReadOnly, false},
+		{"records-keys", recordsKeys, false},
+		{"outbox", outbox, false},
+		{"watch-catch-up", watchCatchUp, false},
+		{"workflow-journal", workflowJournal, true},
+		{"data-copy", dataCopy, false},
+		{"otlp-tables", otlpTables, true},
+	}
+
+	// declarations add, on a case's service, the nodes only that case reads:
+	// the queues' cases a queued command and two more topics (#998).
+	declarations = map[string]func(svc *app.Service, s *suite){
+		"queued-command": declareQueues,
+		"topic-later":    declareQueues,
+		"query-read-only": func(svc *app.Service, s *suite) {
+			s.reader = svc.Query("reader", func(ctx context.Context, d doc) (doc, error) {
+				if d.N > 0 {
+					return d, s.docs.Put(ctx, d)
+				}
+				return s.docs.Get(ctx, d.ID)
+			}, app.ReadOnly())
+		},
+		"records-keys":     declareMemos,
+		"outbox":           declareOutbox,
+		"watch-catch-up":   declareMemoStore,
+		"workflow-journal": declareTimers,
+		"data-copy":        declareMemoStore,
 	}
 
 	// unorderedKeys are written out of order.
@@ -140,6 +175,31 @@ type suite struct {
 	// clock is the app's, a manual one at epoch, for a case that waits on
 	// it; nil for the others, which run on the wall clock.
 	clock *clock.ManualClock
+	// file is a queued command keyed by the document's ID, and filed what
+	// it handled; delayed is a topic, onced one that publishes a key once
+	// an hour, and later what their subscriptions heard — the queues'
+	// cases' (declareQueues).
+	file *app.Command[doc, app.Empty]
+	// reader is a query declared read-only (#1140): it reads a document,
+	// or, given an N, tries to write it.
+	reader         *app.Query[doc, doc]
+	delayed, onced *app.Topic[doc]
+	filed, later   *heard
+	// memos is a store whose text a watch hears, timers one a workflow with
+	// a timer runs over, and mailer a mailer — the cases of what ADR 0178
+	// placed beside the stores (#998, durable.go, subsystems.go).
+	memos  *app.Store[memo]
+	timers *app.Store[doc]
+	expiry *app.Workflow[doc, string]
+	mailer *app.Mailer
+	// listed is what the memos' watch heard and listed.
+	listed *listing
+	// running is the case's product; name names its service, place is the
+	// backend's options it runs on, and stopped says it was stopped.
+	running *app.App
+	name    string
+	place   []app.AppOption
+	stopped bool
 }
 
 // heard are the messages a subscription was delivered.
@@ -156,6 +216,19 @@ func (h *heard) add(id string) {
 	h.Lock()
 	defer h.Unlock()
 	h.ids = append(h.ids, id)
+}
+
+// count is how many times id was delivered.
+func (h *heard) count(id string) int {
+	h.Lock()
+	defer h.Unlock()
+	n := 0
+	for _, got := range h.ids {
+		if got == id {
+			n++
+		}
+	}
+	return n
 }
 
 // has reports whether id was delivered.
@@ -179,6 +252,18 @@ func open(t *testing.T, b BackendConfig, name string, clocked bool) *suite {
 	t.Setenv("STORETEST_SMTP_URL", "")
 	t.Setenv("STORETEST_SECRETS", "memory")
 	t.Setenv("STORETEST_DATABASE_TIMEOUT", "1m")
+	var clk *clock.ManualClock
+	if clocked {
+		clk = clock.NewManualClock(epoch)
+	}
+	s := build(name, b.Options(t, App), clk, declarations[name])
+	s.start(t)
+	return s
+}
+
+// build declares the case's service on a product placed by place — on clk
+// when it is not nil —, without starting it.
+func build(name string, place []app.AppOption, clk *clock.ManualClock, declare func(*app.Service, *suite)) *suite {
 	svc := app.NewService("st-"+name, "A case of the framework's store conformance suite.")
 	docs := svc.Store("docs", doc.key,
 		app.Unique("email", func(d doc) string { return d.Email }),
@@ -192,26 +277,45 @@ func open(t *testing.T, b BackendConfig, name string, clocked bool) *suite {
 		lifecycle: svc.Workflow("lifecycle", docs, stateOf).Initial("new").When("ready", "new", "done", isReady),
 		pages:     pages,
 		pageFlow:  svc.Workflow("publishing", pages, stateOf).Initial("new").When("ready", "new", "done", isReady).On("hold", "new", "held"),
+		name:      name,
+		place:     place,
 	}
 	svc.Subscribe("heard", s.moved, func(_ context.Context, d doc) error { s.heard.add(d.ID); return nil })
-	a := app.NewApp(App, svc).With(append([]app.AppOption{
-		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
-	}, b.Options(t, App)...)...)
-	if clocked {
-		s.clock = clock.NewManualClock(epoch)
-		a = a.With(app.Clock(s.clock))
+	if declare != nil {
+		declare(svc, s)
 	}
-	if err := a.Start(t.Context()); err != nil {
+	s.running = app.NewApp(App, svc).With(append([]app.AppOption{
+		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
+	}, place...)...)
+	if clk != nil {
+		s.clock = clk
+		s.running = s.running.With(app.Clock(clk))
+	}
+	return s
+}
+
+// start starts the case's product, and stops it when the test ends unless
+// the case stopped it first.
+func (s *suite) start(t *testing.T) {
+	t.Helper()
+	if err := s.running.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), stopWait)
-		defer cancel()
-		if err := a.Stop(ctx); err != nil {
-			t.Errorf("stop: %v", err)
-		}
-	})
-	return s
+	t.Cleanup(func() { s.stop(t) })
+}
+
+// stop stops the case's product, once.
+func (s *suite) stop(t *testing.T) {
+	t.Helper()
+	if s.stopped {
+		return
+	}
+	s.stopped = true
+	ctx, cancel := context.WithTimeout(context.Background(), stopWait)
+	defer cancel()
+	if err := s.running.Stop(ctx); err != nil {
+		t.Errorf("stop: %v", err)
+	}
 }
 
 // stateOf is where a document keeps its workflow's state.
@@ -464,6 +568,73 @@ func savepoint(t *testing.T, s *suite) {
 		t.Fatalf("the committed transaction: %v", err)
 	}
 	for id, want := range map[string]string{"outer": "", "after": "", "inner": app.WireNotFound} {
+		_, err := s.docs.Get(ctx, id)
+		expect(t, id+" after the commit", err, want)
+	}
+}
+
+// transactionOptions checks app.Transact's options (#1140) on the backend:
+// a SERIALIZABLE and a REPEATABLE READ transaction commit what they wrote; a
+// read-only one reads and refuses a store's write with
+// CodeTransactionReadOnly, writing nothing; and a nested Transact given an
+// option is refused with CodeTransactionNested, the outer one going on.
+func transactionOptions(t *testing.T, s *suite) {
+	isolatedTransactions(t, s)
+	readOnlyTransaction(t, s)
+	nestedTransactionOptions(t, s)
+}
+
+// isolatedTransactions checks that a SERIALIZABLE and a REPEATABLE READ
+// transaction commit what they wrote.
+func isolatedTransactions(t *testing.T, s *suite) {
+	ctx := t.Context()
+	for id, opt := range map[string]app.TransactOption{"serializable": app.Serializable(), "repeatable": app.RepeatableRead()} {
+		must(t, app.Transact(ctx, func(ctx context.Context) error {
+			return s.docs.Insert(ctx, doc{ID: id, N: 1})
+		}, opt))
+		if got, err := s.docs.Get(ctx, id); err != nil || got.N != 1 {
+			t.Errorf("a %s transaction's write: %+v %v", id, got, err)
+		}
+	}
+}
+
+// readOnlyTransaction checks that a read-only transaction reads and refuses
+// a store's write with CodeTransactionReadOnly, writing nothing.
+func readOnlyTransaction(t *testing.T, s *suite) {
+	ctx := t.Context()
+	err := app.Transact(ctx, func(ctx context.Context) error {
+		if _, err := s.docs.Get(ctx, "serializable"); err != nil {
+			return err
+		}
+		return s.docs.Insert(ctx, doc{ID: "read-only"})
+	}, app.ReadOnly())
+	if !errs.HasCode(err, app.CodeTransactionReadOnly) {
+		t.Errorf("a write in a read-only transaction: %v, want CodeTransactionReadOnly", err)
+	}
+	_, err = s.docs.Get(ctx, "read-only")
+	expect(t, "the refused write", err, app.WireNotFound)
+}
+
+// nestedTransactionOptions checks that a nested Transact given an option is
+// refused with CodeTransactionNested, the outer one going on.
+func nestedTransactionOptions(t *testing.T, s *suite) {
+	ctx := t.Context()
+	err := app.Transact(ctx, func(ctx context.Context) error {
+		if err := s.docs.Insert(ctx, doc{ID: "outer-options"}); err != nil {
+			return err
+		}
+		nested := app.Transact(ctx, func(ctx context.Context) error {
+			return s.docs.Insert(ctx, doc{ID: "nested-options"})
+		}, app.Serializable())
+		if !errs.HasCode(nested, app.CodeTransactionNested) {
+			t.Errorf("a nested Transact given an option: %v, want CodeTransactionNested", nested)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("the outer transaction: %v", err)
+	}
+	for id, want := range map[string]string{"outer-options": "", "nested-options": app.WireNotFound} {
 		_, err := s.docs.Get(ctx, id)
 		expect(t, id+" after the commit", err, want)
 	}
@@ -765,5 +936,124 @@ func expectTrash(t *testing.T, s *suite, what string, want []app.Tombstone) {
 	}
 	if !same {
 		t.Errorf("the trash %s: %+v, want %+v", what, got, want)
+	}
+}
+
+// declareQueues declares what the queues' cases read: a queued command, keyed
+// by the document's ID — a dispatch whose key waits is not queued again —,
+// a topic published later, and one that publishes a key once an hour (ADR
+// 0178 C1, #998). On a database each is a table of the SQL broker, leased
+// with SKIP LOCKED where the engine has it.
+func declareQueues(svc *app.Service, s *suite) {
+	s.filed, s.later = &heard{}, &heard{}
+	s.file = svc.Command("file", func(_ context.Context, d doc) (app.Empty, error) {
+		s.filed.add(d.ID)
+		return app.Empty{}, nil
+	}, app.Queued()).Key(doc.key)
+	s.delayed = svc.Topic[doc]("delayed")
+	svc.Subscribe("delayed-heard", s.delayed, func(_ context.Context, d doc) error { s.later.add(d.ID); return nil })
+	s.onced = svc.Topic[doc]("onced").Once(doc.key, time.Hour)
+	svc.Subscribe("onced-heard", s.onced, func(_ context.Context, d doc) error { s.later.add(d.ID); return nil })
+}
+
+// ticking waits, as eventually does, for cond, moving the case's manual
+// clock a second at each look: what a consumer waits on — its poll, a
+// message's instant — is the app's clock.
+func ticking(t *testing.T, s *suite, what string, cond func() bool) {
+	t.Helper()
+	eventually(t, what, func() bool {
+		s.clock.Advance(time.Second)
+		return cond()
+	})
+}
+
+// queuedCommand checks a queued command on the backend: a dispatch inside a
+// transaction exists if and only if it commits; one queued for later is not
+// handled before its instant and is once after it; a second dispatch of a
+// key that waits is not queued again.
+func queuedCommand(t *testing.T, s *suite) {
+	ctx := t.Context()
+	must(t, app.Transact(ctx, func(ctx context.Context) error {
+		_, err := s.file.Dispatch(ctx, doc{ID: "kept"})
+		return err
+	}))
+	ticking(t, s, "the committed dispatch", func() bool { return s.filed.has("kept") })
+	err := app.Transact(ctx, func(ctx context.Context) error {
+		_, dispatchErr := s.file.Dispatch(ctx, doc{ID: "dropped"})
+		return errors.Join(dispatchErr, errRolled)
+	})
+	if !errors.Is(err, errRolled) {
+		t.Fatal(err)
+	}
+	at := s.clock.Now().Add(time.Hour)
+	must(t, s.file.DispatchAt(ctx, doc{ID: "later"}, at))
+	must(t, s.file.DispatchAt(ctx, doc{ID: "later", N: 1}, at.Add(time.Hour)))
+	time.Sleep(10 * pollEvery)
+	if s.filed.has("later") {
+		t.Fatal("a dispatch for later was handled before its instant")
+	}
+	s.clock.Advance(time.Hour)
+	ticking(t, s, "the dispatch for later", func() bool { return s.filed.has("later") })
+	// One worker handles one dispatch at a time, in order (Parallelism 1,
+	// BatchSize 1): a dispatch due now, handled, says the one for later was
+	// acknowledged, so its lease cannot lapse under the jump below and bring
+	// it back — a second handling the case would read as a key queued twice.
+	_, err = s.file.Dispatch(ctx, doc{ID: "settled"})
+	must(t, err)
+	eventually(t, "the dispatch after the one for later", func() bool { return s.filed.has("settled") })
+	s.clock.Advance(2 * time.Hour)
+	_, err = s.file.Dispatch(ctx, doc{ID: "after"})
+	must(t, err)
+	ticking(t, s, "the dispatch after", func() bool { return s.filed.has("after") })
+	if s.filed.has("dropped") || s.filed.count("later") != 1 {
+		t.Errorf("a rolled back dispatch handled: %v; a key that waited handled %d times, want once",
+			s.filed.has("dropped"), s.filed.count("later"))
+	}
+}
+
+// topicLater checks a topic's publication for later and once on the
+// backend: a message published for later is not delivered before its
+// instant and is after it; a key published twice within its window is
+// delivered once.
+func topicLater(t *testing.T, s *suite) {
+	ctx := t.Context()
+	must(t, s.delayed.PublishAt(ctx, doc{ID: "soon"}, s.clock.Now().Add(time.Hour)))
+	time.Sleep(10 * pollEvery)
+	if s.later.has("soon") {
+		t.Fatal("a message for later was delivered before its instant")
+	}
+	s.clock.Advance(time.Hour)
+	ticking(t, s, "the message for later", func() bool { return s.later.has("soon") })
+	must(t, s.onced.Publish(ctx, doc{ID: "x"}))
+	must(t, s.onced.Publish(ctx, doc{ID: "x", N: 1}))
+	must(t, s.onced.Publish(ctx, doc{ID: "y"}))
+	ticking(t, s, "the messages once", func() bool { return s.later.has("x") && s.later.has("y") })
+	time.Sleep(10 * pollEvery)
+	if n := s.later.count("x"); n != 1 {
+		t.Errorf("a key published twice within its window was delivered %d times", n)
+	}
+}
+
+// queryReadOnly checks a query declared with app.ReadOnly (#1140): its Ask
+// runs in a read-only transaction — a read answers, a store's write is
+// refused before it reaches the backend, nothing written —, and an Ask
+// inside the caller's transaction runs in that one, whose options stand.
+func queryReadOnly(t *testing.T, s *suite) {
+	ctx := t.Context()
+	must(t, s.docs.Put(ctx, doc{ID: "a", N: 1}))
+	if got, err := s.reader.Ask(ctx, doc{ID: "a"}); err != nil || got.N != 1 {
+		t.Fatalf("a read-only query's read: %+v %v", got, err)
+	}
+	_, err := s.reader.Ask(ctx, doc{ID: "b", N: 2})
+	expect(t, "a read-only query's write", err, app.WireInvalid)
+	if _, err := s.docs.Get(ctx, "b"); code(err) != app.WireNotFound {
+		t.Errorf("a refused write left a document: %v", err)
+	}
+	must(t, app.Transact(ctx, func(ctx context.Context) error {
+		_, err := s.reader.Ask(ctx, doc{ID: "c", N: askedN})
+		return err
+	}))
+	if got, err := s.docs.Get(ctx, "c"); err != nil || got.N != askedN {
+		t.Errorf("an Ask inside the caller's transaction: %+v %v", got, err)
 	}
 }

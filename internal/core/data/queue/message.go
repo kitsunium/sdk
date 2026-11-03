@@ -20,6 +20,9 @@ type LiveMessageValue struct {
 	// message is still alive: it comes back at VisibleAt unless it is
 	// acknowledged.
 	Leased bool
+	// Priority is the level the message is delivered at
+	// ([PriorityPublisher]), kept across a retry and a copy.
+	Priority Priority
 }
 
 // MessageValue is one unit of work as the broker minted it. Every field is

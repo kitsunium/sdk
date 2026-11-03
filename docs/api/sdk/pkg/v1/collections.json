@@ -43,7 +43,7 @@
       "spelled": "[T any] kheap.Heap[T]",
       "canonical": "[T any] github.com/kitsunium/sdk/internal/kernel/collections/heap.Heap[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/heap.Heap",
-      "doc": "Heap is a binary heap ordered by the comparison given to [New].\n\n[Heap].Push adds an element in O(log n); [Heap].Pop removes and returns the\ntop one in O(log n), and [Heap].Peek returns it without removing it, both\nreporting false on an empty heap; [Heap].Len counts the elements.\n\nThe zero value is NOT usable — a heap with no comparison has no order — and\na Heap is not safe for concurrent use.\n",
+      "doc": "Heap is a binary heap ordered by the comparison given to [New].\n\n[Heap].Push adds an element in O(log n); [Heap].Pop removes and returns the\ntop one in O(log n), and [Heap].Peek returns it without removing it, both\nreporting false on an empty heap; [Heap].Drain pops them all, in order, as\nan iterator; [Heap].Len counts the elements.\n\nThe zero value is NOT usable — a heap with no comparison has no order — and\na Heap is not safe for concurrent use.\n",
       "file": "heap/gen_facade.go",
       "layer": "public",
       "family": "collections"
@@ -74,6 +74,18 @@
         "public": "Ring buffer capacity must be positive"
       },
       "doc": "CapZero is returned by New for a capacity that is not positive: a ring\nthat can hold nothing is a configuration mistake, not a queue.\n",
+      "file": "ring/gen_facade.go",
+      "layer": "public",
+      "family": "collections"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/collections/ring.Drain[...]",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/collections/ring",
+      "name": "Drain",
+      "spelled": "func[T any](q Queue[T]) iter.Seq[T]",
+      "canonical": "func[T any](q github.com/kitsunium/sdk/pkg/v1/collections/ring.Queue[T]) iter.Seq[T]",
+      "doc": "Drain yields the items q holds, oldest first, until it is empty — the\nconsumer's TryRead loop as an iterator. Only the one consumer goroutine\nmay range over it; a loop that breaks early leaves the rest in q.\n",
       "file": "ring/gen_facade.go",
       "layer": "public",
       "family": "collections"

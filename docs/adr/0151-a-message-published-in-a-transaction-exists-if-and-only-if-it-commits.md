@@ -4,6 +4,7 @@
 - **Amended**: 2026-10-15 — a sixth capability sibling, `DeadLetterWriter`, and `INVALID_DEAD_LETTER` `0.2.23.8` (see the dated section at the end), for ADR 0178's `data copy`
 - **Amended**: 2026-10-15 — a seventh and an eighth capability sibling, `MessageReader` and `MessageWriter`, and `INVALID_MESSAGE` `0.2.23.9` (see the second dated section at the end), for ADR 0178's `data copy`
 - **Amended**: 2026-10-23 — a dead letter keeps the trail of its cause on every broker, and the SQL table a nullable `trail` column: `SQLConfig.Trail`, `SQLTrailMigration` (see the third dated section at the end), for kitsunium/sdk#500
+- **Amended**: 2026-11-02 — two of the Deferred items decided: a jitter for the growing delay (`PolicyValue.RetryJitter`, `RetryJitterMode`, every config's `Random`), and the bulk decisions and a retention for the dead-letter store (`DeadLetterBulkManager`, `PolicyValue.DeadLetterRetention`); and PostgreSQL's lease in one statement outside a transaction — see the fourth dated section at the end, for kitsunium/sdk#1044, #1120 and #1042
 - **Date**: 2026-09-30
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) §Consequences — §D6: the driver's withheld text is one `Withheld` in `service/data/sql`, shared by the queue's and the document store's SQL engines, not a copy per package
@@ -366,11 +367,13 @@ behaviour; `Broker` and `Handler` are unchanged. Two things read differently:
 - A wake across processes (`LISTEN/NOTIFY` on PostgreSQL; MySQL has no
   counterpart).
 - Bulk decisions — replay every dead letter, purge those older than an instant —
-  and a retention for the dead-letter store.
+  and a retention for the dead-letter store. *Decided on 2026-11-02 (fourth
+  dated section).*
 - Timing the SQL broker on the real engines beside docstore's
   (`third-party/db/sql/BENCH.md`).
 - A fallback for servers without SKIP LOCKED.
-- A multiplier and a jitter for the growing delay.
+- A multiplier and a jitter for the growing delay. *The jitter decided on
+  2026-11-02 (fourth dated section); the multiplier still deferred.*
 - ADR 0054's own deferrals — per-key ordering, priorities, `PublishAt`, batch
   acknowledgement — unchanged.
 
@@ -613,6 +616,58 @@ statement on SQLite, PostgreSQL and MySQL, and the migration over a table
 made without the column. In the spool, `TestAMailGivenUpKeepsWhyAfterItsProcess`;
 in the framework, `TestAMailAnEarlierRunGaveUpKeepsWhy` (on disk) and
 `TestAMailAnEarlierRunGaveUpOnTheDatabaseKeepsWhy` (the sealed SQL outbox).
+
+## Amendment (2026-11-02): a jittered retry delay, bulk dead-letter decisions, a retention, and a lease in one statement (kitsunium/sdk#1044, #1120, #1042)
+
+A downstream outage nacks every delivered message of every consumer within one
+retry delay; held at `MaxRetryDelay`, they all became visible again in the same
+instant on every round — the synchronised burst `kernel/backoff`'s jitter
+exists to break, aimed at a dependency already failing. And the operator who
+fixed the bug that killed a thousand messages replayed them one call, and on
+the file broker one directory read, at a time, while nothing ever expired a
+dead letter. Decided:
+
+1. **`PolicyValue.RetryJitter` and `RetryJitterMode`** lay `kernel/backoff`'s
+   three modes (ADR 0184) on the growing delay: additive — the zero — widens
+   it by `[0, RetryJitter)` of itself; full draws it from `[0, grown]`;
+   decorrelated from `[RetryDelay, 3 × the step before]`, held at
+   `MaxRetryDelay`. The zeros draw nothing, and the instant is the one the
+   curve always gave. Refused (`QUEUE_MISCONFIGURED`, by field): a fraction
+   outside `[0, 1]` or NaN, an undefined mode, a fraction beside a mode that
+   ignores it, and either without a `MaxRetryDelay`. A caller's own delay
+   (`NackAfter`) is never jittered.
+2. **The draw is the broker's, injected.** `MemoryConfig`, `FileConfig` and
+   `SQLConfig` take `Random func() float64` beside `Clock` — nil is
+   `math/rand/v2.Float64` — and `retryDelay` draws from it, never from
+   `kernel/backoff`'s process-wide source: a test injecting a fixed draw still
+   asserts every retry instant to the nanosecond, the three brokers draw
+   alike, and `Wake` reports the drawn instant.
+3. **`DeadLetterBulkManager`**, an ADR 0039 sibling: `ReplayDeadLetters(ctx,
+   max)` replays the oldest dead letters, each as `ReplayDeadLetter` replays
+   one, and `PurgeDeadLetters(ctx, before, max)` deletes the oldest of those
+   that failed before an instant — never a live message. One directory read
+   per call on the file broker, one statement on the SQL broker in each
+   dialect's spelling (MySQL bounds the UPDATE or the DELETE itself; the
+   others bound a sub-select of the ids). A failure part-way returns the count
+   done with the error, so a caller resumes; `max` must be positive.
+4. **`PolicyValue.DeadLetterRetention`**: a dead letter whose failure is older
+   is removed by a later Receive, at most one sweep a minute per broker on its
+   clock — a `DELETE` on SQL, a read of each record's header on file. Zero
+   keeps every dead letter, which is what every policy did.
+
+5. **On PostgreSQL, a Receive outside the caller's transaction leases in ONE
+   statement** (kitsunium/sdk#1042): an `UPDATE … FROM` a sub-select read
+   `FOR UPDATE SKIP LOCKED`, `RETURNING` the rows and the instant each was
+   due, atomic by itself and so sent on the pool — the probe and that
+   statement, where the transaction sent five. The batch is sorted by the
+   instant due, then the identifier, as the locked read orders it; the lapsed
+   leases with no attempt left, which it skips, are buried by a statement of
+   their own when the batch is not full. SQLite keeps the transaction, its
+   `RETURNING` unable to name the sub-select's due and so the batch's order;
+   MySQL has no `UPDATE … RETURNING`; inside the caller's transaction nothing
+   changed.
+
+The multiplier stays deferred: the curve doubles.
 
 ## References
 

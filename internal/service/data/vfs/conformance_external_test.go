@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"runtime"
 	"testing"
+	"testing/fstest"
 
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -355,6 +356,172 @@ func TestBothFilesystemsImplementTheStdlibShortcuts(t *testing.T) {
 		}
 		if _, ok := filesystem.(fs.ReadFileFS); !ok {
 			t.Error("does not implement fs.ReadFileFS")
+		}
+		if _, ok := filesystem.(fs.ReadLinkFS); !ok {
+			t.Error("does not implement fs.ReadLinkFS")
+		}
+	})
+}
+
+// TestAPublicationAppliesItsModeOnEveryEngine pins what perm means on a
+// republication (#1052): a publication is a NEW file renamed over the old one,
+// so its mode is perm on every publication — the disk engine's rename-replace
+// semantics, which the memory engine must answer identically. WriteFile keeps
+// the creation-only rule (TestModeAppliesOnCreationAndNotOnRewrite).
+//
+// The disk engine creates through the process umask, so the expectation is
+// what a FRESH publication with the same perm reads back on that engine: 0644
+// under the usual umask, and the same answer on both engines either way.
+func TestAPublicationAppliesItsModeOnEveryEngine(t *testing.T) {
+	t.Parallel()
+	eachImplementation(t, func(t *testing.T, filesystem corevfs.FullFS) {
+		const name, fresh = "secret.txt", "fresh.txt"
+		if err := filesystem.WriteFile(name, []byte("one"), 0o600); err != nil {
+			t.Fatalf("WriteFile = %v, want nil", err)
+		}
+		if err := filesystem.WriteAtomic(name, []byte("two"), 0o644); err != nil {
+			t.Fatalf("WriteAtomic (republication) = %v, want nil", err)
+		}
+		if err := filesystem.WriteAtomic(fresh, []byte("two"), 0o644); err != nil {
+			t.Fatalf("WriteAtomic (creation) = %v, want nil", err)
+		}
+		republished, statErr := fs.Stat(filesystem, name)
+		if statErr != nil {
+			t.Fatalf("fs.Stat = %v, want nil", statErr)
+		}
+		created, freshErr := fs.Stat(filesystem, fresh)
+		if freshErr != nil {
+			t.Fatalf("fs.Stat (fresh) = %v, want nil", freshErr)
+		}
+		if republished.Mode().Perm() != created.Mode().Perm() {
+			t.Fatalf("republished mode = %v, want %v — the mode a fresh publication with perm 0644 gets",
+				republished.Mode().Perm(), created.Mode().Perm())
+		}
+		if republished.Mode().Perm() == 0o600 {
+			t.Fatal("republished mode = 0600: a publication kept the replaced file's mode")
+		}
+	})
+}
+
+// TestEveryEngineIsAValidIoFS runs the standard library's own conformance test
+// for io/fs (#1053) on both engines: every file through Open, ReadDir with and
+// without a count, Stat against the directory entry, Glob, Sub, and Lstat
+// wherever fs.ReadLinkFS is implemented — which both engines do.
+func TestEveryEngineIsAValidIoFS(t *testing.T) {
+	t.Parallel()
+	eachImplementation(t, func(t *testing.T, filesystem corevfs.FullFS) {
+		if err := filesystem.MkdirAll("assets/css", 0o755); err != nil {
+			t.Fatalf("MkdirAll = %v, want nil", err)
+		}
+		files := []string{"index.html", "assets/css/site.css", "assets/css/print.css"}
+		for _, name := range files {
+			if err := filesystem.WriteFile(name, []byte("x"), 0o644); err != nil {
+				t.Fatalf("WriteFile(%q) = %v, want nil", name, err)
+			}
+		}
+		if err := fstest.TestFS(filesystem, files...); err != nil {
+			t.Fatalf("fstest.TestFS = %v, want nil", err)
+		}
+	})
+}
+
+// TestSyncDirAnswersIdenticallyOnEveryEngine pins the DirSyncer sibling
+// (#1060, ADR 0110's deferred durability): flushing an existing directory —
+// the root "." included, the parent one flushes most — succeeds, a file is
+// NOT_REGULAR_FILE, an absent name is DIRECTORY_SYNC_FAILED with
+// fs.ErrNotExist kept in the chain, and an escape is INVALID_PATH, on both
+// engines alike.
+func TestSyncDirAnswersIdenticallyOnEveryEngine(t *testing.T) {
+	t.Parallel()
+	eachImplementation(t, func(t *testing.T, filesystem corevfs.FullFS) {
+		syncer, ok := filesystem.(corevfs.DirSyncer)
+		if !ok {
+			t.Fatal("does not implement vfs.DirSyncer")
+		}
+		if err := filesystem.MkdirAll("members", 0o755); err != nil {
+			t.Fatalf("MkdirAll = %v, want nil", err)
+		}
+		if err := filesystem.WriteFile("members/note.txt", []byte("x"), 0o644); err != nil {
+			t.Fatalf("WriteFile = %v, want nil", err)
+		}
+		for _, dir := range []string{".", "members"} {
+			if err := syncer.SyncDir(dir); err != nil {
+				t.Errorf("SyncDir(%q) = %v, want nil", dir, err)
+			}
+		}
+		if err := syncer.SyncDir("members/note.txt"); !kerrs.HasCode(err, corevfs.CodeNotRegularFile) {
+			t.Errorf("SyncDir(file) = %v, want NOT_REGULAR_FILE", err)
+		}
+		absentErr := syncer.SyncDir("absent")
+		if !kerrs.HasCode(absentErr, corevfs.CodeDirectorySyncFailed) || !errors.Is(absentErr, fs.ErrNotExist) {
+			t.Errorf("SyncDir(absent) = %v, want DIRECTORY_SYNC_FAILED wrapping fs.ErrNotExist", absentErr)
+		}
+		if err := syncer.SyncDir("../escape"); !kerrs.HasCode(err, corevfs.CodeInvalidPath) {
+			t.Errorf("SyncDir(../escape) = %v, want INVALID_PATH", err)
+		}
+	})
+}
+
+// TestWriteAtomicAllAnswersIdenticallyOnEveryEngine pins the
+// AtomicBatchWriter sibling (issue #827) on both engines: a batch across two
+// directories lands whole, each file with perm and its own bytes, a name
+// given twice holding the later data; a refusal anywhere in the batch — a
+// path, a mode, a directory in a file's place — publishes nothing and counts
+// 0; an empty batch is nothing.
+func TestWriteAtomicAllAnswersIdenticallyOnEveryEngine(t *testing.T) {
+	t.Parallel()
+	eachImplementation(t, func(t *testing.T, filesystem corevfs.FullFS) {
+		batcher, ok := filesystem.(corevfs.AtomicBatchWriter)
+		if !ok {
+			t.Fatal("does not implement vfs.AtomicBatchWriter")
+		}
+		if err := filesystem.MkdirAll("queue/ready", 0o755); err != nil {
+			t.Fatalf("MkdirAll = %v, want nil", err)
+		}
+		if err := filesystem.WriteFile("queue/old.txt", []byte("old"), 0o600); err != nil {
+			t.Fatalf("WriteFile = %v, want nil", err)
+		}
+		if published, err := batcher.WriteAtomicAll(nil, 0o644); published != 0 || err != nil {
+			t.Fatalf("WriteAtomicAll(nothing) = %d, %v, want 0, nil", published, err)
+		}
+		refusals := []struct {
+			name  string
+			files []corevfs.FileValue
+			perm  fs.FileMode
+			code  kerrs.Code
+		}{
+			{"an escape third", []corevfs.FileValue{{Name: "queue/a"}, {Name: "queue/b"}, {Name: "../c"}}, 0o644, corevfs.CodeInvalidPath},
+			{"a zero mode", []corevfs.FileValue{{Name: "queue/a"}}, 0, corevfs.CodeInvalidPermission},
+			{"a directory in a file's place", []corevfs.FileValue{{Name: "queue/a"}, {Name: "queue/ready"}}, 0o644, corevfs.CodeNotRegularFile},
+		}
+		for _, refusal := range refusals {
+			published, err := batcher.WriteAtomicAll(refusal.files, refusal.perm)
+			if published != 0 || !kerrs.HasCode(err, refusal.code) {
+				t.Errorf("WriteAtomicAll(%s) = %d, %v, want 0 and code %#x", refusal.name, published, err, uint32(refusal.code))
+			}
+			if _, statErr := fs.Stat(filesystem, "queue/a"); !errors.Is(statErr, fs.ErrNotExist) {
+				t.Errorf("WriteAtomicAll(%s) published queue/a: %v", refusal.name, statErr)
+			}
+		}
+		batch := []corevfs.FileValue{
+			{Name: "queue/ready/1.msg", Data: []byte("one")},
+			{Name: "queue/old.txt", Data: []byte("replaced")},
+			{Name: "queue/ready/2.msg", Data: []byte("two")},
+			{Name: "queue/ready/1.msg", Data: []byte("one again")},
+		}
+		published, err := batcher.WriteAtomicAll(batch, 0o640)
+		if published != len(batch) || err != nil {
+			t.Fatalf("WriteAtomicAll(batch) = %d, %v, want %d, nil", published, err, len(batch))
+		}
+		for name, want := range map[string]string{"queue/ready/1.msg": "one again", "queue/old.txt": "replaced", "queue/ready/2.msg": "two"} {
+			got, readErr := fs.ReadFile(filesystem, name)
+			if readErr != nil || string(got) != want {
+				t.Errorf("ReadFile(%s) = %q, %v, want %q", name, got, readErr, want)
+			}
+			info, statErr := fs.Stat(filesystem, name)
+			if statErr != nil || info.Mode().Perm() != 0o640 {
+				t.Errorf("Stat(%s) = %v, %v, want mode 0640 — a publication applies perm every time", name, info, statErr)
+			}
 		}
 	})
 }

@@ -120,3 +120,22 @@ ok  	github.com/kitsunium/sdk/internal/kernel/clock	15.817s
   allocation-free — the re-arm is one `time.Time.Add`, never a loop over the
   skipped periods, which is what keeps `Advance(time.Hour)` on a nanosecond
   ticker bounded.
+
+## CoarseClock (#814)
+
+Measured 2026-11-02, go1.27.3, branch `wip/sdk-lot-6-cache`, the same shared
+8-core VM, `-cpu=8 -benchtime=200ms -count=6` (first sample shown):
+
+```
+BenchmarkSystem_Now-8            	 3229086	        74.83 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCoarse_Now-8            	74097674	         4.116 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCoarse_Now_Parallel-8   	37465034	         6.704 ns/op	       0 B/op	       0 allocs/op
+```
+
+`Coarse_Now` is one atomic pointer load and a 24-byte copy — ~3.7 ns against
+`System_Now`'s ~77 ns on this box's slow vDSO clock, within the issue's 5 ns.
+Its goroutine re-reads the base clock once per resolution and publishes a new
+`time.Time` (one 24-byte allocation per tick, none per read).
+`Coarse_Now_Parallel` reads one CoarseClock from every P: the published word
+is read-shared and written once a tick. The price is precision: a reading is
+up to one resolution behind (`TestCoarseLagsByAtMostOneResolution`).

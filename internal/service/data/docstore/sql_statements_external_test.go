@@ -214,6 +214,19 @@ func TestSQLTheVersionsStatements(t *testing.T) {
 		` VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $10, $11, $12)`; got != want {
 		t.Errorf("the version rows' insertion =\n%s\nwant\n%s", got, want)
 	}
+	// The index and version rows go through data/sql's InsertRows since #837:
+	// the text each engine is sent is the one the store rendered by hand
+	// before, byte for byte, on the two '?' dialects too.
+	sqlite := docstore.RenderSQLForTest(coresql.DialectSQLite, accountsTable)
+	if got, want := sqlite.InsertIndexRows(1), `INSERT INTO "members__accounts___ix" (index_name, index_key, doc_key, uniq)`+
+		` VALUES (?, ?, ?, ?)`; got != want {
+		t.Errorf("the index rows' insertion on SQLite =\n%s\nwant\n%s", got, want)
+	}
+	mysql := docstore.RenderSQLForTest(coresql.DialectMySQL, accountsTable)
+	if got, want := mysql.InsertVersions(2), "INSERT INTO `members__accounts___vs` (doc_key, num, made_at, made_ns, meta, doc)"+
+		" VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)"; got != want {
+		t.Errorf("the version rows' insertion on MySQL =\n%s\nwant\n%s", got, want)
+	}
 }
 
 // TestSQLTheTrashStatements pins, per dialect, the four statements the trash
@@ -267,6 +280,103 @@ func TestSQLTheVersionWeightStatement(t *testing.T) {
 			t.Errorf("%s versionWeight =\n%s\nwant\n%s", dialect, got, want)
 		}
 	}
+}
+
+// TestSQLTheRevisionStatements pins, per dialect, what Revision and ReplaceIf
+// send (ADR 0209): the document with its row's revision; Replace's UPDATE
+// conditioned on that revision; and Update's locking read on the same
+// condition — FOR UPDATE where rows lock, a write that moves the revision and
+// returns the document on SQLite.
+func TestSQLTheRevisionStatements(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		dialect                        coresql.Dialect
+		revision, replaceIf, lockDocIf string
+	}{
+		{
+			coresql.DialectPostgres,
+			`SELECT rev, doc FROM "members__accounts" WHERE doc_key = $1`,
+			`UPDATE "members__accounts" SET rev = rev + 1, doc = $1 WHERE doc_key = $2 AND rev = $3`,
+			`SELECT doc FROM "members__accounts" WHERE doc_key = $1 AND rev = $2 FOR UPDATE`,
+		},
+		{
+			coresql.DialectMySQL,
+			"SELECT rev, doc FROM `members__accounts` WHERE doc_key = ?",
+			"UPDATE `members__accounts` SET rev = rev + 1, doc = ? WHERE doc_key = ? AND rev = ?",
+			"SELECT doc FROM `members__accounts` WHERE doc_key = ? AND rev = ? FOR UPDATE",
+		},
+		{
+			coresql.DialectSQLite,
+			`SELECT rev, doc FROM "members__accounts" WHERE doc_key = ?`,
+			`UPDATE "members__accounts" SET rev = rev + 1, doc = ? WHERE doc_key = ? AND rev = ?`,
+			`UPDATE "members__accounts" SET rev = rev + 1 WHERE doc_key = ? AND rev = ? RETURNING doc`,
+		},
+	} {
+		rendered := docstore.RenderSQLForTest(tc.dialect, accountsTable)
+		for role, want := range map[string]string{"revision": tc.revision, "replaceIf": tc.replaceIf, "lockDocIf": tc.lockDocIf} {
+			if got := statementFor(t, rendered, role); got != want {
+				t.Errorf("%s %s =\n%s\nwant\n%s", tc.dialect, role, got, want)
+			}
+		}
+	}
+}
+
+// TestSQLTheTrashIndexStatements pins the trash index's DDL per dialect (ADR
+// 0143, amended 2026-11-02): a partial index over doc_key WHERE num = 0 on
+// PostgreSQL and SQLite, created and dropped idempotently; on MySQL, which has
+// neither a partial index nor IF NOT EXISTS for one, a key over (num, doc_key)
+// and the information_schema question both directions ask first.
+func TestSQLTheTrashIndexStatements(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		dialect      coresql.Dialect
+		create, drop string
+	}{
+		{
+			coresql.DialectPostgres,
+			`CREATE INDEX IF NOT EXISTS "members__accounts___tr" ON "members__accounts___vs" (doc_key) WHERE num = 0`,
+			`DROP INDEX IF EXISTS "members__accounts___tr"`,
+		},
+		{
+			coresql.DialectSQLite,
+			`CREATE INDEX IF NOT EXISTS "members__accounts___tr" ON "members__accounts___vs" (doc_key) WHERE num = 0`,
+			`DROP INDEX IF EXISTS "members__accounts___tr"`,
+		},
+		{
+			coresql.DialectMySQL,
+			"ALTER TABLE `members__accounts___vs` ADD KEY `members__accounts___tr` (num, doc_key)",
+			"ALTER TABLE `members__accounts___vs` DROP KEY `members__accounts___tr`",
+		},
+	} {
+		rendered := docstore.RenderSQLForTest(tc.dialect, accountsTable)
+		if got := statementFor(t, rendered, "createTrashIndex"); got != tc.create {
+			t.Errorf("%s create =\n%s\nwant\n%s", tc.dialect, got, tc.create)
+		}
+		if got := statementFor(t, rendered, "dropTrashIndex"); got != tc.drop {
+			t.Errorf("%s drop =\n%s\nwant\n%s", tc.dialect, got, tc.drop)
+		}
+		if tc.dialect == coresql.DialectMySQL {
+			const ask = "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?"
+			if got := statementFor(t, rendered, "trashIndexExists"); got != ask {
+				t.Errorf("mysql trashIndexExists =\n%s\nwant\n%s", got, ask)
+			}
+			continue
+		}
+		migration, err := docstore.SQLVersionsTrashIndexMigration(tc.dialect, accountsTable, 20261102120000)
+		must(t, err)
+		up, down := &ddlRecorder{}, &ddlRecorder{}
+		must(t, migration.Up(t.Context(), up))
+		must(t, migration.Down(t.Context(), down))
+		if !slices.Equal(up.sent, []string{tc.create}) || !slices.Equal(down.sent, []string{tc.drop}) {
+			t.Errorf("%s Up = %q, Down = %q", tc.dialect, up.sent, down.sent)
+		}
+	}
+	_, err := docstore.SQLVersionsTrashIndexMigration(coresql.DialectUnknown, accountsTable, 1)
+	requireCode(t, err, coredocstore.CodeStoreMisconfigured, "no dialect")
+	_, err = docstore.SQLVersionsTrashIndexMigration(coresql.DialectSQLite, "Members; DROP", 1)
+	requireCode(t, err, coredocstore.CodeStoreMisconfigured, "a table name that is not one")
+	_, err = docstore.SQLVersionsTrashIndexMigration(coresql.DialectSQLite, accountsTable, 0)
+	requireCode(t, err, coresql.CodeInvalidMigration, "version zero")
 }
 
 // TestSQLVersionsMigrationCreatesTheVersionsTable pins the versions table's

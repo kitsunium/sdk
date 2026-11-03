@@ -102,7 +102,7 @@ func (b *fileBroker) PublishOnce(
 		//: a duplicate, and that is the answer.
 		return corequeue.MessageValue{}, false, nil
 	}
-	name, writeErr := b.write(payload, now, now)
+	name, writeErr := b.write(payload, now, now, corequeue.PriorityNormal)
 	//: nothing was published.
 	if writeErr != nil {
 		//: QueueBackendFailed.
@@ -326,15 +326,15 @@ func (b *fileBroker) sweepOnce(now time.Time) error {
 		//: nothing to do.
 		return nil
 	}
-	entries, listErr := b.entriesOf(dirOnce)
+	entries, listErr := b.namesOf(dirOnce)
 	//: the directory could not be read.
 	if listErr != nil {
 		//: QueueBackendFailed.
 		return listErr
 	}
 	//: each reservation, and each one left set aside.
-	for _, entry := range entries {
-		if sweepErr := b.sweepEntry(entry.Name(), now.UnixNano()); sweepErr != nil {
+	for _, base := range entries {
+		if sweepErr := b.sweepEntry(base, now.UnixNano()); sweepErr != nil {
 			//: QueueBackendFailed.
 			return sweepErr
 		}

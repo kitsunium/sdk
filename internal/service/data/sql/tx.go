@@ -58,13 +58,13 @@ func (t *transactor) Transact(ctx context.Context, opts coresql.TxOptionsValue, 
 
 // root opens a real transaction, runs fn, and is the ONLY thing that commits.
 func (t *transactor) root(ctx context.Context, opts coresql.TxOptionsValue, fn coresql.TxFunc) error {
-	tx, err := t.cfg.db.BeginTx(ctx, opts.StdOptions())
+	tx, err := t.poolFor(opts).BeginTx(ctx, opts.StdOptions())
 	//: a transaction the driver would not open ran nothing at all.
 	if err != nil {
 		//: the driver's error travels beside the verdict.
 		return failed(coresql.BeginFailed, err)
 	}
-	state := &txState{tx: tx, dialect: t.cfg.dialect}
+	state := &txState{tx: tx, dialect: t.cfg.dialect, budget: t.cfg.budget}
 	scoped := newScopedExecutor(state)
 	settled := false
 	defer func() {
@@ -109,6 +109,19 @@ func (t *transactor) root(ctx context.Context, opts coresql.TxOptionsValue, fn c
 	runAborted(aborted)
 	//: nil only for a commit.
 	return err
+}
+
+// poolFor is the pool a root transaction with opts opens on: the read
+// replica's for a read-only one when a replica was configured, the primary's
+// otherwise.
+func (t *transactor) poolFor(opts coresql.TxOptionsValue) *stdsql.DB {
+	//: a read-only transaction reads where reads are routed.
+	if opts.ReadOnly && t.cfg.replica != nil {
+		//: the replica's pool.
+		return t.cfg.replica
+	}
+	//: the primary's pool.
+	return t.cfg.db
 }
 
 // settle ends a root transaction: commit on success, roll back otherwise.
