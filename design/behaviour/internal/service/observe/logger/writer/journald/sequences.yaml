@@ -152,13 +152,56 @@ sequences:
         eval: newJournaldSink(conn)
         to: newJournaldSink
       - bind: nonblocking
-        eval: "async.New(base, async.Config{BufferSize: c.BufferSize, OnDrop: c.OnDrop, OnError: c.OnError})"
+        eval: "async.New(base, async.Config{BufferSize: c.BufferSize, OnDrop: c.OnDrop, OnError: c.OnError, BatchMax: batchMax})"
         to: async
       - return: levelgate.New(nonblocking, c.MinLevel), nil
         to: levelgate
   - of: newJournaldSink
     steps:
-      - return: "&journaldSink{conn: conn}"
+      - return: "&journaldSink{conn: conn, batch: datagram.NewBatchSender(conn)}"
+  - of: (*journaldSink).WriteBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*journaldSink).WriteBatch
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.frameAll
+        kind: internal
+      - id: s.batch.Send
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, wrapWrite(ctx.Err(), 0)
+          when: ctx != nil && ctx.Err() != nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - eval: s.frameAll(payloads)
+        to: s.frameAll
+      - bind: sent, serr
+        eval: s.batch.Send(s.frames)
+        to: s.batch.Send
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - bind: undelivered
+              eval: "0"
+            - loop:
+                do:
+                  - op: +=
+                    set: undelivered
+                    value: len(p)
+                key: _
+                range: payloads[min(sent, len(payloads)):]
+                value: p
+            - return: sent, wrapWrite(serr, undelivered)
+          when: serr != nil
+      - return: len(payloads), nil
   - of: (*journaldSink).Write
     participants:
       - id: caller

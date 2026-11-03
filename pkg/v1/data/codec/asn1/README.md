@@ -12,7 +12,7 @@ Package asn1 registers the ASN.1 DER codec with the SDK's codec registry — and
 import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/asn1"
 ```
 
-The codec is the standard library's encoding/asn1: Marshal writes DER — the only encoding that package produces — and Unmarshal also accepts BER. The value is whatever encoding/asn1 maps: a struct of exported fields, an integer, a string, a time, a \[]byte, an asn1.ObjectIdentifier. Its MIME type is application/pkix-cert and its extensions .der and .cer.
+The codec is the standard library's encoding/asn1: Marshal writes DER — the only encoding that package produces — and Unmarshal also accepts the few BER relaxations encoding/asn1 reads (an indefinite length is not one of them). [NewStrict](#NewStrict) returns an instance that also refuses bytes past the first structure, for input that is hashed or verified after it is decoded. The value is whatever encoding/asn1 maps: a struct of exported fields, an integer, a string, a time, a \[]byte, an asn1.ObjectIdentifier. Its MIME type is application/pkix-cert and its extensions .der and .cer.
 
 Everything that dispatches through the registry by format name then reads and writes it: the codec package's Marshal and Unmarshal, config.FSSource and i18n.LoadFS. Importing github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK ships; this package links this one codec, the core package declaring its codes and the standard library, and nothing else. Importing both is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
 
@@ -23,6 +23,7 @@ Failures carry the range 0.3.9.\*; match them with errs.HasCode, or the sentinel
 ```
 CodeMarshalFailed    0.3.9.1  encoding/asn1 could not encode the value
 CodeUnmarshalFailed  0.3.9.2  the input is not DER or BER the target can hold
+CodeTrailingData     0.3.9.3  NewStrict's instance found bytes past the structure
 ```
 
 No error message quotes the input.
@@ -31,6 +32,7 @@ No error message quotes the input.
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func NewStrict\(\) codec.Codec](<#NewStrict>)
 
 ## Constants
 
@@ -44,6 +46,17 @@ CodeMarshalFailed is 0.3.9.1: encoding/asn1 could not encode the value.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/asn1.CodeASN1MarshalFailed`.
 
 Code `0.3.9.1`
+
+<a name="CodeTrailingData"></a>
+```go
+const CodeTrailingData errs.Code = 198915
+```
+
+CodeTrailingData is 0.3.9.3: NewStrict's instance found bytes past the first decoded structure.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/asn1.CodeASN1TrailingData`.
+
+Code `0.3.9.3`
 
 <a name="CodeUnmarshalFailed"></a>
 ```go
@@ -76,6 +89,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/asn1.Marshal
 
 Code `0.3.9.1` · reason `MARSHAL_FAILED` · public "ASN.1 DER encoding failed"
 
+<a name="TrailingData"></a>
+```go
+var TrailingData *errs.Error
+```
+
+TrailingData is the sentinel of [CodeTrailingData](#CodeTrailingData).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/asn1.TrailingData`.
+
+Code `0.3.9.3` · reason `TRAILING_DATA` · public "ASN.1 input carries trailing data"
+
 <a name="UnmarshalFailed"></a>
 ```go
 var UnmarshalFailed *errs.Error
@@ -86,5 +110,14 @@ UnmarshalFailed is the sentinel of [CodeUnmarshalFailed](#CodeUnmarshalFailed).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/asn1.UnmarshalFailed`.
 
 Code `0.3.9.2` · reason `UNMARSHAL_FAILED` · public "ASN.1 DER decoding failed"
+
+<a name="NewStrict"></a>
+## func [NewStrict](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/asn1/gen_facade.go>)
+
+```go
+func NewStrict() codec.Codec
+```
+
+NewStrict returns a fresh ASN.1 DER codec, not registered, whose Unmarshal refuses any byte past the first decoded structure with CodeTrailingData. The registered format accepts them, as encoding/asn1 does, so a signed blob with bytes appended decodes equal to the original: decode with this instance whatever is hashed or verified after it is decoded. Marshal and Append are the registered codec's.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

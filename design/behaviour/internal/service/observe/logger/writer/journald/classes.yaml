@@ -14,6 +14,15 @@ constants:
         value: "\"/run/systemd/journal/socket\""
     name: writerName
   - doc: |-
+      batchMax is how many queued records the drainer hands the sink at once
+      (#807): one sendmmsg(2) for up to this many entries on Linux, each still
+      its own datagram.
+    items:
+      - name: batchMax
+        type: int
+        value: "16"
+    name: batchMax
+  - doc: |-
       messagePrefix is the journal field name framing each record as the entry's
       MESSAGE. The trailing '=' separates the field name from the value.
     items:
@@ -43,11 +52,15 @@ files:
     name: doc.go
   - decls:
       - writerName
+      - batchMax
       - Writer
       - journaldFactory
       - (*journaldFactory).Name
       - (*journaldFactory).Open
     name: journald.go
+  - decls:
+      - _
+    name: journald_compliance.go
   - decls:
       - Config
     name: journald_config.go
@@ -55,6 +68,8 @@ files:
       - messagePrefix
       - journaldSink
       - newJournaldSink
+      - (*journaldSink).WriteBatch
+      - (*journaldSink).frameAll
       - (*journaldSink).Write
       - (*journaldSink).Flush
       - (*journaldSink).Close
@@ -111,6 +126,7 @@ imports:
   corejournald: github.com/kitsunium/sdk/internal/core/observe/logger/writer/journald
   corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
   coreproc: github.com/kitsunium/sdk/internal/core/proc
+  datagram: github.com/kitsunium/sdk/internal/service/observe/logger/internal/datagram
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   level: github.com/kitsunium/sdk/internal/core/observe/logger/level
   levelgate: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate
@@ -196,11 +212,41 @@ types:
         type: sync.Mutex
       - doc: |-
           buf is the reused frame buffer; guarded by mu, it makes the steady-state
-          Write path allocation-free after its one-time growth.
+          Write path allocation-free after its one-time growth. WriteBatch frames
+          a whole backlog into it, one entry after the other.
         name: buf
         type: "[]byte"
+      - doc: |-
+          ends marks where each framed entry of a batch ends in buf, and frames
+          slices buf at those ends — both reused under mu.
+        name: ends
+        type: "[]int"
+      - name: frames
+        type: "[][]byte"
+      - doc: |-
+          batch sends a backlog's entries as datagrams in one sendmmsg(2) on
+          Linux (#807); guarded by mu like the socket it writes.
+        name: batch
+        type: "*datagram.BatchSender"
     kind: struct
     methods:
+      - doc: |-
+          WriteBatch frames each payload as Write frames one — "MESSAGE=<line>\n" —
+          into the reused buffer and sends the backlog as one datagram per entry, in
+          one sendmmsg(2) on Linux (#807). It reports how many entries, from the
+          first, were sent; the first refusal ends the batch. Steady state allocates
+          nothing once the buffer has grown to the largest batch.
+        name: WriteBatch
+        params: ctx context.Context, _ []corelogger.RecordEvent, payloads [][]byte
+        recv: s *journaldSink
+        results: written int, err error
+      - doc: |-
+          frameAll frames every payload into s.buf and slices s.frames over it. The
+          ends are recorded first and sliced last, because appending may move buf.
+          The caller holds s.mu.
+        name: frameAll
+        params: payloads [][]byte
+        recv: s *journaldSink
       - doc: |-
           Write frames p as a single "MESSAGE=<line>\n" journal entry and sends it as
           one datagram. The frame is assembled into the reused buffer under the mutex,
@@ -231,3 +277,9 @@ vars:
       - name: Writer
         value: writer.Register(&journaldFactory{})
     name: Writer
+  - doc: journaldSink takes a backlog from the async drainer (#807).
+    items:
+      - name: _
+        type: corelogger.BatchSink
+        value: (*journaldSink)(nil)
+    name: _

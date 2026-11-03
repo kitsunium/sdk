@@ -25,8 +25,8 @@ func TestCodesKeepTheirValues(t *testing.T) {
 	tests := []tc{
 		{"MarshalFailed", corebson.MarshalFailed, corebson.CodeBSONMarshalFailed, 0x00_03_24_01, "BSON_MARSHAL_FAILED"},
 		{"UnmarshalFailed", corebson.UnmarshalFailed, corebson.CodeBSONUnmarshalFailed, 0x00_03_24_02, "BSON_UNMARSHAL_FAILED"},
-		{"SizeExceeded", corebson.SizeExceeded, corebson.CodeBSONSizeExceeded, 0x00_03_24_03, "BSON_SIZE_EXCEEDED"},
-		{"DepthExceeded", corebson.DepthExceeded, corebson.CodeBSONDepthExceeded, 0x00_03_24_04, "BSON_DEPTH_EXCEEDED"},
+		{"SizeExceeded", corebson.SizeExceeded, corebson.CodeBSONSizeExceeded, 0x00_03_24_03, "SIZE_EXCEEDED"},
+		{"DepthExceeded", corebson.DepthExceeded, corebson.CodeBSONDepthExceeded, 0x00_03_24_04, "DEPTH_EXCEEDED"},
 		{"ValueInvalid", corebson.ValueInvalid, corebson.CodeBSONValueInvalid, 0x00_03_24_05, "BSON_VALUE_INVALID"},
 	}
 	runCase := func(t *testing.T, c tc) {

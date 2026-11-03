@@ -34,13 +34,9 @@ alias(
 go_test(
     name = "stdhash_test",
     srcs = [
-        "crc32c_hasher_internal_test.go",
+        "conformance_internal_test.go",
         "digest_writer_external_test.go",
-        "fnv_hasher_internal_test.go",
         "gen_api_test.go",
-        "sha256_hasher_internal_test.go",
-        "sha3_hasher_internal_test.go",
-        "sha512_hasher_internal_test.go",
         "verifying_reader_external_test.go",
         "verifying_reader_internal_test.go",
     ],

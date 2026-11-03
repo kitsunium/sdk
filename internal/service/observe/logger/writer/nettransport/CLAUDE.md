@@ -15,9 +15,9 @@ each composes `levelgate(async(netSink))` over a stdlib `net.Conn` or
 | File | Role |
 |---|---|
 | `nettransport.go` | `WriterTCP/UDP/HTTP` singletons, `netFactory{proto}` (`Name`/`Open`/`build`) |
-| `config.go` | `NetConfig` value type + `compose` (the `levelgate(async(netSink))` order) |
-| `netsink.go` | `netSink` per-record sink (`Write`/`Flush`/`Close`) + `sendFunc` seam |
-| `client.go` | the ONLY net/net-http file: `newConnSeam` (tcp/udp) + `newHTTPSeam`/`postRecord` + the default client and its own pool (`newHTTPClient`/`newHTTPTransport`) |
+| `config.go` | `NetConfig` value type + `compose` / `composeSink` (the `levelgate(async(netSink))` order; `streamBatchMax` 16 for tcp, #807) |
+| `netsink.go` | `netSink` sink (`Write`/`WriteBatch`/`Flush`/`Close`) + `sendFunc` and `batchSendFunc` seams |
+| `client.go` | the ONLY net/net-http file: `newConnSeam` (tcp/udp; the tcp batch seam is one `net.Buffers.WriteTo`, a `writev(2)` on a `*net.TCPConn`; udp's is `datagramBatch` over a `datagram.BatchSender`, one `sendmmsg(2)` on Linux) + `wholeRecords` + `newHTTPSeam`/`newHTTPSeams` (the NDJSON batch call under `HTTPBatchNDJSON`, `ndjsonBody`)/`postRecord`/`postBody` + the default client and its own pool (`newHTTPClient`/`newHTTPTransport`) |
 | `decode.go` | `netFactory.Decode` (`core/observe/logger/writer.Decoder`) + key coercion helpers |
 | `wrap.go` | `wrapDial` / `wrapWrite` — the single wrap points that put a cause under the mirror's codes; never a value parsed from a config or a record |
 | `internal/core/observe/logger/writer/nettransport` | its sentinels — range 0.3.30.\* (service slot 0x1e) — declared in the core mirror since ADR 0160; this package declares none |
@@ -29,6 +29,17 @@ the level floor drops below-floor records before the async ring, the ring gives
 non-blocking back-pressure (`OnDrop`), and the terminal `netSink` ships each
 record synchronously to the transport. The producer **never** blocks on the
 network; saturation surfaces as drops, not stalls.
+
+**tcp and udp drain in batches (#807).** Their async ring runs with
+`BatchMax` 16 and the `netSink` carries the batch seam: on tcp a backlog of up
+to 16 records leaves in one `writev(2)` — the bytes on the stream are the same
+as record by record; on udp in one `sendmmsg(2)` on Linux
+(`logger/internal/datagram`), each record still its own datagram (gathering
+would merge records), one `Write` each elsewhere. http keeps one POST per
+record and `BatchMax` 1 unless `HTTPBatchNDJSON` opts into the NDJSON wire:
+then a backlog of up to 16 is ONE `application/x-ndjson` POST, a record per
+line (`newHTTPSeams`), and a refused POST fails all of them — a wire change the
+collector must accept, hence the opt-in.
 
 ## Performance
 
@@ -130,6 +141,7 @@ Recognised keys under a writer entry's `config:` map:
 | `address` | string (required) | `Address` (host:port for tcp/udp, URL for http) |
 | `min_level` | string | `MinLevel` via `level.ParseLevel` |
 | `buffer_size` | int | `BufferSize` (async ring capacity) |
+| `http_batch_ndjson` | bool | `HTTPBatchNDJSON` (one NDJSON POST per backlog, http only — a wire change, #807) |
 
 The `Dialer` / `HTTPClient` SSRF seams and the `OnDrop` / `OnError` callbacks are
 **code-only** and never decoded from a config blob. A malformed shape returns the shared `core/observe/logger/writer.WriterConfigInvalid`

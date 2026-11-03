@@ -4,6 +4,7 @@ import (
 	"bytes"
 	stdjson "encoding/json"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -306,9 +307,9 @@ func Test_decodeLines(t *testing.T) {
 	}
 }
 
-// Test_countNDJSONRecords pins the capacity-hint helper: every '\n' is a
-// record terminator plus one extra slot for a possible trailing record
-// that lacks a final newline.
+// Test_countNDJSONRecords pins the record count the output is sized by: one
+// per line holding something but whitespace — a last line without its '\n'
+// included — and none for a blank line (#1098).
 func Test_countNDJSONRecords(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -322,7 +323,9 @@ func Test_countNDJSONRecords(t *testing.T) {
 		{"single not terminated", "1", 1},
 		{"two terminated", "1\n2\n", 2},
 		{"trailing partial", "1\n2", 2},
-		{"all blanks counted as upper bound", "\n\n\n", 3},
+		{"blank lines hold no record (#1098)", "\n\n\n", 0},
+		{"whitespace lines hold no record", " \t\r\n\u00a0\n", 0},
+		{"blanks between records", "\n1\n\n \n2\n\n", 2},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -515,5 +518,33 @@ func Test_marshalRawSliceTo(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// TestDecodeLinesGrowsPastTheReservation pins the growth past
+// maxReservedRecords: every record is decoded, in order, into a slice whose
+// length is the record count, through doublings from the first reservation.
+func TestDecodeLinesGrowsPastTheReservation(t *testing.T) {
+	t.Parallel()
+	var data []byte
+	n := 2*maxReservedRecords + 3
+	for i := range n {
+		if i%3 == 0 {
+			data = append(data, " \n"...)
+		}
+		data = strconv.AppendInt(data, int64(i), 10)
+		data = append(data, '\n')
+	}
+	var got []int
+	if err := Codec.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if len(got) != n {
+		t.Fatalf("decoded %d records, want %d", len(got), n)
+	}
+	for i, v := range got {
+		if v != i {
+			t.Fatalf("record %d = %d", i, v)
+		}
 	}
 }

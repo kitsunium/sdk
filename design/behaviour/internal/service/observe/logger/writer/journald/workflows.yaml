@@ -1,0 +1,40 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*journaldSink).frameAll
+    steps:
+      - set: s.buf
+        value: s.buf[:0]
+      - set: s.ends
+        value: s.ends[:0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: p
+                    value: p[:len(p)-1]
+                when: len(p) > 0 && p[len(p)-1] == '\n'
+            - set: s.buf
+              value: append(s.buf, messagePrefix...)
+            - set: s.buf
+              value: append(s.buf, p...)
+            - set: s.buf
+              value: append(s.buf, '\n')
+            - set: s.ends
+              value: append(s.ends, len(s.buf))
+          key: _
+          range: payloads
+          value: p
+      - set: s.frames
+        value: s.frames[:0]
+      - bind: start
+        eval: "0"
+      - loop:
+          do:
+            - set: s.frames
+              value: append(s.frames, s.buf[start:end])
+            - set: start
+              value: end
+          key: _
+          range: s.ends
+          value: end

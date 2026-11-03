@@ -231,11 +231,17 @@ func (d *decodeState) structFromMap(v reflect.Value, p *decodePlan, h itemHead) 
 
 // structEntry decodes one pair into the field its key names, or skips it.
 func (d *decodeState) structEntry(v reflect.Value, p *decodePlan, seen *fieldSet) error {
+	at := d.off
 	idx, found, err := d.fieldIndex(p)
 	//: never on validated input.
 	if err != nil {
 		//: corrupt.
 		return err
+	}
+	//: a strict decode refuses a key no field claims.
+	if !found && d.strict {
+		//: refused.
+		return unknownMember(at, v.Type())
 	}
 	//: an unknown key, or one already set, is skipped with its value.
 	if !found || seen.has(idx) {

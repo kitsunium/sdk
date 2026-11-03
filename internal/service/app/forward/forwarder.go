@@ -103,12 +103,16 @@ func New(ctx context.Context, cfg Config) (*Forwarder, error) {
 // — and every batch lost to a bound is counted Dropped. ctx bounds the
 // publication and the wait.
 func (f *Forwarder) Enqueue(ctx context.Context, batch []byte) error {
-	size := int64(len(batch))
 	//: nothing to keep.
-	if size == 0 {
+	if len(batch) == 0 {
 		//: no publication.
 		return nil
 	}
+	//: what rests is what is bounded and counted: the gzip bytes under Compress.
+	if f.cfg.Compress {
+		batch = gzipBatch(batch)
+	}
+	size := int64(len(batch))
 	//: no policy can make room for it.
 	if size > f.cfg.MaxBytes {
 		f.settle("", &f.stats.Dropped)

@@ -8,6 +8,7 @@ go_library(
         "decode.go",
         "doc.go",
         "journald.go",
+        "journald_compliance.go",
         "journald_config.go",
         "journald_sink.go",
         "socket_other.go",
@@ -26,6 +27,7 @@ go_library(
         "//internal/core/observe/logger/writer/journald",
         "//internal/core/proc",
         "//internal/kernel/errs",
+        "//internal/service/observe/logger/internal/datagram",
         "//internal/service/observe/logger/middleware/async",
         "//internal/service/observe/logger/writer/levelgate",
     ],
@@ -43,6 +45,7 @@ alias(
 go_test(
     name = "journald_test",
     srcs = [
+        "batch_internal_test.go",
         "decode_internal_test.go",
         "gen_api_test.go",
         "journald_config_external_test.go",

@@ -486,3 +486,22 @@ is `(max−min)/median` across all nine.
 | `BenchmarkMarshalPublic/EC` | 2 073.0 | 1.4 % | 704 | 7 |
 | `BenchmarkMarshalPublic/OKP` | 1 514.0 | 1.8 % | 528 | 5 |
 | `BenchmarkThumbprint` | 721.0 | 2.7 % | 416 | 7 |
+
+## Thumbprint over RFC 8785 (#895) — 2026-11-03, go1.27.3
+
+`thumbprintInput` is now `jcs.Marshal` of the required members instead of a
+hand concatenation; the bytes hashed are the same (`TestThumbprintInputIsJCS`
+keeps the concatenation as the oracle). Measured interleaved against the base
+(`740e7c1e`), `-benchtime=300ms -count=8`, medians:
+
+| benchmark | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| `Thumbprint` | 790 → **6 541** | 416 → 1 463 | 7 → 22 |
+
+**About eight times slower, and deliberately so.** The canonical form is now
+derived — the members encoded by json/v2, then read back by a pooled
+`jsontext.Decoder` and written in RFC 8785's form — where it was spelled by
+hand for four known ASCII names. A thumbprint is computed when a key is
+imported or a `kid` is minted, not per request; the table rows above keep the
+base's figure for the record. `codec/jcs/BENCH.md` has the canonicalizer's own
+figures.

@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -192,9 +193,10 @@ func Test_protobufCodec_Unmarshal(t *testing.T) {
 			wantCode: CodeProtobufUnmarshalFailed,
 		},
 		{
+			//: the family's TARGET_INVALID, refused first (#1101).
 			name:     "a nil target",
 			target:   func() any { return nil },
-			wantCode: CodeProtobufUnmarshalFailed,
+			wantCode: codec.CodeTargetInvalid,
 		},
 		{
 			//: one byte past the cap, so the refusal cannot be attributed to

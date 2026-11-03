@@ -21,7 +21,7 @@ file-name order.
 
 | Group | Names |
 |---|---|
-| Ports | `Tracer`, `Span`, `Sampler`, `SpanSink`, `Carrier`, `SpanExporter`, `ContextSpanExporter` (its ADR 0039 sibling, `ExportContext`), `DocumentExporter` (the second sibling, `ExportDocument` — the OTLP/HTTP exporter posts a stored document, ADR 0185), `ExporterName` |
+| Ports | `Tracer`, `Span`, `Sampler`, `SpanSink`, `Carrier`, `SpanExporter`, `ContextSpanExporter` (its ADR 0039 sibling, `ExportContext`), `DocumentExporter` (the second sibling, `ExportDocument` — the OTLP/HTTP exporter posts a stored document, ADR 0185), `EncodedDocumentExporter` (the third, `ExportEncodedDocument` — a stored gzip document posted as it rests, #1051), `ExporterName` |
 | Model | `TraceID`, `SpanID`, `TraceFlags`, `SpanContext`, `TraceState`, `Kind`, `Status`, `StatusCode`, `Event`, `Link`, `SpanData`, `Spans`, `Attr`, `AttrKind`, `Resource`, `Scope`, `SpanParams`, `SamplingParams` |
 | Config | `TracerConfig`, `RecorderConfig`, `BatchSinkConfig`, `OTLPHTTPConfig`, `Recorder`, `BatchSink`, `SDKTracer` |
 | Construction | `NewTracer`, `NewRecorder`, `NewBatchSink` (the specification's batching processor, #479), `NewTraceID`, `NewSpanID` |

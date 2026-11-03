@@ -400,7 +400,7 @@ func TestNestingBound(t *testing.T) {
 			return
 		}
 		if !errs.HasCode(err, corebson.CodeBSONDepthExceeded) {
-			t.Fatalf("Marshal at %d levels = %v, want BSON_DEPTH_EXCEEDED", c.levels, err)
+			t.Fatalf("Marshal at %d levels = %v, want DEPTH_EXCEEDED", c.levels, err)
 		}
 	}
 	for _, c := range tests {

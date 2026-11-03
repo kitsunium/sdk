@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/cbor"
 )
@@ -142,5 +143,48 @@ func fuzzAssertTyped(t *testing.T, data []byte) {
 	var target fuzzTarget
 	if err := cbor.New().Unmarshal(data, &target); err != nil && !errs.HasReason(err, "UNMARSHAL_FAILED") {
 		t.Fatalf("typed Unmarshal(%x) = %v, not UNMARSHAL_FAILED", data, err)
+	}
+}
+
+// FuzzNewDeterministic holds the deterministic instance (#896) to its
+// contract: it refuses only with NOT_DETERMINISTIC or UNMARSHAL_FAILED, and
+// what it writes — for what it read, or for what the registered codec read —
+// it reads back.
+func FuzzNewDeterministic(f *testing.F) {
+	for _, seed := range fuzzSeeds {
+		data, err := hex.DecodeString(seed)
+		if err != nil {
+			f.Fatalf("bad seed %q: %v", seed, err)
+		}
+		f.Add(data)
+	}
+	det := cbor.NewDeterministic()
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var strict any
+		err := det.Unmarshal(data, &strict)
+		if err != nil && !errs.HasReason(err, "NOT_DETERMINISTIC") && !errs.HasReason(err, "UNMARSHAL_FAILED") {
+			t.Fatalf("NewDeterministic().Unmarshal(%x) = %v", data, err)
+		}
+		if err == nil {
+			fuzzAssertReadsItsOwn(t, det, data, strict)
+		}
+		var loose any
+		if cbor.New().Unmarshal(data, &loose) == nil {
+			fuzzAssertReadsItsOwn(t, det, data, loose)
+		}
+	})
+}
+
+// fuzzAssertReadsItsOwn encodes value with c and requires c to read it back;
+// a value c cannot write is not its concern.
+func fuzzAssertReadsItsOwn(t *testing.T, c codec.Codec, data []byte, value any) {
+	t.Helper()
+	written, err := c.Marshal(value)
+	if err != nil {
+		return
+	}
+	var back any
+	if uerr := c.Unmarshal(written, &back); uerr != nil {
+		t.Fatalf("the codec refused its own %x (from %x): %v (%s)", written, data, uerr, errs.PrivateOf(uerr))
 	}
 }

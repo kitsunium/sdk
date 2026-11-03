@@ -4,16 +4,17 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	coretoml "github.com/kitsunium/sdk/internal/core/data/codec/toml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // The problems a decode refuses a target for.
 const (
-	// problemTarget: Unmarshal was not handed a non-nil pointer.
-	problemTarget string = "the target is not a non-nil pointer"
 	// problemMismatch: a value the target's type cannot hold.
 	problemMismatch string = "the value does not fit the target's type"
+	// problemDuration: a string a time.Duration target cannot parse.
+	problemDuration string = "a duration is written with its unit, as in 30s, 15m or 24h"
 	// problemOverflow: a number outside the target's range.
 	problemOverflow string = "the number does not fit the target's type"
 	// problemMapKey: a key the map's key type cannot hold.
@@ -53,19 +54,18 @@ type decoder struct {
 
 // unmarshal parses data and decodes it into v.
 func unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if err := codec.CheckTarget(v); err != nil {
+		return err
+	}
 	//: a document past the cap is refused before it is read.
 	if len(data) > maxDocumentBytes {
-		//: refused, naming the bound.
-		return errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
+		//: refused, naming the bound: the family's SIZE_EXCEEDED, UnmarshalFailed
+		//: in the trail (#894).
+		return errs.Wrap(coretoml.SizeExceeded, errs.WrapParams{Code: coretoml.CodeTOMLUnmarshalFailed},
 			errs.String(fieldProblem, problemTooLarge), errs.Int(fieldLimit, maxDocumentBytes))
 	}
 	rv := reflect.ValueOf(v)
-	//: the target must be somewhere to write.
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		//: refused, naming the type.
-		return errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
-			errs.String(fieldProblem, problemTarget), errs.String(fieldType, typeName(rv)))
-	}
 	p := parserPool.Get()
 	defer parserPool.Put(p)
 	//: the whole document is checked before anything is written.
@@ -76,17 +76,6 @@ func unmarshal(data []byte, v any) error {
 	d := decoder{p: p}
 	//: the root table into the target.
 	return d.root(v, rv.Elem())
-}
-
-// typeName names the type of v for a refusal.
-func typeName(v reflect.Value) string {
-	//: a nil interface has no type.
-	if !v.IsValid() {
-		//: nil.
-		return "nil"
-	}
-	//: the type.
-	return v.Type().String()
 }
 
 // root decodes the root table into the target, natively for the two untyped
@@ -208,11 +197,12 @@ func (d *decoder) anyValue(n int32) any {
 // fail returns UNMARSHAL_FAILED for node n, naming problem, the node's dotted
 // key and line, and the kind of value and the Go type when they are known.
 func (d *decoder) fail(n int32, problem string, target reflect.Type) error {
-	line, _ := position(d.p.data, int(d.p.nodes[n].at))
+	line, column := position(d.p.data, int(d.p.nodes[n].at))
 	fields := []errs.FieldValue{
 		errs.String(fieldProblem, problem),
 		errs.String(fieldKey, d.keyPath(n)),
 		errs.Int(fieldLine, line),
+		errs.Int(fieldColumn, column),
 		errs.String(fieldTOML, kindNames[d.p.nodes[n].kind]),
 	}
 	//: the Go type, when the refusal concerns one.

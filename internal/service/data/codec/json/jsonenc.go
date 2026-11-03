@@ -31,6 +31,14 @@ func AppendUint(dst []byte, v uint64) []byte {
 	return jsonenc.AppendUint(dst, v)
 }
 
+// AppendFloat appends f to dst as the JSON number encoding/json writes for a
+// float64 (1000000, not 1e+06; 1e-7, not 1e-07) and reports true; for NaN
+// and ±Inf it appends nothing and reports false, so the caller writes its
+// own policy for them.
+func AppendFloat(dst []byte, f float64) (number []byte, ok bool) {
+	return jsonenc.AppendFloat(dst, f)
+}
+
 // BeginObject appends the opening brace of an object to dst and returns the
 // [Object] that writes its members after it, in the order they are named.
 func BeginObject(dst []byte) Object {

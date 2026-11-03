@@ -500,3 +500,41 @@ func TestStreamingDecoderReadError(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// durations holds a time.Duration directly, through a pointer and in an
+// array, the three places a configuration puts one.
+type durations struct {
+	Timeout time.Duration    `toml:"timeout"`
+	Retry   *time.Duration   `toml:"retry"`
+	Backoff []time.Duration  `toml:"backoff"`
+	Zero    time.Duration    `toml:"zero,omitzero"`
+	Named   map[string]int64 `toml:"named,omitempty"`
+}
+
+// TestDurationIsWrittenAsItsText pins #1126: a time.Duration is written as
+// the quoted string of its String(), as yaml writes it, and that string reads
+// back to the same value — never the bare nanoseconds a person would have to
+// count the zeros of.
+func TestDurationIsWrittenAsItsText(t *testing.T) {
+	t.Parallel()
+	retry := 1500 * time.Millisecond
+	in := durations{Timeout: 90 * time.Minute, Retry: &retry, Backoff: []time.Duration{time.Second, 2 * time.Second}}
+	out, err := toml.New().Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	want := "timeout = '1h30m0s'\nretry = '1.5s'\nbackoff = ['1s', '2s']\n"
+	//: the text of each Duration, never 5400000000000.
+	if string(out) != want {
+		t.Fatalf("Marshal = %q, want %q", out, want)
+	}
+	var back durations
+	//: the text reads back.
+	if err := toml.New().Unmarshal(out, &back); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	//: the same values.
+	if back.Timeout != in.Timeout || back.Retry == nil || *back.Retry != retry || len(back.Backoff) != 2 || back.Backoff[1] != 2*time.Second {
+		t.Errorf("round trip = %+v, want %+v", back, in)
+	}
+}

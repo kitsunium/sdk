@@ -1,0 +1,412 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The OpenTelemetry slog bridge's severity mapping: SeverityNumber = level+9,
+      so DEBUG (-4) is 5, INFO (0) 9, WARN (4) 13, ERROR (8) 17, held inside the
+      specification's 1 (TRACE) to 24 (FATAL4).
+    grouped: true
+    items:
+      - name: severityOffset
+        type: int
+        value: "9"
+      - name: severityMin
+        type: int
+        value: "1"
+      - name: severityMax
+        type: int
+        value: "24"
+      - doc: decimalBase formats the integers JSON carries as numbers.
+        name: decimalBase
+        type: int
+        value: "10"
+      - doc: groupSeparator joins a group's name and its attributes' keys.
+        name: groupSeparator
+        type: byte
+        value: "'.'"
+    name: severityOffset
+  - doc: OTLPLogsPath is the OTLP/HTTP logs path a collector serves.
+    items:
+      - name: OTLPLogsPath
+        type: string
+        value: "\"/v1/logs\""
+    name: OTLPLogsPath
+  - doc: |-
+      rejectedFieldKey names the count of log records a partial success
+      refused, on the error it returns.
+    items:
+      - name: rejectedFieldKey
+        type: string
+        value: "\"rejected_log_records\""
+    name: rejectedFieldKey
+  - grouped: true
+    items:
+      - doc: writerName is the canonical registry key.
+        name: writerName
+        value: "\"otlpjson\""
+      - doc: |-
+          DefaultBatchMax is how many records one document carries when
+          Config.BatchMax is zero: the async drainer hands the sink up to this many.
+        name: DefaultBatchMax
+        type: int
+        value: "64"
+    name: writerName
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - severityOffset
+      - EncodeOTLPJSON
+      - appendRequest
+      - appendLogRecord
+      - severityNumber
+      - appendHex
+      - appendAttrs
+      - appendKeyValue
+      - appendAnyValue
+      - appendInt
+      - appendUint
+    name: encode.go
+  - decls:
+      - OTLPLogsPath
+      - rejectedFieldKey
+      - otlpSignal
+      - OTLPHTTPConfig
+      - otlpHTTPExporter
+      - NewOTLPHTTPExporter
+      - OTLPRetryable
+      - (*otlpHTTPExporter).ExportDocument
+      - (*otlpHTTPExporter).ExportEncodedDocument
+      - otlpPartialSuccess
+      - (*otlpPartialSuccess).RejectedCount
+      - decodeRejected
+    name: exporter.go
+  - decls:
+      - otlpSink
+      - newSink
+      - (*otlpSink).Write
+      - (*otlpSink).WriteBatch
+      - (*otlpSink).export
+      - (*otlpSink).Flush
+      - (*otlpSink).Close
+      - wrapCancelled
+    name: sink.go
+  - decls:
+      - _
+    name: sink_compliance.go
+  - decls:
+      - writerName
+      - Writer
+      - Config
+      - factory
+      - (*factory).Name
+      - (*factory).Open
+    name: writer.go
+functions:
+  - name: EncodeOTLPJSON
+    params: resource coreotel.ResourceValue, scope coreotel.ScopeValue, recs []corelogger.RecordEvent
+    results: "[]byte"
+  - doc: |-
+      appendRequest appends the ExportLogsServiceRequest of recs to dst:
+      resourceLogs (1) → resource (1), scopeLogs (2) → scope (1), logRecords (2).
+    name: appendRequest
+    params: dst []byte, resource otlp.ResourceMessage, scope otlp.ScopeMessage, recs []corelogger.RecordEvent
+    results: "[]byte"
+  - doc: |-
+      appendLogRecord appends one LogRecord in field-number order:
+      timeUnixNano (1), severityNumber (2), severityText (3), body (5),
+      attributes (6, omitted when none), traceId (9) and spanId (10), both hex
+      and both omitted outside a span.
+    name: appendLogRecord
+    params: dst []byte, rec *corelogger.RecordEvent
+    results: "[]byte"
+  - doc: |-
+      severityNumber maps a level onto OTLP's SeverityNumber as the
+      OpenTelemetry slog bridge does: level+9, held in 1…24.
+    name: severityNumber
+    params: l level.Level
+    results: int
+  - doc: appendHex appends id as a quoted lowercase hex string.
+    name: appendHex
+    params: dst, id []byte
+    results: "[]byte"
+  - doc: |-
+      appendAttrs appends attrs as KeyValues, a group flattened under its name
+      joined by '.', and reports whether anything was written (wrote carries the
+      comma state across a group's recursion).
+    name: appendAttrs
+    params: dst []byte, prefix string, attrs []corelogger.AttrValue, wrote bool
+    results: "[]byte, bool"
+  - doc: |-
+      appendKeyValue appends {"key":…,"value":{…}} with the value typed as the
+      OpenTelemetry slog bridge types it: a bool, an int64, a double and a
+      string as themselves; a uint64 an int64 when it fits and a string when it
+      does not; a duration its int64 nanoseconds; a time its int64 Unix
+      nanoseconds; anything else its rendered string.
+    name: appendKeyValue
+    params: dst []byte, key string, v corelogger.Value
+    results: "[]byte"
+  - doc: appendAnyValue appends the AnyValue member that types v.
+    name: appendAnyValue
+    params: dst []byte, v corelogger.Value
+    results: "[]byte"
+  - doc: appendInt appends an intValue member.
+    name: appendInt
+    params: dst []byte, n int64
+    results: "[]byte"
+  - doc: |-
+      appendUint appends an intValue member for a uint64 that fits an int64,
+      a stringValue for one that does not — OTLP has no unsigned 64-bit value.
+    name: appendUint
+    params: dst []byte, n uint64
+    results: "[]byte"
+  - name: NewOTLPHTTPExporter
+    params: cfg OTLPHTTPConfig
+    results: exporter corelogger.DocumentExporter, err error
+  - name: OTLPRetryable
+    params: err error
+    results: bool
+  - doc: decodeRejected reads rejectedLogRecords off a 2xx response.
+    name: decodeRejected
+    params: payload []byte
+    results: int64
+  - doc: newSink builds the terminal sink of cfg.
+    name: newSink
+    params: cfg *Config
+    results: "*otlpSink"
+  - doc: |-
+      wrapCancelled is a cancelled context under the transient verdict: the
+      batch was not sent and a later attempt may be.
+    name: wrapCancelled
+    params: cause error
+    results: error
+imports:
+  async: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async
+  context: context
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+  coreotlpjson: github.com/kitsunium/sdk/internal/core/observe/logger/writer/otlpjson
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hex: encoding/hex
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  levelgate: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate
+  otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
+  strconv: strconv
+  sync: sync
+  writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/observe/logger/writer/otlpjson
+  name: otlpjson
+  purpose: "Package otlpjson registers the \"otlpjson\" writer factory (#867): the third OpenTelemetry signal."
+types:
+  - kind: named
+    name: OTLPHTTPConfig
+    underlying: otlp.HTTPConfig
+  - doc: otlpHTTPExporter posts logs documents through the shared sender.
+    fields:
+      - doc: sender is the transport and the classification.
+        name: sender
+        type: "*otlp.Sender"
+    kind: struct
+    methods:
+      - doc: |-
+          ExportDocument implements corelogger.DocumentExporter: it POSTs doc — an
+          OTLP/JSON ExportLogsServiceRequest — under ctx. An empty doc posts nothing.
+        name: ExportDocument
+        params: ctx context.Context, doc []byte
+        recv: e *otlpHTTPExporter
+        results: error
+      - doc: |-
+          ExportEncodedDocument implements corelogger.EncodedDocumentExporter: doc
+          posted as it is, labelled with encoding — "gzip" never decompressed, ""
+          as ExportDocument, any other refused before a request (#1051).
+        name: ExportEncodedDocument
+        params: ctx context.Context, doc []byte, encoding string
+        recv: e *otlpHTTPExporter
+        results: error
+    name: otlpHTTPExporter
+  - doc: |-
+      otlpPartialSuccess is ExportLogsPartialSuccess: rejectedLogRecords (1),
+      errorMessage (2).
+    fields:
+      - name: RejectedLogRecords
+        type: otlp.LenientInt64
+      - name: ErrorMessage
+        type: string
+    kind: struct
+    methods:
+      - doc: RejectedCount implements otlp.RejectedCounter.
+        name: RejectedCount
+        recv: p *otlpPartialSuccess
+        results: int64
+    name: otlpPartialSuccess
+  - doc: |-
+      otlpSink encodes each batch the async drainer hands it into one OTLP/JSON
+      document and gives it to the exporter. The document buffer and the
+      one-record scratch are reused under mu, so the steady-state path allocates
+      nothing of its own.
+    fields:
+      - doc: exporter receives each document.
+        name: exporter
+        type: corelogger.DocumentExporter
+      - doc: resource and scope are rendered once per document.
+        name: resource
+        type: otlp.ResourceMessage
+      - name: scope
+        type: otlp.ScopeMessage
+      - doc: mu serialises encoding into doc and the export of it.
+        name: mu
+        type: sync.Mutex
+      - doc: doc is the reused document buffer; one is the scratch Write uses.
+        name: doc
+        type: "[]byte"
+      - name: one
+        type: "[1]corelogger.RecordEvent"
+    kind: struct
+    methods:
+      - doc: |-
+          Write exports r as a document of one record. The async drainer reaches it
+          only when it holds a single record; a backlog goes to WriteBatch.
+        name: Write
+        params: ctx context.Context, r corelogger.RecordEvent, p []byte
+        recv: s *otlpSink
+        results: n int, err error
+      - doc: |-
+          WriteBatch exports recs as ONE document: delivered whole or not at all,
+          so a refusal reports none of them written — the async drainer then
+          reports the failure once per record.
+        name: WriteBatch
+        params: ctx context.Context, recs []corelogger.RecordEvent, _ [][]byte
+        recv: s *otlpSink
+        results: written int, err error
+      - doc: |-
+          export encodes recs into the reused buffer and hands it to the exporter.
+          The caller holds s.mu.
+        name: export
+        params: ctx context.Context, recs []corelogger.RecordEvent
+        recv: s *otlpSink
+        results: error
+      - doc: "Flush is a no-op: every batch is exported as it arrives."
+        name: Flush
+        params: ctx context.Context
+        recv: s *otlpSink
+        results: error
+      - doc: "Close releases nothing: the exporter is the caller's."
+        name: Close
+        recv: s *otlpSink
+        results: error
+    name: otlpSink
+  - fields:
+      - doc: |-
+          Exporter receives each batch as one OTLP/JSON document: the exporter
+          NewOTLPHTTPExporter returns, or forward.NewLogExporter's adapter, which
+          keeps it in a durable queue. It must not retain doc past its return.
+        name: Exporter
+        type: corelogger.DocumentExporter
+      - doc: Resource identifies the producer, carried once per document.
+        name: Resource
+        type: coreotel.ResourceValue
+      - doc: Scope identifies the instrumentation, carried once per document.
+        name: Scope
+        type: coreotel.ScopeValue
+      - doc: |-
+          MinLevel is the optional per-writer severity floor; the zero value
+          (level.Info) inherits the handler-global level.
+        name: MinLevel
+        type: level.Level
+      - doc: |-
+          BatchMax is how many records one document carries at most; zero is
+          DefaultBatchMax.
+        name: BatchMax
+        type: int
+      - doc: |-
+          BufferSize is the async ring capacity; a non-positive value applies
+          async's own default.
+        name: BufferSize
+        type: int
+      - doc: |-
+          OnDrop, when non-nil, is invoked with the count of records discarded
+          because the non-blocking ring saturated.
+        name: OnDrop
+        type: func(dropped int)
+      - doc: |-
+          OnError, when non-nil, is invoked for each record of a batch the
+          exporter refused; nil discards the failure.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: Config
+  - doc: factory builds the writer from a Config.
+    kind: struct
+    methods:
+      - doc: Name reports the canonical key "otlpjson".
+        name: Name
+        recv: "*factory"
+        results: writer.Name
+      - doc: |-
+          Open validates cfg and composes levelgate(async(otlpSink)): the level floor
+          first, then the ring, whose drainer hands the sink up to BatchMax records
+          at a time. A wrong config type, or one with no Exporter, is the shared
+          WriterConfigInvalid.
+        name: Open
+        params: cfg writer.Config
+        recv: "*factory"
+        results: sink corelogger.Sink, err error
+    name: factory
+vars:
+  - doc: |-
+      otlpSignal is the logs signal's vocabulary for every verdict the shared
+      sender reaches: the codes of internal/core/observe/logger/writer/otlpjson.
+    items:
+      - name: otlpSignal
+        value: |-
+          otlp.SignalSpec{
+          	EndpointInvalid: coreotlpjson.OTLPLogsEndpointInvalid,
+          	EndpointUnparsable: errs.WrapParams{
+          		Code:    coreotlpjson.CodeOTLPLogsEndpointInvalid,
+          		Reason:  "OTLP_LOGS_ENDPOINT_INVALID",
+          		Public:  "The OTLP logs endpoint is not an absolute http or https URL with a path",
+          		Private: "service/observe/logger/writer/otlpjson: the configured OTLP logs endpoint could not be parsed as a URL",
+          	},
+          	RequestUnbuildable: errs.WrapParams{
+          		Code:    coreotlpjson.CodeOTLPLogsExportRejected,
+          		Reason:  "OTLP_LOGS_EXPORT_REJECTED",
+          		Public:  "The OTLP collector rejected the logs payload",
+          		Private: "service/observe/logger/writer/otlpjson: the OTLP/HTTP logs request could not be built",
+          	},
+          	TransportFault: errs.WrapParams{
+          		Code:    coreotlpjson.CodeOTLPLogsExportUnavailable,
+          		Reason:  "OTLP_LOGS_EXPORT_UNAVAILABLE",
+          		Public:  "The OTLP collector is unreachable or overloaded",
+          		Private: "service/observe/logger/writer/otlpjson: the OTLP/HTTP logs request failed before a response was read",
+          	},
+          	Rejected:       coreotlpjson.OTLPLogsExportRejected,
+          	Unavailable:    coreotlpjson.OTLPLogsExportUnavailable,
+          	PartialSuccess: coreotlpjson.OTLPLogsPartialSuccess,
+          	RejectedField:  rejectedFieldKey,
+          	DecodeRejected: decodeRejected,
+          }
+    name: otlpSignal
+  - doc: |-
+      otlpSink takes a backlog from the async drainer as one document, and the
+      OTLP/HTTP exporter ships it (#867).
+    grouped: true
+    items:
+      - name: _
+        type: corelogger.BatchSink
+        value: (*otlpSink)(nil)
+      - name: _
+        type: corelogger.DocumentExporter
+        value: (*otlpHTTPExporter)(nil)
+      - name: _
+        type: corelogger.EncodedDocumentExporter
+        value: (*otlpHTTPExporter)(nil)
+    name: _
+  - doc: |-
+      Writer is the registered "otlpjson" factory singleton. The blank assignment
+      runs writer.Register at package load (no init()).
+    items:
+      - name: Writer
+        value: writer.Register(&factory{})
+    name: Writer

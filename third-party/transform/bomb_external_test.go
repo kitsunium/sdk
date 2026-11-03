@@ -55,19 +55,22 @@ func TestZstdRefusesDecompressionBomb(t *testing.T) {
 	}
 	defer closeChecked(t, guarded)
 
-	dst := []byte("prefix")
-	out, derr := guarded.Decompress(dst, bomb)
-	if derr == nil {
-		t.Fatalf("bomb accepted: %d bytes returned", len(out))
-	}
-	if !errs.HasCode(derr, tptransform.CodeDecompressionLimitExceeded) {
-		t.Fatalf("wrong code: want CodeDecompressionLimitExceeded, got %v", derr)
-	}
-	if errs.HasCode(derr, tptransform.CodeZstdFailed) {
-		t.Fatalf("a bomb must not be reported as a corrupt stream: %v", derr)
-	}
-	if !bytes.Equal(out, dst) {
-		t.Fatalf("refusal leaked output: got %d bytes, want the %d-byte dst back", len(out), len(dst))
+	//: a prefix with no room, then one with twice the ceiling of room: the
+	//: tail decode (kitsunium/sdk#1163) must refuse into spare capacity too.
+	for _, dst := range [][]byte{[]byte("prefix"), append(make([]byte, 0, 6+2*bombLimit), "prefix"...)} {
+		out, derr := guarded.Decompress(dst, bomb)
+		if derr == nil {
+			t.Fatalf("bomb accepted: %d bytes returned", len(out))
+		}
+		if !errs.HasCode(derr, tptransform.CodeDecompressionLimitExceeded) {
+			t.Fatalf("wrong code: want CodeDecompressionLimitExceeded, got %v", derr)
+		}
+		if errs.HasCode(derr, tptransform.CodeZstdFailed) {
+			t.Fatalf("a bomb must not be reported as a corrupt stream: %v", derr)
+		}
+		if !bytes.Equal(out, dst) || len(out) != len(dst) {
+			t.Fatalf("refusal leaked output: got %d bytes, want the %d-byte dst back", len(out), len(dst))
+		}
 	}
 
 	//: the guard refuses, it does not wedge — a legal payload still round-trips.
@@ -117,15 +120,19 @@ func TestZstdRefusesMultiFrameBomb(t *testing.T) {
 	}
 	defer closeChecked(t, guarded)
 
-	out, derr := guarded.Decompress(nil, multi)
-	if derr == nil {
-		t.Fatalf("multi-frame bomb accepted: %d bytes returned", len(out))
-	}
-	if !errs.HasCode(derr, tptransform.CodeDecompressionLimitExceeded) {
-		t.Fatalf("wrong code: want CodeDecompressionLimitExceeded, got %v", derr)
-	}
-	if len(out) != 0 {
-		t.Fatalf("refusal leaked %d bytes", len(out))
+	//: nil, then a non-empty dst with room for the whole bomb: the tail
+	//: decode lands in dst's capacity, and must be refused all the same.
+	for _, dst := range [][]byte{nil, append(make([]byte, 0, 6+frames*int(bombLimit/2)), "prefix"...)} {
+		out, derr := guarded.Decompress(dst, multi)
+		if derr == nil {
+			t.Fatalf("multi-frame bomb accepted into a %d-byte dst: %d bytes returned", len(dst), len(out))
+		}
+		if !errs.HasCode(derr, tptransform.CodeDecompressionLimitExceeded) {
+			t.Fatalf("wrong code: want CodeDecompressionLimitExceeded, got %v", derr)
+		}
+		if !bytes.Equal(out, dst) || len(out) != len(dst) {
+			t.Fatalf("refusal leaked output: %d bytes, want the %d-byte dst back", len(out), len(dst))
+		}
 	}
 }
 
@@ -172,45 +179,72 @@ func TestS2RefusesDecompressionBombBeforeDecoding(t *testing.T) {
 	}
 }
 
-// TestBoundaryIsTheDeclaredSize pins the edge of the s2 ceiling: exactly at the
-// limit is accepted, one byte past is refused. A guard nobody has driven to its
-// boundary is a guard nobody knows the sign of.
+// TestBoundaryIsTheDeclaredSize pins the edge of the ceiling, for s2 and
+// zstd: exactly at the limit is accepted, one byte past is refused. A guard
+// nobody has driven to its boundary is a guard nobody knows the sign of. Each
+// row runs into a nil dst and into a dst already longer than the ceiling with
+// the room to take the payload (kitsunium/sdk#1163): the ceiling counts the
+// payload, so the boundary does not move with len(dst).
 func TestBoundaryIsTheDeclaredSize(t *testing.T) {
 	t.Parallel()
 
 	const limit int64 = 4096
-	builder, err := tptransform.NewS2Compressor(limit * 4)
+	s2Builder, err := tptransform.NewS2Compressor(limit * 4)
 	if err != nil {
 		t.Fatalf("build builder: %v", err)
 	}
-	guarded, gerr := tptransform.NewS2Compressor(limit)
+	s2Guarded, gerr := tptransform.NewS2Compressor(limit)
 	if gerr != nil {
 		t.Fatalf("build guarded: %v", gerr)
 	}
+	zBuilder, zerr := tptransform.NewZstdCompressor(tptransform.ZstdFastest, limit*4)
+	if zerr != nil {
+		t.Fatalf("build zstd builder: %v", zerr)
+	}
+	defer closeChecked(t, zBuilder)
+	zGuarded, zgerr := tptransform.NewZstdCompressor(tptransform.ZstdFastest, limit)
+	if zgerr != nil {
+		t.Fatalf("build zstd guarded: %v", zgerr)
+	}
+	defer closeChecked(t, zGuarded)
 
-	for _, tc := range []struct {
-		name    string
-		size    int
-		refused bool
+	for _, sc := range []struct {
+		name     string
+		compress func(dst, src []byte) ([]byte, error)
+		guarded  func(dst, src []byte) ([]byte, error)
 	}{
-		{"one below the ceiling", int(limit) - 1, false},
-		{"exactly at the ceiling", int(limit), false},
-		{"one past the ceiling", int(limit) + 1, true},
+		{"s2", s2Builder.Compress, s2Guarded.Decompress},
+		{"zstd", zBuilder.Compress, zGuarded.Decompress},
 	} {
-		encoded, cerr := builder.Compress(nil, bytes.Repeat([]byte{'a'}, tc.size))
-		if cerr != nil {
-			t.Fatalf("%s: compress: %v", tc.name, cerr)
-		}
-		out, derr := guarded.Decompress(nil, encoded)
-		switch {
-		case tc.refused && derr == nil:
-			t.Fatalf("%s: accepted %d bytes, want refusal", tc.name, len(out))
-		case tc.refused && !errs.HasCode(derr, tptransform.CodeDecompressionLimitExceeded):
-			t.Fatalf("%s: wrong code: %v", tc.name, derr)
-		case !tc.refused && derr != nil:
-			t.Fatalf("%s: refused a legal payload: %v", tc.name, derr)
-		case !tc.refused && len(out) != tc.size:
-			t.Fatalf("%s: got %d bytes, want %d", tc.name, len(out), tc.size)
+		for _, tc := range []struct {
+			name    string
+			size    int
+			refused bool
+		}{
+			{"one below the ceiling", int(limit) - 1, false},
+			{"exactly at the ceiling", int(limit), false},
+			{"one past the ceiling", int(limit) + 1, true},
+		} {
+			encoded, cerr := sc.compress(nil, bytes.Repeat([]byte{'a'}, tc.size))
+			if cerr != nil {
+				t.Fatalf("%s %s: compress: %v", sc.name, tc.name, cerr)
+			}
+			long := bytes.Repeat([]byte{'p'}, int(limit)+1)
+			for _, dst := range [][]byte{nil, append(make([]byte, 0, len(long)+tc.size), long...)} {
+				out, derr := sc.guarded(dst, encoded)
+				switch {
+				case tc.refused && derr == nil:
+					t.Fatalf("%s %s, %d-byte dst: accepted %d bytes, want refusal", sc.name, tc.name, len(dst), len(out))
+				case tc.refused && !errs.HasCode(derr, tptransform.CodeDecompressionLimitExceeded):
+					t.Fatalf("%s %s, %d-byte dst: wrong code: %v", sc.name, tc.name, len(dst), derr)
+				case tc.refused && !bytes.Equal(out, dst):
+					t.Fatalf("%s %s, %d-byte dst: a refusal returned %d bytes, want dst back", sc.name, tc.name, len(dst), len(out))
+				case !tc.refused && derr != nil:
+					t.Fatalf("%s %s, %d-byte dst: refused a legal payload: %v", sc.name, tc.name, len(dst), derr)
+				case !tc.refused && len(out) != len(dst)+tc.size:
+					t.Fatalf("%s %s, %d-byte dst: got %d bytes, want %d", sc.name, tc.name, len(dst), len(out), len(dst)+tc.size)
+				}
+			}
 		}
 	}
 }

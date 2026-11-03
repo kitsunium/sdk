@@ -15,7 +15,7 @@ must never surface as a fan-out failure.
 
 | File | Role |
 |---|---|
-| `gate.go` | `gateSink` + `New(inner, min)` + `Floor(inner, min)` + `Write` / `Flush` / `Close` |
+| `gate.go` | `gateSink` + `New(inner, min)` + `Floor(inner, min)` + `NewLeveled(inner, floor)` + `Write` / `WriteBatch` + `forwardRun` / `Flush` / `Close` |
 
 No `codes.go` / `errors.go` — the gate never originates an error.
 
@@ -27,6 +27,16 @@ No `codes.go` / `errors.go` — the gate never originates an error.
 - For any other `min`, `Write` forwards records at/above the floor and drops the
   rest, reporting `(len(p), nil)` so `middleware/multi` never aggregates a
   spurious failure for a deliberately-dropped record.
+- `WriteBatch` (the `corelogger.BatchSink` sibling, #807) cuts the batch at
+  every dropped record and hands each run of kept ones to the inner sink as a
+  sub-slice — one `WriteBatch` when the inner sink takes one, one `Write` per
+  record otherwise — so a gate between the async drainer and a file keeps the
+  batch, allocates nothing and keeps the order. A dropped record counts as
+  delivered, as `Write` reports a drop.
+- The floor is a `level.Leveler` read per record (per batch in `WriteBatch`):
+  `New` and `Floor` hold `level.Fixed(min)`, `NewLeveled` the caller's — a
+  `level.Var` retuned with `Set` moves the gate on the next record (#1015). A
+  nil floor is `level.Info`; a nil inner is nil, as `Floor`'s.
 - `Flush` / `Close` delegate verbatim — the gate buffers nothing and owns no
   resources.
 - `Floor(inner, min)` is the same gate WITHOUT the inherit sentinel: the floor

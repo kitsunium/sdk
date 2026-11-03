@@ -6,7 +6,9 @@ package transform_test
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os/exec"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -211,5 +213,127 @@ func TestGoListDepsNamesNoCodec(t *testing.T) {
 		if !strings.HasPrefix(line, "github.com/kitsunium/sdk/") || strings.Contains(line, "/data/codec") {
 			t.Errorf("go list -deps names %s", line)
 		}
+	}
+}
+
+// TestALevelIsTheCallers drives the three level constructors through the
+// facade (kitsunium/sdk#900): each compresses at the caller's level — a
+// different stream from the default's — and its output reads back through the
+// registered scheme of the same Algorithm, since the level rides in the bytes
+// and not in the reader. A level that would not compress is clamped, so the
+// compressor still shrinks the payload.
+func TestALevelIsTheCallers(t *testing.T) {
+	t.Parallel()
+	words := []string{"request", "served", "route", "status", "cache", "miss", "retry", "orders", "200", "503"}
+	var b strings.Builder
+	for i := range 8192 {
+		b.WriteString(words[(i*7+i/3)%len(words)])
+		b.WriteByte(' ')
+	}
+	payload := []byte(b.String())
+	for _, c := range []struct {
+		algo  transform.Algorithm
+		build func(level int) transform.Compressor
+	}{
+		{transform.Gzip, transform.NewGzipCompressor},
+		{transform.Flate, transform.NewFlateCompressor},
+		{transform.Zlib, transform.NewZlibCompressor},
+	} {
+		def, derr := transform.Compress(c.algo, nil, payload)
+		fast, ferr := c.build(1).Compress(nil, payload)
+		inert, ierr := c.build(0).Compress(nil, payload)
+		if err := errors.Join(derr, ferr, ierr); err != nil {
+			t.Fatalf("%s: Compress: %v", c.algo, err)
+		}
+		if bytes.Equal(fast, def) {
+			t.Fatalf("%s: level 1 wrote the default's bytes", c.algo)
+		}
+		if len(inert) >= len(payload) {
+			t.Fatalf("%s: level 0 stored the payload (%d of %d bytes): the clamp did not hold", c.algo, len(inert), len(payload))
+		}
+		back, rerr := transform.Decompress(c.algo, nil, fast)
+		if rerr != nil || !bytes.Equal(back, payload) {
+			t.Fatalf("%s: the registered scheme read the level-1 stream back as err=%v, %d bytes", c.algo, rerr, len(back))
+		}
+	}
+}
+
+// countingReader counts the compressed bytes a stream reader takes from its
+// source.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+// Read implements io.Reader and counts.
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// TestAStreamStopsAtItsLimit is #892's first acceptance line: NewReader over a
+// gzip stream ten times its limit hands over exactly limit bytes, then
+// DecompressedTooLarge, having read only part of the compressed source and
+// allocated far less than twice the limit — the stream is never held whole.
+func TestAStreamStopsAtItsLimit(t *testing.T) {
+	const limit int64 = 4 << 20
+	var compressed bytes.Buffer
+	w, err := transform.NewWriter(transform.Gzip, &compressed)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	chunk := bytes.Repeat([]byte("ten times the limit "), 1<<12)
+	for written := int64(0); written < 10*limit; written += int64(len(chunk)) {
+		if _, werr := w.Write(chunk); werr != nil {
+			t.Fatalf("Write: %v", werr)
+		}
+	}
+	if cerr := w.Close(); cerr != nil {
+		t.Fatalf("Close: %v", cerr)
+	}
+	source := &countingReader{r: bytes.NewReader(compressed.Bytes())}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	r, err := transform.NewReader(transform.Gzip, source, limit)
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	n, cerr := io.Copy(io.Discard, r)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(cerr, transform.DecompressedTooLarge) || n != limit {
+		t.Fatalf("handed over %d bytes then err=%v, want %d then DecompressedTooLarge", n, cerr, limit)
+	}
+	if source.n >= int64(compressed.Len()) {
+		t.Fatalf("the reader drained the whole %d-byte source past its limit", compressed.Len())
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated >= uint64(2*limit) {
+		t.Fatalf("reading %d bytes of a stream allocated %d bytes, want under twice the limit", limit, allocated)
+	}
+	t.Logf("%d of %d compressed bytes read, %d allocated, for a %d-byte limit over a %d-byte stream",
+		source.n, compressed.Len(), after.TotalAlloc-before.TotalAlloc, limit, 10*limit)
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+// TestAStreamIsRefusedWithoutAStreamForm pins the facade's two refusals: an
+// unregistered Algorithm is UnknownCompressor, and a registered scheme with no
+// stream form — the plain test scheme — is StreamingUnsupported, for both
+// directions.
+func TestAStreamIsRefusedWithoutAStreamForm(t *testing.T) {
+	t.Parallel()
+	if _, err := transform.NewReader("no-such-scheme", bytes.NewReader(nil), 1); !errors.Is(err, transform.UnknownCompressor) {
+		t.Fatalf("NewReader(unregistered) err=%v, want UnknownCompressor", err)
+	}
+	if _, err := transform.NewWriter("no-such-scheme", io.Discard); !errors.Is(err, transform.UnknownCompressor) {
+		t.Fatalf("NewWriter(unregistered) err=%v, want UnknownCompressor", err)
+	}
+	if _, err := transform.NewReader(plainScheme, bytes.NewReader(nil), 1); !errors.Is(err, transform.StreamingUnsupported) ||
+		!errs.HasCode(err, transform.CodeStreamingUnsupported) {
+		t.Fatalf("NewReader(plain) err=%v, want StreamingUnsupported", err)
+	}
+	if _, err := transform.NewWriter(plainScheme, io.Discard); !errors.Is(err, transform.StreamingUnsupported) {
+		t.Fatalf("NewWriter(plain) err=%v, want StreamingUnsupported", err)
 	}
 }

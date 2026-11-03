@@ -185,13 +185,18 @@
 // [InvalidLabelName], [ReservedLabelName]) and leaves the writer untouched,
 // because a truncated exposition parses as a complete one.
 //
-// A scrape endpoint binds its own exporter with [NewPrometheusExporter] and
-// hands it the response writer:
+// A scrape endpoint is [NewPrometheusHandler] over the meter's Collect: it
+// renders the document whole before a byte leaves, answers a refusal with 500
+// and its Public text rather than a 200 with an empty body (which a scraper
+// reads as every series gone), sets [PrometheusContentType] and the
+// Content-Length, and lets one scrape run at a time (503 for a concurrent one,
+// so a delta meter keeps one reader):
 //
-//	http.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
-//	    w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-//	    _ = metrics.NewPrometheusExporter("scrape", w).Export(m.Collect())
-//	})
+//	h, err := metrics.NewPrometheusHandler(m.Collect, metrics.PrometheusHandlerConfig{})
+//	if err != nil {
+//	    return err
+//	}
+//	mux.Handle("/metrics", h)
 //
 // A non-monotonic sum is typed `gauge` there, not `counter`, because `rate()`
 // on a counter re-extrapolates from zero every time the value falls.

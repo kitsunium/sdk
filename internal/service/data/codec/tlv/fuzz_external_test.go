@@ -139,6 +139,10 @@ func tlvDegenerateSeeds() [][]byte {
 		{0xFF, 0x00},
 		//: nesting past the depth cap: seedOverDepth single-element slices.
 		tlvDeepSeed(),
+		//: a slice whose first child declares the whole 10 MiB ceiling: legal
+		//: alone, it crosses the ceiling once the slice's own header is counted,
+		//: so the stream decoder must refuse it before reading its value (#1105).
+		{seedTagSlice, 0x02, seedTagString, 0x80, 0x80, 0x80, 0x05, 'x'},
 		//: two independent records back to back — trailing bytes for Unmarshal,
 		//: two successful Decode calls for the streaming decoder.
 		{seedTagNil, 0x00, seedTagBoolTrue, 0x00},

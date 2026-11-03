@@ -11,6 +11,17 @@
 // gohcl.EncodeIntoBody, so the top-level value MUST be a struct (or pointer to
 // one) with `hcl:"…"` field tags. Non-streaming; implements the optional Appender.
 //
+// Unmarshal bounds its input twice before hclsyntax parses it: 10 MiB, and 100
+// levels of nesting. hclsyntax's parser is recursive descent with no depth
+// guard, so a document of a million '[' overflowed the goroutine stack — a
+// fatal error that takes the process down and no recover() catches. A lexical
+// pre-scan counts tuples, objects, parentheses, strings, template
+// interpolations and directives, runs of unary operators and chains of
+// conditionals, outside comments and heredoc text, and refuses past the
+// ceiling with DEPTH_EXCEEDED (0.3.37.4). A panic of the parser on a crafted
+// document is recovered into HCL_UNMARSHAL_FAILED, as Marshal recovers
+// gohcl's.
+//
 // Package hcl — range 0.3.37.* (ADR 0022 third-party/codec/hcl block).
 //
 // Package hcl — declares the sentinel *errs.Error values for the HCL codec.

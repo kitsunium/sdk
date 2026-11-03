@@ -1,0 +1,15 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: nameLen
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i
+                when: "!isNameStart(c) && c != '-' && c != '.' && (c < '0' || c > '9')"
+          key: i
+          range: p
+          value: c
+      - return: len(p)

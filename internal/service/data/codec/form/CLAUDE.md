@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-09T00:00:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/form/
 
 ## Purpose
@@ -104,6 +104,7 @@ package always emitted; only the declaration moved.
 | `0.3.40.1`  | `ValueInvalid`    | argument / target is not one of the three modelled shapes (or is a nil pointer to one) |
 | `0.3.40.2`  | `UnmarshalFailed` | `net/url.ParseQuery` refused the input (bad `%XX` escape, `;` separator) **or** a decode bound was exceeded |
 | `0.3.40.3`  | `MultiValue`      | decode of a repeated key into a `map[string]string` target |
+| `0.3.40.4`  | `SizeExceeded`    | a body past `maxFormBytes` or more pairs than `maxFormPairs` — reason `SIZE_EXCEEDED`, `UNMARSHAL_FAILED` in the trail (#894) |
 
 **There is deliberately no `MarshalFailed`.** Past the argument-shape gate,
 percent-escaping a map of strings is a total function — no byte sequence makes
@@ -180,3 +181,7 @@ to the race suite. Its compensating lane is the race-off alloc lane, which
 already covers this package through the `//internal/service/data/codec/...` entry in
 `tools/alloc-lane-targets.txt` — CLAUDE.md rule 12 wants that lane named in the
 same change, and this is the naming.
+
+## Fuzz (#897)
+
+`fuzz_external_test.go` — `FuzzRoundTrip`: ADR 0036's contract: any input decodes without a panic; decoded values re-encode, read back equal, and the second encode is the same bytes. The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.

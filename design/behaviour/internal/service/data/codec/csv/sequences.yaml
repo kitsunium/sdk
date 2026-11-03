@@ -1,6 +1,33 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: NewWithOptions
+    steps:
+      - bind: comma
+        eval: o.Comma
+      - opt:
+          do:
+            - set: comma
+              value: defaultComma
+          when: comma == 0
+      - opt:
+          do:
+            - return: nil, errs.Wrap(corecsv.OptionsInvalid, errs.WrapParams{})
+          when: "!validDelim(comma)"
+      - return: "&csvCodec{escapeFormulas: o.Escape, comma: comma, noHeader: o.NoHeader}, nil"
+  - of: validDelim
+    steps:
+      - return: r != 0 && r != '"' && r != '\r' && r != '\n' && utf8.ValidRune(r) && r != utf8.RuneError
+  - of: (*csvCodec).format
+    steps:
+      - bind: comma
+        eval: c.comma
+      - opt:
+          do:
+            - set: comma
+              value: defaultComma
+          when: comma == 0
+      - return: "format{comma: comma, escape: c.escapeFormulas, noHeader: c.noHeader}"
   - of: New
     steps:
       - return: Codec
@@ -24,118 +51,147 @@ sequences:
         kind: self
       - id: extractRecords
         kind: internal
+      - id: c.marshalTable
+        kind: internal
+      - id: c.format
+        kind: internal
       - id: marshalPromotionShape
         kind: internal
-      - id: escapeFormulaCells
+      - id: appendRecords
         kind: internal
-      - id: scratch
-        kind: package
-      - id: stdcsv
-        kind: stdlib
-      - id: w.WriteAll
-        kind: value
     steps:
       - bind: records, ok
         eval: extractRecords(v)
         to: extractRecords
       - opt:
           do:
-            - return: |-
-                nil, errs.Wrap(nil, errs.WrapParams{
-                			Code:    corecsv.CodeCSVValueInvalid,
-                			Reason:  "VALUE_INVALID",
-                			Public:  "CSV codec requires a [][]string value",
-                			Private: "service/data/codec/csv.Marshal: argument is not [][]string",
-                		})
+            - return: c.marshalTable(v)
+              to: c.marshalTable
           when: "!ok"
+      - bind: f
+        eval: c.format()
+        to: c.format
       - opt:
           do:
             - return: marshalPromotionShape(records[1][0]), nil
               to: marshalPromotionShape
-          when: "!c.escapeFormulas && isPromotionShape(records)"
-      - opt:
-          do:
-            - set: records
-              to: escapeFormulaCells
-              value: escapeFormulaCells(records)
-          when: c.escapeFormulas
-      - bind: buf
-        eval: scratch.AcquireBuffer()
-        to: scratch
-      - bind: w
-        eval: stdcsv.NewWriter(buf)
-        to: stdcsv
-      - opt:
-          do:
-            - eval: scratch.ReleaseBuffer(buf)
-              to: scratch
-            - return: |-
-                nil, errs.Wrap(werr, errs.WrapParams{
-                			Code:    corecsv.CodeCSVMarshalFailed,
-                			Reason:  "MARSHAL_FAILED",
-                			Public:  "CSV encoding failed",
-                			Private: "service/data/codec/csv.Marshal: WriteAll returned an error",
-                		})
-          init:
-            bind: werr
-            eval: w.WriteAll(records)
-            to: w.WriteAll
-          when: werr != nil
+          when: "!f.escape && f.comma == defaultComma && isPromotionShape(records)"
       - bind: out
-        eval: scratch.DetachBuffer(buf)
-        to: scratch
+        eval: make([]byte, 0, recordsLen(records, f.comma, f.escape))
+      - return: appendRecords(out, records, f.comma, f.escape), nil
+        to: appendRecords
+  - of: (*csvCodec).marshalTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvCodec).marshalTable
+        kind: self
+      - id: tableOf
+        kind: internal
+      - id: appendTable
+        kind: internal
+    steps:
+      - bind: t, terr
+        eval: tableOf(v)
+        to: tableOf
+      - opt:
+          do:
+            - return: nil, terr
+          when: terr != nil
+      - bind: out, aerr
+        eval: appendTable(make([]byte, 0, (t.rows.Len()+1)*rowEstimate), t, c.format())
+        to: appendTable
+      - opt:
+          do:
+            - return: nil, aerr
+          when: aerr != nil
       - return: out, nil
-  - of: escapeFormulaCells
+  - of: valueInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: valueInvalid
+        kind: self
+      - id: errs
+        kind: package
     steps:
-      - bind: out
-        eval: make([][]string, 0, len(records))
-      - loop:
-          do:
-            - set: out
-              value: append(out, escapeFormulaRow(row))
-          key: _
-          range: records
-          value: row
-      - return: out
-  - of: escapeFormulaRow
-    steps:
-      - bind: out
-        eval: make([]string, 0, len(row))
-      - loop:
-          do:
-            - set: out
-              value: append(out, escapeIfFormulaCell(cell))
-          key: _
-          range: row
-          value: cell
-      - return: out
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    corecsv.CodeCSVValueInvalid,
+          		Reason:  "VALUE_INVALID",
+          		Public:  "CSV codec requires a [][]string value",
+          		Private: private,
+          	})
+        to: errs
   - of: isFormulaTrigger
     steps:
       - return: b == '=' || b == '+' || b == '-' || b == '@' || b == '\t' || b == '\r'
-  - of: escapeIfFormulaCell
-    steps:
-      - opt:
-          do:
-            - return: cell
-          when: cell == "" || !isFormulaTrigger(cell[0])
-      - return: "\"'\" + cell"
   - of: (*csvCodec).Append
     participants:
       - id: caller
         kind: actor
       - id: (*csvCodec).Append
         kind: self
-      - id: c.Marshal
+      - id: c.appendValue
         kind: internal
     steps:
-      - bind: encoded, merr
-        eval: c.Marshal(v)
-        to: c.Marshal
+      - return: c.appendValue(dst, v)
+        to: c.appendValue
+  - of: (*csvCodec).appendValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvCodec).appendValue
+        kind: self
+      - id: extractRecords
+        kind: internal
+      - id: c.format
+        kind: internal
+      - id: tableOf
+        kind: internal
+      - id: appendTable
+        kind: internal
+      - id: appendPromotionShape
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: appendRecords
+        kind: internal
+    steps:
+      - bind: records, ok
+        eval: extractRecords(v)
+        to: extractRecords
+      - bind: f
+        eval: c.format()
+        to: c.format
       - opt:
           do:
-            - return: dst, merr
-          when: merr != nil
-      - return: append(dst, encoded...), nil
+            - bind: t, terr
+              eval: tableOf(v)
+              to: tableOf
+            - opt:
+                do:
+                  - return: dst, terr
+                when: terr != nil
+            - bind: out, aerr
+              eval: appendTable(dst, t, f)
+              to: appendTable
+            - opt:
+                do:
+                  - return: dst, aerr
+                when: aerr != nil
+            - return: out, nil
+          when: "!ok"
+      - opt:
+          do:
+            - return: appendPromotionShape(dst, records[1][0]), nil
+              to: appendPromotionShape
+          when: "!f.escape && f.comma == defaultComma && isPromotionShape(records)"
+      - set: dst
+        to: slices
+        value: slices.Grow(dst, recordsLen(records, f.comma, f.escape))
+      - return: appendRecords(dst, records, f.comma, f.escape), nil
+        to: appendRecords
   - of: isPromotionShape
     steps:
       - opt:
@@ -146,37 +202,65 @@ sequences:
             		len(records[0]) != promotionColumnCount ||
             		len(records[1]) != promotionColumnCount
       - return: records[0][0] == promotionHeaderCell
+  - of: marshalPromotionShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: marshalPromotionShape
+        kind: self
+      - id: appendPromotionShape
+        kind: internal
+    steps:
+      - bind: out
+        eval: make([]byte, 0, len(promotionHeaderCell)+1+1+promotionBufWorstCaseFactor*len(body)+1+1)
+      - return: appendPromotionShape(out, body)
+        to: appendPromotionShape
   - of: (*csvCodec).Unmarshal
     participants:
       - id: caller
         kind: actor
       - id: (*csvCodec).Unmarshal
         kind: self
-      - id: errs
+      - id: codec
         kind: package
+      - id: rowsTargetOf
+        kind: internal
+      - id: unmarshalTable
+        kind: internal
       - id: scratch
         kind: package
       - id: readAllPreSized
         kind: internal
+      - id: errs
+        kind: package
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - bind: dst, ok
         eval: v.(*[][]string)
       - opt:
           do:
-            - return: |-
-                errs.Wrap(nil, errs.WrapParams{
-                			Code:    corecsv.CodeCSVValueInvalid,
-                			Reason:  "VALUE_INVALID",
-                			Public:  "CSV codec requires a [][]string value",
-                			Private: "service/data/codec/csv.Unmarshal: target is not *[][]string",
-                		})
-              to: errs
+            - bind: t, terr
+              eval: rowsTargetOf(v)
+              to: rowsTargetOf
+            - opt:
+                do:
+                  - return: terr
+                when: terr != nil
+            - return: unmarshalTable(data, t, c.format())
+              to: unmarshalTable
           when: "!ok"
       - bind: br
         eval: scratch.AcquireReader(data)
         to: scratch
       - bind: recs, rerr
-        eval: readAllPreSized(br, data)
+        eval: readAllPreSized(br, data, c.format().comma)
         to: readAllPreSized
       - eval: scratch.ReleaseReader(br)
         to: scratch
@@ -192,7 +276,7 @@ sequences:
           		Reason:  "UNMARSHAL_FAILED",
           		Public:  "CSV decoding failed",
           		Private: "service/data/codec/csv.Unmarshal: ReadAll returned an error",
-          	})
+          	}, parsePosition(rerr)...)
         to: errs
   - of: readAllPreSized
     participants:
@@ -208,12 +292,12 @@ sequences:
       - bind: r
         eval: stdcsv.NewReader(br)
         to: stdcsv
+      - set: r.Comma
+        value: comma
       - set: r.ReuseRecord
         value: "true"
-      - bind: hint
-        eval: bytes.Count(data, []byte{'\n'}) + 1
       - set: records
-        value: make([][]string, 0, hint)
+        value: make([][]string, 0, recordsHint(data))
       - loop:
           do:
             - bind: record, rerr
@@ -247,3 +331,1425 @@ sequences:
             eval: v.(*[][]string)
           when: ptrOk && ptr != nil
       - return: nil, false
+  - of: (*csvCodec).NewDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvCodec).NewDecoder
+        kind: self
+      - id: c.format
+        kind: internal
+      - id: stdcsv
+        kind: stdlib
+    steps:
+      - bind: f
+        eval: c.format()
+        to: c.format
+      - bind: cr
+        eval: stdcsv.NewReader(r)
+        to: stdcsv
+      - set: cr.Comma, cr.ReuseRecord
+        value: f.comma, true
+      - return: "&csvDecoder{r: cr, noHeader: f.noHeader}"
+  - of: (*csvDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvDecoder).Decode
+        kind: self
+      - id: codec
+        kind: package
+      - id: slices
+        kind: stdlib
+      - id: structTarget
+        kind: internal
+      - id: d.columnsFor
+        kind: internal
+      - id: fillRow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: d.err
+                when: "!d.take()"
+            - op: "|="
+              set: d.flags
+              value: flagHeaderDone
+            - set: "*dst"
+              to: slices
+              value: slices.Clone(d.record)
+            - return: nil
+          init:
+            bind: dst, ok
+            eval: v.(*[]string)
+          when: ok && dst != nil
+      - bind: row, schema, err
+        eval: structTarget(v)
+        to: structTarget
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: cols, err
+        eval: d.columnsFor(row.Type(), schema)
+        to: d.columnsFor
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: d.err
+          when: "!d.take()"
+      - return: "fillRow(row, d.record, cols, schema, rowAt{recordNo: d.recordNo, reader: d.r})"
+        to: fillRow
+  - of: (*csvDecoder).More
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvDecoder).More
+        kind: self
+      - id: d.advance
+        kind: internal
+    steps:
+      - eval: d.advance()
+        to: d.advance
+      - return: d.flags&flagReady != 0 || (d.flags&flagReported == 0 && !errors.Is(d.err, io.EOF))
+  - of: (*csvDecoder).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvDecoder).take
+        kind: self
+      - id: d.advance
+        kind: internal
+    steps:
+      - eval: d.advance()
+        to: d.advance
+      - opt:
+          do:
+            - op: "|="
+              set: d.flags
+              value: flagReported
+            - return: "false"
+          when: d.flags&flagReady == 0
+      - op: "&^="
+        set: d.flags
+        value: flagReady
+      - return: "true"
+  - of: (*csvDecoder).advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvDecoder).advance
+        kind: self
+      - id: d.r.Read
+        kind: value
+      - id: unmarshalFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: d.flags&flagReady != 0 || d.err != nil
+      - bind: record, err
+        eval: d.r.Read()
+        to: d.r.Read
+      - opt:
+          do:
+            - set: d.err
+              value: io.EOF
+            - return: ""
+          when: errors.Is(err, io.EOF)
+      - opt:
+          do:
+            - set: d.err
+              to: unmarshalFailed
+              value: unmarshalFailed(err)
+            - return: ""
+          when: err != nil
+      - set: d.record
+        value: record
+      - op: "|="
+        set: d.flags
+        value: flagReady
+      - op: ++
+        set: d.recordNo
+  - of: (*csvDecoder).columnsFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvDecoder).columnsFor
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: mapColumns
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: d.cols, nil
+          when: t == d.colsType && d.cols != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, d.err
+                when: "!d.take()"
+            - set: d.header
+              to: slices
+              value: slices.Clone(d.record)
+            - op: "|="
+              set: d.flags
+              value: flagHeaderDone
+          when: d.flags&flagHeaderDone == 0 && !d.noHeader
+      - bind: header
+        eval: d.header
+      - opt:
+          do:
+            - set: header
+              value: schema.names
+          when: d.noHeader
+      - bind: cols, err
+        eval: mapColumns(header, schema, d.noHeader || d.header == nil)
+        to: mapColumns
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - set: d.cols, d.colsType
+        value: cols, t
+      - return: cols, nil
+  - of: structTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: structTarget
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: schemaOf
+        kind: internal
+      - id: rv.Elem
+        kind: value
+    steps:
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - return: "reflect.Value{}, nil, valueInvalid(\"service/data/codec/csv.Decoder.Decode: target is neither *[]string nor a pointer to a struct\")"
+          when: rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct
+      - bind: schema, err
+        eval: schemaOf(rv.Elem().Type())
+        to: schemaOf
+      - return: rv.Elem(), schema, err
+        to: rv.Elem
+  - of: appendRecords
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendRecords
+        kind: self
+      - id: appendRecord
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: dst
+              to: appendRecord
+              value: appendRecord(dst, record, comma, escape)
+          key: _
+          range: records
+          value: record
+      - return: dst
+  - of: appendRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendRecord
+        kind: self
+      - id: utf8
+        kind: stdlib
+      - id: appendField
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    to: utf8
+                    value: utf8.AppendRune(dst, comma)
+                when: i > 0
+            - set: dst
+              to: appendField
+              value: appendField(dst, field, specFor(field, comma, escape))
+          key: i
+          range: record
+          value: field
+      - return: append(dst, '\n')
+  - of: appendField
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendField
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, formulaPrefix)
+                when: spec.prefixed
+            - return: append(dst, field...)
+          when: "!spec.quoted"
+      - set: dst
+        value: append(dst, '"')
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, formulaPrefix)
+          when: spec.prefixed
+      - loop:
+          cond: field != ""
+          do:
+            - bind: i
+              eval: strings.IndexByte(field, '"')
+              to: strings
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, field...)
+                  - break: true
+                when: i < 0
+            - set: dst
+              value: append(dst, field[:i]...)
+            - set: dst
+              value: append(dst, '"', '"')
+            - set: field
+              value: field[i+1:]
+      - return: append(dst, '"')
+  - of: specFor
+    steps:
+      - bind: prefixed
+        eval: escape && field != "" && isFormulaTrigger(field[0])
+      - opt:
+          do:
+            - return: "fieldSpec{prefixed: true, quoted: hasSpecial(field, comma)}"
+          when: prefixed
+      - return: "fieldSpec{quoted: fieldNeedsQuotes(field, comma)}"
+  - of: fieldNeedsQuotes
+    participants:
+      - id: caller
+        kind: actor
+      - id: fieldNeedsQuotes
+        kind: self
+      - id: utf8
+        kind: stdlib
+      - id: unicode
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: field == ""
+      - opt:
+          do:
+            - return: "true"
+          when: field == `\.` || hasSpecial(field, comma)
+      - bind: r1, _
+        eval: utf8.DecodeRuneInString(field)
+        to: utf8
+      - return: unicode.IsSpace(r1)
+        to: unicode
+  - of: hasSpecial
+    steps:
+      - opt:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: "true"
+                      init:
+                        bind: c
+                        eval: field[i]
+                      when: c == '\n' || c == '\r' || c == '"' || c == byte(comma)
+                key: i
+                range: len(field)
+            - return: "false"
+          when: comma < utf8.RuneSelf
+      - return: strings.ContainsRune(field, comma) || strings.ContainsAny(field, quoteSpecials)
+  - of: recordsLen
+    participants:
+      - id: caller
+        kind: actor
+      - id: recordsLen
+        kind: self
+      - id: utf8
+        kind: stdlib
+      - id: fieldLen
+        kind: internal
+    steps:
+      - bind: commaLen
+        eval: utf8.RuneLen(comma)
+        to: utf8
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - op: ++
+              set: "n"
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - op: +=
+                          set: "n"
+                          value: commaLen
+                      when: i > 0
+                  - op: +=
+                    set: "n"
+                    to: fieldLen
+                    value: fieldLen(field, specFor(field, comma, escape))
+                key: i
+                range: record
+                value: field
+          key: _
+          range: records
+          value: record
+      - return: "n"
+  - of: fieldLen
+    steps:
+      - bind: "n"
+        eval: len(field)
+      - opt:
+          do:
+            - op: ++
+              set: "n"
+          when: spec.prefixed
+      - opt:
+          do:
+            - op: +=
+              set: "n"
+              value: 2 + strings.Count(field, `"`)
+          when: spec.quoted
+      - return: "n"
+  - of: (*csvCodec).NewEncoder
+    steps:
+      - return: "&csvEncoder{w: w, c: c}"
+  - of: (*csvEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvEncoder).Encode
+        kind: self
+      - id: e.appendValue
+        kind: internal
+      - id: e.w.Write
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - var:
+          name: err
+          type: error
+      - set: e.buf, err
+        to: e.appendValue
+        value: e.appendValue(e.buf[:0], v)
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(werr, errs.WrapParams{
+                			Code:    corecsv.CodeCSVMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "CSV encoding failed",
+                			Private: "service/data/codec/csv.Encoder.Encode: the writer failed",
+                		})
+              to: errs
+          init:
+            bind: _, werr
+            eval: e.w.Write(e.buf)
+            to: e.w.Write
+          when: werr != nil
+      - return: nil
+  - of: (*csvEncoder).appendValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*csvEncoder).appendValue
+        kind: self
+      - id: e.c.format
+        kind: internal
+      - id: appendRecord
+        kind: internal
+      - id: reflect
+        kind: stdlib
+      - id: rv.Elem
+        kind: value
+      - id: schemaOf
+        kind: internal
+      - id: appendRow
+        kind: internal
+    steps:
+      - bind: f
+        eval: e.c.format()
+        to: e.c.format
+      - opt:
+          do:
+            - set: e.headerDone
+              value: "true"
+            - return: appendRecord(dst, record, f.comma, f.escape), nil
+              to: appendRecord
+          init:
+            bind: record, ok
+            eval: v.([]string)
+          when: ok
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - set: rv
+              to: rv.Elem
+              value: rv.Elem()
+          when: rv.Kind() == reflect.Pointer && !rv.IsNil()
+      - opt:
+          do:
+            - return: "dst, valueInvalid(\"service/data/codec/csv.Encoder.Encode: argument is neither []string nor a struct\")"
+          when: rv.Kind() != reflect.Struct
+      - bind: schema, err
+        eval: schemaOf(rv.Type())
+        to: schemaOf
+      - opt:
+          do:
+            - return: dst, err
+          when: err != nil
+      - opt:
+          do:
+            - set: dst
+              to: appendRecord
+              value: appendRecord(dst, schema.names, f.comma, f.escape)
+          when: "!e.headerDone && !f.noHeader"
+      - bind: out, err
+        eval: appendRow(dst, rv, false, schema, f)
+        to: appendRow
+      - opt:
+          do:
+            - return: dst[:0], err
+          when: err != nil
+      - set: e.headerDone
+        value: "true"
+      - return: out, nil
+  - of: (*csvEncoder).Close
+    steps:
+      - return: nil
+  - of: schemaOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: schemaOf
+        kind: self
+      - id: schemas.Load
+        kind: value
+      - id: s.collect
+        kind: internal
+      - id: schemaInvalid
+        kind: internal
+      - id: schemas.LoadOrStore
+        kind: value
+    steps:
+      - opt:
+          do:
+            - bind: res, _
+              eval: cached.(schemaResult)
+            - return: res.schema, res.err
+          init:
+            bind: cached, ok
+            eval: schemas.Load(t)
+            to: schemas.Load
+          when: ok
+      - bind: s
+        eval: "&tableSchema{byName: map[string]int{}}"
+      - bind: err
+        eval: s.collect(t, nil)
+        to: s.collect
+      - opt:
+          do:
+            - set: err
+              to: schemaInvalid
+              value: schemaInvalid("the struct maps no field to a column")
+          when: err == nil && len(s.columns) == 0
+      - bind: res
+        eval: "schemaResult{schema: s, err: err}"
+      - opt:
+          do:
+            - set: res.schema
+              value: nil
+          when: err != nil
+      - eval: schemas.LoadOrStore(t, res)
+        to: schemas.LoadOrStore
+      - return: res.schema, res.err
+  - of: (*tableSchema).collect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tableSchema).collect
+        kind: self
+      - id: s.field
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: s.field(t.Field(i), append(append(make([]int, 0, len(prefix)+1), prefix...), i))
+                  to: s.field
+                when: err != nil
+          key: i
+          range: t.NumField()
+      - return: nil
+  - of: (*tableSchema).field
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tableSchema).field
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: s.collect
+        kind: internal
+      - id: s.add
+        kind: internal
+    steps:
+      - bind: name, opts, tagged
+        eval: strings.Cut(f.Tag.Get(tagKey), ",")
+        to: strings
+      - opt:
+          do:
+            - return: nil
+          when: name == "-" && !tagged || !f.IsExported()
+      - opt:
+          do:
+            - return: s.collect(f.Type, index)
+              to: s.collect
+          when: f.Anonymous && name == "" && f.Type.Kind() == reflect.Struct && !isText(f.Type)
+      - return: s.add(f, name, opts, index)
+        to: s.add
+  - of: (*tableSchema).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tableSchema).add
+        kind: self
+      - id: schemaInvalid
+        kind: internal
+      - id: kindOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: name
+              value: f.Name
+          when: name == ""
+      - opt:
+          do:
+            - return: schemaInvalid("two fields map to one column")
+              to: schemaInvalid
+          init:
+            bind: _, dup
+            eval: s.byName[name]
+          when: dup
+      - bind: col
+        eval: "columnSpec{name: name, index: index, required: !hasOption(opts, optionalOption), typ: f.Type}"
+      - opt:
+          do:
+            - set: col.ptr, col.typ
+              value: true, col.typ.Elem()
+          when: col.typ.Kind() == reflect.Pointer
+      - bind: kind, ok
+        eval: kindOf(col.typ)
+        to: kindOf
+      - opt:
+          do:
+            - return: schemaInvalid("a field's type has no cell conversion")
+              to: schemaInvalid
+          when: "!ok"
+      - set: col.kind
+        value: kind
+      - set: s.byName[name]
+        value: len(s.columns)
+      - set: s.columns
+        value: append(s.columns, col)
+      - set: s.names
+        value: append(s.names, name)
+      - return: nil
+  - of: hasOption
+    participants:
+      - id: caller
+        kind: actor
+      - id: hasOption
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - loop:
+          cond: opts != ""
+          do:
+            - var:
+                name: opt
+                type: string
+            - set: opt, opts, _
+              to: strings
+              value: strings.Cut(opts, ",")
+            - opt:
+                do:
+                  - return: "true"
+                when: opt == option
+      - return: "false"
+  - of: kindOf
+    steps:
+      - opt:
+          do:
+            - return: kindText, true
+          when: isText(t)
+      - switch:
+          cases:
+            - case: reflect.String
+              do:
+                - return: kindString, true
+            - case: reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64
+              do:
+                - return: kindInt, true
+            - case: reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64
+              do:
+                - return: kindUint, true
+            - case: reflect.Float32, reflect.Float64
+              do:
+                - return: kindFloat, true
+            - case: reflect.Bool
+              do:
+                - return: kindBool, true
+            - default: true
+              do:
+                - return: 0, false
+          "on": t.Kind()
+  - of: isText
+    participants:
+      - id: caller
+        kind: actor
+      - id: isText
+        kind: self
+      - id: reflect
+        kind: stdlib
+    steps:
+      - bind: pt
+        eval: reflect.PointerTo(t)
+        to: reflect
+      - return: t.Implements(textMarshalerType) || pt.Implements(textMarshalerType) || pt.Implements(textUnmarshalerType)
+  - of: schemaInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: schemaInvalid
+        kind: self
+      - id: valueInvalid
+        kind: internal
+    steps:
+      - return: "valueInvalid(\"service/data/codec/csv: \" + private)"
+        to: valueInvalid
+  - of: headerMismatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: headerMismatch
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corecsv.HeaderMismatch, errs.WrapParams{}, errs.String("problem", problem), errs.String("name", column))
+        to: errs
+  - of: tableOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: tableOf
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: rv.Elem
+        kind: value
+      - id: schemaOf
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - set: rv
+              to: rv.Elem
+              value: rv.Elem()
+          when: rv.Kind() == reflect.Pointer && !rv.IsNil()
+      - opt:
+          do:
+            - return: "typedTable{}, valueInvalid(\"service/data/codec/csv: argument is neither [][]string nor a slice of structs\")"
+          when: rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array
+      - bind: elem, ptr
+        eval: rv.Type().Elem(), false
+      - opt:
+          do:
+            - set: elem, ptr
+              value: elem.Elem(), true
+          when: elem.Kind() == reflect.Pointer
+      - opt:
+          do:
+            - return: "typedTable{}, valueInvalid(\"service/data/codec/csv: argument is neither [][]string nor a slice of structs\")"
+          when: elem.Kind() != reflect.Struct
+      - bind: schema, err
+        eval: schemaOf(elem)
+        to: schemaOf
+      - opt:
+          do:
+            - return: typedTable{}, err
+          when: err != nil
+      - return: "typedTable{rows: rv, ptr: ptr, schema: schema}, nil"
+  - of: appendTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTable
+        kind: self
+      - id: appendRecord
+        kind: internal
+      - id: appendRow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: dst
+              to: appendRecord
+              value: appendRecord(dst, t.schema.names, f.comma, f.escape)
+          when: "!f.noHeader"
+      - loop:
+          do:
+            - var:
+                name: err
+                type: error
+            - set: dst, err
+              to: appendRow
+              value: appendRow(dst, t.rows.Index(i), t.ptr, t.schema, f)
+            - opt:
+                do:
+                  - return: dst, err
+                when: err != nil
+          key: i
+          range: t.rows.Len()
+      - return: dst, nil
+  - of: appendRow
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendRow
+        kind: self
+      - id: appendComma
+        kind: internal
+      - id: row.Elem
+        kind: value
+      - id: formatCell
+        kind: internal
+      - id: appendCell
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - loop:
+                do:
+                  - set: dst
+                    to: appendComma
+                    value: appendComma(dst, f.comma)
+                range: len(schema.columns) - 1
+            - return: append(dst, '\n'), nil
+          when: ptr && row.IsNil()
+      - opt:
+          do:
+            - set: row
+              to: row.Elem
+              value: row.Elem()
+          when: ptr
+      - var:
+          name: scratch
+          type: "[maxCellScratch]byte"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    to: appendComma
+                    value: appendComma(dst, f.comma)
+                when: i > 0
+            - bind: cell, err
+              eval: formatCell(scratch[:0], row.FieldByIndex(schema.columns[i].index), &schema.columns[i])
+              to: formatCell
+            - opt:
+                do:
+                  - return: dst, err
+                when: err != nil
+            - set: dst
+              to: appendCell
+              value: appendCell(dst, cell, f)
+          key: i
+          range: schema.columns
+      - return: append(dst, '\n'), nil
+  - of: appendCell
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendCell
+        kind: self
+      - id: appendField
+        kind: internal
+    steps:
+      - bind: text
+        eval: string(cell)
+      - return: appendField(dst, text, specFor(text, f.comma, f.escape))
+        to: appendField
+  - of: formatCell
+    participants:
+      - id: caller
+        kind: actor
+      - id: formatCell
+        kind: self
+      - id: fv.Elem
+        kind: value
+      - id: strconv
+        kind: stdlib
+      - id: appendText
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: buf, nil
+                when: fv.IsNil()
+            - set: fv
+              to: fv.Elem
+              value: fv.Elem()
+          when: col.ptr
+      - switch:
+          cases:
+            - case: kindString
+              do:
+                - return: append(buf, fv.String()...), nil
+            - case: kindInt
+              do:
+                - return: strconv.AppendInt(buf, fv.Int(), 10), nil
+                  to: strconv
+            - case: kindUint
+              do:
+                - return: strconv.AppendUint(buf, fv.Uint(), 10), nil
+                  to: strconv
+            - case: kindFloat
+              do:
+                - return: strconv.AppendFloat(buf, fv.Float(), 'g', -1, fv.Type().Bits()), nil
+                  to: strconv
+            - case: kindBool
+              do:
+                - return: strconv.AppendBool(buf, fv.Bool()), nil
+                  to: strconv
+            - default: true
+              do:
+                - return: appendText(buf, fv)
+                  to: appendText
+          "on": col.kind
+  - of: appendText
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendText
+        kind: self
+      - id: m.MarshalText
+        kind: value
+    steps:
+      - bind: m, ok
+        eval: reflect.TypeAssert[encoding.TextMarshaler](fv)
+      - opt:
+          do:
+            - set: m, ok
+              value: reflect.TypeAssert[encoding.TextMarshaler](fv.Addr())
+          when: "!ok && fv.CanAddr()"
+      - opt:
+          do:
+            - return: buf, marshalFailed("a field's type reads itself as text but does not write itself")
+          when: "!ok"
+      - bind: text, err
+        eval: m.MarshalText()
+        to: m.MarshalText
+      - opt:
+          do:
+            - return: |-
+                buf, errs.Wrap(err, errs.WrapParams{
+                			Code:    corecsv.CodeCSVMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "CSV encoding failed",
+                			Private: "service/data/codec/csv: a field's MarshalText returned an error",
+                		})
+          when: err != nil
+      - return: append(buf, text...), nil
+  - forward: utf8.AppendRune
+    of: appendComma
+  - of: marshalFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: marshalFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    corecsv.CodeCSVMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "CSV encoding failed",
+          		Private: "service/data/codec/csv: " + private,
+          	})
+        to: errs
+  - of: rowsTargetOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: rowsTargetOf
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: schemaOf
+        kind: internal
+    steps:
+      - bind: rv
+        eval: reflect.ValueOf(v)
+        to: reflect
+      - opt:
+          do:
+            - return: "rowsTarget{}, valueInvalid(\"service/data/codec/csv.Unmarshal: target is neither *[][]string nor a pointer to a slice of structs\")"
+          when: rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Slice
+      - bind: elem, ptr
+        eval: rv.Elem().Type().Elem(), false
+      - opt:
+          do:
+            - set: elem, ptr
+              value: elem.Elem(), true
+          when: elem.Kind() == reflect.Pointer
+      - opt:
+          do:
+            - return: "rowsTarget{}, valueInvalid(\"service/data/codec/csv.Unmarshal: target is neither *[][]string nor a pointer to a slice of structs\")"
+          when: elem.Kind() != reflect.Struct
+      - bind: schema, err
+        eval: schemaOf(elem)
+        to: schemaOf
+      - opt:
+          do:
+            - return: rowsTarget{}, err
+          when: err != nil
+      - return: "rowsTarget{slice: rv.Elem(), ptr: ptr, elem: elem, schema: schema}, nil"
+  - of: trimBOM
+    steps:
+      - opt:
+          do:
+            - return: name[len(utf8BOM):]
+          when: i == 0 && len(name) >= len(utf8BOM) && name[:len(utf8BOM)] == utf8BOM
+      - return: name
+  - of: fillRow
+    participants:
+      - id: caller
+        kind: actor
+      - id: fillRow
+        kind: self
+      - id: parseCell
+        kind: internal
+      - id: at.reader.FieldPos
+        kind: internal
+      - id: codec
+        kind: package
+      - id: errs
+        kind: package
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: i >= len(cols) || cols[i] < 0
+            - bind: col
+              eval: "&schema.columns[cols[i]]"
+            - opt:
+                do:
+                  - bind: line, column
+                    eval: at.reader.FieldPos(i)
+                    to: at.reader.FieldPos
+                  - bind: fields
+                    eval: "codec.PositionFields(codec.PositionValue{Line: line, Column: column})"
+                    to: codec
+                  - return: errs.Wrap(corecsv.CellInvalid, errs.WrapParams{}, append(fields, errs.Int("record", at.recordNo), errs.String("name", col.name))...)
+                    to: errs
+                init:
+                  bind: err
+                  eval: parseCell(cell, row.FieldByIndex(col.index), col)
+                  to: parseCell
+                when: err != nil
+          key: i
+          range: record
+          value: cell
+      - return: nil
+  - of: parseCell
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseCell
+        kind: self
+      - id: fv.SetZero
+        kind: value
+      - id: fv.Set
+        kind: value
+      - id: fv.Elem
+        kind: value
+      - id: parseValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: fv.SetZero()
+                    to: fv.SetZero
+                  - return: nil
+                when: cell == ""
+            - opt:
+                do:
+                  - eval: fv.Set(reflect.New(col.typ))
+                    to: fv.Set
+                when: fv.IsNil()
+            - set: fv
+              to: fv.Elem
+              value: fv.Elem()
+          when: col.ptr
+      - return: parseValue(cell, fv, col.kind)
+        to: parseValue
+  - of: parseValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseValue
+        kind: self
+      - id: fv.SetString
+        kind: value
+      - id: strconv
+        kind: stdlib
+      - id: fv.SetInt
+        kind: value
+      - id: fv.SetUint
+        kind: value
+      - id: fv.SetFloat
+        kind: value
+      - id: fv.SetBool
+        kind: value
+      - id: unmarshalText
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: kindString
+              do:
+                - eval: fv.SetString(cell)
+                  to: fv.SetString
+                - return: nil
+            - case: kindInt
+              do:
+                - bind: n, err
+                  eval: strconv.ParseInt(cell, 10, fv.Type().Bits())
+                  to: strconv
+                - eval: fv.SetInt(n)
+                  to: fv.SetInt
+                - return: err
+            - case: kindUint
+              do:
+                - bind: n, err
+                  eval: strconv.ParseUint(cell, 10, fv.Type().Bits())
+                  to: strconv
+                - eval: fv.SetUint(n)
+                  to: fv.SetUint
+                - return: err
+            - case: kindFloat
+              do:
+                - bind: n, err
+                  eval: strconv.ParseFloat(cell, fv.Type().Bits())
+                  to: strconv
+                - eval: fv.SetFloat(n)
+                  to: fv.SetFloat
+                - return: err
+            - case: kindBool
+              do:
+                - bind: b, err
+                  eval: strconv.ParseBool(cell)
+                  to: strconv
+                - eval: fv.SetBool(b)
+                  to: fv.SetBool
+                - return: err
+            - default: true
+              do:
+                - return: unmarshalText(cell, fv)
+                  to: unmarshalText
+          "on": kind
+  - of: unmarshalText
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmarshalText
+        kind: self
+      - id: schemaInvalid
+        kind: internal
+      - id: u.UnmarshalText
+        kind: value
+    steps:
+      - bind: u, ok
+        eval: reflect.TypeAssert[encoding.TextUnmarshaler](fv.Addr())
+      - opt:
+          do:
+            - return: schemaInvalid("a field's type writes itself as text but does not read itself")
+              to: schemaInvalid
+          when: "!ok"
+      - return: u.UnmarshalText([]byte(cell))
+        to: u.UnmarshalText
+  - of: unmarshalTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmarshalTable
+        kind: self
+      - id: stdcsv
+        kind: stdlib
+      - id: reflect.New(t.slice.Type()).Elem
+        kind: value
+      - id: out.Grow
+        kind: value
+      - id: r.Read
+        kind: value
+      - id: t.slice.Set
+        kind: value
+      - id: unmarshalFailed
+        kind: internal
+      - id: firstColumns
+        kind: internal
+      - id: decodeRowInto
+        kind: internal
+      - id: decodeRows
+        kind: internal
+    steps:
+      - bind: r
+        eval: stdcsv.NewReader(bytes.NewReader(data))
+        to: stdcsv
+      - set: r.Comma, r.ReuseRecord
+        value: f.comma, true
+      - bind: out
+        eval: reflect.New(t.slice.Type()).Elem()
+        to: reflect.New(t.slice.Type()).Elem
+      - eval: out.Grow(recordsHint(data))
+        to: out.Grow
+      - bind: first, err
+        eval: r.Read()
+        to: r.Read
+      - opt:
+          do:
+            - eval: t.slice.Set(out)
+              to: t.slice.Set
+            - return: nil
+          when: errors.Is(err, io.EOF)
+      - opt:
+          do:
+            - return: unmarshalFailed(err)
+              to: unmarshalFailed
+          when: err != nil
+      - bind: cols, err
+        eval: firstColumns(first, t, f)
+        to: firstColumns
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: "decodeRowInto(out, first, cols, t, rowAt{recordNo: 1, reader: r})"
+                  op: =
+                  to: decodeRowInto
+                when: err != nil
+          when: f.noHeader
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: decodeRows(r, out, cols, t)
+            op: =
+            to: decodeRows
+          when: err != nil
+      - eval: t.slice.Set(out)
+        to: t.slice.Set
+      - return: nil
+  - of: firstColumns
+    participants:
+      - id: caller
+        kind: actor
+      - id: firstColumns
+        kind: self
+      - id: mapColumns
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "nil, valueInvalid(\"service/data/codec/csv.Unmarshal: the table is the codec package's promotion container\")"
+          when: "!f.noHeader && isPromotionHeader(first) && !hasColumn(t.schema, promotionHeaderCell)"
+      - return: mapColumns(first, t.schema, f.noHeader)
+        to: mapColumns
+  - of: decodeRows
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRows
+        kind: self
+      - id: r.Read
+        kind: internal
+      - id: unmarshalFailed
+        kind: internal
+      - id: decodeRowInto
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: record, err
+              eval: r.Read()
+              to: r.Read
+            - opt:
+                do:
+                  - return: nil
+                when: errors.Is(err, io.EOF)
+            - opt:
+                do:
+                  - return: unmarshalFailed(err)
+                    to: unmarshalFailed
+                when: err != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: "decodeRowInto(out, record, cols, t, rowAt{recordNo: recordNo, reader: r})"
+                  op: =
+                  to: decodeRowInto
+                when: err != nil
+          init: recordNo := 2
+          post: recordNo++
+  - of: decodeRowInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRowInto
+        kind: self
+      - id: out.Grow
+        kind: value
+      - id: out.SetLen
+        kind: value
+      - id: out.Index
+        kind: value
+      - id: slot.Set
+        kind: value
+      - id: slot.Elem
+        kind: value
+      - id: fillRow
+        kind: internal
+    steps:
+      - eval: out.Grow(1)
+        to: out.Grow
+      - eval: out.SetLen(out.Len() + 1)
+        to: out.SetLen
+      - bind: slot
+        eval: out.Index(out.Len() - 1)
+        to: out.Index
+      - opt:
+          do:
+            - eval: slot.Set(reflect.New(t.elem))
+              to: slot.Set
+            - set: slot
+              to: slot.Elem
+              value: slot.Elem()
+          when: t.ptr
+      - return: fillRow(slot, record, cols, t.schema, at)
+        to: fillRow
+  - of: isPromotionHeader
+    steps:
+      - return: len(header) == promotionColumnCount && header[0] == promotionHeaderCell
+  - of: hasColumn
+    steps:
+      - bind: _, ok
+        eval: schema.byName[name]
+      - return: ok
+  - of: unmarshalFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmarshalFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(err, errs.WrapParams{
+          		Code:    corecsv.CodeCSVUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "CSV decoding failed",
+          		Private: "service/data/codec/csv: encoding/csv.Reader.Read returned an error",
+          	}, parsePosition(err)...)
+        to: errs
+  - of: parsePosition
+    participants:
+      - id: caller
+        kind: actor
+      - id: parsePosition
+        kind: self
+      - id: codec
+        kind: package
+    steps:
+      - bind: pe, ok
+        eval: errors.AsType[*stdcsv.ParseError](err)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - return: "codec.PositionFields(codec.PositionValue{Line: pe.Line, Column: pe.Column})"
+        to: codec

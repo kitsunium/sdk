@@ -175,3 +175,31 @@ where a reader would guess.
 - The span fixture is the W3C Trace Context specification's own traceparent
   example, installed with `trace.ContextWithSpanContext` — the same call the
   inbound HTTP middleware makes after reading the header.
+
+# No stack walk for nobody, and a live floor — #1014, #1015
+
+Taken on an AMD EPYC 7351P, 4 Ps (`GOMAXPROCS=4`), linux/amd64, go1.27.3, a
+shared VM with other agents compiling; `-benchtime=200ms`, 4 rounds each, the
+base (`origin/main` 740e7c1e) in a second worktree run right after this
+branch. Read the ratios, not the absolute figures.
+
+```
+                           base (ns/op)        this branch (ns/op)
+LoggerStaticString          764 – 815            471 – 498      1 alloc, unchanged
+Logger10Fields             1283 – 1419          1000 – 1141     1 alloc, unchanged
+Enabled_Fixed               8.1 – 8.9            9.4 – 11.2
+Enabled_LevelVar                —                9.5 – 10.6
+```
+
+**#1014.** Every emit walked the stack (`runtime.Callers`) for the caller's
+program counter, which only `WithCaller`'s source decorator reads. A Logger now
+asks its handler once, at construction (`corelogger.SourceRequester`), and walks
+only when the answer is true: the static emit is ~38 % faster and a CPU profile
+of `LoggerStaticString` on this branch holds no `runtime.Callers` and no
+`tracebackPCs` frame at all (the base's profile put 20 % of the emit there,
+above). A `WithCaller` logger still walks on every emit.
+
+**#1015.** The level gate reads a `Leveler` — `level.Fixed` for a MinLevel, the
+caller's `LevelVar` for `SinkConfig.Level` — through one interface call: +1.3
+to +2.3 ns per `Enabled` against the frozen value, under the 5 ns the issue
+allows, and the price of a floor that `Set` moves without rebuilding anything.

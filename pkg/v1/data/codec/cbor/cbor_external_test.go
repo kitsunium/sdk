@@ -87,6 +87,33 @@ func TestARefusalCarriesTheNamedCode(t *testing.T) {
 	}
 }
 
+// TestDeterministicReachesTheFacade is #896 through the facade: a COSE-style
+// Tag written by NewDeterministic reads back as the same Tag, and a document
+// that is not deterministic is refused with the facade's code and sentinel.
+func TestDeterministicReachesTheFacade(t *testing.T) {
+	t.Parallel()
+	det := cbor.NewDeterministic()
+	data, err := det.Marshal(cbor.Tag{Number: 18, Content: []any{1.5}})
+	//: tag 18, an array holding a half.
+	if err != nil || string(data) != "\xd2\x81\xf9\x3e\x00" {
+		t.Fatalf("Marshal = %x, %v", data, err)
+	}
+	var back any
+	//: kept as a Tag.
+	if err := det.Unmarshal(data, &back); err != nil {
+		t.Fatalf("Unmarshal = %v", err)
+	}
+	//: the number survives.
+	if tag, ok := back.(cbor.Tag); !ok || tag.Number != 18 {
+		t.Fatalf("Unmarshal = %#v, want a Tag 18", back)
+	}
+	err = det.Unmarshal([]byte{0xfa, 0x3f, 0x80, 0x00, 0x00}, new(any))
+	//: 1.0 as a single is not its shortest form.
+	if !errs.HasCode(err, cbor.CodeNotDeterministic) || !errors.Is(err, cbor.NotDeterministic) {
+		t.Fatalf("err = %v, want CodeNotDeterministic", err)
+	}
+}
+
 // TestItRegistersItsFormatAlone reads the registry this test binary ends up
 // with: this package's formats and nothing else, since nothing else imported a
 // codec.

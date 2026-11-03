@@ -20,7 +20,7 @@ Everything that dispatches through the registry by format name reads and writes 
 
 ### Mapping
 
-The top level is a document: a struct, a map, a [D](#D); anything else is refused. Struct fields take the tag bson:"name,omitempty,minsize,truncate,inline" and default to the field name in lower case. int, int8, int16, int32, uint8 and uint16 are written as int32 (int as int64 when it does not fit), int64, uint, uint32 and uint64 as int64, floats as double, \[]byte as a generic binary, time.Time as a UTC datetime in milliseconds, a nil slice, map or pointer as null, and map keys in sorted order, so the same value always encodes to the same bytes. A type can write and read itself through MarshalBSON() (\[]byte, error) and UnmarshalBSON(\[]byte) error.
+The top level is a document: a struct, a map, a [D](#D); anything else is refused. Struct fields take the tag bson:"name,omitempty,omitzero,minsize,truncate,inline" and default to the field name in lower case; omitzero leaves out a field holding its type's zero value as encoding/json does — its IsZero() when the type declares one, else every bit at zero — and with omitempty either one is enough. int, int8, int16, int32, uint8 and uint16 are written as int32 (int as int64 when it does not fit), int64, uint, uint32 and uint64 as int64, floats as double, \[]byte as a generic binary, time.Time as a UTC datetime in milliseconds, a time.Duration as an int64 of nanoseconds — the binary formats' rule (#1126) —, a nil slice, map or pointer as null, and map keys in sorted order, so the same value always encodes to the same bytes. A type can write and read itself through MarshalBSON() (\[]byte, error) and UnmarshalBSON(\[]byte) error.
 
 Decoding into an interface gives float64, int32, int64, string, bool, nil, [A](#A) for an array, [DateTime](#DateTime), [Binary](#Binary), [ObjectID](#ObjectID), [Decimal128](#Decimal128) and the other value types below — and, for a document, a [D](#D) when decoding into \*any, a map\[string]any when decoding into a map\[string]any. Numbers decode into any numeric field they fit, a double into an integer only when whole unless the field is tagged truncate.
 
@@ -50,6 +50,7 @@ No error message quotes a key or a value from the input.
 - [func Marshal\(v any\) \(\[\]byte, error\)](<#Marshal>)
 - [func NewDateTimeFromTime\(t time.Time\) DateTime](<#NewDateTimeFromTime>)
 - [func NewDecimal128\(high uint64, low uint64\) Decimal128](<#NewDecimal128>)
+- [func NewStrict\(\) codec.Codec](<#NewStrict>)
 - [func ObjectIDFromHex\(s string\) \(ObjectID, error\)](<#ObjectIDFromHex>)
 - [func ParseDecimal128\(s string\) \(Decimal128, error\)](<#ParseDecimal128>)
 - [func Unmarshal\(data \[\]byte, v any\) error](<#Unmarshal>)
@@ -216,6 +217,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/bson.CodeBSO
 
 Code `0.3.36.4`
 
+<a name="CodeDuplicateKey"></a>
+```go
+const CodeDuplicateKey errs.Code = 205830
+```
+
+CodeDuplicateKey is 0.3.36.6: NewStrict's instance found a document that repeats an element name.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/bson.CodeBSONDuplicateKey`.
+
+Code `0.3.36.6`
+
 <a name="CodeMarshalFailed"></a>
 ```go
 const CodeMarshalFailed errs.Code = 205825
@@ -237,6 +249,17 @@ CodeSizeExceeded identifies an Unmarshal input past 10 MiB.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/bson.CodeBSONSizeExceeded`.
 
 Code `0.3.36.3`
+
+<a name="CodeUnknownMember"></a>
+```go
+const CodeUnknownMember errs.Code = 205831
+```
+
+CodeUnknownMember is 0.3.36.7: NewStrict's instance found an element no struct field claims.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/bson.CodeBSONUnknownMember`.
+
+Code `0.3.36.7`
 
 <a name="CodeUnmarshalFailed"></a>
 ```go
@@ -278,7 +301,7 @@ DepthExceeded marks nesting past 100 levels.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/bson.DepthExceeded`.
 
-Code `0.3.36.4` · reason `BSON_DEPTH_EXCEEDED` · public "BSON nesting depth exceeds limit"
+Code `0.3.36.4` · reason `DEPTH_EXCEEDED` · public "BSON nesting depth exceeds limit"
 
 <a name="MarshalFailed"></a>
 ```go
@@ -307,7 +330,7 @@ SizeExceeded marks an Unmarshal input past 10 MiB.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/bson.SizeExceeded`.
 
-Code `0.3.36.3` · reason `BSON_SIZE_EXCEEDED` · public "BSON input exceeds size limit"
+Code `0.3.36.3` · reason `SIZE_EXCEEDED` · public "BSON input exceeds size limit"
 
 <a name="UnmarshalFailed"></a>
 ```go
@@ -366,6 +389,15 @@ func NewDecimal128(high uint64, low uint64) Decimal128
 ```
 
 NewDecimal128 returns the decimal whose BID encoding is high (the first eight bytes) and low (the last eight).
+
+<a name="NewStrict"></a>
+## func [NewStrict](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)
+
+```go
+func NewStrict() codec.Codec
+```
+
+NewStrict returns a fresh BSON codec, not registered, that reads a document one way or not at all: a document repeating an element name is refused with CodeDuplicateKey, an element no struct field claims with CodeUnknownMember. The registered format keeps last-wins and skips unknown elements.
 
 <a name="ObjectIDFromHex"></a>
 ## func [ObjectIDFromHex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/gen_facade.go>)

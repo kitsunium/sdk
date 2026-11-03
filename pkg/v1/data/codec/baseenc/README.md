@@ -24,7 +24,7 @@ Failures carry the range 0.3.24.\*; match them with errs.HasCode, or the sentine
 CodeMarshalFailed    0.3.24.1  the value has no JSON encoding
 CodeUnmarshalFailed  0.3.24.2  the decoded text is not JSON the target can hold
 CodeDecodeFailed     0.3.24.3  the input is not text of the Format's alphabet
-CodeSizeExceeded     0.3.24.4  an input past its bound — 10 MiB, 4 KiB for base58 and base62
+CodeSizeExceeded     0.3.24.4  an input past its bound — 10 MiB, 64 KiB for base58 and base62
 ```
 
 No error message quotes the input.
@@ -69,14 +69,14 @@ Base45 is RFC 9285's alphabet, the one a QR code's alphanumeric mode holds.
 const Base58 = "base58"
 ```
 
-Base58 is Bitcoin's alphabet; its base conversion is quadratic, so its input is capped at 4 KiB.
+Base58 is Bitcoin's alphabet; its base conversion is quadratic, so its input is capped at 64 KiB.
 
 <a name="Base62"></a>
 ```go
 const Base62 = "base62"
 ```
 
-Base62 is the alphanumeric alphabet; capped at 4 KiB like Base58.
+Base62 is the alphanumeric alphabet; capped at 64 KiB like Base58.
 
 <a name="Base64"></a>
 ```go
@@ -119,7 +119,7 @@ Code `0.3.24.1`
 const CodeSizeExceeded errs.Code = 202756
 ```
 
-CodeSizeExceeded is 0.3.24.4: an input past its bound — 10 MiB, 4 KiB for base58 and base62.
+CodeSizeExceeded is 0.3.24.4: an input past its bound — 10 MiB, 64 KiB for base58 and base62.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/baseenc.CodeBaseEncSizeExceeded`.
 
@@ -174,9 +174,9 @@ var SizeExceeded *errs.Error
 
 SizeExceeded is the sentinel of [CodeSizeExceeded](#CodeSizeExceeded).
 
-Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/baseenc.BaseEncSizeExceeded`.
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/baseenc.SizeExceeded`.
 
-Code `0.3.24.4` · reason `BASE_ENC_SIZE_EXCEEDED` · public "base-N input exceeds size limit"
+Code `0.3.24.4` · reason `SIZE_EXCEEDED` · public "base-N input exceeds size limit"
 
 <a name="UnmarshalFailed"></a>
 ```go

@@ -130,28 +130,24 @@ func (*formCodec) Append(dst []byte, v any) (appended []byte, err error) {
 // Unmarshal parses an urlencoded body into v, which must be a non-nil pointer
 // to url.Values, map[string][]string, or map[string]string.
 func (*formCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: refuse oversized bodies before any allocation happens.
 	if len(data) > maxFormBytes {
-		//: surface the documented sentinel with the offending sizes.
-		return errs.Wrap(nil, errs.WrapParams{
-			Code:    coreform.CodeFormUnmarshalFailed,
-			Reason:  "UNMARSHAL_FAILED",
-			Public:  "form body exceeds size limit",
-			Private: "service/data/codec/form.Unmarshal: payload length exceeds maxFormBytes",
-		}, errs.Int("len", len(data)), errs.Int("cap", maxFormBytes))
+		//: the family's SIZE_EXCEEDED, UNMARSHAL_FAILED in the trail (#894).
+		return errs.Wrap(coreform.SizeExceeded, errs.WrapParams{Code: coreform.CodeFormUnmarshalFailed},
+			errs.Int("len", len(data)), errs.Int("cap", maxFormBytes))
 	}
 	//: '&' count + 1 bounds the pair count from above (an empty segment
 	//: counts) and is the bound url.ParseQuery applies itself, so the
 	//: ceiling is enforced without parsing (bytes.Count is SIMD-fast) and
 	//: refuses exactly what the stdlib would.
 	if pairs := bytes.Count(data, []byte{'&'}) + 1; pairs > maxFormPairs {
-		//: surface the documented sentinel with the offending counts.
-		return errs.Wrap(nil, errs.WrapParams{
-			Code:    coreform.CodeFormUnmarshalFailed,
-			Reason:  "UNMARSHAL_FAILED",
-			Public:  "form body declares too many pairs",
-			Private: "service/data/codec/form.Unmarshal: pair count exceeds maxFormPairs",
-		}, errs.Int("pairs", pairs), errs.Int("cap", maxFormPairs))
+		//: the family's SIZE_EXCEEDED, UNMARSHAL_FAILED in the trail (#894).
+		return errs.Wrap(coreform.SizeExceeded, errs.WrapParams{Code: coreform.CodeFormUnmarshalFailed},
+			errs.Int("pairs", pairs), errs.Int("cap", maxFormPairs))
 	}
 	//: net/url owns the decode half: it defines '+' → space, %XX folding,
 	//: and the post-Go-1.17 refusal of ';' as a separator. Re-implementing

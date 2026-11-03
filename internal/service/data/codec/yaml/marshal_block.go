@@ -295,8 +295,8 @@ func (e *encoder) writeStructFields(v reflect.Value, info *structInfo, inner int
 	//: every field.
 	for _, f := range info.fields {
 		fv, ok := fieldForRead(v, f.index)
-		//: absent behind a nil inlined pointer, or empty and omitempty.
-		if !ok || (f.omitEmpty && isEmpty(fv)) {
+		//: absent behind a nil inlined pointer, or left out by omitempty or omitzero.
+		if !ok || f.omitted(fv) {
 			continue
 		}
 		e.writeEntryStart(inner, pending, firstInline)
@@ -358,7 +358,7 @@ func hasVisibleField(v reflect.Value, info *structInfo) bool {
 	for _, f := range info.fields {
 		fv, ok := fieldForRead(v, f.index)
 		//: written.
-		if ok && (!f.omitEmpty || !isEmpty(fv)) {
+		if ok && !f.omitted(fv) {
 			//: yes.
 			return true
 		}

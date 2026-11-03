@@ -16,4 +16,5 @@ type metricHeader struct {
 	temporality  string
 	monotonicity string
 	description  string
+	unit         string
 }

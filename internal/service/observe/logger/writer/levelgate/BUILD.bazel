@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "doc.go",
         "gate.go",
+        "gate_compliance.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate",
     visibility = [
@@ -32,6 +33,7 @@ go_test(
     name = "levelgate_test",
     srcs = [
         "allocwindow_test.go",
+        "batch_internal_test.go",
         "gate_alloc_internal_test.go",
         "gate_bench_test.go",
         "gate_external_test.go",

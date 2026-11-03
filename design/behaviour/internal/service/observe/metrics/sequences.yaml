@@ -28,6 +28,407 @@ sequences:
           		Scope: coremetrics.NormalizeScope(c.Scope),
           		Clock: clk,
           	}
+  - of: stampClock
+    participants:
+      - id: caller
+        kind: actor
+      - id: stampClock
+        kind: self
+      - id: c.setClock
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: c.setClock(clk)
+              to: c.setClock
+          init:
+            bind: c, ok
+            eval: any(inst).(setClocker)
+          when: ok
+      - return: inst
+  - of: sampledSpan
+    participants:
+      - id: caller
+        kind: actor
+      - id: sampledSpan
+        kind: self
+      - id: coretrace
+        kind: package
+    steps:
+      - set: span
+        to: coretrace
+        value: coretrace.SpanContextFromContext(ctx)
+      - return: span, span.IsValid() && span.IsSampled()
+  - of: (*exemplarSlots).setClock
+    steps:
+      - set: e.clk
+        value: clk
+  - of: (*exemplarSlots).offer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*exemplarSlots).offer
+        kind: self
+      - id: e.reservoir.Load
+        kind: value
+      - id: r.offer
+        kind: internal
+    steps:
+      - bind: r
+        eval: e.reservoir.Load()
+        to: e.reservoir.Load
+      - opt:
+          do:
+            - bind: fresh
+              eval: "&exemplarReservoir{clk: e.clk, slots: make([]coremetrics.ExemplarValue, size), held: make([]bool, size)}"
+            - opt:
+                do:
+                  - set: fresh
+                    to: e.reservoir.Load
+                    value: e.reservoir.Load()
+                when: "!e.reservoir.CompareAndSwap(nil, fresh)"
+            - set: r
+              value: fresh
+          when: r == nil
+      - eval: r.offer(slot, value, span)
+        to: r.offer
+  - of: (*exemplarSlots).collect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*exemplarSlots).collect
+        kind: self
+      - id: e.reservoir.Load
+        kind: value
+      - id: r.collect
+        kind: internal
+    steps:
+      - bind: r
+        eval: e.reservoir.Load()
+        to: e.reservoir.Load
+      - opt:
+          do:
+            - return: nil
+          when: r == nil
+      - return: r.collect(delta)
+        to: r.collect
+  - of: (*exemplarReservoir).offer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*exemplarReservoir).offer
+        kind: self
+      - id: r.now
+        kind: internal
+      - id: r.mu.Lock
+        kind: value
+      - id: r.mu.Unlock
+        kind: value
+    steps:
+      - bind: now
+        eval: r.now()
+        to: r.now
+      - eval: r.mu.Lock()
+        to: r.mu.Lock
+      - set: r.slots[slot]
+        value: "coremetrics.ExemplarValue{Time: now, Value: value, TraceID: span.TraceID, SpanID: span.SpanID}"
+      - set: r.held[slot]
+        value: "true"
+      - eval: r.mu.Unlock()
+        to: r.mu.Unlock
+  - of: (*exemplarReservoir).now
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*exemplarReservoir).now
+        kind: self
+      - id: clock.System.Now
+        kind: value
+      - id: r.clk.Now
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: clock.System.Now()
+              to: clock.System.Now
+          when: r.clk == nil
+      - return: r.clk.Now()
+        to: r.clk.Now
+  - of: newExpHistogram
+    steps:
+      - opt:
+          do:
+            - set: maxSize
+              value: coremetrics.DefaultExponentialMaxSize
+          when: maxSize <= 0
+      - opt:
+          do:
+            - panic: coremetrics.InvalidBuckets.Error()
+          when: maxSize == 1
+      - return: |-
+          &memExpHistogram{
+          		maxSize:  maxSize,
+          		scale:    coremetrics.ExponentialMaxScale,
+          		positive: expRange{counts: make([]uint64, maxSize)},
+          		negative: expRange{counts: make([]uint64, maxSize)},
+          	}
+  - of: (*memExpHistogram).Record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memExpHistogram).Record
+        kind: self
+      - id: h.record
+        kind: internal
+    steps:
+      - eval: h.record(value)
+        to: h.record
+  - of: (*memExpHistogram).RecordDuration
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memExpHistogram).RecordDuration
+        kind: self
+      - id: h.record
+        kind: internal
+    steps:
+      - eval: h.record(d.Seconds())
+        to: h.record
+  - of: (*memExpHistogram).RecordContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memExpHistogram).RecordContext
+        kind: self
+      - id: sampledSpan
+        kind: internal
+      - id: h.ex.offer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!h.record(value)"
+      - opt:
+          do:
+            - eval: h.ex.offer(expExemplarSlots, 0, value, span)
+              to: h.ex.offer
+          init:
+            bind: span, ok
+            eval: sampledSpan(ctx)
+            to: sampledSpan
+          when: ok
+  - of: (*memExpHistogram).setClock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memExpHistogram).setClock
+        kind: self
+      - id: h.ex.setClock
+        kind: internal
+    steps:
+      - eval: h.ex.setClock(clk)
+        to: h.ex.setClock
+  - of: (*memExpHistogram).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memExpHistogram).record
+        kind: self
+      - id: coremetrics
+        kind: package
+      - id: h.downscaleFor
+        kind: internal
+      - id: h.downscale
+        kind: internal
+      - id: target.add
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: math.IsNaN(value) || math.IsInf(value, 0)
+      - lock:
+          mutex: h.mu
+      - op: ++
+        set: h.count
+      - op: +=
+        set: h.sum
+        value: value
+      - opt:
+          do:
+            - op: ++
+              set: h.zeroCount
+            - return: "true"
+          when: value == 0
+      - bind: target
+        eval: "&h.positive"
+      - opt:
+          do:
+            - set: target
+              value: "&h.negative"
+          when: value < 0
+      - bind: index
+        eval: coremetrics.ExponentialIndex(max(math.Abs(value), minNormal), h.scale)
+        to: coremetrics
+      - opt:
+          do:
+            - eval: h.downscale(change)
+              to: h.downscale
+            - op: ">>="
+              set: index
+              value: change
+          init:
+            bind: change
+            eval: h.downscaleFor(target, index)
+            to: h.downscaleFor
+          when: change > 0
+      - eval: target.add(index)
+        to: target.add
+      - return: "true"
+  - of: (*memExpHistogram).downscaleFor
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: r.size == 0
+      - bind: low, high
+        eval: min(r.offset, index), max(r.offset+int32(r.size)-1, index)
+      - var:
+          name: change
+          type: int32
+      - loop:
+          cond: int(high>>change-low>>change) >= h.maxSize && h.scale-change > coremetrics.ExponentialMinScale
+          do:
+            - op: ++
+              set: change
+      - return: change
+  - of: (*memExpHistogram).downscale
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memExpHistogram).downscale
+        kind: self
+      - id: h.positive.merge
+        kind: internal
+      - id: h.negative.merge
+        kind: internal
+    steps:
+      - op: "-="
+        set: h.scale
+        value: change
+      - eval: h.positive.merge(change)
+        to: h.positive.merge
+      - eval: h.negative.merge(change)
+        to: h.negative.merge
+  - of: (*expRange).add
+    steps:
+      - opt:
+          do:
+            - set: r.offset, r.size
+              value: index, 1
+            - set: r.counts[0]
+              value: "1"
+            - return: ""
+          when: r.size == 0
+      - opt:
+          do:
+            - bind: shift
+              eval: int(r.offset - index)
+            - eval: copy(r.counts[shift:r.size+shift], r.counts[:r.size])
+            - eval: clear(r.counts[:shift])
+            - set: r.offset
+              value: index
+            - op: +=
+              set: r.size
+              value: shift
+          when: index < r.offset
+      - bind: slot
+        eval: int(index - r.offset)
+      - opt:
+          do:
+            - eval: "clear(r.counts[r.size : slot+1])"
+            - set: r.size
+              value: slot + 1
+          when: slot >= r.size
+      - op: ++
+        set: r.counts[slot]
+  - of: (*expRange).merge
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.size == 0
+      - bind: newOffset
+        eval: r.offset >> change
+      - loop:
+          do:
+            - bind: count
+              eval: r.counts[i]
+            - set: r.counts[i]
+              value: "0"
+            - op: +=
+              set: r.counts[int((r.offset+int32(i))>>change-newOffset)]
+              value: count
+          key: i
+          range: r.size
+      - set: r.size
+        value: int((r.offset+int32(r.size)-1)>>change-newOffset) + 1
+      - set: r.offset
+        value: newOffset
+  - of: (*memExpHistogram).snapshot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memExpHistogram).snapshot
+        kind: self
+      - id: h.ex.collect
+        kind: internal
+      - id: h.positive.reset
+        kind: internal
+      - id: h.negative.reset
+        kind: internal
+    steps:
+      - bind: exemplars
+        eval: h.ex.collect(delta)
+        to: h.ex.collect
+      - lock:
+          mutex: h.mu
+      - bind: point
+        eval: |-
+          coremetrics.ExponentialHistogramValue{
+          		Scale:     h.scale,
+          		ZeroCount: h.zeroCount,
+          		Positive:  h.positive.value(),
+          		Negative:  h.negative.value(),
+          		Sum:       h.sum,
+          		Count:     h.count,
+          		Exemplars: exemplars,
+          	}
+      - opt:
+          do:
+            - eval: h.positive.reset()
+              to: h.positive.reset
+            - eval: h.negative.reset()
+              to: h.negative.reset
+            - set: h.zeroCount, h.sum, h.count
+              value: 0, 0, 0
+            - set: h.scale
+              value: coremetrics.ExponentialMaxScale
+          when: delta
+      - return: point
+  - of: (*expRange).value
+    steps:
+      - opt:
+          do:
+            - return: coremetrics.ExponentialBucketsValue{}
+          when: r.size == 0
+      - return: "coremetrics.ExponentialBucketsValue{Offset: r.offset, Counts: slices.Clone(r.counts[:r.size])}"
+  - of: (*expRange).reset
+    steps:
+      - eval: clear(r.counts[:r.size])
+      - set: r.offset, r.size
+        value: 0, 0
   - of: NewOTLPHTTPExporter
     participants:
       - id: caller
@@ -105,6 +506,21 @@ sequences:
           when: len(doc) == 0
       - return: e.sender.PostContext(ctx, doc)
         to: e.sender.PostContext
+  - of: (*otlpHTTPExporter).ExportEncodedDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpHTTPExporter).ExportEncodedDocument
+        kind: self
+      - id: e.sender.PostEncoded
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(doc) == 0
+      - return: e.sender.PostEncoded(ctx, doc, encoding)
+        to: e.sender.PostEncoded
   - of: EncodeOTLPJSON
     participants:
       - id: caller
@@ -151,6 +567,8 @@ sequences:
         kind: internal
       - id: appendOTLPHistograms
         kind: internal
+      - id: appendOTLPExponentials
+        kind: internal
     steps:
       - bind: start, end
         eval: otlp.UnixNano(snap.StartTime), otlp.UnixNano(snap.Time)
@@ -167,6 +585,13 @@ sequences:
       - set: list, err
         to: appendOTLPHistograms
         value: appendOTLPHistograms(list, snap.Histograms, start, end)
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - set: list, err
+        to: appendOTLPExponentials
+        value: appendOTLPExponentials(list, snap.ExponentialHistograms, start, end)
       - opt:
           do:
             - return: nil, err
@@ -194,7 +619,7 @@ sequences:
                 when: tempErr != nil
             - set: list
               value: |-
-                append(list, otlpMetric{Name: name, Description: metric.Description, Sum: &otlpSum{
+                append(list, otlpMetric{Name: name, Description: metric.Description, Unit: metric.Unit, Sum: &otlpSum{
                 			DataPoints:             otlpSumPoints(metric.Points, start, end),
                 			AggregationTemporality: temporality,
                 			IsMonotonic:            metric.Monotonic,
@@ -215,6 +640,7 @@ sequences:
                 			StartTimeUnixNano: start,
                 			TimeUnixNano:      end,
                 			AsInt:             new(otlp.Int64(point.Value)),
+                			Exemplars:         otlpExemplars(point.Exemplars, true),
                 			Attributes:        otlp.Attrs(point.Attrs),
                 		})
           key: _
@@ -227,7 +653,7 @@ sequences:
           do:
             - set: list
               value: |-
-                append(list, otlpMetric{Name: name, Description: gauges[name].Description, Gauge: &otlpGauge{
+                append(list, otlpMetric{Name: name, Description: gauges[name].Description, Unit: gauges[name].Unit, Gauge: &otlpGauge{
                 			DataPoints: otlpGaugePoints(gauges[name].Points, start, end),
                 		}})
           key: _
@@ -283,7 +709,7 @@ sequences:
                 when: pointsErr != nil
             - set: list
               value: |-
-                append(list, otlpMetric{Name: name, Description: metric.Description, Histogram: &otlpHistogram{
+                append(list, otlpMetric{Name: name, Description: metric.Description, Unit: metric.Unit, Histogram: &otlpHistogram{
                 			DataPoints:             points,
                 			AggregationTemporality: temporality,
                 		}})
@@ -318,9 +744,10 @@ sequences:
                 			StartTimeUnixNano: start,
                 			TimeUnixNano:      end,
                 			Count:             otlp.Uint64(point.Count),
-                			Sum:               new(otlp.Double(point.Sum)),
+                			Sum:               otlpOptionalSum(point.Sum, point.NoSum),
                 			BucketCounts:      otlpBucketCounts(point.Counts),
                 			ExplicitBounds:    otlpExplicitBounds(point.Bounds),
+                			Exemplars:         otlpExemplars(point.Exemplars, false),
                 			Attributes:        otlp.Attrs(point.Attrs),
                 		})
           key: _
@@ -530,6 +957,8 @@ sequences:
         kind: internal
       - id: appendPromHistograms
         kind: internal
+      - id: appendPromExponentials
+        kind: internal
     steps:
       - set: doc, err
         to: appendPromSums
@@ -548,6 +977,13 @@ sequences:
       - set: doc, err
         to: appendPromHistograms
         value: appendPromHistograms(doc, snap.Histograms)
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - set: doc, err
+        to: appendPromExponentials
+        value: appendPromExponentials(doc, snap.ExponentialHistograms)
       - opt:
           do:
             - return: nil, err
@@ -792,9 +1228,12 @@ sequences:
         value: |-
           appendBucket(buf, name, point.Attrs, positiveInfBound,
           		strconv.FormatUint(cumulative, decimalBase))
-      - set: buf
-        to: appendSample
-        value: appendSample(buf, name, sumSuffix, point.Attrs, promFloat(point.Sum))
+      - opt:
+          do:
+            - set: buf
+              to: appendSample
+              value: appendSample(buf, name, sumSuffix, point.Attrs, promFloat(point.Sum))
+          when: "!point.NoSum"
       - return: |-
           appendSample(buf, name, countSuffix, point.Attrs,
           		strconv.FormatUint(point.Count, decimalBase))
@@ -1033,6 +1472,84 @@ sequences:
             - default: true
               do:
                 - return: "false"
+  - of: appendPromExponentials
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendPromExponentials
+        kind: self
+      - id: checkTemporality
+        kind: internal
+      - id: checkMetricName
+        kind: internal
+      - id: appendHelpLine
+        kind: internal
+      - id: appendTypeLine
+        kind: internal
+      - id: checkAttrNames
+        kind: internal
+      - id: strconv
+        kind: stdlib
+      - id: appendBucket
+        kind: internal
+      - id: appendSample
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: metric
+              eval: metrics[name]
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: err
+                  eval: checkTemporality(name, metric.Temporality)
+                  to: checkTemporality
+                when: err != nil
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: err
+                  eval: checkMetricName(name)
+                  to: checkMetricName
+                when: err != nil
+            - set: buf
+              to: appendHelpLine
+              value: appendHelpLine(buf, name, metric.Description)
+            - set: buf
+              to: appendTypeLine
+              value: appendTypeLine(buf, name, promTypeHistogram)
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: nil, err
+                      init:
+                        bind: err
+                        eval: checkAttrNames(point.Attrs, true)
+                        to: checkAttrNames
+                      when: err != nil
+                  - bind: count
+                    eval: strconv.FormatUint(point.Count, decimalBase)
+                    to: strconv
+                  - set: buf
+                    to: appendBucket
+                    value: appendBucket(buf, name, point.Attrs, positiveInfBound, count)
+                  - set: buf
+                    to: appendSample
+                    value: appendSample(buf, name, sumSuffix, point.Attrs, promFloat(point.Sum))
+                  - set: buf
+                    to: appendSample
+                    value: appendSample(buf, name, countSuffix, point.Attrs, count)
+                key: _
+                range: metric.Points
+                value: point
+          key: _
+          range: sortedKeys(metrics)
+          value: name
+      - return: buf, nil
   - of: newTextExporter
     steps:
       - return: "&textExporter{name: name, dst: dst}"
@@ -1068,6 +1585,8 @@ sequences:
         kind: internal
       - id: appendHistograms
         kind: internal
+      - id: appendExponentials
+        kind: internal
       - id: e.mu.Lock
         kind: value
       - id: e.dst.Write
@@ -1098,6 +1617,9 @@ sequences:
       - set: buf
         to: appendHistograms
         value: appendHistograms(buf, snap.Histograms)
+      - set: buf
+        to: appendExponentials
+        value: appendExponentials(buf, snap.ExponentialHistograms)
       - eval: e.mu.Lock()
         to: e.mu.Lock
       - bind: _, err
@@ -1215,6 +1737,7 @@ sequences:
                 			temporality:  metric.Temporality.String(),
                 			monotonicity: monotonicity,
                 			description:  metric.Description,
+                			unit:         metric.Unit,
                 		})
             - loop:
                 do:
@@ -1250,6 +1773,7 @@ sequences:
                 			name:        name,
                 			kind:        textKindGauge,
                 			description: metrics[name].Description,
+                			unit:        metrics[name].Unit,
                 		})
             - loop:
                 do:
@@ -1288,6 +1812,46 @@ sequences:
                 			kind:        textKindHistogram,
                 			temporality: metric.Temporality.String(),
                 			description: metric.Description,
+                			unit:        metric.Unit,
+                		})
+            - loop:
+                do:
+                  - set: buf
+                    to: appendSeriesLine
+                    value: |-
+                      appendSeriesLine(buf, name, point.Attrs,
+                      				strconv.FormatUint(point.Count, decimalBase))
+                key: _
+                range: metric.Points
+                value: point
+          key: _
+          range: sortedKeys(metrics)
+          value: name
+      - return: buf
+  - of: appendExponentials
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendExponentials
+        kind: self
+      - id: appendMetricHeader
+        kind: internal
+      - id: appendSeriesLine
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: metric
+              eval: metrics[name]
+            - set: buf
+              to: appendMetricHeader
+              value: |-
+                appendMetricHeader(buf, metricHeader{
+                			name:        name,
+                			kind:        textKindExponential,
+                			temporality: metric.Temporality.String(),
+                			description: metric.Description,
+                			unit:        metric.Unit,
                 		})
             - loop:
                 do:
@@ -1345,6 +1909,14 @@ sequences:
               to: appendQuoted
               value: appendQuoted(buf, header.description)
           when: header.description != ""
+      - opt:
+          do:
+            - set: buf
+              value: append(buf, " unit="...)
+            - set: buf
+              to: appendQuoted
+              value: appendQuoted(buf, header.unit)
+          when: header.unit != ""
       - return: append(buf, '\n')
   - of: appendSeriesLine
     participants:
@@ -1497,26 +2069,255 @@ sequences:
   - of: newMemGauge
     steps:
       - return: "&memGauge{}"
+  - of: NewPrometheusHandler
+    steps:
+      - opt:
+          do:
+            - return: nil, coremetrics.CollectorNil
+          when: collect == nil
+      - bind: name
+        eval: cfg.Name
+      - opt:
+          do:
+            - set: name
+              value: defaultHandlerExporter
+          when: name == ""
+      - bind: h
+        eval: "&prometheusHandler{collect: collect, name: name, onError: cfg.OnError}"
+      - set: h.docs.New
+        value:
+          closure:
+            results: any
+            steps:
+              - return: new(bytes.Buffer)
+      - return: h, nil
+  - of: (*prometheusHandler).ServeHTTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*prometheusHandler).ServeHTTP
+        kind: self
+      - id: h.serveGet
+        kind: internal
+      - id: w.Header().Set
+        kind: value
+      - id: w.WriteHeader
+        kind: value
+      - id: http
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: http.MethodGet
+              do:
+                - eval: h.serveGet(w)
+                  to: h.serveGet
+            - case: http.MethodHead
+              do:
+                - eval: w.Header().Set("Content-Type", PrometheusContentType)
+                  to: w.Header().Set
+                - eval: w.WriteHeader(http.StatusOK)
+                  to: w.WriteHeader
+            - default: true
+              do:
+                - eval: w.Header().Set("Allow", allowedMethods)
+                  to: w.Header().Set
+                - eval: http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+                  to: http
+          "on": r.Method
+  - of: (*prometheusHandler).serveGet
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*prometheusHandler).serveGet
+        kind: self
+      - id: w.Header().Set
+        kind: value
+      - id: http
+        kind: stdlib
+      - id: h.scrape.Unlock
+        kind: value
+      - id: doc.Reset
+        kind: value
+      - id: h.recycle
+        kind: internal
+      - id: NewPrometheusExporter(h.name, doc).Export
+        kind: value
+      - id: w.WriteHeader
+        kind: value
+      - id: h.write
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: w.Header().Set("Retry-After", busyRetryAfter)
+              to: w.Header().Set
+            - eval: http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+              to: http
+            - return: ""
+          when: "!h.scrape.TryLock()"
+      - defer: h.scrape.Unlock()
+        to: h.scrape.Unlock
+      - bind: doc, _
+        eval: h.docs.Get().(*bytes.Buffer)
+      - eval: doc.Reset()
+        to: doc.Reset
+      - defer: h.recycle(doc)
+        to: h.recycle
+      - opt:
+          do:
+            - eval: w.Header().Set("Content-Type", errorContentType)
+              to: w.Header().Set
+            - eval: w.WriteHeader(http.StatusInternalServerError)
+              to: w.WriteHeader
+            - eval: h.write(w, []byte(publicText(eerr)))
+              to: h.write
+            - return: ""
+          init:
+            bind: eerr
+            eval: NewPrometheusExporter(h.name, doc).Export(h.collect())
+            to: NewPrometheusExporter(h.name, doc).Export
+          when: eerr != nil
+      - eval: w.Header().Set("Content-Type", PrometheusContentType)
+        to: w.Header().Set
+      - eval: w.Header().Set("Content-Length", strconv.Itoa(doc.Len()))
+        to: w.Header().Set
+      - eval: w.WriteHeader(http.StatusOK)
+        to: w.WriteHeader
+      - eval: h.write(w, doc.Bytes())
+        to: h.write
+  - of: (*prometheusHandler).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*prometheusHandler).write
+        kind: self
+      - id: w.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: h.onError(werr)
+          init:
+            bind: _, werr
+            eval: w.Write(body)
+            to: w.Write
+          when: werr != nil && h.onError != nil
+  - of: (*prometheusHandler).recycle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*prometheusHandler).recycle
+        kind: self
+      - id: h.docs.Put
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: doc.Cap() > maxPooledDocument
+      - eval: h.docs.Put(doc)
+        to: h.docs.Put
+  - of: publicText
+    participants:
+      - id: caller
+        kind: actor
+      - id: publicText
+        kind: self
+      - id: errs
+        kind: package
+      - id: http
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: public
+          init:
+            bind: public
+            eval: errs.PublicOf(err)
+            to: errs
+          when: public != ""
+      - return: http.StatusText(http.StatusInternalServerError)
+        to: http
   - of: newHistogram
     participants:
       - id: caller
         kind: actor
       - id: newHistogram
         kind: self
+      - id: coremetrics
+        kind: package
       - id: slices
         kind: stdlib
+      - id: validateBuckets
+        kind: internal
     steps:
+      - opt:
+          do:
+            - set: bounds
+              to: coremetrics
+              value: coremetrics.DefaultBuckets()
+          when: len(bounds) == 0
       - bind: sorted
         eval: slices.Clone(bounds)
         to: slices
       - eval: slices.Sort(sorted)
         to: slices
+      - eval: validateBuckets(sorted)
+        to: validateBuckets
       - return: "&memHistogram{bounds: sorted, counts: make([]atomic.Uint64, len(sorted)+1)}"
   - of: (*memHistogram).Record
     participants:
       - id: caller
         kind: actor
       - id: (*memHistogram).Record
+        kind: self
+      - id: h.record
+        kind: internal
+    steps:
+      - eval: h.record(value)
+        to: h.record
+  - of: (*memHistogram).RecordContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memHistogram).RecordContext
+        kind: self
+      - id: h.record
+        kind: internal
+      - id: sampledSpan
+        kind: internal
+      - id: h.ex.offer
+        kind: internal
+    steps:
+      - bind: idx
+        eval: h.record(value)
+        to: h.record
+      - opt:
+          do:
+            - eval: h.ex.offer(len(h.counts), idx, value, span)
+              to: h.ex.offer
+          init:
+            bind: span, ok
+            eval: sampledSpan(ctx)
+            to: sampledSpan
+          when: ok
+  - of: (*memHistogram).setClock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memHistogram).setClock
+        kind: self
+      - id: h.ex.setClock
+        kind: internal
+    steps:
+      - eval: h.ex.setClock(clk)
+        to: h.ex.setClock
+  - of: (*memHistogram).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memHistogram).record
         kind: self
       - id: h.counts[idx].Add
         kind: value
@@ -1554,7 +2355,7 @@ sequences:
               to: math
             - opt:
                 do:
-                  - return: ""
+                  - return: idx
                 when: h.sumBits.CompareAndSwap(old, next)
           forever: true
   - of: (*memHistogram).snapshot
@@ -1563,11 +2364,23 @@ sequences:
         kind: actor
       - id: (*memHistogram).snapshot
         kind: self
+      - id: h.observedSnapshot
+        kind: internal
+      - id: h.ex.collect
+        kind: internal
       - id: h.counts[i].Swap
         kind: value
       - id: h.counts[i].Load
         kind: value
     steps:
+      - opt:
+          do:
+            - return: h.observedSnapshot(delta)
+              to: h.observedSnapshot
+          when: h.observed != nil
+      - bind: exemplars
+        eval: h.ex.collect(delta)
+        to: h.ex.collect
       - bind: counts
         eval: make([]uint64, len(h.counts))
       - loop:
@@ -1588,18 +2401,20 @@ sequences:
           do:
             - return: |-
                 coremetrics.HistogramValue{
-                			Bounds: slices.Clone(h.bounds),
-                			Counts: counts,
-                			Sum:    math.Float64frombits(h.sumBits.Swap(0)),
-                			Count:  h.count.Swap(0),
+                			Bounds:    slices.Clone(h.bounds),
+                			Counts:    counts,
+                			Sum:       math.Float64frombits(h.sumBits.Swap(0)),
+                			Count:     h.count.Swap(0),
+                			Exemplars: exemplars,
                 		}
           when: delta
       - return: |-
           coremetrics.HistogramValue{
-          		Bounds: slices.Clone(h.bounds),
-          		Counts: counts,
-          		Sum:    math.Float64frombits(h.sumBits.Load()),
-          		Count:  h.count.Load(),
+          		Bounds:    slices.Clone(h.bounds),
+          		Counts:    counts,
+          		Sum:       math.Float64frombits(h.sumBits.Load()),
+          		Count:     h.count.Load(),
+          		Exemplars: exemplars,
           	}
   - of: (*memHistogram).RecordDuration
     participants:
@@ -1612,6 +2427,160 @@ sequences:
     steps:
       - eval: h.Record(d.Seconds())
         to: h.Record
+  - of: newObservedHistogram
+    steps:
+      - return: "&memHistogram{observed: &observedState{}}"
+  - of: (*memHistogram).observe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memHistogram).observe
+        kind: self
+      - id: validateObserved
+        kind: internal
+      - id: h.relayout
+        kind: internal
+      - id: h.count.Store
+        kind: value
+      - id: h.sumBits.Store
+        kind: value
+    steps:
+      - eval: validateObserved(point)
+        to: validateObserved
+      - bind: state
+        eval: h.observed
+      - bind: restart
+        eval: h.relayout(point.Bounds)
+        to: h.relayout
+      - set: restart
+        value: restart || wentDown(point.Counts, state.previous)
+      - bind: differenced
+        eval: delta && !restart
+      - eval: h.count.Store(h.storeWindow(point.Counts, differenced))
+        to: h.count.Store
+      - bind: sum
+        eval: point.Sum
+      - opt:
+          do:
+            - op: "-="
+              set: sum
+              value: state.previousSum
+          when: differenced
+      - set: state.previousSum
+        value: point.Sum
+      - eval: h.sumBits.Store(math.Float64bits(sum))
+        to: h.sumBits.Store
+      - set: state.noSum
+        value: point.NoSum
+      - set: state.reported
+        value: "true"
+  - of: (*memHistogram).relayout
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memHistogram).relayout
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: newLayout
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: slices.Equal(h.bounds, bounds) && h.counts != nil
+      - set: h.bounds
+        to: slices
+        value: slices.Clone(bounds)
+      - set: h.counts, h.observed.previous
+        to: newLayout
+        value: newLayout(len(bounds) + 1)
+      - set: h.observed.previousSum
+        value: "0"
+      - return: "true"
+  - of: newLayout
+    steps:
+      - return: make([]atomic.Uint64, buckets), make([]uint64, buckets)
+  - of: (*memHistogram).storeWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memHistogram).storeWindow
+        kind: self
+      - id: h.counts[i].Store
+        kind: value
+    steps:
+      - bind: previous
+        eval: h.observed.previous
+      - var:
+          name: total
+          type: uint64
+      - loop:
+          do:
+            - bind: window
+              eval: c
+            - opt:
+                do:
+                  - op: "-="
+                    set: window
+                    value: previous[i]
+                when: differenced
+            - eval: h.counts[i].Store(window)
+              to: h.counts[i].Store
+            - set: previous[i]
+              value: c
+            - op: +=
+              set: total
+              value: window
+          key: i
+          range: counts
+          value: c
+      - return: total
+  - of: (*memHistogram).observedSnapshot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memHistogram).observedSnapshot
+        kind: self
+      - id: h.counts[i].Load
+        kind: value
+      - id: h.count.Load
+        kind: value
+      - id: math
+        kind: stdlib
+    steps:
+      - bind: state
+        eval: h.observed
+      - bind: point
+        eval: |-
+          coremetrics.HistogramValue{
+          		Bounds: slices.Clone(h.bounds),
+          		Counts: make([]uint64, len(h.counts)),
+          		NoSum:  state.noSum,
+          	}
+      - opt:
+          do:
+            - return: point
+          when: delta && !state.reported
+      - set: state.reported
+        value: "false"
+      - loop:
+          do:
+            - set: point.Counts[i]
+              to: h.counts[i].Load
+              value: h.counts[i].Load()
+          key: i
+          range: h.counts
+      - set: point.Count
+        to: h.count.Load
+        value: h.count.Load()
+      - opt:
+          do:
+            - set: point.Sum
+              to: math
+              value: math.Float64frombits(h.sumBits.Load())
+          when: "!state.noSum"
+      - return: point
   - of: NewMeter
     participants:
       - id: caller
@@ -1668,6 +2637,9 @@ sequences:
       - set: meter.histograms
         to: newSeriesStore
         value: newSeriesStore[*memHistogram](meter)
+      - set: meter.exponentials
+        to: newSeriesStore
+        value: newSeriesStore[*memExpHistogram](meter)
       - return: meter
   - of: (*memMeter).Counter
     participants:
@@ -1871,13 +2843,14 @@ sequences:
       - bind: snap
         eval: |-
           coremetrics.SnapshotValue{
-          		Resource:   m.resource,
-          		Scope:      m.scope,
-          		StartTime:  m.startTime,
-          		Time:       now,
-          		Sums:       collectSums(m.sums.byKey, m.names, m.descriptions, m.temporality, delta),
-          		Gauges:     collectGauges(m.gauges.byKey, m.names, m.descriptions),
-          		Histograms: collectHistograms(m.histograms.byKey, m.names, m.descriptions, m.temporality, delta),
+          		Resource:              m.resource,
+          		Scope:                 m.scope,
+          		StartTime:             m.startTime,
+          		Time:                  now,
+          		Sums:                  collectSums(m.sums.byKey, m.names, m.annotations(), m.temporality, delta),
+          		Gauges:                collectGauges(m.gauges.byKey, m.names, m.annotations()),
+          		Histograms:            collectHistograms(m.histograms.byKey, m.names, m.annotations(), m.temporality, delta),
+          		ExponentialHistograms: collectExponentials(m.exponentials.byKey, m.names, m.annotations(), m.temporality, delta),
           	}
       - eval: m.mu.RUnlock()
         to: m.mu.RUnlock
@@ -1905,7 +2878,8 @@ sequences:
                 coremetrics.SumMetricValue{
                 			Temporality: temporality,
                 			Monotonic:   slot.kind.monotonic(),
-                			Description: descriptions[name],
+                			Description: notes.descriptions[name],
+                			Unit:        notes.units[name],
                 			Points:      slot.window,
                 		}
           key: name
@@ -1918,8 +2892,9 @@ sequences:
             - set: metric.Points
               value: |-
                 append(metric.Points, coremetrics.SumValue{
-                			Attrs: entry.attrs,
-                			Value: entry.inst.collect(delta),
+                			Attrs:     entry.attrs,
+                			Value:     entry.inst.collect(delta),
+                			Exemplars: entry.inst.exemplars(delta),
                 		})
             - set: out[entry.name]
               value: metric
@@ -1950,7 +2925,8 @@ sequences:
             - set: out[name]
               value: |-
                 coremetrics.GaugeMetricValue{
-                			Description: descriptions[name],
+                			Description: notes.descriptions[name],
+                			Unit:        notes.units[name],
                 			Points:      slot.window,
                 		}
           key: name
@@ -1998,7 +2974,8 @@ sequences:
               value: |-
                 coremetrics.HistogramMetricValue{
                 			Temporality: temporality,
-                			Description: descriptions[name],
+                			Description: notes.descriptions[name],
+                			Unit:        notes.units[name],
                 			Points:      slot.window,
                 		}
           key: name
@@ -2132,6 +3109,141 @@ sequences:
           when: m.descriptions == nil
       - set: m.descriptions[name]
         value: description
+  - of: (*memMeter).annotations
+    steps:
+      - return: "annotations{descriptions: m.descriptions, units: m.units}"
+  - of: (*memMeter).Unit
+    steps:
+      - opt:
+          do:
+            - panic: coremetrics.InvalidUnit.Error()
+          when: "!validUnit(unit)"
+      - lock:
+          mutex: m.mu
+      - bind: existing, bound
+        eval: m.units[name]
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: ""
+                when: existing == unit
+            - panic: coremetrics.UnitConflict.Error()
+          when: bound
+      - opt:
+          do:
+            - set: m.units
+              value: make(map[string]string, 1)
+          when: m.units == nil
+      - set: m.units[name]
+        value: unit
+  - of: (*memMeter).ExponentialHistogram
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memMeter).ExponentialHistogram
+        kind: self
+      - id: sortAttrs
+        kind: internal
+      - id: coremetrics
+        kind: package
+      - id: appendSeriesKey
+        kind: internal
+      - id: m.exponentials.lookup
+        kind: internal
+      - id: newExpHistogram
+        kind: internal
+      - id: m.exponentials.admit
+        kind: internal
+    steps:
+      - var:
+          name: sortBuf
+          type: "[maxStackAttrs]coreotel.AttrValue"
+      - var:
+          name: keyBuf
+          type: "[seriesKeyCap]byte"
+      - bind: sorted
+        eval: sortAttrs(sortBuf[:0], attrs)
+        to: sortAttrs
+      - eval: coremetrics.ValidateAttrs(sorted)
+        to: coremetrics
+      - bind: key
+        eval: appendSeriesKey(keyBuf[:0], kindExponentialHistogram, name, sorted)
+        to: appendSeriesKey
+      - opt:
+          do:
+            - return: inst
+          init:
+            bind: inst, ok
+            eval: m.exponentials.lookup(key)
+            to: m.exponentials.lookup
+          when: ok
+      - bind: build
+        eval:
+          closure:
+            results: "*memExpHistogram"
+            steps:
+              - return: newExpHistogram(maxSize)
+                to: newExpHistogram
+      - return: m.exponentials.admit(name, kindExponentialHistogram, key, sorted, build)
+        to: m.exponentials.admit
+  - of: collectExponentials
+    participants:
+      - id: caller
+        kind: actor
+      - id: collectExponentials
+        kind: self
+      - id: entry.inst.snapshot
+        kind: internal
+      - id: sortPoints
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(store) == 0
+      - bind: out
+        eval: make(map[string]coremetrics.ExponentialHistogramMetricValue, sizeGroups(names, len(store)))
+      - loop:
+          do:
+            - set: out[name]
+              value: |-
+                coremetrics.ExponentialHistogramMetricValue{
+                			Temporality: temporality,
+                			Description: notes.descriptions[name],
+                			Unit:        notes.units[name],
+                			Points:      slot.window,
+                		}
+          key: name
+          range: carve[coremetrics.ExponentialHistogramValue](len(store), names, groupExponential)
+          value: slot
+      - loop:
+          do:
+            - bind: point
+              eval: entry.inst.snapshot(delta)
+              to: entry.inst.snapshot
+            - set: point.Attrs
+              value: entry.attrs
+            - bind: metric
+              eval: out[entry.name]
+            - set: metric.Points
+              value: append(metric.Points, point)
+            - set: out[entry.name]
+              value: metric
+          key: _
+          range: store
+          value: entry
+      - loop:
+          do:
+            - eval: sortPoints(metric.Points, exponentialAttrs)
+              to: sortPoints
+          key: _
+          range: out
+          value: metric
+      - return: out
+  - of: exponentialAttrs
+    steps:
+      - return: p.Attrs
   - of: (*memMeter).ObservableCounter
     participants:
       - id: caller
@@ -2181,7 +3293,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: obs.int64Cb == nil && obs.floatCb == nil
+          when: obs.int64Cb == nil && obs.floatCb == nil && obs.histCb == nil
       - set: m.observers
         value: append(m.observers, obs)
   - of: (*memMeter).runObservers
@@ -2207,6 +3319,15 @@ sequences:
           when: len(regs) == 0
       - loop:
           do:
+            - opt:
+                do:
+                  - eval: |-
+                      obs.histCb(func(point coremetrics.HistogramValue) {
+                      				//: resolve or create, then take the reading.
+                      				m.observeHistogram(obs.name, point, delta)
+                      			})
+                  - continue: true
+                when: obs.kind == kindObservableHistogram
             - opt:
                 do:
                   - eval: |-
@@ -2319,6 +3440,61 @@ sequences:
             - return: newObservableCounter
           when: kind == kindObservableCounter
       - return: newObservableUpDownCounter
+  - of: (*memMeter).ObservableHistogram
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memMeter).ObservableHistogram
+        kind: self
+      - id: m.register
+        kind: internal
+    steps:
+      - eval: "m.register(observer{name: name, kind: kindObservableHistogram, histCb: observe})"
+        to: m.register
+  - of: (*memMeter).observeHistogram
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memMeter).observeHistogram
+        kind: self
+      - id: sortAttrs
+        kind: internal
+      - id: coremetrics
+        kind: package
+      - id: appendSeriesKey
+        kind: internal
+      - id: m.histograms.lookup
+        kind: internal
+      - id: m.histograms.admit
+        kind: internal
+      - id: hist.observe
+        kind: internal
+    steps:
+      - var:
+          name: sortBuf
+          type: "[maxStackAttrs]coreotel.AttrValue"
+      - var:
+          name: keyBuf
+          type: "[seriesKeyCap]byte"
+      - bind: sorted
+        eval: sortAttrs(sortBuf[:0], point.Attrs)
+        to: sortAttrs
+      - eval: coremetrics.ValidateAttrs(sorted)
+        to: coremetrics
+      - bind: key
+        eval: appendSeriesKey(keyBuf[:0], kindObservableHistogram, name, sorted)
+        to: appendSeriesKey
+      - bind: hist, ok
+        eval: m.histograms.lookup(key)
+        to: m.histograms.lookup
+      - opt:
+          do:
+            - set: hist
+              to: m.histograms.admit
+              value: m.histograms.admit(name, kindObservableHistogram, key, sorted, newObservedHistogram)
+          when: "!ok"
+      - eval: hist.observe(point, delta)
+        to: hist.observe
   - of: instrumentKind.group
     steps:
       - switch:
@@ -2329,6 +3505,9 @@ sequences:
             - case: kindGauge, kindObservableGauge
               do:
                 - return: groupGauge
+            - case: kindExponentialHistogram
+              do:
+                - return: groupExponential
             - default: true
               do:
                 - return: groupHistogram
@@ -2368,6 +3547,176 @@ sequences:
             - panic: coremetrics.InstrumentKindConflict.Error()
           when: state.kind != want
       - return: state
+  - of: RegisterObservers
+    participants:
+      - id: caller
+        kind: actor
+      - id: RegisterObservers
+        kind: self
+      - id: registerObserver
+        kind: internal
+    steps:
+      - bind: units, _
+        eval: meter.(coremetrics.UnitDescriber)
+      - loop:
+          do:
+            - eval: registerObserver(meter, units, cfg, observer)
+              to: registerObserver
+          key: _
+          range: observers
+          value: observer
+  - of: registerObserver
+    participants:
+      - id: caller
+        kind: actor
+      - id: registerObserver
+        kind: self
+      - id: describeStats
+        kind: internal
+      - id: spellStat
+        kind: internal
+      - id: registerStat
+        kind: internal
+      - id: units.Unit
+        kind: value
+    steps:
+      - bind: reader
+        eval: "&statReader{observer: observer, series: map[string]*statSeries{}}"
+      - set: reader.record
+        value: reader.store
+      - bind: described
+        eval: describeStats(observer)
+        to: describeStats
+      - set: reader.callbacks
+        value: len(described)
+      - loop:
+          do:
+            - bind: name
+              eval: spellStat(stat.name, cfg.Underscore)
+              to: spellStat
+            - set: reader.series[stat.name]
+              value: "&statSeries{kind: stat.kind}"
+            - eval: registerStat(meter, name, stat, reader)
+              to: registerStat
+            - opt:
+                do:
+                  - eval: units.Unit(name, stat.unit)
+                    to: units.Unit
+                when: units != nil && stat.unit != ""
+          key: _
+          range: described
+          value: stat
+  - of: describeStats
+    participants:
+      - id: caller
+        kind: actor
+      - id: describeStats
+        kind: self
+      - id: observer.Observe
+        kind: value
+    steps:
+      - var:
+          name: described
+          type: "[]describedStat"
+      - bind: seen
+        eval: map[string]bool{}
+      - eval: |-
+          observer.Observe(func(name string, kind coremetrics.StatKind, unit string, _ int64, _ ...coreotel.AttrValue) {
+          		//: a statistic with no kind, or one already described, adds nothing.
+          		if seen[name] || (kind != coremetrics.StatCounter && kind != coremetrics.StatGauge) {
+          			return
+          		}
+          		seen[name] = true
+          		described = append(described, describedStat{name: name, kind: kind, unit: unit})
+          	})
+        to: observer.Observe
+      - return: described
+  - of: spellStat
+    participants:
+      - id: caller
+        kind: actor
+      - id: spellStat
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: strings.ReplaceAll(name, ".", "_")
+              to: strings
+          when: underscore
+      - return: name
+  - of: registerStat
+    participants:
+      - id: caller
+        kind: actor
+      - id: registerStat
+        kind: self
+      - id: reader.emit
+        kind: internal
+      - id: meter.ObservableCounter
+        kind: value
+      - id: meter.ObservableUpDownCounter
+        kind: value
+    steps:
+      - bind: callback
+        eval:
+          closure:
+            params: observe coremetrics.ObserveInt64
+            steps:
+              - eval: reader.emit(stat.name, observe)
+                to: reader.emit
+      - opt:
+          do:
+            - eval: meter.ObservableCounter(name, callback)
+              to: meter.ObservableCounter
+            - return: ""
+          when: stat.kind == coremetrics.StatCounter
+      - eval: meter.ObservableUpDownCounter(name, callback)
+        to: meter.ObservableUpDownCounter
+  - of: (*statReader).emit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*statReader).emit
+        kind: self
+      - id: r.observer.Observe
+        kind: value
+    steps:
+      - lock:
+          mutex: r.mu
+      - opt:
+          do:
+            - loop:
+                do:
+                  - set: series.points
+                    value: series.points[:0]
+                key: _
+                range: r.series
+                value: series
+            - eval: r.observer.Observe(r.record)
+              to: r.observer.Observe
+          when: r.served == 0
+      - set: r.served
+        value: (r.served + 1) % r.callbacks
+      - bind: series
+        eval: r.series[name]
+      - loop:
+          do:
+            - eval: observe(point.value, point.attrs...)
+          key: _
+          range: series.points
+          value: point
+  - of: (*statReader).store
+    steps:
+      - bind: series, ok
+        eval: r.series[name]
+      - opt:
+          do:
+            - return: ""
+          when: "!ok || series.kind != kind"
+      - set: series.points
+        value: "append(series.points, statPoint{value: value, attrs: attrs})"
   - of: (*otlpRequest).appendJSON
     participants:
       - id: caller
@@ -2510,6 +3859,8 @@ sequences:
         kind: internal
       - id: m.Histogram.appendJSON
         kind: internal
+      - id: m.ExponentialHistogram.appendJSON
+        kind: internal
     steps:
       - set: dst
         value: append(dst, '{')
@@ -2528,6 +3879,15 @@ sequences:
               to: otlp
               value: otlp.AppendString(dst, m.Description)
           when: m.Description != ""
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "unit")
+            - set: dst
+              to: otlp
+              value: otlp.AppendString(dst, m.Unit)
+          when: m.Unit != ""
       - opt:
           do:
             - set: dst
@@ -2559,6 +3919,15 @@ sequences:
               to: m.Histogram.appendJSON
               value: m.Histogram.appendJSON(dst)
           when: m.Histogram != nil
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "exponentialHistogram")
+            - set: dst
+              to: m.ExponentialHistogram.appendJSON
+              value: m.ExponentialHistogram.appendJSON(dst)
+          when: m.ExponentialHistogram != nil
       - return: append(dst, '}')
   - of: (*otlpSum).appendJSON
     participants:
@@ -2684,6 +4053,8 @@ sequences:
         kind: value
       - id: p.AsInt.AppendJSON
         kind: value
+      - id: appendExemplars
+        kind: internal
     steps:
       - set: dst
         value: append(dst, '{')
@@ -2717,6 +4088,9 @@ sequences:
               to: p.AsInt.AppendJSON
               value: p.AsInt.AppendJSON(dst)
           when: p.AsInt != nil
+      - set: dst
+        to: appendExemplars
+        value: appendExemplars(dst, p.Exemplars)
       - opt:
           do:
             - set: dst
@@ -2747,6 +4121,8 @@ sequences:
         kind: internal
       - id: appendExplicitBounds
         kind: internal
+      - id: appendExemplars
+        kind: internal
     steps:
       - set: dst
         value: append(dst, '{')
@@ -2768,26 +4144,24 @@ sequences:
       - set: dst
         to: p.Count.AppendJSON
         value: p.Count.AppendJSON(dst)
-      - set: dst
-        to: otlp
-        value: otlp.AppendKey(dst, "sum")
-      - alt:
-          - do:
-              - set: dst
-                to: otlp
-                value: otlp.AppendNull(dst)
-            when: p.Sum == nil
-          - do:
-              - set: dst
-                to: p.Sum.AppendJSON
-                value: p.Sum.AppendJSON(dst)
-            else: true
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "sum")
+            - set: dst
+              to: p.Sum.AppendJSON
+              value: p.Sum.AppendJSON(dst)
+          when: p.Sum != nil
       - set: dst
         to: appendBucketCounts
         value: appendBucketCounts(dst, p.BucketCounts)
       - set: dst
         to: appendExplicitBounds
         value: appendExplicitBounds(dst, p.ExplicitBounds)
+      - set: dst
+        to: appendExemplars
+        value: appendExemplars(dst, p.Exemplars)
       - opt:
           do:
             - set: dst
@@ -2864,6 +4238,330 @@ sequences:
           key: i
           range: bounds
       - return: append(dst, ']')
+  - of: (*otlpBuckets).size
+    steps:
+      - return: len(b.BucketCounts)
+  - of: appendOTLPExponentials
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendOTLPExponentials
+        kind: self
+      - id: otlpTemporality
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: metric
+              eval: metrics[name]
+            - bind: temporality, tempErr
+              eval: otlpTemporality(name, metric.Temporality)
+              to: otlpTemporality
+            - opt:
+                do:
+                  - return: nil, tempErr
+                when: tempErr != nil
+            - set: list
+              value: |-
+                append(list, otlpMetric{Name: name, Description: metric.Description, Unit: metric.Unit, ExponentialHistogram: &otlpExponentialHistogram{
+                			DataPoints:             otlpExponentialPoints(metric.Points, start, end),
+                			AggregationTemporality: temporality,
+                		}})
+          key: _
+          range: sortedKeys(metrics)
+          value: name
+      - return: list, nil
+  - of: otlpExponentialPoints
+    steps:
+      - bind: points
+        eval: make([]otlpExponentialHistogramDataPoint, 0, len(series))
+      - loop:
+          do:
+            - set: points
+              value: |-
+                append(points, otlpExponentialHistogramDataPoint{
+                			StartTimeUnixNano: start,
+                			TimeUnixNano:      end,
+                			Count:             otlp.Uint64(point.Count),
+                			Sum:               new(otlp.Double(point.Sum)),
+                			Scale:             point.Scale,
+                			ZeroCount:         otlp.Uint64(point.ZeroCount),
+                			Positive:          otlpBuckets{Offset: point.Positive.Offset, BucketCounts: otlpBucketCounts(point.Positive.Counts)},
+                			Negative:          otlpBuckets{Offset: point.Negative.Offset, BucketCounts: otlpBucketCounts(point.Negative.Counts)},
+                			ZeroThreshold:     point.ZeroThreshold,
+                			Exemplars:         otlpExemplars(point.Exemplars, false),
+                			Attributes:        otlp.Attrs(point.Attrs),
+                		})
+          key: _
+          range: series
+          value: point
+      - return: points
+  - of: otlpOptionalSum
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: noSum
+      - return: new(otlp.Double(sum))
+  - of: appendExemplars
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendExemplars
+        kind: self
+      - id: otlp
+        kind: package
+      - id: exemplars[i].appendJSON
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst
+          when: len(exemplars) == 0
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "exemplars")
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: exemplars[i].appendJSON
+              value: exemplars[i].appendJSON(dst)
+          key: i
+          range: exemplars
+      - return: append(dst, ']')
+  - of: (*otlpExemplar).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpExemplar).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: e.TimeUnixNano.AppendJSON
+        kind: value
+      - id: e.AsDouble.AppendJSON
+        kind: value
+      - id: e.AsInt.AppendJSON
+        kind: value
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "timeUnixNano")
+      - set: dst
+        to: e.TimeUnixNano.AppendJSON
+        value: e.TimeUnixNano.AppendJSON(dst)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "asDouble")
+            - set: dst
+              to: e.AsDouble.AppendJSON
+              value: e.AsDouble.AppendJSON(dst)
+          when: e.AsDouble != nil
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "spanId")
+      - set: dst
+        to: otlp
+        value: otlp.AppendString(dst, e.SpanID)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "traceId")
+      - set: dst
+        to: otlp
+        value: otlp.AppendString(dst, e.TraceID)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "asInt")
+            - set: dst
+              to: e.AsInt.AppendJSON
+              value: e.AsInt.AppendJSON(dst)
+          when: e.AsInt != nil
+      - return: append(dst, '}')
+  - of: (*otlpExponentialHistogram).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpExponentialHistogram).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: h.DataPoints[i].appendJSON
+        kind: internal
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "dataPoints")
+            - set: dst
+              value: append(dst, '[')
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: dst
+                          value: append(dst, ',')
+                      when: i > 0
+                  - set: dst
+                    to: h.DataPoints[i].appendJSON
+                    value: h.DataPoints[i].appendJSON(dst)
+                key: i
+                range: h.DataPoints
+            - set: dst
+              value: append(dst, ']')
+          when: len(h.DataPoints) > 0
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "aggregationTemporality")
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(h.AggregationTemporality), otlpDocDecimalBase)
+      - return: append(dst, '}')
+  - of: (*otlpExponentialHistogramDataPoint).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpExponentialHistogramDataPoint).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: p.StartTimeUnixNano.AppendJSON
+        kind: value
+      - id: p.TimeUnixNano.AppendJSON
+        kind: value
+      - id: p.Count.AppendJSON
+        kind: value
+      - id: p.Sum.AppendJSON
+        kind: value
+      - id: strconv
+        kind: stdlib
+      - id: p.ZeroCount.AppendJSON
+        kind: value
+      - id: appendBuckets
+        kind: internal
+      - id: otlp.Double(p.ZeroThreshold).AppendJSON
+        kind: value
+      - id: appendExemplars
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "startTimeUnixNano")
+      - set: dst
+        to: p.StartTimeUnixNano.AppendJSON
+        value: p.StartTimeUnixNano.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "timeUnixNano")
+      - set: dst
+        to: p.TimeUnixNano.AppendJSON
+        value: p.TimeUnixNano.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "count")
+      - set: dst
+        to: p.Count.AppendJSON
+        value: p.Count.AppendJSON(dst)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "sum")
+            - set: dst
+              to: p.Sum.AppendJSON
+              value: p.Sum.AppendJSON(dst)
+          when: p.Sum != nil
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "scale")
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(p.Scale), otlpDocDecimalBase)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "zeroCount")
+      - set: dst
+        to: p.ZeroCount.AppendJSON
+        value: p.ZeroCount.AppendJSON(dst)
+      - set: dst
+        to: appendBuckets
+        value: appendBuckets(dst, "positive", &p.Positive)
+      - set: dst
+        to: appendBuckets
+        value: appendBuckets(dst, "negative", &p.Negative)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "zeroThreshold")
+            - set: dst
+              to: otlp.Double(p.ZeroThreshold).AppendJSON
+              value: otlp.Double(p.ZeroThreshold).AppendJSON(dst)
+          when: p.ZeroThreshold != 0
+      - set: dst
+        to: appendExemplars
+        value: appendExemplars(dst, p.Exemplars)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "attributes")
+            - set: dst
+              to: otlp
+              value: otlp.AppendKeyValues(dst, p.Attributes)
+          when: len(p.Attributes) > 0
+      - return: append(dst, '}')
+  - of: appendBuckets
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendBuckets
+        kind: self
+      - id: otlp
+        kind: package
+      - id: strconv
+        kind: stdlib
+      - id: appendBucketCounts
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst
+          when: len(b.BucketCounts) == 0
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, key)
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "offset")
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(b.Offset), otlpDocDecimalBase)
+      - set: dst
+        to: appendBucketCounts
+        value: appendBucketCounts(dst, b.BucketCounts)
+      - return: append(dst, '}')
   - of: (*otlpPartialSuccess).RejectedCount
     steps:
       - return: int64(p.RejectedDataPoints)
@@ -3050,7 +4748,7 @@ sequences:
       - op: ++
         set: state.series
       - bind: entry
-        eval: "&seriesEntry[T]{name: name, attrs: cloneAttrs(sorted), inst: build()}"
+        eval: "&seriesEntry[T]{name: name, attrs: cloneAttrs(sorted), inst: stampClock(build(), s.meter.clk)}"
       - set: s.byKey[retain(key)]
         value: entry
       - return: entry.inst
@@ -3077,10 +4775,60 @@ sequences:
             eval: s.byKey[key]
           when: ok
       - bind: entry
-        eval: "&seriesEntry[T]{name: name, attrs: cloneAttrs(attrs), inst: build()}"
+        eval: "&seriesEntry[T]{name: name, attrs: cloneAttrs(attrs), inst: stampClock(build(), s.meter.clk)}"
       - set: s.byKey[key]
         value: entry
       - return: entry.inst
+  - of: (*memSum).AddContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memSum).AddContext
+        kind: self
+      - id: s.v.Add
+        kind: value
+      - id: sampledSpan
+        kind: internal
+      - id: s.ex.offer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.monotonic && delta <= 0
+      - eval: s.v.Add(delta)
+        to: s.v.Add
+      - opt:
+          do:
+            - eval: s.ex.offer(sumExemplarSlots, 0, float64(delta), span)
+              to: s.ex.offer
+          init:
+            bind: span, ok
+            eval: sampledSpan(ctx)
+            to: sampledSpan
+          when: ok
+  - of: (*memSum).setClock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memSum).setClock
+        kind: self
+      - id: s.ex.setClock
+        kind: internal
+    steps:
+      - eval: s.ex.setClock(clk)
+        to: s.ex.setClock
+  - of: (*memSum).exemplars
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memSum).exemplars
+        kind: self
+      - id: s.ex.collect
+        kind: internal
+    steps:
+      - return: s.ex.collect(delta)
+        to: s.ex.collect
   - of: (*memSum).Add
     participants:
       - id: caller

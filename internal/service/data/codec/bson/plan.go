@@ -193,6 +193,8 @@ type fieldPlan struct {
 	nameBytes []byte
 	// flags are the tag's options, and whether the name is writable.
 	flags fieldFlags
+	// zero is omitzero's test of the field's type, nil without omitzero.
+	zero func(reflect.Value) bool
 }
 
 // fieldFlags are a field's options, one bit each.
@@ -212,6 +214,9 @@ const (
 	// flagBadName marks a name holding a NUL or invalid UTF-8, which an
 	// element name cannot be; encoding the field fails.
 	flagBadName
+	// flagOmitZero leaves the field out when it holds its type's zero value,
+	// as encoding/json's omitzero does (#1103).
+	flagOmitZero
 )
 
 // has reports whether every bit of flag is set.
@@ -310,13 +315,6 @@ var (
 		reflect.Uint32:  keyUint,
 		reflect.Uint64:  keyUint,
 		reflect.Uintptr: keyUint,
-	}
-	// tagOptions maps each option word to its flag.
-	tagOptions = map[string]fieldFlags{
-		"omitempty": flagOmitEmpty,
-		"minsize":   flagMinSize,
-		"truncate":  flagTruncate,
-		"inline":    flagInline,
 	}
 	// plans maps reflect.Type to its complete *typePlan.
 	plans sync.Map
@@ -642,8 +640,7 @@ func (b *planBuilder) newField(sf reflect.StructField, tags fieldTags, index []i
 	if strings.IndexByte(tags.name, 0) >= 0 || !utf8.ValidString(tags.name) {
 		flags |= flagBadName
 	}
-	//: the options parsed from the tag, and the field type's plan.
-	return &fieldPlan{
+	f := &fieldPlan{
 		name:      tags.name,
 		nameBytes: []byte(tags.name),
 		goName:    sf.Name,
@@ -651,6 +648,12 @@ func (b *planBuilder) newField(sf reflect.StructField, tags fieldTags, index []i
 		plan:      b.plan(sf.Type),
 		flags:     flags,
 	}
+	//: omitzero's test is decided once, from the type.
+	if flags.has(flagOmitZero) {
+		f.zero = zeroTest(sf.Type)
+	}
+	//: the options parsed from the tag, and the field type's plan.
+	return f
 }
 
 // inlineMapProblem says why a map cannot be owner's ",inline" map, or "".
@@ -779,15 +782,41 @@ func parseFieldTags(sf reflect.StructField) (fieldTags, bool) {
 		tags.name = first
 	}
 	//: the first part, too, may be an option.
-	tags.flags |= tagOptions[first]
+	tags.flags |= tagOption(first)
 	//: then every part after a comma.
 	for more {
 		var option string
 		option, rest, more = strings.Cut(rest, ",")
-		tags.flags |= tagOptions[option]
+		tags.flags |= tagOption(option)
 	}
 	//: the field is encoded.
 	return tags, false
+}
+
+// tagOption returns the flag an option word of a bson tag sets, and none for
+// a word that is not an option.
+func tagOption(word string) fieldFlags {
+	//: one flag per option word.
+	switch word {
+	//: omitted when empty.
+	case "omitempty":
+		return flagOmitEmpty
+	//: omitted when zero, IsZero included.
+	case "omitzero":
+		return flagOmitZero
+	//: an integer that fits is written as an int32.
+	case "minsize":
+		return flagMinSize
+	//: a decode may drop a double's fraction into an integer.
+	case "truncate":
+		return flagTruncate
+	//: the struct's members, or a map's, at this document's level.
+	case "inline":
+		return flagInline
+	//: a name, or a word no option spells.
+	default:
+		return 0
+	}
 }
 
 // lookupField finds the field an element names: exactly, then by the name

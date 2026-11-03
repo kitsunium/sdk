@@ -78,19 +78,14 @@ constants:
         value: "`\"-Infinity\"`"
     name: jsonNaN
   - doc: |-
-      The strconv parameters every rendering here uses: base ten, and the
-      shortest-round-trip spelling of a 64-bit double.
+      The strconv parameters the integer renderings use: base ten, and the width
+      a response's decimal is parsed at. A double is spelled by
+      kernel/jsonenc.AppendFloat, encoding/json's spelling.
     grouped: true
     items:
       - name: decimalBase
         type: int
         value: "10"
-      - name: floatFmt
-        type: byte
-        value: "'g'"
-      - name: floatPrec
-        type: int
-        value: "-1"
       - name: floatBitSize
         type: int
         value: "64"
@@ -136,6 +131,13 @@ constants:
       - name: retryAfterHeader
         type: string
         value: "\"Retry-After\""
+      - name: contentEncodingHeader
+        type: string
+        value: "\"Content-Encoding\""
+      - doc: gzipEncoding is the Content-Encoding of a gzipped body (HTTPConfig.Gzip).
+        name: gzipEncoding
+        type: string
+        value: "\"gzip\""
     name: contentTypeHeader
   - doc: The 2xx window, named so the classification reads as the specification does.
     grouped: true
@@ -251,12 +253,16 @@ files:
       - retryAfterFieldKey
       - schemeHTTP
       - Sender
+      - gzipBuffers
       - NewSender
       - checkEndpoint
       - newClient
       - newTransport
       - (*Sender).Post
       - (*Sender).PostContext
+      - (*Sender).PostEncoded
+      - (*Sender).post
+      - gzipInto
       - closeResponse
       - swallowTeardown
       - (*Sender).classify
@@ -316,8 +322,9 @@ functions:
     params: dst []byte, v uint64
     results: "[]byte"
   - doc: |-
-      appendDouble appends value as Double's MarshalJSON renders it: shortest
-      round-trip, or its quoted name when it is not finite.
+      appendDouble appends value as Double's MarshalJSON renders it: the number
+      encoding/json writes (1000000, 1e-7, 1e+21), or its quoted name when it is
+      not finite.
     name: appendDouble
     params: dst []byte, value float64
     results: "[]byte"
@@ -388,6 +395,13 @@ functions:
     name: newTransport
     results: "*http.Transport"
   - doc: |-
+      gzipInto compresses body into dst (emptied first) at the default level
+      and returns the compressed bytes, which alias dst. Writing to a
+      bytes.Buffer cannot fail, so neither can the compressor's Write or Close.
+    name: gzipInto
+    params: dst *bytes.Buffer, body []byte
+    results: "[]byte"
+  - doc: |-
       closeResponse drains what is left of the body and closes it, so the
       connection returns to the keep-alive pool.
 
@@ -451,6 +465,7 @@ imports:
   context: context
   coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  gzip: compress/gzip
   http: net/http
   io: io
   json: encoding/json
@@ -543,6 +558,15 @@ types:
           DefaultMaxResponseBytes.
         name: MaxResponseBytes
         type: int64
+      - doc: |-
+          Gzip, when true, compresses every request body — an encoded snapshot or
+          batch, and a stored document ExportDocument posts — with compress/gzip at
+          the default level and sends it with Content-Encoding: gzip, which every
+          OTLP/HTTP collector accepts (#1051). OTLP/JSON shrinks eight to twelve
+          times. The zero value sends the body as it is. A collector that refuses
+          the encoding answers 415, classified permanent like a 400.
+        name: Gzip
+        type: bool
     kind: struct
     name: HTTPConfig
   - fields:
@@ -653,6 +677,9 @@ types:
       - doc: signal names every verdict in the calling signal's words.
         name: signal
         type: "*SignalSpec"
+      - doc: gzip compresses every body before it is posted (HTTPConfig.Gzip).
+        name: gzip
+        type: bool
     kind: struct
     methods:
       - name: Post
@@ -661,6 +688,17 @@ types:
         results: error
       - name: PostContext
         params: ctx context.Context, body []byte
+        recv: s *Sender
+        results: error
+      - name: PostEncoded
+        params: ctx context.Context, body []byte, encoding string
+        recv: s *Sender
+        results: error
+      - doc: |-
+          post sends body under ctx, labelled Content-Encoding: gzip when gzipped,
+          and returns the classified verdict.
+        name: post
+        params: ctx context.Context, body []byte, gzipped bool
         recv: s *Sender
         results: error
       - doc: |-
@@ -758,3 +796,16 @@ types:
         recv: s *Stream
         results: error
     name: Stream
+vars:
+  - doc: The pools gzip draws on (HTTPConfig.Gzip).
+    grouped: true
+    items:
+      - doc: gzipBuffers recycles the compressed bodies between posts.
+        name: gzipBuffers
+        value: "sync.Pool{New: func() any { return new(bytes.Buffer) }}"
+      - doc: |-
+          gzipWriters recycles the compressors: a gzip.Writer holds its deflate
+          window, the expensive part, across Reset.
+        name: gzipWriters
+        value: "sync.Pool{New: func() any { return gzip.NewWriter(io.Discard) }}"
+    name: gzipBuffers

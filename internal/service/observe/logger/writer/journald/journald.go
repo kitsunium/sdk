@@ -19,6 +19,11 @@ const (
 	defaultSocketPath = "/run/systemd/journal/socket"
 )
 
+// batchMax is how many queued records the drainer hands the sink at once
+// (#807): one sendmmsg(2) for up to this many entries on Linux, each still
+// its own datagram.
+const batchMax int = 16
+
 // Writer is the registered journald factory singleton. The blank assignment runs
 // writer.Register at package load (no init()), mirroring the codec convention.
 var Writer = writer.Register(&journaldFactory{})
@@ -75,7 +80,7 @@ func (*journaldFactory) Open(cfg writer.Config) (sink corelogger.Sink, err error
 	}
 	//: terminal datagram sink → async (non-block + OnDrop) → levelgate (floor).
 	base := newJournaldSink(conn)
-	nonblocking := async.New(base, async.Config{BufferSize: c.BufferSize, OnDrop: c.OnDrop, OnError: c.OnError})
+	nonblocking := async.New(base, async.Config{BufferSize: c.BufferSize, OnDrop: c.OnDrop, OnError: c.OnError, BatchMax: batchMax})
 	//: outermost gate drops below-floor records before they reach the ring.
 	return levelgate.New(nonblocking, c.MinLevel), nil
 }

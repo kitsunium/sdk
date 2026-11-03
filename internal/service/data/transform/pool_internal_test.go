@@ -77,7 +77,7 @@ type readerSchemeCase struct {
 	// tag is the readerScheme value this pool's boxes must carry.
 	tag readerScheme
 	// take is the scheme's pooled decoder borrow.
-	take func(src io.Reader) (*readerBox, error)
+	take func(src []byte) (*readerBox, error)
 	// release is the matching return; it is also how a corrupted pool is built.
 	release func(box *readerBox)
 	// rawGet is the pool's own Get, unmediated by a take. It is what lets a
@@ -123,7 +123,7 @@ type writerSchemeCase struct {
 func drainReader(rc io.ReadCloser) (plain []byte, err error) {
 	//: the fixtures are a few hundred bytes, so overflow is not reachable here
 	//: and the production ceiling keeps the helper honest to the real call.
-	plain, _, err = readAllBounded(rc, maxDecompressedBytes)
+	plain, _, err = appendAllBounded(nil, rc, maxDecompressedBytes)
 	//: a Close fault after a clean drain still fails the decode.
 	if cerr := rc.Close(); cerr != nil && err == nil {
 		//: surface the Close fault as this decode's error.
@@ -215,7 +215,7 @@ func primedBox(tb testing.TB, sc readerSchemeCase) *readerBox {
 // good.
 func takeAndDrain(tb testing.TB, sc readerSchemeCase, wire []byte) *readerBox {
 	tb.Helper()
-	box, err := sc.take(bytes.NewReader(wire))
+	box, err := sc.take(wire)
 	//: the fixture frame is valid by construction; a refusal is a broken test.
 	if err != nil {
 		tb.Fatalf("%s: seeding take err=%v", sc.name, err)
@@ -359,8 +359,12 @@ func gzipWriterCase() writerSchemeCase {
 		cycle: func(tb testing.TB, src []byte) (wire []byte, identity any) {
 			tb.Helper()
 			var buf bytes.Buffer
-			w := takeGzipWriter(&buf)
-			defer releaseGzipWriter(w)
+			w, err := takeGzipWriter(&buf, gzip.DefaultCompression)
+			//: DefaultCompression is in band, so this take cannot refuse.
+			if err != nil {
+				tb.Fatalf("gzip: takeGzipWriter err=%v", err)
+			}
+			defer releaseGzipWriter(w, gzip.DefaultCompression)
 			writeAndClose(tb, w, src)
 			//: the encoder pointer is the identity a reuse is proven by.
 			return buf.Bytes(), w
@@ -374,7 +378,7 @@ func gzipWriterCase() writerSchemeCase {
 		},
 		rawGet: func() (empty bool) {
 			//: the factory yields nil, so nil means the pool is dry.
-			return gzipWriterPool.Get() == nil
+			return gzipWriterPoolFor(gzip.DefaultCompression).Get() == nil
 		},
 	}
 }
@@ -386,12 +390,12 @@ func flateWriterCase() writerSchemeCase {
 		cycle: func(tb testing.TB, src []byte) (wire []byte, identity any) {
 			tb.Helper()
 			var buf bytes.Buffer
-			w, err := takeFlateWriter(&buf)
+			w, err := takeFlateWriter(&buf, flate.DefaultCompression)
 			//: DefaultCompression is in band, so this take cannot refuse.
 			if err != nil {
 				tb.Fatalf("flate: takeFlateWriter err=%v", err)
 			}
-			defer releaseFlateWriter(w)
+			defer releaseFlateWriter(w, flate.DefaultCompression)
 			writeAndClose(tb, w, src)
 			//: the encoder pointer is the identity a reuse is proven by.
 			return buf.Bytes(), w
@@ -409,7 +413,7 @@ func flateWriterCase() writerSchemeCase {
 		},
 		rawGet: func() (empty bool) {
 			//: the factory yields nil, so nil means the pool is dry.
-			return flateWriterPool.Get() == nil
+			return flateWriterPoolFor(flate.DefaultCompression).Get() == nil
 		},
 	}
 }
@@ -651,7 +655,7 @@ func hitDecode(tb testing.TB, sc readerSchemeCase, box *readerBox, wire []byte) 
 	for range poolHitAttempts {
 		emptyPool(tb, sc)
 		sc.release(box)
-		got, terr := sc.take(bytes.NewReader(wire))
+		got, terr := sc.take(wire)
 		plain, err = nil, terr
 		//: a take that accepted the stream owns a box the caller must return.
 		if terr == nil {
@@ -1065,7 +1069,7 @@ func TestFlateReaderPoolSurfacesAResetFault(t *testing.T) {
 		sc := flateReaderCase(t)
 		injected := &readerBox{rc: failingFlateResetter{}, scheme: schemeFlate}
 		pool := &stackBoxPool{boxes: []*readerBox{injected}}
-		box, err := takeFlateReaderFrom(pool, bytes.NewReader(sc.good))
+		box, err := takeFlateReaderFrom(pool, sc.good)
 		//: the take must have drawn its box from the pool it was handed.
 		if pool.gets != 1 {
 			t.Fatalf("%s: the take called Get %d times, want 1", c.name, pool.gets)

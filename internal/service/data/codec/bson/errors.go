@@ -1,8 +1,10 @@
 package bson
 
 import (
+	"reflect"
 	"strconv"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	corebson "github.com/kitsunium/sdk/internal/core/data/codec/bson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -33,12 +35,36 @@ func unmarshalError(cause error, detail string) error {
 	})
 }
 
+// checkTarget is core/data/codec.CheckTarget, except that a non-nil map is a
+// target too: the root document fills it in place (#1101).
+func checkTarget(v any) error {
+	//: a map the decoder fills in place.
+	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Map && !rv.IsNil() {
+		return nil
+	}
+	//: anything else must be a non-nil pointer.
+	return codec.CheckTarget(v)
+}
+
+// malformedAt builds the decode failure of a document malformed at byte off
+// of the input: the rule it breaks in the Private text, the offset as the
+// family's field codec.PositionOf reads (#1125) — never in the text alone.
+func malformedAt(off int, rule string) error {
+	//: the offset is a field, the rule a fixed sentence.
+	return errs.Wrap(nil, errs.WrapParams{
+		Code:    corebson.CodeBSONUnmarshalFailed,
+		Reason:  "BSON_UNMARSHAL_FAILED",
+		Public:  "BSON decoding failed",
+		Private: "service/data/codec/bson.Unmarshal: malformed document: " + rule,
+	}, codec.PositionFields(codec.PositionValue{Offset: off})...)
+}
+
 // depthError builds the nesting refusal for op ("Marshal" or "Unmarshal").
 func depthError(op string) error {
 	//: one message per direction, the bound named.
 	return errs.Wrap(nil, errs.WrapParams{
 		Code:    corebson.CodeBSONDepthExceeded,
-		Reason:  "BSON_DEPTH_EXCEEDED",
+		Reason:  "DEPTH_EXCEEDED",
 		Public:  "BSON nesting depth exceeds limit",
 		Private: "service/data/codec/bson." + op + ": nesting exceeds " + strconv.Itoa(maxBSONNestedLevels) + " levels",
 	})

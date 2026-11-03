@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-11-03T12:00:00Z -->
 # pkg/v1/observe/logger/
 
 ## Purpose
@@ -17,12 +17,19 @@ gen_facade.go  — kit's (ADR 0166), from design/observe/logger.yaml's facade:: 
                  Build, LogAttrs (slice overload), Kind alias + its nine constants,
                  WithCaller, Leveler / LevelVar aliases, NewLevelVar, ParseLevel
                  (strict; never echoes its input), RecordSnapshot / MemorySink
-                 aliases, NewMemorySink (the test sink)
+                 aliases, NewMemorySink (the test sink), BatchSink alias (#807),
+                 LevelAmbiguous (0.3.1.5, re-exported, #1015); the logs signal
+                 (#867): DocumentExporter / EncodedDocumentExporter aliases,
+                 OTLPConfig (the "otlpjson" writer's Config) / OTLPHTTPConfig
+                 aliases, NewOTLPHTTPExporter, OTLPRetryable — importing this
+                 package registers the "otlpjson" writer
 logger.go      — Logger / Attr / Level aliases, 4 Level constants, Config struct,
                  NewText, Default, DefaultMulti (console + one file, through NewMulti),
                  Debug|Info|Warn|Error emission helpers,
                  String|Int|Bool|Float64|Int64|Uint64|Duration|Time|Any Attr constructors
-sink.go        — Sink / Record / Encoder aliases, SinkConfig struct, NewWithSink,
+sink.go        — Sink / Record / Encoder aliases, SinkConfig struct (MinLevel, or Level —
+                 a live Leveler such as a LevelVar, #1015; both set is
+                 LevelAmbiguous), NewWithSink + handlerFor,
                  Multi fan-out helper, LevelGate (a per-branch floor over
                  writer/levelgate.Floor — ADR 0132), NewWriterSink (an io.Writer as
                  a Sink), ConsoleStderr|ConsoleStdout, TextEncoder
@@ -32,7 +39,9 @@ writer.go      — WriterName / *Config / ConsoleStream aliases, StreamStderr|St
                  WriterSpec, NewMulti (named writers; the Logger it returns owns them
                  and is an io.Closer)
 fromconfig.go  — Format alias, FromConfig (build a Logger from a config blob),
-                 + parseLevel / decodeTopology / resolveSinks helpers (ADR 0014 §D5)
+                 FromConfigWithLevel (the same, gated on a caller's LevelVar the
+                 topology's level seeds, #1015), + parseLevel / decodeTopology /
+                 resolveSinks / topologySinkConfig helpers (ADR 0014 §D5)
 topology.go    — TopologyConfig DTO (Level + Writers)
 writer_entry.go — WriterEntryConfig DTO (Name + raw Options map)
 tracecontext.go — TraceContext / TraceContextSource aliases + TraceContextFromContext,
@@ -47,7 +56,8 @@ encoder.go     — NewTextEncoder / NewJSONEncoder (one JSON object per line, gr
 witherror.go   — WithError: an error as error.code / error.reason / error.public /
                  error.trail.<n> Attrs, or one error.message for a non-SDK error
 BENCH.md       — the emit-path benchmarks (logger_bench_test.go), then a separate
-                 trace-correlation run (ADR 0062)
+                 trace-correlation run (ADR 0062), then the #1014 / #1015 run
+                 (enabled_bench_test.go: the Leveler gate's cost)
 USES.md        — the interactive use-case tabs a Go doc comment cannot render
 *_test.go      — *_external_test.go suites, fromconfig / witherror internal suites,
                  the two `!race` *_integration_test.go differential allocation gates

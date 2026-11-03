@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -45,6 +46,10 @@ func newStreamDecoder(r io.Reader) *yamlDecoder {
 // Decode reads the next document into v. It returns io.EOF once the stream
 // holds no further document.
 func (d *yamlDecoder) Decode(v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: the stream ended or failed.
 	if d.done {
 		//: nothing more.
@@ -186,8 +191,8 @@ func (d *yamlDecoder) readLine(dst []byte) ([]byte, error) {
 		//: the bound, checked as the document grows.
 		if len(dst) > maxYAMLBytes {
 			//: refused, with the bound.
-			return dst, errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{},
-				errs.Int("cap", maxYAMLBytes), errs.String("detail", "a document of the stream is larger than the decoder accepts"))
+			return dst, bounded(coreyaml.SizeExceeded, "a document of the stream is larger than the decoder accepts",
+				errs.Int("cap", maxYAMLBytes))
 		}
 		//: more of the same line.
 		if errors.Is(err, bufio.ErrBufferFull) {

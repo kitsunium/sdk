@@ -2,7 +2,10 @@
 // and a single drainer goroutine, decoupling the producer hot path from
 // the (potentially slow) downstream sink. Producers call Write synchronously
 // but never block on I/O — entries land in the ring and the drainer sips
-// them out.
+// them out. An idle drainer parks on a wake-up signal the next Write sends,
+// so a sink with nothing to deliver costs no CPU (#806); with Config.BatchMax
+// above one it delivers what it holds to a corelogger.BatchSink downstream in
+// one call (#807).
 //
 // When the ring saturates, the configured DropPolicy decides:
 //   - DropNewest: the new Write returns BufferFull; the OnDrop callback fires.
@@ -31,6 +34,6 @@
 // (drain goroutine).
 //
 // Package async — gathers the small runtime helpers used by the
-// async drainer (yield primitive, channel-closed probe, error swallowers).
+// async drainer (channel-closed probe, background context, error swallowers).
 // Pulled out of async_sink.go to keep that file focused on the Sink contract.
 package async

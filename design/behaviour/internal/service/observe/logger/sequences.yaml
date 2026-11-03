@@ -52,8 +52,6 @@ sequences:
         kind: actor
       - id: (*chainBuilder).Send
         kind: self
-      - id: runtime
-        kind: stdlib
       - id: b.owner.traceContext
         kind: internal
       - id: swallowHandlerError
@@ -61,13 +59,8 @@ sequences:
       - id: recordPool.Put
         kind: value
     steps:
-      - var:
-          name: pcs
-          type: "[1]uintptr"
-      - eval: runtime.Callers(callerSkipDepth, pcs[:])
-        to: runtime
       - bind: r
-        eval: "corelogger.RecordEvent{Level: b.lv, Message: msg, PC: pcs[0], Attrs: b.attrs}"
+        eval: "corelogger.RecordEvent{Level: b.lv, Message: msg, PC: b.owner.callerPC(), Attrs: b.attrs}"
       - opt:
           do:
             - set: r.TraceContext
@@ -83,6 +76,17 @@ sequences:
       - eval: recordPool.Put(b)
         to: recordPool.Put
   - of: NewHandler
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewHandler
+        kind: self
+      - id: NewHandlerLeveled
+        kind: internal
+    steps:
+      - return: NewHandlerLeveled(enc, sink, level.Fixed(min))
+        to: NewHandlerLeveled
+  - of: NewHandlerLeveled
     steps:
       - opt:
           do:
@@ -92,14 +96,31 @@ sequences:
           do:
             - return: nil, corelogger.SinkRequired
           when: sink == nil
-      - return: "&genericHandler{enc: enc, sink: sink, min: min, clk: clock.System}, nil"
+      - bind: penc, _
+        eval: enc.(corelogger.PrefixEncoder)
+      - return: "&genericHandler{enc: enc, penc: penc, sink: sink, floor: floorOrInfo(floor), clk: clock.System}, nil"
+  - of: floorOrInfo
+    participants:
+      - id: caller
+        kind: actor
+      - id: floorOrInfo
+        kind: self
+      - id: level
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: level.Fixed(level.Info)
+              to: level
+          when: floor == nil
+      - return: floor
   - of: (*genericHandler).Enabled
     steps:
       - opt:
           do:
             - return: "false"
           when: ctx != nil && ctx.Err() != nil
-      - return: r.Level >= h.min
+      - return: r.Level >= h.floor.Level()
   - of: (*genericHandler).Handle
     participants:
       - id: caller
@@ -112,10 +133,8 @@ sequences:
         kind: value
       - id: buffer
         kind: package
-      - id: mergeAttrs
+      - id: h.encode
         kind: internal
-      - id: h.enc.Append
-        kind: value
       - id: h.sink.Write
         kind: value
     steps:
@@ -141,20 +160,60 @@ sequences:
         to: buffer
       - defer: buffer.Put(bp)
         to: buffer
-      - bind: bound
-        eval: mergeAttrs(h.attrs, r.Attrs)
-        to: mergeAttrs
-      - set: r.Attrs
-        value: bound
-      - bind: line
-        eval: h.enc.Append(*bp, h.groups, r)
-        to: h.enc.Append
+      - bind: line, merged
+        eval: h.encode(*bp, r)
+        to: h.encode
       - set: "*bp"
         value: line
+      - set: r.Attrs
+        value: merged
       - bind: _, werr
         eval: h.sink.Write(ctx, r, line)
         to: h.sink.Write
       - return: werr
+  - of: (*genericHandler).encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*genericHandler).encode
+        kind: self
+      - id: mergeAttrs
+        kind: internal
+      - id: h.enc.Append
+        kind: value
+      - id: h.penc.AppendWithPrefix
+        kind: value
+    steps:
+      - set: merged
+        to: mergeAttrs
+        value: mergeAttrs(h.attrs, r.Attrs)
+      - opt:
+          do:
+            - set: r.Attrs
+              value: merged
+            - return: h.enc.Append(dst, h.groups, r), merged
+              to: h.enc.Append
+          when: h.prefix == nil
+      - return: h.penc.AppendWithPrefix(dst, h.groups, h.prefix, r), merged
+        to: h.penc.AppendWithPrefix
+  - of: (*genericHandler).derive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*genericHandler).derive
+        kind: self
+      - id: h.penc.AppendAttrs
+        kind: value
+    steps:
+      - bind: child
+        eval: "&genericHandler{enc: h.enc, penc: h.penc, sink: h.sink, attrs: attrs, groups: groups, floor: h.floor, clk: h.clk}"
+      - opt:
+          do:
+            - set: child.prefix
+              to: h.penc.AppendAttrs
+              value: h.penc.AppendAttrs(nil, groups, attrs)
+          when: h.penc != nil && len(attrs) > 0
+      - return: child
   - of: (*genericHandler).WithAttrs
     participants:
       - id: caller
@@ -163,23 +222,45 @@ sequences:
         kind: self
       - id: mergeAttrs
         kind: internal
+      - id: h.derive
+        kind: internal
     steps:
       - bind: cp
         eval: mergeAttrs(h.attrs, attrs)
         to: mergeAttrs
-      - return: "&genericHandler{enc: h.enc, sink: h.sink, attrs: cp, groups: h.groups, min: h.min, clk: h.clk}"
+      - return: h.derive(cp, h.groups)
+        to: h.derive
   - of: (*genericHandler).WithGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*genericHandler).WithGroup
+        kind: self
+      - id: h.withGroup
+        kind: internal
     steps:
       - opt:
           do:
             - return: h
           when: name == ""
+      - return: h.withGroup(name)
+        to: h.withGroup
+  - of: (*genericHandler).withGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*genericHandler).withGroup
+        kind: self
+      - id: h.derive
+        kind: internal
+    steps:
       - bind: cp
         eval: make([]string, len(h.groups)+1)
       - eval: copy(cp, h.groups)
       - set: cp[len(h.groups)]
         value: name
-      - return: "&genericHandler{enc: h.enc, sink: h.sink, attrs: h.attrs, groups: cp, min: h.min, clk: h.clk}"
+      - return: h.derive(h.attrs, cp)
+        to: h.derive
   - of: mergeAttrs
     participants:
       - id: caller
@@ -196,6 +277,33 @@ sequences:
           when: len(parent) == 0
       - return: slices.Concat(parent, child)
         to: slices
+  - of: over
+    steps:
+      - return: "&loggerImpl{h: h, trace: trace, capturePC: wantsSource(h)}"
+  - of: wantsSource
+    steps:
+      - bind: sr, ok
+        eval: h.(corelogger.SourceRequester)
+      - return: ok && sr.WantsSource()
+  - of: (*loggerImpl).callerPC
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loggerImpl).callerPC
+        kind: self
+      - id: runtime
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: "!l.capturePC"
+      - var:
+          name: pcs
+          type: "[1]uintptr"
+      - eval: runtime.Callers(callerSkipDepth+1, pcs[:])
+        to: runtime
+      - return: pcs[0]
   - of: New
     participants:
       - id: caller
@@ -208,12 +316,20 @@ sequences:
       - return: NewWithTraceContext(h, nil)
         to: NewWithTraceContext
   - of: NewWithTraceContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewWithTraceContext
+        kind: self
+      - id: over
+        kind: internal
     steps:
       - opt:
           do:
             - return: nil, corelogger.HandlerNil
           when: h == nil
-      - return: "&loggerImpl{h: h, trace: src}, nil"
+      - return: over(h, src), nil
+        to: over
   - of: (*loggerImpl).traceContext
     steps:
       - opt:
@@ -238,20 +354,13 @@ sequences:
         kind: actor
       - id: (*loggerImpl).Log
         kind: self
-      - id: runtime
-        kind: stdlib
       - id: l.traceContext
         kind: internal
       - id: swallowHandlerError
         kind: internal
     steps:
-      - var:
-          name: pcs
-          type: "[1]uintptr"
-      - eval: runtime.Callers(callerSkipDepth, pcs[:])
-        to: runtime
       - bind: r
-        eval: "corelogger.RecordEvent{Level: lv, Message: msg, PC: pcs[0], Attrs: attrs}"
+        eval: "corelogger.RecordEvent{Level: lv, Message: msg, PC: l.callerPC(), Attrs: attrs}"
       - opt:
           do:
             - return: ""
@@ -262,8 +371,16 @@ sequences:
       - eval: swallowHandlerError(l.h.Handle(ctx, r))
         to: swallowHandlerError
   - of: (*loggerImpl).With
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loggerImpl).With
+        kind: self
+      - id: over
+        kind: internal
     steps:
-      - return: "&loggerImpl{h: l.h.WithAttrs(attrs), trace: l.trace}"
+      - return: over(l.h.WithAttrs(attrs), l.trace)
+        to: over
   - of: Build
     participants:
       - id: caller
@@ -327,20 +444,13 @@ sequences:
         kind: actor
       - id: (*loggerImpl).LogAttrs
         kind: self
-      - id: runtime
-        kind: stdlib
       - id: l.traceContext
         kind: internal
       - id: swallowHandlerError
         kind: internal
     steps:
-      - var:
-          name: pcs
-          type: "[1]uintptr"
-      - eval: runtime.Callers(callerSkipDepth, pcs[:])
-        to: runtime
       - bind: r
-        eval: "corelogger.RecordEvent{Level: lv, Message: msg, PC: pcs[0], Attrs: attrs}"
+        eval: "corelogger.RecordEvent{Level: lv, Message: msg, PC: l.callerPC(), Attrs: attrs}"
       - opt:
           do:
             - return: ""
@@ -351,16 +461,24 @@ sequences:
       - eval: swallowHandlerError(l.h.Handle(ctx, r))
         to: swallowHandlerError
   - of: (*loggerImpl).WithGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loggerImpl).WithGroup
+        kind: self
+      - id: over
+        kind: internal
     steps:
       - opt:
           do:
             - opt:
                 do:
-                  - return: "&loggerImpl{h: l.h, trace: l.trace}"
+                  - return: "&loggerImpl{h: l.h, trace: l.trace, capturePC: l.capturePC}"
                 when: l.owned != nil
             - return: l
           when: name == ""
-      - return: "&loggerImpl{h: l.h.WithGroup(name), trace: l.trace}"
+      - return: over(l.h.WithGroup(name), l.trace)
+        to: over
   - of: (*onceCloser).Close
     participants:
       - id: caller
@@ -419,6 +537,9 @@ sequences:
               value: "0"
           when: skip < 0
       - return: "&sourceHandler{next: next, skip: skip}, nil"
+  - of: (*sourceHandler).WantsSource
+    steps:
+      - return: "true"
   - of: (*sourceHandler).Enabled
     participants:
       - id: caller
@@ -505,6 +626,8 @@ sequences:
         kind: self
       - id: newSourceHandler
         kind: internal
+      - id: over
+        kind: internal
     steps:
       - opt:
           do:
@@ -523,28 +646,40 @@ sequences:
           do:
             - return: lg
           when: err != nil
-      - return: "&loggerImpl{h: wrapped}"
+      - return: over(wrapped, impl.trace)
+        to: over
   - of: NewTextHandler
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewTextHandler
+        kind: self
+      - id: NewTextHandlerLeveled
+        kind: internal
+    steps:
+      - return: NewTextHandlerLeveled(w, level.Fixed(min))
+        to: NewTextHandlerLeveled
+  - of: NewTextHandlerLeveled
     steps:
       - opt:
           do:
             - return: nil, corelogger.WriterNil
           when: w == nil
-      - return: "&TextHandler{w: w, min: min, clk: clock.System}, nil"
+      - return: "&TextHandler{w: w, floor: floorOrInfo(floor), clk: clock.System}, nil"
   - of: (*TextHandler).Enabled
     steps:
       - opt:
           do:
             - return: "false"
           when: ctx != nil && ctx.Err() != nil
-      - return: r.Level >= h.min
+      - return: r.Level >= h.floor.Level()
   - of: (*TextHandler).WithAttrs
     steps:
       - bind: cp
         eval: make([]corelogger.AttrValue, len(h.attrs)+len(attrs))
       - eval: copy(cp, h.attrs)
       - eval: copy(cp[len(h.attrs):], attrs)
-      - return: "&TextHandler{w: h.w, attrs: cp, groups: h.groups, min: h.min, clk: h.clk}"
+      - return: "&TextHandler{w: h.w, attrs: cp, groups: h.groups, floor: h.floor, clk: h.clk}"
   - of: (*TextHandler).WithGroup
     steps:
       - opt:
@@ -556,7 +691,7 @@ sequences:
       - eval: copy(cp, h.groups)
       - set: cp[len(h.groups)]
         value: name
-      - return: "&TextHandler{w: h.w, attrs: h.attrs, groups: cp, min: h.min, clk: h.clk}"
+      - return: "&TextHandler{w: h.w, attrs: h.attrs, groups: cp, floor: h.floor, clk: h.clk}"
   - of: (*TextHandler).Handle
     participants:
       - id: caller

@@ -91,6 +91,8 @@ func TestScalarsSpellWhatProto3JSONSpells(t *testing.T) {
 		{"an unsigned integer is a quoted decimal", maxUint64, `"18446744073709551615"`},
 		{"a finite double is a number", otlp.Double(1.5), `1.5`},
 		{"a large double keeps its exponent", otlp.Double(1e21), `1e+21`},
+		{"a million is plain, as encoding/json writes it", otlp.Double(1e6), `1000000`},
+		{"a small exponent loses its leading zero", otlp.Double(1e-7), `1e-7`},
 		{"NaN is named", otlp.Double(math.NaN()), `"NaN"`},
 		{"+Inf is named", otlp.Double(math.Inf(1)), `"Infinity"`},
 		{"-Inf is named", otlp.Double(math.Inf(-1)), `"-Infinity"`},

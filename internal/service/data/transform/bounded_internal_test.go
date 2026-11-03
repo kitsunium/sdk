@@ -13,7 +13,6 @@ import (
 	"errors"
 	"io"
 	"math"
-	"strings"
 	"testing"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
@@ -32,18 +31,37 @@ const loweredCapBytes int64 = 1 << 10 // 1 KiB
 // of the payload.
 const ceilingBodyBytes int = 4 << 10 // 4 KiB
 
-// errBoundedRead is the sentinel errReader returns; readAllBounded must forward
-// it untouched (overflow=false, plain=nil).
+// errBoundedRead is the sentinel errReader returns; appendAllBounded must
+// forward it untouched (overflow=false, dst back as it came).
 var errBoundedRead = errors.New("bounded read fault")
 
 // errReader is an io.Reader that always fails, so the read-fault branch of
-// readAllBounded can be exercised.
+// appendAllBounded can be exercised.
 type errReader struct{}
 
 // Read implements io.Reader and always returns the bounded-read sentinel.
 func (errReader) Read(_ []byte) (int, error) {
-	//: a transport fault surfaces verbatim through readAllBounded.
+	//: a transport fault surfaces verbatim through appendAllBounded.
 	return 0, errBoundedRead
+}
+
+// lateErrReader hands over n bytes, then fails: the fault arrives after the
+// bytes are in dst's capacity or in a spill chunk, and must still leave dst as
+// it came.
+type lateErrReader struct{ n int }
+
+// Read implements io.Reader: n bytes of 'x', then the bounded-read sentinel.
+func (r *lateErrReader) Read(p []byte) (int, error) {
+	//: the bytes are spent: the fault.
+	if r.n == 0 {
+		return 0, errBoundedRead
+	}
+	k := min(len(p), r.n)
+	for i := range p[:k] {
+		p[i] = 'x'
+	}
+	r.n -= k
+	return k, nil
 }
 
 // compressBomb returns a scheme-compressed blob of n zero bytes.
@@ -94,145 +112,133 @@ func compressBomb(t *testing.T, scheme string, n int) []byte {
 	return buf.Bytes()
 }
 
-// boundedCase is one readAllBounded scenario: a reader, the cap to apply, and
-// the expected (overflow, length, error) outcome.
+// boundedCase is one appendAllBounded scenario: a body, the dst it lands on,
+// the cap to apply, and the expected (overflow, error) outcome.
 type boundedCase struct {
-	name         string
-	reader       io.Reader
-	bodyLen      int
-	max          int64
+	name string
+	// bodyLen is the plaintext the reader holds; reader builds it fresh.
+	bodyLen int
+	// fault makes the reader fail after the body instead of ending it.
+	fault bool
+	// prefix is what dst holds before the call, and spare its spare capacity.
+	prefix string
+	spare  int
+	max    int64
+	// wantOverflow and wantErr are the verdict; a success returns prefix+body.
 	wantOverflow bool
 	wantErr      error
 }
 
-// Test_readAllBounded covers the in-bounds, exactly-at-cap, over-cap, and
-// read-fault branches of the shared bound through its explicit cap parameter.
-// Assertions are inlined in the sub-test closure so every table field is read in
-// the test body (no helper) — race-free since each case uses its own reader.
-func Test_readAllBounded(t *testing.T) {
+// Test_appendAllBounded covers the in-bounds, exactly-at-cap, over-cap and
+// read-fault branches of the shared bound, each landing in dst's spare
+// capacity, in the pooled spill chunks, and across the two — the paths
+// kitsunium/sdk#1102 split the old io.ReadAll into. Every success must return
+// dst's prefix followed by the body, and every refusal dst exactly as it came.
+func Test_appendAllBounded(t *testing.T) {
 	t.Parallel()
-	//: table over the cap-boundary relationships plus the read-fault branch.
+	chunk := spillChunkBytes
 	cases := []boundedCase{
-		{"under-cap", strings.NewReader(strings.Repeat("x", 512)), 512, loweredCapBytes, false, nil},
-		{"at-cap", strings.NewReader(strings.Repeat("x", int(loweredCapBytes))), int(loweredCapBytes), loweredCapBytes, false, nil},
-		{"over-cap", strings.NewReader(strings.Repeat("x", int(loweredCapBytes)+1)), int(loweredCapBytes) + 1, loweredCapBytes, true, nil},
-		{"read-fault", errReader{}, 0, loweredCapBytes, false, errBoundedRead},
+		{name: "under-cap/nil-dst", bodyLen: 512, max: loweredCapBytes},
+		{name: "at-cap/nil-dst", bodyLen: int(loweredCapBytes), max: loweredCapBytes},
+		{name: "over-cap/nil-dst", bodyLen: int(loweredCapBytes) + 1, max: loweredCapBytes, wantOverflow: true},
+		{name: "under-cap/in-capacity", bodyLen: 512, prefix: "PFX", spare: 4096, max: loweredCapBytes},
+		{name: "at-cap/exact-capacity", bodyLen: int(loweredCapBytes), prefix: "PFX", spare: int(loweredCapBytes), max: loweredCapBytes},
+		{name: "over-cap/in-capacity", bodyLen: 4096, prefix: "PFX", spare: 4096, max: loweredCapBytes, wantOverflow: true},
+		{name: "spills/past-capacity", bodyLen: 3*chunk + 17, prefix: "PFX", spare: 100, max: maxDecompressedBytes},
+		{name: "spills/many-chunks", bodyLen: (spillKeepChunks + 3) * chunk, max: maxDecompressedBytes},
+		{name: "over-cap/in-a-chunk", bodyLen: 2*chunk + 1, prefix: "PFX", spare: 100, max: int64(2 * chunk), wantOverflow: true},
+		{name: "at-cap/chunk-boundary", bodyLen: 2 * chunk, max: int64(2 * chunk)},
+		{name: "unbounded/max-int64", bodyLen: chunk + 5, prefix: "PFX", spare: 7, max: math.MaxInt64},
+		{name: "read-fault/at-once", bodyLen: 0, fault: true, prefix: "PFX", spare: 16, max: loweredCapBytes, wantErr: errBoundedRead},
+		{name: "read-fault/in-capacity", bodyLen: 10, fault: true, prefix: "PFX", spare: 64, max: loweredCapBytes, wantErr: errBoundedRead},
+		{name: "read-fault/in-a-chunk", bodyLen: chunk + 10, fault: true, spare: 64, max: maxDecompressedBytes, wantErr: errBoundedRead},
 	}
-	//: drive every case through an inlined assertion closure.
 	for _, tc := range cases {
-		//: each case is independent and parallel-safe (own reader, explicit cap).
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			//: drive the bound with the case's reader and cap.
-			plain, overflow, err := readAllBounded(tc.reader, tc.max)
-			//: an error case must forward the sentinel with no overflow/buffer.
-			if tc.wantErr != nil {
-				//: the read fault must be forwarded verbatim with no buffer.
-				if !errors.Is(err, tc.wantErr) || overflow || plain != nil {
-					t.Fatalf("readAllBounded fault: err=%v overflow=%v plain=%v want %v/false/nil", err, overflow, plain, tc.wantErr)
+			body := bytes.Repeat([]byte{'x'}, tc.bodyLen)
+			var reader io.Reader = bytes.NewReader(body)
+			//: a reader that fails after the body, or at once.
+			if tc.fault {
+				reader = &lateErrReader{n: tc.bodyLen}
+				//: the at-once case has nothing before its fault.
+				if tc.bodyLen == 0 {
+					reader = errReader{}
+				}
+			}
+			var dst []byte
+			//: nil stays nil: the case without a dst at all.
+			if tc.prefix != "" || tc.spare > 0 {
+				dst = append(make([]byte, 0, len(tc.prefix)+tc.spare), tc.prefix...)
+			}
+			out, overflow, err := appendAllBounded(dst, reader, tc.max)
+			//: a refusal hands dst back exactly as it came.
+			if tc.wantErr != nil || tc.wantOverflow {
+				if !errors.Is(err, tc.wantErr) || overflow != tc.wantOverflow {
+					t.Fatalf("err=%v overflow=%v, want %v/%v", err, overflow, tc.wantErr, tc.wantOverflow)
+				}
+				if len(out) != len(dst) || cap(out) != cap(dst) || string(out) != tc.prefix {
+					t.Fatalf("a refusal returned %d bytes of capacity %d, want dst back (%d of %d)", len(out), cap(out), len(dst), cap(dst))
 				}
 				return
 			}
-			//: a clean reader must never surface a read error.
-			if err != nil {
-				t.Fatalf("readAllBounded: unexpected error %v", err)
+			if err != nil || overflow {
+				t.Fatalf("err=%v overflow=%v, want a clean read", err, overflow)
 			}
-			//: the overflow verdict must match the cap/body relationship.
-			if overflow != tc.wantOverflow {
-				t.Fatalf("readAllBounded(body=%d,max=%d) overflow=%v want %v", tc.bodyLen, tc.max, overflow, tc.wantOverflow)
+			//: the prefix, then the body, byte for byte.
+			if want := append([]byte(tc.prefix), body...); !bytes.Equal(out, want) {
+				t.Fatalf("got %d bytes, want the %d-byte prefix and the %d-byte body", len(out), len(tc.prefix), tc.bodyLen)
 			}
-			//: an in-bounds read yields the full body; overflow yields nil.
-			if !overflow && len(plain) != tc.bodyLen {
-				t.Fatalf("readAllBounded: len=%d want %d", len(plain), tc.bodyLen)
-			}
-		})
-	}
-}
-
-// Test_flateDecompress drives flateDecompress end-to-end: a clean round-trip
-// under the production cap, and a bomb under a lowered cap that must trip the
-// overflow→FlateFailed backstop (never a truncated success). The cap is an
-// explicit parameter, so no shared state is mutated.
-func Test_flateDecompress(t *testing.T) {
-	t.Parallel()
-	//: table over the in-bounds round-trip and the over-cap overflow.
-	cases := []struct {
-		name    string
-		max     int64
-		wantErr error
-	}{
-		{"under-cap-round-trips", maxDecompressedBytes, nil},
-		{"over-cap-fails-closed", loweredCapBytes, coretransform.FlateFailed},
-	}
-	//: drive each cap relationship through flateDecompress.
-	for _, tc := range cases {
-		//: each case is independent and parallel-safe (no shared state).
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			//: a 4 MiB zero bomb inflates far past the lowered cap.
-			bomb := compressBomb(t, "flate", overflowPayloadBytes)
-			//: the decode must match the expected sentinel (nil = success).
-			if _, err := flateDecompress(nil, bomb, tc.max); err != tc.wantErr {
-				t.Fatalf("flateDecompress(max=%d) err=%v want %v", tc.max, err, tc.wantErr)
+			//: a body that fits lands in dst's own array, never a copy.
+			if len(tc.prefix)+tc.bodyLen <= cap(dst) && len(out) > 0 && &out[:1][0] != &dst[:1][0] {
+				t.Fatal("a body that fitted dst's capacity was decoded into another array")
 			}
 		})
 	}
 }
 
-// Test_gzipDecompress drives gzipDecompress end-to-end: a clean round-trip under
-// the production cap, and a bomb under a lowered cap that must trip the
-// overflow→GzipFailed backstop.
-func Test_gzipDecompress(t *testing.T) {
-	t.Parallel()
-	//: table over the in-bounds round-trip and the over-cap overflow.
-	cases := []struct {
-		name    string
-		max     int64
-		wantErr error
-	}{
-		{"under-cap-round-trips", maxDecompressedBytes, nil},
-		{"over-cap-fails-closed", loweredCapBytes, coretransform.GzipFailed},
-	}
-	//: drive each cap relationship through gzipDecompress.
-	for _, tc := range cases {
-		//: each case is independent and parallel-safe (no shared state).
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			//: a 4 MiB zero bomb inflates far past the lowered cap.
-			bomb := compressBomb(t, "gzip", overflowPayloadBytes)
-			//: the decode must match the expected sentinel (nil = success).
-			if _, err := gzipDecompress(nil, bomb, tc.max); err != tc.wantErr {
-				t.Fatalf("gzipDecompress(max=%d) err=%v want %v", tc.max, err, tc.wantErr)
-			}
-		})
-	}
+// decompressBackstops is each engine's layer backstop, the cap-parameterised
+// core its Decompress delegates to, keyed by the Algorithm the engine
+// registers under.
+var decompressBackstops = map[coretransform.Algorithm]struct {
+	backstop func(dst, src []byte, max int64) ([]byte, error)
+	sentinel error
+}{
+	"gzip":  {gzipDecompress, coretransform.GzipFailed},
+	"flate": {flateDecompress, coretransform.FlateFailed},
+	"zlib":  {zlibDecompress, coretransform.ZlibFailed},
 }
 
-// Test_zlibDecompress drives zlibDecompress end-to-end: a clean round-trip under
-// the production cap, and a bomb under a lowered cap that must trip the
-// overflow→ZlibFailed backstop. The zlib envelope shares the DEFLATE body with
-// flate, so it inherits the same bomb ratio and needs the same bound.
-func Test_zlibDecompress(t *testing.T) {
+// Test_decompressBackstop is the one row that replaced Test_flateDecompress,
+// Test_gzipDecompress and Test_zlibDecompress (kitsunium/sdk#1123): for every
+// engine the registry holds, a clean round-trip under the production cap, and
+// a bomb under a lowered cap that trips the overflow backstop with the
+// engine's sentinel — never a truncated success. The cap is an explicit
+// parameter, so no shared state is mutated; an engine registered without a
+// backstop in the table fails here rather than going untested.
+func Test_decompressBackstop(t *testing.T) {
 	t.Parallel()
-	//: table over the in-bounds round-trip and the over-cap overflow.
-	cases := []struct {
-		name    string
-		max     int64
-		wantErr error
-	}{
-		{"under-cap-round-trips", maxDecompressedBytes, nil},
-		{"over-cap-fails-closed", loweredCapBytes, coretransform.ZlibFailed},
-	}
-	//: drive each cap relationship through zlibDecompress.
-	for _, tc := range cases {
-		//: each case is independent and parallel-safe (no shared state).
-		t.Run(tc.name, func(t *testing.T) {
+	for _, algo := range coretransform.Available() {
+		engine, ok := decompressBackstops[algo]
+		if !ok {
+			t.Errorf("engine %q is registered with no backstop in decompressBackstops", algo)
+			continue
+		}
+		t.Run(string(algo), func(t *testing.T) {
 			t.Parallel()
 			//: a 4 MiB zero bomb inflates far past the lowered cap.
-			bomb := compressBomb(t, "zlib", overflowPayloadBytes)
-			//: the decode must match the expected sentinel (nil = success).
-			if _, err := zlibDecompress(nil, bomb, tc.max); err != tc.wantErr {
-				t.Fatalf("zlibDecompress(max=%d) err=%v want %v", tc.max, err, tc.wantErr)
+			bomb := compressBomb(t, string(algo), overflowPayloadBytes)
+			out, err := engine.backstop(nil, bomb, maxDecompressedBytes)
+			if err != nil || len(out) != overflowPayloadBytes {
+				t.Fatalf("under the production cap: %d bytes, err=%v, want %d", len(out), err, overflowPayloadBytes)
+			}
+			dst := []byte("prefix")
+			out, err = engine.backstop(dst, bomb, loweredCapBytes)
+			if err != engine.sentinel {
+				t.Fatalf("over the lowered cap: err=%v, want the engine's sentinel %v", err, engine.sentinel)
+			}
+			if string(out) != "prefix" {
+				t.Fatalf("over the lowered cap: %d bytes returned, want dst back", len(out))
 			}
 		})
 	}

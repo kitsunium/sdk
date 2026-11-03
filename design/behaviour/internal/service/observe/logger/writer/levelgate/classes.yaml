@@ -7,16 +7,25 @@ files:
       - gateSink
       - New
       - Floor
+      - NewLeveled
       - (*gateSink).Write
+      - (*gateSink).WriteBatch
+      - (*gateSink).forwardRun
       - (*gateSink).Flush
       - (*gateSink).Close
     name: gate.go
+  - decls:
+      - _
+    name: gate_compliance.go
 functions:
   - name: New
     params: inner corelogger.Sink, min level.Level
     results: corelogger.Sink
   - name: Floor
     params: inner corelogger.Sink, min level.Level
+    results: corelogger.Sink
+  - name: NewLeveled
+    params: inner corelogger.Sink, floor level.Leveler
     results: corelogger.Sink
 imports:
   context: context
@@ -33,9 +42,12 @@ types:
       - doc: inner is the wrapped terminal/middleware sink.
         name: inner
         type: corelogger.Sink
-      - doc: min is the inclusive severity floor; records below it are dropped.
-        name: min
-        type: level.Level
+      - doc: |-
+          floor is the inclusive severity floor, read on every record so a live
+          level.Var moves the gate (NewLeveled, #1015); New and Floor hold a
+          level.Fixed.
+        name: floor
+        type: level.Leveler
     kind: struct
     methods:
       - doc: |-
@@ -46,6 +58,23 @@ types:
         params: ctx context.Context, r corelogger.RecordEvent, p []byte
         recv: s *gateSink
         results: n int, err error
+      - doc: |-
+          WriteBatch forwards the records at or above the floor and drops the rest,
+          counting a dropped record as delivered, as Write reports a drop (#807). Each
+          run of consecutive kept records goes to the inner sink as one sub-slice —
+          one WriteBatch when the inner sink is a corelogger.BatchSink, one Write per
+          record otherwise — so the gate allocates nothing and keeps the order.
+        name: WriteBatch
+        params: ctx context.Context, recs []corelogger.RecordEvent, payloads [][]byte
+        recv: s *gateSink
+        results: written int, err error
+      - doc: |-
+          forwardRun hands a run of kept records to the inner sink and reports how
+          many of them, counted from the first, it delivered.
+        name: forwardRun
+        params: ctx context.Context, recs []corelogger.RecordEvent, payloads [][]byte
+        recv: s *gateSink
+        results: written int, err error
       - doc: Flush delegates to the wrapped sink.
         name: Flush
         params: ctx context.Context
@@ -56,3 +85,10 @@ types:
         recv: s *gateSink
         results: error
     name: gateSink
+vars:
+  - doc: gateSink takes a batch from the async drainer and passes it on (#807).
+    items:
+      - name: _
+        type: corelogger.BatchSink
+        value: (*gateSink)(nil)
+    name: _

@@ -3,6 +3,8 @@ package ndjson
 import (
 	"bytes"
 	stdjson "encoding/json"
+	jsonv2 "encoding/json/v2"
+	"io"
 	"reflect"
 	"slices"
 	"unsafe"
@@ -17,6 +19,12 @@ import (
 // record likely represents a consumer bug or a corrupt stream. Enforced
 // directly by the line splitter — no scanner buffer involved.
 const scannerMaxCapacity int = 10 * 1024 * 1024
+
+// maxReservedRecords caps the slots Unmarshal reserves before it has decoded
+// a record (#1098): an input of N lines that fails at its first one, or whose
+// lines are mostly blank, must not cost N slots up front. Past it the output
+// grows geometrically, by records actually decoded.
+const maxReservedRecords int = 4096
 
 // The registered singleton. Its aliases are literals in MIMETypes and
 // Extensions, not package tables: Register reads them through the Codec
@@ -106,28 +114,32 @@ func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 	return out, nil
 }
 
-// encodeSliceInto runs the per-record stdjson.Marshal loop and appends
-// each encoded record + '\n' separator onto buf. The getElem closure
-// produces one any-typed element at a time so the helper stays free of
-// reflect.Value at the API boundary. Stops at the first per-record
-// failure, returning the raw stdlib error so the caller can wrap it.
+// encodeSliceInto writes each record and its '\n' onto buf. The getElem
+// closure produces one any-typed element at a time so the helper stays free
+// of reflect.Value at the API boundary. Stops at the first per-record
+// failure, returning the raw error so the caller can wrap it.
 func encodeSliceInto(buf *bytes.Buffer, n int, getElem func(int) any) error {
-	//: ONE encoder for the whole batch, writing straight into buf. Its Encode
-	//: is Marshal's bytes (compact, HTML-escaped by default, the same
-	//: marshalers) followed by exactly the '\n' NDJSON wants — and it reuses
-	//: its scratch across records, where a stdjson.Marshal per record handed
-	//: back a fresh slice each time only to copy it into buf.
-	enc := stdjson.NewEncoder(buf)
-	//: encode record-by-record; Encode terminates each with '\n'.
+	//: record-by-record: each record's line, then its terminator.
 	for i := range n {
-		//: surface the raw stdlib error to the caller for wrapping.
-		if merr := enc.Encode(getElem(i)); merr != nil {
+		//: surface the raw error to the caller for wrapping.
+		if merr := encodeRecordTo(buf, getElem(i)); merr != nil {
 			//: caller's responsibility to wrap and release the buffer.
 			return merr
 		}
+		//: the line's end.
+		buf.WriteByte('\n')
 	}
 	//: every record written successfully.
 	return nil
+}
+
+// encodeRecordTo writes one record's JSON to w: json/v2's MarshalWrite under
+// the v1 options — the bytes encoding/json.Marshal writes, compact and
+// HTML-escaped, through the engine's pooled encoder, with no slice handed
+// back per record (#893).
+func encodeRecordTo(w io.Writer, v any) error {
+	//: v1 semantics, by name.
+	return jsonv2.MarshalWrite(w, v, stdjson.DefaultOptionsV1())
 }
 
 // marshalRawSliceTo writes a pre-encoded slice (one of []json.RawMessage
@@ -230,6 +242,10 @@ func appendNDJSONRaw(dst []byte, rows [][]byte) (appended []byte, ok bool) {
 
 // Unmarshal parses NDJSON data into v, which must be a pointer to a slice.
 func (*ndjsonCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: target must be a pointer to a slice.
 	slicePtr, ok := asSlicePointer(v)
 	//: shape-the-target rejection.
@@ -256,51 +272,34 @@ func (*ndjsonCodec) Unmarshal(data []byte, v any) error {
 }
 
 // decodeLines walks data line-by-line and decodes each non-empty line
-// in place into a pre-sized slice of sliceType. Avoids bufio.Scanner
-// (which would copy each line into its internal buffer) by indexing on
-// '\n' directly into the input slice — every produced sub-slice aliases
-// data so no per-line copy occurs before stdjson.Unmarshal reads it.
-// Pre-counts records so the output slice is sized once instead of
-// re-grown via reflect.Append on every line.
+// in place into a slice of sliceType. Avoids bufio.Scanner (which would copy
+// each line into its internal buffer) by indexing on '\n' directly into the
+// input slice — every produced sub-slice aliases data so no per-line copy
+// occurs before encoding/json reads it. The slice is sized by the records the
+// input holds — its non-blank lines — reserved up to maxReservedRecords at
+// first and grown geometrically past it (#1098), so blank lines cost nothing
+// and a refusal at the first line reserves no slot per line.
 func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err error) {
-	//: pre-count records so the output slice is sized exactly once
-	//: instead of paying reflect.Append's geometric re-grow per line.
+	//: the records the input can hold: one per non-blank line.
 	recordCount := countNDJSONRecords(data)
 	//: full-length slice so each record decodes in place into its own slot
 	//: — this drops the per-record reflect.New element allocation and the
-	//: reflect.Append element copy. recordCount is an upper bound (blank
-	//: lines are skipped), so the slice is re-sliced to the decoded count
-	//: before returning.
-	out := reflect.MakeSlice(sliceType, recordCount, recordCount)
-	//: decoded-record cursor; trails recordCount when blank lines are skipped.
+	//: reflect.Append element copy. At most maxReservedRecords up front.
+	out := reflect.MakeSlice(sliceType, min(recordCount, maxReservedRecords), min(recordCount, maxReservedRecords))
+	//: decoded-record cursor.
 	decoded := 0
 	//: walk every '\n'-terminated chunk of data without copying.
 	cursor := 0
 	//: loop drains the input cursor-by-cursor; bytes.IndexByte is SIMD-fast.
 	for cursor < len(data) {
-		//: locate the next newline; -1 means this is the trailing line.
-		nlOffset := bytes.IndexByte(data[cursor:], '\n')
-		//: derive the line and advance the cursor in one branch.
+		//: the next line, and the cursor past its terminator.
 		var line []byte
-		//: branch on terminator presence — trailing-line case has no '\n'.
-		if nlOffset < 0 {
-			//: no trailing newline — the remainder is the final record.
-			line = data[cursor:]
-			cursor = len(data)
-		} else {
-			//: include only the bytes before '\n'; cursor advances past it.
-			line = data[cursor : cursor+nlOffset]
-			cursor += nlOffset + 1
-		}
+		line, cursor = nextLine(data, cursor)
 		//: enforce the per-record cap; bigger records likely mean corruption.
 		if len(line) > scannerMaxCapacity {
-			//: surface the documented sentinel for oversized records.
-			return reflect.Value{}, errs.Wrap(nil, errs.WrapParams{
-				Code:    corendjson.CodeNDJSONUnmarshalFailed,
-				Reason:  "UNMARSHAL_FAILED",
-				Public:  "NDJSON record exceeds size limit",
-				Private: "service/data/codec/ndjson.Unmarshal: line length exceeds scannerMaxCapacity",
-			}, errs.Int("len", len(line)), errs.Int("cap", scannerMaxCapacity))
+			//: the stream decoder's refusal, the family's SIZE_EXCEEDED (#894):
+			//: one record past the cap reads the same both ways.
+			return reflect.Value{}, sizeExceeded(len(line))
 		}
 		//: trim only after the size check so a giant whitespace line still trips it.
 		line = bytes.TrimSpace(line)
@@ -309,10 +308,15 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 			//: nothing to decode on this iteration.
 			continue
 		}
-		//: decode directly into the pre-allocated slot — slice elements
-		//: obtained via Index are addressable, so .Addr() yields a settable
-		//: pointer with no per-record reflect.New allocation.
-		if uerr := stdjson.Unmarshal(line, out.Index(decoded).Addr().Interface()); uerr != nil {
+		//: every reserved slot is filled: grow by records actually decoded.
+		if decoded == out.Len() {
+			//: double, never past the records the input can hold.
+			out = growSlots(out, recordCount)
+		}
+		//: decode directly into the slot — slice elements obtained via Index
+		//: are addressable, so .Addr() yields a settable pointer with no
+		//: per-record reflect.New allocation.
+		if uerr := decodeRecord(line, out.Index(decoded).Addr().Interface()); uerr != nil {
 			//: wrap the stdlib error for reason-based matching.
 			return reflect.Value{}, errs.Wrap(uerr, errs.WrapParams{
 				Code:    corendjson.CodeNDJSONUnmarshalFailed,
@@ -324,29 +328,55 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 		//: advance the decoded-record cursor past the filled slot.
 		decoded++
 	}
-	//: re-slice to the decoded count — blank lines leave trailing slots.
+	//: re-slice to the decoded count.
 	return out.Slice(0, decoded), nil
 }
 
-// countNDJSONRecords estimates the number of decodable records in data
-// by counting '\n' bytes plus one for a possible trailing line that has
-// no terminator. Conservative upper bound — actual decode skips empty /
-// whitespace-only lines, but over-allocating once is much cheaper than
-// re-growing the result slice on every record via reflect.Append.
+// nextLine returns the line starting at cursor, without its '\n', and the
+// cursor past the terminator — or past the end for a last line without one.
+func nextLine(data []byte, cursor int) (line []byte, next int) {
+	//: locate the next newline; -1 means this is the trailing line.
+	nlOffset := bytes.IndexByte(data[cursor:], '\n')
+	//: no trailing newline — the remainder is the final record.
+	if nlOffset < 0 {
+		//: the rest of the input, and the end.
+		return data[cursor:], len(data)
+	}
+	//: the bytes before '\n'; the cursor advances past it.
+	return data[cursor : cursor+nlOffset], cursor + nlOffset + 1
+}
+
+// growSlots returns out with its slots doubled — at least one, never more
+// than limit, the records the input can hold — and its records copied over.
+func growSlots(out reflect.Value, limit int) reflect.Value {
+	//: geometric growth, bounded by the record count.
+	n := min(max(2*out.Len(), 1), limit)
+	//: the new slots, then the decoded records moved into them.
+	grown := reflect.MakeSlice(out.Type(), n, n)
+	reflect.Copy(grown, out)
+	//: the caller decodes into the next free slot.
+	return grown
+}
+
+// countNDJSONRecords counts the records data can hold: its non-blank lines,
+// blank meaning what decodeLines skips — empty once bytes.TrimSpace has run.
+// An exact count on a successful decode; never more slots than lines that
+// carry a byte to decode (#1098: a newline count reserved a slot for every
+// blank line).
 func countNDJSONRecords(data []byte) int {
-	//: empty input means zero records.
-	if len(data) == 0 {
-		//: nothing to allocate for.
-		return 0
+	//: counted line by line.
+	count := 0
+	//: the same split decodeLines walks.
+	for cursor := 0; cursor < len(data); {
+		//: the next line and the cursor past it.
+		var line []byte
+		line, cursor = nextLine(data, cursor)
+		//: a line with something but whitespace is a record.
+		if len(bytes.TrimSpace(line)) > 0 {
+			count++
+		}
 	}
-	//: bytes.Count uses SIMD on amd64/arm64 so this is effectively free.
-	count := bytes.Count(data, []byte{'\n'})
-	//: trailing record without a terminating '\n' adds one slot.
-	if data[len(data)-1] != '\n' {
-		//: include the orphan tail in the capacity hint.
-		count++
-	}
-	//: caller uses this as the slice cap hint.
+	//: caller uses this as the slice bound.
 	return count
 }
 
@@ -477,4 +507,11 @@ func asSlicePointer(v any) (ptr reflect.Value, ok bool) {
 	}
 	//: caller gets the pointer to drive Set on the pointee.
 	return rv, true
+}
+
+// decodeRecord decodes one line into ptr, a pointer to the record's slot:
+// json/v2 under the v1 options, what encoding/json.Unmarshal reads (#893).
+func decodeRecord(line []byte, ptr any) error {
+	//: the v1 semantics, record by record.
+	return jsonv2.Unmarshal(line, ptr, stdjson.DefaultOptionsV1())
 }

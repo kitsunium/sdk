@@ -69,6 +69,8 @@ func freshSink(t testing.TB, policy DropPolicy) *asyncSink {
 		//: pre-equip a valid flushSignal so the channel is always non-nil;
 		//: rows that need a pre-closed signal overwrite it explicitly.
 		flushSignal: make(chan struct{}, 1),
+		wake:        make(chan struct{}, 1),
+		batchMax:    1,
 		done:        done,
 	}
 }

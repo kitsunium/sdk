@@ -40,10 +40,46 @@ packages:
             private: service/observe/logger/middleware/sample.New called with nil downstream
             public: Sample sink requires a non-nil downstream
             reason: SAMPLE_DOWNSTREAM_NIL
-  - doc: |-
-      Package sample implements a 1-of-N rate-limiter Sink. Every Nth Write
-      is forwarded to the downstream sink; the rest are silently dropped. The
-      counter is atomic so concurrent producers stay correct without a mutex.
+  - constants:
+      - doc: DefaultWindow is the keyed sampler's window when KeyedConfig.Window is zero.
+        name: DefaultWindow
+        type: time.Duration
+        value: "1000000000"
+      - doc: |-
+          DefaultFirst is how many records of one key a window forwards before the
+          keyed sampler thins them, when KeyedConfig.First is zero.
+        name: DefaultFirst
+        type: int
+        value: "100"
+      - doc: |-
+          DefaultThereafter is the keyed sampler's 1-in-N past First, when
+          KeyedConfig.Thereafter is zero.
+        name: DefaultThereafter
+        type: int
+        value: "100"
+      - doc: |-
+          DefaultMaxKeys bounds the keyed sampler's table when KeyedConfig.MaxKeys is
+          zero.
+        name: DefaultMaxKeys
+        type: int
+        value: "1024"
+    doc: |-
+      Package sample implements two sampling Sinks. New is a 1-of-N rate
+      limiter: every Nth Write is forwarded to the downstream sink and the rest
+      are silently dropped, by one atomic counter over every record.
+
+      NewKeyed is the sampler a production stream needs (#1017): a counter per
+      key — the record's level and message unless KeyedConfig.Key says
+      otherwise — forwards the first First records of each Window, then every
+      Thereafter-th, so a burst of one repeated line is thinned while a rare
+      line interleaved with it still passes; records at or above
+      MinLevelBypass (Warn by default) are never sampled; every drop is counted
+      (Dropped) and reported (OnDrop), so sampling is told apart from silence
+      (ADR 0031). The window is measured on the configured Clock with no
+      goroutine: a key's counter carries its window start and restarts on the
+      first Write past it. MaxKeys bounds the table; a key past the bound is
+      counted under one overflow counter, so a message carrying an identifier
+      cannot grow it.
 
       Use case: emit verbose Debug records at a 1/100 rate to a remote drain
       while keeping the local console stream intact (compose with sink/multi
@@ -63,6 +99,116 @@ packages:
             type: corelogger.Sink
           - name: err
             type: error
+      - doc: |-
+          NewKeyed constructs the keyed, windowed sampler over downstream. A nil cfg
+          is the zero KeyedConfig, and a zero field of cfg takes its documented
+          default (DefaultWindow, DefaultFirst,
+          DefaultThereafter, DefaultMaxKeys, clock.System, the level-and-message
+          key, a Warn bypass), so the zero KeyedConfig is the documented sampler
+          and never an inert one; a negative Window, First, Thereafter or MaxKeys
+          is refused with RateInvalid, a nil downstream with DownstreamNil.
+        in:
+          - name: downstream
+            type: corelogger.Sink
+          - name: cfg
+            type: "*KeyedConfig"
+        name: NewKeyed
+        out:
+          - name: sink
+            type: "*Keyed"
+          - name: err
+            type: error
     imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+      level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/sample
+    types:
+      - doc: |-
+          KeyedConfig tunes NewKeyed. Every field is optional: the zero value is
+          the documented sampler (one second, the first 100 records of a key, then
+          1 in 100, a table of 1024 keys, Warn and above never sampled).
+        name: KeyedConfig
+        struct:
+          fields:
+            - doc: Window is the period a key's counts are kept over; zero is DefaultWindow.
+              name: Window
+              type: time.Duration
+            - doc: First is how many records of a key a window forwards; zero is DefaultFirst.
+              name: First
+              type: int
+            - doc: |-
+                Thereafter forwards every Thereafter-th record of a key past First in a
+                window; zero is DefaultThereafter, one forwards them all.
+              name: Thereafter
+              type: int
+            - doc: |-
+                MaxKeys bounds the table of keys; zero is DefaultMaxKeys. A new key
+                past the bound, once the keys whose window ended are swept, is
+                counted under one shared overflow counter.
+              name: MaxKeys
+              type: int
+            - doc: Clock measures the windows; nil is clock.System.
+              name: Clock
+              type: clock.Clock
+            - doc: |-
+                Key maps a record to its sampling key; nil keys on the level and the
+                message. It is called on every Write and must not retain the record.
+              name: Key
+              type: func(r corelogger.RecordEvent) string
+            - doc: |-
+                MinLevelBypass is the floor at and above which a record is forwarded
+                without being counted, read on every Write; nil is level.Warn. Pass
+                level.Fixed(level.Error) to sample warnings too.
+              name: MinLevelBypass
+              type: level.Leveler
+            - doc: |-
+                OnDrop, when non-nil, is called with every record the sampler drops,
+                on the Write that drops it.
+              name: OnDrop
+              type: func(r corelogger.RecordEvent)
+      - doc: |-
+          Keyed is the keyed, windowed sampler NewKeyed builds: a corelogger.Sink
+          that forwards the first records of each key in a window and then one in
+          N, and counts what it drops. Safe for concurrent use.
+        methods:
+          - doc: |-
+              Write forwards r when its level bypasses sampling, or when its key's
+              count in the current window is within First or lands on the
+              Thereafter-th; otherwise it drops it, counts it, calls OnDrop and
+              returns (0, nil), as New's dropped writes do.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: r
+                type: corelogger.RecordEvent
+              - name: p
+                type: "[]byte"
+            name: Write
+            out:
+              - name: n
+                type: int
+              - name: err
+                type: error
+            recv: pointer
+          - doc: Flush forwards to the downstream sink.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Flush
+            out:
+              - type: error
+            recv: pointer
+          - doc: Close forwards to the downstream sink.
+            name: Close
+            out:
+              - type: error
+            recv: pointer
+          - doc: Dropped reports how many records the sampler has dropped since it was built.
+            name: Dropped
+            out:
+              - type: uint64
+            recv: pointer
+        name: Keyed
+        struct:
+          unexported: true

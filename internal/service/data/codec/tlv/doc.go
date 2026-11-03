@@ -32,7 +32,9 @@
 //
 // Package tlv — reflection-driven encoder shared by Marshal, Append, and
 // the streaming Encoder. Every helper returns the (possibly re-allocated)
-// destination slice plus a wrapped *errs.Error on failure.
+// destination slice plus a wrapped *errs.Error on failure. A map's pairs are
+// written in key order — string keys byte-wise, integer keys by value, any
+// other key by its encoded record — so equal values encode to equal bytes.
 //
 // Package tlv — shared reflection helpers used by both encoder and decoder.
 //

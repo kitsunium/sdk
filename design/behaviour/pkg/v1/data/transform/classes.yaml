@@ -28,6 +28,9 @@ files:
       - Decompress
       - DecompressBounded
       - judgeAfter
+      - NewReader
+      - NewWriter
+      - streamingFor
     name: transform.go
 functions:
   - name: Compress
@@ -45,8 +48,21 @@ functions:
     name: judgeAfter
     params: c Compressor, dst, src []byte, limit int64
     results: decoded []byte, err error
+  - name: NewReader
+    params: algo Algorithm, r io.Reader, limit int64
+    results: rc io.ReadCloser, err error
+  - name: NewWriter
+    params: algo Algorithm, w io.Writer
+    results: wc io.WriteCloser, err error
+  - doc: |-
+      streamingFor resolves algo to a scheme with a stream form, or the refusal
+      that names why there is none.
+    name: streamingFor
+    params: algo Algorithm
+    results: streaming StreamingCompressor, err error
 imports:
   coretransform: github.com/kitsunium/sdk/internal/core/data/transform
+  io: io
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/pkg/v1/data/transform

@@ -6,7 +6,11 @@ go_library(
     name = "metrics",
     srcs = [
         "attrs.go",
+        "default_buckets.go",
         "doc.go",
+        "exemplar_value.go",
+        "exponential.go",
+        "exponential_histogram_value.go",
         "exporter.go",
         "gauge_value.go",
         "gen_codes.go",
@@ -15,6 +19,7 @@ go_library(
         "observable.go",
         "scope.go",
         "snapshot_value.go",
+        "stat.go",
         "sum_value.go",
         "temporality.go",
     ],
@@ -50,6 +55,7 @@ go_test(
     name = "metrics_test",
     srcs = [
         "describer_external_test.go",
+        "exponential_external_test.go",
         "export_context_external_test.go",
         "exporter_external_test.go",
         "gen_api_test.go",

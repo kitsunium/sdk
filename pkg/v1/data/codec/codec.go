@@ -107,11 +107,14 @@ const (
 
 // Marshal serialises v using the codec registered under f. The codec's
 // native input shape is tried first (fast path, zero overhead); if the
-// codec rejects v as the wrong shape (csv requires [][]string, pem
+// codec rejects v as the wrong shape (csv requires [][]string or a slice
+// of flat structs, pem
 // requires *pem.Block, etc.) the facade promotes v via json-encode +
 // codec-specific wrap so every Format accepts any Go value — see
 // promote.go for the per-format strategies and the uniform-contract
-// rationale.
+// rationale. A value whose type alone rules it out — a struct given to
+// Form, CSV, NDJSON or PEM — is promoted at once, without the codec
+// building a refusal first; the bytes are the same.
 func Marshal(f Format, v any) (encoded []byte, err error) {
 	//: resolve the codec before delegating.
 	c, ok := corecodec.Lookup(f)
@@ -119,6 +122,12 @@ func Marshal(f Format, v any) (encoded []byte, err error) {
 	if !ok {
 		//: caller used an unregistered Format.
 		return nil, unknownFormat(f)
+	}
+	//: a shape the constrained codec refuses for sure is promoted at once,
+	//: never refused first by a codec error built to be thrown away (#910).
+	if refusesShape(f, v) {
+		//: promotion handles its own error wrapping.
+		return promoteMarshal(f, c, v)
 	}
 	//: fast path — try the codec's native input shape first.
 	encoded, err = c.Marshal(v)
@@ -224,6 +233,12 @@ func MarshalMany(v any, formats ...Format) (encodedByFormat map[Format][]byte, e
 // doesn't pay a second Lookup per format. Identical wire output to
 // Marshal on every Format / value combination.
 func encodeWithPromotion(f Format, c corecodec.Codec, v any) (encoded []byte, err error) {
+	//: a shape the constrained codec refuses for sure is promoted at once,
+	//: never refused first by a codec error built to be thrown away (#910).
+	if refusesShape(f, v) {
+		//: promotion handles its own error wrapping.
+		return promoteMarshal(f, c, v)
+	}
 	//: fast path — try the codec's native input shape first.
 	encoded, err = c.Marshal(v)
 	//: slow path — gate on hasPromotionStrategy so MarshalMany matches
@@ -261,6 +276,37 @@ func NewDecoder(f Format, r io.Reader) (dec Decoder, err error) {
 	}
 	//: delegate to the streaming codec.
 	return sc.NewDecoder(r), nil
+}
+
+// NewBoundedDecoder returns a streaming decoder for the codec registered under
+// f that refuses a value longer than maxBytes after reading at most
+// maxBytes+1 bytes of it (#891): the decoder to put in front of a socket.
+// The refusal is the codec's SIZE_EXCEEDED, which [IsTooLarge] reads; a
+// maxBytes of zero or below is refused by the codec with BOUND_INVALID.
+// JSON, XML and CBOR implement it; a Format whose codec does not returns
+// [StreamingUnsupported] — TOML, MessagePack and YAML bound their
+// [NewDecoder] with fixed ceilings of their own.
+func NewBoundedDecoder(f Format, r io.Reader, maxBytes int64) (dec Decoder, err error) {
+	//: resolve the codec.
+	c, found := corecodec.Lookup(f)
+	//: format miss first.
+	if !found {
+		//: surface the facade-level sentinel.
+		return nil, unknownFormat(f)
+	}
+	bounded, supports := c.(corecodec.BoundedStreamingCodec)
+	//: a codec whose decoder cannot hold a caller's ceiling.
+	if !supports {
+		//: the streaming refusal, naming the missing extension.
+		return nil, errs.Wrap(nil, errs.WrapParams{
+			Code:    CodeStreamingUnsupported,
+			Reason:  "STREAMING_UNSUPPORTED",
+			Public:  "codec does not support streaming",
+			Private: "pkg/v1/data/codec: codec " + c.Name() + " does not implement core/data/codec.BoundedStreamingCodec",
+		})
+	}
+	//: the codec refuses a ceiling of zero or below itself.
+	return bounded.NewBoundedDecoder(r, maxBytes)
 }
 
 // FromMIME resolves a MIME string to its registered Format.

@@ -52,6 +52,10 @@ type parser struct {
 	lineStart int
 	// depth is how many collections enclose the cursor.
 	depth int
+	// flowParent is the indentation of the block holding the flow collection
+	// being parsed, -1 at the root: each of its lines must be indented deeper
+	// (YAML 1.2.2 §7.4, s-separate-lines(n) in flow-in context).
+	flowParent int
 }
 
 // acquireParser returns a parser reset to read src.
@@ -80,7 +84,7 @@ func (p *parser) reset() {
 	p.text = p.text[:0]
 	clear(p.dup)
 	p.src = ""
-	p.pos, p.line, p.lineStart, p.depth = 0, 1, 0, 0
+	p.pos, p.line, p.lineStart, p.depth, p.flowParent = 0, 1, 0, 0, -1
 }
 
 // at returns the byte at i, or 0 past the end. A document never holds a NUL —
@@ -163,7 +167,7 @@ func (p *parser) add(n node) (int32, error) {
 	//: the node bound.
 	if len(p.nodes) >= maxNodes {
 		//: refuse at the node that would cross it.
-		return noNode, p.errAt(int(n.line), int(n.off), "the document holds more nodes than the decoder accepts")
+		return noNode, bounded(coreyaml.SizeExceeded, "the document holds more nodes than the decoder accepts", at(int(n.line), p.columnOf(int(n.off)))...)
 	}
 	p.nodes = append(p.nodes, n)
 	//: the new node's index.
@@ -189,7 +193,7 @@ func (p *parser) open(kind nodeKind) (collection int32, base int, err error) {
 	//: the depth bound.
 	if p.depth >= maxDepth {
 		//: refuse at the collection that would cross it.
-		return noNode, 0, p.errHere("collections nest deeper than the decoder accepts")
+		return noNode, 0, bounded(coreyaml.DepthExceeded, "collections nest deeper than the decoder accepts", at(p.line, p.columnOf(p.pos))...)
 	}
 	p.depth++
 	collection, err = p.add(node{off: int32(p.pos), line: int32(p.line), kind: kind})

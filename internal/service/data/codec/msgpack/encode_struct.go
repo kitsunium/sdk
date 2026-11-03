@@ -20,6 +20,10 @@ func newStructEncoder(t reflect.Type) encodeFunc {
 	//: one encoder per field, built (or found) once.
 	for i, f := range layout.fields {
 		s.fields[i] = fieldEncoder{field: f, enc: encoderFor(f.typ), empty: emptyFor(f.typ)}
+		//: omitzero's test is decided once, from the type.
+		if f.omitZero {
+			s.fields[i].zero = zeroTest(f.typ)
+		}
 	}
 	//: the plan.
 	return s.encode
@@ -101,7 +105,8 @@ func (s *structEncoder) keptCount(v reflect.Value) int {
 }
 
 // omitted reports whether the field is left out of struct value v: when it is
-// empty under omitempty, or when it sits behind a nil embedded pointer.
+// empty under omitempty, zero under omitzero — either is enough, as
+// encoding/json combines them — or when it sits behind a nil embedded pointer.
 func (f *fieldEncoder) omitted(v reflect.Value) bool {
 	fv, ok := fieldValue(v, f.field.index)
 	//: behind a nil embedded pointer.
@@ -109,8 +114,8 @@ func (f *fieldEncoder) omitted(v reflect.Value) bool {
 		//: left out, as the vendor did on this path.
 		return true
 	}
-	//: omitempty and empty.
-	return f.field.omitEmpty && f.empty(fv)
+	//: omitempty and empty, or omitzero and zero.
+	return (f.field.omitEmpty && f.empty(fv)) || (f.zero != nil && f.zero(fv))
 }
 
 // encodeValue writes the field's value from struct value v.
@@ -265,8 +270,8 @@ func structEmpty(v reflect.Value) bool {
 	//: one kept field makes it non-empty.
 	for _, f := range layout.fields {
 		fv, ok := fieldValue(v, f.index)
-		//: kept: reachable and not (omitempty and empty).
-		if ok && (!f.omitEmpty || !isEmptyValue(fv)) {
+		//: kept: reachable, not (omitempty and empty), not (omitzero and zero).
+		if ok && (!f.omitEmpty || !isEmptyValue(fv)) && (!f.omitZero || !zeroTest(f.typ)(fv)) {
 			//: not empty.
 			return false
 		}

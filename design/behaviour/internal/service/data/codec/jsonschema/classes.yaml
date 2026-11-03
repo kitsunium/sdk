@@ -1,0 +1,823 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: draft202012 is the one $schema this package compiles.
+    items:
+      - name: draft202012
+        value: "\"https://json-schema.org/draft/2020-12/schema\""
+    name: draft202012
+  - doc: |-
+      maxEvalDepth bounds the schemas an evaluation may enter at once: a "$ref"
+      cycle that consumes no part of the document would otherwise never end.
+    items:
+      - name: maxEvalDepth
+        type: int
+        value: "512"
+    name: maxEvalDepth
+  - doc: |-
+      uuidLayout is a UUID's text (RFC 9562 §4): hexadecimal digits where it
+      has an x, a hyphen where it has one.
+    items:
+      - name: uuidLayout
+        type: string
+        value: "\"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx\""
+    name: uuidLayout
+  - doc: Keyword constants.
+    grouped: true
+    items:
+      - doc: |-
+          violationCode is the code of a violation no validation code names:
+          type, multipleOf, the combinators, the array and object applicators,
+          format.
+        name: violationCode
+        type: errs.Code
+        value: corejsonschema.CodeJSONSchemaViolation
+      - doc: maxBoundDecimals caps the decimals a bound prints with.
+        name: maxBoundDecimals
+        type: int
+        value: "6"
+    name: violationCode
+  - doc: The six JSON kinds.
+    grouped: true
+    items:
+      - doc: kindNull is null.
+        name: kindNull
+        type: kind
+        value: iota
+      - doc: kindBool is true or false.
+        name: kindBool
+      - doc: kindNumber is a number, held exactly.
+        name: kindNumber
+      - doc: kindString is a string.
+        name: kindString
+      - doc: kindArray is an array.
+        name: kindArray
+      - doc: kindObject is an object.
+        name: kindObject
+    name: kindNull
+files:
+  - decls:
+      - patternSchema
+      - buildRef
+      - compileList
+      - buildCombinator
+      - allOf
+      - countMatches
+      - buildNot
+      - buildIf
+      - optionalSchema
+      - buildDependentSchemas
+      - buildItems
+      - elements
+      - buildContains
+      - containsBounds
+      - buildMembers
+      - compileMap
+      - buildProperties
+      - compilePatterns
+      - buildPatternProperties
+      - buildAdditional
+      - additional
+      - matchesAny
+      - buildPropertyNames
+    name: applicators.go
+  - decls:
+      - draft202012
+      - schemaKeywords
+      - compiler
+      - newCompiler
+      - normalizeKeys
+      - (*compiler).index
+      - (*compiler).indexChildren
+      - heldSchemas
+      - appendCollections
+      - appendMembers
+      - (*compiler).addDocument
+      - (*compiler).resource
+      - (*compiler).resolveRef
+      - pointer
+      - step
+      - resolve
+      - (*compiler).compile
+      - (*compiler).compileKeywords
+      - checkDraft
+      - schemaInvalid
+    name: compile.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - maxEvalDepth
+      - check
+      - schema
+      - eval
+      - (*eval).quiet
+      - (*eval).absorb
+      - (*eval).fail
+      - (*schema).validate
+    name: eval.go
+  - decls:
+      - uuidLayout
+      - formatChecker
+      - checkFormats
+      - buildFormat
+      - isDateTime
+      - isUUID
+      - uuidByte
+      - isHex
+      - isEmail
+    name: formats.go
+  - decls:
+      - Config
+      - Validator
+      - NewValidator
+      - (*Validator).Validate
+    name: jsonschema.go
+  - decls:
+      - violationCode
+      - keyword
+      - builder
+      - builderFor
+      - validationBuilder
+      - validationBuilder2
+      - applicatorBuilder
+      - applicatorBuilder2
+      - keywordInvalid
+      - typeMatches
+      - buildType
+      - stringList
+      - buildEnum
+      - buildConst
+      - buildMultipleOf
+      - buildBound
+      - withinBound
+      - boundMessage
+      - sizeOf
+      - nonNegative
+      - buildSize
+      - buildPattern
+      - buildUniqueItems
+      - unique
+      - buildRequired
+      - requireMembers
+      - buildDependentRequired
+    name: keywords.go
+  - decls:
+      - kind
+      - kindNull
+      - value
+      - tokenReader
+      - parse
+      - parseValue
+      - parseScalar
+      - parseArray
+      - parseObject
+      - equal
+      - equalArrays
+      - equalObjects
+      - (*value).isInteger
+      - notOneValue
+    name: value.go
+functions:
+  - doc: |-
+      buildRef compiles "$ref": the schema it names, resolved now — within the
+      document, or in a resource Config registers; never fetched.
+    name: buildRef
+    params: k keyword
+    results: check, error
+  - doc: compileList compiles an array of schemas.
+    name: compileList
+    params: c *compiler, kw *value, name, base string
+    results: "[]*schema, error"
+  - doc: |-
+      buildCombinator compiles "allOf", "anyOf" or "oneOf". allOf's violations
+      are its schemas' own; anyOf and oneOf ask their schemas quietly and report
+      once.
+    name: buildCombinator
+    params: name string
+    results: builder
+  - doc: allOf passes when every schema does; each reports its own violations.
+    name: allOf
+    params: list []*schema
+    results: check
+  - doc: |-
+      countMatches passes anyOf when at least one schema matches, oneOf when
+      exactly one does.
+    name: countMatches
+    params: name string, list []*schema
+    results: check
+  - doc: buildNot compiles "not".
+    name: buildNot
+    params: k keyword
+    results: check, error
+  - doc: |-
+      buildIf compiles "if" with its siblings "then" and "else": the branch the
+      condition picks applies, and reports its own violations.
+    name: buildIf
+    params: k keyword
+    results: check, error
+  - doc: optionalSchema compiles the sibling keyword name when parent has it.
+    name: optionalSchema
+    params: c *compiler, parent *value, name, base string
+    results: "*schema, error"
+  - doc: |-
+      buildDependentSchemas compiles "dependentSchemas": for each member present,
+      its schema applies to the whole object.
+    name: buildDependentSchemas
+    params: k keyword
+    results: check, error
+  - doc: |-
+      buildItems compiles "prefixItems" — a schema per position — or "items" —
+      the schema of every element after prefixItems' positions.
+    name: buildItems
+    params: name string
+    results: builder
+  - doc: |-
+      elements checks an array: list's schemas at their positions, rest at every
+      position from skip on.
+    name: elements
+    params: list []*schema, rest *schema, skip int
+    results: check
+  - doc: |-
+      buildContains compiles "contains" with its siblings "minContains" (one by
+      default) and "maxContains".
+    name: buildContains
+    params: k keyword
+    results: check, error
+  - doc: |-
+      containsBounds reads minContains (1 when absent) and maxContains (-1, no
+      bound, when absent).
+    name: containsBounds
+    params: parent *value
+    results: lo, hi int, err error
+  - doc: |-
+      buildMembers compiles "properties", "patternProperties" or
+      "additionalProperties" — the last applying to every member neither of the
+      others names.
+    name: buildMembers
+    params: name string
+    results: builder
+  - doc: compileMap compiles an object of schemas.
+    name: compileMap
+    params: c *compiler, kw *value, name, base string
+    results: map[string]*schema, error
+  - doc: buildProperties compiles "properties".
+    name: buildProperties
+    params: k keyword
+    results: check, error
+  - doc: compilePatterns compiles "patternProperties".
+    name: compilePatterns
+    params: c *compiler, kw *value, base string
+    results: "[]patternSchema, error"
+  - doc: buildPatternProperties compiles "patternProperties".
+    name: buildPatternProperties
+    params: k keyword
+    results: check, error
+  - doc: buildAdditional compiles "additionalProperties" against its siblings.
+    name: buildAdditional
+    params: k keyword
+    results: check, error
+  - doc: additional applies s to every member neither named nor matched.
+    name: additional
+    params: s *schema, named map[string]bool, patterns []patternSchema
+    results: check
+  - doc: matchesAny reports whether a pattern matches name.
+    name: matchesAny
+    params: patterns []patternSchema, name string
+    results: bool
+  - doc: |-
+      buildPropertyNames compiles "propertyNames": each member name, as a
+      string, against the schema; a failure is reported at the member.
+    name: buildPropertyNames
+    params: k keyword
+    results: check, error
+  - doc: newCompiler returns a compiler over cfg's resources and formats.
+    name: newCompiler
+    params: cfg Config
+    results: "*compiler"
+  - doc: normalizeKeys keys resources by their URI without an empty fragment.
+    name: normalizeKeys
+    params: resources map[string][]byte
+    results: map[string][]byte
+  - doc: heldSchemas lists the schemas v's schema keywords hold.
+    name: heldSchemas
+    params: v *value
+    results: "[]*value"
+  - doc: appendCollections appends the schemas v's array and object keywords hold.
+    name: appendCollections
+    params: out []*value, v *value
+    results: "[]*value"
+  - doc: appendMembers appends an object's member values, in order.
+    name: appendMembers
+    params: out []*value, obj *value
+    results: "[]*value"
+  - doc: |-
+      pointer follows the RFC 6901 JSON Pointer fragment — percent-decoded, then
+      "~1" and "~0" unescaped — from root.
+    name: pointer
+    params: root *value, fragment string
+    results: "*value, error"
+  - doc: step returns the member or element token names in v, or nil.
+    name: step
+    params: v *value, token string
+    results: "*value"
+  - doc: resolve resolves ref against base as RFC 3986 §5 does.
+    name: resolve
+    params: base, ref string
+    results: string, error
+  - doc: checkDraft refuses a "$schema" naming anything but draft 2020-12.
+    name: checkDraft
+    params: v *value
+    results: error
+  - doc: schemaInvalid refuses a schema, keeping cause when there is one.
+    name: schemaInvalid
+    params: problem string, cause error
+    results: error
+  - doc: |-
+      formatCheckers are the formats this package can assert; any other is an
+      annotation, and naming it in Config.AssertFormats is refused.
+    name: formatChecker
+    params: name string
+    results: func(string) bool, bool
+  - doc: |-
+      checkFormats refuses a format named in Config.AssertFormats that this
+      package cannot assert.
+    name: checkFormats
+    params: names []string
+    results: error
+  - doc: |-
+      buildFormat compiles "format": an annotation, unless Config.AssertFormats
+      names it.
+    name: buildFormat
+    params: k keyword
+    results: check, error
+  - doc: isDateTime reports whether s is an RFC 3339 date-time.
+    name: isDateTime
+    params: s string
+    results: bool
+  - doc: isUUID reports whether s is a UUID in its 8-4-4-4-12 hexadecimal text.
+    name: isUUID
+    params: s string
+    results: bool
+  - doc: uuidByte reports whether c may sit at position i of a UUID's text.
+    name: uuidByte
+    params: i int, c byte
+    results: bool
+  - doc: isHex reports whether c is a hexadecimal digit, in either case.
+    name: isHex
+    params: c byte
+    results: bool
+  - doc: |-
+      isEmail reports whether s is an addr-spec as net/mail reads one, and
+      nothing more: no display name, no angle brackets.
+    name: isEmail
+    params: s string
+    results: bool
+  - name: NewValidator
+    params: schema []byte, cfg Config
+    results: "*Validator, error"
+  - doc: |-
+      builderFor returns the builder of a keyword, or false for an annotation or
+      an unknown keyword, which assert nothing.
+    name: builderFor
+    params: kw string
+    results: builder, bool
+  - doc: validationBuilder returns the builders of the validation vocabulary.
+    name: validationBuilder
+    params: kw string
+    results: builder, bool
+  - doc: validationBuilder2 returns the rest of the validation vocabulary's builders.
+    name: validationBuilder2
+    params: kw string
+    results: builder, bool
+  - doc: |-
+      applicatorBuilder returns the builders of the core and applicator
+      vocabularies.
+    name: applicatorBuilder
+    params: kw string
+    results: builder, bool
+  - doc: applicatorBuilder2 returns the array and object applicators' builders.
+    name: applicatorBuilder2
+    params: kw string
+    results: builder, bool
+  - doc: keywordInvalid refuses a keyword whose value has the wrong shape.
+    name: keywordInvalid
+    params: kw string
+    results: error
+  - doc: typeMatches reports whether v is of the JSON Schema type name.
+    name: typeMatches
+    params: v *value, name string
+    results: bool
+  - doc: "buildType compiles \"type\": a name or an array of names."
+    name: buildType
+    params: k keyword
+    results: check, error
+  - doc: stringList reads a string or an array of strings.
+    name: stringList
+    params: kw *value, name string
+    results: "[]string, error"
+  - doc: buildEnum compiles "enum".
+    name: buildEnum
+    params: k keyword
+    results: check, error
+  - doc: buildConst compiles "const".
+    name: buildConst
+    params: k keyword
+    results: check, error
+  - doc: "buildMultipleOf compiles \"multipleOf\": a number above zero."
+    name: buildMultipleOf
+    params: k keyword
+    results: check, error
+  - doc: buildBound compiles one of the four numeric bounds.
+    name: buildBound
+    params: name string
+    results: builder
+  - doc: |-
+      withinBound reports whether cmp, the instance compared with the bound,
+      satisfies the named bound.
+    name: withinBound
+    params: name string, cmp int
+    results: bool
+  - doc: |-
+      boundMessage words a numeric bound, b being its text; the bound is the
+      schema's, never the instance's.
+    name: boundMessage
+    params: name, b string
+    results: string
+  - doc: |-
+      sizeOf measures v for a size keyword: characters, elements or members;
+      -1 when the keyword does not apply to v's kind.
+    name: sizeOf
+    params: name string, v *value
+    results: int
+  - doc: "nonNegative reads a size keyword: a non-negative integer, 2.0 included."
+    name: nonNegative
+    params: kw *value, name string
+    results: int, error
+  - doc: buildSize compiles one of the six size bounds.
+    name: buildSize
+    params: name string
+    results: builder
+  - doc: |-
+      buildPattern compiles "pattern": an ECMA-262 regular expression, read by
+      Go's regexp — a pattern RE2 does not accept (a lookaround, a
+      backreference) is refused when the schema is compiled.
+    name: buildPattern
+    params: k keyword
+    results: check, error
+  - doc: buildUniqueItems compiles "uniqueItems".
+    name: buildUniqueItems
+    params: k keyword
+    results: check, error
+  - doc: unique reports whether no two elements are equal.
+    name: unique
+    params: arr []*value
+    results: bool
+  - doc: buildRequired compiles "required".
+    name: buildRequired
+    params: k keyword
+    results: check, error
+  - doc: requireMembers fails once per name v lacks, at the member's path.
+    name: requireMembers
+    params: e *eval, v *value, path string, names []string, rule string
+    results: bool
+  - doc: buildDependentRequired compiles "dependentRequired".
+    name: buildDependentRequired
+    params: k keyword
+    results: check, error
+  - doc: |-
+      parse reads exactly one JSON value from data, strictly: jsontext's defaults
+      refuse duplicate names, invalid UTF-8 and malformed input.
+    name: parse
+    params: data []byte
+    results: "*value, error"
+  - doc: parseValue reads the next value of dec.
+    name: parseValue
+    params: dec tokenReader
+    results: "*value, error"
+  - doc: parseScalar reads a string, true, false or null.
+    name: parseScalar
+    params: dec tokenReader
+    results: "*value, error"
+  - doc: parseArray reads an array.
+    name: parseArray
+    params: dec tokenReader
+    results: "*value, error"
+  - doc: parseObject reads an object.
+    name: parseObject
+    params: dec tokenReader
+    results: "*value, error"
+  - doc: |-
+      equal is JSON equality: numbers by value, arrays element by element,
+      objects member by member whatever their order.
+    name: equal
+    params: a, b *value
+    results: bool
+  - doc: equalArrays compares two arrays element by element.
+    name: equalArrays
+    params: a, b []*value
+    results: bool
+  - doc: equalObjects compares two objects member by member.
+    name: equalObjects
+    params: a, b *value
+    results: bool
+  - doc: |-
+      notOneValue is the cause of a document with something after its value:
+      the reader's own error, or io.ErrUnexpectedEOF for a second value.
+    name: notOneValue
+    params: err error
+    results: error
+imports:
+  big: math/big
+  bytes: bytes
+  corejsonschema: github.com/kitsunium/sdk/internal/core/data/codec/jsonschema
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  jsontext: encoding/json/jsontext
+  mail: net/mail
+  math: math
+  regexp: regexp
+  strconv: strconv
+  strictjson: github.com/kitsunium/sdk/internal/service/data/codec/strictjson
+  strings: strings
+  time: time
+  url: net/url
+  utf8: unicode/utf8
+  validation: github.com/kitsunium/sdk/internal/core/app/validation
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/jsonschema
+  name: jsonschema
+  purpose: Package jsonschema validates JSON documents somebody else wrote against a JSON Schema 2020-12 they publish — a webhook's payload, an OpenAPI request body, another program's configuration (#882, ADR 0210) — with the standard library alone.
+types:
+  - doc: patternSchema is one "patternProperties" entry.
+    fields:
+      - doc: re matches the member names the schema applies to.
+        name: re
+        type: "*regexp.Regexp"
+      - doc: s is the schema.
+        name: s
+        type: "*schema"
+    kind: struct
+    name: patternSchema
+  - doc: |-
+      compiler turns schema documents into checks, resolving $ref within them
+      and to the resources Config registers.
+    fields:
+      - doc: |-
+          resources are the documents and embedded resources by absolute URI,
+          fragment dropped.
+        name: resources
+        type: map[string]*value
+      - doc: bases is each schema object's base URI.
+        name: bases
+        type: map[*value]string
+      - doc: anchors are "$anchor" locations, by URI with the anchor as fragment.
+        name: anchors
+        type: map[string]*value
+      - doc: compiled memoizes each schema object, so a reference cycle ends.
+        name: compiled
+        type: map[*value]*schema
+      - doc: external are Config's resources not parsed yet, by URI.
+        name: external
+        type: map[string][]byte
+      - doc: formats are the formats asserted.
+        name: formats
+        type: map[string]bool
+    kind: struct
+    methods:
+      - doc: |-
+          index records the base URI of every schema object under v, the resources
+          an "$id" opens and the "$anchor" locations, walking only schema keywords.
+        name: index
+        params: v *value, base string
+        recv: c *compiler
+        results: error
+      - doc: |-
+          indexChildren indexes the schemas held by v's schema keywords: one each,
+          arrays of them, objects of them.
+        name: indexChildren
+        params: v *value, base string
+        recv: c *compiler
+        results: error
+      - doc: |-
+          addDocument parses and indexes a schema document whose retrieval URI is
+          uri, and returns its root.
+        name: addDocument
+        params: uri string, doc []byte
+        recv: c *compiler
+        results: "*value, error"
+      - doc: |-
+          resource returns the document or embedded resource at uri: indexed
+          already, or one of Config's, parsed now. Anything else is unresolved —
+          a remote reference is never fetched.
+        name: resource
+        params: uri string
+        recv: c *compiler
+        results: "*value, error"
+      - doc: |-
+          resolveRef returns the schema value a "$ref" in the schema at base names:
+          the resource it names, then the location its fragment names in it — a JSON
+          Pointer, or an "$anchor".
+        name: resolveRef
+        params: base, ref string
+        recv: c *compiler
+        results: "*value, string, error"
+      - doc: |-
+          compile returns the schema for v, whose base is the one index recorded —
+          or fallback for a location index did not walk. A schema object is compiled
+          once: a reference back to one being compiled gets the same schema, filled
+          in when its compilation ends.
+        name: compile
+        params: v *value, fallback string
+        recv: c *compiler
+        results: "*schema, error"
+      - doc: compileKeywords turns each keyword of the schema object v into a check.
+        name: compileKeywords
+        params: s *schema, v *value, base string
+        recv: c *compiler
+        results: error
+    name: compiler
+  - doc: |-
+      check is one compiled keyword: it reports whether v satisfies it at path,
+      recording the violations when the evaluation collects them.
+    kind: named
+    name: check
+    underlying: func(e *eval, v *value, path string) bool
+  - doc: "schema is a compiled schema: a boolean one, or the checks of its keywords."
+    fields:
+      - doc: always is a boolean schema's verdict; nil for an object schema.
+        name: always
+        type: "*bool"
+      - doc: checks are the keywords that assert, in document order.
+        name: checks
+        type: "[]check"
+    kind: struct
+    methods:
+      - doc: |-
+          validate evaluates v at path against s: every check runs when collecting,
+          so the report is complete; a quiet evaluation stops at the first failure.
+        name: validate
+        params: e *eval, v *value, path string
+        recv: s *schema
+        results: bool
+    name: schema
+  - doc: |-
+      eval is one evaluation: the violations it collects — none when it only
+      answers yes or no, as inside anyOf, oneOf, not and if — and how deep it is.
+    fields:
+      - doc: report holds the violations collected.
+        name: report
+        type: validation.ReportValue
+      - doc: collect is whether violations are recorded.
+        name: collect
+        type: bool
+      - doc: depth is how many schemas are being evaluated at once.
+        name: depth
+        type: int
+      - doc: looped is set when depth passed maxEvalDepth.
+        name: looped
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          quiet returns an evaluation of the same depth that collects nothing: a
+          combinator asks it yes or no and reports once itself.
+        name: quiet
+        recv: e *eval
+        results: "*eval"
+      - doc: absorb carries a quiet evaluation's loop detection back.
+        name: absorb
+        params: q *eval
+        recv: e *eval
+      - doc: fail records a violation when collecting, and reports false.
+        name: fail
+        params: path, rule, message string, code errs.Code
+        recv: e *eval
+        results: bool
+    name: eval
+  - fields:
+      - doc: |-
+          Resources are schema documents a "$ref" may name, by URI: each is a
+          resource at that URI, and at its "$id" when it has one. A reference to
+          any other URI is refused; nothing is fetched.
+        name: Resources
+        type: map[string][]byte
+      - doc: |-
+          AssertFormats are the formats asserted rather than annotated:
+          "date-time" (RFC 3339), "uuid" and "email" (an addr-spec). Naming
+          another is refused.
+        name: AssertFormats
+        type: "[]string"
+    kind: struct
+    name: Config
+  - fields:
+      - doc: root is the compiled root schema.
+        name: root
+        type: "*schema"
+    kind: struct
+    methods:
+      - name: Validate
+        params: doc []byte, maxBytes int64
+        recv: v *Validator
+        results: validation.ReportValue, error
+    name: Validator
+  - doc: |-
+      keyword is one keyword being compiled: the compiler, the schema object
+      that holds it, its value, and the base URI of that schema object.
+    fields:
+      - doc: c is the compiler, for the schemas the keyword holds.
+        name: c
+        type: "*compiler"
+      - doc: parent is the schema object, for the keyword's siblings.
+        name: parent
+        type: "*value"
+      - doc: kw is the keyword's value.
+        name: kw
+        type: "*value"
+      - doc: base is the parent's base URI.
+        name: base
+        type: string
+    kind: struct
+    name: keyword
+  - doc: |-
+      builder compiles one keyword into a check — or nil for a keyword that
+      asserts nothing on its own.
+    kind: named
+    name: builder
+    underlying: func(k keyword) (check, error)
+  - doc: kind is a JSON value's kind.
+    kind: named
+    name: kind
+    underlying: uint8
+  - doc: |-
+      value is a JSON value read exactly: numbers as rationals, so 1 and 1.0 are
+      one number and multipleOf 0.01 is exact, objects with their member order.
+    fields:
+      - doc: kind is which of the fields below holds the value.
+        name: kind
+        type: kind
+      - doc: b is a boolean's value.
+        name: b
+        type: bool
+      - doc: n is a number's value.
+        name: "n"
+        type: "*big.Rat"
+      - doc: s is a string's value.
+        name: s
+        type: string
+      - doc: arr is an array's elements.
+        name: arr
+        type: "[]*value"
+      - doc: keys are an object's member names, in document order.
+        name: keys
+        type: "[]string"
+      - doc: obj is an object's members by name.
+        name: obj
+        type: map[string]*value
+    kind: struct
+    methods:
+      - doc: "isInteger reports whether v is a number with no fractional part: 1.0 is."
+        name: isInteger
+        recv: v *value
+        results: bool
+    name: value
+  - doc: tokenReader is the part of jsontext.Decoder parseValue reads with.
+    kind: named
+    name: tokenReader
+    underlying: |-
+      interface {
+      	// PeekKind is the kind of the next token, without reading it.
+      	PeekKind() jsontext.Kind
+      	// ReadToken reads the next token.
+      	ReadToken() (jsontext.Token, error)
+      	// ReadValue reads the next value whole.
+      	ReadValue() (jsontext.Value, error)
+      }
+vars:
+  - doc: |-
+      The keywords that hold schemas, by how they hold them: one, an array of
+      them, an object of them. index walks only these, so an "$id" inside an
+      "enum" or a "const" is data, as the specification says.
+    grouped: true
+    items:
+      - doc: schemaKeywords hold one schema.
+        name: schemaKeywords
+        value: "[]string{\"items\", \"contains\", \"additionalProperties\", \"propertyNames\", \"not\", \"if\", \"then\", \"else\"}"
+      - doc: arrayKeywords hold an array of schemas.
+        name: arrayKeywords
+        value: "[]string{\"allOf\", \"anyOf\", \"oneOf\", \"prefixItems\"}"
+      - doc: mapKeywords hold an object of schemas.
+        name: mapKeywords
+        value: "[]string{\"$defs\", \"properties\", \"patternProperties\", \"dependentSchemas\"}"
+      - doc: |-
+          refusedKeywords are refused by name: the dynamic scope, the vocabulary
+          mechanism, the unevaluated and content vocabularies (out of scope, #882).
+        name: refusedKeywords
+        value: |-
+          map[string]bool{
+          		"$dynamicRef": true, "$dynamicAnchor": true, "$recursiveRef": true, "$recursiveAnchor": true,
+          		"$vocabulary": true, "unevaluatedItems": true, "unevaluatedProperties": true,
+          		"contentEncoding": true, "contentMediaType": true, "contentSchema": true,
+          	}
+    name: schemaKeywords

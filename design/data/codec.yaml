@@ -11,21 +11,25 @@ packages:
             value: "0x00_02_02_01"
         type: errs.Code
       - const:
-          - doc: CodeEmptyInput identifies Unmarshal being called with a zero-byte slice.
+          - doc: |-
+              CodeEmptyInput identifies Unmarshal being called with a zero-byte slice for
+              a format that has no empty document: json, xml, bson, cbor, msgpack, tlv.
             name: CodeEmptyInput
             value: "0x00_02_02_02"
         type: errs.Code
       - const:
           - doc: |-
-              CodeTargetInvalid identifies Unmarshal being called with a target that is
-              not a non-nil pointer to a storable value.
+              CodeTargetInvalid identifies Unmarshal or Decode being called with a target
+              that is not a non-nil pointer to a storable value — a programmer's error
+              every codec reports before reading a byte (#1101).
             name: CodeTargetInvalid
             value: "0x00_02_02_03"
         type: errs.Code
       - const:
           - doc: |-
-              CodeValueInvalid identifies Marshal being called on a value the codec
-              cannot serialise (channel, function, unsupported map key).
+              CodeValueInvalid identifies Marshal being called on a value no codec can
+              serialise — a channel, a function, an unsafe pointer —, refused before
+              encoding (#1101).
             name: CodeValueInvalid
             value: "0x00_02_02_04"
         type: errs.Code
@@ -48,6 +52,38 @@ packages:
             name: CodeKeyEmpty
             value: "0x00_02_02_06"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeBoundInvalid identifies a byte ceiling of zero or below passed to
+              BoundedStreamingCodec.NewBoundedDecoder: a bound is positive, there is no
+              value meaning unlimited (ADR 0031, #891).
+            name: CodeBoundInvalid
+            value: "0x00_02_02_07"
+        type: errs.Code
+    constants:
+      - blockDoc: |-
+          The keys a decode refusal carries its position under (#1125): every codec
+          writes them through PositionFields or by these names, so PositionOf reads
+          any codec's position back.
+        doc: FieldOffset is the key of a refusal's 0-based byte offset.
+        name: FieldOffset
+        value: "\"offset\""
+      - blockDoc: |-
+          The keys a decode refusal carries its position under (#1125): every codec
+          writes them through PositionFields or by these names, so PositionOf reads
+          any codec's position back.
+        doc: FieldLine is the key of a refusal's 1-based line.
+        name: FieldLine
+        value: "\"line\""
+      - blockDoc: |-
+          The keys a decode refusal carries its position under (#1125): every codec
+          writes them through PositionFields or by these names, so PositionOf reads
+          any codec's position back.
+        doc: |-
+          FieldColumn is the key of a refusal's 1-based column, counted as the format
+          counts it: characters for yaml and toml, bytes for csv.
+        name: FieldColumn
+        value: "\"column\""
     doc: |-
       Package codec — declares the optional Appender extension that
       hot-path encoders (NDJSON, JSON, text) implement so callers can write into
@@ -67,8 +103,9 @@ packages:
 
       Package codec — range 0.2.2.* (ADR 0005 core/data/codec block).
 
-      Package codec — declares the registry's boot-time sentinel. Its var name
-      equals its errs.Define Reason in SCREAMING_SNAKE form.
+      Package codec — declares the registry's boot-time sentinel and the family's
+      three misuse refusals, EmptyInput, TargetInvalid and ValueInvalid (#1101).
+      Each var name equals its Reason in SCREAMING_SNAKE form.
 
       Package codec — declares the typed Format string and its helpers.
       The zero Format ("") is invalid — consumers obtain a Format via the
@@ -159,6 +196,108 @@ packages:
         name: Available
         out:
           - type: "[]Format"
+      - doc: |-
+          IsTooLarge reports whether err, or an error it wraps, is a codec's refusal
+          of input past a size bound — the family's SIZE_EXCEEDED reason, which every
+          bounded codec gives its byte, node, pair and entry bounds (#894), or the two
+          older spellings kept as they were: multipart's LIMIT_EXCEEDED and
+          strictjson's DOCUMENT_TOO_LARGE. An HTTP server answers it with 413.
+        in:
+          - name: err
+            type: error
+        name: IsTooLarge
+        out:
+          - type: bool
+      - doc: |-
+          IsTooDeep reports whether err, or an error it wraps, is a codec's refusal of
+          input nested past a depth bound: the family's DEPTH_EXCEEDED reason (#894).
+        in:
+          - name: err
+            type: error
+        name: IsTooDeep
+        out:
+          - type: bool
+      - doc: |-
+          Detect returns the Format whose registered codec recognises prefix — the
+          first bytes of an input, of which it reads at most 512 as
+          http.DetectContentType does — through its Sniffer (#909). It asks every
+          codec implementing Sniffer, in registration order, and answers only when
+          exactly one claims the bytes: none, or two, is (Format(""), false). It
+          allocates nothing.
+        in:
+          - name: prefix
+            type: "[]byte"
+        name: Detect
+        out:
+          - name: f
+            type: Format
+          - name: ok
+            type: bool
+      - doc: |-
+          PositionFields returns the fields a decode refusal carries p under, for
+          errs.Wrap: FieldOffset, FieldLine and FieldColumn, each only when p knows
+          it — Line and Column when not zero, Offset when not zero or when p has no
+          line (see PositionValue). Every codec places a refusal through it or
+          through those three keys, so PositionOf reads any codec's position back
+          (#1125).
+        in:
+          - name: p
+            type: PositionValue
+        name: PositionFields
+        out:
+          - type: "[]errs.FieldValue"
+      - doc: |-
+          PositionOf reads back the position a codec's refusal carries, in err or an
+          error it wraps: ok is false when it carries none. A key set twice along the
+          chain keeps its first value — the origin's, as errs.Wrap keeps the origin.
+          A key whose value is not an integer is not a position.
+        in:
+          - name: err
+            type: error
+        name: PositionOf
+        out:
+          - name: p
+            type: PositionValue
+          - name: ok
+            type: bool
+      - doc: |-
+          CheckTarget refuses v as the target of an Unmarshal or a Decode unless it
+          is a non-nil pointer: TargetInvalid, its "target" field naming v's type,
+          "nil" for an untyped nil. Every codec calls it before reading a byte
+          (#1101) — bson also takes a non-nil map, flatbuffers a BytesAcceptor that
+          is not a pointer —, so a programmer's error is never reported as corrupt
+          input. It allocates only when it refuses.
+        in:
+          - name: v
+            type: any
+        name: CheckTarget
+        out:
+          - type: error
+      - doc: |-
+          CheckValue refuses v as the value of a Marshal when its kind is one no
+          codec encodes — a channel, a function, an unsafe pointer —: ValueInvalid,
+          its "type" field naming v's type. The Marshal of the codecs that encode any
+          Go value (json, xml, yaml, toml, cbor, msgpack, bson) calls it first
+          (#1101); Append, the hot path, leaves the refusal to the encoder. It
+          allocates only when it refuses.
+        in:
+          - name: v
+            type: any
+        name: CheckValue
+        out:
+          - type: error
+      - doc: |-
+          IsMisuse reports whether err, or an error it wraps, is a codec refusing how
+          it was called rather than a byte it read: EMPTY_INPUT, TARGET_INVALID or
+          VALUE_INVALID, the family's codes 0.2.2.2 to 0.2.2.4 (#1101). A
+          TARGET_INVALID or a VALUE_INVALID is the program's own bug, an HTTP server
+          answers it with 500; an EMPTY_INPUT is a body that never came, 400.
+        in:
+          - name: err
+            type: error
+        name: IsMisuse
+        out:
+          - type: bool
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/codec
@@ -249,6 +388,52 @@ packages:
             out:
               - type: Decoder
         name: StreamingCodec
+      - doc: |-
+          BoundedStreamingCodec is the optional extension of a streaming codec whose
+          Decoder holds a byte ceiling the caller chooses (#891) — a sibling of
+          StreamingCodec, never a wider Decoder (ADR 0039).
+
+          NewBoundedDecoder returns a Decoder that refuses a value longer than
+          maxBytes — counted from the end of the previous value to the end of this
+          one, so a long stream of small values is never refused — with the codec's
+          SIZE_EXCEEDED, which IsTooLarge reads, after reading at most maxBytes+1
+          bytes of it: a hostile stream grows the process by the ceiling, not by the
+          size of its value. A ceiling of zero or below is refused with BoundInvalid:
+          a bound has no value meaning unlimited (ADR 0031).
+        embeds:
+          - StreamingCodec
+        methods:
+          - in:
+              - name: r
+                type: io.Reader
+              - name: maxBytes
+                type: int64
+            name: NewBoundedDecoder
+            out:
+              - name: dec
+                type: Decoder
+              - name: err
+                type: error
+        name: BoundedStreamingCodec
+      - doc: |-
+          Sniffer is the optional extension of a codec whose encoding opens with a
+          recognisable head (#909). Sniff reports whether prefix — the first bytes
+          of an input, at most 512 of them, possibly cut inside a value — is
+          confidently this codec's: a head no other format's output starts with,
+          not merely bytes the codec could parse. It reads nothing past prefix,
+          keeps nothing and allocates nothing. Detect asks every Sniffer and
+          answers only when exactly one claims the bytes.
+        embeds:
+          - Codec
+        methods:
+          - in:
+              - name: prefix
+                type: "[]byte"
+            name: Sniff
+            out:
+              - name: confident
+                type: bool
+        name: Sniffer
       - doc: Encoder writes one or more values to the wrapped writer.
         methods:
           - in:
@@ -289,6 +474,44 @@ packages:
             private: "core/data/codec.Register: a distinct codec already holds this Format name, MIME type or extension"
             public: A codec is already registered under that name, MIME type or extension
             reason: DUPLICATE_REGISTRATION
+          - code: CodeEmptyInput
+            doc: |-
+              EmptyInput is what Unmarshal returns for zero bytes in a format that has
+              no empty document — json, xml, bson, cbor, msgpack, tlv —, before any
+              parsing (#1101). yaml and toml read an empty document and leave the
+              target unchanged.
+            http: 400
+            name: EmptyInput
+            private: "core/data/codec: Unmarshal called with no bytes for a format that has no empty document"
+            public: codec input is empty
+            reason: EMPTY_INPUT
+          - code: CodeTargetInvalid
+            doc: |-
+              TargetInvalid is what CheckTarget returns, and so every codec's Unmarshal
+              and Decode, for a target that is nil or not a pointer (#1101). Its "target"
+              field names the type.
+            name: TargetInvalid
+            private: "core/data/codec: Unmarshal or Decode called with a nil or non-pointer target; the target field names its type"
+            public: codec target must be a non-nil pointer
+            reason: TARGET_INVALID
+          - code: CodeValueInvalid
+            doc: |-
+              ValueInvalid is what CheckValue returns for a value no codec encodes — a
+              channel, a function, an unsafe pointer (#1101). Its "type" field names the
+              type.
+            name: ValueInvalid
+            private: "core/data/codec: Marshal called with a value no codec encodes; the type field names it"
+            public: codec value cannot be encoded
+            reason: VALUE_INVALID
+      - var:
+          - code: CodeBoundInvalid
+            doc: |-
+              BoundInvalid is the refusal of a byte ceiling of zero or below by
+              BoundedStreamingCodec.NewBoundedDecoder (ADR 0031, #891).
+            name: BoundInvalid
+            private: "core/data/codec: NewBoundedDecoder was given a byte ceiling of zero or below"
+            public: A byte ceiling must be positive
+            reason: BOUND_INVALID
     types:
       - doc: Format is the typed string identifier of a codec.
         methods:
@@ -304,6 +527,26 @@ packages:
             recv: value
         name: Format
         underlying: string
+      - doc: |-
+          PositionValue places a decode refusal in its input (#1125). Offset is the
+          0-based byte, Line and Column are 1-based, a zero Line or Column is unknown.
+          A text format places by line and column — characters for yaml and toml,
+          bytes for csv — and adds the offset when it knows a non-zero one; a binary
+          format places by offset alone, so with no Line the Offset is meant even
+          when zero: the input's first byte. json carries the offset and xml the line
+          their standard library's errors give.
+        name: PositionValue
+        struct:
+          fields:
+            - doc: Offset is the 0-based byte offset of the problem in the input.
+              name: Offset
+              type: int
+            - doc: Line is the 1-based line of the problem, zero when unknown.
+              name: Line
+              type: int
+            - doc: Column is the 1-based column of the problem, zero when unknown.
+              name: Column
+              type: int
   - constants:
       - doc: |-
           Any is a value whose kind the type does not decide: an interface, a
@@ -407,6 +650,31 @@ packages:
           - type: "*ShapeValue"
       - doc: "For describes the values of T on the wire: Of(reflect.TypeFor[T]())."
         name: For
+        out:
+          - type: "*ShapeValue"
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          OfV2 describes the values of t on the wire under encoding/json/v2's own
+          default options — what jsonv2.Marshal writes without the v1 options: a
+          nil slice or map written [] or {} and so not Nullable, a byte array as
+          base64, a time.Duration refused (Unsupported) for want of a format,
+          omitempty leaving out a member whose value encodes as null, "", {} or []
+          — never a number or a boolean —, the string option on numbers only (a
+          member carrying it on anything else is Unsupported), and a pointer
+          method called on every value. The members and their names are Of's. Of
+          is unchanged.
+        in:
+          - name: t
+            type: reflect.Type
+        name: OfV2
+        out:
+          - type: "*ShapeValue"
+      - doc: |-
+          ForV2 describes the values of T under encoding/json/v2's own default
+          options: OfV2(reflect.TypeFor[T]()).
+        name: ForV2
         out:
           - type: "*ShapeValue"
         typeParams:
@@ -549,7 +817,8 @@ packages:
       - const:
           - doc: |-
               CodeStreamingUnsupported fires when NewEncoder / NewDecoder is called on
-              a codec that does not implement StreamingCodec.
+              a codec that does not implement StreamingCodec, or NewBoundedDecoder on
+              one that does not implement BoundedStreamingCodec.
             name: CodeStreamingUnsupported
             value: "0x01_02_00_03"
         type: v1errs.Code
@@ -882,12 +1151,12 @@ packages:
       	| Format       | Go constant       | MIME                       | Extension           | Streaming | Best for |
       	|--------------|-------------------|----------------------------|---------------------|:---------:|----------|
       	| json         | codec.JSON        | application/json           | .json               | yes       | API responses, public configs |
-      	| ndjson       | codec.NDJSON      | application/x-ndjson       | .ndjson / .jsonl    | —         | streaming logs, line-oriented batches |
+      	| ndjson       | codec.NDJSON      | application/x-ndjson       | .ndjson / .jsonl    | yes       | streaming logs, line-oriented batches |
       	| xml          | codec.XML         | application/xml            | .xml                | yes       | legacy integrations |
-      	| csv          | codec.CSV         | text/csv                   | .csv                | —         | tabular exports |
+      	| csv          | codec.CSV         | text/csv                   | .csv                | yes       | tabular exports |
       	| form         | codec.Form        | application/x-www-form-urlencoded | .form / .urlencoded | —  | HTML form bodies, query strings |
       	| asn1-der     | codec.ASN1DER     | application/pkix-cert      | .der / .cer         | —         | crypto / X.509 artefacts |
-      	| pem          | codec.PEM         | application/x-pem-file     | .pem / .crt / .key  | —         | block-wrapped DER (certs, keys) |
+      	| pem          | codec.PEM         | application/x-pem-file     | .pem / .crt / .key  | yes       | block-wrapped DER (certs, keys) |
       	| yaml         | codec.YAML        | application/yaml           | .yaml / .yml        | yes       | human-edited configs |
       	| toml         | codec.TOML        | application/toml           | .toml               | yes       | app configs (strict typing) |
       	| cbor         | codec.CBOR        | application/cbor           | .cbor               | yes       | IoT / mobile (RFC 8949) |
@@ -968,8 +1237,33 @@ packages:
       	    NewDecoder(r io.Reader) Decoder
       	}
 
+      	// Bounded streaming — a Decoder refusing any value past maxBytes
+      	// (JSON, XML, CBOR; reached through NewBoundedDecoder).
+      	type BoundedStreamingCodec interface {
+      	    StreamingCodec
+      	    NewBoundedDecoder(r io.Reader, maxBytes int64) (Decoder, error)
+      	}
+
+      	// Sniffing — a confident claim on an input's first bytes, which
+      	// Detect asks of every codec (JSON, NDJSON, XML, PEM, BSON).
+      	type Sniffer interface {
+      	    Sniff(prefix []byte) (confident bool)
+      	}
+
       [StreamingUnsupported] is returned from [NewEncoder] / [NewDecoder]
-      when the resolved codec does not satisfy StreamingCodec.
+      when the resolved codec does not satisfy StreamingCodec, and from
+      [NewBoundedDecoder] when it does not satisfy BoundedStreamingCodec.
+
+      # Durations
+
+      A time.Duration follows one rule per kind of format (#1126). The formats
+      people edit by hand — YAML and TOML — write its String(), "1h30m0s", and
+      read it with time.ParseDuration, refusing a string without its unit. The
+      binary formats — CBOR, MessagePack, BSON — write an integer of int64
+      nanoseconds, no standard tag carrying a duration. JSON keeps the integer
+      encoding/json writes, the standard library's output being its contract,
+      and every format promoted through JSON inherits it. A configuration
+      converted between YAML and TOML keeps "30m" meaning thirty minutes.
 
       # Errors
 
@@ -1010,8 +1304,9 @@ packages:
       Package codec — JSON-bridge promotion path for codecs whose runtime
       preconditions reject the public Marshal(F, any) / Unmarshal(F, *,
       any) contract. Six of the twenty-four registered codecs constrain
-      their input shape: csv expects [][]string, ndjson expects []T, pem
-      expects *pem.Block, flatbuffers expects []byte or BytesProvider,
+      their input shape: csv expects [][]string or a slice of flat structs,
+      ndjson expects []T, pem expects *pem.Block, flatbuffers expects []byte
+      or BytesProvider,
       form expects url.Values, tlv's decoder cannot project composites
       into typed targets. Without promotion the facade's "format-swap is
       a single string change" promise is a lie for 6/24. Promotion
@@ -1044,6 +1339,66 @@ packages:
           name: Available
           out:
             - type: "[]Format"
+      - func:
+          doc: |-
+            IsTooLarge reports whether err is a codec's refusal of input past a size
+            bound — SIZE_EXCEEDED in every bounded format, multipart's
+            LIMIT_EXCEEDED, strictjson's DOCUMENT_TOO_LARGE: answer it with 413.
+          forward: corecodec.IsTooLarge
+          in:
+            - name: err
+              type: error
+          name: IsTooLarge
+          out:
+            - type: bool
+      - func:
+          doc: IsTooDeep reports whether err is a codec's refusal of input nested past a depth bound.
+          forward: corecodec.IsTooDeep
+          in:
+            - name: err
+              type: error
+          name: IsTooDeep
+          out:
+            - type: bool
+      - func:
+          doc: |-
+            IsMisuse reports whether err is a codec refusing how it was called rather
+            than a byte it read: EMPTY_INPUT (no bytes for a format with no empty
+            document), TARGET_INVALID (a nil or non-pointer Unmarshal or Decode
+            target), VALUE_INVALID (a channel, a function, an unsafe pointer to
+            Marshal). The last two are the program's bug: answer them with 500.
+          forward: corecodec.IsMisuse
+          in:
+            - name: err
+              type: error
+          name: IsMisuse
+          out:
+            - type: bool
+      - alias:
+          - doc: |-
+              Position places a decode refusal in its input: Offset the 0-based byte,
+              Line and Column 1-based, a zero Line or Column unknown. yaml, toml and
+              csv place by line and column, json by offset, xml by line, and the
+              binary formats — cbor, msgpack, bson, tlv, flatbuffers — by offset
+              alone, where an Offset of zero is the first byte. Read it with
+              PositionOf.
+            name: Position
+            target: corecodec.PositionValue
+      - func:
+          doc: |-
+            PositionOf returns where in its input a codec refused to decode — the
+            line and column, or the byte offset, the format knows —, whatever the
+            format: ok is false when the refusal carries no position.
+          forward: corecodec.PositionOf
+          in:
+            - name: err
+              type: error
+          name: PositionOf
+          out:
+            - name: p
+              type: Position
+            - name: ok
+              type: bool
       - alias:
           - doc: |-
               CompressAlgorithm is the transform package's Algorithm, so consumers name a
@@ -1110,11 +1465,14 @@ packages:
       - doc: |-
           Marshal serialises v using the codec registered under f. The codec's
           native input shape is tried first (fast path, zero overhead); if the
-          codec rejects v as the wrong shape (csv requires [][]string, pem
+          codec rejects v as the wrong shape (csv requires [][]string or a slice
+          of flat structs, pem
           requires *pem.Block, etc.) the facade promotes v via json-encode +
           codec-specific wrap so every Format accepts any Go value — see
           promote.go for the per-format strategies and the uniform-contract
-          rationale.
+          rationale. A value whose type alone rules it out — a struct given to
+          Form, CSV, NDJSON or PEM — is promoted at once, without the codec
+          building a refusal first; the bytes are the same.
         in:
           - name: f
             type: Format
@@ -1198,6 +1556,64 @@ packages:
             type: Decoder
           - name: err
             type: error
+      - doc: |-
+          NewBoundedDecoder returns a streaming decoder for the codec registered under
+          f that refuses a value longer than maxBytes after reading at most
+          maxBytes+1 bytes of it (#891): the decoder to put in front of a socket.
+          The refusal is the codec's SIZE_EXCEEDED, which [IsTooLarge] reads; a
+          maxBytes of zero or below is refused by the codec with BOUND_INVALID.
+          JSON, XML and CBOR implement it; a Format whose codec does not returns
+          [StreamingUnsupported] — TOML, MessagePack and YAML bound their
+          [NewDecoder] with fixed ceilings of their own.
+        in:
+          - name: f
+            type: Format
+          - name: r
+            type: io.Reader
+          - name: maxBytes
+            type: int64
+        name: NewBoundedDecoder
+        out:
+          - name: dec
+            type: Decoder
+          - name: err
+            type: error
+      - doc: |-
+          Detect returns the Format the first bytes of an input are written in,
+          without a MIME type or a file extension (#909): JSON, NDJSON (two records
+          or more), XML, PEM or BSON, recognised by their head. It reads at most 512
+          bytes of prefix, as http.DetectContentType does, answers (Format(""),
+          false) when no format — or more than one — claims them, and allocates
+          nothing. A frame MarshalCompressed wrote is no Format — UnmarshalCompressed
+          reads it — so Detect never claims one; compressed bytes are
+          DetectCompression's.
+        in:
+          - name: prefix
+            type: "[]byte"
+        name: Detect
+        out:
+          - name: f
+            type: Format
+          - name: ok
+            type: bool
+      - doc: |-
+          DetectCompression returns the compression the first bytes of an input open
+          with, by its magic number (#909): "gzip" (1f 8b 08), "zlib" (an RFC 1950
+          header whose check bits hold), "zstd" (28 b5 2f fd) or "s2" (the framed
+          stream identifier of S2 or Snappy). It answers ("", false) for anything
+          else — raw DEFLATE ("flate") and S2's block form have no magic, and a
+          frame MarshalCompressed wrote is UnmarshalCompressed's — and allocates
+          nothing. zstd and s2 are named, not decompressed, here: they live in
+          third-party/transform (ADR 0066). Decompress, then Detect what is inside.
+        in:
+          - name: prefix
+            type: "[]byte"
+        name: DetectCompression
+        out:
+          - name: algo
+            type: CompressAlgorithm
+          - name: ok
+            type: bool
       - doc: FromMIME resolves a MIME string to its registered Format.
         in:
           - name: mime
@@ -1469,6 +1885,28 @@ packages:
           doc: "For describes the values of T on the wire: Of(reflect.TypeFor[T]())."
           forward: svcjsonshape.For[T]
           name: For
+          out:
+            - type: "*Shape"
+          typeParams:
+            - constraint: any
+              name: T
+      - func:
+          doc: |-
+            OfV2 describes the values of t on the wire under encoding/json/v2's own
+            default options: nil collections not Nullable, byte arrays as base64,
+            time.Duration Unsupported, omitempty as json/v2 defines empty, the string
+            option on numbers only. Of is unchanged.
+          forward: svcjsonshape.OfV2
+          in:
+            - name: t
+              type: reflect.Type
+          name: OfV2
+          out:
+            - type: "*Shape"
+      - func:
+          doc: "ForV2 describes the values of T under json/v2's own options: OfV2(reflect.TypeFor[T]())."
+          forward: svcjsonshape.ForV2[T]
+          name: ForV2
           out:
             - type: "*Shape"
           typeParams:

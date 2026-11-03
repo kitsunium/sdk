@@ -1,6 +1,8 @@
 // Package transform — shared decompression bound for the stdlib gzip, flate and
-// zlib schemes. Each Decompress reads through an io.LimitReader so a malformed or
-// hostile stream cannot drive an unbounded allocation at this layer. The full
+// zlib schemes. Each Decompress counts what it reads and stops one byte past
+// the ceiling, so a malformed or hostile stream cannot drive an unbounded
+// allocation at this layer. The plaintext lands in dst's spare capacity first
+// and in pooled chunks after it, so dst grows once, to its final length. The full
 // self-describing decompression-bomb guard (max output size + max expansion
 // ratio keyed to the frame header) lives in the pkg/v1/data/codec frame layer (a
 // later commit, CodeCompressedFrameInvalid); this is the conservative

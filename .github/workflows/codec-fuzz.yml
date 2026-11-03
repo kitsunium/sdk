@@ -1,0 +1,66 @@
+name: Codec fuzz
+# The fuzz lane of the codec and transform families (#897): every fuzz target
+# of the format codecs, the facade's compressed frame, the transform engines
+# and the vendor parsers, a bounded time each, nightly and on demand. The seed corpus runs
+# on every push already, as plain tests inside the `bazel` job; this is the
+# exploration that is too long for a pull request.
+#
+# An alarm, not a gate: it blocks nothing by itself. A crasher is uploaded
+# as an artefact, and the fix commits it under testdata/fuzz as a
+# regression case.
+
+on:
+  schedule:
+    # 04:53 UTC — off the hour, and clear of the 03:41 fuzz lane.
+    - cron: "53 4 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "time per target (go test -fuzztime)"
+        required: false
+        default: "1m"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: codec fuzz targets
+    if: github.repository == 'kitsunium/sdk'
+    runs-on: ubuntu-latest
+    # Thirty-seven targets at a minute each, plus a build per package.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: fuzz every codec and transform target
+        env:
+          FUZZ_TIME: ${{ github.event.inputs.fuzztime || '1m' }}
+        run: bash scripts/ci/codec-fuzz.sh
+
+      - name: collect crashers
+        if: failure()
+        run: |
+          mkdir -p fuzz-crashers
+          git ls-files --others --exclude-standard -- '*/testdata/fuzz/*' | while IFS= read -r f; do
+            mkdir -p "fuzz-crashers/$(dirname "$f")"
+            cp "$f" "fuzz-crashers/$f"
+          done
+
+      - name: upload crashers
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: codec-fuzz-crashers-${{ github.run_number }}
+          path: fuzz-crashers
+          if-no-files-found: warn

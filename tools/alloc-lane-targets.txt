@@ -42,6 +42,7 @@
 # Labelled-series lookup allocation gate — the claim that resolving an existing
 # series (including one already folded into overflow) costs zero allocations.
 //internal/service/observe/metrics:metrics_test
+//internal/service/observe/metrics/statsbridge:statsbridge_test
 # An unexercised failover branch must cost nothing: the healthy write returns
 # on the first sink and its error slate stays empty, so chain DEPTH must not
 # appear in the allocation profile.
@@ -171,6 +172,18 @@
 # Send, which the test caught before the fix.
 //internal/service/net/server:server_test
 
+# internal/service/data/transform — the decompression tail (kitsunium/sdk#1102,
+# decompress_alloc_test.go, //go:build !race): a dst whose spare capacity holds
+# the plaintext is decoded into in place, zero allocations for gzip and flate
+# and zlib's one Adler-32 digest; a nil dst gets one allocation of the payload.
+//internal/service/data/transform:transform_test
+
+# third-party/transform — the zstd and s2 tail decode (kitsunium/sdk#1163,
+# decompress_alloc_test.go, //go:build !race): a non-empty dst whose spare
+# capacity holds the payload is decoded into in place, zero allocations at
+# 4 KiB and 4 MiB.
+//third-party/transform:transform_test
+
 # BEGIN kit gen from design/sdk.yaml: the packages whose budgets name a fixture,
 # whose gen_perf_test.go runs race off here alone. DO NOT EDIT to the line
 # below: kit gen writes it from the design.
@@ -187,5 +200,6 @@
 //internal/kernel/swar:swar_test
 //internal/service/data/queue:queue_test
 //internal/service/net/http1:http1_test
+//internal/service/observe/logger/middleware/sample:sample_test
 //pkg/v1/observe/logger:logger_test
 # END kit gen

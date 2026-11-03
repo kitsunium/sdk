@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/cbor"
 )
@@ -291,9 +292,10 @@ func TestMarshal_refusals(t *testing.T) {
 		in     any
 		detail string
 	}
+	// A channel or a func at the top is refused before encoding with the
+	// family's VALUE_INVALID (#1101, TestMarshal_topLevelValueInvalid); one
+	// inside a value is the encoder's own refusal.
 	tests := []tc{
-		{"channel", make(chan int), "cannot carry: chan int"},
-		{"func", func() {}, "cannot carry"},
 		{"complex", complex(1, 2), "cannot carry"},
 		{"uintptr", uintptr(1), "cannot carry"},
 		{"map of channels", map[string]chan int{"a": nil}, "cannot carry"},
@@ -329,6 +331,17 @@ func TestMarshal_refusals(t *testing.T) {
 			t.Parallel()
 			runCase(t, tc)
 		})
+	}
+}
+
+// TestMarshal_topLevelValueInvalid: a channel or a func given to Marshal is
+// refused before encoding with the family's VALUE_INVALID (#1101).
+func TestMarshal_topLevelValueInvalid(t *testing.T) {
+	t.Parallel()
+	for name, v := range map[string]any{"channel": make(chan int), "func": func() {}} {
+		if _, err := cbor.New().Marshal(v); !errs.HasCode(err, codec.CodeValueInvalid) {
+			t.Errorf("%s: err = %v, want VALUE_INVALID", name, err)
+		}
 	}
 }
 

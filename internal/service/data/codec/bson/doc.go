@@ -6,15 +6,20 @@
 // struct, a map, a D — so Marshal of a top-level scalar or array surfaces
 // BSON_MARSHAL_FAILED. Go values map onto BSON as the MongoDB Go driver's v1
 // default registry mapped them, struct tags included
-// (bson:"name,omitempty,minsize,truncate,inline"), and the BSON types Go has
+// (bson:"name,omitempty,omitzero,minsize,truncate,inline" — omitzero as
+// encoding/json reads it: the type's IsZero, else every bit at zero), and the
+// BSON types Go has
 // no type for decode into this package's own: ObjectID, DateTime, Decimal128,
 // Binary, Regex, Timestamp, D, M, A and the rest.
 //
 // Unmarshal checks the whole input before it touches the target — every
 // declared length against the bytes remaining, every terminator, every type
 // byte, every string's UTF-8, a nesting depth of at most 100 — so a malformed
-// document is refused whole and never half-decoded. The codec is not a
-// StreamingCodec; it implements the optional Appender.
+// document is refused whole and never half-decoded. It implements the
+// optional Appender, and StreamingCodec over a stream of concatenated
+// documents: an Encode writes one document in one Write, a Decode reads the
+// int32 length prefix, refuses a length past 10 MiB before reserving it, and
+// validates the document whole before decoding it.
 //
 // Package bson — Decimal128, BSON's IEEE 754-2008 128-bit decimal in the
 // binary integer decimal (BID) encoding, and its string forms as the BSON

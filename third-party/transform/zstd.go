@@ -1,11 +1,13 @@
 package transform
 
 import (
+	"bytes"
 	"errors"
 
 	"github.com/klauspost/compress/zstd"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -53,6 +55,20 @@ type ZstdCompressor struct {
 	dec *zstd.Decoder
 	// maxDecompressedBytes is the ceiling, retained for the reported field.
 	maxDecompressedBytes int64
+	// level is the encoder level, kept for the encoders NewWriter builds.
+	level zstd.EncoderLevel
+	// dictionaryID is the ID of the dictionary enc writes with and dec reads,
+	// 0 when the compressor has none; it is what a DictionaryMismatch reports.
+	dictionaryID uint32
+	// dict is the compressor's own copy of the dictionary, nil when it has
+	// none: the library keeps slices of it, so it must not be the caller's.
+	dict []byte
+	// streamDecoders and streamEncoders recycle the stream codecs NewReader
+	// and NewWriter hand out (ADR 0213), built with this compressor's options:
+	// a stream decoder's history and an encoder's window are megabytes, built
+	// per stream otherwise.
+	streamDecoders *recycler.Pool[*zstd.Decoder]
+	streamEncoders *recycler.Pool[*zstd.Encoder]
 }
 
 // Zstd is the registered zstd singleton, built at DefaultMaxDecompressedBytes.
@@ -97,15 +113,79 @@ func NewZstdCompressor(level ZstdLevel, maxDecompressedBytes int64) (compressor 
 		//: no compressor exists that would not bound its output.
 		return nil, lerr
 	}
+	//: no dictionary: the library's options alone.
+	return newZstd(level, maxDecompressedBytes, nil, 0)
+}
+
+// NewZstdCompressorWithDictionary builds a zstd compressor at the given level
+// that encodes with dict and decodes the frames that name it, refusing to
+// decompress more than maxDecompressedBytes of plaintext in one call.
+//
+// dict is a zstd dictionary in the format "zstd --train" and zstd.BuildDict
+// write — a magic number, a non-zero ID and the entropy tables trained on
+// samples of the payloads it serves. It is copied, so the caller's slice may
+// change afterwards. An empty or malformed dictionary returns
+// DictionaryInvalid and no compressor; a non-positive ceiling
+// LimitMisconfigured, as NewZstdCompressor does.
+//
+// Every frame the compressor writes names the dictionary's ID, and a frame
+// naming an ID the reader does not hold is refused with DictionaryMismatch —
+// by this compressor, by one built with another dictionary, and by the
+// registered Zstd — never decoded into a corrupt payload. A frame without a
+// dictionary still decodes. The ID is how a dictionary is versioned: train a
+// new one under a new ID, and a reader that meets an old frame learns from
+// the error which dictionary it needs.
+//
+// The result is not registered: a dictionary is the caller's artefact, trained
+// on the caller's data, and the registry's "zstd" is the dictionary-less
+// singleton. The decoder's window is bounded by maxDecompressedBytes, as
+// NewZstdCompressor's is. Close it when done.
+func NewZstdCompressorWithDictionary(level ZstdLevel, maxDecompressedBytes int64, dict []byte) (compressor *ZstdCompressor, err error) {
+	//: the ceiling first, as the plain constructor checks it.
+	if lerr := checkLimit(maxDecompressedBytes); lerr != nil {
+		//: no compressor exists that would not bound its output.
+		return nil, lerr
+	}
+	//: an empty dictionary is no dictionary, and claiming one would be a lie.
+	if len(dict) == 0 {
+		//: refused, never defaulted to the dictionary-less compressor.
+		return nil, errs.Wrap(DictionaryInvalid, errs.WrapParams{}, errs.Int("dictionary_bytes", 0))
+	}
+	//: the compressor's own copy: the library keeps slices of what it loads.
+	owned := bytes.Clone(dict)
+	//: parse it once here, so a malformed one is named as such and not as a
+	//: library option fault.
+	parsed, derr := zstd.InspectDictionary(owned)
+	//: no magic, an ID of zero, truncated tables.
+	if derr != nil {
+		//: the library's reason kept beneath the sentinel.
+		return nil, errs.Wrap(derr, dictionaryInvalidWrap, errs.Int("dictionary_bytes", len(dict)))
+	}
+	//: encoder and decoder share the one copy.
+	return newZstd(level, maxDecompressedBytes, owned, parsed.ID())
+}
+
+// newZstd builds the compressor's encoder and decoder, with dict when it is
+// not nil. The ceiling has been checked by the caller.
+func newZstd(level ZstdLevel, maxDecompressedBytes int64, dict []byte, dictID uint32) (compressor *ZstdCompressor, err error) {
+	encOpts := []zstd.EOption{zstd.WithEncoderLevel(encoderLevel(level))}
+	//: WithDecoderMaxMemory also caps the window a frame may declare, so the
+	//: ceiling bounds the decoder's memory as well as its output.
+	decOpts := []zstd.DOption{zstd.WithDecoderMaxMemory(uint64(maxDecompressedBytes))}
+	//: a dictionary rides on both halves, or on neither.
+	if dict != nil {
+		encOpts = append(encOpts, zstd.WithEncoderDict(dict))
+		decOpts = append(decOpts, zstd.WithDecoderDicts(dict))
+	}
 	//: the encoder writes to an explicit dst on every call, so nil is the sink.
-	enc, eerr := zstd.NewWriter(nil, zstd.WithEncoderLevel(encoderLevel(level)))
+	enc, eerr := zstd.NewWriter(nil, encOpts...)
 	//: a construction failure here is a library-option fault; surface it typed.
 	if eerr != nil {
 		//: wrap under the zstd sentinel.
 		return nil, errs.Wrap(eerr, zstdWrap)
 	}
 	//: the ceiling is baked into the decoder so it refuses before allocating.
-	dec, derr := zstd.NewReader(nil, zstd.WithDecoderMaxMemory(uint64(maxDecompressedBytes)))
+	dec, derr := zstd.NewReader(nil, decOpts...)
 	//: an option fault leaves the encoder dangling — release it before failing.
 	if derr != nil {
 		//: no compressor is returned, so nothing else will ever close enc; the
@@ -113,7 +193,13 @@ func NewZstdCompressor(level ZstdLevel, maxDecompressedBytes int64) (compressor 
 		return nil, errs.Wrap(errors.Join(derr, enc.Close()), zstdWrap)
 	}
 	//: both halves built — hand back the compressor.
-	return &ZstdCompressor{enc: enc, dec: dec, maxDecompressedBytes: maxDecompressedBytes}, nil
+	return &ZstdCompressor{
+		enc: enc, dec: dec, maxDecompressedBytes: maxDecompressedBytes,
+		level: encoderLevel(level), dictionaryID: dictID, dict: dict,
+		//: empty pools: a stream codec is built on its first miss only.
+		streamDecoders: recycler.NewPool(func() *zstd.Decoder { return nil }),
+		streamEncoders: recycler.NewPool(func() *zstd.Encoder { return nil }),
+	}, nil
 }
 
 // encoderLevel maps a ZstdLevel onto the library's EncoderLevel, clamping any
@@ -165,40 +251,49 @@ func (z *ZstdCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
 //
 // The ceiling counts the DECODED payload only, never len(dst)+payload, so a
 // caller reusing a large dst does not silently shrink its own decompression
-// budget. That takes two paths: an empty dst is handed straight to DecodeAll
-// (where the library's own budget already means exactly the payload), and a
-// non-empty one decodes into a fresh buffer that is then appended. The split is
-// an allocation, not a semantic — both paths bound the same thing. See
-// BENCH.md §"Why decompression takes the empty-dst fast path".
+// budget: the library counts len(dst) into its budget, so the decode is handed
+// dst's TAIL — a zero-length slice over its spare capacity — where the budget
+// means exactly the payload. When the payload fits that capacity the decode
+// lands in it, with no allocation and no copy; when it does not, the library
+// grows its own buffer and that is appended onto dst once. See BENCH.md
+// §"Decompression decodes into the tail".
 //
 // A refusal returns dst at its original length — never a partial payload.
 func (z *ZstdCompressor) Decompress(dst, src []byte) (decoded []byte, err error) {
-	//: an empty dst has no prefix to protect, so DecodeAll can append straight
-	//: into it — and with len(dst)==0 the library's budget counts exactly the
-	//: payload, which is the semantics this method promises. This is the buffer
-	//: -reuse path the port's dst convention exists for, and it is measured at
-	//: half the memory of the general path (BENCH.md).
-	if len(dst) == 0 {
-		//: decode directly into the caller's buffer.
-		out, derr := z.dec.DecodeAll(src, dst)
-		//: on failure hand back dst, never the partial output DecodeAll returns.
-		if derr != nil {
-			//: classify — a bomb and a corrupt frame are different events.
-			return dst, z.classify(derr, len(src))
-		}
-		//: the caller's buffer now holds exactly the payload.
-		return out, nil
-	}
-	//: a non-empty dst must not spend the caller's budget, so decode into a
-	//: fresh buffer and append; the ceiling still means the payload alone.
-	plain, derr := z.dec.DecodeAll(src, nil)
-	//: classify before wrapping — a bomb and a corrupt frame are different events.
+	start := len(dst)
+	//: the tail: no length, so the library's budget counts the payload alone,
+	//: and dst's spare capacity, so the decode can land in it.
+	tail := dst[start:]
+	out, derr := z.dec.DecodeAll(src, tail)
+	//: on failure hand back dst, never the partial output DecodeAll returns.
 	if derr != nil {
-		//: hand back dst untouched with the classified error.
-		return dst, z.classify(derr, len(src))
+		//: classify — a bomb and a corrupt frame are different events.
+		return dst, z.classify(derr, src)
 	}
-	//: append the bounded plaintext onto the caller's dst.
-	return append(dst, plain...), nil
+	return joinTail(dst, tail, out), nil
+}
+
+// joinTail returns dst followed by out, where out is what a decode appended to
+// tail, dst's zero-length tail. When out is still in dst's array — the payload
+// fitted the spare capacity — dst is extended over it, with no copy; when the
+// decoder outgrew the capacity, out is a buffer of its own and is appended
+// onto dst once. An empty dst has no prefix to keep, so out is dst then, as
+// append would make it.
+func joinTail(dst, tail, out []byte) []byte {
+	//: nothing decoded: dst as it came.
+	if len(out) == 0 {
+		return dst
+	}
+	//: no prefix to keep: the decoder's buffer is the result either way.
+	if len(dst) == 0 {
+		return out
+	}
+	//: the decode stayed in dst's array: the prefix is already in front of it.
+	if cap(tail) > 0 && &out[0] == &tail[:1][0] {
+		return dst[:len(dst)+len(out)]
+	}
+	//: the decoder reallocated past dst's capacity: one copy onto dst.
+	return append(dst, out...)
 }
 
 // classify turns a library decode error into the right sentinel: a tripped
@@ -212,7 +307,17 @@ func (z *ZstdCompressor) Decompress(dst, src []byte) (decoded []byte, err error)
 // the ceiling is rejected from its header, before a byte is decompressed. Both
 // are the ceiling doing its job, and reporting the second as a corrupt stream
 // would hide the loudest bomb signature behind the quietest label.
-func (z *ZstdCompressor) classify(cause error, compressedLen int) error {
+func (z *ZstdCompressor) classify(cause error, src []byte) error {
+	compressedLen := len(src)
+	//: a frame naming a dictionary this compressor does not hold.
+	if errors.Is(cause, zstd.ErrUnknownDictionary) {
+		//: refused, never decoded into a corrupt payload; the IDs say which.
+		return errs.Wrap(DictionaryMismatch, errs.WrapParams{},
+			errs.String("algorithm", string(ZstdAlgorithm)),
+			errs.Int64("frame_dictionary_id", int64(frameDictionaryID(src))),
+			errs.Int64("dictionary_id", int64(z.dictionaryID)),
+			errs.Int("compressed_bytes", compressedLen))
+	}
 	//: both library refusals are the configured ceiling speaking.
 	if isLimitError(cause) {
 		//: report the bomb refusal with the numbers an operator needs.
@@ -225,6 +330,19 @@ func (z *ZstdCompressor) classify(cause error, compressedLen int) error {
 	return errs.Wrap(cause, zstdWrap)
 }
 
+// frameDictionaryID reads the dictionary ID src's first frame header names, 0
+// when it names none or the header does not parse. It is read for the error's
+// fields only, after the library has refused the frame.
+func frameDictionaryID(src []byte) uint32 {
+	var header zstd.Header
+	//: a header that does not parse names no dictionary.
+	if header.Decode(src) != nil {
+		return 0
+	}
+	//: the ID the frame was written with.
+	return header.DictionaryID
+}
+
 // isLimitError reports whether cause is one of the two library errors that mean
 // "the configured output ceiling refused this payload".
 func isLimitError(cause error) bool {
@@ -235,6 +353,14 @@ func isLimitError(cause error) bool {
 	}
 	//: ErrWindowSizeExceeded — the frame header declared a window past the cap.
 	return errors.Is(cause, zstd.ErrWindowSizeExceeded)
+}
+
+// DictionaryID returns the ID of the dictionary the compressor encodes with,
+// and the frames it writes name — 0 when it has none. Store it beside the
+// payloads to know which dictionary reads them back.
+func (z *ZstdCompressor) DictionaryID() uint32 {
+	//: fixed at construction.
+	return z.dictionaryID
 }
 
 // Close releases the shared encoder and decoder. It is safe to call once; the

@@ -2,6 +2,7 @@ package otlp
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"maps"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -31,8 +33,11 @@ const contentType string = "application/json"
 // collector's own back-off hint under §OTLP/HTTP Throttling; the client SHOULD
 // honour it — which is the caller's job here, because nothing here retries.
 const (
-	contentTypeHeader string = "Content-Type"
-	retryAfterHeader  string = "Retry-After"
+	contentTypeHeader     string = "Content-Type"
+	retryAfterHeader      string = "Retry-After"
+	contentEncodingHeader string = "Content-Encoding"
+	// gzipEncoding is the Content-Encoding of a gzipped body (HTTPConfig.Gzip).
+	gzipEncoding string = "gzip"
 )
 
 // The 2xx window, named so the classification reads as the specification does.
@@ -84,7 +89,18 @@ type Sender struct {
 	maxResponse int64
 	// signal names every verdict in the calling signal's words.
 	signal *SignalSpec
+	// gzip compresses every body before it is posted (HTTPConfig.Gzip).
+	gzip bool
 }
+
+// The pools gzip draws on (HTTPConfig.Gzip).
+var (
+	// gzipBuffers recycles the compressed bodies between posts.
+	gzipBuffers = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+	// gzipWriters recycles the compressors: a gzip.Writer holds its deflate
+	// window, the expensive part, across Reset.
+	gzipWriters = sync.Pool{New: func() any { return gzip.NewWriter(io.Discard) }}
+)
 
 // NewSender validates cfg and builds the sender a signal's
 // NewOTLPHTTPExporter wraps. A refused endpoint fails HERE, at wiring, under
@@ -128,6 +144,7 @@ func NewSender(cfg *HTTPConfig, signal *SignalSpec) (sender *Sender, err error) 
 		headers:     maps.Clone(cfg.Headers),
 		maxResponse: maxResponse,
 		signal:      signal,
+		gzip:        cfg.Gzip,
 	}, nil
 }
 
@@ -249,6 +266,50 @@ func (s *Sender) Post(body []byte) error {
 // transient verdict — a timeout is retryable, as a transport fault is. The
 // client's own deadline still applies; whichever ends first wins.
 func (s *Sender) PostContext(ctx context.Context, body []byte) error {
+	//: compressed when configured: the body leaves gzipped, labelled so.
+	if s.gzip {
+		compressed, ok := gzipBuffers.Get().(*bytes.Buffer)
+		//: the pool only ever holds buffers; a foreign value is replaced.
+		if !ok {
+			compressed = new(bytes.Buffer)
+		}
+		defer gzipBuffers.Put(compressed)
+		//: the compressed body, labelled gzip.
+		return s.post(ctx, gzipInto(compressed, body), true)
+	}
+	//: the body as it is.
+	return s.post(ctx, body, false)
+}
+
+// PostEncoded posts body already encoded for the transport, labelled with
+// encoding: "" is PostContext — compressed when HTTPConfig.Gzip says so —,
+// and "gzip" a body that is already gzip, posted as it is with
+// Content-Encoding: gzip whatever HTTPConfig.Gzip says, so a document a
+// store-and-forward queue kept compressed is never decompressed on the way
+// (#1051). Any other encoding is refused before a request is built, with
+// the signal's RequestUnbuildable verdict — permanent.
+func (s *Sender) PostEncoded(ctx context.Context, body []byte, encoding string) error {
+	//: the encoding decides the label; nothing is compressed twice.
+	switch encoding {
+	//: the identity encoding: PostContext, compressed when configured.
+	case "":
+		//: as any document.
+		return s.PostContext(ctx, body)
+	//: already gzip: posted as it rests.
+	case gzipEncoding:
+		//: labelled, never decompressed.
+		return s.post(ctx, body, true)
+	//: an encoding this sender cannot label.
+	default:
+		//: refused before any request; the encoding is the caller's, not a secret.
+		return errs.Wrap(nil, s.signal.RequestUnbuildable,
+			errs.String("content_encoding", encoding))
+	}
+}
+
+// post sends body under ctx, labelled Content-Encoding: gzip when gzipped,
+// and returns the classified verdict.
+func (s *Sender) post(ctx context.Context, body []byte, gzipped bool) error {
 	//: build the request under ctx; a body reader gives Content-Length for free.
 	request, buildErr := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(body))
 	//: the endpoint was validated at construction, so this is near-unreachable.
@@ -263,6 +324,10 @@ func (s *Sender) PostContext(ctx context.Context, body []byte) error {
 	}
 	//: the specification requires exactly this for the JSON encoding.
 	request.Header.Set(contentTypeHeader, contentType)
+	//: the encoding the body was written in, after the caller's headers too.
+	if gzipped {
+		request.Header.Set(contentEncodingHeader, gzipEncoding)
+	}
 	//: send it.
 	response, doErr := s.client.Do(request)
 	//: a transport fault is retryable — the specification says a client SHOULD
@@ -284,6 +349,27 @@ func (s *Sender) PostContext(ctx context.Context, body []byte) error {
 	}
 	//: map the answer onto one of the three verdicts.
 	return s.classify(response, payload)
+}
+
+// gzipInto compresses body into dst (emptied first) at the default level
+// and returns the compressed bytes, which alias dst. Writing to a
+// bytes.Buffer cannot fail, so neither can the compressor's Write or Close.
+func gzipInto(dst *bytes.Buffer, body []byte) []byte {
+	dst.Reset()
+	zw, ok := gzipWriters.Get().(*gzip.Writer)
+	//: the pool only ever holds writers; a foreign value is replaced.
+	if !ok {
+		zw = gzip.NewWriter(io.Discard)
+	}
+	defer gzipWriters.Put(zw)
+	zw.Reset(dst)
+	//: a bytes.Buffer never refuses a write; the error paths are unreachable.
+	if _, werr := zw.Write(body); werr != nil {
+		swallowTeardown(werr)
+	}
+	//: Close flushes the last block and writes the trailer.
+	swallowTeardown(zw.Close())
+	return dst.Bytes()
 }
 
 // closeResponse drains what is left of the body and closes it, so the

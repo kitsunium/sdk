@@ -4,6 +4,7 @@ import (
 	stdjson "encoding/json"
 	"io"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -19,6 +20,10 @@ type baseencDecoder struct {
 
 // Decode reads the next JSON value from the base-N → JSON pipeline.
 func (d *baseencDecoder) Decode(v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: lazy-init the json decoder so we obtain the base-N reader once.
 	if d.jsonDec == nil {
 		//: bind the json decoder to the base-N reader.

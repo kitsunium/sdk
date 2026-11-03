@@ -136,8 +136,8 @@ func TestUnmarshalMultiValueTarget(t *testing.T) {
 		{"empty body yields empty values", "", url.Values{}, ""},
 		{"bad percent escape", "a=%zz", nil, "UNMARSHAL_FAILED"},
 		{"semicolon separator is refused", "a=1;b=2", nil, "UNMARSHAL_FAILED"},
-		{"oversize body", strings.Repeat("a", 8*1024*1024+1), nil, "UNMARSHAL_FAILED"},
-		{"too many pairs", strings.Repeat("a=1&", 10_000) + "a=1", nil, "UNMARSHAL_FAILED"},
+		{"oversize body", strings.Repeat("a", 8*1024*1024+1), nil, "SIZE_EXCEEDED"},
+		{"too many pairs", strings.Repeat("a=1&", 10_000) + "a=1", nil, "SIZE_EXCEEDED"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -277,8 +277,8 @@ func TestUnmarshalTargetShapes(t *testing.T) {
 		{"*map[string][]string", "a=1&a=2", kindMulti, ""},
 		{"*map[string]string single-valued body", "a=1&b=2", kindSingle, ""},
 		{"*map[string]string refuses a repeated key", "a=1&a=2", kindSingle, "MULTI_VALUE"},
-		{"nil *url.Values", "a=1", kindNilValues, "VALUE_INVALID"},
-		{"nil *map[string]string", "a=1", kindNilSingle, "VALUE_INVALID"},
+		{"nil *url.Values", "a=1", kindNilValues, "TARGET_INVALID"},
+		{"nil *map[string]string", "a=1", kindNilSingle, "TARGET_INVALID"},
 		{"non-form target", "a=1", kindString, "VALUE_INVALID"},
 	}
 	runCase := func(t *testing.T, tc tc) {

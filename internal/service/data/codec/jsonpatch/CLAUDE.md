@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/jsonpatch/
 
 ## Purpose
@@ -81,3 +81,7 @@ suite's own RFC 6902 applier, every `old` checked against what the path held.
 ## Reference
 
 - ADR 0143 §D9; RFC 6902 (JSON Patch), RFC 6901 (JSON Pointer), RFC 8259
+
+## Fuzz (#897)
+
+`fuzz_external_test.go` — `FuzzDiffApply`: for any two documents `Diff` accepts, the patch applied by the RFC 6902 applier of the tests turns the first into one `Diff` finds equal to the second, and a document against itself is no patch. The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.

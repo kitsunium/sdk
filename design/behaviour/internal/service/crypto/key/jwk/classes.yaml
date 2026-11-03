@@ -386,6 +386,7 @@ imports:
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   fmt: fmt
   io: io
+  jcs: github.com/kitsunium/sdk/internal/service/data/codec/jcs
   json: encoding/json
   sha256: crypto/sha256
   slices: slices
@@ -556,10 +557,11 @@ types:
           thumbprintInput builds the RFC 7638 §3.2 canonical JSON: required members
           only, lexicographic order, no whitespace, no optional members.
 
-          It is assembled by concatenation rather than through encoding/json because
-          the canonical form is order-sensitive and Go's map ordering is not. Every
-          interpolated value is closed-vocabulary — a validated Curve name or base64url
-          output — so none of them can contain a character JSON would need to escape.
+          It is the RFC 8785 canonical form of the required members (codec/jcs, #895):
+          for members whose names are ASCII and whose values are a validated Curve
+          name or base64url output, RFC 7638's form and RFC 8785's are the same bytes —
+          the hand concatenation this replaced, which TestThumbprintInputIsJCS keeps as
+          its oracle.
         name: thumbprintInput
         recv: k KeyValue
         results: canonical []byte, err error

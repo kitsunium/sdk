@@ -105,3 +105,41 @@ func BenchmarkObject(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkAppendFloat prices AppendFloat against the two things an emitter
+// called before it: strconv's 'g' (the logger's and OTLP's spelling, which is
+// not encoding/json's) and json.Marshal of the float64. The cost of the
+// spelling is the cut-off test and, for a small exponent, a two-byte fix-up.
+func BenchmarkAppendFloat(b *testing.B) {
+	values := []struct {
+		name string
+		v    float64
+	}{
+		{"plain", 1234.5678},
+		{"million", 1e6},
+		{"small", 1.5e-8},
+		{"large", 1e300},
+	}
+	for _, v := range values {
+		b.Run(v.name+"/jsonenc", func(b *testing.B) {
+			dst := make([]byte, 0, 64)
+			b.ReportAllocs()
+			for b.Loop() {
+				benchSink, _ = jsonenc.AppendFloat(dst[:0], v.v)
+			}
+		})
+		b.Run(v.name+"/strconv-g", func(b *testing.B) {
+			dst := make([]byte, 0, 64)
+			b.ReportAllocs()
+			for b.Loop() {
+				benchSink = strconv.AppendFloat(dst[:0], v.v, 'g', -1, 64)
+			}
+		})
+		b.Run(v.name+"/stdlib", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				benchSink, _ = json.Marshal(v.v)
+			}
+		})
+	}
+}

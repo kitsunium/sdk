@@ -13,17 +13,17 @@ Bazel target: `pkg/v1/data/codec:codec_bench_test` (tag `manual,benchmark` — e
 | CPU                | AMD EPYC 7351P 16-Core Processor |
 | CPU cores          | 8 |
 | CPU frequency      | 2395.498 MHz |
-| RAM                | 15.6 GiB |
+| RAM                | 12.8 GiB |
 | OS                 | Debian GNU/Linux 13 (trixie) |
 | Kernel             | Linux 6.12.101+deb13-amd64 |
 | Architecture       | amd64 |
 | Hostname           | debian-systemd |
-| Go toolchain       | go1.27.1 linux/amd64 |
+| Go toolchain       | go1.27.3 linux/amd64 |
 | Bazel              | 9.0.2 |
-| Git branch         | jaimerias-que-tu-te-connect |
-| Git commit         | f604c9c |
-| Generated (UTC)    | 2026-09-10T09:47:40Z |
-| Bench wall-clock   | `-test.benchtime=1s` |
+| Git branch         | wip/sdk-lot-5-int |
+| Git commit         | 6baef3230 |
+| Generated (UTC)    | 2026-11-03T18:08:54Z |
+| Bench wall-clock   | `-test.benchtime=100ms` |
 
 ## Results
 
@@ -33,103 +33,105 @@ Each `(operation, size)` table is pivoted by codec and ranked by `ns/op`. Cells 
 - Red cells = **above** the mean.
 - Delta is shown as `±X%` up to ±999% and `×N` / `÷N` past 10× either way.
 
-Each operation is wrapped in a collapsible block (small / medium / large grouped) so the table flood is opt-in. Every registered Format participates in the average — `flatbuffers` (passthrough) and `tlv` (scalar payload) are included verbatim, so the mean reflects the full surface.
+Each operation is wrapped in a collapsible block (small / medium / large grouped) so the table flood is opt-in.
+
+**One value for every format (#899).** Every Format encodes the same struct-only record — scalars and a list of items, no map and no `[]byte`, the shape `encoding/xml` and the schema-ish formats accept — with 1, 100 and 1 000 items at small, medium and large; NDJSON streams three of them. A format whose own codec cannot carry the record is measured through the facade's real promotion path (`promote.go`, the record as JSON inside the format's native shape) and marked *promoted*; a cell a format cannot measure at all (a size past its input bound) is marked *skipped* with the reason. The mean each cell is compared to is computed over the other rows only — the formats that encode the record themselves.
 
 <details open>
 <summary><strong>Marshal</strong> — small / medium / large payloads</summary>
 
 #### Marshal — small payload
 
-> **Mean baseline** across 24 codecs: `51,890 ns/op` · `19,092 B/op` · `38 allocs/op` · `1,133,246 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `3,160 ns/op` · `592 B/op` · `4 allocs/op` · `56,981 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `base58` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `base62` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `flatbuffers` | <span class="bench-win">18,349,906 `×16.2`</span> | <span class="bench-win">64 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-97%`</span> |
-| `tlv` | <span class="bench-win">6,656,390 `+487%`</span> | <span class="bench-win">167 `-100%`</span> | <span class="bench-win">48 `-100%`</span> | <span class="bench-win">3 `-92%`</span> |
-| `pem` | <span class="bench-loss">683,637 `-40%`</span> | <span class="bench-win">1,756 `-97%`</span> | <span class="bench-win">1,472 `-92%`</span> | <span class="bench-win">8 `-79%`</span> |
-| `csv` | <span class="bench-loss">502,464 `-56%`</span> | <span class="bench-win">2,526 `-95%`</span> | <span class="bench-win">4,185 `-78%`</span> | <span class="bench-win">3 `-92%`</span> |
-| `asn1-der` | <span class="bench-loss">410,235 `-64%`</span> | <span class="bench-win">2,671 `-95%`</span> | <span class="bench-win">808 `-96%`</span> | <span class="bench-win">23 `-40%`</span> |
-| `cbor` | <span class="bench-loss">95,028 `-92%`</span> | <span class="bench-win">11,082 `-79%`</span> | <span class="bench-win">8,238 `-57%`</span> | <span class="bench-win">2 `-95%`</span> |
-| `msgpack` | <span class="bench-loss">92,433 `-92%`</span> | <span class="bench-win">13,201 `-75%`</span> | <span class="bench-win">8,551 `-55%`</span> | <span class="bench-win">18 `-53%`</span> |
-| `xml` | <span class="bench-loss">75,664 `-93%`</span> | <span class="bench-win">15,613 `-70%`</span> | <span class="bench-win">5,759 `-70%`</span> | <span class="bench-win">19 `-50%`</span> |
-| `bson` | <span class="bench-loss">54,696 `-95%`</span> | <span class="bench-win">21,852 `-58%`</span> | <span class="bench-win">10,263 `-46%`</span> | <span class="bench-win">34 `-11%`</span> |
-| `json` | <span class="bench-loss">33,694 `-97%`</span> | <span class="bench-win">35,717 `-31%`</span> | <span class="bench-win">10,367 `-46%`</span> | <span class="bench-win">26 `-32%`</span> |
-| `toml` | <span class="bench-loss">32,529 `-97%`</span> | <span class="bench-win">37,107 `-28%`</span> | <span class="bench-win">9,839 `-48%`</span> | <span class="bench-win">15 `-61%`</span> |
-| `multipart` | <span class="bench-loss">26,442 `-98%`</span> | <span class="bench-win">46,102 `-11%`</span> | <span class="bench-loss">21,582 `+13%`</span> | <span class="bench-loss">56 `+47%`</span> |
-| `base64url` | <span class="bench-loss">25,851 `-98%`</span> | <span class="bench-win">46,383 `-11%`</span> | <span class="bench-win">13,207 `-31%`</span> | <span class="bench-win">26 `-32%`</span> |
-| `base64` | <span class="bench-loss">25,129 `-98%`</span> | <span class="bench-win">46,937 `-10%`</span> | <span class="bench-win">13,208 `-31%`</span> | <span class="bench-win">26 `-32%`</span> |
-| `hex` | <span class="bench-loss">23,726 `-98%`</span> | <span class="bench-win">50,670 `-2%`</span> | <span class="bench-loss">19,370 `+1%`</span> | <span class="bench-win">26 `-32%`</span> |
-| `base45` | <span class="bench-loss">21,722 `-98%`</span> | <span class="bench-loss">56,500 `+9%`</span> | <span class="bench-win">14,491 `-24%`</span> | <span class="bench-win">26 `-32%`</span> |
-| `ascii85` | <span class="bench-loss">20,814 `-98%`</span> | <span class="bench-loss">60,764 `+17%`</span> | <span class="bench-win">11,806 `-38%`</span> | <span class="bench-win">26 `-32%`</span> |
-| `base16` | <span class="bench-loss">19,603 `-98%`</span> | <span class="bench-loss">61,640 `+19%`</span> | <span class="bench-loss">19,373 `+1%`</span> | <span class="bench-win">26 `-32%`</span> |
-| `base32` | <span class="bench-loss">21,440 `-98%`</span> | <span class="bench-loss">66,945 `+29%`</span> | <span class="bench-win">14,519 `-24%`</span> | <span class="bench-win">26 `-32%`</span> |
-| `form` | <span class="bench-loss">14,916 `-99%`</span> | <span class="bench-loss">80,238 `+55%`</span> | <span class="bench-loss">30,040 `+57%`</span> | <span class="bench-win">33 `-13%`</span> |
-| `ndjson` | <span class="bench-loss">9,234 `-99%`</span> | <span class="bench-loss">123,104 `+137%`</span> | <span class="bench-loss">59,596 `+212%`</span> | <span class="bench-loss">80 `+110%`</span> |
-| `yaml` | <span class="bench-loss">2,356 `-100%`</span> | <span class="bench-loss">464,325 `+795%`</span> | <span class="bench-loss">181,475 `+851%`</span> | <span class="bench-loss">411 `+979%`</span> |
+| `msgpack` | <span class="bench-win">154,591 `+171%`</span> | <span class="bench-win">788 `-75%`</span> | <span class="bench-win">120 `-80%`</span> | <span class="bench-win">2 `-52%`</span> |
+| `tlv` | <span class="bench-win">124,287 `+118%`</span> | <span class="bench-win">1,007 `-68%`</span> | <span class="bench-win">272 `-54%`</span> | <span class="bench-loss">6 `+44%`</span> |
+| `cbor` | <span class="bench-win">125,624 `+120%`</span> | <span class="bench-win">1,038 `-67%`</span> | <span class="bench-win">120 `-80%`</span> | <span class="bench-win">2 `-52%`</span> |
+| `bson` | <span class="bench-win">92,884 `+63%`</span> | <span class="bench-win">1,346 `-57%`</span> | <span class="bench-win">184 `-69%`</span> | <span class="bench-win">2 `-52%`</span> |
+| `json` | <span class="bench-win">60,092 `+5%`</span> | <span class="bench-win">2,230 `-29%`</span> | <span class="bench-win">216 `-64%`</span> | <span class="bench-win">3 `-28%`</span> |
+| `base64` | <span class="bench-loss">53,030 `-7%`</span> | <span class="bench-win">2,241 `-29%`</span> | <span class="bench-win">248 `-58%`</span> | <span class="bench-win">3 `-28%`</span> |
+| `hex` | <span class="bench-loss">52,513 `-8%`</span> | <span class="bench-win">2,291 `-28%`</span> | <span class="bench-win">328 `-45%`</span> | <span class="bench-win">3 `-28%`</span> |
+| `base32` | <span class="bench-loss">45,535 `-20%`</span> | <span class="bench-win">2,298 `-27%`</span> | <span class="bench-win">280 `-53%`</span> | <span class="bench-win">3 `-28%`</span> |
+| `base16` | <span class="bench-loss">51,236 `-10%`</span> | <span class="bench-win">2,378 `-25%`</span> | <span class="bench-win">328 `-45%`</span> | <span class="bench-win">3 `-28%`</span> |
+| `base45` | <span class="bench-loss">50,809 `-11%`</span> | <span class="bench-win">2,500 `-21%`</span> | <span class="bench-win">264 `-55%`</span> | <span class="bench-win">3 `-28%`</span> |
+| `ascii85` | <span class="bench-loss">50,586 `-11%`</span> | <span class="bench-win">2,560 `-19%`</span> | <span class="bench-win">248 `-58%`</span> | <span class="bench-win">3 `-28%`</span> |
+| `base64url` | <span class="bench-loss">41,901 `-26%`</span> | <span class="bench-win">2,601 `-18%`</span> | <span class="bench-win">248 `-58%`</span> | <span class="bench-win">3 `-28%`</span> |
+| `pem` *promoted* | <span class="bench-loss">39,270 `-31%`</span> | <span class="bench-win">2,930 `-7%`</span> | <span class="bench-loss">600 `+1%`</span> | <span class="bench-loss">6 `+44%`</span> |
+| `csv` *promoted* | <span class="bench-loss">39,776 `-30%`</span> | <span class="bench-win">2,976 `-6%`</span> | <span class="bench-loss">688 `+16%`</span> | <span class="bench-loss">9 `+116%`</span> |
+| `toml` | <span class="bench-loss">37,668 `-34%`</span> | <span class="bench-win">3,160 `±0%`</span> | <span class="bench-win">152 `-74%`</span> | <span class="bench-win">2 `-52%`</span> |
+| `flatbuffers` *promoted* | <span class="bench-loss">37,516 `-34%`</span> | <span class="bench-loss">3,213 `+2%`</span> | <span class="bench-loss">640 `+8%`</span> | <span class="bench-loss">7 `+68%`</span> |
+| `multipart` | <span class="bench-loss">34,287 `-40%`</span> | <span class="bench-loss">3,803 `+20%`</span> | <span class="bench-loss">1,176 `+99%`</span> | <span class="bench-loss">11 `+165%`</span> |
+| `form` *promoted* | <span class="bench-loss">26,472 `-54%`</span> | <span class="bench-loss">4,136 `+31%`</span> | <span class="bench-loss">984 `+66%`</span> | <span class="bench-loss">8 `+92%`</span> |
+| `yaml` | <span class="bench-loss">24,987 `-56%`</span> | <span class="bench-loss">4,956 `+57%`</span> | <span class="bench-win">152 `-74%`</span> | <span class="bench-win">2 `-52%`</span> |
+| `base62` | <span class="bench-loss">23,642 `-59%`</span> | <span class="bench-loss">5,186 `+64%`</span> | <span class="bench-loss">616 `+4%`</span> | <span class="bench-loss">5 `+20%`</span> |
+| `ndjson` | <span class="bench-loss">20,286 `-64%`</span> | <span class="bench-loss">5,687 `+80%`</span> | <span class="bench-win">376 `-37%`</span> | <span class="bench-win">2 `-52%`</span> |
+| `base58` | <span class="bench-loss">23,856 `-58%`</span> | <span class="bench-loss">5,980 `+89%`</span> | <span class="bench-loss">616 `+4%`</span> | <span class="bench-loss">5 `+20%`</span> |
+| `xml` | <span class="bench-loss">14,836 `-74%`</span> | <span class="bench-loss">8,000 `+153%`</span> | <span class="bench-loss">5,308 `+796%`</span> | <span class="bench-loss">16 `+285%`</span> |
+| `asn1-der` *skipped* | [0.3.9.1 MARSHAL_FAILED] ASN.1 DER encoding failed | – | – | – |
 
 #### Marshal — medium payload
 
-> **Mean baseline** across 24 codecs: `469,721 ns/op` · `225,151 B/op` · `579 allocs/op` · `1,142,070 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `647,755 ns/op` · `12,595 B/op` · `15 allocs/op` · `1,570 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `base58` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `base62` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `flatbuffers` | <span class="bench-win">18,369,386 `×16.1`</span> | <span class="bench-win">65 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-100%`</span> |
-| `tlv` | <span class="bench-win">7,213,105 `+532%`</span> | <span class="bench-win">172 `-100%`</span> | <span class="bench-win">48 `-100%`</span> | <span class="bench-win">3 `-99%`</span> |
-| `pem` | <span class="bench-loss">702,708 `-38%`</span> | <span class="bench-win">1,687 `-100%`</span> | <span class="bench-win">1,472 `-99%`</span> | <span class="bench-win">8 `-99%`</span> |
-| `csv` | <span class="bench-loss">506,025 `-56%`</span> | <span class="bench-win">2,534 `-99%`</span> | <span class="bench-win">4,185 `-98%`</span> | <span class="bench-win">3 `-99%`</span> |
-| `asn1-der` | <span class="bench-loss">486,416 `-57%`</span> | <span class="bench-win">2,578 `-99%`</span> | <span class="bench-win">808 `-100%`</span> | <span class="bench-win">23 `-96%`</span> |
-| `xml` | <span class="bench-loss">76,762 `-93%`</span> | <span class="bench-win">15,675 `-97%`</span> | <span class="bench-win">5,759 `-97%`</span> | <span class="bench-win">19 `-97%`</span> |
-| `cbor` | <span class="bench-loss">9,057 `-99%`</span> | <span class="bench-win">127,671 `-73%`</span> | <span class="bench-win">19,158 `-91%`</span> | <span class="bench-win">2 `-100%`</span> |
-| `msgpack` | <span class="bench-loss">5,904 `-99%`</span> | <span class="bench-win">188,036 `-60%`</span> | <span class="bench-win">31,961 `-86%`</span> | <span class="bench-win">504 `-13%`</span> |
-| `bson` | <span class="bench-loss">3,705 `-100%`</span> | <span class="bench-win">311,788 `-34%`</span> | <span class="bench-win">48,884 `-78%`</span> | <span class="bench-loss">712 `+23%`</span> |
-| `json` | <span class="bench-loss">3,751 `-100%`</span> | <span class="bench-win">315,902 `-33%`</span> | <span class="bench-win">35,639 `-84%`</span> | <span class="bench-win">413 `-29%`</span> |
-| `multipart` | <span class="bench-loss">3,661 `-100%`</span> | <span class="bench-win">331,590 `-29%`</span> | <span class="bench-win">62,379 `-72%`</span> | <span class="bench-win">443 `-24%`</span> |
-| `base64` | <span class="bench-loss">3,454 `-100%`</span> | <span class="bench-win">339,078 `-28%`</span> | <span class="bench-win">43,883 `-81%`</span> | <span class="bench-win">413 `-29%`</span> |
-| `base64url` | <span class="bench-loss">3,393 `-100%`</span> | <span class="bench-win">339,442 `-28%`</span> | <span class="bench-win">43,886 `-81%`</span> | <span class="bench-win">413 `-29%`</span> |
-| `hex` | <span class="bench-loss">3,364 `-100%`</span> | <span class="bench-win">352,607 `-25%`</span> | <span class="bench-win">60,407 `-73%`</span> | <span class="bench-win">413 `-29%`</span> |
-| `base45` | <span class="bench-loss">3,276 `-100%`</span> | <span class="bench-win">363,539 `-23%`</span> | <span class="bench-win">52,034 `-77%`</span> | <span class="bench-win">413 `-29%`</span> |
-| `ascii85` | <span class="bench-loss">3,206 `-100%`</span> | <span class="bench-win">388,686 `-17%`</span> | <span class="bench-win">39,876 `-82%`</span> | <span class="bench-win">413 `-29%`</span> |
-| `base32` | <span class="bench-loss">3,082 `-100%`</span> | <span class="bench-win">400,568 `-15%`</span> | <span class="bench-win">52,568 `-77%`</span> | <span class="bench-win">413 `-29%`</span> |
-| `base16` | <span class="bench-loss">3,014 `-100%`</span> | <span class="bench-win">413,967 `-12%`</span> | <span class="bench-win">60,837 `-73%`</span> | <span class="bench-win">413 `-29%`</span> |
-| `form` | <span class="bench-loss">2,556 `-100%`</span> | <span class="bench-win">454,579 `-3%`</span> | <span class="bench-win">102,912 `-54%`</span> | <span class="bench-win">420 `-28%`</span> |
-| `toml` | <span class="bench-loss">2,414 `-100%`</span> | <span class="bench-loss">487,432 `+4%`</span> | <span class="bench-win">36,259 `-84%`</span> | <span class="bench-win">306 `-47%`</span> |
-| `ndjson` | <span class="bench-loss">1,239 `-100%`</span> | <span class="bench-loss">979,507 `+109%`</span> | <span class="bench-win">181,963 `-19%`</span> | <span class="bench-loss">1,241 `+114%`</span> |
-| `yaml` | <span class="bench-loss">219 `-100%`</span> | <span class="bench-loss">5,456,203 `×11.6`</span> | <span class="bench-loss">4,518,696 `×20.1`</span> | <span class="bench-loss">6,922 `×11.9`</span> |
+| `msgpack` | <span class="bench-win">4,406 `+181%`</span> | <span class="bench-win">26,641 `-96%`</span> | <span class="bench-win">4,888 `-61%`</span> | <span class="bench-win">2 `-87%`</span> |
+| `tlv` | <span class="bench-win">4,017 `+156%`</span> | <span class="bench-win">34,331 `-95%`</span> | <span class="bench-loss">24,848 `+97%`</span> | <span class="bench-win">15 `±0%`</span> |
+| `cbor` | <span class="bench-win">3,277 `+109%`</span> | <span class="bench-win">37,771 `-94%`</span> | <span class="bench-win">4,894 `-61%`</span> | <span class="bench-win">2 `-87%`</span> |
+| `bson` | <span class="bench-win">2,649 `+69%`</span> | <span class="bench-win">48,105 `-93%`</span> | <span class="bench-win">9,497 `-25%`</span> | <span class="bench-win">2 `-87%`</span> |
+| `json` | <span class="bench-win">1,658 `+6%`</span> | <span class="bench-win">72,773 `-89%`</span> | <span class="bench-win">6,232 `-51%`</span> | <span class="bench-win">3 `-80%`</span> |
+| `multipart` | <span class="bench-win">1,615 `+3%`</span> | <span class="bench-win">77,620 `-88%`</span> | <span class="bench-loss">13,441 `+7%`</span> | <span class="bench-win">11 `-27%`</span> |
+| `flatbuffers` *promoted* | <span class="bench-loss">1,470 `-6%`</span> | <span class="bench-win">78,227 `-88%`</span> | <span class="bench-loss">18,690 `+48%`</span> | <span class="bench-win">7 `-53%`</span> |
+| `base64url` | <span class="bench-loss">1,528 `-3%`</span> | <span class="bench-win">82,430 `-87%`</span> | <span class="bench-win">8,282 `-34%`</span> | <span class="bench-win">3 `-80%`</span> |
+| `base32` | <span class="bench-loss">1,461 `-7%`</span> | <span class="bench-win">85,790 `-87%`</span> | <span class="bench-win">9,818 `-22%`</span> | <span class="bench-win">3 `-80%`</span> |
+| `base45` | <span class="bench-loss">1,411 `-10%`</span> | <span class="bench-win">88,245 `-86%`</span> | <span class="bench-win">9,562 `-24%`</span> | <span class="bench-win">3 `-80%`</span> |
+| `base16` | <span class="bench-loss">1,459 `-7%`</span> | <span class="bench-win">91,176 `-86%`</span> | <span class="bench-win">12,396 `-2%`</span> | <span class="bench-win">3 `-80%`</span> |
+| `hex` | <span class="bench-loss">1,368 `-13%`</span> | <span class="bench-win">91,968 `-86%`</span> | <span class="bench-win">12,420 `-1%`</span> | <span class="bench-win">3 `-80%`</span> |
+| `pem` *promoted* | <span class="bench-loss">1,432 `-9%`</span> | <span class="bench-win">92,769 `-86%`</span> | <span class="bench-loss">20,654 `+64%`</span> | <span class="bench-win">6 `-60%`</span> |
+| `base64` | <span class="bench-loss">1,530 `-3%`</span> | <span class="bench-win">94,500 `-85%`</span> | <span class="bench-win">8,282 `-34%`</span> | <span class="bench-win">3 `-80%`</span> |
+| `ascii85` | <span class="bench-loss">1,273 `-19%`</span> | <span class="bench-win">94,726 `-85%`</span> | <span class="bench-win">8,301 `-34%`</span> | <span class="bench-win">3 `-80%`</span> |
+| `csv` *promoted* | <span class="bench-loss">1,329 `-15%`</span> | <span class="bench-win">101,236 `-84%`</span> | <span class="bench-loss">24,847 `+97%`</span> | <span class="bench-win">9 `-40%`</span> |
+| `form` *promoted* | <span class="bench-loss">1,116 `-29%`</span> | <span class="bench-win">111,794 `-83%`</span> | <span class="bench-loss">25,128 `+99%`</span> | <span class="bench-win">8 `-47%`</span> |
+| `toml` | <span class="bench-loss">776 `-51%`</span> | <span class="bench-win">153,983 `-76%`</span> | <span class="bench-win">8,217 `-35%`</span> | <span class="bench-win">2 `-87%`</span> |
+| `yaml` | <span class="bench-loss">517 `-67%`</span> | <span class="bench-win">230,492 `-64%`</span> | <span class="bench-win">8,217 `-35%`</span> | <span class="bench-win">2 `-87%`</span> |
+| `ndjson` | <span class="bench-loss">411 `-74%`</span> | <span class="bench-win">246,136 `-62%`</span> | <span class="bench-loss">18,461 `+47%`</span> | <span class="bench-win">2 `-87%`</span> |
+| `xml` | <span class="bench-loss">432 `-72%`</span> | <span class="bench-win">274,922 `-58%`</span> | <span class="bench-loss">18,138 `+44%`</span> | <span class="bench-loss">213 `×14.2`</span> |
+| `base58` | <span class="bench-loss">22 `-99%`</span> | <span class="bench-loss">5,183,596 `+700%`</span> | <span class="bench-loss">26,712 `+112%`</span> | <span class="bench-win">5 `-67%`</span> |
+| `base62` | <span class="bench-loss">24 `-98%`</span> | <span class="bench-loss">5,292,147 `+717%`</span> | <span class="bench-loss">26,712 `+112%`</span> | <span class="bench-win">5 `-67%`</span> |
+| `asn1-der` *skipped* | [0.3.9.1 MARSHAL_FAILED] ASN.1 DER encoding failed | – | – | – |
 
 #### Marshal — large payload
 
-> **Mean baseline** across 24 codecs: `4,328,926 ns/op` · `2,483,680 B/op` · `5,714 allocs/op` · `1,093,501 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `59,796,176 ns/op` · `131,032 B/op` · `157 allocs/op` · `152 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `base58` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `base62` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `flatbuffers` | <span class="bench-win">17,211,396 `×15.7`</span> | <span class="bench-win">66 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-100%`</span> |
-| `tlv` | <span class="bench-win">7,233,058 `+561%`</span> | <span class="bench-win">166 `-100%`</span> | <span class="bench-win">48 `-100%`</span> | <span class="bench-win">3 `-100%`</span> |
-| `pem` | <span class="bench-loss">747,829 `-32%`</span> | <span class="bench-win">1,585 `-100%`</span> | <span class="bench-win">1,472 `-100%`</span> | <span class="bench-win">8 `-100%`</span> |
-| `csv` | <span class="bench-loss">503,148 `-54%`</span> | <span class="bench-win">2,471 `-100%`</span> | <span class="bench-win">4,185 `-100%`</span> | <span class="bench-win">3 `-100%`</span> |
-| `asn1-der` | <span class="bench-loss">465,591 `-57%`</span> | <span class="bench-win">2,692 `-100%`</span> | <span class="bench-win">808 `-100%`</span> | <span class="bench-win">23 `-100%`</span> |
-| `xml` | <span class="bench-loss">77,296 `-93%`</span> | <span class="bench-win">15,922 `-100%`</span> | <span class="bench-win">5,759 `-100%`</span> | <span class="bench-win">19 `-100%`</span> |
-| `cbor` | <span class="bench-loss">963 `-100%`</span> | <span class="bench-win">1,238,550 `-71%`</span> | <span class="bench-win">131,518 `-95%`</span> | <span class="bench-win">3 `-100%`</span> |
-| `msgpack` | <span class="bench-loss">648 `-100%`</span> | <span class="bench-win">1,864,927 `-57%`</span> | <span class="bench-win">260,180 `-90%`</span> | <span class="bench-win">5,004 `-12%`</span> |
-| `json` | <span class="bench-loss">403 `-100%`</span> | <span class="bench-win">2,976,573 `-31%`</span> | <span class="bench-win">277,596 `-89%`</span> | <span class="bench-win">4,013 `-30%`</span> |
-| `base64url` | <span class="bench-loss">368 `-100%`</span> | <span class="bench-win">3,280,417 `-24%`</span> | <span class="bench-win">397,361 `-84%`</span> | <span class="bench-win">4,017 `-30%`</span> |
-| `base64` | <span class="bench-loss">360 `-100%`</span> | <span class="bench-win">3,342,933 `-23%`</span> | <span class="bench-win">441,819 `-82%`</span> | <span class="bench-win">4,019 `-30%`</span> |
-| `bson` | <span class="bench-loss">373 `-100%`</span> | <span class="bench-win">3,432,872 `-21%`</span> | <span class="bench-win">441,126 `-82%`</span> | <span class="bench-loss">7,013 `+23%`</span> |
-| `hex` | <span class="bench-loss">346 `-100%`</span> | <span class="bench-win">3,442,977 `-20%`</span> | <span class="bench-win">562,395 `-77%`</span> | <span class="bench-win">4,019 `-30%`</span> |
-| `base32` | <span class="bench-loss">330 `-100%`</span> | <span class="bench-win">3,459,857 `-20%`</span> | <span class="bench-win">485,345 `-80%`</span> | <span class="bench-win">4,019 `-30%`</span> |
-| `multipart` | <span class="bench-loss">352 `-100%`</span> | <span class="bench-win">3,567,775 `-18%`</span> | <span class="bench-win">536,761 `-78%`</span> | <span class="bench-win">4,049 `-29%`</span> |
-| `base45` | <span class="bench-loss">324 `-100%`</span> | <span class="bench-win">3,784,868 `-13%`</span> | <span class="bench-win">492,138 `-80%`</span> | <span class="bench-win">4,020 `-30%`</span> |
-| `ascii85` | <span class="bench-loss">300 `-100%`</span> | <span class="bench-win">4,016,108 `-7%`</span> | <span class="bench-win">431,373 `-83%`</span> | <span class="bench-win">4,019 `-30%`</span> |
-| `base16` | <span class="bench-loss">296 `-100%`</span> | <span class="bench-win">4,161,267 `-4%`</span> | <span class="bench-win">613,040 `-75%`</span> | <span class="bench-win">4,022 `-30%`</span> |
-| `form` | <span class="bench-loss">277 `-100%`</span> | <span class="bench-loss">4,350,944 `+1%`</span> | <span class="bench-win">911,114 `-63%`</span> | <span class="bench-win">4,028 `-30%`</span> |
-| `toml` | <span class="bench-loss">238 `-100%`</span> | <span class="bench-loss">5,022,426 `+16%`</span> | <span class="bench-win">318,751 `-87%`</span> | <span class="bench-win">3,008 `-47%`</span> |
-| `ndjson` | <span class="bench-loss">100 `-100%`</span> | <span class="bench-loss">10,390,482 `+140%`</span> | <span class="bench-win">2,230,947 `-10%`</span> | <span class="bench-loss">12,057 `+111%`</span> |
-| `yaml` | <span class="bench-loss">31 `-100%`</span> | <span class="bench-loss">45,538,368 `+952%`</span> | <span class="bench-loss">51,064,571 `×20.6`</span> | <span class="bench-loss">69,775 `×12.2`</span> |
+| `msgpack` | <span class="bench-win">468 `+208%`</span> | <span class="bench-win">265,767 `-100%`</span> | <span class="bench-win">49,183 `-62%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `tlv` | <span class="bench-win">350 `+130%`</span> | <span class="bench-win">323,323 `-99%`</span> | <span class="bench-loss">285,456 `+118%`</span> | <span class="bench-win">23 `-85%`</span> |
+| `cbor` | <span class="bench-win">357 `+135%`</span> | <span class="bench-win">335,089 `-99%`</span> | <span class="bench-win">49,183 `-62%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `bson` | <span class="bench-win">234 `+54%`</span> | <span class="bench-win">542,539 `-99%`</span> | <span class="bench-win">91,182 `-30%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `multipart` | <span class="bench-win">154 `+1%`</span> | <span class="bench-win">761,497 `-99%`</span> | <span class="bench-loss">134,524 `+3%`</span> | <span class="bench-win">11 `-93%`</span> |
+| `flatbuffers` *promoted* | <span class="bench-win">153 `+1%`</span> | <span class="bench-win">787,930 `-99%`</span> | <span class="bench-loss">200,632 `+53%`</span> | <span class="bench-win">7 `-96%`</span> |
+| `base32` | <span class="bench-loss">144 `-5%`</span> | <span class="bench-win">814,210 `-99%`</span> | <span class="bench-win">106,613 `-19%`</span> | <span class="bench-win">3 `-98%`</span> |
+| `json` | <span class="bench-loss">139 `-9%`</span> | <span class="bench-win">821,598 `-99%`</span> | <span class="bench-win">65,631 `-50%`</span> | <span class="bench-win">3 `-98%`</span> |
+| `base64url` | <span class="bench-loss">144 `-5%`</span> | <span class="bench-win">821,930 `-99%`</span> | <span class="bench-win">90,229 `-31%`</span> | <span class="bench-win">3 `-98%`</span> |
+| `hex` | <span class="bench-loss">144 `-5%`</span> | <span class="bench-win">832,875 `-99%`</span> | <span class="bench-loss">135,172 `+3%`</span> | <span class="bench-win">3 `-98%`</span> |
+| `base64` | <span class="bench-loss">146 `-4%`</span> | <span class="bench-win">850,769 `-99%`</span> | <span class="bench-win">90,228 `-31%`</span> | <span class="bench-win">3 `-98%`</span> |
+| `base16` | <span class="bench-loss">133 `-12%`</span> | <span class="bench-win">905,835 `-98%`</span> | <span class="bench-loss">137,653 `+5%`</span> | <span class="bench-win">3 `-98%`</span> |
+| `ascii85` | <span class="bench-loss">132 `-13%`</span> | <span class="bench-win">906,434 `-98%`</span> | <span class="bench-win">86,361 `-34%`</span> | <span class="bench-win">3 `-98%`</span> |
+| `base45` | <span class="bench-loss">124 `-18%`</span> | <span class="bench-win">938,617 `-98%`</span> | <span class="bench-win">105,339 `-20%`</span> | <span class="bench-win">3 `-98%`</span> |
+| `pem` *promoted* | <span class="bench-loss">126 `-17%`</span> | <span class="bench-win">990,301 `-98%`</span> | <span class="bench-loss">228,162 `+74%`</span> | <span class="bench-win">6 `-96%`</span> |
+| `csv` *promoted* | <span class="bench-loss">100 `-34%`</span> | <span class="bench-win">1,094,519 `-98%`</span> | <span class="bench-loss">270,957 `+107%`</span> | <span class="bench-win">9 `-94%`</span> |
+| `form` *promoted* | <span class="bench-loss">102 `-33%`</span> | <span class="bench-win">1,150,481 `-98%`</span> | <span class="bench-loss">265,703 `+103%`</span> | <span class="bench-win">9 `-94%`</span> |
+| `toml` | <span class="bench-loss">75 `-51%`</span> | <span class="bench-win">1,547,560 `-97%`</span> | <span class="bench-win">73,765 `-44%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `yaml` | <span class="bench-loss">51 `-66%`</span> | <span class="bench-win">2,232,097 `-96%`</span> | <span class="bench-win">81,954 `-37%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `ndjson` | <span class="bench-loss">48 `-68%`</span> | <span class="bench-win">2,488,426 `-96%`</span> | <span class="bench-loss">196,697 `+50%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `xml` | <span class="bench-loss">43 `-72%`</span> | <span class="bench-win">2,812,745 `-95%`</span> | <span class="bench-loss">136,836 `+4%`</span> | <span class="bench-loss">2,913 `×18.5`</span> |
+| `base62` | <span class="bench-loss">1 `-99%`</span> | <span class="bench-loss">527,183,187 `+782%`</span> | <span class="bench-loss">286,808 `+119%`</span> | <span class="bench-win">5 `-97%`</span> |
+| `base58` | <span class="bench-loss">1 `-99%`</span> | <span class="bench-loss">590,742,847 `+888%`</span> | <span class="bench-loss">286,808 `+119%`</span> | <span class="bench-win">5 `-97%`</span> |
+| `asn1-der` *skipped* | [0.3.9.1 MARSHAL_FAILED] ASN.1 DER encoding failed | – | – | – |
 
 </details>
 
@@ -138,90 +140,96 @@ Each operation is wrapped in a collapsible block (small / medium / large grouped
 
 #### Unmarshal — small payload
 
-> **Mean baseline** across 22 codecs: `81,052 ns/op` · `24,599 B/op` · `183 allocs/op` · `1,250,987 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `5,866 ns/op` · `1,040 B/op` · `14 allocs/op` · `28,193 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `flatbuffers` | <span class="bench-win">18,085,522 `×14.5`</span> | <span class="bench-win">66 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-99%`</span> |
-| `tlv` | <span class="bench-win">7,389,036 `+491%`</span> | <span class="bench-win">152 `-100%`</span> | <span class="bench-win">16 `-100%`</span> | <span class="bench-win">2 `-99%`</span> |
-| `pem` | <span class="bench-loss">888,645 `-29%`</span> | <span class="bench-win">1,201 `-99%`</span> | <span class="bench-win">440 `-98%`</span> | <span class="bench-win">9 `-95%`</span> |
-| `asn1-der` | <span class="bench-loss">554,848 `-56%`</span> | <span class="bench-win">1,968 `-98%`</span> | <span class="bench-win">192 `-99%`</span> | <span class="bench-win">7 `-96%`</span> |
-| `csv` | <span class="bench-loss">284,325 `-77%`</span> | <span class="bench-win">4,719 `-94%`</span> | <span class="bench-win">4,905 `-80%`</span> | <span class="bench-win">23 `-87%`</span> |
-| `msgpack` | <span class="bench-loss">45,254 `-96%`</span> | <span class="bench-win">26,429 `-67%`</span> | <span class="bench-win">12,982 `-47%`</span> | <span class="bench-win">85 `-54%`</span> |
-| `cbor` | <span class="bench-loss">39,578 `-97%`</span> | <span class="bench-win">29,532 `-64%`</span> | <span class="bench-win">12,856 `-48%`</span> | <span class="bench-win">90 `-51%`</span> |
-| `bson` | <span class="bench-loss">29,638 `-98%`</span> | <span class="bench-win">40,451 `-50%`</span> | <span class="bench-win">16,566 `-33%`</span> | <span class="bench-loss">243 `+32%`</span> |
-| `json` | <span class="bench-loss">22,282 `-98%`</span> | <span class="bench-win">53,457 `-34%`</span> | <span class="bench-win">12,830 `-48%`</span> | <span class="bench-win">62 `-66%`</span> |
-| `xml` | <span class="bench-loss">20,486 `-98%`</span> | <span class="bench-win">58,379 `-28%`</span> | <span class="bench-win">11,656 `-53%`</span> | <span class="bench-loss">300 `+64%`</span> |
-| `toml` | <span class="bench-loss">20,026 `-98%`</span> | <span class="bench-win">59,766 `-26%`</span> | <span class="bench-win">13,334 `-46%`</span> | <span class="bench-win">85 `-54%`</span> |
-| `hex` | <span class="bench-loss">17,899 `-99%`</span> | <span class="bench-win">66,927 `-17%`</span> | <span class="bench-win">22,316 `-9%`</span> | <span class="bench-win">63 `-66%`</span> |
-| `base16` | <span class="bench-loss">17,824 `-99%`</span> | <span class="bench-win">67,482 `-17%`</span> | <span class="bench-win">22,317 `-9%`</span> | <span class="bench-win">63 `-66%`</span> |
-| `base64url` | <span class="bench-loss">17,538 `-99%`</span> | <span class="bench-win">68,401 `-16%`</span> | <span class="bench-win">22,317 `-9%`</span> | <span class="bench-win">63 `-66%`</span> |
-| `base64` | <span class="bench-loss">17,336 `-99%`</span> | <span class="bench-win">69,602 `-14%`</span> | <span class="bench-win">22,318 `-9%`</span> | <span class="bench-win">63 `-66%`</span> |
-| `base45` | <span class="bench-loss">16,962 `-99%`</span> | <span class="bench-win">70,674 `-13%`</span> | <span class="bench-win">22,317 `-9%`</span> | <span class="bench-win">63 `-66%`</span> |
-| `multipart` | <span class="bench-loss">15,116 `-99%`</span> | <span class="bench-win">79,523 `-2%`</span> | <span class="bench-loss">37,554 `+53%`</span> | <span class="bench-win">95 `-48%`</span> |
-| `ascii85` | <span class="bench-loss">13,857 `-99%`</span> | <span class="bench-loss">85,947 `+6%`</span> | <span class="bench-loss">34,042 `+38%`</span> | <span class="bench-win">74 `-60%`</span> |
-| `base32` | <span class="bench-loss">9,985 `-99%`</span> | <span class="bench-loss">112,669 `+39%`</span> | <span class="bench-loss">35,915 `+46%`</span> | <span class="bench-win">64 `-65%`</span> |
-| `ndjson` | <span class="bench-loss">6,788 `-99%`</span> | <span class="bench-loss">161,390 `+99%`</span> | <span class="bench-loss">38,565 `+57%`</span> | <span class="bench-loss">187 `+2%`</span> |
-| `form` | <span class="bench-loss">6,638 `-99%`</span> | <span class="bench-loss">180,065 `+122%`</span> | <span class="bench-loss">61,405 `+150%`</span> | <span class="bench-win">77 `-58%`</span> |
-| `yaml` | <span class="bench-loss">2,140 `-100%`</span> | <span class="bench-loss">544,348 `+572%`</span> | <span class="bench-loss">136,325 `+454%`</span> | <span class="bench-loss">2,316 `×12.6`</span> |
+| `msgpack` | <span class="bench-win">72,273 `+156%`</span> | <span class="bench-win">1,862 `-68%`</span> | <span class="bench-win">272 `-74%`</span> | <span class="bench-win">9 `-38%`</span> |
+| `bson` | <span class="bench-win">41,942 `+49%`</span> | <span class="bench-win">2,597 `-56%`</span> | <span class="bench-win">224 `-78%`</span> | <span class="bench-win">8 `-45%`</span> |
+| `cbor` | <span class="bench-win">33,410 `+19%`</span> | <span class="bench-win">3,183 `-46%`</span> | <span class="bench-win">224 `-78%`</span> | <span class="bench-win">8 `-45%`</span> |
+| `tlv` | <span class="bench-win">37,708 `+34%`</span> | <span class="bench-win">3,212 `-45%`</span> | <span class="bench-win">440 `-58%`</span> | <span class="bench-loss">17 `+16%`</span> |
+| `json` | <span class="bench-win">34,562 `+23%`</span> | <span class="bench-win">3,426 `-42%`</span> | <span class="bench-win">176 `-83%`</span> | <span class="bench-win">4 `-73%`</span> |
+| `toml` | <span class="bench-win">32,473 `+15%`</span> | <span class="bench-win">3,642 `-38%`</span> | <span class="bench-win">224 `-78%`</span> | <span class="bench-win">8 `-45%`</span> |
+| `base16` | <span class="bench-win">32,138 `+14%`</span> | <span class="bench-win">3,692 `-37%`</span> | <span class="bench-win">304 `-71%`</span> | <span class="bench-win">5 `-66%`</span> |
+| `base64` | <span class="bench-win">30,897 `+10%`</span> | <span class="bench-win">3,722 `-37%`</span> | <span class="bench-win">304 `-71%`</span> | <span class="bench-win">5 `-66%`</span> |
+| `hex` | <span class="bench-win">30,946 `+10%`</span> | <span class="bench-win">3,755 `-36%`</span> | <span class="bench-win">304 `-71%`</span> | <span class="bench-win">5 `-66%`</span> |
+| `base64url` | <span class="bench-win">31,066 `+10%`</span> | <span class="bench-win">3,841 `-35%`</span> | <span class="bench-win">304 `-71%`</span> | <span class="bench-win">5 `-66%`</span> |
+| `flatbuffers` *promoted* | <span class="bench-loss">27,025 `-4%`</span> | <span class="bench-win">4,166 `-29%`</span> | <span class="bench-win">360 `-65%`</span> | <span class="bench-win">7 `-52%`</span> |
+| `base32` | <span class="bench-loss">25,860 `-8%`</span> | <span class="bench-win">4,514 `-23%`</span> | <span class="bench-win">496 `-52%`</span> | <span class="bench-win">6 `-59%`</span> |
+| `base45` | <span class="bench-loss">24,814 `-12%`</span> | <span class="bench-win">4,621 `-21%`</span> | <span class="bench-win">304 `-71%`</span> | <span class="bench-win">5 `-66%`</span> |
+| `base58` | <span class="bench-loss">24,542 `-13%`</span> | <span class="bench-win">4,745 `-19%`</span> | <span class="bench-win">432 `-58%`</span> | <span class="bench-win">6 `-59%`</span> |
+| `base62` | <span class="bench-loss">22,122 `-22%`</span> | <span class="bench-win">5,326 `-9%`</span> | <span class="bench-win">432 `-58%`</span> | <span class="bench-win">6 `-59%`</span> |
+| `ascii85` | <span class="bench-loss">21,060 `-25%`</span> | <span class="bench-win">5,354 `-9%`</span> | <span class="bench-loss">3,043 `+192%`</span> | <span class="bench-win">7 `-52%`</span> |
+| `pem` *promoted* | <span class="bench-loss">15,872 `-44%`</span> | <span class="bench-loss">7,090 `+21%`</span> | <span class="bench-win">572 `-45%`</span> | <span class="bench-win">11 `-25%`</span> |
+| `form` *promoted* | <span class="bench-loss">15,799 `-44%`</span> | <span class="bench-loss">7,878 `+34%`</span> | <span class="bench-loss">2,122 `+104%`</span> | <span class="bench-loss">19 `+30%`</span> |
+| `yaml` | <span class="bench-loss">14,962 `-47%`</span> | <span class="bench-loss">8,279 `+41%`</span> | <span class="bench-win">304 `-71%`</span> | <span class="bench-win">5 `-66%`</span> |
+| `ndjson` | <span class="bench-loss">10,000 `-65%`</span> | <span class="bench-loss">11,135 `+90%`</span> | <span class="bench-win">624 `-40%`</span> | <span class="bench-loss">16 `+9%`</span> |
+| `multipart` | <span class="bench-loss">9,308 `-67%`</span> | <span class="bench-loss">11,897 `+103%`</span> | <span class="bench-loss">6,618 `+536%`</span> | <span class="bench-loss">28 `+91%`</span> |
+| `csv` *promoted* | <span class="bench-loss">6,673 `-76%`</span> | <span class="bench-loss">18,000 `+207%`</span> | <span class="bench-loss">5,191 `+399%`</span> | <span class="bench-loss">23 `+57%`</span> |
+| `xml` | <span class="bench-loss">5,587 `-80%`</span> | <span class="bench-loss">22,662 `+286%`</span> | <span class="bench-loss">4,744 `+356%`</span> | <span class="bench-loss">125 `+754%`</span> |
+| `asn1-der` *skipped* | [0.3.9.1 MARSHAL_FAILED] ASN.1 DER encoding failed | – | – | – |
 
 #### Unmarshal — medium payload
 
-> **Mean baseline** across 22 codecs: `740,486 ns/op` · `145,195 B/op` · `2,000 allocs/op` · `1,276,190 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `389,298 ns/op` · `39,471 B/op` · `769 allocs/op` · `591 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `flatbuffers` | <span class="bench-win">18,371,910 `×14.4`</span> | <span class="bench-win">65 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-100%`</span> |
-| `tlv` | <span class="bench-win">7,804,818 `+512%`</span> | <span class="bench-win">151 `-100%`</span> | <span class="bench-win">16 `-100%`</span> | <span class="bench-win">2 `-100%`</span> |
-| `pem` | <span class="bench-loss">992,751 `-22%`</span> | <span class="bench-win">1,202 `-100%`</span> | <span class="bench-win">440 `-100%`</span> | <span class="bench-win">9 `-100%`</span> |
-| `asn1-der` | <span class="bench-loss">581,852 `-54%`</span> | <span class="bench-win">1,970 `-100%`</span> | <span class="bench-win">192 `-100%`</span> | <span class="bench-win">7 `-100%`</span> |
-| `csv` | <span class="bench-loss">276,591 `-78%`</span> | <span class="bench-win">4,336 `-99%`</span> | <span class="bench-win">4,905 `-97%`</span> | <span class="bench-win">23 `-99%`</span> |
-| `xml` | <span class="bench-loss">19,788 `-98%`</span> | <span class="bench-win">59,523 `-92%`</span> | <span class="bench-win">11,656 `-92%`</span> | <span class="bench-win">300 `-85%`</span> |
-| `msgpack` | <span class="bench-loss">3,139 `-100%`</span> | <span class="bench-win">375,405 `-49%`</span> | <span class="bench-win">90,417 `-38%`</span> | <span class="bench-win">1,539 `-23%`</span> |
-| `cbor` | <span class="bench-loss">3,022 `-100%`</span> | <span class="bench-win">404,706 `-45%`</span> | <span class="bench-win">79,656 `-45%`</span> | <span class="bench-win">1,542 `-23%`</span> |
-| `json` | <span class="bench-loss">2,169 `-100%`</span> | <span class="bench-win">552,475 `-25%`</span> | <span class="bench-win">102,190 `-30%`</span> | <span class="bench-win">1,202 `-40%`</span> |
-| `hex` | <span class="bench-loss">2,017 `-100%`</span> | <span class="bench-win">596,395 `-19%`</span> | <span class="bench-win">126,793 `-13%`</span> | <span class="bench-win">1,203 `-40%`</span> |
-| `base64` | <span class="bench-loss">2,007 `-100%`</span> | <span class="bench-win">599,068 `-19%`</span> | <span class="bench-win">126,795 `-13%`</span> | <span class="bench-win">1,203 `-40%`</span> |
-| `base64url` | <span class="bench-loss">1,990 `-100%`</span> | <span class="bench-win">601,329 `-19%`</span> | <span class="bench-win">126,793 `-13%`</span> | <span class="bench-win">1,203 `-40%`</span> |
-| `base45` | <span class="bench-loss">1,845 `-100%`</span> | <span class="bench-win">602,756 `-19%`</span> | <span class="bench-win">126,792 `-13%`</span> | <span class="bench-win">1,203 `-40%`</span> |
-| `base16` | <span class="bench-loss">1,986 `-100%`</span> | <span class="bench-win">611,680 `-17%`</span> | <span class="bench-win">126,783 `-13%`</span> | <span class="bench-win">1,203 `-40%`</span> |
-| `multipart` | <span class="bench-loss">1,896 `-100%`</span> | <span class="bench-win">615,988 `-17%`</span> | <span class="bench-loss">164,290 `+13%`</span> | <span class="bench-win">1,239 `-38%`</span> |
-| `ascii85` | <span class="bench-loss">1,836 `-100%`</span> | <span class="bench-win">648,506 `-12%`</span> | <span class="bench-loss">160,840 `+11%`</span> | <span class="bench-win">1,219 `-39%`</span> |
-| `bson` | <span class="bench-loss">1,773 `-100%`</span> | <span class="bench-win">679,759 `-8%`</span> | <span class="bench-loss">169,079 `+16%`</span> | <span class="bench-loss">4,360 `+118%`</span> |
-| `base32` | <span class="bench-loss">1,677 `-100%`</span> | <span class="bench-win">731,250 `-1%`</span> | <span class="bench-loss">167,871 `+16%`</span> | <span class="bench-win">1,205 `-40%`</span> |
-| `form` | <span class="bench-loss">1,294 `-100%`</span> | <span class="bench-loss">954,403 `+29%`</span> | <span class="bench-loss">259,223 `+79%`</span> | <span class="bench-win">1,219 `-39%`</span> |
-| `toml` | <span class="bench-loss">880 `-100%`</span> | <span class="bench-loss">1,364,229 `+84%`</span> | <span class="bench-win">129,114 `-11%`</span> | <span class="bench-win">1,853 `-7%`</span> |
-| `ndjson` | <span class="bench-loss">722 `-100%`</span> | <span class="bench-loss">1,706,859 `+131%`</span> | <span class="bench-loss">306,667 `+111%`</span> | <span class="bench-loss">3,607 `+80%`</span> |
-| `yaml` | <span class="bench-loss">229 `-100%`</span> | <span class="bench-loss">5,178,658 `+599%`</span> | <span class="bench-loss">913,766 `+529%`</span> | <span class="bench-loss">18,675 `+833%`</span> |
+| `msgpack` | <span class="bench-win">1,581 `+167%`</span> | <span class="bench-win">75,452 `-81%`</span> | <span class="bench-win">13,400 `-66%`</span> | <span class="bench-win">405 `-47%`</span> |
+| `bson` | <span class="bench-win">1,082 `+83%`</span> | <span class="bench-win">115,281 `-70%`</span> | <span class="bench-win">13,352 `-66%`</span> | <span class="bench-win">404 `-47%`</span> |
+| `cbor` | <span class="bench-win">896 `+51%`</span> | <span class="bench-win">122,860 `-68%`</span> | <span class="bench-win">13,354 `-66%`</span> | <span class="bench-win">404 `-47%`</span> |
+| `flatbuffers` *promoted* | <span class="bench-win">657 `+11%`</span> | <span class="bench-win">173,695 `-55%`</span> | <span class="bench-win">22,516 `-43%`</span> | <span class="bench-win">379 `-51%`</span> |
+| `json` | <span class="bench-win">651 `+10%`</span> | <span class="bench-win">179,755 `-54%`</span> | <span class="bench-win">22,332 `-43%`</span> | <span class="bench-win">376 `-51%`</span> |
+| `hex` | <span class="bench-win">679 `+15%`</span> | <span class="bench-win">179,806 `-54%`</span> | <span class="bench-win">28,484 `-28%`</span> | <span class="bench-win">377 `-51%`</span> |
+| `tlv` | <span class="bench-win">684 `+16%`</span> | <span class="bench-win">180,984 `-54%`</span> | <span class="bench-win">33,384 `-15%`</span> | <span class="bench-loss">1,205 `+57%`</span> |
+| `base45` | <span class="bench-win">638 `+8%`</span> | <span class="bench-win">182,277 `-53%`</span> | <span class="bench-win">28,486 `-28%`</span> | <span class="bench-win">377 `-51%`</span> |
+| `toml` | <span class="bench-win">620 `+5%`</span> | <span class="bench-win">183,256 `-53%`</span> | <span class="bench-win">13,447 `-66%`</span> | <span class="bench-win">404 `-47%`</span> |
+| `base16` | <span class="bench-win">676 `+14%`</span> | <span class="bench-win">186,937 `-52%`</span> | <span class="bench-win">28,476 `-28%`</span> | <span class="bench-win">377 `-51%`</span> |
+| `base64url` | <span class="bench-win">658 `+11%`</span> | <span class="bench-win">187,839 `-52%`</span> | <span class="bench-win">28,494 `-28%`</span> | <span class="bench-win">377 `-51%`</span> |
+| `ascii85` | <span class="bench-loss">558 `-6%`</span> | <span class="bench-win">196,886 `-49%`</span> | <span class="bench-win">37,104 `-6%`</span> | <span class="bench-win">387 `-50%`</span> |
+| `base64` | <span class="bench-win">624 `+5%`</span> | <span class="bench-win">199,716 `-49%`</span> | <span class="bench-win">28,486 `-28%`</span> | <span class="bench-win">377 `-51%`</span> |
+| `multipart` | <span class="bench-loss">582 `-2%`</span> | <span class="bench-win">201,946 `-48%`</span> | <span class="bench-loss">40,681 `+3%`</span> | <span class="bench-win">408 `-47%`</span> |
+| `base32` | <span class="bench-loss">566 `-4%`</span> | <span class="bench-win">210,740 `-46%`</span> | <span class="bench-win">38,228 `-3%`</span> | <span class="bench-win">378 `-51%`</span> |
+| `pem` *promoted* | <span class="bench-loss">544 `-8%`</span> | <span class="bench-win">256,532 `-34%`</span> | <span class="bench-win">28,769 `-27%`</span> | <span class="bench-win">383 `-50%`</span> |
+| `form` *promoted* | <span class="bench-loss">420 `-29%`</span> | <span class="bench-win">323,058 `-17%`</span> | <span class="bench-loss">66,478 `+68%`</span> | <span class="bench-win">391 `-49%`</span> |
+| `csv` *promoted* | <span class="bench-loss">312 `-47%`</span> | <span class="bench-win">363,584 `-7%`</span> | <span class="bench-loss">77,541 `+96%`</span> | <span class="bench-win">406 `-47%`</span> |
+| `yaml` | <span class="bench-loss">290 `-51%`</span> | <span class="bench-loss">411,436 `+6%`</span> | <span class="bench-win">18,184 `-54%`</span> | <span class="bench-win">104 `-86%`</span> |
+| `ndjson` | <span class="bench-loss">183 `-69%`</span> | <span class="bench-loss">668,027 `+72%`</span> | <span class="bench-loss">67,121 `+70%`</span> | <span class="bench-loss">1,132 `+47%`</span> |
+| `xml` | <span class="bench-loss">100 `-83%`</span> | <span class="bench-loss">1,186,766 `+205%`</span> | <span class="bench-loss">227,601 `+477%`</span> | <span class="bench-loss">6,369 `+728%`</span> |
+| `base58` | <span class="bench-loss">88 `-85%`</span> | <span class="bench-loss">1,342,885 `+245%`</span> | <span class="bench-win">34,676 `-12%`</span> | <span class="bench-win">378 `-51%`</span> |
+| `base62` | <span class="bench-loss">90 `-85%`</span> | <span class="bench-loss">1,383,825 `+255%`</span> | <span class="bench-win">34,675 `-12%`</span> | <span class="bench-win">378 `-51%`</span> |
+| `asn1-der` *skipped* | [0.3.9.1 MARSHAL_FAILED] ASN.1 DER encoding failed | – | – | – |
 
 #### Unmarshal — large payload
 
-> **Mean baseline** across 22 codecs: `9,116,213 ns/op` · `1,379,640 B/op` · `19,269 allocs/op` · `1,264,652 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `15,350,483 ns/op` · `394,825 B/op` · `7,843 allocs/op` · `56 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `flatbuffers` | <span class="bench-win">18,032,770 `×14.3`</span> | <span class="bench-win">66 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-100%`</span> |
-| `tlv` | <span class="bench-win">7,922,193 `+526%`</span> | <span class="bench-win">151 `-100%`</span> | <span class="bench-win">16 `-100%`</span> | <span class="bench-win">2 `-100%`</span> |
-| `pem` | <span class="bench-loss">948,008 `-25%`</span> | <span class="bench-win">1,193 `-100%`</span> | <span class="bench-win">440 `-100%`</span> | <span class="bench-win">9 `-100%`</span> |
-| `asn1-der` | <span class="bench-loss">616,663 `-51%`</span> | <span class="bench-win">1,940 `-100%`</span> | <span class="bench-win">192 `-100%`</span> | <span class="bench-win">7 `-100%`</span> |
-| `csv` | <span class="bench-loss">279,493 `-78%`</span> | <span class="bench-win">4,323 `-100%`</span> | <span class="bench-win">4,905 `-100%`</span> | <span class="bench-win">23 `-100%`</span> |
-| `xml` | <span class="bench-loss">20,502 `-98%`</span> | <span class="bench-win">58,276 `-99%`</span> | <span class="bench-win">11,656 `-99%`</span> | <span class="bench-win">300 `-98%`</span> |
-| `msgpack` | <span class="bench-loss">301 `-100%`</span> | <span class="bench-win">3,950,352 `-57%`</span> | <span class="bench-win">896,468 `-35%`</span> | <span class="bench-win">15,044 `-22%`</span> |
-| `cbor` | <span class="bench-loss">289 `-100%`</span> | <span class="bench-win">4,105,422 `-55%`</span> | <span class="bench-win">794,015 `-42%`</span> | <span class="bench-win">15,046 `-22%`</span> |
-| `json` | <span class="bench-loss">211 `-100%`</span> | <span class="bench-win">5,680,597 `-38%`</span> | <span class="bench-win">1,076,203 `-22%`</span> | <span class="bench-win">12,115 `-37%`</span> |
-| `base16` | <span class="bench-loss">199 `-100%`</span> | <span class="bench-win">5,983,829 `-34%`</span> | <span class="bench-win">1,248,825 `-9%`</span> | <span class="bench-win">12,116 `-37%`</span> |
-| `hex` | <span class="bench-loss">200 `-100%`</span> | <span class="bench-win">6,019,432 `-34%`</span> | <span class="bench-win">1,248,822 `-9%`</span> | <span class="bench-win">12,116 `-37%`</span> |
-| `base64url` | <span class="bench-loss">196 `-100%`</span> | <span class="bench-win">6,061,390 `-34%`</span> | <span class="bench-win">1,248,780 `-9%`</span> | <span class="bench-win">12,116 `-37%`</span> |
-| `base64` | <span class="bench-loss">194 `-100%`</span> | <span class="bench-win">6,065,710 `-33%`</span> | <span class="bench-win">1,248,752 `-9%`</span> | <span class="bench-win">12,116 `-37%`</span> |
-| `base45` | <span class="bench-loss">192 `-100%`</span> | <span class="bench-win">6,153,175 `-33%`</span> | <span class="bench-win">1,248,820 `-9%`</span> | <span class="bench-win">12,116 `-37%`</span> |
-| `multipart` | <span class="bench-loss">188 `-100%`</span> | <span class="bench-win">6,248,673 `-31%`</span> | <span class="bench-loss">1,425,617 `+3%`</span> | <span class="bench-win">12,157 `-37%`</span> |
-| `ascii85` | <span class="bench-loss">181 `-100%`</span> | <span class="bench-win">6,585,670 `-28%`</span> | <span class="bench-loss">1,504,199 `+9%`</span> | <span class="bench-win">12,137 `-37%`</span> |
-| `base32` | <span class="bench-loss">170 `-100%`</span> | <span class="bench-win">6,940,416 `-24%`</span> | <span class="bench-loss">1,519,508 `+10%`</span> | <span class="bench-win">12,118 `-37%`</span> |
-| `bson` | <span class="bench-loss">166 `-100%`</span> | <span class="bench-win">7,191,193 `-21%`</span> | <span class="bench-loss">1,723,118 `+25%`</span> | <span class="bench-loss">43,683 `+127%`</span> |
-| `form` | <span class="bench-loss">135 `-100%`</span> | <span class="bench-win">8,820,791 `-3%`</span> | <span class="bench-loss">2,202,759 `+60%`</span> | <span class="bench-win">12,134 `-37%`</span> |
-| `ndjson` | <span class="bench-loss">69 `-100%`</span> | <span class="bench-loss">16,451,685 `+80%`</span> | <span class="bench-loss">3,227,726 `+134%`</span> | <span class="bench-loss">36,344 `+89%`</span> |
-| `toml` | <span class="bench-loss">22 `-100%`</span> | <span class="bench-loss">49,632,267 `+444%`</span> | <span class="bench-loss">1,403,993 `+2%`</span> | <span class="bench-win">18,127 `-6%`</span> |
-| `yaml` | <span class="bench-loss">21 `-100%`</span> | <span class="bench-loss">54,600,148 `+499%`</span> | <span class="bench-loss">8,317,248 `+503%`</span> | <span class="bench-loss">174,110 `+804%`</span> |
+| `msgpack` | <span class="bench-win">153 `+169%`</span> | <span class="bench-win">772,269 `-95%`</span> | <span class="bench-win">129,400 `-67%`</span> | <span class="bench-win">4,005 `-49%`</span> |
+| `bson` | <span class="bench-win">100 `+76%`</span> | <span class="bench-win">1,120,417 `-93%`</span> | <span class="bench-win">129,352 `-67%`</span> | <span class="bench-win">4,004 `-49%`</span> |
+| `cbor` | <span class="bench-win">98 `+72%`</span> | <span class="bench-win">1,266,327 `-92%`</span> | <span class="bench-win">129,373 `-67%`</span> | <span class="bench-win">4,004 `-49%`</span> |
+| `flatbuffers` *promoted* | <span class="bench-win">67 `+18%`</span> | <span class="bench-win">1,694,490 `-89%`</span> | <span class="bench-win">186,918 `-53%`</span> | <span class="bench-win">4,008 `-49%`</span> |
+| `tlv` | <span class="bench-win">60 `+5%`</span> | <span class="bench-win">1,782,275 `-88%`</span> | <span class="bench-win">335,337 `-15%`</span> | <span class="bench-loss">12,749 `+63%`</span> |
+| `hex` | <span class="bench-win">63 `+11%`</span> | <span class="bench-win">1,799,825 `-88%`</span> | <span class="bench-win">252,294 `-36%`</span> | <span class="bench-win">4,006 `-49%`</span> |
+| `base64` | <span class="bench-win">66 `+16%`</span> | <span class="bench-win">1,806,526 `-88%`</span> | <span class="bench-win">252,368 `-36%`</span> | <span class="bench-win">4,006 `-49%`</span> |
+| `json` | <span class="bench-win">68 `+20%`</span> | <span class="bench-win">1,816,367 `-88%`</span> | <span class="bench-win">186,732 `-53%`</span> | <span class="bench-win">4,005 `-49%`</span> |
+| `toml` | <span class="bench-win">66 `+16%`</span> | <span class="bench-win">1,830,797 `-88%`</span> | <span class="bench-loss">645,728 `+64%`</span> | <span class="bench-win">4,007 `-49%`</span> |
+| `base16` | <span class="bench-win">64 `+12%`</span> | <span class="bench-win">1,833,113 `-88%`</span> | <span class="bench-win">252,206 `-36%`</span> | <span class="bench-win">4,005 `-49%`</span> |
+| `base45` | <span class="bench-win">57 `±0%`</span> | <span class="bench-win">1,845,195 `-88%`</span> | <span class="bench-win">252,299 `-36%`</span> | <span class="bench-win">4,006 `-49%`</span> |
+| `multipart` | <span class="bench-win">64 `+12%`</span> | <span class="bench-win">1,923,661 `-87%`</span> | <span class="bench-win">330,883 `-16%`</span> | <span class="bench-win">4,044 `-48%`</span> |
+| `base64url` | <span class="bench-win">58 `+2%`</span> | <span class="bench-win">1,973,672 `-87%`</span> | <span class="bench-win">252,296 `-36%`</span> | <span class="bench-win">4,006 `-49%`</span> |
+| `ascii85` | <span class="bench-loss">55 `-3%`</span> | <span class="bench-win">2,026,461 `-87%`</span> | <span class="bench-win">327,348 `-17%`</span> | <span class="bench-win">4,023 `-49%`</span> |
+| `base32` | <span class="bench-loss">52 `-9%`</span> | <span class="bench-win">2,108,645 `-86%`</span> | <span class="bench-win">359,035 `-9%`</span> | <span class="bench-win">4,008 `-49%`</span> |
+| `pem` *promoted* | <span class="bench-loss">48 `-16%`</span> | <span class="bench-win">2,396,143 `-84%`</span> | <span class="bench-win">252,589 `-36%`</span> | <span class="bench-win">4,012 `-49%`</span> |
+| `csv` *promoted* | <span class="bench-loss">44 `-23%`</span> | <span class="bench-win">2,561,344 `-83%`</span> | <span class="bench-loss">959,375 `+143%`</span> | <span class="bench-win">4,053 `-48%`</span> |
+| `form` *promoted* | <span class="bench-loss">42 `-26%`</span> | <span class="bench-win">2,900,952 `-81%`</span> | <span class="bench-loss">630,596 `+60%`</span> | <span class="bench-win">4,021 `-49%`</span> |
+| `yaml` | <span class="bench-loss">27 `-53%`</span> | <span class="bench-win">4,052,908 `-74%`</span> | <span class="bench-win">246,268 `-38%`</span> | <span class="bench-win">1,005 `-87%`</span> |
+| `ndjson` | <span class="bench-loss">18 `-68%`</span> | <span class="bench-win">6,672,791 `-57%`</span> | <span class="bench-loss">560,385 `+42%`</span> | <span class="bench-loss">12,017 `+53%`</span> |
+| `xml` | <span class="bench-loss">10 `-82%`</span> | <span class="bench-win">12,673,157 `-17%`</span> | <span class="bench-loss">2,213,300 `+461%`</span> | <span class="bench-loss">63,072 `+704%`</span> |
+| `base62` | <span class="bench-loss">1 `-98%`</span> | <span class="bench-loss">119,038,527 `+675%`</span> | <span class="bench-win">323,544 `-18%`</span> | <span class="bench-win">4,024 `-49%`</span> |
+| `base58` | <span class="bench-loss">1 `-98%`</span> | <span class="bench-loss">125,316,251 `+716%`</span> | <span class="bench-win">323,544 `-18%`</span> | <span class="bench-win">4,024 `-49%`</span> |
+| `asn1-der` *skipped* | [0.3.9.1 MARSHAL_FAILED] ASN.1 DER encoding failed | – | – | – |
 
 </details>
 
@@ -230,96 +238,96 @@ Each operation is wrapped in a collapsible block (small / medium / large grouped
 
 #### Append — small payload
 
-> **Mean baseline** across 24 codecs: `48,041 ns/op` · `11,276 B/op` · `36 allocs/op` · `1,744,995 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `2,985 ns/op` · `442 B/op` · `3 allocs/op` · `67,090 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `base58` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `form` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `base62` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `flatbuffers` | <span class="bench-win">20,134,930 `×11.5`</span> | <span class="bench-win">57 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-97%`</span> |
-| `tlv` | <span class="bench-win">19,618,797 `×11.2`</span> | <span class="bench-win">61 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-97%`</span> |
-| `pem` | <span class="bench-loss">665,704 `-62%`</span> | <span class="bench-win">1,778 `-96%`</span> | <span class="bench-win">1,472 `-87%`</span> | <span class="bench-win">8 `-78%`</span> |
-| `asn1-der` | <span class="bench-loss">425,809 `-76%`</span> | <span class="bench-win">2,638 `-95%`</span> | <span class="bench-win">808 `-93%`</span> | <span class="bench-win">23 `-36%`</span> |
-| `csv` | <span class="bench-loss">378,398 `-78%`</span> | <span class="bench-win">3,299 `-93%`</span> | <span class="bench-win">4,185 `-63%`</span> | <span class="bench-win">3 `-92%`</span> |
-| `cbor` | <span class="bench-loss">155,748 `-91%`</span> | <span class="bench-win">7,638 `-84%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-97%`</span> |
-| `msgpack` | <span class="bench-loss">102,843 `-94%`</span> | <span class="bench-win">10,096 `-79%`</span> | <span class="bench-win">352 `-97%`</span> | <span class="bench-win">17 `-53%`</span> |
-| `xml` | <span class="bench-loss">77,319 `-96%`</span> | <span class="bench-win">15,704 `-67%`</span> | <span class="bench-win">5,183 `-54%`</span> | <span class="bench-win">18 `-50%`</span> |
-| `bson` | <span class="bench-loss">49,150 `-97%`</span> | <span class="bench-win">26,402 `-45%`</span> | <span class="bench-win">10,265 `-9%`</span> | <span class="bench-win">34 `-6%`</span> |
-| `json` | <span class="bench-loss">36,556 `-98%`</span> | <span class="bench-win">33,079 `-31%`</span> | <span class="bench-win">889 `-92%`</span> | <span class="bench-win">25 `-31%`</span> |
-| `toml` | <span class="bench-loss">34,471 `-98%`</span> | <span class="bench-win">33,444 `-30%`</span> | <span class="bench-win">336 `-97%`</span> | <span class="bench-win">14 `-61%`</span> |
-| `base64` | <span class="bench-loss">28,388 `-98%`</span> | <span class="bench-win">42,228 `-12%`</span> | <span class="bench-win">891 `-92%`</span> | <span class="bench-win">25 `-31%`</span> |
-| `hex` | <span class="bench-loss">27,572 `-98%`</span> | <span class="bench-win">43,583 `-9%`</span> | <span class="bench-win">891 `-92%`</span> | <span class="bench-win">25 `-31%`</span> |
-| `base64url` | <span class="bench-loss">25,557 `-99%`</span> | <span class="bench-win">43,849 `-9%`</span> | <span class="bench-win">889 `-92%`</span> | <span class="bench-win">25 `-31%`</span> |
-| `multipart` | <span class="bench-loss">27,466 `-98%`</span> | <span class="bench-win">44,425 `-8%`</span> | <span class="bench-loss">12,064 `+7%`</span> | <span class="bench-loss">55 `+52%`</span> |
-| `base32` | <span class="bench-loss">20,835 `-99%`</span> | <span class="bench-loss">51,553 `+7%`</span> | <span class="bench-win">891 `-92%`</span> | <span class="bench-win">25 `-31%`</span> |
-| `base16` | <span class="bench-loss">19,651 `-99%`</span> | <span class="bench-loss">60,452 `+26%`</span> | <span class="bench-win">891 `-92%`</span> | <span class="bench-win">25 `-31%`</span> |
-| `base45` | <span class="bench-loss">19,279 `-99%`</span> | <span class="bench-loss">60,891 `+27%`</span> | <span class="bench-loss">14,504 `+29%`</span> | <span class="bench-win">26 `-28%`</span> |
-| `ascii85` | <span class="bench-loss">19,069 `-99%`</span> | <span class="bench-loss">62,816 `+31%`</span> | <span class="bench-loss">11,808 `+5%`</span> | <span class="bench-win">26 `-28%`</span> |
-| `ndjson` | <span class="bench-loss">9,850 `-99%`</span> | <span class="bench-loss">116,358 `+142%`</span> | <span class="bench-loss">32,229 `+186%`</span> | <span class="bench-loss">79 `+119%`</span> |
-| `yaml` | <span class="bench-loss">2,508 `-100%`</span> | <span class="bench-loss">492,637 `+925%`</span> | <span class="bench-loss">172,005 `×15.3`</span> | <span class="bench-loss">410 `×11.4`</span> |
+| `tlv` | <span class="bench-win">224,634 `+235%`</span> | <span class="bench-win">523 `-82%`</span> | <span class="bench-win">24 `-95%`</span> | <span class="bench-win">1 `-69%`</span> |
+| `cbor` | <span class="bench-win">164,413 `+145%`</span> | <span class="bench-win">731 `-76%`</span> | <span class="bench-win">24 `-95%`</span> | <span class="bench-win">1 `-69%`</span> |
+| `msgpack` | <span class="bench-win">158,504 `+136%`</span> | <span class="bench-win">732 `-75%`</span> | <span class="bench-win">24 `-95%`</span> | <span class="bench-win">1 `-69%`</span> |
+| `bson` | <span class="bench-win">103,971 `+55%`</span> | <span class="bench-win">1,091 `-63%`</span> | <span class="bench-win">24 `-95%`</span> | <span class="bench-win">1 `-69%`</span> |
+| `base32` | <span class="bench-loss">60,405 `-10%`</span> | <span class="bench-win">2,010 `-33%`</span> | <span class="bench-win">88 `-80%`</span> | <span class="bench-win">2 `-38%`</span> |
+| `base64` | <span class="bench-loss">58,965 `-12%`</span> | <span class="bench-win">2,038 `-32%`</span> | <span class="bench-win">88 `-80%`</span> | <span class="bench-win">2 `-38%`</span> |
+| `base64url` | <span class="bench-loss">59,082 `-12%`</span> | <span class="bench-win">2,049 `-31%`</span> | <span class="bench-win">88 `-80%`</span> | <span class="bench-win">2 `-38%`</span> |
+| `hex` | <span class="bench-loss">57,765 `-14%`</span> | <span class="bench-win">2,076 `-30%`</span> | <span class="bench-win">88 `-80%`</span> | <span class="bench-win">2 `-38%`</span> |
+| `json` | <span class="bench-loss">55,830 `-17%`</span> | <span class="bench-win">2,089 `-30%`</span> | <span class="bench-win">88 `-80%`</span> | <span class="bench-win">2 `-38%`</span> |
+| `base16` | <span class="bench-loss">55,508 `-17%`</span> | <span class="bench-win">2,124 `-29%`</span> | <span class="bench-win">88 `-80%`</span> | <span class="bench-win">2 `-38%`</span> |
+| `base45` | <span class="bench-loss">49,710 `-26%`</span> | <span class="bench-win">2,401 `-20%`</span> | <span class="bench-win">264 `-40%`</span> | <span class="bench-win">3 `-7%`</span> |
+| `ascii85` | <span class="bench-loss">47,528 `-29%`</span> | <span class="bench-win">2,487 `-17%`</span> | <span class="bench-win">248 `-44%`</span> | <span class="bench-win">3 `-7%`</span> |
+| `toml` | <span class="bench-loss">40,929 `-39%`</span> | <span class="bench-win">2,914 `-2%`</span> | <span class="bench-win">24 `-95%`</span> | <span class="bench-win">1 `-69%`</span> |
+| `yaml` | <span class="bench-loss">27,841 `-59%`</span> | <span class="bench-loss">4,282 `+43%`</span> | <span class="bench-win">24 `-95%`</span> | <span class="bench-win">1 `-69%`</span> |
+| `multipart` | <span class="bench-loss">29,426 `-56%`</span> | <span class="bench-loss">4,317 `+45%`</span> | <span class="bench-loss">824 `+86%`</span> | <span class="bench-loss">10 `+211%`</span> |
+| `base58` | <span class="bench-loss">23,740 `-65%`</span> | <span class="bench-loss">5,112 `+71%`</span> | <span class="bench-loss">616 `+39%`</span> | <span class="bench-loss">5 `+56%`</span> |
+| `base62` | <span class="bench-loss">21,310 `-68%`</span> | <span class="bench-loss">5,206 `+74%`</span> | <span class="bench-loss">616 `+39%`</span> | <span class="bench-loss">5 `+56%`</span> |
+| `ndjson` | <span class="bench-loss">22,472 `-67%`</span> | <span class="bench-loss">5,282 `+77%`</span> | <span class="bench-win">72 `-84%`</span> | <span class="bench-win">2 `-38%`</span> |
+| `xml` | <span class="bench-loss">12,686 `-81%`</span> | <span class="bench-loss">9,257 `+210%`</span> | <span class="bench-loss">5,100 `×11.5`</span> | <span class="bench-loss">15 `+367%`</span> |
+| `form` *skipped* | [0.3.40.1 VALUE_INVALID] form codec requires a url.Values-shaped value | – | – | – |
+| `pem` *skipped* | [0.3.10.3 VALUE_INVALID] PEM codec requires a non-nil *pem.Block value | – | – | – |
+| `flatbuffers` *skipped* | [0.3.23.1 FLATBUFFERS_BAD_TYPE] FlatBuffers codec requires []byte or a BytesProvider value | – | – | – |
+| `csv` *skipped* | [0.3.8.3 VALUE_INVALID] CSV codec requires a [][]string value | – | – | – |
+| `asn1-der` *skipped* | [0.3.9.1 MARSHAL_FAILED] ASN.1 DER encoding failed | – | – | – |
 
 #### Append — medium payload
 
-> **Mean baseline** across 24 codecs: `511,695 ns/op` · `203,278 B/op` · `561 allocs/op` · `1,757,102 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `616,576 ns/op` · `4,539 B/op` · `13 allocs/op` · `1,644 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `base58` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `form` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `base62` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `flatbuffers` | <span class="bench-win">20,958,615 `×11.9`</span> | <span class="bench-win">56 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-100%`</span> |
-| `tlv` | <span class="bench-win">19,552,918 `×11.1`</span> | <span class="bench-win">58 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-100%`</span> |
-| `pem` | <span class="bench-loss">694,156 `-60%`</span> | <span class="bench-win">1,717 `-100%`</span> | <span class="bench-win">1,472 `-99%`</span> | <span class="bench-win">8 `-99%`</span> |
-| `asn1-der` | <span class="bench-loss">430,906 `-75%`</span> | <span class="bench-win">2,611 `-99%`</span> | <span class="bench-win">808 `-100%`</span> | <span class="bench-win">23 `-96%`</span> |
-| `csv` | <span class="bench-loss">402,164 `-77%`</span> | <span class="bench-win">3,053 `-99%`</span> | <span class="bench-win">4,185 `-98%`</span> | <span class="bench-win">3 `-99%`</span> |
-| `xml` | <span class="bench-loss">77,521 `-96%`</span> | <span class="bench-win">15,489 `-97%`</span> | <span class="bench-win">5,183 `-97%`</span> | <span class="bench-win">18 `-97%`</span> |
-| `cbor` | <span class="bench-loss">9,211 `-99%`</span> | <span class="bench-win">128,010 `-75%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-100%`</span> |
-| `msgpack` | <span class="bench-loss">6,590 `-100%`</span> | <span class="bench-win">182,432 `-64%`</span> | <span class="bench-win">12,875 `-94%`</span> | <span class="bench-win">503 `-10%`</span> |
-| `json` | <span class="bench-loss">3,997 `-100%`</span> | <span class="bench-win">312,085 `-39%`</span> | <span class="bench-win">11,051 `-95%`</span> | <span class="bench-win">412 `-27%`</span> |
-| `bson` | <span class="bench-loss">3,741 `-100%`</span> | <span class="bench-win">324,346 `-37%`</span> | <span class="bench-win">48,925 `-76%`</span> | <span class="bench-loss">712 `+27%`</span> |
-| `base32` | <span class="bench-loss">3,640 `-100%`</span> | <span class="bench-win">330,014 `-36%`</span> | <span class="bench-win">11,024 `-95%`</span> | <span class="bench-win">412 `-27%`</span> |
-| `multipart` | <span class="bench-loss">3,471 `-100%`</span> | <span class="bench-win">331,081 `-35%`</span> | <span class="bench-win">37,633 `-81%`</span> | <span class="bench-win">442 `-21%`</span> |
-| `base64url` | <span class="bench-loss">3,120 `-100%`</span> | <span class="bench-win">331,192 `-35%`</span> | <span class="bench-win">11,050 `-95%`</span> | <span class="bench-win">412 `-27%`</span> |
-| `hex` | <span class="bench-loss">3,502 `-100%`</span> | <span class="bench-win">334,415 `-35%`</span> | <span class="bench-win">11,076 `-95%`</span> | <span class="bench-win">412 `-27%`</span> |
-| `base64` | <span class="bench-loss">3,568 `-100%`</span> | <span class="bench-win">336,731 `-34%`</span> | <span class="bench-win">11,048 `-95%`</span> | <span class="bench-win">412 `-27%`</span> |
-| `base45` | <span class="bench-loss">3,232 `-100%`</span> | <span class="bench-win">372,568 `-27%`</span> | <span class="bench-win">52,393 `-74%`</span> | <span class="bench-win">413 `-26%`</span> |
-| `ascii85` | <span class="bench-loss">3,061 `-100%`</span> | <span class="bench-win">379,428 `-26%`</span> | <span class="bench-win">39,990 `-80%`</span> | <span class="bench-win">413 `-26%`</span> |
-| `base16` | <span class="bench-loss">3,111 `-100%`</span> | <span class="bench-win">386,791 `-24%`</span> | <span class="bench-win">11,060 `-95%`</span> | <span class="bench-win">412 `-27%`</span> |
-| `toml` | <span class="bench-loss">2,498 `-100%`</span> | <span class="bench-win">487,628 `-5%`</span> | <span class="bench-win">8,926 `-96%`</span> | <span class="bench-win">305 `-46%`</span> |
-| `ndjson` | <span class="bench-loss">1,272 `-100%`</span> | <span class="bench-loss">951,601 `+86%`</span> | <span class="bench-win">108,093 `-47%`</span> | <span class="bench-loss">1,240 `+121%`</span> |
-| `yaml` | <span class="bench-loss">168 `-100%`</span> | <span class="bench-loss">7,069,382 `×13.8`</span> | <span class="bench-loss">4,491,817 `×22.1`</span> | <span class="bench-loss">6,921 `×12.3`</span> |
+| `msgpack` | <span class="bench-win">5,125 `+212%`</span> | <span class="bench-win">23,184 `-96%`</span> | <span class="bench-win">24 `-99%`</span> | <span class="bench-win">1 `-93%`</span> |
+| `tlv` | <span class="bench-win">5,188 `+215%`</span> | <span class="bench-win">24,643 `-96%`</span> | <span class="bench-win">24 `-99%`</span> | <span class="bench-win">1 `-93%`</span> |
+| `cbor` | <span class="bench-win">3,032 `+84%`</span> | <span class="bench-win">35,646 `-94%`</span> | <span class="bench-win">24 `-99%`</span> | <span class="bench-win">1 `-93%`</span> |
+| `bson` | <span class="bench-win">2,617 `+59%`</span> | <span class="bench-win">45,490 `-93%`</span> | <span class="bench-win">24 `-99%`</span> | <span class="bench-win">1 `-93%`</span> |
+| `json` | <span class="bench-win">1,711 `+4%`</span> | <span class="bench-win">70,729 `-89%`</span> | <span class="bench-win">88 `-98%`</span> | <span class="bench-win">2 `-85%`</span> |
+| `base32` | <span class="bench-loss">1,537 `-7%`</span> | <span class="bench-win">75,456 `-88%`</span> | <span class="bench-win">88 `-98%`</span> | <span class="bench-win">2 `-85%`</span> |
+| `base64` | <span class="bench-loss">1,542 `-6%`</span> | <span class="bench-win">76,773 `-88%`</span> | <span class="bench-win">88 `-98%`</span> | <span class="bench-win">2 `-85%`</span> |
+| `base64url` | <span class="bench-loss">1,495 `-9%`</span> | <span class="bench-win">77,543 `-87%`</span> | <span class="bench-win">104 `-98%`</span> | <span class="bench-win">2 `-85%`</span> |
+| `hex` | <span class="bench-loss">1,557 `-5%`</span> | <span class="bench-win">78,395 `-87%`</span> | <span class="bench-win">88 `-98%`</span> | <span class="bench-win">2 `-85%`</span> |
+| `base16` | <span class="bench-loss">1,480 `-10%`</span> | <span class="bench-win">80,161 `-87%`</span> | <span class="bench-win">88 `-98%`</span> | <span class="bench-win">2 `-85%`</span> |
+| `base45` | <span class="bench-loss">1,420 `-14%`</span> | <span class="bench-win">89,984 `-85%`</span> | <span class="bench-loss">9,602 `+112%`</span> | <span class="bench-win">3 `-78%`</span> |
+| `multipart` | <span class="bench-loss">1,006 `-39%`</span> | <span class="bench-win">102,523 `-83%`</span> | <span class="bench-loss">6,885 `+52%`</span> | <span class="bench-win">10 `-26%`</span> |
+| `ascii85` | <span class="bench-loss">1,298 `-21%`</span> | <span class="bench-win">128,271 `-79%`</span> | <span class="bench-loss">8,321 `+83%`</span> | <span class="bench-win">3 `-78%`</span> |
+| `toml` | <span class="bench-loss">648 `-61%`</span> | <span class="bench-win">165,494 `-73%`</span> | <span class="bench-win">24 `-99%`</span> | <span class="bench-win">1 `-93%`</span> |
+| `ndjson` | <span class="bench-loss">572 `-65%`</span> | <span class="bench-win">208,240 `-66%`</span> | <span class="bench-win">72 `-98%`</span> | <span class="bench-win">2 `-85%`</span> |
+| `yaml` | <span class="bench-loss">549 `-67%`</span> | <span class="bench-win">218,050 `-65%`</span> | <span class="bench-win">24 `-99%`</span> | <span class="bench-win">1 `-93%`</span> |
+| `xml` | <span class="bench-loss">432 `-74%`</span> | <span class="bench-win">271,413 `-56%`</span> | <span class="bench-loss">7,256 `+60%`</span> | <span class="bench-loss">212 `×15.6`</span> |
+| `base62` | <span class="bench-loss">24 `-99%`</span> | <span class="bench-loss">4,745,747 `+670%`</span> | <span class="bench-loss">26,712 `+488%`</span> | <span class="bench-win">5 `-63%`</span> |
+| `base58` | <span class="bench-loss">21 `-99%`</span> | <span class="bench-loss">5,197,218 `+743%`</span> | <span class="bench-loss">26,712 `+488%`</span> | <span class="bench-win">5 `-63%`</span> |
+| `form` *skipped* | [0.3.40.1 VALUE_INVALID] form codec requires a url.Values-shaped value | – | – | – |
+| `pem` *skipped* | [0.3.10.3 VALUE_INVALID] PEM codec requires a non-nil *pem.Block value | – | – | – |
+| `flatbuffers` *skipped* | [0.3.23.1 FLATBUFFERS_BAD_TYPE] FlatBuffers codec requires []byte or a BytesProvider value | – | – | – |
+| `csv` *skipped* | [0.3.8.3 VALUE_INVALID] CSV codec requires a [][]string value | – | – | – |
+| `asn1-der` *skipped* | [0.3.9.1 MARSHAL_FAILED] ASN.1 DER encoding failed | – | – | – |
 
 #### Append — large payload
 
-> **Mean baseline** across 24 codecs: `5,070,981 ns/op` · `2,258,384 B/op` · `5,543 allocs/op` · `1,808,400 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `58,033,855 ns/op` · `57,936 B/op` · `155 allocs/op` · `163 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `base58` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `form` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `base62` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `flatbuffers` | <span class="bench-win">21,149,972 `×11.7`</span> | <span class="bench-win">56 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-100%`</span> |
-| `tlv` | <span class="bench-win">20,638,498 `×11.4`</span> | <span class="bench-win">59 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-100%`</span> |
-| `pem` | <span class="bench-loss">684,657 `-62%`</span> | <span class="bench-win">1,703 `-100%`</span> | <span class="bench-win">1,472 `-100%`</span> | <span class="bench-win">8 `-100%`</span> |
-| `asn1-der` | <span class="bench-loss">455,258 `-75%`</span> | <span class="bench-win">2,705 `-100%`</span> | <span class="bench-win">808 `-100%`</span> | <span class="bench-win">23 `-100%`</span> |
-| `csv` | <span class="bench-loss">390,439 `-78%`</span> | <span class="bench-win">3,061 `-100%`</span> | <span class="bench-win">4,185 `-100%`</span> | <span class="bench-win">3 `-100%`</span> |
-| `xml` | <span class="bench-loss">77,134 `-96%`</span> | <span class="bench-win">15,755 `-100%`</span> | <span class="bench-win">5,183 `-100%`</span> | <span class="bench-win">18 `-100%`</span> |
-| `cbor` | <span class="bench-loss">1,020 `-100%`</span> | <span class="bench-win">1,196,331 `-76%`</span> | <span class="bench-win">184 `-100%`</span> | <span class="bench-win">1 `-100%`</span> |
-| `msgpack` | <span class="bench-loss">642 `-100%`</span> | <span class="bench-win">1,815,811 `-64%`</span> | <span class="bench-win">128,442 `-94%`</span> | <span class="bench-win">5,003 `-10%`</span> |
-| `base32` | <span class="bench-loss">390 `-100%`</span> | <span class="bench-win">3,083,018 `-39%`</span> | <span class="bench-win">105,607 `-95%`</span> | <span class="bench-win">4,012 `-28%`</span> |
-| `base64` | <span class="bench-loss">379 `-100%`</span> | <span class="bench-win">3,154,062 `-38%`</span> | <span class="bench-win">105,507 `-95%`</span> | <span class="bench-win">4,012 `-28%`</span> |
-| `base64url` | <span class="bench-loss">372 `-100%`</span> | <span class="bench-win">3,172,687 `-37%`</span> | <span class="bench-win">105,569 `-95%`</span> | <span class="bench-win">4,012 `-28%`</span> |
-| `json` | <span class="bench-loss">406 `-100%`</span> | <span class="bench-win">3,190,821 `-37%`</span> | <span class="bench-win">105,538 `-95%`</span> | <span class="bench-win">4,012 `-28%`</span> |
-| `hex` | <span class="bench-loss">372 `-100%`</span> | <span class="bench-win">3,196,502 `-37%`</span> | <span class="bench-win">105,912 `-95%`</span> | <span class="bench-win">4,012 `-28%`</span> |
-| `multipart` | <span class="bench-loss">372 `-100%`</span> | <span class="bench-win">3,229,305 `-36%`</span> | <span class="bench-win">322,273 `-86%`</span> | <span class="bench-win">4,045 `-27%`</span> |
-| `bson` | <span class="bench-loss">331 `-100%`</span> | <span class="bench-win">3,516,761 `-31%`</span> | <span class="bench-win">447,439 `-80%`</span> | <span class="bench-loss">7,013 `+27%`</span> |
-| `base45` | <span class="bench-loss">328 `-100%`</span> | <span class="bench-win">3,653,886 `-28%`</span> | <span class="bench-win">450,006 `-80%`</span> | <span class="bench-win">4,018 `-28%`</span> |
-| `ascii85` | <span class="bench-loss">313 `-100%`</span> | <span class="bench-win">3,753,717 `-26%`</span> | <span class="bench-win">388,391 `-83%`</span> | <span class="bench-win">4,017 `-28%`</span> |
-| `base16` | <span class="bench-loss">340 `-100%`</span> | <span class="bench-win">3,940,453 `-22%`</span> | <span class="bench-win">110,010 `-95%`</span> | <span class="bench-win">4,012 `-28%`</span> |
-| `toml` | <span class="bench-loss">246 `-100%`</span> | <span class="bench-win">4,943,107 `-3%`</span> | <span class="bench-win">89,014 `-96%`</span> | <span class="bench-win">3,005 `-46%`</span> |
-| `ndjson` | <span class="bench-loss">126 `-100%`</span> | <span class="bench-loss">9,462,132 `+87%`</span> | <span class="bench-win">855,793 `-62%`</span> | <span class="bench-loss">12,042 `+117%`</span> |
-| `yaml` | <span class="bench-loss">20 `-100%`</span> | <span class="bench-loss">70,371,627 `×13.9`</span> | <span class="bench-loss">50,869,847 `×22.5`</span> | <span class="bench-loss">69,774 `×12.6`</span> |
+| `tlv` | <span class="bench-win">534 `+228%`</span> | <span class="bench-win">218,588 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-99%`</span> |
+| `msgpack` | <span class="bench-win">406 `+149%`</span> | <span class="bench-win">286,446 `-100%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-99%`</span> |
+| `cbor` | <span class="bench-win">390 `+139%`</span> | <span class="bench-win">304,039 `-99%`</span> | <span class="bench-win">24 `-100%`</span> | <span class="bench-win">1 `-99%`</span> |
+| `bson` | <span class="bench-win">246 `+51%`</span> | <span class="bench-win">466,912 `-99%`</span> | <span class="bench-win">690 `-99%`</span> | <span class="bench-win">1 `-99%`</span> |
+| `base64` | <span class="bench-loss">156 `-4%`</span> | <span class="bench-win">767,816 `-99%`</span> | <span class="bench-win">770 `-99%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `base32` | <span class="bench-loss">153 `-6%`</span> | <span class="bench-win">773,094 `-99%`</span> | <span class="bench-win">784 `-99%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `base64url` | <span class="bench-loss">153 `-6%`</span> | <span class="bench-win">776,517 `-99%`</span> | <span class="bench-win">784 `-99%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `hex` | <span class="bench-loss">152 `-7%`</span> | <span class="bench-win">787,741 `-99%`</span> | <span class="bench-win">950 `-98%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `multipart` | <span class="bench-loss">146 `-10%`</span> | <span class="bench-win">805,844 `-99%`</span> | <span class="bench-loss">67,153 `+16%`</span> | <span class="bench-win">10 `-94%`</span> |
+| `base16` | <span class="bench-loss">146 `-10%`</span> | <span class="bench-win">816,812 `-99%`</span> | <span class="bench-win">985 `-98%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `json` | <span class="bench-loss">148 `-9%`</span> | <span class="bench-win">836,863 `-99%`</span> | <span class="bench-win">88 `-100%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `base45` | <span class="bench-loss">132 `-19%`</span> | <span class="bench-win">912,243 `-98%`</span> | <span class="bench-loss">107,898 `+86%`</span> | <span class="bench-win">3 `-98%`</span> |
+| `ascii85` | <span class="bench-loss">114 `-30%`</span> | <span class="bench-win">1,029,577 `-98%`</span> | <span class="bench-loss">87,839 `+52%`</span> | <span class="bench-win">3 `-98%`</span> |
+| `toml` | <span class="bench-loss">75 `-54%`</span> | <span class="bench-win">1,524,279 `-97%`</span> | <span class="bench-win">1,225 `-98%`</span> | <span class="bench-win">1 `-99%`</span> |
+| `ndjson` | <span class="bench-loss">49 `-70%`</span> | <span class="bench-win">2,141,330 `-96%`</span> | <span class="bench-win">8,096 `-86%`</span> | <span class="bench-win">2 `-99%`</span> |
+| `yaml` | <span class="bench-loss">52 `-68%`</span> | <span class="bench-win">2,224,125 `-96%`</span> | <span class="bench-win">1,756 `-97%`</span> | <span class="bench-win">1 `-99%`</span> |
+| `xml` | <span class="bench-loss">43 `-74%`</span> | <span class="bench-win">2,738,434 `-95%`</span> | <span class="bench-win">35,090 `-39%`</span> | <span class="bench-loss">2,912 `×18.7`</span> |
+| `base62` | <span class="bench-loss">1 `-99%`</span> | <span class="bench-loss">512,704,026 `+783%`</span> | <span class="bench-loss">393,304 `+579%`</span> | <span class="bench-win">6 `-96%`</span> |
+| `base58` | <span class="bench-loss">1 `-99%`</span> | <span class="bench-loss">572,528,573 `+887%`</span> | <span class="bench-loss">393,304 `+579%`</span> | <span class="bench-win">6 `-96%`</span> |
+| `form` *skipped* | [0.3.40.1 VALUE_INVALID] form codec requires a url.Values-shaped value | – | – | – |
+| `pem` *skipped* | [0.3.10.3 VALUE_INVALID] PEM codec requires a non-nil *pem.Block value | – | – | – |
+| `flatbuffers` *skipped* | [0.3.23.1 FLATBUFFERS_BAD_TYPE] FlatBuffers codec requires []byte or a BytesProvider value | – | – | – |
+| `csv` *skipped* | [0.3.8.3 VALUE_INVALID] CSV codec requires a [][]string value | – | – | – |
+| `asn1-der` *skipped* | [0.3.9.1 MARSHAL_FAILED] ASN.1 DER encoding failed | – | – | – |
 
 </details>
 
@@ -328,75 +336,87 @@ Each operation is wrapped in a collapsible block (small / medium / large grouped
 
 #### StreamEncode — small payload
 
-> **Mean baseline** across 17 codecs: `209,471 ns/op` · `113,949 B/op` · `126 allocs/op` · `211,153 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `10,404 ns/op` · `2,348 B/op` · `11 allocs/op` · `18,375 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `base62` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `base58` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `tlv` | <span class="bench-win">3,431,673 `×16.3`</span> | <span class="bench-win">345 `-100%`</span> | <span class="bench-win">152 `-100%`</span> | <span class="bench-win">4 `-97%`</span> |
-| `toml` | <span class="bench-loss">30,397 `-86%`</span> | <span class="bench-win">40,353 `-81%`</span> | <span class="bench-win">9,876 `-91%`</span> | <span class="bench-win">17 `-87%`</span> |
-| `xml` | <span class="bench-loss">28,746 `-86%`</span> | <span class="bench-win">41,962 `-80%`</span> | <span class="bench-win">9,504 `-92%`</span> | <span class="bench-win">35 `-72%`</span> |
-| `cbor` | <span class="bench-loss">24,472 `-88%`</span> | <span class="bench-win">49,051 `-77%`</span> | <span class="bench-win">57,682 `-49%`</span> | <span class="bench-win">7 `-94%`</span> |
-| `msgpack` | <span class="bench-loss">20,396 `-90%`</span> | <span class="bench-win">58,809 `-72%`</span> | <span class="bench-win">60,520 `-47%`</span> | <span class="bench-win">62 `-51%`</span> |
-| `json` | <span class="bench-loss">7,911 `-96%`</span> | <span class="bench-win">140,408 `-33%`</span> | <span class="bench-win">72,371 `-36%`</span> | <span class="bench-win">79 `-37%`</span> |
-| `multipart` | <span class="bench-loss">6,656 `-97%`</span> | <span class="bench-win">176,259 `-16%`</span> | <span class="bench-win">104,695 `-8%`</span> | <span class="bench-loss">148 `+17%`</span> |
-| `base32` | <span class="bench-loss">5,902 `-97%`</span> | <span class="bench-win">188,694 `-10%`</span> | <span class="bench-loss">134,152 `+18%`</span> | <span class="bench-win">84 `-34%`</span> |
-| `base64url` | <span class="bench-loss">5,994 `-97%`</span> | <span class="bench-win">188,928 `-10%`</span> | <span class="bench-loss">134,153 `+18%`</span> | <span class="bench-win">84 `-34%`</span> |
-| `base64` | <span class="bench-loss">5,740 `-97%`</span> | <span class="bench-win">189,802 `-9%`</span> | <span class="bench-loss">134,140 `+18%`</span> | <span class="bench-win">84 `-34%`</span> |
-| `ascii85` | <span class="bench-loss">5,794 `-97%`</span> | <span class="bench-win">199,955 `-5%`</span> | <span class="bench-win">68,563 `-40%`</span> | <span class="bench-win">83 `-34%`</span> |
-| `hex` | <span class="bench-loss">5,851 `-97%`</span> | <span class="bench-win">201,052 `-4%`</span> | <span class="bench-loss">134,186 `+18%`</span> | <span class="bench-win">85 `-33%`</span> |
-| `base45` | <span class="bench-loss">5,018 `-98%`</span> | <span class="bench-loss">245,088 `+17%`</span> | <span class="bench-loss">154,857 `+36%`</span> | <span class="bench-win">82 `-35%`</span> |
-| `base16` | <span class="bench-loss">4,278 `-98%`</span> | <span class="bench-loss">272,529 `+30%`</span> | <span class="bench-loss">187,706 `+65%`</span> | <span class="bench-win">82 `-35%`</span> |
-| `yaml` | <span class="bench-loss">775 `-100%`</span> | <span class="bench-loss">1,567,781 `+648%`</span> | <span class="bench-loss">674,583 `+492%`</span> | <span class="bench-loss">1,212 `+859%`</span> |
+| `msgpack` | <span class="bench-win">44,602 `+143%`</span> | <span class="bench-win">2,620 `-75%`</span> | <span class="bench-win">760 `-68%`</span> | <span class="bench-win">6 `-47%`</span> |
+| `tlv` | <span class="bench-win">49,837 `+171%`</span> | <span class="bench-win">2,707 `-74%`</span> | <span class="bench-win">984 `-58%`</span> | <span class="bench-win">6 `-47%`</span> |
+| `cbor` | <span class="bench-win">36,463 `+98%`</span> | <span class="bench-win">3,341 `-68%`</span> | <span class="bench-win">776 `-67%`</span> | <span class="bench-win">6 `-47%`</span> |
+| `bson` | <span class="bench-win">28,052 `+53%`</span> | <span class="bench-win">4,316 `-59%`</span> | <span class="bench-win">1,208 `-49%`</span> | <span class="bench-win">6 `-47%`</span> |
+| `toml` | <span class="bench-win">29,257 `+59%`</span> | <span class="bench-win">4,478 `-57%`</span> | <span class="bench-win">464 `-80%`</span> | <span class="bench-win">9 `-21%`</span> |
+| `json` | <span class="bench-loss">16,960 `-8%`</span> | <span class="bench-win">7,337 `-29%`</span> | <span class="bench-win">1,296 `-45%`</span> | <span class="bench-win">10 `-12%`</span> |
+| `ndjson` | <span class="bench-loss">15,742 `-14%`</span> | <span class="bench-win">7,878 `-24%`</span> | <span class="bench-win">1,496 `-36%`</span> | <span class="bench-win">11 `-4%`</span> |
+| `base64` | <span class="bench-loss">14,523 `-21%`</span> | <span class="bench-win">8,173 `-21%`</span> | <span class="bench-loss">2,688 `+14%`</span> | <span class="bench-win">11 `-4%`</span> |
+| `base32` | <span class="bench-loss">14,559 `-21%`</span> | <span class="bench-win">8,209 `-21%`</span> | <span class="bench-loss">2,912 `+24%`</span> | <span class="bench-win">11 `-4%`</span> |
+| `base45` | <span class="bench-loss">14,133 `-23%`</span> | <span class="bench-win">8,489 `-18%`</span> | <span class="bench-loss">2,528 `+8%`</span> | <span class="bench-loss">13 `+14%`</span> |
+| `base16` | <span class="bench-loss">13,538 `-26%`</span> | <span class="bench-win">8,812 `-15%`</span> | <span class="bench-loss">2,784 `+19%`</span> | <span class="bench-loss">13 `+14%`</span> |
+| `base64url` | <span class="bench-loss">13,447 `-27%`</span> | <span class="bench-win">9,033 `-13%`</span> | <span class="bench-loss">2,688 `+14%`</span> | <span class="bench-win">11 `-4%`</span> |
+| `ascii85` | <span class="bench-loss">12,549 `-32%`</span> | <span class="bench-win">9,278 `-11%`</span> | <span class="bench-loss">2,688 `+14%`</span> | <span class="bench-win">11 `-4%`</span> |
+| `multipart` | <span class="bench-loss">12,687 `-31%`</span> | <span class="bench-win">9,338 `-10%`</span> | <span class="bench-loss">3,448 `+47%`</span> | <span class="bench-loss">19 `+66%`</span> |
+| `hex` | <span class="bench-loss">9,453 `-49%`</span> | <span class="bench-loss">11,228 `+8%`</span> | <span class="bench-loss">3,328 `+42%`</span> | <span class="bench-loss">12 `+5%`</span> |
+| `yaml` | <span class="bench-loss">8,637 `-53%`</span> | <span class="bench-loss">16,494 `+59%`</span> | <span class="bench-win">1,016 `-57%`</span> | <span class="bench-win">6 `-47%`</span> |
+| `xml` | <span class="bench-loss">6,850 `-63%`</span> | <span class="bench-loss">18,911 `+82%`</span> | <span class="bench-loss">6,777 `+189%`</span> | <span class="bench-loss">26 `+128%`</span> |
+| `base62` | <span class="bench-loss">4,560 `-75%`</span> | <span class="bench-loss">25,887 `+149%`</span> | <span class="bench-loss">3,393 `+44%`</span> | <span class="bench-loss">15 `+31%`</span> |
+| `base58` | <span class="bench-loss">3,284 `-82%`</span> | <span class="bench-loss">31,157 `+199%`</span> | <span class="bench-loss">3,392 `+44%`</span> | <span class="bench-loss">15 `+31%`</span> |
+| `pem` *skipped* | [0.3.10.3 VALUE_INVALID] PEM codec requires a non-nil *pem.Block value | – | – | – |
+| `csv` *skipped* | [0.3.8.3 VALUE_INVALID] CSV codec requires a [][]string value | – | – | – |
 
 #### StreamEncode — medium payload
 
-> **Mean baseline** across 17 codecs: `1,724,014 ns/op` · `1,069,684 B/op` · `1,992 allocs/op` · `207,995 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `4,906,914 ns/op` · `75,977 B/op` · `44 allocs/op` · `499 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `base58` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `base62` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `tlv` | <span class="bench-win">3,491,037 `×16.8`</span> | <span class="bench-win">344 `-100%`</span> | <span class="bench-win">152 `-100%`</span> | <span class="bench-win">4 `-100%`</span> |
-| `xml` | <span class="bench-loss">28,603 `-86%`</span> | <span class="bench-win">41,916 `-98%`</span> | <span class="bench-win">9,504 `-99%`</span> | <span class="bench-win">35 `-98%`</span> |
-| `cbor` | <span class="bench-loss">2,713 `-99%`</span> | <span class="bench-win">452,764 `-74%`</span> | <span class="bench-win">142,521 `-87%`</span> | <span class="bench-win">8 `-100%`</span> |
-| `toml` | <span class="bench-loss">2,415 `-99%`</span> | <span class="bench-win">489,218 `-72%`</span> | <span class="bench-win">36,253 `-97%`</span> | <span class="bench-win">308 `-85%`</span> |
-| `msgpack` | <span class="bench-loss">1,965 `-99%`</span> | <span class="bench-win">615,111 `-64%`</span> | <span class="bench-win">169,712 `-84%`</span> | <span class="bench-win">1,523 `-24%`</span> |
-| `json` | <span class="bench-loss">1,179 `-99%`</span> | <span class="bench-win">995,625 `-42%`</span> | <span class="bench-win">205,391 `-81%`</span> | <span class="bench-win">1,240 `-38%`</span> |
-| `multipart` | <span class="bench-loss">1,130 `-99%`</span> | <span class="bench-win">1,081,385 `-37%`</span> | <span class="bench-win">284,940 `-73%`</span> | <span class="bench-win">1,310 `-34%`</span> |
-| `base64` | <span class="bench-loss">1,064 `-99%`</span> | <span class="bench-win">1,126,686 `-35%`</span> | <span class="bench-win">296,394 `-72%`</span> | <span class="bench-win">1,246 `-37%`</span> |
-| `base32` | <span class="bench-loss">1,052 `-99%`</span> | <span class="bench-win">1,137,295 `-34%`</span> | <span class="bench-win">296,309 `-72%`</span> | <span class="bench-win">1,246 `-37%`</span> |
-| `base64url` | <span class="bench-loss">1,066 `-99%`</span> | <span class="bench-win">1,148,603 `-33%`</span> | <span class="bench-win">296,051 `-72%`</span> | <span class="bench-win">1,246 `-37%`</span> |
-| `ascii85` | <span class="bench-loss">956 `-100%`</span> | <span class="bench-win">1,246,405 `-28%`</span> | <span class="bench-win">296,598 `-72%`</span> | <span class="bench-win">1,246 `-37%`</span> |
-| `base45` | <span class="bench-loss">908 `-100%`</span> | <span class="bench-win">1,315,169 `-24%`</span> | <span class="bench-win">424,916 `-60%`</span> | <span class="bench-win">1,245 `-38%`</span> |
-| `hex` | <span class="bench-loss">901 `-100%`</span> | <span class="bench-win">1,359,964 `-21%`</span> | <span class="bench-win">558,689 `-48%`</span> | <span class="bench-win">1,249 `-37%`</span> |
-| `base16` | <span class="bench-loss">866 `-100%`</span> | <span class="bench-win">1,382,532 `-20%`</span> | <span class="bench-win">489,114 `-54%`</span> | <span class="bench-win">1,245 `-38%`</span> |
-| `yaml` | <span class="bench-loss">70 `-100%`</span> | <span class="bench-loss">16,915,227 `+881%`</span> | <span class="bench-loss">14,678,087 `×13.7`</span> | <span class="bench-loss">20,729 `+940%`</span> |
+| `msgpack` | <span class="bench-win">1,274 `+155%`</span> | <span class="bench-win">84,084 `-98%`</span> | <span class="bench-win">35,180 `-54%`</span> | <span class="bench-win">6 `-86%`</span> |
+| `tlv` | <span class="bench-win">1,308 `+162%`</span> | <span class="bench-win">85,013 `-98%`</span> | <span class="bench-win">43,102 `-43%`</span> | <span class="bench-win">6 `-86%`</span> |
+| `cbor` | <span class="bench-win">1,113 `+123%`</span> | <span class="bench-win">114,838 `-98%`</span> | <span class="bench-win">35,181 `-54%`</span> | <span class="bench-win">6 `-86%`</span> |
+| `bson` | <span class="bench-win">682 `+37%`</span> | <span class="bench-win">168,676 `-97%`</span> | <span class="bench-win">69,602 `-8%`</span> | <span class="bench-win">6 `-86%`</span> |
+| `toml` | <span class="bench-win">559 `+12%`</span> | <span class="bench-win">190,768 `-96%`</span> | <span class="bench-win">42,589 `-44%`</span> | <span class="bench-win">19 `-57%`</span> |
+| `json` | <span class="bench-win">500 `±0%`</span> | <span class="bench-win">233,845 `-95%`</span> | <span class="bench-win">43,414 `-43%`</span> | <span class="bench-win">10 `-77%`</span> |
+| `multipart` | <span class="bench-loss">474 `-5%`</span> | <span class="bench-win">245,532 `-95%`</span> | <span class="bench-win">62,549 `-18%`</span> | <span class="bench-win">19 `-57%`</span> |
+| `base64` | <span class="bench-loss">458 `-8%`</span> | <span class="bench-win">264,247 `-95%`</span> | <span class="bench-win">66,089 `-13%`</span> | <span class="bench-win">14 `-68%`</span> |
+| `base32` | <span class="bench-loss">458 `-8%`</span> | <span class="bench-win">264,634 `-95%`</span> | <span class="bench-win">66,144 `-13%`</span> | <span class="bench-win">14 `-68%`</span> |
+| `base64url` | <span class="bench-loss">471 `-6%`</span> | <span class="bench-win">266,387 `-95%`</span> | <span class="bench-win">66,089 `-13%`</span> | <span class="bench-win">14 `-68%`</span> |
+| `base16` | <span class="bench-loss">396 `-21%`</span> | <span class="bench-win">294,673 `-94%`</span> | <span class="bench-loss">125,489 `+65%`</span> | <span class="bench-win">13 `-70%`</span> |
+| `ndjson` | <span class="bench-loss">374 `-25%`</span> | <span class="bench-win">296,803 `-94%`</span> | <span class="bench-win">57,416 `-24%`</span> | <span class="bench-win">12 `-73%`</span> |
+| `ascii85` | <span class="bench-loss">400 `-20%`</span> | <span class="bench-win">302,497 `-94%`</span> | <span class="bench-win">66,089 `-13%`</span> | <span class="bench-win">14 `-68%`</span> |
+| `base45` | <span class="bench-loss">355 `-29%`</span> | <span class="bench-win">313,792 `-94%`</span> | <span class="bench-loss">98,316 `+29%`</span> | <span class="bench-win">13 `-70%`</span> |
+| `hex` | <span class="bench-loss">354 `-29%`</span> | <span class="bench-win">348,479 `-93%`</span> | <span class="bench-loss">131,652 `+73%`</span> | <span class="bench-win">16 `-64%`</span> |
+| `yaml` | <span class="bench-loss">165 `-67%`</span> | <span class="bench-win">711,625 `-85%`</span> | <span class="bench-win">57,470 `-24%`</span> | <span class="bench-win">6 `-86%`</span> |
+| `xml` | <span class="bench-loss">142 `-72%`</span> | <span class="bench-win">837,302 `-83%`</span> | <span class="bench-win">73,136 `-4%`</span> | <span class="bench-loss">618 `×14.0`</span> |
+| `base62` | <span class="bench-loss">3 `-99%`</span> | <span class="bench-loss">41,653,722 `+749%`</span> | <span class="bench-loss">152,032 `+100%`</span> | <span class="bench-win">15 `-66%`</span> |
+| `base58` | <span class="bench-loss">3 `-99%`</span> | <span class="bench-loss">46,554,457 `+849%`</span> | <span class="bench-loss">152,032 `+100%`</span> | <span class="bench-win">15 `-66%`</span> |
+| `pem` *skipped* | [0.3.10.3 VALUE_INVALID] PEM codec requires a non-nil *pem.Block value | – | – | – |
+| `csv` *skipped* | [0.3.8.3 VALUE_INVALID] CSV codec requires a [][]string value | – | – | – |
 
 #### StreamEncode — large payload
 
-> **Mean baseline** across 17 codecs: `14,682,394 ns/op` · `11,298,224 B/op` · `19,759 allocs/op` · `207,955 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 17 codecs that encode the record themselves: `3,051,364 ns/op` · `688,729 B/op` · `526 allocs/op` · `57 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `base58` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `base62` | <span class="bench-loss">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> | <span class="bench-win">0 `-100%`</span> |
-| `tlv` | <span class="bench-win">3,504,537 `×16.9`</span> | <span class="bench-win">342 `-100%`</span> | <span class="bench-win">152 `-100%`</span> | <span class="bench-win">4 `-100%`</span> |
-| `xml` | <span class="bench-loss">29,082 `-86%`</span> | <span class="bench-win">41,793 `-100%`</span> | <span class="bench-win">9,504 `-100%`</span> | <span class="bench-win">35 `-100%`</span> |
-| `cbor` | <span class="bench-loss">278 `-100%`</span> | <span class="bench-win">4,271,731 `-71%`</span> | <span class="bench-win">920,455 `-92%`</span> | <span class="bench-win">14 `-100%`</span> |
-| `toml` | <span class="bench-loss">237 `-100%`</span> | <span class="bench-win">5,050,987 `-66%`</span> | <span class="bench-win">284,932 `-97%`</span> | <span class="bench-win">3,008 `-85%`</span> |
-| `msgpack` | <span class="bench-loss">188 `-100%`</span> | <span class="bench-win">6,327,669 `-57%`</span> | <span class="bench-win">1,432,821 `-87%`</span> | <span class="bench-win">15,026 `-24%`</span> |
-| `json` | <span class="bench-loss">120 `-100%`</span> | <span class="bench-win">9,913,113 `-32%`</span> | <span class="bench-win">1,531,245 `-86%`</span> | <span class="bench-win">12,043 `-39%`</span> |
-| `multipart` | <span class="bench-loss">100 `-100%`</span> | <span class="bench-win">11,027,758 `-25%`</span> | <span class="bench-win">2,374,973 `-79%`</span> | <span class="bench-win">12,132 `-39%`</span> |
-| `base32` | <span class="bench-loss">100 `-100%`</span> | <span class="bench-win">11,063,331 `-25%`</span> | <span class="bench-win">2,418,168 `-79%`</span> | <span class="bench-win">12,051 `-39%`</span> |
-| `base64url` | <span class="bench-loss">100 `-100%`</span> | <span class="bench-win">11,092,972 `-24%`</span> | <span class="bench-win">2,432,441 `-78%`</span> | <span class="bench-win">12,052 `-39%`</span> |
-| `base64` | <span class="bench-loss">100 `-100%`</span> | <span class="bench-win">11,160,705 `-24%`</span> | <span class="bench-win">2,425,226 `-79%`</span> | <span class="bench-win">12,052 `-39%`</span> |
-| `hex` | <span class="bench-loss">100 `-100%`</span> | <span class="bench-win">11,217,373 `-24%`</span> | <span class="bench-win">2,419,377 `-79%`</span> | <span class="bench-win">12,052 `-39%`</span> |
-| `ascii85` | <span class="bench-loss">96 `-100%`</span> | <span class="bench-win">11,744,686 `-20%`</span> | <span class="bench-win">2,418,603 `-79%`</span> | <span class="bench-win">12,051 `-39%`</span> |
-| `base45` | <span class="bench-loss">97 `-100%`</span> | <span class="bench-win">11,997,704 `-18%`</span> | <span class="bench-win">3,067,264 `-73%`</span> | <span class="bench-win">12,050 `-39%`</span> |
-| `base16` | <span class="bench-loss">94 `-100%`</span> | <span class="bench-win">12,989,135 `-12%`</span> | <span class="bench-win">3,903,607 `-65%`</span> | <span class="bench-win">12,065 `-39%`</span> |
-| `yaml` | <span class="bench-loss">8 `-100%`</span> | <span class="bench-loss">131,701,409 `+797%`</span> | <span class="bench-loss">166,431,052 `×14.7`</span> | <span class="bench-loss">209,274 `+959%`</span> |
+| `msgpack` | <span class="bench-win">133 `+130%`</span> | <span class="bench-win">899,880 `-71%`</span> | <span class="bench-win">344,218 `-50%`</span> | <span class="bench-win">6 `-99%`</span> |
+| `tlv` | <span class="bench-win">130 `+125%`</span> | <span class="bench-win">924,795 `-70%`</span> | <span class="bench-win">461,117 `-33%`</span> | <span class="bench-win">6 `-99%`</span> |
+| `cbor` | <span class="bench-win">100 `+73%`</span> | <span class="bench-win">1,163,756 `-62%`</span> | <span class="bench-win">344,230 `-50%`</span> | <span class="bench-win">6 `-99%`</span> |
+| `toml` | <span class="bench-win">63 `+9%`</span> | <span class="bench-win">1,855,860 `-39%`</span> | <span class="bench-win">359,365 `-48%`</span> | <span class="bench-win">26 `-95%`</span> |
+| `bson` | <span class="bench-win">84 `+45%`</span> | <span class="bench-win">1,890,905 `-38%`</span> | <span class="bench-win">633,880 `-8%`</span> | <span class="bench-win">6 `-99%`</span> |
+| `json` | <span class="bench-loss">50 `-14%`</span> | <span class="bench-win">2,404,504 `-21%`</span> | <span class="bench-win">459,235 `-33%`</span> | <span class="bench-win">10 `-98%`</span> |
+| `multipart` | <span class="bench-loss">51 `-12%`</span> | <span class="bench-win">2,466,597 `-19%`</span> | <span class="bench-win">662,147 `-4%`</span> | <span class="bench-win">20 `-96%`</span> |
+| `ndjson` | <span class="bench-loss">51 `-12%`</span> | <span class="bench-win">2,524,580 `-17%`</span> | <span class="bench-loss">690,755 `±0%`</span> | <span class="bench-win">20 `-96%`</span> |
+| `base64url` | <span class="bench-loss">46 `-20%`</span> | <span class="bench-win">2,722,195 `-11%`</span> | <span class="bench-win">524,933 `-24%`</span> | <span class="bench-win">17 `-97%`</span> |
+| `base64` | <span class="bench-loss">44 `-24%`</span> | <span class="bench-win">2,867,721 `-6%`</span> | <span class="bench-win">524,926 `-24%`</span> | <span class="bench-win">17 `-97%`</span> |
+| `base32` | <span class="bench-loss">43 `-26%`</span> | <span class="bench-win">2,945,327 `-3%`</span> | <span class="bench-loss">1,049,337 `+52%`</span> | <span class="bench-win">18 `-97%`</span> |
+| `ascii85` | <span class="bench-loss">40 `-31%`</span> | <span class="bench-win">2,953,294 `-3%`</span> | <span class="bench-win">524,936 `-24%`</span> | <span class="bench-win">17 `-97%`</span> |
+| `hex` | <span class="bench-loss">40 `-31%`</span> | <span class="bench-loss">3,067,250 `+1%`</span> | <span class="bench-loss">1,049,357 `+52%`</span> | <span class="bench-win">19 `-96%`</span> |
+| `base16` | <span class="bench-loss">43 `-26%`</span> | <span class="bench-loss">3,121,407 `+2%`</span> | <span class="bench-loss">1,309,370 `+90%`</span> | <span class="bench-win">21 `-96%`</span> |
+| `base45` | <span class="bench-loss">37 `-36%`</span> | <span class="bench-loss">3,279,623 `+7%`</span> | <span class="bench-loss">1,071,543 `+56%`</span> | <span class="bench-win">17 `-97%`</span> |
+| `yaml` | <span class="bench-loss">16 `-72%`</span> | <span class="bench-loss">6,808,931 `+123%`</span> | <span class="bench-win">573,657 `-17%`</span> | <span class="bench-win">6 `-99%`</span> |
+| `xml` | <span class="bench-loss">12 `-79%`</span> | <span class="bench-loss">9,976,575 `+227%`</span> | <span class="bench-loss">1,125,394 `+63%`</span> | <span class="bench-loss">8,722 `×16.6`</span> |
+| `base62` *skipped* | [0.3.24.4 <- 0.3.24.1 SIZE_EXCEEDED] base-N input exceeds size limit | – | – | – |
+| `pem` *skipped* | [0.3.10.3 VALUE_INVALID] PEM codec requires a non-nil *pem.Block value | – | – | – |
+| `csv` *skipped* | [0.3.8.3 VALUE_INVALID] CSV codec requires a [][]string value | – | – | – |
+| `base58` *skipped* | [0.3.24.4 <- 0.3.24.1 SIZE_EXCEEDED] base-N input exceeds size limit | – | – | – |
 
 </details>
 
@@ -405,69 +425,87 @@ Each operation is wrapped in a collapsible block (small / medium / large grouped
 
 #### StreamDecode — small payload
 
-> **Mean baseline** across 15 codecs: `356,486 ns/op` · `93,162 B/op` · `690 allocs/op` · `24,730 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `18,880 ns/op` · `4,350 B/op` · `54 allocs/op` · `8,783 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `tlv` | <span class="bench-win">292,894 `×11.8`</span> | <span class="bench-win">4,654 `-99%`</span> | <span class="bench-win">4,880 `-95%`</span> | <span class="bench-win">26 `-96%`</span> |
-| `msgpack` | <span class="bench-loss">12,870 `-48%`</span> | <span class="bench-win">94,152 `-74%`</span> | <span class="bench-win">51,584 `-45%`</span> | <span class="bench-win">263 `-62%`</span> |
-| `toml` | <span class="bench-loss">12,780 `-48%`</span> | <span class="bench-win">95,832 `-73%`</span> | <span class="bench-win">32,321 `-65%`</span> | <span class="bench-win">98 `-86%`</span> |
-| `cbor` | <span class="bench-loss">9,294 `-62%`</span> | <span class="bench-win">121,069 `-66%`</span> | <span class="bench-win">69,480 `-25%`</span> | <span class="bench-win">278 `-60%`</span> |
-| `xml` | <span class="bench-loss">6,342 `-74%`</span> | <span class="bench-win">196,686 `-45%`</span> | <span class="bench-win">33,448 `-64%`</span> | <span class="bench-loss">883 `+28%`</span> |
-| `multipart` | <span class="bench-loss">4,624 `-81%`</span> | <span class="bench-win">260,857 `-27%`</span> | <span class="bench-loss">107,943 `+16%`</span> | <span class="bench-win">270 `-61%`</span> |
-| `json` | <span class="bench-loss">4,672 `-81%`</span> | <span class="bench-win">262,135 `-26%`</span> | <span class="bench-win">71,695 `-23%`</span> | <span class="bench-win">200 `-71%`</span> |
-| `base16` | <span class="bench-loss">4,527 `-82%`</span> | <span class="bench-win">267,012 `-25%`</span> | <span class="bench-win">72,885 `-22%`</span> | <span class="bench-win">201 `-71%`</span> |
-| `hex` | <span class="bench-loss">4,395 `-82%`</span> | <span class="bench-win">271,080 `-24%`</span> | <span class="bench-win">72,878 `-22%`</span> | <span class="bench-win">201 `-71%`</span> |
-| `ascii85` | <span class="bench-loss">3,880 `-84%`</span> | <span class="bench-win">300,049 `-16%`</span> | <span class="bench-win">74,062 `-21%`</span> | <span class="bench-win">201 `-71%`</span> |
-| `base64` | <span class="bench-loss">3,594 `-85%`</span> | <span class="bench-win">312,360 `-12%`</span> | <span class="bench-win">73,825 `-21%`</span> | <span class="bench-win">202 `-71%`</span> |
-| `base64url` | <span class="bench-loss">3,898 `-84%`</span> | <span class="bench-win">315,786 `-11%`</span> | <span class="bench-win">73,819 `-21%`</span> | <span class="bench-win">202 `-71%`</span> |
-| `base32` | <span class="bench-loss">3,078 `-88%`</span> | <span class="bench-loss">375,084 `+5%`</span> | <span class="bench-win">73,560 `-21%`</span> | <span class="bench-win">202 `-71%`</span> |
-| `base45` | <span class="bench-loss">3,446 `-86%`</span> | <span class="bench-loss">394,425 `+11%`</span> | <span class="bench-loss">188,363 `+102%`</span> | <span class="bench-win">221 `-68%`</span> |
-| `yaml` | <span class="bench-loss">664 `-97%`</span> | <span class="bench-loss">2,076,121 `+482%`</span> | <span class="bench-loss">396,699 `+326%`</span> | <span class="bench-loss">6,905 `+900%`</span> |
+| `toml` | <span class="bench-win">30,399 `+246%`</span> | <span class="bench-win">3,944 `-79%`</span> | <span class="bench-win">832 `-81%`</span> | <span class="bench-win">12 `-78%`</span> |
+| `msgpack` | <span class="bench-win">14,361 `+63%`</span> | <span class="bench-win">8,062 `-57%`</span> | <span class="bench-loss">5,128 `+18%`</span> | <span class="bench-win">32 `-42%`</span> |
+| `cbor` | <span class="bench-win">12,678 `+44%`</span> | <span class="bench-win">9,577 `-49%`</span> | <span class="bench-win">1,936 `-55%`</span> | <span class="bench-win">27 `-51%`</span> |
+| `bson` | <span class="bench-win">10,000 `+14%`</span> | <span class="bench-win">11,091 `-41%`</span> | <span class="bench-loss">5,432 `+25%`</span> | <span class="bench-win">34 `-38%`</span> |
+| `json` | <span class="bench-win">8,977 `+2%`</span> | <span class="bench-win">13,011 `-31%`</span> | <span class="bench-win">1,185 `-73%`</span> | <span class="bench-win">22 `-60%`</span> |
+| `ndjson` | <span class="bench-win">9,012 `+3%`</span> | <span class="bench-win">13,958 `-26%`</span> | <span class="bench-loss">4,891 `+12%`</span> | <span class="bench-win">19 `-65%`</span> |
+| `base16` | <span class="bench-loss">8,475 `-4%`</span> | <span class="bench-win">14,264 `-24%`</span> | <span class="bench-win">2,354 `-46%`</span> | <span class="bench-win">23 `-58%`</span> |
+| `hex` | <span class="bench-loss">7,512 `-14%`</span> | <span class="bench-win">15,725 `-17%`</span> | <span class="bench-win">2,353 `-46%`</span> | <span class="bench-win">23 `-58%`</span> |
+| `base45` | <span class="bench-loss">7,794 `-11%`</span> | <span class="bench-win">16,020 `-15%`</span> | <span class="bench-win">3,019 `-31%`</span> | <span class="bench-win">29 `-47%`</span> |
+| `tlv` | <span class="bench-loss">7,534 `-14%`</span> | <span class="bench-win">16,718 `-11%`</span> | <span class="bench-loss">4,488 `+3%`</span> | <span class="bench-loss">215 `+293%`</span> |
+| `base64url` | <span class="bench-loss">6,866 `-22%`</span> | <span class="bench-win">16,785 `-11%`</span> | <span class="bench-win">3,268 `-25%`</span> | <span class="bench-win">24 `-56%`</span> |
+| `base32` | <span class="bench-loss">6,968 `-21%`</span> | <span class="bench-win">16,965 `-10%`</span> | <span class="bench-win">3,011 `-31%`</span> | <span class="bench-win">24 `-56%`</span> |
+| `base64` | <span class="bench-loss">7,890 `-10%`</span> | <span class="bench-win">17,008 `-10%`</span> | <span class="bench-win">3,269 `-25%`</span> | <span class="bench-win">24 `-56%`</span> |
+| `ascii85` | <span class="bench-loss">7,051 `-20%`</span> | <span class="bench-win">17,368 `-8%`</span> | <span class="bench-win">3,508 `-19%`</span> | <span class="bench-win">23 `-58%`</span> |
+| `base62` | <span class="bench-loss">6,079 `-31%`</span> | <span class="bench-loss">20,167 `+7%`</span> | <span class="bench-win">2,570 `-41%`</span> | <span class="bench-win">28 `-49%`</span> |
+| `base58` | <span class="bench-loss">5,846 `-33%`</span> | <span class="bench-loss">20,376 `+8%`</span> | <span class="bench-win">2,570 `-41%`</span> | <span class="bench-win">28 `-49%`</span> |
+| `multipart` | <span class="bench-loss">4,050 `-54%`</span> | <span class="bench-loss">30,013 `+59%`</span> | <span class="bench-loss">14,476 `+233%`</span> | <span class="bench-loss">70 `+28%`</span> |
+| `yaml` | <span class="bench-loss">3,778 `-57%`</span> | <span class="bench-loss">32,322 `+71%`</span> | <span class="bench-loss">5,645 `+30%`</span> | <span class="bench-win">25 `-54%`</span> |
+| `xml` | <span class="bench-loss">1,621 `-82%`</span> | <span class="bench-loss">65,350 `+246%`</span> | <span class="bench-loss">12,720 `+192%`</span> | <span class="bench-loss">358 `+554%`</span> |
+| `pem` *skipped* | [0.3.10.3 VALUE_INVALID] PEM codec requires a non-nil *pem.Block value | – | – | – |
+| `csv` *skipped* | [0.3.8.3 VALUE_INVALID] CSV codec requires a [][]string value | – | – | – |
 
 #### StreamDecode — medium payload
 
-> **Mean baseline** across 15 codecs: `3,034,856 ns/op` · `488,078 B/op` · `6,717 allocs/op` · `22,091 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 19 codecs that encode the record themselves: `1,830,071 ns/op` · `131,166 B/op` · `2,541 allocs/op` · `198 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `tlv` | <span class="bench-win">317,647 `×14.4`</span> | <span class="bench-win">4,463 `-100%`</span> | <span class="bench-win">4,880 `-99%`</span> | <span class="bench-win">26 `-100%`</span> |
-| `xml` | <span class="bench-loss">6,315 `-71%`</span> | <span class="bench-win">193,663 `-94%`</span> | <span class="bench-win">33,448 `-93%`</span> | <span class="bench-win">883 `-87%`</span> |
-| `msgpack` | <span class="bench-loss">928 `-96%`</span> | <span class="bench-win">1,208,802 `-60%`</span> | <span class="bench-win">283,715 `-42%`</span> | <span class="bench-win">4,625 `-31%`</span> |
-| `cbor` | <span class="bench-loss">873 `-96%`</span> | <span class="bench-win">1,379,245 `-55%`</span> | <span class="bench-win">302,619 `-38%`</span> | <span class="bench-win">4,635 `-31%`</span> |
-| `toml` | <span class="bench-loss">739 `-97%`</span> | <span class="bench-win">1,622,360 `-47%`</span> | <span class="bench-win">189,327 `-61%`</span> | <span class="bench-win">1,872 `-72%`</span> |
-| `multipart` | <span class="bench-loss">565 `-97%`</span> | <span class="bench-win">1,976,439 `-35%`</span> | <span class="bench-loss">489,826 `±0%`</span> | <span class="bench-win">3,704 `-45%`</span> |
-| `json` | <span class="bench-loss">572 `-97%`</span> | <span class="bench-win">2,060,047 `-32%`</span> | <span class="bench-win">372,625 `-24%`</span> | <span class="bench-win">3,622 `-46%`</span> |
-| `hex` | <span class="bench-loss">556 `-97%`</span> | <span class="bench-win">2,144,279 `-29%`</span> | <span class="bench-win">373,993 `-23%`</span> | <span class="bench-win">3,625 `-46%`</span> |
-| `base16` | <span class="bench-loss">567 `-97%`</span> | <span class="bench-win">2,146,111 `-29%`</span> | <span class="bench-win">373,852 `-23%`</span> | <span class="bench-win">3,624 `-46%`</span> |
-| `ascii85` | <span class="bench-loss">548 `-98%`</span> | <span class="bench-win">2,223,592 `-27%`</span> | <span class="bench-win">375,161 `-23%`</span> | <span class="bench-win">3,625 `-46%`</span> |
-| `base64url` | <span class="bench-loss">512 `-98%`</span> | <span class="bench-win">2,385,914 `-21%`</span> | <span class="bench-win">374,906 `-23%`</span> | <span class="bench-win">3,626 `-46%`</span> |
-| `base32` | <span class="bench-loss">498 `-98%`</span> | <span class="bench-win">2,395,198 `-21%`</span> | <span class="bench-win">374,668 `-23%`</span> | <span class="bench-win">3,627 `-46%`</span> |
-| `base64` | <span class="bench-loss">549 `-98%`</span> | <span class="bench-win">2,609,044 `-14%`</span> | <span class="bench-win">374,999 `-23%`</span> | <span class="bench-win">3,627 `-46%`</span> |
-| `base45` | <span class="bench-loss">416 `-98%`</span> | <span class="bench-loss">3,558,078 `+17%`</span> | <span class="bench-loss">667,751 `+37%`</span> | <span class="bench-win">3,655 `-46%`</span> |
-| `yaml` | <span class="bench-loss">80 `-100%`</span> | <span class="bench-loss">19,615,616 `+546%`</span> | <span class="bench-loss">2,729,413 `+459%`</span> | <span class="bench-loss">55,982 `+733%`</span> |
+| `toml` | <span class="bench-win">702 `+254%`</span> | <span class="bench-win">176,091 `-90%`</span> | <span class="bench-win">31,070 `-76%`</span> | <span class="bench-win">417 `-84%`</span> |
+| `msgpack` | <span class="bench-win">328 `+65%`</span> | <span class="bench-win">360,492 `-80%`</span> | <span class="bench-win">44,575 `-66%`</span> | <span class="bench-win">1,220 `-52%`</span> |
+| `bson` | <span class="bench-win">295 `+49%`</span> | <span class="bench-win">368,891 `-80%`</span> | <span class="bench-win">72,728 `-45%`</span> | <span class="bench-win">1,222 `-52%`</span> |
+| `cbor` | <span class="bench-win">314 `+58%`</span> | <span class="bench-win">379,690 `-79%`</span> | <span class="bench-win">54,256 `-59%`</span> | <span class="bench-win">1,218 `-52%`</span> |
+| `ndjson` | <span class="bench-win">205 `+3%`</span> | <span class="bench-win">556,738 `-70%`</span> | <span class="bench-win">82,394 `-37%`</span> | <span class="bench-win">1,137 `-55%`</span> |
+| `json` | <span class="bench-win">199 `±0%`</span> | <span class="bench-win">592,678 `-68%`</span> | <span class="bench-win">83,844 `-36%`</span> | <span class="bench-win">1,144 `-55%`</span> |
+| `multipart` | <span class="bench-loss">188 `-5%`</span> | <span class="bench-win">630,723 `-66%`</span> | <span class="bench-win">117,019 `-11%`</span> | <span class="bench-win">1,211 `-52%`</span> |
+| `base16` | <span class="bench-loss">188 `-5%`</span> | <span class="bench-win">633,374 `-65%`</span> | <span class="bench-win">85,016 `-35%`</span> | <span class="bench-win">1,145 `-55%`</span> |
+| `base64url` | <span class="bench-loss">182 `-8%`</span> | <span class="bench-win">655,700 `-64%`</span> | <span class="bench-win">85,932 `-34%`</span> | <span class="bench-win">1,146 `-55%`</span> |
+| `hex` | <span class="bench-loss">178 `-10%`</span> | <span class="bench-win">656,997 `-64%`</span> | <span class="bench-win">85,020 `-35%`</span> | <span class="bench-win">1,145 `-55%`</span> |
+| `base64` | <span class="bench-loss">181 `-9%`</span> | <span class="bench-win">658,974 `-64%`</span> | <span class="bench-win">85,963 `-34%`</span> | <span class="bench-win">1,146 `-55%`</span> |
+| `ascii85` | <span class="bench-loss">175 `-12%`</span> | <span class="bench-win">671,524 `-63%`</span> | <span class="bench-win">86,175 `-34%`</span> | <span class="bench-win">1,145 `-55%`</span> |
+| `base32` | <span class="bench-loss">172 `-13%`</span> | <span class="bench-win">694,088 `-62%`</span> | <span class="bench-win">85,711 `-35%`</span> | <span class="bench-win">1,146 `-55%`</span> |
+| `base45` | <span class="bench-loss">165 `-17%`</span> | <span class="bench-win">698,506 `-62%`</span> | <span class="bench-loss">161,354 `+23%`</span> | <span class="bench-win">1,163 `-54%`</span> |
+| `tlv` | <span class="bench-loss">163 `-18%`</span> | <span class="bench-win">729,416 `-60%`</span> | <span class="bench-loss">200,712 `+53%`</span> | <span class="bench-loss">10,931 `+330%`</span> |
+| `yaml` | <span class="bench-loss">78 `-61%`</span> | <span class="bench-win">1,406,998 `-23%`</span> | <span class="bench-win">94,423 `-28%`</span> | <span class="bench-win">331 `-87%`</span> |
+| `xml` | <span class="bench-loss">36 `-82%`</span> | <span class="bench-loss">3,441,446 `+88%`</span> | <span class="bench-loss">681,289 `+419%`</span> | <span class="bench-loss">19,090 `+651%`</span> |
+| `base58` | <span class="bench-loss">10 `-95%`</span> | <span class="bench-loss">10,184,835 `+457%`</span> | <span class="bench-loss">177,044 `+35%`</span> | <span class="bench-win">1,166 `-54%`</span> |
+| `base62` | <span class="bench-loss">9 `-95%`</span> | <span class="bench-loss">11,274,200 `+516%`</span> | <span class="bench-loss">177,639 `+35%`</span> | <span class="bench-win">1,167 `-54%`</span> |
+| `pem` *skipped* | [0.3.10.3 VALUE_INVALID] PEM codec requires a non-nil *pem.Block value | – | – | – |
+| `csv` *skipped* | [0.3.8.3 VALUE_INVALID] CSV codec requires a [][]string value | – | – | – |
 
 #### StreamDecode — large payload
 
-> **Mean baseline** across 15 codecs: `30,178,790 ns/op` · `4,570,285 B/op` · `63,937 allocs/op` · `17,680 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
+> **Mean baseline** across the 17 codecs that encode the record themselves: `8,309,394 ns/op` · `1,255,378 B/op` · `27,244 allocs/op` · `21 iters`. Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.
 
 | Codec | Iters | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| `tlv` | <span class="bench-win">258,394 `×14.6`</span> | <span class="bench-win">5,800 `-100%`</span> | <span class="bench-win">4,880 `-100%`</span> | <span class="bench-win">26 `-100%`</span> |
-| `xml` | <span class="bench-loss">6,105 `-65%`</span> | <span class="bench-win">194,758 `-99%`</span> | <span class="bench-win">33,448 `-99%`</span> | <span class="bench-win">883 `-99%`</span> |
-| `msgpack` | <span class="bench-loss">97 `-99%`</span> | <span class="bench-win">12,916,182 `-57%`</span> | <span class="bench-win">2,699,494 `-41%`</span> | <span class="bench-win">45,137 `-29%`</span> |
-| `cbor` | <span class="bench-loss">91 `-99%`</span> | <span class="bench-win">13,011,590 `-57%`</span> | <span class="bench-win">2,642,343 `-42%`</span> | <span class="bench-win">45,149 `-29%`</span> |
-| `multipart` | <span class="bench-loss">64 `-100%`</span> | <span class="bench-win">18,766,501 `-38%`</span> | <span class="bench-win">4,285,342 `-6%`</span> | <span class="bench-win">36,461 `-43%`</span> |
-| `json` | <span class="bench-loss">62 `-100%`</span> | <span class="bench-win">19,453,276 `-36%`</span> | <span class="bench-win">3,754,934 `-18%`</span> | <span class="bench-win">36,365 `-43%`</span> |
-| `base16` | <span class="bench-loss">55 `-100%`</span> | <span class="bench-win">20,399,254 `-32%`</span> | <span class="bench-win">3,756,043 `-18%`</span> | <span class="bench-win">36,366 `-43%`</span> |
-| `hex` | <span class="bench-loss">57 `-100%`</span> | <span class="bench-win">20,431,376 `-32%`</span> | <span class="bench-win">3,755,600 `-18%`</span> | <span class="bench-win">36,365 `-43%`</span> |
-| `ascii85` | <span class="bench-loss">55 `-100%`</span> | <span class="bench-win">20,923,788 `-31%`</span> | <span class="bench-win">3,756,890 `-18%`</span> | <span class="bench-win">36,366 `-43%`</span> |
-| `base64url` | <span class="bench-loss">54 `-100%`</span> | <span class="bench-win">21,304,882 `-29%`</span> | <span class="bench-win">3,756,347 `-18%`</span> | <span class="bench-win">36,366 `-43%`</span> |
-| `base45` | <span class="bench-loss">52 `-100%`</span> | <span class="bench-win">22,177,243 `-27%`</span> | <span class="bench-loss">5,797,310 `+27%`</span> | <span class="bench-win">36,396 `-43%`</span> |
-| `base32` | <span class="bench-loss">52 `-100%`</span> | <span class="bench-win">22,558,232 `-25%`</span> | <span class="bench-win">3,756,353 `-18%`</span> | <span class="bench-win">36,367 `-43%`</span> |
-| `base64` | <span class="bench-loss">50 `-100%`</span> | <span class="bench-win">28,116,920 `-7%`</span> | <span class="bench-win">3,756,668 `-18%`</span> | <span class="bench-win">36,367 `-43%`</span> |
-| `toml` | <span class="bench-loss">20 `-100%`</span> | <span class="bench-loss">52,734,943 `+75%`</span> | <span class="bench-win">1,860,226 `-59%`</span> | <span class="bench-win">18,155 `-72%`</span> |
-| `yaml` | <span class="bench-loss">6 `-100%`</span> | <span class="bench-loss">179,687,112 `+495%`</span> | <span class="bench-loss">24,938,397 `+446%`</span> | <span class="bench-loss">522,286 `+717%`</span> |
+| `toml` | <span class="bench-win">70 `+219%`</span> | <span class="bench-win">1,931,093 `-77%`</span> | <span class="bench-win">833,161 `-34%`</span> | <span class="bench-win">4,027 `-85%`</span> |
+| `msgpack` | <span class="bench-win">34 `+55%`</span> | <span class="bench-win">3,447,183 `-59%`</span> | <span class="bench-win">405,045 `-68%`</span> | <span class="bench-win">12,021 `-56%`</span> |
+| `bson` | <span class="bench-win">36 `+64%`</span> | <span class="bench-win">3,641,792 `-56%`</span> | <span class="bench-win">883,836 `-30%`</span> | <span class="bench-win">12,025 `-56%`</span> |
+| `cbor` | <span class="bench-win">27 `+23%`</span> | <span class="bench-win">4,484,428 `-46%`</span> | <span class="bench-win">469,933 `-63%`</span> | <span class="bench-win">12,020 `-56%`</span> |
+| `multipart` | <span class="bench-loss">21 `-4%`</span> | <span class="bench-win">5,626,079 `-32%`</span> | <span class="bench-win">990,397 `-21%`</span> | <span class="bench-win">12,119 `-56%`</span> |
+| `json` | <span class="bench-loss">18 `-18%`</span> | <span class="bench-win">6,365,510 `-23%`</span> | <span class="bench-win">691,754 `-45%`</span> | <span class="bench-win">12,032 `-56%`</span> |
+| `base16` | <span class="bench-loss">18 `-18%`</span> | <span class="bench-win">6,443,054 `-22%`</span> | <span class="bench-win">824,320 `-34%`</span> | <span class="bench-win">12,035 `-56%`</span> |
+| `ndjson` | <span class="bench-loss">19 `-13%`</span> | <span class="bench-win">6,567,597 `-21%`</span> | <span class="bench-win">817,069 `-35%`</span> | <span class="bench-win">12,028 `-56%`</span> |
+| `base64url` | <span class="bench-loss">18 `-18%`</span> | <span class="bench-win">6,861,730 `-17%`</span> | <span class="bench-win">825,232 `-34%`</span> | <span class="bench-win">12,036 `-56%`</span> |
+| `base64` | <span class="bench-loss">16 `-27%`</span> | <span class="bench-win">6,956,937 `-16%`</span> | <span class="bench-win">825,295 `-34%`</span> | <span class="bench-win">12,036 `-56%`</span> |
+| `hex` | <span class="bench-loss">19 `-13%`</span> | <span class="bench-win">6,999,716 `-16%`</span> | <span class="bench-win">824,028 `-34%`</span> | <span class="bench-win">12,034 `-56%`</span> |
+| `ascii85` | <span class="bench-loss">18 `-18%`</span> | <span class="bench-win">7,096,873 `-15%`</span> | <span class="bench-win">825,474 `-34%`</span> | <span class="bench-win">12,035 `-56%`</span> |
+| `base32` | <span class="bench-loss">14 `-36%`</span> | <span class="bench-win">7,144,324 `-14%`</span> | <span class="bench-win">824,780 `-34%`</span> | <span class="bench-win">12,035 `-56%`</span> |
+| `tlv` | <span class="bench-loss">16 `-27%`</span> | <span class="bench-win">7,763,232 `-7%`</span> | <span class="bench-loss">1,986,377 `+58%`</span> | <span class="bench-loss">110,378 `+305%`</span> |
+| `base45` | <span class="bench-loss">18 `-18%`</span> | <span class="bench-win">7,871,361 `-5%`</span> | <span class="bench-loss">1,543,477 `+23%`</span> | <span class="bench-win">12,058 `-56%`</span> |
+| `yaml` | <span class="bench-loss">8 `-64%`</span> | <span class="bench-loss">14,355,489 `+73%`</span> | <span class="bench-win">1,132,863 `-10%`</span> | <span class="bench-win">3,042 `-89%`</span> |
+| `xml` | <span class="bench-loss">3 `-86%`</span> | <span class="bench-loss">37,703,316 `+354%`</span> | <span class="bench-loss">6,638,397 `+429%`</span> | <span class="bench-loss">189,199 `+594%`</span> |
+| `base62` *skipped* | [0.3.24.4 <- 0.3.24.1 SIZE_EXCEEDED] base-N input exceeds size limit | – | – | – |
+| `pem` *skipped* | [0.3.10.3 VALUE_INVALID] PEM codec requires a non-nil *pem.Block value | – | – | – |
+| `csv` *skipped* | [0.3.8.3 VALUE_INVALID] CSV codec requires a [][]string value | – | – | – |
+| `base58` *skipped* | [0.3.24.4 <- 0.3.24.1 SIZE_EXCEEDED] base-N input exceeds size limit | – | – | – |
 
 </details>
 

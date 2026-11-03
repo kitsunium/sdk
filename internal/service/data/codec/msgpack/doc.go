@@ -34,10 +34,10 @@
 //	str → string           bin → []byte (a copy)
 //	array → []any          map → map[string]any (keys must be str or bin)
 //	timestamp → time.Time (UTC)
+//	any other extension → Ext (its type, a copy of its payload)
 //
 // A map whose keys are not strings is refused here — decode it into a typed
-// map such as map[int]T or map[any]T — and so is an extension type other
-// than the timestamp.
+// map such as map[int]T or map[any]T.
 //
 // Package msgpack — pointers, interfaces, values that decode themselves, and
 // the entry point every decode starts from. unmarshalInto decodes exactly one
@@ -121,9 +121,12 @@
 // everything else by the type's cached plan, so both paths write the same
 // bytes for the same value.
 //
-// Package msgpack — map encoders. Pairs are written in Go's map iteration
-// order, which is not deterministic, exactly as the vendor-backed codec wrote
-// them: a caller who needs stable bytes encodes a struct, or a slice of pairs.
+// Package msgpack — map encoders. Pairs are written in key order, so two
+// Marshal calls on equal values give equal bytes (#1104): string keys
+// byte-wise, as encoding/json orders them; integer keys by value, whatever
+// width each is written in; any other key, or two keys of different kinds,
+// by their encoded bytes; and two keys that encode alike by their values. A
+// map of up to sixteen pairs is ordered on the stack by an insertion sort.
 //
 // The string-keyed maps a program builds most — map[string]any,
 // map[string]string, map[string]int, map[string]int64, map[string]float64 and
@@ -151,7 +154,9 @@
 // encoded once per type. omitempty is decided by the vendor-backed codec's
 // rule: an IsZero() method when the value has one (a nil pointer to such a
 // type is empty), else the kind's zero — no elements, false, 0, nil — and a
-// struct is empty when every one of its fields would be left out.
+// struct is empty when every one of its fields would be left out. omitzero is
+// encoding/json's: the type's IsZero() when it declares one — through the
+// field's address when only the pointer does — else reflect's zero value.
 //
 // One quirk is kept on purpose because the wire shows it: a field inlined
 // from an embedded struct POINTER that is nil is written as nil — unless the
@@ -184,6 +189,10 @@
 //     an empty string, slice, map or array, a nil pointer or interface, a
 //     value whose IsZero() reports true (time.Time), a struct all of whose
 //     fields would be left out.
+//   - `omitzero` leaves a field out when it holds its type's zero value, as
+//     encoding/json does since Go 1.24: the type's IsZero() bool decides when
+//     it declares one, else every bit at zero — so a zero time.Time and an
+//     empty struct are left out. With `omitempty` too, either one is enough.
 //   - A field named `_msgpack` carries struct-wide options: `as_array` (or
 //     `asArray`) encodes the struct as an array of every field in order, and
 //     `omitempty` applies to every field declared after it.

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/yaml"
 )
@@ -627,8 +628,6 @@ func TestMarshalRefuses(t *testing.T) {
 		name  string
 	}
 	tests := []tc{
-		{name: "channel", value: make(chan int)},
-		{name: "function", value: func() {}},
 		{name: "complex", value: complex(1, 2)},
 		{name: "invalid UTF-8", value: "\xff"},
 		{name: "invalid UTF-8 key", value: map[string]int{"\xff": 1}},
@@ -650,6 +649,12 @@ func TestMarshalRefuses(t *testing.T) {
 		_, err := yaml.New().Marshal(tc.value)
 		if !errs.HasReason(err, "MARSHAL_FAILED") {
 			t.Errorf("%s: Marshal error = %v, want MARSHAL_FAILED", tc.name, err)
+		}
+	}
+	//: a channel or a function at the top is the family's VALUE_INVALID (#1101).
+	for name, v := range map[string]any{"channel": make(chan int), "function": func() {}} {
+		if _, err := yaml.New().Marshal(v); !errs.HasCode(err, codec.CodeValueInvalid) {
+			t.Errorf("%s: Marshal error = %v, want VALUE_INVALID", name, err)
 		}
 	}
 	for _, tc := range tests {

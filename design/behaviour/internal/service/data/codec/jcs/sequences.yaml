@@ -1,0 +1,493 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Canonicalize
+    participants:
+      - id: caller
+        kind: actor
+      - id: Canonicalize
+        kind: self
+      - id: readerPool.Get
+        kind: value
+      - id: r.src.Reset
+        kind: value
+      - id: r.dec.Reset
+        kind: value
+      - id: canonicalize
+        kind: internal
+      - id: readerPool.Put
+        kind: value
+    steps:
+      - bind: r
+        eval: readerPool.Get()
+        to: readerPool.Get
+      - eval: r.src.Reset(doc)
+        to: r.src.Reset
+      - eval: r.dec.Reset(&r.src)
+        to: r.dec.Reset
+      - bind: out, err
+        eval: canonicalize(doc, r.dec)
+        to: canonicalize
+      - eval: r.src.Reset(nil)
+        to: r.src.Reset
+      - eval: r.dec.Reset(&r.src)
+        to: r.dec.Reset
+      - eval: readerPool.Put(r)
+        to: readerPool.Put
+      - return: out, err
+  - of: canonicalize
+    participants:
+      - id: caller
+        kind: actor
+      - id: canonicalize
+        kind: self
+      - id: appendValue
+        kind: internal
+      - id: dec.ReadToken
+        kind: internal
+    steps:
+      - bind: out, err
+        eval: appendValue(make([]byte, 0, len(doc)), dec)
+        to: appendValue
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, notJSON(dec)
+          init:
+            bind: _, terr
+            eval: dec.ReadToken()
+            to: dec.ReadToken
+          when: "!errors.Is(terr, io.EOF)"
+      - return: out, nil
+  - of: Marshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: Marshal
+        kind: self
+      - id: jsonv2
+        kind: stdlib
+      - id: Canonicalize
+        kind: internal
+    steps:
+      - bind: doc, err
+        eval: jsonv2.Marshal(v)
+        to: jsonv2
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(err, errs.WrapParams{
+                			Code:    corejcs.CodeJCSMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "The value has no JSON encoding",
+                			Private: "service/data/codec/jcs.Marshal: encoding/json/v2 refused the value",
+                		})
+          when: err != nil
+      - return: Canonicalize(doc)
+        to: Canonicalize
+  - of: appendValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendValue
+        kind: self
+      - id: appendObject
+        kind: internal
+      - id: appendArray
+        kind: internal
+      - id: appendNumber
+        kind: internal
+      - id: appendScalar
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "'{'"
+              do:
+                - return: appendObject(dst, dec)
+                  to: appendObject
+            - case: "'['"
+              do:
+                - return: appendArray(dst, dec)
+                  to: appendArray
+            - case: "'0'"
+              do:
+                - return: appendNumber(dst, dec)
+                  to: appendNumber
+            - default: true
+              do:
+                - return: appendScalar(dst, dec)
+                  to: appendScalar
+          "on": dec.PeekKind()
+  - of: appendScalar
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendScalar
+        kind: self
+      - id: dec.ReadToken
+        kind: internal
+      - id: appendString
+        kind: internal
+    steps:
+      - bind: tok, err
+        eval: dec.ReadToken()
+        to: dec.ReadToken
+      - opt:
+          do:
+            - return: nil, notJSON(dec)
+          when: err != nil
+      - switch:
+          cases:
+            - case: "'\"'"
+              do:
+                - return: appendString(dst, tok.String()), nil
+                  to: appendString
+            - case: "'n'"
+              do:
+                - return: append(dst, "null"...), nil
+            - case: "'t'"
+              do:
+                - return: append(dst, "true"...), nil
+            - case: "'f'"
+              do:
+                - return: append(dst, "false"...), nil
+            - default: true
+              do:
+                - return: nil, notJSON(dec)
+          "on": tok.Kind()
+  - of: appendNumber
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendNumber
+        kind: self
+      - id: dec.ReadValue
+        kind: internal
+      - id: strconv
+        kind: stdlib
+      - id: appendFloat
+        kind: internal
+    steps:
+      - bind: raw, err
+        eval: dec.ReadValue()
+        to: dec.ReadValue
+      - opt:
+          do:
+            - return: nil, notJSON(dec)
+          when: err != nil
+      - bind: f, perr
+        eval: strconv.ParseFloat(string(raw), 64)
+        to: strconv
+      - opt:
+          do:
+            - return: nil, errs.Wrap(corejcs.NumberInvalid, errs.WrapParams{}, errs.Int64("offset", dec.InputOffset()))
+          when: perr != nil
+      - return: appendFloat(dst, f), nil
+        to: appendFloat
+  - of: appendFloat
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFloat
+        kind: self
+      - id: jsonenc
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: append(dst, '0')
+          when: f == 0
+      - bind: number, _
+        eval: jsonenc.AppendFloat(dst, f)
+        to: jsonenc
+      - return: number
+  - of: appendString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendString
+        kind: self
+      - id: appendEscape
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '"')
+      - bind: plain
+        eval: "0"
+      - loop:
+          do:
+            - bind: c
+              eval: s[i]
+            - opt:
+                do:
+                  - continue: true
+                when: c >= firstPrintable && c != '"' && c != '\\'
+            - set: dst
+              value: append(dst, s[plain:i]...)
+            - set: dst
+              to: appendEscape
+              value: appendEscape(dst, c)
+            - set: plain
+              value: i + 1
+          key: i
+          range: len(s)
+      - set: dst
+        value: append(dst, s[plain:]...)
+      - return: append(dst, '"')
+  - of: appendEscape
+    steps:
+      - switch:
+          cases:
+            - case: "'\"'"
+              do:
+                - return: append(dst, '\\', '"')
+            - case: "'\\\\'"
+              do:
+                - return: append(dst, '\\', '\\')
+            - case: "'\\b'"
+              do:
+                - return: append(dst, '\\', 'b')
+            - case: "'\\t'"
+              do:
+                - return: append(dst, '\\', 't')
+            - case: "'\\n'"
+              do:
+                - return: append(dst, '\\', 'n')
+            - case: "'\\f'"
+              do:
+                - return: append(dst, '\\', 'f')
+            - case: "'\\r'"
+              do:
+                - return: append(dst, '\\', 'r')
+            - default: true
+              do:
+                - return: append(dst, '\\', 'u', '0', '0', hexDigits[c>>4], hexDigits[c&0xF])
+          "on": c
+  - of: appendArray
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendArray
+        kind: self
+      - id: dec.ReadToken
+        kind: internal
+      - id: appendValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, notJSON(dec)
+          init:
+            bind: _, err
+            eval: dec.ReadToken()
+            to: dec.ReadToken
+          when: err != nil
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          cond: dec.PeekKind() != ']'
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: "!first"
+            - var:
+                name: err
+                type: error
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: dst, err
+                  eval: appendValue(dst, dec)
+                  op: =
+                  to: appendValue
+                when: err != nil
+          init: first := true
+          post: first = false
+      - opt:
+          do:
+            - return: nil, notJSON(dec)
+          init:
+            bind: _, err
+            eval: dec.ReadToken()
+            to: dec.ReadToken
+          when: err != nil
+      - return: append(dst, ']'), nil
+  - of: appendObject
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendObject
+        kind: self
+      - id: dec.ReadToken
+        kind: internal
+      - id: readMembers
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: appendMembers
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, notJSON(dec)
+          init:
+            bind: _, err
+            eval: dec.ReadToken()
+            to: dec.ReadToken
+          when: err != nil
+      - bind: members, values, err
+        eval: readMembers(dec)
+        to: readMembers
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - eval: slices.SortFunc(members, func(a, b member) int { return compareUTF16(a.name, b.name) })
+        to: slices
+      - return: appendMembers(dst, members, values), nil
+        to: appendMembers
+  - of: readMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: readMembers
+        kind: self
+      - id: dec.ReadToken
+        kind: internal
+      - id: tok.String
+        kind: value
+      - id: appendValue
+        kind: internal
+    steps:
+      - loop:
+          cond: dec.PeekKind() != '}'
+          do:
+            - bind: tok, terr
+              eval: dec.ReadToken()
+              to: dec.ReadToken
+            - opt:
+                do:
+                  - return: nil, nil, notJSON(dec)
+                when: terr != nil || tok.Kind() != '"'
+            - bind: name
+              eval: tok.String()
+              to: tok.String
+            - bind: start
+              eval: len(values)
+            - opt:
+                do:
+                  - return: nil, nil, err
+                init:
+                  bind: values, err
+                  eval: appendValue(values, dec)
+                  op: =
+                  to: appendValue
+                when: err != nil
+            - set: members
+              value: "append(members, member{name: name, start: start, end: len(values)})"
+      - opt:
+          do:
+            - return: nil, nil, notJSON(dec)
+          init:
+            bind: _, err
+            eval: dec.ReadToken()
+            op: =
+            to: dec.ReadToken
+          when: err != nil
+      - return: members, values, nil
+  - of: appendMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendMembers
+        kind: self
+      - id: appendString
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: appendString
+              value: appendString(dst, m.name)
+            - set: dst
+              value: append(dst, ':')
+            - set: dst
+              value: append(dst, values[m.start:m.end]...)
+          key: i
+          range: members
+          value: m
+      - return: append(dst, '}')
+  - of: compareUTF16
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareUTF16
+        kind: self
+      - id: utf8
+        kind: stdlib
+    steps:
+      - loop:
+          cond: a != "" && b != ""
+          do:
+            - bind: ra, na
+              eval: utf8.DecodeRuneInString(a)
+              to: utf8
+            - bind: rb, nb
+              eval: utf8.DecodeRuneInString(b)
+              to: utf8
+            - opt:
+                do:
+                  - return: int(ua) - int(ub)
+                init:
+                  bind: ua, ub
+                  eval: firstUnit(ra), firstUnit(rb)
+                when: ua != ub
+            - opt:
+                do:
+                  - return: int(ra) - int(rb)
+                when: ra != rb
+            - set: a, b
+              value: a[na:], b[nb:]
+      - return: len(a) - len(b)
+  - of: firstUnit
+    participants:
+      - id: caller
+        kind: actor
+      - id: firstUnit
+        kind: self
+      - id: utf16
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: r
+          when: r < firstSupplementary
+      - bind: hi, _
+        eval: utf16.EncodeRune(r)
+        to: utf16
+      - return: hi
+  - of: notJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: notJSON
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corejcs.NotJSON, errs.WrapParams{}, errs.Int64("offset", dec.InputOffset()))
+        to: errs

@@ -9,6 +9,10 @@ sequences:
         kind: self
       - id: conn.Write
         kind: value
+      - id: vec.WriteTo
+        kind: value
+      - id: wholeRecords
+        kind: internal
     steps:
       - bind: dial
         eval: dialer
@@ -21,7 +25,7 @@ sequences:
         eval: dial(network, addr)
       - opt:
           do:
-            - return: nil, nil, wrapDial(derr, network)
+            - return: nil, nil, nil, wrapDial(derr, network)
           when: derr != nil
       - set: send
         value:
@@ -33,18 +37,57 @@ sequences:
                 eval: conn.Write(p)
                 to: conn.Write
               - return: werr
-      - return: send, conn.Close, nil
-  - of: newHTTPSeam
+      - opt:
+          do:
+            - return: send, datagramBatch(datagram.NewBatchSender(conn)), conn.Close, nil
+          when: network != protoTCP
+      - var:
+          name: vec
+          type: net.Buffers
+      - set: sendBatch
+        value:
+          closure:
+            params: _ context.Context, payloads [][]byte
+            results: written int, err error
+            steps:
+              - set: vec
+                value: append(vec[:0], payloads...)
+              - bind: n, werr
+                eval: vec.WriteTo(conn)
+                to: vec.WriteTo
+              - eval: clear(vec[:cap(vec)])
+              - return: wholeRecords(payloads, n), werr
+                to: wholeRecords
+      - return: send, sendBatch, conn.Close, nil
+  - of: datagramBatch
     participants:
       - id: caller
         kind: actor
-      - id: newHTTPSeam
+      - id: datagramBatch
+        kind: self
+      - id: sender.Send
+        kind: value
+    steps:
+      - return:
+          closure:
+            params: _ context.Context, payloads [][]byte
+            results: written int, err error
+            steps:
+              - return: sender.Send(payloads)
+                to: sender.Send
+  - of: newHTTPSeams
+    participants:
+      - id: caller
+        kind: actor
+      - id: newHTTPSeams
         kind: self
       - id: newHTTPClient
         kind: internal
       - id: c.CloseIdleConnections
         kind: value
       - id: postRecord
+        kind: internal
+      - id: postBody
         kind: internal
     steps:
       - bind: c
@@ -77,7 +120,25 @@ sequences:
             steps:
               - return: postRecord(ctx, c, url, p)
                 to: postRecord
-      - return: send, closer
+      - opt:
+          do:
+            - set: sendBatch
+              value:
+                closure:
+                  params: ctx context.Context, payloads [][]byte
+                  results: written int, err error
+                  steps:
+                    - opt:
+                        do:
+                          - return: 0, perr
+                        init:
+                          bind: perr
+                          eval: postBody(ctx, c, url, ndjsonBody(payloads), contentTypeNDJSON)
+                          to: postBody
+                        when: perr != nil
+                    - return: len(payloads), nil
+          when: ndjson
+      - return: send, sendBatch, closer
   - of: newHTTPClient
     steps:
       - return: |-
@@ -115,6 +176,17 @@ sequences:
         kind: actor
       - id: postRecord
         kind: self
+      - id: postBody
+        kind: internal
+    steps:
+      - return: postBody(ctx, c, url, p, contentTypeJSON)
+        to: postBody
+  - of: postBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: postBody
+        kind: self
       - id: http
         kind: stdlib
       - id: req.Header.Set
@@ -129,7 +201,7 @@ sequences:
           do:
             - return: rerr
           when: rerr != nil
-      - eval: req.Header.Set("Content-Type", contentTypeJSON)
+      - eval: req.Header.Set("Content-Type", contentType)
         to: req.Header.Set
       - bind: resp, derr
         eval: c.Do(req)
@@ -164,18 +236,24 @@ sequences:
         kind: actor
       - id: compose
         kind: self
-      - id: newNetSink
+      - id: composeSink
         kind: internal
+    steps:
+      - return: composeSink(newNetSink(network, send, closer), cfg, 1)
+        to: composeSink
+  - of: composeSink
+    participants:
+      - id: caller
+        kind: actor
+      - id: composeSink
+        kind: self
       - id: async
         kind: package
       - id: levelgate
         kind: package
     steps:
-      - bind: base
-        eval: newNetSink(network, send, closer)
-        to: newNetSink
       - bind: nonblocking
-        eval: "async.New(base, async.Config{BufferSize: cfg.BufferSize, OnDrop: cfg.OnDrop, OnError: cfg.OnError})"
+        eval: "async.New(base, async.Config{BufferSize: cfg.BufferSize, OnDrop: cfg.OnDrop, OnError: cfg.OnError, BatchMax: batchMax})"
         to: async
       - return: levelgate.New(nonblocking, cfg.MinLevel)
         to: levelgate
@@ -189,7 +267,8 @@ sequences:
           when: |-
             !decodeStr(raw, "address", &c.Address) || c.Address == "" ||
             		!decodeLevelKey(raw, &c.MinLevel) ||
-            		!decodeIntKey(raw, "buffer_size", &c.BufferSize)
+            		!decodeIntKey(raw, "buffer_size", &c.BufferSize) ||
+            		!decodeBoolKey(raw, "http_batch_ndjson", &c.HTTPBatchNDJSON)
       - return: c, nil
   - of: (*netFactory).invalid
     participants:
@@ -249,6 +328,23 @@ sequences:
           when: perr != nil
       - set: "*dst"
         value: lvl
+      - return: "true"
+  - of: decodeBoolKey
+    steps:
+      - bind: v, present
+        eval: raw[key]
+      - opt:
+          do:
+            - return: "true"
+          when: "!present"
+      - bind: b, ok
+        eval: v.(bool)
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - set: "*dst"
+        value: b
       - return: "true"
   - of: decodeIntKey
     steps:
@@ -316,6 +412,45 @@ sequences:
             - return: 0, wrapWrite(serr, s.network, len(p))
           when: serr != nil
       - return: len(p), nil
+  - of: (*netSink).WriteBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*netSink).WriteBatch
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.sendAll
+        kind: internal
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, wrapWrite(ctx.Err(), s.network, 0)
+          when: ctx != nil && ctx.Err() != nil
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: written, serr
+        eval: s.sendAll(ctx, payloads)
+        to: s.sendAll
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - bind: undelivered
+              eval: "0"
+            - loop:
+                do:
+                  - op: +=
+                    set: undelivered
+                    value: len(p)
+                key: _
+                range: payloads[min(max(written, 0), len(payloads)):]
+                value: p
+            - return: written, wrapWrite(serr, s.network, undelivered)
+          when: serr != nil
+      - return: len(payloads), nil
   - of: (*netSink).Flush
     participants:
       - id: caller
@@ -392,7 +527,7 @@ sequences:
           do:
             - return: nil, wrapDial(nil, f.proto)
           when: c.Address == ""
-      - return: f.build(c)
+      - return: f.build(&c)
         to: f.build
   - of: (*netFactory).build
     participants:
@@ -400,30 +535,49 @@ sequences:
         kind: actor
       - id: (*netFactory).build
         kind: self
-      - id: newHTTPSeam
+      - id: newHTTPSeams
         kind: internal
       - id: compose
+        kind: internal
+      - id: newNetSink
+        kind: internal
+      - id: composeSink
         kind: internal
       - id: newConnSeam
         kind: internal
     steps:
       - opt:
           do:
-            - bind: send, closer
-              eval: newHTTPSeam(c.Address, c.HTTPClient)
-              to: newHTTPSeam
-            - return: compose(f.proto, send, closer, c), nil
-              to: compose
+            - bind: send, sendBatch, closer
+              eval: newHTTPSeams(c.Address, c.HTTPClient, c.HTTPBatchNDJSON)
+              to: newHTTPSeams
+            - opt:
+                do:
+                  - return: compose(f.proto, send, closer, c), nil
+                    to: compose
+                when: sendBatch == nil
+            - bind: base
+              eval: newNetSink(f.proto, send, closer)
+              to: newNetSink
+            - set: base.sendBatch
+              value: sendBatch
+            - return: composeSink(base, c, streamBatchMax), nil
+              to: composeSink
           when: f.proto == protoHTTP
-      - bind: send, closer, derr
+      - bind: send, sendBatch, closer, derr
         eval: newConnSeam(f.proto, c.Address, c.Dialer)
         to: newConnSeam
       - opt:
           do:
             - return: nil, derr
           when: derr != nil
-      - return: compose(f.proto, send, closer, c), nil
-        to: compose
+      - bind: base
+        eval: newNetSink(f.proto, send, closer)
+        to: newNetSink
+      - set: base.sendBatch
+        value: sendBatch
+      - return: composeSink(base, c, streamBatchMax), nil
+        to: composeSink
   - of: wrapDial
     participants:
       - id: caller

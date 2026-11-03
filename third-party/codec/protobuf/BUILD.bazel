@@ -12,14 +12,19 @@ go_library(
     name = "protobuf",
     srcs = [
         "codec.go",
+        "codec_compliance.go",
         "doc.go",
         "gen_codes.go",
+        "stream.go",
     ],
     importpath = "github.com/kitsunium/sdk/third-party/codec/protobuf",
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
+        "@org_golang_google_protobuf//encoding/protodelim",
+        "@org_golang_google_protobuf//encoding/protowire",
         "@org_golang_google_protobuf//proto",
     ],
 )
@@ -36,7 +41,9 @@ go_test(
         "codec_bench_test.go",
         "codec_external_test.go",
         "codec_internal_test.go",
+        "fuzz_external_test.go",
         "gen_api_test.go",
+        "stream_external_test.go",
     ],
     embed = [":protobuf"],
     deps = [
@@ -44,6 +51,7 @@ go_test(
         "//internal/kernel/errs",
         "//internal/service/data/codec/cbor",
         "//internal/service/data/codec/json",
+        "@org_golang_google_protobuf//encoding/protowire",
         "@org_golang_google_protobuf//proto",
         "@org_golang_google_protobuf//types/descriptorpb",
         "@org_golang_google_protobuf//types/known/structpb",

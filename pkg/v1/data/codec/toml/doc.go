@@ -26,6 +26,12 @@
 // value that carry no time zone. Decoded into a time.Time instead, a local
 // value is placed in time.Local.
 //
+// A time.Duration is written as the string of its String() — '1h30m0s' — and
+// read with time.ParseDuration, as the YAML codec writes and reads it: the
+// rule of the formats people edit by hand (#1126). A string without its unit
+// is refused; a bare integer still reads as nanoseconds, the form this codec
+// wrote before, so a file written then loads unchanged.
+//
 // Importing both packages is harmless: a format is registered by the package
 // that implements it, which Go initialises once however many packages import
 // it.

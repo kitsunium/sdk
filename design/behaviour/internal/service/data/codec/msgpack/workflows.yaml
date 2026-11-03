@@ -26,6 +26,38 @@ workflows:
           key: i
           range: s.fields
       - return: "n"
+  - of: appendExt
+    steps:
+      - bind: "n"
+        eval: len(e.Data)
+      - bind: typ
+        eval: byte(e.Type)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: append(append(b, codeFixext1+byte(i), typ), e.Data...), nil
+                when: n == 1<<i
+          key: i
+          range: fixextSizes
+      - switch:
+          cases:
+            - case: n <= math.MaxUint8
+              do:
+                - set: b
+                  value: append(b, codeExt8, byte(n), typ)
+            - case: n <= math.MaxUint16
+              do:
+                - set: b
+                  value: append(binary.BigEndian.AppendUint16(append(b, codeExt16), uint16(n)), typ)
+            - case: uint64(n) <= math.MaxUint32
+              do:
+                - set: b
+                  value: append(binary.BigEndian.AppendUint32(append(b, codeExt32), uint32(n)), typ)
+            - default: true
+              do:
+                - return: b, marshalFault("extension payload exceeds the ext 32 length", errs.Int(fieldLen, n))
+      - return: append(b, e.Data...), nil
   - of: (*layoutBuilder).collides
     steps:
       - loop:

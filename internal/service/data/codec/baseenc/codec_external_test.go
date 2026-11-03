@@ -190,7 +190,7 @@ func TestUnmarshalRejectsBadJSON(t *testing.T) {
 	}
 }
 
-// TestUnmarshalRejectsOversize surfaces BASE_ENC_SIZE_EXCEEDED when the
+// TestUnmarshalRejectsOversize surfaces SIZE_EXCEEDED when the
 // input exceeds the 10 MiB cap.
 func TestUnmarshalRejectsOversize(t *testing.T) {
 	t.Parallel()
@@ -204,8 +204,8 @@ func TestUnmarshalRejectsOversize(t *testing.T) {
 		big := make([]byte, 10*1024*1024+1)
 		var out payload
 		err := c.Unmarshal(big, &out)
-		if !errs.HasReason(err, "BASE_ENC_SIZE_EXCEEDED") {
-			t.Errorf("expected BASE_ENC_SIZE_EXCEEDED, got %v", err)
+		if !errs.HasReason(err, "SIZE_EXCEEDED") {
+			t.Errorf("expected SIZE_EXCEEDED, got %v", err)
 		}
 	}
 	for _, tc := range tests {

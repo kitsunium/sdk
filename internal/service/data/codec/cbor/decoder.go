@@ -3,7 +3,12 @@ package cbor
 import (
 	"errors"
 	"io"
+	"math"
 	"slices"
+
+	"github.com/kitsunium/sdk/internal/core/data/codec"
+	corecbor "github.com/kitsunium/sdk/internal/core/data/codec/cbor"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // The reading policy of the stream decoder.
@@ -31,6 +36,28 @@ type cborDecoder struct {
 	done bool
 	// walk validates the next item, keeping its place across reads.
 	walk validator
+	// mode decodes every item as the instance's Unmarshal does: NewStrict's,
+	// NewDeterministic's or the registered codec's.
+	mode decodeMode
+	// limit is the longest item NewBoundedDecoder's decoder reads, and how
+	// many bytes its buffer ever holds; 0 for NewDecoder's, which has none.
+	limit int
+}
+
+// newBoundedDecoder is NewBoundedDecoder of every instance (#891): a decoder
+// in mode whose items are at most maxBytes long, refused with SIZE_EXCEEDED
+// once maxBytes of an unfinished item are buffered — never more read. A
+// ceiling of zero or below is refused: no bound means unlimited (ADR 0031).
+func newBoundedDecoder(r io.Reader, maxBytes int64, mode decodeMode) (codec.Decoder, error) {
+	//: a ceiling that bounds nothing.
+	if maxBytes <= 0 {
+		//: refused.
+		return nil, errs.Wrap(codec.BoundInvalid, errs.WrapParams{}, errs.Int64("limit", maxBytes))
+	}
+	//: a ceiling past what a buffer can hold is the buffer's own bound.
+	limit := int(min(maxBytes, int64(math.MaxInt)))
+	//: the validator resumes across reads, inside the ceiling.
+	return &cborDecoder{r: r, walk: validator{limit: maxCBORNestedLevels}, mode: mode, limit: limit}, nil
 }
 
 // Decode reads the next data item into v. It returns io.EOF, unwrapped, when
@@ -38,6 +65,10 @@ type cborDecoder struct {
 // one. An item that is well-formed but does not fit v is consumed, so the
 // next Decode reads the item after it.
 func (d *cborDecoder) Decode(v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: a malformed stream cannot be resynchronised.
 	if d.err != nil {
 		//: the same failure.
@@ -57,7 +88,7 @@ func (d *cborDecoder) Decode(v any) error {
 	item := d.buf[d.off : d.off+n]
 	d.off += n
 	d.walk = validator{limit: maxCBORNestedLevels}
-	err = unmarshalItem(item, v)
+	err = unmarshalItemMode(item, v, d.mode)
 	//: a failure ends More, as it always has.
 	if err != nil {
 		d.done = true
@@ -88,6 +119,11 @@ func (d *cborDecoder) nextItem() (int, error) {
 		if complete {
 			//: its length.
 			return d.walk.off, nil
+		}
+		//: an unfinished item already as long as the ceiling is longer.
+		if d.limit > 0 && len(d.buf)-d.off >= d.limit {
+			//: refused, before any more is read.
+			return 0, exceeded(corecbor.SizeExceeded, len(d.buf)-d.off, "a data item in the stream is longer than the decoder's byte ceiling")
 		}
 		//: more bytes, or the reason there are none.
 		if err := d.fill(); err != nil {
@@ -133,17 +169,34 @@ func (d *cborDecoder) compact() {
 	d.off = 0
 }
 
+// growth is how many bytes the buffer grows by: its capacity again, at least
+// minReadSize, and for a bounded decoder never past its ceiling.
+func (d *cborDecoder) growth() int {
+	n := max(minReadSize, cap(d.buf))
+	//: the room left under the ceiling, which nextItem keeps above zero.
+	if d.limit > 0 {
+		n = min(n, d.limit-len(d.buf))
+	}
+	//: the growth.
+	return n
+}
+
 // read reads once into the buffer's free space, which it doubles when it
 // runs short. A reader returning no byte and no error is retried, then
 // reported as stuck.
 func (d *cborDecoder) read() (int, error) {
 	//: room for at least minReadSize bytes, the capacity doubling.
 	if cap(d.buf)-len(d.buf) < minReadSize {
-		d.buf = slices.Grow(d.buf, max(minReadSize, cap(d.buf)))
+		d.buf = slices.Grow(d.buf, d.growth())
+	}
+	free := d.buf[len(d.buf):cap(d.buf)]
+	//: a bounded decoder never buffers past its ceiling.
+	if d.limit > 0 && len(free) > d.limit-len(d.buf) {
+		free = free[:d.limit-len(d.buf)]
 	}
 	//: an io.Reader may return 0, nil; it may not do so forever.
 	for range maxEmptyReads {
-		n, err := d.r.Read(d.buf[len(d.buf):cap(d.buf)])
+		n, err := d.r.Read(free)
 		d.buf = d.buf[:len(d.buf)+n]
 		//: bytes, or an error.
 		if n > 0 || err != nil {

@@ -24,6 +24,14 @@ packages:
             value: "0x00_03_01_04"
         type: errs.Code
       - const:
+          - doc: |-
+              CodeLevelAmbiguous identifies a construction given both a fixed minimum
+              level and a live Leveler — two floors for one handler, of which neither can
+              be said to win.
+            name: CodeLevelAmbiguous
+            value: "0x00_03_01_05"
+        type: errs.Code
+      - const:
           - comment: 0.3.1.10 (serial 10)
             doc: CodeCtxCancelled identifies a Handle call whose context was already done.
             name: CodeCtxCancelled
@@ -301,6 +309,74 @@ packages:
     path: github.com/kitsunium/sdk/internal/core/observe/logger
     ports:
       - doc: |-
+          BatchSink is the sibling port (ADR 0039) of a Sink that can deliver
+          several records in one transport call — one write(2) for a file, one
+          writev(2) for a stream connection — so the async middleware's drainer
+          hands it the records it holds instead of one Write each. The Sink port is
+          not widened: a sink that does not implement BatchSink receives one Write
+          per record, as before. Implementations MUST be safe for concurrent use.
+        methods:
+          - doc: |-
+              WriteBatch delivers payloads[i], the formatted bytes of recs[i], in
+              order, in as few transport calls as the sink can, and reports how
+              many records, counted from the first, were delivered whole. When err
+              is non-nil, recs[written:] were not delivered; when it is nil,
+              written is len(recs). recs and payloads have the same length, and
+              neither they nor the payloads' bytes are retained after the call
+              returns.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: recs
+                type: "[]RecordEvent"
+              - name: payloads
+                type: "[][]byte"
+            name: WriteBatch
+            out:
+              - name: written
+                type: int
+              - name: err
+                type: error
+        name: BatchSink
+      - doc: |-
+          DocumentExporter ships a batch of log records already encoded as its wire
+          document — an OTLP/JSON ExportLogsServiceRequest, what the "otlpjson"
+          writer writes —, under ctx, and returns the verdict (#867). It is the logs
+          signal's twin of the metrics and trace DocumentExporter: the OTLP/HTTP logs
+          exporter posts the document, and app/forward's adapter keeps it in a
+          durable queue to post it later (ADR 0185). An empty doc sends nothing;
+          doc is not retained past the return. Implementations MUST be safe for
+          concurrent use.
+        methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: doc
+                type: "[]byte"
+            name: ExportDocument
+            out:
+              - type: error
+        name: DocumentExporter
+      - doc: |-
+          EncodedDocumentExporter is the sibling of DocumentExporter an exporter
+          implements when it can ship a document already encoded for the transport:
+          "gzip" — what forward's Compress keeps — posted as it rests with
+          Content-Encoding: gzip, "" the identity encoding, which is ExportDocument;
+          any other encoding refused before a request, as a permanent rejection
+          (#1051). Reached by type assertion (ADR 0039).
+        methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: doc
+                type: "[]byte"
+              - name: encoding
+                type: string
+            name: ExportEncodedDocument
+            out:
+              - type: error
+        name: EncodedDocumentExporter
+      - doc: |-
           Encoder formats a RecordEvent into a byte slice. Implementations MUST be
           safe for concurrent use by multiple goroutines and SHOULD avoid allocating
           beyond the caller-supplied buffer (typically borrowed from the
@@ -434,6 +510,52 @@ packages:
                 type: bool
         name: Logger
       - doc: |-
+          PrefixEncoder is the sibling port (ADR 0039) of an Encoder that renders a
+          handler's bound attributes once, when they are bound, and splices the
+          bytes into every record afterwards — instead of rendering the same
+          service, version and instance attributes again on every line. A handler
+          whose Encoder implements it calls AppendAttrs at WithAttrs and WithGroup
+          and AppendWithPrefix per record; one that does not implement it is
+          handed the merged attributes through Append, as before. The line is
+          byte for byte the one Append writes for the record with the bound
+          attributes first.
+        methods:
+          - doc: |-
+              AppendAttrs renders attrs as they appear in a line under the group
+              prefix groups — separators, the reserved-key rename (ADR 0070) and
+              escaping included — and appends the bytes to dst, for a handler to
+              keep and pass to AppendWithPrefix.
+            in:
+              - name: dst
+                type: "[]byte"
+              - name: groups
+                type: "[]string"
+              - name: attrs
+                type: "[]AttrValue"
+            name: AppendAttrs
+            out:
+              - name: out
+                type: "[]byte"
+          - doc: |-
+              AppendWithPrefix serialises r as Append does, with prefix — bytes
+              AppendAttrs wrote for the same groups — spliced after the header and
+              the trace context and before r's own attributes, and returns the
+              (possibly re-allocated) buffer.
+            in:
+              - name: dst
+                type: "[]byte"
+              - name: groups
+                type: "[]string"
+              - name: prefix
+                type: "[]byte"
+              - name: r
+                type: RecordEvent
+            name: AppendWithPrefix
+            out:
+              - name: out
+                type: "[]byte"
+        name: PrefixEncoder
+      - doc: |-
           Sink is the transport port consumed by the generic Handler. Implementations
           MUST be safe for concurrent use by multiple goroutines and SHOULD assume
           their own concurrency model (mutex / lock-free / batched flush) so the
@@ -475,6 +597,23 @@ packages:
               - name: err
                 type: error
         name: Sink
+      - doc: |-
+          SourceRequester is the sibling port (ADR 0039) of a Handler that reads
+          RecordEvent.PC — the caller's program counter. A Logger asks its Handler
+          once, at construction, and walks the stack on each emit only when the
+          answer is true: the walk was a fifth of every emit, paid for an attribute
+          nothing rendered. A Handler that does not implement it answers false, so
+          a foreign Handler that reads PC must implement it and say true; a
+          decorator answers for the Handler it wraps.
+        methods:
+          - doc: |-
+              WantsSource reports whether records handed to this Handler must carry
+              the caller's program counter in RecordEvent.PC.
+            name: WantsSource
+            out:
+              - name: wants
+                type: bool
+        name: SourceRequester
     sentinels:
       - var:
           - code: CodeWriterNil
@@ -501,6 +640,16 @@ packages:
             private: service/observe/logger.NewHandler called with nil Sink
             public: Logger handler requires a non-nil sink
             reason: SINK_REQUIRED
+          - code: CodeLevelAmbiguous
+            doc: |-
+              LevelAmbiguous is returned when a logger is configured with both a
+              non-zero MinLevel and a Leveler: the live floor and the fixed one would
+              disagree as soon as the Leveler moves, so the configuration is refused
+              rather than one of them silently ignored.
+            name: LevelAmbiguous
+            private: a logger configuration set both MinLevel and Level
+            public: Logger configuration sets two minimum levels
+            reason: LEVEL_AMBIGUOUS
           - code: CodeCtxCancelled
             doc: CtxCancelled wraps a cancelled context at Handle time.
             name: CtxCancelled
@@ -816,6 +965,25 @@ packages:
             type: corelogger.Handler
           - name: err
             type: error
+      - doc: |-
+          NewHandlerLeveled is NewHandler gated on a live floor: Enabled reads
+          floor.Level on every record, so a level.Var retuned with Set takes effect on
+          the next record, for this handler and every handler derived from it with
+          WithAttrs or WithGroup. A nil floor gates at level.Info, the zero
+          MinLevel. A nil enc OR sink is rejected as NewHandler rejects it.
+        in:
+          - name: enc
+            type: encoder.Encoder
+          - name: sink
+            type: corelogger.Sink
+          - name: floor
+            type: level.Leveler
+        name: NewHandlerLeveled
+        out:
+          - name: h
+            type: corelogger.Handler
+          - name: err
+            type: error
       - doc: New wraps a core.Handler inside a core.Logger with no trace correlation.
         in:
           - name: h
@@ -903,9 +1071,11 @@ packages:
           WithCaller returns a derived Logger whose emitted records carry a "source"
           attribute resolving the captured call-site program counter into
           file:line:function. The skip argument is the extra stack-frame offset
-          reserved for wrapper layers; pass 0 for direct callers. Foreign Logger
-          implementations (not produced by New) are returned unchanged so callers fail
-          safe rather than losing their logger. A nil Logger is returned as-is.
+          reserved for wrapper layers; pass 0 for direct callers. The derived Logger
+          keeps lg's trace source, so a record emitted under a traced context still
+          carries trace_id and span_id. Foreign Logger implementations (not produced
+          by New) are returned unchanged so callers fail safe rather than losing their
+          logger. A nil Logger is returned as-is.
         in:
           - name: lg
             type: corelogger.Logger
@@ -923,6 +1093,22 @@ packages:
           - name: min
             type: level.Level
         name: NewTextHandler
+        out:
+          - name: h
+            type: "*TextHandler"
+          - name: err
+            type: error
+      - doc: |-
+          NewTextHandlerLeveled is NewTextHandler gated on a live floor: Enabled
+          reads floor.Level on every record, so a level.Var retuned with Set takes
+          effect on the next record, for this handler and every handler derived from
+          it. A nil floor gates at level.Info.
+        in:
+          - name: w
+            type: io.Writer
+          - name: floor
+            type: level.Leveler
+        name: NewTextHandlerLeveled
         out:
           - name: h
             type: "*TextHandler"
@@ -1398,6 +1584,60 @@ packages:
               name: Open
               type: errs.WrapParams
   - doc: |-
+      Package datagram sends a backlog of datagrams over a connected socket in as
+      few system calls as the kernel allows: sendmmsg(2) on Linux, up to MaxBatch
+      datagrams a call, and one Write per datagram elsewhere (#807). It is what the
+      udp writer and journald hand the records their drainer holds. Every payload
+      stays ONE datagram — nothing is gathered — so a record is never merged with
+      the next, which is the property the udp writer's and journald's framing rest
+      on. It declares no error code: a sink wraps what Send returns under its own.
+    constants:
+      - doc: |-
+          MaxBatch is how many datagrams one sendmmsg(2) carries at most; a longer
+          backlog takes several calls.
+        name: MaxBatch
+        type: int
+        value: "64"
+    functions:
+      - doc: |-
+          NewBatchSender returns a BatchSender over conn, a CONNECTED datagram
+          socket — no datagram names a peer. On Linux a conn that exposes its
+          descriptor (syscall.Conn: *net.UDPConn, *net.UnixConn) is written with
+          sendmmsg(2), under the runtime's poller; any other conn, and every other
+          platform, takes one Write per datagram. The scratch one call needs is
+          allocated here, once.
+        in:
+          - name: conn
+            type: net.Conn
+        name: NewBatchSender
+        out:
+          - type: "*BatchSender"
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/internal/datagram
+    types:
+      - doc: |-
+          BatchSender sends payloads as datagrams on one connected socket, reusing
+          one scratch across calls. It is NOT safe for concurrent use: the sink that
+          owns it serialises its sends, as every logger sink does.
+        methods:
+          - doc: |-
+              Send sends each payload as its own datagram, in order, and reports how
+              many, counted from the first, were sent. When err is non-nil,
+              payloads[sent:] were not sent; when it is nil, sent is len(payloads).
+              Neither payloads nor their bytes are retained after Send returns.
+            in:
+              - name: payloads
+                type: "[][]byte"
+            name: Send
+            out:
+              - name: sent
+                type: int
+              - name: err
+                type: error
+            recv: pointer
+        name: BatchSender
+        struct:
+          unexported: true
+  - doc: |-
       Package memory implements a Sink that retains a defensive snapshot of every
       RecordEvent it receives in a mutex-guarded slice. It is intended for tests
       that need to assert on what was logged — level, message, and attrs — without
@@ -1849,9 +2089,10 @@ packages:
             WithCaller returns a derived Logger whose emitted records carry a "source"
             attribute resolving the call site into file:line:function. The skip argument
             is the extra stack-frame offset reserved for wrapper layers; pass 0 for
-            direct callers. The returned Logger shares the original's sink and encoder;
-            the only change is the added annotation, so the option is safe to layer onto
-            any Logger built by this package.
+            direct callers. The returned Logger shares the original's sink, encoder and
+            trace correlation — a record emitted under a traced context still carries
+            trace_id and span_id —; the only change is the added annotation, so the
+            option is safe to layer onto any Logger built by this package.
 
             	lg, _ := logger.Default()
             	lg = logger.WithCaller(lg, 0)
@@ -1976,6 +2217,14 @@ packages:
           name: NewLevelVar
           out:
             - type: "*LevelVar"
+      - var:
+          - doc: |-
+              LevelAmbiguous is returned by NewWithSink when SinkConfig sets both a
+              Level and a non-zero MinLevel (0.3.1.5): two floors, and neither can be
+              said to win.
+            name: LevelAmbiguous
+            reexport: corelogger.LevelAmbiguous
+            type: "*errs.Error"
       - func:
           doc: |-
             ParseLevel maps a canonical lowercase level name (debug / info / warn /
@@ -2065,6 +2314,68 @@ packages:
               pass them to NewWithSink to wire a custom transport pipeline.
             name: Sink
             target: corelogger.Sink
+      - alias:
+          - doc: |-
+              BatchSink is the stable alias for the internal core.BatchSink port: a
+              Sink that also implements it receives several records in one
+              WriteBatch call from an async middleware configured with a BatchMax
+              above one, instead of one Write each.
+            name: BatchSink
+            target: corelogger.BatchSink
+      - alias:
+          - doc: |-
+              DocumentExporter is the stable alias for the port that ships a batch of
+              log records already encoded as an OTLP/JSON document — the OTLP/HTTP
+              logs exporter, or app/forward's queue (#867).
+            name: DocumentExporter
+            target: corelogger.DocumentExporter
+      - alias:
+          - doc: |-
+              EncodedDocumentExporter is the stable alias for the sibling of
+              DocumentExporter that ships a document already gzip, labelled (#1051).
+            name: EncodedDocumentExporter
+            target: corelogger.EncodedDocumentExporter
+      - alias:
+          - doc: |-
+              OTLPConfig is the stable alias for the "otlpjson" writer's
+              configuration: Exporter required; Resource, Scope (the metrics
+              package's Resource and Scope, one type with them), MinLevel, BatchMax,
+              BufferSize, OnDrop and OnError optional (#867).
+            name: OTLPConfig
+            target: otlpjson.Config
+      - alias:
+          - doc: |-
+              OTLPHTTPConfig is the stable alias for the OTLP/HTTP logs exporter's
+              configuration: Endpoint (…/v1/logs), Headers, Timeout, Client,
+              MaxResponseBytes, Gzip.
+            name: OTLPHTTPConfig
+            target: otlpjson.OTLPHTTPConfig
+      - func:
+          doc: |-
+            NewOTLPHTTPExporter returns the OTLP/HTTP logs exporter, the
+            DocumentExporter an OTLPConfig hands its batches to — or a forwarder's
+            Send, which posts them later (#867).
+          forward: otlpjson.NewOTLPHTTPExporter
+          in:
+            - name: cfg
+              type: OTLPHTTPConfig
+          name: NewOTLPHTTPExporter
+          out:
+            - name: exporter
+              type: DocumentExporter
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            OTLPRetryable reports whether a failure of the OTLP/HTTP logs exporter is
+            the transient one a later attempt may cure.
+          forward: otlpjson.OTLPRetryable
+          in:
+            - name: err
+              type: error
+          name: OTLPRetryable
+          out:
+            - type: bool
       - alias:
           - doc: |-
               Record is the stable alias for the internal RecordEvent value passed to
@@ -2286,6 +2597,25 @@ packages:
           - name: raw
             type: "[]byte"
         name: FromConfig
+        out:
+          - name: lg
+            type: Logger
+          - name: err
+            type: error
+      - doc: |-
+          FromConfigWithLevel is FromConfig gated on floor, a LevelVar the caller
+          keeps: the topology's level, when it names one, is set into floor, and
+          every record is checked against floor's current value, so the caller
+          retunes the whole topology with floor.Set and rebuilds nothing. A nil
+          floor is FromConfig.
+        in:
+          - name: format
+            type: Format
+          - name: raw
+            type: "[]byte"
+          - name: floor
+            type: "*LevelVar"
+        name: FromConfigWithLevel
         out:
           - name: lg
             type: Logger
@@ -2630,6 +2960,7 @@ packages:
       levelgate: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate
       memory: github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory
       multi: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/multi
+      otlpjson: github.com/kitsunium/sdk/internal/service/observe/logger/writer/otlpjson
       svclogger: github.com/kitsunium/sdk/internal/service/observe/logger
     path: github.com/kitsunium/sdk/pkg/v1/observe/logger
     sentinels:
@@ -2719,6 +3050,14 @@ packages:
             - doc: MinLevel is the minimum severity emitted; zero value is LevelInfo.
               name: MinLevel
               type: Level
+            - doc: |-
+                Level, when non-nil, is the live floor: every record is checked
+                against Level.Level(), so a LevelVar retuned with Set takes effect on
+                the next record of this Logger and of every Logger derived from it,
+                with nothing rebuilt. Setting both Level and a non-zero MinLevel is
+                refused with LevelAmbiguous (0.3.1.5).
+              name: Level
+              type: Leveler
       - doc: |-
           TopologyConfig is the decoded logger configuration: a global Level (parsed by
           the same names the level package prints — "debug" / "info" / "warn" /

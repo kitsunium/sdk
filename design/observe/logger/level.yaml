@@ -40,7 +40,8 @@ packages:
 
       Package level — range 0.2.17.* (ADR 0006 core/observe/logger/level block).
 
-      Package level — Var, the atomic Level holder behind the Leveler port.
+      Package level — Var, the atomic Level holder behind the Leveler port, and
+      Fixed, the constant one.
     functions:
       - doc: |-
           ParseLevel maps a canonical lowercase level name to its Level constant. It is
@@ -107,6 +108,19 @@ packages:
             recv: value
         name: Level
         underlying: int8
+      - doc: |-
+          Fixed is a constant Leveler: level.Fixed(l) is a floor that never moves,
+          for a handler or a gate built from a plain Level that holds a Leveler. Its
+          Level is one return of the value, which a handler's Enabled reads through
+          the same interface call a live Var answers.
+        methods:
+          - doc: Level reports the constant threshold.
+            name: Level
+            out:
+              - type: Level
+            recv: value
+        name: Fixed
+        underlying: Level
       - doc: |-
           Var is an atomically mutable Level holder satisfying Leveler. Its zero value
           is ready to use and reports Info (the Level zero value), so a freshly

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	coretoml "github.com/kitsunium/sdk/internal/core/data/codec/toml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -20,6 +21,10 @@ type tomlDecoder struct {
 
 // Decode reads the whole document into v.
 func (d *tomlDecoder) Decode(v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: the stream was consumed by an earlier call.
 	if d.done {
 		//: stream already consumed.

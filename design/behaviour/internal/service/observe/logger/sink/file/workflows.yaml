@@ -1,0 +1,18 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: wholeRecords
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i
+                when: len(p) > n
+            - op: "-="
+              set: "n"
+              value: len(p)
+          key: i
+          range: payloads
+          value: p
+      - return: len(payloads)

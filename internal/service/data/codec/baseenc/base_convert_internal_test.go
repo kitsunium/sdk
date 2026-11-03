@@ -7,6 +7,7 @@ package baseenc
 
 import (
 	"bytes"
+	"math/rand/v2"
 	"slices"
 	"testing"
 )
@@ -66,42 +67,37 @@ func Test_buildReverseTable(t *testing.T) {
 	}
 }
 
-// Test_divmodInPlace pins one long-division step. The buffer keeps its length
-// on purpose — leading zeros appear and the caller trims them — so a helper
-// that "helpfully" shortened it would break the caller's loop invariant.
-func Test_divmodInPlace(t *testing.T) {
+// Test_divmodLimbs pins one limb step: the constant-divisor paths of the two
+// shipped radices and the general one agree, the limbs keep their length —
+// the caller trims — and the remainder is the next chunk of digits.
+func Test_divmodLimbs(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name    string
-		buf     []byte
-		radix   int
-		wantBuf []byte
-		wantRem int
+		name      string
+		limbs     []uint32
+		power     uint64
+		wantLimbs []uint32
+		wantRem   uint64
 	}
 	tests := []tc{
-		{"an empty magnitude", []byte{}, 58, []byte{}, 0},
-		{"a value below the radix", []byte{0x01}, 58, []byte{0x00}, 1},
-		{"a value equal to the radix", []byte{58}, 58, []byte{0x01}, 0},
-		{"a two-byte magnitude", []byte{0x01, 0x00}, 58, []byte{0x00, 0x04}, 24},
-		{"an all-zero magnitude", []byte{0x00, 0x00}, 58, []byte{0x00, 0x00}, 0},
-		{"the maximum byte", []byte{0xFF}, 62, []byte{0x04}, 7},
+		{"an empty magnitude", []uint32{}, base58Chunk, []uint32{}, 0},
+		{"a value below the power", []uint32{7}, base58Chunk, []uint32{0}, 7},
+		{"a value equal to the power", []uint32{uint32(base62Chunk)}, base62Chunk, []uint32{1}, 0},
+		{"two limbs", []uint32{1, 0}, base58Chunk, []uint32{0, 6}, 1<<32 - 6*base58Chunk},
+		{"an all-zero magnitude keeps its length", []uint32{0, 0}, base62Chunk, []uint32{0, 0}, 0},
+		{"a radix with no constant path", []uint32{1, 0}, 36 * 36 * 36 * 36 * 36 * 36, []uint32{0, 1}, 1<<32 - 36*36*36*36*36*36},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		buf := slices.Clone(c.buf)
-
-		got := divmodInPlace(buf, c.radix)
-
-		if got != c.wantRem {
-			t.Errorf("divmodInPlace(%x, %d) = %d, want %d", c.buf, c.radix, got, c.wantRem)
+		limbs := slices.Clone(c.limbs)
+		got := divmodLimbs(limbs, c.power)
+		if got != c.wantRem || !slices.Equal(limbs, c.wantLimbs) {
+			t.Errorf("divmodLimbs(%v, %d) = %v rem %d, want %v rem %d", c.limbs, c.power, limbs, got, c.wantLimbs, c.wantRem)
 		}
-		if !bytes.Equal(buf, c.wantBuf) {
-			t.Errorf("divmodInPlace left %x, want %x", buf, c.wantBuf)
-		}
-		//: the length is the caller's loop invariant; the helper must not
-		//: shorten it even when the quotient is all zeros.
-		if len(buf) != len(c.buf) {
-			t.Errorf("divmodInPlace changed the buffer length to %d, want %d", len(buf), len(c.buf))
+		//: the general path must agree with the constant ones.
+		general := slices.Clone(c.limbs)
+		if rem := divmodLimbsBy(general, c.power); rem != got || !slices.Equal(general, limbs) {
+			t.Errorf("divmodLimbsBy disagrees: %v rem %d", general, rem)
 		}
 	}
 	for _, c := range tests {
@@ -112,84 +108,159 @@ func Test_divmodInPlace(t *testing.T) {
 	}
 }
 
-// Test_trimLeadingZeros pins the trim between divisions. An all-zero magnitude
-// must come back empty, because that emptiness is what ends the caller's
-// division loop — trimming to a single zero byte would spin forever.
-func Test_trimLeadingZeros(t *testing.T) {
+// Test_trimLeadingZeroLimbs pins the trim between divisions. An all-zero
+// magnitude must come back empty, because that emptiness is what ends the
+// caller's division loop — trimming to a single zero limb would spin forever.
+func Test_trimLeadingZeroLimbs(t *testing.T) {
 	t.Parallel()
-	type tc struct {
-		name string
+	for _, c := range []struct {
+		in, want []uint32
+	}{
+		{[]uint32{1, 2}, []uint32{1, 2}},
+		{[]uint32{0, 1}, []uint32{1}},
+		{[]uint32{0, 0}, []uint32{}},
+		{[]uint32{}, []uint32{}},
+		{[]uint32{1, 0, 2}, []uint32{1, 0, 2}},
+	} {
+		if got := trimLeadingZeroLimbs(c.in); !slices.Equal(got, c.want) {
+			t.Errorf("trimLeadingZeroLimbs(%v) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+// Test_bytesToLimbs pins the packing: the first limb holds the bytes that do
+// not fill a whole one.
+func Test_bytesToLimbs(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
 		in   []byte
-		want []byte
-	}
-	tests := []tc{
-		{"nothing to trim", []byte{0x01, 0x02}, []byte{0x01, 0x02}},
-		{"one leading zero", []byte{0x00, 0x01}, []byte{0x01}},
-		{"several leading zeros", []byte{0x00, 0x00, 0x00, 0x07}, []byte{0x07}},
-		{"an all-zero magnitude empties", []byte{0x00, 0x00}, []byte{}},
-		{"an empty input", []byte{}, []byte{}},
-		{"an interior zero is kept", []byte{0x01, 0x00, 0x02}, []byte{0x01, 0x00, 0x02}},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		if got := trimLeadingZeros(c.in); !bytes.Equal(got, c.want) {
-			t.Errorf("trimLeadingZeros(%x) = %x, want %x", c.in, got, c.want)
+		want []uint32
+	}{
+		{nil, []uint32{}},
+		{[]byte{0x01}, []uint32{0x01}},
+		{[]byte{0x01, 0x02, 0x03, 0x04}, []uint32{0x01020304}},
+		{[]byte{0x01, 0x02, 0x03, 0x04, 0x05}, []uint32{0x01, 0x02030405}},
+	} {
+		if got := bytesToLimbs(c.in); !slices.Equal(got, c.want) {
+			t.Errorf("bytesToLimbs(%x) = %x, want %x", c.in, got, c.want)
 		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
 	}
 }
 
-// Test_mulAddWindow pins the multiply-add that grows the decode accumulator.
-// The carry loop is the part worth pinning: a carry has to land at the new
-// high end of the window, or the magnitude silently comes out byte-reversed
-// at the top. The reserve check is the second half — the window grows into
-// bytes the caller allocated but never wrote, so anything left of start must
-// still be zero for mag[start:] to be the whole magnitude and nothing else.
-func Test_mulAddWindow(t *testing.T) {
+// Test_mulAddLimbs pins the multiply-add that grows the decode accumulator:
+// a carry lands in a new most-significant limb, never lost.
+func Test_mulAddLimbs(t *testing.T) {
 	t.Parallel()
-	type tc struct {
-		name    string
-		reserve int
-		window  []byte
-		radix   int
-		add     int
-		want    []byte
-	}
-	tests := []tc{
-		{"an empty accumulator takes the addend", 1, []byte{}, 58, 7, []byte{0x07}},
-		{"an empty accumulator with a zero addend stays empty", 1, []byte{}, 58, 0, []byte{}},
-		{"no carry", 1, []byte{0x01}, 58, 0, []byte{58}},
-		{"a carry grows the window", 1, []byte{0xFF}, 58, 0, []byte{0x39, 0xC6}},
-		{"a full-width multiply grows the window", 2, []byte{0xFF, 0xFF}, 256, 0, []byte{0xFF, 0xFF, 0x00}},
-		{"the addend lands in the low byte", 1, []byte{0x01}, 62, 5, []byte{67}},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		mag := make([]byte, c.reserve+len(c.window))
-		copy(mag[c.reserve:], c.window)
-
-		start := mulAddWindow(mag, c.reserve, c.radix, c.add)
-
-		if got := mag[start:]; !bytes.Equal(got, c.want) {
-			t.Errorf("mulAddWindow(%x, radix=%d, add=%d) window = %x, want %x",
-				c.window, c.radix, c.add, got, c.want)
-		}
-		//: the unconsumed reserve must stay zero — a stale byte there would
-		//: silently widen the magnitude on the next growth.
-		if !bytes.Equal(mag[:start], make([]byte, start)) {
-			t.Errorf("mulAddWindow left %x in the reserve, want all zero", mag[:start])
+	for _, c := range []struct {
+		name       string
+		limbs      []uint32
+		scale, add uint64
+		want       []uint32
+	}{
+		{"an empty accumulator takes the addend", nil, base58Chunk, 7, []uint32{7}},
+		{"an empty accumulator with a zero addend stays empty", nil, base58Chunk, 0, nil},
+		{"no carry", []uint32{1}, 58, 0, []uint32{58}},
+		{"a carry grows the magnitude", []uint32{0xFFFFFFFF}, 2, 1, []uint32{0xFFFFFFFF, 1}},
+		{"the addend lands in the low limb", []uint32{1, 1}, 62, 5, []uint32{67, 62}},
+	} {
+		if got := mulAddLimbs(slices.Clone(c.limbs), c.scale, c.add); !slices.Equal(got, c.want) {
+			t.Errorf("%s: mulAddLimbs = %v, want %v", c.name, got, c.want)
 		}
 	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
+}
+
+// referenceEncodeBaseN is the byte-wise long division the limb arithmetic
+// replaced (#898), kept as the oracle its output must equal byte for byte.
+func referenceEncodeBaseN(raw []byte, alphabet string, radix int) []byte {
+	zeros := 0
+	for zeros < len(raw) && raw[zeros] == 0 {
+		zeros++
+	}
+	buf := slices.Clone(raw[zeros:])
+	var digits []byte
+	for len(buf) > 0 {
+		rem := 0
+		for i := range buf {
+			acc := rem*256 + int(buf[i])
+			buf[i] = byte(acc / radix)
+			rem = acc % radix
+		}
+		digits = append(digits, alphabet[rem])
+		for len(buf) > 0 && buf[0] == 0 {
+			buf = buf[1:]
+		}
+	}
+	out := bytes.Repeat([]byte{alphabet[0]}, zeros)
+	slices.Reverse(digits)
+	return append(out, digits...)
+}
+
+// referenceDecodeBaseN is the byte-wise multiply-add the limb arithmetic
+// replaced, kept as the oracle.
+func referenceDecodeBaseN(s []byte, reverse *[base45TableSize]int, radix int) ([]byte, bool) {
+	zeros := 0
+	for zeros < len(s) && reverse[s[zeros]] == 0 {
+		zeros++
+	}
+	var mag []byte
+	for _, c := range s {
+		digit := reverse[c]
+		if digit == base45NotMember {
+			return nil, false
+		}
+		carry := digit
+		for i := len(mag) - 1; i >= 0; i-- {
+			acc := int(mag[i])*radix + carry
+			mag[i] = byte(acc)
+			carry = acc / 256
+		}
+		for carry > 0 {
+			mag = append([]byte{byte(carry)}, mag...)
+			carry /= 256
+		}
+	}
+	return append(make([]byte, zeros), mag...), true
+}
+
+// TestLimbConversionMatchesLongDivision is #898's identity gate: the limb
+// arithmetic writes and reads exactly what the byte-wise long division did,
+// for both radices, on every length from 0 to 95 bytes and in widening steps
+// up to 600 — each limb-boundary residue many times over — with and without
+// leading zeros, and at the all-0xFF magnitudes where the top chunk carries
+// the most digits.
+func TestLimbConversionMatchesLongDivision(t *testing.T) {
+	t.Parallel()
+	rng := rand.New(rand.NewPCG(898, 58))
+	for _, v := range []struct {
+		alphabet string
+		radix    int
+		reverse  *[base45TableSize]int
+	}{
+		{base58Alphabet, base58Radix, &base58Reverse},
+		{base62Alphabet, base62Radix, &base62Reverse},
+	} {
+		for size := 0; size <= 600; size += 1 + 6*(size/96) {
+			raw := make([]byte, size)
+			for i := range raw {
+				raw[i] = byte(rng.Uint32())
+			}
+			inputs := [][]byte{raw, bytes.Repeat([]byte{0xFF}, size)}
+			if size > 2 {
+				inputs = append(inputs, append([]byte{0, 0}, raw[2:]...))
+			}
+			for _, in := range inputs {
+				got := encodeBaseN(in, v.alphabet, v.radix)
+				want := referenceEncodeBaseN(in, v.alphabet, v.radix)
+				if !bytes.Equal(got, want) {
+					t.Fatalf("radix %d, %d bytes: encode %q, long division %q", v.radix, size, got, want)
+				}
+				back, ok := decodeBaseN(got, v.reverse, v.radix)
+				wantBack, wantOK := referenceDecodeBaseN(got, v.reverse, v.radix)
+				if !ok || !wantOK || !bytes.Equal(back, wantBack) || !bytes.Equal(back, in) {
+					t.Fatalf("radix %d, %d bytes: decode %x (%v), long division %x (%v), want %x", v.radix, size, back, ok, wantBack, wantOK, in)
+				}
+			}
+		}
 	}
 }
 
@@ -235,14 +306,15 @@ func Test_assembleDecoded(t *testing.T) {
 	type tc struct {
 		name  string
 		zeros int
-		buf   []byte
+		buf   []uint32
 		want  []byte
 	}
 	tests := []tc{
 		{"no zeros and no magnitude", 0, nil, []byte{}},
 		{"only zeros", 3, nil, []byte{0x00, 0x00, 0x00}},
-		{"only a magnitude", 0, []byte{0x01, 0x02}, []byte{0x01, 0x02}},
-		{"zeros in front of the magnitude", 2, []byte{0x01}, []byte{0x00, 0x00, 0x01}},
+		{"only a magnitude", 0, []uint32{0x0102}, []byte{0x01, 0x02}},
+		{"zeros in front of the magnitude", 2, []uint32{0x01}, []byte{0x00, 0x00, 0x01}},
+		{"limbs little-endian, bytes big-endian", 1, []uint32{0x05060708, 0x01}, []byte{0x00, 0x01, 0x05, 0x06, 0x07, 0x08}},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

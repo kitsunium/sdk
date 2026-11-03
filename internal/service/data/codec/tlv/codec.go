@@ -60,6 +60,14 @@ func (c *tlvCodec) Marshal(v any) (encoded []byte, err error) {
 
 // Unmarshal parses data as TLV into v, which must be a non-nil pointer.
 func (*tlvCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
+	//: no bytes is no document in this format (#1101).
+	if len(data) == 0 {
+		return codec.EmptyInput
+	}
 	//: cap input size so attacker-controlled payloads cannot exhaust RAM.
 	if len(data) > maxTLVBytes {
 		//: surface the size sentinel with diagnostic Fields.

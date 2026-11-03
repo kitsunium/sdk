@@ -3,6 +3,8 @@ package bson
 import (
 	"bytes"
 	"reflect"
+
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 )
 
 // decodeState is what a value's decoding depends on besides its bytes and its
@@ -16,6 +18,8 @@ type decodeState struct {
 	truncate bool
 	// field is the Go name of the innermost struct field, for messages.
 	field string
+	// strict refuses an element no struct field claims (NewStrict, #1106).
+	strict bool
 }
 
 // element is one element of a document: its type byte, its name and the bytes
@@ -38,10 +42,17 @@ func errCorrupt() error {
 
 // decodeInto decodes the validated document data into v.
 func decodeInto(data []byte, v any) error {
+	//: the registered codec's reading.
+	return decodeIntoMode(data, v, false)
+}
+
+// decodeIntoMode is decodeInto, refusing an element no struct field claims
+// when strict is set.
+func decodeIntoMode(data []byte, v any, strict bool) error {
 	//: there is nowhere to decode into.
 	if v == nil {
-		//: refused.
-		return unmarshalError(nil, "the target is nil")
+		//: refused: the family's TARGET_INVALID (#1101).
+		return codec.CheckTarget(nil)
 	}
 	rv := reflect.ValueOf(v)
 	//: a target that reads the whole document itself.
@@ -56,7 +67,7 @@ func decodeInto(data []byte, v any) error {
 		return err
 	}
 	//: the root document into the target.
-	return decodeValue(typeDocument, data, target, planFor(target.Type()), decodeState{})
+	return decodeValue(typeDocument, data, target, planFor(target.Type()), decodeState{strict: strict})
 }
 
 // rootTarget follows a pointer to what it points at, or keeps a map, which is
@@ -72,19 +83,13 @@ func rootTarget(rv reflect.Value) (reflect.Value, error) {
 		//: the map itself.
 		return rv, nil
 	}
-	//: nil, or a value, which cannot be written through.
-	return rv, unmarshalError(nil, "the target must be a non-nil pointer or map, not "+describeTarget(rv))
-}
-
-// describeTarget names a refused target's type, or nil.
-func describeTarget(rv reflect.Value) string {
-	//: a nil pointer or map still has a type.
-	if (rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Map) && rv.IsNil() {
-		//: named as nil.
-		return "a nil " + rv.Type().String()
+	//: nil, or a value, which cannot be written through: the family's refusal (#1101).
+	if !rv.IsValid() {
+		//: an untyped nil.
+		return rv, codec.CheckTarget(nil)
 	}
-	//: any other value.
-	return rv.Type().String()
+	//: a typed nil, or a value.
+	return rv, codec.CheckTarget(rv.Interface())
 }
 
 // rootHook calls a target's own UnmarshalBSON with a copy of the document.

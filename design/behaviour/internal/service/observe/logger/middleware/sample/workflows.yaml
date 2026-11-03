@@ -1,0 +1,26 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*Keyed).admit
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: len(s.keys) < s.cfg.MaxKeys
+      - opt:
+          do:
+            - return: "false"
+          when: now.Sub(s.swept) < s.cfg.Window
+      - set: s.swept
+        value: now
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: now.Sub(c.start) < s.cfg.Window
+            - eval: delete(s.keys, k)
+          key: k
+          range: s.keys
+          value: c
+      - return: len(s.keys) < s.cfg.MaxKeys

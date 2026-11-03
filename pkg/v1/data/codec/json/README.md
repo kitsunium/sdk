@@ -14,6 +14,8 @@ import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/json"
 
 Everything that dispatches through the registry by format name then reads and writes JSON: config.FileSource and config.FSSource, i18n.LoadFS, and the codec package's Marshal and Unmarshal. Importing github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK ships — BSON, CBOR, MessagePack and the rest — which a program that only reads JSON does not need to link. This package links the JSON codec, the core package declaring its codes, the standard library's encoding/json and internal/kernel/jsonenc (the standard library again), and nothing else.
 
+A time.Duration is the integer of its nanoseconds, as encoding/json writes it: the codec's contract is the standard library's own output (#1126).
+
 Importing both packages is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
 
 ### Appenders
@@ -37,6 +39,7 @@ Failures carry the range 0.3.2.\*; match them with errs.HasCode, or the sentinel
 ```
 CodeMarshalFailed    0.3.2.1  encoding/json could not encode the value
 CodeUnmarshalFailed  0.3.2.2  the input is not JSON the target can hold
+CodeSizeExceeded     0.3.2.3  a value longer than NewBoundedDecoder's byte ceiling
 ```
 
 ## Index
@@ -44,6 +47,7 @@ CodeUnmarshalFailed  0.3.2.2  the input is not JSON the target can hold
 - [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func AppendEscaped\(dst \[\]byte, s string\) \[\]byte](<#AppendEscaped>)
+- [func AppendFloat\(dst \[\]byte, f float64\) \(number \[\]byte, ok bool\)](<#AppendFloat>)
 - [func AppendInt\(dst \[\]byte, v int64\) \[\]byte](<#AppendInt>)
 - [func AppendString\(dst \[\]byte, s string\) \[\]byte](<#AppendString>)
 - [func AppendUint\(dst \[\]byte, v uint64\) \[\]byte](<#AppendUint>)
@@ -51,6 +55,7 @@ CodeUnmarshalFailed  0.3.2.2  the input is not JSON the target can hold
 - [type Object](<#Object>)
   - [func \(Object\) Bool\(key string, v bool\) Object](<#Object.Bool>)
   - [func \(Object\) End\(\) \[\]byte](<#Object.End>)
+  - [func \(Object\) Float\(key string, f float64\) Object](<#Object.Float>)
   - [func \(Object\) Int\(key string, v int64\) Object](<#Object.Int>)
   - [func \(Object\) Null\(key string\) Object](<#Object.Null>)
   - [func \(Object\) Raw\(key string, raw \[\]byte\) Object](<#Object.Raw>)
@@ -69,6 +74,17 @@ CodeMarshalFailed identifies a value encoding/json could not encode (0.3.2.1).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/json.CodeJSONMarshalFailed`.
 
 Code `0.3.2.1`
+
+<a name="CodeSizeExceeded"></a>
+```go
+const CodeSizeExceeded errs.Code = 197123
+```
+
+CodeSizeExceeded is 0.3.2.3: a value longer than NewBoundedDecoder's byte ceiling (#891).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/json.CodeJSONSizeExceeded`.
+
+Code `0.3.2.3`
 
 <a name="CodeUnmarshalFailed"></a>
 ```go
@@ -101,6 +117,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/json.Marshal
 
 Code `0.3.2.1` · reason `MARSHAL_FAILED` · public "JSON encoding failed"
 
+<a name="SizeExceeded"></a>
+```go
+var SizeExceeded *errs.Error
+```
+
+SizeExceeded is the sentinel of [CodeSizeExceeded](#CodeSizeExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/json.SizeExceeded`.
+
+Code `0.3.2.3` · reason `SIZE_EXCEEDED` · public "JSON input exceeds a size limit"
+
 <a name="UnmarshalFailed"></a>
 ```go
 var UnmarshalFailed *errs.Error
@@ -120,6 +147,15 @@ func AppendEscaped(dst []byte, s string) []byte
 ```
 
 AppendEscaped appends the body of the JSON string literal of s, without its quotes, so a caller can join several pieces into one literal.
+
+<a name="AppendFloat"></a>
+## func [AppendFloat](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/json/gen_facade.go>)
+
+```go
+func AppendFloat(dst []byte, f float64) (number []byte, ok bool)
+```
+
+AppendFloat appends f to dst as the JSON number encoding/json writes for a float64 and reports true; for NaN and ±Inf it appends nothing and reports false.
 
 <a name="AppendInt"></a>
 ## func [AppendInt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/json/gen_facade.go>)
@@ -189,6 +225,15 @@ func (Object) End() []byte
 ```
 
 End appends the closing brace and returns the slice.
+
+<a name="Object.Float"></a>
+### func \(Object\) [Float](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/jsonenc/object.go>)
+
+```go
+func (Object) Float(key string, f float64) Object
+```
+
+Float writes the member key with f as [AppendFloat](#AppendFloat) writes it, or with the literal null when f is NaN or infinite, which JSON cannot write as a number.
 
 <a name="Object.Int"></a>
 ### func \(Object\) [Int](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/jsonenc/object.go>)

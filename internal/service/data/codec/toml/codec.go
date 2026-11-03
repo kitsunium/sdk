@@ -48,6 +48,10 @@ func (*tomlCodec) Extensions() []string {
 // written into a buffer from the shared codec pool and returned as a copy of
 // exactly its length.
 func (*tomlCodec) Marshal(v any) (encoded []byte, err error) {
+	//: a channel, a function, an unsafe pointer: no wire format holds one (#1101).
+	if verr := codec.CheckValue(v); verr != nil {
+		return nil, verr
+	}
 	//: rent an already-Reset buffer from the shared codec pool.
 	buf := scratch.AcquireBuffer()
 	out, err := encodeDocument(buf.AvailableBuffer(), v)
@@ -70,7 +74,7 @@ func (*tomlCodec) Marshal(v any) (encoded []byte, err error) {
 
 // Unmarshal parses data as a TOML document into v, a non-nil pointer.
 func (*tomlCodec) Unmarshal(data []byte, v any) error {
-	//: parse, then decode; every failure is UNMARSHAL_FAILED.
+	//: the target first (#1101), then parse, then decode; every failure is UNMARSHAL_FAILED.
 	return unmarshal(data, v)
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
 	corecsv "github.com/kitsunium/sdk/internal/core/data/codec/csv"
@@ -33,6 +34,14 @@ const (
 	// expansion in the body cell of the promotion fast-path. Body length
 	// is multiplied by this factor when pre-sizing the output buffer.
 	promotionBufWorstCaseFactor int = 2
+
+	// maxReservedRecords caps the records Unmarshal reserves room for before
+	// it has read one (#1098): past it the table grows by records read.
+	maxReservedRecords int = 4096
+
+	// defaultComma is the delimiter the registered codec writes and reads,
+	// encoding/csv's own default.
+	defaultComma rune = ','
 )
 
 // Package-level vars: the Marshal-buffer pool plus the singleton
@@ -59,6 +68,64 @@ type csvCodec struct {
 	// as text. When false (the default), cells pass through verbatim so
 	// the wire format is lossless for round-trip use.
 	escapeFormulas bool
+	// comma is the delimiter; zero means defaultComma, so the registered
+	// singleton and the instances NewWithEscape builds keep encoding/csv's.
+	comma rune
+	// noHeader is whether a typed table is written and read without a header
+	// row, its columns being the struct's fields in order.
+	noHeader bool
+}
+
+// Options configure a CSV codec built by NewWithOptions. The zero Options is
+// the registered codec's behaviour.
+type Options struct {
+	// Escape turns on the OWASP CSV-injection mitigation (CWE-1236) when
+	// writing: a cell starting with '=', '+', '-', '@', TAB or CR is prefixed
+	// with a single quote so a spreadsheet shows it as text. See NewWithEscape.
+	Escape bool
+	// Comma is the field delimiter; zero means ','. It must be a valid rune
+	// other than '"', '\r', '\n' and U+FFFD, as encoding/csv requires.
+	Comma rune
+	// NoHeader writes and reads a table of structs without a header row: the
+	// columns are the struct's fields, in order. It does not change a
+	// [][]string, whose records are all data.
+	NoHeader bool
+}
+
+// NewWithOptions returns a fresh CSV codec configured by o — the delimiter,
+// the formula mitigation, and whether a table of structs has a header row.
+// A delimiter encoding/csv refuses is OPTIONS_INVALID. The returned codec is
+// not registered: Format("csv") keeps resolving to the default singleton.
+func NewWithOptions(o Options) (c codec.Codec, err error) {
+	//: the zero delimiter is encoding/csv's own.
+	comma := o.Comma
+	if comma == 0 {
+		comma = defaultComma
+	}
+	//: encoding/csv's rule for a delimiter.
+	if !validDelim(comma) {
+		//: refused at construction, never at the first write.
+		return nil, errs.Wrap(corecsv.OptionsInvalid, errs.WrapParams{})
+	}
+	//: a fresh instance, never the singleton.
+	return &csvCodec{escapeFormulas: o.Escape, comma: comma, noHeader: o.NoHeader}, nil
+}
+
+// validDelim is encoding/csv's check of a delimiter.
+func validDelim(r rune) bool {
+	//: not a quote, a line break, the replacement character, or invalid.
+	return r != 0 && r != '"' && r != '\r' && r != '\n' && utf8.ValidRune(r) && r != utf8.RuneError
+}
+
+// format is how the codec writes and reads.
+func (c *csvCodec) format() format {
+	//: the zero delimiter is the default one.
+	comma := c.comma
+	if comma == 0 {
+		comma = defaultComma
+	}
+	//: the codec's settings.
+	return format{comma: comma, escape: c.escapeFormulas, noHeader: c.noHeader}
 }
 
 // New returns the CSV singleton with escapeFormulas disabled. This preserves
@@ -103,84 +170,56 @@ func (*csvCodec) Extensions() []string {
 func (c *csvCodec) Marshal(v any) (encoded []byte, err error) {
 	//: accept both direct and pointer form to keep call sites flexible.
 	records, ok := extractRecords(v)
-	//: type-gate failure surfaces the dedicated sentinel.
+	//: anything else must be a table of structs (#902).
 	if !ok {
-		//: caller passed something that is not [][]string — loud failure.
-		return nil, errs.Wrap(nil, errs.WrapParams{
-			Code:    corecsv.CodeCSVValueInvalid,
-			Reason:  "VALUE_INVALID",
-			Public:  "CSV codec requires a [][]string value",
-			Private: "service/data/codec/csv.Marshal: argument is not [][]string",
-		})
+		//: the typed table, or VALUE_INVALID.
+		return c.marshalTable(v)
 	}
+	//: the codec's delimiter and mitigation.
+	f := c.format()
 	//: promotion-shape fast-path: 2 rows × 1 column with header "_json"
 	//: is the canonical shape pkg/v1/data/codec/promote.go produces for CSV.
-	//: Bypass csv.Writer + WriteAll + Flush by hand-writing the bytes;
-	//: only escape is `"` → `""` because the body is JSON UTF-8.
-	if !c.escapeFormulas && isPromotionShape(records) {
-		//: dedicated fast-path emits identical RFC 4180 bytes.
+	if !f.escape && f.comma == defaultComma && isPromotionShape(records) {
+		//: dedicated fast-path emits the bytes it always emitted.
 		return marshalPromotionShape(records[1][0]), nil
 	}
-	//: apply the OWASP CSV-injection mitigation when the caller opted in;
-	//: unmodified records on the default path preserve wire-format fidelity.
-	if c.escapeFormulas {
-		//: operate on a defensive copy so the caller's slice stays intact.
-		records = escapeFormulaCells(records)
+	//: one allocation at the exact size, then the records written into it
+	//: as encoding/csv's Writer writes them — the mitigation applied cell by
+	//: cell when the caller opted in, never on a copy of the records.
+	out := make([]byte, 0, recordsLen(records, f.comma, f.escape))
+	//: the caller owns the bytes.
+	return appendRecords(out, records, f.comma, f.escape), nil
+}
+
+// marshalTable writes a slice of structs: a header row from the columns,
+// then one record per row (#902).
+func (c *csvCodec) marshalTable(v any) (encoded []byte, err error) {
+	//: the rows and their columns, or VALUE_INVALID.
+	t, terr := tableOf(v)
+	//: not a table of structs.
+	if terr != nil {
+		return nil, terr
 	}
-	//: rent an already-Reset buffer from the shared codec pool.
-	buf := scratch.AcquireBuffer()
-	//: csv.Writer has no Reset — fresh one per call points at our buffer.
-	w := stdcsv.NewWriter(buf)
-	//: WriteAll flushes on return; any error is surfaced via Error().
-	if werr := w.WriteAll(records); werr != nil {
-		//: cap-discard release; abort with the wrapped error.
-		scratch.ReleaseBuffer(buf)
-		//: wrap the stdlib error.
-		return nil, errs.Wrap(werr, errs.WrapParams{
-			Code:    corecsv.CodeCSVMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "CSV encoding failed",
-			Private: "service/data/codec/csv.Marshal: WriteAll returned an error",
-		})
+	//: an estimate of the size; append grows past it.
+	out, aerr := appendTable(make([]byte, 0, (t.rows.Len()+1)*rowEstimate), t, c.format())
+	//: a field that does not write itself.
+	if aerr != nil {
+		return nil, aerr
 	}
-	//: detach + release using the size-aware path: small payload clones
-	//: + repools, oversize orphans the buffer untouched (no extra copy).
-	out := scratch.DetachBuffer(buf)
-	//: hand back the detached bytes.
+	//: the caller owns the bytes.
 	return out, nil
 }
 
-// escapeFormulaCells returns a defensive copy of records with every cell
-// starting with a formula-trigger byte prefixed by a single quote so the
-// cell renders as text in Excel / LibreOffice / Google Sheets. Implements
-// the OWASP CSV Injection mitigation (CWE-1236) on an opt-in basis.
-func escapeFormulaCells(records [][]string) [][]string {
-	//: pre-allocate so no append-reallocation occurs in the hot path.
-	out := make([][]string, 0, len(records))
-	//: walk each row and build a sanitised per-row copy via helper to
-	//: keep the per-row allocation off the outer loop (ktn HOTLOOP).
-	for _, row := range records {
-		//: delegate to escapeFormulaRow so the make() lives in its frame.
-		out = append(out, escapeFormulaRow(row))
-	}
-	//: hand back the sanitised matrix.
-	return out
-}
-
-// escapeFormulaRow returns a defensive copy of row with every cell's
-// first byte passed through escapeIfFormulaCell. Kept as a dedicated
-// helper so its per-row allocation is attributed to its own stack frame
-// rather than being flagged as an inner-loop allocation by static
-// analysis.
-func escapeFormulaRow(row []string) []string {
-	//: pre-sized copy with zero reallocation during append.
-	out := make([]string, 0, len(row))
-	//: inspect every cell and prefix when the first byte triggers evaluation.
-	for _, cell := range row {
-		out = append(out, escapeIfFormulaCell(cell))
-	}
-	//: hand back the sanitised row.
-	return out
+// valueInvalid is the refusal of a value or a target that is not a records
+// matrix; private names the call that refused it.
+func valueInvalid(private string) error {
+	//: the dedicated sentinel's code, reason and public text.
+	return errs.Wrap(nil, errs.WrapParams{
+		Code:    corecsv.CodeCSVValueInvalid,
+		Reason:  "VALUE_INVALID",
+		Public:  "CSV codec requires a [][]string value",
+		Private: private,
+	})
 }
 
 // isFormulaTrigger reports whether b is a byte that a spreadsheet app
@@ -192,36 +231,49 @@ func isFormulaTrigger(b byte) bool {
 	return b == '=' || b == '+' || b == '-' || b == '@' || b == '\t' || b == '\r'
 }
 
-// escapeIfFormulaCell prefixes cell with a single quote when its first
-// byte would otherwise trigger spreadsheet formula evaluation.
-func escapeIfFormulaCell(cell string) string {
-	//: empty cell is inert — nothing to escape; early return keeps the
-	//: single-byte read below unconditionally safe.
-	if cell == "" || !isFormulaTrigger(cell[0]) {
-		//: safe input — pass through verbatim.
-		return cell
-	}
-	//: formula-trigger byte — prefix with single quote so spreadsheets
-	//: render the cell as text rather than evaluating it.
-	return "'" + cell
-}
-
 // Append encodes records into CSV bytes and appends them to dst.
 // Implements the optional codec.Appender interface so hot-path callers
-// (multi-table exports, paginated dumps) can stream CSV records into
-// a recycled buffer without an intermediate allocation per call.
-// Delegates to Marshal so the type-gate + escape-formula + wrap/error
-// contract has a single source.
+// (multi-table exports, paginated dumps) can write CSV records into a
+// recycled buffer: the records are written into dst itself, grown once to
+// the exact size when it lacks the room, with no intermediate encoding.
+// On a refusal dst is returned as it was given.
 func (c *csvCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: delegate to Marshal so the contract has a single source.
-	encoded, merr := c.Marshal(v)
-	//: surface any encoding failure without touching dst.
-	if merr != nil {
-		//: return the untouched buffer plus the wrapped error.
-		return dst, merr
+	//: a forwarder small enough to inline, as Append always was.
+	return c.appendValue(dst, v)
+}
+
+// appendValue is Append's body: the type gate, then the records written in
+// place.
+func (c *csvCodec) appendValue(dst []byte, v any) (appended []byte, err error) {
+	//: the same type gate as Marshal.
+	records, ok := extractRecords(v)
+	//: the codec's delimiter and mitigation.
+	f := c.format()
+	//: a table of structs (#902), written in place.
+	if !ok {
+		//: the rows and their columns, or VALUE_INVALID: dst untouched.
+		t, terr := tableOf(v)
+		if terr != nil {
+			return dst, terr
+		}
+		//: written after the caller's prefix.
+		out, aerr := appendTable(dst, t, f)
+		//: a field that does not write itself: dst as it was given.
+		if aerr != nil {
+			return dst, aerr
+		}
+		//: the caller's prefix, then the table.
+		return out, nil
 	}
-	//: append the encoded bytes onto the caller's buffer.
-	return append(dst, encoded...), nil
+	//: the promotion shape, as Marshal writes it.
+	if !f.escape && f.comma == defaultComma && isPromotionShape(records) {
+		//: appended in place.
+		return appendPromotionShape(dst, records[1][0]), nil
+	}
+	//: room for the whole encoding, then the records written in place.
+	dst = slices.Grow(dst, recordsLen(records, f.comma, f.escape))
+	//: the caller's prefix, then the records.
+	return appendRecords(dst, records, f.comma, f.escape), nil
 }
 
 // isPromotionShape reports whether records is the exact 2-row × 1-col
@@ -241,52 +293,57 @@ func isPromotionShape(records [][]string) bool {
 }
 
 // marshalPromotionShape emits standards-compliant CSV bytes for the
-// 2-row × 1-col promotion shape. The body cell always contains JSON
-// (with `{`, `"`, `,` etc.) so it always needs quoting; the only
-// escape needed is `"` → `""` per the double-quote-doubling rule.
-// Saves csv.Writer construction + per-row Write loop + Flush.
+// 2-row × 1-col promotion shape into a buffer of its own; see
+// appendPromotionShape.
 func marshalPromotionShape(body string) []byte {
 	//: pre-size: header + \n + opening " + worst-case body + closing " + \n.
 	out := make([]byte, 0, len(promotionHeaderCell)+1+1+promotionBufWorstCaseFactor*len(body)+1+1)
-	//: literal header row + line terminator.
-	out = append(out, promotionHeaderCell...)
-	out = append(out, '\n')
-	//: opening double-quote of the body cell.
-	out = append(out, '"')
+	//: the caller owns the bytes.
+	return appendPromotionShape(out, body)
+}
+
+// appendPromotionShape appends the 2-row × 1-col promotion shape to dst. The
+// body cell always contains JSON (with `{`, `"`, `,` etc.) so it is always
+// quoted; the only escape needed is `"` → `""` per the double-quote-doubling
+// rule. Saves csv.Writer construction + per-row Write loop + Flush.
+func appendPromotionShape(dst []byte, body string) []byte {
+	//: literal header row + line terminator, then the opening quote.
+	dst = append(dst, promotionHeaderCell...)
+	dst = append(dst, '\n', '"')
 	//: per-byte walk: `"` doubles, everything else passes through.
 	for i := range len(body) {
 		//: double-quote escape.
 		if body[i] == '"' {
 			//: emit the doubled quote.
-			out = append(out, '"', '"')
+			dst = append(dst, '"', '"')
 			//: next input byte.
 			continue
 		}
 		//: plain byte passthrough — CSV doesn't escape anything else
 		//: inside a quoted field except embedded `"`.
-		out = append(out, body[i])
+		dst = append(dst, body[i])
 	}
-	//: closing double-quote of the body cell.
-	out = append(out, '"')
-	//: line terminator after the body row.
-	out = append(out, '\n')
-	//: caller owns the bytes.
-	return out
+	//: closing double-quote of the body cell, then the line terminator.
+	return append(dst, '"', '\n')
 }
 
 // Unmarshal parses data as CSV into *[][]string.
-func (*csvCodec) Unmarshal(data []byte, v any) error {
-	//: target must be *[][]string so we can populate it.
+func (c *csvCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
+	//: the untyped target: every record, as it is.
 	dst, ok := v.(*[][]string)
-	//: type-gate failure surfaces the dedicated sentinel.
+	//: anything else must be a pointer to a slice of structs (#902).
 	if !ok {
-		//: caller passed something that is not *[][]string — loud failure.
-		return errs.Wrap(nil, errs.WrapParams{
-			Code:    corecsv.CodeCSVValueInvalid,
-			Reason:  "VALUE_INVALID",
-			Public:  "CSV codec requires a [][]string value",
-			Private: "service/data/codec/csv.Unmarshal: target is not *[][]string",
-		})
+		//: the typed target, or VALUE_INVALID.
+		t, terr := rowsTargetOf(v)
+		if terr != nil {
+			return terr
+		}
+		//: the header maps the columns, each record a row.
+		return unmarshalTable(data, t, c.format())
 	}
 	//: rent a *bytes.Reader from the shared pool, positioned at data.
 	br := scratch.AcquireReader(data)
@@ -298,7 +355,7 @@ func (*csvCodec) Unmarshal(data []byte, v any) error {
 	//: caller an independent []string while keeping the strings
 	//: (which are immutable and freshly allocated by the reader)
 	//: shared by reference.
-	recs, rerr := readAllPreSized(br, data)
+	recs, rerr := readAllPreSized(br, data, c.format().comma)
 	//: hand the reader back to the shared pool.
 	scratch.ReleaseReader(br)
 	//: success fast-path.
@@ -314,32 +371,29 @@ func (*csvCodec) Unmarshal(data []byte, v any) error {
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "CSV decoding failed",
 		Private: "service/data/codec/csv.Unmarshal: ReadAll returned an error",
-	})
+	}, parsePosition(rerr)...)
 }
 
 // readAllPreSized is the stdcsv.Reader.ReadAll equivalent with two
-// pre-allocation tricks: the outer [][]string is sized from the wire
-// newline count (one record per '\n', plus an orphan trailing record
-// if the input lacks the final terminator), and ReuseRecord lets the
-// stdlib reader avoid re-allocating the per-record []string backing
-// array on every call. Each record is cloned before storage because
+// pre-allocation tricks: the outer [][]string is sized from the wire's
+// non-empty lines (recordsHint, capped at maxReservedRecords — #1098), and
+// ReuseRecord lets the stdlib reader avoid re-allocating the per-record
+// []string backing array on every call. Each record is cloned before storage because
 // ReuseRecord aliases — the strings inside are fresh (immutable)
 // but the slice header isn't.
-func readAllPreSized(br *bytes.Reader, data []byte) (records [][]string, err error) {
+func readAllPreSized(br *bytes.Reader, data []byte, comma rune) (records [][]string, err error) {
 	//: stdcsv.NewReader is the wire-parsing primitive; no Reset method
 	//: exists so we allocate a fresh one per call (16 ns micro-cost).
 	r := stdcsv.NewReader(br)
+	//: the codec's delimiter.
+	r.Comma = comma
 	//: ReuseRecord = true tells the reader to alias the per-record
 	//: []string across Read calls, eliminating the geometric grow
 	//: cascade inside reader.go:441-445 ReadAll uses.
 	r.ReuseRecord = true
-	//: count newlines to pre-size the outer slice. +1 for a trailing
-	//: record without a final '\n' (legal CSV but uncommon).
-	hint := bytes.Count(data, []byte{'\n'}) + 1
-	//: pre-allocate the outer slice. The hint over-estimates by 1 on
-	//: trailing-newline inputs — append below handles the extra slot
-	//: as unused capacity, no extra alloc.
-	records = make([][]string, 0, hint)
+	//: pre-allocate the outer slice from the non-empty lines, at most
+	//: maxReservedRecords; append grows it past that by records read.
+	records = make([][]string, 0, recordsHint(data))
 	//: read records one at a time so we can clone the aliased slice.
 	for {
 		//: stdlib Read returns the next record OR io.EOF / parse error.
@@ -376,4 +430,30 @@ func extractRecords(v any) (records [][]string, ok bool) {
 	}
 	//: anything else is a programming error for this codec.
 	return nil, false
+}
+
+// recordsHint is the room Unmarshal reserves for data's records: its lines
+// holding a byte but their terminator — encoding/csv skips the others — and
+// at most maxReservedRecords. A quoted field spanning lines makes it an upper
+// bound, never a lower one; 1 MiB of newlines reserves nothing (#1098).
+func recordsHint(data []byte) int {
+	//: counted line by line, up to the cap.
+	n := 0
+	//: each line, the last one with or without its terminator.
+	for len(data) > 0 && n < maxReservedRecords {
+		//: the line's length, its '\n' included when it has one.
+		end := bytes.IndexByte(data, '\n') + 1
+		//: no terminator: the rest is the last line.
+		if end == 0 {
+			end = len(data)
+		}
+		//: "\n" and "\r\n" are the empty lines encoding/csv skips.
+		if line := data[:end]; !bytes.Equal(line, []byte{'\n'}) && !bytes.Equal(line, []byte("\r\n")) {
+			n++
+		}
+		//: the next line.
+		data = data[end:]
+	}
+	//: the reservation.
+	return n
 }

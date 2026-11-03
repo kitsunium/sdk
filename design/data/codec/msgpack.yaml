@@ -19,6 +19,34 @@ packages:
             name: CodeMsgPackUnmarshalFailed
             value: "0x00_03_07_02"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeMsgPackDuplicateKey identifies a document NewStrict's instance refused
+              because one of its maps repeats a key.
+            name: CodeMsgPackDuplicateKey
+            value: "0x00_03_07_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeMsgPackUnknownMember identifies a document NewStrict's instance refused
+              because it carries a member no field of the target struct claims.
+            name: CodeMsgPackUnknownMember
+            value: "0x00_03_07_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeMsgPackSizeExceeded identifies input refused for a size bound: input past maxMsgPackBytes.
+              Its reason is the family's SIZE_EXCEEDED (#894).
+            name: CodeMsgPackSizeExceeded
+            value: "0x00_03_07_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeMsgPackDepthExceeded identifies input refused for a depth bound: containers nested past maxDepth.
+              Its reason is the family's DEPTH_EXCEEDED (#894).
+            name: CodeMsgPackDepthExceeded
+            value: "0x00_03_07_06"
+        type: errs.Code
     doc: |-
       Package msgpack declares the error codes and the sentinels of the
       MessagePack codec, internal/service/data/codec/msgpack — range 0.3.7.* (ADR
@@ -52,6 +80,30 @@ packages:
             private: "service/data/codec/msgpack: Unmarshal/Decode failed"
             public: MessagePack decoding failed
             reason: UNMARSHAL_FAILED
+          - code: CodeMsgPackDuplicateKey
+            doc: DuplicateKey is the strict refusal of a map that repeats a key.
+            name: DuplicateKey
+            private: "service/data/codec/msgpack: NewStrict refused a map holding two equal keys"
+            public: MessagePack document repeats a map key
+            reason: DUPLICATE_KEY
+          - code: CodeMsgPackUnknownMember
+            doc: UnknownMember is the strict refusal of a member no struct field claims.
+            name: UnknownMember
+            private: "service/data/codec/msgpack: NewStrict refused a member no field of the struct claims"
+            public: MessagePack document carries an unknown member
+            reason: UNKNOWN_MEMBER
+          - code: CodeMsgPackSizeExceeded
+            doc: "SizeExceeded is the refusal of input past a size bound: input past maxMsgPackBytes."
+            name: SizeExceeded
+            private: "service/data/codec/msgpack: the input exceeds a size bound"
+            public: MsgPack input exceeds a size limit
+            reason: SIZE_EXCEEDED
+          - code: CodeMsgPackDepthExceeded
+            doc: "DepthExceeded is the refusal of input past a depth bound: containers nested past maxDepth."
+            name: DepthExceeded
+            private: "service/data/codec/msgpack: the input exceeds a depth bound"
+            public: MsgPack input nests too deeply
+            reason: DEPTH_EXCEEDED
   - doc: |-
       Package msgpack is the MessagePack codec — a native implementation of the
       specification (github.com/msgpack/msgpack/blob/master/spec.md) on the
@@ -89,10 +141,10 @@ packages:
       	str → string           bin → []byte (a copy)
       	array → []any          map → map[string]any (keys must be str or bin)
       	timestamp → time.Time (UTC)
+      	any other extension → Ext (its type, a copy of its payload)
 
       A map whose keys are not strings is refused here — decode it into a typed
-      map such as map[int]T or map[any]T — and so is an extension type other
-      than the timestamp.
+      map such as map[int]T or map[any]T.
 
       Package msgpack — pointers, interfaces, values that decode themselves, and
       the entry point every decode starts from. unmarshalInto decodes exactly one
@@ -176,9 +228,12 @@ packages:
       everything else by the type's cached plan, so both paths write the same
       bytes for the same value.
 
-      Package msgpack — map encoders. Pairs are written in Go's map iteration
-      order, which is not deterministic, exactly as the vendor-backed codec wrote
-      them: a caller who needs stable bytes encodes a struct, or a slice of pairs.
+      Package msgpack — map encoders. Pairs are written in key order, so two
+      Marshal calls on equal values give equal bytes (#1104): string keys
+      byte-wise, as encoding/json orders them; integer keys by value, whatever
+      width each is written in; any other key, or two keys of different kinds,
+      by their encoded bytes; and two keys that encode alike by their values. A
+      map of up to sixteen pairs is ordered on the stack by an insertion sort.
 
       The string-keyed maps a program builds most — map[string]any,
       map[string]string, map[string]int, map[string]int64, map[string]float64 and
@@ -206,7 +261,9 @@ packages:
       encoded once per type. omitempty is decided by the vendor-backed codec's
       rule: an IsZero() method when the value has one (a nil pointer to such a
       type is empty), else the kind's zero — no elements, false, 0, nil — and a
-      struct is empty when every one of its fields would be left out.
+      struct is empty when every one of its fields would be left out. omitzero is
+      encoding/json's: the type's IsZero() when it declares one — through the
+      field's address when only the pointer does — else reflect's zero value.
 
       One quirk is kept on purpose because the wire shows it: a field inlined
       from an embedded struct POINTER that is nil is written as nil — unless the
@@ -239,6 +296,10 @@ packages:
           an empty string, slice, map or array, a nil pointer or interface, a
           value whose IsZero() reports true (time.Time), a struct all of whose
           fields would be left out.
+        - `omitzero` leaves a field out when it holds its type's zero value, as
+          encoding/json does since Go 1.24: the type's IsZero() bool decides when
+          it declares one, else every bit at zero — so a zero time.Time and an
+          empty struct are left out. With `omitempty` too, either one is enough.
         - A field named `_msgpack` carries struct-wide options: `as_array` (or
           `asArray`) encodes the struct as an array of every field in order, and
           `omitempty` applies to every field declared after it.
@@ -276,9 +337,41 @@ packages:
         name: New
         out:
           - type: codec.Codec
+      - doc: |-
+          NewStrict returns a fresh MessagePack codec, not registered, whose Unmarshal and
+          Decode read a document somebody else wrote one way or not at all (ADR
+          0102): a map that repeats a key — two keys that decode to the same Go key,
+          whatever form each was written in — is refused with DUPLICATE_KEY before
+          anything is decoded, and a member no field of the target struct claims
+          with UNKNOWN_MEMBER. The registered codec keeps last-wins and skips unknown
+          members. Encoding is the registered codec's.
+        name: NewStrict
+        out:
+          - type: codec.Codec
     imports:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/msgpack
+    types:
+      - doc: |-
+          Ext is a MessagePack extension value the codec has no Go type for: its type
+          and its payload. Types 0 to 127 are the applications' own — the record
+          types, UUIDs and decimals other MessagePack stacks write — and −128 to −2
+          are reserved by the specification; −1 is the timestamp, which decodes into
+          an interface as a time.Time, and into an Ext as its raw payload.
+
+          Decoded into an interface, an extension of any other type is an Ext holding
+          a copy of its payload; decoded into an Ext, any extension is. An Ext encodes
+          in the shortest form its payload allows: fixext 1, 2, 4, 8 or 16, else
+          ext 8, 16 or 32.
+        name: Ext
+        struct:
+          fields:
+            - doc: Data is the payload, opaque to the codec.
+              name: Data
+              type: "[]byte"
+            - doc: Type is the extension type.
+              name: Type
+              type: int8
     variables:
       - blockDoc: |-
           The registered singleton. Its aliases are literals in MIMETypes and
@@ -304,8 +397,10 @@ packages:
 
       The codec is the msgpack.org specification written on the standard
       library: maps, arrays, the integer and float families, strings, binary,
-      the timestamp extension, struct fields by their msgpack tag, and types
-      that marshal themselves. Input is bounded in size and depth, and read
+      the timestamp extension, application extensions as an [Ext], struct
+      fields by their msgpack tag, and types that marshal themselves. A
+      time.Duration is an integer of int64 nanoseconds, the rule of every binary
+      format (#1126). Input is bounded in size and depth, and read
       without allocating what a declared length claims before the bytes are
       there. It streams.
 
@@ -345,6 +440,34 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_07_02"
+          - doc: |-
+              CodeDuplicateKey is 0.3.7.3: NewStrict's instance found a map that
+              repeats a key.
+            name: CodeDuplicateKey
+            reexport: coremsgpack.CodeMsgPackDuplicateKey
+            type: errs.Code
+            typed: true
+            value: "0x00_03_07_03"
+          - doc: |-
+              CodeUnknownMember is 0.3.7.4: NewStrict's instance found a member
+              no struct field claims.
+            name: CodeUnknownMember
+            reexport: coremsgpack.CodeMsgPackUnknownMember
+            type: errs.Code
+            typed: true
+            value: "0x00_03_07_04"
+          - doc: "CodeSizeExceeded is 0.3.7.5: input past maxMsgPackBytes."
+            name: CodeSizeExceeded
+            reexport: coremsgpack.CodeMsgPackSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_07_05"
+          - doc: "CodeDepthExceeded is 0.3.7.6: containers nested past maxDepth."
+            name: CodeDepthExceeded
+            reexport: coremsgpack.CodeMsgPackDepthExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_07_06"
         doc: The error codes, range 0.3.7.*, declared in the core (ADR 0160).
       - doc: "The sentinels, for errors.Is: each carries the code of the same name."
         var:
@@ -356,7 +479,43 @@ packages:
             name: UnmarshalFailed
             reexport: coremsgpack.UnmarshalFailed
             type: "*errs.Error"
+          - doc: DuplicateKey is the sentinel of [CodeDuplicateKey].
+            name: DuplicateKey
+            reexport: coremsgpack.DuplicateKey
+            type: "*errs.Error"
+          - doc: UnknownMember is the sentinel of [CodeUnknownMember].
+            name: UnknownMember
+            reexport: coremsgpack.UnknownMember
+            type: "*errs.Error"
+          - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
+            name: SizeExceeded
+            reexport: coremsgpack.SizeExceeded
+            type: "*errs.Error"
+          - doc: DepthExceeded is the sentinel of [CodeDepthExceeded].
+            name: DepthExceeded
+            reexport: coremsgpack.DepthExceeded
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Ext is an extension value the codec has no Go type for — an application
+              type, 0 to 127, and its payload. A document carrying one decodes into an
+              interface with the extension as an Ext; an Ext encodes in the shortest
+              form its payload allows. The timestamp (−1) stays a time.Time.
+            name: Ext
+            target: svcmsgpack.Ext
+      - func:
+          doc: |-
+            NewStrict returns a fresh MessagePack codec, not registered, that reads a
+            document one way or not at all: a map repeating a key is refused with
+            CodeDuplicateKey, a member no struct field claims with CodeUnknownMember.
+            The registered format keeps last-wins and skips unknown members.
+          forward: svcmsgpack.NewStrict
+          name: NewStrict
+          out:
+            - type: codec.Codec
     imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
       coremsgpack: github.com/kitsunium/sdk/internal/core/data/codec/msgpack
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcmsgpack: github.com/kitsunium/sdk/internal/service/data/codec/msgpack
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/msgpack

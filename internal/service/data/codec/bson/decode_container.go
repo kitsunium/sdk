@@ -570,7 +570,7 @@ func decodeFields(val []byte, rv reflect.Value, p *typePlan, st decodeState) err
 			return err
 		}
 		f := p.fieldFor(el.key, next)
-		//: no field: the inline map, or nothing.
+		//: no field: the inline map, nothing, or a strict refusal.
 		if f == nil {
 			//: the element's own failure.
 			if err := decodeUnknown(el, rv, p, st); err != nil {
@@ -622,17 +622,22 @@ func decodeField(el element, rv reflect.Value, f *fieldPlan, st decodeState) err
 	if fv.Kind() == reflect.Pointer && fv.IsNil() {
 		fv.Set(reflect.New(fv.Type().Elem()))
 	}
-	child := decodeState{truncate: st.truncate || f.flags.has(flagTruncate), field: f.goName}
+	child := decodeState{truncate: st.truncate || f.flags.has(flagTruncate), field: f.goName, strict: st.strict}
 	//: the field's own state: no ancestor, its truncate option, its name.
 	return decodeValue(el.typ, el.value, fv, f.plan, child)
 }
 
 // decodeUnknown decodes an element no field names into the struct's
-// ",inline" map, or skips it when there is none.
+// ",inline" map, or, when there is none, skips it — or refuses it with
+// UNKNOWN_MEMBER under a strict decode, as nothing collects it.
 func decodeUnknown(el element, rv reflect.Value, p *typePlan, st decodeState) error {
-	//: no inline map: the element is skipped.
+	//: no inline map: nothing collects the element.
 	if p.inlineMap == nil {
-		//: nothing to do.
+		//: a strict decode refuses it.
+		if st.strict {
+			return unknownMember(rv.Type())
+		}
+		//: skipped.
 		return nil
 	}
 	m := rv.Field(p.inlineMap.index[0])
@@ -643,7 +648,7 @@ func decodeUnknown(el element, rv reflect.Value, p *typePlan, st decodeState) er
 	}
 	slot := reflect.New(mp.typ.Elem()).Elem()
 	//: the inline map's type is the ancestor, whatever its value type.
-	child := decodeState{ancestor: mp.typ, truncate: st.truncate, field: p.inlineMap.goName}
+	child := decodeState{ancestor: mp.typ, truncate: st.truncate, field: p.inlineMap.goName, strict: st.strict}
 	//: the value's own failure.
 	if err := decodeValue(el.typ, el.value, slot, mp.elem, child); err != nil {
 		//: refused.

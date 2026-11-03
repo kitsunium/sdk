@@ -66,4 +66,12 @@ type HTTPConfig struct {
 	// MaxResponseBytes caps the response body read. Non-positive CLAMPS to
 	// DefaultMaxResponseBytes.
 	MaxResponseBytes int64
+
+	// Gzip, when true, compresses every request body — an encoded snapshot or
+	// batch, and a stored document ExportDocument posts — with compress/gzip at
+	// the default level and sends it with Content-Encoding: gzip, which every
+	// OTLP/HTTP collector accepts (#1051). OTLP/JSON shrinks eight to twelve
+	// times. The zero value sends the body as it is. A collector that refuses
+	// the encoding answers 415, classified permanent like a 400.
+	Gzip bool
 }

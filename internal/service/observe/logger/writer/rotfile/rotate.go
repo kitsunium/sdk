@@ -34,8 +34,12 @@ func (s *rotatingSink) rotate() error {
 		//: still refused — RotFileOpenFailed, nothing rotated.
 		return oerr
 	}
-	//: close the active descriptor before renaming it.
-	if cerr := s.f.Close(); cerr != nil {
+	//: close the active descriptor before renaming it — once no Flush is
+	//: still syncing it (pin, #815).
+	s.pin.Lock()
+	cerr := s.f.Close()
+	s.pin.Unlock()
+	if cerr != nil {
 		//: surface the close failure under the rotate sentinel.
 		return wrapRotate(cerr, "service/observe/logger/writer/rotfile.rotate: closing active file")
 	}

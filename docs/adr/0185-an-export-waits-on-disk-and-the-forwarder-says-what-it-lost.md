@@ -22,6 +22,9 @@
   (`RetryAfter`), kitsunium/sdk#479, kitsunium/sdk#493
 - **Amended**: 2026-10-23 for kitsunium/sdk#580 — D4's count follows the
   queue rather than the process: see D4 and the *Amendment* section.
+- **Amended**: 2026-11-03 for kitsunium/sdk#1051 — a batch may rest gzipped
+  (`Config.Compress`, `SendEncoded`): see the second *Amendment* section; and
+  for kitsunium/sdk#867 — the logs signal (`NewLogExporter`): the third.
 
 ## Context
 
@@ -334,6 +337,33 @@ count growing until its bound refused every batch.
   and nothing else, and the framework's CLI reaches no running product (its
   D13); **a recount in `Stats` itself** — it would put the backlog's read on
   the caller's path, a readiness probe's.
+
+## Amendment — 2026-11-03: a batch may rest gzipped (#1051)
+
+`Config.Compress` gzips each batch in `Enqueue` (`compress/gzip`, the default
+level) before it is published, so `MaxBytes`, `PendingBytes` and the disk hold
+what rests compressed — a 16 KiB OTLP/JSON span batch keeps 2.8 KiB
+(`BENCH.md`). D2 holds: the consumer still never decodes a batch. The gzip
+bytes are handed to the new `Config.SendEncoded` (`EncodedSender`, `func(ctx,
+batch, encoding string) error`) labelled `EncodingGzip`, and an OTLP/HTTP
+exporter's `ExportEncodedDocument` posts them as they rest with
+`Content-Encoding: gzip`. A stored batch says its own encoding — a gzip stream
+opens with `1f 8b 08`, an OTLP/JSON document with `{` —, so a backlog kept
+before `Compress` changed, either way, is labelled right after a restart;
+`Compress` without `SendEncoded` is refused by name (a gzip batch handed to
+`Send` would leave labelled as JSON), and `SendEncoded` alone stands in for
+`Send`. Out of scope: zstd (`third-party/transform`).
+
+## Amendment — 2026-11-03: the third signal (#867)
+
+Logs join the two other signals. The logger's `"otlpjson"` writer encodes each
+batch as an OTLP/JSON `ExportLogsServiceRequest` and hands it to a
+`core/observe/logger.DocumentExporter`: the OTLP/HTTP logs exporter (the same
+shared sender, `/v1/logs`, codes `0.3.104.*`), or `NewLogExporter`, this
+package's adapter, whose `ExportDocument` is `Enqueue` — the encoding happened
+in the writer, one step earlier than for spans and snapshots, and D2 holds:
+the stored document is posted as it was written, by the logs exporter's
+`ExportDocument` as `Send` and `OTLPRetryable` as `Retryable`.
 
 ## References
 

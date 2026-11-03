@@ -55,6 +55,8 @@ type fieldEncoder struct {
 	enc encodeFunc
 	// empty decides omitempty.
 	empty emptyFunc
+	// zero decides omitzero; nil when the field does not carry it.
+	zero emptyFunc
 }
 
 // structEncoder encodes a struct as a map, or as an array with as_array.
@@ -151,6 +153,11 @@ func hookEncoder(t reflect.Type) encodeFunc {
 	if t == timeType {
 		//: time.Time.
 		return encodeTime
+	}
+	//: an application extension.
+	if t == extType {
+		//: Ext.
+		return encodeExt
 	}
 	//: value-receiver methods.
 	if f := methodEncoder(t); f != nil {

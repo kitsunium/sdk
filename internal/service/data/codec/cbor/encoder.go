@@ -10,12 +10,15 @@ import (
 type cborEncoder struct {
 	// w receives each encoded item.
 	w io.Writer
+	// start is the depth each item's walk starts at: carrying the
+	// deterministic mode for NewDeterministic.
+	start walkDepth
 }
 
 // Encode encodes v and writes it as one data item.
 func (e *cborEncoder) Encode(v any) error {
 	buf := scratch.AcquireBuffer()
-	b, err := appendValue(buf.AvailableBuffer(), v, walkDepth{})
+	b, err := appendValue(buf.AvailableBuffer(), v, e.start)
 	//: only a complete item is written.
 	if err == nil {
 		err = e.write(b)

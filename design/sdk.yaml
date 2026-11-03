@@ -426,6 +426,15 @@ codes:
     - range: 0.3.101
       owner: third-party/aws/queue/sqs
       note: ADR 0211, the queue Broker over SQS (0.3.99 and 0.3.100 are #992's and #993's)
+    - range: 0.3.102
+      owner: internal/core/data/codec/jcs
+      note: RFC 8785 canonical JSON (#895)
+    - range: 0.3.103
+      owner: internal/core/data/codec/jsonschema
+      note: ADR 0210, the JSON Schema 2020-12 validator (#882)
+    - range: 0.3.104
+      owner: internal/core/observe/logger/writer/otlpjson
+      note: the OTLP/JSON logs writer, the third signal (#867)
     - range: 0.4.1
       owner: framework/model/internal/core
       note: "ADR 0147: layer 4 is the framework's"
@@ -665,6 +674,10 @@ budgets:
     escapes: []
     allocs: 0
     fixture: AppendUint
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/jsonenc.AppendFloat
+    escapes: []
+    allocs: 0
+    fixture: AppendFloat
   - fn: go:github.com/kitsunium/sdk/internal/kernel/jsonenc.BeginObject
     allocs: 0
     fixture: BeginObject
@@ -690,6 +703,9 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/core/data/codec/scratch.AcquireBuffer
     allocs: 0
     fixture: AcquireBuffer
+  - fn: go:github.com/kitsunium/sdk/internal/core/data/codec/scratch.AcquireBufferSized
+    allocs: 0
+    fixture: AcquireBufferSized
   - fn: go:github.com/kitsunium/sdk/internal/core/data/codec/scratch.AcquireReader
     allocs: 0
     fixture: AcquireReader
@@ -717,3 +733,9 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/pkg/v1/observe/logger.TraceContextFromContext
     allocs: 0
     fixture: TraceContext
+  # The keyed sampler (#1017): once a key is in its table, a kept and a
+  # dropped record allocate nothing — the default key is a struct of the
+  # level and the message, never a concatenated string.
+  - fn: go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/sample.(*Keyed).Write
+    allocs: 0
+    fixture: KeyedWrite

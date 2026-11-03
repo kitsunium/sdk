@@ -1,5 +1,7 @@
 package multipart
 
+import "io"
+
 // counter tracks the running part count and aggregate byte total against a
 // resolved LimitsConfig. Shared by the encode and decode paths so both refuse
 // on exactly the same arithmetic — a bound the encoder ignored would produce
@@ -59,5 +61,88 @@ func (c *counter) admitPart(n int64) error {
 		return limitExceeded("MaxTotalBytes", c.limits.MaxTotalBytes, c.total)
 	}
 	//: within every bound.
+	return nil
+}
+
+// wireBudget charges every byte mime/multipart pulls from the body —
+// delimiters, header blocks, bodies and the reader's look-ahead alike —
+// against MaxTotalBytes (#908). The part-body bounds above are charged after
+// NextPart returned; a header block is read by mime/multipart itself, whose
+// only bounds are the GODEBUG-governed multipartmaxheaders defaults, which a
+// process can lift at run time. Under this reader a body cannot pull more
+// than one byte past the ceiling, whatever its parts' headers hold.
+type wireBudget struct {
+	// r is the body.
+	r io.Reader
+	// err is the refusal, latched once the ceiling is crossed.
+	err error
+	// limit is MaxTotalBytes.
+	limit int64
+	// read counts the bytes pulled from r.
+	read int64
+}
+
+// Read pulls from the body no further than one byte past the ceiling, and
+// refuses once that byte arrives.
+func (w *wireBudget) Read(p []byte) (int, error) {
+	//: a crossed ceiling stays crossed.
+	if w.err != nil {
+		//: latched.
+		return 0, w.err
+	}
+	//: never ask the body for more than the probe byte past the ceiling.
+	if room := probeSize(w.limit) - w.read; int64(len(p)) > room {
+		p = p[:room]
+	}
+	n, err := w.r.Read(p)
+	w.read += int64(n)
+	//: the byte past the ceiling arrived: the body is over it.
+	if w.read > w.limit {
+		w.err = limitExceeded("MaxTotalBytes", w.limit, w.read)
+		//: the bytes up to the ceiling were legitimately read.
+		return n, w.err
+	}
+	//: within the ceiling.
+	return n, err
+}
+
+// admitEncodedPart charges one part the encoder is about to write: the part
+// against MaxParts, its body against MaxPartBytes, and every byte it puts on
+// the wire — delimiter and header block included — against MaxTotalBytes,
+// keeping room for the closing delimiter, so the encoder emits no body the
+// decoder's wireBudget would refuse and Close never crosses the ceiling (#908).
+func (c *counter) admitEncodedPart(body, wire, closing int64) error {
+	//: charge the part slot first — a count overflow is cheaper to detect.
+	c.parts++
+	//: part-count ceiling.
+	if c.parts > c.limits.MaxParts {
+		//: refuse with the knob and its ceiling; the payload is never echoed.
+		return limitExceeded("MaxParts", int64(c.limits.MaxParts), int64(c.parts))
+	}
+	//: per-part ceiling, on the body alone.
+	if body > c.limits.MaxPartBytes {
+		//: refuse naming the offending part size against its bound.
+		return limitExceeded("MaxPartBytes", c.limits.MaxPartBytes, body)
+	}
+	c.total += wire
+	//: the whole body so far, plus the delimiter that will close it.
+	if c.total+closing > c.limits.MaxTotalBytes {
+		//: refuse naming the body's size against its bound.
+		return limitExceeded("MaxTotalBytes", c.limits.MaxTotalBytes, c.total+closing)
+	}
+	//: within every bound.
+	return nil
+}
+
+// admitClosing checks that the closing delimiter still fits under
+// MaxTotalBytes — it always does after a part, which reserved it; a body
+// with no part has only it to charge.
+func (c *counter) admitClosing(closing int64) error {
+	//: the body plus its closing delimiter.
+	if c.total+closing > c.limits.MaxTotalBytes {
+		//: refuse naming the body's size against its bound.
+		return limitExceeded("MaxTotalBytes", c.limits.MaxTotalBytes, c.total+closing)
+	}
+	//: within the bound.
 	return nil
 }

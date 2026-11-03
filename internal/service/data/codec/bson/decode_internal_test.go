@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	corebson "github.com/kitsunium/sdk/internal/core/data/codec/bson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -444,7 +445,9 @@ func TestDecodeReusesSlices(t *testing.T) {
 	}
 }
 
-// TestUnmarshalTargets pins which targets Unmarshal accepts.
+// TestUnmarshalTargets pins which targets Unmarshal accepts: a nil, a value
+// or a nil pointer or map is the family's TARGET_INVALID (#1101), a target
+// of the wrong shape a decoding failure.
 func TestUnmarshalTargets(t *testing.T) {
 	t.Parallel()
 	data, err := New().Marshal(D{{"a", int32(1)}})
@@ -455,15 +458,16 @@ func TestUnmarshalTargets(t *testing.T) {
 		name   string
 		target func() any
 		ok     bool
+		code   errs.Code
 	}
 	tests := []tc{
-		{"nil", func() any { return nil }, false},
-		{"a value", func() any { return decodeInner{} }, false},
-		{"a nil pointer", func() any { return (*decodeInner)(nil) }, false},
-		{"a nil map", func() any { return map[string]any(nil) }, false},
-		{"a map by value", func() any { return map[string]any{} }, true},
-		{"a pointer to a pointer", func() any { return new(*decodeInner) }, true},
-		{"a pointer to a string", func() any { return new(string) }, false},
+		{"nil", func() any { return nil }, false, codec.CodeTargetInvalid},
+		{"a value", func() any { return decodeInner{} }, false, codec.CodeTargetInvalid},
+		{"a nil pointer", func() any { return (*decodeInner)(nil) }, false, codec.CodeTargetInvalid},
+		{"a nil map", func() any { return map[string]any(nil) }, false, codec.CodeTargetInvalid},
+		{"a map by value", func() any { return map[string]any{} }, true, 0},
+		{"a pointer to a pointer", func() any { return new(*decodeInner) }, true, 0},
+		{"a pointer to a string", func() any { return new(string) }, false, corebson.CodeBSONUnmarshalFailed},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -472,8 +476,8 @@ func TestUnmarshalTargets(t *testing.T) {
 		if c.ok != (err == nil) {
 			t.Fatalf("Unmarshal(%T) = %v, want ok=%v", target, err, c.ok)
 		}
-		if err != nil && !errs.HasCode(err, corebson.CodeBSONUnmarshalFailed) {
-			t.Errorf("Unmarshal(%T) = %v, want BSON_UNMARSHAL_FAILED", target, err)
+		if err != nil && !errs.HasCode(err, c.code) {
+			t.Errorf("Unmarshal(%T) = %v, want code %v", target, err, c.code)
 		}
 		//: a map passed by value is filled in place.
 		if m, ok := target.(map[string]any); ok && c.ok && m["a"] != int32(1) {
@@ -499,7 +503,7 @@ func TestMalformedInput(t *testing.T) {
 		rule string
 	}
 	tests := []tc{
-		{"empty input", "", corebson.CodeBSONUnmarshalFailed, "shorter than"},
+		{"empty input", "", codec.CodeEmptyInput, ""},
 		{"a length shorter than the input", "0500000000ff", corebson.CodeBSONUnmarshalFailed, "declared length"},
 		{"a length longer than the input", "0600000000", corebson.CodeBSONUnmarshalFailed, "declared length"},
 		{"no terminator", "0500000001", corebson.CodeBSONUnmarshalFailed, "terminator"},
@@ -619,6 +623,6 @@ func TestSizeCap(t *testing.T) {
 	err := New().Unmarshal(make([]byte, maxBSONBytes+1), new(any))
 	//: the size sentinel, not a malformation.
 	if !errs.HasCode(err, corebson.CodeBSONSizeExceeded) {
-		t.Fatalf("Unmarshal = %v, want BSON_SIZE_EXCEEDED", err)
+		t.Fatalf("Unmarshal = %v, want SIZE_EXCEEDED", err)
 	}
 }

@@ -34,6 +34,7 @@ type flowCollection struct {
 // indicator is under the cursor. It may span lines; the cursor ends just past
 // its closing indicator.
 func (p *parser) parseFlowCollection(parent int) (int32, error) {
+	p.flowParent = parent
 	f := flowCollection{line: p.line, off: p.pos, kind: kindSequence, closing: closingOf(p.peek())}
 	//: a mapping.
 	if p.peek() == '{' {
@@ -272,12 +273,12 @@ func (p *parser) flowKey() (string, scalarStyle, error) {
 	switch p.peek() {
 	//: double-quoted.
 	case '"':
-		value, err := p.scanDoubleQuoted(true)
+		value, err := p.scanDoubleQuoted(-1, true)
 		//: the key.
 		return value, styleDouble, err
 	//: single-quoted.
 	case '\'':
-		value, err := p.scanSingleQuoted(true)
+		value, err := p.scanSingleQuoted(-1, true)
 		//: the key.
 		return value, styleSingle, err
 	//: plain.
@@ -332,12 +333,12 @@ func (p *parser) flowScalar(parent int) (string, scalarStyle, error) {
 	switch p.peek() {
 	//: double-quoted.
 	case '"':
-		value, err := p.scanDoubleQuoted(false)
+		value, err := p.scanDoubleQuoted(parent, false)
 		//: the scalar.
 		return value, styleDouble, err
 	//: single-quoted.
 	case '\'':
-		value, err := p.scanSingleQuoted(false)
+		value, err := p.scanSingleQuoted(parent, false)
 		//: the scalar.
 		return value, styleSingle, err
 	//: plain.
@@ -355,8 +356,13 @@ func (p *parser) skipFlowSpace(line, off int) error {
 	//: until a token.
 	for {
 		moved, err := p.flowSpaceStep()
+		//: a line indented no deeper than the block holding the collection.
+		if err != nil {
+			//: refused.
+			return err
+		}
 		//: a token, or a document marker.
-		if !moved || err != nil {
+		if !moved {
 			break
 		}
 	}
@@ -376,9 +382,15 @@ func (p *parser) flowSpaceStep() (bool, error) {
 	//: a blank.
 	case isBlank(c):
 		p.pos++
-	//: a line break.
+	//: a line break; the next line belongs to the collection only deeper
+	//: than the block holding it.
 	case c == '\n':
 		p.newline()
+		//: a line with content, indented no deeper.
+		if err := p.flowLineIndent(); err != nil {
+			//: refused.
+			return false, err
+		}
 	//: a comment, which a blank or a line start separates.
 	case c == '#' && (p.pos == p.lineStart || isBlank(p.src[p.pos-1])):
 		p.skipToEOL()
@@ -389,6 +401,34 @@ func (p *parser) flowSpaceStep() (bool, error) {
 	}
 	//: moved; a document marker at a new line stops the skip.
 	return !p.atDocumentMarker(), nil
+}
+
+// flowLineIndent refuses the line under the cursor, just started inside a
+// flow collection, when its content is not indented deeper than the block
+// holding the collection (YAML 1.2.2 §7.4, s-separate-lines(n): a tab is
+// not indentation). An empty line, a comment line and a document marker —
+// refused on its own terms — are not judged, and neither is a line opening
+// with a closing indicator: libyaml, and this reader before the
+// yaml-test-suite ran, accept "]" at the key's own column, which no reading
+// of the entries depends on.
+func (p *parser) flowLineIndent() error {
+	i := p.pos
+	//: past the line's blanks.
+	for isBlank(p.at(i)) {
+		i++
+	}
+	//: nothing to judge.
+	if c := p.at(i); c == '\n' || c == '#' || c == 0 || c == ']' || c == '}' || p.atDocumentMarker() {
+		//: accepted here.
+		return nil
+	}
+	//: deeper than the block, or refused.
+	if p.indentOf(p.pos) <= p.flowParent {
+		//: refused where the content starts.
+		return p.errAt(p.line, i, "a flow collection's line must be indented deeper than the block holding it")
+	}
+	//: indented.
+	return nil
 }
 
 // flowSpaceError refuses a document marker the skip stopped on: a document

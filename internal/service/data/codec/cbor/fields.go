@@ -43,6 +43,10 @@ const (
 	flagOmitEmpty
 	// flagOmitZero is the omitzero option.
 	flagOmitZero
+	// flagTimeTag1 is the time=tag1 option.
+	flagTimeTag1
+	// flagTimeTag0 is the time=tag0 option.
+	flagTimeTag0
 )
 
 // structField is one field a struct puts on the wire.
@@ -192,7 +196,7 @@ func newStructField(f reflect.StructField, name, tag, options string, path []int
 // optionFlag maps a tag option to the flag it sets, or 0 for an option this
 // codec does not know, which is ignored as fxamacker/cbor ignored it.
 func optionFlag(option string) fieldFlag {
-	//: the three per-field options.
+	//: the per-field options.
 	switch option {
 	case optionOmitEmpty:
 		//: omitempty.
@@ -203,6 +207,12 @@ func optionFlag(option string) fieldFlag {
 	case optionKeyAsInt:
 		//: keyasint.
 		return flagKeyAsInt
+	case optionTimeTag1:
+		//: a time.Time as tag 1.
+		return flagTimeTag1
+	case optionTimeTag0:
+		//: a time.Time as tag 0.
+		return flagTimeTag0
 	default:
 		//: ignored.
 		return 0

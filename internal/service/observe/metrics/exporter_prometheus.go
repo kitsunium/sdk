@@ -63,8 +63,13 @@ var Prometheus = coremetrics.RegisterExporter(newPrometheusExporter(prometheusEx
 // internal/service/observe/metrics/CLAUDE.md §What the Prometheus connector loses. The
 // short list: temporality (anything but cumulative is REFUSED rather than
 // mis-labelled), the
-// attribute's TYPE, the Resource, the Scope, and exemplars the SDK does not
-// produce at all.
+// attribute's TYPE, the Resource, the Scope, the unit (ADR 0208), every
+// exemplar (the text format has no field for one; OTLP/JSON carries them), the
+// _sum of a histogram whose source keeps none (NoSum: no line rather than a
+// forged 0), and an exponential histogram's buckets — the text format has no
+// native histogram, so such a family keeps only its le="+Inf" bucket, _sum and
+// _count, which is what the Prometheus client itself exposes in text for a
+// native-only histogram.
 //
 // mu serialises the single dst.Write for the same reason textExporter's does —
 // core/observe/metrics.Exporter requires concurrency safety and dst is caller-supplied.
@@ -153,6 +158,13 @@ func renderExposition(snap coremetrics.SnapshotValue) (doc []byte, err error) {
 	}
 	//: then histograms, the only multi-line family.
 	doc, err = appendPromHistograms(doc, snap.Histograms)
+	//: same abort.
+	if err != nil {
+		//: surface the typed refusal.
+		return nil, err
+	}
+	//: last, exponential histograms: the text format keeps their totals only.
+	doc, err = appendPromExponentials(doc, snap.ExponentialHistograms)
 	//: same abort.
 	if err != nil {
 		//: surface the typed refusal.
@@ -324,8 +336,11 @@ func appendHistogramSeries(buf []byte, name string, point coremetrics.HistogramV
 	//: the +Inf bucket is MANDATORY and closes the ladder.
 	buf = appendBucket(buf, name, point.Attrs, positiveInfBound,
 		strconv.FormatUint(cumulative, decimalBase))
-	//: _sum is a float and may legitimately be NaN or ±Inf.
-	buf = appendSample(buf, name, sumSuffix, point.Attrs, promFloat(point.Sum))
+	//: _sum is a float and may legitimately be NaN or ±Inf; a source that
+	//: keeps no total (NoSum) gets no _sum line rather than a forged 0.
+	if !point.NoSum {
+		buf = appendSample(buf, name, sumSuffix, point.Attrs, promFloat(point.Sum))
+	}
 	//: _count closes the family.
 	return appendSample(buf, name, countSuffix, point.Attrs,
 		strconv.FormatUint(point.Count, decimalBase))
@@ -674,4 +689,43 @@ func labelNameByte(c byte, first bool) bool {
 		//: dot every OTel-conventional attribute key carries.
 		return false
 	}
+}
+
+// appendPromExponentials renders each exponential histogram name as a
+// "histogram" family holding only what the text exposition format can carry
+// of it: the mandatory le="+Inf" bucket, _sum and _count. Its buckets are a
+// native histogram's, which only the protobuf exposition carries; spelling
+// them as classic le buckets would mint a series per bucket and change the le
+// set whenever the scale drops. The Prometheus client exposes a native-only
+// histogram in text exactly so; OTLP/JSON carries every bucket.
+func appendPromExponentials(
+	buf []byte, metrics map[string]coremetrics.ExponentialHistogramMetricValue,
+) (doc []byte, err error) {
+	//: the walk every histogram family takes.
+	for _, name := range sortedKeys(metrics) {
+		metric := metrics[name]
+		//: a delta histogram has no honest spelling here.
+		if err := checkTemporality(name, metric.Temporality); err != nil {
+			return nil, err
+		}
+		//: a name that cannot be spelled refuses the export.
+		if err := checkMetricName(name); err != nil {
+			return nil, err
+		}
+		buf = appendHelpLine(buf, name, metric.Description)
+		buf = appendTypeLine(buf, name, promTypeHistogram)
+		//: one family per series: its totals.
+		for _, point := range metric.Points {
+			//: "le" is reserved here as on any histogram.
+			if err := checkAttrNames(point.Attrs, true); err != nil {
+				return nil, err
+			}
+			count := strconv.FormatUint(point.Count, decimalBase)
+			buf = appendBucket(buf, name, point.Attrs, positiveInfBound, count)
+			buf = appendSample(buf, name, sumSuffix, point.Attrs, promFloat(point.Sum))
+			buf = appendSample(buf, name, countSuffix, point.Attrs, count)
+		}
+	}
+	//: the extended buffer.
+	return buf, nil
 }

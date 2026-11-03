@@ -31,13 +31,28 @@
 // [DecompressedTooLarge] rather than cut short — a truncated success would
 // turn a bomb into a parsing bug further up.
 //
+// # Streams
+//
+// [NewReader] and [NewWriter] take an io.Reader or an io.Writer of any length
+// and never hold it whole, through a scheme implementing
+// [StreamingCompressor] — the three registered here, and the third-party
+// module's zstd and s2:
+//
+//	w, err := transform.NewWriter(transform.Gzip, conn)
+//	r, err := transform.NewReader(transform.Gzip, body, 64<<20)
+//
+// The reader's limit is the stream's ceiling: it yields at most limit bytes,
+// and the read past them fails with [DecompressedTooLarge]. Close the writer,
+// or the stream has no end; close the reader, or its decoder is not reused.
+//
 // # Errors
 //
 // Match them with errs.HasCode, or the sentinels with errors.Is:
 //
 //	CodeUnknownCompressor       0.2.5.1   no compressor is registered under the Algorithm
 //	CodeCompressedFrameInvalid  0.2.5.4   the codec package's compressed frame is malformed, or its bomb guard tripped
-//	CodeDecompressedTooLarge    0.2.5.6   the plaintext would exceed DecompressBounded's ceiling
+//	CodeDecompressedTooLarge    0.2.5.6   the plaintext would exceed DecompressBounded's or NewReader's ceiling
+//	CodeStreamingUnsupported    0.2.5.7   the registered scheme has no stream form
 //	CodeGzipFailed              0.3.26.1  compress/gzip refused the stream, compressing or decompressing
 //	CodeFlateFailed             0.3.26.2  compress/flate refused the stream
 //	CodeZlibFailed              0.3.26.3  compress/zlib refused the stream

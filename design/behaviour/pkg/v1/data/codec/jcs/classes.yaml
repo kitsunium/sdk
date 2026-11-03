@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/jcs
+  name: jcs
+  purpose: "Package jcs writes the JSON Canonicalization Scheme of RFC 8785: one byte form for a JSON document — members sorted, no whitespace, numbers and strings spelled one way — so it can be signed or hashed, and checked by anyone who canonicalizes the same document."
+types: []

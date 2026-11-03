@@ -13,12 +13,33 @@ import (
 // to itself — and not data.
 const maxIndirections int = 32
 
+// deterministicMode is the bit of walkDepth.hops that writes RFC 8949
+// §4.2.1's core deterministic encoding (NewDeterministic): every float in the
+// shortest of half, single and double that holds it exactly, and a struct's
+// fields in the bytewise order of their encoded keys. It rides in hops, far
+// above the 32 indirections the count reaches, so the value copied at every
+// call keeps the two words it had.
+const deterministicMode int = 1 << 16
+
 // walkDepth is where the encoder stands in the value it walks.
 type walkDepth struct {
 	// nest counts the arrays, maps and tags open around the current item.
 	nest int
-	// hops counts the pointers and interfaces followed since the last one.
+	// hops counts the pointers and interfaces followed since the last one,
+	// with deterministicMode set for NewDeterministic.
 	hops int
+}
+
+// deterministicWalk is the starting depth of NewDeterministic's encoder.
+func deterministicWalk() walkDepth {
+	//: the mode bit, no level, no indirection.
+	return walkDepth{hops: deterministicMode}
+}
+
+// deterministic reports whether the walk writes core deterministic encoding.
+func (w walkDepth) deterministic() bool {
+	//: the mode bit.
+	return w.hops&deterministicMode != 0
 }
 
 // enter is the depth inside one more array, map or tag, refused past the
@@ -30,13 +51,13 @@ func (w walkDepth) enter() (walkDepth, error) {
 		return w, encodeFailure("a value nested more than 32 arrays, maps and tags deep")
 	}
 	//: one level in, no indirection yet.
-	return walkDepth{nest: w.nest + 1}, nil
+	return walkDepth{nest: w.nest + 1, hops: w.hops & deterministicMode}, nil
 }
 
 // follow is the depth past one more pointer or interface.
 func (w walkDepth) follow() (walkDepth, error) {
 	//: an interface holding a pointer to itself would never end.
-	if w.hops >= maxIndirections {
+	if w.hops&^deterministicMode >= maxIndirections {
 		//: refused.
 		return w, encodeFailure("more than 32 pointers and interfaces between two containers")
 	}
@@ -48,6 +69,13 @@ func (w walkDepth) follow() (walkDepth, error) {
 // document is made of are encoded without reflection.
 func appendValue(b []byte, x any, at walkDepth) ([]byte, error) {
 	//: the scalars first, then the two untyped containers.
+	//: NewDeterministic's float, in its shortest exact form.
+	if at.deterministic() {
+		//: half, single or double.
+		if f, ok := x.(float64); ok {
+			return appendShortestFloat(b, f), nil
+		}
+	}
 	if encoded, handled, err := appendScalar(b, x); handled {
 		//: a scalar, or a string refused for its encoding.
 		return encoded, err

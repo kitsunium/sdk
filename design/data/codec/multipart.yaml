@@ -23,9 +23,10 @@ packages:
       - const:
           - doc: |-
               CodeMultipartValueInvalid identifies a Marshal / Unmarshal / Encode call
-              whose argument shape the codec cannot honour — an Unmarshal target that is
-              not a non-nil pointer, a Part carrying no field name, or a Part whose Name,
-              FileName or ContentType carries a CR, LF or NUL (field "field" names which).
+              whose argument shape the codec cannot honour — a Part carrying no field
+              name, or a Part whose Name, FileName or ContentType carries a CR, LF or NUL
+              (field "field" names which). An Unmarshal or Decode target that is not a
+              non-nil pointer is the family's TARGET_INVALID since 2026-11-03 (#1101).
             name: CodeMultipartValueInvalid
             value: "0x00_03_29_03"
         type: errs.Code
@@ -76,7 +77,7 @@ packages:
           - code: CodeMultipartMarshalFailed
             doc: MarshalFailed wraps a failure raised while writing a part.
             name: MarshalFailed
-            private: "service/data/codec/multipart: mime/multipart returned an error while writing a part"
+            private: "service/data/codec/multipart: the writer returned an error while writing a part"
             public: multipart encoding failed
             reason: MARSHAL_FAILED
           - code: CodeMultipartUnmarshalFailed
@@ -134,9 +135,10 @@ packages:
         type: int
         value: "1024"
       - doc: |-
-          DefaultMaxTotalBytes caps the sum of every part body at 64 MiB. Without it
-          the real ceiling would be DefaultMaxPartBytes × DefaultMaxParts, which is
-          not a bound anybody chose.
+          DefaultMaxTotalBytes caps a whole body at 64 MiB — every byte of it,
+          delimiters and part headers included. Without it the real ceiling would
+          be DefaultMaxPartBytes × DefaultMaxParts, which is not a bound anybody
+          chose.
         name: DefaultMaxTotalBytes
         type: int64
         value: 64 << 20
@@ -179,16 +181,24 @@ packages:
 
       This is the ONLY read path in the package: Unmarshal drives this decoder
       over a bytes.Reader, so a body parsed from memory and a body streamed off a
-      socket go through identical code and identical bounds.
+      socket go through identical code and identical bounds. mime/multipart reads
+      the body through a counter that charges every byte it pulls — delimiters
+      and the header blocks it parses itself included — against MaxTotalBytes,
+      so no header block is bounded only by the GODEBUG multipartmaxheaders
+      defaults a process can lift at run time.
 
       Package multipart — reading a part's Content-Disposition, and the one rule
       its filename is reduced by on every operating system.
 
-      Package multipart — adapts mime/multipart.Writer to codec.Encoder.
+      Package multipart — the codec.Encoder.
 
       This is the ONLY write path in the package: Marshal and Append both drive
       this encoder over a scratch buffer, so a body built in memory and a body
-      streamed to a socket go through identical code and identical bounds.
+      streamed to a socket go through identical code and identical bounds. It
+      writes each part's delimiter and header block itself, the bytes
+      mime/multipart.Writer.CreatePart writes for the same header, into one
+      reused buffer, and charges every byte it writes against MaxTotalBytes,
+      keeping room for the closing delimiter.
 
       Package multipart — the two value types that model a body: one section
       (PartValue) and the container that frames them (FormValue). They live in one
@@ -199,8 +209,9 @@ packages:
       is the SDK surface most exposed to a hostile stream: unbounded, a single
       crafted part drives io.ReadAll to an OOM, and a boundary flood does the same
       with a very large number of empty parts. Three bounds close both doors
-      (per-part bytes, part count, aggregate bytes); the encoder enforces the
-      identical set so the codec never emits a body it would refuse to read back.
+      (per-part bytes, part count, whole-body bytes — delimiters and headers
+      included); the encoder enforces the identical set so the codec never emits
+      a body it would refuse to read back.
 
       Package multipart — compile-time proof that the concrete types satisfy the
       contracts this package advertises. Kept in its own *_compliance.go file so
@@ -406,7 +417,10 @@ packages:
             - doc: MaxParts caps the number of parts; 0 selects DefaultMaxParts.
               name: MaxParts
               type: int
-            - doc: MaxTotalBytes caps the sum of part bodies; 0 selects DefaultMaxTotalBytes.
+            - doc: |-
+                MaxTotalBytes caps the whole body — every byte read or written,
+                delimiters and part headers included, not only the part bodies; 0
+                selects DefaultMaxTotalBytes.
               name: MaxTotalBytes
               type: int64
     variables:
@@ -435,8 +449,9 @@ packages:
 
       	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/multipart"
 
-      The codec is RFC 7578's multipart/form-data on the standard library's
-      mime/multipart. Its native value is a [Form] of [Part]s — a file upload is a
+      The codec is RFC 7578's multipart/form-data: the standard library's
+      mime/multipart reads it, and the codec frames what it writes itself, byte
+      for byte as mime/multipart would. Its native value is a [Form] of [Part]s — a file upload is a
       part with a FileName and a ContentType; any other value travels as one
       JSON-mediated part. The boundary belongs in the Content-Type header, which a
       codec has nowhere to return, so [ContentType] recovers the header value from

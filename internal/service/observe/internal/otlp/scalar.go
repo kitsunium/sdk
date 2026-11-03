@@ -18,13 +18,12 @@ const (
 	jsonNegInfinity string = `"-Infinity"`
 )
 
-// The strconv parameters every rendering here uses: base ten, and the
-// shortest-round-trip spelling of a 64-bit double.
+// The strconv parameters the integer renderings use: base ten, and the width
+// a response's decimal is parsed at. A double is spelled by
+// kernel/jsonenc.AppendFloat, encoding/json's spelling.
 const (
-	decimalBase  int  = 10
-	floatFmt     byte = 'g'
-	floatPrec    int  = -1
-	floatBitSize int  = 64
+	decimalBase  int = 10
+	floatBitSize int = 64
 )
 
 // intBufferSize pre-sizes a quoted 64-bit decimal: 20 digits, a sign, two
@@ -76,26 +75,8 @@ func (v Uint64) MarshalJSON() (encoded []byte, err error) {
 // MarshalJSON renders the double shortest-round-trip, or names it when it is
 // not finite.
 func (v Double) MarshalJSON() (encoded []byte, err error) {
-	//: a value that is not a number has a name rather than a rendering.
-	value := float64(v)
-	//: NaN first — it fails every ordered comparison below.
-	if math.IsNaN(value) {
-		//: the schema's spelling, quoted.
-		return []byte(jsonNaN), nil
-	}
-	//: +Inf.
-	if math.IsInf(value, 1) {
-		//: the schema's spelling, quoted.
-		return []byte(jsonPosInfinity), nil
-	}
-	//: -Inf.
-	if math.IsInf(value, -1) {
-		//: the schema's spelling, quoted.
-		return []byte(jsonNegInfinity), nil
-	}
-	//: finite: shortest representation that round-trips, which is a JSON
-	//: number in every form strconv produces (123, 1.5, 1e+21, -1.5e-08).
-	return strconv.AppendFloat(nil, value, floatFmt, floatPrec, floatBitSize), nil
+	//: one rendering for both paths: the byte-identity the append tests hold.
+	return appendDouble(nil, float64(v)), nil
 }
 
 // appendInt appends a signed decimal, unquoted.
@@ -110,24 +91,25 @@ func appendUint(dst []byte, v uint64) []byte {
 	return jsonenc.AppendUint(dst, v)
 }
 
-// appendDouble appends value as Double's MarshalJSON renders it: shortest
-// round-trip, or its quoted name when it is not finite.
+// appendDouble appends value as Double's MarshalJSON renders it: the number
+// encoding/json writes (1000000, 1e-7, 1e+21), or its quoted name when it is
+// not finite.
 func appendDouble(dst []byte, value float64) []byte {
+	out, ok := jsonenc.AppendFloat(dst, value)
+	//: finite: jsonenc wrote the number.
+	if ok {
+		return out
+	}
 	//: NaN first — it fails every ordered comparison below.
 	if math.IsNaN(value) {
 		//: the schema's spelling, quoted.
 		return append(dst, jsonNaN...)
 	}
 	//: +Inf.
-	if math.IsInf(value, 1) {
+	if value > 0 {
 		//: the schema's spelling, quoted.
 		return append(dst, jsonPosInfinity...)
 	}
-	//: -Inf.
-	if math.IsInf(value, -1) {
-		//: the schema's spelling, quoted.
-		return append(dst, jsonNegInfinity...)
-	}
-	//: finite: the same strconv rendering MarshalJSON returns.
-	return strconv.AppendFloat(dst, value, floatFmt, floatPrec, floatBitSize)
+	//: -Inf, the one value left.
+	return append(dst, jsonNegInfinity...)
 }

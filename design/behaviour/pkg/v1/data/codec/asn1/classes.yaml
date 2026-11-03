@@ -20,5 +20,5 @@ package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/asn1
   name: asn1
-  purpose: "Package asn1 registers the ASN.1 DER codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/asn1\" The codec is the standard library's encoding/asn1: Marshal writes DER — the only encoding that package produces — and Unmarshal also accepts BER."
+  purpose: "Package asn1 registers the ASN.1 DER codec with the SDK's codec registry — and no other codec — when it is imported (ADR 0134): import _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/asn1\" The codec is the standard library's encoding/asn1: Marshal writes DER — the only encoding that package produces — and Unmarshal also accepts the few BER relaxations encoding/asn1 reads (an indefinite length is not one of them)."
 types: []

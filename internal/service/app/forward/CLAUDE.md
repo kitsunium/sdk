@@ -20,15 +20,18 @@ Code range `0.3.93.*`, declared with its sentinels in
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `config.go` | `Config` (`Broker`, `Send`, `Retryable` required), `Sender`, `FullPolicy` (`DropOldest` the zero, `DropNewest`, `Block`) and `String`, the defaults (`DefaultMaxBatches`, `DefaultMaxBytes`, `DefaultBlockTimeout`, `DefaultSendTimeout`, `DefaultMaxAge`, `DefaultRetryBase`, `DefaultRetryMax`, `DefaultRecountInterval`), `validate` (every refusal named by field) and `normalized` |
+| `config.go` | `Config` (`Broker`, `Retryable`, and `Send` or `SendEncoded` required; `Compress` requires `SendEncoded`), `Sender`, `EncodedSender`, `EncodingGzip`, `FullPolicy` (`DropOldest` the zero, `DropNewest`, `Block`) and `String`, the defaults (`DefaultMaxBatches`, `DefaultMaxBytes`, `DefaultBlockTimeout`, `DefaultSendTimeout`, `DefaultMaxAge`, `DefaultRetryBase`, `DefaultRetryMax`, `DefaultRecountInterval`), `validate` (every refusal named by field) and `normalized` |
 | `forwarder.go` | `Forwarder`, `New` (the backlog counted through `MessageReader`), `Enqueue` (the bound, the full policy, then `publishCounted`: the publication and its identifier counted under `publish`), `Stats` (asks for a count once `RecountInterval` passed), `Run` (`Consume` with `AutoExtend` and `BatchSize` 1, beside the goroutine that counts the queue when asked), `dropOldest` (receive and acknowledge), `block` (a wait on the clock, woken by the one-slot signal a leaving batch sends), `hold` / `release` / `settle` / `leave` / `forget` (the counts by identifier; a batch not counted waits for a publication in flight, then is another process's and takes nothing) |
 | `recount.go` | issue #580: `list` (every live message, its size and whether it is leased), `recountLoop` / `recountOnce` (a count per request, on Run's goroutine), `forgetGone`, `countListed`, `uncountGone` (the counts made what the listing holds, but for a batch kept during it, settled and still leased, or back unleased), `dueRecount` / `askRecount` (a one-slot request, never blocking) |
-| `deliver.go` | the queue handler: an expired batch acknowledged unsent, the retry (`resilience.NewRetry`, `MaxInt` attempts, `Retryable` AND young enough, `Delay` the collector's `RetryAfter` or `Backoff.Delay`, held at what is left of the age), one attempt bounded by `SendTimeout` on the clock, the verdict: sent, handed back on a stop, `DoNotRetry` for a permanent refusal, expired |
-| `signal.go` | `NewSpanExporter` / `NewMetricExporter`: the producer adapters, `EncodeOTLPJSON` then `Enqueue` |
+| `compress.go` | issue #1051: `gzipBatch` (the default level, into a fresh slice the broker may keep, the writer pooled) and `encodingOf` (a stored batch says its own encoding: a gzip stream opens with `1f 8b 08`) |
+| `deliver.go` | the queue handler: an expired batch acknowledged unsent, the retry (`resilience.NewRetry`, `MaxInt` attempts, `Retryable` AND young enough, `Delay` the collector's `RetryAfter` or `Backoff.Delay`, held at what is left of the age), one attempt bounded by `SendTimeout` on the clock, the verdict: sent, handed back on a stop, `DoNotRetry` for a permanent refusal, expired; `SendEncoded`, when set, is handed each batch with `encodingOf` it, else `Send` the batch as it rests |
+| `signal.go` | `NewSpanExporter` / `NewMetricExporter`: the producer adapters, `EncodeOTLPJSON` then `Enqueue`; `NewLogExporter` (#867): a logger `DocumentExporter` whose `ExportDocument` is `Enqueue` — the "otlpjson" writer has encoded the batch already |
+| `logs_external_test.go` | #867: a record through the "otlpjson" writer into the forwarder, a collector's 429 with `Retry-After: 90` waited out on the clock, the same document posted again once, then sent |
 | `stats.go` | `StatsValue` |
 | `forward_external_test.go`, `signal_external_test.go`, `harness_external_test.go` | every behaviour on a `ManualClock` that reports each timer it arms, no sleep: refusals, sent and counted, a collector down then back on the backoff, a `Retry-After` waited in full and never past the age, a 400 dead-lettered once, an expired batch dropped unsent, each full policy, a stop that hands the batch back, the bound on one attempt, batches that survive a restart on the file broker; end to end through the real OTLP/HTTP exporter (429 then 400) |
 | `recount_external_test.go` | issue #580, each case failing before it: a dead letter replayed while the head batch is retried is counted at the next count, and both sent leave nothing; a batch another consumer took is no longer counted; a batch another process queued is counted, and its delivery takes nothing from the forwarder's; the caller's `RecountInterval`; four producers, four consumers and a count at every read and settle leave no residue |
-| `forward_bench_test.go` / `BENCH.md` | the cost of `Enqueue`, the producer's path, on the memory and the file broker |
+| `compress_external_test.go` | issue #1051: `Compress` keeps the gzip bytes (counted by `PendingBytes`) and `SendEncoded` gets them labelled gzip; a plain batch unlabelled; `Compress` without `SendEncoded` refused by name; a gzip backlog drained after `Compress` is turned off; the restart test with `Compress` on |
+| `forward_bench_test.go` / `BENCH.md` | the cost of `Enqueue`, the producer's path, on the memory and the file broker, and with `Compress` (the stored bytes per 16 KiB batch) |
 
 ## Why-this-shape
 
@@ -73,13 +76,22 @@ Code range `0.3.93.*`, declared with its sentinels in
   signal nobody waited for only makes the next wait look again; nothing is
   closed, so nothing can be closed twice.
 
+- **A batch says its own encoding (#1051).** The queue keeps no header beside
+  a payload, so `Compress` writes nothing but the gzip stream, whose magic
+  bytes no OTLP/JSON document opens with. A backlog kept under the other
+  setting is therefore labelled right after a restart, and `SendEncoded`
+  posts it as it rests — never decompressed, which keeps D2: the consumer
+  decodes nothing. `Compress` without `SendEncoded` is refused, because
+  `Send` has no way to say the bytes are gzip.
+
 ## Do NOT
 
 - **Nack a retryable failure.** See above; `DoNotRetry` is the one queue
   mark the handler returns.
 - **Write anything anywhere.** The forwarder counts; a caller exports `Stats`
   where it wants (ADR 0149's division).
-- **Decode a stored batch.** It is posted as it was written.
+- **Decode a stored batch** — nor gunzip one. It is posted as it was written,
+  a gzip batch labelled so.
 - **Retry inside the `Sender`** — the forwarder's retry is the only one.
 
 ## Verification

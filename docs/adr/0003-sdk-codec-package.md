@@ -138,6 +138,93 @@ Every Go error emitted from a codec is an `*errs.Error` with a stable `Reason` (
 - Compression layer (`pkg/v1/compress`) — orthogonal, future ADR.
 - Primitive binary packing (`encoding/binary` BE/LE framing) — belongs in a future `pkg/v1/binpack`, not here.
 
+## Amendment — 2026-11-03: one vocabulary for bound refusals (#894)
+
+A codec's refusal of input past one of its bounds keeps the codec's own code
+— a `<X>SizeExceeded` or `<X>DepthExceeded` in its `PP` range, new for yaml,
+toml, msgpack, form and cbor — and takes the family's reason: `SIZE_EXCEEDED`
+for a byte, node, pair or entry bound, `DEPTH_EXCEEDED` for nesting. The
+codec's `UNMARSHAL_FAILED` code joins the trail, so a caller matching any
+decoding failure by code is unchanged. `core/data/codec.IsTooLarge` and
+`IsTooDeep`, forwarded by the facade, answer the question across formats
+(multipart's `LIMIT_EXCEEDED` and strictjson's `DOCUMENT_TOO_LARGE` count as
+too large), which is what a server needs to answer 413. The prefixed reasons
+(`BSON_SIZE_EXCEEDED`, `BSON_DEPTH_EXCEEDED`, `BASE_ENC_SIZE_EXCEEDED`,
+`HCL_SIZE_EXCEEDED`, `PROTOBUF_SIZE_EXCEEDED`) are renamed; their codes are
+not. A reason is part of `Error()`'s text, so this is a visible change.
+
+## Amendment — 2026-11-03: a stream decoder under the caller's ceiling (#891)
+
+`StreamingCodec.NewDecoder` takes no bound, and the json, xml and cbor
+decoders held none of their own, so a socket behind `NewDecoder(JSON, conn)`
+could grow the process by the size of one hostile value. A sibling port,
+`BoundedStreamingCodec`, adds `NewBoundedDecoder(r, maxBytes) (Decoder,
+error)` beside `StreamingCodec` rather than widening `Decoder` (ADR 0039).
+The ceiling bounds one value, counted from the end of the previous one, so a
+long-lived stream of small values is never refused; a value past it is
+refused with the codec's `SIZE_EXCEEDED` — json `0.3.2.3`, xml `0.3.3.3`,
+cbor `0.3.6.6` — after at most `maxBytes+1` bytes of it are read (cbor, whose
+validator knows where an item ends, reads at most `maxBytes`). A ceiling of
+zero or below is refused with `BOUND_INVALID` (0.2.2.7): a bound has no value
+meaning unlimited (ADR 0031). The facade's `NewBoundedDecoder(f, r, maxBytes)`
+answers `STREAMING_UNSUPPORTED` for a codec without the port; toml, msgpack
+and yaml keep the fixed ceilings their `NewDecoder` already enforced.
+
+## Amendment — 2026-11-03: a Format from an input's first bytes (#909)
+
+The registry resolved a Format by name, MIME type or extension only, so a file
+from a listing, a queue message or a request without `Content-Type` had no
+path to a codec. A sibling extension, `Sniffer { Sniff(prefix) (confident
+bool) }`, lets a codec claim a head no other format's output starts with —
+json, ndjson (two records), xml, pem and bson; the formats almost any bytes
+start (cbor, msgpack, asn1, tlv) and the text formats without a head do not
+sniff. `core/data/codec.Detect` reads at most 512 bytes, as
+`http.DetectContentType` does, asks every sniffer in registration order and
+answers only when exactly one claims: a guess is never returned. It allocates
+nothing. The facade forwards it, refusing first its own compressed frame,
+whose payload a sniffer could misread, and adds `DetectCompression` for gzip,
+zlib, zstd and s2 by their magic numbers — compression is a transform, never
+a Format (ADR 0014).
+
+## Amendment — 2026-11-03: one position in every decode refusal (#1125)
+
+A decode refusal that knows where it is places itself the same way in every
+format: the fields `offset` (0-based byte), `line` and `column` (1-based),
+each present only when known, written through `core/data/codec.PositionFields`
+or under its three keys (`FieldOffset`, `FieldLine`, `FieldColumn`), and read
+back by `PositionOf` — forwarded by the facade with its value type, `Position`.
+yaml and toml place by line and column (characters), csv by the line and byte
+column `encoding/csv` gives — a cell its column cannot hold included —, json by
+the offset `encoding/json` gives, xml by the line `encoding/xml` gives; cbor,
+msgpack, bson, tlv and flatbuffers by offset alone, where an offset of zero is
+the first byte, not an unknown one. bson's offset left its Private sentence,
+where no reader found it, for the field; no Private text is a position's only
+carrier any more. Codes, reasons and Public sentences do not change; csv's
+`CELL_INVALID` and `HEADER_MISMATCH` carry the column's name under `name`, not
+`column`, which is now a coordinate. The bounded decoders of #891 place their
+`SIZE_EXCEEDED` at the first byte past the ceiling: json and xml at the
+stream's offset, the ceiling counted from the end of the previous value, cbor
+within its item, as its other stream refusals are placed.
+
+## Amendment — 2026-11-03: misuse has the family's codes (#1101)
+
+The three family codes the registry declared and nothing emitted now have
+emitters. `core/data/codec.CheckTarget` opens every codec's `Unmarshal` and
+`Decode` — the bounded decoders' of #891 included, before their window opens: a nil or non-pointer target is `TARGET_INVALID` (0.2.2.3), its type
+in the `target` field — bson also takes a non-nil map, flatbuffers a
+`BytesAcceptor` held by value. json, xml, bson, cbor, msgpack and tlv refuse
+zero bytes with `EMPTY_INPUT` (0.2.2.2); yaml and toml read an empty document.
+The codecs that encode any Go value open `Marshal` with `CheckValue`: a
+channel, a function or an unsafe pointer is `VALUE_INVALID` (0.2.2.4);
+`Append`, the hot path, leaves it to the encoder. The family code is the origin and no per-format code joins the
+trail — misuse is not a decoding failure, and a server mapping
+`UNMARSHAL_FAILED` to 400 no longer blames the client for its own bug.
+`IsMisuse`, forwarded by the facade, reads the three. A per-format
+`VALUE_INVALID` keeps refusing a pointer of the wrong shape, which the facade
+promotes. This is a visible change: those calls returned each format's
+`UNMARSHAL_FAILED`, `VALUE_INVALID`, `FLATBUFFERS_BAD_TARGET` or
+`MARSHAL_FAILED`.
+
 ## References
 
 - Plan: `/.claude/contexts/sdk-universal-codec.md`

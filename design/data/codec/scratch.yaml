@@ -13,6 +13,16 @@ packages:
         name: MaxRetainedBufBytes
         type: int
         value: 256 << 10
+      - doc: |-
+          MaxRetainedSizedBytes is the capacity past which the size-classed tier
+          drops a buffer: 4 MiB. Between MaxRetainedBufBytes and it, a released buffer
+          joins the class its capacity falls in — up to 1 MiB, up to 4 MiB — so a
+          workload of documents past 256 KiB reuses its buffers instead of growing
+          one on every call; past it, one oversized payload still cannot pin its
+          allocation.
+        name: MaxRetainedSizedBytes
+        type: int
+        value: 4 << 20
     doc: |-
       Package scratch provides shared, size-bounded recycling primitives for the
       service codecs. Every codec that encodes into a transient *bytes.Buffer
@@ -39,6 +49,21 @@ packages:
         out:
           - type: "*bytes.Buffer"
       - doc: |-
+          AcquireBufferSized returns a clean, zero-length *bytes.Buffer with room for
+          at least hint bytes: from the shared pool when hint is within
+          MaxRetainedBufBytes, else from the size class hint falls in — up to 1 MiB,
+          up to 4 MiB — whose new buffers are allocated at the class's full size, so
+          one serves every hint of its class. A codec that knows, or has seen, the
+          size of what it encodes passes it, and a document past 256 KiB is encoded
+          into a recycled buffer instead of a growth chain. The caller owns it until
+          ReleaseBufferSized, which returns it to its class.
+        in:
+          - name: hint
+            type: int
+        name: AcquireBufferSized
+        out:
+          - type: "*bytes.Buffer"
+      - doc: |-
           ReleaseBuffer returns buf to the shared pool unless its capacity exceeds
           MaxRetainedBufBytes, in which case the recycler orphans it for the GC.
           Callers MUST NOT use buf — or any slice aliasing buf.Bytes() — after this
@@ -48,15 +73,27 @@ packages:
             type: "*bytes.Buffer"
         name: ReleaseBuffer
       - doc: |-
+          ReleaseBufferSized returns buf to the pool its capacity belongs to: the
+          shared pool within MaxRetainedBufBytes, the size class past it, and none
+          past MaxRetainedSizedBytes, where the recycler orphans it for the GC. It is
+          the release of a buffer AcquireBufferSized handed out — or of any buffer a
+          codec grew past the shared pool's cap and means to reuse. Callers MUST NOT
+          use buf, or any slice aliasing buf.Bytes(), after this call.
+        in:
+          - name: buf
+            type: "*bytes.Buffer"
+        name: ReleaseBufferSized
+      - doc: |-
           DetachBuffer hands the caller the bytes encoded into buf and ends the
           caller's ownership of buf, by the cheaper of two releases for its size. A
           buffer within MaxRetainedBufBytes is cloned and repooled: the clone is small,
           and the next encode reuses the buffer. An over-cap buffer would pay a full
-          copy of a large payload AND be dropped by the pool anyway, so it is orphaned
-          instead: the returned slice IS its storage, now the caller's, and buf is left
-          for the GC without a reset — a reset would not zero the bytes, but a later
-          write through buf would overwrite them. Either way, buf must not be used
-          after the call. A nil buf yields nil.
+          copy of a large payload, so it is orphaned instead — the size-classed tier
+          is for codecs that ask AcquireBufferSized for their buffer and release it
+          with ReleaseBufferSized: the returned slice IS its storage, now the caller's, and buf is
+          left for the GC without a reset — a reset would not zero the bytes, but a
+          later write through buf would overwrite them. Either way, buf must not be
+          used after the call. A nil buf yields nil.
         in:
           - name: buf
             type: "*bytes.Buffer"
@@ -80,4 +117,79 @@ packages:
           - name: r
             type: "*bytes.Reader"
         name: ReleaseReader
+      - doc: |-
+          NewAppendWriter returns an [AppendWriter] appending to dst that is the
+          caller's to keep, outside the pool: for a writer that lives as long as its
+          owner — a stream encoder writing every record through the same one — where
+          AcquireAppendWriter is for one encode.
+        in:
+          - name: dst
+            type: "[]byte"
+        name: NewAppendWriter
+        out:
+          - type: "*AppendWriter"
+      - doc: |-
+          AcquireAppendWriter returns an [AppendWriter] from the shared pool that
+          appends to dst in place: what an encoder writes through it lands after
+          dst's last byte, in dst's spare capacity while it lasts. It is how a codec's
+          Append hands a caller's buffer to a standard-library encoder that takes an
+          io.Writer, instead of encoding into a pooled buffer and copying the result
+          onto dst. The caller owns the writer until ReleaseAppendWriter.
+        in:
+          - name: dst
+            type: "[]byte"
+        name: AcquireAppendWriter
+        out:
+          - type: "*AppendWriter"
+      - doc: |-
+          ReleaseAppendWriter returns w to the shared pool. The writer forgets the
+          slice it held, so an idle writer keeps no caller's buffer alive. Callers
+          MUST NOT use w after this call; the slice [AppendWriter.Bytes] returned
+          stays theirs. A nil w is a no-op.
+        in:
+          - name: w
+            type: "*AppendWriter"
+        name: ReleaseAppendWriter
     path: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+    types:
+      - doc: |-
+          AppendWriter is an io.Writer over a caller's slice: each Write appends to
+          it, growing it as append grows a slice, and [AppendWriter.Bytes] returns
+          the slice so far. [AppendWriter.Truncate] cuts it back to the length it had
+          when the writer was acquired, so an encode that fails half-way leaves the
+          caller's bytes as they were — the codec.Appender contract. It never fails a
+          Write. Acquire one with AcquireAppendWriter for one encode, or keep one from
+          NewAppendWriter; the zero AppendWriter appends to a nil slice.
+        methods:
+          - doc: |-
+              Write appends p to the slice and reports len(p). It never returns an
+              error, so an encoder writing through it fails only on its own account.
+            in:
+              - name: p
+                type: "[]byte"
+            name: Write
+            out:
+              - name: n
+                type: int
+              - name: err
+                type: error
+            recv: pointer
+          - doc: |-
+              Bytes returns the slice so far: the bytes the writer was acquired with,
+              then everything written since. It may be a new array when a Write
+              outgrew the capacity of the one before.
+            name: Bytes
+            out:
+              - type: "[]byte"
+            recv: pointer
+          - doc: |-
+              Truncate drops everything written since the writer was acquired and
+              returns the slice cut back to its length then, so a failed encode hands
+              the caller back the bytes it gave, unchanged.
+            name: Truncate
+            out:
+              - type: "[]byte"
+            recv: pointer
+        name: AppendWriter
+        struct:
+          unexported: true

@@ -5,11 +5,14 @@
 //
 // The codec is RFC 8949 written on the standard library: maps, arrays, the
 // integers and floats, text and byte strings, tags 0 to 3 for times and big
-// numbers, struct fields by their cbor tag or their json tag. Map pairs are
-// written sorted by their encoded key, the deterministic encoding of RFC 8949
-// §4.2.1, so one value always encodes to the same bytes. Input is checked
-// whole — well-formed, valid, within its bounds — before the target is
-// written. It streams.
+// numbers and any other as a Tag, struct fields by their cbor tag or their
+// json tag. Map pairs are written sorted by their encoded key, the
+// deterministic encoding of RFC 8949 §4.2.1, so one value always encodes to
+// the same bytes; NewDeterministic adds the shortest floats and reads only
+// that encoding, for bytes that are signed. A time.Duration is an integer of
+// int64 nanoseconds, the rule of every binary format (#1126): no standard tag
+// carries a duration. Input is checked whole — well-formed, valid, within its
+// bounds — before the target is written. It streams.
 //
 // Everything that dispatches through the registry by format name then
 // reads and writes it: the codec package's Marshal and Unmarshal,
@@ -27,6 +30,9 @@
 //
 //	CodeMarshalFailed    0.3.6.1  a value CBOR cannot carry, invalid UTF-8, nesting past the bound
 //	CodeUnmarshalFailed  0.3.6.2  input that is not one well-formed item, or an item the target cannot hold
+//	CodeDuplicateKey     0.3.6.3  NewStrict: a map repeats a key
+//	CodeUnknownMember    0.3.6.4  NewStrict: a member no struct field claims
+//	CodeNotDeterministic 0.3.6.5  NewDeterministic: a document not in core deterministic encoding
 //
 // No error message quotes the input.
 package cbor

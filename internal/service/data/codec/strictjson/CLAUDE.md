@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/strictjson/
 
 ## Purpose
@@ -93,3 +93,7 @@ bazel test --config=race //internal/service/data/codec/strictjson:strictjson_tes
 bazel test --config=race //internal/service/data/codec/strictjson/httpbody:httpbody_test
 cd internal/service && GOWORK=off go test -race ./data/codec/strictjson/...
 ```
+
+## Fuzz (#897)
+
+`fuzz_external_test.go` — `FuzzDecodeAgreesWithJSONv2`: under a bound the input never reaches, `Decode` accepts exactly what `encoding/json/v2` accepts with unknown members rejected, into the same value, and a refusal never quotes the document. The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.

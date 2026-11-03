@@ -23,6 +23,7 @@ go_library(
         "//internal/core/crypto",
         "//internal/core/crypto/key/jwk",
         "//internal/kernel/errs",
+        "//internal/service/data/codec/jcs",
     ],
 )
 
@@ -45,6 +46,7 @@ go_test(
         "marshal_external_test.go",
         "parse_external_test.go",
         "set_external_test.go",
+        "thumbprint_jcs_internal_test.go",
     ],
     embed = [":jwk"],
     deps = [

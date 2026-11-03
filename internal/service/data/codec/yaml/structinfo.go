@@ -27,6 +27,9 @@ type fieldInfo struct {
 	omitEmpty bool
 	// flow writes the field's collection in flow style.
 	flow bool
+	// zero is omitzero's test of the field's type, nil without omitzero:
+	// the field is left out when it holds its type's zero value (#1103).
+	zero func(reflect.Value) bool
 }
 
 // structInfo is everything the codec reads from a struct type's tags.
@@ -48,6 +51,8 @@ type structInfo struct {
 type tagFlags struct {
 	// omitEmpty is ",omitempty".
 	omitEmpty bool
+	// omitZero is ",omitzero", encoding/json's option since Go 1.24.
+	omitZero bool
 	// flow is ",flow".
 	flow bool
 	// inline is ",inline".
@@ -99,16 +104,28 @@ func buildStructInfo(info *structInfo, t reflect.Type, prefix []int, visiting ma
 			inlineField(info, field, index, visiting)
 			continue
 		}
-		//: an unexported field can be neither read nor written.
-		if !field.IsExported() {
-			continue
+		//: an exported field is keyed; an unexported one can be neither read
+		//: nor written.
+		if field.IsExported() {
+			addField(info, newFieldInfo(field, name, index, opts))
 		}
-		//: the key: the tag's name, or the field's name in lower case.
-		if name == "" {
-			name = strings.ToLower(field.Name)
-		}
-		addField(info, fieldInfo{key: name, index: index, omitEmpty: opts.omitEmpty, flow: opts.flow})
 	}
+}
+
+// newFieldInfo describes an exported field: its key — the tag's name, or the
+// field's name in lower case — its index path and its options, omitzero's
+// test decided once, from the type.
+func newFieldInfo(field reflect.StructField, name string, index []int, opts tagFlags) fieldInfo {
+	//: no name in the tag: the field's, lower-cased.
+	if name == "" {
+		name = strings.ToLower(field.Name)
+	}
+	f := fieldInfo{key: name, index: index, omitEmpty: opts.omitEmpty, flow: opts.flow}
+	//: omitzero's test, from the type.
+	if opts.omitZero {
+		f.zero = zeroTest(field.Type)
+	}
+	return f
 }
 
 // yamlTag returns the field's yaml tag, and false when the field takes no
@@ -149,6 +166,9 @@ func parseTagFlags(flags string) (tagFlags, string) {
 		//: leave the field out when empty.
 		case "omitempty":
 			opts.omitEmpty = true
+		//: leave the field out when it holds its type's zero value.
+		case "omitzero":
+			opts.omitZero = true
 		//: write the collection in flow style.
 		case "flow":
 			opts.flow = true
@@ -213,4 +233,12 @@ func addField(info *structInfo, f fieldInfo) {
 	}
 	info.byKey[f.key] = len(info.fields)
 	info.fields = append(info.fields, f)
+}
+
+// omitted reports whether the field, holding fv, is left out of the output:
+// empty under omitempty, or zero under omitzero — either is enough, as
+// encoding/json combines them.
+func (f *fieldInfo) omitted(fv reflect.Value) bool {
+	//: omitempty and empty, or omitzero and zero.
+	return (f.omitEmpty && isEmpty(fv)) || (f.zero != nil && f.zero(fv))
 }

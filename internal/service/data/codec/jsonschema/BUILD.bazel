@@ -1,0 +1,55 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "jsonschema",
+    srcs = [
+        "applicators.go",
+        "compile.go",
+        "doc.go",
+        "eval.go",
+        "formats.go",
+        "jsonschema.go",
+        "keywords.go",
+        "value.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/data/codec/jsonschema",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/validation",
+        "//internal/core/data/codec/jsonschema",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/strictjson",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":jsonschema",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "jsonschema_test",
+    srcs = [
+        "gen_api_test.go",
+        "jsonschema_bench_test.go",
+        "jsonschema_external_test.go",
+        "suite_external_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    deps = [
+        ":jsonschema",
+        "//internal/core/app/validation",
+        "//internal/core/data/codec/jsonschema",
+        "//internal/core/data/codec/strictjson",
+        "//internal/kernel/errs",
+    ],
+)

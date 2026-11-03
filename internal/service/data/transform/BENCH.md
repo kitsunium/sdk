@@ -493,7 +493,13 @@ pooling change's real boundary condition, and it is the thing to say out loud:
 
 ## 8. What the decompression bound costs
 
-`readAllBounded` is one `io.LimitReader` plus one length comparison against
+> **Superseded in part by §12 (kitsunium/sdk#1102, 2026-11-03).** The helper
+> measured here, `readAllBounded`, is gone: `appendAllBounded` counts the bytes
+> it reads itself, so the `io.LimitReader` and its 24 bytes are no longer
+> allocated at all. The rows below stay as the record of what that bound cost;
+> the refusal path's shape — cost tracks the cap, never the bomb — is unchanged.
+
+`readAllBounded` was one `io.LimitReader` plus one length comparison against
 `maxDecompressedBytes`. Against a bare `io.ReadAll` over the same bytes
 (`-count=5`, because the 1 MiB pair needed it — §10):
 
@@ -535,6 +541,13 @@ guard; the expansion-ratio guard lives at the `pkg/v1/data/codec` frame layer. T
 rows measure the mechanism at caps small enough to fire it.
 
 ## 9. The optimisation that was refused, with its number
+
+> **Superseded by §12 (kitsunium/sdk#1102, 2026-11-03).** The saving this
+> section measured and refused is now delivered without leaving the
+> append-to-`dst` contract: the decode lands in `dst`'s spare capacity, and a
+> nil `dst` gets one allocation of the payload's size. The refused branch is
+> kept in `transform_bench_test.go` as `benchDecompressRefusedFastPath`, priced
+> beside production in §12.
 
 A fast path was added to all three `Decompress` functions and then removed:
 
@@ -646,9 +659,157 @@ noise and was not.
 
 1. **Do not compress below 128 bytes** (§4). It costs 3–12 µs and makes the
    payload bigger, on every corpus, by construction.
-2. **Pass a `dst` with capacity** (§5). Free 28–34 % on incompressible payloads.
+2. **Pass a `dst` with capacity** (§5, §12). Free 28–34 % on incompressible
+   payloads when compressing; when decompressing, a `dst` whose spare capacity
+   holds the plaintext costs no allocation at all for gzip and flate, and the
+   4 bytes of zlib's Adler-32 digest for zlib.
 3. **`BestSpeed` before `DefaultCompression`** (§6), unless a measurement on
    *your* corpus says otherwise. On this one it is 3.4× faster for the same
    ratio.
 4. **Budget for the pool miss, not the pool hit** (§2, §7), if your service
    allocates heavily between compressions. The floor is the miss column.
+
+## 12. Decompressing into `dst`'s capacity (kitsunium/sdk#1102)
+
+Measured 2026-11-03 on the box of the envelope above, Go 1.27.3, base
+`740e7c1ea` against the working tree of `wip/sdk-lot-5-transform`,
+`-benchtime=0.5s -count=3`, medians (benchstat). The raw files are not in the
+tree; the rows are reproduced by `BenchmarkDecompress`,
+`BenchmarkDecompressSized` and `BenchmarkDecompressTail`.
+
+**What changed.** The decode used to be drained by `io.ReadAll` into a fresh
+buffer — 512 bytes, doubling — and then appended onto `dst`: a caller handing a
+1 MiB spare-capacity `dst` still paid the doubling chain and one copy.
+`appendAllBounded` now reads into `dst`'s spare capacity first, in place; what
+does not fit goes into pooled 32 KiB chunks (`spillPool`, at most 32 handed
+back per call), and `dst` grows **once**, to its final length, the chunks copied
+in. The bound is a counter, not an `io.LimitReader`, and the compressed input is
+read through a `bytes.Reader` held in the pooled decoder's box instead of one
+`bytes.NewReader` per call.
+
+**A sized `dst`** (`BenchmarkDecompressSized`: spare capacity = plaintext):
+
+| row | base B/op | after B/op | base allocs | after allocs | base ns | after ns |
+|---|---:|---:|---:|---:|---:|---:|
+| gzip text 4 KiB | 10 448 | **0** | 11 | **0** | 14 675 | 7 275 |
+| gzip text 64 KiB | 138 284 | **3** | 18 | **0** | 89 317 | 25 943 |
+| gzip text 1 MiB | 2 228 631 | 60 | 27 | **0** | 1 357 579 | 348 881 |
+| flate text 4 KiB | 10 450 | **0** | 11 | **0** | 12 806 | 6 584 |
+| flate text 64 KiB | 138 294 | **2** | 18 | **0** | 85 763 | 19 076 |
+| flate random 64 KiB | 138 273 | **0** | 18 | **0** | 73 187 | 4 473 |
+| zlib text 4 KiB | 10 450 | **4** | 12 | **1** | 15 850 | 9 024 |
+| zlib text 64 KiB | 138 288 | 11 | 19 | **1** | 113 793 | 53 037 |
+
+The few bytes left at 64 KiB and 1 MiB are `sync.Pool` refills after a
+collection, averaged over `b.N`; the allocation gate
+(`TestDecompressIntoASizedDstAllocatesNothing`, alloc lane, the collector held
+off) counts **zero** for gzip and flate. **zlib keeps one allocation of 4
+bytes**: `compress/zlib`'s `Reset` builds a fresh Adler-32 digest
+(`adler32.New`) on every stream, a cost of the standard library's that no
+caller-side buffer can shed. Removing it means decoding the RFC 1950 envelope in
+this package over the pooled flate decoder; that is a change of decoder, not of
+tail, and is not made here.
+
+**A nil `dst`** (`BenchmarkDecompress`): the payload is allocated once, at its
+size.
+
+| row | base B/op | after B/op | after / plaintext | base allocs | after allocs |
+|---|---:|---:|---:|---:|---:|
+| gzip text 64 B | 648 | **64** | 1.00 | 4 | 1 |
+| gzip text 4 KiB | 14 549 | **4 103** | 1.00 | 12 | 1 |
+| gzip text 64 KiB | 203 845 | **65 585** | 1.00 | 19 | 1 |
+| gzip text 1 MiB | 3 279 160 | **1 082 824** | 1.03 | 29 | 6 |
+| zlib text 4 KiB | 14 547 | 4 108 | 1.00 | 13 | 2 |
+
+The 1 MiB row's 3 % and five extra allocations are spill chunks the pool did
+not have after a collection; a decode past 1 MiB (32 chunks) refills from the
+heap for the excess, so its B/op rises toward twice the plaintext — still under
+the base's 3.1×. The gate `TestDecompressIntoANilDstAllocatesThePayloadOnce`
+holds one allocation per call (two for zlib) and a result capacity within 1.5×
+the payload at 4 KiB and 64 KiB.
+
+**Time, geomean over the 60 rows of both benchmarks: −57 %** (22.7 µs → 9.7 µs).
+The largest gains are where the copy was the work: flate on random 64 KiB into a
+sized `dst`, 73.2 µs → 4.5 µs, is a stored block, so the decode is a `memmove`
+and the old tail was everything else.
+
+**The three tails on one binary** (`BenchmarkDecompressTail`, gzip text):
+
+| plaintext | readall-append | refused fast path | production | B/op readall / refused / production |
+|---:|---:|---:|---:|---|
+| 64 B, nil `dst` | 1 038 ns | 891 ns | **817 ns** | 600 / 536 / **64** |
+| 4 KiB, nil `dst` | 14 264 ns | 12 169 ns | **8 865 ns** | 14 496 / 10 399 / **4 104** |
+| 4 KiB, sized `dst` | 12 267 ns | 12 338 ns | **7 193 ns** | 10 396 / 10 397 / **0** |
+| 1 MiB, nil `dst` | 2 383 µs | 1 668 µs | **767 µs** | 3.13 Mi / 2.13 Mi / **1.03 Mi** |
+| 1 MiB, sized `dst` | 1 536 µs | 1 528 µs | **340 µs** | 2.13 Mi / 2.13 Mi / **42 B** |
+
+The refused fast path of §9 is beaten on every row while keeping the contract
+it broke, and the 8× retention §9 found at 64 B is gone too: a nil `dst` now
+gets a result whose capacity is the payload's (64 B for 64 B), not
+`io.ReadAll`'s 512-byte floor.
+
+**Output is unchanged.** Only the decompression tail moved; `Compress` and the
+three wire formats are untouched, so the 30 SHA-256 digests of §Method still
+hold (re-checked after kitsunium/sdk#900 changed the writer pools, §13).
+
+## 13. A level for gzip and flate (kitsunium/sdk#900)
+
+Measured 2026-11-03, same box, Go 1.27.3, `BenchmarkLevel`,
+`-benchtime=1s -count=3`, medians: 4 MiB of JSON log records
+(`benchJSONLog`: repeated keys, a small vocabulary, a random trace ID per
+record), compressed by `NewGzipCompressor`, `NewFlateCompressor` and
+`NewZlibCompressor` at the three levels a caller picks between.
+
+| scheme | level | ns/op | MiB/s | ratio | B/op |
+|---|---|---:|---:|---:|---:|
+| gzip | `BestSpeed` | 21 010 000 | 190.4 | **4.731** | 2.01 Mi |
+| gzip | `DefaultCompression` | 47 110 000 | 84.9 | **5.347** | 2.04 Mi |
+| gzip | `BestCompression` | 301 700 000 | 13.3 | **5.857** | 2.27 Mi |
+| flate | `BestSpeed` | 20 890 000 | 191.4 | 4.731 | 2.00 Mi |
+| flate | `DefaultCompression` | 50 040 000 | 79.9 | 5.347 | 2.04 Mi |
+| flate | `BestCompression` | 302 800 000 | 13.2 | 5.857 | 2.27 Mi |
+| zlib | `BestSpeed` | 23 120 000 | 173.0 | 4.731 | 2.02 Mi |
+| zlib | `DefaultCompression` | 49 020 000 | 81.6 | 5.347 | 2.00 Mi |
+| zlib | `BestCompression` | 304 200 000 | 13.2 | 5.857 | 2.27 Mi |
+
+**The knob is the spread a caller chooses on, and it is wide.** `BestSpeed`
+compresses 2.2× faster than the default for 11.5 % less ratio;
+`BestCompression` buys 9.5 % more ratio than the default for 6.4× the time. The
+three schemes agree to the third decimal on ratio because they share the
+DEFLATE encoder and differ only by their envelope; zlib's Adler-32 is the few
+percent it pays. The B/op column is the output buffer's growth from nil, the
+same at every level within the envelope's few bytes.
+
+**Output identity.** Before any timing, the 30 scheme × corpus × size SHA-256
+digests of §Method were recomputed on base `740e7c1ea` and on the working tree
+after the per-level writer pools replaced gzip's and flate's single pools: **all
+30 equal**. The default level's bytes did not move.
+
+## 14. Streams (ADR 0213, kitsunium/sdk#892)
+
+Measured 2026-11-03, same box, Go 1.27.3, `BenchmarkStream`,
+`-benchtime=0.5s -count=3`, medians, on the 4 MiB JSON log corpus of §13: a
+compress through `NewWriter` into a buffer against `Compress` into nil, and a
+decompress through `NewReader` drained to `io.Discard` against `Decompress`
+into nil.
+
+| scheme | verb | block ns/op | stream ns/op | block B/op | stream B/op | block allocs | stream allocs |
+|---|---|---:|---:|---:|---:|---:|---:|
+| gzip | compress | 45 660 000 | 43 850 000 | 2.09 Mi | 238 Ki | 16 | 3 |
+| gzip | decompress | 24 450 000 | **19 390 000** | 7.04 Mi | **6.8 Ki** | 222 | 119 |
+| flate | compress | 52 450 000 | 52 140 000 | 2.09 Mi | 258 Ki | 15 | 3 |
+| flate | decompress | 22 390 000 | **18 640 000** | 7.04 Mi | **6.7 Ki** | 222 | 119 |
+| zlib | compress | 50 960 000 | 47 250 000 | 2.00 Mi | 258 Ki | 15 | 3 |
+| zlib | decompress | 22 930 000 | **19 670 000** | 7.04 Mi | **6.7 Ki** | 223 | 120 |
+
+**The stream is not the slow form.** It decompresses 15–21 % faster than the
+block form at 4 MiB, because it never materialises the plaintext: the block
+form's 7 MiB/op are the 4 MiB result and the spill chunks past the 1 MiB the
+pool keeps (§12), the stream's are the decoder's Huffman link tables. The
+allocation count left on the stream is `compress/flate`'s own — its
+`huffmanDecoder` builds link tables per dynamic block — not the SDK's.
+
+**The ceiling holds without the memory.** `pkg/v1/data/transform`'s
+`TestAStreamStopsAtItsLimit` reads a gzip stream ten times its 4 MiB ceiling:
+4 MiB come out, then `DecompressedTooLarge`, after 12 KiB of the 100 KiB source
+and 55 KiB allocated.

@@ -647,7 +647,11 @@ sequences:
         kind: self
       - id: s.ensureOpen
         kind: internal
+      - id: s.pin.Lock
+        kind: value
       - id: s.f.Close
+        kind: value
+      - id: s.pin.Unlock
         kind: value
       - id: wrapRotate
         kind: internal
@@ -668,14 +672,17 @@ sequences:
             eval: s.ensureOpen()
             to: s.ensureOpen
           when: oerr != nil
+      - eval: s.pin.Lock()
+        to: s.pin.Lock
+      - bind: cerr
+        eval: s.f.Close()
+        to: s.f.Close
+      - eval: s.pin.Unlock()
+        to: s.pin.Unlock
       - opt:
           do:
             - return: "wrapRotate(cerr, \"service/observe/logger/writer/rotfile.rotate: closing active file\")"
               to: wrapRotate
-          init:
-            bind: cerr
-            eval: s.f.Close()
-            to: s.f.Close
           when: cerr != nil
       - opt:
           do:
@@ -939,12 +946,8 @@ sequences:
         kind: actor
       - id: (*rotatingSink).Write
         kind: self
-      - id: s.ensureOpen
+      - id: s.writeLocked
         kind: internal
-      - id: s.maybeRotate
-        kind: internal
-      - id: s.f.Write
-        kind: value
     steps:
       - opt:
           do:
@@ -958,6 +961,65 @@ sequences:
           when: ctx != nil && ctx.Err() != nil
       - lock:
           mutex: s.mu
+      - return: s.writeLocked(p, errs.Int("level", int(r.Level)))
+        to: s.writeLocked
+  - of: (*rotatingSink).WriteBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).WriteBatch
+        kind: self
+      - id: s.writeLocked
+        kind: internal
+      - id: wholeRecords
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(ctx.Err(), errs.WrapParams{
+                			Code:    corerotfile.CodeRotFileWriteFailed,
+                			Reason:  "ROT_FILE_WRITE_FAILED",
+                			Public:  "Rotating file write failed",
+                			Private: "service/observe/logger/writer/rotfile.WriteBatch saw a cancelled context",
+                		}, errs.Int("records", len(recs)))
+          when: ctx != nil && ctx.Err() != nil
+      - lock:
+          mutex: s.mu
+      - bind: buf
+        eval: s.batch[:0]
+      - loop:
+          do:
+            - set: buf
+              value: append(buf, p...)
+          key: _
+          range: payloads
+          value: p
+      - defer: func() { s.batch = retained(buf) }()
+      - bind: n, werr
+        eval: s.writeLocked(buf, errs.Int("records", len(recs)))
+        to: s.writeLocked
+      - set: written
+        to: wholeRecords
+        value: wholeRecords(payloads, n)
+      - opt:
+          do:
+            - return: written, werr
+          when: werr != nil
+      - return: len(payloads), nil
+  - of: (*rotatingSink).writeLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rotatingSink).writeLocked
+        kind: self
+      - id: s.ensureOpen
+        kind: internal
+      - id: s.maybeRotate
+        kind: internal
+      - id: s.f.Write
+        kind: value
+    steps:
       - opt:
           do:
             - bind: terr
@@ -999,9 +1061,16 @@ sequences:
                 			Reason:  "ROT_FILE_WRITE_FAILED",
                 			Public:  "Rotating file write failed",
                 			Private: "service/observe/logger/writer/rotfile.Write underlying *os.File returned an error",
-                		}, errs.Int("bytes", len(p)), errs.Int("level", int(r.Level)))
+                		}, errs.Int("bytes", len(p)), field)
           when: werr != nil
       - return: written, nil
+  - of: retained
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: cap(buf) > maxRetainedBatch
+      - return: buf[:0]
   - of: (*rotatingSink).Flush
     participants:
       - id: caller
@@ -1012,9 +1081,13 @@ sequences:
         kind: package
       - id: s.mu.Lock
         kind: value
+      - id: s.pin.RLock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
       - id: s.syncOpen
         kind: internal
-      - id: s.mu.Unlock
+      - id: s.pin.RUnlock
         kind: value
     steps:
       - opt:
@@ -1030,11 +1103,17 @@ sequences:
           when: ctx != nil && ctx.Err() != nil
       - eval: s.mu.Lock()
         to: s.mu.Lock
-      - bind: serr
-        eval: s.syncOpen()
-        to: s.syncOpen
+      - bind: f
+        eval: s.f
+      - eval: s.pin.RLock()
+        to: s.pin.RLock
       - eval: s.mu.Unlock()
         to: s.mu.Unlock
+      - bind: serr
+        eval: s.syncOpen(f)
+        to: s.syncOpen
+      - eval: s.pin.RUnlock()
+        to: s.pin.RUnlock
       - opt:
           do:
             - return: |-
@@ -1096,15 +1175,19 @@ sequences:
         kind: actor
       - id: (*rotatingSink).syncOpen
         kind: self
-      - id: s.f.Sync
+      - id: f.Sync
         kind: value
     steps:
       - opt:
           do:
             - return: nil
-          when: s.f == nil
-      - return: s.f.Sync()
-        to: s.f.Sync
+          when: f == nil
+      - opt:
+          do:
+            - return: s.syncFile(f)
+          when: s.syncFile != nil
+      - return: f.Sync()
+        to: f.Sync
   - of: (*rotatingSink).closeOpen
     participants:
       - id: caller
