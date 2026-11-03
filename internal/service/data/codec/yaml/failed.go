@@ -1,15 +1,17 @@
 package yaml
 
 import (
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // at returns the line and column fields every decoding refusal carries: both
-// 1-based, so they read as an editor shows them.
+// 1-based, so they read as an editor shows them, under the family's keys so
+// codec.PositionOf reads them back (#1125).
 func at(line, column int) []errs.FieldValue {
 	//: the position, never the text found there.
-	return []errs.FieldValue{errs.Int("line", line), errs.Int("column", column)}
+	return codec.PositionFields(codec.PositionValue{Line: line, Column: column})
 }
 
 // syntaxError is UnmarshalFailed at a position, with a detail that names what
@@ -25,6 +27,15 @@ func syntaxError(line, column int, detail string) error {
 func refused(sentinel *errs.Error, line, column int) error {
 	//: the construct's sentinel, then the decode failure it is.
 	return errs.Wrap(sentinel, errs.WrapParams{Code: coreyaml.CodeYAMLUnmarshalFailed}, at(line, column)...)
+}
+
+// bounded is input refused for a size or a depth bound (#894): sentinel —
+// SizeExceeded or DepthExceeded — is the origin, so its family reason is what
+// codec.IsTooLarge and codec.IsTooDeep find, and UnmarshalFailed joins the
+// trail as it does for a named refusal. fields place it when it is placed.
+func bounded(sentinel *errs.Error, detail string, fields ...errs.FieldValue) error {
+	//: the bound's sentinel, then the decode failure it is.
+	return errs.Wrap(sentinel, errs.WrapParams{Code: coreyaml.CodeYAMLUnmarshalFailed}, append(fields, errs.String("detail", detail))...)
 }
 
 // marshalError is MarshalFailed with a detail and, when known, the Go type

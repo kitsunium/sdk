@@ -51,6 +51,10 @@ func (*msgpackCodec) Extensions() []string {
 // pooled scratch buffer and the result is one exact-size copy, so a call
 // costs one allocation plus whatever v's own marshal methods allocate.
 func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
+	//: a channel, a function, an unsafe pointer: no wire format holds one (#1101).
+	if verr := codec.CheckValue(v); verr != nil {
+		return nil, verr
+	}
 	//: rent an already-Reset buffer from the shared codec pool.
 	buf := scratch.AcquireBuffer()
 	b, merr := appendAny(buf.AvailableBuffer(), v, 0)
@@ -73,16 +77,19 @@ func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
 // Unmarshal parses data — exactly one MessagePack value, at most
 // maxMsgPackBytes long — into the value v points at.
 func (*msgpackCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
+	//: no bytes is no document in this format (#1101).
+	if len(data) == 0 {
+		return codec.EmptyInput
+	}
 	//: cap input size so a hostile payload cannot make the decoder hold more
 	//: than the bound, whatever lengths it declares.
 	if len(data) > maxMsgPackBytes {
-		//: surface an UNMARSHAL_FAILED with a diagnostic Private message.
-		return errs.Wrap(nil, errs.WrapParams{
-			Code:    coremsgpack.CodeMsgPackUnmarshalFailed,
-			Reason:  reasonUnmarshal,
-			Public:  "MessagePack input exceeds size limit",
-			Private: "service/data/codec/msgpack.Unmarshal: len(data) exceeds maxMsgPackBytes",
-		}, errs.Int("len", len(data)), errs.Int("cap", maxMsgPackBytes))
+		//: the family's SIZE_EXCEEDED, UNMARSHAL_FAILED in the trail (#894).
+		return boundFault(coremsgpack.SizeExceeded, errs.Int("len", len(data)), errs.Int("cap", maxMsgPackBytes))
 	}
 	//: one value, nothing after it.
 	return unmarshalInto(data, v)

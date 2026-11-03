@@ -127,6 +127,9 @@ func hookDecoder(t reflect.Type) decodeFunc {
 	//: the timestamp extension.
 	case t == timeType:
 		return decodeTimeValue
+	//: an application extension, raw.
+	case t == extType:
+		return decodeExtValue
 	//: the MessagePack-specific method.
 	case pt.Implements(unmarshalMsgpackerType):
 		return decodeSelfMsgpack

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"unicode/utf8"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -42,12 +43,12 @@ type decoder struct {
 // line, so a document read from a stream is located in the stream. An empty
 // document leaves v unchanged.
 func decodeDocument(data []byte, v any, firstLine int) error {
-	target := reflect.ValueOf(v)
-	//: a target the decoder can write through.
-	if target.Kind() != reflect.Pointer || target.IsNil() {
+	//: a target the decoder can write through, or the family's refusal (#1101).
+	if err := codec.CheckTarget(v); err != nil {
 		//: refused before reading.
-		return errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{}, errs.String("detail", "the target must be a non-nil pointer"))
+		return err
 	}
+	target := reflect.ValueOf(v)
 	src, err := prepareSource(data, firstLine)
 	//: not UTF-8, or a control character.
 	if err != nil {

@@ -2,6 +2,7 @@ package transform
 
 import (
 	"bytes"
+	"compress/gzip"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -12,9 +13,52 @@ import (
 // keeps us clear of init().
 var GzipCompressor = coretransform.Register(gzipCompressor{})
 
-// gzipCompressor is the concrete Compressor for the gzip wire format. It is a
-// stateless value type so idempotent re-registration is a no-op.
-type gzipCompressor struct{}
+// gzipCompressor is the concrete Compressor for the gzip wire format. The level
+// is fixed at construction and never mutated, so the value stays comparable
+// (idempotent re-registration is a no-op) and safe for concurrent use.
+type gzipCompressor struct {
+	// level is the compress/gzip level, already clamped by usableLevel. Its
+	// zero value means DefaultCompression: NoCompression is the one level the
+	// clamp never lets through, so 0 is free to name the default, and the
+	// registered singleton is the zero value it has always been.
+	level int
+}
+
+// NewGzipCompressor returns a gzip Compressor encoding at level, which may be
+// gzip.DefaultCompression, gzip.HuffmanOnly, or any value from gzip.BestSpeed to
+// gzip.BestCompression. Anything else — including gzip.NoCompression, which the
+// stdlib accepts but which stores the payload verbatim — is clamped to
+// gzip.DefaultCompression, so no configuration can hand back a compressor that
+// silently does not compress (ADR 0031). The result is NOT registered; the
+// registry entry is the default-level GzipCompressor singleton, which
+// NewGzipCompressor(gzip.DefaultCompression) equals.
+func NewGzipCompressor(level int) coretransform.Compressor {
+	//: clamp at construction so the returned Compressor always compresses.
+	return gzipCompressor{level: storedLevel(usableLevel(level))}
+}
+
+// storedLevel maps a clamped level onto the field's representation: the
+// default is stored as the zero value, so the singleton and a default-level
+// compressor built by a constructor are one value.
+func storedLevel(level int) int {
+	//: DefaultCompression is the zero value.
+	if level == gzip.DefaultCompression {
+		return 0
+	}
+	//: every other clamped level is stored as is.
+	return level
+}
+
+// writeLevel is the level the stdlib writer is built at: the stored level,
+// the zero value read as DefaultCompression.
+func writeLevel(stored int) int {
+	//: the zero value is the default, never NoCompression.
+	if stored == 0 {
+		return gzip.DefaultCompression
+	}
+	//: any other stored level was clamped at construction.
+	return stored
+}
 
 // Algorithm implements transform.Compressor and returns the canonical key.
 func (gzipCompressor) Algorithm() coretransform.Algorithm {
@@ -22,15 +66,23 @@ func (gzipCompressor) Algorithm() coretransform.Algorithm {
 	return "gzip"
 }
 
-// Compress gzip-encodes src and appends the result to dst.
-func (gzipCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
+// Compress gzip-encodes src at the receiver's level and appends the result to
+// dst.
+func (c gzipCompressor) Compress(dst, src []byte) (encoded []byte, err error) {
 	//: encode into a buffer pre-seeded with dst so the result is caller-owned.
 	buf := bytes.NewBuffer(dst)
+	level := writeLevel(c.level)
 	//: a recycled writer streams compressed bytes into buf; see pool.go for why
 	//: constructing one per call was 99 % of this path's allocated bytes.
-	w := takeGzipWriter(buf)
-	//: return the encoder on every exit, including the two failure paths.
-	defer releaseGzipWriter(w)
+	w, nerr := takeGzipWriter(buf, level)
+	//: NewWriterLevel only errors on an out-of-range level — the constructor's
+	//: clamp makes it unreachable, an in-package struct literal does not.
+	if nerr != nil {
+		//: wrap the construction error under the gzip sentinel.
+		return dst, errs.Wrap(nerr, gzipWrap)
+	}
+	//: return the encoder to its level's pool on every exit.
+	defer releaseGzipWriter(w, level)
 	//: a Write fault is rare (buffer-backed) but must still be surfaced.
 	if _, werr := w.Write(src); werr != nil {
 		//: wrap the stdlib error under the gzip sentinel.
@@ -128,7 +180,7 @@ func gzipDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
 func gzipDecompressCore(dst, src []byte, max int64) (decoded []byte, tooLarge bool, err error) {
 	//: a recycled gzip reader validates the header up-front, exactly as a fresh
 	//: one does; a bad header fails here either way.
-	box, rerr := takeGzipReader(bytes.NewReader(src))
+	box, rerr := takeGzipReader(src)
 	//: malformed header — surface the failure via the gzip sentinel.
 	if rerr != nil {
 		//: wrap the header error under the gzip sentinel.
@@ -136,8 +188,8 @@ func gzipDecompressCore(dst, src []byte, max int64) (decoded []byte, tooLarge bo
 	}
 	//: return the decoder on every exit below.
 	defer releaseGzipReader(box)
-	//: drain the reader through the shared bounded helper at the given cap.
-	plain, overflow, derr := readAllBounded(box.rc, max)
+	//: drain the reader straight onto dst through the shared bounded helper.
+	out, overflow, derr := appendAllBounded(dst, box.rc, max)
 	//: fold a Close fault into the result so the reader error is never dropped.
 	if cerr := box.rc.Close(); cerr != nil && derr == nil {
 		//: a clean drain followed by a Close fault still fails decompression.
@@ -155,6 +207,6 @@ func gzipDecompressCore(dst, src []byte, max int64) (decoded []byte, tooLarge bo
 		//: no plaintext escapes an over-cap stream.
 		return dst, true, nil
 	}
-	//: append the bounded plaintext onto the caller's dst.
-	return append(dst, plain...), false, nil
+	//: the bounded plaintext, already on the caller's dst.
+	return out, false, nil
 }

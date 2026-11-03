@@ -211,8 +211,9 @@ func TestUnmarshal_untypedRefusals(t *testing.T) {
 }
 
 // TestUnmarshal_documentRefusals pins the refusals of the document itself:
-// an empty input, trailing bytes, a malformed item, and a target that is not
-// a non-nil pointer.
+// an empty input and a target that is not a non-nil pointer — the family's
+// EMPTY_INPUT and TARGET_INVALID (#1101), the target's type in a field —,
+// trailing bytes and a malformed item.
 func TestUnmarshal_documentRefusals(t *testing.T) {
 	t.Parallel()
 	var n int
@@ -220,21 +221,27 @@ func TestUnmarshal_documentRefusals(t *testing.T) {
 		name   string
 		data   string
 		target any
+		reason string
 		detail string
 	}
 	tests := []tc{
-		{"empty input", "", &n, "the input is empty"},
-		{"trailing bytes", "0102", &n, "bytes follow the data item"},
-		{"truncated", "19", &n, "ends inside a data item"},
-		{"nil target", "01", nil, "non-nil pointer, got nil"},
-		{"non-pointer target", "01", n, "non-nil pointer, got int"},
-		{"nil pointer target", "01", (*int)(nil), "non-nil pointer, got *int"},
+		{"empty input", "", &n, "EMPTY_INPUT", ""},
+		{"trailing bytes", "0102", &n, "UNMARSHAL_FAILED", "bytes follow the data item"},
+		{"truncated", "19", &n, "UNMARSHAL_FAILED", "ends inside a data item"},
+		{"nil target", "01", nil, "TARGET_INVALID", "nil"},
+		{"non-pointer target", "01", n, "TARGET_INVALID", "int"},
+		{"nil pointer target", "01", (*int)(nil), "TARGET_INVALID", "*int"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
 		err := cbor.New().Unmarshal(mustHex(t, tc.data), tc.target)
-		if !errs.HasReason(err, "UNMARSHAL_FAILED") || !strings.Contains(errs.PrivateOf(err), tc.detail) {
-			t.Errorf("%s: err = %v (%s), want %q", tc.name, err, errs.PrivateOf(err), tc.detail)
+		got := errs.PrivateOf(err)
+		//: a misuse names the target's type in a field, not in the text.
+		if tc.reason == "TARGET_INVALID" {
+			got = fieldValue(err, "target")
+		}
+		if !errs.HasReason(err, tc.reason) || !strings.Contains(got, tc.detail) {
+			t.Errorf("%s: err = %v (%s), want %s %q", tc.name, err, got, tc.reason, tc.detail)
 		}
 	}
 	for _, tc := range tests {
@@ -243,6 +250,16 @@ func TestUnmarshal_documentRefusals(t *testing.T) {
 			runCase(t, tc)
 		})
 	}
+}
+
+// fieldValue returns the value of err's field key, or "".
+func fieldValue(err error, key string) string {
+	for _, f := range errs.FieldsOf(err) {
+		if f.Key() == key {
+			return f.StringValue()
+		}
+	}
+	return ""
 }
 
 // TestUnmarshal_malformedLeavesTargetUntouched shows the validation pass at

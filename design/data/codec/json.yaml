@@ -13,6 +13,14 @@ packages:
             name: CodeJSONUnmarshalFailed
             value: "0x00_03_02_02"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeJSONSizeExceeded identifies a value refused by NewBoundedDecoder for
+              its byte ceiling: longer than the bound the caller set (#891). Its reason
+              is the family's SIZE_EXCEEDED (#894).
+            name: CodeJSONSizeExceeded
+            value: "0x00_03_02_03"
+        type: errs.Code
     doc: |-
       Package json declares the error codes and the sentinels of the JSON codec,
       internal/service/data/codec/json — range 0.3.2.* (ADR 0005
@@ -46,6 +54,12 @@ packages:
             private: "service/data/codec/json: encoding/json.Unmarshal returned an error"
             public: JSON decoding failed
             reason: UNMARSHAL_FAILED
+          - code: CodeJSONSizeExceeded
+            doc: SizeExceeded is the refusal of a value longer than NewBoundedDecoder's byte ceiling (#891).
+            name: SizeExceeded
+            private: "service/data/codec/json: a value in the stream is longer than the decoder's byte ceiling"
+            public: JSON input exceeds a size limit
+            reason: SIZE_EXCEEDED
   - aliases:
       - doc: |-
           Object is a JSON object being written by [BeginObject]: members land in
@@ -57,13 +71,21 @@ packages:
       registered under Format("json"). Blank-importing this package is enough
       to make JSON resolvable via the core/data/codec registry.
 
+      The registered codec encodes and decodes with encoding/json/v2 under
+      encoding/json's v1 options — the engine and the options Go 1.27 builds
+      encoding/json with, named so the codec states the semantics it keeps: its
+      bytes are encoding/json's, pinned by golden files. NewV2 returns an
+      unregistered codec under json/v2's own semantics, for a wire contract that
+      starts with them.
+
       It also re-exports the JSON appenders of internal/kernel/jsonenc —
-      [AppendString], [AppendEscaped], [AppendInt], [AppendUint], [BeginObject]
-      and the [Object] it returns — for the programs that write a JSON document
-      by hand and want the escaping the SDK's own emitters use (ADR 0186 §D10).
-      They register no codec and read no value by reflection; Marshal is still
-      encoding/json, and does not change. A string is escaped as encoding/json
-      escapes it, except that '<', '>' and '&' are NOT.
+      [AppendString], [AppendEscaped], [AppendInt], [AppendUint], [AppendFloat],
+      [BeginObject] and the [Object] it returns — for the programs that write a
+      JSON document by hand and want the escaping the SDK's own emitters use
+      (ADR 0186 §D10).
+      They register no codec and read no value by reflection; Marshal keeps
+      encoding/json's semantics. A string is escaped as encoding/json escapes
+      it, except that '<', '>' and '&' are NOT.
 
       Package json — adapts *encoding/json.Decoder to codec.Decoder.
 
@@ -71,6 +93,19 @@ packages:
     functions:
       - doc: New returns the JSON codec singleton.
         name: New
+        out:
+          - type: codec.Codec
+      - doc: |-
+          NewV2 returns a fresh JSON codec under encoding/json/v2's semantics, for a
+          wire contract that starts with them: member names matched case-sensitively,
+          a duplicate name or invalid UTF-8 refused, a nil slice or map written as []
+          or {}, a byte array as base64, omitempty meaning an empty JSON value,
+          omitzero honoured, a time.Duration refused without a format — and map
+          members in sorted order. It is not registered: Format("json") keeps the v1
+          semantics every existing document was written with, and this codec is
+          reached only through the value returned. Its errors carry the codes of the
+          registered codec.
+        name: NewV2
         out:
           - type: codec.Codec
       - doc: |-
@@ -119,6 +154,22 @@ packages:
         out:
           - type: "[]byte"
       - doc: |-
+          AppendFloat appends f to dst as the JSON number encoding/json writes for a
+          float64 (1000000, not 1e+06; 1e-7, not 1e-07) and reports true; for NaN
+          and ±Inf it appends nothing and reports false, so the caller writes its
+          own policy for them.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: f
+            type: float64
+        name: AppendFloat
+        out:
+          - name: number
+            type: "[]byte"
+          - name: ok
+            type: bool
+      - doc: |-
           BeginObject appends the opening brace of an object to dst and returns the
           [Object] that writes its members after it, in the order they are named.
         in:
@@ -161,6 +212,9 @@ packages:
       library's encoding/json and internal/kernel/jsonenc (the standard library
       again), and nothing else.
 
+      A time.Duration is the integer of its nanoseconds, as encoding/json writes
+      it: the codec's contract is the standard library's own output (#1126).
+
       Importing both packages is harmless: a format is registered by the package
       that implements it, which Go initialises once however many packages import
       it.
@@ -189,6 +243,7 @@ packages:
 
       	CodeMarshalFailed    0.3.2.1  encoding/json could not encode the value
       	CodeUnmarshalFailed  0.3.2.2  the input is not JSON the target can hold
+      	CodeSizeExceeded     0.3.2.3  a value longer than NewBoundedDecoder's byte ceiling
     facade:
       - const:
           - doc: CodeMarshalFailed identifies a value encoding/json could not encode (0.3.2.1).
@@ -203,6 +258,12 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_02_02"
+          - doc: "CodeSizeExceeded is 0.3.2.3: a value longer than NewBoundedDecoder's byte ceiling (#891)."
+            name: CodeSizeExceeded
+            reexport: corejson.CodeJSONSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_02_03"
         doc: The error codes, range 0.3.2.*, declared in the core (ADR 0160).
       - doc: "The sentinels, for errors.Is: each carries the code of the same name."
         var:
@@ -213,6 +274,10 @@ packages:
           - doc: UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
             name: UnmarshalFailed
             reexport: corejson.UnmarshalFailed
+            type: "*errs.Error"
+          - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
+            name: SizeExceeded
+            reexport: corejson.SizeExceeded
             type: "*errs.Error"
       - alias:
           - doc: |-
@@ -271,6 +336,23 @@ packages:
           name: AppendUint
           out:
             - type: "[]byte"
+      - func:
+          doc: |-
+            AppendFloat appends f to dst as the JSON number encoding/json writes for a
+            float64 and reports true; for NaN and ±Inf it appends nothing and reports
+            false.
+          forward: svcjson.AppendFloat
+          in:
+            - name: dst
+              type: "[]byte"
+            - name: f
+              type: float64
+          name: AppendFloat
+          out:
+            - name: number
+              type: "[]byte"
+            - name: ok
+              type: bool
       - func:
           doc: |-
             BeginObject appends the opening brace of an object to dst and returns the

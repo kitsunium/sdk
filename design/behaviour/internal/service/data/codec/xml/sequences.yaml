@@ -19,6 +19,8 @@ sequences:
         kind: actor
       - id: (*xmlCodec).Marshal
         kind: self
+      - id: codec
+        kind: package
       - id: scratch
         kind: package
       - id: stdxml
@@ -30,6 +32,14 @@ sequences:
       - id: slices
         kind: stdlib
     steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: codec.CheckValue(v)
+            to: codec
+          when: verr != nil
       - bind: buf
         eval: scratch.AcquireBuffer()
         to: scratch
@@ -80,11 +90,25 @@ sequences:
         kind: actor
       - id: (*xmlCodec).Unmarshal
         kind: self
+      - id: codec
+        kind: package
       - id: stdxml
         kind: stdlib
       - id: errs
         kind: package
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
+          when: len(data) == 0
       - bind: xerr
         eval: stdxml.Unmarshal(data, v)
         to: stdxml
@@ -98,7 +122,7 @@ sequences:
           		Reason:  "UNMARSHAL_FAILED",
           		Public:  "XML decoding failed",
           		Private: "service/data/codec/xml.Unmarshal: encoding/xml returned an error",
-          	})
+          	}, position(xerr)...)
         to: errs
   - of: (*xmlCodec).Append
     participants:
@@ -110,78 +134,179 @@ sequences:
         kind: package
       - id: stdxml
         kind: stdlib
-      - id: enc.Encode
-        kind: value
-      - id: enc.Close
+      - id: w.Bytes
         kind: value
     steps:
-      - bind: buf
-        eval: scratch.AcquireBuffer()
+      - bind: w
+        eval: scratch.AcquireAppendWriter(dst)
         to: scratch
       - bind: enc
-        eval: stdxml.NewEncoder(buf)
+        eval: stdxml.NewEncoder(w)
         to: stdxml
+      - bind: xerr, private
+        eval: "enc.Encode(v), \"service/data/codec/xml.Append: encoding/xml returned an error\""
       - opt:
           do:
-            - eval: scratch.ReleaseBuffer(buf)
-              to: scratch
+            - set: xerr, private
+              value: "enc.Close(), \"service/data/codec/xml.Append: encoder.Close returned an error\""
+          when: xerr == nil
+      - bind: out
+        eval: w.Bytes()
+        to: w.Bytes
+      - eval: scratch.ReleaseAppendWriter(w)
+        to: scratch
+      - opt:
+          do:
             - return: |-
                 dst, errs.Wrap(xerr, errs.WrapParams{
                 			Code:    corexml.CodeXMLMarshalFailed,
                 			Reason:  "MARSHAL_FAILED",
                 			Public:  "XML encoding failed",
-                			Private: "service/data/codec/xml.Append: encoding/xml returned an error",
+                			Private: private,
                 		})
-          init:
-            bind: xerr
-            eval: enc.Encode(v)
-            to: enc.Encode
           when: xerr != nil
-      - opt:
-          do:
-            - eval: scratch.ReleaseBuffer(buf)
-              to: scratch
-            - return: |-
-                dst, errs.Wrap(cerr, errs.WrapParams{
-                			Code:    corexml.CodeXMLMarshalFailed,
-                			Reason:  "MARSHAL_FAILED",
-                			Public:  "XML encoding failed",
-                			Private: "service/data/codec/xml.Append: encoder.Close returned an error",
-                		})
-          init:
-            bind: cerr
-            eval: enc.Close()
-            to: enc.Close
-          when: cerr != nil
-      - set: dst
-        value: append(dst, buf.Bytes()...)
-      - eval: scratch.ReleaseBuffer(buf)
-        to: scratch
-      - return: dst, nil
+      - return: out, nil
   - of: (*xmlCodec).NewEncoder
     steps:
       - return: "&xmlEncoder{inner: stdxml.NewEncoder(w)}"
   - of: (*xmlCodec).NewDecoder
     steps:
       - return: "&xmlDecoder{inner: stdxml.NewDecoder(r)}"
+  - of: (*xmlCodec).NewBoundedDecoder
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(codec.BoundInvalid, errs.WrapParams{}, errs.Int64(fieldLimit, maxBytes))
+          when: maxBytes <= 0
+      - bind: w
+        eval: "&window{r: r, max: maxBytes, end: maxBytes + 1}"
+      - return: "&xmlDecoder{inner: stdxml.NewDecoder(w), window: w}, nil"
+  - of: (*window).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*window).Read
+        kind: self
+      - id: w.r.Read
+        kind: value
+    steps:
+      - bind: room
+        eval: w.end - w.read
+      - opt:
+          do:
+            - set: w.hit
+              value: "true"
+            - return: 0, w.exceeded()
+          when: room <= 0
+      - opt:
+          do:
+            - set: p
+              value: p[:room]
+          when: int64(len(p)) > room
+      - bind: n, err
+        eval: w.r.Read(p)
+        to: w.r.Read
+      - op: +=
+        set: w.read
+        value: int64(n)
+      - return: n, err
+  - of: (*window).open
+    steps:
+      - set: w.end
+        value: start + w.max + 1
+  - of: (*window).exceeded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*window).exceeded
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corexml.SizeExceeded, errs.WrapParams{Code: corexml.CodeXMLUnmarshalFailed},
+          		append(offsetField(w.end-1), errs.Int64(fieldLimit, w.max))...)
+        to: errs
   - of: (*xmlDecoder).Decode
     participants:
       - id: caller
         kind: actor
       - id: (*xmlDecoder).Decode
         kind: self
-      - id: d.inner.Decode
-        kind: value
-      - id: errs
+      - id: codec
         kind: package
+      - id: d.decodeBounded
+        kind: internal
+      - id: d.settle
+        kind: internal
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - opt:
           do:
             - return: io.EOF
           when: d.done
+      - opt:
+          do:
+            - return: d.decodeBounded(v)
+              to: d.decodeBounded
+          when: d.window != nil
+      - return: d.settle(d.inner.Decode(v))
+        to: d.settle
+  - of: (*xmlDecoder).decodeBounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlDecoder).decodeBounded
+        kind: self
+      - id: d.window.exceeded
+        kind: internal
+      - id: d.inner.InputOffset
+        kind: value
+      - id: d.window.open
+        kind: internal
+      - id: d.inner.Decode
+        kind: value
+      - id: d.settle
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: d.window.exceeded()
+              to: d.window.exceeded
+          when: d.window.hit
+      - bind: start
+        eval: d.inner.InputOffset()
+        to: d.inner.InputOffset
+      - eval: d.window.open(start)
+        to: d.window.open
       - bind: xerr
         eval: d.inner.Decode(v)
         to: d.inner.Decode
+      - opt:
+          do:
+            - set: d.window.hit
+              value: "true"
+            - return: d.window.exceeded()
+              to: d.window.exceeded
+          when: d.window.hit || (xerr == nil && d.inner.InputOffset()-start > d.window.max)
+      - return: d.settle(xerr)
+        to: d.settle
+  - of: (*xmlDecoder).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlDecoder).settle
+        kind: self
+      - id: errs
+        kind: package
+    steps:
       - opt:
           do:
             - set: d.done
@@ -198,11 +323,11 @@ sequences:
           		Reason:  "UNMARSHAL_FAILED",
           		Public:  "XML decoding failed",
           		Private: "service/data/codec/xml.Decoder.Decode: encoding/xml returned an error",
-          	})
+          	}, position(xerr)...)
         to: errs
   - of: (*xmlDecoder).More
     steps:
-      - return: "!d.done"
+      - return: "!d.done && (d.window == nil || !d.window.hit)"
   - of: (*xmlEncoder).Encode
     participants:
       - id: caller
@@ -255,3 +380,79 @@ sequences:
           		Private: "service/data/codec/xml.Encoder.Close: Flush returned an error",
           	})
         to: errs
+  - of: position
+    participants:
+      - id: caller
+        kind: actor
+      - id: position
+        kind: self
+      - id: codec
+        kind: package
+    steps:
+      - bind: se, ok
+        eval: errors.AsType[*stdxml.SyntaxError](err)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok || se.Line <= 0"
+      - return: "codec.PositionFields(codec.PositionValue{Line: se.Line})"
+        to: codec
+  - of: offsetField
+    participants:
+      - id: caller
+        kind: actor
+      - id: offsetField
+        kind: self
+      - id: codec
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: off > math.MaxInt
+      - return: "codec.PositionFields(codec.PositionValue{Offset: int(off)})"
+        to: codec
+  - of: (*xmlCodec).Sniff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*xmlCodec).Sniff
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: startTag
+        kind: internal
+    steps:
+      - bind: p
+        eval: bytes.TrimLeft(bytes.TrimPrefix(prefix, utf8BOM), " \t\r\n")
+        to: bytes
+      - switch:
+          cases:
+            - case: bytes.HasPrefix(p, declarationHead)
+              do:
+                - return: len(p) == len(declarationHead) || isXMLSpace(p[len(declarationHead)])
+            - case: bytes.HasPrefix(p, commentHead), bytes.HasPrefix(p, doctypeHead)
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: startTag(p)
+                  to: startTag
+  - of: startTag
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(p) < 2 || p[0] != '<' || !isNameStart(p[1])
+      - bind: end
+        eval: 2 + nameLen(p[2:])
+      - return: end == len(p) || endsName(p[end])
+  - of: endsName
+    steps:
+      - return: isXMLSpace(c) || c == '>' || c == '/'
+  - of: isNameStart
+    steps:
+      - return: (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == ':' || c >= utf8.RuneSelf
+  - of: isXMLSpace
+    steps:
+      - return: c == ' ' || c == '\t' || c == '\r' || c == '\n'

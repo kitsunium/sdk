@@ -4,32 +4,6 @@ import (
 	"testing"
 )
 
-func Test_yieldOnce(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-	}{
-		{"yieldOnce returns without panicking"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			panicked := false
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						panicked = true
-					}
-				}()
-				yieldOnce()
-			}()
-			if panicked {
-				t.Error("yieldOnce panicked; runtime.Gosched is panic-free by contract")
-			}
-		})
-	}
-}
-
 func Test_isClosed(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

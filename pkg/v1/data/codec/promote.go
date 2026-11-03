@@ -6,6 +6,7 @@ import (
 	stdjson "encoding/json"
 	stdpem "encoding/pem"
 	"net/url"
+	"reflect"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	fbcodec "github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers"
@@ -367,6 +368,85 @@ func hasPromotionStrategy(f Format) bool {
 		//: no strategy — a codec error is a real fault, forward it.
 		return false
 	}
+}
+
+// refusesShape reports whether the codec registered under f refuses v's
+// shape for sure, read off v's type alone, so Marshal promotes v without
+// first building the codec's refusal to discard it (#910). It mirrors each
+// codec's shape gate exactly — form's six map types, pem's *pem.Block,
+// ndjson's and csv's slice or array, directly or through one pointer — and
+// answers false for any shape it cannot rule out, and for flatbuffers, tlv
+// and every unconstrained Format: there the codec's own refusal stays the
+// authority, and isValueShapeMismatch reads it.
+func refusesShape(f Format, v any) bool {
+	//: one gate per constrained Format whose shape a type decides.
+	switch f {
+	//: url.Values, map[string][]string, map[string]string, or a pointer to one.
+	case Form:
+		//: anything else is refused.
+		return !isFormShape(v)
+	//: a *pem.Block, nil or not: the codec judges a nil one.
+	case PEM:
+		//: anything else is refused.
+		return !isPEMShape(v)
+	//: rows: a slice or an array, through one pointer at most.
+	case NDJSON, CSV:
+		//: anything else is refused.
+		return !isRowsShape(v)
+	//: flatbuffers, tlv, and the Formats that take any value.
+	default:
+		//: the codec decides.
+		return false
+	}
+}
+
+// isPEMShape reports whether v is a *pem.Block, the one type pem's Marshal
+// takes.
+func isPEMShape(v any) bool {
+	//: the exact type of the codec's gate.
+	switch v.(type) {
+	//: nil or not: the codec judges a nil one.
+	case *stdpem.Block:
+		return true
+	//: any other type.
+	default:
+		//: refused.
+		return false
+	}
+}
+
+// isFormShape reports whether v is one of the six types form's Marshal takes.
+func isFormShape(v any) bool {
+	//: the exact types of the codec's asValues, values then pointers.
+	switch v.(type) {
+	//: the shapes a body is.
+	case url.Values, map[string][]string, map[string]string,
+		*url.Values, *map[string][]string, *map[string]string:
+		//: native, or a nil pointer the codec refuses itself.
+		return true
+	//: any other type.
+	default:
+		//: refused.
+		return false
+	}
+}
+
+// isRowsShape reports whether v's type is a slice or an array, directly or
+// through one pointer — the only shapes ndjson's and csv's Marshal take. A
+// nil interface counts as rows: it has no type to rule out, so the codec
+// judges it.
+func isRowsShape(v any) bool {
+	t := reflect.TypeOf(v)
+	//: no type to read.
+	if t == nil {
+		return true
+	}
+	//: one pointer is looked through, as both codecs do.
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	//: rows, or not.
+	return t.Kind() == reflect.Slice || t.Kind() == reflect.Array
 }
 
 // isValueShapeMismatch reports whether err, returned by the codec

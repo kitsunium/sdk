@@ -39,14 +39,18 @@ type otlpScopeMetrics struct {
 // omitted, which is also what the proto3-JSON default mapping does with a
 // default-valued field.
 //
-// unit (3) is still absent: a Meter records none, and an empty string for it
-// would be a placeholder (rule 5).
+// unit (3) follows the same presence rule as description (ADR 0208): emitted
+// when a UnitDescriber bound one, omitted otherwise, so an undeclared unit
+// leaves the document byte for byte what it was before units existed.
 type otlpMetric struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
+	Unit        string         `json:"unit,omitempty"`
 	Gauge       *otlpGauge     `json:"gauge,omitempty"`
 	Sum         *otlpSum       `json:"sum,omitempty"`
 	Histogram   *otlpHistogram `json:"histogram,omitempty"`
+	// ExponentialHistogram is metrics.proto's exponential_histogram (10).
+	ExponentialHistogram *otlpExponentialHistogram `json:"exponentialHistogram,omitempty"`
 }
 
 // otlpGauge is Gauge: dataPoints (1) and nothing else. There is no
@@ -93,6 +97,7 @@ type otlpNumberDataPoint struct {
 	TimeUnixNano      otlp.Uint64     `json:"timeUnixNano"`
 	AsDouble          *otlp.Double    `json:"asDouble,omitempty"`
 	AsInt             *otlp.Int64     `json:"asInt,omitempty"`
+	Exemplars         []otlpExemplar  `json:"exemplars,omitempty"`
 	Attributes        []otlp.KeyValue `json:"attributes,omitempty"`
 }
 
@@ -113,8 +118,9 @@ type otlpHistogramDataPoint struct {
 	StartTimeUnixNano otlp.Uint64     `json:"startTimeUnixNano"`
 	TimeUnixNano      otlp.Uint64     `json:"timeUnixNano"`
 	Count             otlp.Uint64     `json:"count"`
-	Sum               *otlp.Double    `json:"sum"`
+	Sum               *otlp.Double    `json:"sum,omitempty"`
 	BucketCounts      []otlp.Uint64   `json:"bucketCounts,omitempty"`
 	ExplicitBounds    []otlp.Double   `json:"explicitBounds,omitempty"`
+	Exemplars         []otlpExemplar  `json:"exemplars,omitempty"`
 	Attributes        []otlp.KeyValue `json:"attributes,omitempty"`
 }

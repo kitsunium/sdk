@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-11-03T12:00:00Z -->
 # internal/service/observe/logger/encoder/
 
 ## Purpose
@@ -16,6 +16,18 @@ exports it as a type alias for legacy call sites). This package ships two:
 | `text.go`     | `NewText` → `textEncoder` — renders `RecordEvent` → bytes, sanitises framing bytes and terminal controls through the exported `AppendSanitized` (the one scrub the legacy `service/observe/logger.TextHandler` calls too), renders the top-level trace context; `appendQuotedString`/`quoteSafe` are its escaping fast path |
 | `json.go`     | `NewJSON` → `jsonEncoder` — renders `RecordEvent` → one JSON object per line, flat attrs, top-level trace context |
 | `timestamp.go`| `timestampLayout` + `appendTimestamp` — the one RFC3339-milli layout and the renderer BOTH encoders use in place of `time.Time.AppendFormat` |
+| `encoder_compliance.go` | both encoders implement `corelogger.PrefixEncoder` (#1016) |
+
+**Both encoders are `corelogger.PrefixEncoder`s (#1016).** `AppendAttrs(dst,
+groups, attrs)` renders bound attributes exactly as a line carries them — the
+separator before each (a space in text, a comma in JSON), the group prefix,
+the ADR 0070 rename of a top-level reserved key, the scrub or the escaping —
+and `AppendWithPrefix(dst, groups, prefix, r)` writes the line with those
+bytes spliced after the header and the trace context, before `r`'s own
+attributes. `Append` is `AppendWithPrefix` with a nil prefix, so the two paths
+are one function and the line is byte for byte the same
+(`TestBoundAttrsRenderOnceAndTheLineIsUnchanged` in the parent package holds
+it over every Kind, nested groups, the reserved keys and a span).
 
 ## Output shape
 
@@ -95,6 +107,13 @@ exports it as a type alias for legacy call sites). This package ships two:
   as `\u2028` and `\u2029` (they were copied). Every other byte of output is
   unchanged. `Test_jsonStringsThroughTheEncoder` pins the message, the value
   and the key for each. The TEXT encoder is not JSON and is untouched.
+- **JSON floats are `kernel/jsonenc`'s too** (#1039). `appendJSONFloat` calls
+  `jsonenc.AppendFloat`, encoding/json's spelling, and writes `null` on its
+  `ok == false` branch (NaN, ±Inf). **This changed the output, and the change
+  is declared**: a float in [1e-6, 1e21) is written plain (`1e6` was `1e+06`,
+  now `1000000`), and a one-digit negative exponent loses its padding (`1e-07`
+  is now `1e-7`) — what `json.Marshal` of the same value writes. The TEXT
+  encoder's floats are unchanged. `Test_appendJSONFloat` pins both.
 - **`AppendSanitized` copies runs, not bytes** (the JSON encoder did too, before
   `jsonenc`). `AppendSanitized` (text.go) appends each stretch of bytes that
   needs no rewrite in one `append`, and only the scrubbed byte on its own;

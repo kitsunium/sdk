@@ -497,13 +497,13 @@ sequences:
             - case: "'\"'"
               do:
                 - bind: value, err
-                  eval: p.scanDoubleQuoted(true)
+                  eval: p.scanDoubleQuoted(-1, true)
                   to: p.scanDoubleQuoted
                 - return: value, styleDouble, err
             - case: "'\\''"
               do:
                 - bind: value, err
-                  eval: p.scanSingleQuoted(true)
+                  eval: p.scanSingleQuoted(-1, true)
                   to: p.scanSingleQuoted
                 - return: value, styleSingle, err
             - case: "'[', '{'"
@@ -555,15 +555,15 @@ sequences:
         kind: actor
       - id: (*parser).checkKey
         kind: self
-      - id: p.errAt
+      - id: bounded
         kind: internal
       - id: p.refuseAt
         kind: internal
     steps:
       - opt:
           do:
-            - return: p.errAt(line, off, "a mapping key is longer than 1024 characters")
-              to: p.errAt
+            - return: bounded(coreyaml.SizeExceeded, "a mapping key is longer than 1024 characters", at(line, p.columnOf(off))...)
+              to: bounded
           when: utf8.RuneCountInString(p.src[off:end]) > maxKeyRunes
       - opt:
           do:
@@ -683,14 +683,14 @@ sequences:
             - case: "'\"'"
               do:
                 - bind: value, err
-                  eval: p.scanDoubleQuoted(false)
+                  eval: p.scanDoubleQuoted(parent, false)
                   to: p.scanDoubleQuoted
                 - return: p.scalarOrError(value, styleDouble, line, off, err)
                   to: p.scalarOrError
             - case: "'\\''"
               do:
                 - bind: value, err
-                  eval: p.scanSingleQuoted(false)
+                  eval: p.scanSingleQuoted(parent, false)
                   to: p.scanSingleQuoted
                 - return: p.scalarOrError(value, styleSingle, line, off, err)
                   to: p.scalarOrError
@@ -821,6 +821,8 @@ sequences:
         kind: actor
       - id: (*yamlCodec).Marshal
         kind: self
+      - id: codec
+        kind: package
       - id: scratch
         kind: package
       - id: enc.encodeDocument
@@ -828,6 +830,14 @@ sequences:
       - id: slices
         kind: stdlib
     steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: codec.CheckValue(v)
+            to: codec
+          when: verr != nil
       - bind: buf
         eval: scratch.AcquireBuffer()
         to: scratch
@@ -855,18 +865,27 @@ sequences:
         kind: actor
       - id: (*yamlCodec).Unmarshal
         kind: self
-      - id: errs
+      - id: codec
         kind: package
+      - id: bounded
+        kind: internal
       - id: decodeDocument
         kind: internal
     steps:
       - opt:
           do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
             - return: |-
-                errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{},
-                			errs.Int("len", len(data)), errs.Int("cap", maxYAMLBytes),
-                			errs.String("detail", "the document is larger than the decoder accepts"))
-              to: errs
+                bounded(coreyaml.SizeExceeded, "the document is larger than the decoder accepts",
+                			errs.Int("len", len(data)), errs.Int("cap", maxYAMLBytes))
+              to: bounded
           when: len(data) > maxYAMLBytes
       - return: decodeDocument(data, v, 1)
         to: decodeDocument
@@ -924,11 +943,21 @@ sequences:
         kind: actor
       - id: (*yamlDecoder).Decode
         kind: self
+      - id: codec
+        kind: package
       - id: d.readDocument
         kind: internal
       - id: decodeDocument
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - opt:
           do:
             - return: io.EOF
@@ -1092,8 +1121,8 @@ sequences:
             - opt:
                 do:
                   - return: |-
-                      dst, errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{},
-                      				errs.Int("cap", maxYAMLBytes), errs.String("detail", "a document of the stream is larger than the decoder accepts"))
+                      dst, bounded(coreyaml.SizeExceeded, "a document of the stream is larger than the decoder accepts",
+                      				errs.Int("cap", maxYAMLBytes))
                 when: len(dst) > maxYAMLBytes
             - opt:
                 do:
@@ -1211,8 +1240,16 @@ sequences:
         value: "true"
       - return: e.err
   - of: at
+    participants:
+      - id: caller
+        kind: actor
+      - id: at
+        kind: self
+      - id: codec
+        kind: package
     steps:
-      - return: "[]errs.FieldValue{errs.Int(\"line\", line), errs.Int(\"column\", column)}"
+      - return: "codec.PositionFields(codec.PositionValue{Line: line, Column: column})"
+        to: codec
   - of: syntaxError
     participants:
       - id: caller
@@ -1234,6 +1271,17 @@ sequences:
         kind: package
     steps:
       - return: "errs.Wrap(sentinel, errs.WrapParams{Code: coreyaml.CodeYAMLUnmarshalFailed}, at(line, column)...)"
+        to: errs
+  - of: bounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: bounded
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: "errs.Wrap(sentinel, errs.WrapParams{Code: coreyaml.CodeYAMLUnmarshalFailed}, append(fields, errs.String(\"detail\", detail))...)"
         to: errs
   - of: marshalError
     participants:
@@ -1271,6 +1319,8 @@ sequences:
       - id: p.close
         kind: internal
     steps:
+      - set: p.flowParent
+        value: parent
       - bind: f
         eval: "flowCollection{line: p.line, off: p.pos, kind: kindSequence, closing: closingOf(p.peek())}"
       - opt:
@@ -1633,13 +1683,13 @@ sequences:
             - case: "'\"'"
               do:
                 - bind: value, err
-                  eval: p.scanDoubleQuoted(true)
+                  eval: p.scanDoubleQuoted(-1, true)
                   to: p.scanDoubleQuoted
                 - return: value, styleDouble, err
             - case: "'\\''"
               do:
                 - bind: value, err
-                  eval: p.scanSingleQuoted(true)
+                  eval: p.scanSingleQuoted(-1, true)
                   to: p.scanSingleQuoted
                 - return: value, styleSingle, err
             - default: true
@@ -1739,13 +1789,13 @@ sequences:
             - case: "'\"'"
               do:
                 - bind: value, err
-                  eval: p.scanDoubleQuoted(false)
+                  eval: p.scanDoubleQuoted(parent, false)
                   to: p.scanDoubleQuoted
                 - return: value, styleDouble, err
             - case: "'\\''"
               do:
                 - bind: value, err
-                  eval: p.scanSingleQuoted(false)
+                  eval: p.scanSingleQuoted(parent, false)
                   to: p.scanSingleQuoted
                 - return: value, styleSingle, err
             - default: true
@@ -1775,8 +1825,12 @@ sequences:
               to: p.flowSpaceStep
             - opt:
                 do:
+                  - return: err
+                when: err != nil
+            - opt:
+                do:
                   - break: true
-                when: "!moved || err != nil"
+                when: "!moved"
           forever: true
       - opt:
           do:
@@ -1795,6 +1849,8 @@ sequences:
         kind: internal
       - id: p.newline
         kind: internal
+      - id: p.flowLineIndent
+        kind: internal
       - id: p.skipToEOL
         kind: internal
       - id: p.atDocumentMarker
@@ -1810,6 +1866,14 @@ sequences:
               do:
                 - eval: p.newline()
                   to: p.newline
+                - opt:
+                    do:
+                      - return: false, err
+                    init:
+                      bind: err
+                      eval: p.flowLineIndent()
+                      to: p.flowLineIndent
+                    when: err != nil
             - case: c == '#' && (p.pos == p.lineStart || isBlank(p.src[p.pos-1]))
               do:
                 - eval: p.skipToEOL()
@@ -1823,6 +1887,38 @@ sequences:
             to: p.peek
       - return: "!p.atDocumentMarker(), nil"
         to: p.atDocumentMarker
+  - of: (*parser).flowLineIndent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*parser).flowLineIndent
+        kind: self
+      - id: p.at
+        kind: internal
+      - id: p.errAt
+        kind: internal
+    steps:
+      - bind: i
+        eval: p.pos
+      - loop:
+          cond: isBlank(p.at(i))
+          do:
+            - op: ++
+              set: i
+      - opt:
+          do:
+            - return: nil
+          init:
+            bind: c
+            eval: p.at(i)
+            to: p.at
+          when: c == '\n' || c == '#' || c == 0 || c == ']' || c == '}' || p.atDocumentMarker()
+      - opt:
+          do:
+            - return: p.errAt(p.line, i, "a flow collection's line must be indented deeper than the block holding it")
+              to: p.errAt
+          when: p.indentOf(p.pos) <= p.flowParent
+      - return: nil
   - of: (*parser).flowSpaceError
     participants:
       - id: caller
@@ -2922,7 +3018,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: "!ok || (f.omitEmpty && isEmpty(fv))"
+                when: "!ok || f.omitted(fv)"
             - eval: e.writeEntryStart(inner, pending, firstInline)
               to: e.writeEntryStart
             - set: pending
@@ -3028,7 +3124,7 @@ sequences:
             - opt:
                 do:
                   - return: "true"
-                when: ok && (!f.omitEmpty || !isEmpty(fv))
+                when: ok && !f.omitted(fv)
           key: _
           range: info.fields
           value: f
@@ -4161,7 +4257,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: "!ok || (f.omitEmpty && isEmpty(fv))"
+                when: "!ok || f.omitted(fv)"
             - eval: e.flowSeparator(written)
               to: e.flowSeparator
             - op: ++
@@ -4459,6 +4555,99 @@ sequences:
               do:
                 - return: "false"
           "on": text
+  - of: zeroTest
+    steps:
+      - switch:
+          cases:
+            - case: (t.Kind() == reflect.Pointer || t.Kind() == reflect.Interface) && t.Implements(isZeroerType)
+              do:
+                - return: zeroThroughReference
+            - case: t.Implements(isZeroerType)
+              do:
+                - return: zeroByMethod
+            - case: reflect.PointerTo(t).Implements(isZeroerType)
+              do:
+                - return: zeroByAddress
+            - default: true
+              do:
+                - return: reflect.Value.IsZero
+  - of: zeroThroughReference
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroThroughReference
+        kind: self
+      - id: v.Elem
+        kind: value
+      - id: zeroByMethod
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: v.IsNil()
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: elem
+                  eval: v.Elem()
+                  to: v.Elem
+                when: elem.Kind() == reflect.Pointer && elem.IsNil()
+          when: v.Kind() == reflect.Interface
+      - return: zeroByMethod(v)
+        to: zeroByMethod
+  - of: zeroByMethod
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroByMethod
+        kind: self
+      - id: v.IsZero
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: v.IsZero()
+              to: v.IsZero
+          when: "!v.CanInterface()"
+      - bind: z, ok
+        eval: reflect.TypeAssert[isZeroer](v)
+      - return: (ok && z.IsZero()) || (!ok && v.IsZero())
+  - of: zeroByAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroByAddress
+        kind: self
+      - id: v.IsZero
+        kind: value
+      - id: reflect.New(v.Type()).Elem
+        kind: value
+      - id: boxed.Set
+        kind: value
+      - id: zeroByMethod
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: v.IsZero()
+              to: v.IsZero
+          when: "!v.CanInterface()"
+      - opt:
+          do:
+            - bind: boxed
+              eval: reflect.New(v.Type()).Elem()
+              to: reflect.New(v.Type()).Elem
+            - eval: boxed.Set(v)
+              to: boxed.Set
+            - set: v
+              value: boxed
+          when: "!v.CanAddr()"
+      - return: zeroByMethod(v.Addr())
+        to: zeroByMethod
   - of: acquireParser
     participants:
       - id: caller
@@ -4504,8 +4693,8 @@ sequences:
       - eval: clear(p.dup)
       - set: p.src
         value: "\"\""
-      - set: p.pos, p.line, p.lineStart, p.depth
-        value: 0, 1, 0, 0
+      - set: p.pos, p.line, p.lineStart, p.depth, p.flowParent
+        value: 0, 1, 0, 0, -1
   - of: (*parser).at
     steps:
       - opt:
@@ -4593,7 +4782,7 @@ sequences:
     steps:
       - opt:
           do:
-            - return: noNode, p.errAt(int(n.line), int(n.off), "the document holds more nodes than the decoder accepts")
+            - return: noNode, bounded(coreyaml.SizeExceeded, "the document holds more nodes than the decoder accepts", at(int(n.line), p.columnOf(int(n.off)))...)
           when: len(p.nodes) >= maxNodes
       - set: p.nodes
         value: append(p.nodes, n)
@@ -4631,7 +4820,7 @@ sequences:
     steps:
       - opt:
           do:
-            - return: noNode, 0, p.errHere("collections nest deeper than the decoder accepts")
+            - return: noNode, 0, bounded(coreyaml.DepthExceeded, "collections nest deeper than the decoder accepts", at(p.line, p.columnOf(p.pos))...)
           when: p.depth >= maxDepth
       - op: ++
         set: p.depth
@@ -5886,7 +6075,7 @@ sequences:
       - id: p.scanQuoted
         kind: internal
     steps:
-      - return: p.scanQuoted('\'', singleLine)
+      - return: p.scanQuoted('\'', parent, singleLine)
         to: p.scanQuoted
   - of: (*parser).scanDoubleQuoted
     participants:
@@ -5897,7 +6086,7 @@ sequences:
       - id: p.scanQuoted
         kind: internal
     steps:
-      - return: p.scanQuoted('"', singleLine)
+      - return: p.scanQuoted('"', parent, singleLine)
         to: p.scanQuoted
   - of: (*parser).scanQuoted
     participants:
@@ -5911,7 +6100,7 @@ sequences:
         kind: internal
     steps:
       - bind: q
-        eval: "quotedScan{line: p.line, off: p.pos, quote: quote, singleLine: singleLine}"
+        eval: "quotedScan{line: p.line, off: p.pos, quote: quote, singleLine: singleLine, parent: parent}"
       - op: ++
         set: p.pos
       - opt:
@@ -6029,7 +6218,7 @@ sequences:
           when: q.singleLine
       - op: ++
         set: p.pos
-      - return: p.joinEscapedBreak(q.line, q.off)
+      - return: p.joinEscapedBreak(q)
         to: p.joinEscapedBreak
   - of: (*parser).quotedBreak
     participants:
@@ -6051,7 +6240,7 @@ sequences:
         value: p.text[:len(p.text)-q.blanks]
       - set: q.blanks
         value: "0"
-      - return: p.foldQuoted(q.line, q.off)
+      - return: p.foldQuoted(q)
         to: p.foldQuoted
   - of: (*parser).foldQuoted
     participants:
@@ -6088,7 +6277,7 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: p.insideQuoted(line, off)
+            eval: p.insideQuoted(q)
             to: p.insideQuoted
           when: err != nil
       - set: p.text
@@ -6121,7 +6310,7 @@ sequences:
               to: p.newline
             - eval: p.skipBlanks()
               to: p.skipBlanks
-      - return: p.insideQuoted(line, off)
+      - return: p.insideQuoted(q)
         to: p.insideQuoted
   - of: (*parser).insideQuoted
     participants:
@@ -6136,7 +6325,7 @@ sequences:
     steps:
       - opt:
           do:
-            - return: p.errAt(line, off, "a quoted scalar is not closed")
+            - return: p.errAt(q.line, q.off, "a quoted scalar is not closed")
               to: p.errAt
           when: p.pos >= len(p.src)
       - opt:
@@ -6144,7 +6333,22 @@ sequences:
             - return: p.errHere("a document marker inside a quoted scalar")
               to: p.errHere
           when: p.atDocumentMarker()
+      - opt:
+          do:
+            - return: p.errHere("a quoted scalar's line must be indented deeper than the block holding it")
+              to: p.errHere
+          when: p.indentOf(p.lineStart) <= q.parent
       - return: nil
+  - of: (*parser).indentOf
+    steps:
+      - bind: i
+        eval: lineStart
+      - loop:
+          cond: p.at(i) == ' '
+          do:
+            - op: ++
+              set: i
+      - return: i - lineStart
   - of: (*parser).escape
     participants:
       - id: caller
@@ -6653,18 +6857,37 @@ sequences:
                 when: opts.inline
             - opt:
                 do:
-                  - continue: true
-                when: "!field.IsExported()"
-            - opt:
-                do:
-                  - set: name
-                    to: strings
-                    value: strings.ToLower(field.Name)
-                when: name == ""
-            - eval: "addField(info, fieldInfo{key: name, index: index, omitEmpty: opts.omitEmpty, flow: opts.flow})"
-              to: addField
+                  - eval: addField(info, newFieldInfo(field, name, index, opts))
+                    to: addField
+                when: field.IsExported()
           key: i
           range: t.NumField()
+  - of: newFieldInfo
+    participants:
+      - id: caller
+        kind: actor
+      - id: newFieldInfo
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: zeroTest
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: name
+              to: strings
+              value: strings.ToLower(field.Name)
+          when: name == ""
+      - bind: f
+        eval: "fieldInfo{key: name, index: index, omitEmpty: opts.omitEmpty, flow: opts.flow}"
+      - opt:
+          do:
+            - set: f.zero
+              to: zeroTest
+              value: zeroTest(field.Type)
+          when: opts.omitZero
+      - return: f
   - of: yamlTag
     participants:
       - id: caller
@@ -6760,16 +6983,19 @@ sequences:
         value: len(info.fields)
       - set: info.fields
         value: append(info.fields, f)
+  - of: (*fieldInfo).omitted
+    steps:
+      - return: (f.omitEmpty && isEmpty(fv)) || (f.zero != nil && f.zero(fv))
   - of: decodeDocument
     participants:
       - id: caller
         kind: actor
       - id: decodeDocument
         kind: self
+      - id: codec
+        kind: package
       - id: reflect
         kind: stdlib
-      - id: errs
-        kind: package
       - id: prepareSource
         kind: internal
       - id: acquireParser
@@ -6783,14 +7009,17 @@ sequences:
       - id: d.decode
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: err != nil
       - bind: target
         eval: reflect.ValueOf(v)
         to: reflect
-      - opt:
-          do:
-            - return: errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{}, errs.String("detail", "the target must be a non-nil pointer"))
-              to: errs
-          when: target.Kind() != reflect.Pointer || target.IsNil()
       - bind: src, err
         eval: prepareSource(data, firstLine)
         to: prepareSource

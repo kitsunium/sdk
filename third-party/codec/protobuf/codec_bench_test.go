@@ -13,6 +13,9 @@
 package protobuf_test
 
 import (
+	"bufio"
+	"bytes"
+	"io"
 	"strconv"
 	"testing"
 
@@ -380,5 +383,77 @@ func BenchmarkGeneratedUnmarshal(b *testing.B) {
 			b.Fatalf("Unmarshal: %v", uerr)
 		}
 		benchDecoded = dst
+	}
+}
+
+// BenchmarkGeneratedAppend appends the generated message into a destination
+// with room: what the Appender costs when the message has no map field for
+// proto to allocate around — the structpb rows of BenchmarkAppend are mostly
+// that allocation.
+func BenchmarkGeneratedAppend(b *testing.B) {
+	msg := generatedFixture()
+	appender, ok := protobuf.New().(corecodec.Appender)
+	if !ok {
+		b.Fatal("protobuf is not an Appender")
+	}
+	dst := make([]byte, 0, 64<<10)
+	b.ReportAllocs()
+	for b.Loop() {
+		out, err := appender.Append(dst[:0], msg)
+		if err != nil {
+			b.Fatalf("Append: %v", err)
+		}
+		benchWire = out
+	}
+}
+
+// BenchmarkStreamEncode measures the streaming Encoder (#905): one
+// varint-delimited message per Encode, written to io.Discard in one Write.
+// Beside BenchmarkAppend it is the delimiter's price.
+func BenchmarkStreamEncode(b *testing.B) {
+	sc, ok := protobuf.New().(corecodec.StreamingCodec)
+	if !ok {
+		b.Fatal("protobuf is not a StreamingCodec")
+	}
+	for _, doc := range benchDocs(b) {
+		b.Run("protobuf/"+doc.name, func(b *testing.B) {
+			enc := sc.NewEncoder(io.Discard)
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := enc.Encode(doc.asProto); err != nil {
+					b.Fatalf("Encode: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkStreamDecode measures the streaming Decoder (#905) on one
+// delimited message, re-read from the same bytes through a reused
+// bufio.Reader, so the row is the frame and the message, not the buffer.
+func BenchmarkStreamDecode(b *testing.B) {
+	sc, ok := protobuf.New().(corecodec.StreamingCodec)
+	if !ok {
+		b.Fatal("protobuf is not a StreamingCodec")
+	}
+	for _, doc := range benchDocs(b) {
+		var frame bytes.Buffer
+		if err := sc.NewEncoder(&frame).Encode(doc.asProto); err != nil {
+			b.Fatalf("Encode: %v", err)
+		}
+		b.Run("protobuf/"+doc.name, func(b *testing.B) {
+			rd := bytes.NewReader(frame.Bytes())
+			br := bufio.NewReader(rd)
+			b.ReportAllocs()
+			for b.Loop() {
+				rd.Reset(frame.Bytes())
+				br.Reset(rd)
+				var got structpb.Struct
+				if err := sc.NewDecoder(br).Decode(&got); err != nil {
+					b.Fatalf("Decode: %v", err)
+				}
+				benchStruct = &got
+			}
+		})
 	}
 }

@@ -323,6 +323,49 @@ no OTLP/HTTP exporter appears in `AvailableExporters()`.
   package defends is on the *lookup* path, which this change does not touch. A
   benchmark here would pin a number nothing depends on.
 
+## Amendment — 2026-11-03: the body may leave gzipped (#1051)
+
+`HTTPConfig.Gzip` (both signals' `OTLPHTTPConfig`): every request body — an
+encoded snapshot or batch, and a stored document `ExportDocument` posts — is
+compressed with `compress/gzip` at the default level and sent with
+`Content-Encoding: gzip`, which the OTLP/HTTP specification admits on a request
+and every collector accepts; OTLP/JSON shrinks eight to twelve times. The zero
+value is the uncompressed body this ADR shipped, byte for byte. A collector
+refusing the encoding answers 415, classified permanent like any status
+outside the retryable four.
+
+**Completed the same day.** Both signals' document exporters gain the ADR 0039
+sibling `EncodedDocumentExporter` — `ExportEncodedDocument(ctx, doc,
+encoding)`, the shared sender's `PostEncoded` —: a document already gzip is
+posted as it rests, labelled `Content-Encoding: gzip` whatever `Gzip` says, so
+a batch `app/forward` kept compressed (`Config.Compress`, ADR 0185 amended) is
+never decompressed on the way; `""` is `ExportDocument`; any other encoding is
+refused before a request is built, under the signal's `RequestUnbuildable`
+verdict, permanent. The trace half of the port lives in `core/observe/trace`
+and was added here, additively, for #1051.
+
+## Amendment — 2026-11-03: exemplars, the exponential histogram, an absent sum (#868, #869)
+
+Three additions to the document this encoder writes, pinned by hand-written
+bytes as the rest of it (`exemplar_external_test.go`,
+`exponential_histogram_external_test.go`):
+
+- **`exemplars`** on a `NumberDataPoint` and a `HistogramDataPoint`, after
+  the value (respectively after `explicitBounds`) and before the attributes,
+  each Exemplar in field-number order — `timeUnixNano`, `asDouble` (a
+  histogram's), `spanId` and `traceId` in hex, `asInt` (a sum's, decimal
+  string) —, omitted when none was kept.
+- **`exponentialHistogram`** (Metric field 10): `dataPoints` then
+  `aggregationTemporality`; a point writes `startTimeUnixNano`,
+  `timeUnixNano`, `count`, `sum`, `scale` (a number), `zeroCount`,
+  `positive` / `negative` as `{"offset":n,"bucketCounts":[…]}` (an empty run
+  omitted), `zeroThreshold` (omitted at 0), `exemplars`, `attributes`. The
+  temporality is refused as for every other family.
+- **An absent `sum`.** A `HistogramDataPoint` whose source keeps no total
+  (`HistogramValue.NoSum`, the runtime's histograms) writes no `sum` key — the
+  proto's optional, unset — where it used to be always present. A point with
+  a sum is byte for byte as before.
+
 ## Deferred
 
 - **OTLP/protobuf (binary).** It needs a protobuf encoder, and the only honest

@@ -84,6 +84,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/yaml.CodeYAM
 
 Code `0.3.4.8`
 
+<a name="CodeDepthExceeded"></a>
+```go
+const CodeDepthExceeded errs.Code = 197645
+```
+
+CodeDepthExceeded is 0.3.4.13: collections nested past maxDepth, or UnmarshalYAML re-entered past it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/yaml.CodeYAMLDepthExceeded`.
+
+Code `0.3.4.13`
+
 <a name="CodeDirectiveRefused"></a>
 ```go
 const CodeDirectiveRefused errs.Code = 197641
@@ -150,6 +161,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/yaml.CodeYAM
 
 Code `0.3.4.7`
 
+<a name="CodeSizeExceeded"></a>
+```go
+const CodeSizeExceeded errs.Code = 197644
+```
+
+CodeSizeExceeded is 0.3.4.12: a document past maxYAMLBytes, more than maxNodes nodes, or an implicit key past maxKeyRunes.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/yaml.CodeYAMLSizeExceeded`.
+
+Code `0.3.4.12`
+
 <a name="CodeTagRefused"></a>
 ```go
 const CodeTagRefused errs.Code = 197637
@@ -213,6 +235,17 @@ ComplexKeyRefused is the sentinel of [CodeComplexKeyRefused](#CodeComplexKeyRefu
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/yaml.ComplexKeyRefused`.
 
 Code `0.3.4.8` · reason `COMPLEX_KEY_REFUSED` · public "YAML complex keys (?) are outside the supported subset"
+
+<a name="DepthExceeded"></a>
+```go
+var DepthExceeded *errs.Error
+```
+
+DepthExceeded is the sentinel of [CodeDepthExceeded](#CodeDepthExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/yaml.DepthExceeded`.
+
+Code `0.3.4.13` · reason `DEPTH_EXCEEDED` · public "YAML input nests too deeply"
 
 <a name="DirectiveRefused"></a>
 ```go
@@ -279,6 +312,17 @@ MultipleDocumentsRefused is the sentinel of [CodeMultiDocRefused](#CodeMultiDocR
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/yaml.MultipleDocumentsRefused`.
 
 Code `0.3.4.7` · reason `MULTIPLE_DOCUMENTS_REFUSED` · public "YAML input holds more than one document"
+
+<a name="SizeExceeded"></a>
+```go
+var SizeExceeded *errs.Error
+```
+
+SizeExceeded is the sentinel of [CodeSizeExceeded](#CodeSizeExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/yaml.SizeExceeded`.
+
+Code `0.3.4.12` · reason `SIZE_EXCEEDED` · public "YAML input exceeds a size limit"
 
 <a name="TagRefused"></a>
 ```go

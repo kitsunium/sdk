@@ -24,6 +24,7 @@ Failures carry the range 0.3.11.\*; match them with errs.HasCode, or the sentine
 CodeMarshalFailed    0.3.11.1  a record has no JSON encoding
 CodeUnmarshalFailed  0.3.11.2  a line is not JSON its element can hold
 CodeValueInvalid     0.3.11.3  the value or the target is not a slice
+CodeSizeExceeded     0.3.11.4  a stream line past the 10 MiB a record may take
 ```
 
 No error message quotes the input.
@@ -45,6 +46,17 @@ CodeMarshalFailed is 0.3.11.1: a record has no JSON encoding.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/ndjson.CodeNDJSONMarshalFailed`.
 
 Code `0.3.11.1`
+
+<a name="CodeSizeExceeded"></a>
+```go
+const CodeSizeExceeded errs.Code = 199428
+```
+
+CodeSizeExceeded is 0.3.11.4: a stream line past the 10 MiB a record may take.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/ndjson.CodeNDJSONSizeExceeded`.
+
+Code `0.3.11.4`
 
 <a name="CodeUnmarshalFailed"></a>
 ```go
@@ -87,6 +99,17 @@ MarshalFailed is the sentinel of [CodeMarshalFailed](#CodeMarshalFailed).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/ndjson.MarshalFailed`.
 
 Code `0.3.11.1` · reason `MARSHAL_FAILED` · public "NDJSON encoding failed"
+
+<a name="SizeExceeded"></a>
+```go
+var SizeExceeded *errs.Error
+```
+
+SizeExceeded is the sentinel of [CodeSizeExceeded](#CodeSizeExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/ndjson.SizeExceeded`.
+
+Code `0.3.11.4` · reason `SIZE_EXCEEDED` · public "NDJSON record exceeds size limit"
 
 <a name="UnmarshalFailed"></a>
 ```go

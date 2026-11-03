@@ -2,7 +2,6 @@ package logger
 
 import (
 	"context"
-	"runtime"
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
@@ -147,11 +146,9 @@ func (b *chainBuilder) Any(key string, val any) Builder {
 // Logger and returns the builder to the recycler. Callers MUST NOT use
 // the builder after Send returns.
 func (b *chainBuilder) Send(ctx context.Context, msg string) {
-	//: capture the application caller PC so handlers can render frames lazily.
-	var pcs [1]uintptr
-	runtime.Callers(callerSkipDepth, pcs[:])
-	//: build the RecordEvent once so we can pass it to Enabled and Handle.
-	r := corelogger.RecordEvent{Level: b.lv, Message: msg, PC: pcs[0], Attrs: b.attrs}
+	//: build the RecordEvent once so we can pass it to Enabled and Handle; the
+	//: caller PC only when the handler reads it (#1014).
+	r := corelogger.RecordEvent{Level: b.lv, Message: msg, PC: b.owner.callerPC(), Attrs: b.attrs}
 	//: short-circuit when the handler reports disabled — avoids formatting work.
 	if b.owner.h.Enabled(ctx, r) {
 		//: read the span AFTER the level gate so a dropped record pays no context walk.

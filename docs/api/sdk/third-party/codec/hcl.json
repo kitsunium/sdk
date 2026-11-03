@@ -22,10 +22,25 @@
       "name": "hcl",
       "dir": ".",
       "layer": "thirdparty",
-      "doc": "Package hcl wraps HashiCorp HCL v2 as a codec.Codec implementation. It lives\nunder third-party/, in a module of its own (ADR 0157) — NOT\ninternal/service/data/codec — because hashicorp/hcl/v2 pulls go-cty and a heavier\ndependency graph; quarantining it here keeps the dep-light SDK module — its\nservice layer and its proc syscall code — untouched (ADR 0012 / ADR 0021 §Why-not /\nADR 0022). It is opt-in: a consumer blank-imports this package to register\nthe \"hcl\" Format; pkg/v1/data/codec does NOT pull it (the public module stays\ndep-light).\n\nHCL is decode-oriented; symmetric value-marshal is struct-only via\ngohcl.EncodeIntoBody, so the top-level value MUST be a struct (or pointer to\none) with `hcl:\"…\"` field tags. Non-streaming; implements the optional Appender.\n\nPackage hcl — range 0.3.37.* (ADR 0022 third-party/codec/hcl block).\n\nPackage hcl — declares the sentinel *errs.Error values for the HCL codec.\n"
+      "doc": "Package hcl wraps HashiCorp HCL v2 as a codec.Codec implementation. It lives\nunder third-party/, in a module of its own (ADR 0157) — NOT\ninternal/service/data/codec — because hashicorp/hcl/v2 pulls go-cty and a heavier\ndependency graph; quarantining it here keeps the dep-light SDK module — its\nservice layer and its proc syscall code — untouched (ADR 0012 / ADR 0021 §Why-not /\nADR 0022). It is opt-in: a consumer blank-imports this package to register\nthe \"hcl\" Format; pkg/v1/data/codec does NOT pull it (the public module stays\ndep-light).\n\nHCL is decode-oriented; symmetric value-marshal is struct-only via\ngohcl.EncodeIntoBody, so the top-level value MUST be a struct (or pointer to\none) with `hcl:\"…\"` field tags. Non-streaming; implements the optional Appender.\n\nUnmarshal bounds its input twice before hclsyntax parses it: 10 MiB, and 100\nlevels of nesting. hclsyntax's parser is recursive descent with no depth\nguard, so a document of a million '[' overflowed the goroutine stack — a\nfatal error that takes the process down and no recover() catches. A lexical\npre-scan counts tuples, objects, parentheses, strings, template\ninterpolations and directives, runs of unary operators and chains of\nconditionals, outside comments and heredoc text, and refuses past the\nceiling with DEPTH_EXCEEDED (0.3.37.4). A panic of the parser on a crafted\ndocument is recovered into HCL_UNMARSHAL_FAILED, as Marshal recovers\ngohcl's.\n\nPackage hcl — range 0.3.37.* (ADR 0022 third-party/codec/hcl block).\n\nPackage hcl — declares the sentinel *errs.Error values for the HCL codec.\n"
     }
   ],
   "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.CodeHCLDepthExceeded",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "CodeHCLDepthExceeded",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "206084",
+      "code": {
+        "value": "0.3.37.4"
+      },
+      "doc": "CodeHCLDepthExceeded identifies an Unmarshal input nested past 100 levels\n— brackets, braces, parentheses, strings and template sequences, a run of\nunary operators or a chain of conditionals — refused by a lexical pre-scan\nbefore hclsyntax's recursive-descent parser, which has no guard of its\nown, could overflow the goroutine stack (a fatal error, not a panic).\n",
+      "file": "gen_codes.go",
+      "layer": "thirdparty"
+    },
     {
       "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.CodeHCLMarshalFailed",
       "kind": "const",
@@ -83,6 +98,22 @@
       "layer": "thirdparty"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.DepthExceeded",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
+      "name": "DepthExceeded",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.37.4",
+        "reason": "DEPTH_EXCEEDED",
+        "public": "HCL input nested too deeply"
+      },
+      "doc": "DepthExceeded marks an Unmarshal input nested past 100 levels; its reason\nis the one every native reader's nesting refusal carries.\n",
+      "file": "gen_codes.go",
+      "layer": "thirdparty"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/third-party/codec/hcl.MarshalFailed",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/third-party/codec/hcl",
@@ -118,7 +149,7 @@
       "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
       "code": {
         "value": "0.3.37.3",
-        "reason": "HCL_SIZE_EXCEEDED",
+        "reason": "SIZE_EXCEEDED",
         "public": "HCL input exceeds size limit"
       },
       "doc": "SizeExceeded marks an Unmarshal input over the 10 MiB hard cap.\n",

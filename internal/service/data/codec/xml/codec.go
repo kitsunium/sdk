@@ -53,6 +53,10 @@ func (*xmlCodec) Extensions() []string {
 // *bytes.Buffer + xml.NewEncoder so the per-call buffer allocation
 // stdxml.Marshal pays internally is amortised across calls.
 func (*xmlCodec) Marshal(v any) (encoded []byte, err error) {
+	//: a channel, a function, an unsafe pointer: no wire format holds one (#1101).
+	if verr := codec.CheckValue(v); verr != nil {
+		return nil, verr
+	}
 	//: rent an already-Reset buffer from the shared codec pool.
 	buf := scratch.AcquireBuffer()
 	//: encode through the stdlib encoder so xml.Header semantics + the
@@ -95,6 +99,14 @@ func (*xmlCodec) Marshal(v any) (encoded []byte, err error) {
 
 // Unmarshal parses data as XML into v.
 func (*xmlCodec) Unmarshal(data []byte, v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
+	//: no bytes is no document in this format (#1101).
+	if len(data) == 0 {
+		return codec.EmptyInput
+	}
 	//: delegate.
 	xerr := stdxml.Unmarshal(data, v)
 	//: success fast-path.
@@ -108,49 +120,42 @@ func (*xmlCodec) Unmarshal(data []byte, v any) error {
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "XML decoding failed",
 		Private: "service/data/codec/xml.Unmarshal: encoding/xml returned an error",
-	})
+	}, position(xerr)...)
 }
 
 // Append encodes v as XML and appends the bytes to dst. Implements the
 // optional codec.Appender interface so hot-path callers can stream
-// records into a recycled buffer. Encodes directly into the pooled
-// *bytes.Buffer + appends onto dst — saves the slices.Clone the
-// Marshal-delegation shape paid.
+// records into a recycled buffer. The encoder writes through a pooled
+// scratch.AppendWriter over dst, so the bytes land in the caller's buffer
+// with no intermediate copy; on failure dst is returned as it was given.
 func (*xmlCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: rent an already-Reset buffer from the shared codec pool.
-	buf := scratch.AcquireBuffer()
+	//: a pooled writer appending to dst.
+	w := scratch.AcquireAppendWriter(dst)
 	//: stdxml.Encoder has no Reset(w) — fresh one per call.
-	enc := stdxml.NewEncoder(buf)
-	//: encode into the pooled buffer.
-	if xerr := enc.Encode(v); xerr != nil {
-		//: cap-discard release; dst stays pristine.
-		scratch.ReleaseBuffer(buf)
+	enc := stdxml.NewEncoder(w)
+	//: encode, then flush trailing tokens — same Close semantics as Marshal.
+	xerr, private := enc.Encode(v), "service/data/codec/xml.Append: encoding/xml returned an error"
+	//: Close only after a successful Encode, as before.
+	if xerr == nil {
+		//: a close failure is a marshal failure too.
+		xerr, private = enc.Close(), "service/data/codec/xml.Append: encoder.Close returned an error"
+	}
+	//: the grown slice, read before the writer goes back to the pool.
+	out := w.Bytes()
+	//: the writer forgets the slice; out stays the caller's.
+	scratch.ReleaseAppendWriter(w)
+	//: failure — dst as it was given, and the wrapped error.
+	if xerr != nil {
 		//: wrap the library error for reason-based matching.
 		return dst, errs.Wrap(xerr, errs.WrapParams{
 			Code:    corexml.CodeXMLMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "XML encoding failed",
-			Private: "service/data/codec/xml.Append: encoding/xml returned an error",
+			Private: private,
 		})
 	}
-	//: flush trailing tokens; same Close semantics as Marshal.
-	if cerr := enc.Close(); cerr != nil {
-		//: cap-discard release; dst stays pristine on close failure too.
-		scratch.ReleaseBuffer(buf)
-		//: surface the close failure as a marshal error.
-		return dst, errs.Wrap(cerr, errs.WrapParams{
-			Code:    corexml.CodeXMLMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "XML encoding failed",
-			Private: "service/data/codec/xml.Append: encoder.Close returned an error",
-		})
-	}
-	//: append the encoded bytes onto the caller's buffer (1 copy total).
-	dst = append(dst, buf.Bytes()...)
-	//: cap-discard release.
-	scratch.ReleaseBuffer(buf)
 	//: success — bytes are the caller's now.
-	return dst, nil
+	return out, nil
 }
 
 // NewEncoder wraps w in a streaming codec.Encoder.

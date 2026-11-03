@@ -514,6 +514,7 @@ files:
       - at
       - syntaxError
       - refused
+      - bounded
       - marshalError
     name: failed.go
   - decls:
@@ -530,6 +531,7 @@ files:
       - (*parser).flowScalar
       - (*parser).skipFlowSpace
       - (*parser).flowSpaceStep
+      - (*parser).flowLineIndent
       - (*parser).flowSpaceError
     name: flow.go
   - decls:
@@ -683,6 +685,12 @@ files:
       - isNullText
     name: node.go
   - decls:
+      - zeroTest
+      - zeroThroughReference
+      - zeroByMethod
+      - zeroByAddress
+    name: omitzero.go
+  - decls:
       - byteOrderMark
       - noNode
       - smallMapping
@@ -794,6 +802,7 @@ files:
       - (*parser).foldQuoted
       - (*parser).joinEscapedBreak
       - (*parser).insideQuoted
+      - (*parser).indentOf
       - (*parser).escape
       - (*parser).hexEscape
       - isScalarValue
@@ -820,10 +829,12 @@ files:
       - tagFlags
       - structInfoOf
       - buildStructInfo
+      - newFieldInfo
       - yamlTag
       - parseTagFlags
       - inlineField
       - addField
+      - (*fieldInfo).omitted
     name: structinfo.go
   - decls:
       - bomUTF16BigEndian
@@ -914,7 +925,8 @@ functions:
     results: bool
   - doc: |-
       at returns the line and column fields every decoding refusal carries: both
-      1-based, so they read as an editor shows them.
+      1-based, so they read as an editor shows them, under the family's keys so
+      codec.PositionOf reads them back (#1125).
     name: at
     params: line, column int
     results: "[]errs.FieldValue"
@@ -930,6 +942,14 @@ functions:
       caller testing for "any decoding failure" by code still matches.
     name: refused
     params: sentinel *errs.Error, line, column int
+    results: error
+  - doc: |-
+      bounded is input refused for a size or a depth bound (#894): sentinel —
+      SizeExceeded or DepthExceeded — is the origin, so its family reason is what
+      codec.IsTooLarge and codec.IsTooDeep find, and UnmarshalFailed joins the
+      trail as it does for a named refusal. fields place it when it is placed.
+    name: bounded
+    params: sentinel *errs.Error, detail string, fields ...errs.FieldValue
     results: error
   - doc: |-
       marshalError is MarshalFailed with a detail and, when known, the Go type
@@ -1228,6 +1248,33 @@ functions:
     name: isNullText
     params: text string
     results: bool
+  - doc: |-
+      zeroTest returns omitzero's test for a field of type t — encoding/json's
+      since Go 1.24 (#1103): the type's own IsZero when it declares one, reached
+      through the value's address when only the pointer does, and reflect's zero
+      value test otherwise. A nil pointer or interface is zero without asking it.
+    name: zeroTest
+    params: t reflect.Type
+    results: func(reflect.Value) bool
+  - doc: |-
+      zeroThroughReference is omitzero for a pointer or interface type declaring
+      IsZero: nil, or an interface holding a nil pointer, is zero; otherwise the
+      method decides.
+    name: zeroThroughReference
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      zeroByMethod calls the value's own IsZero. A value reflection may not hand
+      out — reached through an unexported embedding — is judged by its bits.
+    name: zeroByMethod
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      zeroByAddress calls IsZero through the value's address, or through an
+      addressable copy when the value has none, as encoding/json does.
+    name: zeroByAddress
+    params: v reflect.Value
+    results: bool
   - doc: acquireParser returns a parser reset to read src.
     name: acquireParser
     params: src string
@@ -1397,6 +1444,13 @@ functions:
       structs is refused instead of recursing forever.
     name: buildStructInfo
     params: info *structInfo, t reflect.Type, prefix []int, visiting map[reflect.Type]bool
+  - doc: |-
+      newFieldInfo describes an exported field: its key — the tag's name, or the
+      field's name in lower case — its index path and its options, omitzero's
+      test decided once, from the type.
+    name: newFieldInfo
+    params: field reflect.StructField, name string, index []int, opts tagFlags
+    results: fieldInfo
   - doc: |-
       yamlTag returns the field's yaml tag, and false when the field takes no
       part: unexported and not embedded, or tagged "-". Like yaml.v3, a field
@@ -2199,6 +2253,12 @@ types:
       - doc: depth is how many collections enclose the cursor.
         name: depth
         type: int
+      - doc: |-
+          flowParent is the indentation of the block holding the flow collection
+          being parsed, -1 at the root: each of its lines must be indented deeper
+          (YAML 1.2.2 §7.4, s-separate-lines(n) in flow-in context).
+        name: flowParent
+        type: int
     kind: struct
     methods:
       - doc: |-
@@ -2481,6 +2541,18 @@ types:
         name: flowSpaceStep
         recv: p *parser
         results: bool, error
+      - doc: |-
+          flowLineIndent refuses the line under the cursor, just started inside a
+          flow collection, when its content is not indented deeper than the block
+          holding the collection (YAML 1.2.2 §7.4, s-separate-lines(n): a tab is
+          not indentation). An empty line, a comment line and a document marker —
+          refused on its own terms — are not judged, and neither is a line opening
+          with a closing indicator: libyaml, and this reader before the
+          yaml-test-suite ran, accept "]" at the key's own column, which no reading
+          of the entries depends on.
+        name: flowLineIndent
+        recv: p *parser
+        results: error
       - doc: |-
           flowSpaceError refuses a document marker the skip stopped on: a document
           cannot end inside a flow collection.
@@ -2799,7 +2871,7 @@ types:
           doubled quote is a quote, every other character is itself, and line breaks
           fold. singleLine refuses a scalar that does not close on its line (a key).
         name: scanSingleQuoted
-        params: singleLine bool
+        params: parent int, singleLine bool
         recv: p *parser
         results: string, error
       - doc: |-
@@ -2807,7 +2879,7 @@ types:
           applying YAML's escapes and folding its line breaks. singleLine refuses a
           scalar that does not close on its line (a key).
         name: scanDoubleQuoted
-        params: singleLine bool
+        params: parent int, singleLine bool
         recv: p *parser
         results: string, error
       - doc: |-
@@ -2815,7 +2887,7 @@ types:
           One that closes on its line with nothing to unescape is the document's own
           bytes; any other is built in p.text.
         name: scanQuoted
-        params: quote byte, singleLine bool
+        params: quote byte, parent int, singleLine bool
         recv: p *parser
         results: string, error
       - doc: |-
@@ -2859,30 +2931,39 @@ types:
         recv: p *parser
         results: error
       - doc: |-
-          foldQuoted folds the line break under the cursor inside a quoted scalar
-          that opened at (line, off): a space when the next line follows directly,
-          one line feed per empty line otherwise, and the next line's leading blanks
-          dropped. A document marker or the end of the document inside the scalar is
-          refused.
+          foldQuoted folds the line break under the cursor inside the quoted scalar
+          q: a space when the next line follows directly, one line feed per empty
+          line otherwise, and the next line's leading blanks dropped. A document
+          marker, the end of the document, or a line not indented deeper than the
+          block holding the scalar is refused.
         name: foldQuoted
-        params: line, off int
+        params: q *quotedScan
         recv: p *parser
         results: error
       - doc: |-
-          joinEscapedBreak handles a line break escaped by "\" in a double-quoted
-          scalar: the break and the next line's leading blanks produce nothing, and
+          joinEscapedBreak handles a line break escaped by "\" in the double-quoted
+          scalar q: the break and the next line's leading blanks produce nothing, and
           each empty line in between produces a line feed.
         name: joinEscapedBreak
-        params: line, off int
+        params: q *quotedScan
         recv: p *parser
         results: error
       - doc: |-
-          insideQuoted refuses a quoted scalar opened at (line, off) whose next line
-          is the end of the document or a document marker.
+          insideQuoted refuses the quoted scalar q when its next line, under the
+          cursor past its blanks, is the end of the document, a document marker, or
+          not indented deeper than the block holding the scalar (YAML 1.2.2 §7.3,
+          s-flow-line-prefix(n): a tab is not indentation).
         name: insideQuoted
-        params: line, off int
+        params: q *quotedScan
         recv: p *parser
         results: error
+      - doc: |-
+          indentOf counts the spaces opening the line that starts at lineStart: its
+          indentation, which a tab never adds to.
+        name: indentOf
+        params: lineStart int
+        recv: p *parser
+        results: int
       - doc: |-
           escape appends the character the escape under the cursor (a backslash)
           names, and moves past it.
@@ -3017,6 +3098,11 @@ types:
       - doc: "singleLine refuses a line break: the scalar is a key."
         name: singleLine
         type: bool
+      - doc: |-
+          parent is the indentation of the block holding the scalar, -1 at the
+          root: each of its continuation lines must be indented deeper.
+        name: parent
+        type: int
     kind: struct
     name: quotedScan
   - doc: blockScalar is the state of a block scalar being read, as libyaml keeps it.
@@ -3082,7 +3168,21 @@ types:
       - doc: flow writes the field's collection in flow style.
         name: flow
         type: bool
+      - doc: |-
+          zero is omitzero's test of the field's type, nil without omitzero:
+          the field is left out when it holds its type's zero value (#1103).
+        name: zero
+        type: func(reflect.Value) bool
     kind: struct
+    methods:
+      - doc: |-
+          omitted reports whether the field, holding fv, is left out of the output:
+          empty under omitempty, or zero under omitzero — either is enough, as
+          encoding/json combines them.
+        name: omitted
+        params: fv reflect.Value
+        recv: f *fieldInfo
+        results: bool
     name: fieldInfo
   - doc: structInfo is everything the codec reads from a struct type's tags.
     fields:
@@ -3110,6 +3210,9 @@ types:
     fields:
       - doc: omitEmpty is ",omitempty".
         name: omitEmpty
+        type: bool
+      - doc: omitZero is ",omitzero", encoding/json's option since Go 1.24.
+        name: omitZero
         type: bool
       - doc: flow is ",flow".
         name: flow

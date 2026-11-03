@@ -1,6 +1,70 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: gzipBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: gzipBatch
+        kind: self
+      - id: out.Grow
+        kind: value
+      - id: gzip
+        kind: stdlib
+      - id: gzipWriters.Put
+        kind: value
+      - id: zw.Reset
+        kind: value
+      - id: zw.Write
+        kind: value
+      - id: unreachable
+        kind: internal
+      - id: out.Bytes
+        kind: value
+    steps:
+      - var:
+          name: out
+          type: bytes.Buffer
+      - eval: out.Grow(len(batch)/4 + len(gzipMagic))
+        to: out.Grow
+      - bind: zw, ok
+        eval: gzipWriters.Get().(*gzip.Writer)
+      - opt:
+          do:
+            - set: zw
+              to: gzip
+              value: gzip.NewWriter(io.Discard)
+          when: "!ok"
+      - defer: gzipWriters.Put(zw)
+        to: gzipWriters.Put
+      - eval: zw.Reset(&out)
+        to: zw.Reset
+      - opt:
+          do:
+            - eval: unreachable(werr)
+              to: unreachable
+          init:
+            bind: _, werr
+            eval: zw.Write(batch)
+            to: zw.Write
+          when: werr != nil
+      - eval: unreachable(zw.Close())
+        to: unreachable
+      - return: out.Bytes()
+        to: out.Bytes
+  - of: encodingOf
+    steps:
+      - opt:
+          do:
+            - return: EncodingGzip
+          when: bytes.HasPrefix(batch, gzipMagic)
+      - return: "\"\""
+  - of: unreachable
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
   - of: FullPolicy.String
     steps:
       - switch:
@@ -35,9 +99,13 @@ sequences:
               do:
                 - return: misconfigured("Broker", "missing")
                   to: misconfigured
-            - case: c.Send == nil
+            - case: c.Send == nil && c.SendEncoded == nil
               do:
                 - return: misconfigured("Send", "missing")
+                  to: misconfigured
+            - case: c.Compress && c.SendEncoded == nil
+              do:
+                - return: misconfigured("SendEncoded", "missing")
                   to: misconfigured
             - case: c.Retryable == nil
               do:
@@ -311,6 +379,10 @@ sequences:
           		case <-done:
           		}
           	}()
+      - opt:
+          do:
+            - return: f.cfg.SendEncoded(sendCtx, payload, encodingOf(payload))
+          when: f.cfg.SendEncoded != nil
       - return: f.cfg.Send(sendCtx, payload)
   - of: New
     participants:
@@ -373,6 +445,8 @@ sequences:
         kind: actor
       - id: (*Forwarder).Enqueue
         kind: self
+      - id: gzipBatch
+        kind: internal
       - id: f.settle
         kind: internal
       - id: kerrs
@@ -382,12 +456,18 @@ sequences:
       - id: f.publishCounted
         kind: internal
     steps:
-      - bind: size
-        eval: int64(len(batch))
       - opt:
           do:
             - return: nil
-          when: size == 0
+          when: len(batch) == 0
+      - opt:
+          do:
+            - set: batch
+              to: gzipBatch
+              value: gzipBatch(batch)
+          when: f.cfg.Compress
+      - bind: size
+        eval: int64(len(batch))
       - opt:
           do:
             - eval: f.settle("", &f.stats.Dropped)
@@ -1034,5 +1114,23 @@ sequences:
           do:
             - return: err
           when: err != nil
+      - return: e.forwarder.Enqueue(ctx, doc)
+        to: e.forwarder.Enqueue
+  - of: NewLogExporter
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("forwarder", "missing")
+          when: forwarder == nil
+      - return: "&logExporter{forwarder: forwarder}, nil"
+  - of: (*logExporter).ExportDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*logExporter).ExportDocument
+        kind: self
+      - id: e.forwarder.Enqueue
+        kind: internal
+    steps:
       - return: e.forwarder.Enqueue(ctx, doc)
         to: e.forwarder.Enqueue

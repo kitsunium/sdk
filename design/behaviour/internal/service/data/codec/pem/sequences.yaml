@@ -27,56 +27,180 @@ sequences:
         kind: actor
       - id: (*pemCodec).Marshal
         kind: self
-      - id: marshalPromotionBlock
+      - id: checkBlock
         kind: internal
-      - id: scratch
-        kind: package
-      - id: stdpem
-        kind: stdlib
+      - id: appendBlock
+        kind: internal
     steps:
-      - bind: block, ok
+      - bind: block, _
         eval: v.(*stdpem.Block)
+      - bind: berr
+        eval: checkBlock(block, "service/data/codec/pem.Marshal")
+        to: checkBlock
       - opt:
           do:
-            - return: |-
-                nil, errs.Wrap(nil, errs.WrapParams{
-                			Code:    corepem.CodePEMValueInvalid,
-                			Reason:  "VALUE_INVALID",
-                			Public:  "PEM codec requires a non-nil *pem.Block value",
-                			Private: "service/data/codec/pem.Marshal: argument is not a non-nil *pem.Block",
-                		})
-          when: "!ok || block == nil"
-      - opt:
-          do:
-            - return: marshalPromotionBlock(block.Bytes), nil
-              to: marshalPromotionBlock
-          when: block.Type == promotionBlockType && len(block.Headers) == 0
-      - bind: buf
-        eval: scratch.AcquireBuffer()
-        to: scratch
-      - opt:
-          do:
-            - eval: scratch.ReleaseBuffer(buf)
-              to: scratch
-            - return: |-
-                nil, errs.Wrap(werr, errs.WrapParams{
-                			Code:    corepem.CodePEMMarshalFailed,
-                			Reason:  "MARSHAL_FAILED",
-                			Public:  "PEM encoding failed",
-                			Private: "service/data/codec/pem.Marshal: encoding/pem.Encode returned an error",
-                		})
-          init:
-            bind: werr
-            eval: stdpem.Encode(buf, block)
-            to: stdpem
-          when: werr != nil
-      - return: scratch.DetachBuffer(buf), nil
-        to: scratch
-  - of: marshalPromotionBlock
+            - return: nil, berr
+          when: berr != nil
+      - return: appendBlock(make([]byte, 0, blockLen(block)), block), nil
+        to: appendBlock
+  - of: (*pemCodec).Append
     participants:
       - id: caller
         kind: actor
-      - id: marshalPromotionBlock
+      - id: (*pemCodec).Append
+        kind: self
+      - id: appendValue
+        kind: internal
+    steps:
+      - bind: block, _
+        eval: v.(*stdpem.Block)
+      - return: appendValue(dst, block)
+        to: appendValue
+  - of: appendValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendValue
+        kind: self
+      - id: checkBlock
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: appendBlock
+        kind: internal
+    steps:
+      - bind: berr
+        eval: checkBlock(block, "service/data/codec/pem.Append")
+        to: checkBlock
+      - opt:
+          do:
+            - return: dst, berr
+          when: berr != nil
+      - set: dst
+        to: slices
+        value: slices.Grow(dst, blockLen(block))
+      - return: appendBlock(dst, block), nil
+        to: appendBlock
+  - of: checkBlock
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkBlock
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    corepem.CodePEMValueInvalid,
+                			Reason:  "VALUE_INVALID",
+                			Public:  "PEM codec requires a non-nil *pem.Block value",
+                			Private: caller + ": argument is not a non-nil *pem.Block",
+                		})
+              to: errs
+          when: block == nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(nil, errs.WrapParams{
+                      				Code:    corepem.CodePEMMarshalFailed,
+                      				Reason:  "MARSHAL_FAILED",
+                      				Public:  "PEM encoding failed",
+                      				Private: caller + ": a header key contains a colon",
+                      			})
+                    to: errs
+                when: strings.Contains(k, ":")
+          key: k
+          range: block.Headers
+      - return: nil
+  - of: appendBlock
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendBlock
+        kind: self
+      - id: appendHeader
+        kind: internal
+      - id: appendBody
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, pemBegin...)
+      - set: dst
+        value: append(dst, block.Type...)
+      - set: dst
+        value: append(dst, pemDashes...)
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    to: appendHeader
+                    value: appendHeader(dst, procTypeHeader, procType)
+                init:
+                  bind: procType, ok
+                  eval: block.Headers[procTypeHeader]
+                when: ok
+            - loop:
+                do:
+                  - set: dst
+                    to: appendHeader
+                    value: appendHeader(dst, k, block.Headers[k])
+                key: _
+                range: sortedHeaderKeys(block.Headers)
+                value: k
+            - set: dst
+              value: append(dst, '\n')
+          when: len(block.Headers) > 0
+      - set: dst
+        to: appendBody
+        value: appendBody(dst, block.Bytes)
+      - set: dst
+        value: append(dst, pemEnd...)
+      - set: dst
+        value: append(dst, block.Type...)
+      - return: append(dst, pemDashes...)
+  - of: appendHeader
+    steps:
+      - set: dst
+        value: append(dst, k...)
+      - set: dst
+        value: "append(dst, \": \"...)"
+      - set: dst
+        value: append(dst, v...)
+      - return: append(dst, '\n')
+  - of: sortedHeaderKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: sortedHeaderKeys
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: keys
+        eval: make([]string, 0, len(headers))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: keys
+                    value: append(keys, k)
+                when: k != procTypeHeader
+          key: k
+          range: headers
+      - eval: slices.Sort(keys)
+        to: slices
+      - return: keys
+  - of: appendBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendBody
         kind: self
       - id: base64.StdEncoding.EncodedLen
         kind: value
@@ -90,76 +214,64 @@ sequences:
         to: base64.StdEncoding.EncodedLen
       - bind: lineCount
         eval: (bodyLen + promotionLineLength - 1) / promotionLineLength
-      - bind: total
-        eval: len(pemJSONBegin) + bodyLen + lineCount + len(pemJSONEnd)
-      - bind: out
-        eval: make([]byte, 0, total)
-      - set: out
-        value: append(out, pemJSONBegin...)
       - bind: bodyStart
-        eval: len(out)
-      - set: out
-        value: out[:bodyStart+bodyLen+lineCount]
-      - eval: base64.StdEncoding.Encode(out[bodyStart:bodyStart+bodyLen], payload)
+        eval: len(dst)
+      - set: dst
+        value: slices.Grow(dst, bodyLen+lineCount)[:bodyStart+bodyLen+lineCount]
+      - eval: base64.StdEncoding.Encode(dst[bodyStart:bodyStart+bodyLen], payload)
         to: base64.StdEncoding.Encode
-      - eval: insertNewlinesEvery64(out[bodyStart:], bodyLen, lineCount)
+      - eval: insertNewlinesEvery64(dst[bodyStart:], bodyLen, lineCount)
         to: insertNewlinesEvery64
-      - set: out
-        value: append(out, pemJSONEnd...)
-      - return: out
-  - of: insertNewlinesEvery64
-    steps:
-      - bind: dst
-        eval: bodyLen + lineCount - 1
-      - loop:
-          cond: line >= 0
-          do:
-            - bind: lineStart
-              eval: line * promotionLineLength
-            - bind: lineEnd
-              eval: lineStart + promotionLineLength
-            - set: lineEnd
-              value: min(lineEnd, bodyLen)
-            - set: body[dst]
-              value: "'\\n'"
-            - op: "--"
-              set: dst
-            - bind: lineLen
-              eval: lineEnd - lineStart
-            - eval: copy(body[dst-lineLen+1:dst+1], body[lineStart:lineEnd])
-            - op: "-="
-              set: dst
-              value: lineLen
-          init: line := lineCount - 1
-          post: line--
-  - of: (*pemCodec).Append
+      - return: dst
+  - of: blockLen
     participants:
       - id: caller
         kind: actor
-      - id: (*pemCodec).Append
+      - id: blockLen
         kind: self
-      - id: c.Marshal
-        kind: internal
+      - id: base64.StdEncoding.EncodedLen
+        kind: value
     steps:
-      - bind: encoded, merr
-        eval: c.Marshal(v)
-        to: c.Marshal
+      - bind: "n"
+        eval: len(pemBegin) + len(pemEnd) + 2*(len(block.Type)+len(pemDashes))
       - opt:
           do:
-            - return: dst, merr
-          when: merr != nil
-      - return: append(dst, encoded...), nil
+            - op: ++
+              set: "n"
+            - loop:
+                do:
+                  - op: +=
+                    set: "n"
+                    value: "len(k) + len(\": \") + len(v) + 1"
+                key: k
+                range: block.Headers
+                value: v
+          when: len(block.Headers) > 0
+      - bind: bodyLen
+        eval: base64.StdEncoding.EncodedLen(len(block.Bytes))
+        to: base64.StdEncoding.EncodedLen
+      - return: n + bodyLen + (bodyLen+promotionLineLength-1)/promotionLineLength
   - of: (*pemCodec).Unmarshal
     participants:
       - id: caller
         kind: actor
       - id: (*pemCodec).Unmarshal
         kind: self
+      - id: codec
+        kind: package
       - id: errs
         kind: package
       - id: stdpem
         kind: stdlib
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - bind: dst, ok
         eval: v.(**stdpem.Block)
       - opt:
@@ -190,3 +302,356 @@ sequences:
       - set: "*dst"
         value: block
       - return: nil
+  - of: insertNewlinesEvery64
+    steps:
+      - bind: dst
+        eval: bodyLen + lineCount - 1
+      - loop:
+          cond: line >= 0
+          do:
+            - bind: lineStart
+              eval: line * promotionLineLength
+            - bind: lineEnd
+              eval: lineStart + promotionLineLength
+            - set: lineEnd
+              value: min(lineEnd, bodyLen)
+            - set: body[dst]
+              value: "'\\n'"
+            - op: "--"
+              set: dst
+            - bind: lineLen
+              eval: lineEnd - lineStart
+            - eval: copy(body[dst-lineLen+1:dst+1], body[lineStart:lineEnd])
+            - op: "-="
+              set: dst
+              value: lineLen
+          init: line := lineCount - 1
+          post: line--
+  - of: (*pemCodec).NewDecoder
+    steps:
+      - return: "&pemDecoder{r: r}"
+  - of: (*pemDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemDecoder).Decode
+        kind: self
+      - id: codec
+        kind: package
+      - id: errs
+        kind: package
+      - id: d.advance
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - bind: dst, ok
+        eval: v.(**stdpem.Block)
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    corepem.CodePEMValueInvalid,
+                			Reason:  "VALUE_INVALID",
+                			Public:  "PEM codec requires a non-nil **pem.Block target",
+                			Private: "service/data/codec/pem.Decoder.Decode: target is not a non-nil **pem.Block",
+                		})
+              to: errs
+          when: "!ok || dst == nil"
+      - eval: d.advance()
+        to: d.advance
+      - opt:
+          do:
+            - set: d.reported
+              value: "true"
+            - return: d.err
+          when: d.next == nil
+      - set: "*dst, d.next"
+        value: d.next, nil
+      - return: nil
+  - of: (*pemDecoder).More
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemDecoder).More
+        kind: self
+      - id: d.advance
+        kind: internal
+    steps:
+      - eval: d.advance()
+        to: d.advance
+      - return: d.next != nil || (!d.reported && !errors.Is(d.err, io.EOF))
+  - of: (*pemDecoder).advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemDecoder).advance
+        kind: self
+      - id: d.lastWholeEnd
+        kind: internal
+      - id: d.decodeHeld
+        kind: internal
+      - id: d.finish
+        kind: internal
+      - id: errs
+        kind: package
+      - id: d.fill
+        kind: internal
+    steps:
+      - loop:
+          cond: d.next == nil && d.err == nil
+          do:
+            - opt:
+                do:
+                  - eval: d.decodeHeld(end)
+                    to: d.decodeHeld
+                  - continue: true
+                init:
+                  bind: end
+                  eval: d.lastWholeEnd()
+                  to: d.lastWholeEnd
+                when: end >= 0
+            - opt:
+                do:
+                  - eval: d.finish()
+                    to: d.finish
+                  - return: ""
+                when: d.eof
+            - opt:
+                do:
+                  - set: d.err
+                    to: errs
+                    value: errs.Wrap(corepem.SizeExceeded, errs.WrapParams{}, errs.Int("cap", maxStreamBlockBytes))
+                  - return: ""
+                when: len(d.buf) > maxStreamBlockBytes
+            - eval: d.fill()
+              to: d.fill
+  - of: (*pemDecoder).decodeHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemDecoder).decodeHeld
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: stdpem
+        kind: stdlib
+      - id: d.drop
+        kind: internal
+    steps:
+      - bind: cut
+        eval: len(d.buf)
+      - opt:
+          do:
+            - set: cut
+              value: end + nl + 1
+          init:
+            bind: nl
+            eval: bytes.IndexByte(d.buf[end:], '\n')
+            to: bytes
+          when: nl >= 0
+      - bind: block, rest
+        eval: stdpem.Decode(d.buf[:cut])
+        to: stdpem
+      - opt:
+          do:
+            - eval: d.drop(end)
+              to: d.drop
+            - return: ""
+          when: block == nil
+      - set: d.next
+        value: block
+      - eval: d.drop(cut - len(rest))
+        to: d.drop
+  - of: (*pemDecoder).drop
+    steps:
+      - set: d.buf
+        value: d.buf[:copy(d.buf, d.buf[n:])]
+      - set: d.searchFrom
+        value: "0"
+  - of: (*pemDecoder).lastWholeEnd
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemDecoder).lastWholeEnd
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - bind: marker
+        eval: "[]byte(\"\\n\" + pemEnd)"
+      - bind: last
+        eval: "-1"
+      - loop:
+          do:
+            - bind: j
+              eval: bytes.Index(d.buf[i:], marker)
+              to: bytes
+            - opt:
+                do:
+                  - set: d.searchFrom
+                    value: max(i, len(d.buf)-len(marker)+1)
+                  - return: last
+                when: j < 0
+            - bind: after
+              eval: i + j + len(marker)
+            - opt:
+                do:
+                  - set: d.searchFrom
+                    value: i + j
+                  - return: last
+                when: "!d.eof && bytes.IndexByte(d.buf[after:], '\\n') < 0"
+            - set: last, i
+              value: after, after
+          init: i := d.searchFrom
+  - of: (*pemDecoder).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemDecoder).finish
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - set: d.err
+              to: errs
+              value: |-
+                errs.Wrap(nil, errs.WrapParams{
+                			Code:    corepem.CodePEMUnmarshalFailed,
+                			Reason:  "UNMARSHAL_FAILED",
+                			Public:  "PEM decoding failed",
+                			Private: "service/data/codec/pem.Decoder: the stream ended inside a block",
+                		})
+            - return: ""
+          when: bytes.Contains(d.buf, []byte(pemBegin))
+      - set: d.err
+        value: io.EOF
+  - of: (*pemDecoder).fill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemDecoder).fill
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: d.r.Read
+        kind: value
+      - id: readFailed
+        kind: internal
+    steps:
+      - set: d.buf
+        to: slices
+        value: slices.Grow(d.buf, streamReadSize)
+      - loop:
+          do:
+            - bind: n, err
+              eval: d.r.Read(d.buf[len(d.buf):cap(d.buf)][:streamReadSize])
+              to: d.r.Read
+            - set: d.buf
+              value: d.buf[:len(d.buf)+n]
+            - opt:
+                do:
+                  - set: d.eof
+                    value: "true"
+                  - return: ""
+                when: errors.Is(err, io.EOF)
+            - opt:
+                do:
+                  - set: d.err
+                    to: readFailed
+                    value: readFailed(err)
+                  - return: ""
+                when: err != nil
+            - opt:
+                do:
+                  - return: ""
+                when: n > 0
+          range: maxEmptyReads
+      - set: d.err
+        to: readFailed
+        value: readFailed(io.ErrNoProgress)
+  - of: readFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: readFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(err, errs.WrapParams{
+          		Code:    corepem.CodePEMUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "PEM decoding failed",
+          		Private: "service/data/codec/pem.Decoder: the reader failed",
+          	})
+        to: errs
+  - of: (*pemCodec).NewEncoder
+    steps:
+      - return: "&pemEncoder{w: w}"
+  - of: (*pemEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemEncoder).Encode
+        kind: self
+      - id: checkBlock
+        kind: internal
+      - id: appendBlock
+        kind: internal
+      - id: e.w.Write
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: block, _
+        eval: v.(*stdpem.Block)
+      - opt:
+          do:
+            - return: berr
+          init:
+            bind: berr
+            eval: checkBlock(block, "service/data/codec/pem.Encoder.Encode")
+            to: checkBlock
+          when: berr != nil
+      - set: e.buf
+        to: appendBlock
+        value: appendBlock(e.buf[:0], block)
+      - bind: _, werr
+        eval: e.w.Write(e.buf)
+        to: e.w.Write
+      - opt:
+          do:
+            - return: nil
+          when: werr == nil
+      - return: |-
+          errs.Wrap(werr, errs.WrapParams{
+          		Code:    corepem.CodePEMMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "PEM encoding failed",
+          		Private: "service/data/codec/pem.Encoder.Encode: the writer failed",
+          	})
+        to: errs
+  - of: (*pemEncoder).Close
+    steps:
+      - return: nil
+  - of: (*pemCodec).Sniff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemCodec).Sniff
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - return: bytes.HasPrefix(bytes.TrimLeft(prefix, " \t\r\n"), beginHead)
+        to: bytes

@@ -34,9 +34,11 @@ A batch the forwarder keeps until a send — one no full queue dropped and no Ma
 - [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func New\(ctx context.Context, cfg Config\) \(\*Forwarder, error\)](<#New>)
+- [func NewLogExporter\(forwarder \*Forwarder\) \(corelogger.DocumentExporter, error\)](<#NewLogExporter>)
 - [func NewMetricExporter\(name coremetrics.ExporterName, forwarder \*Forwarder\) \(coremetrics.ContextExporter, error\)](<#NewMetricExporter>)
 - [func NewSpanExporter\(name coretrace.ExporterName, forwarder \*Forwarder\) \(coretrace.ContextSpanExporter, error\)](<#NewSpanExporter>)
 - [type Config](<#Config>)
+- [type EncodedSender](<#EncodedSender>)
 - [type Forwarder](<#Forwarder>)
   - [func \(\*Forwarder\) Enqueue\(ctx context.Context, batch \[\]byte\) error](<#Forwarder.Enqueue>)
   - [func \(\*Forwarder\) Run\(ctx context.Context\) error](<#Forwarder.Run>)
@@ -147,6 +149,15 @@ DropOldest, the zero: the oldest batches not being sent are taken out, counted D
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/forward.DropOldest`.
 
+<a name="EncodingGzip"></a>
+```go
+const EncodingGzip string = "gzip"
+```
+
+EncodingGzip is the Content-Encoding a batch Config.Compress kept is handed to Config.SendEncoded with.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/forward.EncodingGzip`.
+
 ## Variables
 
 <a name="BatchTooLarge"></a>
@@ -191,6 +202,15 @@ func New(ctx context.Context, cfg Config) (*Forwarder, error)
 
 New builds a forwarder over cfg.Broker, counting the backlog a previous process left in it; Run counts it again once Config.RecountInterval has passed. It starts nothing: Run sends.
 
+<a name="NewLogExporter"></a>
+## func [NewLogExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/forward/gen_facade.go>)
+
+```go
+func NewLogExporter(forwarder *Forwarder) (corelogger.DocumentExporter, error)
+```
+
+NewLogExporter returns a logger DocumentExporter that keeps each OTLP/JSON logs document in forwarder; hand it to the "otlpjson" writer as its Exporter, and the OTLP/HTTP logs exporter's ExportDocument to the forwarder as its Send (#867).
+
 <a name="NewMetricExporter"></a>
 ## func [NewMetricExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/forward/gen_facade.go>)
 
@@ -212,7 +232,7 @@ NewSpanExporter returns a trace ContextSpanExporter that encodes each batch as O
 <a name="Config"></a>
 ## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/forward/gen_facade.go>)
 
-Config is the public alias for a forwarder's configuration: Broker, Send and Retryable required; Clock, MaxBatches, MaxBytes, WhenFull, BlockTimeout, SendTimeout, MaxAge, Backoff, Parallelism, PollInterval, DrainTimeout, SettleTimeout and RecountInterval optional.
+Config is the public alias for a forwarder's configuration: Broker, Retryable, and Send or SendEncoded required; Compress, Clock, MaxBatches, MaxBytes, WhenFull, BlockTimeout, SendTimeout, MaxAge, Backoff, Parallelism, PollInterval, DrainTimeout, SettleTimeout and RecountInterval optional.
 
 ```go
 type Config = svcforward.Config
@@ -230,8 +250,22 @@ type Config struct {
 	// a batch. The forwarder neither sets its policy nor closes it.
 	Broker          corequeue.Broker
 	// Send ships one stored batch: an OTLP/HTTP exporter's ExportDocument,
-	// or any function of that shape.
+	// or any function of that shape. It may be nil when SendEncoded is set,
+	// which then ships every batch. Send receives a batch as it rests: a
+	// backlog a previous process kept with Compress needs SendEncoded until
+	// it drains.
 	Send            Sender
+	// SendEncoded ships one stored batch with the Content-Encoding it rests
+	// in — an OTLP/HTTP exporter's ExportEncodedDocument. When set it ships
+	// every batch, gzipped or not, and Send is not called.
+	SendEncoded     EncodedSender
+	// Compress, when true, gzips every batch in Enqueue (compress/gzip, the
+	// default level) before it is published, so MaxBytes, PendingBytes and
+	// the disk hold what rests compressed — OTLP/JSON shrinks eight to
+	// twelve times — and SendEncoded posts it as it rests, labelled
+	// EncodingGzip. It requires SendEncoded: a gzipped batch handed to Send
+	// would leave labelled as JSON. The zero value keeps a batch as it came.
+	Compress        bool
 	// Retryable classifies a failure of Send as one a later attempt may cure
 	// — trace.OTLPRetryable, metrics.OTLPRetryable. It is REQUIRED: nil reads
 	// as "retry everything" or as "retry nothing", two opposites. A failure
@@ -297,6 +331,21 @@ type Config struct {
 	// DefaultRecountInterval; negative is refused.
 	RecountInterval time.Duration
 }
+```
+
+<a name="EncodedSender"></a>
+## type [EncodedSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/forward/gen_facade.go>)
+
+EncodedSender is the public alias for the function that ships one stored batch with its Content-Encoding — an OTLP/HTTP exporter's ExportEncodedDocument.
+
+```go
+type EncodedSender = svcforward.EncodedSender
+```
+
+EncodedSender is an alias of `github.com/kitsunium/sdk/internal/service/app/forward.EncodedSender`, declared as:
+
+```go
+type EncodedSender func(ctx context.Context, batch []byte, encoding string) error
 ```
 
 <a name="Forwarder"></a>

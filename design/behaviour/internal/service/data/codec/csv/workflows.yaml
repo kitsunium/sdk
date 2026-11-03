@@ -1,30 +1,87 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
-  - of: marshalPromotionShape
+  - of: appendPromotionShape
     steps:
-      - bind: out
-        eval: make([]byte, 0, len(promotionHeaderCell)+1+1+promotionBufWorstCaseFactor*len(body)+1+1)
-      - set: out
-        value: append(out, promotionHeaderCell...)
-      - set: out
-        value: append(out, '\n')
-      - set: out
-        value: append(out, '"')
+      - set: dst
+        value: append(dst, promotionHeaderCell...)
+      - set: dst
+        value: append(dst, '\n', '"')
       - loop:
           do:
             - opt:
                 do:
-                  - set: out
-                    value: append(out, '"', '"')
+                  - set: dst
+                    value: append(dst, '"', '"')
                   - continue: true
                 when: body[i] == '"'
-            - set: out
-              value: append(out, body[i])
+            - set: dst
+              value: append(dst, body[i])
           key: i
           range: len(body)
-      - set: out
-        value: append(out, '"')
-      - set: out
-        value: append(out, '\n')
-      - return: out
+      - return: append(dst, '"', '\n')
+  - of: recordsHint
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: len(data) > 0 && n < maxReservedRecords
+          do:
+            - bind: end
+              eval: bytes.IndexByte(data, '\n') + 1
+            - opt:
+                do:
+                  - set: end
+                    value: len(data)
+                when: end == 0
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                init:
+                  bind: line
+                  eval: data[:end]
+                when: "!bytes.Equal(line, []byte{'\\n'}) && !bytes.Equal(line, []byte(\"\\r\\n\"))"
+            - set: data
+              value: data[end:]
+      - return: "n"
+  - of: mapColumns
+    steps:
+      - bind: cols
+        eval: make(columnMap, len(header))
+      - bind: seen
+        eval: make([]bool, len(schema.columns))
+      - loop:
+          do:
+            - bind: fi, ok
+              eval: i, i < len(schema.columns)
+            - opt:
+                do:
+                  - set: fi, ok
+                    value: schema.byName[trimBOM(name, i)]
+                when: "!noHeader"
+            - opt:
+                do:
+                  - set: cols[i]
+                    value: "-1"
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - return: nil, headerMismatch("a column appears twice in the header", schema.columns[fi].name)
+                when: seen[fi]
+            - set: cols[i], seen[fi]
+              value: fi, true
+          key: i
+          range: header
+          value: name
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, headerMismatch("a required column is missing", col.name)
+                when: col.required && !seen[fi]
+          key: fi
+          range: schema.columns
+          value: col
+      - return: cols, nil

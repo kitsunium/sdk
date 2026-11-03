@@ -47,6 +47,9 @@ files:
     name: encoder.go
   - decls:
       - FromConfig
+      - FromConfigWithLevel
+      - fromConfig
+      - topologySinkConfig
       - decodeTopology
       - resolveSinks
       - openEntry
@@ -76,6 +79,7 @@ files:
   - decls:
       - SinkConfig
       - NewWithSink
+      - handlerFor
       - NewWriterSink
       - TextEncoder
     name: sink.go
@@ -113,6 +117,20 @@ functions:
   - name: FromConfig
     params: format Format, raw []byte
     results: lg Logger, err error
+  - name: FromConfigWithLevel
+    params: format Format, raw []byte, floor *LevelVar
+    results: lg Logger, err error
+  - doc: fromConfig is FromConfig's body, gated on floor when it is non-nil.
+    name: fromConfig
+    params: format Format, raw []byte, floor *LevelVar
+    results: lg Logger, err error
+  - doc: |-
+      topologySinkConfig is the SinkConfig a topology builds its Logger with: the
+      text encoder, and the topology's level fixed — or, with a caller's floor, set
+      into that floor (when the topology names a level) and read live.
+    name: topologySinkConfig
+    params: sink Sink, name string, floor *LevelVar
+    results: SinkConfig
   - doc: |-
       decodeTopology unmarshals raw into a Topology using the codec registered under
       format. It stays on the core/data/codec surface (Lookup + Codec.Unmarshal) so the
@@ -202,6 +220,13 @@ functions:
   - name: NewWithSink
     params: cfg SinkConfig
     results: lg Logger, err error
+  - doc: |-
+      handlerFor builds the generic handler cfg describes: gated on cfg.Level when
+      it is set — a live floor (#1015) — else on the fixed cfg.MinLevel. Both set
+      is LevelAmbiguous: the two floors would disagree the moment Level moves.
+    name: handlerFor
+    params: enc Encoder, cfg *SinkConfig
+    results: h corelogger.Handler, err error
   - name: NewWriterSink
     params: w io.Writer
     results: sink Sink, err error
@@ -293,6 +318,14 @@ types:
       - doc: MinLevel is the minimum severity emitted; zero value is LevelInfo.
         name: MinLevel
         type: Level
+      - doc: |-
+          Level, when non-nil, is the live floor: every record is checked
+          against Level.Level(), so a LevelVar retuned with Set takes effect on
+          the next record of this Logger and of every Logger derived from it,
+          with nothing rebuilt. Setting both Level and a non-zero MinLevel is
+          refused with LevelAmbiguous (0.3.1.5).
+        name: Level
+        type: Leveler
     kind: struct
     name: SinkConfig
   - fields:

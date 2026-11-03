@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) — `third-party/transform` becomes a module of its own
+- **Amended by**: [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) — `third-party/transform` becomes a module of its own; [ADR 0213](0213-a-compression-stream-is-read-under-the-callers-ceiling.md) — the streaming deferral of §Why not is closed by a sibling port; the amendment of 2026-11-03 below — a zstd dictionary is the caller's, named by its ID ([#900](https://github.com/kitsunium/sdk/issues/900)), and zstd decodes into the tail of `dst` ([#1163](https://github.com/kitsunium/sdk/issues/1163))
 - **Related**: [ADR 0014](0014-sdk-transform-crypto-ports-config-topology.md) §Deferred (the `core/transform` port and the deferred vendor compressors), [ADR 0012](0012-logger-writer-registry.md) (the `third-party/` quarantine policy), [ADR 0022](0022-sdk-codec-hcl.md) + [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) (quarantine, and its mechanism corrected), [ADR 0023](0023-sdk-schema-codecs.md) (opt-in codecs under `third-party/`), [ADR 0018](0018-sdk-cross-platform-portability.md) (the build bar and the `x/sys` ban), [ADR 0030](0030-stdout-is-a-protocol-channel.md) + [ADR 0048](0048-sdk-metrics-otlp-json.md) (what an import may and may not arm), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp vs refuse)
 - **Closes**: ADR 0014 §Deferred "zstd / snappy / s2 compressors — DEFER"
 
@@ -312,6 +312,48 @@ make the guard start refusing legitimate traffic.
   whole-buffer port; a streaming compressor is a port change (an ADR 0039
   sibling interface), not a scheme addition, and it would need its own bomb
   story because a stream has no declared output length to check.
+
+## Amendment — 2026-11-03: a zstd dictionary is the caller's, named by its ID ([#900](https://github.com/kitsunium/sdk/issues/900)), and zstd decodes into the tail of `dst` ([#1163](https://github.com/kitsunium/sdk/issues/1163))
+
+§Why not deferred dictionaries "by name": the biggest ratio win for small
+homogeneous payloads, but "a shared mutable artefact that must be versioned
+with the data it was trained on — a domain decision, not a scheme detail". The
+deferral is lifted by giving each of those three objections its owner, not by
+deciding the domain question:
+
+- **Shared — no: the caller's, and copied.** The SDK ships no dictionary and
+  registers no dictionary compressor. `NewZstdCompressorWithDictionary(level,
+  maxDecompressedBytes, dict)` takes one trained on the caller's data — the
+  format `zstd --train` and `zstd.BuildDict` write — and copies it, so nothing
+  the caller does to its buffer afterwards reaches the encoder or the decoder.
+  The registry's `"zstd"` stays the dictionary-less singleton.
+- **Mutable — no: refused unless it is one.** An empty dictionary, bytes without
+  the magic, a truncated one and an ID of zero are `DICTIONARY_INVALID`
+  (`0.3.63.6`) at construction (D4's refuse half: a compressor claiming a
+  dictionary it does not have never exists).
+- **Versioned — by its ID, which every frame carries.** A frame written with a
+  dictionary names its ID; a reader that does not hold that ID — another
+  dictionary's compressor, a dictionary-less one, the registered `Zstd` —
+  refuses it with `DICTIONARY_MISMATCH` (`0.3.63.5`) before decoding a byte, its
+  fields naming the frame's ID and its own. It is never decoded into a corrupt
+  payload, and it is not `ZSTD_FAILED` either (D5's reasoning: the stream is not
+  malformed, it is unreadable without an artefact this reader lacks, and the
+  operator's response differs). Rotating a dictionary is training a new one
+  under a new ID; `DictionaryID()` reports a compressor's for storing beside
+  the payloads.
+
+Which payloads deserve a dictionary, how often to retrain and where to keep it
+remain the domain decision §Why not named, and remain the caller's. Measured
+(`third-party/transform/BENCH.md` §Dictionaries): the ratio of a 256-byte JSON
+record goes from 1.37 to 2.78, of 4 KiB from 4.05 to 5.13, for 1.2× to 4× the
+compression time.
+
+The same change corrects §"Why decompression takes the empty-`dst` fast path"
+of `BENCH.md`: a non-empty `dst` no longer decodes into a fresh buffer and is
+copied. `DecodeAll` is handed `dst`'s zero-length tail, where the library's
+budget — which counts `len(dst)` — means the payload alone, so D4's ceiling
+keeps its meaning and a `dst` with room takes the payload with no allocation
+(#1163).
 
 ## References
 

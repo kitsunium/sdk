@@ -47,6 +47,10 @@ func (*cborCodec) Extensions() []string {
 // Marshal serialises v as CBOR bytes. The encoding is built in a pooled
 // scratch buffer and copied once into a slice of exactly its length.
 func (*cborCodec) Marshal(v any) (encoded []byte, err error) {
+	//: a channel, a function, an unsafe pointer: no wire format holds one (#1101).
+	if verr := codec.CheckValue(v); verr != nil {
+		return nil, verr
+	}
 	buf := scratch.AcquireBuffer()
 	b, err := appendValue(buf.AvailableBuffer(), v, walkDepth{})
 	//: the result is the caller's, sized to the encoding.
@@ -61,10 +65,13 @@ func (*cborCodec) Marshal(v any) (encoded []byte, err error) {
 // Unmarshal parses data as exactly one CBOR data item into v, which must be
 // a non-nil pointer. The whole of data is validated before v is touched.
 func (*cborCodec) Unmarshal(data []byte, v any) error {
-	//: nothing at all is not a data item.
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
+	//: no bytes is no document in this format (#1101).
 	if len(data) == 0 {
-		//: refused.
-		return malformed(0, "the input is empty")
+		return codec.EmptyInput
 	}
 	n, err := validateItem(data, maxCBORNestedLevels)
 	//: not well-formed, not valid, or past a bound.
@@ -118,4 +125,12 @@ func keepScratch(buf *bytes.Buffer, encoded []byte) {
 		*buf = *bytes.NewBuffer(encoded[:0])
 	}
 	scratch.ReleaseBuffer(buf)
+}
+
+// NewBoundedDecoder implements codec.BoundedStreamingCodec (#891): items at
+// most maxBytes long, a longer one refused with SIZE_EXCEEDED once maxBytes of
+// it are buffered.
+func (*cborCodec) NewBoundedDecoder(r io.Reader, maxBytes int64) (codec.Decoder, error) {
+	//: the registered codec's decoding.
+	return newBoundedDecoder(r, maxBytes, decodeMode{})
 }

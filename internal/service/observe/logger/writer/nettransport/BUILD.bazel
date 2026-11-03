@@ -10,6 +10,7 @@ go_library(
         "decode.go",
         "doc.go",
         "netsink.go",
+        "netsink_compliance.go",
         "nettransport.go",
         "wrap.go",
     ],
@@ -24,6 +25,7 @@ go_library(
         "//internal/core/observe/logger/writer",
         "//internal/core/observe/logger/writer/nettransport",
         "//internal/kernel/errs",
+        "//internal/service/observe/logger/internal/datagram",
         "//internal/service/observe/logger/middleware/async",
         "//internal/service/observe/logger/writer/levelgate",
     ],
@@ -41,9 +43,11 @@ alias(
 go_test(
     name = "nettransport_test",
     srcs = [
+        "batch_internal_test.go",
         "client_internal_test.go",
         "config_external_test.go",
         "config_internal_test.go",
+        "datagram_batch_internal_test.go",
         "decode_internal_test.go",
         "gen_api_test.go",
         "netsink_bench_test.go",

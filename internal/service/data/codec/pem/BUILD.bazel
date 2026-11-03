@@ -6,14 +6,16 @@ go_library(
     name = "pem",
     srcs = [
         "codec.go",
+        "decoder.go",
         "doc.go",
+        "encoder.go",
+        "sniff.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/data/codec/pem",
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/data/codec",
         "//internal/core/data/codec/pem",
-        "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
 )
@@ -28,14 +30,22 @@ go_test(
     name = "pem_test",
     size = "small",
     srcs = [
+        "append_bench_test.go",
+        "append_external_test.go",
+        "append_fixtures_external_test.go",
+        "append_integration_test.go",
         "codec_external_test.go",
         "codec_integration_test.go",
         "codec_internal_test.go",
+        "encode_internal_test.go",
         "gen_api_test.go",
+        "stream_external_test.go",
+        "stream_internal_test.go",
     ],
     embed = [":pem"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/pem",
         "//internal/kernel/errs",
     ],
 )

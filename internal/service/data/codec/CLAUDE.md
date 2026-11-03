@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:00:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/
 
 ## Purpose
@@ -9,9 +9,9 @@ Sixteen wire-format codecs covering 24 registered Format names, one Go package e
 
 | Package | Format(s) | `PP` slot | Streaming | Appender |
 |---|---|---|---|---|
-| `asn1/`        | ASN.1 DER (BER accepted on Unmarshal)         | `0.3.9.*`  | no  | yes |
+| `asn1/`        | ASN.1 DER (the BER relaxations encoding/asn1 reads; `NewStrict` refuses trailing bytes) | `0.3.9.*`  | no  | yes |
 | `baseenc/`     | base64, base64url, base32, base16, hex, ascii85, base45, base58, base62 — 9 Format names, JSON-mediated pipeline | `0.3.24.*` | yes | yes |
-| `bson/`        | BSON 1.1 (MongoDB) — native, standard library only | `0.3.36.*` | no  | yes |
+| `bson/`        | BSON 1.1 (MongoDB) — native, standard library only | `0.3.36.*` | yes | yes |
 | `cbor/`        | CBOR (RFC 8949) — native, standard library    | `0.3.6.*`  | yes | yes |
 | `csv/`         | CSV (RFC 4180) — `[][]string`                 | `0.3.8.*`  | no  | yes |
 | `flatbuffers/` | FlatBuffers passthrough (already-encoded `[]byte`) | `0.3.23.*` | no  | yes |
@@ -19,8 +19,8 @@ Sixteen wire-format codecs covering 24 registered Format names, one Go package e
 | `json/`        | JSON (RFC 8259) — encoding/json               | `0.3.2.*`  | yes | yes |
 | `msgpack/`     | MessagePack — native, standard library only   | `0.3.7.*`  | yes | yes |
 | `multipart/`   | multipart/form-data (RFC 7578) — mime/multipart | `0.3.41.*` | yes | yes |
-| `ndjson/`      | Newline-delimited JSON                        | `0.3.11.*` | no  | yes |
-| `pem/`         | PEM block (RFC 7468) — encoding/pem           | `0.3.10.*` | no  | yes |
+| `ndjson/`      | Newline-delimited JSON                        | `0.3.11.*` | yes | yes |
+| `pem/`         | PEM block (RFC 7468) — encoding/pem           | `0.3.10.*` | yes | yes |
 | `tlv/`         | Self-describing TLV (reflection-driven binary)| `0.3.22.*` | yes | yes |
 | `toml/`        | TOML v1.0.0 — native, standard library only   | `0.3.5.*`  | yes | yes |
 | `xml/`         | XML — encoding/xml                            | `0.3.3.*`  | yes | yes |
@@ -53,6 +53,20 @@ the `FormValue` / `PartValue` shapes `multipart/` owns. A codec package register
 itself in its own initialisation, which Go runs once, so being imported by both
 a per-format facade and `pkg/v1/data/codec` registers it once.
 
+`jcs/` is not a codec either (#895, ADR 0102 amendment of 2026-11-03): it
+writes the RFC 8785 canonical form of a JSON document — members sorted by
+UTF-16 code units, numbers as ECMAScript writes a double, minimal string
+escapes — for signing and hashing, reading I-JSON strictly with
+`encoding/json/jsontext`. It owns `0.3.102.*` and is reached through
+`pkg/v1/data/codec/jcs`; `crypto/key/jwk` builds its thumbprint input with it.
+
+`jsonschema/` is not a codec either (#882, ADR 0210): it compiles a JSON
+Schema 2020-12 — core, applicator and validation vocabularies, `$ref` never
+fetched, numbers exact — and validates documents read through `strictjson`,
+returning a `validation.ReportValue` in its path grammar. It owns `0.3.103.*`
+and is reached through `pkg/v1/data/codec/jsonschema`; the official
+JSON-Schema-Test-Suite is vendored as its testdata.
+
 `strictjson/` sits in this tree and is deliberately NOT a codec (ADR 0102): it
 registers no Format and implements no `core/data/codec.Codec`, because what it adds —
 a per-call byte bound, the refusal of unknown and case-variant members, of
@@ -74,7 +88,7 @@ links no `net/http` either. `json/` is unchanged.
 │                                 # (yaml/ is a parser and an encoder of its own, laid out by concern — see yaml/CLAUDE.md)
 ├── codec_internal_test.go        # white-box (per-codec quirks)
 ├── codec_external_test.go        # black-box (interface contract)
-├── codec_integration_test.go     # //go:build !race AllocsPerRun budgets, run by the race-off alloc lane (all but multipart)
+├── codec_integration_test.go     # //go:build !race AllocsPerRun budgets, run by the race-off alloc lane (every codec; multipart since #907)
 ├── encoder_internal_test.go      # only when streaming
 ├── decoder_internal_test.go      # only when streaming
 └── BUILD.bazel                   # gazelle-managed
@@ -84,9 +98,15 @@ links no `net/http` either. `json/` is unchanged.
 
 - **Registration without `init()`**: each codec exposes `var Codec codec.Codec = codec.Register(&xxxCodec{})`. Initialiser order is deterministic, and ktn-linter's `KTN-FUNC-NOINIT` reports any `init()` — active everywhere, with no exclusion in `.ktn-linter.yaml`.
 - **`Name` / `MIMETypes` / `Extensions` read no package variable the initialiser does not reference**: `Register` calls them through the `Codec` interface, and the Go specification (Package initialization) records no dependency through an interface call, so a table those methods read is NOT ordered before `Codec` — declared after it, it is still unset when `Register` runs. gc hid this by laying constant composite literals out statically; `garble -literals` does not, and supervizio/agent#305 died before `main` on the empty MIME type. So each method returns a fresh literal; a table of three entries or more, which `KTN-VAR-CONSTSLICE` keeps hoisted (`pem`'s extensions, `yaml`'s MIME types), is handed to the singleton in `Codec`'s own initialiser (`&pemCodec{extensions: extensions}`), which names it and so orders it first; and `baseenc` builds its singletons through `newVariant`, which takes the variant from its own `variantSpecs` row. `internal/core/data/codec`'s `TestNoCodecRegistersBeforeTheVariablesItsKeysRead` reads every codec here and under `third-party/codec/` and fails on the old shape; `Register` refuses an empty key with `KEY_EMPTY` (0.2.2.6).
-- **Stateless singletons**: `New()` returns the same `Codec` singleton; the two opt-in modes — `csv.NewWithEscape(bool)` and `multipart.NewWithLimits(LimitsConfig)` — each return a fresh instance not added to the registry.
+- **Stateless singletons**: `New()` returns the same `Codec` singleton; the opt-in modes — `csv.NewWithEscape(bool)`, `multipart.NewWithLimits(LimitsConfig)` and `asn1.NewStrict()` — each return a fresh instance not added to the registry.
 - **The caller owns what `MIMETypes()` / `Extensions()` return**: every implementer returns a fresh literal — `pem` and `yaml` a `slices.Clone` of the table their singleton holds, `baseenc` one of its `variantSpecs` row — so no caller can mutate what a later caller, or the registry, sees.
 - **Hardening lives in the codec**: byte caps (`maxYAMLBytes`, `maxMsgPackBytes`, `maxBSONBytes`, `scannerMaxCapacity`, `form.maxFormBytes`, `toml.maxDocumentBytes`), structural caps (`maxCBORArrayElements`, `maxCBORMapPairs`, `maxCBORNestedLevels`, `maxCBORStringChunks`, `maxBSONNestedLevels`, `form.maxFormPairs`, `msgpack.maxDepth`, `toml.maxDepth`, YAML's `maxDepth`, `maxNodes` and `maxKeyRunes`), and OWASP CSV-Injection mitigation (`csv.NewWithEscape`) are codec-local — never lifted into `core/data/codec`. They are `const`, not constructor options — except `multipart`'s three bounds, which `NewWithLimits` takes with a zero field meaning the package default and a negative one refused: a tunable bound whose zero value silently means "unlimited" is exactly what ADR 0031 forbids.
+- **A bound refusal speaks the family's grammar (#894)**: input past a size bound — bytes, nodes, pairs, entries — is refused with the codec's own `<X>SizeExceeded` code under the reason `SIZE_EXCEEDED`, input nested past a depth bound with `<X>DepthExceeded` under `DEPTH_EXCEEDED`, and `UNMARSHAL_FAILED`'s code joins the trail so a test for any decoding failure by code still matches: yaml, toml, msgpack, form, cbor, ndjson, bson, baseenc, tlv, pem, and the vendor codecs hcl and protobuf. `core/data/codec.IsTooLarge` / `IsTooDeep` (and the facade's) read the reason — plus the two older spellings kept, multipart's `LIMIT_EXCEEDED` and strictjson's `DOCUMENT_TOO_LARGE` — so a server answers 413 without knowing the format; `pkg/v1/data/codec`'s `TestEveryByteCapIsTooLarge` runs cap+1 bytes through every capped Format. bson's `BSON_SIZE_EXCEEDED` / `BSON_DEPTH_EXCEEDED`, baseenc's `BASE_ENC_SIZE_EXCEEDED`, hcl's and protobuf's prefixed spellings were renamed to the family's; their codes did not change.
+- **Every format package is fuzzed (#897)**: each package here, the stdlib transform engines and the vendor parsers carry at least one `Fuzz` target stating the property the package claims — a round trip that is a fixed point, agreement with an oracle (`encoding/json/v2` for strictjson, `encoding/json` for jsonshape, the RFC 6902 applier for jsonpatch), a bound never crossed — and `scripts/ci/codec-fuzz.sh` lists every one, run nightly by `codec-fuzz.yml`. A new `Fuzz` function gets its line there.
+- **A head the format alone writes (#909)**: `json`, `ndjson`, `xml`, `pem` and `bson` implement `core/data/codec.Sniffer` in `sniff.go`, which `codec.Detect` asks about an input's first 512 bytes. A claim is confident or absent — an object or array whose bytes so far are JSON's and nothing after it (json) or a second record on the next line (ndjson), a declaration, comment, DOCTYPE or start tag (xml), `-----BEGIN ` (pem), a length within the bound, a known first type and a NUL-terminated name (bson) — reads only the prefix, and allocates nothing. The others have no head no other format's bytes start with, and do not sniff.
+- **A stream under a caller's ceiling (#891)**: `json`, `xml` and `cbor` — whose stream decoders held no ceiling — implement `core/data/codec.BoundedStreamingCodec`: `NewBoundedDecoder(r, maxBytes)` refuses any value longer than `maxBytes`, counted from the end of the previous one, with the codec's `SIZE_EXCEEDED` after at most `maxBytes+1` bytes of it are read (json `0.3.2.3`, xml `0.3.3.3`, cbor `0.3.6.6`), and a ceiling of zero or below with the core's `BOUND_INVALID` (0.2.2.7). Their `Decode` calls `CheckTarget` before the window opens, so a misused call reads nothing (#1101), and the refusal is placed at the first byte past the ceiling (#1125): json and xml at the stream's offset (`offsetField`, nothing past what an int holds), cbor within its item. toml, msgpack, yaml, baseenc and multipart keep the fixed ceilings of their `NewDecoder` and do not take a caller's.
+- **Misuse is refused first, with the family's codes (#1101)**: `Unmarshal` and `Decode` open with `core/data/codec.CheckTarget` — bson's `checkTarget` also takes a non-nil map, flatbuffers' a `BytesAcceptor` held by value —, so a nil or non-pointer target is `TARGET_INVALID` before a byte is read, not each format's `UNMARSHAL_FAILED`, `VALUE_INVALID` or `FLATBUFFERS_BAD_TARGET`; the internal guards that remain (cbor's `pointerTarget`, yaml's `decodeDocument`, tlv's `decodeRoot`, msgpack's `decodeTarget`, bson's `rootTarget`) return the same refusal. json, xml, bson, cbor, msgpack and tlv refuse zero bytes with `EMPTY_INPUT`. json, xml, yaml, toml, cbor, msgpack and bson open `Marshal` with `CheckValue`: a channel, a function or an unsafe pointer is `VALUE_INVALID` (0.2.2.4) — one nested in a value, or given to `Append` (the hot path, whose inlining kit holds), stays the encoder's own refusal. toml's target check sits in `unmarshal`, not in the `Unmarshal` wrapper, which stays inlinable. A per-format `VALUE_INVALID` still refuses a pointer of the wrong shape (the facade promotes on it). `pkg/v1/data/codec`'s `TestEveryTargetMisuseIsTargetInvalid` runs nil, a typed nil and a value through every registered Format.
+- **A decode refusal places itself one way (#1125)**: the position it knows rides as the fields `offset`, `line`, `column` — `core/data/codec.PositionFields`, or its `FieldOffset` / `FieldLine` / `FieldColumn` keys —, read back by `codec.PositionOf`. yaml and toml: line and column in characters; csv: `encoding/csv`'s line and byte column, for a parse error and for a cell its column cannot hold (`FieldPos`); json: `encoding/json`'s offset (v1 and v2 errors); xml: `encoding/xml`'s line; cbor, msgpack, bson (the validator's offset, out of its Private text), tlv (the record the walk stopped on; the typed path walks again on a refusal to find it) and flatbuffers' length refusals: the offset alone, byte 0 meant. A key the family uses for a coordinate never names anything else: csv's column *name* is `name`. `pkg/v1/data/codec`'s `TestEveryRefusalHasAPosition` holds it per format.
 - **Errors use the package's dotted-quad code**: every wrapped failure carries the `CodeXxxMarshalFailed` / `CodeXxxUnmarshalFailed` / `CodeXxxValueInvalid` constant its core mirror declares (`internal/core/data/codec/<codec>/codes.go`, ADR 0160). Wrapping an `*errs.Error` cause is a no-op for params (origin wins).
 - **Optional extensions are opt-in by interface assertion**: callers use `if a, ok := c.(codec.Appender); ok { … }` — the public registry does not promise any extension.
 
@@ -108,7 +128,9 @@ links no `net/http` either. `json/` is unchanged.
 - `flatbuffers/` — see `flatbuffers/CLAUDE.md`
 - `form/`        — see `form/CLAUDE.md`
 - `json/`        — see `json/CLAUDE.md`
+- `jcs/`         — see `jcs/CLAUDE.md` (not a codec — RFC 8785, ADR 0102)
 - `jsonpatch/`   — see `jsonpatch/CLAUDE.md` (not a codec — ADR 0143)
+- `jsonschema/`  — see `jsonschema/CLAUDE.md` (not a codec — ADR 0210)
 - `jsonshape/`   — see `jsonshape/CLAUDE.md` (not a codec — ADR 0133)
 - `msgpack/`     — see `msgpack/CLAUDE.md`
 - `multipart/`   — see `multipart/CLAUDE.md`

@@ -19,17 +19,31 @@ sequences:
         kind: actor
       - id: (*bsonCodec).Marshal
         kind: self
+      - id: codec
+        kind: package
       - id: scratch
         kind: package
       - id: appendDocument
         kind: internal
       - id: slices
         kind: stdlib
+      - id: largeDocumentHint.Store
+        kind: value
     steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: codec.CheckValue(v)
+            to: codec
+          when: verr != nil
+      - bind: hint
+        eval: int(largeDocumentHint.Load())
       - bind: buf
-        eval: scratch.AcquireBuffer()
+        eval: scratch.AcquireBufferSized(hint)
         to: scratch
-      - defer: scratch.ReleaseBuffer(buf)
+      - defer: scratch.ReleaseBufferSized(buf)
         to: scratch
       - bind: out, err
         eval: appendDocument(buf.AvailableBuffer(), v)
@@ -41,11 +55,20 @@ sequences:
       - set: encoded
         to: slices
         value: slices.Clone(out)
+      - alt:
+          - do:
+              - eval: largeDocumentHint.Store(int64(cap(out)))
+                to: largeDocumentHint.Store
+            when: cap(out) > scratch.MaxRetainedBufBytes
+          - do:
+              - eval: largeDocumentHint.Store(0)
+                to: largeDocumentHint.Store
+            when: hint != 0
       - opt:
           do:
             - set: "*buf"
               value: "*bytes.NewBuffer(out[:0])"
-          when: cap(out) > buf.Cap() && cap(out) <= scratch.MaxRetainedBufBytes
+          when: cap(out) > buf.Cap()
       - return: encoded, nil
   - of: (*bsonCodec).Unmarshal
     participants:
@@ -53,6 +76,8 @@ sequences:
         kind: actor
       - id: (*bsonCodec).Unmarshal
         kind: self
+      - id: checkTarget
+        kind: internal
       - id: errs
         kind: package
       - id: validateRoot
@@ -62,10 +87,22 @@ sequences:
     steps:
       - opt:
           do:
+            - return: terr
+          init:
+            bind: terr
+            eval: checkTarget(v)
+            to: checkTarget
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
+          when: len(data) == 0
+      - opt:
+          do:
             - return: |-
                 errs.Wrap(nil, errs.WrapParams{
                 			Code:    corebson.CodeBSONSizeExceeded,
-                			Reason:  "BSON_SIZE_EXCEEDED",
+                			Reason:  "SIZE_EXCEEDED",
                 			Public:  "BSON input exceeds size limit",
                 			Private: "service/data/codec/bson.Unmarshal: len(data) > maxBSONBytes",
                 		})
@@ -649,8 +686,19 @@ sequences:
         kind: actor
       - id: decodeInto
         kind: self
-      - id: unmarshalError
+      - id: decodeIntoMode
         kind: internal
+    steps:
+      - return: decodeIntoMode(data, v, false)
+        to: decodeIntoMode
+  - of: decodeIntoMode
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeIntoMode
+        kind: self
+      - id: codec
+        kind: package
       - id: reflect
         kind: stdlib
       - id: rootHook
@@ -662,8 +710,8 @@ sequences:
     steps:
       - opt:
           do:
-            - return: unmarshalError(nil, "the target is nil")
-              to: unmarshalError
+            - return: codec.CheckTarget(nil)
+              to: codec
           when: v == nil
       - bind: rv
         eval: reflect.ValueOf(v)
@@ -683,7 +731,7 @@ sequences:
           do:
             - return: err
           when: err != nil
-      - return: decodeValue(typeDocument, data, target, planFor(target.Type()), decodeState{})
+      - return: "decodeValue(typeDocument, data, target, planFor(target.Type()), decodeState{strict: strict})"
         to: decodeValue
   - of: rootTarget
     participants:
@@ -703,22 +751,11 @@ sequences:
                 when: rv.Kind() == reflect.Pointer
             - return: rv, nil
           when: (rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Map) && !rv.IsNil()
-      - return: rv, unmarshalError(nil, "the target must be a non-nil pointer or map, not "+describeTarget(rv))
-  - of: describeTarget
-    participants:
-      - id: caller
-        kind: actor
-      - id: describeTarget
-        kind: self
-      - id: rv.Type().String
-        kind: value
-    steps:
       - opt:
           do:
-            - return: "\"a nil \" + rv.Type().String()"
-          when: (rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Map) && rv.IsNil()
-      - return: rv.Type().String()
-        to: rv.Type().String
+            - return: rv, codec.CheckTarget(nil)
+          when: "!rv.IsValid()"
+      - return: rv, codec.CheckTarget(rv.Interface())
   - of: rootHook
     participants:
       - id: caller
@@ -2544,7 +2581,7 @@ sequences:
               to: fv.Set
           when: fv.Kind() == reflect.Pointer && fv.IsNil()
       - bind: child
-        eval: "decodeState{truncate: st.truncate || f.flags.has(flagTruncate), field: f.goName}"
+        eval: "decodeState{truncate: st.truncate || f.flags.has(flagTruncate), field: f.goName, strict: st.strict}"
       - return: decodeValue(el.typ, el.value, fv, f.plan, child)
         to: decodeValue
   - of: decodeUnknown
@@ -2553,6 +2590,8 @@ sequences:
         kind: actor
       - id: decodeUnknown
         kind: self
+      - id: unknownMember
+        kind: internal
       - id: rv.Field
         kind: value
       - id: m.Set
@@ -2566,6 +2605,11 @@ sequences:
     steps:
       - opt:
           do:
+            - opt:
+                do:
+                  - return: unknownMember(rv.Type())
+                    to: unknownMember
+                when: st.strict
             - return: nil
           when: p.inlineMap == nil
       - bind: m
@@ -2582,7 +2626,7 @@ sequences:
         eval: reflect.New(mp.typ.Elem()).Elem()
         to: reflect.New(mp.typ.Elem()).Elem
       - bind: child
-        eval: "decodeState{ancestor: mp.typ, truncate: st.truncate, field: p.inlineMap.goName}"
+        eval: "decodeState{ancestor: mp.typ, truncate: st.truncate, field: p.inlineMap.goName, strict: st.strict}"
       - opt:
           do:
             - return: err
@@ -4284,7 +4328,7 @@ sequences:
       - opt:
           do:
             - return: nil
-          when: "!ok || (f.flags.has(flagOmitEmpty) && isEmptyField(fv, f.plan))"
+          when: "!ok || (f.flags.has(flagOmitEmpty) && isEmptyField(fv, f.plan)) || (f.zero != nil && f.zero(fv))"
       - opt:
           do:
             - return: marshalError(nil, "field "+f.goName+" has an element name holding a NUL byte or invalid UTF-8")
@@ -5325,6 +5369,44 @@ sequences:
           		Private: "service/data/codec/bson.Unmarshal: " + detail,
           	})
         to: errs
+  - of: checkTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkTarget
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: codec
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          init:
+            bind: rv
+            eval: reflect.ValueOf(v)
+            to: reflect
+          when: rv.Kind() == reflect.Map && !rv.IsNil()
+      - return: codec.CheckTarget(v)
+        to: codec
+  - of: malformedAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: malformedAt
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    corebson.CodeBSONUnmarshalFailed,
+          		Reason:  "BSON_UNMARSHAL_FAILED",
+          		Public:  "BSON decoding failed",
+          		Private: "service/data/codec/bson.Unmarshal: malformed document: " + rule,
+          	}, codec.PositionFields(codec.PositionValue{Offset: off})...)
+        to: errs
   - of: depthError
     participants:
       - id: caller
@@ -5337,7 +5419,7 @@ sequences:
       - return: |-
           errs.Wrap(nil, errs.WrapParams{
           		Code:    corebson.CodeBSONDepthExceeded,
-          		Reason:  "BSON_DEPTH_EXCEEDED",
+          		Reason:  "DEPTH_EXCEEDED",
           		Public:  "BSON nesting depth exceeds limit",
           		Private: "service/data/codec/bson." + op + ": nesting exceeds " + strconv.Itoa(maxBSONNestedLevels) + " levels",
           	})
@@ -5541,6 +5623,99 @@ sequences:
             to: json
           when: err != nil || wrapped.OID == nil
       - return: "*wrapped.OID, nil"
+  - of: zeroTest
+    steps:
+      - switch:
+          cases:
+            - case: (t.Kind() == reflect.Pointer || t.Kind() == reflect.Interface) && t.Implements(typeOfZeroer)
+              do:
+                - return: zeroThroughReference
+            - case: t.Implements(typeOfZeroer)
+              do:
+                - return: zeroByMethod
+            - case: reflect.PointerTo(t).Implements(typeOfZeroer)
+              do:
+                - return: zeroByAddress
+            - default: true
+              do:
+                - return: reflect.Value.IsZero
+  - of: zeroThroughReference
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroThroughReference
+        kind: self
+      - id: v.Elem
+        kind: value
+      - id: zeroByMethod
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: v.IsNil()
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: elem
+                  eval: v.Elem()
+                  to: v.Elem
+                when: elem.Kind() == reflect.Pointer && elem.IsNil()
+          when: v.Kind() == reflect.Interface
+      - return: zeroByMethod(v)
+        to: zeroByMethod
+  - of: zeroByMethod
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroByMethod
+        kind: self
+      - id: v.IsZero
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: v.IsZero()
+              to: v.IsZero
+          when: "!v.CanInterface()"
+      - bind: z, ok
+        eval: reflect.TypeAssert[interface{ IsZero() bool }](v)
+      - return: (ok && z.IsZero()) || (!ok && v.IsZero())
+  - of: zeroByAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroByAddress
+        kind: self
+      - id: v.IsZero
+        kind: value
+      - id: reflect.New(v.Type()).Elem
+        kind: value
+      - id: boxed.Set
+        kind: value
+      - id: zeroByMethod
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: v.IsZero()
+              to: v.IsZero
+          when: "!v.CanInterface()"
+      - opt:
+          do:
+            - bind: boxed
+              eval: reflect.New(v.Type()).Elem()
+              to: reflect.New(v.Type()).Elem
+            - eval: boxed.Set(v)
+              to: boxed.Set
+            - set: v
+              value: boxed
+          when: "!v.CanAddr()"
+      - return: zeroByMethod(v.Addr())
+        to: zeroByMethod
   - of: fieldFlags.has
     steps:
       - return: f&flag == flag
@@ -6034,6 +6209,13 @@ sequences:
         to: dominantFields
       - return: kept, inlineMap, invalid
   - of: (*planBuilder).newField
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*planBuilder).newField
+        kind: self
+      - id: zeroTest
+        kind: internal
     steps:
       - bind: flags
         eval: tags.flags
@@ -6043,7 +6225,8 @@ sequences:
               set: flags
               value: flagBadName
           when: strings.IndexByte(tags.name, 0) >= 0 || !utf8.ValidString(tags.name)
-      - return: |-
+      - bind: f
+        eval: |-
           &fieldPlan{
           		name:      tags.name,
           		nameBytes: []byte(tags.name),
@@ -6052,6 +6235,13 @@ sequences:
           		plan:      b.plan(sf.Type),
           		flags:     flags,
           	}
+      - opt:
+          do:
+            - set: f.zero
+              to: zeroTest
+              value: zeroTest(sf.Type)
+          when: flags.has(flagOmitZero)
+      - return: f
   - of: inlineMapProblem
     steps:
       - opt:
@@ -6170,6 +6360,8 @@ sequences:
         kind: value
       - id: strings
         kind: stdlib
+      - id: tagOption
+        kind: internal
     steps:
       - bind: tags
         eval: "fieldTags{name: strings.ToLower(sf.Name)}"
@@ -6195,7 +6387,8 @@ sequences:
           when: first != ""
       - op: "|="
         set: tags.flags
-        value: tagOptions[first]
+        to: tagOption
+        value: tagOption(first)
       - loop:
           cond: more
           do:
@@ -6207,8 +6400,32 @@ sequences:
               value: strings.Cut(rest, ",")
             - op: "|="
               set: tags.flags
-              value: tagOptions[option]
+              to: tagOption
+              value: tagOption(option)
       - return: tags, false
+  - of: tagOption
+    steps:
+      - switch:
+          cases:
+            - case: "\"omitempty\""
+              do:
+                - return: flagOmitEmpty
+            - case: "\"omitzero\""
+              do:
+                - return: flagOmitZero
+            - case: "\"minsize\""
+              do:
+                - return: flagMinSize
+            - case: "\"truncate\""
+              do:
+                - return: flagTruncate
+            - case: "\"inline\""
+              do:
+                - return: flagInline
+            - default: true
+              do:
+                - return: "0"
+          "on": word
   - of: (*typePlan).lookupField
     participants:
       - id: caller
@@ -6234,6 +6451,504 @@ sequences:
   - of: (*typePlan).foldedField
     steps:
       - return: p.byName[strings.ToLower(string(key))]
+  - of: (*bsonCodec).Sniff
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(prefix) < emptyDocumentSize
+      - bind: size
+        eval: int(binary.LittleEndian.Uint32(prefix))
+      - opt:
+          do:
+            - return: "false"
+          when: size < emptyDocumentSize || size > maxBSONBytes || (size <= len(prefix) && prefix[size-1] != 0)
+      - opt:
+          do:
+            - return: prefix[firstTypeAt] == 0
+          when: size == emptyDocumentSize
+      - return: knownType(prefix[firstTypeAt]) && plausibleKey(prefix[firstKeyAt:min(size, len(prefix))])
+  - of: knownType
+    steps:
+      - return: (t >= typeDouble && t <= typeDecimal128) || t == typeMinKey || t == typeMaxKey
+  - of: plausibleKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: plausibleKey
+        kind: self
+      - id: utf8
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: utf8.Valid(p[:i])
+                    to: utf8
+                when: c == 0
+            - opt:
+                do:
+                  - return: "false"
+                when: c < ' ' || c == asciiDEL
+          key: i
+          range: p
+          value: c
+      - return: "false"
+  - of: (*bsonCodec).NewEncoder
+    steps:
+      - return: "&bsonEncoder{w: w}"
+  - of: (*bsonCodec).NewDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bsonCodec).NewDecoder
+        kind: self
+      - id: bufio
+        kind: stdlib
+    steps:
+      - bind: br, ok
+        eval: r.(*bufio.Reader)
+      - opt:
+          do:
+            - set: br
+              to: bufio
+              value: bufio.NewReader(r)
+          when: "!ok"
+      - return: "&bsonDecoder{r: br}"
+  - of: (*bsonEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bsonEncoder).Encode
+        kind: self
+      - id: scratch
+        kind: package
+      - id: appendDocument
+        kind: internal
+      - id: e.w.Write
+        kind: value
+      - id: marshalError
+        kind: internal
+    steps:
+      - bind: buf
+        eval: scratch.AcquireBufferSized(int(largeDocumentHint.Load()))
+        to: scratch
+      - defer: scratch.ReleaseBufferSized(buf)
+        to: scratch
+      - bind: out, err
+        eval: appendDocument(buf.AvailableBuffer(), v)
+        to: appendDocument
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - set: "*buf"
+              value: "*bytes.NewBuffer(out[:0])"
+          when: cap(out) > buf.Cap()
+      - opt:
+          do:
+            - return: "marshalError(werr, \"Encoder.Encode: the writer returned an error\")"
+              to: marshalError
+          init:
+            bind: _, werr
+            eval: e.w.Write(out)
+            to: e.w.Write
+          when: werr != nil
+      - return: nil
+  - of: (*bsonEncoder).Close
+    steps:
+      - return: nil
+  - of: (*bsonDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bsonDecoder).Decode
+        kind: self
+      - id: checkTarget
+        kind: internal
+      - id: d.next
+        kind: internal
+      - id: validateRoot
+        kind: internal
+      - id: decodeStrict
+        kind: internal
+      - id: decodeInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: checkTarget(v)
+            to: checkTarget
+          when: terr != nil
+      - opt:
+          do:
+            - return: io.EOF
+          when: d.done
+      - bind: doc, err
+        eval: d.next()
+        to: d.next
+      - opt:
+          do:
+            - set: d.done
+              value: "true"
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - set: d.done
+              value: "true"
+            - return: verr
+          init:
+            bind: verr
+            eval: validateRoot(doc)
+            to: validateRoot
+          when: verr != nil
+      - opt:
+          do:
+            - return: decodeStrict(doc, v)
+              to: decodeStrict
+          when: d.strict
+      - return: decodeInto(doc, v)
+        to: decodeInto
+  - of: (*bsonDecoder).More
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bsonDecoder).More
+        kind: self
+      - id: d.r.Peek
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: d.done
+      - bind: _, perr
+        eval: d.r.Peek(1)
+        to: d.r.Peek
+      - return: perr == nil
+  - of: (*bsonDecoder).next
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bsonDecoder).next
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: readDocument
+        kind: internal
+    steps:
+      - var:
+          name: prefix
+          type: "[4]byte"
+      - bind: n, rerr
+        eval: io.ReadFull(d.r, prefix[:])
+        to: io
+      - opt:
+          do:
+            - return: nil, io.EOF
+          when: n == 0 && errors.Is(rerr, io.EOF)
+      - opt:
+          do:
+            - return: "nil, unmarshalError(rerr, \"Decoder.Decode: the stream ends inside a length prefix\")"
+          when: rerr != nil
+      - bind: declared
+        eval: int64(int32(binary.LittleEndian.Uint32(prefix[:])))
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(nil, errs.WrapParams{
+                			Code:    corebson.CodeBSONSizeExceeded,
+                			Reason:  "SIZE_EXCEEDED",
+                			Public:  "BSON input exceeds size limit",
+                			Private: "service/data/codec/bson.Decoder.Decode: a declared document length exceeds maxBSONBytes",
+                		}, errs.Int64("len", declared), errs.Int("cap", maxBSONBytes))
+          when: declared > int64(maxBSONBytes)
+      - opt:
+          do:
+            - return: "nil, unmarshalError(nil, \"Decoder.Decode: a declared document length is below the minimum\")"
+          when: declared < int64(minDocumentSize)
+      - return: readDocument(d.r, prefix, int(declared))
+        to: readDocument
+  - of: readDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: readDocument
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: doc
+        eval: make([]byte, len(prefix), min(size, len(prefix)+streamFirstRead))
+      - eval: copy(doc, prefix[:])
+      - loop:
+          cond: len(doc) < size
+          do:
+            - opt:
+                do:
+                  - bind: grown
+                    eval: make([]byte, len(doc), min(size, 2*cap(doc)))
+                  - eval: copy(grown, doc)
+                  - set: doc
+                    value: grown
+                when: len(doc) == cap(doc)
+            - bind: n, rerr
+              eval: io.ReadFull(r, doc[len(doc):cap(doc)])
+              to: io
+            - set: doc
+              value: doc[:len(doc)+n]
+            - opt:
+                do:
+                  - return: "nil, unmarshalError(rerr, \"Decoder.Decode: the stream ends inside a document\")"
+                when: rerr != nil
+      - return: doc, nil
+  - of: NewStrict
+    steps:
+      - return: "&strictCodec{}"
+  - of: (*strictCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*strictCodec).Unmarshal
+        kind: self
+      - id: checkTarget
+        kind: internal
+      - id: c.bsonCodec.Unmarshal
+        kind: internal
+      - id: decodeStrict
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: checkTarget(v)
+            to: checkTarget
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
+          when: len(data) == 0
+      - opt:
+          do:
+            - return: c.bsonCodec.Unmarshal(data, v)
+              to: c.bsonCodec.Unmarshal
+          when: len(data) > maxBSONBytes || validateRoot(data) != nil
+      - return: decodeStrict(data, v)
+        to: decodeStrict
+  - of: (*strictCodec).NewDecoder
+    steps:
+      - bind: d, _
+        eval: (&bsonCodec{}).NewDecoder(r).(*bsonDecoder)
+      - set: d.strict
+        value: "true"
+      - return: d
+  - of: decodeStrict
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStrict
+        kind: self
+      - id: checkNames
+        kind: internal
+      - id: decodeIntoMode
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkNames(data, 0)
+            to: checkNames
+          when: err != nil
+      - return: decodeIntoMode(data, v, true)
+        to: decodeIntoMode
+  - of: checkNames
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkNames
+        kind: self
+      - id: checkDocument
+        kind: internal
+    steps:
+      - return: checkDocument(doc, base, true)
+        to: checkDocument
+  - of: checkDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkDocument
+        kind: self
+      - id: newDocIter
+        kind: internal
+      - id: it.next
+        kind: internal
+      - id: addName
+        kind: internal
+      - id: duplicateName
+        kind: internal
+      - id: checkNested
+        kind: internal
+    steps:
+      - var:
+          name: small
+          type: "[strictLinearNames][]byte"
+      - bind: seen
+        eval: small[:0]
+      - var:
+          name: many
+          type: map[string]struct{}
+      - bind: it
+        eval: newDocIter(doc)
+        to: newDocIter
+      - loop:
+          do:
+            - bind: at
+              eval: base + lengthSize + it.pos
+            - bind: el, more, err
+              eval: it.next()
+              to: it.next
+            - opt:
+                do:
+                  - return: err
+                when: "!more || err != nil"
+            - opt:
+                do:
+                  - var:
+                      name: dup
+                      type: bool
+                  - opt:
+                      do:
+                        - return: duplicateName(at)
+                          to: duplicateName
+                      init:
+                        bind: seen, many, dup
+                        eval: addName(seen, many, el.key)
+                        op: =
+                        to: addName
+                      when: dup
+                when: names
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: checkNested(el, at)
+                  to: checkNested
+                when: err != nil
+          forever: true
+  - of: addName
+    participants:
+      - id: caller
+        kind: actor
+      - id: addName
+        kind: self
+      - id: indexName
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: seen, many, indexName(many, name)
+          when: many != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: seen, nil, true
+                when: bytes.Equal(n, name)
+          key: _
+          range: seen
+          value: "n"
+      - opt:
+          do:
+            - return: append(seen, name), nil, false
+          when: len(seen) < strictLinearNames
+      - set: many
+        value: make(map[string]struct{}, 4*strictLinearNames)
+      - loop:
+          do:
+            - eval: indexName(many, n)
+              to: indexName
+          key: _
+          range: seen
+          value: "n"
+      - return: seen, many, indexName(many, name)
+  - of: indexName
+    steps:
+      - bind: key
+        eval: string(name)
+      - bind: _, held
+        eval: many[key]
+      - set: many[key]
+        value: struct{}{}
+      - return: held
+  - of: checkNested
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkNested
+        kind: self
+      - id: checkDocument
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: typeDocument
+              do:
+                - return: checkDocument(el.value, at, true)
+                  to: checkDocument
+            - case: typeArray
+              do:
+                - return: checkDocument(el.value, at, false)
+                  to: checkDocument
+            - default: true
+              do:
+                - return: nil
+          "on": el.typ
+  - of: duplicateName
+    participants:
+      - id: caller
+        kind: actor
+      - id: duplicateName
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    corebson.CodeBSONDuplicateKey,
+          		Reason:  "DUPLICATE_KEY",
+          		Public:  "BSON document repeats an element name",
+          		Private: "service/data/codec/bson.NewStrict: a document holds two elements of one name",
+          	}, errs.Int(codec.FieldOffset, at))
+        to: errs
+  - of: unknownMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: unknownMember
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    corebson.CodeBSONUnknownMember,
+          		Reason:  "UNKNOWN_MEMBER",
+          		Public:  "BSON document carries an unknown member",
+          		Private: "service/data/codec/bson.NewStrict: an element no field of the struct claims",
+          	}, errs.String("type", t.String()))
+        to: errs
   - of: Binary.Equal
     steps:
       - return: b.Subtype == other.Subtype && bytes.Equal(b.Data, other.Data)
@@ -6376,7 +7091,7 @@ sequences:
         kind: internal
       - id: depthError
         kind: internal
-      - id: unmarshalError
+      - id: malformedAt
         kind: internal
     steps:
       - bind: v
@@ -6388,8 +7103,8 @@ sequences:
                   - return: depthError("Unmarshal")
                     to: depthError
                 when: problem.depth
-            - return: "unmarshalError(nil, \"malformed document at byte \"+strconv.Itoa(problem.offset)+\": \"+problem.rule)"
-              to: unmarshalError
+            - return: malformedAt(problem.offset, problem.rule)
+              to: malformedAt
           init:
             bind: problem
             eval: v.root(data)

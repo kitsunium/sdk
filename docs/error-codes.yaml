@@ -81,6 +81,10 @@ codes:
     const: CodeKeyEmpty
     hex: "0x00_02_02_06"
     package: internal/core/data/codec
+  - code: "0.2.2.7"
+    const: CodeBoundInvalid
+    hex: "0x00_02_02_07"
+    package: internal/core/data/codec
   - code: "0.2.3.1"
     const: CodeDuplicateRegistration
     hex: "0x00_02_03_01"
@@ -204,6 +208,10 @@ codes:
   - code: "0.2.5.6"
     const: CodeDecompressedTooLarge
     hex: "0x00_02_05_06"
+    package: internal/core/data/transform
+  - code: "0.2.5.7"
+    const: CodeStreamingUnsupported
+    hex: "0x00_02_05_07"
     package: internal/core/data/transform
   - code: "0.2.6.1"
     const: CodeUnsupportedPlatform
@@ -372,6 +380,18 @@ codes:
   - code: "0.2.9.8"
     const: CodeDescriptionConflict
     hex: "0x00_02_09_08"
+    package: internal/core/observe/metrics
+  - code: "0.2.9.9"
+    const: CodeInvalidUnit
+    hex: "0x00_02_09_09"
+    package: internal/core/observe/metrics
+  - code: "0.2.9.10"
+    const: CodeUnitConflict
+    hex: "0x00_02_09_0A"
+    package: internal/core/observe/metrics
+  - code: "0.2.9.11"
+    const: CodeInvalidBuckets
+    hex: "0x00_02_09_0B"
     package: internal/core/observe/metrics
   - code: "0.2.10.1"
     const: CodeConfigSourceFailed
@@ -1441,6 +1461,10 @@ codes:
     const: CodeSinkRequired
     hex: "0x00_03_01_04"
     package: internal/core/observe/logger
+  - code: "0.3.1.5"
+    const: CodeLevelAmbiguous
+    hex: "0x00_03_01_05"
+    package: internal/core/observe/logger
   - code: "0.3.1.10"
     const: CodeCtxCancelled
     hex: "0x00_03_01_0A"
@@ -1457,6 +1481,10 @@ codes:
     const: CodeJSONUnmarshalFailed
     hex: "0x00_03_02_02"
     package: internal/core/data/codec/json
+  - code: "0.3.2.3"
+    const: CodeJSONSizeExceeded
+    hex: "0x00_03_02_03"
+    package: internal/core/data/codec/json
   - code: "0.3.3.1"
     const: CodeXMLMarshalFailed
     hex: "0x00_03_03_01"
@@ -1464,6 +1492,10 @@ codes:
   - code: "0.3.3.2"
     const: CodeXMLUnmarshalFailed
     hex: "0x00_03_03_02"
+    package: internal/core/data/codec/xml
+  - code: "0.3.3.3"
+    const: CodeXMLSizeExceeded
+    hex: "0x00_03_03_03"
     package: internal/core/data/codec/xml
   - code: "0.3.4.1"
     const: CodeYAMLMarshalFailed
@@ -1509,6 +1541,14 @@ codes:
     const: CodeYAMLLeadingZeroRefused
     hex: "0x00_03_04_0B"
     package: internal/core/data/codec/yaml
+  - code: "0.3.4.12"
+    const: CodeYAMLSizeExceeded
+    hex: "0x00_03_04_0C"
+    package: internal/core/data/codec/yaml
+  - code: "0.3.4.13"
+    const: CodeYAMLDepthExceeded
+    hex: "0x00_03_04_0D"
+    package: internal/core/data/codec/yaml
   - code: "0.3.5.1"
     const: CodeTOMLMarshalFailed
     hex: "0x00_03_05_01"
@@ -1516,6 +1556,14 @@ codes:
   - code: "0.3.5.2"
     const: CodeTOMLUnmarshalFailed
     hex: "0x00_03_05_02"
+    package: internal/core/data/codec/toml
+  - code: "0.3.5.3"
+    const: CodeTOMLSizeExceeded
+    hex: "0x00_03_05_03"
+    package: internal/core/data/codec/toml
+  - code: "0.3.5.4"
+    const: CodeTOMLDepthExceeded
+    hex: "0x00_03_05_04"
     package: internal/core/data/codec/toml
   - code: "0.3.6.1"
     const: CodeCBORMarshalFailed
@@ -1525,6 +1573,26 @@ codes:
     const: CodeCBORUnmarshalFailed
     hex: "0x00_03_06_02"
     package: internal/core/data/codec/cbor
+  - code: "0.3.6.3"
+    const: CodeCBORDuplicateKey
+    hex: "0x00_03_06_03"
+    package: internal/core/data/codec/cbor
+  - code: "0.3.6.4"
+    const: CodeCBORUnknownMember
+    hex: "0x00_03_06_04"
+    package: internal/core/data/codec/cbor
+  - code: "0.3.6.5"
+    const: CodeCBORNotDeterministic
+    hex: "0x00_03_06_05"
+    package: internal/core/data/codec/cbor
+  - code: "0.3.6.6"
+    const: CodeCBORSizeExceeded
+    hex: "0x00_03_06_06"
+    package: internal/core/data/codec/cbor
+  - code: "0.3.6.7"
+    const: CodeCBORDepthExceeded
+    hex: "0x00_03_06_07"
+    package: internal/core/data/codec/cbor
   - code: "0.3.7.1"
     const: CodeMsgPackMarshalFailed
     hex: "0x00_03_07_01"
@@ -1532,6 +1600,22 @@ codes:
   - code: "0.3.7.2"
     const: CodeMsgPackUnmarshalFailed
     hex: "0x00_03_07_02"
+    package: internal/core/data/codec/msgpack
+  - code: "0.3.7.3"
+    const: CodeMsgPackDuplicateKey
+    hex: "0x00_03_07_03"
+    package: internal/core/data/codec/msgpack
+  - code: "0.3.7.4"
+    const: CodeMsgPackUnknownMember
+    hex: "0x00_03_07_04"
+    package: internal/core/data/codec/msgpack
+  - code: "0.3.7.5"
+    const: CodeMsgPackSizeExceeded
+    hex: "0x00_03_07_05"
+    package: internal/core/data/codec/msgpack
+  - code: "0.3.7.6"
+    const: CodeMsgPackDepthExceeded
+    hex: "0x00_03_07_06"
     package: internal/core/data/codec/msgpack
   - code: "0.3.8.1"
     const: CodeCSVMarshalFailed
@@ -1545,6 +1629,18 @@ codes:
     const: CodeCSVValueInvalid
     hex: "0x00_03_08_03"
     package: internal/core/data/codec/csv
+  - code: "0.3.8.4"
+    const: CodeCSVHeaderMismatch
+    hex: "0x00_03_08_04"
+    package: internal/core/data/codec/csv
+  - code: "0.3.8.5"
+    const: CodeCSVCellInvalid
+    hex: "0x00_03_08_05"
+    package: internal/core/data/codec/csv
+  - code: "0.3.8.6"
+    const: CodeCSVOptionsInvalid
+    hex: "0x00_03_08_06"
+    package: internal/core/data/codec/csv
   - code: "0.3.9.1"
     const: CodeASN1MarshalFailed
     hex: "0x00_03_09_01"
@@ -1552,6 +1648,10 @@ codes:
   - code: "0.3.9.2"
     const: CodeASN1UnmarshalFailed
     hex: "0x00_03_09_02"
+    package: internal/core/data/codec/asn1
+  - code: "0.3.9.3"
+    const: CodeASN1TrailingData
+    hex: "0x00_03_09_03"
     package: internal/core/data/codec/asn1
   - code: "0.3.10.1"
     const: CodePEMMarshalFailed
@@ -1565,6 +1665,10 @@ codes:
     const: CodePEMValueInvalid
     hex: "0x00_03_0A_03"
     package: internal/core/data/codec/pem
+  - code: "0.3.10.4"
+    const: CodePEMSizeExceeded
+    hex: "0x00_03_0A_04"
+    package: internal/core/data/codec/pem
   - code: "0.3.11.1"
     const: CodeNDJSONMarshalFailed
     hex: "0x00_03_0B_01"
@@ -1576,6 +1680,10 @@ codes:
   - code: "0.3.11.3"
     const: CodeNDJSONValueInvalid
     hex: "0x00_03_0B_03"
+    package: internal/core/data/codec/ndjson
+  - code: "0.3.11.4"
+    const: CodeNDJSONSizeExceeded
+    hex: "0x00_03_0B_04"
     package: internal/core/data/codec/ndjson
   - code: "0.3.13.1"
     const: CodeWriterNil
@@ -1861,6 +1969,14 @@ codes:
     const: CodeBSONValueInvalid
     hex: "0x00_03_24_05"
     package: internal/core/data/codec/bson
+  - code: "0.3.36.6"
+    const: CodeBSONDuplicateKey
+    hex: "0x00_03_24_06"
+    package: internal/core/data/codec/bson
+  - code: "0.3.36.7"
+    const: CodeBSONUnknownMember
+    hex: "0x00_03_24_07"
+    package: internal/core/data/codec/bson
   - code: "0.3.37.1"
     const: CodeHCLMarshalFailed
     hex: "0x00_03_25_01"
@@ -1872,6 +1988,10 @@ codes:
   - code: "0.3.37.3"
     const: CodeHCLSizeExceeded
     hex: "0x00_03_25_03"
+    package: third-party/codec/hcl
+  - code: "0.3.37.4"
+    const: CodeHCLDepthExceeded
+    hex: "0x00_03_25_04"
     package: third-party/codec/hcl
   - code: "0.3.38.1"
     const: CodeProtobufMarshalFailed
@@ -1924,6 +2044,10 @@ codes:
   - code: "0.3.40.3"
     const: CodeFormMultiValue
     hex: "0x00_03_28_03"
+    package: internal/core/data/codec/form
+  - code: "0.3.40.4"
+    const: CodeFormSizeExceeded
+    hex: "0x00_03_28_04"
     package: internal/core/data/codec/form
   - code: "0.3.41.1"
     const: CodeMultipartMarshalFailed
@@ -2080,6 +2204,10 @@ codes:
   - code: "0.3.45.10"
     const: CodeOTLPPartialSuccess
     hex: "0x00_03_2D_0A"
+    package: internal/core/observe/metrics
+  - code: "0.3.45.11"
+    const: CodeCollectorNil
+    hex: "0x00_03_2D_0B"
     package: internal/core/observe/metrics
   - code: "0.3.46.1"
     const: CodeRecordCorrupt
@@ -2513,6 +2641,14 @@ codes:
     const: CodeLimitMisconfigured
     hex: "0x00_03_3F_04"
     package: third-party/transform
+  - code: "0.3.63.5"
+    const: CodeDictionaryMismatch
+    hex: "0x00_03_3F_05"
+    package: third-party/transform
+  - code: "0.3.63.6"
+    const: CodeDictionaryInvalid
+    hex: "0x00_03_3F_06"
+    package: third-party/transform
   - code: "0.3.65.1"
     const: CodeEnrolmentFailed
     hex: "0x00_03_41_01"
@@ -2640,6 +2776,10 @@ codes:
   - code: "0.3.77.2"
     const: CodeYAMLFullUnmarshalFailed
     hex: "0x00_03_4D_02"
+    package: third-party/codec/yaml
+  - code: "0.3.77.3"
+    const: CodeYAMLFullDepthExceeded
+    hex: "0x00_03_4D_03"
     package: third-party/codec/yaml
   - code: "0.3.80.1"
     const: CodeDocumentNotFound
@@ -3105,6 +3245,58 @@ codes:
     const: CodeSQSBatchTooLarge
     hex: "0x00_03_65_07"
     package: third-party/aws/queue/sqs
+  - code: "0.3.102.1"
+    const: CodeJCSNotJSON
+    hex: "0x00_03_66_01"
+    package: internal/core/data/codec/jcs
+  - code: "0.3.102.2"
+    const: CodeJCSNumberInvalid
+    hex: "0x00_03_66_02"
+    package: internal/core/data/codec/jcs
+  - code: "0.3.102.3"
+    const: CodeJCSMarshalFailed
+    hex: "0x00_03_66_03"
+    package: internal/core/data/codec/jcs
+  - code: "0.3.103.1"
+    const: CodeJSONSchemaSchemaInvalid
+    hex: "0x00_03_67_01"
+    package: internal/core/data/codec/jsonschema
+  - code: "0.3.103.2"
+    const: CodeJSONSchemaKeywordRefused
+    hex: "0x00_03_67_02"
+    package: internal/core/data/codec/jsonschema
+  - code: "0.3.103.3"
+    const: CodeJSONSchemaRefUnresolved
+    hex: "0x00_03_67_03"
+    package: internal/core/data/codec/jsonschema
+  - code: "0.3.103.4"
+    const: CodeJSONSchemaFormatUnknown
+    hex: "0x00_03_67_04"
+    package: internal/core/data/codec/jsonschema
+  - code: "0.3.103.5"
+    const: CodeJSONSchemaViolation
+    hex: "0x00_03_67_05"
+    package: internal/core/data/codec/jsonschema
+  - code: "0.3.103.6"
+    const: CodeJSONSchemaReferenceLoop
+    hex: "0x00_03_67_06"
+    package: internal/core/data/codec/jsonschema
+  - code: "0.3.104.1"
+    const: CodeOTLPLogsEndpointInvalid
+    hex: "0x00_03_68_01"
+    package: internal/core/observe/logger/writer/otlpjson
+  - code: "0.3.104.2"
+    const: CodeOTLPLogsExportRejected
+    hex: "0x00_03_68_02"
+    package: internal/core/observe/logger/writer/otlpjson
+  - code: "0.3.104.3"
+    const: CodeOTLPLogsExportUnavailable
+    hex: "0x00_03_68_03"
+    package: internal/core/observe/logger/writer/otlpjson
+  - code: "0.3.104.4"
+    const: CodeOTLPLogsPartialSuccess
+    hex: "0x00_03_68_04"
+    package: internal/core/observe/logger/writer/otlpjson
   - code: "0.4.1.1"
     const: CodeInvalidID
     hex: "0x00_04_01_01"

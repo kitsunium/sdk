@@ -69,8 +69,10 @@ func TestDocumentBounds(t *testing.T) {
 		t.Helper()
 		var out any
 		err := yaml.New().Unmarshal([]byte(tc.doc), &out)
-		if tc.refuse && !errs.HasReason(err, "UNMARSHAL_FAILED") {
-			t.Errorf("%s: Unmarshal error = %v, want UNMARSHAL_FAILED", tc.name, err)
+		//: a bound refusal: SIZE_EXCEEDED or DEPTH_EXCEEDED (#894), a decode
+		//: failure by its trail.
+		if tc.refuse && !(errs.HasReason(err, "SIZE_EXCEEDED") || errs.HasReason(err, "DEPTH_EXCEEDED") || errs.HasReason(err, "UNMARSHAL_FAILED")) {
+			t.Errorf("%s: Unmarshal error = %v, want a bound refusal", tc.name, err)
 		}
 		if !tc.refuse && err != nil {
 			t.Errorf("%s: Unmarshal error = %v", tc.name, err)

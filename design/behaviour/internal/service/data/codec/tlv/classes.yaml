@@ -43,6 +43,31 @@ constants:
         value: "0x80"
     name: uvarintSingleByteCap
   - doc: |-
+      smallMapPairs is how many pairs a map can have before the bookkeeping of
+      its order leaves the stack, and before an insertion sort stops beating the
+      general one (#1104).
+    items:
+      - name: smallMapPairs
+        type: int
+        value: "16"
+    name: smallMapPairs
+  - doc: |-
+      prefixBytes is how many leading payload bytes of a string key are compared
+      as one integer before the whole keys are.
+    items:
+      - name: prefixBytes
+        type: int
+        value: "8"
+    name: prefixBytes
+  - doc: |-
+      privateTrailing is the log text of a refusal of bytes left after the
+      first record: placeTyped recognises that refusal by it.
+    items:
+      - name: privateTrailing
+        type: string
+        value: "\"service/data/codec/tlv.Unmarshal: trailing bytes after the first record\""
+    name: privateTrailing
+  - doc: |-
       Numeric limits — grouped at the top so const → type → var → func
       ordering rules are satisfied across the file.
     grouped: true
@@ -68,6 +93,12 @@ constants:
         name: maxVarintBytes
         type: int
         value: "10"
+      - doc: |-
+          frameMinChunk is the first chunk a streamed record is rebuilt into;
+          later chunks grow with the record, up to what the ceiling leaves.
+        name: frameMinChunk
+        type: int
+        value: "512"
       - doc: |-
           sliceHintCap clamps an attacker-declared length to a sane initial
           capacity hint so a malformed buffer cannot trigger a multi-million
@@ -228,12 +259,18 @@ files:
       - (*tlvDecoder).Decode
       - (*tlvDecoder).More
       - readOneRecord
-      - readRecordBody
+      - recordFrame
+      - (*recordFrame).charge
+      - (*recordFrame).ensureRoom
+      - (*recordFrame).appendByte
+      - (*recordFrame).appendUvarint
+      - (*recordFrame).readValue
+      - (*recordFrame).readBody
+      - (*recordFrame).readChildren
+      - (*recordFrame).join
       - isCompositeTag
       - subRecordCount
-      - readCompositeRecord
       - readTag
-      - assembleRecord
       - readUvarint
       - wrapReadFailure
       - decodeRoot
@@ -278,7 +315,6 @@ files:
       - unhashableKeyError
       - nonStringFieldNameError
       - fieldNameTooLongDecodeError
-      - nonPointerTargetError
       - trailingBytesError
       - varintOverflowError
       - incompatibleTypeError
@@ -358,6 +394,27 @@ files:
       - bytesFromReflectValue
     name: helpers.go
   - decls:
+      - smallMapPairs
+      - prefixBytes
+      - pairSpan
+      - wireInt
+      - reorderPairs
+      - sortPairs
+      - comparePairs
+      - compareEncodedKeys
+      - stringPayload
+      - intKey
+      - bigEndian
+      - signedKey
+      - wireInt.compare
+      - markKey
+    name: order.go
+  - decls:
+      - privateTrailing
+      - placed
+      - placeTyped
+    name: position.go
+  - decls:
       - buildNamePrefix
       - structFieldInfo
       - structTypeInfo
@@ -381,15 +438,12 @@ functions:
       map / struct) carry an element/pair/field COUNT in their length header,
       not a byte length, so the body must be parsed by recursing into the
       declared number of sub-records rather than copying length value bytes.
+      Every byte the record rebuilds — each header and each value of every
+      child — is charged against maxTLVBytes, the bound Unmarshal holds the same
+      bytes to, so the stream refuses what Unmarshal refuses before it reads the
+      child that would cross the ceiling (#1105).
     name: readOneRecord
     params: r io.Reader
-    results: record []byte, err error
-  - doc: |-
-      readRecordBody reads the LEB128 length header for an already-consumed tag
-      and the record body, returning the reassembled tag+length+value bytes.
-      depth bounds composite recursion against CWE-674 stack exhaustion.
-    name: readRecordBody
-    params: r io.Reader, tag byte, depth int
     results: record []byte, err error
   - doc: |-
       isCompositeTag reports whether tag's length header is an element / pair /
@@ -405,29 +459,11 @@ functions:
     params: tag Tag, length uint64
     results: uint64
   - doc: |-
-      readCompositeRecord reassembles a composite record (slice / map / struct)
-      by reading its declared sub-records recursively, so the streaming reader
-      frames the body identically to the buffered decoder (V59). The rebuilt
-      bytes are tag + length-as-count + the concatenated child records, which
-      decodeRoot then parses exactly as the buffered path does.
-    name: readCompositeRecord
-    params: r io.Reader, tag byte, length uint64, depth int
-    results: record []byte, err error
-  - doc: |-
       readTag reads exactly one byte (the TLV tag) from r and returns
       io.EOF unchanged when the stream is empty.
     name: readTag
     params: r io.Reader
     results: tag byte, err error
-  - doc: |-
-      assembleRecord reads length value-bytes from r and rebuilds the
-      original tag+length+value record byte sequence. The value buffer grows
-      in chunks so a crafted header declaring length≈maxTLVBytes against a
-      reader that delivers only a handful of bytes pays only the bytes
-      actually delivered, not the declared cap (CWE-400 defence).
-    name: assembleRecord
-    params: r io.Reader, tag byte, length uint64
-    results: record []byte, err error
   - doc: |-
       readUvarint reads a single LEB128 length from r one byte at a time so
       the buffer stays exactly large enough.
@@ -708,11 +744,6 @@ functions:
       name buffer (CWE-400 defence).
     name: fieldNameTooLongDecodeError
     params: length uint64
-    results: error
-  - doc: |-
-      nonPointerTargetError surfaces a Unmarshal call with a non-pointer or
-      nil-pointer target.
-    name: nonPointerTargetError
     results: error
   - doc: |-
       trailingBytesError surfaces an Unmarshal with bytes left after the
@@ -1084,7 +1115,8 @@ functions:
       via MapRange. Each (key, value) pair is dispatched through
       encodeFieldValue with the cached key/value Kinds so scalar
       entries skip the encodeReflectValue → encodeByKind → tryEncodeScalar
-      dispatch chain. Composite entries still take the generic path.
+      dispatch chain. Composite entries still take the generic path. The pairs
+      are then put in key order (#1104), so equal maps encode to equal bytes.
     name: encodeMapDirect
     params: dst []byte, view reflectView, depth int
     results: encoded []byte, err error
@@ -1176,6 +1208,75 @@ functions:
     params: view reflectView
     results: "[]byte"
   - doc: |-
+      reorderPairs sorts the pairs written at b[start:] by their encoded keys and
+      rewrites them in that order, in place: the region is copied once into a
+      pooled scratch buffer and copied back pair by pair, so b never grows.
+    name: reorderPairs
+    params: b []byte, start int, spans []pairSpan
+    results: "[]byte"
+  - doc: |-
+      sortPairs orders spans by encoded key: an insertion sort for a small map,
+      which is most of them, and the general sort beyond.
+    name: sortPairs
+    params: region []byte, spans []pairSpan
+  - doc: |-
+      comparePairs orders two pairs by their keys, and two pairs whose keys
+      encode alike — two NaN float keys — by their values, so even those maps
+      encode one way.
+    name: comparePairs
+    params: region []byte, x, y *pairSpan
+    results: int
+  - doc: |-
+      compareEncodedKeys orders two encoded key records: two strings byte-wise
+      over their payloads, as encoding/json orders keys; two integers by value,
+      whatever width and signedness each was written in; anything else by its
+      encoding.
+    name: compareEncodedKeys
+    params: a, b []byte
+    results: int
+  - doc: |-
+      stringPayload returns the payload of a string record, past its tag and
+      length.
+    name: stringPayload
+    params: record []byte
+    results: "[]byte, bool"
+  - doc: |-
+      intKey reads back an integer record: tagInt8–64 signed, tagUint8–64
+      unsigned, big-endian payloads of the width the tag names.
+    name: intKey
+    params: record []byte
+    results: wireInt, bool
+  - doc: bigEndian reads a 1-, 2-, 4- or 8-byte big-endian payload.
+    name: bigEndian
+    params: payload []byte
+    results: uint64, bool
+  - doc: |-
+      signedKey places a signed value: a negative one apart, a non-negative one
+      with the unsigned values it equals.
+    name: signedKey
+    params: n int64
+    results: wireInt
+  - doc: |-
+      markKey records, for the key written at region[span.key:span.value],
+      whether it is a string and the integer its first bytes make.
+    name: markKey
+    params: region []byte, span *pairSpan
+  - doc: |-
+      placed returns err placed at byte offset off of the input, as the family's
+      field codec.PositionOf reads (#1125); its code, reason and texts are err's.
+    name: placed
+    params: err error, off int
+    results: error
+  - doc: |-
+      placeTyped places a refusal of the typed path. That path does not return
+      where it stopped, so the wire is walked again — on a refusal only — and the
+      refusal is placed where the walk stops on the same code: the wire fault
+      both paths found. A refusal the walk does not reproduce — a value the
+      target cannot hold, a well-formed wire — is returned as it is.
+    name: placeTyped
+    params: data []byte, err error
+    results: error
+  - doc: |-
       buildNamePrefix pre-computes the (tagString + LEB128 length + name)
       byte sequence the encoder emits before every field value. Returns
       nil when the name exceeds maxFieldNameBytes — the encoder's cap
@@ -1200,6 +1301,7 @@ functions:
 imports:
   binary: encoding/binary
   bytes: bytes
+  cmp: cmp
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   coretlv: github.com/kitsunium/sdk/internal/core/data/codec/tlv
   errors: errors
@@ -1209,6 +1311,7 @@ imports:
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
   reflect: reflect
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
   strconv: strconv
   sync: sync
 package:
@@ -1289,6 +1392,80 @@ types:
         results: bool
     name: tlvDecoder
   - doc: |-
+      recordFrame rebuilds one root record read from a stream, charging every
+      byte against maxTLVBytes. The bytes land in chunks, each no larger than
+      what was already rebuilt and never past what the ceiling leaves, and are
+      joined once at the end: a header declaring the ceiling against a reader
+      that delivers a handful of bytes reserves only those bytes (CWE-400), and
+      a record refused at the ceiling has reserved at most one ceiling.
+    fields:
+      - doc: ": r is the stream the record is read from."
+        name: r
+        type: io.Reader
+      - doc: ": chunks holds the filled chunks, in wire order."
+        name: chunks
+        type: "[][]byte"
+      - doc: ": cur is the chunk being filled."
+        name: cur
+        type: "[]byte"
+      - doc: ": size counts the bytes rebuilt so far, across every chunk."
+        name: size
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          charge refuses n more bytes when they would carry the record past
+          maxTLVBytes; it reserves nothing.
+        name: charge
+        params: n uint64
+        recv: f *recordFrame
+        results: error
+      - doc: |-
+          ensureRoom opens a new chunk when the current one is full: as large as
+          what the record already holds, at least frameMinChunk, and never past
+          what the ceiling leaves. Callers charge first, so the room is positive.
+        name: ensureRoom
+        recv: f *recordFrame
+      - doc: appendByte charges and appends one header byte.
+        name: appendByte
+        params: b byte
+        recv: f *recordFrame
+        results: error
+      - doc: appendUvarint charges and appends v as LEB128, the way the record carried it.
+        name: appendUvarint
+        params: v uint64
+        recv: f *recordFrame
+        results: error
+      - doc: |-
+          readValue charges length value bytes, then reads them from the stream into
+          the chunks, so the reservation follows the bytes the reader delivers.
+        name: readValue
+        params: length uint64
+        recv: f *recordFrame
+        results: error
+      - doc: |-
+          readBody reads the LEB128 length header for an already-consumed tag and
+          the record body. depth bounds composite recursion against CWE-674 stack
+          exhaustion.
+        name: readBody
+        params: tag byte, depth int
+        recv: f *recordFrame
+        results: error
+      - doc: |-
+          readChildren reads a composite's declared sub-records recursively, so the
+          streaming reader frames the body identically to the buffered decoder (V59).
+        name: readChildren
+        params: tag byte, length uint64, depth int
+        recv: f *recordFrame
+        results: error
+      - doc: |-
+          join returns the rebuilt record as one slice: the single chunk itself
+          when the record fit in one, else one allocation of exactly its size.
+        name: join
+        recv: f *recordFrame
+        results: "[]byte"
+    name: recordFrame
+  - doc: |-
       scalarSliceWalkResult bundles the populated slice + residual bytes
       produced by walkScalarSlice. Two-value return would exceed the
       linter's NAMEDRETURN budget on a multi-error path.
@@ -1329,6 +1506,46 @@ types:
     kind: named
     name: reflectView
     underlying: reflect.Value
+  - doc: pairSpan locates one encoded map pair, relative to the start of the first.
+    fields:
+      - doc: |-
+          prefix is a string key's first prefixBytes payload bytes, big-endian
+          and zero-padded: two string keys whose prefixes differ are ordered by
+          one integer comparison.
+        name: prefix
+        type: uint64
+      - doc: key is where the pair's key record starts.
+        name: key
+        type: int
+      - doc: value is where the pair's value record starts, and its key ends.
+        name: value
+        type: int
+      - doc: end is where the pair ends.
+        name: end
+        type: int
+      - doc: str is set when the key is a string, and prefix holds its start.
+        name: str
+        type: bool
+    kind: struct
+    name: pairSpan
+  - doc: |-
+      wireInt is an encoded integer key, read back for ordering: neg holds a
+      negative value as its int64 bits, otherwise u is the value.
+    fields:
+      - doc: u is the value, or a negative value's two's-complement bits.
+        name: u
+        type: uint64
+      - doc: neg is set for a value below zero.
+        name: neg
+        type: bool
+    kind: struct
+    methods:
+      - doc: compare orders two integer keys by value.
+        name: compare
+        params: b wireInt
+        recv: a wireInt
+        results: int
+    name: wireInt
   - doc: |-
       structFieldInfo carries the resolved metadata for one exported struct
       field. Pre-resolving the field name as a string saves an allocation

@@ -43,6 +43,20 @@ packages:
             name: CodeBSONValueInvalid
             value: "0x00_03_24_05"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeBSONDuplicateKey identifies a document NewStrict's instance refused
+              because one of its documents repeats an element name.
+            name: CodeBSONDuplicateKey
+            value: "0x00_03_24_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeBSONUnknownMember identifies a document NewStrict's instance refused
+              because it carries an element no field of the target struct claims.
+            name: CodeBSONUnknownMember
+            value: "0x00_03_24_07"
+        type: errs.Code
     doc: |-
       Package bson declares the error codes and the sentinels of the BSON codec,
       internal/service/data/codec/bson — range 0.3.36.* (ADR 0021
@@ -81,7 +95,7 @@ packages:
             name: SizeExceeded
             private: "service/data/codec/bson: len(data) exceeds maxBSONBytes"
             public: BSON input exceeds size limit
-            reason: BSON_SIZE_EXCEEDED
+            reason: SIZE_EXCEEDED
           - code: CodeBSONDepthExceeded
             doc: |-
               DepthExceeded marks a document or value nested deeper than the codec
@@ -89,13 +103,25 @@ packages:
             name: DepthExceeded
             private: "service/data/codec/bson: nesting exceeds maxBSONNestedLevels"
             public: BSON nesting depth exceeds limit
-            reason: BSON_DEPTH_EXCEEDED
+            reason: DEPTH_EXCEEDED
           - code: CodeBSONValueInvalid
             doc: ValueInvalid marks a BSON value type that cannot be built from its input.
             name: ValueInvalid
             private: "service/data/codec/bson: the input does not describe a value of this BSON type"
             public: BSON value is invalid
             reason: BSON_VALUE_INVALID
+          - code: CodeBSONDuplicateKey
+            doc: DuplicateKey is the strict refusal of a document that repeats an element name.
+            name: DuplicateKey
+            private: "service/data/codec/bson: NewStrict refused a document holding two elements of one name"
+            public: BSON document repeats an element name
+            reason: DUPLICATE_KEY
+          - code: CodeBSONUnknownMember
+            doc: UnknownMember is the strict refusal of an element no struct field claims.
+            name: UnknownMember
+            private: "service/data/codec/bson: NewStrict refused an element no field of the struct claims"
+            public: BSON document carries an unknown member
+            reason: UNKNOWN_MEMBER
   - constants:
       - blockDoc: |-
           Binary subtypes, BSON 1.1. A subtype is a single byte the codec carries
@@ -186,15 +212,20 @@ packages:
       struct, a map, a D — so Marshal of a top-level scalar or array surfaces
       BSON_MARSHAL_FAILED. Go values map onto BSON as the MongoDB Go driver's v1
       default registry mapped them, struct tags included
-      (bson:"name,omitempty,minsize,truncate,inline"), and the BSON types Go has
+      (bson:"name,omitempty,omitzero,minsize,truncate,inline" — omitzero as
+      encoding/json reads it: the type's IsZero, else every bit at zero), and the
+      BSON types Go has
       no type for decode into this package's own: ObjectID, DateTime, Decimal128,
       Binary, Regex, Timestamp, D, M, A and the rest.
 
       Unmarshal checks the whole input before it touches the target — every
       declared length against the bytes remaining, every terminator, every type
       byte, every string's UTF-8, a nesting depth of at most 100 — so a malformed
-      document is refused whole and never half-decoded. The codec is not a
-      StreamingCodec; it implements the optional Appender.
+      document is refused whole and never half-decoded. It implements the
+      optional Appender, and StreamingCodec over a stream of concatenated
+      documents: an Encode writes one document in one Write, a Decode reads the
+      int32 length prefix, refuses a length past 10 MiB before reserving it, and
+      validates the document whole before decoding it.
 
       Package bson — Decimal128, BSON's IEEE 754-2008 128-bit decimal in the
       binary integer decimal (BID) encoding, and its string forms as the BSON
@@ -280,6 +311,17 @@ packages:
     functions:
       - doc: New returns the BSON codec singleton.
         name: New
+        out:
+          - type: codec.Codec
+      - doc: |-
+          NewStrict returns a fresh BSON codec, not registered, whose Unmarshal and
+          Decode read a document somebody else wrote one way or not at all (ADR
+          0102): a document — at any depth — holding two elements of one name is
+          refused with DUPLICATE_KEY before anything is decoded, and an element no
+          field of the target struct claims, where the struct has no ",inline" map
+          to collect it, with UNKNOWN_MEMBER. The registered codec keeps last-wins
+          and skips unknown elements. Encoding is the registered codec's.
+        name: NewStrict
         out:
           - type: codec.Codec
       - doc: |-
@@ -726,11 +768,15 @@ packages:
       # Mapping
 
       The top level is a document: a struct, a map, a [D]; anything else is
-      refused. Struct fields take the tag bson:"name,omitempty,minsize,truncate,inline"
-      and default to the field name in lower case. int, int8, int16, int32, uint8
+      refused. Struct fields take the tag bson:"name,omitempty,omitzero,minsize,truncate,inline"
+      and default to the field name in lower case; omitzero leaves out a field
+      holding its type's zero value as encoding/json does — its IsZero() when the
+      type declares one, else every bit at zero — and with omitempty either one is
+      enough. int, int8, int16, int32, uint8
       and uint16 are written as int32 (int as int64 when it does not fit), int64,
       uint, uint32 and uint64 as int64, floats as double, []byte as a generic
-      binary, time.Time as a UTC datetime in milliseconds, a nil slice, map or
+      binary, time.Time as a UTC datetime in milliseconds, a time.Duration as an
+      int64 of nanoseconds — the binary formats' rule (#1126) —, a nil slice, map or
       pointer as null, and map keys in sorted order, so the same value always
       encodes to the same bytes. A type can write and read itself through
       MarshalBSON() ([]byte, error) and UnmarshalBSON([]byte) error.
@@ -864,6 +910,22 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_24_05"
+          - doc: |-
+              CodeDuplicateKey is 0.3.36.6: NewStrict's instance found a document that
+              repeats an element name.
+            name: CodeDuplicateKey
+            reexport: corebson.CodeBSONDuplicateKey
+            type: errs.Code
+            typed: true
+            value: "0x00_03_24_06"
+          - doc: |-
+              CodeUnknownMember is 0.3.36.7: NewStrict's instance found an element no
+              struct field claims.
+            name: CodeUnknownMember
+            reexport: corebson.CodeBSONUnknownMember
+            type: errs.Code
+            typed: true
+            value: "0x00_03_24_07"
         doc: The error codes, range 0.3.36.*.
       - alias:
           - doc: D is a document whose element order matters.
@@ -972,6 +1034,17 @@ packages:
           out:
             - type: Decimal128
             - type: error
+      - func:
+          doc: |-
+            NewStrict returns a fresh BSON codec, not registered, that reads a
+            document one way or not at all: a document repeating an element name is
+            refused with CodeDuplicateKey, an element no struct field claims with
+            CodeUnknownMember. The registered format keeps last-wins and skips
+            unknown elements.
+          forward: svcbson.NewStrict
+          name: NewStrict
+          out:
+            - type: codec.Codec
     functions:
       - doc: |-
           Marshal encodes v, which must encode as a document, into a slice the caller
@@ -1007,6 +1080,7 @@ packages:
         out:
           - type: error
     imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
       corebson: github.com/kitsunium/sdk/internal/core/data/codec/bson
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       svcbson: github.com/kitsunium/sdk/internal/service/data/codec/bson

@@ -145,7 +145,14 @@ func checkFailure(t *testing.T, err error) {
 	if err == nil {
 		return
 	}
-	if code, ok := errs.CodeOf(err); !ok || code != coremsgpack.CodeMsgPackUnmarshalFailed || !errs.HasReason(err, "UNMARSHAL_FAILED") {
+	//: no bytes is the family's EMPTY_INPUT (#1101), not a decoding failure.
+	if errs.HasCode(err, codec.CodeEmptyInput) {
+		return
+	}
+	//: every decode failure carries UNMARSHAL_FAILED's code — a bound refusal
+	//: in its trail, under the family's SIZE_EXCEEDED or DEPTH_EXCEEDED (#894).
+	bound := errs.HasReason(err, "SIZE_EXCEEDED") || errs.HasReason(err, "DEPTH_EXCEEDED")
+	if !errs.HasCode(err, coremsgpack.CodeMsgPackUnmarshalFailed) || (!bound && !errs.HasReason(err, "UNMARSHAL_FAILED")) {
 		t.Fatalf("failure is not UNMARSHAL_FAILED %s: %v", coremsgpack.CodeMsgPackUnmarshalFailed, err)
 	}
 }

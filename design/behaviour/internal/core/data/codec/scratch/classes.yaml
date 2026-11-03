@@ -14,22 +14,69 @@ constants:
         type: int
         value: 256 << 10
     name: MaxRetainedBufBytes
+  - doc: |-
+      MaxRetainedSizedBytes is the capacity past which the size-classed tier
+      drops a buffer: 4 MiB. Between MaxRetainedBufBytes and it, a released buffer
+      joins the class its capacity falls in — up to 1 MiB, up to 4 MiB — so a
+      workload of documents past 256 KiB reuses its buffers instead of growing
+      one on every call; past it, one oversized payload still cannot pin its
+      allocation.
+    items:
+      - name: MaxRetainedSizedBytes
+        type: int
+        value: 4 << 20
+    name: MaxRetainedSizedBytes
+  - doc: |-
+      midClassBytes is the ceiling of the smaller size class, and the size its
+      new buffers are allocated at (#906).
+    items:
+      - name: midClassBytes
+        type: int
+        value: 1 << 20
+    name: midClassBytes
 files:
+  - decls:
+      - appendWriterPool
+      - AppendWriter
+      - NewAppendWriter
+      - AcquireAppendWriter
+      - ReleaseAppendWriter
+      - (*AppendWriter).Write
+      - (*AppendWriter).Bytes
+      - (*AppendWriter).Truncate
+    name: appendwriter.go
   - decls: []
     name: doc.go
   - decls:
       - MaxRetainedBufBytes
+      - MaxRetainedSizedBytes
+      - midClassBytes
       - bufferPool
       - AcquireBuffer
+      - AcquireBufferSized
       - ReleaseBuffer
+      - ReleaseBufferSized
       - DetachBuffer
       - AcquireReader
       - ReleaseReader
     name: scratch.go
 functions:
+  - name: NewAppendWriter
+    params: dst []byte
+    results: "*AppendWriter"
+  - name: AcquireAppendWriter
+    params: dst []byte
+    results: "*AppendWriter"
+  - name: ReleaseAppendWriter
+    params: w *AppendWriter
   - name: AcquireBuffer
     results: "*bytes.Buffer"
+  - name: AcquireBufferSized
+    params: hint int
+    results: "*bytes.Buffer"
   - name: ReleaseBuffer
+    params: buf *bytes.Buffer
+  - name: ReleaseBufferSized
     params: buf *bytes.Buffer
   - name: DetachBuffer
     params: buf *bytes.Buffer
@@ -48,8 +95,37 @@ package:
   importPath: github.com/kitsunium/sdk/internal/core/data/codec/scratch
   name: scratch
   purpose: Package scratch provides shared, size-bounded recycling primitives for the service codecs.
-types: []
+types:
+  - fields:
+      - doc: bytes is the caller's slice followed by everything written since.
+        name: bytes
+        type: "[]byte"
+      - doc: "base is len(bytes) when the writer was acquired: what Truncate keeps."
+        name: base
+        type: int
+    kind: struct
+    methods:
+      - name: Write
+        params: p []byte
+        recv: w *AppendWriter
+        results: n int, err error
+      - name: Bytes
+        recv: w *AppendWriter
+        results: "[]byte"
+      - name: Truncate
+        recv: w *AppendWriter
+        results: "[]byte"
+    name: AppendWriter
 vars:
+  - doc: |-
+      appendWriterPool recycles *AppendWriter. A writer is two words and an int,
+      handed to a standard-library encoder as an io.Writer — which moves it to the
+      heap on every call; the pool is what keeps an Append at the encoder's own
+      allocations. Release clears the slice, so no reset-on-Put is needed.
+    items:
+      - name: appendWriterPool
+        value: recycler.NewPool[*AppendWriter](func() *AppendWriter { return new(AppendWriter) })
+    name: appendWriterPool
   - doc: |-
       Shared recycling pools for the codecs, backed by the kernel recycler. One
       shared pool per pooled type — sync.Pool is internally per-P sharded, so
@@ -75,4 +151,26 @@ vars:
           : cap-discard nor reset-on-Put — a plain Pool is the right fit.
         name: readerPool
         value: recycler.NewPool[*bytes.Reader](func() *bytes.Reader { return new(bytes.Reader) })
+      - doc: |-
+          : midClassPool recycles buffers past MaxRetainedBufBytes up to 1 MiB; a
+          : new one is allocated at 1 MiB, so it serves every hint of its class.
+        name: midClassPool
+        value: |-
+          recycler.NewCappedPool[*bytes.Buffer](
+          		func() *bytes.Buffer { return bytes.NewBuffer(make([]byte, 0, midClassBytes)) },
+          		func(b *bytes.Buffer) { b.Reset() },
+          		func(b *bytes.Buffer) int { return b.Cap() },
+          		midClassBytes,
+          	)
+      - doc: |-
+          : topClassPool recycles buffers past 1 MiB up to MaxRetainedSizedBytes,
+          : a new one allocated at that size.
+        name: topClassPool
+        value: |-
+          recycler.NewCappedPool[*bytes.Buffer](
+          		func() *bytes.Buffer { return bytes.NewBuffer(make([]byte, 0, MaxRetainedSizedBytes)) },
+          		func(b *bytes.Buffer) { b.Reset() },
+          		func(b *bytes.Buffer) int { return b.Cap() },
+          		MaxRetainedSizedBytes,
+          	)
     name: bufferPool

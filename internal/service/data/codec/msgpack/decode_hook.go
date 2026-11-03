@@ -4,6 +4,7 @@ import (
 	"encoding"
 	"reflect"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -13,7 +14,24 @@ var pointerToAnyType = reflect.TypeFor[*any]()
 // unmarshalInto decodes data — exactly one value — into the value v points
 // at.
 func unmarshalInto(data []byte, v any) error {
-	d := &decodeState{data: data}
+	//: the registered codec's reading.
+	return unmarshalIntoMode(data, v, false)
+}
+
+// unmarshalIntoMode is unmarshalInto, strictly when strict is set: a map that
+// repeats a key is refused before anything is decoded, a member no struct
+// field claims while it is.
+func unmarshalIntoMode(data []byte, v any, strict bool) error {
+	//: one reading of the document, checked whole first.
+	if strict {
+		walk := decodeState{data: data}
+		//: a repeated key, or a malformed document.
+		if err := walk.checkKeys(); err != nil {
+			//: nothing decoded.
+			return err
+		}
+	}
+	d := &decodeState{data: data, strict: strict}
 	//: decode the one value.
 	if err := d.decodeTarget(v); err != nil {
 		//: the first failure wins.
@@ -31,12 +49,12 @@ func unmarshalInto(data []byte, v any) error {
 
 // decodeTarget decodes the next value into what the pointer v points at.
 func (d *decodeState) decodeTarget(v any) error {
-	rv := reflect.ValueOf(v)
-	//: only a non-nil pointer can receive a value.
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		//: a programming error at the call site, reported as a decode failure.
-		return unmarshalFault("decode target is not a non-nil pointer")
+	//: only a non-nil pointer can receive a value: a programming error at the
+	//: call site, the family's TARGET_INVALID (#1101).
+	if err := codec.CheckTarget(v); err != nil {
+		return err
 	}
+	rv := reflect.ValueOf(v)
 	e := rv.Elem()
 	//: the untyped target skips the plan lookup.
 	if rv.Type() == pointerToAnyType {

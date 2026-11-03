@@ -25,8 +25,8 @@ const (
 	ASCII85 = "ascii85"
 	// Base45 is RFC 9285's alphabet, the one a QR code's alphanumeric mode holds.
 	Base45 = "base45"
-	// Base58 is Bitcoin's alphabet; its base conversion is quadratic, so its input is capped at 4 KiB.
+	// Base58 is Bitcoin's alphabet; its base conversion is quadratic, so its input is capped at 64 KiB.
 	Base58 = "base58"
-	// Base62 is the alphanumeric alphabet; capped at 4 KiB like Base58.
+	// Base62 is the alphanumeric alphabet; capped at 64 KiB like Base58.
 	Base62 = "base62"
 )

@@ -12,6 +12,7 @@ go_library(
     name = "hcl",
     srcs = [
         "codec.go",
+        "depth.go",
         "doc.go",
         "gen_codes.go",
     ],
@@ -38,6 +39,8 @@ go_test(
         "codec_bench_test.go",
         "codec_external_test.go",
         "codec_internal_test.go",
+        "depth_external_test.go",
+        "fuzz_external_test.go",
         "gen_api_test.go",
     ],
     embed = [":hcl"],

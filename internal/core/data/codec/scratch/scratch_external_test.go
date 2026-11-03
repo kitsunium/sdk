@@ -258,3 +258,31 @@ func TestReleaseReader(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// TestAcquireBufferSized is #906: every hint gets a clean buffer with room
+// for it — from the shared pool within its cap, from a size class past it,
+// a fresh one past the sized tier — and a buffer released into its class
+// comes back for the next hint of that class.
+func TestAcquireBufferSized(t *testing.T) {
+	t.Parallel()
+	for _, hint := range []int{
+		0, 100,
+		scratch.MaxRetainedBufBytes, scratch.MaxRetainedBufBytes + 1,
+		600 << 10, 1 << 20, 1<<20 + 1,
+		scratch.MaxRetainedSizedBytes, scratch.MaxRetainedSizedBytes + 1,
+	} {
+		for range 2 {
+			buf := scratch.AcquireBufferSized(hint)
+			if buf.Len() != 0 || buf.Cap() < hint {
+				t.Fatalf("hint %d: len %d cap %d", hint, buf.Len(), buf.Cap())
+			}
+			before := buf.Cap()
+			buf.Write(make([]byte, hint))
+			if buf.Cap() != before {
+				t.Fatalf("hint %d: writing the hinted bytes grew the buffer from %d to %d", hint, before, buf.Cap())
+			}
+			scratch.ReleaseBufferSized(buf)
+		}
+	}
+	scratch.ReleaseBufferSized(nil)
+}

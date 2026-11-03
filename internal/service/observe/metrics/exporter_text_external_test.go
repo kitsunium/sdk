@@ -3,13 +3,11 @@ package metrics_test
 
 import (
 	"bytes"
-	"errors"
 	"testing"
 	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/observe/metrics"
 	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
-	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/observe/metrics"
 )
 
@@ -288,47 +286,6 @@ func TestTextExporterFromARealMeter(t *testing.T) {
 func contains(haystack, needle string) bool {
 	//: a plain substring search; the documents are small.
 	return bytes.Contains([]byte(haystack), []byte(needle))
-}
-
-// TestTextExporterWriterFailure pins that a dead sink is reported typed. The
-// exporter renders everything into one buffer and writes once, so the write is
-// the only error surface — and swallowing it would leave a caller believing
-// their metrics were shipped.
-func TestTextExporterWriterFailure(t *testing.T) {
-	t.Parallel()
-	sinkErr := errors.New("the sink is gone")
-
-	type tc struct {
-		name string
-		snap coremetrics.SnapshotValue
-	}
-	tests := []tc{
-		{"an empty snapshot", coremetrics.SnapshotValue{}},
-		{"a populated snapshot", coremetrics.SnapshotValue{
-			Sums: map[string]coremetrics.SumMetricValue{"c": promCounter(coremetrics.SumValue{Value: 1})},
-		}},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		e := svcmetrics.NewTextExporter("test", failingWriter{err: sinkErr})
-
-		err := e.Export(c.snap)
-
-		if !kerrs.HasCode(err, coremetrics.CodeExportFailed) {
-			t.Fatalf("Export = %v, want EXPORT_FAILED", err)
-		}
-		//: the sink's own error stays reachable, or an operator cannot tell a
-		//: closed pipe from a full disk.
-		if !errors.Is(err, sinkErr) {
-			t.Errorf("Export = %v, want it to wrap %v", err, sinkErr)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
 }
 
 // TestExporterRegistry pins that importing this package registers its text

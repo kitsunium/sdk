@@ -1,6 +1,99 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The reasons a bound refusal carries in every codec of the family (#894):
+      the per-format code is the origin, the reason is shared, so one test answers
+      "too large" or "too deep" across the formats.
+    grouped: true
+    items:
+      - doc: reasonSizeExceeded is the family's reason for input past a size bound.
+        name: reasonSizeExceeded
+        type: string
+        value: "\"SIZE_EXCEEDED\""
+      - doc: reasonDepthExceeded is the family's reason for input past a depth bound.
+        name: reasonDepthExceeded
+        type: string
+        value: "\"DEPTH_EXCEEDED\""
+      - doc: reasonLimitExceeded is multipart's older spelling of a size refusal.
+        name: reasonLimitExceeded
+        type: string
+        value: "\"LIMIT_EXCEEDED\""
+      - doc: reasonDocumentTooLarge is strictjson's older spelling of one.
+        name: reasonDocumentTooLarge
+        type: string
+        value: "\"DOCUMENT_TOO_LARGE\""
+    name: reasonSizeExceeded
+  - doc: |-
+      sniffLen is how many bytes of an input Detect reads at most: the 512
+      http.DetectContentType reads, so a caller that already peeked that much for
+      the standard library passes the same slice.
+    items:
+      - name: sniffLen
+        type: int
+        value: "512"
+    name: sniffLen
+  - doc: The fields the misuse refusals carry (#1101).
+    grouped: true
+    items:
+      - doc: fieldTarget names the type of a refused Unmarshal or Decode target.
+        name: fieldTarget
+        type: string
+        value: "\"target\""
+      - doc: fieldType names the type of a refused Marshal value.
+        name: fieldType
+        type: string
+        value: "\"type\""
+      - doc: nilTarget is what fieldTarget says for an untyped nil.
+        name: nilTarget
+        type: string
+        value: "\"nil\""
+    name: fieldTarget
+  - doc: |-
+      The keys a decode refusal carries its position under (#1125): every codec
+      writes them through PositionFields or by these names, so PositionOf reads
+      any codec's position back.
+    grouped: true
+    items:
+      - doc: FieldOffset is the key of a refusal's 0-based byte offset.
+        name: FieldOffset
+        value: "\"offset\""
+      - doc: FieldLine is the key of a refusal's 1-based line.
+        name: FieldLine
+        value: "\"line\""
+      - doc: |-
+          FieldColumn is the key of a refusal's 1-based column, counted as the format
+          counts it: characters for yaml and toml, bytes for csv.
+        name: FieldColumn
+        value: "\"column\""
+    name: FieldOffset
+  - doc: The slots of the three coordinates, in the order PositionFields writes them.
+    grouped: true
+    items:
+      - doc: slotOffset is the byte offset's slot.
+        name: slotOffset
+        type: int
+        value: iota
+      - doc: slotLine is the line's slot.
+        name: slotLine
+      - doc: slotColumn is the column's slot.
+        name: slotColumn
+      - doc: positionFieldCount is how many fields a position can carry.
+        name: positionFieldCount
+    name: slotOffset
 files:
+  - decls:
+      - reasonSizeExceeded
+      - IsTooLarge
+      - IsTooDeep
+    name: bounds.go
+  - decls:
+      - sniffLen
+      - sniffEntry
+      - sniffers
+      - indexSniffer
+      - Detect
+    name: detect.go
   - decls: []
     name: doc.go
   - decls:
@@ -11,6 +104,20 @@ files:
       - Format.Known
       - Format.String
     name: format.go
+  - decls:
+      - fieldTarget
+      - CheckTarget
+      - CheckValue
+      - IsMisuse
+    name: misuse.go
+  - decls:
+      - FieldOffset
+      - slotOffset
+      - PositionValue
+      - PositionFields
+      - PositionOf
+      - coordinate
+    name: position.go
   - decls:
       - registry
       - Register
@@ -26,6 +133,21 @@ files:
       - Available
     name: registry.go
 functions:
+  - name: IsTooLarge
+    params: err error
+    results: bool
+  - name: IsTooDeep
+    params: err error
+    results: bool
+  - doc: |-
+      indexSniffer appends c to Detect's list when it implements Sniffer. Register
+      calls it once the Format is c's, so a codec refused for a conflict never
+      sniffs.
+    name: indexSniffer
+    params: name Format, c Codec
+  - name: Detect
+    params: prefix []byte
+    results: f Format, ok bool
   - doc: |-
       conflictText renders a registry conflict for the boot panic that reports it:
       the typed error's header and Public, then each field it carries, quoted.
@@ -34,6 +156,27 @@ functions:
     name: conflictText
     params: err error
     results: string
+  - name: CheckTarget
+    params: v any
+    results: error
+  - name: CheckValue
+    params: v any
+    results: error
+  - name: IsMisuse
+    params: err error
+    results: bool
+  - name: PositionFields
+    params: p PositionValue
+    results: "[]errs.FieldValue"
+  - name: PositionOf
+    params: err error
+    results: p PositionValue, ok bool
+  - doc: |-
+      coordinate returns the slot and the member of p that key names, or a nil
+      member for a key that is not a coordinate.
+    name: coordinate
+    params: p *PositionValue, key string
+    results: slot int, dst *int
   - name: Register
     params: c Codec
     results: Codec
@@ -102,6 +245,8 @@ imports:
   fmt: fmt
   mime: mime
   plugin: github.com/kitsunium/sdk/internal/kernel/plugin
+  reflect: reflect
+  snapshot: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
   strconv: strconv
   strings: strings
 package:
@@ -110,6 +255,18 @@ package:
   name: codec
   purpose: Package codec — declares the optional Appender extension that hot-path encoders (NDJSON, JSON, text) implement so callers can write into a caller-supplied buffer without paying for an intermediate allocation.
 types:
+  - doc: |-
+      sniffEntry is one codec Detect asks: the Format it registered under, and its
+      Sniffer.
+    fields:
+      - doc: name is the Format Detect answers when this codec alone claims the bytes.
+        name: name
+        type: Format
+      - doc: sniffer is the codec's Sniffer.
+        name: sniffer
+        type: Sniffer
+    kind: struct
+    name: sniffEntry
   - kind: named
     methods:
       - name: Known
@@ -120,7 +277,28 @@ types:
         results: string
     name: Format
     underlying: string
+  - fields:
+      - doc: Offset is the 0-based byte offset of the problem in the input.
+        name: Offset
+        type: int
+      - doc: Line is the 1-based line of the problem, zero when unknown.
+        name: Line
+        type: int
+      - doc: Column is the 1-based column of the problem, zero when unknown.
+        name: Column
+        type: int
+    kind: struct
+    name: PositionValue
 vars:
+  - doc: |-
+      sniffers lists, in registration order, every registered codec implementing
+      Sniffer. Like the registry it is written once per codec at import and read
+      on every Detect: a copy-on-write slice behind one atomic load, so Detect
+      takes no lock and allocates nothing.
+    items:
+      - name: sniffers
+        type: snapshot.Value[[]sniffEntry]
+    name: sniffers
   - doc: |-
       Package-level indexes.
 

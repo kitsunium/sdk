@@ -83,14 +83,11 @@ sequences:
         kind: actor
       - id: encodeSliceInto
         kind: self
-      - id: stdjson
-        kind: stdlib
-      - id: enc.Encode
+      - id: encodeRecordTo
+        kind: internal
+      - id: buf.WriteByte
         kind: value
     steps:
-      - bind: enc
-        eval: stdjson.NewEncoder(buf)
-        to: stdjson
       - loop:
           do:
             - opt:
@@ -98,12 +95,25 @@ sequences:
                   - return: merr
                 init:
                   bind: merr
-                  eval: enc.Encode(getElem(i))
-                  to: enc.Encode
+                  eval: encodeRecordTo(buf, getElem(i))
+                  to: encodeRecordTo
                 when: merr != nil
+            - eval: buf.WriteByte('\n')
+              to: buf.WriteByte
           key: i
           range: "n"
       - return: nil
+  - of: encodeRecordTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeRecordTo
+        kind: self
+      - id: jsonv2
+        kind: stdlib
+    steps:
+      - return: jsonv2.MarshalWrite(w, v, stdjson.DefaultOptionsV1())
+        to: jsonv2
   - of: marshalRawSliceTo
     participants:
       - id: caller
@@ -188,6 +198,8 @@ sequences:
         kind: actor
       - id: (*ndjsonCodec).Unmarshal
         kind: self
+      - id: codec
+        kind: package
       - id: asSlicePointer
         kind: internal
       - id: errs
@@ -197,6 +209,14 @@ sequences:
       - id: slicePtr.Elem().Set
         kind: value
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - bind: slicePtr, ok
         eval: asSlicePointer(v)
         to: asSlicePointer
@@ -231,10 +251,14 @@ sequences:
         kind: internal
       - id: reflect
         kind: stdlib
+      - id: nextLine
+        kind: internal
       - id: bytes
         kind: stdlib
-      - id: stdjson
-        kind: stdlib
+      - id: growSlots
+        kind: internal
+      - id: decodeRecord
+        kind: internal
       - id: out.Slice
         kind: value
     steps:
@@ -242,7 +266,7 @@ sequences:
         eval: countNDJSONRecords(data)
         to: countNDJSONRecords
       - bind: out
-        eval: reflect.MakeSlice(sliceType, recordCount, recordCount)
+        eval: reflect.MakeSlice(sliceType, min(recordCount, maxReservedRecords), min(recordCount, maxReservedRecords))
         to: reflect
       - bind: decoded
         eval: "0"
@@ -251,35 +275,15 @@ sequences:
       - loop:
           cond: cursor < len(data)
           do:
-            - bind: nlOffset
-              eval: bytes.IndexByte(data[cursor:], '\n')
-              to: bytes
             - var:
                 name: line
                 type: "[]byte"
-            - alt:
-                - do:
-                    - set: line
-                      value: data[cursor:]
-                    - set: cursor
-                      value: len(data)
-                  when: nlOffset < 0
-                - do:
-                    - set: line
-                      value: "data[cursor : cursor+nlOffset]"
-                    - op: +=
-                      set: cursor
-                      value: nlOffset + 1
-                  else: true
+            - set: line, cursor
+              to: nextLine
+              value: nextLine(data, cursor)
             - opt:
                 do:
-                  - return: |-
-                      reflect.Value{}, errs.Wrap(nil, errs.WrapParams{
-                      				Code:    corendjson.CodeNDJSONUnmarshalFailed,
-                      				Reason:  "UNMARSHAL_FAILED",
-                      				Public:  "NDJSON record exceeds size limit",
-                      				Private: "service/data/codec/ndjson.Unmarshal: line length exceeds scannerMaxCapacity",
-                      			}, errs.Int("len", len(line)), errs.Int("cap", scannerMaxCapacity))
+                  - return: reflect.Value{}, sizeExceeded(len(line))
                 when: len(line) > scannerMaxCapacity
             - set: line
               to: bytes
@@ -288,6 +292,12 @@ sequences:
                 do:
                   - continue: true
                 when: len(line) == 0
+            - opt:
+                do:
+                  - set: out
+                    to: growSlots
+                    value: growSlots(out, recordCount)
+                when: decoded == out.Len()
             - opt:
                 do:
                   - return: |-
@@ -299,34 +309,73 @@ sequences:
                       			})
                 init:
                   bind: uerr
-                  eval: stdjson.Unmarshal(line, out.Index(decoded).Addr().Interface())
-                  to: stdjson
+                  eval: decodeRecord(line, out.Index(decoded).Addr().Interface())
+                  to: decodeRecord
                 when: uerr != nil
             - op: ++
               set: decoded
       - return: out.Slice(0, decoded), nil
         to: out.Slice
+  - of: nextLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: nextLine
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - bind: nlOffset
+        eval: bytes.IndexByte(data[cursor:], '\n')
+        to: bytes
+      - opt:
+          do:
+            - return: data[cursor:], len(data)
+          when: nlOffset < 0
+      - return: "data[cursor : cursor+nlOffset], cursor + nlOffset + 1"
+  - of: growSlots
+    participants:
+      - id: caller
+        kind: actor
+      - id: growSlots
+        kind: self
+      - id: reflect
+        kind: stdlib
+    steps:
+      - bind: "n"
+        eval: min(max(2*out.Len(), 1), limit)
+      - bind: grown
+        eval: reflect.MakeSlice(out.Type(), n, n)
+        to: reflect
+      - eval: reflect.Copy(grown, out)
+        to: reflect
+      - return: grown
   - of: countNDJSONRecords
     participants:
       - id: caller
         kind: actor
       - id: countNDJSONRecords
         kind: self
-      - id: bytes
-        kind: stdlib
+      - id: nextLine
+        kind: internal
     steps:
-      - opt:
-          do:
-            - return: "0"
-          when: len(data) == 0
       - bind: count
-        eval: bytes.Count(data, []byte{'\n'})
-        to: bytes
-      - opt:
+        eval: "0"
+      - loop:
+          cond: cursor < len(data)
           do:
-            - op: ++
-              set: count
-          when: data[len(data)-1] != '\n'
+            - var:
+                name: line
+                type: "[]byte"
+            - set: line, cursor
+              to: nextLine
+              value: nextLine(data, cursor)
+            - opt:
+                do:
+                  - op: ++
+                    set: count
+                when: len(bytes.TrimSpace(line)) > 0
+          init: cursor := 0
       - return: count
   - of: (*ndjsonCodec).Append
     participants:
@@ -456,3 +505,364 @@ sequences:
             - return: reflect.Value{}, false
           when: rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Slice
       - return: rv, true
+  - of: decodeRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRecord
+        kind: self
+      - id: jsonv2
+        kind: stdlib
+    steps:
+      - return: jsonv2.Unmarshal(line, ptr, stdjson.DefaultOptionsV1())
+        to: jsonv2
+  - of: (*ndjsonCodec).NewDecoder
+    steps:
+      - return: "&ndjsonDecoder{r: bufio.NewReader(r)}"
+  - of: (*ndjsonDecoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonDecoder).Decode
+        kind: self
+      - id: codec
+        kind: package
+      - id: d.advance
+        kind: internal
+      - id: decodeRecord
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - eval: d.advance()
+        to: d.advance
+      - opt:
+          do:
+            - set: d.reported
+              value: "true"
+            - return: d.err
+          when: "!d.ready"
+      - set: d.ready
+        value: "false"
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(uerr, errs.WrapParams{
+                			Code:    corendjson.CodeNDJSONUnmarshalFailed,
+                			Reason:  "UNMARSHAL_FAILED",
+                			Public:  "NDJSON decoding failed",
+                			Private: "service/data/codec/ndjson.Decoder.Decode: encoding/json returned an error",
+                		})
+              to: errs
+          init:
+            bind: uerr
+            eval: decodeRecord(d.line, v)
+            to: decodeRecord
+          when: uerr != nil
+      - return: nil
+  - of: (*ndjsonDecoder).More
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonDecoder).More
+        kind: self
+      - id: d.advance
+        kind: internal
+    steps:
+      - eval: d.advance()
+        to: d.advance
+      - return: d.ready || (!d.reported && !errors.Is(d.err, io.EOF))
+  - of: (*ndjsonDecoder).advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonDecoder).advance
+        kind: self
+      - id: d.readLine
+        kind: internal
+      - id: bytes
+        kind: stdlib
+    steps:
+      - loop:
+          cond: "!d.ready && d.err == nil"
+          do:
+            - bind: line, err
+              eval: d.readLine()
+              to: d.readLine
+            - opt:
+                do:
+                  - set: d.line, d.ready
+                    value: trimmed, true
+                init:
+                  bind: trimmed
+                  eval: bytes.TrimSpace(line)
+                  to: bytes
+                when: len(trimmed) > 0
+            - set: d.err
+              value: err
+  - of: (*ndjsonDecoder).readLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonDecoder).readLine
+        kind: self
+      - id: d.r.ReadSlice
+        kind: value
+      - id: lineEnd
+        kind: internal
+    steps:
+      - bind: frag, err
+        eval: d.r.ReadSlice('\n')
+        to: d.r.ReadSlice
+      - opt:
+          do:
+            - return: lineEnd(frag, err)
+              to: lineEnd
+          when: "!errors.Is(err, bufio.ErrBufferFull)"
+      - set: d.long
+        value: append(d.long[:0], frag...)
+      - loop:
+          cond: errors.Is(err, bufio.ErrBufferFull)
+          do:
+            - opt:
+                do:
+                  - return: nil, sizeExceeded(len(d.long))
+                when: len(d.long) > scannerMaxCapacity
+            - set: frag, err
+              to: d.r.ReadSlice
+              value: d.r.ReadSlice('\n')
+            - set: d.long
+              value: append(d.long, frag...)
+      - set: line, err
+        to: lineEnd
+        value: lineEnd(d.long, err)
+      - opt:
+          do:
+            - return: nil, sizeExceeded(len(line))
+          when: len(line) > scannerMaxCapacity
+      - return: line, err
+  - of: lineEnd
+    steps:
+      - opt:
+          do:
+            - return: frag[:len(frag)-1], nil
+          when: err == nil
+      - opt:
+          do:
+            - return: frag, io.EOF
+          when: errors.Is(err, io.EOF)
+      - return: |-
+          frag, errs.Wrap(err, errs.WrapParams{
+          		Code:    corendjson.CodeNDJSONUnmarshalFailed,
+          		Reason:  "UNMARSHAL_FAILED",
+          		Public:  "NDJSON decoding failed",
+          		Private: "service/data/codec/ndjson.Decoder: the reader failed",
+          	})
+  - of: sizeExceeded
+    participants:
+      - id: caller
+        kind: actor
+      - id: sizeExceeded
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corendjson.SizeExceeded, errs.WrapParams{Code: corendjson.CodeNDJSONUnmarshalFailed},
+          		errs.Int("len", n), errs.Int("cap", scannerMaxCapacity))
+        to: errs
+  - of: (*ndjsonCodec).NewEncoder
+    steps:
+      - return: "&ndjsonEncoder{w: w}"
+  - of: (*ndjsonEncoder).Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonEncoder).Encode
+        kind: self
+      - id: e.appendLine
+        kind: internal
+      - id: e.w.Write
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: merr
+        eval: e.appendLine(v)
+        to: e.appendLine
+      - opt:
+          do:
+            - set: _, merr
+              to: e.w.Write
+              value: e.w.Write(e.line)
+          when: merr == nil
+      - opt:
+          do:
+            - return: nil
+          when: merr == nil
+      - return: |-
+          errs.Wrap(merr, errs.WrapParams{
+          		Code:    corendjson.CodeNDJSONMarshalFailed,
+          		Reason:  "MARSHAL_FAILED",
+          		Public:  "NDJSON encoding failed",
+          		Private: "service/data/codec/ndjson.Encoder.Encode: encoding/json returned an error",
+          	})
+        to: errs
+  - of: (*ndjsonEncoder).Close
+    steps:
+      - return: nil
+  - of: (*ndjsonEncoder).appendLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonEncoder).appendLine
+        kind: self
+      - id: scratch
+        kind: package
+      - id: encodeRecordTo
+        kind: internal
+    steps:
+      - bind: w
+        eval: scratch.AcquireAppendWriter(e.line[:0])
+        to: scratch
+      - bind: merr
+        eval: encodeRecordTo(w, v)
+        to: encodeRecordTo
+      - set: e.line
+        value: append(w.Bytes(), '\n')
+      - eval: scratch.ReleaseAppendWriter(w)
+        to: scratch
+      - return: merr
+  - of: (*ndjsonCodec).Sniff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ndjsonCodec).Sniff
+        kind: self
+      - id: scanJSONValue
+        kind: internal
+    steps:
+      - bind: end, closed
+        eval: scanJSONValue(prefix, skipJSONSpace(prefix, 0))
+        to: scanJSONValue
+      - opt:
+          do:
+            - return: "false"
+          when: end < 0 || !closed
+      - loop:
+          cond: end < len(prefix) && (prefix[end] == ' ' || prefix[end] == '\t' || prefix[end] == '\r')
+          do:
+            - op: ++
+              set: end
+      - opt:
+          do:
+            - return: "false"
+          when: end == len(prefix) || prefix[end] != '\n'
+      - bind: next, _
+        eval: scanJSONValue(prefix, skipJSONSpace(prefix, end))
+        to: scanJSONValue
+      - return: next >= 0
+  - of: skipJSONSpace
+    steps:
+      - loop:
+          cond: i < len(p) && (p[i] == ' ' || p[i] == '\t' || p[i] == '\n' || p[i] == '\r')
+          do:
+            - op: ++
+              set: i
+      - return: i
+  - of: scanJSONValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanJSONValue
+        kind: self
+      - id: skipJSONString
+        kind: internal
+      - id: bracketDelta
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "-1, false"
+          when: "!opensJSONValue(p, i)"
+      - bind: depth
+        eval: "0"
+      - loop:
+          cond: j < len(p)
+          do:
+            - opt:
+                do:
+                  - var:
+                      name: ok
+                      type: bool
+                  - set: j, ok
+                    to: skipJSONString
+                    value: skipJSONString(p, j)
+                  - opt:
+                      do:
+                        - return: "-1, false"
+                      when: "!ok"
+                  - continue: true
+                when: p[j] == '"'
+            - op: +=
+              set: depth
+              to: bracketDelta
+              value: bracketDelta(p[j])
+            - opt:
+                do:
+                  - return: j + 1, true
+                when: depth == 0
+            - opt:
+                do:
+                  - return: "-1, false"
+                when: strings.IndexByte(jsonOutsideString, p[j]) < 0
+          init: j := i
+          post: j++
+      - return: len(p), false
+  - of: opensJSONValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: opensJSONValue
+        kind: self
+      - id: skipJSONSpace
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: i >= len(p) || (p[i] != '{' && p[i] != '[')
+      - bind: k
+        eval: skipJSONSpace(p, i+1)
+        to: skipJSONSpace
+      - opt:
+          do:
+            - return: "true"
+          when: k == len(p)
+      - opt:
+          do:
+            - return: p[k] == '"' || p[k] == '}'
+          when: p[i] == '{'
+      - return: strings.IndexByte(jsonValueStart, p[k]) >= 0
+  - of: bracketDelta
+    steps:
+      - switch:
+          cases:
+            - case: "'{', '['"
+              do:
+                - return: "1"
+            - case: "'}', ']'"
+              do:
+                - return: "-1"
+            - default: true
+              do:
+                - return: "0"
+          "on": c

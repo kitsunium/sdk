@@ -128,64 +128,149 @@ sequences:
           key: i
           range: alphabet
       - return: table
-  - of: divmodInPlace
+  - of: chunkOf
     steps:
-      - bind: rem
-        eval: "0"
+      - set: power, digits
+        value: uint64(radix), 1
+      - loop:
+          cond: power*uint64(radix) <= limbMask
+          do:
+            - op: "*="
+              set: power
+              value: uint64(radix)
+            - op: ++
+              set: digits
+      - return: power, digits
+  - of: divmodLimbs
+    participants:
+      - id: caller
+        kind: actor
+      - id: divmodLimbs
+        kind: self
+      - id: divmodLimbsBy58
+        kind: internal
+      - id: divmodLimbsBy62
+        kind: internal
+      - id: divmodLimbsBy
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: base58Chunk
+              do:
+                - return: divmodLimbsBy58(limbs)
+                  to: divmodLimbsBy58
+            - case: base62Chunk
+              do:
+                - return: divmodLimbsBy62(limbs)
+                  to: divmodLimbsBy62
+            - default: true
+              do:
+                - return: divmodLimbsBy(limbs, power)
+                  to: divmodLimbsBy
+          "on": power
+  - of: divmodLimbsBy58
+    steps:
+      - var:
+          name: rem
+          type: uint64
       - loop:
           do:
             - bind: acc
-              eval: rem*byteBase + int(buf[i])
-            - set: buf[i]
-              value: byte(acc / radix)
+              eval: rem<<limbBits | uint64(limb)
+            - set: limbs[i]
+              value: uint32(acc / base58Chunk)
             - set: rem
-              value: acc % radix
+              value: acc % base58Chunk
           key: i
-          range: buf
+          range: limbs
+          value: limb
       - return: rem
-  - of: trimLeadingZeros
+  - of: divmodLimbsBy62
+    steps:
+      - var:
+          name: rem
+          type: uint64
+      - loop:
+          do:
+            - bind: acc
+              eval: rem<<limbBits | uint64(limb)
+            - set: limbs[i]
+              value: uint32(acc / base62Chunk)
+            - set: rem
+              value: acc % base62Chunk
+          key: i
+          range: limbs
+          value: limb
+      - return: rem
+  - of: divmodLimbsBy
+    steps:
+      - var:
+          name: rem
+          type: uint64
+      - loop:
+          do:
+            - bind: acc
+              eval: rem<<limbBits | uint64(limb)
+            - set: limbs[i]
+              value: uint32(acc / power)
+            - set: rem
+              value: acc % power
+          key: i
+          range: limbs
+          value: limb
+      - return: rem
+  - of: bytesToLimbs
+    steps:
+      - bind: limbs
+        eval: make([]uint32, (len(b)+limbBytes-1)/limbBytes)
+      - bind: end
+        eval: len(b)
+      - loop:
+          cond: i >= 0
+          do:
+            - bind: begin
+              eval: max(end-limbBytes, 0)
+            - var:
+                name: v
+                type: uint32
+            - loop:
+                do:
+                  - set: v
+                    value: v<<8 | uint32(c)
+                key: _
+                range: b[begin:end]
+                value: c
+            - set: limbs[i]
+              value: v
+            - set: end
+              value: begin
+          init: i := len(limbs) - 1
+          post: i--
+      - return: limbs
+  - of: trimLeadingZeroLimbs
     steps:
       - bind: i
         eval: "0"
       - loop:
-          cond: i < len(b) && b[i] == 0
+          cond: i < len(limbs) && limbs[i] == 0
           do:
             - op: ++
               set: i
-      - return: b[i:]
-  - of: mulAddWindow
-    steps:
-      - bind: carry
-        eval: add
-      - loop:
-          cond: i >= start
-          do:
-            - bind: acc
-              eval: int(mag[i])*radix + carry
-            - set: mag[i]
-              value: byte(acc)
-            - set: carry
-              value: acc / byteBase
-          init: i := len(mag) - 1
-          post: i--
-      - loop:
-          cond: carry > 0
-          do:
-            - op: "--"
-              set: start
-            - set: mag[start]
-              value: byte(carry)
-            - op: /=
-              set: carry
-              value: byteBase
-      - return: start
+      - return: limbs[i:]
   - of: encodeBaseN
     participants:
       - id: caller
         kind: actor
       - id: encodeBaseN
         kind: self
-      - id: trimLeadingZeros
+      - id: bytesToLimbs
+        kind: internal
+      - id: chunkOf
+        kind: internal
+      - id: divmodLimbs
+        kind: internal
+      - id: trimLeadingZeroLimbs
         kind: internal
       - id: assembleBaseN
         kind: internal
@@ -197,19 +282,36 @@ sequences:
           do:
             - op: ++
               set: zeros
-      - bind: buf
-        eval: make([]byte, len(raw)-zeros)
-      - eval: copy(buf, raw[zeros:])
+      - bind: limbs
+        eval: bytesToLimbs(raw[zeros:])
+        to: bytesToLimbs
+      - bind: power, chunk
+        eval: chunkOf(radix)
+        to: chunkOf
       - bind: digits
-        eval: make([]byte, 0, len(raw)*base45PairBytes)
+        eval: make([]byte, 0, len(raw)*base45PairBytes+chunk)
       - loop:
-          cond: len(buf) > 0
+          cond: len(limbs) > 0
+          do:
+            - bind: rem
+              eval: divmodLimbs(limbs, power)
+              to: divmodLimbs
+            - set: limbs
+              to: trimLeadingZeroLimbs
+              value: trimLeadingZeroLimbs(limbs)
+            - loop:
+                do:
+                  - set: digits
+                    value: append(digits, alphabet[rem%uint64(radix)])
+                  - op: /=
+                    set: rem
+                    value: uint64(radix)
+                range: chunk
+      - loop:
+          cond: len(digits) > 0 && digits[len(digits)-1] == alphabet[0]
           do:
             - set: digits
-              value: append(digits, alphabet[divmodInPlace(buf, radix)])
-            - set: buf
-              to: trimLeadingZeros
-              value: trimLeadingZeros(buf)
+              value: digits[:len(digits)-1]
       - return: assembleBaseN(alphabet[0], zeros, digits)
         to: assembleBaseN
   - of: assembleBaseN
@@ -239,7 +341,11 @@ sequences:
         kind: actor
       - id: decodeBaseN
         kind: self
-      - id: mulAddWindow
+      - id: chunkOf
+        kind: internal
+      - id: chunkValue
+        kind: internal
+      - id: mulAddLimbs
         kind: internal
       - id: assembleDecoded
         kind: internal
@@ -251,36 +357,74 @@ sequences:
           do:
             - op: ++
               set: zeros
-      - bind: mag
-        eval: make([]byte, len(s))
-      - bind: start
-        eval: len(mag)
+      - bind: _, chunk
+        eval: chunkOf(radix)
+        to: chunkOf
+      - bind: limbs
+        eval: make([]uint32, 0, len(s)*maxDigitBits/int(limbBits)+2)
       - loop:
+          cond: begin < len(s)
           do:
-            - bind: digit
-              eval: reverse[c]
+            - bind: value, scale, valid
+              eval: chunkValue(s[begin:min(begin+chunk, len(s))], reverse, radix)
+              to: chunkValue
             - opt:
                 do:
                   - return: nil, false
-                when: digit == base45NotMember
-            - set: start
-              to: mulAddWindow
-              value: mulAddWindow(mag, start, radix, digit)
-          key: _
-          range: s
-          value: c
-      - return: assembleDecoded(zeros, mag[start:]), true
+                when: "!valid"
+            - set: limbs
+              to: mulAddLimbs
+              value: mulAddLimbs(limbs, scale, value)
+          init: begin := 0
+          post: begin += chunk
+      - return: assembleDecoded(zeros, limbs), true
         to: assembleDecoded
+  - of: mulAddLimbs
+    steps:
+      - bind: carry
+        eval: add
+      - loop:
+          do:
+            - bind: acc
+              eval: uint64(limb)*scale + carry
+            - set: limbs[i]
+              value: uint32(acc & limbMask)
+            - set: carry
+              value: acc >> limbBits
+          key: i
+          range: limbs
+          value: limb
+      - opt:
+          do:
+            - set: limbs
+              value: append(limbs, uint32(carry))
+          when: carry > 0
+      - return: limbs
   - of: assembleDecoded
     steps:
       - bind: out
-        eval: make([]byte, 0, zeros+len(buf))
+        eval: make([]byte, 0, zeros+len(limbs)*limbBytes)
+      - set: out
+        value: out[:zeros]
       - loop:
           do:
-            - set: out
-              value: append(out, 0)
-          range: zeros
-      - return: append(out, buf...)
+            - loop:
+                cond: shift >= 0
+                do:
+                  - bind: b
+                    eval: byte(limb >> uint(shift))
+                  - opt:
+                      do:
+                        - continue: true
+                      when: b == 0 && len(out) == zeros
+                  - set: out
+                    value: append(out, b)
+                init: shift := int(limbBits) - byteBits
+                post: shift -= byteBits
+          key: _
+          range: slices.Backward(limbs)
+          value: limb
+      - return: out
   - of: (*bufferingWriter).Write
     participants:
       - id: caller
@@ -477,6 +621,8 @@ sequences:
         kind: actor
       - id: (*baseencCodec).Unmarshal
         kind: self
+      - id: codec
+        kind: package
       - id: errs
         kind: package
       - id: convSizeExceeded
@@ -488,10 +634,18 @@ sequences:
     steps:
       - opt:
           do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
             - return: |-
                 errs.Wrap(nil, errs.WrapParams{
                 			Code:    corebaseenc.CodeBaseEncSizeExceeded,
-                			Reason:  "BASE_ENC_SIZE_EXCEEDED",
+                			Reason:  "SIZE_EXCEEDED",
                 			Public:  "base-N input exceeds size limit",
                 			Private: "service/data/codec/baseenc.Unmarshal: len(data) > maxBaseEncBytes",
                 		})
@@ -913,7 +1067,7 @@ sequences:
       - return: |-
           errs.Wrap(nil, errs.WrapParams{
           		Code:    corebaseenc.CodeBaseEncSizeExceeded,
-          		Reason:  "BASE_ENC_SIZE_EXCEEDED",
+          		Reason:  "SIZE_EXCEEDED",
           		Public:  "base-N input exceeds size limit",
           		Private: where,
           	})
@@ -1020,6 +1174,8 @@ sequences:
         kind: actor
       - id: (*baseencDecoder).Decode
         kind: self
+      - id: codec
+        kind: package
       - id: stdjson
         kind: stdlib
       - id: d.jsonDec.Decode
@@ -1027,6 +1183,14 @@ sequences:
       - id: errs
         kind: package
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - opt:
           do:
             - set: d.jsonDec

@@ -5,6 +5,9 @@
 package bson_test
 
 import (
+	"bufio"
+	"bytes"
+	"io"
 	"runtime"
 	"strconv"
 	"testing"
@@ -299,4 +302,85 @@ func BenchmarkUnmarshalParallel(b *testing.B) {
 		}
 		runtime.KeepAlive(got)
 	})
+}
+
+// BenchmarkStreamEncode measures the streaming Encoder (#1100): one document
+// per Encode into io.Discard — Marshal's work plus one Write, without the
+// caller's copy.
+func BenchmarkStreamEncode(b *testing.B) {
+	for _, fx := range benchFixtures() {
+		b.Run(fx.name, func(b *testing.B) {
+			enc := bson.New().(corecodec.StreamingCodec).NewEncoder(io.Discard)
+			b.ReportAllocs()
+			b.SetBytes(int64(len(benchEncoded(b, fx.value))))
+			for b.Loop() {
+				//: an encode failure inside the loop is a regression, not noise.
+				if err := enc.Encode(fx.value); err != nil {
+					b.Fatalf("Encode = %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkStreamDecode measures the streaming Decoder (#1100) on one
+// document per op, re-read from the same bytes through a reused
+// bufio.Reader — BenchmarkUnmarshalTyped's work plus the frame and the read.
+func BenchmarkStreamDecode(b *testing.B) {
+	for _, fx := range []struct {
+		name  string
+		value any
+		into  func() any
+	}{
+		{"record", benchRecordAt(7), func() any { return new(benchRecord) }},
+		{"batch1000", benchBatchValue(), func() any { return new(benchBatch) }},
+	} {
+		b.Run(fx.name, func(b *testing.B) {
+			data := benchEncoded(b, fx.value)
+			sc := bson.New().(corecodec.StreamingCodec)
+			rd := bytes.NewReader(data)
+			br := bufio.NewReader(rd)
+			b.ReportAllocs()
+			b.SetBytes(int64(len(data)))
+			for b.Loop() {
+				rd.Reset(data)
+				br.Reset(rd)
+				got := fx.into()
+				//: a decode failure inside the loop is a regression, not noise.
+				if err := sc.NewDecoder(br).Decode(got); err != nil {
+					b.Fatalf("Decode = %v", err)
+				}
+				benchSinkAny = got
+			}
+		})
+	}
+}
+
+// BenchmarkUnmarshalStrict is BenchmarkUnmarshalTyped through NewStrict
+// (#1106): the duplicate-name walk before the decode, and the unknown-member
+// check in it.
+func BenchmarkUnmarshalStrict(b *testing.B) {
+	for _, fx := range []struct {
+		name  string
+		value any
+		into  func() any
+	}{
+		{"record", benchRecordAt(7), func() any { return new(benchRecord) }},
+		{"batch1000", benchBatchValue(), func() any { return new(benchBatch) }},
+	} {
+		b.Run(fx.name, func(b *testing.B) {
+			data := benchEncoded(b, fx.value)
+			codc := bson.NewStrict()
+			b.ReportAllocs()
+			b.SetBytes(int64(len(data)))
+			for b.Loop() {
+				got := fx.into()
+				//: a decode failure inside the loop is a regression, not noise.
+				if err := codc.Unmarshal(data, got); err != nil {
+					b.Fatalf("Unmarshal = %v", err)
+				}
+				benchSinkAny = got
+			}
+		})
+	}
 }

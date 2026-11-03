@@ -111,3 +111,59 @@ says more about the neighbours than about the codec.
 Measured on an Apple M1 Pro (10 cores), 16 GiB, macOS 26.6.2 (25G83),
 go1.27.1 darwin/arm64, on 2026-10-03 between 02:14 and 02:34 CEST; old at
 `390aa80f`, new at `b6609749`.
+
+## #896: the deterministic instance, and what it costs the registered codec
+
+`NewDeterministic` rides on the registered codec's walk: one bit in
+`walkDepth.hops` selects the shortest float and the key-sorted struct loop
+(`appendFieldsInOrder`, apart from the loop the registered codec runs), and a
+decode mode keeps tags and adds the deterministic walk. Measured on the
+L5 work VM (AMD EPYC 7351P, 4 of 16 cores, Go 1.27.3 linux/amd64, shared with
+other builds), `go test -bench -benchmem`, base `3cb6093ee` and branch
+interleaved, 8 rounds, `benchstat`:
+
+| benchmark | base ns/op | branch ns/op | delta | allocs/op |
+|---|---:|---:|---|---|
+| `MarshalSmall` | 234.8 ± 6 % | 257.0 ± 6 % | +9.5 % (p=0.007) | 1 → 1 |
+| `UnmarshalSmall` | 766.4 ± 2 % | 792.8 ± 14 % | +3.4 % (p=0.007) | 3 → 3 |
+| `MarshalRecord` | 1 528 ± 2 % | 1 515 ± 21 % | ~ (p=0.88) | 2 → 2 |
+| `AppendRecord` | 1 307 ± 3 % | 1 279 ± 11 % | ~ (p=0.31) | 1 → 1 |
+| `UnmarshalRecord` | 4 275 ± 3 % | 4 466 ± 11 % | +4.5 % (p=0.05) | 17 → 17 |
+| `MarshalMap16` | 3 429 ± 3 % | 3 480 ± 7 % | ~ | 1 → 1 |
+| `MarshalDocAny` | 1 267 ± 3 % | 1 271 ± 8 % | ~ | 1 → 1 |
+| `UnmarshalDocAny` | 2 977 ± 3 % | 3 030 ± 3 % | ~ | 32 → 32 |
+| `MarshalRecords1000` | 1 142 000 ± 1 % | 1 129 000 ± 7 % | ~ | 2 → 2 |
+| `StreamEncode` | 142 400 ± 19 % | 139 300 ± 7 % | ~ | 101 → 101 |
+| `StreamDecode` | 420 100 ± 4 % | 424 700 ± 3 % | ~ | 1 594 → 1 594 |
+
+Allocations are unchanged on every row, and `MarshalRecord` / `AppendRecord`
+— #896's bar — are unchanged in time. The two-field `MarshalSmall` pays
+about 20 ns: three earlier shapes of the mode (a third `walkDepth` field, a
+parameter on the scalar appenders, the sort inside the struct loop) measured
++3 % to +15 % there, and this one is the least; the cause left is the mode
+test on the untyped path, not proven further on a machine this noisy.
+
+The instance itself, same run conditions (`-count=8`, branch only):
+
+| benchmark | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| `MarshalRecord` | 1 535 | 320 | 2 |
+| `MarshalRecordDeterministic` | 1 569 | 304 | 2 |
+| `UnmarshalRecord` | 4 291 | 784 | 17 |
+| `UnmarshalRecordDeterministic` | 4 947 | 784 | 17 |
+
+Encoding deterministically costs 2 % — the struct's keys sorted, the float
+two bytes shorter (304 B against 320 B) —; decoding 15 %, the deterministic
+walk over the validated item before the decode.
+
+## #891: the bounded stream decoder costs the unbounded one nothing
+
+`NewBoundedDecoder` shares the stream decoder; the unbounded path gains one
+comparison per read and per unfinished item (`d.limit > 0`). Same machine,
+base `ca04929e7` and branch interleaved, 8 rounds, `benchstat`:
+
+| benchmark | base ns/op | branch ns/op | delta | allocs/op |
+|---|---:|---:|---|---|
+| `StreamDecode` | 422 400 ± 2 % | 420 700 ± 3 % | ~ (p=0.645) | 1 594 → 1 594 |
+
+Within the issue's 2 % bar, B/op identical (64.62 KiB).

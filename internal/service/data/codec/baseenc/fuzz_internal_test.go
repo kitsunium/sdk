@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Bounds the base-conversion fuzz targets work within. maxConvBytes (4 KiB) is
+// Bounds the base-conversion fuzz targets work within. maxConvBytes (64 KiB) is
 // the production cap on the RAW side of the O(n²) variants; the targets stay
 // well under it so one execution cannot dominate the budget, while still
 // crossing every length class the transforms branch on.
@@ -56,15 +56,11 @@ func fuzzRawSeeds() [][]byte {
 // back Base58 and Base62.
 //
 // These are the only arithmetic in the codec tree that the stdlib does not
-// provide: encodeBaseN divides a big-endian magnitude down by the radix,
-// decodeBaseN folds it back up through mulAddWindow, and mulAddWindow grows
-// its live window LEFTWARDS into a reserved prefix rather than reallocating.
-// That last one carries an explicit safety claim in its doc-comment — "the
-// window can never run past index 0", justified by 256^n bounding radix^n for
-// any radix below 256. If that claim is ever wrong by one, `mag[start]` with
-// start == -1 panics. This target is what makes the claim testable rather than
-// merely asserted, because the exact-recovery property below cannot hold
-// unless the window arithmetic is exact.
+// provide: encodeBaseN divides a magnitude held in 32-bit limbs down by a
+// power of the radix, five digits a step, and decodeBaseN folds it back up
+// through mulAddLimbs, sized up front from radix^n < 2^(6n). The output must
+// also be the byte-wise long division's, which the limbs replaced (#898):
+// referenceEncodeBaseN is checked on every input.
 //
 // The invariant is EXACT RECOVERY, including the leading-zero prefix, which is
 // carried by a completely separate code path from the magnitude and is where a
@@ -93,6 +89,11 @@ func FuzzBaseConvRoundTrip(f *testing.F) {
 			alphabet, radix, reverse = base62Alphabet, base62Radix, &base62Reverse
 		}
 		encoded := encodeBaseN(raw, alphabet, radix)
+		//: the limb arithmetic writes what the byte-wise long division wrote.
+		if want := referenceEncodeBaseN(raw, alphabet, radix); !bytes.Equal(encoded, want) {
+			//: the identity #898 promised is broken.
+			t.Fatalf("radix %d: limbs encode %q, long division %q", radix, encoded, want)
+		}
 		//: every emitted char must be a member of the alphabet it claims.
 		for i, c := range encoded {
 			//: a char the reverse table does not know is not in the alphabet.

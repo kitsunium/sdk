@@ -3,7 +3,7 @@ domain: kernel/jsonenc
 packages:
   - doc: |-
       Package jsonenc appends JSON to a byte slice: a string literal, an integer,
-      and an object whose members are written in the order they are named. It is a
+      a float, and an object whose members are written in the order they are named. It is a
       kernel primitive — stdlib-only, and generic down to the signatures: a slice
       and a value, with no logger, no token and no codec in any of them. It
       registers no codec and reads no value by reflection; encoding/json stays the
@@ -42,6 +42,17 @@ packages:
       most of them, costs one search and one copy. A byte from 0x80 up is where the
       slow path starts: the run of non-ASCII is decoded rune by rune, validated,
       and copied whole unless it holds a bad byte or a line separator.
+
+      # What a float becomes
+
+      [AppendFloat] writes a finite float64 as encoding/json writes it — the ES6
+      number-to-string rule: the shortest decimal that reads back to the same
+      value, in plain notation from 1e-6 up to (not including) 1e21 and in
+      exponent notation outside it, with an exponent of one digit written
+      without its leading zero (1e-7, not 1e-07). So 1e6 is 1000000 and not
+      1e+06, as strconv's 'g' would write it. NaN and ±Inf have no JSON number:
+      AppendFloat appends nothing for them and reports false, and the caller
+      writes what its own format says — null, a quoted name, a refusal.
 
       # Objects
 
@@ -107,6 +118,22 @@ packages:
         out:
           - type: "[]byte"
       - doc: |-
+          AppendFloat appends f to dst as the JSON number encoding/json writes for
+          a float64 and reports true; for NaN, +Inf and -Inf, which JSON cannot
+          write, it appends nothing and reports false, so the caller spells its
+          own policy for them. See the package comment for the exact spelling.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: f
+            type: float64
+        name: AppendFloat
+        out:
+          - name: number
+            type: "[]byte"
+          - name: ok
+            type: bool
+      - doc: |-
           BeginObject appends the opening brace of an object to dst and returns the
           object that writes its members after it.
         in:
@@ -152,6 +179,19 @@ packages:
               - name: v
                 type: uint64
             name: Uint
+            out:
+              - type: Object
+            recv: value
+          - doc: |-
+              Float writes the member key with f as [AppendFloat] writes it, or with
+              the literal null when f is NaN or infinite, which JSON cannot write
+              as a number.
+            in:
+              - name: key
+                type: string
+              - name: f
+                type: float64
+            name: Float
             out:
               - type: Object
             recv: value

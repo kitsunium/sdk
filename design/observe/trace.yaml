@@ -743,6 +743,31 @@ packages:
               - type: error
         name: DocumentExporter
       - doc: |-
+          EncodedDocumentExporter is the sibling of DocumentExporter an exporter
+          implements when it can ship a wire document already ENCODED for the
+          transport: ExportEncodedDocument sends doc as it is, labelled with
+          encoding — "gzip", the Content-Encoding a store-and-forward queue that
+          compresses what it keeps (forward's Compress) rests a document in, or ""
+          for the identity encoding, which is ExportDocument —, with the verdicts of
+          ExportContext. A gzip document is never decompressed on the way; an
+          encoding the exporter cannot label is refused before any request, as a
+          permanent rejection. An empty doc sends nothing.
+
+          A caller holding a ContextSpanExporter asks for it with a type
+          assertion (ADR 0039). Implementations MUST be safe for concurrent use.
+        methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: doc
+                type: "[]byte"
+              - name: encoding
+                type: string
+            name: ExportEncodedDocument
+            out:
+              - type: error
+        name: EncodedDocumentExporter
+      - doc: |-
           Tracer starts spans. It is the only way a span comes into existence.
 
           IFACE-PLUGIN: it is FROZEN at one method (ADR 0039). Everything a caller might
@@ -3387,6 +3412,14 @@ packages:
               spans, with the same verdicts (ADR 0185).
             name: DocumentExporter
             target: coretrace.DocumentExporter
+      - alias:
+          - doc: |-
+              EncodedDocumentExporter is the sibling of DocumentExporter an exporter
+              implements to ship a document already encoded for the transport — the
+              OTLP/HTTP exporter's ExportEncodedDocument posts a gzip batch as it
+              rests, with Content-Encoding: gzip (#1051).
+            name: EncodedDocumentExporter
+            target: coretrace.EncodedDocumentExporter
       - alias:
           - doc: ExporterName is the typed key a SpanExporter registers under.
             name: ExporterName

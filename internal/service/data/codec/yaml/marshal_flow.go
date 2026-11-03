@@ -313,8 +313,8 @@ func (e *encoder) writeFlowFields(v reflect.Value, info *structInfo) (int, error
 	//: every field.
 	for _, f := range info.fields {
 		fv, ok := fieldForRead(v, f.index)
-		//: absent, or empty and omitempty.
-		if !ok || (f.omitEmpty && isEmpty(fv)) {
+		//: absent, or left out by omitempty or omitzero.
+		if !ok || f.omitted(fv) {
 			continue
 		}
 		e.flowSeparator(written)

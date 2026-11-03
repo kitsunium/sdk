@@ -36,3 +36,9 @@ machine load: the native subset is 2.9× to 9.9× faster (4.96× in geometric
 mean) and makes 1 to 4 752 allocations where this codec makes 28 to 50 042.
 Its absolute times are higher than the ones above because the machine was
 busier then; its ratios are the comparison to quote.
+
+## #1099: what the depth bound costs
+
+Against 740e7c1e, six interleaved passes of the two test binaries
+(linux/amd64, 4 vCPU VM, go1.27.3), the depth refusal mapped to DEPTH_EXCEEDED (#1099), which runs only on an error, moves no row: benchstat finds no
+change on UnmarshalStruct and UnmarshalAny, small, medium and large (every row ~ at p ≥ 0.39; allocs identical).

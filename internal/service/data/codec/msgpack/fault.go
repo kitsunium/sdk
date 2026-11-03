@@ -3,6 +3,7 @@ package msgpack
 import (
 	"reflect"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	coremsgpack "github.com/kitsunium/sdk/internal/core/data/codec/msgpack"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -23,8 +24,9 @@ const (
 
 // Field keys attached to failures.
 const (
-	// fieldOffset is the byte offset in the input where a decode failed.
-	fieldOffset string = "offset"
+	// fieldOffset is the byte offset in the input where a decode failed, under
+	// the family's key codec.PositionOf reads (#1125).
+	fieldOffset string = codec.FieldOffset
 	// fieldType is the Go type the codec was encoding or decoding into.
 	fieldType string = "type"
 	// fieldWire is the MessagePack family the input carried.
@@ -130,5 +132,14 @@ func depthExceeded(encode bool) error {
 		return marshalFault("value nests deeper than the depth limit (a cyclic value?)", errs.Int(fieldLimit, maxDepth))
 	}
 	//: the decode side refuses before the stack grows further.
-	return unmarshalFault("input nests deeper than the depth limit", errs.Int(fieldLimit, maxDepth))
+	return boundFault(coremsgpack.DepthExceeded, errs.Int(fieldLimit, maxDepth))
+}
+
+// boundFault is input refused for a size or a depth bound (#894): sentinel —
+// SizeExceeded or DepthExceeded — is the origin, so its family reason is what
+// codec.IsTooLarge and codec.IsTooDeep find, and UNMARSHAL_FAILED joins the
+// trail, so a test for any decoding failure by code still matches.
+func boundFault(sentinel *errs.Error, fields ...errs.FieldValue) error {
+	//: the bound's sentinel, then the decode failure it is.
+	return errs.Wrap(sentinel, errs.WrapParams{Code: coremsgpack.CodeMsgPackUnmarshalFailed}, fields...)
 }

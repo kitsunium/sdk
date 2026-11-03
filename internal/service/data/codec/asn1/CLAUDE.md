@@ -1,9 +1,9 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/asn1/
 
 ## Purpose
 
-ASN.1 DER codec wrapping stdlib `encoding/asn1`. Emits DER exclusively (the stdlib produces nothing else); BER input is silently accepted on `Unmarshal`.
+ASN.1 DER codec wrapping stdlib `encoding/asn1`. Emits DER exclusively (the stdlib produces nothing else). `Unmarshal` reads DER plus the few BER relaxations `encoding/asn1` reads — not BER in general (#904, below).
 
 ## Surface
 
@@ -12,7 +12,7 @@ ASN.1 DER codec wrapping stdlib `encoding/asn1`. Emits DER exclusively (the stdl
 | `Name()`         | `"asn1-der"` |
 | `MIMETypes()`    | `application/pkix-cert` |
 | `Extensions()`   | `.der`, `.cer` |
-| Constructor      | `New() codec.Codec` (returns the registered singleton) |
+| Constructor      | `New() codec.Codec` (returns the registered singleton) · `NewStrict() codec.Codec` (fresh, unregistered: refuses trailing bytes — #904) |
 | Streaming        | not implemented |
 | Appender         | yes (`Append(dst, v) ([]byte, error)`) — delegates to Marshal (encoding/asn1 has no append API) then appends onto dst |
 
@@ -27,13 +27,15 @@ package always emitted; only the declaration moved.
 |---|---|---|
 | `0.3.9.1`    | `MarshalFailed`   | `encoding/asn1.Marshal` returned an error |
 | `0.3.9.2`    | `UnmarshalFailed` | `encoding/asn1.Unmarshal` returned an error |
+| `0.3.9.3`    | `TrailingData`    | `NewStrict`'s instance found bytes past the first structure — field `trailing` counts them |
 
-Both sentinels use Reason `MARSHAL_FAILED` / `UNMARSHAL_FAILED`.
+Reasons `MARSHAL_FAILED` / `UNMARSHAL_FAILED` / `TRAILING_DATA`.
 
 ## Conventions
 
 - Stateless singleton; `New()` returns `Codec`.
-- `Unmarshal` accepts trailing bytes past the first decoded structure (stdlib contract). If strict trailing-byte rejection is needed, add a dedicated `UnmarshalStrict` helper rather than tightening this default.
+- `Unmarshal` accepts trailing bytes past the first decoded structure (stdlib contract), so a signed blob with bytes appended decodes equal to the original — the signature-malleability lever for anything that hashes what it decoded rather than what it received. `NewStrict()` (#904) returns an unregistered instance — the `csv.NewWithEscape` shape — whose `Unmarshal` refuses a non-empty rest with `TRAILING_DATA`; `Marshal` and `Append` are the registered codec's. The registered Format keeps the lenient contract. On that refusal the target holds what `encoding/asn1` decoded. Re-exported by `pkg/v1/data/codec/asn1`. Adopting it in the crypto packages that parse DER they sign or verify is theirs to do: none of them goes through this codec today.
+- **Which BER `encoding/asn1` reads** (pinned by `TestUnmarshalReadsTheBERFormsTheDocNames`, both instances alike). Accepted: a UTCTime without seconds or with a `+hhmm` offset, a DEFAULT value written out, a SET OF in any order, a PrintableString with `*` or `&`. Refused with `UNMARSHAL_FAILED`: an indefinite length, a length or tag number not in its shortest form, a non-minimal INTEGER, a BOOLEAN other than `0x00`/`0xFF`, a constructed (segmented) string.
 
 ## Performance (lib-bound)
 
@@ -50,3 +52,7 @@ pass — do not re-attempt a local pool or reflect cache here.)
 ```
 bazel test --config=race //internal/service/data/codec/asn1:asn1_test
 ```
+
+## Fuzz (#897)
+
+`fuzz_external_test.go` — `FuzzUnmarshal`: any input decodes without a panic under `New` and `NewStrict`; a decoded record re-encodes as DER that reads back equal — the BER relaxations are normalised, never kept. The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.

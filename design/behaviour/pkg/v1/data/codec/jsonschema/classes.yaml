@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/codec/jsonschema
+  name: jsonschema
+  purpose: Package jsonschema validates JSON documents somebody else wrote against a JSON Schema 2020-12 they publish — a webhook's payload, an OpenAPI request body, another program's configuration — with the standard library alone.
+types: []

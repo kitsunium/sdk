@@ -101,7 +101,7 @@ func (s *seriesStore[T]) admit(
 	//: an admitted attribute set spends one slot of the bound.
 	state.series++
 	//: create, own the attributes, publish under the retained key.
-	entry := &seriesEntry[T]{name: name, attrs: cloneAttrs(sorted), inst: build()}
+	entry := &seriesEntry[T]{name: name, attrs: cloneAttrs(sorted), inst: stampClock(build(), s.meter.clk)}
 	s.byKey[retain(key)] = entry
 	//: hand back the fresh instrument.
 	return entry.inst
@@ -129,7 +129,7 @@ func (s *seriesStore[T]) overflow(state *nameState, name string, build func() T)
 		return entry.inst
 	}
 	//: first fold — create the aggregated series.
-	entry := &seriesEntry[T]{name: name, attrs: cloneAttrs(attrs), inst: build()}
+	entry := &seriesEntry[T]{name: name, attrs: cloneAttrs(attrs), inst: stampClock(build(), s.meter.clk)}
 	s.byKey[key] = entry
 	//: hand back the series every later overflow will reuse.
 	return entry.inst

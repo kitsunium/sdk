@@ -6,13 +6,14 @@
 Public facade for describing how values of a Go type look on the wire under
 `encoding/json` (ADR 0133): kinds, members, which may be missing or null, and
 the Go field behind each member. Aliases onto `internal/service/data/codec/jsonshape`
-plus the forwarding `Of` and `For`. No logic lives here.
+plus the forwarding `Of`, `For`, `OfV2` and `ForV2`. No logic lives here.
 
 ## Surface
 
 | Symbol | Role |
 |---|---|
 | `Of(t)`, `For[T]()` | the description of a type; never fails, a new tree each call |
+| `OfV2(t)`, `ForV2[T]()` | the same under encoding/json/v2's own default options (#893) — what `jsonv2.Marshal` writes |
 | `Shape` | `Kind`, `Name`, `Format`, `Nullable`, `Fields`, `Items`, `Values`, `Ref` |
 | `Field` | `Name`, `Shape`, `Optional`, `Quoted`, `Rules` — and `GoName`, `Tag`, `Index` for the Go field |
 | `Kind` | `Any` (the zero value), `Object`, `Array`, `Map`, `String`, `Integer`, `Number`, `Boolean`, `Unsupported`; encodes as its name |

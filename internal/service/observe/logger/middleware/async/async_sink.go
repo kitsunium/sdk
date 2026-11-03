@@ -3,6 +3,7 @@ package async
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
@@ -64,6 +65,27 @@ type asyncSink struct {
 	// generic kernel primitive (ADR 0014 §D6). nil on the white-box test
 	// path that spawns drain() by hand.
 	daemon *worker.LoopDaemon
+	// wake carries "the ring is no longer empty" from a producer to a parked
+	// drainer (#806). One buffered slot: a Write that lands while the drainer
+	// is parked leaves a token whether or not the drainer has reached its
+	// select yet, and a second one finds the slot full and need not send.
+	wake chan struct{}
+	// parked is set by the drainer before its last look at an empty ring and
+	// cleared when it resumes; a producer sends on wake only while it is set,
+	// so a busy drainer costs a producer one atomic load and no channel op.
+	parked atomic.Bool
+	// batchSink is the downstream as a corelogger.BatchSink, nil when it is
+	// not one or when batchMax is one: the drainer then writes record by record.
+	batchSink corelogger.BatchSink
+	// batchMax is how many entries the drainer takes off the ring at once
+	// (Config.BatchMax, at least one).
+	batchMax int
+	// batch, recs and payloads are the drainer's scratch for one take: owned
+	// by the single drainer goroutine (drain, then drainRemaining after stop),
+	// so they need no lock and allocate once.
+	batch    []*recordEntry
+	recs     []corelogger.RecordEvent
+	payloads [][]byte
 	// flushSignal fires once after every drainer forward() so Flush can
 	// wait on progress instead of Gosched-spinning. Buffered by 1 so the
 	// drainer never blocks when nobody is flushing; Flush selects on it
@@ -109,23 +131,12 @@ func New(downstream corelogger.Sink, cfg Config) corelogger.Sink {
 	}
 	//: ring construction is infallible for positive capacity by contract.
 	queue := mustNewRing(size)
-	//: substitute the no-op default when the caller did not wire a metric.
-	callback := cfg.OnDrop
-	//: nil callback degrades to a no-op so the drainer can call it unconditionally.
-	if callback == nil {
-		//: fall back to the documented no-op.
-		callback = noopOnDrop
-	}
-	//: same treatment for the error callback so the drainer can fire it
-	//: unconditionally without a nil check on the hot path.
-	errCallback := cfg.OnError
-	//: nil callback degrades to a no-op so the drainer can call it unconditionally.
-	if errCallback == nil {
-		//: fall back to the documented no-op.
-		errCallback = noopOnError
-	}
+	//: the two callbacks, never nil, so the hot paths call them unconditionally.
+	callback, errCallback := callbacksOf(&cfg)
 	//: recycler keeps per-entry allocation off the hot path.
 	pool := recycler.NewPool[*recordEntry](newRecordEntry)
+	//: non-positive is one record per delivery, the zero Config's behaviour.
+	batchMax := max(cfg.BatchMax, 1)
 	//: build the sink with channels primed for the drainer lifecycle.
 	out := &asyncSink{
 		downstream:  downstream,
@@ -137,9 +148,14 @@ func New(downstream corelogger.Sink, cfg Config) corelogger.Sink {
 		onDrop:      callback,
 		onError:     errCallback,
 		flushSignal: make(chan struct{}, 1),
+		wake:        make(chan struct{}, 1),
+		batchMax:    batchMax,
+		batch:       make([]*recordEntry, 0, batchMax),
 		stop:        make(chan struct{}),
 		done:        make(chan struct{}),
 	}
+	//: a batch is handed over in one call only to a downstream that takes one.
+	out.wireBatch()
 	//: the Block policy's bound and clock, resolved once; never unbounded.
 	if out.policy == Block {
 		//: non-positive is the documented bound, not "forever" (ADR 0031).
@@ -164,6 +180,38 @@ func New(downstream corelogger.Sink, cfg Config) corelogger.Sink {
 	})
 	//: hand back the sink behind the public Sink interface.
 	return out
+}
+
+// callbacksOf resolves Config's two callbacks, substituting the documented
+// no-ops for nil ones so the drainer and Write call them unconditionally.
+func callbacksOf(cfg *Config) (onDrop func(missed int), onError func(err error)) {
+	onDrop, onError = cfg.OnDrop, cfg.OnError
+	//: nil callback degrades to a no-op so the drainer can call it unconditionally.
+	if onDrop == nil {
+		//: fall back to the documented no-op.
+		onDrop = noopOnDrop
+	}
+	//: same treatment for the error callback, fired on the drainer's hot path.
+	if onError == nil {
+		//: fall back to the documented no-op.
+		onError = noopOnError
+	}
+	//: both callable.
+	return onDrop, onError
+}
+
+// wireBatch keeps the downstream as a corelogger.BatchSink, with the scratch a
+// WriteBatch call is built in, when it is one and batchMax is above one (#807).
+// Otherwise batchSink stays nil and the drainer writes record by record.
+func (s *asyncSink) wireBatch() {
+	bs, ok := s.downstream.(corelogger.BatchSink)
+	//: one record per call, or a downstream without the sibling port.
+	if !ok || s.batchMax <= 1 {
+		return
+	}
+	s.batchSink = bs
+	s.recs = make([]corelogger.RecordEvent, 0, s.batchMax)
+	s.payloads = make([][]byte, 0, s.batchMax)
 }
 
 // mustNewRing wraps ring.New for the New constructor — the size is
@@ -233,6 +281,8 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 	//: TryWrite runs inside ringMu — SPSC contract honoured.
 	if werr := s.queue.TryWrite(ent); werr == nil {
 		s.ringMu.Unlock()
+		//: a parked drainer has something to deliver now.
+		s.wakeDrainer()
 		//: happy path — bytes accepted by the ring.
 		return len(payload), nil
 	}
@@ -246,6 +296,8 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 	//: apply the configured drop policy, still under ringMu.
 	n, err = s.handleFull(ent)
 	s.ringMu.Unlock()
+	//: a full ring is not empty: a drainer that parked must not stay parked.
+	s.wakeDrainer()
 	//: the policy's verdict.
 	return n, err
 }
@@ -344,8 +396,29 @@ func (s *asyncSink) retryBlocked(ent *recordEntry) (n int, done bool, err error)
 	if s.queue.Len() < s.queue.Capacity() {
 		s.signalSpace()
 	}
+	//: the entry is queued: a parked drainer has something to deliver.
+	s.wakeDrainer()
 	//: accepted.
 	return len(ent.data), true, nil
+}
+
+// wakeDrainer tells a parked drainer that the ring holds an entry. It is
+// called after an entry was accepted and reads parked only after that, so
+// with the drainer's own order — parked set, then the ring looked at again —
+// one of the two always sees the other: the drainer finds the entry, or the
+// producer finds it parked and leaves a token on wake. Non-blocking.
+func (s *asyncSink) wakeDrainer() {
+	//: a running drainer will find the entry on its next read.
+	if !s.parked.Load() {
+		//: nothing to wake.
+		return
+	}
+	select {
+	case s.wake <- struct{}{}:
+		//: the drainer resumes.
+	default:
+		//: a token is already waiting for it.
+	}
 }
 
 // signalSpace tells one Block waiter that a slot may be free. Non-blocking,

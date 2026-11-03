@@ -124,12 +124,12 @@ func (d *decodeState) decodePayloadAny(h header) (any, error) {
 }
 
 // extAny decodes an extension payload: the timestamp becomes a time.Time,
-// every other type is refused by name.
+// every other type an Ext holding a copy of the payload (#903).
 func extAny(ext int8, p []byte) (any, error) {
 	//: −1 is the only type the specification defines.
 	if ext != extTimestamp {
-		//: an application extension has no Go type here.
-		return nil, unmarshalFault("unsupported extension type", errs.Int(fieldWire, int(ext)))
+		//: an application extension, as it came.
+		return Ext{Type: ext, Data: cloneBytes(p)}, nil
 	}
 	//: decode the instant.
 	return decodeTimestamp(p)

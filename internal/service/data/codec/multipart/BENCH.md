@@ -104,3 +104,36 @@ BenchmarkBoundary-8                           819.9 ns/op                       
 BenchmarkContentType-8                       1827.0 ns/op                       224 B/op    8 allocs/op
 BenchmarkUnmarshal_OverLimit-8              66167.0 ns/op                     20550 B/op   62 allocs/op
 ```
+
+## #907 and #908: the framing written directly, headers charged to the total
+
+#907 replaced `mime/multipart.Writer.CreatePart` — a `textproto.MIMEHeader`
+per part, its keys sorted and every line formatted through `fmt` into a fresh
+`bytes.Buffer` — with an `appendHead` into one buffer the encoder keeps, writing
+the same bytes (`TestMarshalWritesWhatTheStdlibWriterWrites`). #908 reads the
+body through a `wireBudget` that charges every byte, headers included, against
+`MaxTotalBytes`. Against 740e7c1e, the two test binaries run interleaved, six
+passes at `-test.benchtime 500ms`, linux/amd64, 4 vCPU VM (`GOMAXPROCS=4`),
+go1.27.3:
+
+| row | before | after | delta | B/op | allocs/op |
+|---|---:|---:|---:|---|---|
+| Marshal_TextForm | 10.561 µs | 1.916 µs | −82 % | 4 154 → 816 | **69 → 5** |
+| Marshal_Upload_64KiB | 43.44 µs | 31.72 µs | −27 % | 75.34 Ki → 72.49 Ki | 60 → 5 |
+| Marshal_Upload_1MiB | 574.1 µs | 467.2 µs | −19 % | 1.012 Mi → 1.009 Mi | 66 → 10 |
+| Unmarshal_TextForm | 20.42 µs | 20.13 µs | ~ (p=0.94) | 11.74 Ki → 11.86 Ki | 72 → 73 |
+| Unmarshal_Upload_1MiB | 1.855 ms | 1.963 ms | ~ (p=0.39) | 2.137 Mi → 2.137 Mi | 84 → 85 |
+| Unmarshal_OverLimit | 27.01 µs | 28.05 µs | ~ (p=0.49) | 20.42 Ki → 20.56 Ki | 67 → 68 |
+
+Boundary and ContentType do not move. The time columns of the three decode
+rows were measured on a first version that allocated the budget apart; their
+B/op and allocs/op columns are the final code's, from a follow-up run of three.
+The decode rows' one allocation is the
+decoder itself: it holds the `wireBudget` mime/multipart reads through, so it
+now escapes where `Unmarshal` used to keep it on the stack (a first version
+with the budget allocated apart cost two). The four-part text form's Marshal
+is five allocations — the `FormValue` copy, the encoder, its header buffer,
+the pooled buffer's growth on a cold pool and the result — and
+`codec_integration_test.go` holds Marshal, Append and the stream encoder at
+three per part on the race-off lane.
+

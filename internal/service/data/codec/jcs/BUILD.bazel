@@ -1,0 +1,45 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "jcs",
+    srcs = [
+        "doc.go",
+        "jcs.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/data/codec/jcs",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/data/codec/jcs",
+        "//internal/kernel/concur/recycler",
+        "//internal/kernel/errs",
+        "//internal/kernel/jsonenc",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":jcs",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "jcs_test",
+    srcs = [
+        "gen_api_test.go",
+        "jcs_bench_test.go",
+        "jcs_external_test.go",
+    ],
+    deps = [
+        ":jcs",
+        "//internal/core/data/codec/jcs",
+        "//internal/kernel/errs",
+    ],
+)

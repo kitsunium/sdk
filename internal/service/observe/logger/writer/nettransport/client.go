@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corenettransport "github.com/kitsunium/sdk/internal/core/observe/logger/writer/nettransport"
+	"github.com/kitsunium/sdk/internal/service/observe/logger/internal/datagram"
 )
 
 // defaultHTTPTimeout bounds an HTTP POST so a stalled collector cannot wedge the
@@ -39,6 +40,10 @@ const httpFallbackIdleTimeout time.Duration = 90 * time.Second
 // JSON is the de-facto log-ingestion content type (Loki/Datadog/Elastic).
 const contentTypeJSON string = "application/json"
 
+// contentTypeNDJSON labels an HTTPBatchNDJSON body: newline-delimited JSON,
+// one record per line (#807).
+const contentTypeNDJSON string = "application/x-ndjson"
+
 // httpStatusFloor / httpStatusCeil bound the accepted 2xx success range.
 const (
 	httpStatusFloor int = 200
@@ -46,11 +51,17 @@ const (
 )
 
 // newConnSeam dials network/addr (via dialer, or net.Dial when nil) and returns
-// a sendFunc that writes each record verbatim to the connection plus the
-// connection's Close as the closer. The encoder owns line framing; for udp the
-// datagram boundary is the frame, for tcp the encoder's trailing newline
-// delimits records — so send writes p as-is and stays 0 alloc.
-func newConnSeam(network, addr string, dialer func(network, addr string) (net.Conn, error)) (send sendFunc, closer func() error, err error) {
+// a sendFunc that writes each record verbatim to the connection, the batch seam
+// and the connection's Close as the closer. The encoder owns line framing; for
+// udp the datagram boundary is the frame, for tcp the encoder's trailing newline
+// delimits records — so send writes p as-is and stays 0 alloc. sendBatch (#807)
+// writes a whole backlog with one net.Buffers.WriteTo — one writev(2) on a
+// *net.TCPConn, sequential Writes on a connection that does not take a vector —
+// and reports how many records landed whole. A udp datagram is a record and
+// gathering several would merge them, so udp's sendBatch is a
+// datagram.BatchSender instead: one sendmmsg(2) per backlog on Linux, each
+// record still its own datagram, one Write each elsewhere.
+func newConnSeam(network, addr string, dialer func(network, addr string) (net.Conn, error)) (send sendFunc, sendBatch batchSendFunc, closer func() error, err error) {
 	//: nil dialer falls back to stdlib net.Dial (zero-config usage).
 	dial := dialer
 	//: the fallback is outside the hot path — one branch at construction.
@@ -63,7 +74,7 @@ func newConnSeam(network, addr string, dialer func(network, addr string) (net.Co
 	//: surface the dial failure to Open.
 	if derr != nil {
 		//: wrapDial attaches only the network, never the address (SSRF gate).
-		return nil, nil, wrapDial(derr, network)
+		return nil, nil, nil, wrapDial(derr, network)
 	}
 	//: send writes the record verbatim; the caller's netSink holds the mutex.
 	send = func(_ context.Context, p []byte) error {
@@ -72,11 +83,52 @@ func newConnSeam(network, addr string, dialer func(network, addr string) (net.Co
 		//: return the raw cause; netSink.Write wraps it with the write sentinel.
 		return werr
 	}
+	//: a datagram socket keeps one datagram per record, sent in one call.
+	if network != protoTCP {
+		//: the scratch is the sender's, allocated once; the netSink's mutex
+		//: serialises its use.
+		return send, datagramBatch(datagram.NewBatchSender(conn)), conn.Close, nil
+	}
+	//: the vector WriteTo consumes; the caller's netSink holds the mutex, so
+	//: one scratch serves every batch and the caller's slice is never touched.
+	var vec net.Buffers
+	sendBatch = func(_ context.Context, payloads [][]byte) (written int, err error) {
+		vec = append(vec[:0], payloads...)
+		n, werr := vec.WriteTo(conn)
+		//: drop the references the consumed vector still holds.
+		clear(vec[:cap(vec)])
+		//: the records that landed whole, and the raw cause.
+		return wholeRecords(payloads, n), werr
+	}
 	//: hand back the send + the connection's Close as the closer.
-	return send, conn.Close, nil
+	return send, sendBatch, conn.Close, nil
 }
 
-// newHTTPSeam returns a sendFunc that POSTs each record to url (via client, or a
+// datagramBatch adapts a datagram.BatchSender to the batch seam.
+func datagramBatch(sender *datagram.BatchSender) batchSendFunc {
+	//: the context bounds nothing a datagram send waits on.
+	return func(_ context.Context, payloads [][]byte) (written int, err error) {
+		//: one datagram per record, in as few calls as the kernel allows.
+		return sender.Send(payloads)
+	}
+}
+
+// wholeRecords counts the payloads, from the first, that lie entirely within
+// the first n bytes of their concatenation.
+func wholeRecords(payloads [][]byte, n int64) int {
+	//: walk the payloads until one does not fit in what was written.
+	for i, p := range payloads {
+		//: this record was cut, or never started.
+		if int64(len(p)) > n {
+			return i
+		}
+		n -= int64(len(p))
+	}
+	//: all of them.
+	return len(payloads)
+}
+
+// newHTTPSeams returns a sendFunc that POSTs each record to url (via client, or a
 // timeout-bounded default when nil). Unlike the conn seam this allocates per
 // send (request + reader) — HTTP egress is not a 0-alloc path; the 0-alloc
 // invariant is the conn seam's.
@@ -87,7 +139,16 @@ func newConnSeam(network, addr string, dialer func(network, addr string) (net.Co
 // would reach whatever else shares that pool — for a client with a nil
 // Transport, every other client in the process — and emptying a shared pool is
 // the very call newHTTPTransport explains is not harmless.
-func newHTTPSeam(url string, client *http.Client) (send sendFunc, closer func() error) {
+//
+// When ndjson is true it also returns the batch call
+// HTTPBatchNDJSON opts into (#807): the backlog the drainer holds posted as
+// ONE application/x-ndjson body, a record per line — a record that does not
+// end its line gains the newline —, through the same client and verdict. A
+// refused POST delivered none of the batch. Without ndjson sendBatch is nil
+// and the drainer hands records one at a time, the wire unchanged. The body
+// is built fresh per batch: the transport may still be reading it after the
+// verdict, so it is never reused.
+func newHTTPSeams(url string, client *http.Client, ndjson bool) (send sendFunc, sendBatch batchSendFunc, closer func() error) {
 	//: a supplied client is the caller's, used as given.
 	c := client
 	//: its pool is the caller's to release, so by default there is none to close.
@@ -113,8 +174,40 @@ func newHTTPSeam(url string, client *http.Client) (send sendFunc, closer func() 
 		//: post the record and map a non-2xx status to the write sentinel.
 		return postRecord(ctx, c, url, p)
 	}
-	//: hand back the send + the idle-teardown closer.
-	return send, closer
+	//: the batch call only when the caller opted into the NDJSON wire.
+	if ndjson {
+		sendBatch = func(ctx context.Context, payloads [][]byte) (written int, err error) {
+			//: one POST for the batch, or none of it delivered.
+			if perr := postBody(ctx, c, url, ndjsonBody(payloads), contentTypeNDJSON); perr != nil {
+				return 0, perr
+			}
+			//: every record, in one body.
+			return len(payloads), nil
+		}
+	}
+	//: hand back the send, the batch call and the idle-teardown closer.
+	return send, sendBatch, closer
+}
+
+// ndjsonBody joins payloads into one NDJSON document, each record on its
+// own line.
+func ndjsonBody(payloads [][]byte) []byte {
+	size := 0
+	//: room for every record and a newline each.
+	for _, p := range payloads {
+		size += len(p) + 1
+	}
+	body := make([]byte, 0, size)
+	//: in order, each record ending its line.
+	for _, p := range payloads {
+		body = append(body, p...)
+		//: a record the encoder did not end gains its newline.
+		if len(p) == 0 || p[len(p)-1] != '\n' {
+			body = append(body, '\n')
+		}
+	}
+	//: the document.
+	return body
 }
 
 // newHTTPClient builds the default client: bounded by timeout, refusing to
@@ -199,6 +292,13 @@ func newHTTPTransport() *http.Transport {
 // what the bound refuses. The bound is on bytes, not time: a collector that
 // stops sending mid-body is bounded only by the client's deadline.
 func postRecord(ctx context.Context, c *http.Client, url string, p []byte) error {
+	//: one record, labelled JSON.
+	return postBody(ctx, c, url, p, contentTypeJSON)
+}
+
+// postBody is postRecord for a body of any content type: an NDJSON batch
+// under HTTPBatchNDJSON, one JSON record otherwise.
+func postBody(ctx context.Context, c *http.Client, url string, p []byte, contentType string) error {
 	//: build a context-bound POST so cancellation aborts a slow request.
 	req, rerr := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(p))
 	//: a malformed url surfaces as a raw request-build error.
@@ -207,7 +307,7 @@ func postRecord(ctx context.Context, c *http.Client, url string, p []byte) error
 		return rerr
 	}
 	//: label the body so the collector parses it correctly.
-	req.Header.Set("Content-Type", contentTypeJSON)
+	req.Header.Set("Content-Type", contentType)
 	resp, derr := c.Do(req)
 	//: a transport failure surfaces raw.
 	if derr != nil {

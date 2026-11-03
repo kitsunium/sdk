@@ -12,7 +12,7 @@ Package msgpack registers the MessagePack codec with the SDK's codec registry �
 import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/msgpack"
 ```
 
-The codec is the msgpack.org specification written on the standard library: maps, arrays, the integer and float families, strings, binary, the timestamp extension, struct fields by their msgpack tag, and types that marshal themselves. Input is bounded in size and depth, and read without allocating what a declared length claims before the bytes are there. It streams.
+The codec is the msgpack.org specification written on the standard library: maps, arrays, the integer and float families, strings, binary, the timestamp extension, application extensions as an [Ext](#Ext), struct fields by their msgpack tag, and types that marshal themselves. A time.Duration is an integer of int64 nanoseconds, the rule of every binary format (#1126). Input is bounded in size and depth, and read without allocating what a declared length claims before the bytes are there. It streams.
 
 Everything that dispatches through the registry by format name then reads and writes it: the codec package's Marshal and Unmarshal, config.FSSource and i18n.LoadFS. Importing github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK ships; this package links this one codec, the core package declaring its codes and the standard library, and nothing else. Importing both is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
 
@@ -31,8 +31,32 @@ No error message quotes the input.
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func NewStrict\(\) codec.Codec](<#NewStrict>)
+- [type Ext](<#Ext>)
 
 ## Constants
+
+<a name="CodeDepthExceeded"></a>
+```go
+const CodeDepthExceeded errs.Code = 198406
+```
+
+CodeDepthExceeded is 0.3.7.6: containers nested past maxDepth.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.CodeMsgPackDepthExceeded`.
+
+Code `0.3.7.6`
+
+<a name="CodeDuplicateKey"></a>
+```go
+const CodeDuplicateKey errs.Code = 198403
+```
+
+CodeDuplicateKey is 0.3.7.3: NewStrict's instance found a map that repeats a key.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.CodeMsgPackDuplicateKey`.
+
+Code `0.3.7.3`
 
 <a name="CodeMarshalFailed"></a>
 ```go
@@ -44,6 +68,28 @@ CodeMarshalFailed is 0.3.7.1: a value MessagePack cannot represent, nesting past
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.CodeMsgPackMarshalFailed`.
 
 Code `0.3.7.1`
+
+<a name="CodeSizeExceeded"></a>
+```go
+const CodeSizeExceeded errs.Code = 198405
+```
+
+CodeSizeExceeded is 0.3.7.5: input past maxMsgPackBytes.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.CodeMsgPackSizeExceeded`.
+
+Code `0.3.7.5`
+
+<a name="CodeUnknownMember"></a>
+```go
+const CodeUnknownMember errs.Code = 198404
+```
+
+CodeUnknownMember is 0.3.7.4: NewStrict's instance found a member no struct field claims.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.CodeMsgPackUnknownMember`.
+
+Code `0.3.7.4`
 
 <a name="CodeUnmarshalFailed"></a>
 ```go
@@ -65,6 +111,28 @@ Format is the name MessagePack is registered under. It is an untyped constant, s
 
 ## Variables
 
+<a name="DepthExceeded"></a>
+```go
+var DepthExceeded *errs.Error
+```
+
+DepthExceeded is the sentinel of [CodeDepthExceeded](#CodeDepthExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.DepthExceeded`.
+
+Code `0.3.7.6` · reason `DEPTH_EXCEEDED` · public "MsgPack input nests too deeply"
+
+<a name="DuplicateKey"></a>
+```go
+var DuplicateKey *errs.Error
+```
+
+DuplicateKey is the sentinel of [CodeDuplicateKey](#CodeDuplicateKey).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.DuplicateKey`.
+
+Code `0.3.7.3` · reason `DUPLICATE_KEY` · public "MessagePack document repeats a map key"
+
 <a name="MarshalFailed"></a>
 ```go
 var MarshalFailed *errs.Error
@@ -76,6 +144,28 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.Mars
 
 Code `0.3.7.1` · reason `MARSHAL_FAILED` · public "MessagePack encoding failed"
 
+<a name="SizeExceeded"></a>
+```go
+var SizeExceeded *errs.Error
+```
+
+SizeExceeded is the sentinel of [CodeSizeExceeded](#CodeSizeExceeded).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.SizeExceeded`.
+
+Code `0.3.7.5` · reason `SIZE_EXCEEDED` · public "MsgPack input exceeds a size limit"
+
+<a name="UnknownMember"></a>
+```go
+var UnknownMember *errs.Error
+```
+
+UnknownMember is the sentinel of [CodeUnknownMember](#CodeUnknownMember).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.UnknownMember`.
+
+Code `0.3.7.4` · reason `UNKNOWN_MEMBER` · public "MessagePack document carries an unknown member"
+
 <a name="UnmarshalFailed"></a>
 ```go
 var UnmarshalFailed *errs.Error
@@ -86,5 +176,34 @@ UnmarshalFailed is the sentinel of [CodeUnmarshalFailed](#CodeUnmarshalFailed).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/msgpack.UnmarshalFailed`.
 
 Code `0.3.7.2` · reason `UNMARSHAL_FAILED` · public "MessagePack decoding failed"
+
+<a name="NewStrict"></a>
+## func [NewStrict](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/msgpack/gen_facade.go>)
+
+```go
+func NewStrict() codec.Codec
+```
+
+NewStrict returns a fresh MessagePack codec, not registered, that reads a document one way or not at all: a map repeating a key is refused with CodeDuplicateKey, a member no struct field claims with CodeUnknownMember. The registered format keeps last-wins and skips unknown members.
+
+<a name="Ext"></a>
+## type [Ext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/msgpack/gen_facade.go>)
+
+Ext is an extension value the codec has no Go type for — an application type, 0 to 127, and its payload. A document carrying one decodes into an interface with the extension as an Ext; an Ext encodes in the shortest form its payload allows. The timestamp (−1) stays a time.Time.
+
+```go
+type Ext = svcmsgpack.Ext
+```
+
+Ext is an alias of `github.com/kitsunium/sdk/internal/service/data/codec/msgpack.Ext`, declared as:
+
+```go
+type Ext struct {
+	// Data is the payload, opaque to the codec.
+	Data []byte
+	// Type is the extension type.
+	Type int8
+}
+```
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

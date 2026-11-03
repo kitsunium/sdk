@@ -3993,7 +3993,7 @@
       "spelled": "svcforward.Config",
       "canonical": "github.com/kitsunium/sdk/internal/service/app/forward.Config",
       "owner": "go:github.com/kitsunium/sdk/internal/service/app/forward.Config",
-      "doc": "Config is the public alias for a forwarder's configuration: Broker, Send\nand Retryable required; Clock, MaxBatches, MaxBytes, WhenFull,\nBlockTimeout, SendTimeout, MaxAge, Backoff, Parallelism, PollInterval,\nDrainTimeout, SettleTimeout and RecountInterval optional.\n",
+      "doc": "Config is the public alias for a forwarder's configuration: Broker,\nRetryable, and Send or SendEncoded required; Compress, Clock, MaxBatches,\nMaxBytes, WhenFull, BlockTimeout, SendTimeout, MaxAge, Backoff,\nParallelism, PollInterval, DrainTimeout, SettleTimeout and\nRecountInterval optional.\n",
       "file": "forward/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -4139,6 +4139,33 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/forward.EncodedSender",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/forward",
+      "name": "EncodedSender",
+      "spelled": "svcforward.EncodedSender",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/forward.EncodedSender",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/forward.EncodedSender",
+      "doc": "EncodedSender is the public alias for the function that ships one stored\nbatch with its Content-Encoding — an OTLP/HTTP exporter's\nExportEncodedDocument.\n",
+      "file": "forward/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/forward.EncodingGzip",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/forward",
+      "name": "EncodingGzip",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"gzip\"",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/forward.EncodingGzip",
+      "doc": "EncodingGzip is the Content-Encoding a batch Config.Compress kept is\nhanded to Config.SendEncoded with.\n",
+      "file": "forward/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/forward.Forwarder",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/forward",
@@ -4208,6 +4235,18 @@
       "spelled": "func(ctx context.Context, cfg Config) (*Forwarder, error)",
       "canonical": "func(ctx context.Context, cfg github.com/kitsunium/sdk/pkg/v1/app/forward.Config) (*github.com/kitsunium/sdk/pkg/v1/app/forward.Forwarder, error)",
       "doc": "New builds a forwarder over cfg.Broker, counting the backlog a previous\nprocess left in it; Run counts it again once Config.RecountInterval has\npassed. It starts nothing: Run sends.\n",
+      "file": "forward/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/forward.NewLogExporter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/forward",
+      "name": "NewLogExporter",
+      "spelled": "func(forwarder *Forwarder) (corelogger.DocumentExporter, error)",
+      "canonical": "func(forwarder *github.com/kitsunium/sdk/pkg/v1/app/forward.Forwarder) (github.com/kitsunium/sdk/internal/core/observe/logger.DocumentExporter, error)",
+      "doc": "NewLogExporter returns a logger DocumentExporter that keeps each\nOTLP/JSON logs document in forwarder; hand it to the \"otlpjson\" writer\nas its Exporter, and the OTLP/HTTP logs exporter's ExportDocument to the\nforwarder as its Send (#867).\n",
       "file": "forward/gen_facade.go",
       "layer": "public",
       "family": "app"

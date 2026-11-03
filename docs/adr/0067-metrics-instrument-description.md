@@ -266,6 +266,10 @@ mint the instrument before documenting it.
   the interoperability specification's own translation rules, which means
   adopting it changes metric NAMES — and this connector refuses non-injective
   name rewriting everywhere else. It needs its own ADR.
+  **Resolved 2026-11-03 by [ADR 0208](0208-an-instrument-gets-a-unit-and-it-belongs-to-the-name.md)**:
+  a `UnitDescriber` sibling, `Unit` on the three envelopes, OTLP's
+  `Metric.unit` and the text header carry it, and the Prometheus connector
+  names the loss and adds no suffix (#1021).
 - **`Metric.metadata`** (field 12, `repeated KeyValue`). Nothing in the SDK
   produces one, and an always-empty repeated field is a placeholder (rule 5).
 - **A length bound on a description.** None of the three wires imposes one, and

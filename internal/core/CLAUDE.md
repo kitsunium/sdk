@@ -14,7 +14,7 @@ carries a `CLAUDE.md` naming its members and the rule that put them together:
 `security/` (`authz`, `redact`, `secret`, `session`, `token`), `observe/` (`logger`
 with `logger/level` and `logger/writer` beneath it, and beneath those the
 code mirrors of the logger engine's `middleware/*`, `sink/*` and
-`writer/{journald, nettransport, rotfile}`, `metrics`, `otel`, `profiling`,
+`writer/{journald, nettransport, otlpjson, rotfile}`, `metrics`, `otel`, `profiling`,
 `trace`), `data/` (`cache`, `codec` with `codec/scratch` and one code
 package per codec beneath it, `docstore`, `queue`, `sql`, `transform`, `vfs`)
 and `app/` (`cli`, `config`, `events`, `forward`,
@@ -29,14 +29,14 @@ ADR 0160). No domain sits at the root of this layer any more, and the root
 
 | Package | Purpose | Code range (ADR 0005/0006/0012/0013) |
 |---|---|---|
-| `data/codec/` | `Codec` / `StreamingCodec` / `Encoder` / `Decoder` / `Appender` + process-wide registry, `Format` value type | `0.2.2.*` |
-| `data/codec/<format>/` | the codes and `errs.Define` sentinels of `internal/service/data/codec/<format>` — eighteen packages, one per codec plus `strictjson` and `jsonpatch`, codes and nothing else (ADR 0160 §2) | each its service range, `0.3.<PP>.*` |
+| `data/codec/` | `Codec` / `StreamingCodec` / `BoundedStreamingCodec` / `Sniffer` / `Encoder` / `Decoder` / `Appender` + process-wide registry, `Format` value type | `0.2.2.*` |
+| `data/codec/<format>/` | the codes and `errs.Define` sentinels of `internal/service/data/codec/<format>` — twenty packages, one per codec plus `strictjson`, `jsonpatch`, `jcs` and `jsonschema`, codes and nothing else (ADR 0160 §2) | each its service range, `0.3.<PP>.*` |
 | `observe/logger/writer/` | `Factory` / `Name` / `Config` + process-wide registry mapping a writer name to a `Sink`-producing factory (ADR 0012); beneath `observe/logger/` because what it produces is the logger's `Sink` | `0.2.3.*` |
 | `crypto/` | eight registries on one `Algorithm` keyspace: `AEAD` + redacting `Key` (`Seal`/`Open`), the non-authenticated `Hasher` (`Sum`/`SumHex`/`NewHash`), the `Signer` (`Sign`/`Verify`/`GenerateKey`), the key-separation `Deriver` (`Subkey`), the password-storage `PasswordHasher` (`HashPassword`/`VerifyPassword`/`NeedsRehash`), the detached `MAC` (`MACTag`/`MACVerify`), the `Agreement` DH port, and the chunked `StreamSealer` (ADR 0013 + ADR 0014) | `0.2.4.*` |
 | `crypto/key/jwk/` | the JSON Web Key format's codes and sentinels and nothing else — the format itself is `internal/service/crypto/key/jwk`, at the mirrored path (ADR 0160); `crypto/key/` holds no Go code | `0.3.42.*` (allocated to the service, value unchanged) |
-| `data/transform/` | `Compressor` port + process-wide registry mapping an `Algorithm` to a `Compressor` (`Compress`/`Decompress`); a parallel registry, never a codec `Format` (ADR 0014); since ADR 0160 also the stdlib schemes' sentinels | `0.2.5.*`; `0.3.26.*` |
+| `data/transform/` | `Compressor` port + process-wide registry mapping an `Algorithm` to a `Compressor` (`Compress`/`Decompress`); a parallel registry, never a codec `Format` (ADR 0014); the optional `BoundedDecompressor` and, since ADR 0213, `StreamingCompressor` (`NewReader(r, max)` / `NewWriter(w)`); since ADR 0160 also the stdlib schemes' sentinels | `0.2.5.*`; `0.3.26.*` |
 | `observe/logger/` | `Logger` / `Handler` / `Sink` / `Encoder` interfaces, `RecordEvent` (incl. `TraceContext`), `AttrValue`, `Value`, `Kind`, `TraceContextValue` + the `TraceContextSource` FUNC port (ADR 0062 — stdlib-only: the trace domain is NOT imported here); since ADR 0160 also the logger engine's codes and sentinels (`WriterNil` … `WriteFailed`) | `0.2.1.*` (reserved, empty) + `0.3.1.*` (the engine's) |
-| `observe/logger/{middleware/{async, encwrite, failover, multi, recover, route, sample, tee}, sink/{console, file, syslog}, writer/{journald, nettransport, rotfile}}/` | the codes and sentinels of the logger engine's decorators, terminals and writers — one core package per engine package that declares a code, and nothing else in it (ADR 0160 §2) | `0.3.13.*`–`0.3.21.*`, `0.3.27.*`–`0.3.31.*` (the engines') |
+| `observe/logger/{middleware/{async, encwrite, failover, multi, recover, route, sample, tee}, sink/{console, file, syslog}, writer/{journald, nettransport, otlpjson, rotfile}}/` | the codes and sentinels of the logger engine's decorators, terminals and writers — one core package per engine package that declares a code, and nothing else in it (ADR 0160 §2) | `0.3.13.*`–`0.3.21.*`, `0.3.27.*`–`0.3.31.*` (the engines') |
 | `app/mail/` | electronic-mail port: `Transport` frozen at one method, `BatchSender`/`Outbox` siblings, the message as a value (`MessageValue`/`AddressValue`/`AttachmentValue`/`HeaderFieldValue`), `EnvelopeValue` where Bcc becomes RCPT TO and no header, the header names the composer owns, and every refusal — CR/LF/NUL in a header is a typed refusal, never a repair. The guards themselves (the injection gate, the addr-spec subset, `Validate`, `Envelope`) are the service's since ADR 0160; **no registry** (ADR 0064) | `0.2.31.*` + the engine's `0.3.61.*` (ADR 0160) |
 | `observe/logger/level/` | `Level int8` + `Debug`/`Info`/`Warn`/`Error` constants + `String()` | `0.2.17.*` |
 | `proc/` | OS process-supervision foundation: `Process` / `Reaper` / `Group` / `Listener` ports + `Spec` / `ExitValue` / `LimitValue` / `NotificationValue` / `Signal` / `Resource` value types; no registry (build-tag selection) (ADR 0016) | `0.2.6.*` |
@@ -159,4 +159,4 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `observe/profiling/` — see `internal/core/observe/profiling/CLAUDE.md` (the profiles' values and codes, and why there is no port — ADR 0121, ADR 0160)
 - `crypto/key/` — see `internal/core/crypto/key/CLAUDE.md` (a directory, no Go code: the key formats' code packages, `jwk` alone today)
 - `observe/logger/middleware/` and `observe/logger/sink/` — see their `CLAUDE.md` (directories, no Go code: the code packages of the logger engine's decorators and terminals, one per engine package that declares a code); `observe/logger/writer/{journald,nettransport,rotfile}/` — one `CLAUDE.md` each, the writers' codes beneath the registry (ADR 0160)
-- `data/codec/{asn1,baseenc,bson,cbor,csv,flatbuffers,form,json,jsonpatch,msgpack,multipart,ndjson,pem,strictjson,tlv,toml,xml,yaml}/` — one `CLAUDE.md` each: the codes and sentinels of the service package at the same path (ADR 0160)
+- `data/codec/{asn1,baseenc,bson,cbor,csv,flatbuffers,form,jcs,json,jsonpatch,jsonschema,msgpack,multipart,ndjson,pem,strictjson,tlv,toml,xml,yaml}/` — one `CLAUDE.md` each: the codes and sentinels of the service package at the same path (ADR 0160)

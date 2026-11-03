@@ -34,7 +34,8 @@ type handler struct {
 // The SDK Logger's threshold is the only one consulted: the bridge holds no
 // level of its own, which is what makes "one pipeline, one threshold" true.
 func (h handler) Enabled(ctx context.Context, lv slog.Level) bool {
-	//: delegate so a LevelVar retuned at runtime takes effect here too.
+	//: delegate so a LevelVar the Logger was built over (SinkConfig.Level)
+	//: and retuned at runtime takes effect here too.
 	return h.lg.Enabled(ctx, toLevel(lv))
 }
 

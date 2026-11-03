@@ -1,6 +1,7 @@
 package cbor
 
 import (
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	corecbor "github.com/kitsunium/sdk/internal/core/data/codec/cbor"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -37,7 +38,22 @@ func malformed(off int, detail string) error {
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "CBOR decoding failed",
 		Private: privatePrefix + detail,
-	}, errs.Int("offset", off))
+	}, errs.Int(codec.FieldOffset, off))
+}
+
+// exceeded is input refused at offset off for a size or a depth bound (#894):
+// sentinel — SizeExceeded or DepthExceeded — is the origin, so its family
+// reason is what codec.IsTooLarge and codec.IsTooDeep find, UNMARSHAL_FAILED
+// joins the trail, and detail says which bound, never what was read.
+func exceeded(sentinel *errs.Error, off int, detail string) error {
+	bound := errs.Wrap(nil, errs.WrapParams{
+		Code:    sentinel.Code(),
+		Reason:  sentinel.Reason(),
+		Public:  sentinel.Public(),
+		Private: privatePrefix + detail,
+	}, errs.Int(codec.FieldOffset, off))
+	//: the bound is the origin, the decode failure it is joins the trail.
+	return errs.Wrap(bound, errs.WrapParams{Code: corecbor.CodeCBORUnmarshalFailed})
 }
 
 // decodeCause is the UNMARSHAL_FAILED error wrapping cause — a reader's,

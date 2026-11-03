@@ -20,4 +20,13 @@ var (
 		Public:  "s2 transform failed",
 		Private: "third-party/transform: the s2 codec returned an error",
 	}
+
+	// dictionaryInvalidWrap is the WrapParams a malformed dictionary's library
+	// cause is attached under, mirroring the DictionaryInvalid sentinel.
+	dictionaryInvalidWrap = errs.WrapParams{
+		Code:    CodeDictionaryInvalid,
+		Reason:  "DICTIONARY_INVALID",
+		Public:  "The compression dictionary is empty or malformed",
+		Private: "third-party/transform: the dictionary is empty or not a zstd dictionary",
+	}
 )

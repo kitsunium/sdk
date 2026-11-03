@@ -19,6 +19,45 @@ packages:
             name: CodeCBORUnmarshalFailed
             value: "0x00_03_06_02"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeCBORDuplicateKey identifies a document NewStrict's instance refused
+              because one of its maps repeats a key.
+            name: CodeCBORDuplicateKey
+            value: "0x00_03_06_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCBORUnknownMember identifies a document NewStrict's instance refused
+              because it carries a member no field of the target struct claims.
+            name: CodeCBORUnknownMember
+            value: "0x00_03_06_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCBORNotDeterministic identifies a document NewDeterministic's
+              instance refused because it is not in the core deterministic encoding
+              of RFC 8949 §4.2.1: a head or a float longer than it needs, an
+              indefinite length, a NaN other than 0xf97e00, or map keys out of the
+              bytewise order of their encodings.
+            name: CodeCBORNotDeterministic
+            value: "0x00_03_06_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCBORSizeExceeded identifies input refused for a size bound: an array, map or chunked string past its 1 048 576-entry bound,
+              or a data item longer than NewBoundedDecoder's byte ceiling (#891).
+              Its reason is the family's SIZE_EXCEEDED (#894).
+            name: CodeCBORSizeExceeded
+            value: "0x00_03_06_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCBORDepthExceeded identifies input refused for a depth bound: arrays, maps and tags nested past 32 levels.
+              Its reason is the family's DEPTH_EXCEEDED (#894).
+            name: CodeCBORDepthExceeded
+            value: "0x00_03_06_07"
+        type: errs.Code
     doc: |-
       Package cbor declares the error codes and the sentinels of the CBOR codec,
       internal/service/data/codec/cbor — range 0.3.6.* (ADR 0005
@@ -59,6 +98,42 @@ packages:
             private: "service/data/codec/cbor: the input could not be decoded as CBOR"
             public: CBOR decoding failed
             reason: UNMARSHAL_FAILED
+          - code: CodeCBORDuplicateKey
+            doc: DuplicateKey is the strict refusal of a map that repeats a key.
+            name: DuplicateKey
+            private: "service/data/codec/cbor: NewStrict refused a map holding two equal keys"
+            public: CBOR document repeats a map key
+            reason: DUPLICATE_KEY
+          - code: CodeCBORUnknownMember
+            doc: UnknownMember is the strict refusal of a member no struct field claims.
+            name: UnknownMember
+            private: "service/data/codec/cbor: NewStrict refused a member no field of the struct claims"
+            public: CBOR document carries an unknown member
+            reason: UNKNOWN_MEMBER
+          - code: CodeCBORNotDeterministic
+            doc: |-
+              NotDeterministic is the refusal of a document NewDeterministic's
+              instance does not read: one not in RFC 8949 §4.2.1's core
+              deterministic encoding.
+            name: NotDeterministic
+            private: "service/data/codec/cbor: NewDeterministic refused a document not in core deterministic encoding"
+            public: CBOR document is not in deterministic encoding
+            reason: NOT_DETERMINISTIC
+          - code: CodeCBORSizeExceeded
+            doc: |-
+              SizeExceeded is the refusal of input past a size bound: an array, map or
+              chunked string past its 1 048 576-entry bound, or an item past
+              NewBoundedDecoder's ceiling.
+            name: SizeExceeded
+            private: "service/data/codec/cbor: the input exceeds a size bound"
+            public: CBOR input exceeds a size limit
+            reason: SIZE_EXCEEDED
+          - code: CodeCBORDepthExceeded
+            doc: "DepthExceeded is the refusal of input past a depth bound: arrays, maps and tags nested past 32 levels."
+            name: DepthExceeded
+            private: "service/data/codec/cbor: the input exceeds a depth bound"
+            public: CBOR input nests too deeply
+            reason: DEPTH_EXCEEDED
   - doc: |-
       Package cbor is the SDK's CBOR codec (RFC 8949), written on the standard
       library alone. It encodes any Go value the reflection rules below can
@@ -86,7 +161,8 @@ packages:
       thirty-two levels, a million chunks per string), before anything is
       decoded: malformed input never touches the target. A text string must be
       UTF-8 wherever it sits; tags 0 to 3 must enclose the type RFC 8949 gives
-      them. A tag the codec does not interpret is transparent.
+      them. A tag the codec does not interpret is transparent, except to a Tag,
+      which receives its number and its content.
 
       # Struct tags
 
@@ -94,9 +170,25 @@ packages:
       has no `cbor` tag, or its Go name; the options are omitempty, omitzero and
       keyasint, and a blank field `_ struct{}` tagged `cbor:",toarray"` encodes
       a struct as an array. Embedded structs follow encoding/json's rules. A
-      type implementing encoding.BinaryMarshaler is written as a byte string,
-      and one implementing encoding.BinaryUnmarshaler reads one; a type with
-      MarshalCBOR or UnmarshalCBOR writes or reads its own item.
+      time.Time field tagged `cbor:",time=tag1"` is written as tag 1: integer
+      seconds when it holds no fraction, float seconds when a double carries it
+      to the nanosecond, and otherwise as tag 0, its RFC 3339 text to the
+      nanosecond, so the instant is never rounded; `cbor:",time=tag0"` always
+      writes tag 0. Either reads back the same instant. A type implementing
+      encoding.BinaryMarshaler is written as a byte string, and one implementing
+      encoding.BinaryUnmarshaler reads one; a type with MarshalCBOR or
+      UnmarshalCBOR writes or reads its own item.
+
+      # Tags and determinism
+
+      A Tag writes its number and its content, for an application's own tags —
+      COSE (RFC 9052) and CWT (RFC 8392) among them; one numbered 0 to 3 must
+      enclose the type RFC 8949 gives the number. NewDeterministic returns a
+      fresh instance writing RFC 8949 §4.2.1's core deterministic encoding —
+      the registered codec's, every float in the shortest of half, single and
+      double that holds it exactly — and reading only that encoding, every tag
+      but a bignum decoded into an interface as a Tag, so a document decodes and
+      encodes back to its own bytes.
 
       Package cbor — the decoder's walk over input the validator has accepted.
 
@@ -126,6 +218,9 @@ packages:
       	tag 0 or 1                time.Time
       	tag 2 or 3 (bignum)       big.Int
       	any other tag             its content, as though untagged
+
+      NewDeterministic's instance keeps every tag but a bignum: a Tag holding
+      its number and its content, decoded by the same rules.
 
       An unassigned simple value has no Go value and is refused, as RFC 8949
       §5.4 allows a decoder to; so is a map key Go cannot hash — a byte string,
@@ -190,8 +285,14 @@ packages:
       every width, floats and strings, each answering omitempty for its kind.
 
       Package cbor — the kind encoders of the types with an encoding of their
-      own: time.Time as Unix seconds, a type's MarshalCBOR verbatim once checked,
-      and a BinaryMarshaler as a byte string.
+      own: time.Time as Unix seconds — or as tag 1 or tag 0 under the time
+      option —, a Tag as its number and content, a type's MarshalCBOR verbatim
+      once checked, and a BinaryMarshaler as a byte string.
+
+      Package cbor — the deterministic instance: RFC 8949 §4.2.1's core
+      deterministic encoding written, every float in its shortest exact form,
+      and the same encoding required of what is read, checked in one walk over
+      the validated item before anything is decoded.
 
       Package cbor — structs on the encoding side: a map keyed by field name (or
       by integer, keyasint), or an array (toarray); omitempty and omitzero.
@@ -229,9 +330,50 @@ packages:
         name: New
         out:
           - type: codec.Codec
+      - doc: |-
+          NewStrict returns a fresh CBOR codec, not registered, whose Unmarshal and
+          Decode read a document somebody else wrote one way or not at all (ADR
+          0102): a map that repeats a key — two keys that decode to the same Go key,
+          whatever form each was written in — is refused with DUPLICATE_KEY before
+          anything is decoded, and a member no field of the target struct claims
+          with UNKNOWN_MEMBER. The registered codec keeps last-wins and skips unknown
+          members. Encoding is the registered codec's.
+        name: NewStrict
+        out:
+          - type: codec.Codec
+      - doc: |-
+          NewDeterministic returns a fresh CBOR codec, not registered, for bytes that
+          are signed or hashed: it writes RFC 8949 §4.2.1's core deterministic
+          encoding — the registered codec's, every float in the shortest of half,
+          single and double that holds it exactly — and its Unmarshal and Decode
+          refuse with NOT_DETERMINISTIC a document not in that encoding: a head or a
+          float longer than it needs, an indefinite length, a NaN other than
+          0xf97e00, or map keys out of the bytewise order of their encodings. Into
+          an interface it decodes every tag but a bignum as a Tag, so a document
+          decodes and encodes back to its own bytes.
+        name: NewDeterministic
+        out:
+          - type: codec.Codec
     imports:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
     path: github.com/kitsunium/sdk/internal/service/data/codec/cbor
+    types:
+      - doc: |-
+          TagValue is a CBOR tag (RFC 8949 §3.4): a number and the data item it encloses,
+          for the tags an application defines — COSE's 16 to 18 and 96 to 98, CWT's
+          61. Encoding one writes its number then its Content as any value is
+          written; a tag numbered 0 to 3 must enclose the type RFC 8949 gives it.
+          Decoding into a TagValue takes any tag, its content decoded as into an
+          interface; an untagged item does not fit one.
+        name: TagValue
+        struct:
+          fields:
+            - doc: Number is the tag number.
+              name: Number
+              type: uint64
+            - doc: Content is the enclosed data item.
+              name: Content
+              type: any
     variables:
       - blockDoc: |-
           The registered singleton. Its aliases are literals in MIMETypes and
@@ -256,11 +398,14 @@ packages:
 
       The codec is RFC 8949 written on the standard library: maps, arrays, the
       integers and floats, text and byte strings, tags 0 to 3 for times and big
-      numbers, struct fields by their cbor tag or their json tag. Map pairs are
-      written sorted by their encoded key, the deterministic encoding of RFC 8949
-      §4.2.1, so one value always encodes to the same bytes. Input is checked
-      whole — well-formed, valid, within its bounds — before the target is
-      written. It streams.
+      numbers and any other as a Tag, struct fields by their cbor tag or their
+      json tag. Map pairs are written sorted by their encoded key, the
+      deterministic encoding of RFC 8949 §4.2.1, so one value always encodes to
+      the same bytes; NewDeterministic adds the shortest floats and reads only
+      that encoding, for bytes that are signed. A time.Duration is an integer of
+      int64 nanoseconds, the rule of every binary format (#1126): no standard tag
+      carries a duration. Input is checked whole — well-formed, valid, within its
+      bounds — before the target is written. It streams.
 
       Everything that dispatches through the registry by format name then
       reads and writes it: the codec package's Marshal and Unmarshal,
@@ -278,6 +423,9 @@ packages:
 
       	CodeMarshalFailed    0.3.6.1  a value CBOR cannot carry, invalid UTF-8, nesting past the bound
       	CodeUnmarshalFailed  0.3.6.2  input that is not one well-formed item, or an item the target cannot hold
+      	CodeDuplicateKey     0.3.6.3  NewStrict: a map repeats a key
+      	CodeUnknownMember    0.3.6.4  NewStrict: a member no struct field claims
+      	CodeNotDeterministic 0.3.6.5  NewDeterministic: a document not in core deterministic encoding
 
       No error message quotes the input.
     facade:
@@ -298,6 +446,42 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_06_02"
+          - doc: |-
+              CodeDuplicateKey is 0.3.6.3: NewStrict's instance found a map that
+              repeats a key.
+            name: CodeDuplicateKey
+            reexport: corecbor.CodeCBORDuplicateKey
+            type: errs.Code
+            typed: true
+            value: "0x00_03_06_03"
+          - doc: |-
+              CodeUnknownMember is 0.3.6.4: NewStrict's instance found a member
+              no struct field claims.
+            name: CodeUnknownMember
+            reexport: corecbor.CodeCBORUnknownMember
+            type: errs.Code
+            typed: true
+            value: "0x00_03_06_04"
+          - doc: |-
+              CodeNotDeterministic is 0.3.6.5: NewDeterministic's instance found a
+              document not in core deterministic encoding.
+            name: CodeNotDeterministic
+            reexport: corecbor.CodeCBORNotDeterministic
+            type: errs.Code
+            typed: true
+            value: "0x00_03_06_05"
+          - doc: "CodeSizeExceeded is 0.3.6.6: an array, map or chunked string past its 1 048 576-entry bound, or an item past NewBoundedDecoder's ceiling."
+            name: CodeSizeExceeded
+            reexport: corecbor.CodeCBORSizeExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_06_06"
+          - doc: "CodeDepthExceeded is 0.3.6.7: arrays, maps and tags nested past 32 levels."
+            name: CodeDepthExceeded
+            reexport: corecbor.CodeCBORDepthExceeded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_06_07"
         doc: The error codes, range 0.3.6.*, declared in the core (ADR 0160).
       - doc: "The sentinels, for errors.Is: each carries the code of the same name."
         var:
@@ -309,7 +493,56 @@ packages:
             name: UnmarshalFailed
             reexport: corecbor.UnmarshalFailed
             type: "*errs.Error"
+          - doc: DuplicateKey is the sentinel of [CodeDuplicateKey].
+            name: DuplicateKey
+            reexport: corecbor.DuplicateKey
+            type: "*errs.Error"
+          - doc: UnknownMember is the sentinel of [CodeUnknownMember].
+            name: UnknownMember
+            reexport: corecbor.UnknownMember
+            type: "*errs.Error"
+          - doc: NotDeterministic is the sentinel of [CodeNotDeterministic].
+            name: NotDeterministic
+            reexport: corecbor.NotDeterministic
+            type: "*errs.Error"
+          - doc: SizeExceeded is the sentinel of [CodeSizeExceeded].
+            name: SizeExceeded
+            reexport: corecbor.SizeExceeded
+            type: "*errs.Error"
+          - doc: DepthExceeded is the sentinel of [CodeDepthExceeded].
+            name: DepthExceeded
+            reexport: corecbor.DepthExceeded
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            NewStrict returns a fresh CBOR codec, not registered, that reads a
+            document one way or not at all: a map repeating a key is refused with
+            CodeDuplicateKey, a member no struct field claims with CodeUnknownMember.
+            The registered format keeps last-wins and skips unknown members.
+          forward: svccbor.NewStrict
+          name: NewStrict
+          out:
+            - type: codec.Codec
+      - func:
+          doc: |-
+            NewDeterministic returns a fresh CBOR codec, not registered, for bytes
+            that are signed or hashed: it writes RFC 8949's core deterministic
+            encoding — every float in its shortest exact form — and refuses with
+            CodeNotDeterministic a document not in it. Into an interface it decodes
+            every tag but a bignum as a Tag, so a document round-trips to its bytes.
+          forward: svccbor.NewDeterministic
+          name: NewDeterministic
+          out:
+            - type: codec.Codec
+      - alias:
+          - doc: |-
+              Tag is a CBOR tag: a number and the item it encloses, for an
+              application's own tags — COSE, CWT.
+            name: Tag
+            target: svccbor.TagValue
     imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
       corecbor: github.com/kitsunium/sdk/internal/core/data/codec/cbor
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svccbor: github.com/kitsunium/sdk/internal/service/data/codec/cbor
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/cbor

@@ -73,6 +73,10 @@ type encodePlan struct {
 	holders *recycler.Pool[*mapHolders]
 	// fields are a struct's fields on the wire.
 	fields []encodeField
+	// order lists a struct's fields in the bytewise order of their encoded
+	// keys, which core deterministic encoding writes them in; nil when the
+	// declaration order is that order already.
+	order []int
 	// refusal says why no value of the type can be encoded.
 	refusal string
 	// omittable counts the struct fields carrying omitempty.
@@ -174,6 +178,9 @@ func (pl *encodePlanner) fill(p *encodePlan) {
 	case t == bigIntType:
 		//: an integer or a bignum; never "empty".
 		p.kind = bigIntEncoder{}
+	case t == tagType:
+		//: a tag number and its content; never "empty".
+		p.kind = tagEncoder{}
 	case reflect.PointerTo(t).Implements(cborMarshalerType):
 		//: the type's own CBOR; never "empty".
 		p.kind = cborMarshalerEncoder{}

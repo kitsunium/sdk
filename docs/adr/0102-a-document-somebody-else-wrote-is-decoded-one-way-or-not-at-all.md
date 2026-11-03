@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — §D5's precedent — `hash` and `sign` standing apart from `crypto` — rests on a false reason, and the facades nest
+- **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — §D5's precedent — `hash` and `sign` standing apart from `crypto` — rests on a false reason, and the facades nest; the amendment of 2026-11-03 below — `codec/json` names json/v2 under the v1 options with `NewV2` beside it, and `codec/jcs` is the second JSON policy placed as §D5 places this one; the amendment of 2026-11-03 in §Deferred — strict `cbor`, `msgpack` and `bson` instances refusing a duplicate key or an unknown member (#1106)
 - **Related**: [ADR 0003](0003-sdk-codec-package.md) (the universal codec), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero bound), [ADR 0029](0029-sdk-net-domain.md) (the HTTP adapter), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code range)
 
 ## Context
@@ -133,10 +133,56 @@ unchanged.
   are the substance and none of them is HTTP's; a caller reading a document
   from a file or a queue wants the same decoder.
 
+## Amendment — 2026-11-03: the JSON codec names json/v2, and a canonical form is a policy too ([#893](https://github.com/kitsunium/sdk/issues/893), [#895](https://github.com/kitsunium/sdk/issues/895))
+
+**`codec/json` keeps the v1 semantics and says so.** This ADR moved
+`strictjson` to `encoding/json/v2` and left `json/` on the v1 API. Since Go 1.27
+the v1 API *is* json/v2 under `DefaultOptionsV1()` (`GOEXPERIMENT=jsonv2` is in
+the toolchain's baseline), so `codec/json` and `codec/ndjson` now call
+`jsonv2.Marshal` / `Unmarshal` / `MarshalWrite` with
+`encoding/json.DefaultOptionsV1()` by name: no byte changes — golden files
+written by the codec on the base hold `Marshal`, `Append`, the stream encoder
+and what `Unmarshal` reads, for `json`, `ndjson` and the facade's `complexRT` —
+and no allocation moves (`json/BENCH.md`). `Format("json")` keeps meaning what
+every stored document was written with. The one divergence the goldens show
+between the legacy engine (`GOEXPERIMENT=nojsonv2`) and the 1.27 engine is
+older than this amendment: invalid UTF-8 is written as `\ufffd` by the former
+and as U+FFFD itself by the latter.
+
+**`json.NewV2()` is how a new contract gets json/v2's semantics** — the
+defaults this ADR's §D1 chose for `strictjson` (case-sensitive names,
+duplicates and invalid UTF-8 refused, nil slices and maps as `[]` / `{}`),
+plus `Deterministic(true)` so map members keep a stable order. It is not
+registered, as `csv.NewWithEscape` is not: two semantics under one Format name
+would make a document's meaning depend on which package registered first.
+
+**`codec/jcs` is the second JSON policy, placed as §D5 places `strictjson`.**
+RFC 8785 canonical JSON is a decision over JSON, not a wire format: it reads
+I-JSON strictly with `encoding/json/jsontext` and writes one byte form —
+members sorted by UTF-16 code units, numbers as ECMAScript writes a double,
+minimal escapes — in its own package and facade (`pkg/v1/data/codec/jcs`),
+codes `0.3.102.*`, registering no Format. `crypto/key/jwk` builds its RFC 7638
+thumbprint input with it: the same bytes as the hand concatenation it
+replaced, at about eight times the cost of that concatenation, paid when a key
+is imported or a `kid` minted (`jwk/BENCH.md`).
+
 ## Deferred
 
 - **A strict decode for other formats.** Nothing asks for one yet, and each
   format's "one document, one reading" is its own list.
+  *Amended 2026-11-03 (sdk#1106):* resolved for the three binary formats the
+  SDK reads natively from peers — CBOR (COSE, CWT, WebAuthn), MessagePack and
+  BSON. `cbor.NewStrict()`, `msgpack.NewStrict()` and `bson.NewStrict()` return
+  fresh, unregistered instances (the `csv.NewWithEscape` shape) whose
+  `Unmarshal` and `Decode` refuse a map — or a BSON document, at any depth —
+  repeating a key with `DUPLICATE_KEY`, two keys counting as one when they
+  decode to the same Go key whatever form each was written in (a str and a
+  bin, an integer in two widths, a CBOR text in one chunk and in two), before
+  anything is decoded; and a member no field of the target struct claims with
+  `UNKNOWN_MEMBER`. The registered Formats keep last-wins and skip unknown
+  members. Case-variant matching is left as each reader has it — cbor still
+  falls back to a case-folded field match, which its strict instance does not
+  refuse; that is a follow-up, not this amendment.
 - **Violations over the decoded value.** Structure is this package's; values
   are `pkg/v1/validation`'s, which a handler runs after a successful decode.
 

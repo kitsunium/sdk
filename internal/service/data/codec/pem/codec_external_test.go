@@ -50,7 +50,7 @@ func TestMarshal(t *testing.T) {
 		{"wrong type surfaces VALUE_INVALID", "nope", "VALUE_INVALID"},
 		{"nil block surfaces VALUE_INVALID", (*stdpem.Block)(nil), "VALUE_INVALID"},
 		//: Type=="JSON" + no headers is the promotion shape — Marshal takes
-		//: the hand-written fast-path (marshalPromotionBlock).
+		//: the hand-written encoder (appendBlock).
 		{"promotion-shape block uses fast-path", &stdpem.Block{Type: "JSON", Bytes: []byte("hello")}, ""},
 		//: a header KEY containing a colon makes encoding/pem.Encode return
 		//: a non-writer error (pem.go: "header key that contains a colon"),
@@ -117,7 +117,7 @@ func TestUnmarshal(t *testing.T) {
 }
 
 // TestMarshalPromotionShape pins the promotion fast-path
-// (marshalPromotionBlock + insertNewlinesEvery64): for a "JSON"-typed
+// (appendBody + insertNewlinesEvery64): for a "JSON"-typed
 // block with no headers, Marshal MUST emit bytes byte-identical to
 // encoding/pem.EncodeToMemory (the production comment guarantees this),
 // and the result MUST round-trip back to the same block. Payload sizes

@@ -48,8 +48,10 @@ type TextHandler struct {
 	// groups carries the active group prefix stack (outermost first); each
 	// emitted attribute key is rendered as "g1.g2.….key" in the line.
 	groups []string
-	// min is the minimum level the handler emits; records below are dropped.
-	min level.Level
+	// floor is the minimum level the handler emits, read on every record so a
+	// level.Var retuned with Set takes effect on the next one (#1015); derived
+	// handlers share it.
+	floor level.Leveler
 	// clk sources the timestamp when RecordEvent.Time is the zero value.
 	clk clock.Clock
 }
@@ -57,13 +59,22 @@ type TextHandler struct {
 // NewTextHandler constructs a TextHandler that writes to w and filters records
 // strictly below min. The returned handler uses the real system clock.
 func NewTextHandler(w io.Writer, min level.Level) (h *TextHandler, err error) {
+	//: a constant floor: the same gate a live one is.
+	return NewTextHandlerLeveled(w, level.Fixed(min))
+}
+
+// NewTextHandlerLeveled is NewTextHandler gated on a live floor: Enabled
+// reads floor.Level on every record, so a level.Var retuned with Set takes
+// effect on the next record, for this handler and every handler derived from
+// it. A nil floor gates at level.Info.
+func NewTextHandlerLeveled(w io.Writer, floor level.Leveler) (h *TextHandler, err error) {
 	//: reject nil writers early rather than panic at first write.
 	if w == nil {
 		//: caller supplied no sink — return the documented sentinel.
 		return nil, corelogger.WriterNil
 	}
 	//: construct a fresh handler bound to the real wall clock.
-	return &TextHandler{w: w, min: min, clk: clock.System}, nil
+	return &TextHandler{w: w, floor: floorOrInfo(floor), clk: clock.System}, nil
 }
 
 // Enabled reports whether the handler would emit a record at r.Level, taking
@@ -74,8 +85,8 @@ func (h *TextHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) boo
 		//: caller's context is already done; skip emission entirely.
 		return false
 	}
-	//: threshold check; handlers below min are expected to skip formatting.
-	return r.Level >= h.min
+	//: threshold check against the floor's current value (#1015).
+	return r.Level >= h.floor.Level()
 }
 
 // WithAttrs returns a derived TextHandler sharing the writer but owning a new
@@ -87,7 +98,7 @@ func (h *TextHandler) WithAttrs(attrs []corelogger.AttrValue) corelogger.Handler
 	copy(cp, h.attrs)
 	copy(cp[len(h.attrs):], attrs)
 	//: share the writer and clock, but own a private attrs slice and mutex.
-	return &TextHandler{w: h.w, attrs: cp, groups: h.groups, min: h.min, clk: h.clk}
+	return &TextHandler{w: h.w, attrs: cp, groups: h.groups, floor: h.floor, clk: h.clk}
 }
 
 // WithGroup returns a derived TextHandler that namespaces every subsequent
@@ -103,7 +114,7 @@ func (h *TextHandler) WithGroup(name string) corelogger.Handler {
 	copy(cp, h.groups)
 	cp[len(h.groups)] = name
 	//: share the writer/clock/attrs, own a private groups slice and mutex.
-	return &TextHandler{w: h.w, attrs: h.attrs, groups: cp, min: h.min, clk: h.clk}
+	return &TextHandler{w: h.w, attrs: h.attrs, groups: cp, floor: h.floor, clk: h.clk}
 }
 
 // Handle formats and writes a RecordEvent to the underlying io.Writer.

@@ -1,8 +1,53 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: DefaultWindow is the keyed sampler's window when KeyedConfig.Window is zero.
+        name: DefaultWindow
+        type: time.Duration
+        value: time.Second
+      - doc: |-
+          DefaultFirst is how many records of one key a window forwards before the
+          keyed sampler thins them, when KeyedConfig.First is zero.
+        name: DefaultFirst
+        type: int
+        value: "100"
+      - doc: |-
+          DefaultThereafter is the keyed sampler's 1-in-N past First, when
+          KeyedConfig.Thereafter is zero.
+        name: DefaultThereafter
+        type: int
+        value: "100"
+      - doc: |-
+          DefaultMaxKeys bounds the keyed sampler's table when KeyedConfig.MaxKeys is
+          zero.
+        name: DefaultMaxKeys
+        type: int
+        value: "1024"
+    name: DefaultWindow
 files:
   - decls: []
     name: doc.go
+  - decls:
+      - DefaultWindow
+      - KeyedConfig
+      - keyedKey
+      - keyedCounter
+      - Keyed
+      - NewKeyed
+      - resolveKeyed
+      - orDefault
+      - (*Keyed).Write
+      - (*Keyed).keyOf
+      - (*Keyed).keep
+      - (*Keyed).admit
+      - (*Keyed).advance
+      - (*Keyed).forwards
+      - (*Keyed).Flush
+      - (*Keyed).Close
+      - (*Keyed).Dropped
+    name: keyed.go
   - decls:
       - sampleSink
       - New
@@ -11,20 +56,169 @@ files:
       - (*sampleSink).Close
     name: sample_sink.go
 functions:
+  - name: NewKeyed
+    params: downstream corelogger.Sink, cfg *KeyedConfig
+    results: sink *Keyed, err error
+  - doc: resolveKeyed applies every zero field's documented default.
+    name: resolveKeyed
+    params: cfg *KeyedConfig
+  - doc: orDefault is v, or def when v is zero.
+    name: orDefault
+    params: v, def T
+    results: T
+    typeParams: T int | time.Duration
   - name: New
     params: downstream corelogger.Sink, rate int
     results: sink corelogger.Sink, err error
 imports:
   atomic: sync/atomic
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
   coresample: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/sample
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  sync: sync
+  time: time
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/sample
   name: sample
-  purpose: Package sample implements a 1-of-N rate-limiter Sink.
+  purpose: Package sample implements two sampling Sinks.
 types:
+  - fields:
+      - doc: Window is the period a key's counts are kept over; zero is DefaultWindow.
+        name: Window
+        type: time.Duration
+      - doc: First is how many records of a key a window forwards; zero is DefaultFirst.
+        name: First
+        type: int
+      - doc: |-
+          Thereafter forwards every Thereafter-th record of a key past First in a
+          window; zero is DefaultThereafter, one forwards them all.
+        name: Thereafter
+        type: int
+      - doc: |-
+          MaxKeys bounds the table of keys; zero is DefaultMaxKeys. A new key
+          past the bound, once the keys whose window ended are swept, is
+          counted under one shared overflow counter.
+        name: MaxKeys
+        type: int
+      - doc: Clock measures the windows; nil is clock.System.
+        name: Clock
+        type: clock.Clock
+      - doc: |-
+          Key maps a record to its sampling key; nil keys on the level and the
+          message. It is called on every Write and must not retain the record.
+        name: Key
+        type: func(r corelogger.RecordEvent) string
+      - doc: |-
+          MinLevelBypass is the floor at and above which a record is forwarded
+          without being counted, read on every Write; nil is level.Warn. Pass
+          level.Fixed(level.Error) to sample warnings too.
+        name: MinLevelBypass
+        type: level.Leveler
+      - doc: |-
+          OnDrop, when non-nil, is called with every record the sampler drops,
+          on the Write that drops it.
+        name: OnDrop
+        type: func(r corelogger.RecordEvent)
+    kind: struct
+    name: KeyedConfig
+  - doc: |-
+      keyedKey is a table key: the level and the message by default, the
+      caller's Key with a zero level otherwise. A struct, so the default key is
+      built without concatenating a string per record.
+    fields:
+      - doc: lv is the record's level (default key) or zero (caller's Key).
+        name: lv
+        type: level.Level
+      - doc: s is the record's message (default key) or the caller's key.
+        name: s
+        type: string
+    kind: struct
+    name: keyedKey
+  - doc: keyedCounter is one key's count in its current window.
+    fields:
+      - doc: start is when the counter's window began.
+        name: start
+        type: time.Time
+      - doc: count is how many records of the key the window has seen.
+        name: count
+        type: int
+    kind: struct
+    name: keyedCounter
+  - fields:
+      - doc: downstream receives the forwarded records.
+        name: downstream
+        type: corelogger.Sink
+      - doc: cfg is the resolved configuration, every default applied.
+        name: cfg
+        type: KeyedConfig
+      - doc: mu guards keys, overflow and swept.
+        name: mu
+        type: sync.Mutex
+      - doc: |-
+          keys is the per-key table, at most cfg.MaxKeys entries; a counter is
+          updated in place, so a known key costs one hash per record.
+        name: keys
+        type: map[keyedKey]*keyedCounter
+      - doc: overflow counts every key the full table could not admit.
+        name: overflow
+        type: keyedCounter
+      - doc: |-
+          swept is when the table was last swept of ended windows, so a full
+          table is swept at most once a window.
+        name: swept
+        type: time.Time
+      - doc: dropped counts every dropped record.
+        name: dropped
+        type: atomic.Uint64
+    kind: struct
+    methods:
+      - name: Write
+        params: ctx context.Context, r corelogger.RecordEvent, p []byte
+        recv: s *Keyed
+        results: n int, err error
+      - doc: "keyOf is r's table key: the caller's Key, or the level and the message."
+        name: keyOf
+        params: r corelogger.RecordEvent
+        recv: s *Keyed
+        results: keyedKey
+      - doc: |-
+          keep counts one record of key in its window and reports whether it is
+          forwarded: within First, or on every Thereafter-th past it.
+        name: keep
+        params: key keyedKey
+        recv: s *Keyed
+        results: bool
+      - doc: |-
+          admit reports whether the table has room for one more key, sweeping the
+          keys whose window ended — at most once a window — when it is full. The
+          caller holds s.mu.
+        name: admit
+        params: now time.Time
+        recv: s *Keyed
+        results: bool
+      - doc: advance counts one record into c, restarting c's window when it ended.
+        name: advance
+        params: c *keyedCounter, now time.Time
+        recv: s *Keyed
+      - doc: forwards reports whether the count-th record of a window is forwarded.
+        name: forwards
+        params: count int
+        recv: s *Keyed
+        results: bool
+      - name: Flush
+        params: ctx context.Context
+        recv: s *Keyed
+        results: error
+      - name: Close
+        recv: s *Keyed
+        results: error
+      - name: Dropped
+        recv: s *Keyed
+        results: uint64
+    name: Keyed
   - doc: |-
       sampleSink keeps every Nth Write; the rest are discarded. The counter
       is atomic so concurrent producers do not need a mutex on the hot path.

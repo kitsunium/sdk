@@ -13,6 +13,9 @@
 // library's encoding/json and internal/kernel/jsonenc (the standard library
 // again), and nothing else.
 //
+// A time.Duration is the integer of its nanoseconds, as encoding/json writes
+// it: the codec's contract is the standard library's own output (#1126).
+//
 // Importing both packages is harmless: a format is registered by the package
 // that implements it, which Go initialises once however many packages import
 // it.
@@ -41,4 +44,5 @@
 //
 //	CodeMarshalFailed    0.3.2.1  encoding/json could not encode the value
 //	CodeUnmarshalFailed  0.3.2.2  the input is not JSON the target can hold
+//	CodeSizeExceeded     0.3.2.3  a value longer than NewBoundedDecoder's byte ceiling
 package json

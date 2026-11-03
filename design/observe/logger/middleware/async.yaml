@@ -119,7 +119,10 @@ packages:
       and a single drainer goroutine, decoupling the producer hot path from
       the (potentially slow) downstream sink. Producers call Write synchronously
       but never block on I/O — entries land in the ring and the drainer sips
-      them out.
+      them out. An idle drainer parks on a wake-up signal the next Write sends,
+      so a sink with nothing to deliver costs no CPU (#806); with Config.BatchMax
+      above one it delivers what it holds to a corelogger.BatchSink downstream in
+      one call (#807).
 
       When the ring saturates, the configured DropPolicy decides:
         - DropNewest: the new Write returns BufferFull; the OnDrop callback fires.
@@ -148,7 +151,7 @@ packages:
       (drain goroutine).
 
       Package async — gathers the small runtime helpers used by the
-      async drainer (yield primitive, channel-closed probe, error swallowers).
+      async drainer (channel-closed probe, background context, error swallowers).
       Pulled out of async_sink.go to keep that file focused on the Sink contract.
     functions:
       - doc: |-
@@ -204,10 +207,21 @@ packages:
               name: OnDrop
               type: func(missed int)
             - doc: |-
+                BatchMax is how many queued records the drainer hands the downstream
+                at once. When it is above one and the downstream implements
+                corelogger.BatchSink, the drainer takes up to BatchMax records off the
+                ring and delivers them with one WriteBatch — one write(2) for a file
+                sink instead of one per record; a downstream that does not implement
+                it still receives one Write per record. Non-positive means one, the
+                record-at-a-time delivery of a zero Config.
+              name: BatchMax
+              type: int
+            - doc: |-
                 OnError is invoked for every downstream Write failure seen by the
                 drainer goroutine. Async cannot block the producer on a failing
                 downstream, so without this hook those errors are silently lost;
                 the callback gives operators a path to emit a counter or log to a
-                fallback sink. nil disables the callback. Finding #24.
+                fallback sink. nil disables the callback. Finding #24. A failed
+                WriteBatch fires it once per record the batch did not deliver.
               name: OnError
               type: func(err error)

@@ -202,6 +202,13 @@ so nobody re-profiles this and concludes there is a second win hiding in it.
 
 ## Why decompression takes the empty-`dst` fast path
 
+> **Superseded by "Decompression decodes into the tail" below
+> (kitsunium/sdk#1163, 2026-11-03).** The split this section measured is gone:
+> every `dst` — empty or not — is now decoded into its own tail. The section
+> stays as the record of the measurement that forced the tail, which is still
+> true of v1.19.2: the library's budget counts `len(dst)` (`runDecoder`'s
+> `maxSyncLen = FrameContentSize + len(dst)`).
+
 The same argument, on the other side, with a subtlety worth stating.
 
 The zstd decoder's ceiling (`WithDecoderMaxMemory`) counts `len(dst) + decoded`,
@@ -239,10 +246,121 @@ s2 gets the tail treatment unconditionally rather than a fast path, because its
 block header already declares the exact decoded length — the buffer can be sized
 once, correctly, with no guess and no branch.
 
+## Decompression decodes into the tail (kitsunium/sdk#1163)
+
+Measured 2026-11-03, Go 1.27.3, same box, base `740e7c1ea` against the working
+tree of `wip/sdk-lot-5-transform`, `-benchtime=0.5s -count=5`, medians
+(benchstat), `BenchmarkDecompress` and the new `BenchmarkDecompressSized`.
+
+The empty-`dst` fast path above left a NON-empty `dst` — a frame header already
+written, a loop appending several payloads into one buffer — on the general
+path: decode into a fresh buffer, then copy onto `dst`. s2 already decoded into
+its tail. zstd now does the same: `DecodeAll` is handed `dst[len(dst):]`, a
+zero-length slice over the spare capacity, so the library's budget counts the
+payload alone (the semantics this package promises) and the decode lands in the
+caller's capacity when it fits. When it does not, the library's own buffer is
+appended onto `dst` once — the old general path, now the exception.
+
+`BenchmarkDecompressSized` hands a 64-byte prefix and spare capacity for the
+payload:
+
+| row | base ns/op | after ns/op | base B/op | after B/op | base allocs | after allocs |
+|---|---:|---:|---:|---:|---:|---:|
+| json 4 KiB, zstd-fastest | 12 849 | **9 213** (−28 %) | 4 867 | **0** | 1 | **0** |
+| json 4 MiB, zstd-fastest | 6 263 µs | **5 035 µs** (−20 %) | 4 203 093 | **66** | 1 | **0** |
+| random 4 MiB, zstd-fastest | 2 366 µs | **1 068 µs** (−55 %) | 4 202 496 | **0** | 1 | **0** |
+| json 4 KiB, s2 | 1 731 | 1 474 | 0 | 0 | 0 | 0 |
+| json 4 MiB, s2 | 2 065 µs | 2 142 µs (~) | 0 | 0 | 0 | 0 |
+
+The 66 B/op at 4 MiB is the decoder's occasional internal refill averaged over
+`b.N`; the alloc lane's `TestDecompressIntoSpareCapacityAllocatesNothing`
+counts zero allocations for zstd and s2 at 4 KiB and 4 MiB, with a non-empty
+`dst`.
+
+The empty-`dst` rows of `BenchmarkDecompress` did not move beyond noise for
+zstd on JSON (fastest 5.749 → 5.692 ms, default 5.382 → 5.322, better 4.809 →
+4.880, p ≥ 0.22) and s2 (2.587 → 2.565 ms); on `random` they read 7–15 %
+faster, which is this shared box's variance rather than the change — the empty
+path decodes exactly as before. Their B/op and allocs are identical.
+
+`TestTheCeilingCountsThePayloadNotDst` pins the semantic: a `dst` already
+longer than the ceiling still accepts a payload under it, with and without the
+room to hold it, the prefix intact. Mutation-checked: handing `DecodeAll` the
+whole `dst` instead of its tail fails it, and `TestBoundaryIsTheDeclaredSize`'s
+new non-empty-`dst` rows, with `DECOMPRESSION_LIMIT_EXCEEDED` on a payload one
+byte under the ceiling.
+
+## Dictionaries (kitsunium/sdk#900)
+
+Measured 2026-11-03, Go 1.27.3, same box, `BenchmarkZstdDictionary`,
+`-benchtime=0.5s -count=3`, medians. A dictionary is trained per record size
+with `zstd.BuildDict` (ID `0x10900`, `SpeedFastest`) on 600 records cut from the
+JSON corpus — the first third as history, the rest as samples — and measured on
+64 other records of the same size, both arms at `ZstdFastest`. Each iteration
+compresses or decompresses one record; the ratio is the 64 records' plaintext
+over their compressed bytes.
+
+| record | arm | ratio | compress MB/s | decompress MB/s | allocs |
+|---:|---|---:|---:|---:|---:|
+| 256 B | plain | 1.367 | 22.9 | 63.3 | 0 |
+| 256 B | dictionary | **2.778** | 18.4 | 75.8 | 0 |
+| 1 KiB | plain | 2.549 | 71.7 | 177.8 | 0 |
+| 1 KiB | dictionary | **4.187** | 31.0 | 189.4 | 0 |
+| 4 KiB | plain | 4.045 | 147.5 | 418.4 | 0 |
+| 4 KiB | dictionary | **5.134** | 36.6 | 271.2 | 0 |
+
+**The win is where the issue said it would be, and it shrinks with the
+record.** A 256-byte record has almost no history of its own, so the generic
+encoder barely compresses it (1.37); a dictionary trained on its siblings
+doubles that (2.78). At 4 KiB the record carries enough of its own repetition
+that the gain falls to 27 %.
+
+**It is paid for when compressing.** Each frame loads the dictionary's history
+into the encoder before encoding, which costs a fixed few microseconds: 1.2× at
+256 B, 2.3× at 1 KiB, 4× at 4 KiB, where the record's own work no longer hides
+it. Decompression is within noise of the plain arm at 256 B and 1 KiB and 35 %
+slower at 4 KiB. Choose a dictionary for small records whose bytes cost more
+than their CPU — a log shipment, a queue of RPC frames — and measure your own
+corpus above a kilobyte.
+
+## Streams (ADR 0213, kitsunium/sdk#892)
+
+Measured 2026-11-03, Go 1.27.3, same box, `BenchmarkStream`,
+`-benchtime=0.5s -count=3`, medians: a compress through `NewWriter` into a
+buffer against `Compress` into nil, a decompress through `NewReader` drained to
+`io.Discard` against `Decompress` into nil, with the stream codecs pooled (one
+zstd pool of each per compressor, one shared s2 pool of each).
+
+| corpus | scheme | verb | block | stream | Δ | block B/op | stream B/op |
+|---|---|---|---:|---:|---:|---:|---:|
+| json | zstd-fastest | compress | 18.39 ms | 17.78 ms | −3 % | 3.87 Mi | 337 Ki |
+| json | zstd-fastest | decompress | 5.414 ms | 5.503 ms | **+1.6 %** | 4.01 Mi | 56 Ki |
+| json | s2 | compress | 7.973 ms | 6.269 ms | −21 % | 4.01 Mi | 53 Ki |
+| json | s2 | decompress | 2.513 ms | 2.777 ms | **+10.5 %** | 4.01 Mi | 9.8 Ki |
+| random | zstd-fastest | compress | 4.359 ms | 2.326 ms | −47 % | 21.2 Mi | 64 Ki |
+| random | zstd-fastest | decompress | 1.417 ms | 1.130 ms | −20 % | 4.01 Mi | 9.6 Ki |
+| random | s2 | compress | 1.020 ms | 1.069 ms | +4.8 % | 4.01 Mi | 17 Ki |
+| random | s2 | decompress | 0.957 ms | 1.707 ms | **+78 %** | 4.00 Mi | 6.0 Ki |
+
+**zstd streams at the block form's speed**, and faster where the block form's
+cost is materialising: compressing random bytes, the block encoder's output
+buffer grows to 21 MiB/op; the stream's is the caller's.
+
+**s2 is within the 10 % on JSON and is not on random bytes, for a reason that
+belongs to the format.** An s2 stream is the framing format, which carries a
+CRC-32C per chunk and verifies it; the block format carries none. On
+incompressible bytes the block decode is a copy, so the checksum is most of the
+stream's work: +78 %. That is the price of a checked stream and is kept — the
+alternative, a stream form without integrity, would be the block format the
+stream cannot be. On JSON, where decoding is real work, it is +10.5 %.
+
+The first measurement, before the stream codecs were pooled, put zstd's
+decompress at +8.4 % and s2's at +23 % on JSON: a stream decoder's history and
+an s2 writer's 1 MiB block buffer were built per stream. Pooling took them off
+the per-call path; the B/op column is what is left.
+
 ## What is deliberately not measured here
 
-- **Streaming.** `core/data/transform.Compressor` is a whole-buffer port. Both
-  libraries have streaming APIs; neither is exposed, so neither is benchmarked.
 - **Concurrent throughput.** `TestConcurrentUseIsSafe` proves the singletons are
   safe under `-race`; how they *scale* is a property of the caller's fan-out and
   of `GOMAXPROCS`, not of this package, and a number measured on a contended

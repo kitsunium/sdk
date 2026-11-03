@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T05:55:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/toml/
 
 ## Purpose
@@ -36,6 +36,8 @@ package always emitted; only the declaration moved.
 |---|---|---|
 | `0.3.5.1` | `MarshalFailed`   | a value TOML cannot represent: a non-table root, nil, chan/func/complex, an unsigned integer above `MaxInt64`, a string or key that is not UTF-8, two map keys written alike, a cycle; a writer or `MarshalText` failure (its error kept as the cause) |
 | `0.3.5.2` | `UnmarshalFailed` | a document that is not TOML, past the size or depth cap, or a value its target cannot hold; a reader or `UnmarshalText` failure (cause kept) |
+| `0.3.5.3` | `SizeExceeded` | a document past `maxDocumentBytes` — reason `SIZE_EXCEEDED`, `UNMARSHAL_FAILED` in the trail (#894) |
+| `0.3.5.4` | `DepthExceeded` | tables and arrays nested past `maxDepth` — reason `DEPTH_EXCEEDED`, `UNMARSHAL_FAILED` in the trail (#894) |
 
 No other code: every refusal keeps the reason consumers already match
 (`HasReason(err, "UNMARSHAL_FAILED")` — pinned by `pkg/v1/data/codec`'s V75 test).
@@ -44,6 +46,8 @@ The diagnosis is in fields: `problem` (a fixed sentence), `line` and `column`
 key), `toml` (the kind of value) and `type` (the Go type). **No field and no
 message ever carries a byte of the document or of the value** — that is where
 secrets live; `TestRefusalNeverQuotesTheDocument` pins it.
+
+**Position (#1125).** A refusal carries its 1-based `line` and `column` (characters) under the family's keys — `fieldLine` / `fieldColumn` are `core/data/codec.FieldLine` / `FieldColumn` —, a value its target cannot hold too (the column joined the line there): `codec.PositionOf` reads them back as for any format.
 
 ## Design
 
@@ -91,6 +95,18 @@ secrets live; `TestRefusalNeverQuotesTheDocument` pins it.
 | boolean | `bool` | bool; any other kind through its UnmarshalText |
 | offset date-time | `time.Time` (UTC for a zero offset, else a fixed zone) | `time.Time` only |
 | local date-time / date / time | `LocalDateTime` / `LocalDate` / `LocalTime` | the same type, or `time.Time` in `time.Local`; nothing else |
+
+`time.Duration` (#1126) is written as the string of its `String()` —
+`'1h30m0s'` — and a string into a `time.Duration` is read by
+`time.ParseDuration`, as `yaml/` writes and reads it: the rule of the formats
+people edit by hand. A string without its unit (`'30'`) is refused with the
+type-mismatch refusal (problem `a duration is written with its unit…`), no new
+code. A bare integer into a `time.Duration` still reads as **nanoseconds** —
+the form this encoder wrote before #1126 — so a file written then loads
+unchanged; the issue proposed refusing it, the legacy reading was kept on
+purpose (`TestDurationReadsItsTextAndTheOldIntegers`). The match is on the
+exact type (`plan.go` `typeDuration`), as `yaml/` matches it: a named type over
+`int64` stays an integer.
 
 Into a target that already holds a map — untyped or typed — a table defined
 by a `[header]` or by dotted keys is **merged**; an inline table, like every

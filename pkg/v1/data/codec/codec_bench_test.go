@@ -4,10 +4,9 @@
 // (small / medium / large), and through every extension interface
 // (Marshal/Unmarshal, parallel variants, Appender, StreamingCodec).
 //
-// The bench file shares its package with codec_external_test.go so all
-// fixture helpers (sampleComplex, tweakForCodec, complexRT, complexEqual,
-// nextInt, sampleXML, sampleCSV, sampleASN1, samplePEMBlock,
-// sampleFlatBuffer) are reachable verbatim.
+// Every Format is benched on ONE value, benchRecord (#899), scaled by the
+// size knob; a Format whose own codec cannot carry it is measured through
+// the facade's promotion path and marked so in BENCH.md.
 //
 // Block + mutex profiling is intentionally NOT enabled here via a
 // TestMain hook: KTN-TEST-SUFFIX forbids non-Benchmark functions in a
@@ -19,7 +18,6 @@ package codec_test
 import (
 	"bytes"
 	"cmp"
-	stdpem "encoding/pem"
 	"flag"
 	"fmt"
 	"math"
@@ -75,6 +73,10 @@ type benchReportRow struct {
 	BPerOp int64
 	//: AllocsPerOp is the per-op allocation count.
 	AllocsPerOp int64
+	//: Promoted marks a format the facade carries through promote.go (#899).
+	Promoted bool
+	//: Skipped is why the cell was not measured; empty when it was.
+	Skipped string
 }
 
 // machineEnvelope is the reproducibility metadata stamped at the top of
@@ -119,155 +121,98 @@ type benchProgress struct {
 	tty   bool      // stderr is an interactive terminal (redraw vs lines)
 }
 
-// scaleComplex returns a copy of base with its slice/map fields multiplied
-// by factor. Deterministic — factor seeds the synthesised entries — so
-// rerunning the benchmark on the same machine produces identical
-// allocator pressure. Capped expansion keeps the encoded payload well
-// under TLV/baseenc's 10 MiB hardening limit; the bench caller picks
-// factors so the encoded forms hit ~10 KiB (medium) and ~1 MiB (large).
-func scaleComplex(base complexRT, factor int) complexRT {
-	//: shallow copy first; we only mutate the collection fields below.
-	out := base
-	//: pre-allocated slices/maps cut the bench-setup time.
-	out.Ints = make([]int, 0, factor)
-	out.Strings = make([]string, 0, factor)
-	out.Floats = make([]float64, 0, factor)
-	out.StringMap = make(map[string]int, factor)
-	out.StringStruct = make(map[string]innerRT, factor)
-	out.Children = make([]innerRT, 0, factor)
-	//: walk factor synthesising deterministic entries.
-	for i := range factor {
-		//: pre-render the textual key so map/slice insertion share it.
+// benchItem is one element of benchRecord's list: the scalars every format
+// carries and a short list of strings.
+type benchItem struct {
+	ID    int64    `json:"id" xml:"id" cbor:"id" yaml:"id" toml:"id" msgpack:"id" bson:"id"`
+	Name  string   `json:"name" xml:"name" cbor:"name" yaml:"name" toml:"name" msgpack:"name" bson:"name"`
+	Score float64  `json:"score" xml:"score" cbor:"score" yaml:"score" toml:"score" msgpack:"score" bson:"score"`
+	Tags  []string `json:"tags" xml:"tags>tag" cbor:"tags" yaml:"tags" toml:"tags" msgpack:"tags" bson:"tags"`
+}
+
+// benchRecord is the ONE value every format is benched on (#899): struct
+// only — no map, no []byte — the shape encoding/xml and the schema-ish
+// formats accept, so xml measures the same record as json, cbor or yaml, and
+// the size knob scales it for every format through Items. A format whose own
+// codec cannot carry it (csv, form, pem, asn1-der, flatbuffers, tlv) is
+// measured through the facade's real promotion path and marked promoted.
+type benchRecord struct {
+	ID     int64       `json:"id" xml:"id" cbor:"id" yaml:"id" toml:"id" msgpack:"id" bson:"id"`
+	Name   string      `json:"name" xml:"name" cbor:"name" yaml:"name" toml:"name" msgpack:"name" bson:"name"`
+	Active bool        `json:"active" xml:"active" cbor:"active" yaml:"active" toml:"active" msgpack:"active" bson:"active"`
+	Score  float64     `json:"score" xml:"score" cbor:"score" yaml:"score" toml:"score" msgpack:"score" bson:"score"`
+	Items  []benchItem `json:"items" xml:"items>item" cbor:"items" yaml:"items" toml:"items" msgpack:"items" bson:"items"`
+}
+
+// benchItemsPerSize is how many Items the size knob gives the record: one,
+// a hundred, a thousand — the encoded record grows from ~0.1 KiB to ~70 KiB
+// in JSON, inside every format's input bound.
+var benchItemsPerSize = map[string]int{"small": 1, "medium": 100, "large": 1000}
+
+// benchRecordFor returns the record at size, its fields offset by seq so the
+// records of one stream differ. Deterministic: rerunning the benchmark on the
+// same machine produces identical allocator pressure.
+func benchRecordFor(size string, seq int) benchRecord {
+	n := benchItemsPerSize[size]
+	rec := benchRecord{ID: int64(seq), Name: "record-" + strconv.Itoa(seq), Active: seq%2 == 0, Score: float64(seq) + 0.5, Items: make([]benchItem, 0, n)}
+	//: every item distinct, its tags short.
+	for i := range n {
 		idx := strconv.Itoa(i)
-		key := "k" + idx
-		//: scalar slice growth — element width stays modest so wide
-		//: codecs (CBOR/MsgPack) do not blow past the size budget.
-		out.Ints = append(out.Ints, i)
-		//: string slice with a short tag derived from the index.
-		out.Strings = append(out.Strings, "s"+idx)
-		//: float slice — bounded magnitude to avoid scientific
-		//: notation inflation on text codecs.
-		out.Floats = append(out.Floats, float64(i)*0.5)
-		//: map keys are deterministic.
-		out.StringMap[key] = i
-		//: nested struct map exercises composite encoding.
-		out.StringStruct[key] = innerRT{
-			Name:   key,
-			Score:  float64(i) * 1.25,
-			Tags:   []string{"t" + idx},
-			Extras: map[string]string{"i": idx},
-		}
-		//: child struct slice mirrors StringStruct without map overhead.
-		out.Children = append(out.Children, innerRT{
-			Name:  "c" + idx,
-			Score: float64(i) * 0.75,
-			Tags:  []string{"x"},
-		})
+		rec.Items = append(rec.Items, benchItem{ID: int64(i), Name: "item-" + idx, Score: float64(i) * 1.25, Tags: []string{"t" + idx, "u"}})
 	}
-	//: hand back the expanded fixture.
-	return out
+	return rec
 }
 
-// benchFixtureFor returns a codec-appropriate payload at the requested
-// size. Universal-shape codecs receive a tweaked complexRT; codecs that
-// do not accept complexRT (XML, CSV, ASN.1, PEM, TLV, FlatBuffers)
-// receive their specialised fixture verbatim and ignore the size knob
-// since their payloads are not parametric in the same way.
-func benchFixtureFor(name, size string) any {
-	//: lower-case the codec name once for the dispatch.
-	n := strings.ToLower(name)
-	//: dispatch specialised payloads first; they ignore the size knob.
-	switch n {
-	//: XML uses xmlDoc — encoding/xml cannot encode maps/[]byte.
-	case "xml":
-		return sampleXML()
-	//: CSV models a [][]string matrix.
-	case "csv":
-		return sampleCSV()
-	//: ASN.1 only accepts the strict tag-rule subset.
-	case "asn1-der":
-		return sampleASN1()
-	//: PEM operates on a *pem.Block fixture.
-	case "pem":
-		return samplePEMBlock()
-	//: FlatBuffers is a passthrough []byte sink.
-	case "flatbuffers":
-		return sampleFlatBuffer()
-	//: TLV restores structs to map[string]any so we round-trip a primitive.
-	case "tlv":
-		return int64(-64_000_000_000)
-	}
-	//: universal-shape codecs (json, yaml, toml, cbor, msgpack, ndjson,
-	//: + every baseenc variant since the pipeline is JSON-mediated).
-	base := tweakForCodec(n, sampleComplex())
-	//: dispatch on size: small=base, medium=100x, large=1000x. Large at
-	//: 1000x lands well below the 10 MiB TLV/baseenc cap for every
-	//: codec under test.
-	switch size {
-	case "small":
-		return base
-	case "medium":
-		return scaleComplex(base, 100)
-	case "large":
-		return scaleComplex(base, 1000)
-	}
-	//: defensive default — should never trigger; benchSizes is closed.
-	return base
-}
-
-// ndjsonRecordsFor wraps benchFixtureFor for NDJSON which expects a
-// slice of records, not a single record.
-func ndjsonRecordsFor(size string) []complexRT {
-	//: derive three sequential records from the size-appropriate fixture.
-	val, _ := benchFixtureFor("ndjson", size).(complexRT)
-	//: three records keep the line-count assertion non-trivial.
-	return []complexRT{val, nextInt(val), nextInt(nextInt(val))}
-}
-
-// payloadFor synthesises the codec-appropriate bench payload, including
-// the NDJSON slice variant.
+// payloadFor returns the bench payload of format name at size: the record,
+// or for NDJSON — a stream format whose Marshal takes a slice — three of them.
 func payloadFor(name, size string) any {
-	//: NDJSON expects a slice payload — synthesise it directly.
+	//: NDJSON expects a slice of records.
 	if strings.EqualFold(name, "ndjson") {
-		return ndjsonRecordsFor(size)
+		return []benchRecord{benchRecordFor(size, 0), benchRecordFor(size, 1), benchRecordFor(size, 2)}
 	}
-	//: every other codec gets its fixture verbatim.
-	return benchFixtureFor(name, size)
+	//: every other format the one record.
+	return benchRecordFor(size, 0)
 }
 
-// newDecodeTargetFor returns a fresh, codec-appropriate decode target.
-// Universal-shape codecs decode into *complexRT; specialised codecs
-// decode into the type their adapter uses.
-func newDecodeTargetFor(name string, payload any) any {
-	//: PEM uses **pem.Block — detect via the codec name BEFORE the type
-	//: switch since *stdpem.Block has no payload-side discriminator.
-	if strings.EqualFold(name, "pem") {
-		//: pemAdapter passes &got where got is *stdpem.Block.
-		var got *stdpem.Block
-		return &got
+// newDecodeTargetFor returns a fresh decode target for payload's type.
+func newDecodeTargetFor(_ string, payload any) any {
+	//: the NDJSON slice.
+	if _, ok := payload.([]benchRecord); ok {
+		return &[]benchRecord{}
 	}
-	//: dispatch on the payload's concrete type — keeps the bench helper
-	//: independent of the codec table.
-	switch payload.(type) {
-	case xmlDoc:
-		return &xmlDoc{}
-	case [][]string:
-		return &[][]string{}
-	case asn1Doc:
-		return &asn1Doc{}
-	case []complexRT:
-		return &[]complexRT{}
-	case []byte:
-		//: FlatBuffers Unmarshal writes through *[]byte.
-		out := []byte{}
-		return &out
-	case int64:
-		//: TLV scalar fixture.
-		var out int64
-		return &out
+	//: the record.
+	return &benchRecord{}
+}
+
+// promotedFormat reports whether the facade promotes the record for f
+// (#899): its own codec refuses to Marshal it, or cannot Unmarshal what it
+// wrote into a fresh target — promote.go then carries it as JSON inside the
+// format's native shape. A promoted row measures that path, and is left out
+// of the mean the other rows are compared to.
+func promotedFormat(f codec.Format) bool {
+	c, ok := corecodec.Lookup(f)
+	//: no codec, nothing to promote.
+	if !ok {
+		return false
 	}
-	//: default fixture target is a fresh complexRT pointer.
-	return &complexRT{}
+	payload := payloadFor(string(f), "small")
+	data, err := c.Marshal(payload)
+	//: the codec's own encoder refuses the record.
+	if err != nil {
+		return true
+	}
+	//: or its own decoder cannot give it back.
+	return c.Unmarshal(data, newDecodeTargetFor(string(f), payload)) != nil
+}
+
+// skippedRow is the row of a cell that cannot be measured, with the reason.
+func skippedRow(category, codec, size string, cause error) benchReportRow {
+	reason := cause.Error()
+	//: one line, short enough for a table cell.
+	if len(reason) > 120 {
+		reason = reason[:120] + "…"
+	}
+	return benchReportRow{Category: category, Codec: codec, Size: size, Skipped: strings.ReplaceAll(reason, "|", "/")}
 }
 
 // BenchmarkMarshal measures one-shot Marshal latency + allocs/op across
@@ -278,6 +223,11 @@ func BenchmarkMarshal(b *testing.B) {
 		for _, sz := range benchSizes {
 			//: payload is size-appropriate for the codec.
 			payload := payloadFor(string(f), sz)
+			//: a format that cannot carry the record at this size says why.
+			if _, merr := codec.Marshal(f, payload); merr != nil {
+				b.Run(string(f)+"/"+sz, makeSkipBench(string(f), "Marshal refused the record", merr))
+				continue
+			}
 			//: subbench name carries codec + size for benchstat parsing.
 			b.Run(string(f)+"/"+sz, makeMarshalBench(f, payload))
 		}
@@ -383,6 +333,11 @@ func BenchmarkMarshalParallel(b *testing.B) {
 	for _, f := range codec.Available() {
 		for _, sz := range benchSizes {
 			payload := payloadFor(string(f), sz)
+			//: a format that cannot carry the record at this size says why.
+			if _, merr := codec.Marshal(f, payload); merr != nil {
+				b.Run(string(f)+"/"+sz, makeSkipBench(string(f), "Marshal refused the record", merr))
+				continue
+			}
 			b.Run(string(f)+"/"+sz, makeMarshalParallelBench(f, payload))
 		}
 	}
@@ -474,6 +429,11 @@ func BenchmarkAppend(b *testing.B) {
 		}
 		for _, sz := range benchSizes {
 			payload := payloadFor(string(f), sz)
+			//: the Appender takes the record without promotion.
+			if _, aerr := appender.Append(nil, payload); aerr != nil {
+				b.Run(string(f)+"/"+sz, makeSkipBench(string(f), "Append refused the record", aerr))
+				continue
+			}
 			b.Run(string(f)+"/"+sz, makeAppendBench(appender, payload))
 		}
 	}
@@ -581,8 +541,13 @@ func BenchmarkStreamEncode(b *testing.B) {
 			continue
 		}
 		for _, sz := range benchSizes {
-			//: codec-native record batch (xmlDoc / int64 / complexRT / …).
+			//: the record batch streamRecordsFor builds.
 			records := streamRecordsFor(string(f), sz)
+			//: a stream that cannot carry the record says why.
+			if _, serr := seedStream(stream, records); serr != nil {
+				b.Run(string(f)+"/"+sz, makeSkipBench(string(f), "seed encode failed", serr))
+				continue
+			}
 			b.Run(string(f)+"/"+sz, makeStreamEncodeBench(stream, records))
 		}
 	}
@@ -709,7 +674,7 @@ func BenchmarkStreamDecode(b *testing.B) {
 
 // makeStreamDecodeBench builds the BenchmarkStreamDecode subbench closure.
 // recordCount + name drive the per-iter decode loop: name picks the decode
-// target shape (xmlDoc / int64 / complexRT / …), recordCount tells the
+// target shape (the record, or untyped for tlv), recordCount tells the
 // loop how many Decode calls to issue.
 func makeStreamDecodeBench(stream corecodec.StreamingCodec, name string, recordCount int, seed []byte) func(b *testing.B) {
 	return func(b *testing.B) {
@@ -783,103 +748,32 @@ func makeStreamDecodeParallelBench(stream corecodec.StreamingCodec, name string,
 	}
 }
 
-// streamRecordsFor returns the codec-appropriate record batch the
-// streaming Encode/Decode pair will iterate over. The slice type is
-// []any so every codec drives its Encode through its own concrete
-// payload type (xmlDoc for xml, int64 for tlv, complexRT for the
-// universal-shape codecs). Single-document codecs (TOML) return a
-// one-element slice so the Decode loop matches the codec's grammar.
+// streamRecordsFor returns the records a streaming Encode/Decode iteration
+// writes: streamRecordCount records at size, each distinct, or ONE for TOML,
+// whose stream is a single document.
 func streamRecordsFor(name, size string) []any {
-	//: lower-case once for case-insensitive dispatch.
-	switch strings.ToLower(name) {
-	//: xml streams concatenated <doc>…</doc> elements; xmlDoc round-trips
-	//: through encoding/xml's Encoder + Decoder identically per record.
-	case "xml":
-		//: scale via record count, not field count — xml's bench cost is
-		//: dominated by start-element / end-element bookkeeping.
-		base := sampleXML()
-		recs := make([]any, 0, streamRecordCount)
-		for range streamRecordCount {
-			recs = append(recs, base)
-		}
-		return recs
-	//: tlv streams primitive int64 records (the TLV encoder dispatches
-	//: on reflect.Kind, so a scalar exercises the fast path). Three
-	//: distinct values keep DCE honest.
-	case "tlv":
-		return []any{int64(-64_000_000_000), int64(1 << 30), int64(-1 << 29)}
-	//: toml is single-document by design — its streaming Decoder reads
-	//: the entire stream into one value, so the bench emits ONE record
-	//: per stream. Multi-record concat would yield invalid TOML.
-	case "toml":
-		base := tweakForCodec("toml", sampleComplex())
-		switch size {
-		case "medium":
-			base = scaleComplex(base, 100)
-		case "large":
-			base = scaleComplex(base, 1000)
-		}
-		return []any{base}
+	count := streamRecordCount
+	//: toml's Decoder reads the whole stream as one document.
+	if strings.EqualFold(name, "toml") {
+		count = 1
 	}
-	//: universal-shape codecs (json, yaml, cbor, msgpack, baseenc family).
-	//: streamRecordCount records keep the Encode/Decode loop measurable.
-	typed := buildStreamRecords(name, size)
-	//: indexed-assignment widens []complexRT into []any without the
-	//: make-range-append pattern that triggers KTN-VAR-SLICECLONE
-	//: (slices.Clone can't change element type, so it doesn't apply).
-	out := make([]any, len(typed))
-	for i, r := range typed {
-		out[i] = r
+	out := make([]any, 0, count)
+	for i := range count {
+		out = append(out, benchRecordFor(size, i))
 	}
 	return out
 }
 
-// newStreamDecodeTarget returns a fresh, codec-shaped pointer the
-// streaming decoder writes through. Symmetric with streamRecordsFor:
-// every record type emitted there has a matching target here.
+// newStreamDecodeTarget returns a fresh target the streaming decoder writes
+// through: the record, or an untyped value for tlv, whose decoder builds
+// composites into untyped values only.
 func newStreamDecodeTarget(name string) any {
-	//: lower-case once for case-insensitive dispatch.
-	switch strings.ToLower(name) {
-	case "xml":
-		//: encoding/xml.Decoder.Decode reads into a typed struct.
-		var d xmlDoc
-		return &d
-	case "tlv":
-		//: tlv scalar — Decode writes through *int64.
-		var i int64
-		return &i
+	//: tlv cannot project a composite into a struct.
+	if strings.EqualFold(name, "tlv") {
+		return new(any)
 	}
-	//: universal target is *complexRT — every other streaming codec
-	//: round-trips that shape.
-	var c complexRT
-	return &c
-}
-
-// buildStreamRecords synthesises streamRecordCount sequential complexRT
-// records for the universal-shape streaming benches. Records share the
-// size-appropriate fixture and offset their integer fields via nextInt
-// so each record is distinguishable on decode.
-func buildStreamRecords(name, size string) []complexRT {
-	//: base fixture sized for the bench class.
-	base := tweakForCodec(name, sampleComplex())
-	//: scale per size class so the stream carries non-trivial
-	//: per-record cost at medium / large.
-	switch size {
-	case "medium":
-		base = scaleComplex(base, 100)
-	case "large":
-		base = scaleComplex(base, 1000)
-	}
-	//: pre-allocated for streamRecordCount entries.
-	records := make([]complexRT, 0, streamRecordCount)
-	//: walk the fixed-size loop emitting offset copies.
-	cur := base
-	for range streamRecordCount {
-		records = append(records, cur)
-		cur = nextInt(cur)
-	}
-	//: hand back the freshly built batch.
-	return records
+	//: every other streaming codec decodes the record.
+	return &benchRecord{}
 }
 
 // seedStream pre-encodes the record batch through stream's encoder and
@@ -1105,10 +999,16 @@ func runAllBenches() []benchReportRow {
 // collectMarshal benches every codec × size through codec.Marshal.
 func collectMarshal(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
 	for _, f := range formats {
+		promoted := promotedFormat(f)
 		for _, sz := range benchSizes {
 			payload := payloadFor(string(f), sz)
+			//: a format that cannot carry the record at this size says why.
+			if _, merr := codec.Marshal(f, payload); merr != nil {
+				rows = append(rows, skippedRow("Marshal", string(f), sz, merr))
+				continue
+			}
 			r := testing.Benchmark(makeMarshalBench(f, payload))
-			rows = append(rows, toRow("Marshal", string(f), sz, r))
+			rows = append(rows, toRow("Marshal", string(f), sz, r, promoted))
 			prog.step("Marshal " + string(f) + "/" + sz)
 		}
 	}
@@ -1119,15 +1019,17 @@ func collectMarshal(rows []benchReportRow, formats []codec.Format, prog *benchPr
 // one-shot seed outside b.Loop so only the decode cost is timed.
 func collectUnmarshal(rows []benchReportRow, formats []codec.Format, prog *benchProgress) []benchReportRow {
 	for _, f := range formats {
+		promoted := promotedFormat(f)
 		for _, sz := range benchSizes {
 			payload := payloadFor(string(f), sz)
 			data, merr := codec.Marshal(f, payload)
 			if merr != nil {
-				//: skip — Marshal already failed, decode would be moot.
+				//: skipped — Marshal already failed, decode would be moot.
+				rows = append(rows, skippedRow("Unmarshal", string(f), sz, merr))
 				continue
 			}
 			r := testing.Benchmark(makeUnmarshalBench(f, payload, data))
-			rows = append(rows, toRow("Unmarshal", string(f), sz, r))
+			rows = append(rows, toRow("Unmarshal", string(f), sz, r, promoted))
 			prog.step("Unmarshal " + string(f) + "/" + sz)
 		}
 	}
@@ -1140,8 +1042,12 @@ func collectMarshalParallel(rows []benchReportRow, formats []codec.Format, prog 
 	for _, f := range formats {
 		for _, sz := range benchSizes {
 			payload := payloadFor(string(f), sz)
+			//: a format that cannot carry the record is measured nowhere.
+			if _, merr := codec.Marshal(f, payload); merr != nil {
+				continue
+			}
 			r := testing.Benchmark(makeMarshalParallelBench(f, payload))
-			rows = append(rows, toRow("MarshalParallel", string(f), sz, r))
+			rows = append(rows, toRow("MarshalParallel", string(f), sz, r, promotedFormat(f)))
 			prog.step("MarshalParallel " + string(f) + "/" + sz)
 		}
 	}
@@ -1158,7 +1064,7 @@ func collectUnmarshalParallel(rows []benchReportRow, formats []codec.Format, pro
 				continue
 			}
 			r := testing.Benchmark(makeUnmarshalParallelBench(f, payload, data))
-			rows = append(rows, toRow("UnmarshalParallel", string(f), sz, r))
+			rows = append(rows, toRow("UnmarshalParallel", string(f), sz, r, promotedFormat(f)))
 			prog.step("UnmarshalParallel " + string(f) + "/" + sz)
 		}
 	}
@@ -1180,8 +1086,13 @@ func collectAppend(rows []benchReportRow, formats []codec.Format, prog *benchPro
 		}
 		for _, sz := range benchSizes {
 			payload := payloadFor(string(f), sz)
+			//: the Appender takes the record as Marshal does, without promotion.
+			if _, aerr := appender.Append(nil, payload); aerr != nil {
+				rows = append(rows, skippedRow("Append", string(f), sz, aerr))
+				continue
+			}
 			r := testing.Benchmark(makeAppendBench(appender, payload))
-			rows = append(rows, toRow("Append", string(f), sz, r))
+			rows = append(rows, toRow("Append", string(f), sz, r, false))
 			prog.step("Append " + string(f) + "/" + sz)
 		}
 	}
@@ -1202,8 +1113,13 @@ func collectStreamEncode(rows []benchReportRow, formats []codec.Format, prog *be
 		}
 		for _, sz := range benchSizes {
 			records := streamRecordsFor(string(f), sz)
+			//: a stream that cannot carry the record says why.
+			if _, serr := seedStream(stream, records); serr != nil {
+				rows = append(rows, skippedRow("StreamEncode", string(f), sz, serr))
+				continue
+			}
 			r := testing.Benchmark(makeStreamEncodeBench(stream, records))
-			rows = append(rows, toRow("StreamEncode", string(f), sz, r))
+			rows = append(rows, toRow("StreamEncode", string(f), sz, r, false))
 			prog.step("StreamEncode " + string(f) + "/" + sz)
 		}
 	}
@@ -1226,10 +1142,11 @@ func collectStreamDecode(rows []benchReportRow, formats []codec.Format, prog *be
 			records := streamRecordsFor(string(f), sz)
 			seed, serr := seedStream(stream, records)
 			if serr != nil {
+				rows = append(rows, skippedRow("StreamDecode", string(f), sz, serr))
 				continue
 			}
 			r := testing.Benchmark(makeStreamDecodeBench(stream, string(f), len(records), seed))
-			rows = append(rows, toRow("StreamDecode", string(f), sz, r))
+			rows = append(rows, toRow("StreamDecode", string(f), sz, r, false))
 			prog.step("StreamDecode " + string(f) + "/" + sz)
 		}
 	}
@@ -1238,7 +1155,7 @@ func collectStreamDecode(rows []benchReportRow, formats []codec.Format, prog *be
 
 // toRow projects a testing.BenchmarkResult onto the typed row record
 // the renderer consumes.
-func toRow(category, codec, size string, r testing.BenchmarkResult) benchReportRow {
+func toRow(category, codec, size string, r testing.BenchmarkResult, promoted bool) benchReportRow {
 	return benchReportRow{
 		Category:    category,
 		Codec:       codec,
@@ -1247,6 +1164,7 @@ func toRow(category, codec, size string, r testing.BenchmarkResult) benchReportR
 		NsPerOp:     r.NsPerOp(),
 		BPerOp:      r.AllocedBytesPerOp(),
 		AllocsPerOp: r.AllocsPerOp(),
+		Promoted:    promoted,
 	}
 }
 
@@ -1305,7 +1223,8 @@ func writeResultsIntro(b *strings.Builder) {
 	b.WriteString("- Green cells = **below** the mean for that column (faster, lighter, fewer allocs — or more iters for `Iters`).\n")
 	b.WriteString("- Red cells = **above** the mean.\n")
 	b.WriteString("- Delta is shown as `±X%` up to ±999% and `×N` / `÷N` past 10× either way.\n\n")
-	b.WriteString("Each operation is wrapped in a collapsible block (small / medium / large grouped) so the table flood is opt-in. Every registered Format participates in the average — `flatbuffers` (passthrough) and `tlv` (scalar payload) are included verbatim, so the mean reflects the full surface.\n\n")
+	b.WriteString("Each operation is wrapped in a collapsible block (small / medium / large grouped) so the table flood is opt-in.\n\n")
+	b.WriteString("**One value for every format (#899).** Every Format encodes the same struct-only record — scalars and a list of items, no map and no `[]byte`, the shape `encoding/xml` and the schema-ish formats accept — with 1, 100 and 1 000 items at small, medium and large; NDJSON streams three of them. A format whose own codec cannot carry the record is measured through the facade's real promotion path (`promote.go`, the record as JSON inside the format's native shape) and marked *promoted*; a cell a format cannot measure at all (a size past its input bound) is marked *skipped* with the reason. The mean each cell is compared to is computed over the other rows only — the formats that encode the record themselves.\n\n")
 }
 
 // writeAllPivotTables emits one sub-table per (category, size) pair, in
@@ -1364,18 +1283,19 @@ func filterRows(rows []benchReportRow, category, size string) []benchReportRow {
 // writePivotTable emits one mean-baseline sub-table. The codec column
 // is sorted by ns/op ascending so the fastest codecs sit at the top.
 func writePivotTable(b *strings.Builder, category, size string, rows []benchReportRow) {
-	means := computeMeans(rows)
+	universal := slices.DeleteFunc(slices.Clone(rows), func(r benchReportRow) bool { return r.Promoted || r.Skipped != "" })
+	means := computeMeans(universal)
 	//: slices.SortFunc is the Go 1.21+ generic, reflection-free alternative
-	//: to sort.Slice (KTN-VAR-SORTALLOC).
+	//: to sort.Slice (KTN-VAR-SORTALLOC); skipped cells sink to the end.
 	slices.SortFunc(rows, func(a, b benchReportRow) int {
-		return cmp.Compare(a.NsPerOp, b.NsPerOp)
+		return cmp.Or(cmp.Compare(boolRank(a.Skipped != ""), boolRank(b.Skipped != "")), cmp.Compare(a.NsPerOp, b.NsPerOp))
 	})
 	fmt.Fprintf(b, "#### %s — %s payload\n\n", category, size)
 	fmt.Fprintf(
 		b,
-		"> **Mean baseline** across %d codecs: `%s ns/op` · `%s B/op` · `%s allocs/op` · `%s iters`. "+
+		"> **Mean baseline** across the %d codecs that encode the record themselves: `%s ns/op` · `%s B/op` · `%s allocs/op` · `%s iters`. "+
 			"Green cells sit **below** the mean (faster / lighter / fewer allocs); red cells above.\n\n",
-		len(rows),
+		len(universal),
 		formatThousands(int64(means.nsop)),
 		formatThousands(int64(means.bop)),
 		formatThousands(int64(means.allocs)),
@@ -1383,13 +1303,32 @@ func writePivotTable(b *strings.Builder, category, size string, rows []benchRepo
 	)
 	b.WriteString("| Codec | Iters | ns/op | B/op | allocs/op |\n|---|---:|---:|---:|---:|\n")
 	for _, r := range rows {
+		//: a cell not measured, and why.
+		if r.Skipped != "" {
+			fmt.Fprintf(b, "| `%s` *skipped* | %s | – | – | – |\n", r.Codec, r.Skipped)
+			continue
+		}
+		label := "`" + r.Codec + "`"
+		//: measured through promote.go, outside the mean.
+		if r.Promoted {
+			label += " *promoted*"
+		}
 		itersCell := formatCell(float64(r.Iters), means.iters, true)
 		nsopCell := formatCell(float64(r.NsPerOp), means.nsop, false)
 		bopCell := formatCell(float64(r.BPerOp), means.bop, false)
 		allocsCell := formatCell(float64(r.AllocsPerOp), means.allocs, false)
-		fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n", r.Codec, itersCell, nsopCell, bopCell, allocsCell)
+		fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n", label, itersCell, nsopCell, bopCell, allocsCell)
 	}
 	b.WriteString("\n")
+}
+
+// boolRank orders false before true.
+func boolRank(v bool) int {
+	//: true sorts last.
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // computeMeans averages every column of the given row set. Caller

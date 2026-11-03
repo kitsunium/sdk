@@ -27,7 +27,7 @@ since ADR 0160 §2 with its values unchanged (`ENTROPY_FAILED`,
 and declares none; `codeRangeOwners` maps both keys to this directory.
 
 **The ports are generated from the design** (ADR 0163): `Tracer`, `Span`,
-`Carrier`, `SpanExporter` and its siblings `ContextSpanExporter` and `DocumentExporter` are declared, with their doc comments, under
+`Carrier`, `SpanExporter` and its siblings `ContextSpanExporter`, `DocumentExporter` and `EncodedDocumentExporter` (#1051, added by the observe lot for the forwarder's gzipped batches) are declared, with their doc comments, under
 `ports:` in `design/observe/trace.yaml`, and `kit gen` writes them into
 `gen_ports.go`. A port or its doc comment changes in the design, then `kit
 gen`, then `make api` — never in `gen_ports.go`, whose header digests `make

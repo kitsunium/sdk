@@ -39,12 +39,12 @@
 //	| Format       | Go constant       | MIME                       | Extension           | Streaming | Best for |
 //	|--------------|-------------------|----------------------------|---------------------|:---------:|----------|
 //	| json         | codec.JSON        | application/json           | .json               | yes       | API responses, public configs |
-//	| ndjson       | codec.NDJSON      | application/x-ndjson       | .ndjson / .jsonl    | —         | streaming logs, line-oriented batches |
+//	| ndjson       | codec.NDJSON      | application/x-ndjson       | .ndjson / .jsonl    | yes       | streaming logs, line-oriented batches |
 //	| xml          | codec.XML         | application/xml            | .xml                | yes       | legacy integrations |
-//	| csv          | codec.CSV         | text/csv                   | .csv                | —         | tabular exports |
+//	| csv          | codec.CSV         | text/csv                   | .csv                | yes       | tabular exports |
 //	| form         | codec.Form        | application/x-www-form-urlencoded | .form / .urlencoded | —  | HTML form bodies, query strings |
 //	| asn1-der     | codec.ASN1DER     | application/pkix-cert      | .der / .cer         | —         | crypto / X.509 artefacts |
-//	| pem          | codec.PEM         | application/x-pem-file     | .pem / .crt / .key  | —         | block-wrapped DER (certs, keys) |
+//	| pem          | codec.PEM         | application/x-pem-file     | .pem / .crt / .key  | yes       | block-wrapped DER (certs, keys) |
 //	| yaml         | codec.YAML        | application/yaml           | .yaml / .yml        | yes       | human-edited configs |
 //	| toml         | codec.TOML        | application/toml           | .toml               | yes       | app configs (strict typing) |
 //	| cbor         | codec.CBOR        | application/cbor           | .cbor               | yes       | IoT / mobile (RFC 8949) |
@@ -125,8 +125,33 @@
 //	    NewDecoder(r io.Reader) Decoder
 //	}
 //
+//	// Bounded streaming — a Decoder refusing any value past maxBytes
+//	// (JSON, XML, CBOR; reached through NewBoundedDecoder).
+//	type BoundedStreamingCodec interface {
+//	    StreamingCodec
+//	    NewBoundedDecoder(r io.Reader, maxBytes int64) (Decoder, error)
+//	}
+//
+//	// Sniffing — a confident claim on an input's first bytes, which
+//	// Detect asks of every codec (JSON, NDJSON, XML, PEM, BSON).
+//	type Sniffer interface {
+//	    Sniff(prefix []byte) (confident bool)
+//	}
+//
 // [StreamingUnsupported] is returned from [NewEncoder] / [NewDecoder]
-// when the resolved codec does not satisfy StreamingCodec.
+// when the resolved codec does not satisfy StreamingCodec, and from
+// [NewBoundedDecoder] when it does not satisfy BoundedStreamingCodec.
+//
+// # Durations
+//
+// A time.Duration follows one rule per kind of format (#1126). The formats
+// people edit by hand — YAML and TOML — write its String(), "1h30m0s", and
+// read it with time.ParseDuration, refusing a string without its unit. The
+// binary formats — CBOR, MessagePack, BSON — write an integer of int64
+// nanoseconds, no standard tag carrying a duration. JSON keeps the integer
+// encoding/json writes, the standard library's output being its contract,
+// and every format promoted through JSON inherits it. A configuration
+// converted between YAML and TOML keeps "30m" meaning thirty minutes.
 //
 // # Errors
 //
@@ -167,8 +192,9 @@
 // Package codec — JSON-bridge promotion path for codecs whose runtime
 // preconditions reject the public Marshal(F, any) / Unmarshal(F, *,
 // any) contract. Six of the twenty-four registered codecs constrain
-// their input shape: csv expects [][]string, ndjson expects []T, pem
-// expects *pem.Block, flatbuffers expects []byte or BytesProvider,
+// their input shape: csv expects [][]string or a slice of flat structs,
+// ndjson expects []T, pem expects *pem.Block, flatbuffers expects []byte
+// or BytesProvider,
 // form expects url.Values, tlv's decoder cannot project composites
 // into typed targets. Without promotion the facade's "format-swap is
 // a single string change" promise is a lie for 6/24. Promotion

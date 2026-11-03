@@ -17,6 +17,9 @@ const (
 	markerField string = "_msgpack"
 	// optOmitEmpty leaves an empty field out.
 	optOmitEmpty string = "omitempty"
+	// optOmitZero leaves a field holding its type's zero value out, as
+	// encoding/json's omitzero does (#1103).
+	optOmitZero string = "omitzero"
 	// optAsArray encodes the struct as an array.
 	optAsArray string = "as_array"
 	// optAsArrayCamel is the camel-case spelling of optAsArray.
@@ -45,6 +48,8 @@ type structField struct {
 	index []int
 	// omitEmpty leaves the field out when it is empty.
 	omitEmpty bool
+	// omitZero leaves the field out when it holds its type's zero value.
+	omitZero bool
 }
 
 // structLayout is the cached map form of one struct type.
@@ -58,7 +63,8 @@ type structLayout struct {
 	fields []*structField
 	// asArray encodes the struct as an array.
 	asArray bool
-	// hasOmitEmpty is set when any field may be left out.
+	// hasOmitEmpty is set when any field may be left out, by omitempty or
+	// by omitzero.
 	hasOmitEmpty bool
 }
 
@@ -159,6 +165,7 @@ func (b *layoutBuilder) addField(f reflect.StructField) {
 		name:      cmpOrName(tag.name, f.Name),
 		index:     []int{f.Index[0]},
 		omitEmpty: b.omitAll || tag.has(optOmitEmpty),
+		omitZero:  tag.has(optOmitZero),
 	}
 	//: an embedded struct may contribute its own fields instead.
 	if f.Anonymous && !tag.has(optNoInline) && b.inline(field, tag.has(optInline)) {
@@ -215,7 +222,7 @@ func (b *layoutBuilder) inline(field *structField, forced bool) bool {
 			continue
 		}
 		b.add(&structField{
-			typ: sf.typ, name: sf.name, omitEmpty: sf.omitEmpty,
+			typ: sf.typ, name: sf.name, omitEmpty: sf.omitEmpty, omitZero: sf.omitZero,
 			index: append(append(make([]int, 0, len(field.index)+len(sf.index)), field.index...), sf.index...),
 		})
 	}
@@ -249,7 +256,7 @@ func (b *layoutBuilder) add(field *structField) {
 	b.layout.fields = append(b.layout.fields, field)
 	b.layout.byName[field.name] = field
 	//: one optional field is enough to take the counting path.
-	if field.omitEmpty {
+	if field.omitEmpty || field.omitZero {
 		//: latch it.
 		b.layout.hasOmitEmpty = true
 	}

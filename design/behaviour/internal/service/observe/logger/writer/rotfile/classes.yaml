@@ -21,6 +21,14 @@ constants:
         type: os.FileMode
         value: "0o600"
     name: defaultFilePerm
+  - doc: |-
+      maxRetainedBatch is the largest concatenation buffer WriteBatch keeps for
+      the next batch; a burst that grew it past this is let go.
+    items:
+      - name: maxRetainedBatch
+        type: int
+        value: 1 << 20
+    name: maxRetainedBatch
 files:
   - decls:
       - (*rotatingSink).backupName
@@ -66,16 +74,24 @@ files:
     name: rotate_manual.go
   - decls:
       - defaultFilePerm
+      - maxRetainedBatch
       - openRefusals
       - rotatingSink
       - openHardened
       - newRotatingSink
       - (*rotatingSink).Write
+      - (*rotatingSink).WriteBatch
+      - (*rotatingSink).writeLocked
+      - retained
+      - wholeRecords
       - (*rotatingSink).Flush
       - (*rotatingSink).Close
       - (*rotatingSink).syncOpen
       - (*rotatingSink).closeOpen
     name: rotating_sink.go
+  - decls:
+      - _
+    name: rotating_sink_compliance.go
   - decls:
       - Config
     name: rotating_sink_config.go
@@ -191,6 +207,18 @@ functions:
     params: cfg *Config
     results: sink corelogger.Sink, err error
   - doc: |-
+      retained is buf emptied for reuse, or nil when it grew past
+      maxRetainedBatch.
+    name: retained
+    params: buf []byte
+    results: "[]byte"
+  - doc: |-
+      wholeRecords counts the payloads, from the first, that lie entirely within
+      the first n bytes of their concatenation.
+    name: wholeRecords
+    params: payloads [][]byte, n int
+    results: int
+  - doc: |-
       wrapRotate wraps cause under the RotFileRotateFailed sentinel with a private
       diagnostic, keeping the rotation call sites terse. The cause never carries
       key bytes or path-derived secrets; only the supplied private string is added.
@@ -233,12 +261,29 @@ types:
         type: Config
       - doc: |-
           mu serialises Write + rotation so the size accounting, rename shift, and
-          reopen are atomic against concurrent producers.
+          reopen are atomic against concurrent producers. Flush holds it only to
+          read f, never across the fsync (#815).
         name: mu
         type: sync.Mutex
+      - doc: |-
+          pin keeps the descriptor a Flush is syncing open against a rotation:
+          Flush read-locks it while it still holds mu, and rotate write-locks it
+          (under mu) before closing the active file, so a rotation waits for an
+          fsync in progress — rotations are rare — while a Write never does.
+        name: pin
+        type: sync.RWMutex
       - doc: f is the currently open active file at cfg.Path.
         name: f
         type: "*os.File"
+      - doc: batch is WriteBatch's concatenation buffer, reused under mu.
+        name: batch
+        type: "[]byte"
+      - doc: |-
+          syncFile, when set, replaces (*os.File).Sync as the fsync Flush runs: a
+          white-box test substitutes one that blocks, to prove a Write is not held
+          behind it. nil in production.
+        name: syncFile
+        type: func(f *os.File) error
       - doc: |-
           size tracks bytes written to the active file since the last open, so the
           threshold check needs no per-write stat syscall.
@@ -396,6 +441,24 @@ types:
         recv: s *rotatingSink
         results: n int, err error
       - doc: |-
+          WriteBatch appends every payload to the active file in ONE write, under
+          the local mutex, rotating first when the batch would push the file past
+          MaxBytes — the threshold is checked once per batch, as a single record is
+          once per write (#807). It reports how many records landed whole.
+        name: WriteBatch
+        params: ctx context.Context, recs []corelogger.RecordEvent, payloads [][]byte
+        recv: s *rotatingSink
+        results: written int, err error
+      - doc: |-
+          writeLocked is Write's body after the context check: the stashed interval
+          error reported, the descriptor reopened when the last reopen failed, the
+          rotation when p would cross MaxBytes, then the write, whose failure carries
+          the caller's field beside the byte count. The caller holds s.mu.
+        name: writeLocked
+        params: p []byte, field errs.FieldValue
+        recv: s *rotatingSink
+        results: n int, err error
+      - doc: |-
           Flush calls fsync on the active file so kernel page cache contents reach
           durable storage.
         name: Flush
@@ -409,9 +472,13 @@ types:
         recv: s *rotatingSink
         results: error
       - doc: |-
-          syncOpen syncs the active descriptor; a sink whose last reopen failed holds
-          none, and there is nothing it wrote to sync. The caller holds s.mu.
+          syncOpen syncs f, the descriptor Flush read under mu; a sink whose last
+          reopen failed holds none, and there is nothing it wrote to sync. A Close
+          racing the sync makes Sync report the file closed — correct for a closing
+          sink — and never touches a reused descriptor: os.File keeps it open until
+          the in-flight Sync returns. The caller holds s.pin, not s.mu.
         name: syncOpen
+        params: f *os.File
         recv: s *rotatingSink
         results: error
       - doc: |-
@@ -485,6 +552,12 @@ vars:
           	},
           }
     name: openRefusals
+  - doc: rotatingSink takes a whole backlog in one write (#807).
+    items:
+      - name: _
+        type: corelogger.BatchSink
+        value: (*rotatingSink)(nil)
+    name: _
   - doc: |-
       Writer is the registered rotfile factory singleton. The blank assignment runs
       writer.Register at package load (no init()), mirroring the codec convention.

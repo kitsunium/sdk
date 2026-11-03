@@ -1,11 +1,12 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/data/codec/multipart/
 
 ## Purpose
 
 RFC 7578 `multipart/form-data` — the shape every file upload and HTML form
 post arrives in. `mime/multipart` is stdlib, so this codec adds **zero
-dependencies**.
+dependencies**. Its `Reader` parses every body; the encoder frames what it
+writes itself, the bytes `mime/multipart.Writer` writes (#907, §Encoding cost).
 
 Unlike every other codec in this tree, the format is a **container**, not a
 value serialisation: it frames a list of named sections, each with its own
@@ -57,7 +58,9 @@ concurrent use") or invent an out-of-band channel, the package exposes
 `ContentType(data)`, which reads the delimiter back off the bytes `Marshal`
 just returned and formats the full header value through `mime.FormatMediaType`.
 A caller who needs a *chosen* boundary sets `FormValue.Boundary`; it is
-validated by `mime/multipart.Writer.SetBoundary` and used verbatim.
+validated by `validateBoundary` — the RFC 2046 rule `mime/multipart.Writer.SetBoundary`
+applies — and used verbatim. A generated one is drawn as that writer draws it:
+thirty `crypto/rand` bytes in hex.
 
 **2. Decoding from `[]byte` — solved for every real body, NOT solved in
 general.** `Unmarshal` recovers the delimiter with `Boundary(data)`: it scans a
@@ -113,7 +116,7 @@ body it cannot read back:
 |---|---|---|
 | `MaxPartBytes`  | 32 MiB (`DefaultMaxPartBytes`)  | one crafted part driving `io.ReadAll` to an OOM |
 | `MaxParts`      | 1024 (`DefaultMaxParts`)        | a boundary flood — cheap for the attacker, a header parse each for us; the byte bounds do not constrain a *count* on a streaming reader |
-| `MaxTotalBytes` | 64 MiB (`DefaultMaxTotalBytes`) | the aggregate; without it the real ceiling would be 32 MiB × 1024 = 32 GiB, which is not a bound anybody chose |
+| `MaxTotalBytes` | 64 MiB (`DefaultMaxTotalBytes`) | the WHOLE body — every byte read or written, delimiters and part headers included, not only the sum of part bodies (#908); without it the real ceiling would be 32 MiB × 1024 = 32 GiB, which is not a bound anybody chose |
 
 **A zero field means "use the documented default", never "unlimited"** —
 ADR 0031's clamp arm. **A negative field is refused** with `LIMITS_INVALID`
@@ -134,6 +137,24 @@ read uses the `internal/service/data/transform/bounded.go` template — an
   a whole part — 1.5× with the defaults, unbounded when `MaxPartBytes` exceeds
   `MaxTotalBytes` — and the refusal now names the knob that actually stopped the
   read (the per-part cap on a tie, matching `admitPart`'s order).
+- **Headers count** (#908). The three bounds used to be charged to part
+  bodies after `NextPart` returned, so a part's header block — parsed by
+  mime/multipart itself — was bounded only by the GODEBUG
+  `multipartmaxheaders` defaults, which a process can lift at run time (the
+  form codec's argument for its own pair cap). `decoderFor` now hands
+  mime/multipart the body through a `wireBudget` (`counter.go`) that charges
+  every byte it pulls, its read-ahead included, against `MaxTotalBytes` and
+  never pulls more than one byte past it: a header block of twice the ceiling
+  is refused with `LIMIT_EXCEEDED` / knob `MaxTotalBytes` before any part is
+  handed back (`TestDecodeChargesHeadersAgainstTheTotal`), and once the
+  ceiling is crossed no further part is framed. The encoder charges the bytes
+  it writes the same way (`admitEncodedPart`, reserving the closing
+  delimiter), so a body Marshal accepts is one the decoder reads back. The
+  per-part body accounting above is unchanged; it is now always at most what
+  the wire counter charges. **Semantic change:** a body whose part bodies sum
+  to exactly `MaxTotalBytes` was admitted and is now refused — the bound is
+  the body as transmitted (`TestDecodeChargesTheLastPartAgainstTheAggregate`
+  admits a body exactly at its own length and refuses one byte less).
 - **No probe byte at `math.MaxInt64`** (`probeSize`). `max+1` wraps negative
   there, `io.LimitReader` reads nothing through a negative limit, and with
   `MaxPartBytes` at `MaxInt64` — an accepted value — every part decoded
@@ -142,18 +163,35 @@ read uses the `internal/service/data/transform/bounded.go` template — an
 ## Header values are refused, never repaired
 
 `Name`, `FileName` and `ContentType` are written into the part's header block,
-and `mime/multipart.Writer.CreatePart` writes header values **verbatim**: a CR
+and the encoder writes header values **verbatim**, as
+`mime/multipart.Writer.CreatePart` does: a CR
 or LF inside one ends the line, and the rest becomes header lines — or, after an
 empty line, body — the caller never wrote. The encoder refuses a CR, LF or NUL
-in any of the three with `VALUE_INVALID` **before** `CreatePart` writes a byte,
+in any of the three with `VALUE_INVALID` **before** it writes a byte of the part,
 naming the field (`field` = `Name` / `FileName` / `ContentType`) and never the
 value — ADR 0064's stance on mail headers. It deliberately does not do what
 `mime/multipart`'s own escaper does (percent-encode CR and LF): that is a
 repair, delivering a filename the caller never supplied while reporting
 success. Quotes and backslashes are still escaped inside the quoted parameters
-(`quoteEscaper`), and UTF-8 is written raw (RFC 7578 §4.2). Pinned by
+(`appendQuoted`), and UTF-8 is written raw (RFC 7578 §4.2). Pinned by
 `TestEncoderRefusesHeaderInjection` and `TestEncodedHeadersReparseWithTheStdlib`,
 which requires the stdlib reader to read back exactly the header block asked for.
+
+## Encoding cost: the framing is written, not formatted (#907)
+
+`mime/multipart.Writer.CreatePart` took a `textproto.MIMEHeader` — a map built
+per part — sorted its keys and formatted every line through `fmt` into a fresh
+`bytes.Buffer`: a four-field text form cost 69 allocations to Marshal. The
+encoder now appends each part's delimiter line and header block
+(`appendHead`) into one buffer it keeps for its lifetime, then writes it and
+the body: the same bytes, Content-Disposition before Content-Type as the
+writer's sorted keys put them, and the closing `\r\n--<boundary>--\r\n` its
+`Close` wrote. `TestMarshalWritesWhatTheStdlibWriterWrites` holds every header
+shape — bare field, file with a media type, quotes and backslashes, an empty
+body, no part, a generated boundary — byte for byte to `mime/multipart.Writer`.
+`codec_integration_test.go` gives multipart the race-off alloc budget the other
+codecs have: three allocations per part on Marshal, Append and the stream
+encoder (`BENCH.md` §#907).
 
 ## A filename is reduced by one rule, on every OS
 
@@ -189,7 +227,7 @@ package always emitted; only the declaration moved.
 |---|---|---|
 | `0.3.41.1` | `MarshalFailed`    | `mime/multipart` failed writing a part header/body/closing delimiter, or `encoding/json` rejected the value on the JSON-mediated path |
 | `0.3.41.2` | `UnmarshalFailed`  | malformed part header, truncated body, a part with no form-data name (RFC 7578 §4.2 — the encoder refuses to write one, so it is refused on the way in too), non-JSON `_json` part, or a body with no `_json` part when the target is not a `*FormValue` |
-| `0.3.41.3` | `ValueInvalid`     | `PartValue` with no `Name`; a CR, LF or NUL in `Name` / `FileName` / `ContentType` (field `field` names which, never the value); nil `*FormValue` / `*PartValue`; decode target that is not a non-nil pointer |
+| `0.3.41.3` | `ValueInvalid`     | `PartValue` with no `Name`; a CR, LF or NUL in `Name` / `FileName` / `ContentType` (field `field` names which, never the value); nil `*FormValue` / `*PartValue` (a decode target that is not a non-nil pointer is the family's `TARGET_INVALID` since #1101) |
 | `0.3.41.4` | `BoundaryInvalid`  | delimiter not recoverable from the body, or a caller-supplied boundary outside RFC 2046 (1–70 bchars, no trailing space) |
 | `0.3.41.5` | `LimitExceeded`    | `MaxPartBytes` / `MaxParts` / `MaxTotalBytes` crossed — fields carry `knob`, `bound`, `got` |
 | `0.3.41.6` | `LimitsInvalid`    | a negative `LimitsConfig` field (ADR 0031 refusal) — field carries `knob` |
@@ -249,3 +287,7 @@ Locally, without Bazel:
 ```
 cd internal/service && GOWORK=off go test -race ./data/codec/multipart/
 ```
+
+## Fuzz (#897)
+
+`fuzz_external_test.go` — `FuzzUnmarshal`: over a body framed by a boundary the input picks: any body decodes without a panic; a decoded body was framed by the boundary `Boundary` sniffs from it (sniff and confirm agree), and its parts re-encode, read back equal and re-encode to the same bytes. The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.

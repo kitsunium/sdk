@@ -1,49 +1,65 @@
 package multipart
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	stdjson "encoding/json"
-	stdmp "mime/multipart"
-	"net/textproto"
+	"io"
 	"strings"
 
 	coremultipart "github.com/kitsunium/sdk/internal/core/data/codec/multipart"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// partHeaderFields is the number of headers a part carries at most —
-// Content-Disposition plus an optional Content-Type. Used to size the map in
-// one shot rather than letting it grow.
-const partHeaderFields int = 2
-
 // forbiddenHeaderOctets are the three octets no part header value may carry.
-// mime/multipart.Writer.CreatePart writes every header value verbatim, so a CR
-// or an LF inside one does not corrupt the field — it ENDS the line, and the
-// rest of the value is read back as a header line of its own or, after an
-// empty line, as the start of the body. NUL ends the value for any consumer
-// written in C. The same three octets ADR 0064's mail header gate refuses.
+// A header value is written verbatim, so a CR or an LF inside one does not
+// corrupt the field — it ENDS the line, and the rest of the value is read back
+// as a header line of its own or, after an empty line, as the start of the
+// body. NUL ends the value for any consumer written in C. The same three
+// octets ADR 0064's mail header gate refuses.
 const forbiddenHeaderOctets string = "\r\n\x00"
 
-// quoteEscaper escapes the two characters that can end or bend a quoted header
-// parameter: the backslash and the double quote.
-//
-// It is deliberately NOT a copy of mime/multipart's own (unexported) escaper,
-// which also percent-encodes CR and LF. That encoding is a REPAIR — the part
-// would carry a filename the caller never supplied while Encode reported
-// success. This package refuses those octets instead, before any header is
-// built (see forbiddenHeaderOctets), so a value reaching this replacer holds no
-// CR, LF or NUL left to encode.
-//
-//nolint:gochecknoglobals // strings.Replacer is immutable and safe to share.
-var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+// The framing the encoder writes, byte for byte what mime/multipart.Writer
+// writes: its CreatePart and Close are the oracle the tests hold it to (#907).
+const (
+	// crlf ends every line of the framing.
+	crlf string = "\r\n"
+	// dispositionOpen opens a part's Content-Disposition header.
+	dispositionOpen string = `Content-Disposition: form-data; name="`
+	// filenameOpen opens the filename parameter of a file part.
+	filenameOpen string = `; filename="`
+	// contentTypeOpen opens a part's optional Content-Type header.
+	contentTypeOpen string = "Content-Type: "
+	// headScratchBytes sizes the buffer a part's delimiter and header block
+	// are built in, once per encoder: a form field's name and a short
+	// filename fit, a longer header grows it once.
+	headScratchBytes int = 160
+	// generatedBoundaryBytes is how many random bytes a generated boundary
+	// spells in hex — mime/multipart's 30, so 60 characters.
+	generatedBoundaryBytes int = 30
+)
 
-// multipartEncoder adapts *mime/multipart.Writer to codec.Encoder. One Encode
-// call writes exactly one part; Close writes the terminating delimiter.
+// multipartEncoder writes a multipart/form-data body. One Encode call writes
+// exactly one part; Close writes the terminating delimiter. It frames the
+// parts itself rather than through mime/multipart.Writer, whose CreatePart
+// built a textproto.MIMEHeader per part and formatted and sorted it through
+// fmt — about seventeen allocations a part, for bytes that are a handful of
+// appends (#907).
 type multipartEncoder struct {
-	// inner is the stdlib writer that owns the delimiter and the framing.
-	inner *stdmp.Writer
-	// count charges the bounds per part — identical to the decoder's set, so
-	// the encoder never emits a body this package would refuse to read back.
+	// w receives the body; the encoder never closes it.
+	w io.Writer
+	// boundary is the delimiter, generated or pinned.
+	boundary string
+	// head is the reused buffer each part's delimiter and header block are
+	// built in before they are written.
+	head []byte
+	// count charges the bounds per part — the same LimitsConfig as the
+	// decoder's, so the encoder never emits a body this package would refuse
+	// to read back.
 	count counter
+	// open is set once a part has been written since the encoder began or
+	// last closed: the next delimiter then starts on a new line.
+	open bool
 }
 
 // Encode writes v as one part of the multipart body.
@@ -54,48 +70,43 @@ type multipartEncoder struct {
 // applied inside the codec so Marshal(F, anyValue) holds natively.
 func (e *multipartEncoder) Encode(v any) error {
 	//: resolve the value to a concrete part (native or JSON-mediated).
-	part, perr := asPart(v)
-	//: shape or JSON failure — nothing has been written yet.
-	if perr != nil {
-		//: propagate the typed refusal verbatim.
-		return perr
+	part, err := asPart(v)
+	//: a part: its header block and body, once the bounds admit them. A shape
+	//: or JSON failure writes nothing and is returned verbatim.
+	if err == nil {
+		err = e.writePart(part)
 	}
-	//: charge the part against the three bounds before materialising it.
-	if lerr := e.count.admitPart(int64(len(part.Data))); lerr != nil {
-		//: typed LIMIT_EXCEEDED; the body is left mid-stream for the caller
-		//: to discard, exactly as a failed io.Writer would.
-		return lerr
-	}
-	//: write the header block and the body.
-	return e.writePart(part)
+	return err
 }
 
 // Close writes the closing delimiter. The wrapped io.Writer is NOT closed —
 // the encoder never owns it, matching every other streaming codec here.
 func (e *multipartEncoder) Close() error {
-	//: multipart.Writer.Close writes "--<boundary>--"; without it the body
-	//: is truncated and every reader reports an unexpected EOF.
-	cerr := e.inner.Close()
-	//: success fast-path.
-	if cerr == nil {
-		//: nothing to wrap.
-		return nil
+	closing := e.closingLen()
+	//: the closing delimiter counts against MaxTotalBytes like any byte the
+	//: decoder will read; a part admitted kept room for it.
+	if lerr := e.count.admitClosing(closing); lerr != nil {
+		//: typed LIMIT_EXCEEDED.
+		return lerr
 	}
-	//: wrap the stdlib error for reason-based matching.
-	return errs.Wrap(cerr, errs.WrapParams{
-		Code:    coremultipart.CodeMultipartMarshalFailed,
-		Reason:  "MARSHAL_FAILED",
-		Public:  "multipart encoding failed",
-		Private: "service/data/codec/multipart.Encoder.Close: mime/multipart returned an error",
-	})
+	e.head = append(append(append(append(e.head[:0], crlf...), delimiterPrefix...), e.boundary...), delimiterPrefix+crlf...)
+	e.open = false
+	//: without it the body is truncated and every reader reports an
+	//: unexpected EOF.
+	if _, werr := e.w.Write(e.head); werr != nil {
+		//: wrap the transport error for reason-based matching.
+		return marshalFailed(werr, "Encoder.Close: writing the closing delimiter failed")
+	}
+	//: the body is complete.
+	return nil
 }
 
 // Boundary returns the delimiter this encoder writes, so a caller streaming a
 // request body can set its Content-Type header BEFORE the first byte goes out.
 // Reachable through the BoundaryProvider assertion on the codec.Encoder.
 func (e *multipartEncoder) Boundary() string {
-	//: delegate to the stdlib writer, which owns the generated value.
-	return e.inner.Boundary()
+	//: generated at construction or pinned by the caller.
+	return e.boundary
 }
 
 // writePart emits one part's header block followed by its body.
@@ -106,27 +117,96 @@ func (e *multipartEncoder) writePart(part *PartValue) error {
 		return valueInvalid("part carries no field name")
 	}
 	//: a CR, LF or NUL in a header value would end its line and write the rest
-	//: as header lines the caller never wrote — refused before CreatePart puts
-	//: a byte on the wire, and never repaired (ADR 0064's stance).
+	//: as header lines the caller never wrote — refused before a byte is
+	//: written, and never repaired (ADR 0064's stance).
 	if field, found := injectedHeaderField(part); found {
 		//: typed refusal naming the field; the value is never echoed.
 		return valueInvalid("a part header value carries a CR, LF or NUL",
 			errs.String("field", field))
 	}
-	//: open the part; CreatePart writes the delimiter + header block.
-	body, cerr := e.inner.CreatePart(partHeader(part))
-	//: header write failure.
-	if cerr != nil {
-		//: wrap with the marshal sentinel.
-		return marshalFailed(cerr, "Encoder.Encode: CreatePart returned an error")
+	e.head = e.appendHead(e.head[:0], part)
+	wire := int64(len(e.head)) + int64(len(part.Data))
+	//: charge the part against the three bounds before writing a byte of it.
+	if lerr := e.count.admitEncodedPart(int64(len(part.Data)), wire, e.closingLen()); lerr != nil {
+		//: typed LIMIT_EXCEEDED; the body is left mid-stream for the caller
+		//: to discard, exactly as a failed io.Writer would.
+		return lerr
 	}
-	//: body write; a short write is reported as an error by the stdlib.
-	if _, werr := body.Write(part.Data); werr != nil {
+	e.open = true
+	//: the delimiter and the header block in one write.
+	if _, werr := e.w.Write(e.head); werr != nil {
+		//: wrap with the marshal sentinel.
+		return marshalFailed(werr, "Encoder.Encode: writing the part header failed")
+	}
+	//: the body; a short write is reported as an error by the io.Writer contract.
+	if _, werr := e.w.Write(part.Data); werr != nil {
 		//: wrap with the marshal sentinel.
 		return marshalFailed(werr, "Encoder.Encode: writing the part body failed")
 	}
 	//: part complete.
 	return nil
+}
+
+// appendHead appends a part's delimiter line and its RFC 7578 header block to
+// b: the field name always, the filename and the Content-Type only when set,
+// both quoted parameters escaping the backslash and the double quote — the
+// bytes mime/multipart.Writer.CreatePart writes for the same header, whose
+// keys it sorts, Content-Disposition before Content-Type.
+func (e *multipartEncoder) appendHead(b []byte, part *PartValue) []byte {
+	//: a delimiter after a part starts on a new line.
+	if e.open {
+		b = append(b, crlf...)
+	}
+	b = append(append(append(b, delimiterPrefix...), e.boundary...), crlf...)
+	b = appendQuoted(append(b, dispositionOpen...), part.Name)
+	//: a file part also carries its filename.
+	if part.FileName != "" {
+		b = appendQuoted(append(append(b, '"'), filenameOpen...), part.FileName)
+	}
+	b = append(append(b, '"'), crlf...)
+	//: Content-Type is optional; an empty value is simply omitted.
+	if part.ContentType != "" {
+		b = append(append(append(b, contentTypeOpen...), part.ContentType...), crlf...)
+	}
+	//: the empty line that ends the header block.
+	return append(b, crlf...)
+}
+
+// closingLen is the length of the closing delimiter this encoder writes.
+func (e *multipartEncoder) closingLen() int64 {
+	//: CRLF, "--", the boundary, "--", CRLF.
+	return int64(len(crlf) + 2*len(delimiterPrefix) + len(e.boundary) + len(crlf))
+}
+
+// appendQuoted appends s escaping the two characters that can end or bend a
+// quoted header parameter: the backslash and the double quote.
+//
+// It is deliberately NOT mime/multipart's own (unexported) escaper, which also
+// percent-encodes CR and LF. That encoding is a REPAIR — the part would carry a
+// filename the caller never supplied while Encode reported success. This
+// package refuses those octets instead, before any header is built (see
+// forbiddenHeaderOctets), so a value reaching here holds no CR, LF or NUL.
+func appendQuoted(b []byte, s string) []byte {
+	//: one byte at a time; the two specials get a backslash first.
+	for i := range len(s) {
+		//: escape the specials.
+		if s[i] == '\\' || s[i] == '"' {
+			b = append(b, '\\')
+		}
+		b = append(b, s[i])
+	}
+	//: escaped.
+	return b
+}
+
+// generateBoundary draws a delimiter as mime/multipart.Writer does: thirty
+// random bytes from crypto/rand, in lower-case hex.
+func generateBoundary() string {
+	var raw [generatedBoundaryBytes]byte
+	//: crypto/rand.Read never fails on a supported platform (Go 1.24).
+	_, _ = rand.Read(raw[:])
+	//: sixty characters, every one in the RFC 2046 set.
+	return hex.EncodeToString(raw[:])
 }
 
 // injectedHeaderField reports the first of the three caller-supplied header
@@ -151,28 +231,6 @@ func injectedHeaderField(part *PartValue) (field string, found bool) {
 	}
 	//: every header value fits on its own line.
 	return "", false
-}
-
-// partHeader builds the RFC 7578 header block for part.
-func partHeader(part *PartValue) textproto.MIMEHeader {
-	//: Content-Disposition always carries the field name.
-	disposition := `form-data; name="` + quoteEscaper.Replace(part.Name) + `"`
-	//: a file part additionally carries its filename.
-	if part.FileName != "" {
-		//: append the filename parameter, escaped the same way.
-		disposition += `; filename="` + quoteEscaper.Replace(part.FileName) + `"`
-	}
-	//: sized once for the two headers a part can carry.
-	header := make(textproto.MIMEHeader, partHeaderFields)
-	//: canonical key casing is applied by Set.
-	header.Set("Content-Disposition", disposition)
-	//: Content-Type is optional; an empty value is simply omitted.
-	if part.ContentType != "" {
-		//: preserve the caller's media type verbatim.
-		header.Set("Content-Type", part.ContentType)
-	}
-	//: ready for CreatePart.
-	return header
 }
 
 // asPart resolves an arbitrary value to the part the encoder will write.

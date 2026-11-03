@@ -1,6 +1,7 @@
 package tlv
 
 import (
+	"bytes"
 	"io"
 	"reflect"
 	"runtime"
@@ -235,6 +236,33 @@ func BenchmarkEncoderStream(b *testing.B) {
 			b.ResetTimer()
 			for range b.N {
 				benchSinkErr = enc.Encode(row.value)
+			}
+		})
+	}
+}
+
+// BenchmarkDecoderStream measures the streaming Decoder on one record per
+// Decode — the stream rows' scalar, mixed and large values — so the cost of
+// rebuilding a record from the reader, the part Unmarshal does not pay, is
+// read beside BenchmarkUnmarshalAny. The record is re-read from the same
+// bytes each iteration; the target is untyped, so the rows also carry the
+// walker's own allocations.
+func BenchmarkDecoderStream(b *testing.B) {
+	codecUnderTest := &tlvCodec{}
+	for _, row := range benchStreamCases()[:3] {
+		encoded, err := codecUnderTest.Marshal(row.value)
+		if err != nil {
+			b.Fatalf("Marshal %s: %v", row.name, err)
+		}
+		b.Run(row.name, func(b *testing.B) {
+			reader := bytes.NewReader(encoded)
+			dec := &tlvDecoder{r: reader}
+			b.ResetTimer()
+			for range b.N {
+				reader.Reset(encoded)
+				var out any
+				benchSinkErr = dec.Decode(&out)
+				benchSinkAny = out
 			}
 		})
 	}

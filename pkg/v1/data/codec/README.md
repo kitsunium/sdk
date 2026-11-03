@@ -27,12 +27,12 @@ Single blank import (\`import \_ "github.com/kitsunium/sdk/pkg/v1/data/codec"\`)
 | Format       | Go constant       | MIME                       | Extension           | Streaming | Best for |
 |--------------|-------------------|----------------------------|---------------------|:---------:|----------|
 | json         | codec.JSON        | application/json           | .json               | yes       | API responses, public configs |
-| ndjson       | codec.NDJSON      | application/x-ndjson       | .ndjson / .jsonl    | —         | streaming logs, line-oriented batches |
+| ndjson       | codec.NDJSON      | application/x-ndjson       | .ndjson / .jsonl    | yes       | streaming logs, line-oriented batches |
 | xml          | codec.XML         | application/xml            | .xml                | yes       | legacy integrations |
-| csv          | codec.CSV         | text/csv                   | .csv                | —         | tabular exports |
+| csv          | codec.CSV         | text/csv                   | .csv                | yes       | tabular exports |
 | form         | codec.Form        | application/x-www-form-urlencoded | .form / .urlencoded | —  | HTML form bodies, query strings |
 | asn1-der     | codec.ASN1DER     | application/pkix-cert      | .der / .cer         | —         | crypto / X.509 artefacts |
-| pem          | codec.PEM         | application/x-pem-file     | .pem / .crt / .key  | —         | block-wrapped DER (certs, keys) |
+| pem          | codec.PEM         | application/x-pem-file     | .pem / .crt / .key  | yes       | block-wrapped DER (certs, keys) |
 | yaml         | codec.YAML        | application/yaml           | .yaml / .yml        | yes       | human-edited configs |
 | toml         | codec.TOML        | application/toml           | .toml               | yes       | app configs (strict typing) |
 | cbor         | codec.CBOR        | application/cbor           | .cbor               | yes       | IoT / mobile (RFC 8949) |
@@ -108,9 +108,26 @@ type StreamingCodec interface {
     NewEncoder(w io.Writer) Encoder
     NewDecoder(r io.Reader) Decoder
 }
+
+// Bounded streaming — a Decoder refusing any value past maxBytes
+// (JSON, XML, CBOR; reached through NewBoundedDecoder).
+type BoundedStreamingCodec interface {
+    StreamingCodec
+    NewBoundedDecoder(r io.Reader, maxBytes int64) (Decoder, error)
+}
+
+// Sniffing — a confident claim on an input's first bytes, which
+// Detect asks of every codec (JSON, NDJSON, XML, PEM, BSON).
+type Sniffer interface {
+    Sniff(prefix []byte) (confident bool)
+}
 ```
 
-[StreamingUnsupported](#StreamingUnsupported) is returned from [NewEncoder](#NewEncoder) / [NewDecoder](#NewDecoder) when the resolved codec does not satisfy StreamingCodec.
+[StreamingUnsupported](#StreamingUnsupported) is returned from [NewEncoder](#NewEncoder) / [NewDecoder](#NewDecoder) when the resolved codec does not satisfy StreamingCodec, and from [NewBoundedDecoder](#NewBoundedDecoder) when it does not satisfy BoundedStreamingCodec.
+
+### Durations
+
+A time.Duration follows one rule per kind of format (#1126). The formats people edit by hand — YAML and TOML — write its String(), "1h30m0s", and read it with time.ParseDuration, refusing a string without its unit. The binary formats — CBOR, MessagePack, BSON — write an integer of int64 nanoseconds, no standard tag carrying a duration. JSON keeps the integer encoding/json writes, the standard library's output being its contract, and every format promoted through JSON inherits it. A configuration converted between YAML and TOML keeps "30m" meaning thirty minutes.
 
 ### Errors
 
@@ -135,21 +152,28 @@ Package codec — declares the sentinel \*errs.Error values the facade emits whe
 
 Package codec — the multipart/form-data value types, and the one helper a consumer needs to send what Marshal(Multipart, …) returns. The format is a container whose delimiter lives in the Content-Type header, which the Codec contract cannot carry, so the facade publishes the two shapes the codec speaks natively and the function that recovers that header from the body — the multipart package's own Form, Part and ContentType, under the names this package has always given them.
 
-Package codec — JSON-bridge promotion path for codecs whose runtime preconditions reject the public Marshal(F, any) / Unmarshal(F, \*, any) contract. Six of the twenty-four registered codecs constrain their input shape: csv expects \[]\[]string, ndjson expects \[]T, pem expects \*pem.Block, flatbuffers expects \[]byte or BytesProvider, form expects url.Values, tlv's decoder cannot project composites into typed targets. Without promotion the facade's "format-swap is a single string change" promise is a lie for 6/24. Promotion intercepts the VALUE\_INVALID / FLATBUFFERS\_BAD\_\* / UNMARSHAL\_FAILED responses, encodes the value to JSON, wraps the bytes in a codec-specific container the codec will accept, and reverses the pipeline on Unmarshal. The fast (native-shape) path is untouched so existing callers see zero overhead. See TestUniversalRoundtripAllCodecs for the contract pin.
+Package codec — JSON-bridge promotion path for codecs whose runtime preconditions reject the public Marshal(F, any) / Unmarshal(F, \*, any) contract. Six of the twenty-four registered codecs constrain their input shape: csv expects \[]\[]string or a slice of flat structs, ndjson expects \[]T, pem expects \*pem.Block, flatbuffers expects \[]byte or BytesProvider, form expects url.Values, tlv's decoder cannot project composites into typed targets. Without promotion the facade's "format-swap is a single string change" promise is a lie for 6/24. Promotion intercepts the VALUE\_INVALID / FLATBUFFERS\_BAD\_\* / UNMARSHAL\_FAILED responses, encodes the value to JSON, wraps the bytes in a codec-specific container the codec will accept, and reverses the pipeline on Unmarshal. The fast (native-shape) path is untouched so existing callers see zero overhead. See TestUniversalRoundtripAllCodecs for the contract pin.
 
 ## Index
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func Available\(\) \[\]Format](<#Available>)
+- [func Detect\(prefix \[\]byte\) \(f Format, ok bool\)](<#Detect>)
+- [func DetectCompression\(prefix \[\]byte\) \(algo CompressAlgorithm, ok bool\)](<#DetectCompression>)
 - [func FromExtension\(ext string\) \(f Format, ok bool\)](<#FromExtension>)
 - [func FromMIME\(mime string\) \(f Format, ok bool\)](<#FromMIME>)
+- [func IsMisuse\(err error\) bool](<#IsMisuse>)
+- [func IsTooDeep\(err error\) bool](<#IsTooDeep>)
+- [func IsTooLarge\(err error\) bool](<#IsTooLarge>)
 - [func Marshal\(f Format, v any\) \(encoded \[\]byte, err error\)](<#Marshal>)
 - [func MarshalCompressed\(f Format, algo CompressAlgorithm, v any\) \(box \[\]byte, err error\)](<#MarshalCompressed>)
 - [func MarshalMany\(v any, formats ...Format\) \(encodedByFormat map\[Format\]\[\]byte, err error\)](<#MarshalMany>)
 - [func MultipartContentType\(body \[\]byte\) \(value string, err error\)](<#MultipartContentType>)
+- [func NewBoundedDecoder\(f Format, r io.Reader, maxBytes int64\) \(dec Decoder, err error\)](<#NewBoundedDecoder>)
 - [func NewDecoder\(f Format, r io.Reader\) \(dec Decoder, err error\)](<#NewDecoder>)
 - [func NewEncoder\(f Format, w io.Writer\) \(enc Encoder, err error\)](<#NewEncoder>)
+- [func PositionOf\(err error\) \(p Position, ok bool\)](<#PositionOf>)
 - [func Unmarshal\(f Format, data \[\]byte, v any\) error](<#Unmarshal>)
 - [func UnmarshalCompressed\(box \[\]byte, v any\) error](<#UnmarshalCompressed>)
 - [type Codec](<#Codec>)
@@ -172,6 +196,7 @@ Package codec — JSON-bridge promotion path for codecs whose runtime preconditi
   - [func \(Format\) String\(\) string](<#Format.String>)
 - [type MultipartForm](<#MultipartForm>)
 - [type MultipartPart](<#MultipartPart>)
+- [type Position](<#Position>)
 
 ## Constants
 
@@ -282,7 +307,7 @@ Code `1.2.0.4`
 const CodeStreamingUnsupported v1errs.Code = 16908291
 ```
 
-CodeStreamingUnsupported fires when NewEncoder / NewDecoder is called on a codec that does not implement StreamingCodec.
+CodeStreamingUnsupported fires when NewEncoder / NewDecoder is called on a codec that does not implement StreamingCodec, or NewBoundedDecoder on one that does not implement BoundedStreamingCodec.
 
 Code `1.2.0.3`
 
@@ -440,6 +465,24 @@ func Available() []Format
 
 Available returns the sorted list of registered formats.
 
+<a name="Detect"></a>
+## func [Detect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/detect.go>)
+
+```go
+func Detect(prefix []byte) (f Format, ok bool)
+```
+
+Detect returns the Format the first bytes of an input are written in, without a MIME type or a file extension (#909): JSON, NDJSON (two records or more), XML, PEM or BSON, recognised by their head. It reads at most 512 bytes of prefix, as http.DetectContentType does, answers (Format(""), false) when no format — or more than one — claims them, and allocates nothing. A frame MarshalCompressed wrote is no Format — UnmarshalCompressed reads it — so Detect never claims one; compressed bytes are DetectCompression's.
+
+<a name="DetectCompression"></a>
+## func [DetectCompression](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/detect.go>)
+
+```go
+func DetectCompression(prefix []byte) (algo CompressAlgorithm, ok bool)
+```
+
+DetectCompression returns the compression the first bytes of an input open with, by its magic number (#909): "gzip" (1f 8b 08), "zlib" (an RFC 1950 header whose check bits hold), "zstd" (28 b5 2f fd) or "s2" (the framed stream identifier of S2 or Snappy). It answers ("", false) for anything else — raw DEFLATE ("flate") and S2's block form have no magic, and a frame MarshalCompressed wrote is UnmarshalCompressed's — and allocates nothing. zstd and s2 are named, not decompressed, here: they live in third-party/transform (ADR 0066). Decompress, then Detect what is inside.
+
 <a name="FromExtension"></a>
 ## func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go>)
 
@@ -458,6 +501,33 @@ func FromMIME(mime string) (f Format, ok bool)
 
 FromMIME resolves a MIME string to its registered Format.
 
+<a name="IsMisuse"></a>
+## func [IsMisuse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
+
+```go
+func IsMisuse(err error) bool
+```
+
+IsMisuse reports whether err is a codec refusing how it was called rather than a byte it read: EMPTY\_INPUT (no bytes for a format with no empty document), TARGET\_INVALID (a nil or non-pointer Unmarshal or Decode target), VALUE\_INVALID (a channel, a function, an unsafe pointer to Marshal). The last two are the program's bug: answer them with 500.
+
+<a name="IsTooDeep"></a>
+## func [IsTooDeep](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
+
+```go
+func IsTooDeep(err error) bool
+```
+
+IsTooDeep reports whether err is a codec's refusal of input nested past a depth bound.
+
+<a name="IsTooLarge"></a>
+## func [IsTooLarge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
+
+```go
+func IsTooLarge(err error) bool
+```
+
+IsTooLarge reports whether err is a codec's refusal of input past a size bound — SIZE\_EXCEEDED in every bounded format, multipart's LIMIT\_EXCEEDED, strictjson's DOCUMENT\_TOO\_LARGE: answer it with 413.
+
 <a name="Marshal"></a>
 ## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go>)
 
@@ -465,7 +535,7 @@ FromMIME resolves a MIME string to its registered Format.
 func Marshal(f Format, v any) (encoded []byte, err error)
 ```
 
-Marshal serialises v using the codec registered under f. The codec's native input shape is tried first (fast path, zero overhead); if the codec rejects v as the wrong shape (csv requires \[]\[]string, pem requires \*pem.Block, etc.) the facade promotes v via json-encode + codec-specific wrap so every Format accepts any Go value — see promote.go for the per-format strategies and the uniform-contract rationale.
+Marshal serialises v using the codec registered under f. The codec's native input shape is tried first (fast path, zero overhead); if the codec rejects v as the wrong shape (csv requires \[]\[]string or a slice of flat structs, pem requires \*pem.Block, etc.) the facade promotes v via json-encode + codec-specific wrap so every Format accepts any Go value — see promote.go for the per-format strategies and the uniform-contract rationale. A value whose type alone rules it out — a struct given to Form, CSV, NDJSON or PEM — is promoted at once, without the codec building a refusal first; the bytes are the same.
 
 <a name="MarshalCompressed"></a>
 ## func [MarshalCompressed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/compressed.go>)
@@ -506,6 +576,15 @@ MultipartContentType returns the Content-Type header value — "multipart/form-d
 
 A caller streaming through NewEncoder(Multipart, w) must set the header before the first byte instead: the Encoder returned has a Boundary() string method, and mime.FormatMediaType builds the same value from it.
 
+<a name="NewBoundedDecoder"></a>
+## func [NewBoundedDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go>)
+
+```go
+func NewBoundedDecoder(f Format, r io.Reader, maxBytes int64) (dec Decoder, err error)
+```
+
+NewBoundedDecoder returns a streaming decoder for the codec registered under f that refuses a value longer than maxBytes after reading at most maxBytes+1 bytes of it (#891): the decoder to put in front of a socket. The refusal is the codec's SIZE\_EXCEEDED, which [IsTooLarge](#IsTooLarge) reads; a maxBytes of zero or below is refused by the codec with BOUND\_INVALID. JSON, XML and CBOR implement it; a Format whose codec does not returns [StreamingUnsupported](#StreamingUnsupported) — TOML, MessagePack and YAML bound their [NewDecoder](#NewDecoder) with fixed ceilings of their own.
+
 <a name="NewDecoder"></a>
 ## func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go>)
 
@@ -523,6 +602,15 @@ func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
 ```
 
 NewEncoder returns a streaming encoder for the codec registered under f.
+
+<a name="PositionOf"></a>
+## func [PositionOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
+
+```go
+func PositionOf(err error) (p Position, ok bool)
+```
+
+PositionOf returns where in its input a codec refused to decode — the line and column, or the byte offset, the format knows —, whatever the format: ok is false when the refusal carries no position.
 
 <a name="Unmarshal"></a>
 ## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go>)
@@ -783,6 +871,28 @@ type MultipartPart struct {
 	ContentType string
 	// Data is the part body.
 	Data        []byte
+}
+```
+
+<a name="Position"></a>
+## type [Position](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
+
+Position places a decode refusal in its input: Offset the 0-based byte, Line and Column 1-based, a zero Line or Column unknown. yaml, toml and csv place by line and column, json by offset, xml by line, and the binary formats — cbor, msgpack, bson, tlv, flatbuffers — by offset alone, where an Offset of zero is the first byte. Read it with PositionOf.
+
+```go
+type Position = corecodec.PositionValue
+```
+
+Position is an alias of `github.com/kitsunium/sdk/internal/core/data/codec.PositionValue`, declared as:
+
+```go
+type Position struct {
+	// Offset is the 0-based byte offset of the problem in the input.
+	Offset int
+	// Line is the 1-based line of the problem, zero when unknown.
+	Line   int
+	// Column is the 1-based column of the problem, zero when unknown.
+	Column int
 }
 ```
 

@@ -1,6 +1,11 @@
 <!-- updated: 2026-09-28T16:42:12Z -->
 # internal/service/observe/logger/middleware/
 
+
+**Contract.** Every package here is a row of the family's conformance table,
+`internal/service/observe/logger/conformance_external_test.go` (#1149): a new
+one is added with its row, or `TestConformanceCoversEveryPackage` fails.
+
 ## Purpose
 
 Chainable `core/observe/logger.Sink` decorators. Each sub-package is itself a

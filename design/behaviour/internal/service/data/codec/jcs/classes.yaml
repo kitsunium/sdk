@@ -1,0 +1,216 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The escapes of RFC 8785 §3.2.2.2.
+    grouped: true
+    items:
+      - doc: hexDigits are the lower-case digits of a \u00XX escape.
+        name: hexDigits
+        value: "\"0123456789abcdef\""
+      - doc: |-
+          firstPrintable is the first byte RFC 8785 writes as itself: below it
+          are the C0 controls, all escaped.
+        name: firstPrintable
+        type: byte
+        value: "0x20"
+      - doc: firstSupplementary is the first character UTF-16 writes as a pair.
+        name: firstSupplementary
+        type: rune
+        value: "0x10000"
+    name: hexDigits
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - hexDigits
+      - readerPool
+      - reader
+      - member
+      - Canonicalize
+      - canonicalize
+      - Marshal
+      - appendValue
+      - appendScalar
+      - appendNumber
+      - appendFloat
+      - appendString
+      - appendEscape
+      - appendArray
+      - appendObject
+      - readMembers
+      - appendMembers
+      - compareUTF16
+      - firstUnit
+      - inputOffsetter
+      - tokenReader
+      - notJSON
+    name: jcs.go
+functions:
+  - name: Canonicalize
+    params: doc []byte
+    results: "[]byte, error"
+  - doc: |-
+      canonicalize reads exactly one value from dec, the reader over doc, and
+      returns its canonical form.
+    name: canonicalize
+    params: doc []byte, dec tokenReader
+    results: "[]byte, error"
+  - name: Marshal
+    params: v any
+    results: "[]byte, error"
+  - doc: appendValue appends the canonical form of the next value of dec.
+    name: appendValue
+    params: dst []byte, dec tokenReader
+    results: "[]byte, error"
+  - doc: appendScalar appends a string or a literal.
+    name: appendScalar
+    params: dst []byte, dec tokenReader
+    results: "[]byte, error"
+  - doc: appendNumber appends a number as ECMAScript writes its IEEE 754 double.
+    name: appendNumber
+    params: dst []byte, dec tokenReader
+    results: "[]byte, error"
+  - doc: |-
+      appendFloat appends f as ECMAScript's Number::toString writes it (RFC 8785
+      §3.2.2.3): the shortest digits that read back as f, in decimal notation for
+      a magnitude from 1e-6 up to 1e21 and in exponent notation outside it, with
+      the exponent's sign and no leading zero; -0 is 0. f must be finite.
+
+      That is encoding/json's spelling of a float64, ES6's by design, which
+      jsonenc.AppendFloat writes for every emitter of the SDK (#1039) — but for
+      the negative zero, which encoding/json writes -0 and ECMAScript 0.
+    name: appendFloat
+    params: dst []byte, f float64
+    results: "[]byte"
+  - doc: |-
+      appendString appends s as RFC 8785 §3.2.2.2 writes a string: '"' and '\'
+      escaped, the control characters as \b \t \n \f \r or \u00xx, everything
+      else as itself.
+    name: appendString
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: |-
+      appendEscape appends the escape of c, a quote, a backslash or a control
+      character.
+    name: appendEscape
+    params: dst []byte, c byte
+    results: "[]byte"
+  - doc: appendArray appends an array, its elements canonicalized in order.
+    name: appendArray
+    params: dst []byte, dec tokenReader
+    results: "[]byte, error"
+  - doc: |-
+      appendObject appends an object: each member's value canonicalized into a
+      buffer of the object's own, then the members written in the order of their
+      names' UTF-16 code units (§3.2.3).
+    name: appendObject
+    params: dst []byte, dec tokenReader
+    results: "[]byte, error"
+  - doc: |-
+      readMembers reads an object's members up to and including its closing
+      brace: each name, and its value canonicalized into values.
+    name: readMembers
+    params: dec tokenReader
+    results: members []member, values []byte, err error
+  - doc: appendMembers writes sorted members as an object, with no whitespace.
+    name: appendMembers
+    params: dst []byte, members []member, values []byte
+    results: "[]byte"
+  - doc: |-
+      compareUTF16 orders two valid UTF-8 strings by their UTF-16 code units:
+      byte order but where a character past U+FFFF — a surrogate pair, 0xD800 up
+      — sorts before one from U+E000 to U+FFFF.
+    name: compareUTF16
+    params: a, b string
+    results: int
+  - doc: firstUnit is r's first UTF-16 code unit.
+    name: firstUnit
+    params: r rune
+    results: rune
+  - doc: notJSON is NotJSON at the reader's offset.
+    name: notJSON
+    params: dec inputOffsetter
+    results: error
+imports:
+  bytes: bytes
+  corejcs: github.com/kitsunium/sdk/internal/core/data/codec/jcs
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  jsonenc: github.com/kitsunium/sdk/internal/kernel/jsonenc
+  jsontext: encoding/json/jsontext
+  jsonv2: encoding/json/v2
+  recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  slices: slices
+  strconv: strconv
+  utf16: unicode/utf16
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/codec/jcs
+  name: jcs
+  purpose: "Package jcs writes the JSON Canonicalization Scheme of RFC 8785: one byte form for a JSON document, whatever the order of its members or the spelling of its numbers and strings, so it can be signed or hashed and checked by anyone who canonicalizes the same document."
+types:
+  - doc: reader is a pooled decoder and the bytes.Reader it reads.
+    fields:
+      - doc: src is the document being read.
+        name: src
+        type: bytes.Reader
+      - doc: dec reads src with jsontext's defaults, I-JSON's.
+        name: dec
+        type: "*jsontext.Decoder"
+    kind: struct
+    name: reader
+  - doc: |-
+      member is one object member, canonicalized: its name, and where its value's
+      canonical bytes sit in the object's buffer.
+    fields:
+      - doc: name is the member name, unescaped.
+        name: name
+        type: string
+      - doc: start and end delimit the value in the buffer.
+        name: start
+        type: int
+      - doc: start and end delimit the value in the buffer.
+        name: end
+        type: int
+    kind: struct
+    name: member
+  - doc: "inputOffsetter is what notJSON reads the offset from: the jsontext.Decoder."
+    kind: named
+    name: inputOffsetter
+    underlying: |-
+      interface {
+      	// InputOffset is the offset of the reader in the document.
+      	InputOffset() int64
+      }
+  - doc: |-
+      tokenReader is the part of jsontext.Decoder the canonical writer reads
+      with.
+    kind: named
+    name: tokenReader
+    underlying: |-
+      interface {
+      	inputOffsetter
+      	// PeekKind is the kind of the next token, without reading it.
+      	PeekKind() jsontext.Kind
+      	// ReadToken reads the next token.
+      	ReadToken() (jsontext.Token, error)
+      	// ReadValue reads the next value whole.
+      	ReadValue() (jsontext.Value, error)
+      }
+vars:
+  - doc: |-
+      readerPool recycles the reader Canonicalize parses with: a jsontext.Decoder
+      carries several kilobytes of state, which a document of a few members —
+      a JWK's required members — would otherwise allocate on every call.
+    items:
+      - name: readerPool
+        value: |-
+          recycler.NewPool[*reader](func() *reader {
+          	//: a decoder over an empty reader, repointed on each use.
+          	r := &reader{}
+          	r.dec = jsontext.NewDecoder(&r.src)
+          	return r
+          })
+    name: readerPool

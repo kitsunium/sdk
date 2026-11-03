@@ -36,11 +36,25 @@ sequences:
         kind: actor
       - id: (*tlvCodec).Unmarshal
         kind: self
+      - id: codec
+        kind: package
       - id: errs
         kind: package
       - id: decodeRoot
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
+          when: len(data) == 0
       - opt:
           do:
             - return: |-
@@ -85,11 +99,21 @@ sequences:
         kind: actor
       - id: (*tlvDecoder).Decode
         kind: self
+      - id: codec
+        kind: package
       - id: readOneRecord
         kind: internal
       - id: decodeRoot
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - bind: buf, rerr
         eval: readOneRecord(d.r)
         to: readOneRecord
@@ -118,7 +142,11 @@ sequences:
         kind: self
       - id: readTag
         kind: internal
-      - id: readRecordBody
+      - id: frame.appendByte
+        kind: internal
+      - id: frame.readBody
+        kind: internal
+      - id: frame.join
         kind: internal
     steps:
       - bind: tag, terr
@@ -132,43 +160,282 @@ sequences:
           do:
             - return: nil, terr
           when: terr != nil
-      - return: readRecordBody(r, tag, 0)
-        to: readRecordBody
-  - of: readRecordBody
+      - bind: frame
+        eval: "recordFrame{r: r}"
+      - opt:
+          do:
+            - return: nil, aerr
+          init:
+            bind: aerr
+            eval: frame.appendByte(tag)
+            to: frame.appendByte
+          when: aerr != nil
+      - opt:
+          do:
+            - return: nil, berr
+          init:
+            bind: berr
+            eval: frame.readBody(tag, 0)
+            to: frame.readBody
+          when: berr != nil
+      - return: frame.join(), nil
+        to: frame.join
+  - of: (*recordFrame).charge
     participants:
       - id: caller
         kind: actor
-      - id: readRecordBody
+      - id: (*recordFrame).charge
         kind: self
-      - id: readUvarint
-        kind: internal
-      - id: readCompositeRecord
-        kind: internal
-      - id: assembleRecord
+      - id: sizeExceededError
         kind: internal
     steps:
       - opt:
           do:
-            - return: nil, depthExceededError(depth)
+            - return: sizeExceededError(uint64(f.size) + n)
+              to: sizeExceededError
+          when: n > uint64(maxTLVBytes-f.size)
+      - return: nil
+  - of: (*recordFrame).ensureRoom
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(f.cur) < cap(f.cur)
+      - opt:
+          do:
+            - set: f.chunks
+              value: append(f.chunks, f.cur)
+          when: f.cur != nil
+      - set: f.cur
+        value: make([]byte, 0, min(max(f.size, frameMinChunk), maxTLVBytes-f.size))
+  - of: (*recordFrame).appendByte
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*recordFrame).appendByte
+        kind: self
+      - id: f.charge
+        kind: internal
+      - id: f.ensureRoom
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: cerr
+          init:
+            bind: cerr
+            eval: f.charge(1)
+            to: f.charge
+          when: cerr != nil
+      - eval: f.ensureRoom()
+        to: f.ensureRoom
+      - set: f.cur
+        value: append(f.cur, b)
+      - op: ++
+        set: f.size
+      - return: nil
+  - of: (*recordFrame).appendUvarint
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*recordFrame).appendUvarint
+        kind: self
+      - id: f.appendByte
+        kind: internal
+    steps:
+      - var:
+          name: buf
+          type: "[maxVarintBytes]byte"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: aerr
+                init:
+                  bind: aerr
+                  eval: f.appendByte(b)
+                  to: f.appendByte
+                when: aerr != nil
+          key: _
+          range: binary.AppendUvarint(buf[:0], v)
+          value: b
+      - return: nil
+  - of: (*recordFrame).readValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*recordFrame).readValue
+        kind: self
+      - id: f.charge
+        kind: internal
+      - id: f.ensureRoom
+        kind: internal
+      - id: io
+        kind: stdlib
+      - id: wrapReadFailure
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: cerr
+          init:
+            bind: cerr
+            eval: f.charge(length)
+            to: f.charge
+          when: cerr != nil
+      - bind: remaining
+        eval: int(length)
+      - loop:
+          cond: remaining > 0
+          do:
+            - eval: f.ensureRoom()
+              to: f.ensureRoom
+            - bind: "n"
+              eval: min(remaining, cap(f.cur)-len(f.cur))
+            - bind: start
+              eval: len(f.cur)
+            - opt:
+                do:
+                  - return: wrapReadFailure(rerr)
+                    to: wrapReadFailure
+                init:
+                  bind: _, rerr
+                  eval: io.ReadFull(f.r, f.cur[start:start+n])
+                  to: io
+                when: rerr != nil
+            - set: f.cur
+              value: f.cur[:start+n]
+            - op: +=
+              set: f.size
+              value: "n"
+            - op: "-="
+              set: remaining
+              value: "n"
+      - return: nil
+  - of: (*recordFrame).readBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*recordFrame).readBody
+        kind: self
+      - id: depthExceededError
+        kind: internal
+      - id: readUvarint
+        kind: internal
+      - id: sizeExceededError
+        kind: internal
+      - id: f.appendUvarint
+        kind: internal
+      - id: f.readChildren
+        kind: internal
+      - id: f.readValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: depthExceededError(depth)
+              to: depthExceededError
           when: depth > maxTLVDepth
       - bind: length, lerr
-        eval: readUvarint(r)
+        eval: readUvarint(f.r)
         to: readUvarint
       - opt:
           do:
-            - return: nil, lerr
+            - return: lerr
           when: lerr != nil
       - opt:
           do:
-            - return: nil, sizeExceededError(length)
+            - return: sizeExceededError(length)
+              to: sizeExceededError
           when: length > uint64(maxTLVBytes)
       - opt:
           do:
-            - return: readCompositeRecord(r, tag, length, depth)
-              to: readCompositeRecord
+            - return: aerr
+          init:
+            bind: aerr
+            eval: f.appendUvarint(length)
+            to: f.appendUvarint
+          when: aerr != nil
+      - opt:
+          do:
+            - return: f.readChildren(tag, length, depth)
+              to: f.readChildren
           when: isCompositeTag(Tag(tag))
-      - return: assembleRecord(r, tag, length)
-        to: assembleRecord
+      - return: f.readValue(length)
+        to: f.readValue
+  - of: (*recordFrame).readChildren
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*recordFrame).readChildren
+        kind: self
+      - id: f.charge
+        kind: internal
+      - id: readTag
+        kind: internal
+      - id: truncatedError
+        kind: internal
+      - id: f.appendByte
+        kind: internal
+      - id: f.readBody
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: cerr
+                init:
+                  bind: cerr
+                  eval: f.charge(uint64(minRecordBytes))
+                  to: f.charge
+                when: cerr != nil
+            - bind: childTag, terr
+              eval: readTag(f.r)
+              to: readTag
+            - opt:
+                do:
+                  - return: truncatedError()
+                    to: truncatedError
+                when: errors.Is(terr, io.EOF)
+            - opt:
+                do:
+                  - return: terr
+                when: terr != nil
+            - opt:
+                do:
+                  - return: aerr
+                init:
+                  bind: aerr
+                  eval: f.appendByte(childTag)
+                  to: f.appendByte
+                when: aerr != nil
+            - opt:
+                do:
+                  - return: berr
+                init:
+                  bind: berr
+                  eval: f.readBody(childTag, depth+1)
+                  to: f.readBody
+                when: berr != nil
+          range: subRecordCount(Tag(tag), length)
+      - return: nil
+  - of: (*recordFrame).join
+    steps:
+      - opt:
+          do:
+            - return: f.cur
+          when: len(f.chunks) == 0
+      - bind: out
+        eval: make([]byte, 0, f.size)
+      - loop:
+          do:
+            - set: out
+              value: append(out, chunk...)
+          key: _
+          range: f.chunks
+          value: chunk
+      - return: append(out, f.cur...)
   - of: isCompositeTag
     steps:
       - return: tag == tagSlice || tag == tagMap || tag == tagStruct
@@ -179,50 +446,6 @@ sequences:
             - return: length * recordsPerPair
           when: tag == tagMap || tag == tagStruct
       - return: length
-  - of: readCompositeRecord
-    participants:
-      - id: caller
-        kind: actor
-      - id: readCompositeRecord
-        kind: self
-      - id: binary
-        kind: stdlib
-      - id: readTag
-        kind: internal
-      - id: readRecordBody
-        kind: internal
-    steps:
-      - bind: out
-        eval: make([]byte, 0, 1+maxVarintBytes)
-      - set: out
-        value: append(out, tag)
-      - set: out
-        to: binary
-        value: binary.AppendUvarint(out, length)
-      - loop:
-          do:
-            - bind: childTag, terr
-              eval: readTag(r)
-              to: readTag
-            - opt:
-                do:
-                  - return: nil, truncatedError()
-                when: errors.Is(terr, io.EOF)
-            - opt:
-                do:
-                  - return: nil, terr
-                when: terr != nil
-            - bind: child, cerr
-              eval: readRecordBody(r, childTag, depth+1)
-              to: readRecordBody
-            - opt:
-                do:
-                  - return: nil, cerr
-                when: cerr != nil
-            - set: out
-              value: append(out, child...)
-          range: subRecordCount(Tag(tag), length)
-      - return: out, nil
   - of: readTag
     participants:
       - id: caller
@@ -247,44 +470,6 @@ sequences:
             - return: 0, wrapReadFailure(rerr)
           when: rerr != nil
       - return: buf[0], nil
-  - of: assembleRecord
-    participants:
-      - id: caller
-        kind: actor
-      - id: assembleRecord
-        kind: self
-      - id: value.ReadFrom
-        kind: value
-      - id: binary
-        kind: stdlib
-    steps:
-      - bind: limited
-        eval: "&io.LimitedReader{R: r, N: int64(length)}"
-      - var:
-          name: value
-          type: bytes.Buffer
-      - opt:
-          do:
-            - return: nil, wrapReadFailure(verr)
-          init:
-            bind: _, verr
-            eval: value.ReadFrom(limited)
-            to: value.ReadFrom
-          when: verr != nil
-      - opt:
-          do:
-            - return: nil, wrapReadFailure(io.ErrUnexpectedEOF)
-          when: uint64(value.Len()) != length
-      - bind: out
-        eval: make([]byte, 0, 1+maxVarintBytes+value.Len())
-      - set: out
-        value: append(out, tag)
-      - set: out
-        to: binary
-        value: binary.AppendUvarint(out, length)
-      - set: out
-        value: append(out, value.Bytes()...)
-      - return: out, nil
   - of: readUvarint
     participants:
       - id: caller
@@ -363,35 +548,41 @@ sequences:
         kind: actor
       - id: decodeRoot
         kind: self
+      - id: codec
+        kind: package
       - id: reflect
         kind: stdlib
-      - id: nonPointerTargetError
-        kind: internal
       - id: rv.Elem
         kind: value
       - id: tryDecodeRootInto
         kind: internal
+      - id: placeTyped
+        kind: internal
       - id: decodeValue
         kind: internal
-      - id: trailingBytesError
+      - id: placed
         kind: internal
       - id: assignDecoded
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: err != nil
       - bind: rv
         eval: reflect.ValueOf(v)
         to: reflect
-      - opt:
-          do:
-            - return: nonPointerTargetError()
-              to: nonPointerTargetError
-          when: rv.Kind() != reflect.Pointer || rv.IsNil()
       - bind: target
         eval: rv.Elem()
         to: rv.Elem
       - opt:
           do:
-            - return: err
+            - return: placeTyped(data, err)
+              to: placeTyped
           init:
             bind: handled, err
             eval: tryDecodeRootInto(data, target)
@@ -402,12 +593,13 @@ sequences:
         to: decodeValue
       - opt:
           do:
-            - return: derr
+            - return: placed(derr, cap(data)-cap(rest))
+              to: placed
           when: derr != nil
       - opt:
           do:
-            - return: trailingBytesError(len(rest))
-              to: trailingBytesError
+            - return: placed(trailingBytesError(len(rest)), len(data)-len(rest))
+              to: placed
           when: len(rest) != 0
       - return: assignDecoded(reflectView(target), target.Type(), value)
         to: assignDecoded
@@ -758,7 +950,7 @@ sequences:
               to: decodeValue
             - opt:
                 do:
-                  - return: nil, rest, derr
+                  - return: nil, next, derr
                 when: derr != nil
             - set: out
               value: append(out, val)
@@ -784,14 +976,14 @@ sequences:
               to: decodeValue
             - opt:
                 do:
-                  - return: nil, rest, kerr
+                  - return: nil, next, kerr
                 when: kerr != nil
             - bind: val, next2, verr
               eval: decodeValue(next, depth+1)
               to: decodeValue
             - opt:
                 do:
-                  - return: nil, rest, verr
+                  - return: nil, next2, verr
                 when: verr != nil
             - opt:
                 do:
@@ -823,14 +1015,14 @@ sequences:
               to: decodeFieldName
             - opt:
                 do:
-                  - return: nil, rest, nerr
+                  - return: nil, next, nerr
                 when: nerr != nil
             - bind: val, next2, verr
               eval: decodeValue(next, depth+1)
               to: decodeValue
             - opt:
                 do:
-                  - return: nil, rest, verr
+                  - return: nil, next2, verr
                 when: verr != nil
             - set: out[nameStr]
               value: val
@@ -1534,23 +1726,6 @@ sequences:
           		Private: "service/data/codec/tlv.decodeFieldName: declared field name length exceeds maxFieldNameBytes",
           	}, errs.String("len", strconv.FormatUint(length, decimalBase)), errs.Int("cap", maxFieldNameBytes))
         to: errs
-  - of: nonPointerTargetError
-    participants:
-      - id: caller
-        kind: actor
-      - id: nonPointerTargetError
-        kind: self
-      - id: errs
-        kind: package
-    steps:
-      - return: |-
-          errs.Wrap(nil, errs.WrapParams{
-          		Code:    coretlv.CodeTLVUnmarshalFailed,
-          		Reason:  "UNMARSHAL_FAILED",
-          		Public:  "TLV codec requires a non-nil pointer target",
-          		Private: "service/data/codec/tlv.Unmarshal: target is not a non-nil pointer",
-          	})
-        to: errs
   - of: trailingBytesError
     participants:
       - id: caller
@@ -1565,7 +1740,7 @@ sequences:
           		Code:    coretlv.CodeTLVUnmarshalFailed,
           		Reason:  "UNMARSHAL_FAILED",
           		Public:  "TLV decoding failed",
-          		Private: "service/data/codec/tlv.Unmarshal: trailing bytes after the first record",
+          		Private: privateTrailing,
           	}, errs.Int("trailing", trailing))
         to: errs
   - of: varintOverflowError
@@ -3037,9 +3212,15 @@ sequences:
         kind: value
       - id: rv.Type().Elem().Kind
         kind: value
+      - id: rv.Len
+        kind: value
       - id: rv.MapRange
         kind: value
       - id: encodeFieldValue
+        kind: internal
+      - id: markKey
+        kind: internal
+      - id: reorderPairs
         kind: internal
     steps:
       - bind: rv
@@ -3054,12 +3235,30 @@ sequences:
       - bind: valKind
         eval: rv.Type().Elem().Kind()
         to: rv.Type().Elem().Kind
+      - bind: start
+        eval: len(dst)
+      - var:
+          name: small
+          type: "[smallMapPairs]pairSpan"
+      - bind: spans
+        eval: small[:0]
+      - opt:
+          do:
+            - set: spans
+              value: make([]pairSpan, 0, n)
+          init:
+            bind: "n"
+            eval: rv.Len()
+            to: rv.Len
+          when: n > smallMapPairs
       - bind: iter
         eval: rv.MapRange()
         to: rv.MapRange
       - loop:
           cond: iter.Next()
           do:
+            - bind: span
+              eval: "pairSpan{key: len(dst) - start}"
             - bind: next, kerr
               eval: encodeFieldValue(dst, reflectView(iter.Key()), keyKind, depth+1)
               to: encodeFieldValue
@@ -3067,6 +3266,10 @@ sequences:
                 do:
                   - return: dst, kerr
                 when: kerr != nil
+            - set: span.value
+              value: len(next) - start
+            - eval: markKey(next[start:], &span)
+              to: markKey
             - bind: next2, verr
               eval: encodeFieldValue(next, reflectView(iter.Value()), valKind, depth+1)
               to: encodeFieldValue
@@ -3076,7 +3279,12 @@ sequences:
                 when: verr != nil
             - set: dst
               value: next2
-      - return: dst, nil
+            - set: span.end
+              value: len(dst) - start
+            - set: spans
+              value: append(spans, span)
+      - return: reorderPairs(dst, start, spans), nil
+        to: reorderPairs
   - of: encodeSliceDirect
     participants:
       - id: caller
@@ -3491,6 +3699,352 @@ sequences:
           key: i
           range: rv.Len()
       - return: buf
+  - of: reorderPairs
+    participants:
+      - id: caller
+        kind: actor
+      - id: reorderPairs
+        kind: self
+      - id: sortPairs
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: tmp.Write
+        kind: value
+      - id: tmp.Bytes
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: b
+          when: len(spans) < 2
+      - bind: region
+        eval: b[start:]
+      - eval: sortPairs(region, spans)
+        to: sortPairs
+      - bind: tmp
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - eval: tmp.Write(region)
+        to: tmp.Write
+      - bind: unsorted
+        eval: tmp.Bytes()
+        to: tmp.Bytes
+      - bind: cursor
+        eval: start
+      - loop:
+          do:
+            - op: +=
+              set: cursor
+              value: copy(b[cursor:], unsorted[spans[i].key:spans[i].end])
+          key: i
+          range: spans
+      - eval: scratch.ReleaseBuffer(tmp)
+        to: scratch
+      - return: b
+  - of: sortPairs
+    participants:
+      - id: caller
+        kind: actor
+      - id: sortPairs
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - eval: |-
+                slices.SortFunc(spans, func(x, y pairSpan) int {
+                			//: by encoded key.
+                			return comparePairs(region, &x, &y)
+                		})
+              to: slices
+            - return: ""
+          when: len(spans) > smallMapPairs
+      - loop:
+          cond: i < len(spans)
+          do:
+            - loop:
+                cond: j > 0 && comparePairs(region, &spans[j-1], &spans[j]) > 0
+                do:
+                  - set: spans[j-1], spans[j]
+                    value: spans[j], spans[j-1]
+                init: j := i
+                post: j--
+          init: i := 1
+          post: i++
+  - of: comparePairs
+    participants:
+      - id: caller
+        kind: actor
+      - id: comparePairs
+        kind: self
+      - id: cmp
+        kind: stdlib
+      - id: compareEncodedKeys
+        kind: internal
+      - id: bytes
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: cmp.Compare(x.prefix, y.prefix)
+              to: cmp
+          when: x.str && y.str && x.prefix != y.prefix
+      - opt:
+          do:
+            - return: c
+          init:
+            bind: c
+            eval: compareEncodedKeys(region[x.key:x.value], region[y.key:y.value])
+            to: compareEncodedKeys
+          when: c != 0
+      - return: bytes.Compare(region[x.value:x.end], region[y.value:y.end])
+        to: bytes
+  - of: compareEncodedKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareEncodedKeys
+        kind: self
+      - id: stringPayload
+        kind: internal
+      - id: bytes
+        kind: stdlib
+      - id: intKey
+        kind: internal
+      - id: ia.compare
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: bytes.Compare(sa, sb)
+                    to: bytes
+                init:
+                  bind: sb, isStr
+                  eval: stringPayload(b)
+                  to: stringPayload
+                when: isStr
+          init:
+            bind: sa, ok
+            eval: stringPayload(a)
+            to: stringPayload
+          when: ok
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: ia.compare(ib)
+                    to: ia.compare
+                init:
+                  bind: ib, isInt
+                  eval: intKey(b)
+                  to: intKey
+                when: isInt
+          init:
+            bind: ia, ok
+            eval: intKey(a)
+            to: intKey
+          when: ok
+      - return: bytes.Compare(a, b)
+        to: bytes
+  - of: stringPayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: stringPayload
+        kind: self
+      - id: binary
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: len(record) == 0 || Tag(record[0]) != tagString
+      - bind: _, n
+        eval: binary.Uvarint(record[1:])
+        to: binary
+      - opt:
+          do:
+            - return: nil, false
+          when: n <= 0
+      - return: record[1+n:], true
+  - of: intKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: intKey
+        kind: self
+      - id: bigEndian
+        kind: internal
+      - id: signedKey
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wireInt{}, false
+          when: len(record) < minRecordBytes
+      - bind: payload
+        eval: record[minRecordBytes:]
+      - switch:
+          cases:
+            - case: tag >= tagInt8 && tag <= tagInt64
+              do:
+                - bind: u, ok
+                  eval: bigEndian(payload)
+                  to: bigEndian
+                - bind: shift
+                  eval: uint(64 - 8*len(payload))
+                - return: signedKey(int64(u<<shift) >> shift), ok
+                  to: signedKey
+            - case: tag >= tagUint8 && tag <= tagUint64
+              do:
+                - bind: u, ok
+                  eval: bigEndian(payload)
+                  to: bigEndian
+                - return: "wireInt{u: u}, ok"
+            - default: true
+              do:
+                - return: wireInt{}, false
+          init:
+            bind: tag
+            eval: Tag(record[0])
+  - of: bigEndian
+    participants:
+      - id: caller
+        kind: actor
+      - id: bigEndian
+        kind: self
+      - id: binary.BigEndian.Uint64
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: width8
+              do:
+                - return: uint64(payload[0]), true
+            - case: width16
+              do:
+                - return: uint64(binary.BigEndian.Uint16(payload)), true
+            - case: width32
+              do:
+                - return: uint64(binary.BigEndian.Uint32(payload)), true
+            - case: width64
+              do:
+                - return: binary.BigEndian.Uint64(payload), true
+                  to: binary.BigEndian.Uint64
+            - default: true
+              do:
+                - return: 0, false
+          "on": len(payload)
+  - of: signedKey
+    steps:
+      - opt:
+          do:
+            - return: "wireInt{u: uint64(n), neg: true}"
+          when: n < 0
+      - return: "wireInt{u: uint64(n)}"
+  - of: wireInt.compare
+    participants:
+      - id: caller
+        kind: actor
+      - id: wireInt.compare
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "-1"
+                when: a.neg
+            - return: "1"
+          when: a.neg != b.neg
+      - opt:
+          do:
+            - return: cmp.Compare(int64(a.u), int64(b.u))
+              to: cmp
+          when: a.neg
+      - return: cmp.Compare(a.u, b.u)
+        to: cmp
+  - of: markKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: markKey
+        kind: self
+      - id: stringPayload
+        kind: internal
+      - id: binary.BigEndian.Uint64
+        kind: value
+    steps:
+      - bind: payload, ok
+        eval: stringPayload(region[span.key:span.value])
+        to: stringPayload
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - var:
+          name: padded
+          type: "[prefixBytes]byte"
+      - eval: copy(padded[:], payload)
+      - set: span.str
+        value: "true"
+      - set: span.prefix
+        to: binary.BigEndian.Uint64
+        value: binary.BigEndian.Uint64(padded[:])
+  - of: placed
+    participants:
+      - id: caller
+        kind: actor
+      - id: placed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: "errs.Wrap(err, errs.WrapParams{}, codec.PositionFields(codec.PositionValue{Offset: off})...)"
+        to: errs
+  - of: placeTyped
+    participants:
+      - id: caller
+        kind: actor
+      - id: placeTyped
+        kind: self
+      - id: errs
+        kind: package
+      - id: decodeValue
+        kind: internal
+      - id: placed
+        kind: internal
+    steps:
+      - bind: code, ok
+        eval: errs.CodeOf(err)
+        to: errs
+      - opt:
+          do:
+            - return: err
+          when: err == nil || !ok
+      - bind: _, rest, werr
+        eval: decodeValue(data, 0)
+        to: decodeValue
+      - bind: walked, wok
+        eval: errs.CodeOf(werr)
+        to: errs
+      - opt:
+          do:
+            - return: placed(err, cap(data)-cap(rest))
+              to: placed
+          when: werr != nil && wok && walked == code
+      - opt:
+          do:
+            - return: placed(err, len(data)-len(rest))
+              to: placed
+          when: werr == nil && len(rest) != 0 && errs.PrivateOf(err) == privateTrailing
+      - return: err
   - of: buildNamePrefix
     participants:
       - id: caller

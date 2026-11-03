@@ -37,8 +37,8 @@ func Test_parser_add(t *testing.T) {
 	}
 	index, err := p.add(node{line: 1})
 	//: the node past the bound is refused, under the decode failure's reason.
-	if !errs.HasReason(err, "UNMARSHAL_FAILED") || index != noNode {
-		t.Errorf("node %d: index %d, error %v, want noNode and UNMARSHAL_FAILED", maxNodes+1, index, err)
+	if !errs.HasReason(err, "SIZE_EXCEEDED") || index != noNode {
+		t.Errorf("node %d: index %d, error %v, want noNode and SIZE_EXCEEDED", maxNodes+1, index, err)
 	}
 	//: and it is not in the arena.
 	if len(p.nodes) != maxNodes {

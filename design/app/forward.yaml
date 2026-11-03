@@ -174,6 +174,13 @@ packages:
         name: Block
         type: FullPolicy
         value: "2"
+      - doc: |-
+          EncodingGzip is the Content-Encoding a batch Config.Compress kept is
+          handed to Config.SendEncoded with; a batch kept as it came is handed
+          with "", the identity encoding.
+        name: EncodingGzip
+        type: string
+        value: "\"gzip\""
     doc: |-
       Package forward is the store-and-forward engine (ADR 0185): a batch kept in
       a durable queue by Enqueue, sent later by Run through the caller's Sender,
@@ -234,8 +241,24 @@ packages:
         out:
           - type: coremetrics.ContextExporter
           - type: error
+      - doc: |-
+          NewLogExporter returns a logger DocumentExporter that keeps each
+          OTLP/JSON logs document the "otlpjson" writer hands it in forwarder,
+          returning once it is durable — the logs signal's adapter, as
+          NewSpanExporter and NewMetricExporter are the other two's; the writer
+          has encoded the batch already. The forwarder's Send is the OTLP/HTTP logs
+          exporter's ExportDocument. A nil forwarder is refused with
+          ForwardMisconfigured (#867).
+        in:
+          - name: forwarder
+            type: "*Forwarder"
+        name: NewLogExporter
+        out:
+          - type: corelogger.DocumentExporter
+          - type: error
     imports:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
       coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
       corequeue: github.com/kitsunium/sdk/internal/core/data/queue
       coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
@@ -253,6 +276,17 @@ packages:
           DocumentExporter).
         name: Sender
         underlying: func(ctx context.Context, batch []byte) error
+      - doc: |-
+          EncodedSender ships one batch as the forwarder stored it, with the
+          Content-Encoding it was stored in: EncodingGzip for a batch
+          Config.Compress kept, "" for one kept as it came. It is called as a
+          Sender is, and its verdict is classified the same way.
+
+          An OTLP/HTTP exporter's ExportEncodedDocument has its shape (trace and
+          metrics EncodedDocumentExporter): a gzip batch is posted as it rests, with
+          Content-Encoding: gzip, never decompressed on the way.
+        name: EncodedSender
+        underlying: func(ctx context.Context, batch []byte, encoding string) error
       - doc: FullPolicy says what Enqueue does with a batch the queue has no room for.
         methods:
           - doc: |-
@@ -265,8 +299,8 @@ packages:
         name: FullPolicy
         underlying: uint8
       - doc: |-
-          Config configures [New]. Broker, Send and Retryable are required; every
-          other field is optional.
+          Config configures [New]. Broker, Retryable, and Send or SendEncoded are
+          required; every other field is optional. Compress requires SendEncoded.
         name: Config
         struct:
           fields:
@@ -281,9 +315,27 @@ packages:
               type: corequeue.Broker
             - doc: |-
                 Send ships one stored batch: an OTLP/HTTP exporter's ExportDocument,
-                or any function of that shape.
+                or any function of that shape. It may be nil when SendEncoded is set,
+                which then ships every batch. Send receives a batch as it rests: a
+                backlog a previous process kept with Compress needs SendEncoded until
+                it drains.
               name: Send
               type: Sender
+            - doc: |-
+                SendEncoded ships one stored batch with the Content-Encoding it rests
+                in — an OTLP/HTTP exporter's ExportEncodedDocument. When set it ships
+                every batch, gzipped or not, and Send is not called.
+              name: SendEncoded
+              type: EncodedSender
+            - doc: |-
+                Compress, when true, gzips every batch in Enqueue (compress/gzip, the
+                default level) before it is published, so MaxBytes, PendingBytes and
+                the disk hold what rests compressed — OTLP/JSON shrinks eight to
+                twelve times — and SendEncoded posts it as it rests, labelled
+                EncodingGzip. It requires SendEncoded: a gzipped batch handed to Send
+                would leave labelled as JSON. The zero value keeps a batch as it came.
+              name: Compress
+              type: bool
             - doc: |-
                 Retryable classifies a failure of Send as one a later attempt may cure
                 — trace.OTLPRetryable, metrics.OTLPRetryable. It is REQUIRED: nil reads
@@ -618,10 +670,11 @@ packages:
             target: svcforward.Forwarder
       - alias:
           - doc: |-
-              Config is the public alias for a forwarder's configuration: Broker, Send
-              and Retryable required; Clock, MaxBatches, MaxBytes, WhenFull,
-              BlockTimeout, SendTimeout, MaxAge, Backoff, Parallelism, PollInterval,
-              DrainTimeout, SettleTimeout and RecountInterval optional.
+              Config is the public alias for a forwarder's configuration: Broker,
+              Retryable, and Send or SendEncoded required; Compress, Clock, MaxBatches,
+              MaxBytes, WhenFull, BlockTimeout, SendTimeout, MaxAge, Backoff,
+              Parallelism, PollInterval, DrainTimeout, SettleTimeout and
+              RecountInterval optional.
             name: Config
             target: svcforward.Config
       - alias:
@@ -642,6 +695,22 @@ packages:
               an OTLP/HTTP exporter's ExportDocument.
             name: Sender
             target: svcforward.Sender
+      - alias:
+          - doc: |-
+              EncodedSender is the public alias for the function that ships one stored
+              batch with its Content-Encoding — an OTLP/HTTP exporter's
+              ExportEncodedDocument.
+            name: EncodedSender
+            target: svcforward.EncodedSender
+      - const:
+          - doc: |-
+              EncodingGzip is the Content-Encoding a batch Config.Compress kept is
+              handed to Config.SendEncoded with.
+            name: EncodingGzip
+            reexport: svcforward.EncodingGzip
+            type: string
+            typed: true
+            value: "\"gzip\""
       - doc: |-
           The forwarder's sentinels (0.3.93.*). errors.Is matches one, and
           errs.CodeOf reads its code.
@@ -707,8 +776,23 @@ packages:
           out:
             - type: coremetrics.ContextExporter
             - type: error
+      - func:
+          doc: |-
+            NewLogExporter returns a logger DocumentExporter that keeps each
+            OTLP/JSON logs document in forwarder; hand it to the "otlpjson" writer
+            as its Exporter, and the OTLP/HTTP logs exporter's ExportDocument to the
+            forwarder as its Send (#867).
+          forward: svcforward.NewLogExporter
+          in:
+            - name: forwarder
+              type: "*Forwarder"
+          name: NewLogExporter
+          out:
+            - type: corelogger.DocumentExporter
+            - type: error
     imports:
       coreforward: github.com/kitsunium/sdk/internal/core/app/forward
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
       coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
       coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
       errs: github.com/kitsunium/sdk/internal/kernel/errs

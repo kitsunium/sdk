@@ -4,14 +4,14 @@ constants:
   - doc: The problems a decode refuses a target for.
     grouped: true
     items:
-      - doc: "problemTarget: Unmarshal was not handed a non-nil pointer."
-        name: problemTarget
-        type: string
-        value: "\"the target is not a non-nil pointer\""
       - doc: "problemMismatch: a value the target's type cannot hold."
         name: problemMismatch
         type: string
         value: "\"the value does not fit the target's type\""
+      - doc: "problemDuration: a string a time.Duration target cannot parse."
+        name: problemDuration
+        type: string
+        value: "\"a duration is written with its unit, as in 30s, 15m or 24h\""
       - doc: "problemOverflow: a number outside the target's range."
         name: problemOverflow
         type: string
@@ -40,7 +40,7 @@ constants:
         name: problemNotThisKind
         type: string
         value: "\"the text is not the date or time this type reads\""
-    name: problemTarget
+    name: problemMismatch
   - doc: The problems an encode refuses a value for.
     grouped: true
     items:
@@ -717,6 +717,10 @@ constants:
         name: typeValue
       - doc: "typeBadNames: a tag names a key that is not valid UTF-8."
         name: typeBadNames
+      - doc: |-
+          typeDuration: the type is time.Duration, written as its String() and
+          read with time.ParseDuration (#1126).
+        name: typeDuration
     name: typeTextMarshaler
   - doc: foldBufferBytes is the longest key folded to lower case on the stack.
     items:
@@ -789,14 +793,18 @@ constants:
         name: fieldProblem
         type: string
         value: "\"problem\""
-      - doc: fieldLine is the 1-based line of the problem.
+      - doc: |-
+          fieldLine is the 1-based line of the problem, under the family's key
+          codec.PositionOf reads (#1125).
         name: fieldLine
         type: string
-        value: "\"line\""
-      - doc: fieldColumn is the 1-based column of the problem, in characters.
+        value: codec.FieldLine
+      - doc: |-
+          fieldColumn is the 1-based column of the problem, in characters, under
+          the family's key.
         name: fieldColumn
         type: string
-        value: "\"column\""
+        value: codec.FieldColumn
       - doc: fieldKey is the dotted key of the value a target could not hold.
         name: fieldKey
         type: string
@@ -967,11 +975,10 @@ files:
       - (*tomlCodec).NewDecoder
     name: codec.go
   - decls:
-      - problemTarget
+      - problemMismatch
       - kindNames
       - decoder
       - unmarshal
-      - typeName
       - (*decoder).root
       - (*decoder).anyInto
       - (*decoder).mergeTable
@@ -991,6 +998,7 @@ files:
       - (*decoder).localAny
       - instantOf
       - (*decoder).scalar
+      - (*decoder).duration
       - (*decoder).native
       - (*decoder).setString
       - (*decoder).setInteger
@@ -1318,10 +1326,6 @@ functions:
     name: unmarshal
     params: data []byte, v any
     results: error
-  - doc: typeName names the type of v for a refusal.
-    name: typeName
-    params: v reflect.Value
-    results: string
   - doc: |-
       quoteKey returns key as it would be written: bare when it can be, quoted
       otherwise.
@@ -1897,6 +1901,16 @@ types:
           library had, so a string-kinded type with an UnmarshalText is still set
           directly from a TOML string.
         name: scalar
+        params: n int32, v reflect.Value
+        recv: d *decoder
+        results: error
+      - doc: |-
+          duration decodes a string into a time.Duration with time.ParseDuration: the
+          form yaml writes and the encoder writes since #1126. A string without its
+          unit, or any other text ParseDuration refuses, is a mismatch. An integer
+          never reaches here: it is the nanoseconds the encoder wrote before #1126,
+          and native still assigns it, so a document written then reads the same.
+        name: duration
         params: n int32, v reflect.Value
         recv: d *decoder
         results: error
@@ -3164,6 +3178,9 @@ vars:
       - doc: timeType is time.Time.
         name: timeType
         value: reflect.TypeFor[time.Time]()
+      - doc: durationType is time.Duration.
+        name: durationType
+        value: reflect.TypeFor[time.Duration]()
       - doc: localDateType is LocalDate.
         name: localDateType
         value: reflect.TypeFor[LocalDate]()

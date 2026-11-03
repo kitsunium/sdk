@@ -17,6 +17,10 @@
 // kinds. A struct field is keyed by its toml tag, or by its name, matched
 // exactly first and then without regard to case.
 //
+// A time.Duration is written as the string of its String() and read with
+// time.ParseDuration, as the YAML codec does (#1126); a bare integer still
+// reads as nanoseconds, the form written before.
+//
 // Package toml — the decode: a parsed tree written into a Go value. Untyped
 // targets (map[string]any, any, []any) are built natively; typed ones through
 // reflection, guided by the cached typeInfo of each type.

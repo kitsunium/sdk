@@ -12,6 +12,7 @@ go_library(
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/cbor",
     visibility = ["//visibility:public"],
     deps = [
+        "//internal/core/data/codec",
         "//internal/core/data/codec/cbor",
         "//internal/kernel/errs",
         "//internal/service/data/codec/cbor",
@@ -34,6 +35,7 @@ go_test(
         ":cbor",
         "//internal/core/data/codec",
         "//internal/kernel/errs",
+        "//internal/service/data/codec/cbor",
         "//pkg/v1/errs",
     ],
 )

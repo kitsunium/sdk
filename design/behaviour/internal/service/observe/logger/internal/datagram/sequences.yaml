@@ -1,0 +1,197 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewBatchSender
+    steps:
+      - return: "&BatchSender{conn: conn, batch: newBatch(conn)}"
+  - of: (*BatchSender).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSender).Send
+        kind: self
+      - id: sendEach
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s.batch(payloads)
+          when: s.batch != nil
+      - return: sendEach(s.conn, payloads)
+        to: sendEach
+  - of: sendEach
+    participants:
+      - id: caller
+        kind: actor
+      - id: sendEach
+        kind: self
+      - id: conn.Write
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i, werr
+                init:
+                  bind: _, werr
+                  eval: conn.Write(p)
+                  to: conn.Write
+                when: werr != nil
+          key: i
+          range: payloads
+          value: p
+      - return: len(payloads), nil
+  - of: newBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: newBatch
+        kind: self
+      - id: newMmsgBatch
+        kind: internal
+    steps:
+      - bind: m
+        eval: newMmsgBatch(conn)
+        to: newMmsgBatch
+      - opt:
+          do:
+            - return: nil
+          when: m == nil
+      - return: m.send
+  - of: newMmsgBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: newMmsgBatch
+        kind: self
+      - id: sc.SyscallConn
+        kind: value
+    steps:
+      - bind: sc, ok
+        eval: conn.(syscall.Conn)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - bind: raw, err
+        eval: sc.SyscallConn()
+        to: sc.SyscallConn
+      - opt:
+          do:
+            - return: nil
+          when: err != nil
+      - bind: m
+        eval: "&mmsgBatch{raw: raw, call: sendmmsg}"
+      - set: m.write
+        value: m.writePending
+      - return: m
+  - of: (*mmsgBatch).send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mmsgBatch).send
+        kind: self
+      - id: m.sendChunk
+        kind: internal
+    steps:
+      - loop:
+          cond: sent < len(payloads)
+          do:
+            - bind: n, cerr
+              eval: m.sendChunk(payloads[sent:min(len(payloads), sent+MaxBatch)])
+              to: m.sendChunk
+            - op: +=
+              set: sent
+              value: "n"
+            - opt:
+                do:
+                  - return: sent, cerr
+                when: cerr != nil
+      - return: sent, nil
+  - of: (*mmsgBatch).sendChunk
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mmsgBatch).sendChunk
+        kind: self
+      - id: setKernelLen
+        kind: internal
+      - id: m.raw.Write
+        kind: value
+      - id: runtime
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - set: m.iovecs[i]
+              value: syscall.Iovec{}
+            - opt:
+                do:
+                  - set: m.iovecs[i].Base
+                    value: "&p[0]"
+                when: len(p) > 0
+            - eval: setKernelLen(&m.iovecs[i].Len, len(p))
+              to: setKernelLen
+            - set: m.headers[i]
+              value: mmsghdr{}
+            - set: m.headers[i].hdr.Iov
+              value: "&m.iovecs[i]"
+            - eval: setKernelLen(&m.headers[i].hdr.Iovlen, 1)
+              to: setKernelLen
+          key: i
+          range: chunk
+          value: p
+      - set: m.pending
+        value: m.headers[:len(chunk)]
+      - bind: werr
+        eval: m.raw.Write(m.write)
+        to: m.raw.Write
+      - bind: sent, errno
+        eval: m.sent, m.errno
+      - eval: runtime.KeepAlive(chunk)
+        to: runtime
+      - eval: clear(m.iovecs[:len(chunk)])
+      - set: m.pending
+        value: nil
+      - opt:
+          do:
+            - return: 0, werr
+          when: werr != nil
+      - opt:
+          do:
+            - return: 0, errno
+          when: errno != 0
+      - opt:
+          do:
+            - return: 0, io.ErrShortWrite
+          when: sent == 0
+      - return: sent, nil
+  - of: (*mmsgBatch).writePending
+    steps:
+      - set: m.sent, m.errno
+        value: m.call(fd, m.pending)
+      - return: m.errno != syscall.EAGAIN
+  - of: sendmmsg
+    participants:
+      - id: caller
+        kind: actor
+      - id: sendmmsg
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: result, _, callErrno
+        eval: |-
+          syscall.Syscall6(sysSendmmsg, fd,
+          		uintptr(unsafe.Pointer(&headers[0])), uintptr(len(headers)), 0, 0, 0)
+        to: syscall
+      - opt:
+          do:
+            - return: 0, callErrno
+          when: callErrno != 0
+      - return: int(result), 0
+  - of: setKernelLen
+    steps:
+      - set: "*dst"
+        value: T(n)

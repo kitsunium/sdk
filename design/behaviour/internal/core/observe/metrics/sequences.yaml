@@ -23,6 +23,70 @@ sequences:
     steps:
       - return: coreotel.NormalizeResource(resource, InvalidAttribute)
         to: coreotel
+  - of: DefaultBuckets
+    participants:
+      - id: caller
+        kind: actor
+      - id: DefaultBuckets
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Clone(defaultBuckets)
+        to: slices
+  - of: ExponentialIndex
+    participants:
+      - id: caller
+        kind: actor
+      - id: ExponentialIndex
+        kind: self
+      - id: math
+        kind: stdlib
+      - id: powerOfTwoIndex
+        kind: internal
+    steps:
+      - bind: frac, exp
+        eval: math.Frexp(magnitude)
+        to: math
+      - opt:
+          do:
+            - return: powerOfTwoIndex(int32(exp-1), scale)
+              to: powerOfTwoIndex
+          when: frac == frexpHalf
+      - opt:
+          do:
+            - return: int32(exp-1) >> -scale
+          when: scale <= 0
+      - bind: index
+        eval: int32(math.Floor(math.Log(magnitude) * math.Ldexp(math.Log2E, int(scale))))
+      - return: min(index, maxNormalExponent<<scale-1)
+  - of: ExponentialLowerBound
+    participants:
+      - id: caller
+        kind: actor
+      - id: ExponentialLowerBound
+        kind: self
+      - id: math
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: math.Ldexp(1, int(index)<<-scale)
+              to: math
+          when: scale <= 0
+      - bind: whole
+        eval: int(index) >> scale
+      - bind: part
+        eval: int(index) - whole<<scale
+      - return: math.Ldexp(math.Exp(float64(part)*math.Ldexp(math.Ln2, -int(scale))), whole)
+        to: math
+  - of: powerOfTwoIndex
+    steps:
+      - opt:
+          do:
+            - return: e<<scale - 1
+          when: scale > 0
+      - return: (e - 1) >> -scale
   - of: ExporterName.String
     steps:
       - return: string(n)

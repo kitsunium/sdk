@@ -31,7 +31,7 @@ func Test_compose(t *testing.T) {
 				mu.Unlock()
 				return nil
 			}
-			sink := compose("tcp", send, func() error { return nil }, NetConfig{MinLevel: tc.minLevel})
+			sink := compose("tcp", send, func() error { return nil }, &NetConfig{MinLevel: tc.minLevel})
 			//: compose must return a usable chain.
 			if sink == nil {
 				t.Fatal("compose returned nil sink")

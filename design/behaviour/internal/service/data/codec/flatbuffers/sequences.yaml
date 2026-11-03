@@ -56,6 +56,8 @@ sequences:
         kind: actor
       - id: (*flatbuffersCodec).Unmarshal
         kind: self
+      - id: checkTarget
+        kind: internal
       - id: validateBuffer
         kind: internal
       - id: acc.SetBytes
@@ -63,6 +65,14 @@ sequences:
       - id: errs
         kind: package
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: checkTarget(v)
+            to: checkTarget
+          when: terr != nil
       - opt:
           do:
             - return: verr
@@ -145,6 +155,31 @@ sequences:
           		Public:  "FlatBuffers codec requires []byte or a BytesProvider value",
           		Private: "service/data/codec/flatbuffers.Marshal: argument is not []byte and does not implement BytesProvider",
           	})
+  - of: checkTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkTarget
+        kind: self
+      - id: codec
+        kind: package
+    steps:
+      - typeswitch:
+          bind: acc
+          cases:
+            - do:
+                - opt:
+                    do:
+                      - return: nil
+                    when: reflect.TypeOf(acc).Kind() != reflect.Pointer
+                - return: codec.CheckTarget(v)
+                  to: codec
+              types: BytesAcceptor
+            - default: true
+              do:
+                - return: codec.CheckTarget(v)
+                  to: codec
+          "on": v
   - of: validateBuffer
     participants:
       - id: caller
@@ -162,7 +197,8 @@ sequences:
                 			Reason:  "FLATBUFFERS_TRUNCATED",
                 			Public:  "FlatBuffers buffer is truncated",
                 			Private: "service/data/codec/flatbuffers.validateBuffer: len(data) < flatBuffersHeaderBytes",
-                		}, errs.Int("len", len(data)), errs.Int("min", flatBuffersHeaderBytes))
+                		}, append(codec.PositionFields(codec.PositionValue{Offset: len(data)}),
+                			errs.Int("len", len(data)), errs.Int("min", flatBuffersHeaderBytes))...)
               to: errs
           when: len(data) < flatBuffersHeaderBytes
       - opt:
@@ -173,7 +209,8 @@ sequences:
                 			Reason:  "FLATBUFFERS_TRUNCATED",
                 			Public:  "FlatBuffers buffer exceeds size limit",
                 			Private: "service/data/codec/flatbuffers.validateBuffer: len(data) > maxFlatBuffersBytes",
-                		}, errs.Int("len", len(data)), errs.Int("max", maxFlatBuffersBytes))
+                		}, append(codec.PositionFields(codec.PositionValue{Offset: maxFlatBuffersBytes}),
+                			errs.Int("len", len(data)), errs.Int("max", maxFlatBuffersBytes))...)
               to: errs
           when: len(data) > maxFlatBuffersBytes
       - return: nil

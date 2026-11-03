@@ -381,3 +381,27 @@ BenchmarkEncoderStream/oversize-10       	   10000	    197094 ns/op	  533060 B/o
 BenchmarkZZPoolRoundTrip/handrolled-10         	26988400	        10.06 ns/op	       0 B/op	       0 allocs/op
 BenchmarkZZPoolRoundTrip/capped-10             	19111132	        13.65 ns/op	       0 B/op	       0 allocs/op
 ```
+
+## 8. The stream decoder rebuilds a record once, and no longer copies it four times
+
+#1105 bounded the stream `Decoder` by the record as a whole: a `recordFrame`
+charges every rebuilt byte against `maxTLVBytes`. The same change replaced the
+rebuild itself. Before, every scalar child read its value into a
+`bytes.Buffer`, copied it into a fresh tag+length+value slice, and every
+composite appended that slice into its own growing buffer — three copies per
+level. Now every byte lands once, in chunks that grow with the record, and a
+record that fits the first 512-byte chunk is handed to `decodeRoot` as it is.
+
+`BenchmarkDecoderStream` decodes one record per op into an untyped target, so
+the rows carry the walker's own allocations too. Six runs each, linux/amd64,
+4 vCPU VM (`GOMAXPROCS=4`), go1.27.3, before at 740e7c1e:
+
+| row | before | after | delta | B/op | allocs/op |
+|---|---:|---:|---:|---|---|
+| scalar | 1 152 ns | 597.8 ns | −48 % | 1 616 → 544 | 8 → 5 |
+| mixed | 10.97 µs | 2.860 µs | −74 % | 15 392 → 960 | 77 → 35 |
+| large (1 000 rows) | 12.93 ms | 2.500 ms | −81 % | 15.3 Mi → 563.5 Ki | 76 024 → 33 017 |
+
+benchstat reports p = 0.002 on every row. The allocations left are the
+walker's and the one-byte reads of `readTag` / `readUvarint`, whose buffer
+escapes through the `io.Reader` interface — unchanged by this work.

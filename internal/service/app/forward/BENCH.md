@@ -46,3 +46,26 @@ BenchmarkEnqueueDropOldest-8   	   65396	     16340 ns/op	1002.69 MB/s	   33431 
   before the publication. It is cheaper per op than the empty queue here only
   because the memory broker's queue stays at 64 messages instead of growing
   with the run.
+
+## Compress (#1051), 2026-11-03
+
+`BenchmarkEnqueueCompress`, the memory broker, a 16 KiB OTLP/JSON span batch
+with random identifiers and timestamps (`otlpLike`), `-benchtime=1s`, one run
+on the machine above (4 of its cores, `GOMAXPROCS=4`), branch
+`wip/sdk-lot-5-obs`:
+
+```
+BenchmarkEnqueueCompress/compress=false-4   103084     11889 ns/op  1378.12 MB/s  16384 stored-B/batch  16799 B/op  4 allocs/op
+BenchmarkEnqueueCompress/compress=true-4      6433    176590 ns/op    92.78 MB/s   2776 stored-B/batch   8559 B/op  6 allocs/op
+```
+
+- **Stored bytes per batch: 16 384 → 2 776**, 5.9 times less on disk and
+  under `MaxBytes` — random 128-bit identifiers are the part gzip cannot
+  shrink; a batch whose resource and attribute keys repeat more compresses
+  further. `PendingBytes` counts the 2 776.
+- **The price is the producer's**: ~165 µs of deflate at the default level per
+  16 KiB batch, paid once in `Enqueue`. On the file broker that is a twentieth
+  of the ~3 ms fsync, and the write itself is six times smaller.
+- The consumer pays nothing: `SendEncoded` posts the gzip bytes as they rest,
+  with `Content-Encoding: gzip`, never decompressed on the way.
+

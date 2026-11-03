@@ -19,6 +19,8 @@ sequences:
         kind: actor
       - id: (*msgpackCodec).Marshal
         kind: self
+      - id: codec
+        kind: package
       - id: scratch
         kind: package
       - id: appendAny
@@ -28,6 +30,14 @@ sequences:
       - id: retain
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: codec.CheckValue(v)
+            to: codec
+          when: verr != nil
       - bind: buf
         eval: scratch.AcquireBuffer()
         to: scratch
@@ -55,21 +65,29 @@ sequences:
         kind: actor
       - id: (*msgpackCodec).Unmarshal
         kind: self
-      - id: errs
+      - id: codec
         kind: package
+      - id: boundFault
+        kind: internal
       - id: unmarshalInto
         kind: internal
     steps:
       - opt:
           do:
-            - return: |-
-                errs.Wrap(nil, errs.WrapParams{
-                			Code:    coremsgpack.CodeMsgPackUnmarshalFailed,
-                			Reason:  reasonUnmarshal,
-                			Public:  "MessagePack input exceeds size limit",
-                			Private: "service/data/codec/msgpack.Unmarshal: len(data) exceeds maxMsgPackBytes",
-                		}, errs.Int("len", len(data)), errs.Int("cap", maxMsgPackBytes))
-              to: errs
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
+          when: len(data) == 0
+      - opt:
+          do:
+            - return: boundFault(coremsgpack.SizeExceeded, errs.Int("len", len(data)), errs.Int("cap", maxMsgPackBytes))
+              to: boundFault
           when: len(data) > maxMsgPackBytes
       - return: unmarshalInto(data, v)
         to: unmarshalInto
@@ -632,7 +650,7 @@ sequences:
     steps:
       - opt:
           do:
-            - return: nil, unmarshalFault("unsupported extension type", errs.Int(fieldWire, int(ext)))
+            - return: "Ext{Type: ext, Data: cloneBytes(p)}, nil"
           when: ext != extTimestamp
       - return: decodeTimestamp(p)
         to: decodeTimestamp
@@ -815,13 +833,39 @@ sequences:
         kind: actor
       - id: unmarshalInto
         kind: self
+      - id: unmarshalIntoMode
+        kind: internal
+    steps:
+      - return: unmarshalIntoMode(data, v, false)
+        to: unmarshalIntoMode
+  - of: unmarshalIntoMode
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmarshalIntoMode
+        kind: self
+      - id: walk.checkKeys
+        kind: internal
       - id: d.decodeTarget
         kind: internal
       - id: unmarshalFault
         kind: internal
     steps:
+      - opt:
+          do:
+            - bind: walk
+              eval: "decodeState{data: data}"
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: walk.checkKeys()
+                  to: walk.checkKeys
+                when: err != nil
+          when: strict
       - bind: d
-        eval: "&decodeState{data: data}"
+        eval: "&decodeState{data: data, strict: strict}"
       - opt:
           do:
             - return: err
@@ -844,23 +888,26 @@ sequences:
         kind: actor
       - id: (*decodeState).decodeTarget
         kind: self
+      - id: codec
+        kind: package
       - id: reflect
         kind: stdlib
-      - id: unmarshalFault
-        kind: internal
       - id: rv.Elem
         kind: value
       - id: decodeEmptyInterface
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: err != nil
       - bind: rv
         eval: reflect.ValueOf(v)
         to: reflect
-      - opt:
-          do:
-            - return: unmarshalFault("decode target is not a non-nil pointer")
-              to: unmarshalFault
-          when: rv.Kind() != reflect.Pointer || rv.IsNil()
       - bind: e
         eval: rv.Elem()
         to: rv.Elem
@@ -2109,6 +2156,9 @@ sequences:
             - case: t == timeType
               do:
                 - return: decodeTimeValue
+            - case: t == extType
+              do:
+                - return: decodeExtValue
             - case: pt.Implements(unmarshalMsgpackerType)
               do:
                 - return: decodeSelfMsgpack
@@ -2804,11 +2854,15 @@ sequences:
         kind: self
       - id: d.readKey
         kind: internal
+      - id: unknownMember
+        kind: internal
       - id: d.skip
         kind: internal
       - id: f.decodeInto
         kind: internal
     steps:
+      - bind: at
+        eval: d.off
       - bind: key, err
         eval: d.readKey()
         to: d.readKey
@@ -2818,6 +2872,11 @@ sequences:
           when: err != nil
       - bind: f
         eval: s.byName[string(key)]
+      - opt:
+          do:
+            - return: unknownMember(at, v.Type())
+              to: unknownMember
+          when: f == nil && d.strict
       - opt:
           do:
             - return: d.skip()
@@ -3014,6 +3073,8 @@ sequences:
         kind: actor
       - id: (*msgpackDecoder).Decode
         kind: self
+      - id: codec
+        kind: package
       - id: d.ending
         kind: internal
       - id: d.finish
@@ -3021,6 +3082,14 @@ sequences:
       - id: d.decodeNext
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
       - opt:
           do:
             - return: d.ending()
@@ -3110,7 +3179,7 @@ sequences:
         kind: actor
       - id: (*msgpackDecoder).decodeBuffered
         kind: self
-      - id: unmarshalInto
+      - id: unmarshalIntoMode
         kind: internal
       - id: d.r.Discard
         kind: value
@@ -3118,8 +3187,8 @@ sequences:
         kind: internal
     steps:
       - bind: err
-        eval: unmarshalInto(frame, v)
-        to: unmarshalInto
+        eval: unmarshalIntoMode(frame, v, d.strict)
+        to: unmarshalIntoMode
       - opt:
           do:
             - return: wrapUnmarshal(derr, "reading the stream failed")
@@ -3140,7 +3209,7 @@ sequences:
         kind: package
       - id: f.run
         kind: internal
-      - id: unmarshalInto
+      - id: unmarshalIntoMode
         kind: internal
       - id: retain
         kind: internal
@@ -3156,8 +3225,8 @@ sequences:
       - opt:
           do:
             - set: err
-              to: unmarshalInto
-              value: unmarshalInto(f.out, v)
+              to: unmarshalIntoMode
+              value: unmarshalIntoMode(f.out, v, d.strict)
           when: err == nil
       - eval: retain(buf, f.out)
         to: retain
@@ -4107,6 +4176,8 @@ sequences:
         kind: internal
       - id: appendMapHeader
         kind: internal
+      - id: sortedStringKeys
+        kind: internal
       - id: appendString
         kind: internal
     steps:
@@ -4126,8 +4197,23 @@ sequences:
           do:
             - return: b, err
           when: err != nil
+      - var:
+          name: small
+          type: "[smallMapPairs]string"
+      - bind: buf
+        eval: small[:0]
+      - opt:
+          do:
+            - set: buf
+              value: make([]string, 0, len(m))
+          when: len(m) > smallMapPairs
+      - bind: keys
+        eval: sortedStringKeys(m, buf)
+        to: sortedStringKeys
       - loop:
           do:
+            - bind: x
+              eval: m[k]
             - set: b, err
               to: appendString
               value: appendString(b, k)
@@ -4141,9 +4227,9 @@ sequences:
                 do:
                   - return: b, err
                 when: err != nil
-          key: k
-          range: m
-          value: x
+          key: _
+          range: keys
+          value: k
       - return: b, nil
   - of: appendAnyElem
     participants:
@@ -4210,11 +4296,17 @@ sequences:
         kind: internal
       - id: appendMapHeader
         kind: internal
+      - id: v.Len
+        kind: value
       - id: v.MapRange
         kind: value
-      - id: m.encodePairsInPlace
+      - id: m.holders
         kind: internal
-      - id: m.encodePairsCopied
+      - id: m.pair
+        kind: internal
+      - id: markKey
+        kind: internal
+      - id: reorderPairs
         kind: internal
     steps:
       - opt:
@@ -4233,89 +4325,418 @@ sequences:
           do:
             - return: b, err
           when: err != nil
+      - bind: start
+        eval: len(b)
+      - var:
+          name: small
+          type: "[smallMapPairs]pairSpan"
+      - bind: spans
+        eval: small[:0]
+      - opt:
+          do:
+            - set: spans
+              value: make([]pairSpan, 0, n)
+          init:
+            bind: "n"
+            eval: v.Len()
+            to: v.Len
+          when: n > smallMapPairs
       - bind: iter
         eval: v.MapRange()
         to: v.MapRange
-      - opt:
+      - bind: key, val
+        eval: m.holders(v)
+        to: m.holders
+      - loop:
+          cond: iter.Next()
           do:
-            - return: m.encodePairsInPlace(b, iter, depth)
-              to: m.encodePairsInPlace
-          when: v.CanInterface()
-      - return: m.encodePairsCopied(b, iter, depth)
-        to: m.encodePairsCopied
-  - of: (*mapEncoder).encodePairsInPlace
+            - bind: k, x
+              eval: m.pair(iter, key, val)
+              to: m.pair
+            - bind: span
+              eval: "pairSpan{key: len(b) - start}"
+            - set: b, err
+              value: m.key(b, k, depth+1)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+            - set: span.value
+              value: len(b) - start
+            - eval: markKey(b[start:], &span)
+              to: markKey
+            - set: b, err
+              value: m.elem(b, x, depth+1)
+            - opt:
+                do:
+                  - return: b, err
+                when: err != nil
+            - set: span.end
+              value: len(b) - start
+            - set: spans
+              value: append(spans, span)
+      - return: reorderPairs(b, start, spans), nil
+        to: reorderPairs
+  - of: (*mapEncoder).holders
     participants:
       - id: caller
         kind: actor
-      - id: (*mapEncoder).encodePairsInPlace
+      - id: (*mapEncoder).holders
         kind: self
       - id: reflect.New(m.keyType).Elem
         kind: value
-      - id: reflect.New(m.elemType).Elem
-        kind: value
-      - id: key.SetIterKey
-        kind: value
-      - id: val.SetIterValue
-        kind: value
-      - id: m.encodePair
-        kind: internal
     steps:
-      - bind: key
-        eval: reflect.New(m.keyType).Elem()
-        to: reflect.New(m.keyType).Elem
-      - bind: val
-        eval: reflect.New(m.elemType).Elem()
-        to: reflect.New(m.elemType).Elem
-      - loop:
-          cond: iter.Next()
+      - opt:
           do:
-            - eval: key.SetIterKey(iter)
-              to: key.SetIterKey
-            - eval: val.SetIterValue(iter)
-              to: val.SetIterValue
-            - var:
-                name: err
-                type: error
-            - set: b, err
-              to: m.encodePair
-              value: m.encodePair(b, key, val, depth)
-            - opt:
-                do:
-                  - return: b, err
-                when: err != nil
-      - return: b, nil
-  - of: (*mapEncoder).encodePairsCopied
+            - return: reflect.Value{}, reflect.Value{}
+          when: "!v.CanInterface()"
+      - return: reflect.New(m.keyType).Elem(), reflect.New(m.elemType).Elem()
+        to: reflect.New(m.keyType).Elem
+  - of: (*mapEncoder).pair
     participants:
       - id: caller
         kind: actor
-      - id: (*mapEncoder).encodePairsCopied
+      - id: (*mapEncoder).pair
         kind: self
-      - id: m.encodePair
-        kind: internal
+      - id: iter.Key
+        kind: value
+      - id: keyHolder.SetIterKey
+        kind: value
+      - id: elemHolder.SetIterValue
+        kind: value
     steps:
-      - loop:
-          cond: iter.Next()
-          do:
-            - var:
-                name: err
-                type: error
-            - set: b, err
-              to: m.encodePair
-              value: m.encodePair(b, iter.Key(), iter.Value(), depth)
-            - opt:
-                do:
-                  - return: b, err
-                when: err != nil
-      - return: b, nil
-  - of: (*mapEncoder).encodePair
-    steps:
-      - bind: b, err
-        eval: m.key(b, key, depth+1)
       - opt:
           do:
-            - return: b, err
-          when: err != nil
-      - return: m.elem(b, val, depth+1)
+            - return: iter.Key(), iter.Value()
+              to: iter.Key
+          when: "!keyHolder.IsValid()"
+      - eval: keyHolder.SetIterKey(iter)
+        to: keyHolder.SetIterKey
+      - eval: elemHolder.SetIterValue(iter)
+        to: elemHolder.SetIterValue
+      - return: keyHolder, elemHolder
+  - of: sortedStringKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: sortedStringKeys
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: keys
+        eval: slices.AppendSeq(buf, maps.Keys(m))
+        to: slices
+      - opt:
+          do:
+            - eval: slices.Sort(keys)
+              to: slices
+            - return: keys
+          when: len(keys) > smallMapPairs
+      - loop:
+          cond: i < len(keys)
+          do:
+            - loop:
+                cond: j > 0 && keys[j-1] > keys[j]
+                do:
+                  - set: keys[j-1], keys[j]
+                    value: keys[j], keys[j-1]
+                init: j := i
+                post: j--
+          init: i := 1
+          post: i++
+      - return: keys
+  - of: reorderPairs
+    participants:
+      - id: caller
+        kind: actor
+      - id: reorderPairs
+        kind: self
+      - id: sortPairs
+        kind: internal
+      - id: scratch
+        kind: package
+      - id: tmp.Write
+        kind: value
+      - id: tmp.Bytes
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: b
+          when: len(spans) < 2
+      - bind: region
+        eval: b[start:]
+      - eval: sortPairs(region, spans)
+        to: sortPairs
+      - bind: tmp
+        eval: scratch.AcquireBuffer()
+        to: scratch
+      - eval: tmp.Write(region)
+        to: tmp.Write
+      - bind: unsorted
+        eval: tmp.Bytes()
+        to: tmp.Bytes
+      - bind: cursor
+        eval: start
+      - loop:
+          do:
+            - op: +=
+              set: cursor
+              value: copy(b[cursor:], unsorted[spans[i].key:spans[i].end])
+          key: i
+          range: spans
+      - eval: scratch.ReleaseBuffer(tmp)
+        to: scratch
+      - return: b
+  - of: sortPairs
+    participants:
+      - id: caller
+        kind: actor
+      - id: sortPairs
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - eval: |-
+                slices.SortFunc(spans, func(x, y pairSpan) int {
+                			//: by encoded key.
+                			return comparePairs(region, &x, &y)
+                		})
+              to: slices
+            - return: ""
+          when: len(spans) > smallMapPairs
+      - loop:
+          cond: i < len(spans)
+          do:
+            - loop:
+                cond: j > 0 && comparePairs(region, &spans[j-1], &spans[j]) > 0
+                do:
+                  - set: spans[j-1], spans[j]
+                    value: spans[j], spans[j-1]
+                init: j := i
+                post: j--
+          init: i := 1
+          post: i++
+  - of: comparePairs
+    participants:
+      - id: caller
+        kind: actor
+      - id: comparePairs
+        kind: self
+      - id: cmp
+        kind: stdlib
+      - id: compareEncodedKeys
+        kind: internal
+      - id: bytes
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: cmp.Compare(x.prefix, y.prefix)
+              to: cmp
+          when: x.str && y.str && x.prefix != y.prefix
+      - opt:
+          do:
+            - return: c
+          init:
+            bind: c
+            eval: compareEncodedKeys(region[x.key:x.value], region[y.key:y.value])
+            to: compareEncodedKeys
+          when: c != 0
+      - return: bytes.Compare(region[x.value:x.end], region[y.value:y.end])
+        to: bytes
+  - of: compareEncodedKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareEncodedKeys
+        kind: self
+      - id: strPayload
+        kind: internal
+      - id: bytes
+        kind: stdlib
+      - id: intKey
+        kind: internal
+      - id: ia.compare
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: bytes.Compare(sa, sb)
+                    to: bytes
+                init:
+                  bind: sb, isStr
+                  eval: strPayload(b)
+                  to: strPayload
+                when: isStr
+          init:
+            bind: sa, ok
+            eval: strPayload(a)
+            to: strPayload
+          when: ok
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: ia.compare(ib)
+                    to: ia.compare
+                init:
+                  bind: ib, isInt
+                  eval: intKey(b)
+                  to: intKey
+                when: isInt
+          init:
+            bind: ia, ok
+            eval: intKey(a)
+            to: intKey
+          when: ok
+      - return: bytes.Compare(a, b)
+        to: bytes
+  - of: strPayload
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: len(key) == 0
+      - switch:
+          cases:
+            - case: c&^fixstrLenMask == fixstrPrefix
+              do:
+                - return: key[1:], true
+            - case: c == codeStr8 && len(key) >= 1+int(width8)
+              do:
+                - return: key[1+int(width8):], true
+            - case: c == codeStr16 && len(key) >= 1+int(width16)
+              do:
+                - return: key[1+int(width16):], true
+            - case: c == codeStr32 && len(key) >= 1+int(width32)
+              do:
+                - return: key[1+int(width32):], true
+            - default: true
+              do:
+                - return: nil, false
+          init:
+            bind: c
+            eval: key[0]
+  - of: intKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: intKey
+        kind: self
+      - id: signedKey
+        kind: internal
+      - id: sizedIntKey
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wireInt{}, false
+          when: len(key) == 0
+      - bind: c, body
+        eval: key[0], key[1:]
+      - switch:
+          cases:
+            - case: c <= posFixintMax
+              do:
+                - return: "wireInt{u: uint64(c)}, true"
+            - case: c >= negFixintMin
+              do:
+                - return: signedKey(int64(int8(c))), true
+                  to: signedKey
+            - default: true
+              do:
+                - return: sizedIntKey(c, body)
+                  to: sizedIntKey
+  - of: sizedIntKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: sizedIntKey
+        kind: self
+      - id: widen
+        kind: internal
+      - id: signedKey
+        kind: internal
+    steps:
+      - bind: info
+        eval: "&headerTable[c]"
+      - opt:
+          do:
+            - return: wireInt{}, false
+          when: (info.fam != famUint && info.fam != famInt) || len(body) != int(info.width)
+      - bind: raw
+        eval: widen(beUint(body), info)
+        to: widen
+      - opt:
+          do:
+            - return: "wireInt{u: raw}, true"
+          when: info.fam == famUint
+      - return: signedKey(int64(raw)), true
+        to: signedKey
+  - of: signedKey
+    steps:
+      - opt:
+          do:
+            - return: "wireInt{u: uint64(n), neg: true}"
+          when: n < 0
+      - return: "wireInt{u: uint64(n)}"
+  - of: wireInt.compare
+    participants:
+      - id: caller
+        kind: actor
+      - id: wireInt.compare
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "-1"
+                when: a.neg
+            - return: "1"
+          when: a.neg != b.neg
+      - opt:
+          do:
+            - return: cmp.Compare(int64(a.u), int64(b.u))
+              to: cmp
+          when: a.neg
+      - return: cmp.Compare(a.u, b.u)
+        to: cmp
+  - of: markKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: markKey
+        kind: self
+      - id: strPayload
+        kind: internal
+      - id: binary.BigEndian.Uint64
+        kind: value
+    steps:
+      - bind: payload, ok
+        eval: strPayload(region[span.key:span.value])
+        to: strPayload
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - var:
+          name: padded
+          type: "[prefixBytes]byte"
+      - eval: copy(padded[:], payload)
+      - set: span.str
+        value: "true"
+      - set: span.prefix
+        to: binary.BigEndian.Uint64
+        value: binary.BigEndian.Uint64(padded[:])
   - of: encoderFor
     participants:
       - id: caller
@@ -4436,6 +4857,10 @@ sequences:
           do:
             - return: encodeTime
           when: t == timeType
+      - opt:
+          do:
+            - return: encodeExt
+          when: t == extType
       - opt:
           do:
             - return: f
@@ -4896,6 +5321,8 @@ sequences:
         kind: internal
       - id: failingEncoder
         kind: internal
+      - id: zeroTest
+        kind: internal
     steps:
       - bind: layout
         eval: layoutOf(t)
@@ -4920,6 +5347,12 @@ sequences:
           do:
             - set: s.fields[i]
               value: "fieldEncoder{field: f, enc: encoderFor(f.typ), empty: emptyFor(f.typ)}"
+            - opt:
+                do:
+                  - set: s.fields[i].zero
+                    to: zeroTest
+                    value: zeroTest(f.typ)
+                when: f.omitZero
           key: i
           range: layout.fields
           value: f
@@ -5038,7 +5471,7 @@ sequences:
           do:
             - return: "true"
           when: "!ok"
-      - return: f.field.omitEmpty && f.empty(fv)
+      - return: (f.field.omitEmpty && f.empty(fv)) || (f.zero != nil && f.zero(fv))
   - of: (*fieldEncoder).encodeValue
     participants:
       - id: caller
@@ -5233,7 +5666,7 @@ sequences:
             - opt:
                 do:
                   - return: "false"
-                when: ok && (!f.omitEmpty || !isEmptyValue(fv))
+                when: ok && (!f.omitEmpty || !isEmptyValue(fv)) && (!f.omitZero || !zeroTest(f.typ)(fv))
           key: _
           range: layout.fields
           value: f
@@ -5314,6 +5747,83 @@ sequences:
       - return: nil
   - of: (*msgpackEncoder).Close
     steps:
+      - return: nil
+  - of: encodeExt
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeExt
+        kind: self
+      - id: interfaceOf
+        kind: internal
+      - id: appendExt
+        kind: internal
+    steps:
+      - bind: e, ok
+        eval: interfaceOf[Ext](v)
+        to: interfaceOf
+      - opt:
+          do:
+            - return: b, readOnly(v.Type())
+          when: "!ok"
+      - return: appendExt(b, e)
+        to: appendExt
+  - of: decodeExtValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeExtValue
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: d.take
+        kind: internal
+      - id: unmarshalFault
+        kind: internal
+      - id: interfaceOf
+        kind: internal
+    steps:
+      - bind: at
+        eval: d.off
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - var:
+          name: e
+          type: Ext
+      - switch:
+          cases:
+            - case: famExt
+              do:
+                - bind: p, terr
+                  eval: d.take(h.arg)
+                  to: d.take
+                - opt:
+                    do:
+                      - return: terr
+                    when: terr != nil
+                - set: e
+                  value: "Ext{Type: h.ext, Data: cloneBytes(p)}"
+            - case: famNil
+            - default: true
+              do:
+                - return: unmarshalFault("an Ext takes an extension", errs.Int(fieldOffset, at))
+                  to: unmarshalFault
+          "on": h.fam
+      - bind: dst, ok
+        eval: interfaceOf[*Ext](v.Addr())
+        to: interfaceOf
+      - opt:
+          do:
+            - return: unmarshalFault("cannot set a value reached through an unexported field", errs.Int(fieldOffset, at))
+              to: unmarshalFault
+          when: "!ok"
+      - set: "*dst"
+        value: e
       - return: nil
   - of: family.String
     steps:
@@ -5416,7 +5926,7 @@ sequences:
         kind: self
       - id: marshalFault
         kind: internal
-      - id: unmarshalFault
+      - id: boundFault
         kind: internal
     steps:
       - opt:
@@ -5424,8 +5934,507 @@ sequences:
             - return: marshalFault("value nests deeper than the depth limit (a cyclic value?)", errs.Int(fieldLimit, maxDepth))
               to: marshalFault
           when: encode
-      - return: unmarshalFault("input nests deeper than the depth limit", errs.Int(fieldLimit, maxDepth))
-        to: unmarshalFault
+      - return: boundFault(coremsgpack.DepthExceeded, errs.Int(fieldLimit, maxDepth))
+        to: boundFault
+  - of: boundFault
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundFault
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: "errs.Wrap(sentinel, errs.WrapParams{Code: coremsgpack.CodeMsgPackUnmarshalFailed}, fields...)"
+        to: errs
+  - of: zeroTest
+    steps:
+      - switch:
+          cases:
+            - case: (t.Kind() == reflect.Pointer || t.Kind() == reflect.Interface) && t.Implements(isZeroerType)
+              do:
+                - return: zeroThroughReference
+            - case: t.Implements(isZeroerType)
+              do:
+                - return: zeroByMethod
+            - case: reflect.PointerTo(t).Implements(isZeroerType)
+              do:
+                - return: zeroByAddress
+            - default: true
+              do:
+                - return: reflect.Value.IsZero
+  - of: zeroThroughReference
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroThroughReference
+        kind: self
+      - id: v.Elem
+        kind: value
+      - id: zeroByMethod
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: v.IsNil()
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: elem
+                  eval: v.Elem()
+                  to: v.Elem
+                when: elem.Kind() == reflect.Pointer && elem.IsNil()
+          when: v.Kind() == reflect.Interface
+      - return: zeroByMethod(v)
+        to: zeroByMethod
+  - of: zeroByMethod
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroByMethod
+        kind: self
+      - id: v.IsZero
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: v.IsZero()
+              to: v.IsZero
+          when: "!v.CanInterface()"
+      - bind: z, ok
+        eval: reflect.TypeAssert[isZeroer](v)
+      - return: (ok && z.IsZero()) || (!ok && v.IsZero())
+  - of: zeroByAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroByAddress
+        kind: self
+      - id: v.IsZero
+        kind: value
+      - id: reflect.New(v.Type()).Elem
+        kind: value
+      - id: boxed.Set
+        kind: value
+      - id: zeroByMethod
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: v.IsZero()
+              to: v.IsZero
+          when: "!v.CanInterface()"
+      - opt:
+          do:
+            - bind: boxed
+              eval: reflect.New(v.Type()).Elem()
+              to: reflect.New(v.Type()).Elem
+            - eval: boxed.Set(v)
+              to: boxed.Set
+            - set: v
+              value: boxed
+          when: "!v.CanAddr()"
+      - return: zeroByMethod(v.Addr())
+        to: zeroByMethod
+  - of: NewStrict
+    steps:
+      - return: "&strictCodec{}"
+  - of: (*strictCodec).Unmarshal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*strictCodec).Unmarshal
+        kind: self
+      - id: codec
+        kind: package
+      - id: c.msgpackCodec.Unmarshal
+        kind: internal
+      - id: unmarshalIntoMode
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
+            - return: codec.EmptyInput
+          when: len(data) == 0
+      - opt:
+          do:
+            - return: c.msgpackCodec.Unmarshal(data, v)
+              to: c.msgpackCodec.Unmarshal
+          when: len(data) > maxMsgPackBytes
+      - return: unmarshalIntoMode(data, v, true)
+        to: unmarshalIntoMode
+  - of: (*strictCodec).NewDecoder
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*strictCodec).NewDecoder
+        kind: self
+      - id: newDecoder
+        kind: internal
+    steps:
+      - bind: d
+        eval: newDecoder(r)
+        to: newDecoder
+      - set: d.strict
+        value: "true"
+      - return: d
+  - of: (*decodeState).checkKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkKeys
+        kind: self
+      - id: d.readHeader
+        kind: internal
+      - id: d.checkMapKeys
+        kind: internal
+      - id: d.checkElements
+        kind: internal
+      - id: d.skipBody
+        kind: internal
+    steps:
+      - bind: h, err
+        eval: d.readHeader()
+        to: d.readHeader
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - switch:
+          cases:
+            - case: famMap
+              do:
+                - return: d.checkMapKeys(h)
+                  to: d.checkMapKeys
+            - case: famArray
+              do:
+                - return: d.checkElements(h)
+                  to: d.checkElements
+            - default: true
+              do:
+                - set: _, err
+                  to: d.skipBody
+                  value: d.skipBody(h, 0)
+                - return: err
+          "on": h.fam
+  - of: (*decodeState).checkElements
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkElements
+        kind: self
+      - id: d.checkCount
+        kind: internal
+      - id: d.enter
+        kind: internal
+      - id: d.checkKeys
+        kind: internal
+      - id: d.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.checkCount(h)
+            to: d.checkCount
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.enter()
+            to: d.enter
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.checkKeys()
+                  to: d.checkKeys
+                when: err != nil
+          range: h.arg
+      - eval: d.leave()
+        to: d.leave
+      - return: nil
+  - of: (*decodeState).checkMapKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkMapKeys
+        kind: self
+      - id: d.checkCount
+        kind: internal
+      - id: d.enter
+        kind: internal
+      - id: d.checkPairKey
+        kind: internal
+      - id: d.checkKeys
+        kind: internal
+      - id: d.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.checkCount(h)
+            to: d.checkCount
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.enter()
+            to: d.enter
+          when: err != nil
+      - var:
+          name: small
+          type: "[strictLinearKeys]normKey"
+      - bind: seen
+        eval: small[:0]
+      - var:
+          name: many
+          type: map[string]struct{}
+      - loop:
+          do:
+            - var:
+                name: err
+                type: error
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: seen, many, err
+                  eval: d.checkPairKey(seen, many)
+                  op: =
+                  to: d.checkPairKey
+                when: err != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.checkKeys()
+                  to: d.checkKeys
+                when: err != nil
+          range: h.arg
+      - eval: d.leave()
+        to: d.leave
+      - return: nil
+  - of: (*normKey).equal
+    steps:
+      - return: k.class == o.class && k.n == o.n && bytes.Equal(k.content, o.content)
+  - of: (*normKey).setKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*normKey).setKey
+        kind: self
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - bind: b
+        eval: binary.BigEndian.AppendUint64([]byte{k.class}, k.n.u)
+        to: binary.BigEndian.AppendUint64
+      - opt:
+          do:
+            - set: b
+              value: append(b, 1)
+          when: k.n.neg
+      - return: string(append(b, k.content...))
+  - of: (*decodeState).checkPairKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeState).checkPairKey
+        kind: self
+      - id: d.skip
+        kind: internal
+      - id: addKey
+        kind: internal
+    steps:
+      - bind: at
+        eval: d.off
+      - opt:
+          do:
+            - return: seen, many, err
+          init:
+            bind: err
+            eval: d.skip()
+            to: d.skip
+          when: err != nil
+      - bind: kept, indexed, dup
+        eval: addKey(seen, many, normalKey(d.data[at:d.off]))
+        to: addKey
+      - opt:
+          do:
+            - return: kept, indexed, duplicateKey(at)
+          when: dup
+      - return: kept, indexed, nil
+  - of: addKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: addKey
+        kind: self
+      - id: indexKey
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: seen, many, indexKey(many, &key)
+          when: many != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: seen, nil, true
+                when: seen[i].equal(&key)
+          key: i
+          range: seen
+      - opt:
+          do:
+            - return: append(seen, key), nil, false
+          when: len(seen) < strictLinearKeys
+      - set: many
+        value: make(map[string]struct{}, 4*strictLinearKeys)
+      - loop:
+          do:
+            - eval: indexKey(many, &seen[i])
+              to: indexKey
+          key: i
+          range: seen
+      - return: seen, many, indexKey(many, &key)
+  - of: indexKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexKey
+        kind: self
+      - id: key.setKey
+        kind: internal
+    steps:
+      - bind: k
+        eval: key.setKey()
+        to: key.setKey
+      - bind: _, held
+        eval: many[k]
+      - set: many[k]
+        value: struct{}{}
+      - return: held
+  - of: normalKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: normalKey
+        kind: self
+      - id: strPayload
+        kind: internal
+      - id: binPayload
+        kind: internal
+      - id: intKey
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "normKey{class: keyClassText, content: p}"
+          init:
+            bind: p, ok
+            eval: strPayload(key)
+            to: strPayload
+          when: ok
+      - opt:
+          do:
+            - return: "normKey{class: keyClassText, content: p}"
+          init:
+            bind: p, ok
+            eval: binPayload(key)
+            to: binPayload
+          when: ok
+      - opt:
+          do:
+            - return: "normKey{class: keyClassInt, n: n}"
+          init:
+            bind: n, ok
+            eval: intKey(key)
+            to: intKey
+          when: ok
+      - return: "normKey{class: keyClassRaw, content: key}"
+  - of: binPayload
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: len(key) == 0
+      - switch:
+          cases:
+            - case: codeBin8
+              do:
+                - return: key[min(len(key), 1+int(width8)):], true
+            - case: codeBin16
+              do:
+                - return: key[min(len(key), 1+int(width16)):], true
+            - case: codeBin32
+              do:
+                - return: key[min(len(key), 1+int(width32)):], true
+            - default: true
+              do:
+                - return: nil, false
+          "on": key[0]
+  - of: duplicateKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: duplicateKey
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coremsgpack.CodeMsgPackDuplicateKey,
+          		Reason:  "DUPLICATE_KEY",
+          		Public:  "MessagePack document repeats a map key",
+          		Private: "service/data/codec/msgpack.NewStrict: a map holds two keys that decode to the same key",
+          	}, errs.Int(fieldOffset, at))
+        to: errs
+  - of: unknownMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: unknownMember
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:    coremsgpack.CodeMsgPackUnknownMember,
+          		Reason:  "UNKNOWN_MEMBER",
+          		Public:  "MessagePack document carries an unknown member",
+          		Private: "service/data/codec/msgpack.NewStrict: a key no field of the struct claims",
+          	}, errs.Int(fieldOffset, at), typeField(t))
+        to: errs
   - of: layoutOf
     participants:
       - id: caller
@@ -5531,6 +6540,7 @@ sequences:
           		name:      cmpOrName(tag.name, f.Name),
           		index:     []int{f.Index[0]},
           		omitEmpty: b.omitAll || tag.has(optOmitEmpty),
+          		omitZero:  tag.has(optOmitZero),
           	}
       - opt:
           do:
@@ -5607,7 +6617,7 @@ sequences:
                 when: taken
             - eval: |-
                 b.add(&structField{
-                			typ: sf.typ, name: sf.name, omitEmpty: sf.omitEmpty,
+                			typ: sf.typ, name: sf.name, omitEmpty: sf.omitEmpty, omitZero: sf.omitZero,
                 			index: append(append(make([]int, 0, len(field.index)+len(sf.index)), field.index...), sf.index...),
                 		})
               to: b.add
@@ -5648,7 +6658,7 @@ sequences:
           do:
             - set: b.layout.hasOmitEmpty
               value: "true"
-          when: field.omitEmpty
+          when: field.omitEmpty || field.omitZero
   - of: (*layoutBuilder).alias
     steps:
       - opt:

@@ -25,6 +25,7 @@
 //	CodeMarshalFailed    0.3.11.1  a record has no JSON encoding
 //	CodeUnmarshalFailed  0.3.11.2  a line is not JSON its element can hold
 //	CodeValueInvalid     0.3.11.3  the value or the target is not a slice
+//	CodeSizeExceeded     0.3.11.4  a stream line past the 10 MiB a record may take
 //
 // No error message quotes the input.
 package ndjson

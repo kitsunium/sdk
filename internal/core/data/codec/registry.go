@@ -85,6 +85,8 @@ func Register(c Codec) Codec {
 	indexAliases(&mimeIndex, mimes, name, "MIME", normalizeMIME)
 	//: extensions share the same shape but only need case-folding.
 	indexAliases(&extIndex, exts, name, "extension", strings.ToLower)
+	//: a codec that recognises its own head joins Detect's list (#909).
+	indexSniffer(name, c)
 	//: returning the codec lets callers bind it to a typed singleton var.
 	return c
 }

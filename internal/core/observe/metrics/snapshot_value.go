@@ -24,6 +24,11 @@ type SumMetricValue struct {
 	// outright — so it never joins the series identity and an exporter that
 	// cannot carry it loses nothing but the prose. See Describer.
 	Description string
+	// Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+	// when nobody declared one. Like Description it belongs to the name, is
+	// non-identifying, and an exporter that cannot carry it loses only the
+	// annotation (ADR 0208). See UnitDescriber.
+	Unit string
 	// Points holds the name's series, sorted by attribute set.
 	Points []SumValue
 }
@@ -39,17 +44,21 @@ type GaugeMetricValue struct {
 	// Description is the instrument's human-readable docstring, or "" when
 	// nobody described it. See SumMetricValue.Description.
 	Description string
+	// Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+	// when nobody declared one. Like Description it belongs to the name, is
+	// non-identifying, and an exporter that cannot carry it loses only the
+	// annotation (ADR 0208). See UnitDescriber.
+	Unit string
 	// Points holds the name's series, sorted by attribute set.
 	Points []GaugeValue
 }
 
-// HistogramMetricValue is every series of ONE histogram instrument name, plus
-// its temporality.
+// HistogramMetricValue is every series of ONE explicit-bucket histogram
+// instrument name, plus its temporality.
 //
-// Exponential (base-2) histograms, which the OTel model also defines, are not
-// implemented: they are a different bucketing scheme with their own scale /
-// offset / zero-count fields, and adding them is a second point type rather
-// than a field on this one. Deferred by ADR 0044 §Deferred.
+// Exponential (base-2) histograms, which the OTel model also defines, are a
+// second point type rather than a field on this one: see
+// ExponentialHistogramMetricValue (ADR 0044 §Deferred, resolved).
 type HistogramMetricValue struct {
 	// Temporality says which window Points cover. Never
 	// TemporalityUnspecified.
@@ -57,6 +66,11 @@ type HistogramMetricValue struct {
 	// Description is the instrument's human-readable docstring, or "" when
 	// nobody described it. See SumMetricValue.Description.
 	Description string
+	// Unit is the instrument's unit in UCUM ("s", "By", "{request}"), or ""
+	// when nobody declared one. Like Description it belongs to the name, is
+	// non-identifying, and an exporter that cannot carry it loses only the
+	// annotation (ADR 0208). See UnitDescriber.
+	Unit string
 	// Points holds the name's series, sorted by attribute set.
 	Points []HistogramValue
 }
@@ -107,4 +121,23 @@ type SnapshotValue struct {
 	Gauges map[string]GaugeMetricValue
 	// Histograms maps an instrument name to its histogram metric.
 	Histograms map[string]HistogramMetricValue
+	// ExponentialHistograms maps an instrument name to its exponential
+	// histogram metric. Nil from a meter that holds none.
+	ExponentialHistograms map[string]ExponentialHistogramMetricValue
+}
+
+// ExponentialHistogramMetricValue is every series of ONE exponential histogram
+// instrument name, plus its temporality.
+type ExponentialHistogramMetricValue struct {
+	// Temporality says which window Points cover. Never
+	// TemporalityUnspecified.
+	Temporality Temporality
+	// Description is the instrument's human-readable docstring, or "" when
+	// nobody described it. See SumMetricValue.Description.
+	Description string
+	// Unit is the instrument's unit in UCUM, or "" when nobody declared one
+	// (ADR 0208). See UnitDescriber.
+	Unit string
+	// Points holds the name's series, sorted by attribute set.
+	Points []ExponentialHistogramValue
 }

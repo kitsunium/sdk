@@ -2,9 +2,13 @@ package tlv
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
+	"runtime"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // Test_tlvDecoder_Decode covers both a success path and a malformed-input
@@ -199,6 +203,126 @@ func Test_sliceHint(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, tc)
+		})
+	}
+}
+
+// countingReader counts the bytes a decoder pulls from the stream it wraps.
+type countingReader struct {
+	r io.Reader
+	n int
+}
+
+// Read forwards to the wrapped reader and adds what it delivered.
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
+// fillReader is an endless stream of one byte.
+type fillReader byte
+
+// Read fills p with the byte.
+func (f fillReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = byte(f)
+	}
+	return len(p), nil
+}
+
+// compositeOfStrings frames a slice record declaring len(sizes) string
+// children, the i-th carrying sizes[i] bytes, without materialising them.
+func compositeOfStrings(sizes ...int) io.Reader {
+	header := binary.AppendUvarint([]byte{byte(tagSlice)}, uint64(len(sizes)))
+	parts := []io.Reader{bytes.NewReader(header)}
+	for _, size := range sizes {
+		child := binary.AppendUvarint([]byte{byte(tagString)}, uint64(size))
+		parts = append(parts, bytes.NewReader(child), io.LimitReader(fillReader('a'), int64(size)))
+	}
+	return io.MultiReader(parts...)
+}
+
+// compositeBytes is compositeOfStrings materialised, for the buffered path.
+func compositeBytes(t *testing.T, sizes ...int) []byte {
+	t.Helper()
+	data, err := io.ReadAll(compositeOfStrings(sizes...))
+	if err != nil {
+		t.Fatalf("framing the composite: %v", err)
+	}
+	return data
+}
+
+// compositeOverhead is the bytes a one-child slice record spends beyond its
+// child's payload: the slice tag and count, the child's tag and length.
+func compositeOverhead(payload int) int {
+	return 1 + len(binary.AppendUvarint(nil, 1)) + 1 + len(binary.AppendUvarint(nil, uint64(payload)))
+}
+
+// TestStreamDecodeChargesTheWholeRecordAgainstTheCeiling is #1105: the stream
+// Decoder used to cap each scalar child at maxTLVBytes and rebuild a composite
+// with no total bound, so four 9 MiB children materialised 36 MiB before
+// decodeRoot saw a byte. The record as a whole now obeys Unmarshal's ceiling:
+// the refusal comes before the second child is read, and what it allocated
+// stays within two ceilings. No t.Parallel: it reads the process-wide
+// allocation counter.
+func TestStreamDecodeChargesTheWholeRecordAgainstTheCeiling(t *testing.T) {
+	const child = 9 << 20
+	counted := &countingReader{r: compositeOfStrings(child, child, child, child)}
+	dec := &tlvDecoder{r: counted}
+	var got any
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	err := dec.Decode(&got)
+	runtime.ReadMemStats(&after)
+	if !errs.HasReason(err, "SIZE_EXCEEDED") {
+		t.Fatalf("want SIZE_EXCEEDED, got %v", err)
+	}
+	if counted.n > maxTLVBytes+1 {
+		t.Fatalf("read %d bytes from the stream, want at most %d", counted.n, maxTLVBytes+1)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 2*uint64(maxTLVBytes) {
+		t.Fatalf("allocated %d bytes, want at most %d", grew, 2*maxTLVBytes)
+	}
+	if dec.More() {
+		t.Fatal("a refused record must halt the stream")
+	}
+}
+
+// TestStreamDecodeAgreesWithUnmarshalAtTheCeiling frames one composite whose
+// total is one byte under, exactly at and one byte over maxTLVBytes: the stream
+// Decoder and Unmarshal accept and refuse the same records.
+func TestStreamDecodeAgreesWithUnmarshalAtTheCeiling(t *testing.T) {
+	t.Parallel()
+	payload := maxTLVBytes - compositeOverhead(maxTLVBytes)
+	for _, tc := range []struct {
+		name    string
+		payload int
+		refused bool
+	}{
+		{"one byte under the ceiling", payload - 1, false},
+		{"exactly the ceiling", payload, false},
+		{"one byte over the ceiling", payload + 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			data := compositeBytes(t, tc.payload)
+			var buffered, streamed any
+			uerr := (&tlvCodec{}).Unmarshal(data, &buffered)
+			derr := (&tlvDecoder{r: bytes.NewReader(data)}).Decode(&streamed)
+			if tc.refused {
+				if !errs.HasReason(uerr, "SIZE_EXCEEDED") || !errs.HasReason(derr, "SIZE_EXCEEDED") {
+					t.Fatalf("want SIZE_EXCEEDED on both paths, got Unmarshal %v, Decode %v", uerr, derr)
+				}
+				return
+			}
+			if uerr != nil || derr != nil {
+				t.Fatalf("want both paths to decode, got Unmarshal %v, Decode %v", uerr, derr)
+			}
+			elems, ok := streamed.([]any)
+			if !ok || len(elems) != 1 || len(elems[0].(string)) != tc.payload {
+				t.Fatalf("stream decoded %T, want one %d-byte string", streamed, tc.payload)
+			}
 		})
 	}
 }

@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "goruntime",
+    srcs = [
+        "doc.go",
+        "gen_facade.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/observe/metrics/goruntime",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/observe/metrics",
+        "//internal/service/observe/metrics/goruntime",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":goruntime",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "goruntime_test",
+    srcs = ["gen_api_test.go"],
+    deps = [
+        ":goruntime",
+        "//internal/core/observe/metrics",
+        "//internal/service/observe/metrics/goruntime",
+    ],
+)

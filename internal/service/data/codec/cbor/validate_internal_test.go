@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	corecbor "github.com/kitsunium/sdk/internal/core/data/codec/cbor"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -95,7 +96,8 @@ func Test_validateItem(t *testing.T) {
 		if verr == nil {
 			t.Fatalf("%s: validateItem accepted %x", tc.name, data)
 		}
-		if !errs.HasReason(verr, "UNMARSHAL_FAILED") || !strings.Contains(errs.PrivateOf(verr), tc.wantErr) {
+		//: a decode failure by code — a bound's under SIZE_EXCEEDED or DEPTH_EXCEEDED (#894).
+		if !errs.HasCode(verr, corecbor.CodeCBORUnmarshalFailed) || !strings.Contains(errs.PrivateOf(verr), tc.wantErr) {
 			t.Errorf("%s: refusal %v (%s), want one mentioning %q", tc.name, verr, errs.PrivateOf(verr), tc.wantErr)
 		}
 	}

@@ -80,6 +80,15 @@ constants:
           batch with ForwardFull, counted Dropped.
         name: Block
     name: DropOldest
+  - doc: |-
+      EncodingGzip is the Content-Encoding a batch Config.Compress kept is
+      handed to Config.SendEncoded with; a batch kept as it came is handed
+      with "", the identity encoding.
+    items:
+      - name: EncodingGzip
+        type: string
+        value: "\"gzip\""
+    name: EncodingGzip
   - doc: The names String renders.
     grouped: true
     items:
@@ -98,11 +107,19 @@ constants:
     name: dropOldestName
 files:
   - decls:
+      - gzipMagic
+      - gzipBatch
+      - encodingOf
+      - unreachable
+    name: compress.go
+  - decls:
       - DefaultMaxBatches
       - countPage
       - DropOldest
+      - EncodingGzip
       - dropOldestName
       - Sender
+      - EncodedSender
       - FullPolicy
       - Config
       - FullPolicy.String
@@ -161,11 +178,33 @@ files:
       - (*metricExporter).Name
       - (*metricExporter).Export
       - (*metricExporter).ExportContext
+      - logExporter
+      - NewLogExporter
+      - (*logExporter).ExportDocument
     name: signal.go
   - decls:
       - StatsValue
     name: stats.go
 functions:
+  - doc: |-
+      gzipBatch compresses batch at the default level into a fresh slice — the
+      broker may keep the bytes it is handed, so they are never pooled. Writing
+      to a bytes.Buffer cannot fail, so neither can the compressor.
+    name: gzipBatch
+    params: batch []byte
+    results: "[]byte"
+  - doc: |-
+      encodingOf is the Content-Encoding batch rests in: EncodingGzip for a
+      gzip stream, "" for anything else.
+    name: encodingOf
+    params: batch []byte
+    results: string
+  - doc: |-
+      unreachable drops an error a compressor writing into a bytes.Buffer
+      cannot return — the buffer never refuses a write. It is a named function
+      so the discard is a documented decision rather than a blank assignment.
+    name: unreachable
+    params: err error
   - doc: orDefault returns value, or fallback when value is zero.
     name: orDefault
     params: value, fallback T
@@ -184,14 +223,21 @@ functions:
   - name: NewMetricExporter
     params: name coremetrics.ExporterName, forwarder *Forwarder
     results: coremetrics.ContextExporter, error
+  - name: NewLogExporter
+    params: forwarder *Forwarder
+    results: corelogger.DocumentExporter, error
 imports:
+  bytes: bytes
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   coreforward: github.com/kitsunium/sdk/internal/core/app/forward
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
   coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
   corequeue: github.com/kitsunium/sdk/internal/core/data/queue
   coreres: github.com/kitsunium/sdk/internal/core/app/resilience
   coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
+  gzip: compress/gzip
+  io: io
   kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
   kerrs: github.com/kitsunium/sdk/internal/kernel/errs
   math: math
@@ -211,6 +257,9 @@ types:
     name: Sender
     underlying: func(ctx context.Context, batch []byte) error
   - kind: named
+    name: EncodedSender
+    underlying: func(ctx context.Context, batch []byte, encoding string) error
+  - kind: named
     methods:
       - name: String
         recv: p FullPolicy
@@ -229,9 +278,27 @@ types:
         type: corequeue.Broker
       - doc: |-
           Send ships one stored batch: an OTLP/HTTP exporter's ExportDocument,
-          or any function of that shape.
+          or any function of that shape. It may be nil when SendEncoded is set,
+          which then ships every batch. Send receives a batch as it rests: a
+          backlog a previous process kept with Compress needs SendEncoded until
+          it drains.
         name: Send
         type: Sender
+      - doc: |-
+          SendEncoded ships one stored batch with the Content-Encoding it rests
+          in — an OTLP/HTTP exporter's ExportEncodedDocument. When set it ships
+          every batch, gzipped or not, and Send is not called.
+        name: SendEncoded
+        type: EncodedSender
+      - doc: |-
+          Compress, when true, gzips every batch in Enqueue (compress/gzip, the
+          default level) before it is published, so MaxBytes, PendingBytes and
+          the disk hold what rests compressed — OTLP/JSON shrinks eight to
+          twelve times — and SendEncoded posts it as it rests, labelled
+          EncodingGzip. It requires SendEncoded: a gzipped batch handed to Send
+          would leave labelled as JSON. The zero value keeps a batch as it came.
+        name: Compress
+        type: bool
       - doc: |-
           Retryable classifies a failure of Send as one a later attempt may cure
           — trace.OTLPRetryable, metrics.OTLPRetryable. It is REQUIRED: nil reads
@@ -650,6 +717,23 @@ types:
         recv: e *metricExporter
         results: error
     name: metricExporter
+  - doc: |-
+      logExporter is the producer half for the logs signal: the "otlpjson"
+      writer has encoded the batch already, so the document is kept as it is.
+    fields:
+      - doc: forwarder keeps the documents.
+        name: forwarder
+        type: "*Forwarder"
+    kind: struct
+    methods:
+      - doc: |-
+          ExportDocument keeps doc, or refuses it by the forwarder's bounds; an
+          empty document keeps nothing.
+        name: ExportDocument
+        params: ctx context.Context, doc []byte
+        recv: e *logExporter
+        results: error
+    name: logExporter
   - fields:
       - doc: |-
           LastRetryAfterAt is when a collector last imposed a delay; zero when
@@ -693,3 +777,20 @@ types:
         type: uint64
     kind: struct
     name: StatsValue
+vars:
+  - doc: What Compress writes and how a stored batch is recognised.
+    grouped: true
+    items:
+      - doc: |-
+          gzipMagic opens every gzip stream (RFC 1952 §2.3.1): ID1, ID2 and CM
+          8, deflate. No OTLP/JSON document opens with 0x1f, so a stored batch
+          says itself whether Compress kept it — across a restart and a
+          configuration change alike.
+        name: gzipMagic
+        value: "[]byte{0x1f, 0x8b, 0x08}"
+      - doc: |-
+          gzipWriters recycles the compressors: a gzip.Writer holds its deflate
+          window, the expensive part, across Reset.
+        name: gzipWriters
+        value: "sync.Pool{New: func() any { return gzip.NewWriter(io.Discard) }}"
+    name: gzipMagic

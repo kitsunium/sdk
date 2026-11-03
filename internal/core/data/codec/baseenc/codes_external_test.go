@@ -26,7 +26,7 @@ func TestCodesKeepTheirValues(t *testing.T) {
 		{"BaseEncMarshalFailed", corebaseenc.BaseEncMarshalFailed, corebaseenc.CodeBaseEncMarshalFailed, 0x00_03_18_01, "BASE_ENC_MARSHAL_FAILED"},
 		{"BaseEncUnmarshalFailed", corebaseenc.BaseEncUnmarshalFailed, corebaseenc.CodeBaseEncUnmarshalFailed, 0x00_03_18_02, "BASE_ENC_UNMARSHAL_FAILED"},
 		{"BaseEncDecodeFailed", corebaseenc.BaseEncDecodeFailed, corebaseenc.CodeBaseEncDecodeFailed, 0x00_03_18_03, "BASE_ENC_DECODE_FAILED"},
-		{"BaseEncSizeExceeded", corebaseenc.BaseEncSizeExceeded, corebaseenc.CodeBaseEncSizeExceeded, 0x00_03_18_04, "BASE_ENC_SIZE_EXCEEDED"},
+		{"SizeExceeded", corebaseenc.SizeExceeded, corebaseenc.CodeBaseEncSizeExceeded, 0x00_03_18_04, "SIZE_EXCEEDED"},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

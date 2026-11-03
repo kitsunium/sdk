@@ -53,3 +53,36 @@ batch removes is the garbage — a thousand-record `Append` used to leave 78 KiB
 for the collector and now leaves 74 bytes. `TestAllocPerRecord` (race-off alloc
 lane) pins the slope at 0 per record for every shape but `[]any`, whose dynamic
 value json/v2 must still copy (1).
+
+## Unmarshal of blank lines (#1098) — 2026-11-03, go1.27.3
+
+Measured by `sizing_integration_test.go` (race off, `testing.Benchmark`'s
+byte counter), base `740e7c1e` against the change:
+
+| input, decoded into | before | after |
+|---|---:|---:|
+| 1 MiB of `'\n'` into `[]struct{ten strings}` | 167 772 241 B | **72 B** |
+| 1 MiB of `" \t\r\n"` lines into `[]struct{ten strings}` | (a slot per line) | **72 B** |
+| 1 MiB of `"1\n"` into `[]struct{ten strings}` — refused at line 1 | 83 887 179 B | **655 946 B** |
+
+The output used to be sized by the input's newline count before a record was
+decoded; it is now sized by its non-blank lines — exact on success — and at
+most 4 096 slots are reserved up front (`maxReservedRecords`), past which it
+grows by doubling. The refusal row is those 4 096 slots. Inputs without blank
+lines up to 4 096 records allocate as before (`TestAllocBudget` unchanged);
+the `MarshalBatch` / `AppendBatch` rows above do not decode and are untouched.
+
+## Stream decode against Unmarshal (#901) — 2026-11-03, go1.27.3
+
+64 `benchEvent` records (`stream_bench_test.go`, `-benchtime=300ms -count=6`,
+medians):
+
+| benchmark | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| `Unmarshal64` | 103 100 | 4 683 | 68 |
+| `StreamDecode64` | 101 100 | 4 865 | 68 |
+
+**One allocation per record on both paths** — the `actor` string each record
+holds. The stream decoder adds no allocation per record: a line that fits its
+`bufio.Reader` is decoded in place. Its per-call constant (the decoder, its
+4 KiB read buffer) replaces `Unmarshal`'s (the `[]benchEvent`).

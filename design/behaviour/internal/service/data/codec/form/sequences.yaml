@@ -59,6 +59,8 @@ sequences:
         kind: actor
       - id: (*formCodec).Unmarshal
         kind: self
+      - id: codec
+        kind: package
       - id: errs
         kind: package
       - id: url
@@ -68,24 +70,24 @@ sequences:
     steps:
       - opt:
           do:
+            - return: terr
+          init:
+            bind: terr
+            eval: codec.CheckTarget(v)
+            to: codec
+          when: terr != nil
+      - opt:
+          do:
             - return: |-
-                errs.Wrap(nil, errs.WrapParams{
-                			Code:    coreform.CodeFormUnmarshalFailed,
-                			Reason:  "UNMARSHAL_FAILED",
-                			Public:  "form body exceeds size limit",
-                			Private: "service/data/codec/form.Unmarshal: payload length exceeds maxFormBytes",
-                		}, errs.Int("len", len(data)), errs.Int("cap", maxFormBytes))
+                errs.Wrap(coreform.SizeExceeded, errs.WrapParams{Code: coreform.CodeFormUnmarshalFailed},
+                			errs.Int("len", len(data)), errs.Int("cap", maxFormBytes))
               to: errs
           when: len(data) > maxFormBytes
       - opt:
           do:
             - return: |-
-                errs.Wrap(nil, errs.WrapParams{
-                			Code:    coreform.CodeFormUnmarshalFailed,
-                			Reason:  "UNMARSHAL_FAILED",
-                			Public:  "form body declares too many pairs",
-                			Private: "service/data/codec/form.Unmarshal: pair count exceeds maxFormPairs",
-                		}, errs.Int("pairs", pairs), errs.Int("cap", maxFormPairs))
+                errs.Wrap(coreform.SizeExceeded, errs.WrapParams{Code: coreform.CodeFormUnmarshalFailed},
+                			errs.Int("pairs", pairs), errs.Int("cap", maxFormPairs))
               to: errs
           init:
             bind: pairs

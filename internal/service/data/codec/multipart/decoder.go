@@ -10,6 +10,7 @@ import (
 	stdmp "mime/multipart"
 	"reflect"
 
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	coremultipart "github.com/kitsunium/sdk/internal/core/data/codec/multipart"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -22,6 +23,9 @@ type multipartDecoder struct {
 	inner *stdmp.Reader
 	// count charges the bounds per part, identical to the encoder's set.
 	count counter
+	// wire charges every byte read from the body against MaxTotalBytes;
+	// inner reads through it.
+	wire wireBudget
 	// pending is the one-part look-ahead so More can answer without consuming.
 	pending *PartValue
 	// pendErr is the one error waiting to be surfaced by the next Decode.
@@ -39,6 +43,10 @@ type multipartDecoder struct {
 // side of the JSON-mediated shape Encode writes. io.EOF is returned verbatim
 // once the stream is drained, matching every other streaming codec here.
 func (d *multipartDecoder) Decode(v any) error {
+	//: a nil or non-pointer target is the caller's error, refused first (#1101).
+	if terr := codec.CheckTarget(v); terr != nil {
+		return terr
+	}
 	//: fill the look-ahead slot when nothing is buffered.
 	d.fetch()
 	//: a parked failure is reported exactly once, then latches the stream.
@@ -95,10 +103,18 @@ func (d *multipartDecoder) fetch() {
 		//: nothing further to read.
 		return
 	}
+	//: a body that crossed MaxTotalBytes yields no further part, even one
+	//: mime/multipart could still frame from bytes it read ahead (#908).
+	if d.wire.err != nil {
+		//: LIMIT_EXCEEDED, knob MaxTotalBytes.
+		d.pendErr = d.wire.err
+		//: nothing buffered.
+		return
+	}
 	//: advance to the next part; io.EOF means the closing delimiter was read.
 	next, nerr := d.inner.NextPart()
-	//: clean end of stream.
-	if errIsEOF(nerr) {
+	//: clean end of stream — unless reaching it crossed the ceiling.
+	if errIsEOF(nerr) && d.wire.err == nil {
 		//: latch so More stops promising values.
 		d.done = true
 		//: Decode will return io.EOF verbatim.
@@ -106,8 +122,9 @@ func (d *multipartDecoder) fetch() {
 	}
 	//: a malformed header block or a truncated body.
 	if nerr != nil {
-		//: park the wrapped failure for the next Decode.
-		d.pendErr = unmarshalFailed(nerr, "Decoder: reading the next part failed")
+		//: park the wrapped failure for the next Decode — the body's own
+		//: ceiling, as itself, when that is what stopped the read.
+		d.pendErr = d.readFailure(nerr, "Decoder: reading the next part failed")
 		//: nothing buffered.
 		return
 	}
@@ -163,8 +180,8 @@ func (d *multipartDecoder) readBody(src io.Reader) (body []byte, err error) {
 	read, overflow, rerr := readBounded(src, budget)
 	//: a read fault mid-body is a wire failure.
 	if rerr != nil {
-		//: typed UNMARSHAL_FAILED.
-		return nil, unmarshalFailed(rerr, "Decoder: reading a part body failed")
+		//: typed UNMARSHAL_FAILED, or the body's ceiling.
+		return nil, d.readFailure(rerr, "Decoder: reading a part body failed")
 	}
 	//: an over-budget body is refused by the bound, not by the reader.
 	if overflow {
@@ -179,6 +196,19 @@ func (d *multipartDecoder) readBody(src io.Reader) (body []byte, err error) {
 	}
 	//: within every bound.
 	return read, nil
+}
+
+// readFailure types a failure of mime/multipart: the body's MaxTotalBytes
+// refusal, as it is, when the wireBudget stopped the read — mime/multipart
+// wraps it in its own text — and an UNMARSHAL_FAILED otherwise.
+func (d *multipartDecoder) readFailure(cause error, detail string) error {
+	//: the ceiling under the reader was crossed.
+	if d.wire.err != nil {
+		//: LIMIT_EXCEEDED, knob MaxTotalBytes.
+		return d.wire.err
+	}
+	//: a malformed body.
+	return unmarshalFailed(cause, detail)
 }
 
 // readBounded drains r into a fresh buffer, refusing to materialise more than

@@ -1,6 +1,189 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: NewKeyed
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewKeyed
+        kind: self
+      - id: resolveKeyed
+        kind: internal
+    steps:
+      - var:
+          name: resolved
+          type: KeyedConfig
+      - opt:
+          do:
+            - set: resolved
+              value: "*cfg"
+          when: cfg != nil
+      - opt:
+          do:
+            - return: nil, coresample.RateInvalid
+          when: resolved.Window < 0 || resolved.First < 0 || resolved.Thereafter < 0 || resolved.MaxKeys < 0
+      - opt:
+          do:
+            - return: nil, coresample.DownstreamNil
+          when: downstream == nil
+      - eval: resolveKeyed(&resolved)
+        to: resolveKeyed
+      - return: "&Keyed{downstream: downstream, cfg: resolved, keys: make(map[keyedKey]*keyedCounter, resolved.MaxKeys)}, nil"
+  - of: resolveKeyed
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveKeyed
+        kind: self
+      - id: orDefault
+        kind: internal
+      - id: level
+        kind: package
+    steps:
+      - set: cfg.Window
+        to: orDefault
+        value: orDefault(cfg.Window, DefaultWindow)
+      - set: cfg.First
+        to: orDefault
+        value: orDefault(cfg.First, DefaultFirst)
+      - set: cfg.Thereafter
+        to: orDefault
+        value: orDefault(cfg.Thereafter, DefaultThereafter)
+      - set: cfg.MaxKeys
+        to: orDefault
+        value: orDefault(cfg.MaxKeys, DefaultMaxKeys)
+      - opt:
+          do:
+            - set: cfg.Clock
+              value: clock.System
+          when: cfg.Clock == nil
+      - opt:
+          do:
+            - set: cfg.MinLevelBypass
+              to: level
+              value: level.Fixed(level.Warn)
+          when: cfg.MinLevelBypass == nil
+  - of: orDefault
+    steps:
+      - opt:
+          do:
+            - return: def
+          when: v == 0
+      - return: v
+  - of: (*Keyed).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Keyed).Write
+        kind: self
+      - id: s.downstream.Write
+        kind: value
+      - id: s.dropped.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: s.downstream.Write(ctx, r, p)
+              to: s.downstream.Write
+          when: r.Level >= s.cfg.MinLevelBypass.Level() || s.keep(s.keyOf(r))
+      - eval: s.dropped.Add(1)
+        to: s.dropped.Add
+      - opt:
+          do:
+            - eval: s.cfg.OnDrop(r)
+          when: s.cfg.OnDrop != nil
+      - return: 0, nil
+  - of: (*Keyed).keyOf
+    steps:
+      - opt:
+          do:
+            - return: "keyedKey{s: s.cfg.Key(r)}"
+          when: s.cfg.Key != nil
+      - return: "keyedKey{lv: r.Level, s: r.Message}"
+  - of: (*Keyed).keep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Keyed).keep
+        kind: self
+      - id: s.cfg.Clock.Now
+        kind: value
+      - id: s.advance
+        kind: internal
+      - id: s.forwards
+        kind: internal
+    steps:
+      - bind: now
+        eval: s.cfg.Clock.Now()
+        to: s.cfg.Clock.Now
+      - lock:
+          mutex: s.mu
+      - bind: c
+        eval: s.keys[key]
+      - opt:
+          do:
+            - alt:
+                - do:
+                    - set: c
+                      value: "&s.overflow"
+                  when: "!s.admit(now)"
+                - do:
+                    - set: c
+                      value: "&keyedCounter{}"
+                    - set: s.keys[key]
+                      value: c
+                  else: true
+          when: c == nil
+      - eval: s.advance(c, now)
+        to: s.advance
+      - return: s.forwards(c.count)
+        to: s.forwards
+  - of: (*Keyed).advance
+    steps:
+      - opt:
+          do:
+            - set: c.start, c.count
+              value: now, 1
+            - return: ""
+          when: c.count == 0 || now.Sub(c.start) >= s.cfg.Window
+      - op: ++
+        set: c.count
+  - of: (*Keyed).forwards
+    steps:
+      - return: count <= s.cfg.First || (count-s.cfg.First)%s.cfg.Thereafter == 0
+  - of: (*Keyed).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Keyed).Flush
+        kind: self
+      - id: s.downstream.Flush
+        kind: value
+    steps:
+      - return: s.downstream.Flush(ctx)
+        to: s.downstream.Flush
+  - of: (*Keyed).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Keyed).Close
+        kind: self
+      - id: s.downstream.Close
+        kind: value
+    steps:
+      - return: s.downstream.Close()
+        to: s.downstream.Close
+  - of: (*Keyed).Dropped
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Keyed).Dropped
+        kind: self
+      - id: s.dropped.Load
+        kind: value
+    steps:
+      - return: s.dropped.Load()
+        to: s.dropped.Load
   - of: New
     steps:
       - opt:

@@ -65,7 +65,7 @@ secret octets would be (#433, `TestFormattingNeverPrintsMaterialThroughAnyVerb`)
 |---|---|
 | `jwk.go` | `Type` (EC/OKP/oct), `Curve` (P-256/384/521, Ed25519), the immutable `KeyValue` + accessors (`Kty`/`Crv`/`Kid`/`Use`/`Alg`/`KeyOps`/`IsZero`/`IsPrivate`), `With*` copy-on-write setters, `Public`, `Equal`, redacting `String`/`GoString`/`Format`; the private member behind a pointer (`privateMember`, `holdPrivate`, `secret`) |
 | `parse.go` | `Parse` — the single decode entry point, plus the per-family validators |
-| `marshal.go` | `MarshalPublic` / `MarshalPrivate` / `MarshalJSON`, RFC 7638 `Thumbprint` and `WithThumbprintKid` |
+| `marshal.go` | `MarshalPublic` / `MarshalPrivate` / `MarshalJSON`, RFC 7638 `Thumbprint` and `WithThumbprintKid` — the thumbprint input is the RFC 8785 canonical form of the required members, `codec/jcs.Marshal` (#895), the same bytes as RFC 7638 §3.2's concatenation (`TestThumbprintInputIsJCS`); about eight times the cost of that concatenation (`BENCH.md`) |
 | `bridge.go` | `FromECDSAPublic`/`FromECDSAPrivate`/`FromEd25519Public`/`FromEd25519Private`/`FromSecret` and the reverse `ECDSAPublic`/`ECDSAPrivate`/`Ed25519Public`/`Ed25519Private`/`Secret` |
 | `curve.go` | curve tables (`coordLen`, `ecdhCurve`, `ellipticCurve`, `curveFromElliptic`) and the two real checks: `checkECPoint`, `checkECScalar` |
 | `set.go` | `Set`, `NewSet`, `ParseSet`, `Keys`, `Len`, `ByKid`, `AllByKid`, the three set marshallers, redacting `String`/`GoString` |

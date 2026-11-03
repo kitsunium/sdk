@@ -275,7 +275,51 @@ constants:
           flagBadName marks a name holding a NUL or invalid UTF-8, which an
           element name cannot be; encoding the field fails.
         name: flagBadName
+      - doc: |-
+          flagOmitZero leaves the field out when it holds its type's zero value,
+          as encoding/json's omitzero does (#1103).
+        name: flagOmitZero
     name: flagOmitEmpty
+  - doc: The layout Sniff checks a document's head against.
+    grouped: true
+    items:
+      - doc: |-
+          emptyDocumentSize is the length of the empty document: its int32 length
+          and its terminating NUL.
+        name: emptyDocumentSize
+        type: int
+        value: "5"
+      - doc: firstTypeAt is where the first element's type byte sits.
+        name: firstTypeAt
+        type: int
+        value: "4"
+      - doc: firstKeyAt is where the first element's name starts.
+        name: firstKeyAt
+        type: int
+        value: "5"
+      - doc: asciiDEL is the one ASCII control byte above the space.
+        name: asciiDEL
+        type: byte
+        value: "0x7F"
+    name: emptyDocumentSize
+  - doc: |-
+      streamFirstRead is how much of a streamed document's body the decoder
+      reserves before the reader has delivered any of it; past it, the buffer
+      grows with the bytes that arrive, so a length prefix the reader never
+      honours costs what it delivered, not what it declared (CWE-400).
+    items:
+      - name: streamFirstRead
+        type: int
+        value: 64 << 10
+    name: streamFirstRead
+  - doc: |-
+      strictLinearNames is how many element names of one document the duplicate
+      check compares pairwise before it switches to a set.
+    items:
+      - name: strictLinearNames
+        type: int
+        value: "32"
+    name: strictLinearNames
   - doc: |-
       Element type bytes, BSON 1.1. The deprecated types (undefined, DBPointer,
       symbol, code with scope) are still read and written: a document an older
@@ -526,8 +570,8 @@ files:
       - element
       - errCorrupt
       - decodeInto
+      - decodeIntoMode
       - rootTarget
-      - describeTarget
       - rootHook
       - decodeValue
       - decodeContainer
@@ -708,6 +752,8 @@ files:
   - decls:
       - marshalError
       - unmarshalError
+      - checkTarget
+      - malformedAt
       - depthError
       - valueError
     name: errors.go
@@ -726,6 +772,12 @@ files:
       - (*ObjectID).UnmarshalJSON
       - objectIDJSONText
     name: objectid.go
+  - decls:
+      - zeroTest
+      - zeroThroughReference
+      - zeroByMethod
+      - zeroByAddress
+    name: omitzero.go
   - decls:
       - planKind
       - kindUnsupported
@@ -763,10 +815,45 @@ files:
       - dominantFields
       - fieldTags
       - parseFieldTags
+      - tagOption
       - (*typePlan).lookupField
       - (*typePlan).foldedField
       - needsFolding
     name: plan.go
+  - decls:
+      - emptyDocumentSize
+      - (*bsonCodec).Sniff
+      - knownType
+      - plausibleKey
+    name: sniff.go
+  - decls:
+      - streamFirstRead
+      - bsonEncoder
+      - bsonDecoder
+      - (*bsonCodec).NewEncoder
+      - (*bsonCodec).NewDecoder
+      - (*bsonEncoder).Encode
+      - (*bsonEncoder).Close
+      - (*bsonDecoder).Decode
+      - (*bsonDecoder).More
+      - (*bsonDecoder).next
+      - readDocument
+    name: stream.go
+  - decls:
+      - strictLinearNames
+      - strictCodec
+      - NewStrict
+      - (*strictCodec).Unmarshal
+      - (*strictCodec).NewDecoder
+      - decodeStrict
+      - checkNames
+      - checkDocument
+      - addName
+      - indexName
+      - checkNested
+      - duplicateName
+      - unknownMember
+    name: strict.go
   - decls:
       - D
       - E
@@ -927,15 +1014,17 @@ functions:
     params: data []byte, v any
     results: error
   - doc: |-
+      decodeIntoMode is decodeInto, refusing an element no struct field claims
+      when strict is set.
+    name: decodeIntoMode
+    params: data []byte, v any, strict bool
+    results: error
+  - doc: |-
       rootTarget follows a pointer to what it points at, or keeps a map, which is
       filled in place.
     name: rootTarget
     params: rv reflect.Value
     results: reflect.Value, error
-  - doc: describeTarget names a refused target's type, or nil.
-    name: describeTarget
-    params: rv reflect.Value
-    results: string
   - doc: rootHook calls a target's own UnmarshalBSON with a copy of the document.
     name: rootHook
     params: u interface{ UnmarshalBSON(data []byte) error }, rv reflect.Value, data []byte
@@ -1207,7 +1296,8 @@ functions:
     results: error
   - doc: |-
       decodeUnknown decodes an element no field names into the struct's
-      ",inline" map, or skips it when there is none.
+      ",inline" map, or, when there is none, skips it — or refuses it with
+      UNKNOWN_MEMBER under a strict decode, as nothing collects it.
     name: decodeUnknown
     params: el element, rv reflect.Value, p *typePlan, st decodeState
     results: error
@@ -1433,6 +1523,19 @@ functions:
     name: unmarshalError
     params: cause error, detail string
     results: error
+  - doc: |-
+      checkTarget is core/data/codec.CheckTarget, except that a non-nil map is a
+      target too: the root document fills it in place (#1101).
+    name: checkTarget
+    params: v any
+    results: error
+  - doc: |-
+      malformedAt builds the decode failure of a document malformed at byte off
+      of the input: the rule it breaks in the Private text, the offset as the
+      family's field codec.PositionOf reads (#1125) — never in the text alone.
+    name: malformedAt
+    params: off int, rule string
+    results: error
   - doc: depthError builds the nesting refusal for op ("Marshal" or "Unmarshal").
     name: depthError
     params: op string
@@ -1450,6 +1553,33 @@ functions:
     name: objectIDJSONText
     params: data []byte
     results: string, error
+  - doc: |-
+      zeroTest returns omitzero's test for a field of type t — encoding/json's
+      since Go 1.24 (#1103): the type's own IsZero when it declares one, reached
+      through the value's address when only the pointer does, and reflect's zero
+      value test otherwise. A nil pointer or interface is zero without asking it.
+    name: zeroTest
+    params: t reflect.Type
+    results: func(reflect.Value) bool
+  - doc: |-
+      zeroThroughReference is omitzero for a pointer or interface type declaring
+      IsZero: nil, or an interface holding a nil pointer, is zero; otherwise the
+      method decides.
+    name: zeroThroughReference
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      zeroByMethod calls the value's own IsZero. A value reflection may not hand
+      out — reached through an unexported embedding — is judged by its bits.
+    name: zeroByMethod
+    params: v reflect.Value
+    results: bool
+  - doc: |-
+      zeroByAddress calls IsZero through the value's address, or through an
+      addressable copy when the value has none, as encoding/json does.
+    name: zeroByAddress
+    params: v reflect.Value
+    results: bool
   - doc: |-
       planFor returns the plan of t, building and publishing it — and every plan
       it reaches — on first use.
@@ -1506,11 +1636,79 @@ functions:
     params: sf reflect.StructField
     results: fieldTags, bool
   - doc: |-
+      tagOption returns the flag an option word of a bson tag sets, and none for
+      a word that is not an option.
+    name: tagOption
+    params: word string
+    results: fieldFlags
+  - doc: |-
       needsFolding reports whether lower-casing key could change it: an ASCII
       upper-case letter, or any non-ASCII byte.
     name: needsFolding
     params: key []byte
     results: bool
+  - doc: |-
+      knownType reports whether t is a BSON 1.1 element type, the deprecated ones
+      included.
+    name: knownType
+    params: t byte
+    results: bool
+  - doc: |-
+      plausibleKey reports whether p opens with an element name: UTF-8 with no
+      control byte, ended by a NUL within p.
+    name: plausibleKey
+    params: p []byte
+    results: bool
+  - doc: |-
+      readDocument reads the rest of a document of size bytes after its prefix,
+      reserving at most streamFirstRead before the reader delivers, then growing
+      with what it delivers.
+    name: readDocument
+    params: r io.Reader, prefix [4]byte, size int
+    results: "[]byte, error"
+  - name: NewStrict
+    results: codec.Codec
+  - doc: decodeStrict decodes the validated document data into v strictly.
+    name: decodeStrict
+    params: data []byte, v any
+    results: error
+  - doc: |-
+      checkNames walks the validated document doc and refuses one holding two
+      elements of one name; base is doc's offset in the input, for the message.
+      An array's names are its indexes, which no decoder reads: only the
+      documents inside it are walked.
+    name: checkNames
+    params: doc []byte, base int
+    results: error
+  - doc: checkDocument walks a document, checking its names when names is set.
+    name: checkDocument
+    params: doc []byte, base int, names bool
+    results: error
+  - doc: |-
+      addName records name among the element names one document has shown —
+      seen while they are at most strictLinearNames, compared pairwise on the
+      caller's stack, many once indexed — and reports whether the document
+      already held it. It takes and returns the two by value, so seen's array
+      stays the caller's stack array.
+    name: addName
+    params: seen [][]byte, many map[string]struct{}, name []byte
+    results: kept [][]byte, indexed map[string]struct{}, dup bool
+  - doc: indexName inserts name into many and reports whether it was there already.
+    name: indexName
+    params: many map[string]struct{}, name []byte
+    results: bool
+  - doc: checkNested walks the documents an element holds.
+    name: checkNested
+    params: el element, at int
+    results: error
+  - doc: duplicateName is the strict refusal of a repeated element name.
+    name: duplicateName
+    params: at int
+    results: error
+  - doc: unknownMember is the strict refusal of an element no struct field claims.
+    name: unknownMember
+    params: t reflect.Type
+    results: error
   - name: NewDateTimeFromTime
     params: t time.Time
     results: DateTime
@@ -1575,15 +1773,19 @@ functions:
     params: b []byte
     results: int
 imports:
+  atomic: sync/atomic
   binary: encoding/binary
   bits: math/bits
+  bufio: bufio
   bytes: bytes
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   corebson: github.com/kitsunium/sdk/internal/core/data/codec/bson
   encoding: encoding
+  errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   fmt: fmt
   hex: encoding/hex
+  io: io
   json: encoding/json
   math: math
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
@@ -1621,7 +1823,11 @@ types:
           Marshal encodes v as a BSON document into a slice the caller owns. v must
           encode as a document at the top level; anything else surfaces
           BSON_MARSHAL_FAILED, and nesting past 100 levels — a cyclic value included —
-          BSON_DEPTH_EXCEEDED.
+          DEPTH_EXCEEDED.
+
+          A document past the shared pool's 256 KiB cap is encoded into a buffer of
+          the size-classed tier, sized by the last such document (#906): a workload
+          of large documents reuses its buffer instead of growing one on every call.
         name: Marshal
         params: v any
         recv: "*bsonCodec"
@@ -1642,6 +1848,34 @@ types:
         params: dst []byte, v any
         recv: "*bsonCodec"
         results: appended []byte, err error
+      - doc: |-
+          Sniff implements codec.Sniffer (#909): prefix is BSON when it opens with a
+          document's int32 length within the codec's bound, a valid first element type
+          and that element's name — UTF-8 without control bytes, NUL-terminated within
+          the prefix — and, when the whole document lies in the prefix, its closing
+          NUL where the length says. The empty document is its five bytes. It reads
+          only prefix and allocates nothing.
+        name: Sniff
+        params: prefix []byte
+        recv: "*bsonCodec"
+        results: bool
+      - doc: |-
+          NewEncoder wraps w in a streaming codec.Encoder: each Encode appends one
+          document through the Append path into a pooled buffer and issues one Write,
+          so a value that fails to encode writes nothing.
+        name: NewEncoder
+        params: w io.Writer
+        recv: "*bsonCodec"
+        results: codec.Encoder
+      - doc: |-
+          NewDecoder wraps r in a streaming codec.Decoder: each Decode reads the
+          int32 length prefix, refuses a length past maxBSONBytes before reserving
+          it, reads the document — growing with what the reader delivers — validates
+          it whole and decodes it.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*bsonCodec"
+        results: codec.Decoder
     name: bsonCodec
   - fields:
       - name: h
@@ -1740,6 +1974,9 @@ types:
       - doc: field is the Go name of the innermost struct field, for messages.
         name: field
         type: string
+      - doc: "strict refuses an element no struct field claims (NewStrict, #1106)."
+        name: strict
+        type: bool
     kind: struct
     name: decodeState
   - doc: |-
@@ -2296,6 +2533,9 @@ types:
       - doc: flags are the tag's options, and whether the name is writable.
         name: flags
         type: fieldFlags
+      - doc: zero is omitzero's test of the field's type, nil without omitzero.
+        name: zero
+        type: func(reflect.Value) bool
     kind: struct
     name: fieldPlan
   - doc: fieldFlags are a field's options, one bit each.
@@ -2396,6 +2636,74 @@ types:
         type: fieldFlags
     kind: struct
     name: fieldTags
+  - doc: |-
+      bsonEncoder writes one document per Encode — the layout of a mongodump file
+      and of a socket of concatenated documents (#1100).
+    fields:
+      - doc: w receives the stream; the encoder never closes it.
+        name: w
+        type: io.Writer
+    kind: struct
+    methods:
+      - doc: Encode writes v as one document.
+        name: Encode
+        params: v any
+        recv: e *bsonEncoder
+        results: error
+      - doc: Close implements codec.Encoder; a stream of documents has no trailer.
+        name: Close
+        recv: "*bsonEncoder"
+        results: error
+    name: bsonEncoder
+  - doc: bsonDecoder reads one length-prefixed document per Decode.
+    fields:
+      - doc: r is the stream, buffered so More can look ahead one byte.
+        name: r
+        type: "*bufio.Reader"
+      - doc: done latches once the stream drained or failed.
+        name: done
+        type: bool
+      - doc: strict decodes every document as NewStrict's Unmarshal does.
+        name: strict
+        type: bool
+    kind: struct
+    methods:
+      - doc: Decode reads the next document into v.
+        name: Decode
+        params: v any
+        recv: d *bsonDecoder
+        results: error
+      - doc: More reports whether another document may follow.
+        name: More
+        recv: d *bsonDecoder
+        results: bool
+      - doc: next reads one length-prefixed document whole.
+        name: next
+        recv: d *bsonDecoder
+        results: "[]byte, error"
+    name: bsonDecoder
+  - doc: |-
+      strictCodec is the instance NewStrict returns: the registered codec's
+      encoding, and a decode that reads one document one way or not at all.
+    fields:
+      - name: ""
+        role: embedded
+        type: bsonCodec
+    kind: struct
+    methods:
+      - doc: |-
+          Unmarshal validates data like the registered codec, then refuses a
+          repeated name, then decodes refusing an unknown member.
+        name: Unmarshal
+        params: data []byte, v any
+        recv: c *strictCodec
+        results: error
+      - doc: NewDecoder wraps r in a strict streaming codec.Decoder.
+        name: NewDecoder
+        params: r io.Reader
+        recv: "*strictCodec"
+        results: codec.Decoder
+    name: strictCodec
   - kind: named
     name: D
     underlying: "[]E"
@@ -2543,7 +2851,7 @@ types:
     name: Timestamp
   - doc: |-
       validationError says where, and why, a document is malformed. It is turned
-      into BSON_UNMARSHAL_FAILED or BSON_DEPTH_EXCEEDED by validateRoot; its text
+      into BSON_UNMARSHAL_FAILED or DEPTH_EXCEEDED by validateRoot; its text
       names an offset and a rule, never the bytes found there.
     fields:
       - doc: offset is where in the input the problem was found.
@@ -2633,11 +2941,20 @@ types:
         results: int, *validationError
     name: validator
 vars:
-  - doc: Codec is the registered BSON singleton.
+  - grouped: true
     items:
-      - name: Codec
+      - doc: Codec is the registered BSON singleton.
+        name: Codec
         type: codec.Codec
         value: codec.Register(&bsonCodec{})
+      - doc: |-
+          largeDocumentHint is the capacity the last document Marshal wrote
+          needed, when the shared pool could not keep a buffer that large, or 0
+          when it could: the size Marshal asks the size-classed tier for (#906). A
+          hint is only a choice of pool, so the race between two callers setting
+          it costs at most one buffer growth.
+        name: largeDocumentHint
+        type: atomic.Int64
     name: Codec
   - doc: valueTypeBytes maps each value type to the BSON type it is read from.
     items:
@@ -2835,15 +3152,6 @@ vars:
           		reflect.Uint32:  keyUint,
           		reflect.Uint64:  keyUint,
           		reflect.Uintptr: keyUint,
-          	}
-      - doc: tagOptions maps each option word to its flag.
-        name: tagOptions
-        value: |-
-          map[string]fieldFlags{
-          		"omitempty": flagOmitEmpty,
-          		"minsize":   flagMinSize,
-          		"truncate":  flagTruncate,
-          		"inline":    flagInline,
           	}
       - doc: plans maps reflect.Type to its complete *typePlan.
         name: plans
