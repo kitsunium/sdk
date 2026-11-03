@@ -11,6 +11,14 @@ constants:
         type: int
         value: "2"
     name: branching
+  - doc: |-
+      noSlot marks a handle id that names no element: its element was popped or
+      removed, and the id waits on the free list for the next Push.
+    items:
+      - name: noSlot
+        type: int
+        value: "-1"
+    name: noSlot
 files:
   - decls: []
     name: doc.go
@@ -22,15 +30,41 @@ files:
       - (*Heap).Push
       - (*Heap).Peek
       - (*Heap).Pop
+      - (*Heap).Drain
       - (*Heap).up
       - (*Heap).down
     name: heap.go
+  - decls:
+      - noSlot
+      - Handle
+      - indexedItem
+      - indexedSlot
+      - IndexedHeap
+      - NewIndexed
+      - (*IndexedHeap).Len
+      - (*IndexedHeap).Push
+      - (*IndexedHeap).Peek
+      - (*IndexedHeap).Pop
+      - (*IndexedHeap).Update
+      - (*IndexedHeap).Remove
+      - (*IndexedHeap).position
+      - (*IndexedHeap).removeAt
+      - (*IndexedHeap).fix
+      - (*IndexedHeap).place
+      - (*IndexedHeap).up
+      - (*IndexedHeap).down
+    name: indexed.go
 functions:
   - name: New
     params: cmp func(a, b T) int
     results: "*Heap[T]"
     typeParams: T any
-imports: {}
+  - name: NewIndexed
+    params: cmp func(a, b T) int
+    results: "*IndexedHeap[T]"
+    typeParams: T any
+imports:
+  iter: iter
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/kernel/collections/heap
@@ -60,6 +94,9 @@ types:
       - name: Pop
         recv: h *Heap[T]
         results: T, bool
+      - name: Drain
+        recv: h *Heap[T]
+        results: iter.Seq[T]
       - doc: up restores the heap invariant along the path from child to the root.
         name: up
         params: child int
@@ -69,4 +106,112 @@ types:
         params: parent int
         recv: h *Heap[T]
     name: Heap
+    typeParams: T any
+  - fields:
+      - doc: id indexes the position table; ids are recycled through a free list.
+        name: id
+        type: uint32
+      - doc: |-
+          gen is the id's generation at the Push; it starts at 1, so the zero
+          Handle never matches a live element.
+        name: gen
+        type: uint32
+    kind: struct
+    name: Handle
+  - doc: |-
+      indexedItem is one array cell: the element, and the id of the handle that
+      names it, so a sift can keep the position table in step.
+    fields:
+      - name: value
+        type: T
+      - name: id
+        type: uint32
+    kind: struct
+    name: indexedItem
+    typeParams: T any
+  - doc: |-
+      indexedSlot is one entry of the position table: where the handle's element
+      sits in the array, and the generation the handle must carry to name it.
+    fields:
+      - name: at
+        type: int
+      - name: gen
+        type: uint32
+    kind: struct
+    name: indexedSlot
+  - fields:
+      - doc: items is the heap array, as in Heap, each cell carrying its handle id.
+        name: items
+        type: "[]indexedItem[T]"
+      - doc: slots is the position table, indexed by handle id.
+        name: slots
+        type: "[]indexedSlot"
+      - doc: free holds the ids of the elements that left, reused by Push.
+        name: free
+        type: "[]uint32"
+      - doc: cmp is the caller's order. Non-nil by construction; see NewIndexed.
+        name: cmp
+        type: func(a, b T) int
+    kind: struct
+    methods:
+      - name: Len
+        recv: h *IndexedHeap[T]
+        results: int
+      - name: Push
+        params: v T
+        recv: h *IndexedHeap[T]
+        results: Handle
+      - name: Peek
+        recv: h *IndexedHeap[T]
+        results: T, Handle, bool
+      - name: Pop
+        recv: h *IndexedHeap[T]
+        results: T, Handle, bool
+      - name: Update
+        params: handle Handle, v T
+        recv: h *IndexedHeap[T]
+        results: bool
+      - name: Remove
+        params: handle Handle
+        recv: h *IndexedHeap[T]
+        results: T, bool
+      - doc: position resolves handle to its array index, refusing a stale one.
+        name: position
+        params: handle Handle
+        recv: h *IndexedHeap[T]
+        results: int, bool
+      - doc: |-
+          removeAt takes the element at index at out: the last leaf takes its place
+          and is sifted whichever way the order asks, the vacated cell is cleared and
+          the element's id goes back to the free list.
+        name: removeAt
+        params: at int
+        recv: h *IndexedHeap[T]
+      - doc: |-
+          fix restores the order around index at, whose element changed: up when it
+          now sorts before its parent, down otherwise.
+        name: fix
+        params: at int
+        recv: h *IndexedHeap[T]
+      - doc: |-
+          place writes item into cell at and records the position. Every sift moves
+          elements through it: one copy and one table write per level, where a swap
+          would make two of each.
+        name: place
+        params: at int, item indexedItem[T]
+        recv: h *IndexedHeap[T]
+      - doc: |-
+          up restores the invariant along the path from child to the root, moving
+          the element up through a hole, and reports whether it moved.
+        name: up
+        params: child int
+        recv: h *IndexedHeap[T]
+        results: bool
+      - doc: |-
+          down restores the invariant along the path from parent to a leaf, moving
+          the element down through a hole.
+        name: down
+        params: parent int
+        recv: h *IndexedHeap[T]
+    name: IndexedHeap
     typeParams: T any

@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "doc.go",
         "heap.go",
+        "indexed.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/collections/heap",
     visibility = [
@@ -28,10 +29,15 @@ go_test(
     name = "heap_test",
     size = "small",
     srcs = [
+        "drain_external_test.go",
         "gen_api_test.go",
+        "gen_perf_test.go",
         "heap_bench_test.go",
         "heap_external_test.go",
         "heap_internal_test.go",
+        "indexed_external_test.go",
+        "indexed_internal_test.go",
+        "perf_fixtures_test.go",
     ],
     embed = [":heap"],
 )

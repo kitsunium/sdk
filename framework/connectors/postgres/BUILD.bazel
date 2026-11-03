@@ -12,8 +12,10 @@ go_library(
     srcs = [
         "credentials.go",
         "doc.go",
+        "engine_compliance.go",
         "gen_codes.go",
         "postgres.go",
+        "transient.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/connectors/postgres",
     deps = [
@@ -22,6 +24,7 @@ go_library(
         "//pkg/v1/errs",
         "//pkg/v1/security/secret",
         "@com_github_jackc_pgx_v5//:pgx",
+        "@com_github_jackc_pgx_v5//pgconn",
         "@com_github_jackc_pgx_v5//stdlib",
     ],
 )
@@ -43,11 +46,14 @@ go_test(
         "former_test.go",
         "gen_api_test.go",
         "postgres_test.go",
+        "queuecmd_test.go",
         "server_test.go",
         "subsystems_test.go",
+        "transact_test.go",
+        "transient_internal_test.go",
     ],
+    embed = [":postgres"],
     deps = [
-        ":postgres",
         "//framework/app",
         "//framework/app/server",
         "//framework/app/storetest",
@@ -55,6 +61,8 @@ go_test(
         "//pkg/v1/errs",
         "//pkg/v1/security/secret",
         "@com_github_jackc_pgx_v5//:pgx",
+        "@com_github_jackc_pgx_v5//pgconn",
+        "@com_github_jackc_pgx_v5//stdlib",
     ],
 )
 

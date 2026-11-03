@@ -2,6 +2,7 @@ package queueengine
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -96,6 +97,35 @@ func (b *broker) DeadLetters(ctx context.Context, maxLetters int) ([]plug.DeadLe
 		out[i] = pluggedDeadLetter(&dead[i])
 	}
 	return out, nil
+}
+
+// Replay moves the dead letter id back into the live queue, its attempts
+// counted afresh (issue #1138); found is false when the queue holds none.
+func (b *broker) Replay(ctx context.Context, id string) (bool, error) {
+	manager, ok := b.q.(queue.DeadLetterManager)
+	if !ok {
+		return false, lacks("DeadLetterManager")
+	}
+	return deadLetterFound(manager.ReplayDeadLetter(ctx, id))
+}
+
+// Drop deletes the dead letter id for good; found is false when the queue
+// holds none.
+func (b *broker) Drop(ctx context.Context, id string) (bool, error) {
+	manager, ok := b.q.(queue.DeadLetterManager)
+	if !ok {
+		return false, lacks("DeadLetterManager")
+	}
+	return deadLetterFound(manager.DeleteDeadLetter(ctx, id))
+}
+
+// deadLetterFound is err as the CLI reads it: a dead letter the queue does
+// not hold is not found, and no failure.
+func deadLetterFound(err error) (bool, error) {
+	if errors.Is(err, queue.DeadLetterNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // Messages are up to maxMessages live messages after the identifier after,

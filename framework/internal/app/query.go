@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 
+	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/security/authz"
 )
@@ -29,13 +30,17 @@ type Query[Q, R any] struct {
 
 // QueryConfigurer configures a query: the options every operation takes —
 // [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient], [Timeout],
-// [Bulkhead].
+// [Bulkhead] — and a transaction's — [ReadOnly], [Serializable],
+// [RepeatableRead] —, which run its Ask in a transaction opened with them.
 type QueryConfigurer interface {
 	queryConfigure(o *queryOptions)
 }
 
 type queryOptions struct {
 	callOptions
+	// tx are the options of the transaction an Ask runs in, given by
+	// [ReadOnly], [Serializable] or [RepeatableRead]; none runs it in none.
+	tx plug.TxOptionsValue
 }
 
 // Query declares a query of the service: an operation named name, run by
@@ -117,8 +122,26 @@ func (q *Query[Q, R]) Ask(ctx context.Context, in Q) (R, error) {
 		return zero, unmounted(&q.nodeBase)
 	}
 	return inProcess(ctx, &callSpec{app: a, node: q, edge: model.EdgeAsks, op: model.OpAsk, name: q.name, auth: q.authMode(), payloads: true}, in, func(ctx context.Context) (R, error) {
-		return q.pipe.invoke(ctx, a, q, in, q.steps(a))
+		return q.invoke(ctx, a, in)
 	})
+}
+
+// invoke runs the query's pipeline: in a transaction opened with the
+// options it was declared with ([ReadOnly] — the database told it only
+// reads, a store's write refused —, or a level), when it was declared with
+// some and the Ask runs in no transaction; in the caller's otherwise, whose
+// options stand.
+func (q *Query[Q, R]) invoke(ctx context.Context, a *App, in Q) (R, error) {
+	if q.opts.tx == (plug.TxOptionsValue{}) || unitOf(ctx) != nil {
+		return q.pipe.invoke(ctx, a, q, in, q.steps(a))
+	}
+	var out R
+	err := transactWith(ctx, a, func(ctx context.Context) error {
+		var err error
+		out, err = q.pipe.invoke(ctx, a, q, in, q.steps(a))
+		return err
+	}, q.opts.tx)
+	return out, err
 }
 
 // steps are a query's own, inside its policies: its authorization, then

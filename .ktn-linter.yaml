@@ -165,6 +165,16 @@ vocabulary:
     # concept — the exact confusion the naming rule exists to prevent. Same
     # class as Transactor and Tracer above: the name is the domain's own word.
     - github.com/kitsunium/sdk/internal/core/app/cli.Executor
+    # framework/internal/app.Classifier and plug.Classifier (#1000) are the
+    # BoundProver case: the name already ends in -er and names the ROLE an
+    # engine plays — it classifies a failed transaction as transient or not —
+    # while the -er form the rule derives from the method, "Transienter", is
+    # not a word. Both are ADR 0039 siblings of Engine and Database, the
+    # family that tells a reader at a glance which capability a type
+    # assertion asks for, and core/data/sql.Classify is the SDK's own reading
+    # they extend.
+    - github.com/kitsunium/sdk/framework/internal/app.Classifier
+    - github.com/kitsunium/sdk/framework/internal/app/plug.Classifier
 
 # ── Global options ────────────────────────────────────────────────────────────
 
@@ -1172,6 +1182,34 @@ rules:
       # a reader to wonder about. Scoped to the one file.
       - "**/internal/service/app/cli/help.go"
       - "internal/service/app/cli/help.go"
+      # service/data/sql's Each (#837) closes its rows in a deferred
+      # `_ = rows.Close()` on the one path that has nobody to tell: the caller's
+      # range loop broke — or panicked — and left, so the sequence cannot yield
+      # again (iter.Seq2's contract: a yield after false panics). It cannot LOG:
+      # ADR 0030, and the domain owns no logger (ADR 0055). Every other path
+      # hands the close's failure on — yielded when nothing failed before it,
+      # through firstFailure — so this is the health/handler.go case: the only
+      # seam where neither is available. Scoped to the one file.
+      - "**/internal/service/data/sql/rows.go"
+      - "internal/service/data/sql/rows.go"
+      # Three best-effort steps of the L6 vendor adapters (ADR 0211), the
+      # service/app/cli/help.go case: propagating would report the less
+      # actionable fact and change the verdict the caller routes on, and the
+      # SDK does not log (ADR 0030). sqs's lease and JetStream's grant
+      # dead-letter a message whose delivery budget consumers that died
+      # spent, inside a Receive whose other leases already stand: failing the
+      # Receive would strand those, and the message left in place is offered
+      # again by the next Receive, which retries the move. The Valkey cache's
+      # fillLeased releases its fill lease after the fill succeeded: the
+      # value is stored, and a lease the release could not delete lapses at
+      # FillLease on its own, as one whose holder died does. Scoped to the
+      # three files.
+      - "**/third-party/aws/queue/sqs/broker.go"
+      - "third-party/aws/queue/sqs/broker.go"
+      - "**/third-party/nats/queue/broker.go"
+      - "third-party/nats/queue/broker.go"
+      - "**/third-party/db/redis/cache/load.go"
+      - "third-party/db/redis/cache/load.go"
 
   # KTN-FUNC-EMPTYSENTINEL (phase 5) — "" is a domain value here, not a sentinel.
   #
@@ -1438,6 +1476,20 @@ rules:
       # the decoder fills it from a date and a time it has already checked.
       - "**/internal/service/data/codec/toml/localtime.go"
       - "internal/service/data/codec/toml/localtime.go"
+      # kernel/concur/commit.Group (ADR 0207, #803) is the kernel/concur/group.Group
+      # case above, word for word: the package produces one main type, built by
+      # New, used qualified as commit.New(flush, cfg). NewGroup would read
+      # commit.NewGroup, the stutter the group and heap entries refuse. Scoped
+      # to the one file.
+      - "**/internal/kernel/concur/commit/commit.go"
+      - "internal/kernel/concur/commit/commit.go"
+      # kernel/clock.CoarseClock (#814) is built by NewCoarse, read at the call
+      # site as clock.NewCoarse(base, resolution): the package names the clock,
+      # the constructor the kind. NewCoarseClock would say clock twice, the
+      # trade the group and heap entries above make the same way. Scoped to the
+      # one file.
+      - "**/internal/kernel/clock/coarse.go"
+      - "internal/kernel/clock/coarse.go"
 
   # KTN-GOROUTINE-SYNCMAP / KTN-GOROUTINE-ATOMICVAL (phase 4) — the suggested
   # replacements cannot express what this map is for.
@@ -1500,6 +1552,18 @@ rules:
     exclude:
       - "**/internal/service/observe/trace/**"
       - "internal/service/observe/trace/**"
+      # kernel/clock.CoarseClock (#814) and kernel/collections/heap.IndexedHeap
+      # (#1036) are the trace.Tracer case: the package is named after what it
+      # provides, and the type after the kind of it. A CoarseClock IS a Clock —
+      # it implements the package's Clock interface — and sits beside
+      # clock.ManualClock, named the same way; an IndexedHeap is a Heap whose
+      # nodes have handles, beside heap.Heap. Renaming either ("Coarse",
+      # "Indexed") would drop the word the type is discussed in, in #814, #1036
+      # and ADR 0025. Scoped to the two files.
+      - "**/internal/kernel/clock/coarse.go"
+      - "internal/kernel/clock/coarse.go"
+      - "**/internal/kernel/collections/heap/indexed.go"
+      - "internal/kernel/collections/heap/indexed.go"
 
   # KTN-STRUCT-ROLE (info) — "every exported struct declares its role by a
   # suffix". The suffixes the rule accepts (Value, State, Config, Spec, Event)
@@ -1581,6 +1645,21 @@ rules:
       # they wrap. Scoped to the one file.
       - "**/internal/service/net/http1/chain.go"
       - "internal/service/net/http1/chain.go"
+      # kernel/collections/heap.Handle (#1036) is the core/net.LoopConnRef case:
+      # it names a node the heap owns, by index and generation, and carries
+      # none of it; "Handle" is its role, the word container/heap's Fix and
+      # Remove are discussed in. IndexedHeap is the heap.Heap beside it, whose
+      # nodes have handles; the suffix the rule infers ("Service") would name a
+      # data structure a service. Scoped to the one file.
+      - "**/internal/kernel/collections/heap/indexed.go"
+      - "internal/kernel/collections/heap/indexed.go"
+      # kernel/collections/cache.Striped (#808) is the kernel/jsonenc.Object
+      # case: the word the issue and ADR 0025's amendment decide in — a cache
+      # striped over N independent caches, used qualified as cache.Striped
+      # beside cache.Cache. "StripedService" would name a data structure a
+      # service, and "StripedCache" would stutter. Scoped to the one file.
+      - "**/internal/kernel/collections/cache/striped.go"
+      - "internal/kernel/collections/cache/striped.go"
 
   # KTN-GOROUTINE-LOCKSCOPE (warning) — "move unrelated statements outside the
   # critical section". In service/proc/childwait's spawn, the statement the
@@ -1658,6 +1737,17 @@ rules:
       # headers, never their elements. Scoped to the one file.
       - "**/internal/core/app/consensus/membership.go"
       - "internal/core/app/consensus/membership.go"
+      # core/data/queue.PolicyValue (72 bytes) crossed 64 bytes when #835 gave it
+      # MaxAge and DeadLetterRetention and #1044 RetryJitter and
+      # RetryJitterMode, beside the lease, the budget and the retry curve. It is
+      # the MembershipValue case above: Validate and Normalized take it by value
+      # as the design fixes (recv: value) and pkg/v1/data/queue aliases it — a
+      # caller validates the policy literal it wrote, which a pointer receiver
+      # would not compile on —, and the helpers Validate calls keep the
+      # receiver it has (KTN-VAR-RECVCONS). A policy is validated once per
+      # broker built, never on a message's path. Scoped to the one file.
+      - "**/internal/core/data/queue/policy.go"
+      - "internal/core/data/queue/policy.go"
       # core/app/cli.CommandValue is 88 bytes — Name + Summary + Description (16
       # each) + Flags + Run (8 each) + Commands (24) — and none of the six is
       # removable: they are the whole declaration. Value semantics are the
@@ -2009,6 +2099,26 @@ rules:
       # framework directory only.
       - "framework/**"
       - "**/framework/**"
+      # The constructors of the L6 vendor adapters (ADR 0211) take their
+      # config BY VALUE, the service/data/queue FileConfig/SQLConfig case
+      # above: sqs.New, s3.New, the Valkey cache's NewStore and stream
+      # broker's NewStream validate the struct they were given — a policy, a
+      # bucket, a prefix — and a pointer would let a caller change it after
+      # validation passed. The copy happens once per broker, store or
+      # filesystem, next to a client the AWS SDK or go-redis builds. sqs's
+      # newBroker and s3's newFS are the service/net/loop group.go newLoop
+      # case: called once by New, and pinned by the white-box suites, which
+      # build a broker or a filesystem straight from a Config literal over a
+      # fake. Every other function of these packages takes *Config. Scoped to
+      # the four files that hold a constructor.
+      - "**/third-party/aws/queue/sqs/broker.go"
+      - "third-party/aws/queue/sqs/broker.go"
+      - "**/third-party/aws/vfs/s3/fs.go"
+      - "third-party/aws/vfs/s3/fs.go"
+      - "**/third-party/db/redis/cache/store.go"
+      - "third-party/db/redis/cache/store.go"
+      - "**/third-party/db/redis/queue/broker.go"
+      - "third-party/db/redis/queue/broker.go"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue, and on

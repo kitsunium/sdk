@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "cache",
     srcs = [
+        "absent.go",
         "cache_interface.go",
         "doc.go",
         "entry.go",
@@ -16,7 +17,10 @@ go_library(
         "//:__subpackages__",
         "//internal/core:core_consumers",
     ],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/core/app/lock",
+        "//internal/kernel/errs",
+    ],
 )
 
 alias(

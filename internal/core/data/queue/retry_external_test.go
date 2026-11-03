@@ -219,11 +219,39 @@ func TestTheQueueSiblingsKeepTheirMethodCounts(t *testing.T) {
 		{reflect.TypeFor[corequeue.DeadLetterWriter](), 1},
 		{reflect.TypeFor[corequeue.MessageReader](), 1},
 		{reflect.TypeFor[corequeue.MessageWriter](), 1},
+		{reflect.TypeFor[corequeue.MessageLister](), 1},
+		{reflect.TypeFor[corequeue.Counter](), 1},
+		{reflect.TypeFor[corequeue.Purger](), 1},
+		{reflect.TypeFor[corequeue.DeadLetterPager](), 1},
+		{reflect.TypeFor[corequeue.DeadLetterBulkManager](), 2},
+		{reflect.TypeFor[corequeue.BatchPublisher](), 1},
+		{reflect.TypeFor[corequeue.Acker](), 1},
+		{reflect.TypeFor[corequeue.PriorityPublisher](), 1},
 	}
 	for _, testCase := range cases {
 		if got := testCase.typ.NumMethod(); got != testCase.want {
 			t.Errorf("%v has %d methods, want %d — a published port grows by siblings (ADR 0039)",
 				testCase.typ, got, testCase.want)
 		}
+	}
+}
+
+// TestThePrioritiesAreAClosedSetAroundTheZero pins the levels ADR 0054's
+// 2026-11-03 amendment closed: five, consecutive, the zero the normal one —
+// the level every message written before priorities existed reads as.
+func TestThePrioritiesAreAClosedSetAroundTheZero(t *testing.T) {
+	t.Parallel()
+	levels := []corequeue.Priority{
+		corequeue.PriorityLowest, corequeue.PriorityLow, corequeue.PriorityNormal,
+		corequeue.PriorityHigh, corequeue.PriorityHighest,
+	}
+	for index, level := range levels {
+		if want := corequeue.Priority(index - 2); level != want {
+			t.Errorf("level %d = %d, want %d", index, level, want)
+		}
+	}
+	var zero corequeue.Priority
+	if zero != corequeue.PriorityNormal {
+		t.Fatalf("the zero Priority = %d, want PriorityNormal", zero)
 	}
 }

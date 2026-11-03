@@ -1,0 +1,73 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "s3",
+    srcs = [
+        "client.go",
+        "config.go",
+        "cred_adapter.go",
+        "dir.go",
+        "doc.go",
+        "entry.go",
+        "errors.go",
+        "file.go",
+        "fs.go",
+        "gen_codes.go",
+        "info.go",
+        "list.go",
+        "remove.go",
+        "write.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/aws/vfs/s3",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/vfs",
+        "//internal/core/observe/logger/writer",
+        "//internal/kernel/errs",
+        "@com_github_aws_aws_sdk_go_v2//aws",
+        "@com_github_aws_aws_sdk_go_v2_service_s3//:s3",
+        "@com_github_aws_aws_sdk_go_v2_service_s3//types",
+        "@com_github_aws_smithy_go//:smithy-go",
+        "@com_github_aws_smithy_go//transport/http",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":s3",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "s3_test",
+    srcs = [
+        "config_internal_test.go",
+        "conformance_internal_test.go",
+        "docstore_internal_test.go",
+        "errors_internal_test.go",
+        "fakebucket_internal_test.go",
+        "gen_api_test.go",
+    ],
+    embed = [":s3"],
+    deps = [
+        "//internal/core/data/vfs",
+        "//internal/core/observe/logger/writer",
+        "//internal/kernel/errs",
+        "//internal/service/data/docstore",
+        "@com_github_aws_aws_sdk_go_v2//aws",
+        "@com_github_aws_aws_sdk_go_v2_service_s3//:s3",
+        "@com_github_aws_aws_sdk_go_v2_service_s3//types",
+        "@com_github_aws_smithy_go//:smithy-go",
+        "@com_github_aws_smithy_go//transport/http",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (//:audit_sources) so its errs.Define call sites are scanned under Bazel.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

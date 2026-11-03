@@ -5,9 +5,12 @@ import (
 	"errors"
 	"io/fs"
 	"path"
+	"reflect"
+	"slices"
 	"strings"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
+	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -19,20 +22,30 @@ import (
 // directory that holds both, which is what makes a new overlay directory
 // itself durable. Open holds the only reference, so no lock is taken.
 func (s *Store[T]) load() (needsFold bool, err error) {
+	var created []string
 	//: the snapshot's own directory, when it has one.
 	if dir := path.Dir(s.path); dir != "." {
 		//: created 0700 when absent.
-		if mkErr := s.fs.MkdirAll(dir, dirPerm); mkErr != nil {
-			//: LoadFailed, naming the directory.
-			return false, loadFailed(dir, "cannot be created", mkErr)
+		made, mkErr := s.makeDir(dir)
+		//: LoadFailed, naming the directory.
+		if mkErr != nil {
+			//: no store without its directory.
+			return false, mkErr
 		}
+		created = append(created, made...)
 	}
 	_, statErr := fs.Stat(s.fs, s.overlay)
 	overlayExisted := statErr == nil
+	made, mkErr := s.makeDir(s.overlay)
 	//: the overlay directory, created 0700 when absent.
-	if mkErr := s.fs.MkdirAll(s.overlay, dirPerm); mkErr != nil {
+	if mkErr != nil {
 		//: LoadFailed, naming the directory.
-		return false, loadFailed(s.overlay, "cannot be created", mkErr)
+		return false, mkErr
+	}
+	//: LoadFailed: a directory created and not durable is not a store's.
+	if syncErr := s.syncCreated(append(created, made...)); syncErr != nil {
+		//: no store over a directory whose entry may not survive a crash.
+		return false, syncErr
 	}
 	snapshotFound, readErr := s.readSnapshot()
 	//: LoadFailed.
@@ -48,6 +61,53 @@ func (s *Store[T]) load() (needsFold bool, err error) {
 	//: at rest already — one snapshot, an empty overlay that is durable — or
 	//: not yet.
 	return !snapshotFound || !overlayExisted || len(s.pending) > 0, nil
+}
+
+// makeDir creates dir and every missing parent, 0700, and returns the
+// directories it created, top-down: each one absent before the call, so the
+// first missing component and every one beneath it.
+func (s *Store[T]) makeDir(dir string) (created []string, err error) {
+	parts := strings.Split(dir, "/")
+	//: top-down: once a component is missing, so is every one below it.
+	for i := range parts {
+		prefix := strings.Join(parts[:i+1], "/")
+		//: a component already there was not created by this call.
+		if _, statErr := fs.Stat(s.fs, prefix); statErr != nil {
+			created = append(created, prefix)
+		}
+	}
+	//: created 0700 when absent.
+	if mkErr := s.fs.MkdirAll(dir, dirPerm); mkErr != nil {
+		//: LoadFailed, naming the directory.
+		return nil, loadFailed(dir, "cannot be created", mkErr)
+	}
+	//: what this call created.
+	return created, nil
+}
+
+// syncCreated flushes the parent of every directory in created, deepest
+// first, so each new directory's entry survives a power loss — the step
+// ADR 0110 deferred while vfs had no verb for it. A filesystem without
+// vfs.DirSyncer is left as it was: the snapshot's publication still flushes
+// the directory that holds it.
+func (s *Store[T]) syncCreated(created []string) error {
+	syncer, ok := s.fs.(corevfs.DirSyncer)
+	//: a third-party filesystem with no directory flush.
+	if !ok {
+		//: what the store did before the verb existed.
+		return nil
+	}
+	//: deepest first: a directory's entry is durable before its parent's is.
+	for _, dir := range slices.Backward(created) {
+		parent := path.Dir(dir)
+		//: LoadFailed, naming the directory that would not flush.
+		if syncErr := syncer.SyncDir(parent); syncErr != nil {
+			//: the vfs verdict as a field, never a document.
+			return loadFailed(parent, "cannot be flushed", syncErr)
+		}
+	}
+	//: every new entry flushed.
+	return nil
 }
 
 // replayOverSnapshot loads what the snapshot does not hold: the versions
@@ -87,7 +147,7 @@ func (s *Store[T]) readSnapshot() (found bool, err error) {
 	if decodeErr := json.Unmarshal(raw, &object); decodeErr != nil {
 		//: LoadFailed, saying where the JSON broke and never what it held.
 		return false, kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
-			kerrs.String("file", s.path), kerrs.String("problem", "not a snapshot"), kerrs.String("cause", jsonCause(decodeErr)))
+			kerrs.String("file", s.path), kerrs.String("problem", "not a snapshot"), kerrs.String("cause", jsonCause(decodeErr, reflect.TypeOf(object))))
 	}
 	//: a JSON null decodes without an error into no map at all: a file that
 	//: says nothing is not an empty store.
@@ -118,10 +178,14 @@ func (s *Store[T]) readOverlay() error {
 		//: LoadFailed, naming the directory.
 		return loadFailed(s.overlay, "unreadable", listErr)
 	}
+	group := false
 	//: every file in the directory.
 	for _, entry := range entries {
 		name := entry.Name()
 		switch {
+		//: a batch a crash interrupted: replayed over the keys' entries.
+		case name == groupEntryName:
+			group = true
 		//: one key's latest state.
 		case isEntryName(name):
 			//: LoadFailed.
@@ -136,6 +200,44 @@ func (s *Store[T]) readOverlay() error {
 		default:
 		}
 	}
+	//: a batch's group entry holds its keys' latest state, newer than any
+	//: entry of theirs: no entry is written while one exists.
+	if group {
+		//: LoadFailed, or the batch replayed whole.
+		return s.replayGroup()
+	}
+	//: replayed.
+	return nil
+}
+
+// replayGroup applies a batch's group entry over the keys' entries: every
+// record is checked as an entry is, and marked pending, as is the group
+// entry, which the fold at Open then removes.
+func (s *Store[T]) replayGroup() error {
+	file := path.Join(s.overlay, groupEntryName)
+	raw, readErr := fs.ReadFile(s.fs, file)
+	//: a group entry that cannot be read.
+	if readErr != nil {
+		//: LoadFailed, naming the file.
+		return loadFailed(file, "unreadable", readErr)
+	}
+	var records []entryRecord
+	//: not a group entry.
+	if decodeErr := json.Unmarshal(raw, &records); decodeErr != nil {
+		//: LoadFailed, saying where the JSON broke and never what it held.
+		return kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
+			kerrs.String("file", file), kerrs.String("problem", "not a group entry"), kerrs.String("cause", jsonCause(decodeErr, reflect.TypeOf(records))))
+	}
+	//: each key's latest state, as its own entry would hold it.
+	for _, record := range records {
+		//: LoadFailed, naming the file.
+		if applyErr := s.applyRecord(file, record); applyErr != nil {
+			//: no store over a batch it could not replay.
+			return applyErr
+		}
+		s.pending[entryName(record.Key)] = struct{}{}
+	}
+	s.pending[groupEntryName] = struct{}{}
 	//: replayed.
 	return nil
 }
@@ -154,13 +256,31 @@ func (s *Store[T]) replay(name string) error {
 	if decodeErr := json.Unmarshal(raw, &record); decodeErr != nil {
 		//: LoadFailed, saying where the JSON broke and never what it held.
 		return kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
-			kerrs.String("file", file), kerrs.String("problem", "not an overlay entry"), kerrs.String("cause", jsonCause(decodeErr)))
+			kerrs.String("file", file), kerrs.String("problem", "not an overlay entry"), kerrs.String("cause", jsonCause(decodeErr, reflect.TypeOf(record))))
 	}
 	//: the name is the key's digest: an entry under another key's name was
 	//: moved or edited, and replaying it would file it under the wrong key.
 	if record.Key == "" || entryName(record.Key) != name {
 		//: LoadFailed, naming the file.
 		return loadFailed(file, "names another key than its file", nil)
+	}
+	//: LoadFailed, or the record applied.
+	if applyErr := s.applyRecord(file, record); applyErr != nil {
+		//: no store over an entry it could not replay.
+		return applyErr
+	}
+	s.pending[name] = struct{}{}
+	//: replayed.
+	return nil
+}
+
+// applyRecord applies one key's latest state — an entry's, or a record of a
+// batch's group entry — read from file.
+func (s *Store[T]) applyRecord(file string, record entryRecord) error {
+	//: a record nobody could ask for.
+	if record.Key == "" {
+		//: LoadFailed, naming the file.
+		return loadFailed(file, "holds a record under the empty key", nil)
 	}
 	//: versions the store would neither keep nor write back, or that no
 	//: store wrote.
@@ -183,8 +303,7 @@ func (s *Store[T]) replay(name string) error {
 		s.docs[record.Key] = record.Document
 		s.setVersions(record.Key, compacted(record.Versions))
 	}
-	s.pending[name] = struct{}{}
-	//: replayed.
+	//: applied.
 	return nil
 }
 
@@ -257,7 +376,7 @@ func (s *Store[T]) readVersions() error {
 	if decodeErr := json.Unmarshal(raw, &records); decodeErr != nil {
 		//: LoadFailed, saying where the JSON broke and never what it held.
 		return kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
-			kerrs.String("file", s.versionsPath), kerrs.String("problem", "not a versions file"), kerrs.String("cause", jsonCause(decodeErr)))
+			kerrs.String("file", s.versionsPath), kerrs.String("problem", "not a versions file"), kerrs.String("cause", jsonCause(decodeErr, reflect.TypeOf(records))))
 	}
 	//: a JSON null decodes into no map at all.
 	if records == nil {

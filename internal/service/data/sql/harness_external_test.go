@@ -62,8 +62,12 @@ type fakeDB struct {
 	beginErr error
 	// beginFailures fail the next BEGINs, one each, before beginErr applies.
 	beginFailures []error
-	commitErr     error
-	rollbackErr   error
+	// commitFailures fail the next COMMITs, one each, before commitErr
+	// applies — how a serialization failure that clears on a retry is
+	// scripted.
+	commitFailures []error
+	commitErr      error
+	rollbackErr    error
 	// pingErr fails the liveness probe.
 	pingErr error
 	// pingBlock, when non-nil, blocks every ping until it is closed or the
@@ -72,6 +76,13 @@ type fakeDB struct {
 	// openConns counts connections handed out and not yet closed, so a test
 	// can prove the migration lock does not leak one.
 	openConns int
+	// hangs names statements that block until their context ends, then
+	// fail with its error — how a statement that outlives its budget is
+	// scripted.
+	hangs map[string]bool
+	// rowsOpened and rowsClosed count result sets handed out and closed, so a
+	// test can prove an iteration closed what it read.
+	rowsOpened, rowsClosed int
 	// quiet suppresses the statement log. A benchmark runs the same
 	// statement millions of times, and appending each one would measure the
 	// harness's own growing slice instead of the code under test.
@@ -256,8 +267,37 @@ func (c *fakeConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error)
 	return &fakeTx{db: c.db}, nil
 }
 
-// ExecContext runs a statement that returns no rows.
-func (c *fakeConn) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+// hang scripts an exact statement to block until its context ends.
+func (f *fakeDB) hang(query string) *fakeDB {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.hangs == nil {
+		f.hangs = map[string]bool{}
+	}
+	f.hangs[query] = true
+	return f
+}
+
+// held blocks a scripted hanging statement until ctx ends.
+func (f *fakeDB) held(ctx context.Context, query string) error {
+	f.mu.Lock()
+	hangs := f.hangs[query]
+	f.mu.Unlock()
+	if !hangs {
+		return nil
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// ExecContext runs a statement that returns no rows; its result reports
+// one row affected per argument tuple the test cannot see, so it reports
+// none.
+func (c *fakeConn) ExecContext(ctx context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+	if err := c.db.held(ctx, query); err != nil {
+		c.db.run(query)
+		return nil, err
+	}
 	_, _, err := c.db.run(query)
 	if err != nil {
 		return nil, err
@@ -266,7 +306,11 @@ func (c *fakeConn) ExecContext(_ context.Context, query string, _ []driver.Named
 }
 
 // QueryContext runs a statement that returns rows.
-func (c *fakeConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
+func (c *fakeConn) QueryContext(ctx context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
+	if err := c.db.held(ctx, query); err != nil {
+		c.db.run(query)
+		return nil, err
+	}
 	cols, rows, err := c.db.run(query)
 	if err != nil {
 		return nil, err
@@ -274,7 +318,10 @@ func (c *fakeConn) QueryContext(_ context.Context, query string, _ []driver.Name
 	if cols == nil {
 		cols = []string{"c"}
 	}
-	return &fakeRows{cols: cols, rows: rows}, nil
+	c.db.mu.Lock()
+	c.db.rowsOpened++
+	c.db.mu.Unlock()
+	return &fakeRows{cols: cols, rows: rows, db: c.db}, nil
 }
 
 // Ping answers the liveness probe, honouring the scripted block and failure.
@@ -324,6 +371,11 @@ func (t *fakeTx) Commit() error {
 	if !t.db.quiet {
 		t.db.log = append(t.db.log, "COMMIT")
 	}
+	if len(t.db.commitFailures) > 0 {
+		failure := t.db.commitFailures[0]
+		t.db.commitFailures = t.db.commitFailures[1:]
+		return failure
+	}
 	return t.db.commitErr
 }
 
@@ -339,16 +391,33 @@ func (t *fakeTx) Rollback() error {
 
 // fakeRows replays a scripted result set.
 type fakeRows struct {
-	cols []string
-	rows [][]driver.Value
-	next int
+	cols   []string
+	rows   [][]driver.Value
+	next   int
+	db     *fakeDB
+	closed bool
 }
 
 // Columns names the result columns.
 func (r *fakeRows) Columns() []string { return r.cols }
 
-// Close releases the result set.
-func (r *fakeRows) Close() error { return nil }
+// Close releases the result set, counted once.
+func (r *fakeRows) Close() error {
+	if r.db != nil && !r.closed {
+		r.closed = true
+		r.db.mu.Lock()
+		r.db.rowsClosed++
+		r.db.mu.Unlock()
+	}
+	return nil
+}
+
+// openRows reports how many result sets were handed out and not closed.
+func (f *fakeDB) openRows() (opened, closed int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rowsOpened, f.rowsClosed
+}
 
 // Next copies the next row, or reports the end of the set.
 func (r *fakeRows) Next(dest []driver.Value) error {

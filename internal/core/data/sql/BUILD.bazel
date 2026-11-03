@@ -11,6 +11,7 @@ go_library(
         "sql.go",
         "sql_dialect.go",
         "sql_migration.go",
+        "sql_statement.go",
         "sql_txoptions.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/data/sql",

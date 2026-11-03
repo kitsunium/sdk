@@ -24,13 +24,31 @@ func TestTheURLsParametersWin(t *testing.T) {
 		wait time.Duration
 		want map[string]string
 	}{
-		{"/data/archive.sqlite", 0, map[string]string{"_journal_mode": "WAL", "_busy_timeout": "5000", "_txlock": "immediate"}},
-		{"/data/archive.sqlite", 4500 * time.Millisecond, map[string]string{"_journal_mode": "WAL", "_busy_timeout": strconv.FormatInt(busyTimeout(4500*time.Millisecond).Milliseconds(), 10), "_txlock": "immediate"}},
+		{"/data/archive.sqlite", 0, map[string]string{
+			"_journal_mode": "WAL", "_busy_timeout": "5000", "_txlock": "immediate",
+			"_synchronous": "NORMAL", "_pragma": "journal_size_limit(67108864)",
+		}},
+		{"/data/archive.sqlite", 4500 * time.Millisecond, map[string]string{
+			"_journal_mode": "WAL", "_busy_timeout": strconv.FormatInt(busyTimeout(4500*time.Millisecond).Milliseconds(), 10),
+			"_txlock": "immediate", "_synchronous": "NORMAL", "_pragma": "journal_size_limit(67108864)",
+		}},
 		{"file:/data/archive.sqlite?_busy_timeout=9000&_foreign_keys=1", 4500 * time.Millisecond, map[string]string{
 			"_journal_mode": "WAL", "_busy_timeout": "9000", "_txlock": "immediate", "_foreign_keys": "1",
+			"_synchronous": "NORMAL", "_pragma": "journal_size_limit(67108864)",
 		}},
 		{"file:/data/archive.sqlite?_timeout=900&_journal=DELETE", 4500 * time.Millisecond, map[string]string{
 			"_journal": "DELETE", "_timeout": "900", "_txlock": "immediate",
+			"_synchronous": "NORMAL", "_pragma": "journal_size_limit(67108864)",
+		}},
+		// #999: a URL that writes either spelling of synchronous keeps it, and
+		// one that writes any _pragma keeps its own list.
+		{"file:/data/archive.sqlite?_sync=FULL", 0, map[string]string{
+			"_journal_mode": "WAL", "_busy_timeout": "5000", "_txlock": "immediate",
+			"_sync": "FULL", "_pragma": "journal_size_limit(67108864)",
+		}},
+		{"file:/data/archive.sqlite?_pragma=cache_size(-2000)", 0, map[string]string{
+			"_journal_mode": "WAL", "_busy_timeout": "5000", "_txlock": "immediate",
+			"_synchronous": "NORMAL", "_pragma": "cache_size(-2000)",
 		}},
 	} {
 		got, err := dsn(c.raw, c.wait)

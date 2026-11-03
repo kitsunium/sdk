@@ -336,6 +336,7 @@ func TestNoPublicMessageDescribesInfrastructure(t *testing.T) {
 		coresql.HealthCheckTimeout, coresql.MigrationFailed, coresql.MigrationOutOfOrder,
 		coresql.MigrationLockUnsupported, coresql.MigrationLockTimeout,
 		coresql.MigrationUnknownVersion, coresql.VersionTableInvalid, coresql.DuplicateMigration,
+		coresql.MigrationChanged, coresql.TxRetriesExhausted, coresql.StatementTimedOut,
 	}
 	banned := []string{"password", "host=", "://", "SELECT", "INSERT", "dsn"}
 	for _, sentinel := range sentinels {

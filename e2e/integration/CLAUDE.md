@@ -22,6 +22,17 @@ graph of every consumer of a database writer.
 | `writer/clickhouse/` | the `"clickhouse"` writer (`third-party/db/writer/clickhouse`) through `writer.Open`, rows read back | `clickhouse/clickhouse-server:24-alpine` |
 | `writer/mysql/` | the `"mysql"` writer over the bind-mounted Unix socket, rows read back | `mysql:8` |
 | `writer/redis/` | the `"redis"` writer over the bind-mounted Unix socket: XADD, MaxLen trimming, the `AddFailed` path | `redis:7-alpine` |
+| `queue/redis/` | the Valkey stream broker (`third-party/db/redis/queue`, ADR 0211): the queue rows on a ManualClock, two consumers over 1 000 messages, the missing group, the wake | `valkey/valkey:8`, or `VALKEY_ADDR` |
+| `queue/nats/` | the JetStream broker (`third-party/nats/queue`, ADR 0211): the queue rows on the wall clock, two consumers over 1 000 messages, `PublishOnce`'s deduplication, the missing stream | `nats:2.11 -js`, or `NATS_URL` |
+| `cache/valkey/` | the Valkey cache tier (`third-party/db/redis/cache`, ADR 0211): the store, the remaining TTL, tag counts over scan pages, one fill across two replicas, the chain's far tier | `valkey/valkey:8`, or `VALKEY_ADDR` |
+
+`queue/brokerrows/` is no suite: it is the queue conformance rows the two
+broker suites share — the rows of `internal/service/data/queue`'s table a
+vendor broker can keep, restated until the importable `queuetest` suite
+exists (kitsunium/sdk#985); a row moves time through the suite's own
+`Advance` (a ManualClock where the leases are the broker's clock's, a sleep
+where they are the server's). `internal/servers/` starts the servers, or
+hands back the one the environment names.
 
 The writer suites are external test packages: they import the writer module
 for its registration side effect and drive `internal/core/observe/logger/writer`'s registry,
@@ -34,7 +45,9 @@ than sentinel codes — see `e2e/CLAUDE.md` §Rules.
 No CI lane runs them — the runners do not start the containers — and the
 census lanes (ADR 0137) that loop over `e2e` compile none of them: the default
 build excludes every file by its tag. They are a named, manual lane. Run them
-from the `e2e` module, with Docker (or a Docker-compatible runtime) reachable:
+from the `e2e` module, with Docker (or a Docker-compatible runtime) reachable —
+or, for the data adapters' suites, with `VALKEY_ADDR` (`host:port`) and
+`NATS_URL` naming servers already running, which needs no Docker:
 
 ```sh
 cd e2e
@@ -46,7 +59,9 @@ Each suite self-skips the cases whose server cannot start, and removes every
 container it started. Run `sql/` on any change to `internal/service/data/sql`,
 `internal/core/data/sql`, the SQL engine of `internal/service/data/docstore` or the SQL
 broker of `internal/service/data/queue`; run `writer/<engine>/` before shipping a
-change to that writer's factory or batching chain.
+change to that writer's factory or batching chain; run `queue/redis/`,
+`queue/nats/` and `cache/valkey/` on any change to their adapter under
+`third-party/`, to `queue/brokerrows/`, or to the port they implement.
 
 On macOS, the mysql and redis writer suites fail where the bind-mounted Unix
 socket path exceeds the kernel's 104-byte `sun_path` (`connect: invalid
@@ -68,3 +83,4 @@ move.
 
 - `sql/` — see `sql/CLAUDE.md`
 - `writer/clickhouse/`, `writer/mysql/`, `writer/redis/` — see each one's `CLAUDE.md` (the case, the server, what is open)
+- `queue/redis/`, `queue/nats/`, `cache/valkey/` — see each one's `CLAUDE.md`; `queue/brokerrows/` and `internal/servers/` are their shared helpers

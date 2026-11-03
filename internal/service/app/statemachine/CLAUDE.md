@@ -30,7 +30,7 @@ declares none and raises the core's.
 | `transition.go` | `Start`, `Fire`; the shared path — `transition` → `locked` (flight, `commit`, `settle`, deferred release) → `replan` → `announce`; `landing` (change, `gone`, late failures); the hooks' panic recovery |
 | `notify.go` | `Changed`, `Deleted`, `refresh` (under a read flight), `landRead`, `replan` |
 | `book.go` | records, census and flights under one mutex, never held across the journal; the journal writes under a gate per key |
-| `agenda.go` | the heap with lazy deletion and its rebuild bound, the dirty set, the per-key backoff, the wake token |
+| `agenda.go` | the indexed heap holding one entry per scheduled key, the dirty set, the per-key backoff, the wake token |
 | `loop.go` | `Run`, `Step`, `Wake`, `LoopEvent`; `run`/`wait`/`sleep`/`retarget`, `step`/`guarded`/`process`/`look`/`inspect`/`fire`/`outcome` |
 | `locks.go` | the per-key lock table (a one-token channel each, abandonable by `acquire`), the reentrancy mark (`within` / `inside`) |
 
@@ -109,11 +109,13 @@ declares none and raises the core's.
 - **Per-entity backoff.** `agenda.failed` holds back the failing key only;
   `schedule` clamps any instant to its `notBefore`; a success or a new state
   (`restart`) clears it.
-- **Lazy deletion, bounded.** `kernel/collections/heap` has no `Fix`; a reschedule pushes
-  a fresh entry and the stale one is dropped when it surfaces, the heap rebuilt
-  past `2*live + 64` — `TestTheHeapIsRebuiltBeforeStaleEntriesOutgrowItsBound`.
-  Sequence numbers never repeat, so a forgotten key's stale entries can never
-  match a later plan.
+- **One entry per key, no lazy deletion.** The agenda keeps its heap in
+  `kernel/collections/heap`'s `IndexedHeap` (#1036): each scheduled key's plan
+  holds the `Handle` of its one entry, a reschedule re-keys it in place
+  (`Update`) and an unschedule or a forget removes it (`Remove`), both
+  O(log N). The heap never holds a stale entry, so there is nothing to rebuild
+  — `TestTheHeapHoldsOneEntryPerScheduledKey`. A sequence number still orders
+  equal instants in the order they were scheduled.
 - **Why `StateMachine` and `MachineSpec`.** ktn-linter's role rule cannot see
   the constructor or the interface a generic type with two type parameters
   satisfies (probed: a one-parameter generic with a single-result constructor

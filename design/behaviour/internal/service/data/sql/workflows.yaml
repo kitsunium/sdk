@@ -19,6 +19,32 @@ workflows:
           key: i
           range: len(name)
       - return: "true"
+  - of: (*migrator).compareChecksums
+    steps:
+      - loop:
+          do:
+            - bind: recorded, applied
+              eval: sums[migration.Version]
+            - opt:
+                do:
+                  - continue: true
+                when: "!applied || migration.Checksum == \"\""
+            - opt:
+                do:
+                  - set: missing
+                    value: append(missing, migration)
+                  - continue: true
+                when: "!recorded.Valid"
+            - opt:
+                do:
+                  - return: |-
+                      nil, kerrs.Wrap(coresql.MigrationChanged, kerrs.WrapParams{},
+                      				versionField(migration), directionField(direction))
+                when: recorded.String != migration.Checksum
+          key: _
+          range: m.plan.migrations
+          value: migration
+      - return: missing, nil
   - of: (*migrator).pending
     steps:
       - set: queued

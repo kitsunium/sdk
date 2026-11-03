@@ -482,6 +482,19 @@ constants:
         type: errs.Code
         value: iapp.CodeOTLPExport
       - doc: |-
+          CodeTransactionNested refuses a Transact inside another that asks for an
+          isolation level or read-only ([Serializable], [RepeatableRead],
+          [ReadOnly]): the inner level is a savepoint, which can change neither.
+        name: CodeTransactionNested
+        type: errs.Code
+        value: iapp.CodeTransactionNested
+      - doc: |-
+          CodeTransactionReadOnly refuses a store's write inside a transaction
+          opened with [ReadOnly], on every backend.
+        name: CodeTransactionReadOnly
+        type: errs.Code
+        value: iapp.CodeTransactionReadOnly
+      - doc: |-
           The signals the framework ends one of its own steps with and catches itself — a
           caller never receives one —, typed when the SDK made rule 2 a gate.
         name: CodeSealErased
@@ -680,6 +693,8 @@ files:
       - Engine
       - LockWaiter
       - DatabaseOption
+      - Classifier
+      - TransactOption
       - Keepable
     name: database_interface.go
   - decls:
@@ -959,6 +974,9 @@ files:
     name: topic.go
   - decls:
       - Transact
+      - Serializable
+      - RepeatableRead
+      - ReadOnly
     name: transact.go
   - decls:
       - Written
@@ -1403,8 +1421,14 @@ functions:
   - name: OwnStores
     results: SubscriptionOption
   - name: Transact
-    params: ctx context.Context, fn func(context.Context) error
+    params: ctx context.Context, fn func(context.Context) error, opts ...TransactOption
     results: error
+  - name: Serializable
+    results: TransactOption
+  - name: RepeatableRead
+    results: TransactOption
+  - name: ReadOnly
+    results: TransactOption
 imports:
   clock: github.com/kitsunium/sdk/pkg/v1/clock
   context: context
@@ -1633,6 +1657,22 @@ types:
     kind: alias
     name: DatabaseOption
     underlying: iapp.DatabaseConfigurer
+  - alias: true
+    doc: |-
+      Classifier is an [Engine] that reads its driver's errors: Transient says
+      whether a failed transaction is one the database asks to run again. The
+      framework runs such a transaction again, its outermost level, up to
+      <name>-tx-retries times — never one a [Service].Go body opens.
+    kind: alias
+    name: Classifier
+    underlying: iapp.Classifier
+  - alias: true
+    doc: |-
+      TransactOption asks a transaction for an isolation level or for
+      read-only: [Serializable], [RepeatableRead], [ReadOnly].
+    kind: alias
+    name: TransactOption
+    underlying: iapp.TransactOption
   - alias: true
     doc: |-
       Keepable is what a database keeps: a service — every store it declares —,
@@ -2002,7 +2042,8 @@ types:
     doc: |-
       QueryOption configures a query: the options every operation takes —
       [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient], [Timeout],
-      [Bulkhead].
+      [Bulkhead] — and a transaction's — [ReadOnly], [Serializable],
+      [RepeatableRead] —, which run its Ask in a transaction opened with them.
     kind: alias
     name: QueryOption
     underlying: iapp.QueryConfigurer

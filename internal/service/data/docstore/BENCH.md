@@ -133,3 +133,46 @@ together, so its cost grows with what the versions weigh — about 0.39 µs a
 kept version of this hundred-byte document — and not with the store's size.
 On a disk the two flushes still dominate: 42 µs of encoding at a hundred
 versions is 0.4 % of the 11 ms a durable write costs here.
+
+### A page costs its documents, and a batch buys atomicity (#836, #1057)
+
+`BenchmarkDocumentsPage` reads one page of 100 documents with `Documents`,
+resuming a third of the way in; `BenchmarkDocumentsPass` pages through 10 000
+documents by 100 from the last key read, against `Entries(0)`, which copies
+them all at once; `BenchmarkBatch` writes 100 existing documents as one
+`Batch`, against the same 100 `Put`s, in a store of 1 000, over the in-memory
+filesystem and on disk.
+
+| Dimension | Value |
+|---|---|
+| Machine | 4 of 8 vCPUs (`GOMAXPROCS=4`, AMD EPYC 7351P), 15 GiB, Linux 6.12.101 (Debian 13), ext4, go1.27.3 linux/amd64, shared with other jobs |
+| Git branch | `wip/sdk-lot-6-cd` |
+| Git commit | `65e0535` (pre-commit: the tree these rows ship with) |
+| Generated (UTC) | 2026-11-03 |
+| Command | `cd internal/service && GOWORK=off go test -run='^$' -bench='BenchmarkDocumentsPage\|BenchmarkDocumentsPass\|BenchmarkBatch/fs=mem' -benchmem -benchtime=1s ./data/docstore/`, then `-bench='BenchmarkBatch/fs=disk' -benchtime=10x` |
+
+```
+BenchmarkDocumentsPage/docs=1000-4         	   10000	    114008 ns/op	   25152 B/op	     202 allocs/op
+BenchmarkDocumentsPage/docs=10000-4        	    2212	    475030 ns/op	   25152 B/op	     202 allocs/op
+BenchmarkDocumentsPass/paged=100-4         	      27	  42640002 ns/op	 2038656 B/op	   10201 allocs/op
+BenchmarkDocumentsPass/entries-4           	     296	   4131466 ns/op	 2347465 B/op	   10023 allocs/op
+BenchmarkBatch/fs=mem/batch=100-4          	     987	   1241197 ns/op	  332356 B/op	    3143 allocs/op
+BenchmarkBatch/fs=mem/puts=100-4           	    1165	   1033077 ns/op	  179242 B/op	    2878 allocs/op
+BenchmarkBatch/fs=disk/batch=100-4         	      10	 330732182 ns/op	  554030 B/op	    7541 allocs/op
+BenchmarkBatch/fs=disk/puts=100-4          	      10	 326873894 ns/op	  411212 B/op	    7206 allocs/op
+```
+
+A page allocates what it hands out — 202 allocations and 25 KiB at 1 000
+documents and at 10 000 alike — and never a copy of the store's keys. Its
+time is a pass over the keys under the read lock, so it grows with the
+store: 114 µs at 1 000, 475 µs at 10 000. A whole pass by pages of 100
+therefore costs about ten times one `Entries(0)` here (43 ms against 4 ms):
+what paging buys is a bounded page in memory, and a reader that stops early,
+not a cheaper full scan. A caller that reads everything at once and can hold
+it should keep `List` or `Entries`.
+
+A batch of 100 costs what 100 `Put`s cost, give or take its group entry:
+20 % more in memory, 1 % more on this disk, where each key's entry still
+pays its own flush. What it buys is that the 100 writes stand or fall
+together, as ADR 0209's amendment says; paying the keys' flushes once per
+batch is not this change.

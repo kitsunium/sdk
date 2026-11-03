@@ -12,7 +12,7 @@ import (
 // one running fn — and read by the waiters only AFTER close(done), which is
 // the happens-before edge that makes the reads race-free without a second
 // mutex. refs and retired are the exception: they are group bookkeeping and
-// are read and written under Group.mu.
+// are read and written under the mutex of the shard holding the call.
 type call[V any] struct {
 	// done is closed once val/err/panicked are final. Closing rather than
 	// sending is what lets N waiters observe one result.
@@ -25,11 +25,11 @@ type call[V any] struct {
 	// cancel stops the shared context. It is fired when the last caller
 	// abandons the call, and again (harmlessly) when fn returns.
 	cancel context.CancelFunc
-	// refs counts the callers still waiting. Guarded by Group.mu.
+	// refs counts the callers still waiting. Guarded by the shard's mutex.
 	refs int
 	// retired records that the call has left the Group's map, so a late
 	// abandonment cannot delete a key that now belongs to a different call.
-	// Guarded by Group.mu.
+	// Guarded by the shard's mutex.
 	retired bool
 
 	// val and err are fn's outcome.

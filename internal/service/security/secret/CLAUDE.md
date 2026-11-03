@@ -29,9 +29,9 @@ declarations moved.
 | `file.go`, `file_config.go`, `file_record.go`, `fileguard_*.go` | `NewFile` / `FileConfig` — the directory store |
 | `keyring.go` | `Keyring` / `NewKeyring` — seal, open, sign, verify over versions |
 | `keyring_view.go` | `rootView` — the keyring read ONCE, every usable version's sealing key derived once: what `Rewrap` seals and opens with |
-| `subjectkeys.go` | `SubjectKeys` / `NewSubjectKeys` / `SubjectKeysConfig` — `Seal`, `Open`, `Destroy`, and the acquire / load / create / unwrap path |
+| `subjectkeys.go` | `SubjectKeys` / `NewSubjectKeys` / `SubjectKeysConfig` — `Seal`, `Open`, `Destroy`, `Expire`, and the acquire / load / create / unwrap path |
 | `subjectbox.go` | the subject box layout, `SubjectOf`, the length-prefixed binding, the wrap's associated data |
-| `subjectcache.go` | `openedKey` (copies out, wipes in place) and `keyCache` (the `kernel/collections/cache` primitive plus the destruction epoch) |
+| `subjectcache.go` | `openedKey` (copies out, wipes in place) and `keyCache` (the `kernel/collections/cache` primitive plus the destruction epoch; `expire`, the caller's sweep) |
 | `subjectrewrap.go` | `Rewrap` / `RewrapValue` and `OldestRoot` |
 | `subjectmemory.go` | `NewMemorySubjectKeyStore` — the reference `core/security/secret.SubjectKeyStore` |
 | `rotator.go` | `Rotator` / `NewRotator` / `RotatorConfig` / `PolicySpec` / `Random` |
@@ -136,6 +136,17 @@ declarations moved.
   match is dropped and the store read once (another process replaced it).
   `CacheTTL` is required with a cache and refused without one: it bounds how
   long a key destroyed by ANOTHER process keeps opening — and sealing — here.
+  Every lookup first sweeps the cache (`kcache.Cache.Expire`, #1038): a key
+  whose `CacheTTL` passed is wiped by the next call on ANY subject, not kept
+  until its own subject is read again. A process that makes no call at all
+  is the caller's to sweep: `SubjectKeys.Expire` (#1038, option (b), the
+  owner's choice on 2026-11-03, ADR 0142 amendment) wipes every opened key
+  past its TTL through the same `OnEvict` and reports how many, reads no store,
+  and costs nothing when no key is due. The engine owns no goroutine and no
+  `Close`: the caller drives it, `worker.Every(ttl/2, …)` wiping an idle key
+  within 1.5 × `CacheTTL`. A swept key stays in the store, so the next call on
+  its subject reads and opens it again
+  (`TestExpireWipesAnIdleSubjectsKeyWithNoCallAtAll`).
 - **Rewrap**: reads the root once (`rootView`) and OPENS every key
   (`unwrapIn`: grammar, version held, authenticated, one key long); moves each
   key not under the newest version with a compare-and-swap `Replace` (a key
@@ -224,7 +235,7 @@ neighbour's:
 | `PolicySpec`, `Random(n)` | the policy and its generator |
 | `InvalidConfig` … `KeyFileInvalid`, `KeyDestroyed`, `SubjectKeyUnreadable` (`0.3.68.1`–`0.3.68.10`) | the engines' refusals: declared in `core/security/secret` beside the port's verdicts (ADR 0160) — its Surface table says what each one means — and raised here, bare or through `wrapAs` with log-only fields |
 | `KeyFile(path) (crypto.Key, error)` | the machine-local key |
-| `NewSubjectKeys(SubjectKeysConfig) (*SubjectKeys, error)` | `Seal(ctx, subject, plaintext, bind...)` / `Open(ctx, box, bind...)` / `Destroy` / `Rewrap` / `OldestRoot` |
+| `NewSubjectKeys(SubjectKeysConfig) (*SubjectKeys, error)` | `Seal(ctx, subject, plaintext, bind...)` / `Open(ctx, box, bind...)` / `Destroy` / `Expire() int` / `Rewrap` / `OldestRoot` |
 | `SubjectKeysConfig` | `Root`, `Former`, `Store`, `CacheSize`, `CacheTTL`, `Clock` |
 | `RewrapValue` | `Root`, `Current`, `Rewrapped`, `FromFormer`, `Skipped`, `Unreadable` |
 | `SubjectOf(box) (string, error)` | the subject a box names, without opening it |

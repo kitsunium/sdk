@@ -1,10 +1,13 @@
 package queue_test
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
@@ -190,6 +193,7 @@ func TestEverySentinelCarriesAWireSafePublic(t *testing.T) {
 		corequeue.DeadLetterNotFound,
 		corequeue.QueueBackendFailed, corequeue.QueueDirectoryUnusable, corequeue.ConsumerMisconfigured,
 		corequeue.HandlerPanicked, corequeue.SQLQueueMisconfigured,
+		corequeue.MessageExpired, corequeue.Acknowledged,
 	}
 	for _, sentinel := range sentinels {
 		public := errs.PublicOf(sentinel)
@@ -227,5 +231,89 @@ func TestTheSevenCodesAreDistinctAndInTheOwnedRange(t *testing.T) {
 			t.Fatalf("code %#x is declared twice", uint32(code))
 		}
 		seen[code] = true
+	}
+}
+
+// TestTheTwelveCodesOfTheBacklogAmendmentAreTheNextSerials pins the two codes
+// the 2026-11-02 amendment of ADR 0054 added after RETRY_REQUESTED's
+// 0.2.23.10: MESSAGE_EXPIRED at 0.2.23.11 and ACKNOWLEDGED at 0.2.23.12, both
+// in the range this package owns.
+func TestTheTwelveCodesOfTheBacklogAmendmentAreTheNextSerials(t *testing.T) {
+	t.Parallel()
+	if corequeue.CodeMessageExpired != 0x00_02_17_0B || corequeue.CodeAcknowledged != 0x00_02_17_0C {
+		t.Fatalf("MESSAGE_EXPIRED %#x, ACKNOWLEDGED %#x, want 0.2.23.11 and 0.2.23.12",
+			uint32(corequeue.CodeMessageExpired), uint32(corequeue.CodeAcknowledged))
+	}
+	for _, sentinel := range []*errs.Error{corequeue.MessageExpired, corequeue.Acknowledged} {
+		if code, _ := errs.CodeOf(sentinel); code&0xFF_FF_FF_00 != 0x00_02_17_00 {
+			t.Fatalf("%v is outside 0.2.23.*", sentinel)
+		}
+	}
+}
+
+// TestALifetimeIsRefusedNegativeOrPastTheCeiling pins MaxAge and
+// DeadLetterRetention: zero is "for good" and accepted, a negative value and
+// one past MaxDeadlineOffset are refused by field (issues #835, #1120).
+func TestALifetimeIsRefusedNegativeOrPastTheCeiling(t *testing.T) {
+	t.Parallel()
+	base := corequeue.PolicyValue{VisibilityTimeout: time.Second, MaxDeliveries: 1}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("Validate() of zero lifetimes = %v, want nil", err)
+	}
+	for field, set := range map[string]func(*corequeue.PolicyValue, time.Duration){
+		"MaxAge":              func(p *corequeue.PolicyValue, d time.Duration) { p.MaxAge = d },
+		"DeadLetterRetention": func(p *corequeue.PolicyValue, d time.Duration) { p.DeadLetterRetention = d },
+	} {
+		for _, value := range []time.Duration{-1, corequeue.MaxDeadlineOffset + 1} {
+			policy := base
+			set(&policy, value)
+			err := policy.Validate()
+			if !errs.HasCode(err, corequeue.CodeQueueMisconfigured) || !strings.Contains(fmt.Sprint(errs.FieldsOf(err)), field) {
+				t.Errorf("%s = %v: Validate() = %v, want QUEUE_MISCONFIGURED naming the field", field, value, err)
+			}
+		}
+		policy := base
+		set(&policy, time.Hour)
+		if err := policy.Validate(); err != nil {
+			t.Errorf("%s = 1h: Validate() = %v, want nil", field, err)
+		}
+	}
+}
+
+// TestARetryJitterNeedsAGrowingDelayAndAFractionInRange pins RetryJitter and
+// RetryJitterMode (issue #1044): a fraction in [0, 1] beside a MaxRetryDelay
+// is accepted, and so is a full or decorrelated mode; anything else is
+// refused, naming the field.
+func TestARetryJitterNeedsAGrowingDelayAndAFractionInRange(t *testing.T) {
+	t.Parallel()
+	growing := corequeue.PolicyValue{
+		VisibilityTimeout: time.Second, MaxDeliveries: 1, RetryDelay: time.Second, MaxRetryDelay: time.Minute,
+	}
+	for _, accepted := range []func(*corequeue.PolicyValue){
+		func(p *corequeue.PolicyValue) { p.RetryJitter = 0.2 },
+		func(p *corequeue.PolicyValue) { p.RetryJitter = 1 },
+		func(p *corequeue.PolicyValue) { p.RetryJitterMode = kbackoff.JitterFull },
+		func(p *corequeue.PolicyValue) { p.RetryJitterMode = kbackoff.JitterDecorrelated },
+	} {
+		policy := growing
+		accepted(&policy)
+		if err := policy.Validate(); err != nil {
+			t.Errorf("Validate(%+v) = %v, want nil", policy, err)
+		}
+	}
+	for field, refused := range map[string]func(*corequeue.PolicyValue){
+		"RetryJitter":     func(p *corequeue.PolicyValue) { p.RetryJitter = math.NaN() },
+		"RetryJitterMode": func(p *corequeue.PolicyValue) { p.RetryJitterMode = kbackoff.JitterDecorrelated + 1 },
+	} {
+		policy := growing
+		refused(&policy)
+		if err := policy.Validate(); !errs.HasCode(err, corequeue.CodeQueueMisconfigured) {
+			t.Errorf("%s refused: Validate() = %v, want QUEUE_MISCONFIGURED", field, err)
+		}
+	}
+	constant := growing
+	constant.MaxRetryDelay, constant.RetryJitter = 0, 0.5
+	if err := constant.Validate(); !errs.HasCode(err, corequeue.CodeQueueMisconfigured) {
+		t.Errorf("a jitter with no MaxRetryDelay: Validate() = %v, want QUEUE_MISCONFIGURED", err)
 	}
 }

@@ -9,6 +9,8 @@ that links a MySQL driver — go-sql-driver/mysql, through `database/sql`.
 
 | File | Holds |
 |---|---|
+| `transient.go` | `Transient` — 1213 (deadlock) and 1205 (lock wait timeout), read from `MySQLError.Number`, which go-sql-driver exposes as a field the SDK's `sql.Classify` cannot read; `transient_internal_test.go` is its table (#1000) |
+| `engine_compliance.go` | the compile-time assertion that the engine is an `app.Classifier` (#1000) |
 | `mysql.go` | `Engine()`: `Dialect` (`app.DialectMySQL`, kit's own type — ADR 0179 Q5); the blank import of `framework/app/store`, the stores a database keeps (ADR 0179 §4); `Describe` — the address (TCP, or a socket), the database, and the `tls` as the URL writes it, never a user or a password —; `Open` — the driver's connector, with a `BeforeConnect` that reads the URL again (`current`) —; `config` and `parse`, which read a `mysql://` or `mariadb://` URL (its query holds the driver's parameters; port 3306 when left out) or the driver's own DSN, drop the TLS configuration the DSN parser built for another address, and silence the driver's logger (`quiet`); `errMalformed`, which quotes nothing |
 | `credentials.go` | `withCredentials`: the user and the password of the URL as it is now, given to the connection the driver is about to make |
 

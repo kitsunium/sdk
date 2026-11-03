@@ -1,6 +1,6 @@
 # ADR 0142 — one key per subject, under a root that rotates, and an erasure is the key's destruction
 
-- **Status**: Accepted
+- **Status**: Accepted — amended 2026-11-03 (§7: `SubjectKeys.Expire`, the caller's sweep of opened keys past their TTL, #1038)
 - **Date**: 2026-09-27
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0096](0096-a-secret-is-a-value-no-rendering-writes-down.md) §6 (a rotation's prune honours `RotatorConfig.InUse`)
@@ -422,3 +422,35 @@ break, which ADR 0040 accepts while the module is v0.
     https://pkg.go.dev/crypto/cipher, https://pkg.go.dev/crypto/hkdf,
     https://pkg.go.dev/crypto/rand, https://pkg.go.dev/crypto/subtle
   - RFC 5869 (HKDF), RFC 3394 (AES Key Wrap)
+
+## Amendment — 2026-11-03: the caller sweeps the opened keys ([#1038](https://github.com/kitsunium/sdk/issues/1038))
+
+§7 promises that a key another process destroyed stops opening here "within
+its `CacheTTL`". The cache's expiry was lazy (ADR 0025): an opened key past
+its TTL was wiped only when a lookup of ITS subject, or a capacity eviction,
+reached it, so an idle subject's key — sealed once, never asked for again —
+stayed in memory, opened and unwiped, for as long as the process ran.
+
+- **Every lookup sweeps first.** The primitive gained `Expire` over an expiry
+  heap (ADR 0025, amended 2026-11-02), and every `Seal` and `Open` calls it
+  before reading its own subject: a key past its TTL is wiped by the next call
+  on ANY subject.
+- **`SubjectKeys.Expire() int` is the sweep a caller drives** — an ADR
+  0039 addition to the engine, no port touched. It wipes every opened key past
+  its TTL through the cache's `OnEvict`, the same wipe in place as an eviction
+  (§7's first rule), reports how many, reads no store, and costs nothing when
+  no key is due. A swept key stays in the store: the next call on its subject
+  reads and opens it again.
+- **The engine owns no goroutine.** ADR 0049 refused a sweeper inside a store
+  because it owns a cadence the caller never asked for; the same holds here,
+  and a goroutine would also demand a `Close` that `SubjectKeys` has never had.
+  The caller sweeps on its own ticker or scheduler —
+  `worker.Every(ttl/2, func() { keys.Expire() })` wipes an idle key within
+  1.5 × `CacheTTL` — and stops it with the engine. This was the owner's choice
+  (option (b)) on 2026-11-03, over an engine-owned ticker.
+
+Verified by `TestExpireWipesAnIdleSubjectsKeyWithNoCallAtAll`: with no call on
+any subject, a sweep before the deadline wipes nothing, one past it wipes the
+key — its bytes zeroed in place, its entry gone — and the next `Open` of its
+box reads the store again; an engine without a cache wipes nothing. A sweep
+that does not reach the cache fails it.

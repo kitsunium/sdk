@@ -47,7 +47,7 @@ func NewPrefixMatcher(prefix, mask Code) *PrefixMatcher // CIDR-style; pass to e
 func RegistryMarker() string
 ```
 
-Getters on `*Error`: `Code() / Reason() / Public() / Private() / Fields() / Trail() / TrailTruncated() / HTTPStatus() / ExitCode() / Error() / Unwrap() / Source()`. The Layer/Major/Package/Serial octets are reached via `e.Code().Layer()` etc. — composable on the typed `Code`.
+Getters on `*Error`: `Code() / Reason() / Public() / Private() / Fields() / Trail() / TrailTruncated() / HTTPStatus() / ExitCode() / Error() / Unwrap() / Source()`, and `Params()` — the sentinel restated as the `WrapParams` a wrap of a foreign cause takes (its code, reason, public and private messages, exit status; no HTTP override), which the L6 vendor adapters wrap a vendor's error with instead of copying the fields by hand. The Layer/Major/Package/Serial octets are reached via `e.Code().Layer()` etc. — composable on the typed `Code`.
 
 Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf / PrivateOf / FieldsOf / HTTPStatusOf / ExitCodeOf / TrailOf`. All return the typed `Code` / `string` / etc. — no int variants.
 

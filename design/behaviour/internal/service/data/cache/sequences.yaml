@@ -17,6 +17,10 @@ sequences:
                 			kerrs.Int("tiers", len(stores)),
                 			kerrs.String("problem", "fewer than two tiers"))
           when: len(stores) < minChainTiers
+      - opt:
+          do:
+            - return: nil, misconfigured("LeasePoll", kerrs.String("value", cfg.LeasePoll.String()))
+          when: cfg.LeasePoll < 0
       - bind: tiers
         eval: make([]tier[V], 0, len(stores))
       - loop:
@@ -33,7 +37,16 @@ sequences:
           key: position
           range: stores
           value: store
-      - return: "&chainStore[V]{tiers: tiers, onPromoteError: cfg.OnPromoteError}, nil"
+      - var:
+          name: waiter
+          type: clock.Waiter
+          value: clock.System
+      - opt:
+          do:
+            - set: waiter
+              value: cfg.Clock
+          when: cfg.Clock != nil
+      - return: "&chainStore[V]{tiers: tiers, onPromoteError: cfg.OnPromoteError, waiter: waiter, leasePoll: pollOrDefault(cfg.LeasePoll)}, nil"
   - of: newTier
     steps:
       - opt:
@@ -346,7 +359,7 @@ sequences:
         kind: self
       - id: c.Fetch
         kind: internal
-      - id: c.Set
+      - id: c.fillAndSet
         kind: internal
     steps:
       - opt:
@@ -357,6 +370,17 @@ sequences:
             eval: c.Fetch(ctx, key)
             to: c.Fetch
           when: fetchErr == nil && ok
+      - return: c.fillAndSet(ctx, key, fill)
+        to: c.fillAndSet
+  - of: (*chainStore).fillAndSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).fillAndSet
+        kind: self
+      - id: c.Set
+        kind: internal
+    steps:
       - bind: entry, fillErr
         eval: fill(ctx)
       - opt:
@@ -413,32 +437,405 @@ sequences:
           		Private: corecache.CacheTierFailed.Private(),
           	}, fields...)
         to: kerrs
+  - of: (*chainStore).Expire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).Expire
+        kind: self
+      - id: expirer.Expire
+        kind: value
+    steps:
+      - var:
+          name: failures
+          type: "[]error"
+      - loop:
+          do:
+            - bind: expirer, ok
+              eval: level.store.(corecache.Expirer)
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - bind: dropped, expireErr
+              eval: expirer.Expire(ctx)
+              to: expirer.Expire
+            - op: +=
+              set: removed
+              value: dropped
+            - opt:
+                do:
+                  - set: failures
+                    value: append(failures, tierFailure(position, "expire", "", expireErr))
+                when: expireErr != nil
+          key: position
+          range: slices.Backward(c.tiers)
+          value: level
+      - return: removed, errors.Join(failures...)
+  - of: (*chainStore).FetchMany
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).FetchMany
+        kind: self
+      - id: c.generation.Load
+        kind: value
+      - id: distinct
+        kind: internal
+      - id: fetchPass
+        kind: internal
+      - id: c.promoteMany
+        kind: internal
+    steps:
+      - bind: seen
+        eval: c.generation.Load()
+        to: c.generation.Load
+      - bind: found
+        eval: make(map[string]V, len(keys))
+      - bind: missing
+        eval: distinct(keys)
+        to: distinct
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: len(missing) == 0
+            - bind: hits, still, fetchErr
+              eval: fetchPass(ctx, position, level, missing)
+              to: fetchPass
+            - opt:
+                do:
+                  - return: nil, fetchErr
+                when: fetchErr != nil
+            - loop:
+                do:
+                  - set: found[key]
+                    value: entry.Value
+                key: key
+                range: hits
+                value: entry
+            - opt:
+                do:
+                  - eval: c.promoteMany(ctx, hits, position, seen)
+                    to: c.promoteMany
+                when: position > 0 && len(hits) > 0
+            - set: missing
+              value: still
+          key: position
+          range: c.tiers
+          value: level
+      - return: found, nil
+  - of: fetchPass
+    participants:
+      - id: caller
+        kind: actor
+      - id: fetchPass
+        kind: self
+      - id: level.entry.FetchEntry
+        kind: value
+    steps:
+      - set: hits
+        value: make(map[string]corecache.EntryValue[V], len(missing))
+      - loop:
+          do:
+            - bind: stored, ok, fetchErr
+              eval: level.entry.FetchEntry(ctx, key)
+              to: level.entry.FetchEntry
+            - opt:
+                do:
+                  - return: nil, nil, tierFailure(position, "fetch", key, fetchErr)
+                when: fetchErr != nil
+            - opt:
+                do:
+                  - set: still
+                    value: append(still, key)
+                  - continue: true
+                when: "!ok"
+            - set: hits[key]
+              value: stored
+          key: _
+          range: missing
+          value: key
+      - return: hits, still, nil
+  - of: (*chainStore).promoteMany
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).promoteMany
+        kind: self
+      - id: c.reportPromoteError
+        kind: internal
+    steps:
+      - lock:
+          mutex: c.promoting
+          read: true
+      - opt:
+          do:
+            - return: ""
+          when: c.writing.Load() != 0 || c.generation.Load() != seen
+      - loop:
+          do:
+            - loop:
+                do:
+                  - eval: c.reportPromoteError(key, tierFailure(position, "promote", key, err))
+                    to: c.reportPromoteError
+                key: key
+                range: setBatch(ctx, level.store, hits)
+                value: err
+          key: position
+          range: slices.Backward(c.tiers[:found])
+          value: level
+  - of: setBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: setBatch
+        kind: self
+      - id: bulk.SetMany
+        kind: value
+      - id: store.Set
+        kind: value
+    steps:
+      - var:
+          name: failures
+          type: map[string]error
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: failures
+                    value: make(map[string]error, len(entries))
+                  - loop:
+                      do:
+                        - set: failures[key]
+                          value: err
+                      key: key
+                      range: entries
+                init:
+                  bind: err
+                  eval: bulk.SetMany(ctx, entries)
+                  to: bulk.SetMany
+                when: err != nil
+            - return: failures
+          init:
+            bind: bulk, ok
+            eval: store.(corecache.BulkSetter[V])
+          when: ok
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - set: failures
+                          value: make(map[string]error, len(entries))
+                      when: failures == nil
+                  - set: failures[key]
+                    value: err
+                init:
+                  bind: err
+                  eval: store.Set(ctx, key, entry)
+                  to: store.Set
+                when: err != nil
+          key: key
+          range: entries
+          value: entry
+      - return: failures
+  - of: (*chainStore).SetMany
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).SetMany
+        kind: self
+      - id: validateEntry
+        kind: internal
+      - id: c.announce
+        kind: internal
+      - id: c.finish
+        kind: internal
+      - id: tierFailure
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: refusal
+                init:
+                  bind: refusal
+                  eval: validateEntry(key, entry)
+                  to: validateEntry
+                when: refusal != nil
+          key: key
+          range: entries
+          value: entry
+      - eval: c.announce()
+        to: c.announce
+      - defer: c.finish()
+        to: c.finish
+      - loop:
+          do:
+            - loop:
+                do:
+                  - return: tierFailure(position, "set", key, err)
+                    to: tierFailure
+                key: key
+                range: setBatch(ctx, level.store, entries)
+                value: err
+          key: position
+          range: slices.Backward(c.tiers)
+          value: level
+      - return: nil
+  - of: (*chainStore).LoadRefreshing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).LoadRefreshing
+        kind: self
+      - id: c.FetchEntry
+        kind: internal
+      - id: c.Load
+        kind: internal
+      - id: c.refresh
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: V
+            - return: zero, refusedWindow(before)
+          when: before <= 0
+      - bind: entry, ok, fetchErr
+        eval: c.FetchEntry(ctx, key)
+        to: c.FetchEntry
+      - opt:
+          do:
+            - return: c.Load(ctx, key, fill)
+              to: c.Load
+          when: fetchErr != nil || !ok
+      - opt:
+          do:
+            - go: c.refresh(ctx, key, fill, entry.TTL)
+              to: c.refresh
+          when: entry.TTL > 0 && entry.TTL < before && c.claimRefresh(key)
+      - return: entry.Value, nil
+  - of: (*chainStore).claimRefresh
+    steps:
+      - lock:
+          mutex: c.refreshMu
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: _, running
+            eval: c.refreshing[key]
+          when: running
+      - opt:
+          do:
+            - set: c.refreshing
+              value: make(map[string]struct{})
+          when: c.refreshing == nil
+      - set: c.refreshing[key]
+        value: struct{}{}
+      - return: "true"
+  - of: (*chainStore).refresh
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).refresh
+        kind: self
+      - id: c.releaseRefresh
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: c.Set
+        kind: internal
+    steps:
+      - defer: c.releaseRefresh(key)
+        to: c.releaseRefresh
+      - bind: bounded, cancel
+        eval: context.WithTimeout(context.WithoutCancel(ctx), left)
+        to: context
+      - defer: cancel()
+      - bind: entry, fillErr
+        eval: fill(bounded)
+      - opt:
+          do:
+            - return: ""
+          when: fillErr != nil
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: setErr
+            eval: c.Set(bounded, key, entry)
+            to: c.Set
+          when: setErr != nil
+  - of: (*chainStore).releaseRefresh
+    steps:
+      - lock:
+          mutex: c.refreshMu
+      - eval: delete(c.refreshing, key)
   - of: MemoryConfig.validate
     participants:
       - id: caller
         kind: actor
       - id: MemoryConfig.validate
         kind: self
-      - id: kerrs
-        kind: package
+      - id: misconfigured
+        kind: internal
     steps:
       - opt:
           do:
-            - return: |-
-                kerrs.Wrap(corecache.CacheMisconfigured, kerrs.WrapParams{},
-                			kerrs.String("option", "MaxEntries"),
-                			kerrs.Int("value", c.MaxEntries))
-              to: kerrs
+            - return: misconfigured("MaxEntries", kerrs.Int("value", c.MaxEntries))
+              to: misconfigured
           when: c.MaxEntries <= 0
       - opt:
           do:
-            - return: |-
-                kerrs.Wrap(corecache.CacheMisconfigured, kerrs.WrapParams{},
-                			kerrs.String("option", "DefaultTTL"),
-                			kerrs.String("value", c.DefaultTTL.String()))
-              to: kerrs
+            - return: misconfigured("DefaultTTL", kerrs.String("value", c.DefaultTTL.String()))
+              to: misconfigured
           when: c.DefaultTTL < 0
+      - opt:
+          do:
+            - return: misconfigured("Stripes", kerrs.Int("value", c.Stripes))
+              to: misconfigured
+          when: c.Stripes < 0
+      - opt:
+          do:
+            - return: misconfigured("MaxBytes", kerrs.Int64("value", c.MaxBytes))
+              to: misconfigured
+          when: c.MaxBytes < 0
+      - opt:
+          do:
+            - return: misconfigured("LeasePoll", kerrs.String("value", c.LeasePoll.String()))
+              to: misconfigured
+          when: c.LeasePoll < 0
       - return: nil
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corecache.CacheMisconfigured, kerrs.WrapParams{},
+          		append([]kerrs.FieldValue{kerrs.String("option", option)}, fields...)...)
+        to: kerrs
+  - of: MemoryConfig.stripeCount
+    steps:
+      - bind: count
+        eval: min(max(c.Stripes, 1), c.MaxEntries, maxStripes)
+      - opt:
+          do:
+            - set: count
+              value: int(min(int64(count), c.MaxBytes))
+          when: c.MaxBytes > 0
+      - return: count
   - of: MemoryConfig.clockOrSystem
     steps:
       - opt:
@@ -446,16 +843,330 @@ sequences:
             - return: clock.System
           when: c.Clock == nil
       - return: c.Clock
+  - of: shareOf
+    steps:
+      - bind: share
+        eval: bound / count
+      - opt:
+          do:
+            - op: ++
+              set: share
+          when: at < bound%count
+      - return: share
+  - of: shareOf64
+    steps:
+      - bind: share
+        eval: bound / int64(count)
+      - opt:
+          do:
+            - op: ++
+              set: share
+          when: int64(at) < bound%int64(count)
+      - return: share
+  - of: leased.run
+    participants:
+      - id: caller
+        kind: actor
+      - id: leased.run
+        kind: self
+      - id: l.locker.TryAcquire
+        kind: value
+      - id: l.holding
+        kind: internal
+      - id: l.wait
+        kind: internal
+      - id: l.read
+        kind: internal
+    steps:
+      - bind: name
+        eval: leasePrefix + key
+      - loop:
+          do:
+            - bind: lease, held, tryErr
+              eval: l.locker.TryAcquire(ctx, name)
+              to: l.locker.TryAcquire
+            - opt:
+                do:
+                  - var:
+                      name: zero
+                      type: V
+                  - return: zero, leaseFailure("acquire", key, tryErr)
+                when: tryErr != nil
+            - opt:
+                do:
+                  - return: l.holding(ctx, key, lease)
+                    to: l.holding
+                when: held
+            - opt:
+                do:
+                  - var:
+                      name: zero
+                      type: V
+                  - return: zero, waitErr
+                init:
+                  bind: waitErr
+                  eval: l.wait(ctx)
+                  to: l.wait
+                when: waitErr != nil
+            - opt:
+                do:
+                  - return: hit, lookErr
+                init:
+                  bind: found, hit, lookErr
+                  eval: l.read(ctx)
+                  to: l.read
+                when: found || lookErr != nil
+          forever: true
+  - of: leased.read
+    steps:
+      - set: value, found, err
+        value: l.lookup(ctx)
+      - return: found, value, err
+  - of: leased.holding
+    participants:
+      - id: caller
+        kind: actor
+      - id: leased.holding
+        kind: self
+      - id: l.read
+        kind: internal
+    steps:
+      - defer: |-
+          func() {
+          		releaseErr := lease.Release(context.WithoutCancel(ctx))
+          		//: the call's own failure says more than the release's.
+          		if releaseErr != nil && err == nil {
+          			var zero V
+          			value, err = zero, leaseFailure("release", key, releaseErr)
+          		}
+          	}()
+      - opt:
+          do:
+            - return: hit, lookErr
+          init:
+            bind: found, hit, lookErr
+            eval: l.read(ctx)
+            to: l.read
+          when: found || lookErr != nil
+      - return: l.fill(ctx)
+  - of: leased.wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: leased.wait
+        kind: self
+      - id: l.waiter.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: ctx.Err
+        kind: value
+    steps:
+      - bind: timer
+        eval: l.waiter.NewTimer(l.poll)
+        to: l.waiter.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
+            - comm: <-timer.C()
+              do:
+                - return: nil
+  - of: waiterOf
+    steps:
+      - opt:
+          do:
+            - return: waiter
+          init:
+            bind: waiter, ok
+            eval: clk.(clock.Waiter)
+          when: ok
+      - return: clock.System
+  - of: pollOrDefault
+    steps:
+      - opt:
+          do:
+            - return: defaultLeasePoll
+          when: poll == 0
+      - return: poll
+  - of: (*memoryStore).LoadLeased
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).LoadLeased
+        kind: self
+      - id: s.Load
+        kind: internal
+      - id: s.fetchRecord
+        kind: internal
+      - id: s.group.Do
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: s.Load(ctx, key, fill)
+              to: s.Load
+          when: locker == nil
+      - opt:
+          do:
+            - return: rec.value, rec.absent
+          init:
+            bind: rec, ok
+            eval: s.fetchRecord(key)
+            to: s.fetchRecord
+          when: ok
+      - bind: filled, _, groupErr
+        eval: |-
+          s.group.Do(ctx, key, func(callCtx context.Context) (V, error) {
+          		//: one goroutine per key in this process; then the lease.
+          		return leased[V]{
+          			locker: locker,
+          			waiter: s.waiter,
+          			poll:   s.leasePoll,
+          			lookup: func(context.Context) (V, bool, error) {
+          				rec, ok := s.fetchRecord(key)
+          				//: a negative entry is found, its error the answer.
+          				return rec.value, ok, rec.absent
+          			},
+          			fill: func(fillCtx context.Context) (V, error) {
+          				//: stored as Load stores, a negative answer included.
+          				return s.fillAndStore(fillCtx, key, fill)
+          			},
+          		}.run(callCtx, key)
+          	})
+        to: s.group.Do
+      - return: filled, groupErr
+  - of: (*chainStore).LoadLeased
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).LoadLeased
+        kind: self
+      - id: c.Load
+        kind: internal
+      - id: c.Fetch
+        kind: internal
+      - id: c.group.Do
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: c.Load(ctx, key, fill)
+              to: c.Load
+          when: locker == nil
+      - opt:
+          do:
+            - return: hit, nil
+          init:
+            bind: hit, ok, fetchErr
+            eval: c.Fetch(ctx, key)
+            to: c.Fetch
+          when: fetchErr == nil && ok
+      - bind: filled, _, groupErr
+        eval: |-
+          c.group.Do(ctx, key, func(callCtx context.Context) (V, error) {
+          		//: one goroutine per key in this process; then the lease.
+          		return leased[V]{
+          			locker: locker,
+          			waiter: c.waiter,
+          			poll:   c.leasePoll,
+          			lookup: func(lookCtx context.Context) (V, bool, error) {
+          				hit, ok, fetchErr := c.Fetch(lookCtx, key)
+          				//: a failing tier reads as a miss, as Load reads it.
+          				return hit, ok && fetchErr == nil, nil
+          			},
+          			fill: func(fillCtx context.Context) (V, error) {
+          				//: write-through, as Load's fill.
+          				return c.fillAndSet(fillCtx, key, fill)
+          			},
+          		}.run(callCtx, key)
+          	})
+        to: c.group.Do
+      - return: filled, groupErr
+  - of: leaseFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: leaseFailure
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: fields
+        eval: |-
+          []kerrs.FieldValue{
+          		kerrs.String("operation", operation),
+          		kerrs.String("key", key),
+          		kerrs.String("cause", cause.Error()),
+          	}
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(corecache.CacheLeaseFailed, kerrs.WrapParams{},
+                			append(fields, kerrs.String("cause_code", typedErr.Code().String()))...)
+              to: kerrs
+          init:
+            bind: typedErr, typed
+            eval: errors.AsType[*kerrs.Error](cause)
+          when: typed
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code:    corecache.CacheLeaseFailed.Code(),
+          		Reason:  corecache.CacheLeaseFailed.Reason(),
+          		Public:  corecache.CacheLeaseFailed.Public(),
+          		Private: corecache.CacheLeaseFailed.Private(),
+          	}, fields...)
+        to: kerrs
   - of: NewMemory
     participants:
       - id: caller
         kind: actor
       - id: NewMemory
         kind: self
+      - id: newMemory
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "nil, misconfigured(\"MaxBytes\", kerrs.Int64(\"value\", cfg.MaxBytes), kerrs.String(\"problem\", \"no weigher: use NewWeighedMemory\"))"
+          when: cfg.MaxBytes > 0
+      - return: newMemory[V](cfg, nil)
+        to: newMemory
+  - of: NewWeighedMemory
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewWeighedMemory
+        kind: self
+      - id: newMemory
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("MaxBytes", kerrs.Int64("value", cfg.MaxBytes), kerrs.Bool("weigh", weigh != nil))
+          when: weigh == nil || cfg.MaxBytes <= 0
+      - return: newMemory(cfg, weigh)
+        to: newMemory
+  - of: newMemory
+    participants:
+      - id: caller
+        kind: actor
+      - id: newMemory
+        kind: self
       - id: cfg.validate
         kind: internal
-      - id: kcache
-        kind: package
+      - id: cfg.stripeCount
+        kind: internal
+      - id: waiterOf
+        kind: internal
+      - id: built.newStripe
+        kind: internal
+      - id: shareOf64
+        kind: internal
     steps:
       - opt:
           do:
@@ -465,48 +1176,134 @@ sequences:
             eval: cfg.validate()
             to: cfg.validate
           when: cfgErr != nil
+      - bind: count
+        eval: cfg.stripeCount()
+        to: cfg.stripeCount
       - bind: built
         eval: |-
           &memoryStore[V]{
-          		tags:       newTagIndex(),
+          		stripes:    make([]*memoryStripe[V], count),
+          		seed:       maphash.MakeSeed(),
           		clk:        cfg.clockOrSystem(),
           		defaultTTL: cfg.DefaultTTL,
+          		weigh:      weigh,
+          		leasePoll:  pollOrDefault(cfg.LeasePoll),
           	}
-      - set: built.lru
-        to: kcache
-        value: |-
-          kcache.NewCache(kcache.Config[string, record[V]]{
-          		MaxEntries: cfg.MaxEntries,
-          		Clock:      built.clk,
-          		OnEvict:    built.onEvict,
-          	})
+      - set: built.waiter
+        to: waiterOf
+        value: waiterOf(built.clk)
+      - loop:
+          do:
+            - set: built.stripes[at]
+              to: built.newStripe
+              value: built.newStripe(cfg, shareOf(cfg.MaxEntries, count, at), shareOf64(cfg.MaxBytes, count, at))
+          key: at
+          range: built.stripes
+      - set: built.maxWeight
+        to: shareOf64
+        value: shareOf64(cfg.MaxBytes, count, count-1)
       - return: built, nil
-  - of: (*memoryStore).onEvict
-    steps:
-      - set: s.evicted
-        value: append(s.evicted, key)
-  - of: (*memoryStore).drainEvicted
+  - of: (*memoryStore).newStripe
     participants:
       - id: caller
         kind: actor
-      - id: (*memoryStore).drainEvicted
+      - id: (*memoryStore).newStripe
         kind: self
-      - id: s.tags.remove
+      - id: kcache
+        kind: package
+    steps:
+      - bind: stripe
+        eval: "&memoryStripe[V]{tags: newTagIndex()}"
+      - bind: primitive
+        eval: |-
+          kcache.Config[string, record[V]]{
+          		MaxEntries: entries,
+          		Clock:      s.clk,
+          		OnEvict:    stripe.onEvict,
+          		Policy:     cfg.Policy,
+          	}
+      - opt:
+          do:
+            - set: primitive.MaxWeight
+              value: bytes
+            - set: primitive.WeightOf
+              value: s.weightOf
+          when: s.weigh != nil
+      - set: stripe.lru
+        to: kcache
+        value: kcache.NewCache(primitive)
+      - return: stripe
+  - of: (*memoryStore).absentWeight
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: s.weigh == nil
+      - return: "1"
+  - of: (*memoryStore).weightOf
+    steps:
+      - return: rec.weight
+  - of: (*memoryStore).stripeOf
+    steps:
+      - opt:
+          do:
+            - return: s.stripes[0]
+          when: len(s.stripes) == 1
+      - return: s.stripes[maphashString(s, key)%uint64(len(s.stripes))]
+  - of: maphashString
+    participants:
+      - id: caller
+        kind: actor
+      - id: maphashString
+        kind: self
+      - id: maphash
+        kind: stdlib
+    steps:
+      - return: maphash.String(s.seed, key)
+        to: maphash
+  - of: (*memoryStripe).onEvict
+    steps:
+      - set: m.evicted
+        value: append(m.evicted, key)
+  - of: (*memoryStripe).drainEvicted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStripe).drainEvicted
+        kind: self
+      - id: m.tags.remove
         kind: internal
     steps:
       - opt:
           do:
             - return: ""
-          when: len(s.evicted) == 0
+          when: len(m.evicted) == 0
       - loop:
           do:
-            - eval: s.tags.remove(key)
-              to: s.tags.remove
+            - eval: m.tags.remove(key)
+              to: m.tags.remove
           key: _
-          range: s.evicted
+          range: m.evicted
           value: key
-      - set: s.evicted
-        value: s.evicted[:0]
+      - set: m.evicted
+        value: m.evicted[:0]
+  - of: (*memoryStripe).fetch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStripe).fetch
+        kind: self
+      - id: m.lru.Fetch
+        kind: value
+      - id: m.drainEvicted
+        kind: internal
+    steps:
+      - bind: stored, ok
+        eval: m.lru.Fetch(key)
+        to: m.lru.Fetch
+      - eval: m.drainEvicted()
+        to: m.drainEvicted
+      - return: stored, ok
   - of: (*memoryStore).Fetch
     participants:
       - id: caller
@@ -525,7 +1322,7 @@ sequences:
                 name: zero
                 type: V
             - return: zero, false, nil
-          when: "!ok"
+          when: "!ok || rec.absent != nil"
       - return: rec.value, true, nil
   - of: (*memoryStore).FetchEntry
     participants:
@@ -535,8 +1332,8 @@ sequences:
         kind: self
       - id: s.fetchRecord
         kind: internal
-      - id: slices
-        kind: stdlib
+      - id: s.entryOf
+        kind: internal
     steps:
       - bind: rec, ok
         eval: s.fetchRecord(key)
@@ -544,11 +1341,12 @@ sequences:
       - opt:
           do:
             - return: corecache.EntryValue[V]{}, false, nil
-          when: "!ok"
-      - bind: tags
-        eval: slices.Clone(rec.tags)
-        to: slices
-      - return: "corecache.EntryValue[V]{Value: rec.value, TTL: s.remaining(rec), Tags: tags}, true, nil"
+          when: "!ok || rec.absent != nil"
+      - return: s.entryOf(rec), true, nil
+        to: s.entryOf
+  - of: (*memoryStore).entryOf
+    steps:
+      - return: "corecache.EntryValue[V]{Value: rec.value, TTL: s.remaining(rec), Tags: slices.Clone(rec.tags)}"
   - of: (*memoryStore).remaining
     participants:
       - id: caller
@@ -576,85 +1374,139 @@ sequences:
         kind: actor
       - id: (*memoryStore).fetchRecord
         kind: self
-      - id: s.lru.Fetch
-        kind: value
-      - id: s.drainEvicted
+      - id: s.stripeOf
         kind: internal
+      - id: stripe.mu.Lock
+        kind: value
+      - id: stripe.fetch
+        kind: internal
+      - id: stripe.mu.Unlock
+        kind: value
     steps:
-      - lock:
-          mutex: s.mu
-      - bind: stored, ok
-        eval: s.lru.Fetch(key)
-        to: s.lru.Fetch
-      - eval: s.drainEvicted()
-        to: s.drainEvicted
-      - return: stored, ok
+      - bind: stripe
+        eval: s.stripeOf(key)
+        to: s.stripeOf
+      - eval: stripe.mu.Lock()
+        to: stripe.mu.Lock
+      - set: rec, found
+        to: stripe.fetch
+        value: stripe.fetch(key)
+      - eval: stripe.mu.Unlock()
+        to: stripe.mu.Unlock
+      - return: rec, found
   - of: (*memoryStore).Set
     participants:
       - id: caller
         kind: actor
       - id: (*memoryStore).Set
         kind: self
+      - id: s.validate
+        kind: internal
+      - id: s.stripeOf
+        kind: internal
+      - id: s.store
+        kind: internal
+    steps:
+      - bind: weight, refusal
+        eval: s.validate(key, entry)
+        to: s.validate
+      - opt:
+          do:
+            - return: refusal
+          when: refusal != nil
+      - bind: stripe
+        eval: s.stripeOf(key)
+        to: s.stripeOf
+      - lock:
+          mutex: stripe.mu
+      - eval: "s.store(stripe, key, record[V]{value: entry.Value, tags: entry.Tags, weight: weight}, entry.TTL)"
+        to: s.store
+      - return: nil
+  - of: (*memoryStore).validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).validate
+        kind: self
       - id: validateEntry
-        kind: internal
-      - id: primitiveTTL
-        kind: internal
-      - id: s.clk.Now().Add
-        kind: value
-      - id: s.tags.add
-        kind: internal
-      - id: s.lru.SetTTL
-        kind: value
-      - id: s.drainEvicted
         kind: internal
     steps:
       - opt:
           do:
-            - return: refusal
+            - return: 0, refusal
           init:
             bind: refusal
             eval: validateEntry(key, entry)
             to: validateEntry
           when: refusal != nil
-      - bind: ttl
-        eval: primitiveTTL(entry.TTL, s.defaultTTL)
-        to: primitiveTTL
-      - lock:
-          mutex: s.mu
-      - var:
-          name: expireAt
-          type: time.Time
       - opt:
           do:
-            - set: expireAt
+            - return: 0, nil
+          when: s.weigh == nil
+      - set: weight
+        value: max(s.weigh(entry.Value), 0)
+      - opt:
+          do:
+            - return: 0, rejected("value", "weighs "+strconv.FormatInt(weight, 10)+", over the "+strconv.FormatInt(s.maxWeight, 10)+" a stripe holds", key)
+          when: weight > s.maxWeight
+      - return: weight, nil
+  - of: (*memoryStore).store
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).store
+        kind: self
+      - id: primitiveTTL
+        kind: internal
+      - id: s.clk.Now().Add
+        kind: value
+      - id: stripe.tags.add
+        kind: internal
+      - id: stripe.lru.SetTTL
+        kind: value
+      - id: stripe.drainEvicted
+        kind: internal
+    steps:
+      - bind: lifetime
+        eval: primitiveTTL(ttl, s.defaultTTL)
+        to: primitiveTTL
+      - set: rec.expireAt
+        value: time.Time{}
+      - opt:
+          do:
+            - set: rec.expireAt
               to: s.clk.Now().Add
-              value: s.clk.Now().Add(ttl)
-          when: ttl > 0
-      - bind: owned
-        eval: s.tags.add(key, entry.Tags)
-        to: s.tags.add
-      - eval: "s.lru.SetTTL(key, record[V]{value: entry.Value, expireAt: expireAt, tags: owned}, ttl)"
-        to: s.lru.SetTTL
-      - eval: s.drainEvicted()
-        to: s.drainEvicted
-      - return: nil
+              value: s.clk.Now().Add(lifetime)
+          when: lifetime > 0
+      - set: rec.tags
+        to: stripe.tags.add
+        value: stripe.tags.add(key, rec.tags)
+      - eval: stripe.lru.SetTTL(key, rec, lifetime)
+        to: stripe.lru.SetTTL
+      - eval: stripe.drainEvicted()
+        to: stripe.drainEvicted
   - of: (*memoryStore).Delete
     participants:
       - id: caller
         kind: actor
       - id: (*memoryStore).Delete
         kind: self
-      - id: s.lru.Delete
+      - id: s.stripeOf
+        kind: internal
+      - id: stripe.lru.Delete
         kind: value
-      - id: s.tags.remove
+      - id: stripe.tags.remove
         kind: internal
     steps:
+      - bind: stripe
+        eval: s.stripeOf(key)
+        to: s.stripeOf
       - lock:
-          mutex: s.mu
-      - eval: s.lru.Delete(key)
-        to: s.lru.Delete
-      - eval: s.tags.remove(key)
-        to: s.tags.remove
+          mutex: stripe.mu
+      - eval: stripe.lru.Delete(key)
+        to: stripe.lru.Delete
+      - eval: stripe.tags.remove(key)
+        to: stripe.tags.remove
       - return: nil
   - of: (*memoryStore).InvalidateTag
     participants:
@@ -662,11 +1514,7 @@ sequences:
         kind: actor
       - id: (*memoryStore).InvalidateTag
         kind: self
-      - id: s.tags.keysFor
-        kind: internal
-      - id: s.lru.Delete
-        kind: value
-      - id: s.tags.remove
+      - id: stripe.invalidate
         kind: internal
     steps:
       - opt:
@@ -675,40 +1523,101 @@ sequences:
                 0, kerrs.Wrap(corecache.CacheEntryRejected, kerrs.WrapParams{},
                 			kerrs.String("part", "tag"), kerrs.String("problem", "empty"))
           when: tag == ""
-      - lock:
-          mutex: s.mu
-      - bind: keys
-        eval: s.tags.keysFor(tag)
-        to: s.tags.keysFor
       - loop:
           do:
-            - eval: s.lru.Delete(key)
-              to: s.lru.Delete
-            - eval: s.tags.remove(key)
-              to: s.tags.remove
+            - op: +=
+              set: removed
+              to: stripe.invalidate
+              value: stripe.invalidate(tag)
+          key: _
+          range: s.stripes
+          value: stripe
+      - return: removed, nil
+  - of: (*memoryStripe).invalidate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStripe).invalidate
+        kind: self
+      - id: m.tags.keysFor
+        kind: internal
+      - id: m.lru.Delete
+        kind: value
+      - id: m.tags.remove
+        kind: internal
+    steps:
+      - lock:
+          mutex: m.mu
+      - bind: keys
+        eval: m.tags.keysFor(tag)
+        to: m.tags.keysFor
+      - loop:
+          do:
+            - eval: m.lru.Delete(key)
+              to: m.lru.Delete
+            - eval: m.tags.remove(key)
+              to: m.tags.remove
           key: _
           range: keys
           value: key
-      - return: len(keys), nil
+      - return: len(keys)
+  - of: (*memoryStore).Expire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).Expire
+        kind: self
+      - id: stripe.expire
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - op: +=
+              set: removed
+              to: stripe.expire
+              value: stripe.expire()
+          key: _
+          range: s.stripes
+          value: stripe
+      - return: removed, nil
+  - of: (*memoryStripe).expire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStripe).expire
+        kind: self
+      - id: m.lru.Expire
+        kind: value
+      - id: m.drainEvicted
+        kind: internal
+    steps:
+      - lock:
+          mutex: m.mu
+      - bind: reaped
+        eval: m.lru.Expire()
+        to: m.lru.Expire
+      - eval: m.drainEvicted()
+        to: m.drainEvicted
+      - return: reaped
   - of: (*memoryStore).Load
     participants:
       - id: caller
         kind: actor
       - id: (*memoryStore).Load
         kind: self
-      - id: s.Fetch
+      - id: s.fetchRecord
         kind: internal
       - id: s.group.Do
         kind: value
     steps:
       - opt:
           do:
-            - return: hit, nil
+            - return: rec.value, rec.absent
           init:
-            bind: hit, ok, fetchErr
-            eval: s.Fetch(ctx, key)
-            to: s.Fetch
-          when: fetchErr == nil && ok
+            bind: rec, ok
+            eval: s.fetchRecord(key)
+            to: s.fetchRecord
+          when: ok
       - bind: filled, _, groupErr
         eval: |-
           s.group.Do(ctx, key, func(callCtx context.Context) (V, error) {
@@ -723,19 +1632,42 @@ sequences:
         kind: actor
       - id: (*memoryStore).fillOnce
         kind: self
-      - id: s.Fetch
+      - id: s.fetchRecord
         kind: internal
-      - id: s.Set
+      - id: s.fillAndStore
         kind: internal
     steps:
       - opt:
           do:
-            - return: hit, nil
+            - return: rec.value, rec.absent
           init:
-            bind: hit, ok, fetchErr
-            eval: s.Fetch(ctx, key)
-            to: s.Fetch
-          when: fetchErr == nil && ok
+            bind: rec, ok
+            eval: s.fetchRecord(key)
+            to: s.fetchRecord
+          when: ok
+      - return: s.fillAndStore(ctx, key, fill)
+        to: s.fillAndStore
+  - of: (*memoryStore).fillAndStore
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).fillAndStore
+        kind: self
+      - id: fillFailure
+        kind: internal
+      - id: corecache
+        kind: package
+      - id: s.stripeOf
+        kind: internal
+      - id: stripe.mu.Lock
+        kind: value
+      - id: s.store
+        kind: internal
+      - id: stripe.mu.Unlock
+        kind: value
+      - id: s.Set
+        kind: internal
+    steps:
       - bind: entry, fillErr
         eval: fill(ctx)
       - opt:
@@ -743,7 +1675,26 @@ sequences:
             - var:
                 name: zero
                 type: V
-            - return: zero, fillFailure(key, fillErr)
+            - bind: labelled
+              eval: fillFailure(key, fillErr)
+              to: fillFailure
+            - opt:
+                do:
+                  - bind: stripe
+                    eval: s.stripeOf(key)
+                    to: s.stripeOf
+                  - eval: stripe.mu.Lock()
+                    to: stripe.mu.Lock
+                  - eval: "s.store(stripe, key, record[V]{tags: entry.Tags, absent: labelled, weight: s.absentWeight()}, ttl)"
+                    to: s.store
+                  - eval: stripe.mu.Unlock()
+                    to: stripe.mu.Unlock
+                init:
+                  bind: ttl, absent
+                  eval: corecache.AbsentTTLOf(fillErr)
+                  to: corecache
+                when: absent && ttl > 0 && !slices.Contains(entry.Tags, "")
+            - return: zero, labelled
           when: fillErr != nil
       - opt:
           do:
@@ -757,6 +1708,291 @@ sequences:
             to: s.Set
           when: setErr != nil
       - return: entry.Value, nil
+  - of: (*memoryStore).FetchMany
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).FetchMany
+        kind: self
+      - id: s.stripes[0].fetchInto
+        kind: internal
+      - id: s.stripes[at].fetchInto
+        kind: internal
+    steps:
+      - bind: found
+        eval: make(map[string]V, len(keys))
+      - opt:
+          do:
+            - eval: s.stripes[0].fetchInto(found, keys)
+              to: s.stripes[0].fetchInto
+            - return: found, nil
+          when: len(s.stripes) == 1
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: s.stripes[at].fetchInto(found, group)
+                    to: s.stripes[at].fetchInto
+                when: len(group) > 0
+          key: at
+          range: s.groupByStripe(keys)
+          value: group
+      - return: found, nil
+  - of: (*memoryStripe).fetchInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStripe).fetchInto
+        kind: self
+      - id: m.fetch
+        kind: internal
+    steps:
+      - lock:
+          mutex: m.mu
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, seen
+                  eval: found[key]
+                when: seen
+            - opt:
+                do:
+                  - set: found[key]
+                    value: rec.value
+                init:
+                  bind: rec, ok
+                  eval: m.fetch(key)
+                  to: m.fetch
+                when: ok && rec.absent == nil
+          key: _
+          range: keys
+          value: key
+  - of: (*memoryStore).groupByStripe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).groupByStripe
+        kind: self
+      - id: s.stripeIndex
+        kind: internal
+    steps:
+      - bind: groups
+        eval: make([][]string, len(s.stripes))
+      - loop:
+          do:
+            - bind: at
+              eval: s.stripeIndex(key)
+              to: s.stripeIndex
+            - set: groups[at]
+              value: append(groups[at], key)
+          key: _
+          range: keys
+          value: key
+      - return: groups
+  - of: (*memoryStore).SetMany
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).SetMany
+        kind: self
+      - id: s.validate
+        kind: internal
+      - id: s.stripeIndex
+        kind: internal
+      - id: s.setInto
+        kind: internal
+    steps:
+      - bind: weights
+        eval: make(map[string]int64, len(entries))
+      - loop:
+          do:
+            - bind: weight, refusal
+              eval: s.validate(key, entry)
+              to: s.validate
+            - opt:
+                do:
+                  - return: refusal
+                when: refusal != nil
+            - set: weights[key]
+              value: weight
+          key: key
+          range: entries
+          value: entry
+      - bind: groups
+        eval: make([][]string, len(s.stripes))
+      - loop:
+          do:
+            - bind: at
+              eval: s.stripeIndex(key)
+              to: s.stripeIndex
+            - set: groups[at]
+              value: append(groups[at], key)
+          key: key
+          range: entries
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: s.setInto(s.stripes[at], group, entries, weights)
+                    to: s.setInto
+                when: len(group) > 0
+          key: at
+          range: groups
+          value: group
+      - return: nil
+  - of: (*memoryStore).setInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).setInto
+        kind: self
+      - id: s.store
+        kind: internal
+    steps:
+      - lock:
+          mutex: stripe.mu
+      - loop:
+          do:
+            - bind: entry
+              eval: entries[key]
+            - eval: "s.store(stripe, key, record[V]{value: entry.Value, tags: entry.Tags, weight: weights[key]}, entry.TTL)"
+              to: s.store
+          key: _
+          range: keys
+          value: key
+  - of: (*memoryStore).stripeIndex
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: len(s.stripes) == 1
+      - return: int(maphashString(s, key) % uint64(len(s.stripes)))
+  - of: remainingOf
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: expireAt.IsZero()
+      - return: max(expireAt.Sub(now), 0)
+  - of: (*memoryStore).LoadRefreshing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).LoadRefreshing
+        kind: self
+      - id: s.stripeOf
+        kind: internal
+      - id: stripe.mu.Lock
+        kind: value
+      - id: stripe.fetch
+        kind: internal
+      - id: remainingOf
+        kind: internal
+      - id: stripe.mu.Unlock
+        kind: value
+      - id: s.Load
+        kind: internal
+      - id: s.refresh
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: V
+            - return: zero, refusedWindow(before)
+          when: before <= 0
+      - bind: stripe
+        eval: s.stripeOf(key)
+        to: s.stripeOf
+      - eval: stripe.mu.Lock()
+        to: stripe.mu.Lock
+      - bind: rec, ok
+        eval: stripe.fetch(key)
+        to: stripe.fetch
+      - bind: left
+        eval: remainingOf(rec.expireAt, s.clk.Now())
+        to: remainingOf
+      - bind: start
+        eval: ok && rec.absent == nil && !rec.expireAt.IsZero() && left < before && stripe.claimRefresh(key)
+      - eval: stripe.mu.Unlock()
+        to: stripe.mu.Unlock
+      - opt:
+          do:
+            - return: s.Load(ctx, key, fill)
+              to: s.Load
+          when: "!ok"
+      - opt:
+          do:
+            - go: s.refresh(ctx, stripe, key, fill, left)
+              to: s.refresh
+          when: start
+      - return: rec.value, rec.absent
+  - of: (*memoryStripe).claimRefresh
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: _, running
+            eval: m.refreshing[key]
+          when: running
+      - opt:
+          do:
+            - set: m.refreshing
+              value: make(map[string]struct{})
+          when: m.refreshing == nil
+      - set: m.refreshing[key]
+        value: struct{}{}
+      - return: "true"
+  - of: (*memoryStore).refresh
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStore).refresh
+        kind: self
+      - id: stripe.releaseRefresh
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: s.fillAndStore
+        kind: internal
+    steps:
+      - defer: stripe.releaseRefresh(key)
+        to: stripe.releaseRefresh
+      - bind: bounded, cancel
+        eval: context.WithTimeout(context.WithoutCancel(ctx), left)
+        to: context
+      - defer: cancel()
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, fillErr
+            eval: s.fillAndStore(bounded, key, fill)
+            to: s.fillAndStore
+          when: fillErr != nil
+  - of: (*memoryStripe).releaseRefresh
+    steps:
+      - lock:
+          mutex: m.mu
+      - eval: delete(m.refreshing, key)
+  - of: refusedWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: refusedWindow
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(corecache.CacheMisconfigured, kerrs.WrapParams{},
+          		kerrs.String("option", "before"), kerrs.String("value", before.String()))
+        to: kerrs
   - of: validateEntry
     participants:
       - id: caller

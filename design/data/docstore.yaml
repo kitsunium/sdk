@@ -154,10 +154,28 @@ packages:
             name: CodeVersionsInvalid
             value: "0x00_03_50_16"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeRevisionMismatch identifies a conditional replacement whose revision
+              is not the stored document's: another write landed after the caller read
+              it (ADR 0209).
+            name: CodeRevisionMismatch
+            value: "0x00_03_50_17"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeIndexNotOrdered identifies a range read of an index declared
+              without an order: only an index [Ordered] built keeps its keys in
+              order (ADR 0209, amended 2026-11-03).
+            name: CodeIndexNotOrdered
+            value: "0x00_03_50_18"
+        type: errs.Code
     doc: |-
       Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;
-      ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21, and
-      ADR 0178 22, for a document written with its versions). Both
+      ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21,
+      ADR 0178 22, for a document written with its versions, and ADR 0209 23,
+      for a replacement made on a revision, and 24, for a range read of an
+      index that keeps no order). Both
       engines answer every one of them alike, and the range keeps the LL = 3 its
       engine allocated it under now that it is declared here (ADR 0160).
 
@@ -178,12 +196,17 @@ packages:
           [KeyListerContext] for the keys alone, [VersionWriter] and
           [VersionWriterContext] for a document written with its versions as they
           are, [VersionWeigher] and [VersionWeigherContext] for what the versions
-          weigh, and [Announcer] is the pair of hooks both engines answer exactly
-          as they are;
+          weigh, [Revisioned] and [RevisionedContext] for a replacement made on the
+          revision the caller read, [Batcher] and [BatcherContext] for several
+          writes as one, through a [BatchWriter], [Pager] and [PagerContext] for
+          the documents a page at a time, [Ranged] and [RangedContext] for an
+          ordered index read between two keys, and [Announcer] is the pair of
+          hooks both engines answer exactly as they are;
         - the values both engines read and return — [EntryValue], [VersionValue],
-          [StampValue], [TombstoneValue], [VersionWeightValue] — and [IndexSpec],
-          the declaration both take, with its two constructors [Unique] and
-          [Index];
+          [StampValue], [TombstoneValue], [VersionWeightValue], [RevisionValue] —
+          and [IndexSpec],
+          the declaration both take, with its three constructors [Unique],
+          [Index] and [Ordered];
         - the codes of the 0.3.80.* range and their sentinels: both engines answer
           the same refusals under the same codes (ADR 0160).
 
@@ -200,8 +223,11 @@ packages:
 
       Package docstore — the siblings of Collection (ADR 0039): a document's
       versions, its trash, the keys alone (ADR 0178), a document written with its
-      versions as they are (ADR 0178), what the versions weigh, and the same ports
-      with a context on every call, which the SQL engine implements.
+      versions as they are (ADR 0178), what the versions weigh, a replacement made
+      on a revision and several writes as one (ADR 0209), the documents a page
+      at a time and an ordered index read between two keys (ADR 0209, amended
+      2026-11-03), and the same ports with a context on every call, which the
+      SQL engine implements.
 
       Package docstore — declares the sentinel *errs.Error outcomes both engines
       answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
@@ -248,6 +274,24 @@ packages:
           - name: keys
             type: func(T) []string
         name: Index
+        out:
+          - type: IndexSpec[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          Ordered declares an index over the one key key returns that keeps its
+          keys in order, for [Ranged].Range: a key may file several documents, and
+          an empty key is not indexed. Keys compare as bytes, as Go compares
+          strings, so a number is padded to a fixed width and an instant written
+          in RFC 3339 at one offset — UTC — to sort as it reads. Find and FindAfter
+          read it as any index.
+        in:
+          - name: name
+            type: string
+          - name: key
+            type: func(T) string
+        name: Ordered
         out:
           - type: IndexSpec[T]
         typeParams:
@@ -300,6 +344,11 @@ packages:
           The versions of a document are [Versioned], its sibling; the file engine's
           Stats, Fold and Close are the engine's own, because a double of the port has
           no files to fold.
+
+          Consistency: a write is read back by every call of the process once it has
+          returned — read-your-writes within the process — and a reader never waits
+          for a writer or a disk: it sees the store before a write or after it, never
+          between. Nothing is shared with another process.
         embeds:
           - Announcer
         methods:
@@ -523,6 +572,12 @@ packages:
 
           The SQL engine's Count and Reindex are the engine's own: a double of the
           port has no tables to count or to file again.
+
+          Consistency: a call reads at the isolation of the transaction it runs on. A
+          write is visible to its own transaction at once, and to every other one
+          once it commits — never before, and never if it rolls back; a REPEATABLE
+          READ caller reads its own snapshot. A call on the pool is its own
+          transaction, and reads what is committed.
         embeds:
           - Announcer
         methods:
@@ -973,6 +1028,309 @@ packages:
               - type: VersionWeightValue
               - type: error
         name: VersionWeigherContext
+      - doc: |-
+          Revisioned is a replacement made on the revision the caller read, on a
+          store whose calls take no context: the sibling of [Collection] the file
+          engine implements beside it (ADR 0209). A caller that reads a document,
+          shows it to a person and writes it back a minute later cannot hold
+          Update's lock that long, and Replace would overwrite whatever landed in
+          between: Revision hands it the document with a token, and ReplaceIf
+          writes only while the token is still the stored document's.
+
+          The token is opaque and an engine's own: the file engine's names the
+          stored JSON, the SQL engine's the row's revision. A token from one store
+          or engine never matches another's document unless that document is what
+          it names, and a token is never a number to compare.
+        methods:
+          - doc: |-
+              Revision returns the document stored under key and its revision, the
+              token ReplaceIf compares. DOCUMENT_NOT_FOUND when no document is
+              stored under key — a trashed one included.
+            in:
+              - name: key
+                type: string
+            name: Revision
+            out:
+              - type: T
+              - type: RevisionValue
+              - type: error
+          - doc: |-
+              ReplaceIf stores v over the document under its key when that document's
+              revision is still rev, exactly as Replace stores it — its versions,
+              its index keys, OnWrite. REVISION_MISMATCH when another write changed
+              the document since rev was read, which then stays as that write left
+              it; DOCUMENT_NOT_FOUND when no document is under the key, so a
+              document deleted meanwhile is never brought back.
+            in:
+              - name: v
+                type: T
+              - name: rev
+                type: RevisionValue
+            name: ReplaceIf
+            out:
+              - type: error
+        name: Revisioned
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          RevisionedContext is [Revisioned] with a context on every call: the sibling
+          of [CollectionContext] the SQL engine implements beside it. The revision
+          is the row's, which every write moves.
+        methods:
+          - doc: |-
+              Revision is Revisioned.Revision under ctx, read in one statement on the
+              transaction ctx carries for the store's database, and on the pool
+              otherwise.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Revision
+            out:
+              - type: T
+              - type: RevisionValue
+              - type: error
+          - doc: |-
+              ReplaceIf is Revisioned.ReplaceIf under ctx: the comparison and the
+              write are one statement, or a row locked from the comparison to the
+              write, in the write's transaction — a savepoint of the one ctx
+              carries.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+              - name: rev
+                type: RevisionValue
+            name: ReplaceIf
+            out:
+              - type: error
+        name: RevisionedContext
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          BatchWriter records the writes of one batch, in order, for [Batcher] and
+          [BatcherContext]: each call prepares its document — its key, its JSON, its
+          index keys — and answers at once only what the document alone decides,
+          DOCUMENT_KEY_EMPTY, DOCUMENT_UNENCODABLE or, on the SQL engine,
+          KEY_TOO_LONG. What the store decides — DOCUMENT_EXISTS, DOCUMENT_NOT_FOUND,
+          UNIQUE_KEY_TAKEN — is decided when the batch commits, in order, each write
+          seeing the batch's own writes before it, and the first refusal refuses the
+          batch. A BatchWriter is valid only while the function it was given to runs.
+        methods:
+          - doc: Put records v, created or replacing whatever is under its key.
+            in:
+              - name: v
+                type: T
+            name: Put
+            out:
+              - type: error
+          - doc: Insert records v, which must be new.
+            in:
+              - name: v
+                type: T
+            name: Insert
+            out:
+              - type: error
+          - doc: Replace records v over the document under its key, which must be there.
+            in:
+              - name: v
+                type: T
+            name: Replace
+            out:
+              - type: error
+          - doc: Delete records the deletion of the document under key, which must be there.
+            in:
+              - name: key
+                type: string
+            name: Delete
+            out:
+              - type: error
+        name: BatchWriter
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          Batcher writes several documents as one, on a store whose calls take no
+          context: the sibling of [Collection] the file engine implements beside it
+          (ADR 0209, amended 2026-11-02). Every write of a batch takes effect, or
+          none does — an order and its stock line, a user and the reservation of
+          its e-mail — and a bulk import pays one durable write per batch instead of
+          one per document.
+        methods:
+          - doc: |-
+              Batch runs fn with a [BatchWriter], then writes what it recorded, in
+              order, as one: every write, or none when one is refused — the refusal
+              returned, nothing changed — and none when fn returns an error, which
+              Batch returns as it is. A write makes its version and files its index
+              keys as it would alone; OnWrite and OnDelete are told about each write
+              once the whole batch took effect, in order. fn runs before any lock: it
+              may read the store, and its writes wait for the batch.
+            in:
+              - name: fn
+                type: func(w BatchWriter[T]) error
+            name: Batch
+            out:
+              - type: error
+        name: Batcher
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          BatcherContext is [Batcher] with a context on every call: the sibling of
+          [CollectionContext] the SQL engine implements beside it. A batch is one
+          transaction — a savepoint of the one ctx carries — so it commits or rolls
+          back whole, and its hooks run after the commit.
+        methods:
+          - doc: Batch is Batcher.Batch under ctx, in one transaction.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: fn
+                type: func(w BatchWriter[T]) error
+            name: Batch
+            out:
+              - type: error
+        name: BatcherContext
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          Pager reads a store's documents a page at a time, on a store whose calls
+          take no context: the sibling of [Collection] the file engine implements
+          beside it (ADR 0209, amended 2026-11-03). A page costs what its own
+          documents weigh, never the store's: List and Find read every document
+          they answer at once, a pager reads at most limit of them per call, and
+          a caller resumes after the last key it was handed.
+        methods:
+          - doc: |-
+              Documents yields the documents whose key sorts after after — from the
+              first when after is empty — in key order, byte order as Go compares
+              strings, each with its key and its JSON, a copy the caller owns: at
+              most limit of them, or every one when limit is not positive. Stopping
+              early is allowed, and the last key yielded is where the next page
+              starts. A write made during the listing is seen when its key sorts
+              after the last key read. A failure is yielded once, with an empty
+              entry, and ends the listing; a closed store yields STORE_CLOSED.
+            in:
+              - name: after
+                type: string
+              - name: limit
+                type: int
+            name: Documents
+            out:
+              - type: iter.Seq2[EntryValue, error]
+          - doc: |-
+              FindAfter yields the documents filed under key in the index named
+              index whose store key sorts after after — from the first when after is
+              empty — in store-key order, at most limit of them, or every one when
+              limit is not positive: Find a page at a time. It reads any index; an
+              undeclared one yields INDEX_UNKNOWN, a document that no longer decodes
+              DOCUMENT_UNDECODABLE, each once, ending the listing.
+            in:
+              - name: index
+              - name: key
+              - name: after
+                type: string
+              - name: limit
+                type: int
+            name: FindAfter
+            out:
+              - type: iter.Seq2[T, error]
+        name: Pager
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          PagerContext is [Pager] with a context on every call: the sibling of
+          [CollectionContext] the SQL engine implements beside it.
+        methods:
+          - doc: |-
+              Documents is Pager.Documents under ctx: each page one statement on the
+              transaction ctx carries for the store's database, and on the pool
+              otherwise, resuming after the last key read.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: after
+                type: string
+              - name: limit
+                type: int
+            name: Documents
+            out:
+              - type: iter.Seq2[EntryValue, error]
+          - doc: FindAfter is Pager.FindAfter under ctx, a page per statement.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: index
+              - name: key
+              - name: after
+                type: string
+              - name: limit
+                type: int
+            name: FindAfter
+            out:
+              - type: iter.Seq2[T, error]
+        name: PagerContext
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          Ranged reads an ordered index between two keys, on a store whose calls
+          take no context: the sibling of [Collection] the file engine implements
+          beside it (ADR 0209, amended 2026-11-03). It decodes only the documents
+          it yields — the orders between two dates, not every order through
+          Filter.
+        methods:
+          - doc: |-
+              Range yields the documents filed in the ordered index named index under
+              a key from lo, included, to hi, excluded — no upper bound when hi is
+              empty — in index-key order, then store-key order among the documents
+              of one key, at most limit of them, or every one when limit is not
+              positive. Keys compare as bytes. An undeclared index yields
+              INDEX_UNKNOWN, an index declared without [Ordered] INDEX_NOT_ORDERED,
+              a document that no longer decodes DOCUMENT_UNDECODABLE, each once,
+              ending the listing.
+            in:
+              - name: index
+              - name: lo
+              - name: hi
+                type: string
+              - name: limit
+                type: int
+            name: Range
+            out:
+              - type: iter.Seq2[T, error]
+        name: Ranged
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          RangedContext is [Ranged] with a context on every call: the sibling of
+          [CollectionContext] the SQL engine implements beside it. The index table's
+          primary key answers the range.
+        methods:
+          - doc: Range is Ranged.Range under ctx, a page per statement.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: index
+              - name: lo
+              - name: hi
+                type: string
+              - name: limit
+                type: int
+            name: Range
+            out:
+              - type: iter.Seq2[T, error]
+        name: RangedContext
+        typeParams:
+          - constraint: any
+            name: T
     sentinels:
       - var:
           - code: CodeDocumentNotFound
@@ -1202,14 +1560,36 @@ packages:
             private: "service/data/docstore: PutDocument was given versions no store keeps as given; the fields name the store and the problem, never a key or a version"
             public: The document's versions cannot be written as they were given
             reason: VERSIONS_INVALID
+          - code: CodeRevisionMismatch
+            doc: |-
+              RevisionMismatch refuses a conditional replacement: the document under
+              the key is no longer the one the caller's revision names — another
+              write changed it after Revision read it. Nothing changed; read it
+              again, and decide again.
+            http: 409
+            name: RevisionMismatch
+            private: "service/data/docstore: ReplaceIf was given a revision the stored document no longer has; the fields name the store, never the key or the revision"
+            public: The document changed since it was read
+            reason: REVISION_MISMATCH
+          - code: CodeIndexNotOrdered
+            doc: |-
+              IndexNotOrdered refuses a range read of an index declared without an
+              order: declare it with [Ordered], or read it with Find.
+            http: 400
+            name: IndexNotOrdered
+            private: "service/data/docstore: Range reads an index in key order and was given one declared without Ordered; the index field names it"
+            public: "The index keeps no order: declare it with Ordered"
+            reason: INDEX_NOT_ORDERED
     types:
       - doc: |-
           IndexSpec declares one secondary index: a name to read it by, whether it is
-          unique, and the function that gives a document its keys in it. Build one
-          with [Unique] or [Index], and give it to an engine's constructor — Open or
-          OpenSQL in internal/service/data/docstore, which refuse the same
-          declarations alike. The file engine rebuilds its indexes when the store
-          opens; both keep them in step with every write.
+          unique, whether it keeps its keys in order, and the function that gives a
+          document its keys in it. Build one with [Unique], [Index] or [Ordered], and
+          give it to an engine's constructor — Open or OpenSQL in
+          internal/service/data/docstore, which refuse the same declarations alike.
+          The file engine rebuilds its indexes when the store opens; both keep them
+          in step with every write. A field added here is added at the end, so a
+          declaration written field by field keeps compiling.
         name: IndexSpec
         struct:
           fields:
@@ -1223,6 +1603,13 @@ packages:
               type: string
             - doc: Unique refuses a write that would file two documents under one key.
               name: Unique
+              type: bool
+            - doc: |-
+                Ordered keeps the index's keys in order, for [Ranged].Range. The SQL
+                engine files an ordered index's rows as any other's, so declaring
+                one changes no table; the file engine keeps a sorted list beside the
+                index it rebuilds at Open.
+              name: Ordered
               type: bool
         typeParams:
           - constraint: any
@@ -1331,6 +1718,15 @@ packages:
                 The instants and the metadata they carry are not counted.
               name: Bytes
               type: int64
+      - doc: |-
+          RevisionValue is the token [Revisioned].Revision returns with a document
+          and ReplaceIf compares: opaque, an engine's own, equal to the one read
+          while the stored document is the one read. The file engine renders the
+          SHA-256 of the document's JSON as json.Marshal writes it, which holds
+          across a fold and a reopen; the SQL engine renders the row's revision,
+          which every write moves. Compare two only for equality.
+        name: RevisionValue
+        underlying: string
   - constants:
       - doc: |-
           DefaultFoldAt is the least number of overlay entries that folds the overlay
@@ -1547,6 +1943,13 @@ packages:
           gone — so a run MySQL's implicit commit stopped halfway completes when it
           runs again, and applying the migration over tables a previous deployment
           made changes nothing (ADR 0139).
+
+          Its Checksum fingerprints the statements Up runs (ADR 0055, amended
+          2026-11-02): a version table that recorded it refuses a build whose
+          statements differ, MIGRATION_CHANGED, and one that recorded the version
+          without a checksum is given this one by the next locked run. The
+          statements are therefore never edited: a later column comes as a
+          migration of its own.
         in:
           - name: dialect
             type: coresql.Dialect
@@ -1567,7 +1970,8 @@ packages:
           run it to turn versions off for good (ADR 0143).
 
           Its one statement does nothing when the table already exists, or is already
-          gone, as SQLMigration's do.
+          gone, as SQLMigration's do. Its Checksum fingerprints that statement, as
+          SQLMigration's does.
         in:
           - name: dialect
             type: coresql.Dialect
@@ -1576,6 +1980,34 @@ packages:
           - name: version
             type: uint64
         name: SQLVersionsMigration
+        out:
+          - type: coresql.MigrationValue
+          - type: error
+      - doc: |-
+          SQLVersionsTrashIndexMigration returns the migration that indexes the trash
+          of a SQL store named table on dialect — the rows numbered 0 of
+          <table>___vs, which Tombstones reads — as a core/data/sql MigrationValue
+          numbered version, after the one [SQLVersionsMigration] returns. Without
+          it, Tombstones scans every version of every document to find a handful
+          of trashed ones; with it, the database reads the trash alone, in key
+          order (ADR 0143, amended 2026-11-02).
+
+          The index is <table>___tr: on PostgreSQL and SQLite a partial index over
+          doc_key WHERE num = 0, on MySQL a key over (num, doc_key), which has no
+          partial index. A versions table an earlier release created gets it from
+          this migration, and so does a new one: run it once, after
+          SQLVersionsMigration, wherever versions are kept. Up does nothing when
+          the index exists — MySQL, which has no IF NOT EXISTS for an index, asks
+          information_schema first — and Down drops it, doing nothing when it is
+          gone; no version is touched either way.
+        in:
+          - name: dialect
+            type: coresql.Dialect
+          - name: table
+            type: string
+          - name: version
+            type: uint64
+        name: SQLVersionsTrashIndexMigration
         out:
           - type: coresql.MigrationValue
           - type: error
@@ -1726,6 +2158,61 @@ packages:
             name: Keys
             out:
               - type: iter.Seq2[string, error]
+            recv: pointer
+          - doc: |-
+              Documents yields the documents whose key sorts after after, in key
+              order, each with its key and a copy of its JSON, at most limit of them —
+              every one when limit is not positive — as core/data/docstore.Pager
+              says. Each page is taken under the read lock: the next keys above the
+              last one yielded, chosen without sorting the store, so a page costs its
+              own documents and a pass over the keys, never a copy of them all. A
+              write made during the listing is seen when its key sorts after the last
+              key read. A closed store yields StoreClosed once.
+            in:
+              - name: after
+                type: string
+              - name: limit
+                type: int
+            name: Documents
+            out:
+              - type: iter.Seq2[coredocstore.EntryValue, error]
+            recv: pointer
+          - doc: |-
+              FindAfter yields the documents filed under key in the index named index
+              whose store key sorts after after, in store-key order, at most limit of
+              them — every one when limit is not positive —, each decoded as it is
+              yielded. The holders are taken under the read lock when the range
+              starts. IndexUnknown for an undeclared index, StoreClosed after Close.
+            in:
+              - name: index
+              - name: key
+              - name: after
+                type: string
+              - name: limit
+                type: int
+            name: FindAfter
+            out:
+              - type: iter.Seq2[T, error]
+            recv: pointer
+          - doc: |-
+              Range yields the documents filed in the ordered index named index under a
+              key from lo, included, to hi, excluded — no upper bound when hi is empty
+              — in index-key order, then store-key order, at most limit of them —
+              every one when limit is not positive —, each decoded as it is yielded,
+              and no other. The index keeps its entries sorted, so the range is a
+              binary search and a walk, taken under the read lock when the range
+              starts. IndexUnknown for an undeclared index, IndexNotOrdered for one
+              declared without Ordered, StoreClosed after Close.
+            in:
+              - name: index
+              - name: lo
+              - name: hi
+                type: string
+              - name: limit
+                type: int
+            name: Range
+            out:
+              - type: iter.Seq2[T, error]
             recv: pointer
           - doc: |-
               Lookup returns the document holding key in the unique index named index,
@@ -2034,6 +2521,48 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
+              Revision returns the document stored under key and its revision — the
+              SHA-256 of its JSON as json.Marshal writes it, so a fold, a reopen or
+              the memory store leave it unchanged — read under the read lock.
+              DocumentNotFound when no document is stored under key.
+            in:
+              - name: key
+                type: string
+            name: Revision
+            out:
+              - type: T
+              - type: coredocstore.RevisionValue
+              - type: error
+            recv: pointer
+          - doc: |-
+              ReplaceIf stores v over the document under its key, as Replace does,
+              when that document's revision is still rev — compared under the
+              writers' lock, which the write then keeps. RevisionMismatch otherwise,
+              DocumentNotFound when there is no document.
+            in:
+              - name: v
+                type: T
+              - name: rev
+                type: coredocstore.RevisionValue
+            name: ReplaceIf
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Batch writes what fn records as one: planned under the writers' lock
+              over the store and the batch's own writes — the first refusal ends it,
+              nothing written — then published as ONE group entry holding every
+              written key's latest state, then each key's own entry, then the group
+              entry removed; a crash leaves the group entry, which the next Open
+              replays over the keys' entries. The hooks run once it took effect.
+            in:
+              - name: fn
+                type: func(w coredocstore.BatchWriter[T]) error
+            name: Batch
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
               VersionWeight reports what the store keeps beyond its documents — its
               former versions, its trashed documents and the bytes of their JSON — as
               core/data/docstore.VersionWeigher says. It reads the counter every
@@ -2119,7 +2648,11 @@ packages:
                 lookup, which a keyed hash keeps: a framework passes an HMAC under a key
                 of its own, and an e-mail address never reaches a table. It is called
                 with the index's name and a non-empty key; an empty answer files
-                nothing, as an empty key does. Nil stores index keys as they are.
+                nothing, as an empty key does. Nil stores index keys as they are. An
+                ordered index's keys, and Range's bounds, go through it too: Range
+                compares them as the table holds them, so a transform that does not
+                keep their order — a keyed hash — leaves Range no order to read;
+                return an ordered index's key as it is.
               name: IndexKey
               type: func(index, key string) []byte
             - doc: |-
@@ -2255,6 +2788,68 @@ packages:
             name: Keys
             out:
               - type: iter.Seq2[string, error]
+            recv: pointer
+          - doc: |-
+              Documents yields the documents whose key sorts after after, in key
+              order, each with its key and the JSON the store wrote, at most limit of
+              them — every one when limit is not positive. It reads them in pages of
+              at most a few hundred, each page one statement on the primary key that
+              resumes after the last key read, on the transaction ctx carries, else
+              on the pool; a page is read whole and its rows closed before the first
+              of it is yielded, so the caller may write in the loop. A failed
+              statement is yielded once, as StatementFailed, and ends the listing.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: after
+                type: string
+              - name: limit
+                type: int
+            name: Documents
+            out:
+              - type: iter.Seq2[coredocstore.EntryValue, error]
+            recv: pointer
+          - doc: |-
+              FindAfter yields the documents filed under key in the index named index
+              whose store key sorts after after, in store-key order, at most limit of
+              them — every one when limit is not positive —, a page per statement on
+              the index table's primary key, decoded as they are yielded.
+              IndexUnknown for an undeclared index.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: index
+              - name: key
+              - name: after
+                type: string
+              - name: limit
+                type: int
+            name: FindAfter
+            out:
+              - type: iter.Seq2[T, error]
+            recv: pointer
+          - doc: |-
+              Range yields the documents filed in the ordered index named index under a
+              key from lo, included, to hi, excluded — no upper bound when hi is empty
+              — in index-key order, then store-key order, at most limit of them —
+              every one when limit is not positive —, a page per statement on the
+              index table's primary key, which resumes after the last index key and
+              store key read; only the documents yielded are read and decoded. The
+              bounds reach the table as an index key does, through IndexKey when one
+              is set. IndexUnknown for an undeclared index, IndexNotOrdered for one
+              declared without Ordered.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: index
+              - name: lo
+              - name: hi
+                type: string
+              - name: limit
+                type: int
+            name: Range
+            out:
+              - type: iter.Seq2[T, error]
             recv: pointer
           - doc: Count returns how many documents the store holds.
             in:
@@ -2593,6 +3188,55 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
+              Revision returns the document stored under key and its revision — the
+              row's rev, which every write moves, in decimal — read in one
+              statement on the transaction ctx carries, else on the pool.
+              DocumentNotFound when no document is stored under key.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Revision
+            out:
+              - type: T
+              - type: coredocstore.RevisionValue
+              - type: error
+            recv: pointer
+          - doc: |-
+              ReplaceIf stores v over the document under its key, as Replace does,
+              when the row's revision is still rev: one UPDATE conditioned on it, or
+              — on a store that keeps versions, which reads what it replaces — the
+              row read and locked on that condition, in the write's transaction.
+              When nothing matched, the row is read again past the caller's
+              snapshot: RevisionMismatch when it is there, DocumentNotFound when it
+              is not. A revision that is not one of this engine's never matches.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+              - name: rev
+                type: coredocstore.RevisionValue
+            name: ReplaceIf
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Batch writes what fn records as one transaction — a savepoint of the
+              one ctx carries, or one of the store's own — each write sending the
+              statements it sends alone; a refusal or a failure rolls the whole
+              batch back. The hooks run once the transaction committed.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: fn
+                type: func(w coredocstore.BatchWriter[T]) error
+            name: Batch
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
               VersionWeight reports what the store keeps beyond its documents, as
               core/data/docstore.VersionWeigherContext says: one aggregate statement
               over the versions table — its former rows, its trash rows numbered 0,
@@ -2694,6 +3338,18 @@ packages:
       It is one process's store: a second process opening the same files is not
       detected. It keeps every document in memory. It has no transaction across
       documents. It is a store for the documents a service owns, not a database.
+
+      # Consistency
+
+      The two engines state what a read after a write returns, and it is not the
+      same. A [Store] is read-your-writes within the process: once a write has
+      returned, every call of the process reads it, and a reader never waits —
+      it sees the store before a write or after it, never between. A [SQLStore]
+      reads at the isolation of the transaction a call runs on: a write is
+      visible to its own transaction at once, and to every other one once it
+      commits — never before, never if it rolls back — and a caller inside a
+      REPEATABLE READ transaction reads its snapshot. A call on the pool is a
+      transaction of its own and reads what is committed.
 
       # The same store over SQL
 
@@ -3006,6 +3662,18 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_50_16"
+          - doc: "CodeRevisionMismatch: a conditional replacement on a revision the document no longer has."
+            name: CodeRevisionMismatch
+            reexport: coredocstore.CodeRevisionMismatch
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_17"
+          - doc: "CodeIndexNotOrdered: Range on an index declared without Ordered."
+            name: CodeIndexNotOrdered
+            reexport: coredocstore.CodeIndexNotOrdered
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_18"
         doc: The codes of the store's refusals (0.3.80.*), for errs.HasCode.
       - doc: The store's sentinels, for errors.Is.
         var:
@@ -3101,10 +3769,19 @@ packages:
             name: VersionsInvalid
             reexport: coredocstore.VersionsInvalid
             type: "*errs.Error"
+          - doc: RevisionMismatch refuses a conditional replacement on a revision the document no longer has.
+            name: RevisionMismatch
+            reexport: coredocstore.RevisionMismatch
+            type: "*errs.Error"
+          - doc: IndexNotOrdered refuses a Range on an index declared without Ordered.
+            name: IndexNotOrdered
+            reexport: coredocstore.IndexNotOrdered
+            type: "*errs.Error"
       - alias:
           - doc: |-
               Store is the public alias for the document store: Get, List, Filter,
-              Entries, Keys, Lookup, Find and Stats read; Put, Insert, Replace, Update and
+              Entries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and
+              Range read a page at a time; Put, Insert, Replace, Update and
               Delete write, and their Stamped forms say what the version they make
               records; Versions and Version read a document's versions, RewriteVersions
               rewrites its former ones, VersionWeight says what they weigh; Trash,
@@ -3154,7 +3831,7 @@ packages:
       - alias:
           - doc: |-
               IndexSpec is the public alias for one secondary index's declaration, built
-              by [Unique] or [Index] and given to [Open].
+              by [Unique], [Index] or [Ordered] and given to [Open].
             name: IndexSpec
             target: coredocstore.IndexSpec[T]
             typeParams:
@@ -3174,7 +3851,8 @@ packages:
       - alias:
           - doc: |-
               SQLStore is the public alias for the document store over SQL: Get, List,
-              Filter, Entries, Keys, Count, Lookup and Find read; Put, Insert, Replace, Update
+              Filter, Entries, Keys, Count, Lookup and Find read, and Documents,
+              FindAfter and Range read a page at a time; Put, Insert, Replace, Update
               and Delete write, and their Stamped forms say what the version they make
               records; Versions, Version, RewriteVersions and VersionWeight, Trash,
               Restore, Purge and Tombstones as for [Store]; OnWrite and OnDelete announce once the write's
@@ -3291,6 +3969,99 @@ packages:
             target: coredocstore.VersionWeigherContext
       - alias:
           - doc: |-
+              Revisioned is the public alias for the sibling of [Collection] that
+              replaces a document on the revision the caller read, without a context,
+              which [Store] implements: Revision and ReplaceIf — optimistic
+              concurrency for a write that cannot hold a lock while a person decides.
+            name: Revisioned
+            target: coredocstore.Revisioned[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              RevisionedContext is the public alias for [Revisioned] with a context on
+              every call, which [SQLStore] implements.
+            name: RevisionedContext
+            target: coredocstore.RevisionedContext[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              Revision is the public alias for the opaque token Revision returns and
+              ReplaceIf compares: an engine's own, compared only for equality.
+            name: Revision
+            target: coredocstore.RevisionValue
+      - alias:
+          - doc: |-
+              Batcher is the public alias for the sibling of [Collection] that writes
+              several documents as one without a context, which [Store] implements:
+              Batch — every write, or none.
+            name: Batcher
+            target: coredocstore.Batcher[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              BatcherContext is the public alias for [Batcher] with a context on every
+              call, which [SQLStore] implements: one transaction.
+            name: BatcherContext
+            target: coredocstore.BatcherContext[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              BatchWriter is the public alias for what a batch's function records its
+              writes on: Put, Insert, Replace and Delete, decided in order when the
+              batch commits.
+            name: BatchWriter
+            target: coredocstore.BatchWriter[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              Pager is the public alias for the sibling of [Collection] that reads the
+              documents a page at a time without a context, which [Store] implements:
+              Documents and FindAfter.
+            name: Pager
+            target: coredocstore.Pager[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              PagerContext is the public alias for [Pager] with a context on every
+              call, which [SQLStore] implements.
+            name: PagerContext
+            target: coredocstore.PagerContext[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              Ranged is the public alias for the sibling of [Collection] that reads an
+              ordered index between two keys without a context, which [Store]
+              implements: Range.
+            name: Ranged
+            target: coredocstore.Ranged[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              RangedContext is the public alias for [Ranged] with a context on every
+              call, which [SQLStore] implements.
+            name: RangedContext
+            target: coredocstore.RangedContext[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
               Announcer is the public alias for the pair of hooks both engines answer
               exactly as they are: OnWrite and OnDelete.
             name: Announcer
@@ -3340,7 +4111,9 @@ packages:
             named table keeps on dialect, numbered version for the caller's own version
             table. Its Down drops both, and every document in them. Every statement does
             nothing when its table exists, so a run MySQL's implicit commit stopped
-            halfway completes when it runs again.
+            halfway completes when it runs again. Its
+            Checksum fingerprints Up's statements, so a version table that recorded
+            it refuses a build whose statements differ.
           forward: svcdocstore.SQLMigration
           in:
             - name: dialect
@@ -3359,7 +4132,9 @@ packages:
             store named table keeps its versions in on dialect, numbered version for the
             caller's own version table, beside [SQLMigration]'s. A store opened with
             [SQLConfig].Versions needs it. Its Down drops the table, and every version
-            in it: run it to turn versions off for good.
+            in it: run it to turn versions off for good. Its
+            Checksum fingerprints Up's statements, so a version table that recorded
+            it refuses a build whose statements differ.
           forward: svcdocstore.SQLVersionsMigration
           in:
             - name: dialect
@@ -3369,6 +4144,25 @@ packages:
             - name: version
               type: uint64
           name: SQLVersionsMigration
+          out:
+            - type: sql.Migration
+            - type: error
+      - func:
+          doc: |-
+            SQLVersionsTrashIndexMigration returns the migration that indexes the trash
+            of a SQL store named table on dialect, numbered version for the caller's own
+            version table, after [SQLVersionsMigration]'s: Tombstones then reads the
+            trash alone instead of every version. Up and Down do nothing when there is
+            nothing to do, and touch no version.
+          forward: svcdocstore.SQLVersionsTrashIndexMigration
+          in:
+            - name: dialect
+              type: sql.Dialect
+            - name: table
+              type: string
+            - name: version
+              type: uint64
+          name: SQLVersionsTrashIndexMigration
           out:
             - type: sql.Migration
             - type: error
@@ -3399,6 +4193,23 @@ packages:
             - name: keys
               type: func(T) []string
           name: Index
+          out:
+            - type: IndexSpec[T]
+          typeParams:
+            - constraint: any
+              name: T
+      - func:
+          doc: |-
+            Ordered declares an index over the one key key returns that keeps its keys
+            in order, for Range: keys compare as bytes, so pad a number and write an
+            instant in RFC 3339, in UTC. An empty key is not indexed.
+          forward: coredocstore.Ordered
+          in:
+            - name: name
+              type: string
+            - name: key
+              type: func(T) string
+          name: Ordered
           out:
             - type: IndexSpec[T]
           typeParams:

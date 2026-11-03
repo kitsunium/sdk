@@ -1,6 +1,29 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: distinct
+    steps:
+      - bind: seen
+        eval: make(map[string]struct{}, len(keys))
+      - bind: out
+        eval: make([]string, 0, len(keys))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, dup
+                  eval: seen[key]
+                when: dup
+            - set: seen[key]
+              value: struct{}{}
+            - set: out
+              value: append(out, key)
+          key: _
+          range: keys
+          value: key
+      - return: out
   - of: (*tagIndex).remove
     steps:
       - bind: tags, found

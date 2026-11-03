@@ -38,6 +38,9 @@ var (
 	_ ExposeConfigurer   = callOption(nil)
 	_ QueryConfigurer    = callOption(nil)
 
+	// A transaction's options configure a query too (#1140).
+	_ QueryConfigurer = TransactOption{}
+
 	_ ExposeConfigurer = endpointOption(nil)
 
 	_ sealingSource = (*Command[struct{}, struct{}])(nil)

@@ -14,7 +14,7 @@ kernel's one rule — stdlib-only AND generic (`internal/kernel/CLAUDE.md`).
 A primitive belongs here when what it is FOR is several goroutines: it runs
 them and waits for them (`worker`, `group`), lets them share one execution or
 one value (`singleflight`, `snapshot`), coalesces what they hand it
-(`batcher`), or lets them reuse objects instead of allocating them
+(`batcher`, and `commit` when each caller waits for the verdict), or lets them reuse objects instead of allocating them
 (`recycler`, `buffer`).
 
 Being safe to call from several goroutines is not enough: `collections/cache`
@@ -29,6 +29,7 @@ byte-slice threshold, so it sits beside the primitive it specialises.
 |---|---|---|
 | `batcher/` | `Batcher[T]` — coalesce, then flush on size or on a ticker that runs on the injected `Config.Clock` (ADR 0014) | `pkg/v1/concur/batcher`, an alias (ADR 0159 §4) |
 | `buffer/` | the pooled `*[]byte` the logger and the network server format into — `recycler.CappedPool` specialised for bytes (ADR 0010) | not on its own (ADR 0159 §4): reached through the domains that use it |
+| `commit/` | `Group[T]` — group commit: N callers each add an item, ONE flush runs over the batch, every caller gets its verdict (#803) | not yet: kernel-only until a domain adopts it |
 | `group/` | structured concurrency — `Go` / `Wait` / `Collect`, the first error or every error joined (`NewJoined`), a bounded parallelism, a child's panic delivered to the waiter | `pkg/v1/concur/group`, an alias (ADR 0159 §4) |
 | `recycler/` | `Pool[T]` and `CappedPool[T]` over `sync.Pool` — reuse, reset, and a capacity past which an object is dropped (ADR 0010) | `pkg/v1/concur/recycler`, an alias (ADR 0159 §4) |
 | `singleflight/` | `Group[K, V]` — one execution per key however many callers arrive, a panic re-raised in every waiter (ADR 0049) | `pkg/v1/concur/singleflight`, an alias (ADR 0159 §4) |

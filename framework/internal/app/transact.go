@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	stdsql "database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -9,7 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/framework/telemetry"
+	"github.com/kitsunium/sdk/pkg/v1/app/resilience"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
@@ -62,7 +66,12 @@ const localName = "the data directory"
 // between the commit and the release loses what was held.
 //
 // On a database the transaction is the database's own, at its default
-// isolation. On the data directory and in memory the framework keeps its own: it takes
+// isolation unless opts ask for another: [Serializable] or [RepeatableRead]
+// opens it at that level, [ReadOnly] tells the database it only reads, and a
+// store's write inside it is refused ([Invalid], [CodeTransactionReadOnly]) on
+// every backend. Options go on the outermost Transact: a nested one given
+// any is refused ([Invalid], [CodeTransactionNested]), its savepoint able to
+// change neither. On the data directory and in memory the framework keeps its own: it takes
 // the data's writer turn — one transaction at a time; a write outside any
 // waits for it, and such writes share the turn among themselves —, its
 // writes land at once, and an error writes each entity's previous value
@@ -72,11 +81,63 @@ const localName = "the data directory"
 //
 // A command's handler runs in one already ([NoTransaction] opts out), and
 // so does a workflow's transition.
-func Transact(ctx context.Context, fn func(context.Context) error) error {
+func Transact(ctx context.Context, fn func(context.Context) error, opts ...TransactOption) error {
 	if fn == nil {
 		return Invalid("app.Transact needs a function to run")
 	}
-	return transact(ctx, appOf(ctx), fn)
+	return transactWith(ctx, appOf(ctx), fn, txOptionsOf(opts))
+}
+
+// TransactOption asks a transaction for an isolation level or for
+// read-only: [Serializable], [RepeatableRead], [ReadOnly]. None given is the
+// database's default, as always.
+type TransactOption struct {
+	// isolation is the level asked for, zero for none.
+	isolation stdsql.IsolationLevel
+	// readOnly asks for a transaction that only reads.
+	readOnly bool
+}
+
+// Serializable opens the transaction at the SERIALIZABLE isolation level: it
+// commits only if running it alone would have given the same result, and a
+// concurrent transaction that would break that fails instead — on
+// PostgreSQL with SQLSTATE 40001, which the database asks to run again. On
+// the data directory and in memory, whose transactions already take one
+// writer at a time, it changes nothing.
+func Serializable() TransactOption { return TransactOption{isolation: stdsql.LevelSerializable} }
+
+// RepeatableRead opens the transaction at the REPEATABLE READ isolation
+// level: a row it read reads the same until it ends. On the data directory
+// and in memory it changes nothing.
+func RepeatableRead() TransactOption { return TransactOption{isolation: stdsql.LevelRepeatableRead} }
+
+// ReadOnly opens the transaction read-only: the database is told it only
+// reads, and a store's write inside it is refused ([Invalid],
+// [CodeTransactionReadOnly]) on every backend, before it reaches one.
+// Given to a query's declaration, it runs the query's Ask in such a
+// transaction — the caller's own, when the Ask runs inside one.
+func ReadOnly() TransactOption { return TransactOption{readOnly: true} }
+
+// queryConfigure makes o a query's: its Ask runs in a transaction opened
+// with it, folded with the options given before it.
+func (o TransactOption) queryConfigure(q *queryOptions) {
+	if o.isolation != stdsql.LevelDefault {
+		q.tx.Isolation = o.isolation
+	}
+	q.tx.ReadOnly = q.tx.ReadOnly || o.readOnly
+}
+
+// txOptionsOf folds opts into what a database transaction is asked: the last
+// level given wins, and read-only once asked stays.
+func txOptionsOf(opts []TransactOption) plug.TxOptionsValue {
+	var out plug.TxOptionsValue
+	for _, o := range opts {
+		if o.isolation != stdsql.LevelDefault {
+			out.Isolation = o.isolation
+		}
+		out.ReadOnly = out.ReadOnly || o.readOnly
+	}
+	return out
 }
 
 // transact runs fn as a level of the transaction ctx carries, or as the
@@ -84,7 +145,46 @@ func Transact(ctx context.Context, fn func(context.Context) error) error {
 // transaction learns its app at its first store call otherwise, and draws
 // no span.
 func transact(ctx context.Context, a *App, fn func(context.Context) error) error {
+	return transactWith(ctx, a, fn, plug.TxOptionsValue{})
+}
+
+// transactWith is transact with the options the outermost level opens with:
+// a nested level given any is refused before fn runs, its savepoint able to
+// change neither the isolation level nor read-only. The outermost level runs
+// again — fn from its start, in a new transaction — while it fails on an
+// error its database calls transient and <name>-tx-retries allows (#1000);
+// a nested level runs once, as its savepoint cannot run alone.
+func transactWith(ctx context.Context, a *App, fn func(context.Context) error, opts plug.TxOptionsValue) error {
+	nested := unitOf(ctx) != nil
+	if opts != (plug.TxOptionsValue{}) && nested {
+		return nestedRefusal()
+	}
+	for attempt := 0; ; attempt++ {
+		t, err := transactOnce(ctx, a, fn, opts, attempt)
+		if nested {
+			return err
+		}
+		wait, again := t.retryAfter(ctx, err, attempt)
+		if !again {
+			return err
+		}
+		t.reportRetry(ctx, err, wait)
+		if werr := t.waitRetry(ctx, wait); werr != nil {
+			return errors.Join(err, werr)
+		}
+	}
+}
+
+// transactOnce runs fn as one level: the outermost of a new transaction, or
+// one nested in the transaction ctx carries. attempt counts the runs of an
+// outermost level before this one, which its span says.
+func transactOnce(ctx context.Context, a *App, fn func(context.Context) error, opts plug.TxOptionsValue, attempt int) (ran *txn, err error) {
 	ctx, l := beginTransaction(ctx, a)
+	ran = l.u.tx
+	ran.setOptions(opts)
+	if attempt > 0 && l.sp != nil {
+		l.sp.attr("retries", strconv.Itoa(attempt))
+	}
 	defer func() {
 		if p := recover(); p != nil {
 			if err := l.finish(ctx, errTransactionPanicked); err != nil && !errors.Is(err, errTransactionPanicked) && a != nil {
@@ -93,7 +193,73 @@ func transact(ctx context.Context, a *App, fn func(context.Context) error) error
 			panic(p)
 		}
 	}()
-	return l.finish(ctx, fn(ctx))
+	return ran, l.finish(ctx, fn(ctx))
+}
+
+// retryAfter says whether the transaction t, whose outermost level ended
+// with err after attempt runs before it, runs again, and after how long: on
+// a database whose classifier calls err transient, while <name>-tx-retries
+// allows, waiting <name>-tx-retry-delay grown by 2 with full jitter.
+func (t *txn) retryAfter(ctx context.Context, err error, attempt int) (time.Duration, bool) {
+	if err == nil || ctx.Err() != nil {
+		return 0, false
+	}
+	t.mu.Lock()
+	db, a := t.db, t.app
+	t.mu.Unlock()
+	if db == nil || a == nil || attempt >= resolvedSetting(a, db.d.txRetries) || a.inRoutine(ctx) {
+		return 0, false
+	}
+	c, ok := db.database().(plug.Classifier)
+	if !ok || !c.Transient(err) {
+		return 0, false
+	}
+	curve := resilience.Backoff{BaseDelay: resolvedSetting(a, db.d.txRetryDelay), JitterMode: resilience.JitterFull}
+	return curve.Delay(attempt + 1), true
+}
+
+// inRoutine reports whether ctx runs in a [Service.Go] body: the product's
+// own loop, which the framework cannot know may run a function twice — so a
+// transaction it opens is never run again (#1000).
+func (a *App) inRoutine(ctx context.Context) bool {
+	_, ok := a.findNode(currentNode(ctx)).(*Routine)
+	return ok
+}
+
+// reportRetry puts the transaction's next run on the telemetry port, as a
+// port's retry is (#1000): the node that runs it, the failure's code, the
+// wait before the next run.
+func (t *txn) reportRetry(ctx context.Context, err error, wait time.Duration) {
+	t.mu.Lock()
+	a := t.app
+	t.mu.Unlock()
+	ex := a.tel.Load()
+	if ex == nil {
+		return
+	}
+	ev := telemetry.Event{
+		Kind: telemetry.KindRetry, Op: telemetry.OpCall, Outcome: telemetry.OutcomeError,
+		Node: ex.Ref(currentNode(ctx)), Start: a.clock.Now().UnixNano(), Duration: int64(wait),
+	}
+	if code, ok := errs.CodeOf(err); ok {
+		ev.Code = uint32(code)
+	}
+	ex.Emit(&ev)
+}
+
+// waitRetry waits d on the app's clock, or until ctx ends.
+func (t *txn) waitRetry(ctx context.Context, d time.Duration) error {
+	t.mu.Lock()
+	a := t.app
+	t.mu.Unlock()
+	timer := a.clock.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C():
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // txLevel is a level begun and not yet finished: its unit, and its span
@@ -200,6 +366,34 @@ type txn struct {
 	ends []func()
 	// done is set once the outermost level ended.
 	done bool
+	// opts are what the outermost level opened with: its isolation level and
+	// read-only, which a store's write is refused under.
+	opts plug.TxOptionsValue
+}
+
+// setOptions records the outermost level's options, once: a nested level
+// never sets any (transactWith refuses it).
+func (t *txn) setOptions(opts plug.TxOptionsValue) {
+	if opts == (plug.TxOptionsValue{}) {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.opts = opts
+}
+
+// nestedRefusal is the refusal of a nested Transact given options.
+func nestedRefusal() error {
+	cause := failure(CodeTransactionNested, "TRANSACTION_NESTED", "a nested transaction cannot change isolation or read-only", nil)
+	return Invalid("a Transact inside another is a savepoint, which can change neither the isolation level nor read-only: give the options to the outermost Transact").Wrap(cause)
+}
+
+// readOnlyRefusal is the refusal of a store's write inside a read-only
+// transaction.
+func readOnlyRefusal(store string) error {
+	cause := failure(CodeTransactionReadOnly, "TRANSACTION_READ_ONLY", "a read-only transaction cannot write", nil,
+		errs.String("store", store))
+	return Invalid(fmt.Sprintf("%s cannot be written: the transaction was opened read-only", store)).Wrap(cause)
 }
 
 // ended reports whether the transaction's outermost level returned.
@@ -375,6 +569,10 @@ func (u *unit) claimLocal(ctx context.Context, a *App, store string) error {
 	t.mu.Lock()
 	if t.app == nil {
 		t.app = a
+	}
+	if t.opts.ReadOnly {
+		t.mu.Unlock()
+		return readOnlyRefusal(store)
 	}
 	switch {
 	case t.db != nil:

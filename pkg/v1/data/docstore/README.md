@@ -54,6 +54,10 @@ A Store is safe for concurrent use, and a reader never waits for a disk: writers
 
 It is one process's store: a second process opening the same files is not detected. It keeps every document in memory. It has no transaction across documents. It is a store for the documents a service owns, not a database.
 
+### Consistency
+
+The two engines state what a read after a write returns, and it is not the same. A [Store](#Store) is read-your-writes within the process: once a write has returned, every call of the process reads it, and a reader never waits — it sees the store before a write or after it, never between. A [SQLStore](#SQLStore) reads at the isolation of the transaction a call runs on: a write is visible to its own transaction at once, and to every other one once it commits — never before, never if it rolls back — and a caller inside a REPEATABLE READ transaction reads its snapshot. A call on the pool is a transaction of its own and reads what is committed.
+
 ### The same store over SQL
 
 [OpenSQL](#OpenSQL) keeps the same documents — the same keys, indexes, write modes, hooks and refusals, the same codes — in two tables of a PostgreSQL, MySQL or SQLite database the caller opened and hands over as a \[sql.Transactor]. Nothing is held in memory: the database is the source of truth, and every call is a round trip that takes a context (ADR 0139).
@@ -141,12 +145,23 @@ for key, err := range pages.Keys("") {
 - [func Index\[T any\]\(name string, keys func\(T\) \[\]string\) IndexSpec\[T\]](<#Index>)
 - [func Open\[T any\]\(cfg Config\[T\], indexes ...IndexSpec\[T\]\) \(\*Store\[T\], error\)](<#Open>)
 - [func OpenSQL\[T any\]\(cfg SQLConfig\[T\], indexes ...IndexSpec\[T\]\) \(\*SQLStore\[T\], error\)](<#OpenSQL>)
+- [func Ordered\[T any\]\(name string, key func\(T\) string\) IndexSpec\[T\]](<#Ordered>)
 - [func SQLMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLMigration>)
 - [func SQLVersionsMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLVersionsMigration>)
+- [func SQLVersionsTrashIndexMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLVersionsTrashIndexMigration>)
 - [func Unique\[T any\]\(name string, key func\(T\) string\) IndexSpec\[T\]](<#Unique>)
 - [type Announcer](<#Announcer>)
   - [func \(Announcer\) OnDelete\(fn func\(key string\)\) \(remove func\(\)\)](<#Announcer.OnDelete>)
   - [func \(Announcer\) OnWrite\(fn func\(key string\)\) \(remove func\(\)\)](<#Announcer.OnWrite>)
+- [type BatchWriter](<#BatchWriter>)
+  - [func \(BatchWriter\) Delete\(key string\) error](<#BatchWriter.Delete>)
+  - [func \(BatchWriter\) Insert\(v T\) error](<#BatchWriter.Insert>)
+  - [func \(BatchWriter\) Put\(v T\) error](<#BatchWriter.Put>)
+  - [func \(BatchWriter\) Replace\(v T\) error](<#BatchWriter.Replace>)
+- [type Batcher](<#Batcher>)
+  - [func \(Batcher\) Batch\(fn func\(w BatchWriter\[T\]\) error\) error](<#Batcher.Batch>)
+- [type BatcherContext](<#BatcherContext>)
+  - [func \(BatcherContext\) Batch\(ctx context.Context, fn func\(w BatchWriter\[T\]\) error\) error](<#BatcherContext.Batch>)
 - [type Collection](<#Collection>)
   - [func \(Collection\) Delete\(key string\) error](<#Collection.Delete>)
   - [func \(Collection\) Entries\(limit int\) \(\[\]EntryValue, error\)](<#Collection.Entries>)
@@ -178,13 +193,33 @@ for key, err := range pages.Keys("") {
   - [func \(KeyLister\) Keys\(after string\) iter.Seq2\[string, error\]](<#KeyLister.Keys>)
 - [type KeyListerContext](<#KeyListerContext>)
   - [func \(KeyListerContext\) Keys\(ctx context.Context, after string\) iter.Seq2\[string, error\]](<#KeyListerContext.Keys>)
+- [type Pager](<#Pager>)
+  - [func \(Pager\) Documents\(after string, limit int\) iter.Seq2\[EntryValue, error\]](<#Pager.Documents>)
+  - [func \(Pager\) FindAfter\(index string, key string, after string, limit int\) iter.Seq2\[T, error\]](<#Pager.FindAfter>)
+- [type PagerContext](<#PagerContext>)
+  - [func \(PagerContext\) Documents\(ctx context.Context, after string, limit int\) iter.Seq2\[EntryValue, error\]](<#PagerContext.Documents>)
+  - [func \(PagerContext\) FindAfter\(ctx context.Context, index string, key string, after string, limit int\) iter.Seq2\[T, error\]](<#PagerContext.FindAfter>)
+- [type Ranged](<#Ranged>)
+  - [func \(Ranged\) Range\(index string, lo string, hi string, limit int\) iter.Seq2\[T, error\]](<#Ranged.Range>)
+- [type RangedContext](<#RangedContext>)
+  - [func \(RangedContext\) Range\(ctx context.Context, index string, lo string, hi string, limit int\) iter.Seq2\[T, error\]](<#RangedContext.Range>)
+- [type Revision](<#Revision>)
+- [type Revisioned](<#Revisioned>)
+  - [func \(Revisioned\) ReplaceIf\(v T, rev RevisionValue\) error](<#Revisioned.ReplaceIf>)
+  - [func \(Revisioned\) Revision\(key string\) \(T, RevisionValue, error\)](<#Revisioned.Revision>)
+- [type RevisionedContext](<#RevisionedContext>)
+  - [func \(RevisionedContext\) ReplaceIf\(ctx context.Context, v T, rev RevisionValue\) error](<#RevisionedContext.ReplaceIf>)
+  - [func \(RevisionedContext\) Revision\(ctx context.Context, key string\) \(T, RevisionValue, error\)](<#RevisionedContext.Revision>)
 - [type SQLConfig](<#SQLConfig>)
 - [type SQLStore](<#SQLStore>)
+  - [func \(\*SQLStore\) Batch\(ctx context.Context, fn func\(w coredocstore.BatchWriter\[T\]\) error\) error](<#SQLStore.Batch>)
   - [func \(\*SQLStore\) Count\(ctx context.Context\) \(int, error\)](<#SQLStore.Count>)
   - [func \(\*SQLStore\) Delete\(ctx context.Context, key string\) error](<#SQLStore.Delete>)
+  - [func \(\*SQLStore\) Documents\(ctx context.Context, after string, limit int\) iter.Seq2\[coredocstore.EntryValue, error\]](<#SQLStore.Documents>)
   - [func \(\*SQLStore\) Entries\(ctx context.Context, limit int\) \(entries \[\]coredocstore.EntryValue, err error\)](<#SQLStore.Entries>)
   - [func \(\*SQLStore\) Filter\(ctx context.Context, keep func\(T\) bool\) \(\[\]T, error\)](<#SQLStore.Filter>)
   - [func \(\*SQLStore\) Find\(ctx context.Context, index string, key string\) \(\[\]T, error\)](<#SQLStore.Find>)
+  - [func \(\*SQLStore\) FindAfter\(ctx context.Context, index string, key string, after string, limit int\) iter.Seq2\[T, error\]](<#SQLStore.FindAfter>)
   - [func \(\*SQLStore\) Get\(ctx context.Context, key string\) \(T, error\)](<#SQLStore.Get>)
   - [func \(\*SQLStore\) Insert\(ctx context.Context, v T\) error](<#SQLStore.Insert>)
   - [func \(\*SQLStore\) InsertStamped\(ctx context.Context, v T, stamp coredocstore.StampValue\) error](<#SQLStore.InsertStamped>)
@@ -197,10 +232,13 @@ for key, err := range pages.Keys("") {
   - [func \(\*SQLStore\) Put\(ctx context.Context, v T\) error](<#SQLStore.Put>)
   - [func \(\*SQLStore\) PutDocument\(ctx context.Context, key string, versions \[\]coredocstore.VersionValue, trashedAt time.Time\) error](<#SQLStore.PutDocument>)
   - [func \(\*SQLStore\) PutStamped\(ctx context.Context, v T, stamp coredocstore.StampValue\) error](<#SQLStore.PutStamped>)
+  - [func \(\*SQLStore\) Range\(ctx context.Context, index string, lo string, hi string, limit int\) iter.Seq2\[T, error\]](<#SQLStore.Range>)
   - [func \(\*SQLStore\) Reindex\(ctx context.Context\) error](<#SQLStore.Reindex>)
   - [func \(\*SQLStore\) Replace\(ctx context.Context, v T\) error](<#SQLStore.Replace>)
+  - [func \(\*SQLStore\) ReplaceIf\(ctx context.Context, v T, rev coredocstore.RevisionValue\) error](<#SQLStore.ReplaceIf>)
   - [func \(\*SQLStore\) ReplaceStamped\(ctx context.Context, v T, stamp coredocstore.StampValue\) error](<#SQLStore.ReplaceStamped>)
   - [func \(\*SQLStore\) Restore\(ctx context.Context, key string\) error](<#SQLStore.Restore>)
+  - [func \(\*SQLStore\) Revision\(ctx context.Context, key string\) \(T, coredocstore.RevisionValue, error\)](<#SQLStore.Revision>)
   - [func \(\*SQLStore\) RewriteVersions\(ctx context.Context, key string, fn func\(former \[\]coredocstore.VersionValue\) \(\[\]coredocstore.VersionValue, error\)\) error](<#SQLStore.RewriteVersions>)
   - [func \(\*SQLStore\) Tombstones\(ctx context.Context\) \(tombstones \[\]coredocstore.TombstoneValue, err error\)](<#SQLStore.Tombstones>)
   - [func \(\*SQLStore\) Trash\(ctx context.Context, key string\) error](<#SQLStore.Trash>)
@@ -212,11 +250,14 @@ for key, err := range pages.Keys("") {
 - [type Stamp](<#Stamp>)
 - [type Stats](<#Stats>)
 - [type Store](<#Store>)
+  - [func \(\*Store\) Batch\(fn func\(w coredocstore.BatchWriter\[T\]\) error\) error](<#Store.Batch>)
   - [func \(\*Store\) Close\(\) error](<#Store.Close>)
   - [func \(\*Store\) Delete\(key string\) error](<#Store.Delete>)
+  - [func \(\*Store\) Documents\(after string, limit int\) iter.Seq2\[coredocstore.EntryValue, error\]](<#Store.Documents>)
   - [func \(\*Store\) Entries\(limit int\) \(\[\]coredocstore.EntryValue, error\)](<#Store.Entries>)
   - [func \(\*Store\) Filter\(keep func\(T\) bool\) \(\[\]T, error\)](<#Store.Filter>)
   - [func \(\*Store\) Find\(index string, key string\) \(\[\]T, error\)](<#Store.Find>)
+  - [func \(\*Store\) FindAfter\(index string, key string, after string, limit int\) iter.Seq2\[T, error\]](<#Store.FindAfter>)
   - [func \(\*Store\) Fold\(\) error](<#Store.Fold>)
   - [func \(\*Store\) Get\(key string\) \(T, error\)](<#Store.Get>)
   - [func \(\*Store\) Insert\(v T\) error](<#Store.Insert>)
@@ -230,9 +271,12 @@ for key, err := range pages.Keys("") {
   - [func \(\*Store\) Put\(v T\) error](<#Store.Put>)
   - [func \(\*Store\) PutDocument\(key string, versions \[\]coredocstore.VersionValue, trashedAt time.Time\) error](<#Store.PutDocument>)
   - [func \(\*Store\) PutStamped\(v T, stamp coredocstore.StampValue\) error](<#Store.PutStamped>)
+  - [func \(\*Store\) Range\(index string, lo string, hi string, limit int\) iter.Seq2\[T, error\]](<#Store.Range>)
   - [func \(\*Store\) Replace\(v T\) error](<#Store.Replace>)
+  - [func \(\*Store\) ReplaceIf\(v T, rev coredocstore.RevisionValue\) error](<#Store.ReplaceIf>)
   - [func \(\*Store\) ReplaceStamped\(v T, stamp coredocstore.StampValue\) error](<#Store.ReplaceStamped>)
   - [func \(\*Store\) Restore\(key string\) error](<#Store.Restore>)
+  - [func \(\*Store\) Revision\(key string\) \(T, coredocstore.RevisionValue, error\)](<#Store.Revision>)
   - [func \(\*Store\) RewriteVersions\(key string, fn func\(former \[\]coredocstore.VersionValue\) \(\[\]coredocstore.VersionValue, error\)\) error](<#Store.RewriteVersions>)
   - [func \(\*Store\) Stats\(\) StatsValue](<#Store.Stats>)
   - [func \(\*Store\) Tombstones\(\) \(\[\]coredocstore.TombstoneValue, error\)](<#Store.Tombstones>)
@@ -370,6 +414,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.CodeIndex
 
 Code `0.3.80.12`
 
+<a name="CodeIndexNotOrdered"></a>
+```go
+const CodeIndexNotOrdered errs.Code = 217112
+```
+
+CodeIndexNotOrdered: Range on an index declared without Ordered.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.CodeIndexNotOrdered`.
+
+Code `0.3.80.24`
+
 <a name="CodeIndexNotUnique"></a>
 ```go
 const CodeIndexNotUnique errs.Code = 217095
@@ -424,6 +479,17 @@ CodePersistFailed: the filesystem refused the write; nothing changed.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.CodePersistFailed`.
 
 Code `0.3.80.10`
+
+<a name="CodeRevisionMismatch"></a>
+```go
+const CodeRevisionMismatch errs.Code = 217111
+```
+
+CodeRevisionMismatch: a conditional replacement on a revision the document no longer has.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.CodeRevisionMismatch`.
+
+Code `0.3.80.23`
 
 <a name="CodeStatementFailed"></a>
 ```go
@@ -650,6 +716,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.IndexBrok
 
 Code `0.3.80.12` · reason `INDEX_BROKEN` · public "The stored documents break a unique index"
 
+<a name="IndexNotOrdered"></a>
+```go
+var IndexNotOrdered *errs.Error
+```
+
+IndexNotOrdered refuses a Range on an index declared without Ordered.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.IndexNotOrdered`.
+
+Code `0.3.80.24` · reason `INDEX_NOT_ORDERED` · public "The index keeps no order: declare it with Ordered"
+
 <a name="IndexNotUnique"></a>
 ```go
 var IndexNotUnique *errs.Error
@@ -704,6 +781,17 @@ PersistFailed reports a write the filesystem refused.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.PersistFailed`.
 
 Code `0.3.80.10` · reason `PERSIST_FAILED` · public "The document could not be written to storage"
+
+<a name="RevisionMismatch"></a>
+```go
+var RevisionMismatch *errs.Error
+```
+
+RevisionMismatch refuses a conditional replacement on a revision the document no longer has.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.RevisionMismatch`.
+
+Code `0.3.80.23` · reason `REVISION_MISMATCH` · public "The document changed since it was read"
 
 <a name="StatementFailed"></a>
 ```go
@@ -831,6 +919,15 @@ func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], er
 
 OpenSQL builds a store over SQL from cfg with the secondary indexes given, declared as for [Open](#Open). It sends no statement: its tables are [SQLMigration](#SQLMigration)'s, run by the caller's Migrator before the store is used.
 
+<a name="Ordered"></a>
+## func [Ordered](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+```go
+func Ordered[T any](name string, key func(T) string) IndexSpec[T]
+```
+
+Ordered declares an index over the one key key returns that keeps its keys in order, for Range: keys compare as bytes, so pad a number and write an instant in RFC 3339, in UTC. An empty key is not indexed.
+
 <a name="SQLMigration"></a>
 ## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
@@ -838,7 +935,7 @@ OpenSQL builds a store over SQL from cfg with the secondary indexes given, decla
 func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
 ```
 
-SQLMigration returns the migration that creates the two tables a SQL store named table keeps on dialect, numbered version for the caller's own version table. Its Down drops both, and every document in them. Every statement does nothing when its table exists, so a run MySQL's implicit commit stopped halfway completes when it runs again.
+SQLMigration returns the migration that creates the two tables a SQL store named table keeps on dialect, numbered version for the caller's own version table. Its Down drops both, and every document in them. Every statement does nothing when its table exists, so a run MySQL's implicit commit stopped halfway completes when it runs again. Its Checksum fingerprints Up's statements, so a version table that recorded it refuses a build whose statements differ.
 
 <a name="SQLVersionsMigration"></a>
 ## func [SQLVersionsMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
@@ -847,7 +944,16 @@ SQLMigration returns the migration that creates the two tables a SQL store named
 func SQLVersionsMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
 ```
 
-SQLVersionsMigration returns the migration that creates the table a SQL store named table keeps its versions in on dialect, numbered version for the caller's own version table, beside [SQLMigration](#SQLMigration)'s. A store opened with [SQLConfig](#SQLConfig).Versions needs it. Its Down drops the table, and every version in it: run it to turn versions off for good.
+SQLVersionsMigration returns the migration that creates the table a SQL store named table keeps its versions in on dialect, numbered version for the caller's own version table, beside [SQLMigration](#SQLMigration)'s. A store opened with [SQLConfig](#SQLConfig).Versions needs it. Its Down drops the table, and every version in it: run it to turn versions off for good. Its Checksum fingerprints Up's statements, so a version table that recorded it refuses a build whose statements differ.
+
+<a name="SQLVersionsTrashIndexMigration"></a>
+## func [SQLVersionsTrashIndexMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+```go
+func SQLVersionsTrashIndexMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
+```
+
+SQLVersionsTrashIndexMigration returns the migration that indexes the trash of a SQL store named table on dialect, numbered version for the caller's own version table, after [SQLVersionsMigration](#SQLVersionsMigration)'s: Tombstones then reads the trash alone instead of every version. Up and Down do nothing when there is nothing to do, and touch no version.
 
 <a name="Unique"></a>
 ## func [Unique](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
@@ -899,6 +1005,114 @@ func (Announcer) OnWrite(fn func(key string)) (remove func())
 ```
 
 OnWrite registers fn to be told the key of every document Put, Insert, Replace, Update or Restore stored, and returns the function that removes the registration. A nil fn registers nothing. A panic in fn reaches the writer after its write stood.
+
+<a name="BatchWriter"></a>
+## type [BatchWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+BatchWriter is the public alias for what a batch's function records its writes on: Put, Insert, Replace and Delete, decided in order when the batch commits.
+
+```go
+type BatchWriter[T any] = coredocstore.BatchWriter[T]
+```
+
+BatchWriter is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.BatchWriter`, declared as:
+
+```go
+type BatchWriter[T any] interface {
+	Delete(key string) error
+	Insert(v T) error
+	Put(v T) error
+	Replace(v T) error
+}
+```
+
+<a name="BatchWriter.Delete"></a>
+### func \(BatchWriter\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (BatchWriter) Delete(key string) error
+```
+
+Delete records the deletion of the document under key, which must be there.
+
+<a name="BatchWriter.Insert"></a>
+### func \(BatchWriter\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (BatchWriter) Insert(v T) error
+```
+
+Insert records v, which must be new.
+
+<a name="BatchWriter.Put"></a>
+### func \(BatchWriter\) [Put](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (BatchWriter) Put(v T) error
+```
+
+Put records v, created or replacing whatever is under its key.
+
+<a name="BatchWriter.Replace"></a>
+### func \(BatchWriter\) [Replace](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (BatchWriter) Replace(v T) error
+```
+
+Replace records v over the document under its key, which must be there.
+
+<a name="Batcher"></a>
+## type [Batcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+Batcher is the public alias for the sibling of [Collection](#Collection) that writes several documents as one without a context, which [Store](#Store) implements: Batch — every write, or none.
+
+```go
+type Batcher[T any] = coredocstore.Batcher[T]
+```
+
+Batcher is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.Batcher`, declared as:
+
+```go
+type Batcher[T any] interface {
+	Batch(fn func(w BatchWriter[T]) error) error
+}
+```
+
+<a name="Batcher.Batch"></a>
+### func \(Batcher\) [Batch](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (Batcher) Batch(fn func(w BatchWriter[T]) error) error
+```
+
+Batch runs fn with a [BatchWriter](#BatchWriter), then writes what it recorded, in order, as one: every write, or none when one is refused — the refusal returned, nothing changed — and none when fn returns an error, which Batch returns as it is. A write makes its version and files its index keys as it would alone; OnWrite and OnDelete are told about each write once the whole batch took effect, in order. fn runs before any lock: it may read the store, and its writes wait for the batch.
+
+<a name="BatcherContext"></a>
+## type [BatcherContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+BatcherContext is the public alias for [Batcher](#Batcher) with a context on every call, which [SQLStore](#SQLStore) implements: one transaction.
+
+```go
+type BatcherContext[T any] = coredocstore.BatcherContext[T]
+```
+
+BatcherContext is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.BatcherContext`, declared as:
+
+```go
+type BatcherContext[T any] interface {
+	Batch(ctx context.Context, fn func(w BatchWriter[T]) error) error
+}
+```
+
+<a name="BatcherContext.Batch"></a>
+### func \(BatcherContext\) [Batch](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (BatcherContext) Batch(ctx context.Context, fn func(w BatchWriter[T]) error) error
+```
+
+Batch is Batcher.Batch under ctx, in one transaction.
 
 <a name="Collection"></a>
 ## type [Collection](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
@@ -1232,7 +1446,7 @@ type Entry struct {
 <a name="IndexSpec"></a>
 ## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
-IndexSpec is the public alias for one secondary index's declaration, built by [Unique](#Unique) or [Index](#Index) and given to [Open](#Open).
+IndexSpec is the public alias for one secondary index's declaration, built by [Unique](#Unique), [Index](#Index) or [Ordered](#Ordered) and given to [Open](#Open).
 
 ```go
 type IndexSpec[T any] = coredocstore.IndexSpec[T]
@@ -1244,11 +1458,16 @@ IndexSpec is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.I
 type IndexSpec[T any] struct {
 	// Keys returns a document's keys in the index. Empty keys are not
 	// indexed, and a key listed twice is filed once.
-	Keys   func(T) []string
+	Keys    func(T) []string
 	// Name reads the index in Lookup and Find, and names it in a refusal.
-	Name   string
+	Name    string
 	// Unique refuses a write that would file two documents under one key.
-	Unique bool
+	Unique  bool
+	// Ordered keeps the index's keys in order, for [Ranged].Range. The SQL
+	// engine files an ordered index's rows as any other's, so declaring
+	// one changes no table; the file engine keeps a sorted list beside the
+	// index it rebuilds at Open.
+	Ordered bool
 }
 ```
 
@@ -1313,6 +1532,217 @@ func (KeyListerContext) Keys(ctx context.Context, after string) iter.Seq2[string
 
 Keys is KeyLister.Keys under ctx: each step that reads runs on the transaction ctx carries for the store's database, and on the pool otherwise.
 
+<a name="Pager"></a>
+## type [Pager](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+Pager is the public alias for the sibling of [Collection](#Collection) that reads the documents a page at a time without a context, which [Store](#Store) implements: Documents and FindAfter.
+
+```go
+type Pager[T any] = coredocstore.Pager[T]
+```
+
+Pager is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.Pager`, declared as:
+
+```go
+type Pager[T any] interface {
+	Documents(after string, limit int) iter.Seq2[EntryValue, error]
+	FindAfter(index string, key string, after string, limit int) iter.Seq2[T, error]
+}
+```
+
+<a name="Pager.Documents"></a>
+### func \(Pager\) [Documents](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (Pager) Documents(after string, limit int) iter.Seq2[EntryValue, error]
+```
+
+Documents yields the documents whose key sorts after after — from the first when after is empty — in key order, byte order as Go compares strings, each with its key and its JSON, a copy the caller owns: at most limit of them, or every one when limit is not positive. Stopping early is allowed, and the last key yielded is where the next page starts. A write made during the listing is seen when its key sorts after the last key read. A failure is yielded once, with an empty entry, and ends the listing; a closed store yields STORE\_CLOSED.
+
+<a name="Pager.FindAfter"></a>
+### func \(Pager\) [FindAfter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (Pager) FindAfter(index string, key string, after string, limit int) iter.Seq2[T, error]
+```
+
+FindAfter yields the documents filed under key in the index named index whose store key sorts after after — from the first when after is empty — in store-key order, at most limit of them, or every one when limit is not positive: Find a page at a time. It reads any index; an undeclared one yields INDEX\_UNKNOWN, a document that no longer decodes DOCUMENT\_UNDECODABLE, each once, ending the listing.
+
+<a name="PagerContext"></a>
+## type [PagerContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+PagerContext is the public alias for [Pager](#Pager) with a context on every call, which [SQLStore](#SQLStore) implements.
+
+```go
+type PagerContext[T any] = coredocstore.PagerContext[T]
+```
+
+PagerContext is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.PagerContext`, declared as:
+
+```go
+type PagerContext[T any] interface {
+	Documents(ctx context.Context, after string, limit int) iter.Seq2[EntryValue, error]
+	FindAfter(ctx context.Context, index string, key string, after string, limit int) iter.Seq2[T, error]
+}
+```
+
+<a name="PagerContext.Documents"></a>
+### func \(PagerContext\) [Documents](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (PagerContext) Documents(ctx context.Context, after string, limit int) iter.Seq2[EntryValue, error]
+```
+
+Documents is Pager.Documents under ctx: each page one statement on the transaction ctx carries for the store's database, and on the pool otherwise, resuming after the last key read.
+
+<a name="PagerContext.FindAfter"></a>
+### func \(PagerContext\) [FindAfter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (PagerContext) FindAfter(ctx context.Context, index string, key string, after string, limit int) iter.Seq2[T, error]
+```
+
+FindAfter is Pager.FindAfter under ctx, a page per statement.
+
+<a name="Ranged"></a>
+## type [Ranged](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+Ranged is the public alias for the sibling of [Collection](#Collection) that reads an ordered index between two keys without a context, which [Store](#Store) implements: Range.
+
+```go
+type Ranged[T any] = coredocstore.Ranged[T]
+```
+
+Ranged is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.Ranged`, declared as:
+
+```go
+type Ranged[T any] interface {
+	Range(index string, lo string, hi string, limit int) iter.Seq2[T, error]
+}
+```
+
+<a name="Ranged.Range"></a>
+### func \(Ranged\) [Range](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (Ranged) Range(index string, lo string, hi string, limit int) iter.Seq2[T, error]
+```
+
+Range yields the documents filed in the ordered index named index under a key from lo, included, to hi, excluded — no upper bound when hi is empty — in index-key order, then store-key order among the documents of one key, at most limit of them, or every one when limit is not positive. Keys compare as bytes. An undeclared index yields INDEX\_UNKNOWN, an index declared without [Ordered](#Ordered) INDEX\_NOT\_ORDERED, a document that no longer decodes DOCUMENT\_UNDECODABLE, each once, ending the listing.
+
+<a name="RangedContext"></a>
+## type [RangedContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+RangedContext is the public alias for [Ranged](#Ranged) with a context on every call, which [SQLStore](#SQLStore) implements.
+
+```go
+type RangedContext[T any] = coredocstore.RangedContext[T]
+```
+
+RangedContext is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.RangedContext`, declared as:
+
+```go
+type RangedContext[T any] interface {
+	Range(ctx context.Context, index string, lo string, hi string, limit int) iter.Seq2[T, error]
+}
+```
+
+<a name="RangedContext.Range"></a>
+### func \(RangedContext\) [Range](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (RangedContext) Range(ctx context.Context, index string, lo string, hi string, limit int) iter.Seq2[T, error]
+```
+
+Range is Ranged.Range under ctx, a page per statement.
+
+<a name="Revision"></a>
+## type [Revision](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+Revision is the public alias for the opaque token Revision returns and ReplaceIf compares: an engine's own, compared only for equality.
+
+```go
+type Revision = coredocstore.RevisionValue
+```
+
+Revision is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.RevisionValue`, declared as:
+
+```go
+type Revision string
+```
+
+<a name="Revisioned"></a>
+## type [Revisioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+Revisioned is the public alias for the sibling of [Collection](#Collection) that replaces a document on the revision the caller read, without a context, which [Store](#Store) implements: Revision and ReplaceIf — optimistic concurrency for a write that cannot hold a lock while a person decides.
+
+```go
+type Revisioned[T any] = coredocstore.Revisioned[T]
+```
+
+Revisioned is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.Revisioned`, declared as:
+
+```go
+type Revisioned[T any] interface {
+	ReplaceIf(v T, rev RevisionValue) error
+	Revision(key string) (T, RevisionValue, error)
+}
+```
+
+<a name="Revisioned.ReplaceIf"></a>
+### func \(Revisioned\) [ReplaceIf](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (Revisioned) ReplaceIf(v T, rev RevisionValue) error
+```
+
+ReplaceIf stores v over the document under its key when that document's revision is still rev, exactly as Replace stores it — its versions, its index keys, OnWrite. REVISION\_MISMATCH when another write changed the document since rev was read, which then stays as that write left it; DOCUMENT\_NOT\_FOUND when no document is under the key, so a document deleted meanwhile is never brought back.
+
+<a name="Revisioned.Revision"></a>
+### func \(Revisioned\) [Revision](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (Revisioned) Revision(key string) (T, RevisionValue, error)
+```
+
+Revision returns the document stored under key and its revision, the token ReplaceIf compares. DOCUMENT\_NOT\_FOUND when no document is stored under key — a trashed one included.
+
+<a name="RevisionedContext"></a>
+## type [RevisionedContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+RevisionedContext is the public alias for [Revisioned](#Revisioned) with a context on every call, which [SQLStore](#SQLStore) implements.
+
+```go
+type RevisionedContext[T any] = coredocstore.RevisionedContext[T]
+```
+
+RevisionedContext is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.RevisionedContext`, declared as:
+
+```go
+type RevisionedContext[T any] interface {
+	ReplaceIf(ctx context.Context, v T, rev RevisionValue) error
+	Revision(ctx context.Context, key string) (T, RevisionValue, error)
+}
+```
+
+<a name="RevisionedContext.ReplaceIf"></a>
+### func \(RevisionedContext\) [ReplaceIf](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (RevisionedContext) ReplaceIf(ctx context.Context, v T, rev RevisionValue) error
+```
+
+ReplaceIf is Revisioned.ReplaceIf under ctx: the comparison and the write are one statement, or a row locked from the comparison to the write, in the write's transaction — a savepoint of the one ctx carries.
+
+<a name="RevisionedContext.Revision"></a>
+### func \(RevisionedContext\) [Revision](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (RevisionedContext) Revision(ctx context.Context, key string) (T, RevisionValue, error)
+```
+
+Revision is Revisioned.Revision under ctx, read in one statement on the transaction ctx carries for the store's database, and on the pool otherwise.
+
 <a name="SQLConfig"></a>
 ## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
@@ -1349,7 +1779,11 @@ type SQLConfig[T any] struct {
 	// lookup, which a keyed hash keeps: a framework passes an HMAC under a key
 	// of its own, and an e-mail address never reaches a table. It is called
 	// with the index's name and a non-empty key; an empty answer files
-	// nothing, as an empty key does. Nil stores index keys as they are.
+	// nothing, as an empty key does. Nil stores index keys as they are. An
+	// ordered index's keys, and Range's bounds, go through it too: Range
+	// compares them as the table holds them, so a transform that does not
+	// keep their order — a keyed hash — leaves Range no order to read;
+	// return an ordered index's key as it is.
 	IndexKey   func(index string, key string) []byte
 	// Table names the documents' table. The store derives its index table's
 	// name from it by appending "___ix". It is a lower-case SQL identifier of
@@ -1378,7 +1812,7 @@ type SQLConfig[T any] struct {
 <a name="SQLStore"></a>
 ## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
-SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Keys, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version, RewriteVersions and VersionWeight, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
+SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Keys, Count, Lookup and Find read, and Documents, FindAfter and Range read a page at a time; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version, RewriteVersions and VersionWeight, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
 
 ```go
 type SQLStore[T any] = svcdocstore.SQLStore[T]
@@ -1389,6 +1823,15 @@ SQLStore is an alias of `github.com/kitsunium/sdk/internal/service/data/docstore
 ```go
 type SQLStore[T any] struct{}
 ```
+
+<a name="SQLStore.Batch"></a>
+### func \(SQLStore\) [Batch](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_batch.go>)
+
+```go
+func (*SQLStore) Batch(ctx context.Context, fn func(w coredocstore.BatchWriter[T]) error) error
+```
+
+Batch writes what fn records as one transaction — a savepoint of the one ctx carries, or one of the store's own — each write sending the statements it sends alone; a refusal or a failure rolls the whole batch back. The hooks run once the transaction committed.
 
 <a name="SQLStore.Count"></a>
 ### func \(SQLStore\) [Count](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_store.go>)
@@ -1407,6 +1850,15 @@ func (*SQLStore) Delete(ctx context.Context, key string) error
 ```
 
 Delete removes the document stored under key, or returns DocumentNotFound. Its versions go with it, in the same transaction: a deletion never reaches the trash, which is Trash's.
+
+<a name="SQLStore.Documents"></a>
+### func \(SQLStore\) [Documents](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_page.go>)
+
+```go
+func (*SQLStore) Documents(ctx context.Context, after string, limit int) iter.Seq2[coredocstore.EntryValue, error]
+```
+
+Documents yields the documents whose key sorts after after, in key order, each with its key and the JSON the store wrote, at most limit of them — every one when limit is not positive. It reads them in pages of at most a few hundred, each page one statement on the primary key that resumes after the last key read, on the transaction ctx carries, else on the pool; a page is read whole and its rows closed before the first of it is yielded, so the caller may write in the loop. A failed statement is yielded once, as StatementFailed, and ends the listing.
 
 <a name="SQLStore.Entries"></a>
 ### func \(SQLStore\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_store.go>)
@@ -1434,6 +1886,15 @@ func (*SQLStore) Find(ctx context.Context, index string, key string) ([]T, error
 ```
 
 Find returns the documents filed under key in the index named index, in store-key order. It reads any index, unique or not, and no document is an empty slice, not an error.
+
+<a name="SQLStore.FindAfter"></a>
+### func \(SQLStore\) [FindAfter](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_page.go>)
+
+```go
+func (*SQLStore) FindAfter(ctx context.Context, index string, key string, after string, limit int) iter.Seq2[T, error]
+```
+
+FindAfter yields the documents filed under key in the index named index whose store key sorts after after, in store-key order, at most limit of them — every one when limit is not positive —, a page per statement on the index table's primary key, decoded as they are yielded. IndexUnknown for an undeclared index.
 
 <a name="SQLStore.Get"></a>
 ### func \(SQLStore\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_store.go>)
@@ -1543,6 +2004,15 @@ func (*SQLStore) PutStamped(ctx context.Context, v T, stamp coredocstore.StampVa
 
 PutStamped is Put, with what the write says about the version it makes.
 
+<a name="SQLStore.Range"></a>
+### func \(SQLStore\) [Range](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_page.go>)
+
+```go
+func (*SQLStore) Range(ctx context.Context, index string, lo string, hi string, limit int) iter.Seq2[T, error]
+```
+
+Range yields the documents filed in the ordered index named index under a key from lo, included, to hi, excluded — no upper bound when hi is empty — in index-key order, then store-key order, at most limit of them — every one when limit is not positive —, a page per statement on the index table's primary key, which resumes after the last index key and store key read; only the documents yielded are read and decoded. The bounds reach the table as an index key does, through IndexKey when one is set. IndexUnknown for an undeclared index, IndexNotOrdered for one declared without Ordered.
+
 <a name="SQLStore.Reindex"></a>
 ### func \(SQLStore\) [Reindex](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_reindex.go>)
 
@@ -1565,6 +2035,15 @@ func (*SQLStore) Replace(ctx context.Context, v T) error
 
 Replace stores v over the document already under its key: DocumentNotFound when there is none, so a document deleted meanwhile is never brought back.
 
+<a name="SQLStore.ReplaceIf"></a>
+### func \(SQLStore\) [ReplaceIf](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_revision.go>)
+
+```go
+func (*SQLStore) ReplaceIf(ctx context.Context, v T, rev coredocstore.RevisionValue) error
+```
+
+ReplaceIf stores v over the document under its key, as Replace does, when the row's revision is still rev: one UPDATE conditioned on it, or — on a store that keeps versions, which reads what it replaces — the row read and locked on that condition, in the write's transaction. When nothing matched, the row is read again past the caller's snapshot: RevisionMismatch when it is there, DocumentNotFound when it is not. A revision that is not one of this engine's never matches.
+
 <a name="SQLStore.ReplaceStamped"></a>
 ### func \(SQLStore\) [ReplaceStamped](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_version.go>)
 
@@ -1582,6 +2061,15 @@ func (*SQLStore) Restore(ctx context.Context, key string) error
 ```
 
 Restore brings the document trashed under key back exactly as it was — the same JSON, the same current version — files it again and calls OnWrite once its transaction commits. DocumentNotTrashed when no document is trashed under key, UniqueKeyTaken when another document took one of its unique keys meanwhile, DocumentUndecodable when it no longer decodes into the store's type; nothing changes on a refusal.
+
+<a name="SQLStore.Revision"></a>
+### func \(SQLStore\) [Revision](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_revision.go>)
+
+```go
+func (*SQLStore) Revision(ctx context.Context, key string) (T, coredocstore.RevisionValue, error)
+```
+
+Revision returns the document stored under key and its revision — the row's rev, which every write moves, in decimal — read in one statement on the transaction ctx carries, else on the pool. DocumentNotFound when no document is stored under key.
 
 <a name="SQLStore.RewriteVersions"></a>
 ### func \(SQLStore\) [RewriteVersions](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_version.go>)
@@ -1717,7 +2205,7 @@ type Stats struct {
 <a name="Store"></a>
 ## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
-Store is the public alias for the document store: Get, List, Filter, Entries, Keys, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones, VersionWeight says what they weigh; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
+Store is the public alias for the document store: Get, List, Filter, Entries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and Range read a page at a time; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones, VersionWeight says what they weigh; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
 
 ```go
 type Store[T any] = svcdocstore.Store[T]
@@ -1728,6 +2216,15 @@ Store is an alias of `github.com/kitsunium/sdk/internal/service/data/docstore.St
 ```go
 type Store[T any] struct{}
 ```
+
+<a name="Store.Batch"></a>
+### func \(Store\) [Batch](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/batch.go>)
+
+```go
+func (*Store) Batch(fn func(w coredocstore.BatchWriter[T]) error) error
+```
+
+Batch writes what fn records as one: planned under the writers' lock over the store and the batch's own writes — the first refusal ends it, nothing written — then published as ONE group entry holding every written key's latest state, then each key's own entry, then the group entry removed; a crash leaves the group entry, which the next Open replays over the keys' entries. The hooks run once it took effect.
 
 <a name="Store.Close"></a>
 ### func \(Store\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/persist.go>)
@@ -1746,6 +2243,15 @@ func (*Store) Delete(key string) error
 ```
 
 Delete removes the document stored under key, or returns DocumentNotFound. Its versions go with it: a deletion never reaches the trash, which is Trash's.
+
+<a name="Store.Documents"></a>
+### func \(Store\) [Documents](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/page.go>)
+
+```go
+func (*Store) Documents(after string, limit int) iter.Seq2[coredocstore.EntryValue, error]
+```
+
+Documents yields the documents whose key sorts after after, in key order, each with its key and a copy of its JSON, at most limit of them — every one when limit is not positive — as core/data/docstore.Pager says. Each page is taken under the read lock: the next keys above the last one yielded, chosen without sorting the store, so a page costs its own documents and a pass over the keys, never a copy of them all. A write made during the listing is seen when its key sorts after the last key read. A closed store yields StoreClosed once.
 
 <a name="Store.Entries"></a>
 ### func \(Store\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/docstore.go>)
@@ -1773,6 +2279,15 @@ func (*Store) Find(index string, key string) ([]T, error)
 ```
 
 Find returns the documents filed under key in the index named index, in store-key order. It reads any index, unique or not, and no document is an empty slice, not an error.
+
+<a name="Store.FindAfter"></a>
+### func \(Store\) [FindAfter](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/page.go>)
+
+```go
+func (*Store) FindAfter(index string, key string, after string, limit int) iter.Seq2[T, error]
+```
+
+FindAfter yields the documents filed under key in the index named index whose store key sorts after after, in store-key order, at most limit of them — every one when limit is not positive —, each decoded as it is yielded. The holders are taken under the read lock when the range starts. IndexUnknown for an undeclared index, StoreClosed after Close.
 
 <a name="Store.Fold"></a>
 ### func \(Store\) [Fold](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/persist.go>)
@@ -1891,6 +2406,15 @@ func (*Store) PutStamped(v T, stamp coredocstore.StampValue) error
 
 PutStamped is Put, with what the write says about the version it makes.
 
+<a name="Store.Range"></a>
+### func \(Store\) [Range](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/page.go>)
+
+```go
+func (*Store) Range(index string, lo string, hi string, limit int) iter.Seq2[T, error]
+```
+
+Range yields the documents filed in the ordered index named index under a key from lo, included, to hi, excluded — no upper bound when hi is empty — in index-key order, then store-key order, at most limit of them — every one when limit is not positive —, each decoded as it is yielded, and no other. The index keeps its entries sorted, so the range is a binary search and a walk, taken under the read lock when the range starts. IndexUnknown for an undeclared index, IndexNotOrdered for one declared without Ordered, StoreClosed after Close.
+
 <a name="Store.Replace"></a>
 ### func \(Store\) [Replace](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/write.go>)
 
@@ -1899,6 +2423,15 @@ func (*Store) Replace(v T) error
 ```
 
 Replace stores v over the document already under its key: DocumentNotFound when there is none, so a document deleted meanwhile is never brought back.
+
+<a name="Store.ReplaceIf"></a>
+### func \(Store\) [ReplaceIf](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/revision.go>)
+
+```go
+func (*Store) ReplaceIf(v T, rev coredocstore.RevisionValue) error
+```
+
+ReplaceIf stores v over the document under its key, as Replace does, when that document's revision is still rev — compared under the writers' lock, which the write then keeps. RevisionMismatch otherwise, DocumentNotFound when there is no document.
 
 <a name="Store.ReplaceStamped"></a>
 ### func \(Store\) [ReplaceStamped](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/version.go>)
@@ -1917,6 +2450,15 @@ func (*Store) Restore(key string) error
 ```
 
 Restore brings the document trashed under key back exactly as it was — the same JSON, the same current version — files it again and calls OnWrite. DocumentNotTrashed when no document is trashed under key, UniqueKeyTaken when another document took one of its unique keys meanwhile, DocumentUndecodable when it no longer decodes into the store's type; nothing changes on a refusal.
+
+<a name="Store.Revision"></a>
+### func \(Store\) [Revision](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/revision.go>)
+
+```go
+func (*Store) Revision(key string) (T, coredocstore.RevisionValue, error)
+```
+
+Revision returns the document stored under key and its revision — the SHA-256 of its JSON as json.Marshal writes it, so a fold, a reopen or the memory store leave it unchanged — read under the read lock. DocumentNotFound when no document is stored under key.
 
 <a name="Store.RewriteVersions"></a>
 ### func \(Store\) [RewriteVersions](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/version.go>)

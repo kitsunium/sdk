@@ -75,7 +75,7 @@ func (a *App) migrateOTLPSignal(ctx context.Context, cfg *plug.OTLPConfig, signa
 		return err
 	}
 	n := 0
-	err = cfg.Database.Transact(ctx, func(ctx context.Context) error {
+	err = cfg.Database.Transact(ctx, plug.TxOptionsValue{}, func(ctx context.Context) error {
 		var copyErr error
 		if n, copyErr = p.copy(ctx); copyErr != nil {
 			return copyErr

@@ -1,0 +1,221 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/nats
+packages:
+  - codes:
+      - const:
+          - doc: |-
+              CodeJetStreamMisconfigured identifies a Config NewJetStream refuses
+              before any request: no connection, an empty stream, subject or consumer
+              name, a policy JetStream cannot honour.
+            name: CodeJetStreamMisconfigured
+            note: |-
+              range: 0.3.97.0 - 0.3.97.255
+
+              ADR 0211: the queue Broker over NATS JetStream.
+            value: "0x00_03_61_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeJetStreamStreamMissing identifies a stream the server does not have
+              while Config.CreateStream is false.
+            name: CodeJetStreamStreamMissing
+            value: "0x00_03_61_02"
+        type: errs.Code
+      - const:
+          - doc: CodeJetStreamConsumerMissing identifies a durable consumer the stream does not have.
+            name: CodeJetStreamConsumerMissing
+            value: "0x00_03_61_03"
+        type: errs.Code
+      - const:
+          - doc: CodeJetStreamServerUnreachable identifies a connection that is closed or a request that timed out.
+            name: CodeJetStreamServerUnreachable
+            value: "0x00_03_61_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeJetStreamPublishUnacked identifies a publication the stream did not
+              acknowledge: it may or may not be stored.
+            name: CodeJetStreamPublishUnacked
+            value: "0x00_03_61_05"
+        type: errs.Code
+      - const:
+          - doc: CodeJetStreamRequestFailed identifies any other JetStream failure, the cause kept in the chain.
+            name: CodeJetStreamRequestFailed
+            value: "0x00_03_61_06"
+        type: errs.Code
+    constants:
+      - doc: |-
+          DefaultDuplicateWindow is the duplicate window of a stream
+          Config.CreateStream creates — JetStream's own default — and so the one
+          window PublishOnce accepts on such a stream.
+        name: DefaultDuplicateWindow
+        type: time.Duration
+        value: "120_000_000_000"
+    doc: |-
+      Package queue is a core/data/queue Broker over a NATS JetStream stream and
+      one durable pull consumer (ADR 0054's deferred connector, ADR 0211), in the
+      third-party/nats vendor module.
+
+      # Mapping
+
+      Publish is a JetStream publication the stream acknowledges (PubAck); the
+      stream sequence is the message's ID, and the enqueue instant, read from
+      Config.Clock, travels in a header. Receive is a Fetch of up to max
+      messages that waits for none; the delivery count is the server's
+      NumDelivered. Ack is an acknowledgement the server confirms (a double
+      acknowledgement); Nack is a NakWithDelay by the retry delay, or, once the
+      message has been delivered MaxDeliveries times, a publication on the
+      dead-letter subject with its cause followed by Term — two requests, so a
+      crash between them dead-letters the message twice and never loses it. The
+      consumer has no MaxDeliver of its own: the broker owns the decision to
+      dead-letter (ADR 0054), and a message whose leases all lapsed is
+      dead-lettered by the Receive that finds it past its budget, its Reason
+      LEASE_EXPIRED. Kafka is not this port — it has no per-message
+      acknowledgement — and belongs to data/stream.
+
+      # Whose clock is the lease
+
+      The server redelivers on its own clock once AckWait passes. The broker
+      reads Config.Clock before each Fetch, so the deadline it hands out never
+      falls after the server's, and the lease is the policy's visibility timeout
+      or the consumer's AckWait, whichever is shorter. It refuses an Ack, Nack,
+      Extend or Reject at or past that deadline with
+      core/data/queue.LeaseExpired before anything is sent, so a consumer that
+      lost its lease learns it whatever the server did meanwhile. A receipt is
+      good with the broker that issued it, whose table holds the delivery that
+      acknowledges it; one another broker minted is
+      core/data/queue.UnknownReceipt.
+
+      # The stream
+
+      Config.CreateStream creates a work-queue stream over Subject and
+      DeadLetterSubject, so an acknowledged message leaves it and a dead letter,
+      which no consumer reads, stays; and the durable consumer, filtered on
+      Subject, its AckWait the policy's visibility timeout. A stream made by
+      hand must capture both subjects too: DeadLetters reads the dead-letter
+      subject back from the same stream by direct get, without consuming it.
+
+      # Capabilities
+
+      Waker (a publication or hand-back by this process, and the next deadline
+      it knows of), LeaseExtender (InProgress resets AckWait, so a renewal lasts
+      the shorter of the asked duration and AckWait), Rejecter, DelayedNacker
+      (NakWithDelay), OncePublisher (Nats-Msg-Id; JetStream deduplicates over
+      the stream's duplicate window and no other, so the window asked for must
+      be that one) and DeadLetterReader. Not Releaser: the server's delivery
+      count cannot be given back. Every failed request is the package's
+      sentinel, core/data/queue.QueueBackendFailed in its trail.
+    functions:
+      - doc: |-
+          NewJetStream returns a broker over cfg.Stream and its durable consumer
+          cfg.Consumer. It sends no request: the stream and the consumer are looked
+          up, or created when cfg.CreateStream asks, on first use. A policy the
+          broker cannot honour is core/data/queue.QueueMisconfigured; a missing
+          connection or name is JetStreamMisconfigured.
+        in:
+          - name: cfg
+            type: Config
+        name: NewJetStream
+        out:
+          - name: broker
+            type: corequeue.Broker
+          - name: err
+            type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corequeue: github.com/kitsunium/sdk/internal/core/data/queue
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      nats: github.com/nats-io/nats.go
+    path: github.com/kitsunium/sdk/third-party/nats/queue
+    sentinels:
+      - var:
+          - code: CodeJetStreamMisconfigured
+            doc: JetStreamMisconfigured refuses a Config NewJetStream cannot build a broker from.
+            exit: CONFIG
+            name: JetStreamMisconfigured
+            private: "third-party/nats/queue.NewJetStream: the configuration is refused before any request"
+            public: The JetStream queue broker is misconfigured
+            reason: JET_STREAM_MISCONFIGURED
+          - code: CodeJetStreamStreamMissing
+            doc: StreamMissing reports a stream the server does not have.
+            exit: CONFIG
+            name: StreamMissing
+            private: "third-party/nats/queue: the stream does not exist and Config.CreateStream is false"
+            public: The queue's stream does not exist
+            reason: STREAM_MISSING
+          - code: CodeJetStreamConsumerMissing
+            doc: ConsumerMissing reports a durable consumer the stream does not have.
+            exit: CONFIG
+            name: ConsumerMissing
+            private: "third-party/nats/queue: the durable consumer does not exist"
+            public: The queue's consumer does not exist
+            reason: CONSUMER_MISSING
+          - code: CodeJetStreamServerUnreachable
+            doc: ServerUnreachable wraps a closed connection or a timed-out request.
+            exit: UNAVAILABLE
+            name: ServerUnreachable
+            private: "third-party/nats/queue: the server could not be reached"
+            public: The queue server could not be reached
+            reason: SERVER_UNREACHABLE
+          - code: CodeJetStreamPublishUnacked
+            doc: PublishUnacked reports a publication the stream did not acknowledge.
+            exit: TEMPFAIL
+            name: PublishUnacked
+            private: "third-party/nats/queue: no PubAck within the deadline; the message may or may not be stored"
+            public: The queue did not confirm the message
+            reason: PUBLISH_UNACKED
+          - code: CodeJetStreamRequestFailed
+            doc: RequestFailed wraps any other JetStream failure.
+            exit: UNAVAILABLE
+            name: RequestFailed
+            private: "third-party/nats/queue: a JetStream request failed"
+            public: The queue request failed
+            reason: REQUEST_FAILED
+    types:
+      - doc: |-
+          Config configures NewJetStream: the connection, the stream, its subject and
+          dead-letter subject, the durable consumer, and the delivery discipline.
+        name: Config
+        struct:
+          fields:
+            - doc: Conn is the caller's connection; the broker never closes it. Required.
+              name: Conn
+              type: "*nats.Conn"
+            - doc: |-
+                Clock stamps the enqueue instant and the lease deadlines a receipt
+                carries, and judges them. Nil means clock.System.
+              name: Clock
+              type: clock.Clock
+            - doc: Stream names the JetStream stream that holds the queue. Required.
+              name: Stream
+              type: string
+            - doc: |-
+                Subject is the subject messages are published on; the stream must
+                capture it. Required.
+              name: Subject
+              type: string
+            - doc: |-
+                DeadLetterSubject is the subject a message is published on, with its
+                cause, once it is dead-lettered; the stream must capture it too, and
+                the consumer never reads it. Required.
+              name: DeadLetterSubject
+              type: string
+            - doc: Consumer is the durable pull consumer every broker of the queue shares. Required.
+              name: Consumer
+              type: string
+            - doc: |-
+                Policy is the delivery discipline: VisibilityTimeout is AckWait. Its
+                zero value is refused, as for every broker.
+              name: Policy
+              type: corequeue.PolicyValue
+            - doc: |-
+                Timeout bounds every request that waits on the server — a publication's
+                PubAck, an acknowledgement's confirmation. Zero is refused (ADR 0031).
+              name: Timeout
+              type: time.Duration
+            - doc: |-
+                CreateStream creates the stream, over Subject and DeadLetterSubject,
+                and the consumer, when first use finds them missing. False answers
+                StreamMissing or ConsumerMissing instead.
+              name: CreateStream
+              type: bool

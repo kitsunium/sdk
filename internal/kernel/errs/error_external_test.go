@@ -1008,3 +1008,26 @@ func TestStaticMatchesDefine(t *testing.T) {
 		})
 	}
 }
+
+// TestParamsCarryTheSentinelOverAForeignCause pins Params: a cause from
+// outside the SDK wrapped with a sentinel's parameters reads as the sentinel —
+// its code, reason, public and private messages and exit status, errors.Is
+// matching it — and keeps the cause in the chain; the zero exit override
+// reads as the default, as ExitCode does.
+func TestParamsCarryTheSentinelOverAForeignCause(t *testing.T) {
+	t.Parallel()
+	for _, sentinel := range []*errs.Error{
+		newSampleSentinel(t),
+		errs.Define(0x00_03_0F_98, "PARAMS_EXIT", "Params exit public", "params exit private", errs.WithExitCode(74)),
+	} {
+		params := sentinel.Params()
+		if params.Code != sentinel.Code() || params.Reason != sentinel.Reason() || params.Public != sentinel.Public() ||
+			params.Private != sentinel.Private() || params.ExitCode != sentinel.ExitCode() {
+			t.Fatalf("Params() = %+v, want the sentinel %s restated", params, sentinel.Reason())
+		}
+		wrapped := errs.Wrap(fs.ErrNotExist, params)
+		if !errors.Is(wrapped, sentinel) || !errors.Is(wrapped, fs.ErrNotExist) || wrapped.ExitCode() != sentinel.ExitCode() {
+			t.Errorf("a foreign cause wrapped with %s's params: %v, exit %d", sentinel.Reason(), wrapped, wrapped.ExitCode())
+		}
+	}
+}

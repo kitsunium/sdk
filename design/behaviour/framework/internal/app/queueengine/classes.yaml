@@ -8,6 +8,9 @@ files:
       - (*broker).PublishOnce
       - (*broker).Consume
       - (*broker).DeadLetters
+      - (*broker).Replay
+      - (*broker).Drop
+      - deadLetterFound
       - (*broker).Messages
       - (*broker).PutMessage
       - (*broker).PutDeadLetter
@@ -65,6 +68,12 @@ files:
       - _
     name: queueengine_compliance.go
 functions:
+  - doc: |-
+      deadLetterFound is err as the CLI reads it: a dead letter the queue does
+      not hold is not found, and no failure.
+    name: deadLetterFound
+    params: err error
+    results: bool, error
   - name: BrokerOf
     params: b plug.Broker
     results: queue.Broker, bool
@@ -170,6 +179,7 @@ functions:
 imports:
   clock: github.com/kitsunium/sdk/pkg/v1/clock
   context: context
+  errors: errors
   errs: github.com/kitsunium/sdk/pkg/v1/errs
   io: io
   model: github.com/kitsunium/sdk/framework/model
@@ -229,6 +239,20 @@ types:
         params: ctx context.Context, maxLetters int
         recv: b *broker
         results: "[]plug.DeadLetterValue, error"
+      - doc: |-
+          Replay moves the dead letter id back into the live queue, its attempts
+          counted afresh (issue #1138); found is false when the queue holds none.
+        name: Replay
+        params: ctx context.Context, id string
+        recv: b *broker
+        results: bool, error
+      - doc: |-
+          Drop deletes the dead letter id for good; found is false when the queue
+          holds none.
+        name: Drop
+        params: ctx context.Context, id string
+        recv: b *broker
+        results: bool, error
       - doc: |-
           Messages are up to maxMessages live messages after the identifier after,
           as they lie.
@@ -438,6 +462,9 @@ vars:
         value: (*broker)(nil)
       - name: _
         type: plug.LaterPublisher
+        value: (*broker)(nil)
+      - name: _
+        type: plug.DeadLetterManager
         value: (*broker)(nil)
       - name: _
         type: io.Closer

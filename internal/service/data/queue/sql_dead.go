@@ -30,6 +30,17 @@ func (b *sqlBroker) Reject(ctx context.Context, receipt corequeue.ReceiptValue, 
 func (b *sqlBroker) DeadLetters(
 	ctx context.Context, max int,
 ) (dead []corequeue.DeadLetterValue, err error) {
+	//: the first page, from the first identifier.
+	return b.DeadLettersAfter(ctx, "", max)
+}
+
+// DeadLettersAfter reads up to max dead letters whose identifier sorts after
+// after, in identifier order — the primary key's — in one statement
+// (core/data/queue.DeadLetterPager). Inside the caller's transaction it reads
+// what that transaction sees.
+func (b *sqlBroker) DeadLettersAfter(
+	ctx context.Context, after string, max int,
+) (dead []corequeue.DeadLetterValue, err error) {
 	//: the same refusal Receive makes.
 	if invalid := checkBatch(max); invalid != nil {
 		//: InvalidBatchSize.
@@ -41,18 +52,17 @@ func (b *sqlBroker) DeadLetters(
 		return nil, ctx.Err()
 	}
 	ex, _ := b.tx.join.Join(ctx)
-	rows, err := ex.QueryContext(ctx, b.stmts.deadList, int64(max))
-	//: the read did not start.
+	rows, err := ex.QueryContext(ctx, b.stmts.deadList, []byte(after), int64(max))
+	//: the database refused.
 	if err != nil {
 		//: QueueBackendFailed.
 		return nil, b.failed("read the dead letters", err)
 	}
-	//: rows are this call's, so this call closes them.
 	defer func() { err = b.finishRows(rows, "read the dead letters", err) }()
-	//: one dead letter per row; nil until one is found.
+	//: every row, in identifier order.
 	for rows.Next() {
-		record, scanErr := scanDeadLetter(rows, b.stmts.trail)
-		//: a row the driver cannot hand over fails the read.
+		record, scanErr := scanDeadLetter(rows, b.stmts.trail, b.stmts.priority)
+		//: a row the scan refused.
 		if scanErr != nil {
 			//: QueueBackendFailed.
 			return nil, b.failed("read the dead letters", scanErr)
@@ -70,15 +80,20 @@ type scanner interface {
 }
 
 // scanDeadLetter reads one dead letter's row: its trail too when the
-// statement names the column (SQLConfig.Trail).
-func scanDeadLetter(rows scanner, withTrail bool) (corequeue.DeadLetterValue, error) {
+// statement names the column (SQLConfig.Trail), and its level when it names
+// that one (SQLConfig.Priority).
+func scanDeadLetter(rows scanner, withTrail, withPriority bool) (corequeue.DeadLetterValue, error) {
 	var id, reason, cause, trail, payload []byte
-	var enqueuedAt, deliveries, failedAt int64
+	var enqueuedAt, deliveries, failedAt, level int64
 	var code stdsql.NullInt64
 	dest := []any{&id, &enqueuedAt, &deliveries, &failedAt, &reason, &cause, &code, &payload}
 	//: the trail is read between the code and the payload, as it is named.
 	if withTrail {
 		dest = []any{&id, &enqueuedAt, &deliveries, &failedAt, &reason, &cause, &code, &trail, &payload}
+	}
+	//: the level is named last.
+	if withPriority {
+		dest = append(dest, &level)
 	}
 	//: in the order the statement names the columns.
 	if err := rows.Scan(dest...); err != nil {
@@ -92,7 +107,7 @@ func scanDeadLetter(rows scanner, withTrail bool) (corequeue.DeadLetterValue, er
 		},
 		FailedAt: time.Unix(0, failedAt), Deliveries: int(deliveries),
 		Reason: string(reason), Cause: string(cause), Code: uint32(code.Int64), //nolint:gosec // written from a uint32
-		Trail: decodeTrail(string(trail)),
+		Trail: decodeTrail(string(trail)), Priority: corequeue.Priority(level), //nolint:gosec // written from a Priority
 	}, nil
 }
 
@@ -161,6 +176,11 @@ func (b *sqlBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLetter
 		//: InvalidDeadLetter or MessageTooLarge.
 		return "", invalid
 	}
+	//: a level the table has no column for.
+	if invalid := b.checkLevel(dead.Priority); invalid != nil {
+		//: QueueMisconfigured, naming the option.
+		return "", invalid
+	}
 	entropy, entropyErr := randomHex(idEntropyBytes)
 	//: the identifier's random half, as Publish mints it.
 	if entropyErr != nil {
@@ -214,13 +234,19 @@ func (b *sqlBroker) Messages(ctx context.Context, after string, max int) (live [
 	}
 	//: rows are this call's, so this call closes them.
 	defer func() { err = b.finishRows(rows, "read the messages", err) }()
-	//: one message per row; nil until one is found.
+	var id string
+	var lease, payload []byte
+	var enqueuedAt, deliveries, due, level int64
+	dest := []any{&id, &enqueuedAt, &deliveries, &due, &lease, &payload}
+	//: the level is named last, where the table keeps one.
+	if b.stmts.priority {
+		dest = append(dest, &level)
+	}
+	//: one message per row, each scanned afresh — a *[]byte receives a
+	//: copy —; nil until one is found.
 	for rows.Next() {
-		var id string
-		var lease, payload []byte
-		var enqueuedAt, deliveries, due int64
 		//: a row the driver cannot hand over fails the read.
-		if scanErr := rows.Scan(&id, &enqueuedAt, &deliveries, &due, &lease, &payload); scanErr != nil {
+		if scanErr := rows.Scan(dest...); scanErr != nil {
 			//: QueueBackendFailed.
 			return nil, b.failed("read the messages", scanErr)
 		}
@@ -228,6 +254,7 @@ func (b *sqlBroker) Messages(ctx context.Context, after string, max int) (live [
 			VisibleAt:  time.Unix(0, due),
 			Message:    corequeue.MessageValue{ID: id, Payload: payload, EnqueuedAt: time.Unix(0, enqueuedAt)},
 			Deliveries: int(deliveries), Leased: lease != nil,
+			Priority: corequeue.Priority(level), //nolint:gosec // written from a Priority
 		})
 	}
 	//: the table's live messages, still where they were.
@@ -251,6 +278,11 @@ func (b *sqlBroker) PutMessage(ctx context.Context, live corequeue.LiveMessageVa
 		//: InvalidMessage or MessageTooLarge.
 		return "", invalid
 	}
+	//: a level the table has no column for.
+	if invalid := b.checkLevel(live.Priority); invalid != nil {
+		//: QueueMisconfigured, naming the option.
+		return "", invalid
+	}
 	entropy, entropyErr := randomHex(idEntropyBytes)
 	//: the identifier's random half, as Publish mints it.
 	if entropyErr != nil {
@@ -260,8 +292,12 @@ func (b *sqlBroker) PutMessage(ctx context.Context, live corequeue.LiveMessageVa
 	enqueuedAt := live.Message.EnqueuedAt.UnixNano()
 	id := messageID(enqueuedAt, entropy)
 	err := b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
-		_, execErr := ex.ExecContext(txCtx, b.stmts.putLive,
-			[]byte(id), live.VisibleAt.UnixNano(), enqueuedAt, int64(live.Deliveries), live.Message.Payload)
+		args := []any{[]byte(id), live.VisibleAt.UnixNano(), enqueuedAt, int64(live.Deliveries), live.Message.Payload}
+		//: the level, last, where the table keeps one.
+		if b.stmts.priority {
+			args = append(args, int64(live.Priority))
+		}
+		_, execErr := ex.ExecContext(txCtx, b.stmts.putLive, args...)
 		//: the insertion did not complete.
 		if execErr != nil {
 			//: QueueBackendFailed, the driver's text withheld.

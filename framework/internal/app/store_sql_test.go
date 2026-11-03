@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -95,6 +96,39 @@ func TestAStoreOnADatabaseHashesItsIndexKeys(t *testing.T) {
 	st := a.Graph().Node("register/store/members").Store
 	if st.Backend != "postgres" || st.Database != "database" || st.Table != "register__members" || st.Count == nil || *st.Count != 1 {
 		t.Errorf("the store as the graph says it: %+v", st)
+	}
+}
+
+// A filter over a store on a database reads its table a page at a time
+// (#1153): one statement per page of records on the primary key, never the
+// whole table in one — what it holds is what it keeps and one page —, and
+// it keeps what the predicate keeps, in key order.
+func TestAFilterOnADatabaseReadsAPageAtATime(t *testing.T) {
+	needsFileStore(t)
+	db, r := app.NewFakeDB(sql.DialectPostgres), newRegister()
+	runRegister(t, r, db)
+	for i := range 600 {
+		m := member{ID: fmt.Sprintf("m%03d", i), Email: fmt.Sprintf("m%03d@example.com", i), State: "new"}
+		if err := r.members.Put(t.Context(), m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := len(db.Queried())
+	kept, err := r.members.Filter(t.Context(), func(m member) bool { return m.ID < "m010" || m.ID == "m599" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := 0
+	for _, q := range db.Queried()[before:] {
+		switch {
+		case strings.HasPrefix(q, `SELECT doc FROM "register__members" ORDER BY`):
+			t.Fatalf("Filter read the whole table in one statement: %s", q)
+		case strings.HasPrefix(q, `SELECT doc_key, doc FROM "register__members" WHERE doc_key >`):
+			pages++
+		}
+	}
+	if len(kept) != 11 || kept[0].ID != "m000" || kept[10].ID != "m599" || pages != 3 {
+		t.Fatalf("Filter kept %d records in %d pages, want m000..m009 and m599 in 3 pages of 256", len(kept), pages)
 	}
 }
 

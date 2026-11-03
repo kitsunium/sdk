@@ -18,12 +18,13 @@ package declares no code and restates them in its wrap helpers.
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `vfs.go` | `verdict`, and the `failRead` / `failWrite` / `failPublish` wrap helpers |
-| `os.go` | `NewOS`, the read half (delegating to `os.Root`), the write guards, and `Close` — `io.Closer` by type assertion (ADR 0039), releasing the root's descriptor rather than waiting for `os.Root`'s finalizer |
+| `os.go` | `NewOS`, the read half (delegating to `os.Root`) — `Stat`, `ReadDir`, `ReadFile`, and the link shortcuts `Lstat` / `ReadLink` forwarded to `os.Root`, which the plain `fs.FS` it held used to hide (#1053) —, the write guards, and `Close` — `io.Closer` by type assertion (ADR 0039), releasing the root's descriptor rather than waiting for `os.Root`'s finalizer |
 | `os_write.go` | `WriteFile`, `MkdirAll`, `Remove`, `RemoveAll` — the non-atomic verbs |
-| `os_publish.go` | **the domain's reason to exist**: `publish`, `atomicOps`, `tempPath` |
+| `os_publish.go` | **the domain's reason to exist**: `publish` (`stage`, steps 1 to 4, then step 5), `atomicOps`, `tempPath`; `WriteAtomicAll` — `core/data/vfs.AtomicBatchWriter`: `stage` per file, then `syncDirs` once per directory (`publishAll`, #827); and `SyncDir` — `core/data/vfs.DirSyncer`, step 5 offered for a directory just created (#1060) — with `failDirSync`, the `DirectorySyncFailed` restatement both share |
+| `os_dirflush.go` | `dirFlushes`: step 5 of the disk engine's publications through one `kernel/concur/commit` group per directory, so the publications into one directory that reach it while a flush runs share the next one (#803); a directory's group lives while a publication waits on it |
 | `osguard_unix.go` / `osguard_other.go` | `platformNative` + `syncDirHandle`, and the honest refusal where the mechanics do not exist |
-| `mem.go` | `NewMem`, the read half, the locked helpers |
-| `mem_write.go` | the memory write verbs, including `WriteAtomic` |
+| `mem.go` | `NewMem`, the read half — `Lstat` is `Stat` and `ReadLink` `READ_FAILED` over `fs.ErrInvalid`, since no link exists here —, `SyncDir` (the disk engine's refusals, nothing to flush), the locked helpers |
+| `mem_write.go` | the memory write verbs, including `WriteAtomic`, which applies `perm` on every publication as the disk engine's rename does, where `WriteFile` applies it on creation only (#1052) |
 | `mem_node.go` / `mem_info.go` / `mem_file.go` / `mem_dir.go` | the tree entry, its `fs.FileInfo`, and the two open handles |
 | `BENCH.md` | what publication costs, and what it is that costs |
 
@@ -44,6 +45,11 @@ package declares no code and restates them in its wrap helpers.
    atomically, so a concurrent reader gets the old inode or the new one.
 5. **flush the DIRECTORY.** Without it the entry naming the new inode may not
    survive a crash, and the file comes back with content and no name.
+   On the disk engine, the publications into one directory that reach this
+   step while a flush of it runs share the NEXT flush (`os_dirflush.go`, #803):
+   each joins the batch still gathering — never the one already flushing — so
+   the flush it waits for began after its own rename, and every participant
+   gets that flush's verdict.
 
 **Steps 1–4 failing mean nothing was published.** The temporary is removed and
 the previous bytes are untouched — that is what returning `PublishFailed`
@@ -56,6 +62,40 @@ so the temporary is genuinely half-written on the write case.
 new content, and the only thing in doubt is durability. It is deliberately
 **not** rolled back: undoing it would be a second, non-atomic write to repair a
 durability problem, which is how a good file gets replaced by a worse one.
+
+### A publication's mode, and the directory above it
+
+- **`perm` applies on every publication.** A publication is a new inode
+  renamed over the old one, so the file afterwards has the mode it was
+  published with, whatever the replaced file had; the memory engine stores
+  `perm` on every `WriteAtomic` to answer identically. `WriteFile` rewrites in
+  place and keeps os.WriteFile's creation-only rule.
+  `TestAPublicationAppliesItsModeOnEveryEngine` and
+  `TestModeAppliesOnCreationAndNotOnRewrite` pin the two (ADR 0056, amended
+  2026-11-02).
+- **Step 5 flushes the directory naming the file, and nothing above it.** A
+  directory `MkdirAll` created needs its parent flushed for its own entry to
+  survive a power loss: `SyncDir` — the `DirSyncer` sibling, reached by type
+  assertion and not embedded in `FullFS` — opens the directory through the
+  root and runs the same mechanic. `NOT_REGULAR_FILE` for a file,
+  `DIRECTORY_SYNC_FAILED` with the cause kept for a directory it cannot open
+  or flush. docstore's `Open` calls it on the parent of every directory it
+  creates. `TestSyncDirAnswersIdenticallyOnEveryEngine`.
+- **A batch shares step 5, and keeps steps 1 to 4 per file (#827).**
+  `WriteAtomicAll` — the `AtomicBatchWriter` sibling, not in `FullFS` —
+  checks every target first (a refusal publishes nothing), then runs each
+  file's temporary, write, file flush and rename, then flushes each directory
+  once, after its last rename: a flush makes every earlier rename into the
+  directory durable, so a batch of sixteen pays sixteen file flushes and one
+  directory flush where `WriteAtomic` pays two flushes a file. A failure at a
+  file's steps 1 to 4 stops the batch: the count returned names the files
+  renamed, whose directories are flushed before the call returns, and the rest
+  keep their previous bytes; a directory flush that fails is
+  `DIRECTORY_SYNC_FAILED`, winning over `PUBLISH_FAILED`, never rolled back.
+  The memory engine checks every target under the lock and assigns them all.
+  `TestWriteAtomicAllAnswersIdenticallyOnEveryEngine`,
+  `TestABatchFlushesEachFileOnceAndItsDirectoryOnce` (the flush counts, by the
+  `atomicOps` double), `TestABatchThatFailsAtTheKthFileLeavesTheFirstKDurableAndTheRestUntouched`.
 
 ### What it does not guarantee
 
@@ -138,6 +178,11 @@ lane runs all of it (ADR 0095).
   dependencies.** That is the only reason the failure paths are reachable at
   all: a write that stops halfway or a `Sync` that errors cannot be provoked on
   a real file without a hostile filesystem.
+- **Both engines offer the same stdlib shortcuts**: `fs.StatFS`,
+  `fs.ReadDirFS`, `fs.ReadFileFS` and `fs.ReadLinkFS`
+  (`TestBothFilesystemsImplementTheStdlibShortcuts`), and both pass
+  `testing/fstest.TestFS` (`TestEveryEngineIsAValidIoFS`) — the standard
+  library's own conformance test for an `fs.FS`.
 - **One store-wide `RWMutex` for `memFS`.** The map is a filesystem *tree*, and
   `MkdirAll` / `RemoveAll` / `WriteFile` are multi-key transactions. See the
   `.ktn-linter.yaml` entry for why `sync.Map` cannot express them.
@@ -149,6 +194,11 @@ lane runs all of it (ADR 0095).
   production and invisible in tests.
 - **Do NOT roll back on a directory-flush failure.** The content is already
   published; a second non-atomic write is strictly worse than a truthful error.
+- **Do NOT let a publication take a directory flush already running as its
+  own.** It may have begun before the publication's rename, and then flushes
+  nothing the publication needs. `dirFlushes` joins the batch still gathering;
+  `TestEveryPublicationsFlushBeginsAfterItsRename` fails on the variant that
+  waits for the running flush instead.
 - **Do NOT let the cleanup failure replace the cause.** `discard` reports "the
   disk is full", not "the orphan would not unlink" — the consequence must not
   displace the problem.

@@ -45,6 +45,10 @@ codes:
     const: CodeRingCapZero
     hex: "0x00_01_03_03"
     package: internal/kernel/collections/ring
+  - code: "0.1.4.1"
+    const: CodeCommitClosed
+    hex: "0x00_01_04_01"
+    package: internal/kernel/concur/commit
   - code: "0.1.5.1"
     const: CodeBatcherClosed
     hex: "0x00_01_05_01"
@@ -821,6 +825,10 @@ codes:
     const: CodeCacheEntryRejected
     hex: "0x00_02_12_04"
     package: internal/core/data/cache
+  - code: "0.2.18.5"
+    const: CodeCacheAbsent
+    hex: "0x00_02_12_05"
+    package: internal/core/data/cache
   - code: "0.2.19.1"
     const: CodeInvalidComponent
     hex: "0x00_02_13_01"
@@ -944,6 +952,14 @@ codes:
   - code: "0.2.23.10"
     const: CodeRetryRequested
     hex: "0x00_02_17_0A"
+    package: internal/core/data/queue
+  - code: "0.2.23.11"
+    const: CodeMessageExpired
+    hex: "0x00_02_17_0B"
+    package: internal/core/data/queue
+  - code: "0.2.23.12"
+    const: CodeAcknowledged
+    hex: "0x00_02_17_0C"
     package: internal/core/data/queue
   - code: "0.2.24.1"
     const: CodeUnknownDialect
@@ -2125,6 +2141,10 @@ codes:
     const: CodeCacheTierFailed
     hex: "0x00_03_30_02"
     package: internal/core/data/cache
+  - code: "0.3.48.3"
+    const: CodeCacheLeaseFailed
+    hex: "0x00_03_30_03"
+    package: internal/core/data/cache
   - code: "0.3.49.1"
     const: CodeStartFailed
     hex: "0x00_03_31_01"
@@ -2316,6 +2336,18 @@ codes:
   - code: "0.3.54.17"
     const: CodeDuplicateMigration
     hex: "0x00_03_36_11"
+    package: internal/core/data/sql
+  - code: "0.3.54.18"
+    const: CodeMigrationChanged
+    hex: "0x00_03_36_12"
+    package: internal/core/data/sql
+  - code: "0.3.54.19"
+    const: CodeTxRetriesExhausted
+    hex: "0x00_03_36_13"
+    package: internal/core/data/sql
+  - code: "0.3.54.20"
+    const: CodeStatementTimedOut
+    hex: "0x00_03_36_14"
     package: internal/core/data/sql
   - code: "0.3.55.1"
     const: CodeRootUnavailable
@@ -2697,6 +2729,14 @@ codes:
     const: CodeVersionsInvalid
     hex: "0x00_03_50_16"
     package: internal/core/data/docstore
+  - code: "0.3.80.23"
+    const: CodeRevisionMismatch
+    hex: "0x00_03_50_17"
+    package: internal/core/data/docstore
+  - code: "0.3.80.24"
+    const: CodeIndexNotOrdered
+    hex: "0x00_03_50_18"
+    package: internal/core/data/docstore
   - code: "0.3.81.1"
     const: CodeSpoolMisconfigured
     hex: "0x00_03_51_01"
@@ -2965,6 +3005,106 @@ codes:
     const: CodeBatchTooLarge
     hex: "0x00_03_5D_03"
     package: internal/core/app/forward
+  - code: "0.3.95.1"
+    const: CodeRedisCacheCommandFailed
+    hex: "0x00_03_5F_01"
+    package: third-party/db/redis/cache
+  - code: "0.3.95.2"
+    const: CodeRedisCacheValueUndecodable
+    hex: "0x00_03_5F_02"
+    package: third-party/db/redis/cache
+  - code: "0.3.96.1"
+    const: CodeRedisQueueMisconfigured
+    hex: "0x00_03_60_01"
+    package: third-party/db/redis/queue
+  - code: "0.3.96.2"
+    const: CodeRedisQueueUnreachable
+    hex: "0x00_03_60_02"
+    package: third-party/db/redis/queue
+  - code: "0.3.96.3"
+    const: CodeRedisQueueGroupMissing
+    hex: "0x00_03_60_03"
+    package: third-party/db/redis/queue
+  - code: "0.3.96.4"
+    const: CodeRedisQueueCommandRefused
+    hex: "0x00_03_60_04"
+    package: third-party/db/redis/queue
+  - code: "0.3.97.1"
+    const: CodeJetStreamMisconfigured
+    hex: "0x00_03_61_01"
+    package: third-party/nats/queue
+  - code: "0.3.97.2"
+    const: CodeJetStreamStreamMissing
+    hex: "0x00_03_61_02"
+    package: third-party/nats/queue
+  - code: "0.3.97.3"
+    const: CodeJetStreamConsumerMissing
+    hex: "0x00_03_61_03"
+    package: third-party/nats/queue
+  - code: "0.3.97.4"
+    const: CodeJetStreamServerUnreachable
+    hex: "0x00_03_61_04"
+    package: third-party/nats/queue
+  - code: "0.3.97.5"
+    const: CodeJetStreamPublishUnacked
+    hex: "0x00_03_61_05"
+    package: third-party/nats/queue
+  - code: "0.3.97.6"
+    const: CodeJetStreamRequestFailed
+    hex: "0x00_03_61_06"
+    package: third-party/nats/queue
+  - code: "0.3.98.1"
+    const: CodeS3FSMisconfigured
+    hex: "0x00_03_62_01"
+    package: third-party/aws/vfs/s3
+  - code: "0.3.98.2"
+    const: CodeS3FSBucketMissing
+    hex: "0x00_03_62_02"
+    package: third-party/aws/vfs/s3
+  - code: "0.3.98.3"
+    const: CodeS3FSAccessDenied
+    hex: "0x00_03_62_03"
+    package: third-party/aws/vfs/s3
+  - code: "0.3.98.4"
+    const: CodeS3FSThrottled
+    hex: "0x00_03_62_04"
+    package: third-party/aws/vfs/s3
+  - code: "0.3.98.5"
+    const: CodeS3FSObjectTooLarge
+    hex: "0x00_03_62_05"
+    package: third-party/aws/vfs/s3
+  - code: "0.3.98.6"
+    const: CodeS3FSRequestFailed
+    hex: "0x00_03_62_06"
+    package: third-party/aws/vfs/s3
+  - code: "0.3.101.1"
+    const: CodeSQSMisconfigured
+    hex: "0x00_03_65_01"
+    package: third-party/aws/queue/sqs
+  - code: "0.3.101.2"
+    const: CodeSQSSendFailed
+    hex: "0x00_03_65_02"
+    package: third-party/aws/queue/sqs
+  - code: "0.3.101.3"
+    const: CodeSQSReceiveFailed
+    hex: "0x00_03_65_03"
+    package: third-party/aws/queue/sqs
+  - code: "0.3.101.4"
+    const: CodeSQSAckFailed
+    hex: "0x00_03_65_04"
+    package: third-party/aws/queue/sqs
+  - code: "0.3.101.5"
+    const: CodeSQSLeaseLost
+    hex: "0x00_03_65_05"
+    package: third-party/aws/queue/sqs
+  - code: "0.3.101.6"
+    const: CodeSQSDelayTooLong
+    hex: "0x00_03_65_06"
+    package: third-party/aws/queue/sqs
+  - code: "0.3.101.7"
+    const: CodeSQSBatchTooLarge
+    hex: "0x00_03_65_07"
+    package: third-party/aws/queue/sqs
   - code: "0.4.1.1"
     const: CodeInvalidID
     hex: "0x00_04_01_01"
@@ -3328,6 +3468,14 @@ codes:
   - code: "0.4.2.90"
     const: CodeOTLPExport
     hex: "0x00_04_02_5A"
+    package: framework/internal/app
+  - code: "0.4.2.91"
+    const: CodeTransactionNested
+    hex: "0x00_04_02_5B"
+    package: framework/internal/app
+  - code: "0.4.2.92"
+    const: CodeTransactionReadOnly
+    hex: "0x00_04_02_5C"
     package: framework/internal/app
   - code: "0.4.3.1"
     const: CodeMisconfigured

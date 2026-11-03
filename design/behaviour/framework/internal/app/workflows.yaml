@@ -938,6 +938,45 @@ workflows:
           range: a.productStores()
           value: st
       - return: out
+  - of: parseQueueArgs
+    steps:
+      - opt:
+          do:
+            - return: queueArgs{}, false
+          when: len(args) == 0 || !slices.Contains(queueVerbs, args[0])
+      - bind: out
+        eval: "queueArgs{verb: args[0]}"
+      - bind: rest
+        eval: args[1:]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: queueArgs{}, false
+                when: arg == "" || strings.HasPrefix(arg, "-")
+          key: _
+          range: rest
+          value: arg
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: queueArgs{}, false
+                when: len(rest) > 1
+            - opt:
+                do:
+                  - set: out.node
+                    value: rest[0]
+                when: len(rest) == 1
+            - return: out, true
+          when: out.verb == "dead-letters"
+      - opt:
+          do:
+            - return: queueArgs{}, false
+          when: len(rest) < 2
+      - set: out.node, out.ids
+        value: rest[0], rest[1:]
+      - return: out, true
   - of: yieldKeys
     steps:
       - loop:
@@ -1416,6 +1455,24 @@ workflows:
           key: _
           range: missing
           value: s
+      - return: out
+  - of: txOptionsOf
+    steps:
+      - var:
+          name: out
+          type: plug.TxOptionsValue
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out.Isolation
+                    value: o.isolation
+                when: o.isolation != stdsql.LevelDefault
+            - set: out.ReadOnly
+              value: out.ReadOnly || o.readOnly
+          key: _
+          range: opts
+          value: o
       - return: out
   - of: (*unit).held
     steps:

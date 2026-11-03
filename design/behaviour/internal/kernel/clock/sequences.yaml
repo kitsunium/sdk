@@ -1,6 +1,122 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: NewCoarse
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewCoarse
+        kind: self
+      - id: requirePositivePeriod
+        kind: internal
+      - id: built.store
+        kind: internal
+      - id: built.running.Go
+        kind: value
+    steps:
+      - eval: requirePositivePeriod("NewCoarse", resolution)
+        to: requirePositivePeriod
+      - opt:
+          do:
+            - set: base
+              value: System
+          when: base == nil
+      - bind: built
+        eval: |-
+          &CoarseClock{
+          		base:   base,
+          		ticker: base.NewTicker(resolution),
+          		quit:   make(chan struct{}),
+          	}
+      - eval: built.store()
+        to: built.store
+      - eval: built.running.Go(built.publish)
+        to: built.running.Go
+      - return: built
+  - of: (*CoarseClock).publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CoarseClock).publish
+        kind: self
+      - id: c.store
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-c.quit
+                    do:
+                      - return: ""
+                  - comm: _, ticking := <-c.ticker.C()
+                    do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!ticking"
+                      - eval: c.store()
+                        to: c.store
+          forever: true
+  - of: (*CoarseClock).store
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CoarseClock).store
+        kind: self
+      - id: c.reading.Store
+        kind: value
+    steps:
+      - eval: c.reading.Store(new(c.base.Now()))
+        to: c.reading.Store
+  - of: (*CoarseClock).Now
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CoarseClock).Now
+        kind: self
+      - id: c.reading.Load
+        kind: value
+      - id: c.base.Now
+        kind: internal
+    steps:
+      - bind: published
+        eval: c.reading.Load()
+        to: c.reading.Load
+      - opt:
+          do:
+            - return: c.base.Now()
+              to: c.base.Now
+          when: published == nil
+      - return: "*published"
+  - of: (*CoarseClock).Since
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CoarseClock).Since
+        kind: self
+      - id: c.Now().Sub
+        kind: value
+    steps:
+      - return: c.Now().Sub(t)
+        to: c.Now().Sub
+  - of: (*CoarseClock).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CoarseClock).Stop
+        kind: self
+      - id: c.once.Do
+        kind: value
+    steps:
+      - eval: |-
+          c.once.Do(func() {
+          		c.ticker.Stop()
+          		close(c.quit)
+          		c.running.Wait()
+          		c.reading.Store(nil)
+          	})
+        to: c.once.Do
   - of: (*ManualClock).NewTimer
     participants:
       - id: caller

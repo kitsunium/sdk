@@ -369,6 +369,7 @@ files:
       - Clock
       - Timer
       - Ticker
+      - DeadLetterManager
     name: queue_interface.go
   - decls:
       - WriteUpsert
@@ -391,7 +392,9 @@ files:
       - TombstoneValue
     name: store.go
   - decls:
+      - TxOptionsValue
       - Database
+      - Classifier
       - Checker
       - MigratorProvider
       - Migrator
@@ -1450,6 +1453,18 @@ types:
       	// Reset makes the ticker fire every d.
       	Reset(d time.Duration)
       }
+  - kind: named
+    name: DeadLetterManager
+    underlying: |-
+      interface {
+      	// Replay moves the dead letter id back into the live queue, its
+      	// attempts counted afresh: its consumer handles it again. found is
+      	// false when the queue holds no dead letter id.
+      	Replay(ctx context.Context, id string) (found bool, err error)
+      	// Drop deletes the dead letter id for good. found is false when the
+      	// queue holds no dead letter id.
+      	Drop(ctx context.Context, id string) (found bool, err error)
+      }
   - fields:
       - doc: |-
           Open opens the engine of one store, as cfg places it: loaded from the
@@ -1669,6 +1684,13 @@ types:
       - doc: CheckTimeout bounds a check of the database.
         name: CheckTimeout
         type: time.Duration
+      - doc: |-
+          Transient is the engine's own reading of a failed transaction — true
+          when the database asks for it to run again —, nil when the engine
+          offers none (app.Classifier). The store subsystem reads the SDK's
+          Classify beside it.
+        name: Transient
+        type: func(err error) bool
     kind: struct
     name: DatabaseConfig
   - fields:
@@ -1736,14 +1758,24 @@ types:
         type: time.Time
     kind: struct
     name: TombstoneValue
+  - fields:
+      - doc: Isolation is the transaction's isolation level; zero is the database's default.
+        name: Isolation
+        type: sql.IsolationLevel
+      - doc: ReadOnly tells the database the transaction only reads.
+        name: ReadOnly
+        type: bool
+    kind: struct
+    name: TxOptionsValue
   - kind: named
     name: Database
     underlying: |-
       interface {
       	// Transact runs fn in a transaction of the database, or in a savepoint
       	// of the one ctx carries for it: nil commits or releases, an error
-      	// rolls back.
-      	Transact(ctx context.Context, fn func(ctx context.Context) error) error
+      	// rolls back. opts are the transaction's: its isolation level and
+      	// whether it only reads; a savepoint is given none.
+      	Transact(ctx context.Context, opts TxOptionsValue, fn func(ctx context.Context) error) error
       	// InTransaction reports whether ctx carries a transaction of this
       	// database.
       	InTransaction(ctx context.Context) bool
@@ -1755,6 +1787,13 @@ types:
       	// database is undone, and reports true; outside one it holds nothing
       	// and reports false.
       	OnAbort(ctx context.Context, fn func(ctx context.Context)) bool
+      }
+  - kind: named
+    name: Classifier
+    underlying: |-
+      interface {
+      	// Transient reports whether err asks for the transaction to run again.
+      	Transient(err error) bool
       }
   - kind: named
     name: Checker

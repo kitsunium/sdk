@@ -49,8 +49,14 @@ func (c *checker) Check(ctx context.Context) error {
 	//: goroutine forever on a receiver that has moved on.
 	answer := make(chan error, 1)
 	go func() {
-		//: the only statement this port ever sends.
-		answer <- c.cfg.db.PingContext(probe)
+		err := c.cfg.db.PingContext(probe)
+		//: a replica reads for the primary, so it answers too.
+		if err == nil && c.cfg.replica != nil {
+			//: the second and last ping.
+			err = c.cfg.replica.PingContext(probe)
+		}
+		//: the only statements this port ever sends.
+		answer <- err
 	}()
 	select {
 	case err := <-answer:

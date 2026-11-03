@@ -39,6 +39,9 @@ func TestTheServiceRangeKeepsItsValues(t *testing.T) {
 		{coresql.MigrationUnknownVersion, "MIGRATION_UNKNOWN_VERSION", 0x00_03_36_0F, 78, 500},
 		{coresql.VersionTableInvalid, "VERSION_TABLE_INVALID", 0x00_03_36_10, 78, 500},
 		{coresql.DuplicateMigration, "DUPLICATE_MIGRATION", 0x00_03_36_11, 78, 500},
+		{coresql.MigrationChanged, "MIGRATION_CHANGED", 0x00_03_36_12, 78, 500},
+		{coresql.TxRetriesExhausted, "TX_RETRIES_EXHAUSTED", 0x00_03_36_13, 75, 503},
+		{coresql.StatementTimedOut, "STATEMENT_TIMED_OUT", 0x00_03_36_14, 75, 503},
 	}
 	for _, tc := range cases {
 		t.Run(tc.reason, func(t *testing.T) {

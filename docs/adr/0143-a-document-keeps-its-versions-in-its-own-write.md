@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
+- **Amended**: 2026-11-02 — the trash indexed, `SQLVersionsTrashIndexMigration` (see the dated section at the end)
 - **Amended**: 2026-10-15 — the trash this record deferred, for [ADR 0178](0178-kits-effects-join-the-transaction-on-the-database-that-keeps-their-queue.md) C4 (see the dated section at the end)
 - **Amended**: 2026-10-15 — a document written with its versions and its trash as they are given, `VersionWriter.PutDocument`, and `VERSIONS_INVALID` `0.3.80.22`, for ADR 0178's `data copy` (see the second dated section at the end)
 - **Amended**: 2026-10-15 — what the versions weigh, `VersionWeigher` and `VersionWeigherContext`, for kit's Studio (its ADR 0007 §5; see the third dated section at the end)
@@ -814,3 +815,42 @@ on its fake database, and `TestRevisionsOnTheFile` on a SQLite file through
 field of `StatsValue`, all new; an unkeyed `StatsValue` literal, which no
 caller has reason to write, no longer compiles, under ADR 0040. Nothing stored
 changes.
+
+## Amendment (2026-11-02): the trash is indexed
+
+**Why (kitsunium/sdk#1054).** The trash is the row numbered 0 of
+`<table>___vs`, whose only index was its primary key `(doc_key, num)`: the
+`tombstones` statement's `WHERE num = 0 ORDER BY doc_key` could not use it,
+so `Tombstones` — the call a purge sweep or a trash view makes repeatedly —
+read every version row of every document and sorted the survivors. The
+versions table's own comment ("never looked up by what they hold") predated
+the trash, which is looked up by what it holds.
+
+**Decision.** `SQLVersionsTrashIndexMigration(dialect, table, version)` adds
+the index `<table>___tr`: on PostgreSQL and SQLite a partial index
+`(doc_key) WHERE num = 0`, on MySQL, which has none, a key `(num, doc_key)`.
+It is ONE migration for every table, an earlier release's and a new one's:
+`SQLVersionsMigration` is unchanged, because a migration already applied
+never runs its `Up` again, and because a key built into MySQL's
+`CREATE TABLE` would make the same migration list fail on a fresh install
+the day it also carries the `ALTER TABLE` an old install needs. Every
+direction is idempotent: PostgreSQL and SQLite spell `IF [NOT] EXISTS`, and
+MySQL — no `IF NOT EXISTS` for an index — asks `information_schema.statistics`
+first, so a run its implicit commit stopped before the version was recorded
+completes when it runs again. The name is the table's plus `___tr`, not
+`<table>___vs___trash`: at the longest table name (58 bytes) that would pass
+PostgreSQL's 63-byte limit, which truncates silently, onto the versions
+table's own name. No statement of the store changes: the engines choose the
+index for the statement `Tombstones` already sends.
+
+**Verification.** `TestSQLTheTrashIndexStatements` pins the DDL;
+`TestSQLTheTrashIndexMigrationRunsTwiceAndKeepsTheTrash` runs it twice up
+and twice down over a store that already has trashed documents, on the three
+dialects over the fake engine; and `e2e/integration/sql`'s
+`TestTheTrashIndexServesTombstonesOnEveryEngine` asserts from each engine's
+own plan (`EXPLAIN QUERY PLAN` on SQLite, `EXPLAIN` with sequential scans
+discouraged on PostgreSQL, `EXPLAIN` on MySQL) that the statement reads the
+index after the migration and not before. On 2026-11-02 it passed on SQLite;
+PostgreSQL 17 and MySQL 8.4 could not start on the machine that ran it (its
+Docker root file system was full) and skipped.
+

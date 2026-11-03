@@ -21,7 +21,20 @@ func (t *transactor) Join(ctx context.Context) (ex coresql.Executor, inTx bool) 
 		return scope.exec, true
 	}
 	//: no transaction of ours: the pool, one statement at a time.
-	return t.cfg.db, false
+	return t.cfg.primary, false
+}
+
+// Reader returns the executor a read issued under ctx runs on: the innermost
+// scope of the transaction ctx carries for this transactor, else the read
+// replica's pool, else the primary's (core/data/sql.Router).
+func (t *transactor) Reader(ctx context.Context) coresql.Executor {
+	//: inside a transaction of ours, the read sees what it wrote.
+	if scope := scopeFor(ctx, t); scope != nil {
+		//: the executor that scope lent its unit of work.
+		return scope.exec
+	}
+	//: the replica's pool when one is configured, else the primary's.
+	return t.cfg.reader
 }
 
 // Defer holds fn until the transaction ctx carries for this transactor

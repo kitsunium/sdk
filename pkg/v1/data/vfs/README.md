@@ -68,9 +68,14 @@ The disk filesystem needs a rename that atomically replaces, a directory handle 
 - [Variables](<#variables>)
 - [func NewMem\(\) FullFS](<#NewMem>)
 - [func NewOS\(root string\) \(filesystem FullFS, err error\)](<#NewOS>)
+- [type AtomicBatchWriter](<#AtomicBatchWriter>)
+  - [func \(AtomicBatchWriter\) WriteAtomicAll\(files \[\]FileValue, perm fs.FileMode\) \(published int, err error\)](<#AtomicBatchWriter.WriteAtomicAll>)
 - [type AtomicWriter](<#AtomicWriter>)
   - [func \(AtomicWriter\) WriteAtomic\(name string, data \[\]byte, perm fs.FileMode\) error](<#AtomicWriter.WriteAtomic>)
+- [type DirSyncer](<#DirSyncer>)
+  - [func \(DirSyncer\) SyncDir\(name string\) error](<#DirSyncer.SyncDir>)
 - [type FS](<#FS>)
+- [type FileValue](<#FileValue>)
 - [type FullFS](<#FullFS>)
 - [type WritableFS](<#WritableFS>)
   - [func \(WritableFS\) MkdirAll\(name string, perm fs.FileMode\) error](<#WritableFS.MkdirAll>)
@@ -214,6 +219,62 @@ It returns proc.UnsupportedPlatform on a GOOS that lacks the mechanics this file
 
 The filesystem holds the directory's descriptor and additionally implements io.Closer, which releases it; every call after Close fails.
 
+<a name="AtomicBatchWriter"></a>
+## type [AtomicBatchWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
+
+AtomicBatchWriter is the public alias for the batch publication capability, reached by type assertion: several files published, each directory flushed once. Both constructors' filesystems implement it; [FullFS](#FullFS) does not embed it.
+
+```go
+type AtomicBatchWriter = corevfs.AtomicBatchWriter
+```
+
+AtomicBatchWriter is an alias of `github.com/kitsunium/sdk/internal/core/data/vfs.AtomicBatchWriter`, declared as:
+
+```go
+type AtomicBatchWriter interface {
+	// WriteAtomicAll publishes every file of files, in order, each under
+	// [AtomicWriter.WriteAtomic]'s contract: a concurrent reader sees the
+	// previous content at its name or the new one, never a partial file.
+	// perm applies to every file, as it does to a publication.
+	//
+	// Every name and perm is checked before anything is written: a
+	// refusal — [InvalidPath], [InvalidPermission], [PathEscaped],
+	// [NotRegularFile] — publishes nothing and returns 0. A name given
+	// twice ends with the later file's data. An empty batch publishes
+	// nothing and returns no error.
+	//
+	// published counts the files renamed into place, from the first:
+	// files[published:] were not published, and the bytes previously at
+	// their names are unchanged. A failure before a file's rename is
+	// [PublishFailed] for files[published], no temporary surviving; the
+	// files before it are flushed with their directories before the call
+	// returns. [DirectorySyncFailed] means a directory flush failed — it
+	// wins over [PublishFailed] —: the files counted are visible, and
+	// their survival across a power loss is in doubt.
+	//
+	// The operating-system filesystem flushes each file before its rename
+	// and each directory once, after the last rename into it. An
+	// in-memory one publishes the batch in one step and has no device to
+	// flush.
+	WriteAtomicAll(files []FileValue, perm fs.FileMode) (published int, err error)
+}
+```
+
+<a name="AtomicBatchWriter.WriteAtomicAll"></a>
+### func \(AtomicBatchWriter\) [WriteAtomicAll](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/gen_ports.go>)
+
+```go
+func (AtomicBatchWriter) WriteAtomicAll(files []FileValue, perm fs.FileMode) (published int, err error)
+```
+
+WriteAtomicAll publishes every file of files, in order, each under [AtomicWriter.WriteAtomic](#AtomicWriter.WriteAtomic)'s contract: a concurrent reader sees the previous content at its name or the new one, never a partial file. perm applies to every file, as it does to a publication.
+
+Every name and perm is checked before anything is written: a refusal — [InvalidPath](#InvalidPath), [InvalidPermission](#InvalidPermission), [PathEscaped](#PathEscaped), [NotRegularFile](#NotRegularFile) — publishes nothing and returns 0. A name given twice ends with the later file's data. An empty batch publishes nothing and returns no error.
+
+published counts the files renamed into place, from the first: files\[published:] were not published, and the bytes previously at their names are unchanged. A failure before a file's rename is [PublishFailed](#PublishFailed) for files\[published], no temporary surviving; the files before it are flushed with their directories before the call returns. [DirectorySyncFailed](#DirectorySyncFailed) means a directory flush failed — it wins over [PublishFailed](#PublishFailed) —: the files counted are visible, and their survival across a power loss is in doubt.
+
+The operating-system filesystem flushes each file before its rename and each directory once, after the last rename into it. An in-memory one publishes the batch in one step and has no device to flush.
+
 <a name="AtomicWriter"></a>
 ## type [AtomicWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
 
@@ -240,6 +301,13 @@ type AtomicWriter interface {
 	// Durability beyond the process is the implementation's to describe: the
 	// operating-system filesystem flushes the file AND the directory entry,
 	// while an in-memory one has no device to flush and says so.
+	//
+	// perm applies on EVERY publication, a republication included: a
+	// publication is a new file renamed over the old one, so the file at name
+	// afterwards has mode perm, whatever mode the file it replaced had. It is
+	// the rename-replace semantics, the only ones a publication can honour
+	// without a racy stat and chmod; WriteFile, which rewrites in place,
+	// applies perm on creation only.
 	WriteAtomic(name string, data []byte, perm fs.FileMode) error
 }
 ```
@@ -257,6 +325,41 @@ The contract on FAILURE is why this method exists, and it is what [PublishFailed
 
 Durability beyond the process is the implementation's to describe: the operating-system filesystem flushes the file AND the directory entry, while an in-memory one has no device to flush and says so.
 
+perm applies on EVERY publication, a republication included: a publication is a new file renamed over the old one, so the file at name afterwards has mode perm, whatever mode the file it replaced had. It is the rename-replace semantics, the only ones a publication can honour without a racy stat and chmod; WriteFile, which rewrites in place, applies perm on creation only.
+
+<a name="DirSyncer"></a>
+## type [DirSyncer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
+
+DirSyncer is the public alias for the directory-flush capability, reached by type assertion: SyncDir on the parent of a directory just created makes its entry survive a power loss. Both constructors' filesystems implement it; [FullFS](#FullFS) does not embed it.
+
+```go
+type DirSyncer = corevfs.DirSyncer
+```
+
+DirSyncer is an alias of `github.com/kitsunium/sdk/internal/core/data/vfs.DirSyncer`, declared as:
+
+```go
+type DirSyncer interface {
+	// SyncDir flushes the entries of the directory name — "." for the root,
+	// the parent flushed most — so the names it holds survive a power loss.
+	// name is validated by [ValidatePath], the root allowed. A name that is
+	// not a directory is [NotRegularFile]; a directory that cannot be opened
+	// or flushed — an absent one included, fs.ErrNotExist kept in the chain
+	// — is [DirectorySyncFailed]. An in-memory filesystem has no device:
+	// it answers the same refusals and flushes nothing.
+	SyncDir(name string) error
+}
+```
+
+<a name="DirSyncer.SyncDir"></a>
+### func \(DirSyncer\) [SyncDir](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/vfs/gen_ports.go>)
+
+```go
+func (DirSyncer) SyncDir(name string) error
+```
+
+SyncDir flushes the entries of the directory name — "." for the root, the parent flushed most — so the names it holds survive a power loss. name is validated by \[ValidatePath], the root allowed. A name that is not a directory is [NotRegularFile](#NotRegularFile); a directory that cannot be opened or flushed — an absent one included, fs.ErrNotExist kept in the chain — is [DirectorySyncFailed](#DirectorySyncFailed). An in-memory filesystem has no device: it answers the same refusals and flushes nothing.
+
 <a name="FS"></a>
 ## type [FS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
 
@@ -267,6 +370,28 @@ type FS = corevfs.FS
 ```
 
 FS is an alias of `io/fs.FS`.
+
+<a name="FileValue"></a>
+## type [FileValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)
+
+FileValue is the public alias for one file of a batch [AtomicBatchWriter](#AtomicBatchWriter) publishes: its name and its content.
+
+```go
+type FileValue = corevfs.FileValue
+```
+
+FileValue is an alias of `github.com/kitsunium/sdk/internal/core/data/vfs.FileValue`, declared as:
+
+```go
+type FileValue struct {
+	// Name is where the file is published, a slash-separated path
+	// [ValidateWritePath] accepts, its directory already existing.
+	Name string
+	// Data is the file's content, written as given. The slice is read
+	// during the call and never kept.
+	Data []byte
+}
+```
 
 <a name="FullFS"></a>
 ## type [FullFS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/vfs/gen_facade.go>)

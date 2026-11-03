@@ -19,6 +19,9 @@ writes from `design/data/vfs.yaml`: edit the design, run `kit gen`, then
 | `FS` | alias → `corevfs.FS` (= `io/fs.FS`) | reading is the stdlib's, unchanged |
 | `WritableFS` | alias → `corevfs.WritableFS` | four write verbs on the embedded `FS`; frozen |
 | `AtomicWriter` | alias → `corevfs.AtomicWriter` | ADR 0039 sibling, reached by type assertion |
+| `DirSyncer` | alias → `corevfs.DirSyncer` | ADR 0039 sibling, reached by type assertion: `SyncDir` flushes a directory's entries — the parent of one just created (ADR 0056, amended 2026-11-02); not in `FullFS` |
+| `AtomicBatchWriter` | alias → `corevfs.AtomicBatchWriter` | ADR 0039 sibling, reached by type assertion: `WriteAtomicAll` publishes several files, each directory flushed once (ADR 0056, amended 2026-11-03); not in `FullFS` |
+| `FileValue` | alias → `corevfs.FileValue` | one file of a batch: `Name`, `Data` |
 | `FullFS` | alias → `corevfs.FullFS` | the union both constructors return |
 | `NewOS(root)` | func | confined to one tree; refuses at construction; the filesystem also answers `io.Closer` by type assertion, releasing its directory descriptor |
 | `NewMem()` | func | a filesystem in a map; takes no arguments, on purpose |

@@ -10,6 +10,10 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 )
 
+// filterHint is the capacity Filter's answer starts with: a guess, grown by
+// append past it.
+const filterHint int = 16
+
 // Secondary indexes of a store.
 //
 // The store's engine — the SDK's document store — keeps them beside the
@@ -149,18 +153,45 @@ func (s *storeCore) filterIn(ctx context.Context, keep func(v any) bool) ([]any,
 		return nil, notRunning(&s.nodeBase)
 	}
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: model.EdgeReads, op: model.OpRead, name: "Filter"})
-	all, err := s.all(ctx)
-	var out []any
-	if err == nil {
-		out = all[:0]
-		for _, v := range all {
-			if keep(v) {
-				out = append(out, v)
-			}
-		}
-	}
+	out, err := s.filter(ctx, keep)
 	sp.end(err)
 	return out, err
+}
+
+// filter is every entity keep keeps, in key order, through the engine's
+// Filter: on a database a page of records at a time, never the whole table
+// at once (#1153); each record decoded once, the first that does not decode
+// failing the read.
+func (s *storeCore) filter(ctx context.Context, keep func(v any) bool) ([]any, error) {
+	eng := s.engine()
+	if eng == nil {
+		return nil, notRunning(&s.nodeBase)
+	}
+	out := make([]any, 0, filterHint)
+	var undecoded error
+	_, err := eng.Filter(ctx, func(d plug.DocumentValue) bool {
+		if undecoded != nil {
+			return false
+		}
+		v, decodeErr := s.valueOf(d)
+		if decodeErr != nil {
+			undecoded = decodeErr
+			return false
+		}
+		if keep(v) {
+			out = append(out, v)
+		}
+		// The engine keeps nothing: the entities are kept here, decoded
+		// once.
+		return false
+	})
+	if err == nil {
+		err = undecoded
+	}
+	if err != nil {
+		return nil, s.said(err, "", "")
+	}
+	return out, nil
 }
 
 // declareIndexes checks the index options of a store once it is registered:

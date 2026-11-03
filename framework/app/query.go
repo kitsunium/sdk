@@ -19,5 +19,6 @@ type Query[Q, R any] = iapp.Query[Q, R]
 
 // QueryOption configures a query: the options every operation takes —
 // [Auth], [AuthOptional], [RateLimit], [RateLimitPerClient], [Timeout],
-// [Bulkhead].
+// [Bulkhead] — and a transaction's — [ReadOnly], [Serializable],
+// [RepeatableRead] —, which run its Ask in a transaction opened with them.
 type QueryOption = iapp.QueryConfigurer

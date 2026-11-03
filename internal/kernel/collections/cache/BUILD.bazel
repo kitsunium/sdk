@@ -10,14 +10,22 @@ go_library(
         "doc.go",
         "entry.go",
         "eviction.go",
+        "ghost.go",
+        "list.go",
+        "policy.go",
+        "s3fifo.go",
         "stats.go",
+        "striped.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/collections/cache",
     visibility = [
         "//:__subpackages__",
         "//internal/kernel:kernel_consumers",
     ],
-    deps = ["//internal/kernel/clock"],
+    deps = [
+        "//internal/kernel/clock",
+        "//internal/kernel/collections/heap",
+    ],
 )
 
 alias(
@@ -35,7 +43,14 @@ go_test(
         "cache_bench_test.go",
         "cache_external_test.go",
         "cache_internal_test.go",
+        "expire_external_test.go",
         "gen_api_test.go",
+        "keys_external_test.go",
+        "policy_bench_test.go",
+        "policy_external_test.go",
+        "striped_bench_test.go",
+        "striped_external_test.go",
+        "weight_external_test.go",
     ],
     embed = [":cache"],
     deps = ["//internal/kernel/clock"],
