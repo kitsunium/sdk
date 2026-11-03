@@ -23,7 +23,7 @@ func (f *fixedClock) Since(t time.Time) time.Duration { return f.now.Sub(t) }
 func listKeys[K comparable, V any](c *Cache[K, V]) []K {
 	keys := make([]K, 0, len(c.items))
 	//: walk from most- to least-recently-used.
-	for node := c.head; node != nil; node = node.next {
+	for node := c.main.head; node != nil; node = node.next {
 		keys = append(keys, node.key)
 	}
 	return keys
@@ -36,7 +36,7 @@ func listKeys[K comparable, V any](c *Cache[K, V]) []K {
 func listKeysBackward[K comparable, V any](c *Cache[K, V]) []K {
 	keys := make([]K, 0, len(c.items))
 	//: walk from least- to most-recently-used.
-	for node := c.tail; node != nil; node = node.prev {
+	for node := c.main.tail; node != nil; node = node.prev {
 		keys = append(keys, node.key)
 	}
 	return keys
@@ -87,12 +87,12 @@ func Test_Cache_pushFront(t *testing.T) {
 		for _, k := range c.insert {
 			ent := &entry[string, int]{key: k}
 			cch.items[k] = ent
-			cch.pushFront(ent)
+			cch.listOf(ent).pushFront(ent)
 		}
 		assertListIntact(t, cch, c.want)
 		//: the tail must be the oldest insertion, which is what eviction picks.
-		if cch.tail.key != c.want[len(c.want)-1] {
-			t.Errorf("tail = %q, want %q", cch.tail.key, c.want[len(c.want)-1])
+		if cch.main.tail.key != c.want[len(c.want)-1] {
+			t.Errorf("tail = %q, want %q", cch.main.tail.key, c.want[len(c.want)-1])
 		}
 	}
 	for _, c := range tests {
@@ -105,7 +105,7 @@ func Test_Cache_pushFront(t *testing.T) {
 
 // Test_Cache_unlink pins that removing a node repairs the list from whichever
 // position it held. The head and tail cases are the ones that silently corrupt
-// the ends, because they are the only ones where c.head / c.tail must change.
+// the ends, because they are the only ones where c.main.head / c.main.tail must change.
 func Test_Cache_unlink(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -125,7 +125,7 @@ func Test_Cache_unlink(t *testing.T) {
 		for _, k := range []string{"a", "b", "c"} {
 			ent := &entry[string, int]{key: k}
 			cch.items[k] = ent
-			cch.pushFront(ent)
+			cch.listOf(ent).pushFront(ent)
 		}
 
 		victim := cch.items[c.remove]
@@ -167,10 +167,10 @@ func Test_Cache_moveFront(t *testing.T) {
 		for _, k := range []string{"a", "b", "c"} {
 			ent := &entry[string, int]{key: k}
 			cch.items[k] = ent
-			cch.pushFront(ent)
+			cch.listOf(ent).pushFront(ent)
 		}
 
-		cch.moveFront(cch.items[c.promote])
+		cch.listOf(cch.items[c.promote]).moveFront(cch.items[c.promote])
 		assertListIntact(t, cch, c.want)
 	}
 	for _, c := range tests {
@@ -243,11 +243,11 @@ func Test_Cache_evictIfNeeded(t *testing.T) {
 		for _, k := range c.insert {
 			ent := &entry[string, int]{key: k}
 			cch.items[k] = ent
-			cch.pushFront(ent)
+			cch.listOf(ent).pushFront(ent)
 		}
 
 		var pending []evictionValue[string, int]
-		cch.evictIfNeeded(&pending)
+		cch.evictIfNeeded(nil, &pending)
 
 		assertListIntact(t, cch, c.wantRemains)
 		if len(pending) != len(c.wantPending) {
@@ -294,7 +294,7 @@ func Test_Cache_removeEvict(t *testing.T) {
 		cch := NewCache[string, int](Config[string, int]{OnEvict: c.onEvict})
 		ent := &entry[string, int]{key: "k", val: 7}
 		cch.items["k"] = ent
-		cch.pushFront(ent)
+		cch.listOf(ent).pushFront(ent)
 
 		var pending []evictionValue[string, int]
 		cch.removeEvict(ent, &pending)
@@ -306,7 +306,7 @@ func Test_Cache_removeEvict(t *testing.T) {
 		if _, still := cch.items["k"]; still {
 			t.Error("the evicted key is still in the map")
 		}
-		if cch.head != nil || cch.tail != nil {
+		if cch.main.head != nil || cch.main.tail != nil {
 			t.Error("the list is not empty after evicting its only node")
 		}
 		if cch.evictions != 1 {

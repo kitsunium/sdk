@@ -96,6 +96,27 @@ type Config struct {
 	// CheckTimeout is the budget one [core/data/sql.Checker.Check] gets. A
 	// non-positive value clamps to [DefaultCheckTimeout].
 	CheckTimeout time.Duration
+	// StatementTimeout bounds each statement the transactor's executors run —
+	// inside a transaction, and through Join or Reader on a pool — measured
+	// on Clock. Zero, or negative, is none: a statement then runs until the
+	// caller's context ends, as database/sql runs it.
+	//
+	// An Exec or a Prepare is bounded until it returns; a Query until its
+	// rows are read and closed, or the budget elapses, whichever comes first
+	// — the cut context lives until then, one timer per statement in
+	// flight. A cut answered by the call itself is joined with
+	// [core/data/sql.StatementTimedOut], its "operation" field naming exec,
+	// query or prepare; a cut met while reading rows surfaces from Next,
+	// Err or Scan as the context's own end. The migration runner never
+	// applies it: a migration's DDL runs as long as it takes, under the
+	// caller's context.
+	StatementTimeout time.Duration
+	// ReadReplica is a second pool, on a replica of DB, that a read-only
+	// transaction and [core/data/sql.Router]'s Reader run on. Nil is none:
+	// every transaction opens on DB. Pool is applied to it as to DB, and the
+	// health probe pings both. It is the caller's, opened with its own
+	// driver, and this package never closes it.
+	ReadReplica *stdsql.DB
 }
 
 // resolve validates the Config, applies the pool policy to the caller's DB,
@@ -120,8 +141,17 @@ func (c Config) resolve() (settings resolved, err error) {
 		//: propagate POOL_MISCONFIGURED unchanged.
 		return settings, err
 	}
+	//: the replica takes the same policy, validated above for DB.
+	if c.ReadReplica != nil {
+		c.Pool.install(c.ReadReplica)
+	}
+	clk := c.resolvedClock()
 	//: every remaining field has a documented fallback.
-	settings = resolved{db: c.DB, dialect: c.Dialect, clk: c.resolvedClock(), probe: c.probeBudget()}
+	settings = resolved{
+		db: c.DB, replica: c.ReadReplica, dialect: c.Dialect, clk: clk, probe: c.probeBudget(),
+		budget: stmtBudget{limit: c.StatementTimeout, clk: clk},
+	}
+	settings.primary, settings.reader = settings.executors()
 	//: validated and clamped.
 	return settings, nil
 }
@@ -156,14 +186,19 @@ func (p PoolConfig) apply(db *stdsql.DB) error {
 		return kerrs.Wrap(coresql.PoolMisconfigured, kerrs.WrapParams{},
 			kerrs.String("field", "MaxOpen"), kerrs.Int("value", p.MaxOpen))
 	}
+	p.install(db)
+	//: the policy is installed.
+	return nil
+}
+
+// install sets the policy on db, which apply validated.
+func (p PoolConfig) install(db *stdsql.DB) {
 	db.SetMaxOpenConns(p.MaxOpen)
 	db.SetMaxIdleConns(p.idleCeiling())
 	db.SetConnMaxLifetime(p.lifetime())
 	//: a non-positive idle deadline is database/sql's own "no deadline", and
 	//: it is safe here because the lifetime above is always finite.
 	db.SetConnMaxIdleTime(p.MaxIdleTime)
-	//: the policy is installed.
-	return nil
 }
 
 // idleCeiling applies both documented idle clamps.

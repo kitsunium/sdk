@@ -6,8 +6,10 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	corecache "github.com/kitsunium/sdk/internal/core/data/cache"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/concur/singleflight"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -62,6 +64,13 @@ type chainStore[V any] struct {
 	generation atomic.Uint64
 	// writing counts the writes announced and not finished.
 	writing atomic.Int64
+	// refreshMu guards refreshing, the keys a background refresh runs for.
+	refreshMu  sync.Mutex
+	refreshing map[string]struct{}
+	// waiter is what LoadLeased waits on between two reads (#830).
+	waiter clock.Waiter
+	// leasePoll is LoadLeased's step while another process holds the lease.
+	leasePoll time.Duration
 }
 
 // NewChain puts each store in front of the next: tiers[0] is the nearest and
@@ -73,7 +82,10 @@ type chainStore[V any] struct {
 // that sentinel for the reasoning.
 //
 // The returned value is a [corecache.Store] and also implements
-// [corecache.EntryFetcher], [corecache.Tagger] and [corecache.Loader].
+// [corecache.EntryFetcher], [corecache.Tagger], [corecache.Loader],
+// [corecache.Expirer], [corecache.BulkFetcher], [corecache.BulkSetter],
+// [corecache.Refresher] and [corecache.Leaser]. A negative LeasePoll is
+// refused with [corecache.CacheMisconfigured].
 //
 // IFACE-PLUGIN: the concrete chain stays unexported behind this constructor.
 func NewChain[V any](cfg ChainConfig, stores ...corecache.Store[V]) (chain corecache.Store[V], err error) {
@@ -84,6 +96,11 @@ func NewChain[V any](cfg ChainConfig, stores ...corecache.Store[V]) (chain corec
 		return nil, kerrs.Wrap(corecache.CacheChainMisconfigured, kerrs.WrapParams{},
 			kerrs.Int("tiers", len(stores)),
 			kerrs.String("problem", "fewer than two tiers"))
+	}
+	//: a negative step means nothing.
+	if cfg.LeasePoll < 0 {
+		//: refuse rather than reinterpret.
+		return nil, misconfigured("LeasePoll", kerrs.String("value", cfg.LeasePoll.String()))
 	}
 	tiers := make([]tier[V], 0, len(stores))
 	//: resolve every tier's capabilities up front; one that cannot answer the
@@ -97,8 +114,13 @@ func NewChain[V any](cfg ChainConfig, stores ...corecache.Store[V]) (chain corec
 		}
 		tiers = append(tiers, built)
 	}
+	var waiter clock.Waiter = clock.System
+	//: an injected clock is what the lease's waits run on.
+	if cfg.Clock != nil {
+		waiter = cfg.Clock
+	}
 	//: ready.
-	return &chainStore[V]{tiers: tiers, onPromoteError: cfg.OnPromoteError}, nil
+	return &chainStore[V]{tiers: tiers, onPromoteError: cfg.OnPromoteError, waiter: waiter, leasePoll: pollOrDefault(cfg.LeasePoll)}, nil
 }
 
 // newTier checks that store answers the whole tier contract.
@@ -325,6 +347,13 @@ func (c *chainStore[V]) fillOnce(ctx context.Context, key string, fill corecache
 		//: someone else's fill already answered this.
 		return hit, nil
 	}
+	//: the fill, written through.
+	return c.fillAndSet(ctx, key, fill)
+}
+
+// fillAndSet runs fill and writes its entry through every tier. A failed
+// fill stores nothing, in any tier.
+func (c *chainStore[V]) fillAndSet(ctx context.Context, key string, fill corecache.Fill[V]) (value V, err error) {
 	entry, fillErr := fill(ctx)
 	//: a failed fill stores nothing, in any tier.
 	if fillErr != nil {

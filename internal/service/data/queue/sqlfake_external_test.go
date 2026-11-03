@@ -62,6 +62,9 @@ type queueRow struct {
 	code                                 driver.Value // nil or int64
 	id                                   string
 	dead, due, enqueued, count           int64
+	// priority is the row's level, 0 — the column's default — unless a
+	// statement of SQLConfig.Priority wrote one.
+	priority int64
 }
 
 // queueTable is one version of the table, by identifier.
@@ -95,6 +98,9 @@ type sqlEngine struct {
 	causeArgs int
 	// trail is SQLConfig.Trail: the dead letters' rows carry the column.
 	trail bool
+	// priority is SQLConfig.Priority: the lease's read takes the highest
+	// level first, and the copies and listings carry the column.
+	priority bool
 	// noTable says the queue's table is not there yet, and trailColumn that
 	// it has the trail column: what SQLTrailMigration reads and changes.
 	noTable, trailColumn bool
@@ -103,6 +109,13 @@ type sqlEngine struct {
 // newSQLEngine returns an empty engine for the broker keeping its queue in
 // table on dialect, with SQLConfig.Trail set or not.
 func newSQLEngine(dialect coresql.Dialect, table string, trail bool) *sqlEngine {
+	return newSQLEngineColumns(dialect, table, trail, false)
+}
+
+// newSQLEngineColumns returns an empty engine for the broker keeping its
+// queue in table on dialect, with SQLConfig.Trail and SQLConfig.Priority set
+// or not.
+func newSQLEngineColumns(dialect coresql.Dialect, table string, trail, priority bool) *sqlEngine {
 	causeArgs := 4
 	if trail {
 		causeArgs = 5
@@ -110,10 +123,11 @@ func newSQLEngine(dialect coresql.Dialect, table string, trail bool) *sqlEngine 
 	return &sqlEngine{
 		committed: queueTable{},
 		failures:  map[string][]error{},
-		stmts:     svcqueue.RenderSQLForTest(dialect, table, trail),
+		stmts:     svcqueue.RenderSQLColumnsForTest(dialect, table, trail, priority),
 		dialect:   dialect,
 		causeArgs: causeArgs,
 		trail:     trail,
+		priority:  priority,
 	}
 }
 
@@ -150,7 +164,7 @@ func (e *sqlEngine) rows() int {
 var fakeSQLSeq atomic.Int64
 
 // open registers the engine under a fresh driver name and returns a pool.
-func (e *sqlEngine) open(t *testing.T) *stdsql.DB {
+func (e *sqlEngine) open(t testing.TB) *stdsql.DB {
 	t.Helper()
 	name := "queuefake" + strconv.FormatInt(fakeSQLSeq.Add(1), 10)
 	stdsql.Register(name, &fakeSQLDriver{engine: e})
@@ -322,7 +336,7 @@ func (c *fakeSQLConn) run(ctx context.Context, query string, args []driver.Value
 // writes reports whether an autocommit statement of role takes the writer.
 func writes(role string) bool {
 	switch role {
-	case "probe", "next", "pick", "deadList", "liveList", "oncePick", "trailProbe":
+	case "probe", "next", "pick", "deadList", "liveList", "oncePick", "trailProbe", "stats", "ackPick":
 		return false
 	default:
 		return true
@@ -380,6 +394,12 @@ func (e *sqlEngine) recognise(query string, nargs int) string {
 		return "buryRows"
 	case nargs > 1 && query == e.stmts.OnceSweepRows(nargs-1):
 		return "onceSweepRows"
+	case nargs >= 4 && nargs%4 == 0 && query == e.stmts.InsertRows(nargs/4):
+		return "insertRows"
+	case nargs >= 4 && (nargs-1)%3 == 0 && query == e.stmts.AckRows((nargs-1)/3):
+		return "ackRows"
+	case nargs >= 4 && (nargs-1)%3 == 0 && query == e.stmts.AckPick((nargs-1)/3):
+		return "ackPick"
 	}
 	return query
 }
@@ -395,6 +415,13 @@ func (e *sqlEngine) execute(role, query string, args []driver.Value, work queueT
 		}
 		work[id] = queueRow{id: id, due: args[1].(int64), enqueued: args[2].(int64), payload: blob(args[3])}
 		return answer{affected: 1}, nil
+	case "insertPriority":
+		id := str(args[0])
+		if _, taken := work[id]; taken {
+			return answer{}, errDuplicate{key: id}
+		}
+		work[id] = queueRow{id: id, due: args[1].(int64), enqueued: args[2].(int64), payload: blob(args[3]), priority: args[4].(int64)}
+		return answer{affected: 1}, nil
 	case "putDead":
 		id := str(args[0])
 		if _, taken := work[id]; taken {
@@ -409,6 +436,11 @@ func (e *sqlEngine) execute(role, query string, args []driver.Value, work queueT
 			row.trail = blob(args[8])
 			work[id] = row
 		}
+		if e.priority {
+			row := work[id]
+			row.priority = args[len(args)-1].(int64)
+			work[id] = row
+		}
 		return answer{affected: 1}, nil
 	case "lock":
 		return answer{}, nil
@@ -420,17 +452,30 @@ func (e *sqlEngine) execute(role, query string, args []driver.Value, work queueT
 		now := args[0].(int64)
 		return minDue(work, func(row queueRow) bool { return row.due > now }), nil
 	case "pick":
-		return pick(work, args[0].(int64), int(args[1].(int64))), nil
+		return pick(work, args[0].(int64), int(args[1].(int64)), e.priority), nil
 	case "deadList":
-		return deadList(work, int(args[0].(int64)), e.trail), nil
+		return withPriority(deadList(work, str(args[0]), int(args[1].(int64)), e.trail), work, e.priority), nil
+	case "stats":
+		return stats(work), nil
+	case "leaseReturning":
+		return leaseReturning(work, args), nil
+	case "insertRows":
+		return insertRows(work, args)
+	case "ackRows", "ackPick":
+		return ackRows(work, args, role == "ackRows"), nil
 	case "liveList":
-		return liveList(work, str(args[0]), int(args[1].(int64))), nil
+		return withPriority(liveList(work, str(args[0]), int(args[1].(int64))), work, e.priority), nil
 	case "putLive":
 		id := str(args[0])
 		if _, taken := work[id]; taken {
 			return answer{}, errDuplicate{key: id}
 		}
 		work[id] = queueRow{id: id, due: args[1].(int64), enqueued: args[2].(int64), count: args[3].(int64), payload: blob(args[4])}
+		if e.priority {
+			row := work[id]
+			row.priority = args[5].(int64)
+			work[id] = row
+		}
 		return answer{affected: 1}, nil
 	case "onceClaim":
 		id := str(args[0])
@@ -502,6 +547,57 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work queueTab
 		return dropPassedReservations(work, args[1].(int64), args[:1]), nil
 	case "onceSweepRows":
 		return dropPassedReservations(work, args[0].(int64), args[1:]), nil
+	}
+	return e.bulkWrite(role, query, args, work)
+}
+
+// bulkWrite runs the statements of the siblings that act on a whole queue.
+func (e *sqlEngine) bulkWrite(role, query string, args []driver.Value, work queueTable) (answer, error) {
+	switch role {
+	case "purgeQueued", "purgeLeased":
+		leased := role == "purgeLeased"
+		return deleteWhere(work, func(row queueRow) bool { return row.dead == 0 && (row.lease != nil) == leased }), nil
+	case "buryExhausted":
+		n := e.causeArgs
+		now, maxDeliveries := args[n].(int64), args[n+1].(int64)
+		affected := int64(0)
+		for _, row := range ordered(work, func(row queueRow) bool {
+			return row.dead == 0 && row.lease != nil && row.due <= now && row.count >= maxDeliveries
+		}) {
+			buryRow(&row, args[:n])
+			work[row.id] = row
+			affected++
+		}
+		return answer{affected: affected}, nil
+	case "expire":
+		n := e.causeArgs
+		cutoff, now := args[n].(int64), args[n+1].(int64)
+		affected := int64(0)
+		for _, row := range ordered(work, func(row queueRow) bool { return row.dead == 0 && row.enqueued <= cutoff && row.due <= now }) {
+			buryRow(&row, args[:n])
+			work[row.id] = row
+			affected++
+		}
+		return answer{affected: affected}, nil
+	case "retention":
+		cutoff := args[0].(int64)
+		return deleteWhere(work, func(row queueRow) bool { return row.dead == 1 && row.due <= cutoff }), nil
+	case "replayMany":
+		now, limit := args[0].(int64), int(args[1].(int64))
+		dead := byID(work, func(row queueRow) bool { return row.dead == 1 })
+		for _, row := range dead[:min(limit, len(dead))] {
+			row.dead, row.due, row.count = 0, now, 0
+			row.reason, row.cause, row.code, row.trail = nil, nil, nil, nil
+			work[row.id] = row
+		}
+		return answer{affected: int64(min(limit, len(dead)))}, nil
+	case "purgeDeadMany":
+		before, limit := args[0].(int64), int(args[1].(int64))
+		dead := byID(work, func(row queueRow) bool { return row.dead == 1 && row.due < before })
+		for _, row := range dead[:min(limit, len(dead))] {
+			delete(work, row.id)
+		}
+		return answer{affected: int64(min(limit, len(dead)))}, nil
 	}
 	return answer{}, errors.New("the fake engine does not speak: " + query)
 }
@@ -656,9 +752,13 @@ func ordered(work queueTable, keep func(queueRow) bool) []queueRow {
 	return out
 }
 
-// pick answers the live rows due by now, oldest due first, at most limit.
-func pick(work queueTable, now int64, limit int) answer {
+// pick answers the live rows due by now, oldest due first — the highest
+// level first with priority —, at most limit.
+func pick(work queueTable, now int64, limit int, priority bool) answer {
 	due := ordered(work, func(row queueRow) bool { return row.dead == 0 && row.due <= now })
+	if priority {
+		slices.SortStableFunc(due, func(a, b queueRow) int { return cmp.Compare(b.priority, a.priority) })
+	}
 	rows := make([][]driver.Value, 0, min(limit, len(due)))
 	for _, row := range due[:min(limit, len(due))] {
 		rows = append(rows, []driver.Value{[]byte(row.id), row.enqueued, row.count, nullable(row.lease), nullable(row.payload)})
@@ -666,10 +766,125 @@ func pick(work queueTable, now int64, limit int) answer {
 	return answer{cols: []string{"id", "enqueued_at", "deliveries", "lease", "payload"}, rows: rows}
 }
 
-// deadList answers the dead letters in the order they died, at most limit,
-// their trail before their payload when trail is set.
-func deadList(work queueTable, limit int, trail bool) answer {
-	dead := ordered(work, func(row queueRow) bool { return row.dead == 1 })
+// byID returns the rows of work keep accepts, by identifier.
+func byID(work queueTable, keep func(queueRow) bool) []queueRow {
+	var out []queueRow
+	for _, row := range work {
+		if keep(row) {
+			out = append(out, row)
+		}
+	}
+	slices.SortFunc(out, func(a, b queueRow) int { return cmp.Compare(a.id, b.id) })
+	return out
+}
+
+// deleteWhere deletes every row of work drop accepts and counts them.
+func deleteWhere(work queueTable, drop func(queueRow) bool) answer {
+	n := int64(0)
+	for id, row := range work {
+		if drop(row) {
+			delete(work, id)
+			n++
+		}
+	}
+	return answer{affected: n}
+}
+
+// leaseReturning leases the due rows that have an attempt left — deadline,
+// lease, now, the attempt bound and the batch bound —, oldest due first, and
+// answers them with the instant each was due, in an order no engine
+// promises: newest identifier first.
+func leaseReturning(work queueTable, args []driver.Value) answer {
+	deadline, lease, now := args[0].(int64), blob(args[1]), args[2].(int64)
+	maxDeliveries, limit := args[3].(int64), int(args[4].(int64))
+	due := ordered(work, func(row queueRow) bool {
+		return row.dead == 0 && row.due <= now && (row.lease == nil || row.count < maxDeliveries)
+	})
+	due = due[:min(limit, len(due))]
+	slices.SortFunc(due, func(a, b queueRow) int { return cmp.Compare(b.id, a.id) })
+	rows := make([][]driver.Value, 0, len(due))
+	for _, row := range due {
+		wasDue := row.due
+		row.due, row.lease = deadline, bytes.Clone(lease)
+		row.count++
+		work[row.id] = row
+		rows = append(rows, []driver.Value{[]byte(row.id), row.enqueued, row.count, nullable(row.payload), wasDue})
+	}
+	return answer{cols: []string{"id", "enqueued_at", "deliveries", "payload", "due"}, rows: rows, affected: int64(len(rows))}
+}
+
+// stats answers the count of each (dead, leased) group with its earliest
+// enqueue and due instants, as the stats statement does.
+func stats(work queueTable) answer {
+	type group struct{ dead, leased int64 }
+	type agg struct{ count, enqueued, due int64 }
+	groups := map[group]agg{}
+	for _, row := range work {
+		if row.dead > 1 {
+			continue
+		}
+		key := group{dead: row.dead}
+		if row.lease != nil {
+			key.leased = 1
+		}
+		held, seen := groups[key]
+		if !seen {
+			held = agg{enqueued: row.enqueued, due: row.due}
+		}
+		held.count++
+		held.enqueued, held.due = min(held.enqueued, row.enqueued), min(held.due, row.due)
+		groups[key] = held
+	}
+	var rows [][]driver.Value
+	for key, held := range groups {
+		rows = append(rows, []driver.Value{key.dead, key.leased, held.count, held.enqueued, held.due})
+	}
+	return answer{cols: []string{"dead", "leased", "count", "enqueued", "due"}, rows: rows}
+}
+
+// insertRows inserts one row per four arguments — identifier, due, enqueue
+// instant, payload —, refusing the whole statement on a taken identifier.
+func insertRows(work queueTable, args []driver.Value) (answer, error) {
+	added := queueTable{}
+	for row := 0; row+4 <= len(args); row += 4 {
+		id := str(args[row])
+		if _, taken := work[id]; taken {
+			return answer{}, errDuplicate{key: id}
+		}
+		if _, taken := added[id]; taken {
+			return answer{}, errDuplicate{key: id}
+		}
+		added[id] = queueRow{id: id, due: args[row+1].(int64), enqueued: args[row+2].(int64), payload: blob(args[row+3])}
+	}
+	maps.Copy(work, added)
+	return answer{affected: int64(len(added))}, nil
+}
+
+// ackRows matches every live row a receipt — identifier, lease, count —
+// holds with a deadline after the first argument, answers their identifier
+// and lease, and deletes them when remove is set.
+func ackRows(work queueTable, args []driver.Value, remove bool) answer {
+	now := args[0].(int64)
+	var rows [][]driver.Value
+	for at := 1; at+3 <= len(args); at += 3 {
+		row, found := work[str(args[at])]
+		if !found || row.dead != 0 || row.lease == nil || !bytes.Equal(row.lease, blob(args[at+1])) ||
+			row.count != args[at+2].(int64) || row.due <= now {
+			continue
+		}
+		rows = append(rows, []driver.Value{[]byte(row.id), bytes.Clone(row.lease)})
+		if remove {
+			delete(work, row.id)
+		}
+	}
+	return answer{cols: []string{"id", "lease"}, rows: rows, affected: int64(len(rows))}
+}
+
+// deadList answers the dead letters whose identifier sorts after after, in
+// identifier order, at most limit, their trail before their payload when
+// trail is set.
+func deadList(work queueTable, after string, limit int, trail bool) answer {
+	dead := byID(work, func(row queueRow) bool { return row.dead == 1 && row.id > after })
 	rows := make([][]driver.Value, 0, min(limit, len(dead)))
 	for _, row := range dead[:min(limit, len(dead))] {
 		values := []driver.Value{
@@ -703,6 +918,19 @@ func liveList(work queueTable, after string, limit int) answer {
 		rows = append(rows, []driver.Value{[]byte(row.id), row.enqueued, row.count, row.due, nullable(row.lease), nullable(row.payload)})
 	}
 	return answer{cols: []string{"id", "enqueued_at", "deliveries", "due", "lease", "payload"}, rows: rows}
+}
+
+// withPriority appends each listed row's level as a last column, when the
+// statement names it (SQLConfig.Priority).
+func withPriority(listed answer, work queueTable, priority bool) answer {
+	if !priority {
+		return listed
+	}
+	for index, row := range listed.rows {
+		listed.rows[index] = append(row, work[str(row[0])].priority)
+	}
+	listed.cols = append(listed.cols, "priority")
+	return listed
 }
 
 // str reads a bound []byte as a string.

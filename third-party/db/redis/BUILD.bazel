@@ -1,0 +1,11 @@
+# gazelle:prefix github.com/kitsunium/sdk/third-party/db/redis
+
+# third-party/db/redis is a Go module of its own (ADR 0157, ADR 0211): the
+# go-redis vendor module, named by its vendor rather than by one package
+# (#984), hosting the cache tier (cache/) and the queue broker (queue/) over
+# Valkey or Redis. The redis logger writer joins it when #984 moves
+# third-party/db/writer/redis here. This directory holds no package; the file
+# marks the module root as a Bazel package so gazelle's go_deps extension can
+# load //third-party/db/redis:go.mod, which go.work names.
+
+package(default_visibility = ["//visibility:public"])

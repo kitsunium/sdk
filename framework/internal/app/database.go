@@ -22,6 +22,8 @@ const (
 	dbTimeout      = "timeout"
 	dbCheckTimeout = "check-timeout"
 	dbMigrate      = "migrate"
+	dbTxRetries    = "tx-retries"
+	dbTxRetryDelay = "tx-retry-delay"
 )
 
 // The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
@@ -110,6 +112,10 @@ type database struct {
 	maxOpen, maxIdle                                *SettingService[int]
 	maxLifetime, maxIdleTime, timeout, checkTimeout *SettingService[time.Duration]
 	migrate                                         *SettingService[string]
+	// txRetries and txRetryDelay are how often, and after how long a first
+	// wait, a transaction the database asks to run again runs again (#1000).
+	txRetries    *SettingService[int]
+	txRetryDelay *SettingService[time.Duration]
 }
 
 // location is where the database is, as the diagram says it in dev:
@@ -200,7 +206,9 @@ func Migrations(m ...MigrationValue) interface {
 // naming a file that holds it, then the environment's secret store —, and
 // its settings: <name>-max-open (10), <name>-max-idle (2), <name>-max-lifetime
 // (30m), <name>-max-idle-time (0: none), <name>-timeout (5s), <name>-check-timeout
-// (5s) and <name>-migrate (start, or manual). Outside dev the URL is
+// (5s), <name>-tx-retries (3: how many times a transaction the database asks
+// to run again runs again, 0 for never — [Classifier]), <name>-tx-retry-delay
+// (50ms: the first wait before it does) and <name>-migrate (start, or manual). Outside dev the URL is
 // required and writes its TLS mode; in dev a database without one leaves its
 // stores in the data directory, and a SQLite database without one is the
 // file <data>/<name>.sqlite. [InMemory] on the app opens none.
@@ -220,29 +228,26 @@ func Database(name string, engine Engine, opts ...DatabaseConfigurer) AppConfigu
 // declareSettings declares the database's tuning, as kit declares it for
 // every database.
 func (d *database) declareSettings() {
-	positive := func(v any) phrase {
-		if t, ok := v.(time.Duration); ok && t <= 0 {
-			return say("database.positive")
-		}
-		return phrase{}
-	}
-	d.maxOpen = databaseSetting(d, dbMaxOpen, 10, func(v any) phrase {
-		if n, ok := v.(int); ok && n <= 0 {
-			return say("database.max-open")
-		}
-		return phrase{}
-	})
+	positive := judged(func(t time.Duration) bool { return t > 0 }, func() phrase { return say("database.positive") })
+	d.maxOpen = databaseSetting(d, dbMaxOpen, 10,
+		judged(func(n int) bool { return n > 0 }, func() phrase { return say("database.max-open") }))
 	d.maxIdle = databaseSetting(d, dbMaxIdle, 2, nil)
 	d.maxLifetime = databaseSetting(d, dbMaxLifetime, 30*time.Minute, nil)
 	d.maxIdleTime = databaseSetting(d, dbMaxIdleTime, time.Duration(0), nil)
 	d.timeout = databaseSetting(d, dbTimeout, 5*time.Second, positive)
 	d.checkTimeout = databaseSetting(d, dbCheckTimeout, 5*time.Second, positive)
-	d.migrate = databaseSetting(d, dbMigrate, migrateAtStart, func(v any) phrase {
-		if s, ok := v.(string); ok && s != migrateAtStart && s != migrateManual {
-			return say("database.migrate-mode", "start", migrateAtStart, "manual", migrateManual)
-		}
-		return phrase{}
-	})
+	d.txRetries = databaseSetting(d, dbTxRetries, 3,
+		judged(func(n int) bool { return n >= 0 }, func() phrase { return say("database.tx-retries") }))
+	d.txRetryDelay = databaseSetting(d, dbTxRetryDelay, 50*time.Millisecond, positive)
+	d.migrate = databaseSetting(d, dbMigrate, migrateAtStart, judged(isMigrateMode, func() phrase {
+		return say("database.migrate-mode", "start", migrateAtStart, "manual", migrateManual)
+	}))
+}
+
+// isMigrateMode reports whether mode is one a database's migrations run in:
+// at the start, or by hand.
+func isMigrateMode(mode string) bool {
+	return mode == migrateAtStart || mode == migrateManual
 }
 
 // databaseSetting declares one setting of a database: <name>-<suffix>.
@@ -255,7 +260,7 @@ func databaseSetting[T SettingValue](d *database, suffix string, def T, check fu
 
 // settingDecls are the database's settings, in the table's order.
 func (d *database) settingDecls() []settingDecl {
-	return []settingDecl{d.maxOpen, d.maxIdle, d.maxLifetime, d.maxIdleTime, d.timeout, d.checkTimeout, d.migrate}
+	return []settingDecl{d.maxOpen, d.maxIdle, d.maxLifetime, d.maxIdleTime, d.timeout, d.checkTimeout, d.txRetries, d.txRetryDelay, d.migrate}
 }
 
 // urlSecret is the name of the database's URL, a secret of the product's.

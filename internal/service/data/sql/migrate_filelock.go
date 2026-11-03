@@ -139,7 +139,7 @@ func runPhase(err error, began bool, outcome error) error {
 // the lock.
 func (m *migrator) takeFileLock(ctx context.Context, ex coresql.Executor) error {
 	//: inside the transaction, so a lock that turns out to be busy undoes it.
-	if _, err := ex.ExecContext(ctx, createTableSQL(m.plan.table)); err != nil {
+	if _, err := ex.ExecContext(ctx, createTableSQL(m.plan.table, m.plan.checksums)); err != nil {
 		//: busy, or a real failure — the caller tells them apart.
 		return err
 	}

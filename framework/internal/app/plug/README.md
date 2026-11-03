@@ -24,6 +24,8 @@ The package imports the standard library and the framework's model only, so that
   - [func \(Broker\) Publish\(ctx context.Context, payload \[\]byte\) error](<#Broker.Publish>)
 - [type Checker](<#Checker>)
   - [func \(Checker\) Check\(ctx context.Context\) error](<#Checker.Check>)
+- [type Classifier](<#Classifier>)
+  - [func \(Classifier\) Transient\(err error\) bool](<#Classifier.Transient>)
 - [type Clock](<#Clock>)
   - [func \(Clock\) After\(d time.Duration\) \<-chan time.Time](<#Clock.After>)
   - [func \(Clock\) NewTicker\(d time.Duration\) Ticker](<#Clock.NewTicker>)
@@ -36,8 +38,11 @@ The package imports the standard library and the framework's model only, so that
   - [func \(Database\) Defer\(ctx context.Context, fn func\(\)\) bool](<#Database.Defer>)
   - [func \(Database\) InTransaction\(ctx context.Context\) bool](<#Database.InTransaction>)
   - [func \(Database\) OnAbort\(ctx context.Context, fn func\(ctx context.Context\)\) bool](<#Database.OnAbort>)
-  - [func \(Database\) Transact\(ctx context.Context, fn func\(ctx context.Context\) error\) error](<#Database.Transact>)
+  - [func \(Database\) Transact\(ctx context.Context, opts TxOptionsValue, fn func\(ctx context.Context\) error\) error](<#Database.Transact>)
 - [type DatabaseConfig](<#DatabaseConfig>)
+- [type DeadLetterManager](<#DeadLetterManager>)
+  - [func \(DeadLetterManager\) Drop\(ctx context.Context, id string\) \(found bool, err error\)](<#DeadLetterManager.Drop>)
+  - [func \(DeadLetterManager\) Replay\(ctx context.Context, id string\) \(found bool, err error\)](<#DeadLetterManager.Replay>)
 - [type DeadLetterValue](<#DeadLetterValue>)
 - [type DeliveryValue](<#DeliveryValue>)
 - [type DocumentSink](<#DocumentSink>)
@@ -219,6 +224,7 @@ The package imports the standard library and the framework's model only, so that
   - [func \(Trasher\) Tombstones\(ctx context.Context\) \(\[\]TombstoneValue, error\)](<#Trasher.Tombstones>)
   - [func \(Trasher\) Trash\(ctx context.Context, key string\) error](<#Trasher.Trash>)
   - [func \(Trasher\) Untrash\(ctx context.Context, key string\) error](<#Trasher.Untrash>)
+- [type TxOptionsValue](<#TxOptionsValue>)
 - [type VersionKeeper](<#VersionKeeper>)
   - [func \(VersionKeeper\) RewriteVersions\(ctx context.Context, key string, fn func\(vs \[\]VersionValue\) \(\[\]VersionValue, error\)\) error](<#VersionKeeper.RewriteVersions>)
   - [func \(VersionKeeper\) StoredVersions\(ctx context.Context, key string\) \(\[\]VersionValue, error\)](<#VersionKeeper.StoredVersions>)
@@ -950,6 +956,27 @@ func (Checker) Check(ctx context.Context) error
 
 Check asks the database whether it answers, within its check timeout.
 
+<a name="Classifier"></a>
+## type [Classifier](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_interface.go>)
+
+Classifier is a [Database](#Database) that says whether a failed transaction is one the database asks to run again: a serialization failure, a deadlock, a lock wait that timed out. app.Transact runs such a transaction again, at its outermost level. A sibling of [Database](#Database).
+
+```go
+type Classifier interface {
+	// Transient reports whether err asks for the transaction to run again.
+	Transient(err error) bool
+}
+```
+
+<a name="Classifier.Transient"></a>
+### func \(Classifier\) [Transient](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_interface.go>)
+
+```go
+func (Classifier) Transient(err error) bool
+```
+
+Transient reports whether err asks for the transaction to run again.
+
 <a name="Clock"></a>
 ## type [Clock](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue_interface.go>)
 
@@ -1080,8 +1107,9 @@ type Database interface {
 	OnAbort(ctx context.Context, fn func(ctx context.Context)) bool
 	// Transact runs fn in a transaction of the database, or in a savepoint
 	// of the one ctx carries for it: nil commits or releases, an error
-	// rolls back.
-	Transact(ctx context.Context, fn func(ctx context.Context) error) error
+	// rolls back. opts are the transaction's: its isolation level and
+	// whether it only reads; a savepoint is given none.
+	Transact(ctx context.Context, opts TxOptionsValue, fn func(ctx context.Context) error) error
 }
 ```
 
@@ -1116,10 +1144,10 @@ OnAbort holds fn until the work of the scope ctx carries for the database is und
 ### func \(Database\) [Transact](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_interface.go>)
 
 ```go
-func (Database) Transact(ctx context.Context, fn func(ctx context.Context) error) error
+func (Database) Transact(ctx context.Context, opts TxOptionsValue, fn func(ctx context.Context) error) error
 ```
 
-Transact runs fn in a transaction of the database, or in a savepoint of the one ctx carries for it: nil commits or releases, an error rolls back.
+Transact runs fn in a transaction of the database, or in a savepoint of the one ctx carries for it: nil commits or releases, an error rolls back. opts are the transaction's: its isolation level and whether it only reads; a savepoint is given none.
 
 <a name="DatabaseConfig"></a>
 ## type [DatabaseConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store.go>)
@@ -1147,8 +1175,48 @@ type DatabaseConfig struct {
 	MaxIdleTime  time.Duration
 	// CheckTimeout bounds a check of the database.
 	CheckTimeout time.Duration
+	// Transient is the engine's own reading of a failed transaction — true
+	// when the database asks for it to run again —, nil when the engine
+	// offers none (app.Classifier). The store subsystem reads the SDK's
+	// Classify beside it.
+	Transient    func(err error) bool
 }
 ```
+
+<a name="DeadLetterManager"></a>
+## type [DeadLetterManager](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue_interface.go>)
+
+DeadLetterManager is a Broker whose dead letters an operator replays into the live queue or drops for good, from the product's CLI (issue #1138). A sibling of [Broker](#Broker).
+
+```go
+type DeadLetterManager interface {
+	// Drop deletes the dead letter id for good. found is false when the
+	// queue holds no dead letter id.
+	Drop(ctx context.Context, id string) (found bool, err error)
+	// Replay moves the dead letter id back into the live queue, its
+	// attempts counted afresh: its consumer handles it again. found is
+	// false when the queue holds no dead letter id.
+	Replay(ctx context.Context, id string) (found bool, err error)
+}
+```
+
+<a name="DeadLetterManager.Drop"></a>
+### func \(DeadLetterManager\) [Drop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue_interface.go>)
+
+```go
+func (DeadLetterManager) Drop(ctx context.Context, id string) (found bool, err error)
+```
+
+Drop deletes the dead letter id for good. found is false when the queue holds no dead letter id.
+
+<a name="DeadLetterManager.Replay"></a>
+### func \(DeadLetterManager\) [Replay](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue_interface.go>)
+
+```go
+func (DeadLetterManager) Replay(ctx context.Context, id string) (found bool, err error)
+```
+
+Replay moves the dead letter id back into the live queue, its attempts counted afresh: its consumer handles it again. found is false when the queue holds no dead letter id.
 
 <a name="DeadLetterValue"></a>
 ## type [DeadLetterValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue.go>)
@@ -3725,6 +3793,20 @@ func (Trasher) Untrash(ctx context.Context, key string) error
 ```
 
 Untrash brings the record trashed under key back as it was.
+
+<a name="TxOptionsValue"></a>
+## type [TxOptionsValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_interface.go>)
+
+TxOptionsValue is what app.Transact asks of a database transaction: an isolation level — the zero value the database's default — and whether it only reads. A savepoint is given the zero value.
+
+```go
+type TxOptionsValue struct {
+	// Isolation is the transaction's isolation level; zero is the database's default.
+	Isolation sql.IsolationLevel
+	// ReadOnly tells the database the transaction only reads.
+	ReadOnly  bool
+}
+```
 
 <a name="VersionKeeper"></a>
 ## type [VersionKeeper](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_interface.go>)

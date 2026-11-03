@@ -43,7 +43,12 @@ import (
 // between the commit and the release loses what was held.
 //
 // On a database the transaction is the database's own, at its default
-// isolation. On the data directory and in memory the framework keeps its own: it takes
+// isolation unless opts ask for another: [Serializable] or [RepeatableRead]
+// opens it at that level, [ReadOnly] tells the database it only reads, and a
+// store's write inside it is refused ([Invalid], [CodeTransactionReadOnly]) on
+// every backend. Options go on the outermost Transact: a nested one given
+// any is refused ([Invalid], [CodeTransactionNested]), its savepoint able to
+// change neither. On the data directory and in memory the framework keeps its own: it takes
 // the data's writer turn — one transaction at a time; a write outside any
 // waits for it, and such writes share the turn among themselves —, its
 // writes land at once, and an error writes each entity's previous value
@@ -53,7 +58,36 @@ import (
 //
 // A command's handler runs in one already ([NoTransaction] opts out), and
 // so does a workflow's transition.
-func Transact(ctx context.Context, fn func(context.Context) error) error {
+func Transact(ctx context.Context, fn func(context.Context) error, opts ...TransactOption) error {
 	//: the implementation is framework/internal/app's; this facade only forwards.
-	return iapp.Transact(ctx, fn)
+	return iapp.Transact(ctx, fn, opts...)
+}
+
+// Serializable opens the transaction at the SERIALIZABLE isolation level: it
+// commits only if running it alone would have given the same result, and a
+// concurrent transaction that would break that fails instead — on
+// PostgreSQL with SQLSTATE 40001, which the database asks to run again. On
+// the data directory and in memory, whose transactions already take one
+// writer at a time, it changes nothing.
+func Serializable() TransactOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.Serializable()
+}
+
+// RepeatableRead opens the transaction at the REPEATABLE READ isolation
+// level: a row it read reads the same until it ends. On the data directory
+// and in memory it changes nothing.
+func RepeatableRead() TransactOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.RepeatableRead()
+}
+
+// ReadOnly opens the transaction read-only: the database is told it only
+// reads, and a store's write inside it is refused ([Invalid],
+// [CodeTransactionReadOnly]) on every backend, before it reaches one.
+// Given to a query's declaration, it runs the query's Ask in such a
+// transaction — the caller's own, when the Ask runs inside one.
+func ReadOnly() TransactOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.ReadOnly()
 }

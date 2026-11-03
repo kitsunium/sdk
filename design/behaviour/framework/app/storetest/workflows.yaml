@@ -1,0 +1,32 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*heard).count
+    steps:
+      - lock:
+          mutex: h
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                when: got == id
+          key: _
+          range: h.ids
+          value: got
+      - return: "n"
+  - of: (*suite).mailed
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: m.Subject == "about "+id
+          key: _
+          range: s.mailer.Captured()
+          value: m
+      - return: "false"

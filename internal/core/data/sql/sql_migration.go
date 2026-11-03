@@ -55,6 +55,20 @@ type MigrationValue struct {
 	// only one of them is a defect. The same rule core/app/lifecycle applies to a
 	// nil Stop, for the same reason.
 	Down Step
+	// Checksum is the fingerprint of the statements Up runs, recorded in the
+	// version table beside the version when the migration applies, so a
+	// later run notices that an applied migration's text was edited — the
+	// merge that rewrote a column type, the branch that renumbered — and
+	// refuses with [MigrationChanged] before applying anything, instead of
+	// calling it applied by its number alone.
+	//
+	// Empty means unverified: the migration is never compared, which is what
+	// a [Step] written as code rather than as statements must be, since a
+	// func is opaque (ADR 0055 §D12). A migration built with
+	// internal/service/data/sql's Statements sets it from the same
+	// statements with ChecksumOf. A version recorded before checksums
+	// existed is given this one by the next run that declares it.
+	Checksum string
 }
 
 // Irreversible is the [Step] a caller assigns to [MigrationValue.Down] to

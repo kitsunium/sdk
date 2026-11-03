@@ -2,6 +2,15 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      allMessagesPage is how many live messages an AllMessages iterator reads per
+      page of a broker's Messages: large enough that a queue of thousands costs a
+      handful of reads, small enough that a page's payloads stay a bounded heap.
+    items:
+      - name: allMessagesPage
+        type: int
+        value: "256"
+    name: allMessagesPage
+  - doc: |-
       armTimerRounds bounds how many times armUntil re-arms a timer the clock
       moved past while it was being armed.
     items:
@@ -16,8 +25,9 @@ constants:
       It is a CLAMP and not a refusal (ADR 0031): its zero has one reading — "you
       did not think about polling" — and 100 ms is defensible for every queue,
       because it bounds idle latency at a tenth of a second while costing one
-      directory read per worker per tenth of a second. A caller who cares picks
-      their own.
+      probe per tenth of a second — on the file broker a stat of each state
+      directory while the queue is quiet, a read of them once it moves. A caller
+      who cares picks their own.
 
       Every broker in this package is a [corequeue.Waker], so for them it bounds
       only what a wake cannot see — a publication made by ANOTHER process into a
@@ -81,6 +91,25 @@ constants:
         value: "74"
     name: exitIOErr
   - doc: |-
+      deadSweepAll is the bound of a retention sweep: every record the directory
+      holds.
+    items:
+      - name: deadSweepAll
+        type: int
+        value: int(^uint(0) >> 1)
+    name: deadSweepAll
+  - doc: |-
+      deadHeaderMax bounds what a sweep reads of a dead-letter record to find its
+      failure instant: a header this package writes is well under it — seven
+      short lines, a trail of sixteen codes, a reason and a cause of 120 runes —
+      so the payload behind it is never read, and a record whose header does not
+      end within it is not one this package wrote.
+    items:
+      - name: deadHeaderMax
+        type: int
+        value: "4096"
+    name: deadHeaderMax
+  - doc: |-
       queueDirMode is the mode a queue directory is CREATED with when it is
       absent: owner-only. A directory this broker created has the mode it asked
       for, so [checkQueueDir] is about directories somebody else created.
@@ -130,6 +159,42 @@ constants:
         type: int
         value: "120"
     name: publicMaxRunes
+  - doc: |-
+      racyMargin is how much older than the listing that read it a directory's
+      modification instant must be for the listing to be reused (issue #811).
+
+      A directory's mtime is the filesystem's record of its last change, stamped
+      from the kernel's coarse clock — up to one tick behind the real one — and
+      truncated to the filesystem's granularity: a nanosecond on ext4, XFS, Btrfs
+      or APFS, one second on ext3 or HFS+, two on FAT. A change made after a
+      listing began can therefore carry the very mtime the listing recorded, when
+      both fall in one tick: the directory changed, and its mtime did not. Git
+      meets the same fact in its index and names it "racily clean" — an entry
+      whose file changed in the second the index was written is looked at again,
+      whatever its stat says. The broker does the same: a listing whose
+      directory's mtime is within racyMargin of the instant the listing began is
+      never reused, so a publication in the same tick as a listing is seen by the
+      next Receive. Three seconds covers the coarsest granularity named above
+      plus the coarse clock's lag, with room to spare.
+    items:
+      - name: racyMargin
+        type: time.Duration
+        value: 3 * time.Second
+    name: racyMargin
+  - doc: |-
+      listingMaxAge bounds how long a listing is reused even when its directory's
+      mtime says nothing changed: past it, the next look reads the directory
+      again. It is what keeps "finally seen" unconditional where the mtime cannot
+      be trusted at all — a wall clock stepped back across a listing, a network
+      filesystem stamping with a server clock far behind this one, a tool that
+      restores a directory's mtime — at the cost of one read per directory every
+      listingMaxAge on a queue nobody touches. It runs on the monotonic clock, so
+      a step of the wall clock does not stretch it.
+    items:
+      - name: listingMaxAge
+        type: time.Duration
+        value: 10 * time.Second
+    name: listingMaxAge
   - doc: |-
       The three directories are the three states. A message is queued, leased, or
       abandoned, and it is in exactly one of them because rename(2) moves it
@@ -250,6 +315,20 @@ constants:
         type: int
         value: "3"
     name: readyFields
+  - doc: "maxNameFields is the most fields any name carries: the in-flight grammar's."
+    items:
+      - name: maxNameFields
+        type: int
+        value: inflightFields
+    name: maxNameFields
+  - doc: |-
+      normalDigit stands for the normal level in the order of the names: it is
+      never written, since a normal name carries no digit.
+    items:
+      - name: normalDigit
+        type: byte
+        value: "'0' + byte(corequeue.PriorityHighest-corequeue.PriorityNormal)"
+    name: normalDigit
   - doc: |-
       The position of each field within a queued or in-flight name. They are
       named rather than written as indices because the two layouts differ only by
@@ -318,6 +397,16 @@ constants:
         value: time.Minute
     name: onceSweepEvery
   - doc: |-
+      retentionSweepEvery is how often, at most, a broker's Receive looks for a
+      dead letter past PolicyValue.DeadLetterRetention, on the broker's clock: a
+      retention is days, so a minute late costs nothing, and a Receive that swept
+      on every poll would pay a scan of the dead-letter store each time.
+    items:
+      - name: retentionSweepEvery
+        type: time.Duration
+        value: time.Minute
+    name: retentionSweepEvery
+  - doc: |-
       instanceNonceBytes is the entropy in a broker's receipt prefix. It is what
       lets an unknown receipt be told apart from an expired one without keeping a
       record of every receipt ever issued: a receipt carrying THIS broker's nonce
@@ -328,6 +417,14 @@ constants:
         type: int
         value: "8"
     name: instanceNonceBytes
+  - doc: |-
+      memIDHalfWidth is how many base-36 digits the widest uint64 takes: each
+      half of a memory identifier is padded to it, so identifiers sort by value.
+    items:
+      - name: memIDHalfWidth
+        type: int
+        value: "13"
+    name: memIDHalfWidth
   - doc: |-
       receiptRadix is the base a memory receipt's counter is written in. Base 36
       keeps it short without needing a second alphabet, and nothing ever parses
@@ -390,6 +487,22 @@ constants:
         value: "\",\""
     name: trailSeparator
   - doc: |-
+      priorityLevels is how many levels a broker orders: PriorityLowest to
+      PriorityHighest.
+    items:
+      - name: priorityLevels
+        type: int
+        value: int(corequeue.PriorityHighest-corequeue.PriorityLowest) + 1
+    name: priorityLevels
+  - doc: |-
+      decorrelatedFactor is how far above the previous wait a decorrelated draw
+      may reach: kernel/backoff's, the Builders' Library's `sleep * 3`.
+    items:
+      - name: decorrelatedFactor
+        type: float64
+        value: "3"
+    name: decorrelatedFactor
+  - doc: |-
       sqlLeaseEntropyBytes is the entropy in a lease's random half. It is the
       proof a receipt holds the lease — the identifier is known to anyone who can
       read the queue — so it is as wide as a message's own entropy.
@@ -412,6 +525,30 @@ constants:
         type: string
         value: "\"sql\""
     name: sqlBrokerName
+  - doc: |-
+      sqlStatsGroups is how many groups the stats statement can answer: live
+      without a lease, live with one, and dead.
+    items:
+      - name: sqlStatsGroups
+        type: int
+        value: "3"
+    name: sqlStatsGroups
+  - doc: |-
+      sqlInsertArgs is how many arguments one row of a multi-row INSERT binds:
+      the identifier, the due instant, the enqueue instant and the payload.
+    items:
+      - name: sqlInsertArgs
+        type: int
+        value: "4"
+    name: sqlInsertArgs
+  - doc: |-
+      sqlAckArgs is how many arguments one receipt of AckMany's statement binds:
+      the identifier, the lease and the delivery count.
+    items:
+      - name: sqlAckArgs
+        type: int
+        value: "3"
+    name: sqlAckArgs
   - doc: |-
       MaxSQLTableLen is the longest table name [NewSQL] and [SQLMigration] accept,
       in bytes: PostgreSQL's identifier limit. The broker derives no table from
@@ -489,6 +626,23 @@ constants:
         value: "\"trail\""
     name: sqlTrailColumn
   - doc: |-
+      sqlPriorityColumn is the column SQLConfig.Priority keeps a message's level
+      in (ADR 0054, amended 2026-11-03).
+    items:
+      - name: sqlPriorityColumn
+        type: string
+        value: "\"priority\""
+    name: sqlPriorityColumn
+  - doc: |-
+      sqlPutDeadArgs is how many arguments PutDeadLetter's insertion binds
+      before the optional columns': the identifier, the two instants, the count,
+      the payload and the three of the cause.
+    items:
+      - name: sqlPutDeadArgs
+        type: int
+        value: "8"
+    name: sqlPutDeadArgs
+  - doc: |-
       sqlCauseColumnLen is the width of MySQL's reason and cause columns. What a
       dead letter keeps of a failure is bounded to publicMaxRunes runes, at most
       four bytes each.
@@ -523,13 +677,47 @@ constants:
         type: int
         value: "100"
     name: sqlOnceSweepRows
+  - doc: |-
+      sqlPriorityMigrationPrefix starts the name of every migration
+      SQLPriorityMigration builds, the table's name after it.
+    items:
+      - name: sqlPriorityMigrationPrefix
+        type: string
+        value: "\"queue priority \""
+    name: sqlPriorityMigrationPrefix
+  - doc: |-
+      sqlPriorityIndexSuffix ends the name of the index SQLPriorityMigration
+      creates over (dead, priority, due, id).
+    items:
+      - name: sqlPriorityIndexSuffix
+        type: string
+        value: "\"_priority\""
+    name: sqlPriorityIndexSuffix
+  - doc: |-
+      sqlPriorityIndexHash is how many bytes of the table name's SHA-256 a
+      shortened index name keeps, so two long table names sharing a prefix still
+      name two indexes.
+    items:
+      - name: sqlPriorityIndexHash
+        type: int
+        value: "4"
+    name: sqlPriorityIndexHash
 files:
+  - decls:
+      - allMessagesPage
+      - checkSizes
+      - pagedMessages
+      - refusedReceipt
+      - yieldFailure
+    name: bulk.go
   - decls:
       - armTimerRounds
       - Consume
       - consumer
       - newConsumer
       - (*consumer).pump
+      - (*consumer).turn
+      - (*consumer).idleTurn
       - idleFor
       - idle
       - armUntil
@@ -545,12 +733,24 @@ files:
       - ignoreCancelled
     name: consume.go
   - decls:
+      - ackedWindow
+      - newAckedWindow
+      - (*ackedWindow).holds
+      - (*ackedWindow).remember
+    name: consume_acked.go
+  - decls:
       - DefaultPollInterval
       - DefaultSettleTimeout
       - ConsumerConfig
       - ConsumerConfig.validate
       - ConsumerConfig.normalized
     name: consume_config.go
+  - decls:
+      - idleGate
+      - newIdleGate
+      - (*idleGate).enter
+      - (*idleGate).release
+    name: consume_idle.go
   - decls:
       - leaseMarginDivisor
       - renewDivisor
@@ -585,13 +785,34 @@ files:
       - (*fileBroker).Close
       - (*fileBroker).Publish
       - (*fileBroker).write
+      - (*fileBroker).PublishPriority
       - (*fileBroker).PublishAt
       - (*fileBroker).Ack
       - (*fileBroker).resolve
       - (*fileBroker).classifyMissing
       - backendFailed
-      - (*fileBroker).entriesOf
     name: file.go
+  - decls:
+      - deadSweepAll
+      - deadHeaderMax
+      - (*fileBroker).DeadLettersAfter
+      - (*fileBroker).Purge
+      - (*fileBroker).unlinkLive
+      - (*fileBroker).ReplayDeadLetters
+      - deadMessages
+      - (*fileBroker).PurgeDeadLetters
+      - (*fileBroker).sweepRetention
+      - (*fileBroker).removeDeadFailedBy
+      - (*fileBroker).removeIfFailedBy
+      - (*fileBroker).deadFailedAt
+      - (*fileBroker).PublishMany
+      - mintFileBatch
+      - (*fileBroker).publishEach
+      - (*fileBroker).wakeIfAny
+      - (*fileBroker).AckMany
+      - (*fileBroker).AllMessages
+      - (*fileBroker).readLive
+    name: file_bulk.go
   - decls:
       - queueDirMode
       - messageMode
@@ -627,6 +848,17 @@ files:
       - intField
     name: file_dead.go
   - decls:
+      - racyMargin
+      - listingMaxAge
+      - stateListing
+      - (*stateListing).reusable
+      - listings
+      - (*listings).slot
+      - (*fileBroker).namesOf
+      - (*fileBroker).readNames
+      - sortState
+    name: file_listing.go
+  - decls:
       - dirReady
       - dirOnce
       - suffixMessage
@@ -638,6 +870,8 @@ files:
       - int64Bits
       - uint32Bits
       - readyFields
+      - maxNameFields
+      - normalDigit
       - posAt
       - posDeadEnqueued
       - stateDirs
@@ -653,6 +887,12 @@ files:
       - parseReady
       - parseInflight
       - parseDead
+      - splitLeveled
+      - atLevel
+      - nameStem
+      - levelOf
+      - compareReady
+      - compareStem
       - assemble
       - splitName
       - parseNano
@@ -684,16 +924,20 @@ files:
   - decls:
       - (*fileBroker).Receive
       - (*fileBroker).leaseVisible
+      - leaseWalk
+      - (*fileBroker).leaseStep
       - (*fileBroker).takeLease
       - (*fileBroker).readLeased
       - (*fileBroker).reclaim
       - (*fileBroker).recoverOne
       - (*fileBroker).dropStale
       - ignoreMissing
+      - (*fileBroker).expireReady
     name: file_receive.go
   - decls:
       - liveFile
       - (*fileBroker).ReplayDeadLetter
+      - (*fileBroker).replayRecords
       - (*fileBroker).DeleteDeadLetter
       - (*fileBroker).PutDeadLetter
       - (*fileBroker).Messages
@@ -704,22 +948,38 @@ files:
       - (*fileBroker).removeDead
     name: file_replay.go
   - decls:
+      - (*fileBroker).Stats
+      - (*fileBroker).countLive
+      - (*fileBroker).countDead
+    name: file_stats.go
+  - decls:
       - leaseExpiry
     name: lease_expiry.go
+  - decls:
+      - retentionSweepEvery
+      - expiredCause
+      - messageExpired
+      - retentionDue
+      - retentionCutoff
+    name: lifetime.go
   - decls:
       - memRecord
     name: mem_record.go
   - decls:
       - instanceNonceBytes
+      - memIDHalfWidth
       - memoryBroker
       - NewMemory
       - (*memoryBroker).Publish
       - (*memoryBroker).enqueue
+      - (*memoryBroker).enqueueQuiet
+      - (*memoryBroker).PublishPriority
       - (*memoryBroker).PublishAt
       - (*memoryBroker).PublishOnce
       - (*memoryBroker).dropPassedOnce
       - (*memoryBroker).Receive
       - (*memoryBroker).takeEligible
+      - (*memoryBroker).takeVisible
       - (*memoryBroker).lease
       - (*memoryBroker).mintReceipt
       - (*memoryBroker).Ack
@@ -740,12 +1000,36 @@ files:
       - (*memoryBroker).DeadLetters
       - (*memoryBroker).resolve
       - (*memoryBroker).reclaimExpired
+      - (*memoryBroker).unlease
+      - newLeaseExpiries
       - (*memoryBroker).recoverExpired
       - (*memoryBroker).bury
+      - (*memoryBroker).insertDead
+      - compareDeadID
       - (*memoryBroker).insertReady
+      - (*memoryBroker).earliestReady
+      - (*memoryBroker).readyAfter
+      - (*memoryBroker).readyCount
       - laterThan
       - memID
+      - padBase36
     name: memory.go
+  - decls:
+      - (*memoryBroker).DeadLettersAfter
+      - (*memoryBroker).deadAfter
+      - (*memoryBroker).Stats
+      - earlierOf
+      - (*memoryBroker).Purge
+      - (*memoryBroker).ReplayDeadLetters
+      - (*memoryBroker).requeueDead
+      - (*memoryBroker).PurgeDeadLetters
+      - (*memoryBroker).sweepRetention
+      - (*memoryBroker).expired
+      - (*memoryBroker).PublishMany
+      - (*memoryBroker).AckMany
+      - (*memoryBroker).AllMessages
+      - ackOutcomeOf
+    name: memory_bulk.go
   - decls:
       - receiptRadix
       - MemoryConfig
@@ -760,6 +1044,7 @@ files:
       - maxDeadDeliveries
       - maxDeadTrail
       - trailSeparator
+      - priorityLevels
       - causeValue
       - describeCause
       - trailCodes
@@ -779,9 +1064,15 @@ files:
       - onceUntil
       - onceDigest
       - keptAsWritten
+      - priorityKnown
+      - checkPriority
+      - readyIndex
     name: queue.go
   - decls:
+      - decorrelatedFactor
       - retryDelay
+      - drawBetween
+      - randomOrDefault
     name: retry.go
   - decls:
       - sqlLeaseEntropyBytes
@@ -796,6 +1087,9 @@ files:
       - sqlOwnTxOptions
       - (*sqlBroker).Publish
       - (*sqlBroker).PublishAt
+      - (*sqlBroker).PublishPriority
+      - (*sqlBroker).checkLevel
+      - (*sqlBroker).publishRow
       - (*sqlBroker).Ack
       - (*sqlBroker).Nack
       - (*sqlBroker).NackAfter
@@ -816,6 +1110,33 @@ files:
       - rowsAffected
     name: sql.go
   - decls:
+      - sqlStatsGroups
+      - (*sqlBroker).Stats
+      - (*sqlBroker).Purge
+      - (*sqlBroker).ReplayDeadLetters
+      - (*sqlBroker).PurgeDeadLetters
+      - (*sqlBroker).sweepRetention
+      - (*sqlBroker).expireDue
+      - (*sqlBroker).PublishMany
+      - mintBatch
+      - (*sqlBroker).AckMany
+      - sqlLanded
+      - (*sqlBroker).ackChunk
+      - (*sqlBroker).readLanded
+      - (*sqlBroker).AllMessages
+    name: sql_bulk.go
+  - decls:
+      - sqlInsertArgs
+      - sqlAckArgs
+      - sqlBulkStatements
+      - renderSQLBulkStatements
+      - (*sqlBulkStatements).insertRows
+      - (*sqlBulkStatements).ackHeld
+      - (*sqlBulkStatements).ackRows
+      - (*sqlBulkStatements).ackPick
+      - bulkRowsPerStatement
+    name: sql_bulk_dialect.go
+  - decls:
       - MaxSQLTableLen
       - sqlTableSeparator
       - sqlReservedPrefix
@@ -829,6 +1150,7 @@ files:
   - decls:
       - (*sqlBroker).Reject
       - (*sqlBroker).DeadLetters
+      - (*sqlBroker).DeadLettersAfter
       - scanner
       - scanDeadLetter
       - (*sqlBroker).ReplayDeadLetter
@@ -845,9 +1167,14 @@ files:
       - sqlCauseArgs
       - sqlTrailColumnLen
       - sqlTrailColumn
+      - sqlPriorityColumn
+      - sqlPutDeadArgs
       - sqlCauseColumnLen
+      - sqlColumns
       - sqlStatements
       - renderSQLStatements
+      - (*sqlStatements).withPriority
+      - (*sqlStatements).insertAt
       - sqlHeldBy
       - (*sqlStatements).leaseRows
       - (*sqlStatements).buryRows
@@ -876,9 +1203,23 @@ files:
       - (*sqlBroker).pickPassedOnce
     name: sql_once.go
   - decls:
+      - sqlPriorityMigrationPrefix
+      - sqlPriorityIndexSuffix
+      - sqlPriorityIndexHash
+      - SQLPriorityMigration
+      - priorityColumnStatements
+      - renderPriorityColumnStatements
+      - priorityIndexName
+      - priorityProbe
+      - priorityColumnStatements.step
+    name: sql_priority.go
+  - decls:
       - sqlPicked
       - sqlLeaseRound
       - (*sqlBroker).Receive
+      - (*sqlBroker).receiveInstants
+      - (*sqlBroker).probeOutside
+      - (*sqlBroker).leaseInTransaction
       - sqlInstants
       - (*sqlBroker).leaseDue
       - (*sqlBroker).leaseRound
@@ -889,6 +1230,9 @@ files:
       - rowSet
       - (*sqlBroker).finishRows
       - idArgs
+      - (*sqlBroker).receiveReturning
+      - (*sqlBroker).leaseReturning
+      - sortedByDue
     name: sql_receive.go
   - decls:
       - trailColumnStatements
@@ -914,6 +1258,36 @@ files:
       - canonicalDir
     name: wake.go
 functions:
+  - doc: |-
+      checkSizes refuses a batch any of whose payloads is above maxBytes, naming
+      the first one by its index, before anything of the batch is written.
+    name: checkSizes
+    params: payloads [][]byte, maxBytes int
+    results: error
+  - doc: |-
+      pagedMessages is MessageLister.AllMessages over a broker's Messages: it
+      threads the last identifier of each page into the next call, and stops on
+      a short page, a failure — yielded once beside a zero value — or a loop
+      that breaks. A cancelled ctx is the failure Messages answers with.
+    name: pagedMessages
+    params: |2
+
+      	ctx context.Context, after string,
+      	page func(ctx context.Context, after string, max int) ([]corequeue.LiveMessageValue, error),
+    results: iter.Seq2[corequeue.LiveMessageValue, error]
+  - doc: |-
+      refusedReceipt reports whether err is Ack's refusal of the receipt itself —
+      a lapsed lease, or a receipt the broker never issued — rather than a
+      failure of the call.
+    name: refusedReceipt
+    params: err error
+    results: bool
+  - doc: |-
+      yieldFailure yields err once beside a zero value: the last thing a walk
+      says, whatever the caller answers.
+    name: yieldFailure
+    params: yield func(V, error) bool, err error
+    typeParams: V any
   - name: Consume
     params: ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig
     results: error
@@ -984,6 +1358,15 @@ functions:
     params: ctx context.Context, cause error
     results: error
   - doc: |-
+      newAckedWindow returns a window remembering the last size identifiers;
+      size is positive.
+    name: newAckedWindow
+    params: size int
+    results: "*ackedWindow"
+  - doc: newIdleGate returns a free slot.
+    name: newIdleGate
+    results: "*idleGate"
+  - doc: |-
       timerC is timer's channel, or nil — which blocks forever in a select — when
       there is no timer.
     name: timerC
@@ -1034,6 +1417,19 @@ functions:
     name: backendFailed
     params: op, name string, cause error
     results: error
+  - doc: |-
+      deadMessages groups the dead-letter records of entries by the message they
+      name, in name order: the records of one message share the name's leading
+      instant and entropy, so they are adjacent.
+    name: deadMessages
+    params: entries []string
+    results: iter.Seq2[string, []string]
+  - doc: |-
+      mintFileBatch names every payload of a batch as Publish names one, enqueued and
+      visible at now, and returns the messages and the files to publish.
+    name: mintFileBatch
+    params: payloads [][]byte, now time.Time
+    results: "[]corequeue.MessageValue, []corevfs.FileValue, error"
   - doc: |-
       prepareQueueDir creates the queue directory and its three states, or checks
       them when they already exist.
@@ -1172,6 +1568,13 @@ functions:
     params: value string
     results: int
   - doc: |-
+      sortState sorts one state directory's names in the order its readers walk
+      them: queued names by level, then visibility (compareReady); in-flight and
+      dead names by what follows their level (compareStem) — a deadline, an
+      enqueue instant; any other directory by name.
+    name: sortState
+    params: state string, names []string
+  - doc: |-
       messageID renders the identifier the two durable brokers mint: the enqueue
       instant, zero-padded so identifiers sort in publication order, a dash, and
       the message's random half.
@@ -1207,15 +1610,59 @@ functions:
     params: base string
     results: name nameValue, ok bool
   - doc: |-
+      splitLeveled is splitName over a name that may open with a level's digit:
+      a name without one — every name written before priorities existed, and
+      every name of the normal level since — reads at the normal level.
+    name: splitLeveled
+    params: base, suffix string, want int
+    results: fields [maxNameFields]string, level corequeue.Priority, ok bool
+  - doc: |-
+      atLevel renders a name at level: the name itself at the normal level, and
+      otherwise one digit, PriorityHighest − level, and a dot before it, so the
+      digits of the levels sort as the levels are received — highest first.
+    name: atLevel
+    params: level corequeue.Priority, name string
+    results: string
+  - doc: |-
+      nameStem splits a name into the digit of its level — normalDigit for a
+      name that carries none — and the rest. A name this broker writes without a
+      level opens with a 19-digit instant, so a dot in second place is a level's.
+    name: nameStem
+    params: base string
+    results: digit byte, stem string
+  - doc: |-
+      levelOf reads a level's digit, refusing anything else — the normal level's
+      digit included, which no name carries: a name has one spelling.
+    name: levelOf
+    params: digit byte
+    results: corequeue.Priority, bool
+  - doc: |-
+      compareReady orders queued names as a Receive hands them out: the highest
+      level first, then by the rest of the name — visibility, enqueue instant,
+      entropy.
+    name: compareReady
+    params: first, second string
+    results: int
+  - doc: |-
+      compareStem orders in-flight and dead names by what follows the level: a
+      lease's deadline, a dead letter's enqueue instant — the order a reclaim and
+      a listing read, whatever the level.
+    name: compareStem
+    params: first, second string
+    results: int
+  - doc: |-
       assemble turns the parsed fields into a nameValue, refusing anything that
       is not a number where a number belongs or hex where hex belongs.
     name: assemble
     params: at, enqueued, entropy, deliveries, lease string
     results: name nameValue, ok bool
-  - doc: splitName strips the suffix and cuts the base into exactly want fields.
+  - doc: |-
+      splitName strips the suffix and cuts the base into exactly want fields,
+      into an array rather than a slice: a scan parses a name per entry it
+      meets, and a slice per name was an allocation per entry (issue #811).
     name: splitName
     params: base, suffix string, want int
-    results: fields []string, ok bool
+    results: fields [maxNameFields]string, ok bool
   - doc: |-
       parseNano reads a zero-padded instant, refusing anything that is not
       exactly nanoWidth digits.
@@ -1223,8 +1670,12 @@ functions:
     params: field string
     results: nanos int64, ok bool
   - doc: |-
-      parseCount reads a delivery count spelled exactly as padCount writes it.
-      strconv.Atoi alone also takes "+01" and "0001", second names for one message.
+      parseCount reads a delivery count spelled exactly as padCount writes it:
+      digits only, at least deliveryWidth of them, and a leading zero only as
+      padding. strconv.Atoi alone also takes "+01" and "0001", second names for
+      one message. The spelling is checked byte by byte rather than by rendering
+      the count back: a scan parses a name per entry, and the rendering was an
+      allocation per entry (issue #811).
     name: parseCount
     params: field string
     results: count int, ok bool
@@ -1280,6 +1731,30 @@ functions:
     name: parseLive
     params: dir, base string
     results: nameValue, bool
+  - doc: |-
+      expiredCause is what a dead letter records of a message past
+      PolicyValue.MaxAge: MESSAGE_EXPIRED, its code and its public words.
+    name: expiredCause
+    results: causeValue
+  - doc: |-
+      messageExpired reports whether a message enqueued at enqueued — Unix
+      nanoseconds — has reached policy's MaxAge by now: never when MaxAge is zero.
+    name: messageExpired
+    params: policy corequeue.PolicyValue, enqueued, now int64
+    results: bool
+  - doc: |-
+      retentionDue reports whether a broker whose last retention sweep ran at
+      swept — Unix nanoseconds, zero for never — sweeps again at now: when the
+      policy keeps dead letters for a time at all, and a minute has passed.
+    name: retentionDue
+    params: policy corequeue.PolicyValue, swept, now int64
+    results: bool
+  - doc: |-
+      retentionCutoff is the instant before which a dead letter has outlived
+      policy's DeadLetterRetention at now: one that failed at or before it goes.
+    name: retentionCutoff
+    params: policy corequeue.PolicyValue, now int64
+    results: int64
   - name: NewMemory
     params: cfg MemoryConfig
     results: broker corequeue.Broker, err error
@@ -1289,6 +1764,13 @@ functions:
     name: liveOf
     params: record *memRecord, visibleAt time.Time, leased bool
     results: corequeue.LiveMessageValue
+  - doc: newLeaseExpiries returns an empty expiry heap, earliest deadline first.
+    name: newLeaseExpiries
+    results: "*heap.IndexedHeap[leaseExpiry]"
+  - doc: compareDeadID orders a dead letter against an identifier, by bytes.
+    name: compareDeadID
+    params: held corequeue.DeadLetterValue, id string
+    results: int
   - doc: laterThan reports whether first sorts after second in the ready order.
     name: laterThan
     params: first, second *memRecord
@@ -1301,6 +1783,23 @@ functions:
     name: memID
     params: now time.Time, seq uint64
     results: string
+  - doc: |-
+      padBase36 writes n in base 36 into into, right-aligned and zero-padded;
+      into is memIDHalfWidth long, the widest a uint64 takes.
+    name: padBase36
+    params: into []byte, n uint64
+  - doc: |-
+      earlierOf is the earlier of two instants, the zero time.Time standing for
+      none.
+    name: earlierOf
+    params: held, candidate time.Time
+    results: time.Time
+  - doc: |-
+      ackOutcomeOf is the outcome of a receipt Ack refused with err: a lapsed
+      lease, or one this broker never issued.
+    name: ackOutcomeOf
+    params: err error
+    results: corequeue.AckOutcome
   - doc: clockOrSystem resolves a nil clock to the wall clock.
     name: clockOrSystem
     params: clk clock.Clock
@@ -1433,21 +1932,55 @@ functions:
     params: value string
     results: bool
   - doc: |-
+      priorityKnown reports whether level is one of the five levels a broker
+      orders (core/data/queue.Priority).
+    name: priorityKnown
+    params: level corequeue.Priority
+    results: bool
+  - doc: |-
+      checkPriority refuses a level a PublishPriority cannot publish at, as every
+      broker refuses it: outside the closed set (ADR 0054, amended 2026-11-03).
+    name: checkPriority
+    params: level corequeue.Priority
+    results: error
+  - doc: readyIndex is a level's index among priorityLevels, the lowest at 0.
+    name: readyIndex
+    params: level corequeue.Priority
+    results: int
+  - doc: |-
       retryDelay is how long a message nacked on its deliveries-th delivery stays
       invisible: the policy's RetryDelay, or — when MaxRetryDelay asks for growth
       — the SDK's one backoff curve from RetryDelay up to MaxRetryDelay (ADR 0103,
-      ADR 0151), doubling with each delivery that failed.
+      ADR 0151), doubling with each delivery that failed, randomised as
+      RetryJitterMode says from one draw of random.
 
       It is one function the three brokers call rather than three copies of a
       comparison, for the reason core/data/queue.PolicyValue.Validate lives in core:
       the memory broker is a double only as long as it waits exactly what the
       durable ones wait. policy is normalised, so RetryDelay is never negative,
       and validated, so a growing delay has a positive RetryDelay below its
-      ceiling. The curve's jitter stays at zero: a retry instant is part of what
-      Wake reports and of what a test asserts to the nanosecond.
+      ceiling and a jitter only beside a ceiling. The draw is the broker's
+      injected random, never kernel/backoff's own: a retry instant is part of
+      what Wake reports and of what a test asserts to the nanosecond, so a test
+      that injects a fixed draw still can (issue #1044). With RetryJitter zero
+      and the zero mode the instant is the one the curve gave before the jitter
+      existed, and random is not called.
     name: retryDelay
-    params: policy corequeue.PolicyValue, deliveries int
+    params: policy corequeue.PolicyValue, deliveries int, random func() float64
     results: time.Duration
+  - doc: |-
+      drawBetween returns a duration in [low, high] from one draw of random, a
+      number in [0, 1). A draw outside it — a broken source — is held inside, so
+      no source makes a retry wait less than low or more than high.
+    name: drawBetween
+    params: low, high time.Duration, random func() float64
+    results: time.Duration
+  - doc: |-
+      randomOrDefault is a configuration's Random, or math/rand/v2's Float64 when
+      it named none.
+    name: randomOrDefault
+    params: random func() float64
+    results: func() float64
   - name: NewSQL
     params: cfg SQLConfig
     results: broker corequeue.Broker, err error
@@ -1496,6 +2029,28 @@ functions:
     params: result stdsql.Result, execErr error
     results: int64, error
   - doc: |-
+      mintBatch mints a message for every payload, enqueued at now, and the
+      arguments of their rows: identifier, due, enqueue instant, payload.
+    name: mintBatch
+    params: payloads [][]byte, now time.Time
+    results: "[]corequeue.MessageValue, []any, error"
+  - doc: |-
+      renderSQLBulkStatements renders the bulk statements for dialect over the
+      quoted table, burying through causeSet and clearing a replayed row's cause
+      through cleared — the strings the burial and the replay of one row use —,
+      the cause binding one more argument when trail names its column.
+    name: renderSQLBulkStatements
+    params: dialect coresql.Dialect, quoted, causeSet, cleared string, trail bool
+    results: sqlBulkStatements
+  - doc: |-
+      bulkRowsPerStatement bounds the rows one multi-row statement binds:
+      sqlRowsPerStatement, at most, and fewer when a row binds more arguments, so
+      no statement binds more than the leases' largest — well under SQLite's
+      and PostgreSQL's limits.
+    name: bulkRowsPerStatement
+    params: argsPerRow int
+    results: int
+  - doc: |-
       validateSQLTable refuses a table name the broker could not interpolate
       safely, or that a document store's derived table could collide with.
     name: validateSQLTable
@@ -1507,18 +2062,20 @@ functions:
     results: error
   - doc: |-
       scanDeadLetter reads one dead letter's row: its trail too when the
-      statement names the column (SQLConfig.Trail).
+      statement names the column (SQLConfig.Trail), and its level when it names
+      that one (SQLConfig.Priority).
     name: scanDeadLetter
-    params: rows scanner, withTrail bool
+    params: rows scanner, withTrail, withPriority bool
     results: corequeue.DeadLetterValue, error
   - doc: |-
       renderSQLStatements renders every fixed statement of the broker keeping its
-      queue in table, on dialect; with trail, the statements that write, read and
-      clear a dead letter's cause name the trail column too, and without it they
-      are the statements the broker sent before the column existed. The table
-      name was validated at NewSQL.
+      queue in table, on dialect; with cols.trail, the statements that write, read
+      and clear a dead letter's cause name the trail column too, with
+      cols.priority those that pick, copy and list a message name the priority
+      column, and without them they are the statements the broker sent before
+      the columns existed. The table name was validated at NewSQL.
     name: renderSQLStatements
-    params: dialect coresql.Dialect, table string, trail bool
+    params: dialect coresql.Dialect, table string, cols sqlColumns
     results: sqlStatements
   - doc: |-
       sqlHeldBy renders the condition that says a receipt still holds its lease:
@@ -1586,10 +2143,40 @@ functions:
   - name: SQLTrailMigration
     params: dialect coresql.Dialect, table string, version uint64
     results: coresql.MigrationValue, error
+  - name: SQLPriorityMigration
+    params: dialect coresql.Dialect, table string, version uint64
+    results: coresql.MigrationValue, error
+  - doc: |-
+      renderPriorityColumnStatements renders SQLPriorityMigration's statements
+      over table on dialect. The table name was validated by the caller.
+    name: renderPriorityColumnStatements
+    params: dialect coresql.Dialect, table string
+    results: priorityColumnStatements
+  - doc: |-
+      priorityIndexName is the name of the index over table's levels: the table's
+      name and a suffix, shortened — a hash of the whole name keeping it apart
+      from another's — where that would pass MaxSQLTableLen, the longest name
+      every engine accepts.
+    name: priorityIndexName
+    params: table string
+    results: string
+  - doc: |-
+      priorityProbe renders the read of a table's columns from catalogue, whose
+      column nameColumn names each: how many there are, and how many of them are
+      the priority column.
+    name: priorityProbe
+    params: nameColumn, catalogue string
+    results: string
   - doc: idArgs binds the identifiers of rows.
     name: idArgs
     params: rows []sqlPicked
     results: "[]any"
+  - doc: |-
+      sortedByDue orders batch by the instant each delivery was due — due[i] for
+      batch[i] — then by identifier.
+    name: sortedByDue
+    params: batch []corequeue.DeliveryValue, due []int64
+    results: "[]corequeue.DeliveryValue"
   - doc: |-
       renderTrailColumnStatements renders SQLTrailMigration's statements over
       table on dialect. The table name was validated by the caller.
@@ -1663,12 +2250,13 @@ imports:
   heap: github.com/kitsunium/sdk/internal/kernel/collections/heap
   hex: encoding/hex
   io: io
+  iter: iter
   kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
   kerrs: github.com/kitsunium/sdk/internal/kernel/errs
   math: math
   os: os
   path: path
-  rand: crypto/rand
+  rand: math/rand/v2
   reflect: reflect
   regexp: regexp
   runtime: runtime
@@ -1709,6 +2297,14 @@ types:
         type: corequeue.DelayedNacker
       - name: extender
         type: corequeue.LeaseExtender
+      - doc: |-
+          acked remembers the messages handled in this process
+          (ConsumerConfig.AckedWindow); nil when the window is off.
+        name: acked
+        type: "*ackedWindow"
+      - doc: "gate lets one idle worker at a time poll for the others (issue #1049)."
+        name: gate
+        type: "*idleGate"
       - name: cfg
         type: ConsumerConfig
     kind: struct
@@ -1720,6 +2316,28 @@ types:
         params: ctx context.Context
         recv: c *consumer
         results: error
+      - doc: |-
+          turn is one round of a worker: a lease, then the batch processed and
+          acknowledged, or the wait an empty queue asks for. It reports stop when the
+          worker returns, with the error pump returns — nil when the consumer was
+          stopped.
+        name: turn
+        params: ctx context.Context, probing *bool
+        recv: c *consumer
+        results: stop bool, err error
+      - doc: |-
+          idleTurn waits for a worker's next look at an empty queue (issue #1049).
+          One idle worker of the Consume — the first to find the queue empty, then
+          whichever takes the slot it hands on — waits as an idle worker always did,
+          on the broker's wake and its poll, and looks for all of them; every other
+          idle worker waits only until that one finds work, or the consumer stops.
+          So Parallelism idle workers poll once per interval, not Parallelism times,
+          and a publication still reaches them at once: the polling worker is woken,
+          finds it, and wakes the rest. It reports false when ctx ended.
+        name: idleTurn
+        params: ctx context.Context, signal <-chan struct{}, probing *bool
+        recv: c *consumer
+        results: bool
       - doc: |-
           settleBatch runs the handler over each delivery and reports each outcome to
           the broker, stopping only if the STORAGE refuses.
@@ -1885,6 +2503,43 @@ types:
         params: ctx context.Context, armed clock.Timer, done <-chan struct{}, exited chan<- struct{}, expire func()
         recv: c *consumer
     name: consumer
+  - doc: |-
+      ackedWindow is the bounded memory of the messages one Consume handled in
+      this process (ConsumerConfig.AckedWindow): the last n identifiers, oldest
+      forgotten first. It is the mail spool's DeliveredMemory lifted into the
+      engine, for every broker (issue #1046).
+
+      Every worker of the Consume shares it, so it takes a mutex: a ring alone is
+      one producer and one consumer, and here every worker is both. A nil window
+      remembers nothing and holds nothing, so a Consume without one pays one nil
+      check per message.
+    fields:
+      - doc: held maps each remembered identifier to the slot of ring it sits in.
+        name: held
+        type: map[string]int
+      - doc: |-
+          ring holds the identifiers in the order they were remembered; next is
+          the slot the next one takes — the oldest, once the ring is full.
+        name: ring
+        type: "[]string"
+      - name: next
+        type: int
+      - name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: holds reports whether id is among the identifiers the window remembers.
+        name: holds
+        params: id string
+        recv: w *ackedWindow
+        results: bool
+      - doc: |-
+          remember adds id to the window, forgetting the oldest identifier when the
+          window is full. An identifier already held is not added twice.
+        name: remember
+        params: id string
+        recv: w *ackedWindow
+    name: ackedWindow
   - fields:
       - doc: Handler processes one delivery. It must be non-nil.
         name: Handler
@@ -1981,6 +2636,23 @@ types:
         name: DrainTimeout
         type: time.Duration
       - doc: |-
+          AckedWindow is how many message identifiers the engine remembers
+          having handled: the last AckedWindow messages whose handler returned
+          nil or [corequeue.Acknowledged] in this process. A delivery of one of
+          them — its lease lapsed before the acknowledgement landed, and the
+          broker delivered it again — is acknowledged without running the
+          handler a second time.
+
+          It narrows the duplicates at-least-once delivery leaves, as the mail
+          spool's memory of what it delivered does, for every broker; it does
+          not remove them. The window is this process's and is lost when it
+          stops: a redelivery to another consumer, or after a restart, still
+          runs the handler, which is still idempotent. Zero, or negative,
+          remembers nothing — every delivery runs the handler, what Consume
+          always did.
+        name: AckedWindow
+        type: int
+      - doc: |-
           AutoExtend renews the lease of the message a handler is running, a
           third of the lease after it was granted or last renewed, for as long
           as the handler runs — the heartbeat of SQS, JetStream's in-progress
@@ -2038,6 +2710,39 @@ types:
         recv: c ConsumerConfig
         results: ConsumerConfig
     name: ConsumerConfig
+  - doc: |-
+      idleGate is the slot one idle worker of a Consume holds while it polls an
+      empty queue for all of them (issue #1049): before it, every idle worker
+      asked the broker on its own — eight workers, eight probes of the same empty
+      table or eight scans of the same directories per poll interval.
+
+      The holder releases it when it finds work — waking every worker waiting on
+      it, each of which looks once — or when it stops. A worker holding work
+      never holds the slot.
+    fields:
+      - doc: found is closed when the holder finds work, and replaced.
+        name: found
+        type: chan struct{}
+      - name: mu
+        type: sync.Mutex
+      - doc: held reports that an idle worker polls.
+        name: held
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          enter takes the slot when it is free — took true — or returns the channel
+          its holder closes when it finds work.
+        name: enter
+        recv: g *idleGate
+        results: found <-chan struct{}, took bool
+      - doc: |-
+          release frees the slot, and when work was found wakes every worker waiting
+          on it.
+        name: release
+        params: work bool
+        recv: g *idleGate
+    name: idleGate
   - doc: |-
       leasePlan is how one delivery's lease is judged: how long the broker
       granted it, the margin the handler is stopped by, and how often AutoExtend
@@ -2183,6 +2888,9 @@ types:
           nothing; the consumer's poll finds it.
         name: wake
         type: "*wakeSignal"
+      - doc: random draws the retry jitter (FileConfig.Random).
+        name: random
+        type: func() float64
       - name: policy
         type: corequeue.PolicyValue
       - doc: |-
@@ -2190,6 +2898,17 @@ types:
           reservations, in Unix nanoseconds on its clock; zero before the first.
         name: onceSwept
         type: atomic.Int64
+      - doc: |-
+          deadSwept is when this broker last swept the dead letters past the
+          policy's DeadLetterRetention, in Unix nanoseconds on its clock; zero
+          before the first.
+        name: deadSwept
+        type: atomic.Int64
+      - doc: |-
+          listed is the last listing of each state directory, reused while the
+          directory's mtime says nothing changed (file_listing.go, issue #811).
+        name: listed
+        type: listings
     kind: struct
     methods:
       - doc: |-
@@ -2232,13 +2951,25 @@ types:
         recv: b *fileBroker
         results: message corequeue.MessageValue, err error
       - doc: |-
-          write publishes payload durably as a queued message enqueued at now and
-          visible at visibleAt, and returns its name. It wakes nobody: the caller
-          does, once the message is one it keeps.
+          write publishes payload durably as a queued message at level, enqueued at
+          now and visible at visibleAt, and returns its name. It wakes nobody: the
+          caller does, once the message is one it keeps.
         name: write
-        params: payload []byte, now, visibleAt time.Time
+        params: payload []byte, now, visibleAt time.Time, level corequeue.Priority
         recv: b *fileBroker
         results: nameValue, error
+      - doc: |-
+          PublishPriority publishes payload as Publish does, at level
+          (core/data/queue.PriorityPublisher): a level other than the normal one
+          opens the queued name with its digit, so the listing sorts the levels,
+          highest first, before visibility, and a Receive empties a level of its
+          visible messages before it looks at the next.
+        name: PublishPriority
+        params: |2
+
+          	ctx context.Context, payload []byte, level corequeue.Priority,
+        recv: b *fileBroker
+        results: message corequeue.MessageValue, err error
       - doc: |-
           PublishAt publishes payload as Publish does, under a queued name whose
           visibility instant is at (core/data/queue.DelayedPublisher): the directory
@@ -2277,18 +3008,138 @@ types:
         recv: b *fileBroker
         results: error
       - doc: |-
-          entriesOf lists one state directory, sorted by name — which, because of the
-          zero-padded instant that opens every name, is sorted by TIME.
+          DeadLettersAfter returns up to max dead letters whose identifier sorts after
+          after, in name order — which, the name opening with the zero-padded enqueue
+          instant and the entropy the identifier is made of, is identifier order
+          (core/data/queue.DeadLetterPager). It reads the directory once.
+        name: DeadLettersAfter
+        params: |2
 
-          It reads the whole directory. That is O(entries) per call and it is the
-          broker's known scaling limit, measured in BENCH.md rather than asserted:
-          this is a durable queue for a backlog of hundreds to thousands, and a
-          caller with millions in flight wants a broker over a system built for that,
-          behind this same port.
-        name: entriesOf
-        params: state string
+          	ctx context.Context, after string, max int,
         recv: b *fileBroker
-        results: entries []fs.DirEntry, err error
+        results: dead []corequeue.DeadLetterValue, err error
+      - doc: |-
+          Purge unlinks every queued, then every in-flight message, and no dead
+          letter (core/data/queue.Purger). Queued first: a message a consumer leases
+          meanwhile moves into flight, which is read after, so it is not missed. A
+          name gone by the time it is unlinked was taken by somebody else and is not
+          counted.
+        name: Purge
+        params: ctx context.Context
+        recv: b *fileBroker
+        results: corequeue.PurgeValue, error
+      - doc: |-
+          unlinkLive removes every message dir holds by the state's grammar and
+          counts the ones it removed.
+        name: unlinkLive
+        params: dir string
+        recv: b *fileBroker
+        results: removed int, err error
+      - doc: |-
+          ReplayDeadLetters replays up to max dead letters, oldest enqueued first,
+          over one read of the dead-letter directory
+          (core/data/queue.DeadLetterBulkManager). Each is replayed as
+          ReplayDeadLetter replays one — the queued file published first, the
+          records removed after —, so a failure or a cancellation part-way leaves
+          every dead letter not counted still dead.
+        name: ReplayDeadLetters
+        params: ctx context.Context, max int
+        recv: b *fileBroker
+        results: replayed int, err error
+      - doc: |-
+          PurgeDeadLetters deletes up to max dead letters whose failure instant is
+          before before, oldest enqueued first, over one read of the directory and
+          one read of each record's header (core/data/queue.DeadLetterBulkManager).
+        name: PurgeDeadLetters
+        params: ctx context.Context, before time.Time, max int
+        recv: b *fileBroker
+        results: removed int, err error
+      - doc: |-
+          sweepRetention removes every dead letter past the policy's
+          DeadLetterRetention, at most once a minute per broker on its clock.
+        name: sweepRetention
+        params: now int64
+        recv: b *fileBroker
+        results: error
+      - doc: |-
+          removeDeadFailedBy removes, in name order and up to max, every dead-letter
+          record whose failure instant is at or before cutoff, and counts them. A
+          record whose header cannot be read — a stray, a planted file, one still
+          being published — is left alone: what it records is unknown.
+        name: removeDeadFailedBy
+        params: ctx context.Context, cutoff int64, max int
+        recv: b *fileBroker
+        results: removed int, err error
+      - doc: |-
+          removeIfFailedBy removes the dead-letter record base when its failure
+          instant is known and at or before cutoff, and reports whether this call
+          removed it. A record removed meanwhile by somebody else is not this call's
+          to count.
+        name: removeIfFailedBy
+        params: base string, cutoff int64
+        recv: b *fileBroker
+        results: gone bool, err error
+      - doc: |-
+          deadFailedAt reads the failure instant of the dead-letter record base from
+          its header alone, never its payload.
+        name: deadFailedAt
+        params: base string
+        recv: b *fileBroker
+        results: failed int64, known bool, err error
+      - doc: |-
+          PublishMany publishes every payload in order and wakes once
+          (core/data/queue.BatchPublisher). Every name is minted first; then the
+          batch goes to vfs's AtomicBatchWriter in one call — each message its own
+          atomic publication, its file flushed before its rename, and ready/ flushed
+          ONCE after the last rename (issue #827), where a Publish per message paid a
+          directory flush each. A publisher without the sibling publishes message by
+          message, as before.
+
+          On a failure at the k-th payload, the messages returned beside the error —
+          the first k−1 — are on the device, and the rest were never written. A
+          directory flush that fails leaves the batch visible and its durability in
+          doubt: nothing is returned as published then, as Publish returns nothing
+          beside the same failure, and a retry may deliver a message twice — which
+          at-least-once permits.
+        name: PublishMany
+        params: ctx context.Context, payloads [][]byte
+        recv: b *fileBroker
+        results: "[]corequeue.MessageValue, error"
+      - doc: |-
+          publishEach publishes the payloads one by one, each through Publish's own
+          durable write, and stops at the first failure with what was published.
+        name: publishEach
+        params: payloads [][]byte, now time.Time
+        recv: b *fileBroker
+        results: "[]corequeue.MessageValue, error"
+      - doc: wakeIfAny wakes the consumers of this queue when n messages were queued.
+        name: wakeIfAny
+        params: n int
+        recv: b *fileBroker
+      - doc: |-
+          AckMany acknowledges every receipt as Ack acknowledges one — an unlink each,
+          no flush, as Ack's — and reports one outcome per receipt
+          (core/data/queue.Acker). A failure of the medium stops the batch: the
+          receipts after it are reported not attempted.
+        name: AckMany
+        params: ctx context.Context, receipts []corequeue.ReceiptValue
+        recv: b *fileBroker
+        results: corequeue.AckResultValue, error
+      - doc: |-
+          AllMessages yields the live messages in identifier order over one read of
+          each state directory, reading each payload only when its message is
+          yielded (core/data/queue.MessageLister).
+        name: AllMessages
+        params: ctx context.Context, after string
+        recv: b *fileBroker
+        results: iter.Seq2[corequeue.LiveMessageValue, error]
+      - doc: |-
+          readLive reads the payload of the live message f names, ok false when it
+          moved since the listing.
+        name: readLive
+        params: ctx context.Context, f liveFile
+        recv: b *fileBroker
+        results: live corequeue.LiveMessageValue, ok bool, err error
       - doc: Nack hands the message back and reports what the broker decided.
         name: Nack
         params: |2
@@ -2390,6 +3241,32 @@ types:
           	base string,
         recv: b *fileBroker
         results: record corequeue.DeadLetterValue, ok bool, err error
+      - doc: |-
+          namesOf lists one state directory in the state's order (sortState) —
+          which, because of the zero-padded instant that opens every name after its
+          level, is the order of TIME within a level.
+
+          A state's listing is reused while its directory's mtime has not moved and
+          was already old when the listing began (racyMargin, listingMaxAge): an
+          idle consumer's poll, a count, a listing of a queue nobody touches cost one
+          stat per directory rather than a read and a sort of every entry (issue
+          #811). Any change moves the mtime — a publication, a lease, an
+          acknowledgement, in this process or another —, and the next look reads the
+          directory again, so a busy queue is read on every Receive as before: that
+          is O(entries) per call, measured in BENCH.md, and a caller with millions in
+          flight wants a broker over a system built for that, behind this same port.
+        name: namesOf
+        params: state string
+        recv: b *fileBroker
+        results: names []string, err error
+      - doc: |-
+          readNames reads every entry name of one directory, sorted. Names alone:
+          the grammar needs nothing else, and a fs.DirEntry per entry was half of
+          what a listing allocated.
+        name: readNames
+        params: state string
+        recv: b *fileBroker
+        results: names []string, err error
       - doc: |-
           PublishOnce publishes payload unless key is still reserved, and reserves it
           for window (core/data/queue.OncePublisher).
@@ -2527,16 +3404,28 @@ types:
         recv: b *fileBroker
         results: batch []corequeue.DeliveryValue, err error
       - doc: |-
-          leaseVisible walks the queued messages in visibility order and leases up to
-          max of them. It also returns the instant, in Unix nanoseconds, at which the
-          next queued message becomes visible — now itself when it stopped on a full
-          batch with more behind it, zero when nothing else is queued.
+          leaseVisible walks the queued messages level by level, highest first, each
+          level in visibility order, and leases up to max of them. A level's first
+          message not yet visible ends that level's walk, never the next level's: a
+          high message held back does not hold back a visible normal one (ADR 0054,
+          amended 2026-11-03). It also returns the instant, in Unix nanoseconds, at
+          which the next queued message becomes visible — now itself when it stopped
+          on a full batch with more behind it, zero when nothing else is queued.
         name: leaseVisible
         params: |2
 
           	now int64, max int,
         recv: b *fileBroker
         results: batch []corequeue.DeliveryValue, next int64, err error
+      - doc: |-
+          leaseStep leases the queued message base names into walk's batch when it is
+          visible, buries it when it is past its MaxAge, and skips the rest of a level
+          whose first message is not yet visible. It reports full when the batch is
+          full and base is visible.
+        name: leaseStep
+        params: walk *leaseWalk, base string
+        recv: b *fileBroker
+        results: full bool, err error
       - doc: |-
           takeLease moves one queued message into flight and reads it back.
 
@@ -2593,6 +3482,19 @@ types:
         recv: b *fileBroker
         results: error
       - doc: |-
+          expireReady moves one queued message past the policy's MaxAge to the
+          dead-letter store, with MESSAGE_EXPIRED and the count it had.
+
+          It claims the message first, by the rename that IS the exclusion — into
+          flight, under a lease of its own and with its count unchanged —, so two
+          consumers never bury it twice; then it buries what it holds, as a lapsed
+          lease with no attempt left is buried. A crash between the two leaves an
+          ordinary lease, which lapses, is reclaimed, and is expired again.
+        name: expireReady
+        params: name nameValue, base string, now int64
+        recv: b *fileBroker
+        results: error
+      - doc: |-
           ReplayDeadLetter queues the dead letter id again, visible now, with its
           delivery count reset (core/data/queue.DeadLetterManager). It keeps its ID, its
           payload and its enqueue instant.
@@ -2609,6 +3511,15 @@ types:
         params: ctx context.Context, id string
         recv: b *fileBroker
         results: error
+      - doc: |-
+          replayRecords queues the message id again from the first of its records
+          that reads back as id, then removes every one of them, and reports whether
+          it queued it: false when none could be read — removed meanwhile, or never
+          a record of id.
+        name: replayRecords
+        params: id string, records []string
+        recv: b *fileBroker
+        results: queued bool, err error
       - doc: |-
           DeleteDeadLetter removes every record of the dead letter id for good
           (core/data/queue.DeadLetterManager).
@@ -2676,6 +3587,27 @@ types:
         params: records []string
         recv: b *fileBroker
         results: error
+      - doc: |-
+          Stats counts the three state directories by their names, opening no file
+          (core/data/queue.Counter): the counts are the entries the grammar accepts,
+          the oldest instant the smallest enqueue instant a live name carries, and
+          the next due the smallest visibility instant a queued name carries.
+        name: Stats
+        params: ctx context.Context
+        recv: b *fileBroker
+        results: corequeue.StatsValue, error
+      - doc: |-
+          countLive adds to stats the messages the live state directory dir names —
+          queued or in flight — and lowers oldest to the earliest enqueue instant
+          among them.
+        name: countLive
+        params: dir string, stats *corequeue.StatsValue, oldest *int64
+        recv: b *fileBroker
+        results: error
+      - doc: countDead counts the dead-letter records, as DeadLetters lists them.
+        name: countDead
+        recv: b *fileBroker
+        results: int64, error
     name: fileBroker
   - fields:
       - doc: |-
@@ -2693,6 +3625,15 @@ types:
           Nil means clock.System.
         name: Clock
         type: clock.Clock
+      - doc: |-
+          Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+          for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+          math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+          retry instant to the nanosecond, as it does without a jitter; the
+          three brokers draw from it identically, so the memory broker stays an
+          exact double. It may be called by several goroutines at once.
+        name: Random
+        type: func() float64
       - doc: |-
           Dir is the queue directory. It is created owner-only when absent, and
           refused when it exists and any account outside the owner and group
@@ -2716,6 +3657,63 @@ types:
         type: corequeue.PolicyValue
     kind: struct
     name: FileConfig
+  - doc: |-
+      stateListing is one state directory's names as one read found them, and the
+      two instants that decide whether the next look may reuse them.
+    fields:
+      - doc: |-
+          listedAt is the real clock's reading BEFORE the directory was read:
+          every change the read could have missed happened after it.
+        name: listedAt
+        type: time.Time
+      - doc: modTime is the directory's mtime as stat read it before the listing.
+        name: modTime
+        type: time.Time
+      - doc: |-
+          names is the directory's entries in the state's order. It is never
+          written once the listing is stored: every caller only reads it.
+        name: names
+        type: "[]string"
+    kind: struct
+    methods:
+      - doc: |-
+          reusable reports whether this listing still names what the directory
+          holds: the directory's mtime is the one the listing recorded, that mtime
+          is older than the listing by racyMargin — a change in the listing's own
+          tick could not have left it unchanged —, and the listing is younger than
+          listingMaxAge.
+        name: reusable
+        params: modTime, now time.Time
+        recv: l *stateListing
+        results: bool
+    name: stateListing
+  - doc: |-
+      listings holds the last listing of each state a Receive, a listing or a
+      count reads. The reservations' directory is not among them: its sweep reads
+      it once a minute at most.
+    fields:
+      - doc: |-
+          wall reads the real clock — never the broker's, which a test may hold
+          still: the instants compared are the filesystem's, and it stamps them
+          from the real clock. A field so a test can move it.
+        name: wall
+        type: func() time.Time
+      - name: ready
+        type: atomic.Pointer[stateListing]
+      - name: inflight
+        type: atomic.Pointer[stateListing]
+      - name: dead
+        type: atomic.Pointer[stateListing]
+    kind: struct
+    methods:
+      - doc: |-
+          slot returns the cell holding state's last listing, nil for a directory
+          that is never cached.
+        name: slot
+        params: state string
+        recv: l *listings
+        results: "*atomic.Pointer[stateListing]"
+    name: listings
   - doc: |-
       nameValue is a message's identity and state, as encoded in its filename.
 
@@ -2764,6 +3762,13 @@ types:
       - doc: Deliveries is how many times the message has been handed out.
         name: Deliveries
         type: int
+      - doc: |-
+          Priority is the level the message is delivered at. The normal level
+          adds nothing to a name — its names are the ones written before
+          priorities existed, byte for byte —, every other level a leading
+          digit (atLevel).
+        name: Priority
+        type: corequeue.Priority
     kind: struct
     methods:
       - doc: |-
@@ -2797,6 +3802,29 @@ types:
         recv: n nameValue
         results: string
     name: nameValue
+  - doc: leaseWalk is what leaseVisible carries from one queued name to the next.
+    fields:
+      - doc: |-
+          out is the batch; nil until something is eligible, so an empty poll
+          allocates nothing.
+        name: out
+        type: "[]corequeue.DeliveryValue"
+      - doc: now is the instant visibility is judged at, in Unix nanoseconds.
+        name: now
+        type: int64
+      - doc: later is the earliest instant a level's walk stopped at.
+        name: later
+        type: int64
+      - doc: max bounds the batch.
+        name: max
+        type: int
+      - doc: |-
+          skipping is the digit of the level being skipped — none at first,
+          since no digit is a zero byte.
+        name: skipping
+        type: byte
+    kind: struct
+    name: leaseWalk
   - doc: |-
       liveFile is one live message as the directories name it: the state
       directory it sits in, its file name, and what that name says.
@@ -2822,10 +3850,9 @@ types:
       leaseExpiry is one entry in the deadline heap: when a lease lapses and
       which lease it is.
 
-      It carries the deadline as well as the receipt so a POPPED entry can be
-      checked against the record's current deadline — an Extend leaves the old
-      entry in the heap, and comparing the two is how the stale one is recognised
-      without ever having to find and remove it.
+      The deadline is the order; the receipt finds the record a popped entry
+      lapses. Each lease has exactly one entry, named by the record's Handle, so
+      an entry is never stale (#1036).
     fields:
       - name: at
         type: time.Time
@@ -2854,10 +3881,20 @@ types:
         type: corequeue.ReceiptValue
       - name: payload
         type: "[]byte"
+      - doc: |-
+          lapse names the lease's entry in the broker's expiry heap; the zero
+          Handle while the record is not in flight.
+        name: lapse
+        type: heap.Handle
       - name: seq
         type: uint64
       - name: deliveries
         type: int
+      - doc: |-
+          priority is the level the message is delivered at; it picks the
+          ready list the record waits in.
+        name: priority
+        type: corequeue.Priority
     kind: struct
     name: memRecord
   - doc: |-
@@ -2899,13 +3936,14 @@ types:
           of actual work. The file broker never had the problem, because its
           in-flight directory sorts by deadline and its scan breaks. See BENCH.md.
 
-          Entries are removed LAZILY: an Ack, a Nack or an Extend drops the
-          record from the map and leaves the heap entry to be popped and
-          discarded when its deadline arrives. That keeps every acknowledgement
-          O(1) and bounds the heap by the leases taken within one visibility
-          timeout rather than by the queue's depth.
+          Each entry is named by the Handle its record keeps (memRecord.lapse):
+          an Extend re-keys it in place and an Ack, a Nack, a Reject or a
+          Release removes it, each in O(log n), so the heap holds exactly the
+          leases in flight and every entry it pops is live (#1036). Before, the
+          entries were removed lazily — an acknowledgement left its entry to be
+          discarded when popped, and every Extend left one more behind.
         name: expiry
-        type: "*heap.Heap[leaseExpiry]"
+        type: "*heap.IndexedHeap[leaseExpiry]"
       - doc: |-
           once holds each PublishOnce key still reserved, by the end of its
           window; onceEnds orders those ends so a passed one is dropped at the
@@ -2922,12 +3960,26 @@ types:
       - doc: nonce prefixes every receipt this broker mints.
         name: nonce
         type: string
-      - doc: ready holds the queued records, ordered by visibleAt then seq.
+      - doc: |-
+          ready holds the queued records, one list per level — the lowest at
+          index 0, readyIndex — each ordered by visibleAt then seq (ADR 0054,
+          amended 2026-11-03).
         name: ready
-        type: "[]*memRecord"
-      - doc: dead holds what the broker gave up on, oldest first.
+        type: "[priorityLevels][]*memRecord"
+      - doc: |-
+          dead holds what the broker gave up on, in the byte order of their
+          identifiers — the order DeadLetters and DeadLettersAfter list, the
+          durable brokers' (ADR 0054, amended 2026-11-02) —, kept at insertion.
         name: dead
         type: "[]corequeue.DeadLetterValue"
+      - doc: random draws the retry jitter (MemoryConfig.Random).
+        name: random
+        type: func() float64
+      - doc: |-
+          swept is when the last dead-letter retention sweep ran, in Unix
+          nanoseconds; zero for never.
+        name: swept
+        type: int64
       - name: policy
         type: corequeue.PolicyValue
       - doc: |-
@@ -2950,13 +4002,30 @@ types:
         recv: b *memoryBroker
         results: message corequeue.MessageValue, err error
       - doc: |-
-          enqueue queues payload, enqueued at now and visible at visibleAt, wakes
-          every idle consumer, and returns the message it minted. The caller holds the
-          write lock and has checked the payload's size.
+          enqueue queues payload at level, enqueued at now and visible at visibleAt,
+          wakes every idle consumer, and returns the message it minted. The caller
+          holds the write lock and has checked the payload's size.
         name: enqueue
-        params: payload []byte, now, visibleAt time.Time
+        params: payload []byte, now, visibleAt time.Time, level corequeue.Priority
         recv: b *memoryBroker
         results: corequeue.MessageValue
+      - doc: |-
+          enqueueQuiet is enqueue without the wake, for a batch that wakes once. The
+          caller holds mu.
+        name: enqueueQuiet
+        params: payload []byte, now, visibleAt time.Time, level corequeue.Priority
+        recv: b *memoryBroker
+        results: corequeue.MessageValue
+      - doc: |-
+          PublishPriority queues payload at level (core/data/queue.PriorityPublisher):
+          a record in that level's ready list, which a Receive empties of its visible
+          records before it looks at a lower level.
+        name: PublishPriority
+        params: |2
+
+          	ctx context.Context, payload []byte, level corequeue.Priority,
+        recv: b *memoryBroker
+        results: message corequeue.MessageValue, err error
       - doc: |-
           PublishAt queues payload, received by no consumer before at
           (core/data/queue.DelayedPublisher): a record whose visibility is at, in the
@@ -2991,9 +4060,19 @@ types:
           	ctx context.Context, max int,
         recv: b *memoryBroker
         results: batch []corequeue.DeliveryValue, err error
-      - doc: takeEligible removes and returns the oldest visible record, or nil.
+      - doc: |-
+          takeEligible removes and returns the oldest visible record of the highest
+          level that has one, or nil: a level whose head is not yet visible holds
+          back nobody below it.
         name: takeEligible
         params: now time.Time
+        recv: b *memoryBroker
+        results: "*memRecord"
+      - doc: |-
+          takeVisible removes and returns the head of one level's ready list when it
+          is visible, burying first every visible head past its MaxAge.
+        name: takeVisible
+        params: level int, now time.Time
         recv: b *memoryBroker
         results: "*memRecord"
       - doc: lease moves record into flight and builds the delivery for it.
@@ -3114,15 +4193,14 @@ types:
           retry delay is ending, or the earliest lease, whose holder may have died.
 
           Both are read from the structures Receive itself uses, under the same lock,
-          so the answer is never staler than the call. The expiry heap may still hold
-          an entry an Ack has made stale; that only wakes a consumer early, to a
-          Receive that discards it.
+          so the answer is never staler than the call. The expiry heap holds exactly
+          the leases in flight, so its top is a lease that can still lapse.
         name: Wake
         recv: b *memoryBroker
         results: corequeue.WakeValue
       - doc: |-
-          DeadLetters returns up to max abandoned messages, oldest first, and removes
-          none of them.
+          DeadLetters returns up to max abandoned messages, oldest enqueued first,
+          and removes none of them: DeadLettersAfter's first page.
         name: DeadLetters
         params: |2
 
@@ -3151,6 +4229,12 @@ types:
         name: reclaimExpired
         params: now time.Time
         recv: b *memoryBroker
+      - doc: |-
+          unlease takes record out of flight: out of the in-flight map, and its
+          deadline out of the expiry heap. The caller holds the write lock.
+        name: unlease
+        params: record *memRecord
+        recv: b *memoryBroker
       - doc: recoverExpired decides what becomes of one lapsed lease.
         name: recoverExpired
         params: record *memRecord, now time.Time
@@ -3160,7 +4244,16 @@ types:
         params: record *memRecord, now time.Time, cause causeValue
         recv: b *memoryBroker
       - doc: |-
-          insertReady places record in visibility order, ties broken by seq.
+          insertDead keeps the dead list in the byte order of the identifiers, so the
+          memory broker lists its dead letters as the durable ones do — by enqueue
+          instant, whatever order they died in — and a cursor resumes by a binary
+          search.
+        name: insertDead
+        params: dead corequeue.DeadLetterValue
+        recv: b *memoryBroker
+      - doc: |-
+          insertReady places record in its level's list, in visibility order, ties
+          broken by seq.
 
           The list is kept ordered at INSERTION rather than sorted at Receive: a
           consumer polls far more often than a producer publishes, so sorting on the
@@ -3168,6 +4261,111 @@ types:
         name: insertReady
         params: record *memRecord
         recv: b *memoryBroker
+      - doc: |-
+          earliestReady is the earliest instant a queued record becomes visible: the
+          earliest head of the levels' lists, each in visibility order; the zero
+          time.Time when nothing waits.
+        name: earliestReady
+        recv: b *memoryBroker
+        results: time.Time
+      - doc: |-
+          readyAfter is every queued record, every level's, whose identifier sorts
+          after after, in no order.
+        name: readyAfter
+        params: after string
+        recv: b *memoryBroker
+        results: "[]*memRecord"
+      - doc: readyCount is how many records wait, every level together.
+        name: readyCount
+        recv: b *memoryBroker
+        results: int
+      - doc: |-
+          DeadLettersAfter returns up to max dead letters whose identifier sorts after
+          after, in the byte order of their identifiers, and removes none of them
+          (core/data/queue.DeadLetterPager).
+        name: DeadLettersAfter
+        params: |2
+
+          	ctx context.Context, after string, max int,
+        recv: b *memoryBroker
+        results: dead []corequeue.DeadLetterValue, err error
+      - doc: |-
+          deadAfter is the index of the first dead letter whose identifier sorts
+          after after. The caller holds mu.
+        name: deadAfter
+        params: after string
+        recv: b *memoryBroker
+        results: int
+      - doc: Stats counts the queue as the heap holds it (core/data/queue.Counter).
+        name: Stats
+        params: ctx context.Context
+        recv: b *memoryBroker
+        results: corequeue.StatsValue, error
+      - doc: |-
+          Purge removes every live message, waiting and leased, and no dead letter
+          (core/data/queue.Purger).
+        name: Purge
+        params: ctx context.Context
+        recv: b *memoryBroker
+        results: corequeue.PurgeValue, error
+      - doc: |-
+          ReplayDeadLetters replays up to max dead letters, oldest enqueued first
+          (core/data/queue.DeadLetterBulkManager). Under one lock it cannot fail
+          part-way.
+        name: ReplayDeadLetters
+        params: ctx context.Context, max int
+        recv: b *memoryBroker
+        results: replayed int, err error
+      - doc: |-
+          requeueDead puts dead back into the queue, visible at now, its count reset,
+          keeping its identifier, payload and enqueue instant. The caller holds mu
+          and has taken dead out of the store.
+        name: requeueDead
+        params: dead corequeue.DeadLetterValue, now time.Time
+        recv: b *memoryBroker
+      - doc: |-
+          PurgeDeadLetters deletes up to max dead letters that failed before before,
+          oldest enqueued first (core/data/queue.DeadLetterBulkManager).
+        name: PurgeDeadLetters
+        params: ctx context.Context, before time.Time, max int
+        recv: b *memoryBroker
+        results: removed int, err error
+      - doc: |-
+          sweepRetention removes every dead letter past the policy's
+          DeadLetterRetention, at most once a minute on the broker's clock. The
+          caller holds mu.
+        name: sweepRetention
+        params: now time.Time
+        recv: b *memoryBroker
+      - doc: |-
+          expired reports whether a message enqueued at enqueuedAt has reached the
+          policy's MaxAge by now.
+        name: expired
+        params: enqueuedAt, now time.Time
+        recv: b *memoryBroker
+        results: bool
+      - doc: |-
+          PublishMany appends every payload under one lock and wakes once
+          (core/data/queue.BatchPublisher). It cannot fail part-way: every payload is
+          checked first, and nothing else can refuse.
+        name: PublishMany
+        params: ctx context.Context, payloads [][]byte
+        recv: b *memoryBroker
+        results: "[]corequeue.MessageValue, error"
+      - doc: |-
+          AckMany acknowledges every receipt under one lock, one outcome each
+          (core/data/queue.Acker).
+        name: AckMany
+        params: ctx context.Context, receipts []corequeue.ReceiptValue
+        recv: b *memoryBroker
+        results: corequeue.AckResultValue, error
+      - doc: |-
+          AllMessages yields the live messages a page at a time
+          (core/data/queue.MessageLister).
+        name: AllMessages
+        params: ctx context.Context, after string
+        recv: b *memoryBroker
+        results: iter.Seq2[corequeue.LiveMessageValue, error]
     name: memoryBroker
   - fields:
       - doc: |-
@@ -3179,6 +4377,15 @@ types:
           Nil means clock.System.
         name: Clock
         type: clock.Clock
+      - doc: |-
+          Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+          for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+          math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+          retry instant to the nanosecond, as it does without a jitter; the
+          three brokers draw from it identically, so the memory broker stays an
+          exact double. It may be called by several goroutines at once.
+        name: Random
+        type: func() float64
       - doc: |-
           Policy is the delivery discipline. Its zero value is refused; see
           core/data/queue.PolicyValue.
@@ -3279,8 +4486,17 @@ types:
       - doc: own are the options of a transaction the broker opens itself.
         name: own
         type: coresql.TxOptionsValue
+      - doc: random draws the retry jitter (SQLConfig.Random).
+        name: random
+        type: func() float64
       - name: policy
         type: corequeue.PolicyValue
+      - doc: |-
+          deadSwept is when this broker last deleted the dead letters past the
+          policy's DeadLetterRetention, in Unix nanoseconds on its clock; zero
+          before the first.
+        name: deadSwept
+        type: atomic.Int64
     kind: struct
     methods:
       - doc: |-
@@ -3309,6 +4525,32 @@ types:
         params: |2
 
           	ctx context.Context, payload []byte, at time.Time,
+        recv: b *sqlBroker
+        results: message corequeue.MessageValue, err error
+      - doc: |-
+          PublishPriority inserts payload into the queue at level
+          (core/data/queue.PriorityPublisher): its row's priority column holds the
+          level, and the lease's read takes the due rows of the highest level first.
+          A broker whose SQLConfig.Priority is unset keeps no level: it publishes at
+          the normal one as Publish does, and refuses any other.
+        name: PublishPriority
+        params: |2
+
+          	ctx context.Context, payload []byte, level corequeue.Priority,
+        recv: b *sqlBroker
+        results: message corequeue.MessageValue, err error
+      - doc: |-
+          checkLevel refuses a level outside the closed set, and one other than the
+          normal level on a table without the priority column (SQLConfig.Priority).
+        name: checkLevel
+        params: level corequeue.Priority
+        recv: b *sqlBroker
+        results: error
+      - doc: publishRow inserts payload at level, due at at — now when at has passed.
+        name: publishRow
+        params: |2
+
+          	ctx context.Context, payload []byte, at time.Time, level corequeue.Priority,
         recv: b *sqlBroker
         results: message corequeue.MessageValue, err error
       - doc: Ack deletes the leased message. It is the only call that removes one.
@@ -3431,6 +4673,97 @@ types:
         recv: b *sqlBroker
         results: error
       - doc: |-
+          Stats counts the table by state and lease in one statement, reading no
+          payload (core/data/queue.Counter). Inside the caller's transaction it
+          counts what that transaction sees.
+        name: Stats
+        params: ctx context.Context
+        recv: b *sqlBroker
+        results: stats corequeue.StatsValue, err error
+      - doc: |-
+          Purge deletes every live row — those without a lease, then those with one —
+          in one transaction, and no dead letter or PublishOnce reservation
+          (core/data/queue.Purger).
+        name: Purge
+        params: ctx context.Context
+        recv: b *sqlBroker
+        results: corequeue.PurgeValue, error
+      - doc: |-
+          ReplayDeadLetters replays up to max dead letters, oldest enqueued first, in
+          one statement (core/data/queue.DeadLetterBulkManager): atomic, so it never
+          fails part-way.
+        name: ReplayDeadLetters
+        params: ctx context.Context, max int
+        recv: b *sqlBroker
+        results: replayed int, err error
+      - doc: |-
+          PurgeDeadLetters deletes up to max dead letters that failed before before,
+          oldest enqueued first, in one statement
+          (core/data/queue.DeadLetterBulkManager).
+        name: PurgeDeadLetters
+        params: ctx context.Context, before time.Time, max int
+        recv: b *sqlBroker
+        results: removed int, err error
+      - doc: |-
+          sweepRetention deletes every dead letter past the policy's
+          DeadLetterRetention, at most once a minute per broker on its clock, in one
+          statement on the transaction ctx carries or the pool.
+        name: sweepRetention
+        params: ctx context.Context, now int64
+        recv: b *sqlBroker
+        results: error
+      - doc: |-
+          expireDue buries every due row past the policy's MaxAge with
+          MESSAGE_EXPIRED, in the lease's transaction, before its first pick. A
+          policy with no MaxAge sends nothing.
+        name: expireDue
+        params: ctx context.Context, ex coresql.Executor, now int64
+        recv: b *sqlBroker
+        results: error
+      - doc: |-
+          PublishMany inserts every payload in multi-row INSERTs — one when the batch
+          fits one statement — on the transaction ctx carries, or in one of the
+          broker's own when it takes several, so the batch exists entirely or not
+          at all (core/data/queue.BatchPublisher).
+        name: PublishMany
+        params: ctx context.Context, payloads [][]byte
+        recv: b *sqlBroker
+        results: "[]corequeue.MessageValue, error"
+      - doc: |-
+          AckMany deletes the rows every receipt holds in one statement per chunk of
+          receipts, and reads which landed from the rows it deleted
+          (core/data/queue.Acker): RETURNING on PostgreSQL and SQLite, a locking read
+          first on MySQL. A receipt this broker cannot parse is never sent.
+        name: AckMany
+        params: ctx context.Context, receipts []corequeue.ReceiptValue
+        recv: b *sqlBroker
+        results: corequeue.AckResultValue, error
+      - doc: |-
+          ackChunk deletes the rows chunk holds and records each one deleted in
+          landed.
+        name: ackChunk
+        params: |2
+
+          	ctx context.Context, ex coresql.Executor, now int64, chunk []sqlReceipt, landed map[sqlLanded]bool,
+        recv: b *sqlBroker
+        results: error
+      - doc: |-
+          readLanded runs query and records the (identifier, lease) of every row it
+          returns in landed.
+        name: readLanded
+        params: |2
+
+          	ctx context.Context, ex coresql.Executor, query string, args []any, landed map[sqlLanded]bool,
+        recv: b *sqlBroker
+        results: err error
+      - doc: |-
+          AllMessages yields the live rows a page at a time, each page one unlocked
+          read after the last identifier (core/data/queue.MessageLister).
+        name: AllMessages
+        params: ctx context.Context, after string
+        recv: b *sqlBroker
+        results: iter.Seq2[corequeue.LiveMessageValue, error]
+      - doc: |-
           Reject dead-letters the leased message at once with cause, whatever its
           delivery count (core/data/queue.Rejecter): the burial a nack on the last attempt
           makes, reached sooner, in one statement.
@@ -3446,6 +4779,17 @@ types:
         params: |2
 
           	ctx context.Context, max int,
+        recv: b *sqlBroker
+        results: dead []corequeue.DeadLetterValue, err error
+      - doc: |-
+          DeadLettersAfter reads up to max dead letters whose identifier sorts after
+          after, in identifier order — the primary key's — in one statement
+          (core/data/queue.DeadLetterPager). Inside the caller's transaction it reads
+          what that transaction sees.
+        name: DeadLettersAfter
+        params: |2
+
+          	ctx context.Context, after string, max int,
         recv: b *sqlBroker
         results: dead []corequeue.DeadLetterValue, err error
       - doc: |-
@@ -3582,6 +4926,36 @@ types:
         recv: b *sqlBroker
         results: batch []corequeue.DeliveryValue, err error
       - doc: |-
+          receiveInstants reads the clock once for a Receive — the instant a lease is
+          judged against and the deadline one taken now gets — refusing a clock this
+          broker could not write down, and sweeps the dead letters past their
+          retention on the same look, at most once a minute, in a statement of its
+          own.
+        name: receiveInstants
+        params: ctx context.Context
+        recv: b *sqlBroker
+        results: sqlInstants, error
+      - doc: |-
+          probeOutside asks, outside any transaction, whether anything is due, and
+          answers the Receive when it can: nothing due — the probe's record is the
+          wake —, or, on PostgreSQL, the lease taken in one statement with no
+          transaction of the broker's own (issue #1042). answered is false when the
+          lease must run in a transaction.
+        name: probeOutside
+        params: |2
+
+          	ctx context.Context, ex coresql.Executor, at sqlInstants, max int,
+        recv: b *sqlBroker
+        results: batch []corequeue.DeliveryValue, answered bool, err error
+      - doc: |-
+          leaseInTransaction leases up to max due rows in a transaction — the
+          broker's own, or a savepoint of the caller's — and records when the next
+          row becomes due once the leases stand.
+        name: leaseInTransaction
+        params: ctx context.Context, at sqlInstants, max int
+        recv: b *sqlBroker
+        results: "[]corequeue.DeliveryValue, error"
+      - doc: |-
           leaseDue leases up to max due rows inside the transaction ex runs, and
           returns them with the instant an idle consumer should look again.
         name: leaseDue
@@ -3638,6 +5012,31 @@ types:
         params: rows rowSet, step string, err error
         recv: b *sqlBroker
         results: error
+      - doc: |-
+          receiveReturning leases up to max due messages outside the caller's
+          transaction in ONE statement — leaseReturning, atomic by itself, so it runs
+          on the pool with no BEGIN and no COMMIT (issue #1042). A batch it did not
+          fill buries the lapsed leases with no attempt left, which the statement
+          skips, and asks when the next message is due. A policy with a MaxAge buries
+          the expired messages first, in a statement of its own.
+
+          RETURNING promises no order, so the batch is sorted by the instant each row
+          was due, then its identifier: pick's order, the queue's visibility order.
+        name: receiveReturning
+        params: |2
+
+          	ctx context.Context, ex coresql.Executor, at sqlInstants, max int,
+        recv: b *sqlBroker
+        results: batch []corequeue.DeliveryValue, err error
+      - doc: |-
+          leaseReturning sends the one statement that leases, and reads the rows it
+          leased into deliveries under one lease, in identifier order.
+        name: leaseReturning
+        params: |2
+
+          	ctx context.Context, ex coresql.Executor, at sqlInstants, max int,
+        recv: b *sqlBroker
+        results: batch []corequeue.DeliveryValue, err error
     name: sqlBroker
   - doc: "sqlReceipt is what a receipt names: one lease on one message."
     fields:
@@ -3660,6 +5059,104 @@ types:
         recv: r sqlReceipt
         results: "[]any"
     name: sqlReceipt
+  - doc: |-
+      sqlLanded names a row AckMany deleted: its identifier and the lease it was
+      held under.
+    fields:
+      - name: id
+        type: string
+      - name: lease
+        type: string
+    kind: struct
+    name: sqlLanded
+  - doc: |-
+      sqlBulkStatements are the statements of the siblings that act on a whole
+      queue (ADR 0054 and ADR 0151, amended 2026-11-02): rendered once, beside
+      the others, and sent only by the calls that need them — a broker whose
+      policy has no MaxAge and no DeadLetterRetention sends none of them from
+      Receive.
+    fields:
+      - doc: |-
+          stats counts the rows by state and lease, with the earliest enqueue and
+          due instants of each group: Counter.Stats in one statement.
+        name: stats
+        type: string
+      - doc: |-
+          purgeQueued and purgeLeased delete the live rows without and with a
+          lease: Purger.Purge, which reports the two counts apart.
+        name: purgeQueued
+        type: string
+      - doc: |-
+          purgeQueued and purgeLeased delete the live rows without and with a
+          lease: Purger.Purge, which reports the two counts apart.
+        name: purgeLeased
+        type: string
+      - doc: |-
+          expire buries every live row past MaxAge that is due — waiting and
+          visible, or a lapsed lease — with MESSAGE_EXPIRED.
+        name: expire
+        type: string
+      - doc: |-
+          retention deletes every dead letter that failed at or before an
+          instant.
+        name: retention
+        type: string
+      - doc: |-
+          replayMany replays the oldest dead letters, up to a bound, as replay
+          replays one; purgeDeadMany deletes the oldest that failed before an
+          instant, up to a bound. MySQL spells the bound as the UPDATE's or the
+          DELETE's own ORDER BY … LIMIT, the others as a sub-select of the ids.
+        name: replayMany
+        type: string
+      - doc: |-
+          replayMany replays the oldest dead letters, up to a bound, as replay
+          replays one; purgeDeadMany deletes the oldest that failed before an
+          instant, up to a bound. MySQL spells the bound as the UPDATE's or the
+          DELETE's own ORDER BY … LIMIT, the others as a sub-select of the ids.
+        name: purgeDeadMany
+        type: string
+      - doc: table is the table's quoted name; dialect its placeholders.
+        name: table
+        type: string
+      - name: dialect
+        type: coresql.Dialect
+      - doc: causeArgs is how many arguments a burial's cause binds.
+        name: causeArgs
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          insertRows renders the INSERT of n messages, published as insert publishes
+          one: n rows of (identifier, due, enqueue instant, payload).
+        name: insertRows
+        params: n int
+        recv: s *sqlBulkStatements
+        results: string
+      - doc: |-
+          ackHeld renders the condition AckMany's statements share: a live row whose
+          lease is still ahead of the first argument and that one of n receipts —
+          identifier, lease, count — holds.
+        name: ackHeld
+        params: n int
+        recv: s *sqlBulkStatements
+        results: string
+      - doc: |-
+          ackRows renders AckMany's DELETE of n receipts' rows. On PostgreSQL and
+          SQLite it returns the identifier and lease of each row it deleted, so the
+          one statement says which receipts landed; on MySQL, which has no
+          RETURNING, ackPick reads them first in the same transaction.
+        name: ackRows
+        params: n int
+        recv: s *sqlBulkStatements
+        results: string
+      - doc: |-
+          ackPick renders MySQL's read of the rows AckMany's DELETE will remove,
+          locked, in the transaction that removes them.
+        name: ackPick
+        params: n int
+        recv: s *sqlBulkStatements
+        results: string
+    name: sqlBulkStatements
   - fields:
       - doc: |-
           Transactor is the transaction manager of the database the queue lives
@@ -3682,6 +5179,15 @@ types:
           the precision a lease needs — as they must for the file broker.
         name: Clock
         type: clock.Clock
+      - doc: |-
+          Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+          for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+          math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+          retry instant to the nanosecond, as it does without a jitter; the
+          three brokers draw from it identically, so the memory broker stays an
+          exact double. It may be called by several goroutines at once.
+        name: Random
+        type: func() float64
       - doc: |-
           Table names the queue's one table, which [SQLMigration] creates. It is
           a lower-case SQL identifier of at most [MaxSQLTableLen] bytes, holds no
@@ -3710,6 +5216,16 @@ types:
           Unset, the broker sends the statements it sent before the column
           existed, and a dead letter it buries or reads has no trail.
         name: Trail
+        type: bool
+      - doc: |-
+          Priority makes the broker keep a message's level
+          (core/data/queue.PriorityPublisher) in the table's priority column,
+          which [SQLPriorityMigration] adds, and hand out the visible rows of
+          the highest level first: run that migration before setting it.
+          Unset, the broker sends the statements it sent before the column
+          existed, reads every message as core/data/queue.PriorityNormal, and
+          refuses to publish or write one at any other level.
+        name: Priority
         type: bool
     kind: struct
     methods:
@@ -3740,6 +5256,18 @@ types:
       	// Scan copies the row's columns into dest.
       	Scan(dest ...any) error
       }
+  - doc: |-
+      sqlColumns are the optional columns a broker's statements name: each one
+      an SQLConfig option, and each one absent from every statement without it.
+    fields:
+      - doc: trail is SQLConfig.Trail.
+        name: trail
+        type: bool
+      - doc: priority is SQLConfig.Priority.
+        name: priority
+        type: bool
+    kind: struct
+    name: sqlColumns
   - doc: |-
       sqlStatements are the statements one SQL broker sends, rendered for its
       dialect and table.
@@ -3780,6 +5308,22 @@ types:
         name: next
         type: string
       - doc: |-
+          leaseReturning leases up to a bound of the due rows in ONE statement —
+          an UPDATE … FROM a locked, skipping sub-select, RETURNING what a
+          delivery needs and the instant each row was due — on PostgreSQL, for a
+          Receive outside the caller's transaction (issue #1042). Empty on MySQL,
+          which has no UPDATE … RETURNING, and on SQLite, whose RETURNING cannot
+          name the sub-select's due and so cannot keep a batch in visibility
+          order: both keep the transaction of pick and leaseRows. It skips a
+          lapsed lease with no attempt left, which buryExhausted buries.
+        name: leaseReturning
+        type: string
+      - doc: |-
+          buryExhausted buries, with LEASE_EXPIRED, every lapsed lease with no
+          attempt left: what leaseReturning skips.
+        name: buryExhausted
+        type: string
+      - doc: |-
           ack, retry, bury and extend end or renew one lease, matching the
           receipt's identifier, lease and delivery count, and a deadline still
           ahead.
@@ -3808,7 +5352,9 @@ types:
           delivery count it moved on moved back, under the same condition.
         name: release
         type: string
-      - doc: deadList reads the dead letters, in the order they died.
+      - doc: |-
+          deadList reads the dead letters after an identifier, in identifier
+          order — the enqueue order every broker lists them in (issue #1043).
         name: deadList
         type: string
       - doc: replay and deleteDead act on one dead letter.
@@ -3835,6 +5381,9 @@ types:
       - doc: once are PublishOnce's fixed statements.
         name: once
         type: sqlOnceStatements
+      - doc: bulk are the statements of the siblings that act on a whole queue.
+        name: bulk
+        type: sqlBulkStatements
       - doc: table is the table's quoted name.
         name: table
         type: string
@@ -3842,12 +5391,38 @@ types:
         name: dialect
         type: coresql.Dialect
       - doc: |-
+          insertPriority publishes a message at a level other than the normal
+          one; empty without SQLConfig.Priority.
+        name: insertPriority
+        type: string
+      - doc: |-
           trail is SQLConfig.Trail: every burial writes the trail column, the
           dead-letter read returns it, a replay clears it.
         name: trail
         type: bool
+      - doc: |-
+          priority is SQLConfig.Priority: the lease's read takes the highest
+          level first, a copy writes and the listings read the priority column.
+        name: priority
+        type: bool
     kind: struct
     methods:
+      - doc: |-
+          withPriority renders the statements SQLConfig.Priority changes: the
+          lease's read takes the highest level first — the index SQLPriorityMigration
+          creates over (dead, priority, due, id) serves it —, a copy writes the
+          level, the listings read it, and insertPriority publishes at a level.
+        name: withPriority
+        params: dialect coresql.Dialect, quoted string
+        recv: s *sqlStatements
+      - doc: |-
+          insertAt is the statement and arguments of a publication at level: the
+          insertion every broker sends at the normal level, insertPriority with the
+          level last at any other.
+        name: insertAt
+        params: level corequeue.Priority, id []byte, due, enqueued int64, payload []byte
+        recv: s *sqlStatements
+        results: string, []any
       - doc: |-
           leaseRows renders the lease of n rows: their deadline, their lease's random
           half, and their delivery count moved on — for the rows still live.
@@ -3910,6 +5485,35 @@ types:
         type: string
     kind: struct
     name: sqlOnceStatements
+  - doc: |-
+      priorityColumnStatements are what SQLPriorityMigration sends to add the
+      priority column and its index to a queue's table, or to drop them, on one
+      dialect. Every engine reads the table's columns from its catalogue first —
+      the table's name bound, never interpolated —, so a table that is not there
+      or already has the column is left alone: an index cannot be created IF NOT
+      EXISTS over a table that is not there.
+    fields:
+      - doc: |-
+          probe counts the table's columns and, among them, the priority column:
+          (0, 0) for no table.
+        name: probe
+        type: string
+      - doc: add adds the column and the index, in order.
+        name: add
+        type: "[]string"
+      - doc: drop drops the index and the column, in order.
+        name: drop
+        type: "[]string"
+    kind: struct
+    methods:
+      - doc: |-
+          step is SQLPriorityMigration's Up — the column and its index added — or,
+          with drop, its Down — both dropped —, each only where it changes something.
+        name: step
+        params: table string, drop bool
+        recv: s priorityColumnStatements
+        results: coresql.Step
+    name: priorityColumnStatements
   - doc: sqlPicked is one row the lease's read returned.
     fields:
       - doc: id is the message identifier.

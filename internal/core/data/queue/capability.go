@@ -54,4 +54,9 @@ type DeadLetterValue struct {
 	// this SDK's brokers produce by running out of attempts, and is the count
 	// the message had for one a handler rejected ([Rejecter]).
 	Deliveries int
+	// Priority is the level the message was published at
+	// ([PriorityPublisher]); a replay queues it at that level again.
+	// [PriorityNormal] for one written before priorities existed, and on
+	// an SQL broker whose SQLConfig.Priority is not set.
+	Priority Priority
 }

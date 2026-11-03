@@ -16,7 +16,7 @@ directory holds no Go code — it is a prefix, not a package — and carries a
 ```
 internal/kernel/
 ├── errs/  clock/  backoff/  semver/  plugin/  swar/  jsonenc/     the root: no family describes them
-├── concur/        batcher, buffer, group, recycler, singleflight, snapshot, worker
+├── concur/        batcher, buffer, commit, group, recycler, singleflight, snapshot, worker
 ├── collections/   cache, heap, ring
 └── fs/            flock, pathchain, winacl
 ```
@@ -39,6 +39,7 @@ internal/kernel/
 |---|---|---|
 | `concur/batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014); the `FlushEvery` ticker runs on `Config.Clock` (`clock.System` when nil); published as `pkg/v1/concur/batcher` | `0.1.5.*` (BATCHER_CLOSED / BATCHER_DELIVER_FAILED) |
 | `concur/buffer/` | `sync.Pool` of `[]byte` — a `recycler.CappedPool[*[]byte]` specialisation | `0.1.1.*` (reserved) |
+| `concur/commit/` | generic `Group[T]` group commit (#803, ADR 0207): concurrent `Do` calls each add an item, one goroutine runs the flush over the batch, every caller gets its verdict; batches gather for `MaxWait` on `Config.Clock` or up to `MaxItems`, flush one at a time in order; not published in `pkg/v1` | `0.1.4.*` (COMMIT_CLOSED) |
 | `concur/group/` | generic structured concurrency (`Group`, `Go`/`Wait`/`Collect`, `Unlimited`); first error — or every error joined in submission order (`NewJoined`) — bounded parallelism, and a child panic delivered to the waiter; published as `pkg/v1/concur/group` | (none — forwards the task's error; a panic is re-raised, not coded) |
 | `concur/recycler/` | generic `Pool[T]` + `CappedPool[T]` object pools (ADR 0010); published as `pkg/v1/concur/recycler` | (none — panics on programmer error) |
 | `concur/singleflight/` | generic `Group[K,V]` call deduplication (ADR 0049); one execution per key however many callers arrive; published as `pkg/v1/concur/singleflight` | (none — transparent to `fn`'s error; a panic is re-raised, not coded) |

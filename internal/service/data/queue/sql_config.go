@@ -56,6 +56,13 @@ type SQLConfig struct {
 	// instants their own clocks wrote, so those clocks must agree to within
 	// the precision a lease needs — as they must for the file broker.
 	Clock clock.Clock
+	// Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+	// for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+	// math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+	// retry instant to the nanosecond, as it does without a jitter; the
+	// three brokers draw from it identically, so the memory broker stays an
+	// exact double. It may be called by several goroutines at once.
+	Random func() float64
 	// Table names the queue's one table, which [SQLMigration] creates. It is
 	// a lower-case SQL identifier of at most [MaxSQLTableLen] bytes, holds no
 	// three underscores in a row — docstore's derived tables do — and does
@@ -77,6 +84,14 @@ type SQLConfig struct {
 	// Unset, the broker sends the statements it sent before the column
 	// existed, and a dead letter it buries or reads has no trail.
 	Trail bool
+	// Priority makes the broker keep a message's level
+	// (core/data/queue.PriorityPublisher) in the table's priority column,
+	// which [SQLPriorityMigration] adds, and hand out the visible rows of
+	// the highest level first: run that migration before setting it.
+	// Unset, the broker sends the statements it sent before the column
+	// existed, reads every message as core/data/queue.PriorityNormal, and
+	// refuses to publish or write one at any other level.
+	Priority bool
 }
 
 // sqlParts are the two capabilities the SQL broker needs of its transactor,

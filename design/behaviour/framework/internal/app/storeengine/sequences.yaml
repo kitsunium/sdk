@@ -43,7 +43,7 @@ sequences:
           do:
             - return: nil, said(err)
           when: err != nil
-      - return: "&database{cfg: scfg, tm: tm, checker: checker, dialect: dialect}, nil"
+      - return: "&database{cfg: scfg, tm: tm, checker: checker, dialect: dialect, transient: cfg.Transient}, nil"
   - of: dialectOf
     steps:
       - switch:
@@ -69,10 +69,13 @@ sequences:
         kind: internal
     steps:
       - return: |-
-          said(d.tm.Transact(ctx, sql.TxOptions{}, func(ctx context.Context, _ sql.Executor) error {
+          said(d.tm.Transact(ctx, sql.TxOptions{Isolation: opts.Isolation, ReadOnly: opts.ReadOnly}, func(ctx context.Context, _ sql.Executor) error {
           		return fn(ctx)
           	}))
         to: said
+  - of: (*database).Transient
+    steps:
+      - return: (d.transient != nil && d.transient(err)) || sql.Classify(err)
   - of: (*database).InTransaction
     participants:
       - id: caller
@@ -2169,20 +2172,74 @@ sequences:
         kind: actor
       - id: (*sqlEngine).Filter
         kind: self
-      - id: e.List
+      - id: e.recordsChunk
         kind: internal
-      - id: filtered
+      - id: rawRecord(en.JSON).value
         kind: internal
     steps:
-      - bind: all, err
-        eval: e.List(ctx)
-        to: e.List
+      - bind: kept
+        eval: make([]plug.DocumentValue, 0, sqlKeysChunk)
+      - loop:
+          do:
+            - bind: page, err
+              eval: e.recordsChunk(ctx, after)
+              to: e.recordsChunk
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: kept
+                          value: append(kept, d)
+                      init:
+                        bind: d
+                        eval: rawRecord(en.JSON).value()
+                        to: rawRecord(en.JSON).value
+                      when: keep(d)
+                key: _
+                range: page
+                value: en
+            - opt:
+                do:
+                  - return: kept, nil
+                when: len(page) < sqlKeysChunk
+            - set: after
+              value: page[len(page)-1].Key
+          init: after := ""
+  - of: (*sqlEngine).recordsChunk
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlEngine).recordsChunk
+        kind: self
+      - id: e.call
+        kind: internal
+    steps:
+      - bind: c, done, err
+        eval: e.call(ctx, false)
+        to: e.call
       - opt:
           do:
             - return: nil, err
           when: err != nil
-      - return: filtered(all, keep), nil
-        to: filtered
+      - defer: done()
+      - bind: page
+        eval: make([]docstore.Entry, 0, sqlKeysChunk)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, said(err)
+                when: err != nil
+            - set: page
+              value: append(page, en)
+          key: en
+          range: e.ds.Documents(c, after, sqlKeysChunk)
+          value: err
+      - return: page, nil
   - of: (*sqlEngine).Lookup
     participants:
       - id: caller

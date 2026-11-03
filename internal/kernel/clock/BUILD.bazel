@@ -6,6 +6,7 @@ go_library(
     name = "clock",
     srcs = [
         "clock_compliance.go",
+        "coarse.go",
         "doc.go",
         "gen_decls.go",
         "manual.go",
@@ -32,6 +33,7 @@ go_test(
         "clock_bench_test.go",
         "clock_external_test.go",
         "clock_internal_test.go",
+        "coarse_external_test.go",
         "gen_api_test.go",
         "gen_perf_test.go",
         "manual_external_test.go",

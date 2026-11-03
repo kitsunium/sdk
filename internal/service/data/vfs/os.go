@@ -24,6 +24,9 @@ type osFS struct {
 	// of direct calls so publish() stays a pure function of them, which is
 	// what lets the internal test provoke a failure at each step.
 	ops atomicOps
+	// flushes shares step 5 between the publications into one directory
+	// (#803); ops.syncDir goes through it.
+	flushes *dirFlushes
 }
 
 // NewOS opens root as a confined filesystem.
@@ -47,6 +50,8 @@ func NewOS(root string) (filesystem corevfs.FullFS, err error) {
 		return nil, failRoot(openErr, kerrs.String("root", root))
 	}
 	disk := &osFS{root: handle, read: handle.FS()}
+	//: one directory flush shared by the publications that wait on it.
+	disk.flushes = newDirFlushes(disk.syncDir)
 	//: bind the native mechanics once; nothing swaps them in production.
 	disk.ops = disk.nativeOps()
 	//: a filesystem that publishes atomically, confined to root.
@@ -138,6 +143,44 @@ func (o *osFS) ReadDir(name string) (entries []fs.DirEntry, err error) {
 	}
 	//: sorted, as io/fs promises.
 	return listed, nil
+}
+
+// Lstat implements the half of fs.ReadLinkFS that describes a name without
+// following a final symbolic link. It forwards to os.Root, confined like every
+// other read (#1053).
+func (o *osFS) Lstat(name string) (info fs.FileInfo, err error) {
+	//: same grammar as Open.
+	if pathErr := corevfs.ValidatePath(name); pathErr != nil {
+		//: InvalidPath.
+		return nil, pathErr
+	}
+	stat, statErr := o.root.Lstat(name)
+	//: ReadFailed.
+	if statErr != nil {
+		//: nothing partial escapes.
+		return nil, failRead(statErr, kerrs.String("path", name))
+	}
+	//: the link itself, when name is one.
+	return stat, nil
+}
+
+// ReadLink implements fs.ReadLinkFS: the target of the symbolic link name, as
+// written, never followed. os.Root's FS already answers it; the wrapper used
+// to hide it behind a plain fs.FS (#1053).
+func (o *osFS) ReadLink(name string) (target string, err error) {
+	//: same grammar as Open.
+	if pathErr := corevfs.ValidatePath(name); pathErr != nil {
+		//: InvalidPath.
+		return "", pathErr
+	}
+	link, readErr := o.root.Readlink(name)
+	//: ReadFailed — a name that is not a link is the operating system's EINVAL.
+	if readErr != nil {
+		//: no partial target alongside an error.
+		return "", failRead(readErr, kerrs.String("path", name))
+	}
+	//: the target, as written.
+	return link, nil
 }
 
 // ReadFile implements fs.ReadFileFS.

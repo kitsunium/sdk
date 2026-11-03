@@ -10,6 +10,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -47,6 +48,14 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 		{dialect: coresql.DialectPostgres, role: "pick", text: `SELECT id, enqueued_at, deliveries, lease, payload FROM "app__jobs" WHERE dead = 0 AND due <= $1` +
 			` ORDER BY due, id LIMIT $2 FOR UPDATE SKIP LOCKED`},
 		{dialect: coresql.DialectPostgres, role: "next", text: `SELECT MIN(due) FROM "app__jobs" WHERE dead = 0 AND due > $1`},
+		//: issue #1042: PostgreSQL leases outside a transaction in one
+		//: statement, returning the instant each row was due for the order.
+		{dialect: coresql.DialectPostgres, role: "leaseReturning", text: `UPDATE "app__jobs" SET due = $1, lease = $2, deliveries = deliveries + 1` +
+			` FROM (SELECT id, due FROM "app__jobs" WHERE dead = 0 AND due <= $3 AND (lease IS NULL OR deliveries < $4)` +
+			` ORDER BY due, id LIMIT $5 FOR UPDATE SKIP LOCKED) AS picked WHERE "app__jobs".id = picked.id` +
+			` RETURNING "app__jobs".id, "app__jobs".enqueued_at, "app__jobs".deliveries, "app__jobs".payload, picked.due`},
+		{dialect: coresql.DialectPostgres, role: "buryExhausted", text: `UPDATE "app__jobs" SET dead = 1, due = $1, lease = NULL, reason = $2, cause = $3, code = $4` +
+			` WHERE dead = 0 AND lease IS NOT NULL AND due <= $5 AND deliveries >= $6`},
 		{dialect: coresql.DialectPostgres, role: "ack", text: `DELETE FROM "app__jobs" WHERE id = $1 AND lease = $2 AND deliveries = $3 AND dead = 0 AND due > $4`},
 		{dialect: coresql.DialectPostgres, role: "retry", text: `UPDATE "app__jobs" SET due = $1, lease = NULL WHERE id = $2 AND lease = $3 AND deliveries = $4` +
 			` AND dead = 0 AND due > $5`},
@@ -58,8 +67,10 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 			` WHERE id = $2 AND lease = $3 AND deliveries = $4 AND dead = 0 AND due > $5`},
 		{dialect: coresql.DialectMySQL, role: "release", text: "UPDATE `app__jobs` SET due = ?, lease = NULL, deliveries = deliveries - 1" +
 			" WHERE id = ? AND lease = ? AND deliveries = ? AND dead = 0 AND due > ?"},
+		//: issue #1043: the dead letters in identifier order — the enqueue
+		//: order every broker lists them in —, resumable after a cursor.
 		{dialect: coresql.DialectPostgres, role: "deadList", text: `SELECT id, enqueued_at, deliveries, due, reason, cause, code, payload FROM "app__jobs"` +
-			` WHERE dead = 1 ORDER BY due, id LIMIT $1`},
+			` WHERE dead = 1 AND id > $1 ORDER BY id LIMIT $2`},
 		{dialect: coresql.DialectPostgres, role: "replay", text: `UPDATE "app__jobs" SET dead = 0, due = $1, deliveries = 0, reason = NULL, cause = NULL, code = NULL` +
 			` WHERE id = $2 AND dead = 1`},
 		{dialect: coresql.DialectPostgres, role: "deleteDead", text: `DELETE FROM "app__jobs" WHERE id = $1 AND dead = 1`},
@@ -96,6 +107,26 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 		{dialect: coresql.DialectMySQL, role: "oncePick", text: "SELECT id FROM `app__jobs` WHERE dead = 2 AND due <= ?" +
 			" ORDER BY due, id LIMIT ? FOR UPDATE SKIP LOCKED"},
 		{dialect: coresql.DialectSQLite, role: "oncePick", text: `SELECT id FROM "app__jobs" WHERE dead = 2 AND due <= ? ORDER BY due, id LIMIT ?`},
+		//: ADR 0054 and ADR 0151, amended 2026-11-02: the siblings that act on
+		//: a whole queue, each one statement.
+		{dialect: coresql.DialectPostgres, role: "stats", text: `SELECT dead, CASE WHEN lease IS NULL THEN 0 ELSE 1 END, COUNT(*), MIN(enqueued_at), MIN(due)` +
+			` FROM "app__jobs" WHERE dead < 2 GROUP BY dead, CASE WHEN lease IS NULL THEN 0 ELSE 1 END`},
+		{dialect: coresql.DialectPostgres, role: "purgeQueued", text: `DELETE FROM "app__jobs" WHERE dead = 0 AND lease IS NULL`},
+		{dialect: coresql.DialectPostgres, role: "purgeLeased", text: `DELETE FROM "app__jobs" WHERE dead = 0 AND lease IS NOT NULL`},
+		{dialect: coresql.DialectPostgres, role: "expire", text: `UPDATE "app__jobs" SET dead = 1, due = $1, lease = NULL, reason = $2, cause = $3, code = $4` +
+			` WHERE dead = 0 AND enqueued_at <= $5 AND due <= $6`},
+		{dialect: coresql.DialectPostgres, role: "retention", text: `DELETE FROM "app__jobs" WHERE dead = 1 AND due <= $1`},
+		{dialect: coresql.DialectPostgres, role: "replayMany", text: `UPDATE "app__jobs" SET dead = 0, due = $1, deliveries = 0, reason = NULL, cause = NULL, code = NULL` +
+			` WHERE dead = 1 AND id IN (SELECT id FROM "app__jobs" WHERE dead = 1 ORDER BY id LIMIT $2)`},
+		{dialect: coresql.DialectPostgres, role: "purgeDeadMany", text: `DELETE FROM "app__jobs" WHERE dead = 1 AND id IN (SELECT id FROM "app__jobs"` +
+			` WHERE dead = 1 AND due < $1 ORDER BY id LIMIT $2)`},
+		{dialect: coresql.DialectSQLite, role: "replayMany", text: `UPDATE "app__jobs" SET dead = 0, due = ?, deliveries = 0, reason = NULL, cause = NULL, code = NULL` +
+			` WHERE dead = 1 AND id IN (SELECT id FROM "app__jobs" WHERE dead = 1 ORDER BY id LIMIT ?)`},
+		{dialect: coresql.DialectMySQL, role: "replayMany", text: "UPDATE `app__jobs` SET dead = 0, due = ?, deliveries = 0, reason = NULL, cause = NULL, code = NULL" +
+			" WHERE dead = 1 ORDER BY id LIMIT ?"},
+		{dialect: coresql.DialectMySQL, role: "purgeDeadMany", text: "DELETE FROM `app__jobs` WHERE dead = 1 AND due < ? ORDER BY id LIMIT ?"},
+		{dialect: coresql.DialectMySQL, role: "deadList", text: "SELECT id, enqueued_at, deliveries, due, reason, cause, code, payload FROM `app__jobs`" +
+			" WHERE dead = 1 AND id > ? ORDER BY id LIMIT ?"},
 	} {
 		rendered := svcqueue.RenderSQLForTest(want.dialect, jobsTable, false)
 		if got := statementFor(t, rendered, want.role); got != want.text {
@@ -106,6 +137,13 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 		for text, role := range svcqueue.RenderSQLForTest(dialect, jobsTable, false).Fixed {
 			if role == "lock" {
 				t.Errorf("%s sends a lock statement %q; only SQLite's lock is a write", dialect, text)
+			}
+		}
+	}
+	for _, dialect := range []coresql.Dialect{coresql.DialectMySQL, coresql.DialectSQLite} {
+		for text, role := range svcqueue.RenderSQLForTest(dialect, jobsTable, false).Fixed {
+			if role == "leaseReturning" {
+				t.Errorf("%s leases in one statement %q; MySQL has no RETURNING, SQLite's cannot name the due", dialect, text)
 			}
 		}
 	}
@@ -126,6 +164,29 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 		" WHERE dead = 0 AND id IN (?, ?, ?)"; got != want {
 		t.Errorf("the lease of three rows on MySQL =\n%s\nwant\n%s", got, want)
 	}
+	//: a batch published in one INSERT, acknowledged in one DELETE that
+	//: names the rows it removed — MySQL, with no RETURNING, reads them first.
+	if got, want := postgres.InsertRows(2), `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries, payload)`+
+		` VALUES ($1, 0, $2, $3, 0, $4), ($5, 0, $6, $7, 0, $8)`; got != want {
+		t.Errorf("the publication of two messages =\n%s\nwant\n%s", got, want)
+	}
+	if got, want := postgres.AckRows(2), `DELETE FROM "app__jobs" WHERE dead = 0 AND due > $1`+
+		` AND ((id = $2 AND lease = $3 AND deliveries = $4) OR (id = $5 AND lease = $6 AND deliveries = $7)) RETURNING id, lease`; got != want {
+		t.Errorf("the acknowledgement of two receipts =\n%s\nwant\n%s", got, want)
+	}
+	sqlite := svcqueue.RenderSQLForTest(coresql.DialectSQLite, jobsTable, false)
+	if got, want := sqlite.AckRows(1), `DELETE FROM "app__jobs" WHERE dead = 0 AND due > ?`+
+		` AND ((id = ? AND lease = ? AND deliveries = ?)) RETURNING id, lease`; got != want {
+		t.Errorf("the acknowledgement of one receipt on SQLite =\n%s\nwant\n%s", got, want)
+	}
+	if got, want := mysql.AckRows(1), "DELETE FROM `app__jobs` WHERE dead = 0 AND due > ?"+
+		" AND ((id = ? AND lease = ? AND deliveries = ?))"; got != want {
+		t.Errorf("the acknowledgement of one receipt on MySQL =\n%s\nwant\n%s", got, want)
+	}
+	if got, want := mysql.AckPick(1), "SELECT id, lease FROM `app__jobs` WHERE dead = 0 AND due > ?"+
+		" AND ((id = ? AND lease = ? AND deliveries = ?)) FOR UPDATE"; got != want {
+		t.Errorf("MySQL's read of one receipt's row =\n%s\nwant\n%s", got, want)
+	}
 }
 
 // TestSQLTheTrailStatementsAsSent pins the statements SQLConfig.Trail changes
@@ -142,7 +203,11 @@ func TestSQLTheTrailStatementsAsSent(t *testing.T) {
 		{dialect: coresql.DialectPostgres, role: "bury", text: `UPDATE "app__jobs" SET dead = 1, due = $1, lease = NULL, reason = $2, cause = $3, code = $4,` +
 			` trail = $5 WHERE id = $6 AND lease = $7 AND deliveries = $8 AND dead = 0 AND due > $9`},
 		{dialect: coresql.DialectPostgres, role: "deadList", text: `SELECT id, enqueued_at, deliveries, due, reason, cause, code, trail, payload FROM "app__jobs"` +
-			` WHERE dead = 1 ORDER BY due, id LIMIT $1`},
+			` WHERE dead = 1 AND id > $1 ORDER BY id LIMIT $2`},
+		{dialect: coresql.DialectPostgres, role: "expire", text: `UPDATE "app__jobs" SET dead = 1, due = $1, lease = NULL, reason = $2, cause = $3, code = $4,` +
+			` trail = $5 WHERE dead = 0 AND enqueued_at <= $6 AND due <= $7`},
+		{dialect: coresql.DialectPostgres, role: "replayMany", text: `UPDATE "app__jobs" SET dead = 0, due = $1, deliveries = 0, reason = NULL, cause = NULL, code = NULL,` +
+			` trail = NULL WHERE dead = 1 AND id IN (SELECT id FROM "app__jobs" WHERE dead = 1 ORDER BY id LIMIT $2)`},
 		{dialect: coresql.DialectPostgres, role: "replay", text: `UPDATE "app__jobs" SET dead = 0, due = $1, deliveries = 0, reason = NULL, cause = NULL, code = NULL,` +
 			` trail = NULL WHERE id = $2 AND dead = 1`},
 		{dialect: coresql.DialectPostgres, role: "putDead", text: `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code, trail)` +
@@ -159,7 +224,7 @@ func TestSQLTheTrailStatementsAsSent(t *testing.T) {
 	for _, dialect := range []coresql.Dialect{coresql.DialectPostgres, coresql.DialectMySQL, coresql.DialectSQLite} {
 		without, with := svcqueue.RenderSQLForTest(dialect, jobsTable, false), svcqueue.RenderSQLForTest(dialect, jobsTable, true)
 		for text, role := range without.Fixed {
-			if _, kept := with.Fixed[text]; !kept && !slices.Contains([]string{"bury", "deadList", "replay", "putDead"}, role) {
+			if _, kept := with.Fixed[text]; !kept && !slices.Contains([]string{"bury", "deadList", "replay", "putDead", "expire", "replayMany", "buryExhausted"}, role) {
 				t.Errorf("%s: Trail changes %s, which no cause goes through", dialect, role)
 			}
 		}
@@ -326,5 +391,103 @@ func TestSQLMigrationRefusals(t *testing.T) {
 	}
 	if _, err := svcqueue.SQLMigration(coresql.DialectSQLite, jobsTable, 0); !errs.HasCode(err, coresql.CodeInvalidMigration) {
 		t.Errorf("SQLMigration(version 0) = %v, want CodeInvalidMigration", err)
+	}
+}
+
+// TestSQLThePriorityStatementsAsSent pins what SQLConfig.Priority changes
+// (issue #1045): the lease's read ordered by level first, the publication at
+// a level, the copies writing it and the listings reading it last; that
+// every other statement is the one sent without it — so a broker without the
+// option sends, byte for byte, what it sent before the column existed —; and
+// that PostgreSQL then leases through pick, its one-statement lease left out.
+func TestSQLThePriorityStatementsAsSent(t *testing.T) {
+	t.Parallel()
+	type pinned struct {
+		role, text string
+		dialect    coresql.Dialect
+	}
+	for _, want := range []pinned{
+		{dialect: coresql.DialectPostgres, role: "pick", text: `SELECT id, enqueued_at, deliveries, lease, payload FROM "app__jobs" WHERE dead = 0 AND due <= $1` +
+			` ORDER BY priority DESC, due, id LIMIT $2 FOR UPDATE SKIP LOCKED`},
+		{dialect: coresql.DialectMySQL, role: "pick", text: "SELECT id, enqueued_at, deliveries, lease, payload FROM `app__jobs` WHERE dead = 0 AND due <= ?" +
+			" ORDER BY priority DESC, due, id LIMIT ? FOR UPDATE SKIP LOCKED"},
+		{dialect: coresql.DialectSQLite, role: "pick", text: `SELECT id, enqueued_at, deliveries, lease, payload FROM "app__jobs" WHERE dead = 0 AND due <= ?` +
+			` ORDER BY priority DESC, due, id LIMIT ?`},
+		{dialect: coresql.DialectPostgres, role: "insertPriority", text: `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries, payload, priority)` +
+			` VALUES ($1, 0, $2, $3, 0, $4, $5)`},
+		{dialect: coresql.DialectPostgres, role: "putLive", text: `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries, payload, priority)` +
+			` VALUES ($1, 0, $2, $3, $4, $5, $6)`},
+		{dialect: coresql.DialectPostgres, role: "putDead", text: `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code, trail, priority)` +
+			` VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`},
+		{dialect: coresql.DialectPostgres, role: "deadList", text: `SELECT id, enqueued_at, deliveries, due, reason, cause, code, trail, payload, priority FROM "app__jobs"` +
+			` WHERE dead = 1 AND id > $1 ORDER BY id LIMIT $2`},
+		{dialect: coresql.DialectPostgres, role: "liveList", text: `SELECT id, enqueued_at, deliveries, due, lease, payload, priority FROM "app__jobs"` +
+			` WHERE dead = 0 AND id > $1 ORDER BY id LIMIT $2`},
+	} {
+		if got := statementFor(t, svcqueue.RenderSQLColumnsForTest(want.dialect, jobsTable, true, true), want.role); got != want.text {
+			t.Errorf("%s %s with Priority =\n%s\nwant\n%s", want.dialect, want.role, got, want.text)
+		}
+	}
+	for _, dialect := range []coresql.Dialect{coresql.DialectPostgres, coresql.DialectMySQL, coresql.DialectSQLite} {
+		without, with := svcqueue.RenderSQLForTest(dialect, jobsTable, true), svcqueue.RenderSQLColumnsForTest(dialect, jobsTable, true, true)
+		for text, role := range without.Fixed {
+			if _, kept := with.Fixed[text]; !kept && !slices.Contains([]string{"pick", "putLive", "putDead", "deadList", "liveList", "leaseReturning"}, role) {
+				t.Errorf("%s: Priority changes %s, which no level goes through", dialect, role)
+			}
+		}
+		for _, role := range with.Fixed {
+			if role == "leaseReturning" {
+				t.Errorf("%s: a broker keeping levels still leases in one statement, whose batch would ignore them", dialect)
+			}
+		}
+	}
+}
+
+// TestSQLPriorityMigrationAddsTheColumnAndItsIndex pins SQLPriorityMigration's
+// statements per dialect — the catalogue read first, the column NOT NULL
+// DEFAULT 0 so every row already there reads normal, the index over (dead,
+// priority, due, id), and the reversal index first —, its name and version,
+// its refusals, and the index name shortened past MaxSQLTableLen.
+func TestSQLPriorityMigrationAddsTheColumnAndItsIndex(t *testing.T) {
+	t.Parallel()
+	type ddl struct {
+		probe     string
+		add, drop []string
+	}
+	for dialect, want := range map[coresql.Dialect]ddl{
+		coresql.DialectPostgres: {
+			probe: `SELECT COUNT(*), COALESCE(SUM(CASE WHEN column_name = 'priority' THEN 1 ELSE 0 END), 0) FROM information_schema.columns` +
+				` WHERE table_schema = current_schema() AND table_name = $1`,
+			add:  []string{`ALTER TABLE "app__jobs" ADD COLUMN priority smallint NOT NULL DEFAULT 0`, `CREATE INDEX IF NOT EXISTS "app__jobs_priority" ON "app__jobs" (dead, priority, due, id)`},
+			drop: []string{`DROP INDEX IF EXISTS "app__jobs_priority"`, `ALTER TABLE "app__jobs" DROP COLUMN priority`},
+		},
+		coresql.DialectMySQL: {
+			probe: "SELECT COUNT(*), COALESCE(SUM(CASE WHEN column_name = 'priority' THEN 1 ELSE 0 END), 0) FROM information_schema.columns" +
+				" WHERE table_schema = DATABASE() AND table_name = ?",
+			add:  []string{"ALTER TABLE `app__jobs` ADD COLUMN priority SMALLINT NOT NULL DEFAULT 0, ADD INDEX `app__jobs_priority` (dead, priority, due, id)"},
+			drop: []string{"ALTER TABLE `app__jobs` DROP INDEX `app__jobs_priority`, DROP COLUMN priority"},
+		},
+		coresql.DialectSQLite: {
+			probe: `SELECT COUNT(*), COALESCE(SUM(CASE WHEN name = 'priority' THEN 1 ELSE 0 END), 0) FROM pragma_table_info(?)`,
+			add:   []string{`ALTER TABLE "app__jobs" ADD COLUMN priority INTEGER NOT NULL DEFAULT 0`, `CREATE INDEX IF NOT EXISTS "app__jobs_priority" ON "app__jobs" (dead, priority, due, id)`},
+			drop:  []string{`DROP INDEX IF EXISTS "app__jobs_priority"`, `ALTER TABLE "app__jobs" DROP COLUMN priority`},
+		},
+	} {
+		probe, add, drop := svcqueue.PriorityColumnSQLForTest(dialect, jobsTable)
+		if probe != want.probe || !slices.Equal(add, want.add) || !slices.Equal(drop, want.drop) {
+			t.Errorf("%s: SQLPriorityMigration's statements =\n%q\n%q\n%q\nwant\n%q\n%q\n%q", dialect, probe, add, drop, want.probe, want.add, want.drop)
+		}
+		migration, err := svcqueue.SQLPriorityMigration(dialect, jobsTable, 20261103120000)
+		if err != nil || migration.Version != 20261103120000 || migration.Name != "queue priority app__jobs" {
+			t.Fatalf("%s: SQLPriorityMigration() = %d %q, %v", dialect, migration.Version, migration.Name, err)
+		}
+	}
+	if _, err := svcqueue.SQLPriorityMigration(coresql.DialectSQLite, "bad name", 1); !errs.HasCode(err, corequeue.CodeSQLQueueMisconfigured) {
+		t.Fatalf("SQLPriorityMigration(a bad table) = %v, want SQL_QUEUE_MISCONFIGURED", err)
+	}
+	long := "q" + strings.Repeat("abcdefgh", 7) + "abcdef"
+	if name := svcqueue.PriorityIndexNameForTest(long); len(name) > svcqueue.MaxSQLTableLen ||
+		name == svcqueue.PriorityIndexNameForTest(long[:len(long)-1]+"x") {
+		t.Fatalf("the index of a %d-byte table = %q, want at most %d bytes and distinct from a neighbour's", len(long), name, svcqueue.MaxSQLTableLen)
 	}
 }

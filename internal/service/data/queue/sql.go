@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
@@ -74,8 +75,14 @@ type sqlBroker struct {
 	// stmts are the rendered statements.
 	stmts sqlStatements
 	// own are the options of a transaction the broker opens itself.
-	own    coresql.TxOptionsValue
+	own coresql.TxOptionsValue
+	// random draws the retry jitter (SQLConfig.Random).
+	random func() float64
 	policy corequeue.PolicyValue
+	// deadSwept is when this broker last deleted the dead letters past the
+	// policy's DeadLetterRetention, in Unix nanoseconds on its clock; zero
+	// before the first.
+	deadSwept atomic.Int64
 }
 
 // sqlReceipt is what a receipt names: one lease on one message.
@@ -106,8 +113,8 @@ func NewSQL(cfg SQLConfig) (broker corequeue.Broker, err error) {
 	return &sqlBroker{
 		tm: cfg.Transactor, clk: clockOrSystem(cfg.Clock), tx: parts,
 		wake: sqlWakeFor(parts.join, cfg.Table), table: cfg.Table,
-		stmts: renderSQLStatements(cfg.Dialect, cfg.Table, cfg.Trail), own: sqlOwnTxOptions(cfg.Dialect),
-		policy: cfg.Policy.Normalized(),
+		stmts: renderSQLStatements(cfg.Dialect, cfg.Table, sqlColumns{trail: cfg.Trail, priority: cfg.Priority}), own: sqlOwnTxOptions(cfg.Dialect),
+		policy: cfg.Policy.Normalized(), random: randomOrDefault(cfg.Random),
 	}, nil
 }
 
@@ -157,8 +164,8 @@ func sqlOwnTxOptions(dialect coresql.Dialect) coresql.TxOptionsValue {
 func (b *sqlBroker) Publish(
 	ctx context.Context, payload []byte,
 ) (message corequeue.MessageValue, err error) {
-	//: an instant already past is now: visible at once.
-	return b.PublishAt(ctx, payload, time.Time{})
+	//: an instant already past is now: visible at once, at the normal level.
+	return b.publishRow(ctx, payload, time.Time{}, corequeue.PriorityNormal)
 }
 
 // PublishAt inserts payload into the queue as Publish does, its row due at at
@@ -167,6 +174,48 @@ func (b *sqlBroker) Publish(
 // now, and its identifier is minted from it.
 func (b *sqlBroker) PublishAt(
 	ctx context.Context, payload []byte, at time.Time,
+) (message corequeue.MessageValue, err error) {
+	//: the normal level, the row the table always held.
+	return b.publishRow(ctx, payload, at, corequeue.PriorityNormal)
+}
+
+// PublishPriority inserts payload into the queue at level
+// (core/data/queue.PriorityPublisher): its row's priority column holds the
+// level, and the lease's read takes the due rows of the highest level first.
+// A broker whose SQLConfig.Priority is unset keeps no level: it publishes at
+// the normal one as Publish does, and refuses any other.
+func (b *sqlBroker) PublishPriority(
+	ctx context.Context, payload []byte, level corequeue.Priority,
+) (message corequeue.MessageValue, err error) {
+	//: one of the five levels, and one the table can keep.
+	if invalid := b.checkLevel(level); invalid != nil {
+		//: QueueMisconfigured, and nothing is sent.
+		return corequeue.MessageValue{}, invalid
+	}
+	//: visible at once, at its level.
+	return b.publishRow(ctx, payload, time.Time{}, level)
+}
+
+// checkLevel refuses a level outside the closed set, and one other than the
+// normal level on a table without the priority column (SQLConfig.Priority).
+func (b *sqlBroker) checkLevel(level corequeue.Priority) error {
+	//: the refusal every broker makes.
+	if invalid := checkPriority(level); invalid != nil {
+		return invalid
+	}
+	//: a level the table has no column for.
+	if level != corequeue.PriorityNormal && !b.stmts.priority {
+		//: QueueMisconfigured, naming the option.
+		return kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+			kerrs.String("field", "SQLConfig.Priority"), kerrs.Int("level", int(level)))
+	}
+	//: kept.
+	return nil
+}
+
+// publishRow inserts payload at level, due at at — now when at has passed.
+func (b *sqlBroker) publishRow(
+	ctx context.Context, payload []byte, at time.Time, level corequeue.Priority,
 ) (message corequeue.MessageValue, err error) {
 	//: a cancelled producer gets its own error rather than a message nobody
 	//: asked for any more.
@@ -203,7 +252,8 @@ func (b *sqlBroker) PublishAt(
 	insertErr := b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
 		//: one row: live, queued, due at its visibility, never delivered. A nil
 		//: or empty payload may be stored as NULL, which reads back as empty.
-		if _, execErr := ex.ExecContext(txCtx, b.stmts.insert, []byte(id), visibleAt.UnixNano(), now.UnixNano(), payload); execErr != nil {
+		statement, args := b.stmts.insertAt(level, []byte(id), visibleAt.UnixNano(), now.UnixNano(), payload)
+		if _, execErr := ex.ExecContext(txCtx, statement, args...); execErr != nil {
 			//: QueueBackendFailed, the driver's text withheld.
 			return b.failed("publish", execErr)
 		}
@@ -245,7 +295,7 @@ func (b *sqlBroker) Nack(
 	//: the policy's delay, grown with the deliveries when it asks for that.
 	return b.nackWith(ctx, receipt, cause, func(deliveries int) time.Duration {
 		//: the curve every broker waits on.
-		return retryDelay(b.policy, deliveries)
+		return retryDelay(b.policy, deliveries, b.random)
 	})
 }
 

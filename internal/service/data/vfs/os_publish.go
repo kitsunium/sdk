@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"slices"
 
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -79,6 +80,9 @@ type atomicOps struct {
 //     new one and never a partial file.
 //  5. flush the DIRECTORY. Without it the entry naming the new inode may not
 //     survive a crash, and the file would come back with content and no name.
+//     Publications into one directory that reach this step while a flush of it
+//     runs share the next flush (#803): each still waits for a flush BEGUN
+//     after its own rename, and gets that flush's verdict.
 //
 // Steps 1–4 failing means nothing was published: the temporary is removed and
 // the previous bytes are untouched. Step 5 failing means the opposite and gets
@@ -98,6 +102,84 @@ func (o *osFS) WriteAtomic(name string, data []byte, perm fs.FileMode) error {
 // reference to os.Root, so the test that proves its guarantee can substitute
 // mechanics that fail.
 func publish(ops atomicOps, name string, data []byte, perm fs.FileMode) error {
+	//: steps 1 to 4: nothing is published unless all four succeed.
+	if stageErr := stage(ops, name, data, perm); stageErr != nil {
+		//: PublishFailed — the destination is untouched.
+		return stageErr
+	}
+	//: published; only the durability of the NAME is still in question.
+	return syncPublished(ops, path.Dir(name), name)
+}
+
+// WriteAtomicAll publishes every file of files, in order, and flushes each
+// directory they land in once, after the last rename into it
+// ([corevfs.AtomicBatchWriter], issue #827).
+//
+// Each file runs steps 1 to 4 of [osFS.WriteAtomic] — a temporary beside it,
+// the payload, the FILE's flush, the rename —, so each is atomic exactly as a
+// publication is. Step 5 is the one a batch shares: a directory flush makes
+// every rename into that directory before it durable, so one per directory
+// after the last of them gives every file of the batch the guarantee a flush
+// per file gave each, at half the device round trips.
+//
+// Every target is checked before any is written, so a refusal publishes
+// nothing. A failure at a file's steps 1 to 4 leaves that file and the rest
+// unpublished and their previous bytes untouched; the files already renamed
+// are flushed with their directories first, so the count returned beside
+// PublishFailed is a count of durable files.
+func (o *osFS) WriteAtomicAll(files []corevfs.FileValue, perm fs.FileMode) (published int, err error) {
+	//: the guard WriteAtomic runs, for every file, before a byte is written.
+	for _, file := range files {
+		//: InvalidPath, InvalidPermission, PathEscaped or NotRegularFile.
+		if guardErr := o.guardFileTarget(file.Name, perm); guardErr != nil {
+			return 0, guardErr
+		}
+	}
+	//: the mechanics are a field so the batch is testable at every step.
+	return publishAll(o.ops, files, perm)
+}
+
+// publishAll runs steps 1 to 4 for every file over ops, then step 5 once per
+// directory renamed into, and returns how many files were renamed into place.
+func publishAll(ops atomicOps, files []corevfs.FileValue, perm fs.FileMode) (published int, err error) {
+	var dirs []string
+	//: in order: a failure stops the batch at the file it struck.
+	for index, file := range files {
+		//: steps 1 to 4 of this file.
+		if stageErr := stage(ops, file.Name, file.Data, perm); stageErr != nil {
+			//: the files before it are visible: durable before the count says
+			//: so — or DirectorySyncFailed, which wins.
+			return index, cmp.Or(syncDirs(ops, dirs), stageErr)
+		}
+		//: each directory once, in the order the batch reached it.
+		if dir := path.Dir(file.Name); !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	//: step 5, once per directory.
+	return len(files), syncDirs(ops, dirs)
+}
+
+// syncDirs flushes every directory of dirs — all of them, a failure
+// included, so as much of a batch as the device accepts is durable — and
+// reports the first failure as DirectorySyncFailed.
+func syncDirs(ops atomicOps, dirs []string) error {
+	var first error
+	//: every directory, whatever an earlier one answered.
+	for _, dir := range dirs {
+		//: the first refusal is the one reported.
+		if syncErr := ops.syncDir(dir); syncErr != nil && first == nil {
+			first = failDirSync(syncErr, dir)
+		}
+	}
+	//: nil when every directory was flushed.
+	return first
+}
+
+// stage runs steps 1 to 4 of a publication over ops: the temporary, the
+// payload, the file's flush and the rename. On any failure the temporary is
+// removed and nothing was published.
+func stage(ops atomicOps, name string, data []byte, perm fs.FileMode) error {
 	dir := path.Dir(name)
 	tempName, nameErr := tempPath(dir)
 	//: entropy failing is the one step with nothing to clean up.
@@ -121,8 +203,8 @@ func publish(ops atomicOps, name string, data []byte, perm fs.FileMode) error {
 		//: PublishFailed — the previous content is still the current content.
 		return discard(ops, tempName, name, renameErr)
 	}
-	//: published; only the durability of the NAME is still in question.
-	return syncPublished(ops, dir, name)
+	//: renamed into place; its directory's flush is the caller's.
+	return nil
 }
 
 // writeAndSync writes the payload, flushes it to the device, and closes the
@@ -155,11 +237,49 @@ func syncPublished(ops atomicOps, dir, name string) error {
 	//: deliberately NOT rolled back: the rename already happened, so every
 	//: reader now sees the new content, and undoing it would mean a second
 	//: non-atomic write to repair a durability problem.
-	return kerrs.Wrap(syncErr, kerrs.WrapParams{
+	return failDirSync(syncErr, name)
+}
+
+// SyncDir implements [corevfs.DirSyncer]: it opens the directory name through
+// the root — "." included — and flushes its entries, the step WriteAtomic
+// takes for the directory naming the file it publishes, offered for the
+// directory naming a directory just created (#1060, ADR 0110's deferral).
+func (o *osFS) SyncDir(name string) error {
+	//: the read grammar: the root is the directory flushed most.
+	if pathErr := corevfs.ValidatePath(name); pathErr != nil {
+		//: InvalidPath.
+		return pathErr
+	}
+	info, statErr := o.root.Stat(name)
+	//: a directory that cannot be described cannot be flushed.
+	if statErr != nil {
+		//: DirectorySyncFailed, the *fs.PathError kept.
+		return failDirSync(statErr, name)
+	}
+	//: a file is not what the call needs.
+	if !info.IsDir() {
+		//: NotRegularFile.
+		return verdict(corevfs.NotRegularFile, kerrs.String("path", name))
+	}
+	//: the same mechanic step 5 of a publication runs.
+	if syncErr := o.syncDir(name); syncErr != nil {
+		//: DirectorySyncFailed, the cause kept.
+		return failDirSync(syncErr, name)
+	}
+	//: flushed.
+	return nil
+}
+
+// failDirSync wraps a directory flush's cause onto
+// [corevfs.DirectorySyncFailed] by restating it, so the operating-system
+// error survives in the chain — the shape of failRead / failWrite.
+func failDirSync(cause error, name string) error {
+	//: a durability verdict, never a rollback.
+	return kerrs.Wrap(cause, kerrs.WrapParams{
 		Code:     corevfs.CodeDirectorySyncFailed,
 		Reason:   "DIRECTORY_SYNC_FAILED",
 		Public:   "The file was published but the directory entry was not flushed",
-		Private:  "service/data/vfs: fsync on the parent directory failed AFTER a successful rename; the content is visible and may not survive a power loss — deliberately not rolled back",
+		Private:  "service/data/vfs: fsync on a directory failed — after a successful rename, the content is visible and may not survive a power loss, deliberately not rolled back; from SyncDir, the directory's entries may not",
 		ExitCode: exitIOErr,
 	}, kerrs.String("path", name))
 }
@@ -216,9 +336,11 @@ func (o *osFS) nativeOps() atomicOps {
 			//: a real handle.
 			return file, nil
 		},
-		rename:  o.root.Rename,
-		remove:  o.root.Remove,
-		syncDir: o.syncDir,
+		rename: o.root.Rename,
+		remove: o.root.Remove,
+		//: step 5, shared by the publications into one directory that reach
+		//: it while a flush of that directory runs (#803).
+		syncDir: o.flushes.sync,
 	}
 }
 

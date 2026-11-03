@@ -56,10 +56,43 @@ func (m *memFS) WriteAtomic(name string, data []byte, perm fs.FileMode) error {
 		//: NotRegularFile or WriteFailed; nothing was touched.
 		return placeErr
 	}
-	//: one assignment, under the exclusive lock.
-	m.storeLocked(name, data, perm)
+	//: one assignment, under the exclusive lock — and perm applies on EVERY
+	//: publication, as the disk engine's rename of a new file over the old one
+	//: gives it (#1052).
+	m.nodes[name] = &memNode{mode: perm, data: slices.Clone(data)}
 	//: published.
 	return nil
+}
+
+// WriteAtomicAll publishes every file of files in one step
+// ([corevfs.AtomicBatchWriter], issue #827): every target is checked under
+// the exclusive lock first, then every file is assigned, so a reader sees
+// the whole batch or none of it, and a refusal publishes nothing. Like
+// WriteAtomic it makes no durability claim.
+func (m *memFS) WriteAtomicAll(files []corevfs.FileValue, perm fs.FileMode) (published int, err error) {
+	//: the lexical guards, before the lock.
+	for _, file := range files {
+		//: InvalidPath or InvalidPermission.
+		if guardErr := guardNameAndPerm(file.Name, perm); guardErr != nil {
+			return 0, guardErr
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	//: every placement, before anything is touched.
+	for _, file := range files {
+		//: NotRegularFile or WriteFailed; nothing was touched.
+		if placeErr := m.checkFileTargetLocked(file.Name); placeErr != nil {
+			return 0, placeErr
+		}
+	}
+	//: one assignment each, under the one lock — the later of a name given
+	//: twice wins, as its rename would on disk.
+	for _, file := range files {
+		m.nodes[file.Name] = &memNode{mode: perm, data: slices.Clone(file.Data)}
+	}
+	//: published, all of them.
+	return len(files), nil
 }
 
 // checkFileTargetLocked rejects every reason a file write cannot proceed. The
@@ -93,8 +126,9 @@ func (m *memFS) checkFileTargetLocked(name string) error {
 	return nil
 }
 
-// storeLocked performs the mutation. The caller MUST hold the write lock and
-// MUST have run [memFS.checkFileTargetLocked] first.
+// storeLocked performs WriteFile's mutation. The caller MUST hold the write
+// lock and MUST have run [memFS.checkFileTargetLocked] first. WriteAtomic does
+// not come here: a publication applies its mode every time.
 func (m *memFS) storeLocked(name string, data []byte, perm fs.FileMode) {
 	mode := perm
 	//: perm applies on CREATION only, which is os.WriteFile's rule — so a

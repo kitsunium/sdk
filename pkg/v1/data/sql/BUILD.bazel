@@ -13,6 +13,10 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/data/sql",
+        "//internal/core/observe/logger",
+        "//internal/core/observe/trace",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
         "//internal/service/data/sql",
     ],
 )
@@ -33,6 +37,10 @@ go_test(
     deps = [
         ":sql",
         "//internal/core/data/sql",
+        "//internal/core/observe/logger",
+        "//internal/core/observe/trace",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
         "//internal/service/data/sql",
         "//pkg/v1/errs",
     ],

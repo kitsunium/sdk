@@ -66,3 +66,313 @@ sequences:
               to: h.down
           when: last > 0
       - return: top, true
+  - of: (*Heap).Drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Heap).Drain
+        kind: self
+      - id: h.Pop
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(T) bool
+            steps:
+              - loop:
+                  do:
+                    - bind: top, ok
+                      eval: h.Pop()
+                      to: h.Pop
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!ok"
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yield(top)"
+                  forever: true
+  - of: NewIndexed
+    steps:
+      - opt:
+          do:
+            - panic: "\"kernel/collections/heap: NewIndexed requires a comparison function — there is no order a heap can invent for an arbitrary T\""
+          when: cmp == nil
+      - return: "&IndexedHeap[T]{cmp: cmp}"
+  - of: (*IndexedHeap).Len
+    steps:
+      - return: len(h.items)
+  - of: (*IndexedHeap).Push
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*IndexedHeap).Push
+        kind: self
+      - id: h.up
+        kind: internal
+    steps:
+      - var:
+          name: id
+          type: uint32
+      - alt:
+          - do:
+              - set: id
+                value: h.free[last]
+              - set: h.free
+                value: h.free[:last]
+            init:
+              bind: last
+              eval: len(h.free) - 1
+            when: last >= 0
+          - do:
+              - set: id
+                value: uint32(len(h.slots))
+              - set: h.slots
+                value: "append(h.slots, indexedSlot{at: noSlot})"
+            else: true
+      - bind: slot
+        eval: "&h.slots[id]"
+      - op: ++
+        set: slot.gen
+      - opt:
+          do:
+            - set: slot.gen
+              value: "1"
+          when: slot.gen == 0
+      - set: slot.at
+        value: len(h.items)
+      - set: h.items
+        value: "append(h.items, indexedItem[T]{value: v, id: id})"
+      - eval: h.up(slot.at)
+        to: h.up
+      - return: "Handle{id: id, gen: slot.gen}"
+  - of: (*IndexedHeap).Peek
+    steps:
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: T
+            - return: zero, Handle{}, false
+          when: len(h.items) == 0
+      - bind: top
+        eval: h.items[0]
+      - return: "top.value, Handle{id: top.id, gen: h.slots[top.id].gen}, true"
+  - of: (*IndexedHeap).Pop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*IndexedHeap).Pop
+        kind: self
+      - id: h.removeAt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: T
+            - return: zero, Handle{}, false
+          when: len(h.items) == 0
+      - bind: top
+        eval: h.items[0]
+      - bind: named
+        eval: "Handle{id: top.id, gen: h.slots[top.id].gen}"
+      - eval: h.removeAt(0)
+        to: h.removeAt
+      - return: top.value, named, true
+  - of: (*IndexedHeap).Update
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*IndexedHeap).Update
+        kind: self
+      - id: h.position
+        kind: internal
+      - id: h.fix
+        kind: internal
+    steps:
+      - bind: at, ok
+        eval: h.position(handle)
+        to: h.position
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - set: h.items[at].value
+        value: v
+      - eval: h.fix(at)
+        to: h.fix
+      - return: "true"
+  - of: (*IndexedHeap).Remove
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*IndexedHeap).Remove
+        kind: self
+      - id: h.position
+        kind: internal
+      - id: h.removeAt
+        kind: internal
+    steps:
+      - bind: at, ok
+        eval: h.position(handle)
+        to: h.position
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: T
+            - return: zero, false
+          when: "!ok"
+      - bind: removed
+        eval: h.items[at].value
+      - eval: h.removeAt(at)
+        to: h.removeAt
+      - return: removed, true
+  - of: (*IndexedHeap).position
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: int(handle.id) >= len(h.slots)
+      - bind: slot
+        eval: h.slots[handle.id]
+      - opt:
+          do:
+            - return: 0, false
+          when: slot.at == noSlot || slot.gen != handle.gen
+      - return: slot.at, true
+  - of: (*IndexedHeap).removeAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*IndexedHeap).removeAt
+        kind: self
+      - id: h.fix
+        kind: internal
+    steps:
+      - bind: last
+        eval: len(h.items) - 1
+      - bind: gone
+        eval: h.items[at].id
+      - opt:
+          do:
+            - set: h.items[at]
+              value: h.items[last]
+            - set: h.slots[h.items[at].id].at
+              value: at
+          when: at != last
+      - set: h.items[last]
+        value: indexedItem[T]{}
+      - set: h.items
+        value: h.items[:last]
+      - set: h.slots[gone].at
+        value: noSlot
+      - set: h.free
+        value: append(h.free, gone)
+      - opt:
+          do:
+            - eval: h.fix(at)
+              to: h.fix
+          when: at < last
+  - of: (*IndexedHeap).fix
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*IndexedHeap).fix
+        kind: self
+      - id: h.down
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: h.down(at)
+              to: h.down
+          when: "!h.up(at)"
+  - of: (*IndexedHeap).place
+    steps:
+      - set: h.items[at]
+        value: item
+      - set: h.slots[item.id].at
+        value: at
+  - of: (*IndexedHeap).up
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*IndexedHeap).up
+        kind: self
+      - id: h.place
+        kind: internal
+    steps:
+      - bind: item
+        eval: h.items[child]
+      - bind: start
+        eval: child
+      - loop:
+          cond: child > 0
+          do:
+            - bind: parent
+              eval: (child - 1) / branching
+            - opt:
+                do:
+                  - break: true
+                when: h.cmp(item.value, h.items[parent].value) >= 0
+            - eval: h.place(child, h.items[parent])
+              to: h.place
+            - set: child
+              value: parent
+      - opt:
+          do:
+            - eval: h.place(child, item)
+              to: h.place
+          when: child != start
+      - return: child != start
+  - of: (*IndexedHeap).down
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*IndexedHeap).down
+        kind: self
+      - id: h.place
+        kind: internal
+    steps:
+      - bind: count
+        eval: len(h.items)
+      - bind: item
+        eval: h.items[parent]
+      - bind: start
+        eval: parent
+      - loop:
+          do:
+            - bind: left
+              eval: branching*parent + 1
+            - opt:
+                do:
+                  - break: true
+                when: left >= count
+            - bind: first
+              eval: left
+            - opt:
+                do:
+                  - set: first
+                    value: right
+                init:
+                  bind: right
+                  eval: left + 1
+                when: right < count && h.cmp(h.items[right].value, h.items[left].value) < 0
+            - opt:
+                do:
+                  - break: true
+                when: h.cmp(h.items[first].value, item.value) >= 0
+            - eval: h.place(parent, h.items[first])
+              to: h.place
+            - set: parent
+              value: first
+          forever: true
+      - opt:
+          do:
+            - eval: h.place(parent, item)
+              to: h.place
+          when: parent != start

@@ -54,6 +54,9 @@ func NewMigrator(cfg Config, mig MigrateConfig) (runner coresql.Migrator, err er
 		//: propagate the set's own verdict unchanged.
 		return nil, err
 	}
+	//: a migration's DDL runs as long as it takes, under the caller's
+	//: context: the statement budget is the application's, not the runner's.
+	res.budget = stmtBudget{}
 	//: one manager, shared by every migration transaction.
 	return &migrator{cfg: res, plan: plan, tx: &transactor{cfg: res}}, nil
 }
@@ -73,12 +76,20 @@ func NewMigrator(cfg Config, mig MigrateConfig) (runner coresql.Migrator, err er
 // a corrupted schema — and it is a better trade than a dry run that blocks
 // behind a real migration for its entire duration.
 func (m *migrator) Plan(ctx context.Context) (pending []coresql.MigrationValue, err error) {
+	//: the dry run: no lock, nothing written but the bookkeeping table.
+	return m.planned(ctx, false)
+}
+
+// planned is Plan's work, and Up's under the lock: locked says whether the
+// version table may be written — its checksum column added, the checksums
+// recorded before it backfilled.
+func (m *migrator) planned(ctx context.Context, locked bool) (pending []coresql.MigrationValue, err error) {
 	//: the bookkeeping table must exist before it can be read.
-	if err := m.ensureTable(ctx); err != nil {
+	if err := m.ensureTable(ctx, locked); err != nil {
 		//: propagate MIGRATION_FAILED unchanged.
 		return nil, err
 	}
-	applied, highest, err := m.applied(ctx)
+	applied, highest, err := m.applied(ctx, locked, directionUp)
 	//: an unreadable version table makes every answer a guess.
 	if err != nil {
 		//: propagate MIGRATION_FAILED unchanged.
@@ -100,7 +111,7 @@ func (m *migrator) Up(ctx context.Context) error {
 func (m *migrator) upAll(ctx context.Context) error {
 	//: the plan is recomputed UNDER the lock: the one computed before it
 	//: could have been made stale by the holder that just finished.
-	pending, err := m.Plan(ctx)
+	pending, err := m.planned(ctx, true)
 	//: an unreadable or inconsistent history stops the run.
 	if err != nil {
 		//: propagate the planning verdict unchanged.
@@ -131,11 +142,11 @@ func (m *migrator) Down(ctx context.Context, target uint64) error {
 // reversal down to target.
 func (m *migrator) downTo(ctx context.Context, target uint64) error {
 	//: the bookkeeping table must exist before it can be read.
-	if err := m.ensureTable(ctx); err != nil {
+	if err := m.ensureTable(ctx, true); err != nil {
 		//: propagate MIGRATION_FAILED unchanged.
 		return err
 	}
-	applied, _, err := m.applied(ctx)
+	applied, _, err := m.applied(ctx, true, directionDown)
 	//: an unreadable version table makes every reversal a guess.
 	if err != nil {
 		//: propagate MIGRATION_FAILED unchanged.

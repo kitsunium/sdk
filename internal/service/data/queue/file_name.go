@@ -1,11 +1,14 @@
 package queue
 
 import (
+	"cmp"
 	"encoding/hex"
 	"math"
 	"strconv"
 	"strings"
 	"time"
+
+	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 )
 
 // The three directories are the three states. A message is queued, leased, or
@@ -78,6 +81,13 @@ const (
 	deadFields     int = 3
 )
 
+// maxNameFields is the most fields any name carries: the in-flight grammar's.
+const maxNameFields int = inflightFields
+
+// normalDigit stands for the normal level in the order of the names: it is
+// never written, since a normal name carries no digit.
+const normalDigit byte = '0' + byte(corequeue.PriorityHighest-corequeue.PriorityNormal)
+
 // The position of each field within a queued or in-flight name. They are
 // named rather than written as indices because the two layouts differ only by
 // their last field, and an off-by-one between them would read a delivery
@@ -141,6 +151,11 @@ type nameValue struct {
 	EnqueuedAt int64
 	// Deliveries is how many times the message has been handed out.
 	Deliveries int
+	// Priority is the level the message is delivered at. The normal level
+	// adds nothing to a name — its names are the ones written before
+	// priorities existed, byte for byte —, every other level a leading
+	// digit (atLevel).
+	Priority corequeue.Priority
 }
 
 // ID returns the opaque message identifier. It is stable across every
@@ -188,33 +203,35 @@ func (n nameValue) EnqueuedTime() time.Time {
 
 // readyName renders a queued message's filename.
 func (n nameValue) readyName() string {
-	//: visibility first, so the sort order IS the delivery order.
-	return strings.Join([]string{
+	//: the level, then visibility, so the sort order IS the delivery order.
+	return atLevel(n.Priority, strings.Join([]string{
 		pad(n.At), pad(n.EnqueuedAt), n.Entropy, padCount(n.Deliveries),
-	}, ".") + suffixMessage
+	}, ".")+suffixMessage)
 }
 
 // inflightName renders a leased message's filename, which is also its
 // receipt.
 func (n nameValue) inflightName() string {
-	//: deadline first, so a reclaim scan meets the most overdue lease first.
-	return strings.Join([]string{
+	//: deadline first, so a reclaim scan meets the most overdue lease first —
+	//: after the level, which the in-flight order skips (compareStem).
+	return atLevel(n.Priority, strings.Join([]string{
 		pad(n.At), pad(n.EnqueuedAt), n.Entropy, padCount(n.Deliveries), n.Lease,
-	}, ".") + suffixMessage
+	}, ".")+suffixMessage)
 }
 
 // deadName renders an abandoned message's filename.
 func (n nameValue) deadName() string {
 	//: no visibility and no lease: a dead letter is never delivered again, so
-	//: it sorts by the only instant that still means anything.
-	return strings.Join([]string{
+	//: it sorts by the only instant that still means anything — after the
+	//: level, which the dead order skips (compareStem).
+	return atLevel(n.Priority, strings.Join([]string{
 		pad(n.EnqueuedAt), n.Entropy, padCount(n.Deliveries),
-	}, ".") + suffixDead
+	}, ".")+suffixDead)
 }
 
 // parseReady reads a queued message's filename.
 func parseReady(base string) (name nameValue, ok bool) {
-	fields, split := splitName(base, suffixMessage, readyFields)
+	fields, level, split := splitLeveled(base, suffixMessage, readyFields)
 	//: anything that is not exactly this shape is not one of our messages —
 	//: an atomic publication's temporary, an editor's backup, a stray file.
 	if !split {
@@ -222,8 +239,10 @@ func parseReady(base string) (name nameValue, ok bool) {
 		return nameValue{}, false
 	}
 	//: field 0 is the visibility instant for a queued message.
-	return assemble(fields[posAt], fields[posEnqueued], fields[posEntropy],
-		fields[posDeliveries], "")
+	name, ok = assemble(fields[posAt], fields[posEnqueued], fields[posEntropy], fields[posDeliveries], "")
+	name.Priority = level
+	//: the name at its level; a refused one is never read.
+	return name, ok
 }
 
 // parseInflight reads a leased message's filename, which is what a receipt
@@ -236,7 +255,7 @@ func parseReady(base string) (name nameValue, ok bool) {
 // and lower-case hex, so no such receipt exists — and os.Root would refuse it
 // anyway, which is the second of the two locks on that door.
 func parseInflight(base string) (name nameValue, ok bool) {
-	fields, split := splitName(base, suffixMessage, inflightFields)
+	fields, level, split := splitLeveled(base, suffixMessage, inflightFields)
 	//: not a receipt this broker could have minted — and an in-flight name
 	//: always carries a lease, where assemble lets an empty one through for
 	//: the two states that have none.
@@ -245,13 +264,15 @@ func parseInflight(base string) (name nameValue, ok bool) {
 		return nameValue{}, false
 	}
 	//: field 0 is the lease deadline for an in-flight message.
-	return assemble(fields[posAt], fields[posEnqueued], fields[posEntropy],
-		fields[posDeliveries], fields[posLease])
+	name, ok = assemble(fields[posAt], fields[posEnqueued], fields[posEntropy], fields[posDeliveries], fields[posLease])
+	name.Priority = level
+	//: the name at its level; a refused one is never read.
+	return name, ok
 }
 
 // parseDead reads an abandoned message's filename.
 func parseDead(base string) (name nameValue, ok bool) {
-	fields, split := splitName(base, suffixDead, deadFields)
+	fields, level, split := splitLeveled(base, suffixDead, deadFields)
 	//: not a dead letter.
 	if !split {
 		//: the caller skips the entry.
@@ -259,8 +280,87 @@ func parseDead(base string) (name nameValue, ok bool) {
 	}
 	//: a dead letter has no visibility instant; At mirrors EnqueuedAt so the
 	//: value stays total rather than carrying a zero nobody may read.
-	return assemble(fields[posDeadEnqueued], fields[posDeadEnqueued], fields[posDeadEntropy],
-		fields[posDeadDeliveries], "")
+	name, ok = assemble(fields[posDeadEnqueued], fields[posDeadEnqueued], fields[posDeadEntropy], fields[posDeadDeliveries], "")
+	name.Priority = level
+	//: the name at its level; a refused one is never read.
+	return name, ok
+}
+
+// splitLeveled is splitName over a name that may open with a level's digit:
+// a name without one — every name written before priorities existed, and
+// every name of the normal level since — reads at the normal level.
+func splitLeveled(base, suffix string, want int) (fields [maxNameFields]string, level corequeue.Priority, ok bool) {
+	digit, stem := nameStem(base)
+	level, known := levelOf(digit)
+	//: a leading field that is no level's digit — the normal level's
+	//: included, which no name spells: a message has one name.
+	if !known || (level == corequeue.PriorityNormal && len(stem) != len(base)) {
+		//: not ours.
+		return fields, corequeue.PriorityNormal, false
+	}
+	fields, ok = splitName(stem, suffix, want)
+	//: the fields and the level they are at.
+	return fields, level, ok
+}
+
+// atLevel renders a name at level: the name itself at the normal level, and
+// otherwise one digit, PriorityHighest − level, and a dot before it, so the
+// digits of the levels sort as the levels are received — highest first.
+func atLevel(level corequeue.Priority, name string) string {
+	//: the normal level's names are those written before priorities existed.
+	if level == corequeue.PriorityNormal {
+		return name
+	}
+	//: one digit and its dot.
+	return string(rune('0'+int(corequeue.PriorityHighest-level))) + "." + name
+}
+
+// nameStem splits a name into the digit of its level — normalDigit for a
+// name that carries none — and the rest. A name this broker writes without a
+// level opens with a 19-digit instant, so a dot in second place is a level's.
+func nameStem(base string) (digit byte, stem string) {
+	//: a single character, then a dot: a level's digit.
+	if len(base) > 2 && base[1] == '.' {
+		return base[0], base[2:]
+	}
+	//: no level: the normal one.
+	return normalDigit, base
+}
+
+// levelOf reads a level's digit, refusing anything else — the normal level's
+// digit included, which no name carries: a name has one spelling.
+func levelOf(digit byte) (corequeue.Priority, bool) {
+	//: the normal level, read from a name that carries no digit.
+	if digit == normalDigit {
+		return corequeue.PriorityNormal, true
+	}
+	//: the four other digits.
+	if digit < '0' || digit > '0'+byte(corequeue.PriorityHighest-corequeue.PriorityLowest) {
+		//: no level's.
+		return corequeue.PriorityNormal, false
+	}
+	//: the level the digit renders.
+	return corequeue.PriorityHighest - corequeue.Priority(digit-'0'), true
+}
+
+// compareReady orders queued names as a Receive hands them out: the highest
+// level first, then by the rest of the name — visibility, enqueue instant,
+// entropy.
+func compareReady(first, second string) int {
+	firstDigit, firstStem := nameStem(first)
+	secondDigit, secondStem := nameStem(second)
+	//: the level first, then the rest.
+	return cmp.Or(cmp.Compare(firstDigit, secondDigit), strings.Compare(firstStem, secondStem))
+}
+
+// compareStem orders in-flight and dead names by what follows the level: a
+// lease's deadline, a dead letter's enqueue instant — the order a reclaim and
+// a listing read, whatever the level.
+func compareStem(first, second string) int {
+	_, firstStem := nameStem(first)
+	_, secondStem := nameStem(second)
+	//: the level skipped.
+	return strings.Compare(firstStem, secondStem)
 }
 
 // assemble turns the parsed fields into a nameValue, refusing anything that
@@ -285,34 +385,45 @@ func assemble(at, enqueued, entropy, deliveries, lease string) (name nameValue, 
 	}, true
 }
 
-// splitName strips the suffix and cuts the base into exactly want fields.
-func splitName(base, suffix string, want int) (fields []string, ok bool) {
+// splitName strips the suffix and cuts the base into exactly want fields,
+// into an array rather than a slice: a scan parses a name per entry it
+// meets, and a slice per name was an allocation per entry (issue #811).
+func splitName(base, suffix string, want int) (fields [maxNameFields]string, ok bool) {
 	stem, trimmed := strings.CutSuffix(base, suffix)
 	//: the suffix is what tells a message from a temporary.
 	if !trimmed {
 		//: not ours.
-		return nil, false
+		return fields, false
 	}
-	cut := strings.Split(stem, ".")
-	//: exactly — a name with one field too many is not a name we wrote.
-	if len(cut) != want {
-		//: not ours.
-		return nil, false
+	//: exactly want fields — a name with one field too many, or too few, is
+	//: not a name we wrote.
+	for index := range want {
+		field, rest, more := strings.Cut(stem, ".")
+		//: every field but the last is followed by a dot, and the last by none.
+		if more != (index < want-1) {
+			//: not ours.
+			return [maxNameFields]string{}, false
+		}
+		fields[index] = field
+		stem = rest
 	}
 	//: the fields, in the order the renderers wrote them.
-	return cut, true
+	return fields, true
 }
 
 // parseNano reads a zero-padded instant, refusing anything that is not
 // exactly nanoWidth digits.
 func parseNano(field string) (nanos int64, ok bool) {
-	//: a shorter field would sort wrong; a longer one was not written here.
-	if len(field) != nanoWidth {
+	//: a shorter field would sort wrong; a longer one was not written here;
+	//: and every byte is a digit, because ParseInt reads a leading "+" that
+	//: the padding never writes — a name that parsed and wrote back as
+	//: another (issue #1047, found by FuzzNameGrammar).
+	if len(field) != nanoWidth || strings.Trim(field, "0123456789") != "" {
 		//: refused.
 		return 0, false
 	}
 	value, err := strconv.ParseInt(field, decimalBase, int64Bits)
-	//: ParseInt also refuses a sign, which the padding never emits.
+	//: out of the int64 range: nineteen nines.
 	if err != nil || value < 0 {
 		//: refused.
 		return 0, false
@@ -321,12 +432,23 @@ func parseNano(field string) (nanos int64, ok bool) {
 	return value, true
 }
 
-// parseCount reads a delivery count spelled exactly as padCount writes it.
-// strconv.Atoi alone also takes "+01" and "0001", second names for one message.
+// parseCount reads a delivery count spelled exactly as padCount writes it:
+// digits only, at least deliveryWidth of them, and a leading zero only as
+// padding. strconv.Atoi alone also takes "+01" and "0001", second names for
+// one message. The spelling is checked byte by byte rather than by rendering
+// the count back: a scan parses a name per entry, and the rendering was an
+// allocation per entry (issue #811).
 func parseCount(field string) (count int, ok bool) {
+	//: no sign, no space: digits alone, at padCount's width or wider — and
+	//: wider only for a count that needs it, so no zero leads.
+	if len(field) < deliveryWidth || strings.Trim(field, "0123456789") != "" ||
+		(len(field) > deliveryWidth && field[0] == '0') {
+		//: refused.
+		return 0, false
+	}
 	count, err := strconv.Atoi(field)
-	//: a number, non-negative, and in padCount's own spelling.
-	if err != nil || count < 0 || padCount(count) != field {
+	//: a number in int's range.
+	if err != nil {
 		//: refused.
 		return 0, false
 	}

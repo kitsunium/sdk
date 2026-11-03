@@ -36,6 +36,12 @@ func (b *fileBroker) Receive(
 		//: QueueBackendFailed — the medium refused mid-recovery.
 		return nil, reclaimErr
 	}
+	//: a dead letter past its retention goes on the same look, at most once
+	//: a minute.
+	if sweepErr := b.sweepRetention(now); sweepErr != nil {
+		//: QueueBackendFailed.
+		return nil, sweepErr
+	}
 	batch, visible, leaseErr := b.leaseVisible(now, max)
 	//: the medium refused while leasing.
 	if leaseErr != nil {
@@ -55,58 +61,104 @@ func (b *fileBroker) Receive(
 	return batch, nil
 }
 
-// leaseVisible walks the queued messages in visibility order and leases up to
-// max of them. It also returns the instant, in Unix nanoseconds, at which the
-// next queued message becomes visible — now itself when it stopped on a full
-// batch with more behind it, zero when nothing else is queued.
+// leaseVisible walks the queued messages level by level, highest first, each
+// level in visibility order, and leases up to max of them. A level's first
+// message not yet visible ends that level's walk, never the next level's: a
+// high message held back does not hold back a visible normal one (ADR 0054,
+// amended 2026-11-03). It also returns the instant, in Unix nanoseconds, at
+// which the next queued message becomes visible — now itself when it stopped
+// on a full batch with more behind it, zero when nothing else is queued.
 func (b *fileBroker) leaseVisible(
 	now int64, max int,
 ) (batch []corequeue.DeliveryValue, next int64, err error) {
-	entries, listErr := b.entriesOf(dirReady)
+	entries, listErr := b.namesOf(dirReady)
 	//: the medium refused.
 	if listErr != nil {
 		//: QueueBackendFailed.
 		return nil, 0, listErr
 	}
-	//: nil until something is eligible, so an empty poll allocates nothing.
-	var out []corequeue.DeliveryValue
-	//: in visibility order, because fs.ReadDir sorts and the name opens with
-	//: a zero-padded instant.
-	for _, entry := range entries {
-		name, ok := parseReady(entry.Name())
-		//: anything that is not one of our messages — notably the `.vfs-*.tmp`
-		//: temporary a concurrent atomic publication is still writing, which
-		//: MUST NOT be delivered as a half-written message.
-		if !ok {
-			continue
-		}
-		//: the first one that is not yet visible means none of the rest are —
-		//: and its instant is when the next one will be.
-		if name.At > now {
-			//: stop here; nothing later is visible either.
-			return out, name.At, nil
-		}
-		//: the batch is full and this message is visible: somebody should look
-		//: again at once.
-		if len(out) == max {
-			//: a consumer loop that is not busy picks it up immediately.
-			return out, now, nil
-		}
-		delivery, leased, leaseErr := b.takeLease(name, entry.Name(), now)
-		//: the medium refused for a reason that is not "somebody beat us".
-		if leaseErr != nil {
+	walk := leaseWalk{now: now, max: max}
+	//: by level, then in visibility order, because the listing sorts so and
+	//: the name opens with its level and a zero-padded instant.
+	for _, base := range entries {
+		full, stepErr := b.leaseStep(&walk, base)
+		//: the medium refused.
+		if stepErr != nil {
 			//: QueueBackendFailed.
-			return nil, 0, leaseErr
+			return nil, 0, stepErr
 		}
-		//: another consumer won the rename; that is not a failure, it is the
-		//: exclusion mechanism working.
-		if !leased {
-			continue
+		//: the batch is full and a visible message is left: somebody should
+		//: look again at once — a consumer loop that is not busy picks it up
+		//: immediately.
+		if full {
+			//: what was leased, due now.
+			return walk.out, now, nil
 		}
-		out = append(out, delivery)
 	}
-	//: whatever this consumer won, with nothing left queued behind it.
-	return out, 0, nil
+	//: whatever this consumer won, and when the earliest message held back
+	//: becomes visible — zero when none is.
+	return walk.out, walk.later, nil
+}
+
+// leaseWalk is what leaseVisible carries from one queued name to the next.
+type leaseWalk struct {
+	// out is the batch; nil until something is eligible, so an empty poll
+	// allocates nothing.
+	out []corequeue.DeliveryValue
+	// now is the instant visibility is judged at, in Unix nanoseconds.
+	now int64
+	// later is the earliest instant a level's walk stopped at.
+	later int64
+	// max bounds the batch.
+	max int
+	// skipping is the digit of the level being skipped — none at first,
+	// since no digit is a zero byte.
+	skipping byte
+}
+
+// leaseStep leases the queued message base names into walk's batch when it is
+// visible, buries it when it is past its MaxAge, and skips the rest of a level
+// whose first message is not yet visible. It reports full when the batch is
+// full and base is visible.
+func (b *fileBroker) leaseStep(walk *leaseWalk, base string) (full bool, err error) {
+	name, ok := parseReady(base)
+	digit, _ := nameStem(base)
+	//: anything that is not one of our messages — notably the `.vfs-*.tmp`
+	//: temporary a concurrent atomic publication is still writing, which
+	//: MUST NOT be delivered as a half-written message —, and the rest of
+	//: a level whose walk ended.
+	if !ok || digit == walk.skipping {
+		//: skipped.
+		return false, nil
+	}
+	//: the first one of its level that is not yet visible means none of
+	//: the rest of the level are — and its instant is when the next one
+	//: of the level will be. The next level is walked all the same.
+	if name.At > walk.now {
+		walk.later, walk.skipping = earliest(walk.later, name.At), digit
+		//: the level ends here.
+		return false, nil
+	}
+	//: a visible message past its MaxAge is never delivered: buried, as a
+	//: lease with no attempt left is, and the scan moves on.
+	if messageExpired(b.policy, name.EnqueuedAt, walk.now) {
+		//: QueueBackendFailed when the medium refuses.
+		return false, b.expireReady(name, base, walk.now)
+	}
+	//: the batch is full and this message is visible.
+	if len(walk.out) == walk.max {
+		//: full.
+		return true, nil
+	}
+	delivery, leased, leaseErr := b.takeLease(name, base, walk.now)
+	//: another consumer won the rename; that is not a failure, it is the
+	//: exclusion mechanism working.
+	if leased {
+		walk.out = append(walk.out, delivery)
+	}
+	//: QueueBackendFailed when the medium refused for a reason that is not
+	//: "somebody beat us".
+	return false, leaseErr
 }
 
 // takeLease moves one queued message into flight and reads it back.
@@ -129,7 +181,7 @@ func (b *fileBroker) takeLease(
 	}
 	leasedName := nameValue{
 		At: now + int64(b.policy.VisibilityTimeout), EnqueuedAt: name.EnqueuedAt,
-		Entropy: name.Entropy, Deliveries: name.Deliveries + 1, Lease: lease,
+		Entropy: name.Entropy, Deliveries: name.Deliveries + 1, Lease: lease, Priority: name.Priority,
 	}
 	target := leasedName.inflightName()
 	renameErr := b.root.Rename(path.Join(dirReady, base), path.Join(dirInflight, target))
@@ -193,7 +245,7 @@ func (b *fileBroker) readLeased(
 // message that killed the process would be redelivered forever, killing every
 // consumer that touched it.
 func (b *fileBroker) reclaim(now int64) (next int64, err error) {
-	entries, listErr := b.entriesOf(dirInflight)
+	entries, listErr := b.namesOf(dirInflight)
 	//: the medium refused.
 	if listErr != nil {
 		//: QueueBackendFailed.
@@ -201,8 +253,8 @@ func (b *fileBroker) reclaim(now int64) (next int64, err error) {
 	}
 	//: in lease-deadline order, for the same reason the ready scan is in
 	//: visibility order.
-	for _, entry := range entries {
-		name, ok := parseInflight(entry.Name())
+	for _, base := range entries {
+		name, ok := parseInflight(base)
 		//: not one of ours.
 		if !ok {
 			continue
@@ -215,7 +267,7 @@ func (b *fileBroker) reclaim(now int64) (next int64, err error) {
 		}
 		//: whichever consumer gets here first wins the rename; the others get
 		//: ENOENT and move on.
-		if recoverErr := b.recoverOne(name, entry.Name(), now); recoverErr != nil {
+		if recoverErr := b.recoverOne(name, base, now); recoverErr != nil {
 			//: QueueBackendFailed.
 			return 0, recoverErr
 		}
@@ -238,6 +290,7 @@ func (b *fileBroker) recoverOne(name nameValue, base string, now int64) error {
 		//: is not charged the retry delay on top: a crashed consumer must not
 		//: be punished harder than a failing one.
 		At: now, EnqueuedAt: name.EnqueuedAt, Entropy: name.Entropy, Deliveries: name.Deliveries,
+		Priority: name.Priority,
 	}
 	renameErr := b.root.Rename(path.Join(dirInflight, base), path.Join(dirReady, requeued.readyName()))
 	//: another consumer reclaimed it first, which is the ordinary race.
@@ -276,4 +329,46 @@ func ignoreMissing(op, name string, cause error) error {
 	}
 	//: the medium refused for a reason of its own.
 	return backendFailed(op, name, cause)
+}
+
+// expireReady moves one queued message past the policy's MaxAge to the
+// dead-letter store, with MESSAGE_EXPIRED and the count it had.
+//
+// It claims the message first, by the rename that IS the exclusion — into
+// flight, under a lease of its own and with its count unchanged —, so two
+// consumers never bury it twice; then it buries what it holds, as a lapsed
+// lease with no attempt left is buried. A crash between the two leaves an
+// ordinary lease, which lapses, is reclaimed, and is expired again.
+func (b *fileBroker) expireReady(name nameValue, base string, now int64) error {
+	lease, entropyErr := randomHex(leaseEntropyBytes)
+	//: the claim needs a lease name nobody else can hold.
+	if entropyErr != nil {
+		//: QueueBackendFailed — nothing moved.
+		return backendFailed("rand", "", entropyErr)
+	}
+	claimed := nameValue{
+		At: now + int64(b.policy.VisibilityTimeout), EnqueuedAt: name.EnqueuedAt,
+		Entropy: name.Entropy, Deliveries: name.Deliveries, Lease: lease, Priority: name.Priority,
+	}
+	target := claimed.inflightName()
+	renameErr := b.root.Rename(path.Join(dirReady, base), path.Join(dirInflight, target))
+	//: another consumer took it first — to lease or to bury, both its own.
+	if renameErr != nil {
+		//: a lost rename may have made its target, which is ours alone.
+		if os.IsNotExist(renameErr) {
+			//: QueueBackendFailed when the medium refuses the removal.
+			if dropErr := b.dropStale(path.Join(dirInflight, target)); dropErr != nil {
+				return dropErr
+			}
+		}
+		//: nil for the lost race, the medium's refusal otherwise.
+		return ignoreMissing("rename", base, renameErr)
+	}
+	//: the queued name must not survive the rename that claimed it.
+	if dropErr := b.dropStale(path.Join(dirReady, base)); dropErr != nil {
+		//: QueueBackendFailed.
+		return dropErr
+	}
+	//: dead, with the reason it died for.
+	return b.bury(claimed, target, expiredCause(), now)
 }

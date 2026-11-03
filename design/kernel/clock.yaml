@@ -75,7 +75,24 @@ packages:
       Package clock — hosts the waiting half of the time port: the [Waiter]
       contract, plus the single guard both implementations funnel their
       non-positive-period refusal through.
+
+      Package clock — hosts CoarseClock, the [Clock] whose reading is published by
+      a goroutine of its own every resolution, so Now is one atomic load.
     functions:
+      - doc: |-
+          NewCoarse returns a CoarseClock that publishes base's reading every
+          resolution, on a ticker of base: a ManualClock base makes it
+          deterministic. A nil base is [System]. A resolution that is not positive
+          panics, as base's NewTicker does. The caller owns the goroutine it starts
+          and ends it with Stop.
+        in:
+          - name: base
+            type: Timed
+          - name: resolution
+            type: time.Duration
+        name: NewCoarse
+        out:
+          - type: "*CoarseClock"
       - doc: |-
           NewManualClock returns a ManualClock reading start. Any instant is legal —
           before the Unix epoch, after 2038, in any location — which is the point:
@@ -89,6 +106,43 @@ packages:
           - type: "*ManualClock"
     path: github.com/kitsunium/sdk/internal/kernel/clock
     types:
+      - doc: |-
+          CoarseClock is a [Clock] whose Now is one atomic load: a goroutine of its
+          own re-reads its base clock every resolution and publishes the instant,
+          so a reading is at most one resolution behind the base. It trades
+          precision for cost on a hot path — a TTL cache hit that reads the time on
+          every lookup — and makes every deadline it measures late by up to the
+          resolution.
+
+          Stop ends the goroutine; a stopped CoarseClock reads its base directly,
+          so a component that outlives it never sees time stand still. The zero
+          value is NOT usable — construct with [NewCoarse].
+        implements:
+          - Clock
+        methods:
+          - doc: |-
+              Now returns the last published reading, at most one resolution behind the
+              base; after Stop, the base's own reading.
+            name: Now
+            out:
+              - type: time.Time
+            recv: pointer
+          - doc: Since returns the time elapsed since t by this clock's reading.
+            in:
+              - name: t
+                type: time.Time
+            name: Since
+            out:
+              - type: time.Duration
+            recv: pointer
+          - doc: |-
+              Stop ends the publishing goroutine and returns once it has exited. It is
+              idempotent; after it, Now reads the base directly.
+            name: Stop
+            recv: pointer
+        name: CoarseClock
+        struct:
+          unexported: true
       - decl: true
         doc: |-
           Clock produces timestamps and durations.
@@ -576,6 +630,30 @@ packages:
             reexport: kclock.System
             type: Timed
             typed: true
+      - alias:
+          - doc: |-
+              CoarseClock is a [Clock] whose Now is one atomic load: a goroutine of its own
+              re-reads a base clock every resolution and publishes the instant, so a
+              reading is at most one resolution behind and every deadline it measures is
+              late by up to the resolution. Stop ends the goroutine; a stopped CoarseClock
+              reads its base directly.
+            name: CoarseClock
+            target: kclock.CoarseClock
+      - func:
+          doc: |-
+            NewCoarse returns a [CoarseClock] publishing base's reading every
+            resolution, on a ticker of base — a [ManualClock] base makes it
+            deterministic. A nil base is [System]; a resolution that is not positive
+            panics. Call Stop when done.
+          forward: kclock.NewCoarse
+          in:
+            - name: base
+              type: Timed
+            - name: resolution
+              type: time.Duration
+          name: NewCoarse
+          out:
+            - type: "*CoarseClock"
       - func:
           doc: |-
             NewManualClock returns a [ManualClock] reading start. Any instant is legal —

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-11-02T00:00:00Z -->
 # pkg/v1/data/sql/
 
 ## Purpose
@@ -16,13 +16,13 @@ writes from `design/data/sql.yaml`: edit the design, run `kit gen`, then
 
 | Kind | Names |
 |---|---|
-| Port aliases | `Executor`, `Preparer`, `TxFunc`, `Transactor`, `Joiner`, `Deferrer` and `Aborter` (the transactor's ADR 0039 siblings — ADR 0139; `Aborter` by its 2026-10-14 amendment), `Checker`, `Migrator`, `Step` |
+| Port aliases | `Executor`, `Preparer`, `TxFunc`, `Transactor`, `Joiner`, `Deferrer` and `Aborter` (the transactor's ADR 0039 siblings — ADR 0139; `Aborter` by its 2026-10-14 amendment), `Router` (the fourth — ADR 0055, 2026-11-02), `Checker`, `Migrator`, `Step`, `Transient`, `StatementObserver` |
 | Value aliases | `TxOptions` (= `coresql.TxOptionsValue`), `Migration` (= `coresql.MigrationValue`), `Dialect` — with the engine's vocabulary its core type spells: `Placeholder`, `QuoteIdent`, `ForUpdate`, `ForUpdateSkipLocked` |
-| Config aliases | `Config`, `PoolConfig`, `MigrateConfig` |
-| Constants | `DialectPostgres`, `DialectMySQL`, `DialectSQLite` |
-| Constructors | `NewTransactor`, `NewChecker`, `NewMigrator` |
-| Functions | `ParseDialect`, `Irreversible`, `Statements`, `Transact` |
-| Sentinels | the 22 `errs.Define` values of `internal/core/data/sql` — the port's 5 and the 17 run outcomes `internal/service/data/sql` emits, declared in the core since ADR 0160 — re-exported |
+| Config aliases | `Config`, `PoolConfig`, `MigrateConfig`, `RetryConfig`, `Backoff` (the kernel's backoff curve a retry waits on), `InsertSpec` (the table, columns and rows per statement `InsertRows` writes) |
+| Constants | `DialectPostgres`, `DialectMySQL`, `DialectSQLite`, `StatementExec` … `StatementRollback` (with the `StatementKind` alias) |
+| Constructors | `NewTransactor`, `NewChecker`, `NewMigrator`, `NewRetrying`, `Observe`, `SlowQueries`, `Traced` |
+| Functions | `ParseDialect`, `Irreversible`, `Statements`, `ChecksumOf`, `Classify`, `Each`, `InsertRows`, `Transact` |
+| Sentinels | the 25 `errs.Define` values of `internal/core/data/sql` — the port's 5 and the 20 run outcomes `internal/service/data/sql` emits, declared in the core since ADR 0160 — re-exported |
 
 ## Conventions
 

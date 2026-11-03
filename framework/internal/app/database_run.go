@@ -250,11 +250,21 @@ func (a *App) tune(d *database, pool *stdsql.DB, desc *DatabaseURLValue) (plug.D
 		MaxOpen: resolvedSetting(a, d.maxOpen), MaxIdle: resolvedSetting(a, d.maxIdle),
 		MaxLifetime: resolvedSetting(a, d.maxLifetime), MaxIdleTime: resolvedSetting(a, d.maxIdleTime),
 		CheckTimeout: resolvedSetting(a, d.checkTimeout),
+		Transient:    engineTransient(d.engine),
 	})
 	if err != nil {
 		return nil, dbFailure(CodeDatabaseConfig, "DATABASE_POOL", fmt.Sprintf("the pool of database %q cannot be set up: %s", d.name, errs.PublicOf(err)), a.dbFields(d, desc)...)
 	}
 	return db, nil
+}
+
+// engineTransient is the engine's own reading of a failed transaction, nil
+// when it offers none ([Classifier]).
+func engineTransient(e Engine) func(error) bool {
+	if c, ok := e.(Classifier); ok {
+		return c.Transient
+	}
+	return nil
 }
 
 // startDatabase brings a database up: opened, migrated — or its pending

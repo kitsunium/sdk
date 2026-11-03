@@ -7,6 +7,7 @@ files:
       - IndexSpec
       - Unique
       - Index
+      - Ordered
     name: index.go
   - decls:
       - EntryValue
@@ -14,6 +15,7 @@ files:
       - StampValue
       - TombstoneValue
       - VersionWeightValue
+      - RevisionValue
     name: value.go
 functions:
   - name: Unique
@@ -24,6 +26,10 @@ functions:
     params: name string, keys func(T) []string
     results: IndexSpec[T]
     typeParams: T any
+  - name: Ordered
+    params: name string, key func(T) string
+    results: IndexSpec[T]
+    typeParams: T any
 imports:
   json: encoding/json
   time: time
@@ -31,7 +37,7 @@ package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/core/data/docstore
   name: docstore
-  purpose: Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block; ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21, and ADR 0178 22, for a document written with its versions).
+  purpose: Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block; ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21, ADR 0178 22, for a document written with its versions, and ADR 0209 23, for a replacement made on a revision, and 24, for a range read of an index that keeps no order).
 types:
   - fields:
       - doc: |-
@@ -44,6 +50,13 @@ types:
         type: string
       - doc: Unique refuses a write that would file two documents under one key.
         name: Unique
+        type: bool
+      - doc: |-
+          Ordered keeps the index's keys in order, for [Ranged].Range. The SQL
+          engine files an ordered index's rows as any other's, so declaring
+          one changes no table; the file engine keeps a sorted list beside the
+          index it rebuilds at Open.
+        name: Ordered
         type: bool
     kind: struct
     name: IndexSpec
@@ -131,3 +144,6 @@ types:
         type: int64
     kind: struct
     name: VersionWeightValue
+  - kind: named
+    name: RevisionValue
+    underlying: string

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-11-02T12:00:00Z -->
 # pkg/v1/collections/ring/
 
 ## Purpose
@@ -19,6 +19,7 @@ beside the other kernel primitives so a program can reach it through
 |---|---|
 | `Queue[T]` | alias of the INTERFACE `TryWrite` / `TryRead` / `Capacity` / `Len` — frozen at four methods by this publication (ADR 0039, ADR 0159 §5) |
 | `New[T](capacity)` | `(Queue[T], error)`; the storage is allocated once, here |
+| `Drain[T](q)` | `iter.Seq[T]`: the consumer's `TryRead` loop as an iterator, oldest first, until `Empty` or a break — a function, never a fifth method of the frozen interface (issue #816) |
 | `Full` | `0.1.3.1` — `TryWrite` on a full ring |
 | `Empty` | `0.1.3.2` — `TryRead` on an empty ring |
 | `CapZero` | `0.1.3.3` — `New` with a capacity that is not positive |

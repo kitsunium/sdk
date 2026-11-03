@@ -344,6 +344,13 @@ packages:
               Durability beyond the process is the implementation's to describe: the
               operating-system filesystem flushes the file AND the directory entry,
               while an in-memory one has no device to flush and says so.
+
+              perm applies on EVERY publication, a republication included: a
+              publication is a new file renamed over the old one, so the file at name
+              afterwards has mode perm, whatever mode the file it replaced had. It is
+              the rename-replace semantics, the only ones a publication can honour
+              without a racy stat and chmod; WriteFile, which rewrites in place,
+              applies perm on creation only.
             in:
               - name: name
                 type: string
@@ -355,6 +362,90 @@ packages:
             out:
               - type: error
         name: AtomicWriter
+      - doc: |-
+          DirSyncer flushes a directory's entries to the device. It is the ADR 0039
+          sibling of [WritableFS] and [AtomicWriter], reached by type assertion: a
+          file [AtomicWriter] publishes is flushed with the directory that names it,
+          and nothing flushes the directory that names THAT directory, so a caller
+          that created one with MkdirAll calls SyncDir on its parent for the new
+          entry to survive a power loss (ADR 0110's deferred durability).
+
+          	if syncer, ok := filesystem.(vfs.DirSyncer); ok {
+          		err = syncer.SyncDir(".") // the parent of the directory just made
+          	}
+
+          Both filesystems in internal/service/data/vfs implement it. [FullFS] does
+          not embed it, so a third-party filesystem stays a FullFS without it, and a
+          caller that finds no DirSyncer does what it did before.
+        methods:
+          - doc: |-
+              SyncDir flushes the entries of the directory name — "." for the root,
+              the parent flushed most — so the names it holds survive a power loss.
+              name is validated by [ValidatePath], the root allowed. A name that is
+              not a directory is [NotRegularFile]; a directory that cannot be opened
+              or flushed — an absent one included, fs.ErrNotExist kept in the chain
+              — is [DirectorySyncFailed]. An in-memory filesystem has no device:
+              it answers the same refusals and flushes nothing.
+            in:
+              - name: name
+                type: string
+            name: SyncDir
+            out:
+              - type: error
+        name: DirSyncer
+      - doc: |-
+          AtomicBatchWriter publishes several files, each as [AtomicWriter]
+          publishes one, and flushes each directory they land in once for the
+          whole batch rather than once per file. It is the ADR 0039 sibling of
+          [AtomicWriter], reached by type assertion: a caller with a batch — a
+          queue's producer, a site regenerated — pays the directory flush, half of
+          what a durable publication costs on a device, once.
+
+          	if batcher, ok := filesystem.(vfs.AtomicBatchWriter); ok {
+          		published, err = batcher.WriteAtomicAll(files, 0o644)
+          	}
+
+          Both filesystems in internal/service/data/vfs implement it. [FullFS]
+          does not embed it, so a third-party filesystem stays a FullFS without
+          it, and a caller that finds none publishes file by file.
+        methods:
+          - doc: |-
+              WriteAtomicAll publishes every file of files, in order, each under
+              [AtomicWriter.WriteAtomic]'s contract: a concurrent reader sees the
+              previous content at its name or the new one, never a partial file.
+              perm applies to every file, as it does to a publication.
+
+              Every name and perm is checked before anything is written: a
+              refusal — [InvalidPath], [InvalidPermission], [PathEscaped],
+              [NotRegularFile] — publishes nothing and returns 0. A name given
+              twice ends with the later file's data. An empty batch publishes
+              nothing and returns no error.
+
+              published counts the files renamed into place, from the first:
+              files[published:] were not published, and the bytes previously at
+              their names are unchanged. A failure before a file's rename is
+              [PublishFailed] for files[published], no temporary surviving; the
+              files before it are flushed with their directories before the call
+              returns. [DirectorySyncFailed] means a directory flush failed — it
+              wins over [PublishFailed] —: the files counted are visible, and
+              their survival across a power loss is in doubt.
+
+              The operating-system filesystem flushes each file before its rename
+              and each directory once, after the last rename into it. An
+              in-memory one publishes the batch in one step and has no device to
+              flush.
+            in:
+              - name: files
+                type: "[]FileValue"
+              - name: perm
+                type: fs.FileMode
+            name: WriteAtomicAll
+            out:
+              - name: published
+                type: int
+              - name: err
+                type: error
+        name: AtomicBatchWriter
       - doc: |-
           FullFS is the union of [WritableFS] and [AtomicWriter], and it is what the
           SDK's own constructors return.
@@ -489,11 +580,32 @@ packages:
               good file gets replaced by a worse one. The caller is told exactly what
               is true — published, not proven durable — and decides whether that is
               acceptable for its data.
+
+              [DirSyncer].SyncDir answers it too, for a directory it could not open
+              or flush: nothing was renamed then, and only the durability of the
+              entries the directory holds is in doubt.
             exit: IOERR
             name: DirectorySyncFailed
-            private: "service/data/vfs: fsync on the parent directory failed AFTER a successful rename; the content is visible and may not survive a power loss — deliberately not rolled back"
+            private: "service/data/vfs: fsync on a directory failed — after a successful rename, the content is visible and may not survive a power loss, deliberately not rolled back; from SyncDir, the directory's entries may not"
             public: The file was published but the directory entry was not flushed
             reason: DIRECTORY_SYNC_FAILED
+    types:
+      - doc: |-
+          FileValue is one file of a batch [AtomicBatchWriter.WriteAtomicAll]
+          publishes: the name it lands at and the whole of its content.
+        name: FileValue
+        struct:
+          fields:
+            - doc: |-
+                Name is where the file is published, a slash-separated path
+                [ValidateWritePath] accepts, its directory already existing.
+              name: Name
+              type: string
+            - doc: |-
+                Data is the file's content, written as given. The slice is read
+                during the call and never kept.
+              name: Data
+              type: "[]byte"
   - doc: |-
       Package vfs — the in-memory filesystem, and the read half of its contract.
 
@@ -754,6 +866,28 @@ packages:
               type assertion on a filesystem this package did not build.
             name: AtomicWriter
             target: corevfs.AtomicWriter
+      - alias:
+          - doc: |-
+              DirSyncer is the public alias for the directory-flush capability, reached
+              by type assertion: SyncDir on the parent of a directory just created
+              makes its entry survive a power loss. Both constructors' filesystems
+              implement it; [FullFS] does not embed it.
+            name: DirSyncer
+            target: corevfs.DirSyncer
+      - alias:
+          - doc: |-
+              AtomicBatchWriter is the public alias for the batch publication
+              capability, reached by type assertion: several files published, each
+              directory flushed once. Both constructors' filesystems implement it;
+              [FullFS] does not embed it.
+            name: AtomicBatchWriter
+            target: corevfs.AtomicBatchWriter
+      - alias:
+          - doc: |-
+              FileValue is the public alias for one file of a batch
+              [AtomicBatchWriter] publishes: its name and its content.
+            name: FileValue
+            target: corevfs.FileValue
       - alias:
           - doc: |-
               FullFS is the public alias for the union both constructors return: a

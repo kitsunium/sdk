@@ -1,11 +1,14 @@
 package vfs_test
 
 import (
+	"errors"
 	"io/fs"
 	"sync"
 	"testing"
 	"time"
 
+	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
+	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svcvfs "github.com/kitsunium/sdk/internal/service/data/vfs"
 )
 
@@ -102,4 +105,29 @@ func TestTheMemoryFilesystemPublishesAtomicallyUnderConcurrentReaders(t *testing
 		}
 	}
 	writers.Wait()
+}
+
+// TestTheMemoryFilesystemHasNoLinkToRead pins the memory engine's answer to
+// the two link shortcuts (#1053): it holds no symbolic link, so fs.Lstat is
+// fs.Stat and fs.ReadLink of an existing name is READ_FAILED wrapping
+// fs.ErrInvalid — what the operating system answers for a name that is not a
+// link — and of an absent one READ_FAILED wrapping fs.ErrNotExist.
+func TestTheMemoryFilesystemHasNoLinkToRead(t *testing.T) {
+	t.Parallel()
+	filesystem := svcvfs.NewMem()
+	if err := filesystem.WriteFile("note.txt", []byte("x"), 0o640); err != nil {
+		t.Fatalf("WriteFile = %v, want nil", err)
+	}
+	info, statErr := fs.Lstat(filesystem, "note.txt")
+	if statErr != nil || info.Mode() != 0o640 {
+		t.Fatalf("fs.Lstat = (%v, %v), want the file's own mode 0640", info, statErr)
+	}
+	_, readErr := fs.ReadLink(filesystem, "note.txt")
+	if !errors.Is(readErr, fs.ErrInvalid) || !kerrs.HasCode(readErr, corevfs.CodeReadFailed) {
+		t.Fatalf("fs.ReadLink = %v, want READ_FAILED wrapping fs.ErrInvalid", readErr)
+	}
+	_, absentErr := fs.ReadLink(filesystem, "absent")
+	if !errors.Is(absentErr, fs.ErrNotExist) || !kerrs.HasCode(absentErr, corevfs.CodeReadFailed) {
+		t.Fatalf("fs.ReadLink(absent) = %v, want READ_FAILED wrapping fs.ErrNotExist", absentErr)
+	}
 }

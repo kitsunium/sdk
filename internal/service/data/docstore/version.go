@@ -225,13 +225,33 @@ func (s *Store[T]) RewriteVersions(key string, fn func(former []coredocstore.Ver
 // and for a document stored before it kept them that no write has versioned
 // since. The caller holds the writers' lock.
 func (s *Store[T]) nextVersions(key string, raw json.RawMessage, stamp coredocstore.StampValue) *versionsRecord {
+	old, existed := s.docs[key]
+	//: what the store holds under key, as it holds it.
+	return s.nextVersionsFrom(key, priorState{raw: old, existed: existed, record: s.versions[key]}, raw, stamp)
+}
+
+// priorState is what a key holds before a write: its document, whether there
+// is one, and its versions record.
+type priorState struct {
+	// raw is the document, when existed.
+	raw json.RawMessage
+	// existed says whether there is a document.
+	existed bool
+	// record is the key's versions record, nil when none.
+	record *versionsRecord
+}
+
+// nextVersionsFrom is nextVersions over a state given rather than read: the
+// document, whether there is one and the versions record prior holds, as a
+// batch sees them after its own earlier writes. The caller holds the writers'
+// lock.
+func (s *Store[T]) nextVersionsFrom(key string, prior priorState, raw json.RawMessage, stamp coredocstore.StampValue) *versionsRecord {
+	old, existed, record := prior.raw, prior.existed, prior.record
 	//: a store that keeps none records none.
 	if s.keep == 0 {
 		//: no versions.
 		return nil
 	}
-	old, existed := s.docs[key]
-	record := s.versions[key]
 	//: a creation under the key of a document in the trash is a write over
 	//: that document: it continues its versions, and the trash lets it go.
 	if !existed && record != nil && record.Trashed != nil {

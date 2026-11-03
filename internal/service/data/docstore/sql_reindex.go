@@ -8,6 +8,7 @@ import (
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	svcsql "github.com/kitsunium/sdk/internal/service/data/sql"
 )
 
 // reindexPage is how many documents Reindex reads at a time. A page is read
@@ -127,13 +128,11 @@ func (s *SQLStore[T]) refile(ctx context.Context, ex coresql.Executor, page []st
 		for i := range rows {
 			rows[i].unique = false
 		}
-		//: a bounded number of rows per statement.
-		for batch := range slices.Chunk(rows, indexRowsPerStatement) {
-			//: the document's rows.
-			if _, execErr := ex.ExecContext(ctx, s.stmts.insertIndexRows(len(batch)), rowArgs(doc.key, batch)...); execErr != nil {
-				//: StatementFailed.
-				return s.failed("file a document's index rows", execErr)
-			}
+		//: the document's rows, a bounded number per statement.
+		if _, execErr := svcsql.InsertRows(ctx, ex, s.stmts.dialect, s.stmts.indexInsert(),
+			rowsOf(rowArgs(doc.key, rows), indexRowArgs)); execErr != nil {
+			//: StatementFailed.
+			return s.failed("file a document's index rows", execErr)
 		}
 	}
 	//: the page is filed.

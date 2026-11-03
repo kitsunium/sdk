@@ -1,7 +1,9 @@
 //go:build integration
 
 // Package sql_test — what a call to the document store over SQL costs on each
-// real engine, and what joining the caller's transaction adds to a write.
+// real engine, and what joining the caller's transaction adds to a write;
+// what a batch costs against the same writes one by one (#1057); what the
+// trash index saves Tombstones over 110 000 version rows (#1054).
 // BENCH.md in this directory has the numbers and how to refresh them.
 package sql_test
 
@@ -164,4 +166,110 @@ func BenchmarkSQLStoreVersions(b *testing.B) {
 			})
 		})
 	}
+}
+
+// BenchmarkSQLStoreBatch measures, on each engine, 100 writes of existing
+// documents as one Batch — one transaction — against the same 100 as Puts,
+// each its own transaction, in a store of 1 000 documents (#1057).
+func BenchmarkSQLStoreBatch(b *testing.B) {
+	for name, open := range benchEngines {
+		b.Run(name, func(b *testing.B) {
+			fx, _ := fillForBench(b, open, 1000)
+			ctx := b.Context()
+			b.Run("batch=100", func(b *testing.B) {
+				for round := 0; b.Loop(); round++ {
+					err := fx.store.Batch(ctx, func(w docstore.BatchWriter[member]) error {
+						for i := range 100 {
+							m := benchMember(i)
+							m.Name = fmt.Sprintf("batch %d", round)
+							if err := w.Put(m); err != nil {
+								return err
+							}
+						}
+						return nil
+					})
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("puts=100", func(b *testing.B) {
+				for round := 0; b.Loop(); round++ {
+					for i := range 100 {
+						m := benchMember(i)
+						m.Name = fmt.Sprintf("puts %d", round)
+						if err := fx.store.Put(ctx, m); err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+			})
+		})
+	}
+}
+
+// tombstoneDocs and tombstoneVersions shape the versions table
+// BenchmarkSQLStoreTombstones reads: 10 000 documents, each with ten former
+// versions and its head — 110 000 rows —, and trashed, every hundredth
+// of them, a trash row more.
+const (
+	tombstoneDocs     int = 10_000
+	tombstoneVersions int = 10
+	tombstoneEvery    int = 100
+)
+
+// BenchmarkSQLStoreTombstones measures Tombstones on each engine over a
+// versions table of 110 000 version rows and 100 trash rows, before the
+// trash index and after SQLVersionsTrashIndexMigration adds it (#1054): a
+// scan of the whole table against a read of the index. The rows are
+// inserted as the store lays them out, in multi-row statements, rather than
+// written one document at a time.
+func BenchmarkSQLStoreTombstones(b *testing.B) {
+	for name, open := range benchEngines {
+		b.Run(name, func(b *testing.B) {
+			e := open(b)
+			fx := openVersioned(b, e, tombstoneVersions)
+			ctx := b.Context()
+			fillVersionRows(b, e, fx.table+"___vs")
+			read := func(b *testing.B) {
+				for b.Loop() {
+					stones, err := fx.store.Tombstones(ctx)
+					if err != nil || len(stones) != tombstoneDocs/tombstoneEvery {
+						b.Fatalf("Tombstones() = %d, %v", len(stones), err)
+					}
+				}
+			}
+			b.Run("index=none", read)
+			migration, err := docstore.SQLVersionsTrashIndexMigration(e.dialect, fx.table, 3)
+			must(b, err)
+			must(b, migration.Up(ctx, e.db))
+			b.Run("index=trash", read)
+		})
+	}
+}
+
+// fillVersionRows inserts the versions table vs of BenchmarkSQLStoreTombstones:
+// per document, its former versions — numbered from 1, each holding a
+// document —, its head — the next number, NULL where the documents' table
+// holds it —, and every hundredth document's trash row, numbered 0.
+func fillVersionRows(b *testing.B, e *engine, vs string) {
+	b.Helper()
+	doc := []byte(`{"id":"m","email":"user@example.com","name":"An ordinary name","teams":["red"]}`)
+	cols := []string{"doc_key", "num", "made_at", "made_ns", "meta", "doc"}
+	rows := make([][]any, 0, tombstoneDocs*(tombstoneVersions+1)+tombstoneDocs/tombstoneEvery)
+	for i := range tombstoneDocs {
+		key := []byte(benchKey(i))
+		for n := 1; n <= tombstoneVersions; n++ {
+			rows = append(rows, []any{key, int64(n), int64(1_790_000_000 + n), int64(0), nil, doc})
+		}
+		rows = append(rows, []any{key, int64(tombstoneVersions + 1), int64(1_790_000_100), int64(0), nil, nil})
+		if i%tombstoneEvery == 0 {
+			rows = append(rows, []any{key, int64(0), int64(1_790_000_200), int64(0), nil, doc})
+		}
+	}
+	err := sql.Transact(b.Context(), transactor(b, e), func(ctx context.Context, ex sql.Executor) error {
+		_, err := sql.InsertRows(ctx, ex, e.dialect, sql.InsertSpec{Table: e.dialect.QuoteIdent(vs), Columns: cols, PerStatement: 500}, rows)
+		return err
+	})
+	must(b, err)
 }

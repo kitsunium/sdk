@@ -3,6 +3,8 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — the first `FullFS` outside `internal/service/data/vfs`: an S3 bucket (`third-party/aws/vfs/s3`), whose `PutObject` is the atomic publication, no rename faked
+- **Amended**: 2026-11-02 — a publication's mode, the link shortcuts, a directory flush, and step 5 shared between the publications into one directory; 2026-11-03 — a batch published under one directory flush, `AtomicBatchWriter` (see the dated sections at the end)
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (refuse or clamp, never inert), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse where the mechanic does not exist), [ADR 0045](0045-sdk-session-domain.md) (the file store this domain generalises), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (a zero value must not be the dangerous one)
 
 ## Context
@@ -421,3 +423,101 @@ misleading name, and the domain already offers `WriteFile`.
 - `internal/service/vfs/publish_internal_test.go` — the failure-injection proof
 - `internal/service/vfs/torn_external_test.go` — the in-place-versus-published
   measurement
+
+## Amendment (2026-11-02): a publication's mode, the link shortcuts, and a directory flush
+
+Three gaps the continuous audit found (kitsunium/sdk#1052, #1053, #1060).
+None widens `WritableFS` (ADR 0039).
+
+**A publication applies its mode every time (#1052).** The disk engine's
+`WriteAtomic` creates a new file with `perm` and renames it over the old one,
+so a `0600` file republished with `0644` read back `0644`; the memory double
+shared `WriteFile`'s creation-only rule and kept `0600`. A test that passed on
+`NewMem` could fail on `NewOS` — the one property the double exists for. The
+port now says what the disk engine always did: `perm` applies on EVERY
+publication, the rename-replace semantics, the only ones a publication can
+keep without a racy stat and chmod. `memFS.WriteAtomic` stores `perm`
+unconditionally; `WriteFile` keeps the creation-only rule. Conformance:
+`TestAPublicationAppliesItsModeOnEveryEngine` beside
+`TestModeAppliesOnCreationAndNotOnRewrite`.
+
+**Both engines are `fs.ReadLinkFS`, and the standard library's own
+conformance test runs on them (#1053).** `os.Root.FS()` answers `ReadLink`
+and `Lstat`, but `osFS` held it as a plain `fs.FS` and re-declared only
+`Open`, `Stat`, `ReadDir` and `ReadFile`, so `fs.ReadLink` and `fs.Lstat`
+answered `ErrInvalid` where the wrapped root answers. `osFS` forwards both to
+`os.Root` after `ValidatePath`, wrapped by `failRead` like every read; `memFS`
+answers `Lstat` as `Stat` — it holds no link — and `ReadLink` as
+`READ_FAILED` over `fs.ErrInvalid` (`fs.ErrNotExist` for an absent name).
+`TestEveryEngineIsAValidIoFS` runs `testing/fstest.TestFS` on both engines —
+every file through `Open`, `ReadDir` with and without a count, `Stat`, `Glob`,
+`Sub`, and `Lstat` where `ReadLinkFS` is implemented. It already passed
+before the shortcuts; it now checks them too.
+
+**`DirSyncer` flushes a directory (#1060).** A publication flushes the
+directory naming its file; nothing flushed the directory naming THAT
+directory, so a directory `MkdirAll` created could lose its entry on a power
+loss — ADR 0110 deferred it "because vfs has no verb for it". `DirSyncer` —
+`SyncDir(name string) error` — is a sibling reached by type assertion: the
+root `"."` allowed (`ValidatePath`), `NOT_REGULAR_FILE` for a file, and
+`DIRECTORY_SYNC_FAILED` — the `*fs.PathError` kept, `fs.ErrNotExist` for an
+absent name — for a directory that could not be opened or flushed; its log
+text now names both callers. The disk engine opens the directory through
+`os.Root` and runs step 5 of a publication; the memory engine
+answers the same refusals and flushes nothing. Both constructors' filesystems
+implement it; **`FullFS` does not embed it**, unlike what the issue proposed:
+widening the union every third-party `FullFS` — the S3 one #991 plans among
+them — implements would break them at compile time, and a caller reaches the
+capability by assertion as it reaches `AtomicWriter` on a filesystem it did
+not build. `TestSyncDirAnswersIdenticallyOnEveryEngine` holds the rows.
+
+**Step 5 is shared between the publications into one directory (#803, ADR
+0207).** On the disk engine the directory flush runs through a
+`kernel/concur/commit` group per directory: the publications that reach step
+5 while a flush of their directory runs share the next one. What step 5
+guarantees is unchanged — every publication waits for a directory flush BEGUN
+after its own rename (it joins the batch still gathering, never the one
+flushing) and gets that flush's verdict, `DIRECTORY_SYNC_FAILED` for its own
+name when it fails. A directory's group lives while a publication waits on it.
+`publish` and its injected-failure matrix are untouched: the sharing is the
+`syncDir` mechanic `NewOS` binds. `WriteAtomicAll` (one flush for a batch a
+single caller holds) is not part of this change.
+
+## Amendment (2026-11-03): a batch published under one directory flush (kitsunium/sdk#827)
+
+A queue producer with a batch paid two device flushes per message, and the
+second — the directory's — is the same for every message of the batch: one
+flush after the last rename makes every rename into the directory durable.
+#803 shares that flush between CONCURRENT publications; a single caller
+holding a batch publishes one file after another and never overlaps itself.
+Decided:
+
+1. **`AtomicBatchWriter`, a sibling reached by type assertion (ADR 0039)**,
+   with one method, `WriteAtomicAll(files []FileValue, perm) (published int,
+   err error)`, and a value, `FileValue{Name, Data}`. Both constructors'
+   filesystems implement it; `FullFS` does not embed it, for the reason
+   `DirSyncer` stays out: a third-party `FullFS` — S3's among them — stays
+   one.
+2. **Steps 1 to 4 per file, step 5 per directory.** Each file is published
+   exactly as `WriteAtomic` publishes one — its temporary beside it, its own
+   flush before its rename —, so each is atomic for a concurrent reader; each
+   directory renamed into is flushed once, after its last rename, through
+   the same per-directory commit group as a publication's step 5. The
+   failure contract is `WriteAtomic`'s, extended by a count: every target is
+   checked before anything is written (a refusal publishes nothing);
+   `published` counts the files renamed into place, from the first, and the
+   files after it keep their previous bytes with no temporary left; the
+   renamed ones are flushed with their directories before the call returns,
+   so beside `PUBLISH_FAILED` the count is a count of durable files;
+   `DIRECTORY_SYNC_FAILED` wins when a flush fails — visible, durability in
+   doubt, never rolled back. The memory engine checks every target under its
+   lock and assigns them all.
+3. **What it buys.** Measured on this VM's overlayfs, a batch of sixteen
+   256-byte files costs 1.78 ms a file against `WriteAtomic`'s 2.9 ms: the
+   directory flush is shared, the sixteen file flushes are not. Flushing the
+   temporaries concurrently, so the journal merges them, would buy more and
+   is not done here: it reorders failures across files, and the prefix
+   semantics above would need restating.
+
+The queue's file broker publishes `PublishMany` through it (ADR 0054,
+amended 2026-11-03).

@@ -66,6 +66,50 @@ from nothing to 4096 `int`s: 12 growth steps plus the tail. A heap that lives
 across many fills pays this once, which is why `New` deliberately allocates
 nothing (`TestNewLeavesTheArrayNil`).
 
+## `IndexedHeap` — the sibling with handles (#1036)
+
+Measured 2026-11-02 on the same 8-core AMD EPYC 7351P VM, go1.27.3, branch
+`wip/sdk-lot-6-cache`, `-benchtime=200ms -count=6`, the first sample of each
+row below (the box was shared, so read ratios, not absolutes: `PushPop_SteadyState`
+read 166 ns in this run against the 96.9 ns above).
+
+```
+BenchmarkPushPop_SteadyState-8              	 1431232	       156.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIndexed_PushPop_SteadyState-8      	 1000000	       222.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIndexed_Update_SteadyState-8       	 8143266	        29.84 ns/op	       0 B/op	       0 allocs/op
+BenchmarkIndexed_Remove_SteadyState-8       	 3605131	        73.60 ns/op	       0 B/op	       0 allocs/op
+```
+
+- **`Indexed_PushPop_SteadyState`** against `PushPop_SteadyState` is what the
+  position table costs a sift: every element a sift moves also writes its slot.
+  The sifts move the element through a hole — one copy and one table write per
+  level, not a swap's two — which is what keeps the premium near 1.35×.
+- **`Indexed_Update_SteadyState`** (~29 ns) re-keys one element in place. The
+  alternative it replaces — lazy deletion — paid a whole `Push` for the new
+  entry now and a whole `Pop` for the stale one later (`PushPop_SteadyState`,
+  ~166 ns), and let the heap grow by one entry per reschedule until it surfaced.
+- **`Indexed_Remove_SteadyState`** (~69 ns) takes an element out from anywhere
+  and pushes it back; lazy deletion cannot remove at all.
+- **Zero allocations in steady state** on all three — a design budget
+  (`design/sdk.yaml`, `perf_fixtures_test.go`): every array keeps its capacity
+  and a freed id is reused before a new one is made.
+
+## `Drain` — Pop's loop as an iterator (#816)
+
+Measured 2026-11-02 on the same VM, go1.27.3, branch `wip/sdk-lot-6-int`,
+`-benchtime=300ms -count=4`, the 4-CPU lane; the refill runs with the timer
+stopped, so one operation is one drain of 4096 elements:
+
+```
+BenchmarkDrain-4          	     648	    536615 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillAndDrain-4   	     522	    698106 ns/op	  128248 B/op	      16 allocs/op
+```
+
+**0 allocations for 4096 pops** (the issue's acceptance): the iterator's
+closure does not escape a range-over-func loop, and each step is a `Pop`.
+~131 ns per element, the sift-down `FillAndDrain` already prices (its 16
+allocations are the fill's array growth, which `Drain` reuses).
+
 ## `Peek` is free
 
 `BenchmarkPeek` at 0.37 ns/op is a bounds check and a slice index — below the

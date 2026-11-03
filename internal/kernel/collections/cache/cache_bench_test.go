@@ -2,6 +2,7 @@ package cache
 
 import (
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -182,8 +183,11 @@ func BenchmarkFetch_Parallel(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
+	var offset atomic.Int64
 	b.RunParallel(func(pb *testing.PB) {
-		i := 0
+		//: each goroutine starts at its own place in the key set, so they do
+		//: not walk it in lockstep and meet on the same keys.
+		i := int(offset.Add(131))
 		for pb.Next() {
 			if _, ok := c.Fetch(keys[i&1023]); !ok {
 				b.Errorf("miss on seeded key")
@@ -215,5 +219,26 @@ func BenchmarkStats(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		benchStats = c.Stats()
+	}
+}
+
+// BenchmarkKeys_1024 measures one whole walk of 1024 keys (#816): the
+// snapshot under the read lock — one slice — and the loop over it.
+func BenchmarkKeys_1024(b *testing.B) {
+	keys := benchKeys(1024)
+	c := NewCache[string, int](Config[string, int]{MaxEntries: 2048})
+	for i, k := range keys {
+		c.Set(k, i)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		walked := 0
+		for range c.Keys() {
+			walked++
+		}
+		if walked != len(keys) {
+			b.Fatalf("Keys() yielded %d keys, want %d", walked, len(keys))
+		}
 	}
 }

@@ -132,6 +132,7 @@ go_library(
         "query.go",
         "queue_later.go",
         "queue_plug.go",
+        "queuecmd.go",
         "queued.go",
         "ratelimit.go",
         "records.go",
@@ -365,6 +366,7 @@ go_test(
         "profiles_test.go",
         "queue_later_internal_test.go",
         "queue_plug_internal_test.go",
+        "queuecmd_internal_test.go",
         "queued_test.go",
         "ratelimit_internal_test.go",
         "records_keys_internal_test.go",
@@ -407,6 +409,7 @@ go_test(
         "supervision_test.go",
         "telemetry_test.go",
         "ticker_test.go",
+        "transact_retry_test.go",
         "transact_seal_test.go",
         "transact_test.go",
         "transact_warn_internal_test.go",
@@ -445,6 +448,7 @@ go_test(
         "//framework/internal/app/plug",
         "//framework/internal/app/queueengine",
         "//framework/model",
+        "//framework/telemetry",
         "//pkg/v1/app/health",
         "//pkg/v1/app/i18n",
         "//pkg/v1/app/lifecycle",
@@ -465,42 +469,7 @@ go_test(
         "//pkg/v1/proc/ipc",
         "//pkg/v1/security/authz",
         "//pkg/v1/security/secret",
-    ] + select({
-        "@rules_go//go/platform:aix": [
-            "//framework/telemetry",
-        ],
-        "@rules_go//go/platform:android": [
-            "//framework/telemetry",
-        ],
-        "@rules_go//go/platform:darwin": [
-            "//framework/telemetry",
-        ],
-        "@rules_go//go/platform:dragonfly": [
-            "//framework/telemetry",
-        ],
-        "@rules_go//go/platform:freebsd": [
-            "//framework/telemetry",
-        ],
-        "@rules_go//go/platform:illumos": [
-            "//framework/telemetry",
-        ],
-        "@rules_go//go/platform:ios": [
-            "//framework/telemetry",
-        ],
-        "@rules_go//go/platform:linux": [
-            "//framework/telemetry",
-        ],
-        "@rules_go//go/platform:netbsd": [
-            "//framework/telemetry",
-        ],
-        "@rules_go//go/platform:openbsd": [
-            "//framework/telemetry",
-        ],
-        "@rules_go//go/platform:solaris": [
-            "//framework/telemetry",
-        ],
-        "//conditions:default": [],
-    }),
+    ],
 )
 
 filegroup(

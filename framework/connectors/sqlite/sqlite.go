@@ -30,12 +30,19 @@ var (
 	// defaults are the parameters the engine opens every file with, unless the
 	// URL writes its own under either spelling the driver reads: WAL, so
 	// readers do not wait for a writer; a busy timeout, so a writer waits for
-	// another; and the write lock taken when a transaction begins, so two
-	// writers queue instead of failing on upgrade.
+	// another; the write lock taken when a transaction begins, so two writers
+	// queue instead of failing on upgrade; synchronous=NORMAL, which under WAL
+	// syncs at a checkpoint rather than at every commit — a power cut may lose
+	// the last commits, never the database's consistency (#999); and a
+	// journal_size_limit of 64 MiB, so a WAL a burst grew is truncated after
+	// its checkpoint. _pragma is multi-valued: a URL that writes any keeps its
+	// own list, and the limit is then its to set.
 	defaults = []struct{ key, alias, value string }{
 		{"_journal_mode", "_journal", "WAL"},
 		{busyKey, "_timeout", "5000"},
 		{"_txlock", "", "immediate"},
+		{"_synchronous", "_sync", "NORMAL"},
+		{"_pragma", "", "journal_size_limit(67108864)"},
 	}
 )
 

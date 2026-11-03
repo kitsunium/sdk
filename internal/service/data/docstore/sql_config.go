@@ -37,6 +37,12 @@ const derivedSeparator string = "___"
 // indexTableTag names the table of index rows beside the documents' table.
 const indexTableTag string = "ix"
 
+// trashIndexTag names the index of the trash on the versions table: the rows
+// numbered 0, which Tombstones reads (ADR 0143, amended 2026-11-02). It is
+// two letters, as the tables' tags are, so the longest table name still gives
+// an index name every engine keeps whole.
+const trashIndexTag string = "tr"
+
 // versionsTableTag names the table of versions beside the documents' table
 // (ADR 0143).
 const versionsTableTag string = "vs"
@@ -99,7 +105,11 @@ type SQLConfig[T any] struct {
 	// lookup, which a keyed hash keeps: a framework passes an HMAC under a key
 	// of its own, and an e-mail address never reaches a table. It is called
 	// with the index's name and a non-empty key; an empty answer files
-	// nothing, as an empty key does. Nil stores index keys as they are.
+	// nothing, as an empty key does. Nil stores index keys as they are. An
+	// ordered index's keys, and Range's bounds, go through it too: Range
+	// compares them as the table holds them, so a transform that does not
+	// keep their order — a keyed hash — leaves Range no order to read;
+	// return an ordered index's key as it is.
 	IndexKey func(index, key string) []byte
 	// Table names the documents' table. The store derives its index table's
 	// name from it by appending "___ix". It is a lower-case SQL identifier of
@@ -258,4 +268,10 @@ func indexTable(table string) string {
 func versionsTable(table string) string {
 	//: the documents' table, the separator no table name holds, the tag.
 	return table + derivedSeparator + versionsTableTag
+}
+
+// trashIndex is the name of the index of the trash of table's store.
+func trashIndex(table string) string {
+	//: the documents' table, the separator no table name holds, the tag.
+	return table + derivedSeparator + trashIndexTag
 }

@@ -114,12 +114,17 @@ type consumer struct {
 	rejecter corequeue.Rejecter
 	delayer  corequeue.DelayedNacker
 	extender corequeue.LeaseExtender
-	cfg      ConsumerConfig
+	// acked remembers the messages handled in this process
+	// (ConsumerConfig.AckedWindow); nil when the window is off.
+	acked *ackedWindow
+	// gate lets one idle worker at a time poll for the others (issue #1049).
+	gate *idleGate
+	cfg  ConsumerConfig
 }
 
 // newConsumer asks broker for its siblings once, for every worker.
 func newConsumer(broker corequeue.Broker, cfg ConsumerConfig) *consumer {
-	engine := &consumer{broker: broker, cfg: cfg}
+	engine := &consumer{broker: broker, cfg: cfg, gate: newIdleGate()}
 	engine.waker, _ = broker.(corequeue.Waker)
 	engine.releaser, _ = broker.(corequeue.Releaser)
 	engine.rejecter, _ = broker.(corequeue.Rejecter)
@@ -128,6 +133,10 @@ func newConsumer(broker corequeue.Broker, cfg ConsumerConfig) *consumer {
 	if cfg.AutoExtend {
 		engine.extender, _ = broker.(corequeue.LeaseExtender)
 	}
+	//: a window of zero remembers nothing, and costs nothing.
+	if cfg.AckedWindow > 0 {
+		engine.acked = newAckedWindow(cfg.AckedWindow)
+	}
 	//: shared by every worker, read-only from here.
 	return engine
 }
@@ -135,50 +144,106 @@ func newConsumer(broker corequeue.Broker, cfg ConsumerConfig) *consumer {
 // pump is one worker: lease, process, acknowledge, repeat. It returns only
 // when its context ends or the storage refuses.
 func (c *consumer) pump(ctx context.Context) error {
+	//: whether this worker is the one idle worker that polls for the others.
+	var probing bool
+	//: a worker that stops hands the slot on.
+	defer func() {
+		//: only the holder releases it.
+		if probing {
+			c.gate.release(false)
+		}
+	}()
 	//: until the consumer is stopped or the medium gives up.
 	for {
-		//: checked first, so a cancelled consumer never leases a message it
-		//: is about to abandon.
-		if ctx.Err() != nil {
-			//: a stopped consumer, not a failed one.
-			return nil
-		}
-		var signal <-chan struct{}
-		//: taken BEFORE the Receive: a publication landing between an empty
-		//: Receive and the wait closes this channel, so it is not missed.
-		if c.waker != nil {
-			signal = c.waker.Wake().Signal
-		}
-		batch, receiveErr := c.broker.Receive(ctx, c.cfg.BatchSize)
-		//: a cancelled Receive is the stop, not a storage failure.
-		if receiveErr != nil {
-			//: nil for the caller's own cancellation, the broker's error
-			//: otherwise.
-			return ignoreCancelled(ctx, receiveErr)
-		}
-		//: an empty queue is not an error and not a busy loop.
-		if len(batch) == 0 {
-			//: waits through the clock, never time.Sleep, and wakes on cancel,
-			//: on a publication, or when something the broker holds is due.
-			//: the instant the wait is measured from is read BEFORE the broker
-			//: is asked, so a clock moving meanwhile can only make the wake
-			//: early — a cheap empty Receive — and never late.
-			from := c.cfg.Clock.Now()
-			if !idle(ctx, c.cfg, signal, from.Add(idleFor(c.cfg.PollInterval, c.waker))) {
-				//: cancelled while waiting.
-				return nil
-			}
-			continue
-		}
-		//: sequentially: the batch is held under one lease each, and running
-		//: them concurrently here would be a second, invisible parallelism
-		//: knob beside cfg.Parallelism. The instant it arrived is what every
-		//: lease of the batch is measured from.
-		if settleErr := c.settleBatch(ctx, batch, c.cfg.Clock.Now()); settleErr != nil {
-			//: the medium refused while reporting an outcome.
-			return ignoreCancelled(ctx, settleErr)
+		//: one round: a stop, a failure, or the next round.
+		if stop, err := c.turn(ctx, &probing); stop {
+			//: nil for a stopped consumer, the medium's error otherwise.
+			return err
 		}
 	}
+}
+
+// turn is one round of a worker: a lease, then the batch processed and
+// acknowledged, or the wait an empty queue asks for. It reports stop when the
+// worker returns, with the error pump returns — nil when the consumer was
+// stopped.
+func (c *consumer) turn(ctx context.Context, probing *bool) (stop bool, err error) {
+	//: checked first, so a cancelled consumer never leases a message it
+	//: is about to abandon.
+	if ctx.Err() != nil {
+		//: a stopped consumer, not a failed one.
+		return true, nil
+	}
+	var signal <-chan struct{}
+	//: taken BEFORE the Receive: a publication landing between an empty
+	//: Receive and the wait closes this channel, so it is not missed.
+	if c.waker != nil {
+		signal = c.waker.Wake().Signal
+	}
+	batch, receiveErr := c.broker.Receive(ctx, c.cfg.BatchSize)
+	//: a cancelled Receive is the stop, not a storage failure.
+	if receiveErr != nil {
+		//: nil for the caller's own cancellation, the broker's error
+		//: otherwise.
+		return true, ignoreCancelled(ctx, receiveErr)
+	}
+	//: an empty queue is not an error and not a busy loop: the worker waits
+	//: through the clock, never time.Sleep, and wakes on cancel, on a
+	//: publication, or when something the broker holds is due.
+	if len(batch) == 0 {
+		//: cancelled while waiting is the stop.
+		return !c.idleTurn(ctx, signal, probing), nil
+	}
+	//: work: an idle worker that was polling for the others hands the
+	//: slot on, and wakes them to look for the rest.
+	if *probing {
+		c.gate.release(true)
+		*probing = false
+	}
+	//: sequentially: the batch is held under one lease each, and running
+	//: them concurrently here would be a second, invisible parallelism
+	//: knob beside cfg.Parallelism. The instant it arrived is what every
+	//: lease of the batch is measured from.
+	if settleErr := c.settleBatch(ctx, batch, c.cfg.Clock.Now()); settleErr != nil {
+		//: the medium refused while reporting an outcome.
+		return true, ignoreCancelled(ctx, settleErr)
+	}
+	//: the next round.
+	return false, nil
+}
+
+// idleTurn waits for a worker's next look at an empty queue (issue #1049).
+// One idle worker of the Consume — the first to find the queue empty, then
+// whichever takes the slot it hands on — waits as an idle worker always did,
+// on the broker's wake and its poll, and looks for all of them; every other
+// idle worker waits only until that one finds work, or the consumer stops.
+// So Parallelism idle workers poll once per interval, not Parallelism times,
+// and a publication still reaches them at once: the polling worker is woken,
+// finds it, and wakes the rest. It reports false when ctx ended.
+func (c *consumer) idleTurn(ctx context.Context, signal <-chan struct{}, probing *bool) bool {
+	//: not polling yet: take the slot, or wait on its holder.
+	if !*probing {
+		found, took := c.gate.enter()
+		//: another idle worker polls for this one.
+		if !took {
+			select {
+			//: stopped.
+			case <-ctx.Done():
+				return false
+			//: it found work: look for some too.
+			case <-found:
+				return true
+			}
+		}
+		*probing = true
+	}
+	//: waits through the clock, never time.Sleep, and wakes on cancel, on a
+	//: publication, or when something the broker holds is due. The instant
+	//: the wait is measured from is read BEFORE the broker is asked, so a
+	//: clock moving meanwhile can only make the wake early — a cheap empty
+	//: Receive — and never late.
+	from := c.cfg.Clock.Now()
+	return idle(ctx, c.cfg, signal, from.Add(idleFor(c.cfg.PollInterval, c.waker)))
 }
 
 // idleFor returns how long a worker that just found the queue empty may
@@ -338,9 +403,20 @@ func (c *consumer) prepare(
 
 // process runs the handler on one delivery, watched, and reports its outcome.
 func (c *consumer) process(ctx context.Context, delivery corequeue.DeliveryValue, plan leasePlan) error {
+	//: a message this process already handled — its acknowledgement lost
+	//: to a lapsed lease — is acknowledged without a second run.
+	if c.acked.holds(delivery.Message.ID) {
+		//: nil failure: an acknowledgement.
+		return c.settle(ctx, delivery.Lease.Receipt, nil, false)
+	}
 	watched := c.watch(ctx, delivery, plan)
 	failure := guard(watched.ctx, c.cfg.Handler, delivery)
 	lease, stopped := watched.finish(ctx, failure)
+	//: done, by the engine's acknowledgement or the handler's own: a
+	//: redelivery of it is not run again.
+	if failure == nil || kerrs.HasCode(failure, corequeue.CodeAcknowledged) {
+		c.acked.remember(delivery.Message.ID)
+	}
 	//: the receipt AutoExtend last renewed to, which is the one that holds.
 	return c.settle(ctx, lease.Receipt, failure, stopped)
 }
@@ -380,6 +456,14 @@ func (c *consumer) process(ctx context.Context, delivery corequeue.DeliveryValue
 // duplicate a graceful stop caused, on every broker whose verbs honour their
 // context (kitsunium/sdk#472, #474).
 func (c *consumer) settle(ctx context.Context, receipt corequeue.ReceiptValue, failure error, stopped bool) error {
+	//: the handler acknowledged inside its own transaction: an
+	//: acknowledgement would find no message, and a nack would hand back
+	//: work that is done. A handler that only said so finds its message
+	//: again once the lease lapses.
+	if kerrs.HasCode(failure, corequeue.CodeAcknowledged) {
+		//: nothing to send.
+		return nil
+	}
 	//: the ordinary path, and the overwhelmingly common one.
 	if failure == nil {
 		//: the only call in the domain that removes a message, past a stop.

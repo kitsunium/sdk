@@ -1,0 +1,302 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/db/redis
+packages:
+  - codes:
+      - const:
+          - doc: |-
+              CodeRedisCacheCommandFailed identifies a command Valkey or Redis refused,
+              or a connection that failed under it. It rides with
+              core/data/cache.CacheBackendFailed in the error's trail.
+            name: CodeRedisCacheCommandFailed
+            note: |-
+              range: 0.3.95.0 - 0.3.95.255
+
+              ADR 0211: the cache port over Valkey or Redis, in the go-redis vendor
+              module named by its vendor (#984).
+            value: "0x00_03_5F_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeRedisCacheValueUndecodable identifies a stored value the configured
+              codec cannot decode into the store's type: another writer, another
+              type, another codec under the same prefix.
+            name: CodeRedisCacheValueUndecodable
+            value: "0x00_03_5F_02"
+        type: errs.Code
+    doc: |-
+      Package cache is the remote tier of the cache domain: a core/data/cache
+      Store over Valkey or Redis through go-redis, implementing the four ports —
+      Store, EntryFetcher, Tagger and Loader — so internal/service/data/cache's
+      NewChain accepts it as its far tier behind a memory store (ADR 0049,
+      ADR 0211). It lives in the go-redis vendor module, third-party/db/redis,
+      named by its vendor rather than by one package (#984).
+
+      # Keys
+
+      Every key of one store shares the hash tag of Config.Prefix, so the store
+      lives on one slot of a cluster and every write is one atomic script: the
+      value under {prefix}:v:<key>, the entry's tags under {prefix}:t:<key>, and
+      each tag's members under {prefix}:g:<tag>. A store therefore does not shard
+      across a cluster; two stores with two prefixes do.
+
+      # What the server owns
+
+      An entry's deadline is the server's: Set writes it with PX, FetchEntry reads
+      the remaining TTL with PTTL, so promotion carries the time left, never the
+      time first asked for. Values are encoded with Config.Codec; a value that
+      does not decode is ValueUndecodable, never a silent miss.
+
+      # Loader across replicas
+
+      Load collapses concurrent misses on one key within the process, as the
+      port promises, and, when Config.FillLease is positive, across processes:
+      the first caller takes {prefix}:l:<key> with SET NX PX FillLease and fills,
+      the others poll every FillPoll on the injected clock until the value
+      appears or the lease is gone. The lease is not fenced — a filler that
+      outlives it may race a second one, and the later Set wins — the
+      non-guarantee the lock domain states for its own leases (ADR 0052).
+    functions:
+      - doc: |-
+          NewStore returns the store over cfg.Client under cfg.Prefix. It sends no
+          command. A missing client or codec, an empty prefix or one holding a
+          brace, a negative DefaultTTL, and a FillPoll that is not positive and
+          shorter than a positive FillLease are core/data/cache.CacheMisconfigured.
+        in:
+          - name: cfg
+            type: Config
+        name: NewStore
+        out:
+          - name: store
+            type: corecache.Store[V]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: V
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+      corecache: github.com/kitsunium/sdk/internal/core/data/cache
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      goredis: github.com/redis/go-redis/v9
+    path: github.com/kitsunium/sdk/third-party/db/redis/cache
+    sentinels:
+      - var:
+          - code: CodeRedisCacheCommandFailed
+            doc: CommandFailed wraps a failed command; nothing is assumed stored.
+            exit: UNAVAILABLE
+            name: CommandFailed
+            private: "third-party/db/redis/cache: a Valkey/Redis command failed"
+            public: The cache server could not complete the request
+            reason: COMMAND_FAILED
+          - code: CodeRedisCacheValueUndecodable
+            doc: ValueUndecodable reports a stored value the codec cannot decode.
+            exit: DATAERR
+            name: ValueUndecodable
+            private: "third-party/db/redis/cache: the stored value does not decode with the configured codec"
+            public: A cached value could not be decoded
+            reason: VALUE_UNDECODABLE
+    types:
+      - doc: |-
+          Config configures NewStore: the client, the namespace, the default
+          lifetime, the codec values travel in, and the cross-replica fill lease.
+        name: Config
+        struct:
+          fields:
+            - doc: |-
+                Client is the caller's go-redis client — a single node, a sentinel
+                failover or a cluster. The store never closes it. Required.
+              name: Client
+              type: goredis.UniversalClient
+            - doc: Codec encodes and decodes the values. Required.
+              name: Codec
+              type: codec.Codec
+            - doc: |-
+                Clock times the pollers' waits. Nil means clock.System. An entry's
+                deadline is the server's, never this clock's.
+              name: Clock
+              type: clock.Timed
+            - doc: |-
+                Prefix namespaces every key and is their hash tag, so it must be
+                non-empty and hold no brace. Required.
+              name: Prefix
+              type: string
+            - doc: |-
+                DefaultTTL applies to an entry whose own TTL is zero; zero means no
+                deadline, as for the memory store. Negative is refused.
+              name: DefaultTTL
+              type: time.Duration
+            - doc: |-
+                FillLease is how long the cross-replica fill lease of Load lasts. Zero
+                keeps Load's collapsing within the process, the port's own promise;
+                negative is refused.
+              name: FillLease
+              type: time.Duration
+            - doc: |-
+                FillPoll is how often a caller that lost the fill lease looks for the
+                winner's value. Required, positive and shorter than FillLease, when
+                FillLease is positive.
+              name: FillPoll
+              type: time.Duration
+  - codes:
+      - const:
+          - doc: |-
+              CodeRedisQueueMisconfigured identifies a StreamConfig NewStream refuses
+              before any command: a missing client, an empty or brace-holding stream,
+              group or consumer name.
+            name: CodeRedisQueueMisconfigured
+            note: |-
+              range: 0.3.96.0 - 0.3.96.255
+
+              ADR 0211: the queue Broker over Valkey or Redis streams.
+            value: "0x00_03_60_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeRedisQueueUnreachable identifies a connection to the server
+              that failed or timed out; nothing is assumed done.
+            name: CodeRedisQueueUnreachable
+            value: "0x00_03_60_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeRedisQueueGroupMissing identifies a consumer group the stream does not
+              have (NOGROUP) while StreamConfig.CreateGroup is false.
+            name: CodeRedisQueueGroupMissing
+            value: "0x00_03_60_03"
+        type: errs.Code
+      - const:
+          - doc: CodeRedisQueueCommandRefused identifies a command the server answered with an error.
+            name: CodeRedisQueueCommandRefused
+            value: "0x00_03_60_04"
+        type: errs.Code
+    doc: |-
+      Package queue is a core/data/queue Broker over a Valkey or Redis stream and
+      one consumer group (ADR 0054's deferred connector, ADR 0211), in the
+      go-redis vendor module named by its vendor (#984).
+
+      # Mapping
+
+      Publish is XADD, the entry id the message's ID. Receive first reclaims what
+      lapsed — a lease past its deadline, dead-lettered when its deliveries are
+      spent —, leases again the hand-backs whose instant has come (XCLAIM), then
+      reads new entries with XREADGROUP; the pending-entries list holds every
+      message from its first lease to its XACK. Ack is XACK and XDEL, so one
+      stream is one queue. A message that runs out of attempts moves to the
+      dead-letter stream, its cause beside it, in the same script that removes
+      it. Receive and every settlement are one Lua script, atomic on the
+      server, and every key of one broker shares the stream's hash tag, so a
+      broker lives on one slot of a cluster. A failed command is
+      StreamUnreachable or CommandRefused, core/data/queue.QueueBackendFailed
+      in its trail.
+
+      # Whose clock is the lease
+
+      The lease deadlines are the broker's, read from StreamConfig.Clock and kept
+      in a sorted set beside the stream, to the microsecond — not the server's idle
+      time, which XAUTOCLAIM would read: a test drives every deadline with a
+      ManualClock, as for the SQL broker, and replicas agree as far as their
+      clocks do. The broker computes every instant and passes it to the script
+      as text. A receipt names the entry, the token of its lease and its
+      delivery, so a lapsed or replaced lease is LeaseExpired and one this
+      package never minted UnknownReceipt.
+
+      # Capabilities
+
+      Waker (a publication or hand-back by this process, and the next deadline
+      it knows of), LeaseExtender, Rejecter, Releaser, DelayedNacker and
+      DeadLetterReader. Out of scope: hash-slot placement across a cluster (one
+      stream is one slot), and a partitioned log, which is data/stream's.
+    functions:
+      - doc: |-
+          NewStream returns a broker over cfg.Stream and cfg.Group. It sends no
+          command: the group is checked, or created when cfg.CreateGroup asks, on
+          the first Receive. A policy the broker cannot honour is
+          core/data/queue.QueueMisconfigured; a missing client or name is
+          StreamMisconfigured.
+        in:
+          - name: cfg
+            type: StreamConfig
+        name: NewStream
+        out:
+          - name: broker
+            type: corequeue.Broker
+          - name: err
+            type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corequeue: github.com/kitsunium/sdk/internal/core/data/queue
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      goredis: github.com/redis/go-redis/v9
+    path: github.com/kitsunium/sdk/third-party/db/redis/queue
+    sentinels:
+      - var:
+          - code: CodeRedisQueueMisconfigured
+            doc: StreamMisconfigured refuses a StreamConfig NewStream cannot build a broker from.
+            exit: CONFIG
+            name: StreamMisconfigured
+            private: "third-party/db/redis/queue.NewStream: the configuration is refused before any command"
+            public: The stream queue broker is misconfigured
+            reason: STREAM_MISCONFIGURED
+          - code: CodeRedisQueueUnreachable
+            doc: StreamUnreachable wraps a connection failure; nothing is assumed done.
+            exit: UNAVAILABLE
+            name: StreamUnreachable
+            private: "third-party/db/redis/queue: the server could not be reached"
+            public: The queue server could not be reached
+            reason: STREAM_UNREACHABLE
+          - code: CodeRedisQueueGroupMissing
+            doc: GroupMissing reports a consumer group the stream does not have.
+            exit: CONFIG
+            name: GroupMissing
+            private: "third-party/db/redis/queue: NOGROUP and StreamConfig.CreateGroup is false"
+            public: The queue's consumer group does not exist
+            reason: GROUP_MISSING
+          - code: CodeRedisQueueCommandRefused
+            doc: CommandRefused wraps a command the server answered with an error.
+            exit: UNAVAILABLE
+            name: CommandRefused
+            private: "third-party/db/redis/queue: the server refused a command"
+            public: The queue server refused the request
+            reason: COMMAND_REFUSED
+    types:
+      - doc: |-
+          StreamConfig configures NewStream: the client, the stream and group, this
+          process's consumer name, and the delivery discipline.
+        name: StreamConfig
+        struct:
+          fields:
+            - doc: |-
+                Client is the caller's go-redis client; the broker never closes it.
+                Required.
+              name: Client
+              type: goredis.UniversalClient
+            - doc: |-
+                Clock stamps every instant the broker writes and judges the lease
+                deadlines. Nil means clock.System.
+              name: Clock
+              type: clock.Clock
+            - doc: |-
+                Stream names the queue; it is the hash tag of every key the broker
+                writes, so it must be non-empty and hold no brace. Required.
+              name: Stream
+              type: string
+            - doc: Group is the consumer group every consumer of the queue reads through. Required.
+              name: Group
+              type: string
+            - doc: |-
+                Consumer names this broker in the group's pending-entries list. Empty
+                mints one per broker; two live brokers must not share one.
+              name: Consumer
+              type: string
+            - doc: |-
+                Policy is the delivery discipline. Its zero value is refused, as for
+                every broker.
+              name: Policy
+              type: corequeue.PolicyValue
+            - doc: |-
+                CreateGroup creates the group, and the stream with it (XGROUP CREATE
+                MKSTREAM), when the first Receive finds it missing. False answers
+                GroupMissing instead.
+              name: CreateGroup
+              type: bool

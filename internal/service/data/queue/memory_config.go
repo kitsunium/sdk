@@ -25,6 +25,13 @@ type MemoryConfig struct {
 	//
 	// Nil means clock.System.
 	Clock clock.Clock
+	// Random draws the retry jitter [corequeue.PolicyValue].RetryJitter asks
+	// for: a number in [0, 1), as math/rand/v2.Float64 returns. Nil means
+	// math/rand/v2.Float64. A test injects a fixed sequence and asserts every
+	// retry instant to the nanosecond, as it does without a jitter; the
+	// three brokers draw from it identically, so the memory broker stays an
+	// exact double. It may be called by several goroutines at once.
+	Random func() float64
 	// Policy is the delivery discipline. Its zero value is refused; see
 	// core/data/queue.PolicyValue.
 	Policy corequeue.PolicyValue

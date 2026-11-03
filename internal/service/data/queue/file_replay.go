@@ -46,6 +46,26 @@ func (b *fileBroker) ReplayDeadLetter(ctx context.Context, id string) error {
 		//: QueueBackendFailed.
 		return listErr
 	}
+	queued, replayErr := b.replayRecords(id, records)
+	//: the medium refused mid-replay.
+	if replayErr != nil {
+		//: QueueBackendFailed.
+		return replayErr
+	}
+	//: never dead, or already replayed or deleted.
+	if !queued {
+		//: DeadLetterNotFound.
+		return deadLetterNotFound("file", id)
+	}
+	//: queued; its next delivery counts 1.
+	return nil
+}
+
+// replayRecords queues the message id again from the first of its records
+// that reads back as id, then removes every one of them, and reports whether
+// it queued it: false when none could be read — removed meanwhile, or never
+// a record of id.
+func (b *fileBroker) replayRecords(id string, records []string) (queued bool, err error) {
 	//: the first readable record is the message; the others are copies a
 	//: crash left behind, and they go with it.
 	for _, base := range records {
@@ -53,7 +73,7 @@ func (b *fileBroker) ReplayDeadLetter(ctx context.Context, id string) error {
 		//: the medium refused mid-read.
 		if readErr != nil {
 			//: QueueBackendFailed.
-			return readErr
+			return false, readErr
 		}
 		//: removed meanwhile by a concurrent replay or deletion, unreadable, or
 		//: a record whose header names another message than its file name
@@ -62,21 +82,21 @@ func (b *fileBroker) ReplayDeadLetter(ctx context.Context, id string) error {
 			continue
 		}
 		name, _ := parseDead(base)
-		queued := nameValue{At: b.clk.Now().UnixNano(), EnqueuedAt: name.EnqueuedAt, Entropy: name.Entropy}
+		requeued := nameValue{At: b.clk.Now().UnixNano(), EnqueuedAt: name.EnqueuedAt, Entropy: name.Entropy, Priority: name.Priority}
 		//: THE durable step, exactly as Publish takes it.
 		if writeErr := b.publisher.WriteAtomic(
-			path.Join(dirReady, queued.readyName()), record.Message.Payload, messageMode,
+			path.Join(dirReady, requeued.readyName()), record.Message.Payload, messageMode,
 		); writeErr != nil {
 			//: QueueBackendFailed — vfs guarantees nothing was published.
-			return backendFailed("publish", dirReady, writeErr)
+			return false, backendFailed("publish", dirReady, writeErr)
 		}
 		//: queued; an idle consumer over this directory looks again now.
 		b.wake.fire()
 		//: only now, every record of the message.
-		return b.removeDead(records)
+		return true, b.removeDead(records)
 	}
-	//: never dead, or already replayed or deleted.
-	return deadLetterNotFound("file", id)
+	//: nothing readable as id.
+	return false, nil
 }
 
 // DeleteDeadLetter removes every record of the dead letter id for good
@@ -127,7 +147,9 @@ func (b *fileBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLette
 		//: QueueBackendFailed — nothing was written.
 		return "", backendFailed("rand", "", entropyErr)
 	}
-	name := nameValue{EnqueuedAt: dead.Message.EnqueuedAt.UnixNano(), Entropy: entropy, Deliveries: dead.Deliveries}
+	name := nameValue{
+		EnqueuedAt: dead.Message.EnqueuedAt.UnixNano(), Entropy: entropy, Deliveries: dead.Deliveries, Priority: dead.Priority,
+	}
 	cause := causeValue{reason: dead.Reason, public: dead.Cause, code: dead.Code, trail: dead.Trail}
 	record := encodeDead(name, cause, dead.FailedAt.UnixNano(), dead.Message.Payload)
 	//: THE durable step, exactly as a burial takes it.
@@ -177,7 +199,7 @@ func (b *fileBroker) Messages(ctx context.Context, after string, max int) ([]cor
 		out = append(out, corequeue.LiveMessageValue{
 			VisibleAt:  f.name.AtTime(),
 			Message:    corequeue.MessageValue{ID: f.id, Payload: payload, EnqueuedAt: f.name.EnqueuedTime()},
-			Deliveries: f.name.Deliveries, Leased: f.leased,
+			Deliveries: f.name.Deliveries, Leased: f.leased, Priority: f.name.Priority,
 		})
 		//: the caller asked for a bounded batch.
 		if len(out) == max {
@@ -195,20 +217,20 @@ func (b *fileBroker) liveFiles(after string) ([]liveFile, error) {
 	var found []liveFile
 	//: queued, then in flight; the sort below orders them together.
 	for _, dir := range []string{dirReady, dirInflight} {
-		entries, err := b.entriesOf(dir)
+		entries, err := b.namesOf(dir)
 		//: the medium refused.
 		if err != nil {
 			//: QueueBackendFailed.
 			return nil, err
 		}
 		//: every entry the grammar of its state accepts.
-		for _, entry := range entries {
-			name, ok := parseLive(dir, entry.Name())
+		for _, base := range entries {
+			name, ok := parseLive(dir, base)
 			//: not one of ours, or before where the listing resumes.
 			if !ok || name.ID() <= after {
 				continue
 			}
-			found = append(found, liveFile{dir: dir, base: entry.Name(), id: name.ID(), name: name, leased: dir == dirInflight})
+			found = append(found, liveFile{dir: dir, base: base, id: name.ID(), name: name, leased: dir == dirInflight})
 		}
 	}
 	slices.SortFunc(found, func(x, y liveFile) int {
@@ -257,7 +279,7 @@ func (b *fileBroker) PutMessage(ctx context.Context, live corequeue.LiveMessageV
 	}
 	name := nameValue{
 		At: live.VisibleAt.UnixNano(), EnqueuedAt: live.Message.EnqueuedAt.UnixNano(),
-		Entropy: entropy, Deliveries: live.Deliveries,
+		Entropy: entropy, Deliveries: live.Deliveries, Priority: live.Priority,
 	}
 	//: THE durable step, exactly as Publish takes it.
 	if writeErr := b.publisher.WriteAtomic(path.Join(dirReady, name.readyName()), live.Message.Payload, messageMode); writeErr != nil {
@@ -281,18 +303,20 @@ func (b *fileBroker) deadRecordsOf(id string) (records []string, err error) {
 		//: nothing to look for.
 		return nil, nil
 	}
-	entries, listErr := b.entriesOf(dirDead)
+	entries, listErr := b.namesOf(dirDead)
 	//: the medium refused.
 	if listErr != nil {
 		//: QueueBackendFailed.
 		return nil, listErr
 	}
 	prefix := pad(enqueued) + "." + entropy + "."
-	//: every record of that message, and nothing that merely looks like one.
-	for _, entry := range entries {
+	//: every record of that message, and nothing that merely looks like one —
+	//: its level's digit, if any, before the prefix.
+	for _, base := range entries {
+		_, stem := nameStem(base)
 		//: the name's own grammar, not only its prefix.
-		if _, named := parseDead(entry.Name()); named && strings.HasPrefix(entry.Name(), prefix) {
-			records = append(records, entry.Name())
+		if _, named := parseDead(base); named && strings.HasPrefix(stem, prefix) {
+			records = append(records, base)
 		}
 	}
 	//: possibly none.

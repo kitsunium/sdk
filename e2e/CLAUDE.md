@@ -14,8 +14,9 @@ job, ADR 0177, whose `*-kernel` legs boot the official Debian, Fedora and
 Alpine cloud images under QEMU/KVM, so each runs on its distro's own kernel).
 
 The module also hosts the **Docker-backed integration suites** under
-`integration/` (ADR 0157): the SQL mechanisms and the database writers against
-real servers started by testcontainers-go. They are tests behind the
+`integration/` (ADR 0157): the SQL mechanisms, the database writers, and the
+Valkey and JetStream adapters of the data ports (ADR 0211) against real
+servers started by testcontainers-go. They are tests behind the
 `integration` tag, not part of the binary, and they live here because this
 module is the one no consumer requires — see `integration/CLAUDE.md`.
 
@@ -73,9 +74,12 @@ e2e/
   the conformance lane, so a laptop without cgroup delegation stays green.
 - Imports may reach `internal/*` for the sentinel **codes only** (the e2e binary
   is internal tooling, not a consumer) — this is why it sits outside the Bazel
-  graph the layer firewall queries (`.bazelignore`; ADR 0068). The one exception
-  is `integration/writer/*`, whose suites drive `internal/core/observe/logger/writer`'s registry
-  exactly as they did beside the writer packages they test.
+  graph the layer firewall queries (`.bazelignore`; ADR 0068). The exceptions
+  are `integration/writer/*`, whose suites drive `internal/core/observe/logger/writer`'s registry
+  exactly as they did beside the writer packages they test, and the data
+  adapters' suites — `integration/queue/*`, `integration/cache/*` — which hold
+  a vendor broker or cache to the port's values and sentinels, a ManualClock
+  and the memory tier of a chain (ADR 0211).
 
 ## Build system
 
@@ -97,4 +101,4 @@ e2e/
 
 - `checks/` — see `checks/CLAUDE.md` (each conformance group and what it proves on the host)
 - `harness/` — see `harness/CLAUDE.md` (the runner: statuses, the watchdog, the table)
-- `integration/` — see `integration/CLAUDE.md` (the Docker-backed suites; `sql/` and each `writer/<engine>/` has its own)
+- `integration/` — see `integration/CLAUDE.md` (the Docker-backed suites; `sql/`, each `writer/<engine>/` and each data adapter's suite has its own)

@@ -71,4 +71,7 @@
 // Package clock — hosts the waiting half of the time port: the [Waiter]
 // contract, plus the single guard both implementations funnel their
 // non-positive-period refusal through.
+//
+// Package clock — hosts CoarseClock, the [Clock] whose reading is published by
+// a goroutine of its own every resolution, so Now is one atomic load.
 package clock

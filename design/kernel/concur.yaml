@@ -187,6 +187,140 @@ packages:
         typeParams:
           - constraint: any
             name: T
+  - codes:
+      - const:
+          - doc: CodeCommitClosed identifies a Do call made after Close.
+            name: CodeCommitClosed
+            note: "range: 0.1.4.0 - 0.1.4.255"
+            value: "0x00_01_04_01"
+        type: errs.Code
+    doc: |-
+      Package commit provides Group, a group commit: concurrent callers each
+      contribute an item, one goroutine runs a flush over all of them, and every
+      caller receives that flush's verdict. N callers that each need their item
+      durable share one fsync where each would have paid its own.
+
+      It is the primitive between two the kernel already has. singleflight
+      deduplicates IDENTICAL calls; batcher coalesces items asynchronously — Add
+      returns before delivery and the caller never learns the flush's verdict.
+      Here every caller blocks until the flush that carried its item has run,
+      and gets its error.
+
+      A batch starts with its first item and gathers followers for MaxWait on an
+      injected clock, or until MaxItems; flushes run one at a time, in the order
+      their batches started, and a batch keeps gathering while the one before it
+      flushes — with a zero MaxWait, coalescing comes from the flush's own
+      duration. The flush runs on a goroutine of its own, with the first
+      caller's context values and none of its cancellation: a caller that leaves
+      gets its ctx.Err(), and its item is flushed all the same.
+
+      Stdlib-only and generic: one type parameter, one function. Range 0.1.4.*
+      (ADR 0005 kernel block, #803).
+
+      Package commit — one batch: its items, the channels that order and publish
+      it, and the verdict.
+
+      Package commit — the Config value type.
+
+      Package commit — declares the sentinel returned by Do after Close.
+    functions:
+      - doc: |-
+          New builds a Group that hands each batch of items to flush. A nil flush
+          panics, at the call that made the mistake: there is nothing a Group could
+          do with an item without one.
+        in:
+          - name: flush
+            type: func(ctx context.Context, items []T) error
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: "*Group[T]"
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/kernel/concur/commit
+    sentinels:
+      - var:
+          - code: CodeCommitClosed
+            doc: |-
+              Closed is returned by Do once Close has run: the Group takes no more
+              items, and every batch started before Close has been flushed.
+            name: Closed
+            private: "internal/kernel/concur/commit: Do called after Close"
+            public: The commit group is closed
+            reason: COMMIT_CLOSED
+    types:
+      - doc: |-
+          Group coalesces concurrent [Group.Do] calls into one flush: every caller
+          contributes an item, one goroutine runs the flush over all of them, and
+          every caller receives that flush's verdict. It is group commit — N callers
+          that each need their item durable share one fsync, where each would have
+          paid its own.
+
+          Safe for concurrent use. The zero value is NOT usable — construct with
+          [New].
+        methods:
+          - doc: |-
+              Do adds item to the batch being gathered — starting one if none is — and
+              returns the verdict of the flush that carried it: every participant of a
+              flush receives the same error, nil included.
+
+              A caller whose ctx ends before the flush returns ctx.Err() at once, and its
+              item is STILL flushed: leaving is a departure, not a withdrawal, since the
+              flush may already be writing it. The flush runs on a goroutine of its own,
+              with the first participant's context values and none of its cancellation.
+
+              Do returns [Closed] once Close has run. If the flush panics, every
+              participant panics with the same value.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: item
+                type: T
+            name: Do
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Close refuses every later Do with [Closed] and returns once every batch
+              already started has been flushed. It is idempotent.
+            name: Close
+            recv: pointer
+        name: Group
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          Config tunes a Group. The zero Config is usable: no item cap, no gathering
+          wait — a batch is flushed as soon as the flush before it has finished, so
+          the callers that arrived during one flush share the next.
+        name: Config
+        struct:
+          fields:
+            - doc: |-
+                MaxItems seals a batch once it holds this many items: a full batch is
+                flushed without waiting out MaxWait, and the next caller starts another.
+                Zero or negative means no cap.
+              name: MaxItems
+              type: int
+            - doc: |-
+                MaxWait is how long a batch gathers followers after its first item before
+                it is flushed. Zero means no wait: the batch is flushed as soon as the
+                one before it has been — coalescing then comes from the flushes' own
+                duration. Negative is read as zero.
+              name: MaxWait
+              type: time.Duration
+            - doc: |-
+                Clock is what MaxWait is waited on. nil means clock.System; a
+                clock.ManualClock makes the gathering deterministic in a test.
+              name: Clock
+              type: clock.Waiter
   - doc: |-
       Package buffer provides a pooled *[]byte for zero-alloc formatting in hot
       paths. Consumers acquire a reusable buffer via Get and return it via Put so

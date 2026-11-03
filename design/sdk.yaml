@@ -1,7 +1,7 @@
 # design/sdk.yaml — the SDK's project file: its structure, and the rules kit
 # holds it to (ADR 0163). The other files of design/ are its surface: every
 # exported symbol of the SDK's modules (modules: below) — the root, internal,
-# the pkg/v1 families — and of the thirteen vendor modules, one
+# the pkg/v1 families — and of the fifteen vendor modules, one
 # file per domain or package group, each with its inputs and outputs —
 # `surface: closed` makes an exported symbol no file declares a finding. An
 # API change starts here, then `kit gen` writes the pins, the ports, the
@@ -84,11 +84,15 @@ modules:
     requires: [internal]
   - dir: third-party/codec/yaml
     requires: [internal]
+  - dir: third-party/db/redis
+    requires: [internal]
   - dir: third-party/db/writer/clickhouse
     requires: [internal]
   - dir: third-party/db/writer/mysql
     requires: [internal]
   - dir: third-party/db/writer/redis
+    requires: [internal]
+  - dir: third-party/nats
     requires: [internal]
   - dir: third-party/transform
     requires: [internal]
@@ -174,6 +178,8 @@ codes:
   ranges:
     - range: 0.1.3
       owner: internal/kernel/collections/ring
+    - range: 0.1.4
+      owner: internal/kernel/concur/commit
     - range: 0.1.5
       owner: internal/kernel/concur/batcher
     - range: 0.2.2
@@ -405,6 +411,21 @@ codes:
     - range: 0.3.93
       owner: internal/core/app/forward
       note: ADR 0185
+    - range: 0.3.95
+      owner: third-party/db/redis/cache
+      note: ADR 0211, the cache port over Valkey/Redis
+    - range: 0.3.96
+      owner: third-party/db/redis/queue
+      note: ADR 0211, the queue Broker over Valkey/Redis streams
+    - range: 0.3.97
+      owner: third-party/nats/queue
+      note: ADR 0211, the queue Broker over NATS JetStream
+    - range: 0.3.98
+      owner: third-party/aws/vfs/s3
+      note: ADR 0211, the vfs FullFS over S3
+    - range: 0.3.101
+      owner: third-party/aws/queue/sqs
+      note: ADR 0211, the queue Broker over SQS (0.3.99 and 0.3.100 are #992's and #993's)
     - range: 0.4.1
       owner: framework/model/internal/core
       note: "ADR 0147: layer 4 is the framework's"
@@ -521,6 +542,18 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/buffer.Get
     allocs: 0
     fixture: GetPut
+  # The indexed heap in steady state (#1036): a push with its pop, an update
+  # and a removal with its push back allocate nothing — every array keeps its
+  # capacity and a freed id is reused before a new one is made.
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/heap.(*IndexedHeap[...]).Push
+    allocs: 0
+    fixture: IndexedPushPop
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/heap.(*IndexedHeap[...]).Update
+    allocs: 0
+    fixture: IndexedUpdate
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/heap.(*IndexedHeap[...]).Remove
+    allocs: 0
+    fixture: IndexedRemove
   # A version comparison, and every other reading, allocates nothing (ADR
   # 0156 §4).
   - fn: go:github.com/kitsunium/sdk/internal/kernel/semver.IsValid
@@ -664,6 +697,15 @@ budgets:
     allocs: 1
     allocsMin: 1
     fixture: DetachBuffer
+  # The queue (issue #1048): one message published to the memory broker and
+  # handled by a running Consume — the wake, the handler's goroutine and its
+  # watch (kitsunium/sdk#474), the acknowledgement. Not zero, and not meant
+  # to be: 28 is what a round trip measured on 2026-11-03 (840 000 over the
+  # 30 000 calls, five runs alike), so a change that adds an allocation to the
+  # engine's happy path says so here first.
+  - fn: go:github.com/kitsunium/sdk/internal/service/data/queue.Consume
+    allocs: 28
+    fixture: ConsumeRoundTrip
   # The logger: an emit is not allocation-free (at least the handler's attrs
   # clone, V116 — the floor of "one alloc per emit"), and reading the span
   # off a context allocates nothing (ADR 0062).

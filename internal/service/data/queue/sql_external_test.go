@@ -195,13 +195,19 @@ func TestSQLStatementsPerCall(t *testing.T) {
 		expect("an idle Receive", []string{"probe"}, func() { receiveNone(t, fx.broker) })
 		expect("a Publish", []string{"insert"}, func() { publish(t, fx.broker, "m") })
 		var delivery corequeue.DeliveryValue
-		expect("a Receive that fills its batch", slices.Concat([]string{"probe", begin}, lock, []string{"pick", "leaseRows", "COMMIT"}),
-			func() { delivery = receiveOne(t, fx.broker) })
+		fills, partial := slices.Concat([]string{"probe", begin}, lock, []string{"pick", "leaseRows", "COMMIT"}),
+			slices.Concat([]string{"probe", begin}, lock, []string{"pick", "leaseRows", "next", "COMMIT"})
+		//: issue #1042: PostgreSQL leases in one statement, no transaction of
+		//: its own; a batch it did not fill buries the exhausted leases it
+		//: skipped and asks when the next message is due.
+		if fx.dialect() == coresql.DialectPostgres {
+			fills, partial = []string{"probe", "leaseReturning"}, []string{"probe", "leaseReturning", "buryExhausted", "next"}
+		}
+		expect("a Receive that fills its batch", fills, func() { delivery = receiveOne(t, fx.broker) })
 		expect("a Nack", []string{"retry"}, func() { nack(t, fx.broker, delivery.Lease.Receipt, nil) })
 		publish(t, fx.broker, "m")
 		//: a batch that is not full asks when the next message is due.
-		expect("a Receive that does not fill its batch", slices.Concat([]string{"probe", begin}, lock, []string{"pick", "leaseRows", "next", "COMMIT"}),
-			func() { delivery = receive(t, fx.broker, 10)[0] })
+		expect("a Receive that does not fill its batch", partial, func() { delivery = receive(t, fx.broker, 10)[0] })
 		expect("an Ack", []string{"ack"}, func() {
 			if err := fx.broker.Ack(t.Context(), delivery.Lease.Receipt); err != nil {
 				t.Fatalf("Ack() = %v", err)
