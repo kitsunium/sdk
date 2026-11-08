@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
-	github.com/klauspost/compress v1.19.2
+	github.com/klauspost/compress v1.20.2
 )
 
 replace github.com/kitsunium/sdk/internal => ../../internal
