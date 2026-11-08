@@ -205,6 +205,10 @@ var reservedTables = map[string]string{
 // or lowers, a digest meeting another. Each is said at the app.Database.
 func (a *App) tableProblems(d *database) []string {
 	seen := maps.Clone(reservedTables)
+	// maps.Clone(nil) is nil, and seen is written below (KTN-VAR-CLONENIL).
+	if seen == nil {
+		seen = make(map[string]string)
+	}
 	var out []string
 	for _, t := range a.frameworkTables(d) {
 		if owner, taken := seen[t.name]; taken && owner != t.node {
