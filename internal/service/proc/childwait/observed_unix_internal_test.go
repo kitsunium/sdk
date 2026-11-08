@@ -51,6 +51,12 @@ func TestReapAnyObservedReportsEveryCollection(t *testing.T) {
 	deadline := time.Now().Add(reapDeadline)
 	//: sweep until the three children are reported, or out of patience.
 	for len(seen) < 3 && time.Now().Before(deadline) {
+		//: SIGKILL again until it is collected: this test's own child, and a
+		//: kill landing in the child's exec window can be lost (seen on NetBSD,
+		//: where the process then ran its full sleep).
+		if len(seen[killed.Pid]) == 0 {
+			_ = killed.Signal(syscall.SIGKILL)
+		}
 		pid, rerr := ReapAnyObserved(observe)
 		//: nothing ready yet, or interrupted: sweep again.
 		if errors.Is(rerr, syscall.EINTR) || (rerr == nil && pid == 0) {
