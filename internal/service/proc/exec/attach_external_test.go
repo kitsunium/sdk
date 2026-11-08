@@ -89,7 +89,9 @@ func TestAttachStop(t *testing.T) {
 		t.Fatalf("Stop = %v", sErr)
 	}
 	exit, wErr := child.Wait()
-	if wErr != nil || !exit.Signaled || exit.Signal != coreproc.Signal(syscall.SIGTERM) {
+	//: the signal ends the child: killed outright, or the shell that was still
+	//: starting reports it as its own status, 128+15 (OpenBSD's ksh).
+	if wErr != nil || !((exit.Signaled && exit.Signal == coreproc.Signal(syscall.SIGTERM)) || (!exit.Signaled && exit.Code == 143)) {
 		t.Errorf("the child's exit = %+v, %v, want SIGTERM", exit, wErr)
 	}
 }

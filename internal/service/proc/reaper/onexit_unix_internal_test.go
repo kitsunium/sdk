@@ -4,6 +4,8 @@ package reaper
 
 import (
 	"os"
+	osexec "os/exec"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -54,7 +56,11 @@ func TestWithOnExitReportsAnOrphansEnd(t *testing.T) {
 	}
 	got := events[killed.Pid]
 	if len(got) != 1 || got[0].Owned || !got[0].Exit.Signaled || got[0].Exit.Signal != coreproc.Signal(syscall.SIGKILL) || got[0].Exit.Code != -1 {
-		t.Fatalf("the killed orphan reported %+v, want one unowned SIGKILL", got)
+		//: what the process and the kernel say, for the run that fails.
+		ps, _ := osexec.Command("ps", "-o", "pid,ppid,stat,command", "-p", strconv.Itoa(killed.Pid)).CombinedOutput()
+		var ws syscall.WaitStatus
+		wpid, werr := syscall.Wait4(killed.Pid, &ws, syscall.WNOHANG, nil)
+		t.Fatalf("the killed orphan reported %+v, want one unowned SIGKILL (ps %q, wait4 %d, %v, status %#x)", got, ps, wpid, werr, uint32(ws))
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/cilium/ebpf/asm"
@@ -207,8 +209,9 @@ func verifyProgram(insns asm.Instructions) (map[string]int, error) {
 			return nil, fmt.Errorf("instruction %d (%v) is unreachable", i, insns[i])
 		}
 	}
-	//: the jumps resolve.
-	if err := marshalable(insns).Marshal(io.Discard, hostOrder()); err != nil {
+	//: the jumps resolve; the encoding itself is Linux's (asm refuses a
+	//: Linux-only helper elsewhere), the decisions stay the interpreter's.
+	if err := marshalable(insns).Marshal(io.Discard, hostOrder()); err != nil && (runtime.GOOS == "linux" || !strings.Contains(err.Error(), "not supported on "+runtime.GOOS)) {
 		return nil, fmt.Errorf("marshal: %w", err)
 	}
 	return labels, nil

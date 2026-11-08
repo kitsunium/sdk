@@ -70,6 +70,7 @@ func TestPrivilegedPrefixesAndTheSandbox(t *testing.T) {
 
 // storeConfig is a unit with a store, its template under sb.
 func storeConfig(t *testing.T, sb *coreproc.SandboxValue) Config {
+	storeHere(t)
 	return Config{
 		Name: "unit", Notify: stubNotify{}, FileDescriptorStoreMax: 4,
 		ExecStart: []coresvc.CommandValue{cmd(t, "/bin/main")},

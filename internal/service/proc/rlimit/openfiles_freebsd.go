@@ -19,7 +19,9 @@ const (
 
 // openFiles asks the kernel for the caller's descriptor count.
 func openFiles() (int, error) {
-	mib := [sysctlNameLen]int32{ctlKern, kernProc, kernProcNFDs, int32(syscall.Getpid())}
+	//: the name ends in 0: this sysctl answers for the calling process only,
+	//: and refuses any other (EINVAL).
+	mib := [sysctlNameLen]int32{ctlKern, kernProc, kernProcNFDs, 0}
 	var count int32
 	size := unsafe.Sizeof(count)
 	//: __sysctl(name, namelen, old, oldlenp, nil, 0).

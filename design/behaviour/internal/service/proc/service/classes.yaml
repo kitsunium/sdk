@@ -1426,7 +1426,7 @@ functions:
     results: error
   - doc: withinGroup reports whether path is the group dir or a group beneath it.
     name: withinGroup
-    params: dir, path string
+    params: dir, named string
     results: bool
   - doc: |-
       defaultType is TypeDefault resolved as systemd's service_add_extras does:

@@ -145,10 +145,11 @@ The codes — `0.3.91.1`–`9`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
   peer, a peer this account may not open) `RecvFiles` is `FD_PASS_REFUSED`
   and the sender keeps what it sent. A send whose write failed after a byte
   leaves the duplicates to the receiver rather than risk closing a handle
-  value this process reused. A TCP listener cannot be passed on Windows: the
-  net package gives a socket no `*os.File` there (`File` and `FileListener`
-  return EWINDOWS) — `TestATCPListenerHasNoFileOnWindows` fails the day it
-  does. None of this has run here (e2e-cross's Windows lane runs it).
+  value this process reused. A TCP listener is not passed on Windows: Go's
+  net now hands a socket an `*os.File` there (`TestATCPListenerFileOnWindows`
+  records it), but this package's `DuplicateHandle` route for a socket is
+  not written, and no test passes one (Refs #936). None of this has run here
+  (e2e-cross's Windows lane runs it).
 - **The directory rule is split by side (#1092).** `NewListener` keeps
   `checkDir`: the directory is this account's. `Dial` runs `checkDialDir`: the
   same chain, holder and entry rules — a real directory nobody but its owner can

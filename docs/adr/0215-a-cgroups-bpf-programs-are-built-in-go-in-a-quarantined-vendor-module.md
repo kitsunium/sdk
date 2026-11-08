@@ -144,8 +144,9 @@ is there. The attachment is the kernel's: it outlives the process that made
 it, until `Close` or the group's removal.
 
 The group is opened first, and refused (`ATTACH_FAILED`) when it is not on
-cgroup2fs or has no `cgroup.type` — the hierarchy's root, the machine's or a
-cgroup namespace's —, where a policy would bind everything.
+cgroup2fs, has no `cgroup.type` — the machine's hierarchy root — or is the
+top of its mount — a cgroup namespace's root, which keeps its `cgroup.type` —,
+where a policy would bind everything.
 
 ### 6. `RLIMIT_MEMLOCK` before 5.11, lazily
 

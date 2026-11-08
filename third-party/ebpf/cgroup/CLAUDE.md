@@ -36,9 +36,10 @@ returns a constant 0 or 1, the range the verifier holds a cgroup program to.
   `rlimit` package is NOT imported: its `init` lowers the limit to zero and
   calls `bpf()` in every program that links it.
 - `open`: the group's directory is opened and held; `fstatfs` must say
-  cgroup2fs and the directory must have a `cgroup.type` — the hierarchy's
-  root, the machine's or a namespace's, has none and is refused
-  (`ATTACH_FAILED`, step `hierarchy-root`).
+  cgroup2fs, the directory must have a `cgroup.type` (the machine's root
+  has none) and must not be the top of its cgroup2 mount (a cgroup
+  namespace's root, whose parent directory lies on another filesystem);
+  each refused as `ATTACH_FAILED`, step `hierarchy-root`.
 - `handle.add`: `ebpf.NewProgram` (`LOAD_REFUSED`, the verifier's log in the
   chain), then `link.RawAttachProgram` with `BPF_F_ALLOW_MULTI` and nothing
   else (`ATTACH_FAILED`). Not `link.AttachCgroup`: it tries `bpf_link` — gone

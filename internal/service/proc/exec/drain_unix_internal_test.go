@@ -96,6 +96,11 @@ func TestWait_drainGraceBoundsTheCopierJoin(t *testing.T) {
 		if c.advance {
 			//: the drain timer is the only one this handle arms.
 			manual.BlockUntil(1)
+			//: the copier reads what the leader wrote on its own schedule; wait
+			//: for it before the grace closes, this test is about the expiry.
+			for deadline := time.Now().Add(5 * time.Second); out.String() != c.wantOutput && time.Now().Before(deadline); {
+				time.Sleep(time.Millisecond)
+			}
 			manual.Advance(defaultDrainGrace)
 		}
 		var got waitResult

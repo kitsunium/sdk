@@ -36,6 +36,12 @@ func TestReservedEnvKeysListed(t *testing.T) {
 	}
 }
 
+// isProductionSource reports whether entry is a production Go file.
+func isProductionSource(entry os.DirEntry) bool {
+	name := entry.Name()
+	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+}
+
 // declaredReservedKeys parses the package's production files and returns,
 // sorted, the value of every string constant that begins reservedEnvPrefix.
 func declaredReservedKeys(t *testing.T) []string {
@@ -43,6 +49,12 @@ func declaredReservedKeys(t *testing.T) []string {
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("reading the package directory: %v", err)
+	}
+	//: a test binary run away from its sources (the guests of
+	//: scripts/ci/run-test-binaries.sh) has nothing to scan; the scan runs under
+	//: go test, and under Bazel through the go_test's data.
+	if !slices.ContainsFunc(entries, isProductionSource) {
+		t.Skip("no production source beside this test binary: the scan needs the package's directory")
 	}
 	fset := token.NewFileSet()
 	var out []string

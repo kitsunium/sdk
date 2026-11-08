@@ -1849,9 +1849,9 @@ sequences:
         to: invalid
   - of: withinGroup
     steps:
-      - set: dir, path
-        value: filepath.Clean(dir), filepath.Clean(path)
-      - return: path == dir || strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/")
+      - set: dir, named
+        value: path.Clean(dir), path.Clean(named)
+      - return: named == dir || strings.HasPrefix(named, strings.TrimSuffix(dir, "/")+"/")
   - of: (*step).onBusName
     participants:
       - id: caller

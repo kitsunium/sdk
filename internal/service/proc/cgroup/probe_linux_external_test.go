@@ -68,8 +68,11 @@ func TestProbeNamesTheOwnGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Probe = %v", err)
 	}
-	//: the own group ends with the membership path (the mount may expose a subtree).
-	if got.OwnGroup == "" || !strings.HasSuffix(filepath.Clean("/"+got.OwnGroup), filepath.Base(filepath.Clean("/"+v2))) {
+	base := filepath.Base(filepath.Clean("/" + v2))
+	//: the own group ends with the membership path (the mount may expose a
+	//: subtree); a process in the root group (no cgroup manager: OpenRC, a bare
+	//: init) has membership "/", whose directory is the mount itself.
+	if got.OwnGroup == "" || (base != "/" && !strings.HasSuffix(filepath.Clean("/"+got.OwnGroup), base)) {
 		t.Fatalf("OwnGroup = %q, want the directory of %q", got.OwnGroup, v2)
 	}
 }

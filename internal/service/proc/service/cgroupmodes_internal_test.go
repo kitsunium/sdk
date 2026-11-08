@@ -70,8 +70,12 @@ func TestCgroupSettings(t *testing.T) {
 	}
 	beneath := Config{Name: "u", ExecStart: []coresvc.CommandValue{cmd(t, "/bin/d")}, Cgroup: &unitStub{path: unitDir}}
 	beneath.Spec.CgroupPath = unitDir + "/service"
-	if s, rerr := resolve(&beneath); rerr != nil || s.cgroupPath != "" {
-		t.Fatalf("a group beneath: path %q, %v; want the template's kept", s.cgroupPath, rerr)
+	s, rerr := resolve(&beneath)
+	if rerr != nil {
+		t.Fatalf("a group beneath: %v; want the template's kept", rerr)
+	}
+	if s.cgroupPath != "" {
+		t.Fatalf("a group beneath: path %q; want the template's kept", s.cgroupPath)
 	}
 	outside := beneath
 	outside.Spec.CgroupPath = "/sys/fs/cgroup/test.slice/other"

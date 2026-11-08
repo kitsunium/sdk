@@ -1,7 +1,7 @@
 package service
 
 import (
-	"path/filepath"
+	"path"
 	"strings"
 
 	coresvc "github.com/kitsunium/sdk/internal/core/proc/service"
@@ -95,8 +95,8 @@ func resolveCgroupPath(cfg *Config, s *settings, dir string) error {
 }
 
 // withinGroup reports whether path is the group dir or a group beneath it.
-func withinGroup(dir, path string) bool {
-	dir, path = filepath.Clean(dir), filepath.Clean(path)
+func withinGroup(dir, named string) bool {
+	dir, named = path.Clean(dir), path.Clean(named)
 	//: the group itself, or below it.
-	return path == dir || strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/")
+	return named == dir || strings.HasPrefix(named, strings.TrimSuffix(dir, "/")+"/")
 }

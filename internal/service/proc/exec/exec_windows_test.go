@@ -8,6 +8,7 @@ package exec_test
 
 import (
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -187,17 +188,38 @@ func TestWindowsStop(t *testing.T) {
 	}
 }
 
-// TestWindowsDrainGraceBoundsWait spawns a capture child that starts a
-// background ping sharing its stdout and exits at once (#1088): the ping holds
-// the pipe for seconds, so Wait returns once the default one-second drain
-// grace closes, with the child's own exit code 0 and STDIO_DRAIN_TIMEOUT —
-// not when the ping ends.
+// windowsDrainHelperEnv marks the child of TestWindowsDrainGraceBoundsWait: a
+// process that leaves a grandchild holding its stdout and exits at once.
+const windowsDrainHelperEnv string = "KITSUNIUM_WINDOWS_DRAIN_HELPER"
+
+// TestWindowsDrainGraceBoundsWait re-executes this test binary as a capture
+// child that starts a grandchild sharing its stdout and exits at once (#1088):
+// the grandchild holds the pipe for seconds, so Wait returns once the default
+// one-second drain grace closes, with the child's own exit code 0 and
+// STDIO_DRAIN_TIMEOUT — not when the grandchild ends. A shell is no use here:
+// cmd.exe's "start /b" never returned on the windows-latest runner, with no
+// console to attach to (#1088, first run of this suite).
 func TestWindowsDrainGraceBoundsWait(t *testing.T) {
+	//: the helper itself: a process that leaves a grandchild holding stdout.
+	if os.Getenv(windowsDrainHelperEnv) != "" {
+		ping := osexec.Command("ping", "-n", "8", "127.0.0.1")
+		ping.Stdout = os.Stdout
+		//: the helper's own failure, read by the parent as a non-zero exit.
+		if err := ping.Start(); err != nil {
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
 	t.Parallel()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("Executable: %v", err)
+	}
 	var out strings.Builder
 	p, err := svcexec.Start(t.Context(), coreproc.Spec{
-		Path:   comspec(t),
-		Args:   []string{"cmd", "/c", "start /b ping -n 8 127.0.0.1 & exit 0"},
+		Path:   self,
+		Args:   []string{self, "-test.run=^TestWindowsDrainGraceBoundsWait$"},
+		Env:    append(os.Environ(), windowsDrainHelperEnv+"=1"),
 		Stdio:  coreproc.StdioCapture,
 		Stdout: &out,
 	})
@@ -205,15 +227,29 @@ func TestWindowsDrainGraceBoundsWait(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	start := time.Now()
-	exit, werr := p.Wait()
+	type result struct {
+		exit coreproc.ExitValue
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		exit, werr := p.Wait()
+		done <- result{exit, werr}
+	}()
+	var got result
+	select {
+	case got = <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Wait did not return within 30 s: the drain grace did not bound the copier join")
+	}
 	if elapsed := time.Since(start); elapsed > 4*time.Second {
 		t.Errorf("Wait took %v: the drain grace did not bound the copier join", elapsed)
 	}
-	if exit.Code != 0 {
-		t.Errorf("exit Code = %d, want the child's own 0", exit.Code)
+	if got.exit.Code != 0 {
+		t.Errorf("exit Code = %d, want the child's own 0", got.exit.Code)
 	}
-	if !errs.HasCode(werr, coreproc.CodeStdioDrainTimeout) {
-		t.Fatalf("Wait = %v, want STDIO_DRAIN_TIMEOUT", werr)
+	if !errs.HasCode(got.err, coreproc.CodeStdioDrainTimeout) {
+		t.Fatalf("Wait = %v, want STDIO_DRAIN_TIMEOUT", got.err)
 	}
 }
 

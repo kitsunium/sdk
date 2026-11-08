@@ -3,6 +3,7 @@
 package exec
 
 import (
+	"os"
 	"syscall"
 	"testing"
 	"unsafe"
@@ -30,6 +31,11 @@ func Test_Start_schedulingFreeBSD(t *testing.T) {
 		Scheduling: &coreproc.SchedulingValue{Policy: coreproc.SchedIdle, Priority: 10},
 	})
 	if err != nil {
+		//: rtprio(RTP_SET) to the idle class needs root, or
+		//: security.bsd.unprivileged_idprio: the kernel's refusal, typed.
+		if os.Geteuid() != 0 && errs.HasCode(err, coreproc.CodeRlimitFailed) {
+			t.Skipf("rtprio(idle) refused without privilege: %v", err)
+		}
 		t.Fatalf("Start(SchedIdle) = %v", err)
 	}
 	defer func() {

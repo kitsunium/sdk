@@ -4,6 +4,7 @@ package service
 
 import (
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -51,8 +52,26 @@ func (h *harness) names() []string {
 	return out
 }
 
+// storeHere lets a store test run where the store exists, and elsewhere checks
+// the refusal and skips: the descriptor store is Linux's, every other platform
+// refuses FileDescriptorStoreMax= (TestStoreRefusedOffLinux, off Linux).
+func storeHere(t *testing.T) {
+	t.Helper()
+	//: the store's platform.
+	if runtime.GOOS == "linux" {
+		return
+	}
+	cfg := Config{Name: "u", Notify: stubNotify{}, FileDescriptorStoreMax: 1, ExecStart: []coresvc.CommandValue{cmd(t, "/bin/d")}}
+	//: anywhere else the directive is refused by name, and the test has no store to read.
+	if _, err := resolve(&cfg); !hasCode(err, coresvc.CodeDirectiveUnsupported) || field(err, "directive") != "FileDescriptorStoreMax" {
+		t.Fatalf("FileDescriptorStoreMax=1 off Linux: %v, want DIRECTIVE_UNSUPPORTED", err)
+	}
+	t.Skipf("the descriptor store is Linux's; FileDescriptorStoreMax= is refused on %s", runtime.GOOS)
+}
+
 // storing is a simple unit with a store of max descriptors.
 func storing(t *testing.T, max int) Config {
+	storeHere(t)
 	return Config{Notify: stubNotify{}, FileDescriptorStoreMax: max, ExecStart: []coresvc.CommandValue{cmd(t, "/bin/d")}}
 }
 
@@ -283,6 +302,7 @@ func TestStoreHangup(t *testing.T) {
 // NotifySource and implies NotifyAccess=main, every command gets $FDSTORE,
 // and the store's key follows ExecStart=, the user and the groups.
 func TestStoreSettings(t *testing.T) {
+	storeHere(t)
 	start := []coresvc.CommandValue{cmd(t, "/bin/d")}
 	for _, cfg := range []Config{
 		{FileDescriptorStoreMax: -1, Notify: stubNotify{}},

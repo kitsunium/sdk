@@ -176,9 +176,28 @@ func corePatternWritesAFile() bool {
 	return p != "" && !strings.HasPrefix(p, "|") && !strings.HasPrefix(p, "/")
 }
 
+// corePatternPipes reports whether the kernel hands a core dump to a program
+// (core_pattern starts with "|", as apport and systemd-coredump do): core(5)
+// says RLIMIT_CORE is not enforced for a dump piped to a program, so a limit
+// of zero does not stop WCOREDUMP there.
+func corePatternPipes() bool {
+	//: only Linux names its pattern in procfs.
+	if runtime.GOOS != "linux" {
+		//: no pattern to read.
+		return false
+	}
+	pattern, err := os.ReadFile("/proc/sys/kernel/core_pattern")
+	//: an unreadable pattern is an unknown destination, treated as not piping.
+	if err != nil {
+		//: cannot tell.
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(pattern)), "|")
+}
+
 // segvSpec returns a spec whose shell kills itself with SIGSEGV in dir, its
 // RLIMIT_CORE set to core (soft and hard), so the kernel dumps core exactly
-// when core is not zero.
+// when core is not zero, a pattern piping to a program aside (corePatternPipes).
 func segvSpec(dir string, core uint64) coreproc.Spec {
 	//: kill -SEGV $$ is a SIGSEGV death whatever sent it: the default action dumps.
 	return coreproc.Spec{
@@ -241,8 +260,9 @@ func TestWait_coreDumpedAndUsageAgreeOnBothPaths(t *testing.T) {
 		if (got.Usage != nil) != rusageReported() {
 			t.Errorf("Usage = %+v, want a value exactly where the kernel reports one", got.Usage)
 		}
-		//: RLIMIT_CORE at zero never dumps, on any kernel.
-		if c.core == 0 && got.CoreDumped {
+		//: RLIMIT_CORE at zero stops a dump to a file; a pattern that pipes to a
+		//: program is not bound by it (core(5)), where the kernel still dumps.
+		if c.core == 0 && !corePatternPipes() && got.CoreDumped {
 			t.Errorf("CoreDumped = true with RLIMIT_CORE at zero")
 		}
 		//: an allowed dump is asserted where its destination is the child's dir.

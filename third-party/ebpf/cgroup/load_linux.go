@@ -20,9 +20,10 @@ import (
 // license is the programs' license string: they call no GPL-only helper.
 const license = "MIT"
 
-// cgroupTypeFile is a file every cgroup v2 group has but a hierarchy's
-// root: its absence is how the root — of the machine, or of a cgroup
-// namespace — is recognised and refused.
+// cgroupTypeFile is a file every cgroup v2 group has but the machine's
+// hierarchy root: its absence is how that root is recognised and refused. A
+// cgroup namespace's root keeps it, being a group of the machine's hierarchy,
+// and is recognised by being the top of its mount.
 const cgroupTypeFile = "cgroup.type"
 
 // groupOpenFlags open a group's directory to attach to: a directory, read
@@ -217,7 +218,24 @@ func checkGroup(dir int) (string, error) {
 	var st unix.Stat_t
 	//: a group that is not the root has a cgroup.type.
 	if err := unix.Fstatat(dir, cgroupTypeFile, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-		//: the root of the machine, or of a namespace: a policy there binds everything.
+		//: the machine's root: a policy there binds everything.
+		return "hierarchy-root", unix.EPERM
+	}
+	var self, parent unix.Stat_t
+	//: the group's identity and its parent directory's.
+	if err := unix.Fstat(dir, &self); err != nil {
+		//: unreadable.
+		return "statfs", err
+	}
+	//: ".." from the top of a mount reaches the filesystem it is mounted on.
+	if err := unix.Fstatat(dir, "..", &parent, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		//: unreadable.
+		return "statfs", err
+	}
+	//: the top of its cgroup2 mount is a cgroup namespace's root: a policy
+	//: there binds the whole namespace, as one on the machine's root would.
+	if parent.Dev != self.Dev {
+		//: refused, as the machine's root is.
 		return "hierarchy-root", unix.EPERM
 	}
 	//: a group below a root.

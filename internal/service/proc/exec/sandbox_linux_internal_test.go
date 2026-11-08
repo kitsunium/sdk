@@ -471,18 +471,30 @@ func TestSandboxPivotRoot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	var binds []coreproc.MountValue
 	for _, l := range []string{"bin", "lib", "lib64"} {
-		if target, err := os.Readlink("/" + l); err == nil {
+		target, err := os.Readlink("/" + l)
+		//: a merged /usr: the same link in the new root.
+		if err == nil {
 			if err := os.Symlink(target, filepath.Join(root, l)); err != nil {
 				t.Fatal(err)
 			}
+			continue
+		}
+		//: a real directory (Alpine's /bin and /lib): bound read-only, the new
+		//: root's /bin/sh and its loader are there.
+		if info, statErr := os.Stat("/" + l); statErr == nil && info.IsDir() {
+			if err := os.Mkdir(filepath.Join(root, l), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			binds = append(binds, coreproc.MountValue{Kind: coreproc.MountBind, Source: "/" + l, Target: filepath.Join(root, l), ReadOnly: true})
 		}
 	}
 	sb := inUserNS(coreproc.NamespaceMount)
-	sb.Mounts = []coreproc.MountValue{
+	sb.Mounts = append([]coreproc.MountValue{
 		{Kind: coreproc.MountBind, Source: "/usr", Target: filepath.Join(root, "usr"), ReadOnly: true},
 		{Kind: coreproc.MountBind, Source: out, Target: filepath.Join(root, "out")},
-	}
+	}, binds...)
 	sb.Root = root
 	spec := coreproc.Spec{Path: "/bin/sh", Args: []string{"sh", "-c", `ls / > /out/ls; pwd > /out/pwd`}, Dir: "/out", Sandbox: sb, Stdio: coreproc.StdioNull}
 	_, err := startWait(t, spec)

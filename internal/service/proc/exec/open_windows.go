@@ -132,10 +132,14 @@ func (f *foreign) Stop(ctx context.Context, grace time.Duration, sig coreproc.Si
 			return err
 		}
 	}
-	//: the forced terminate, through the HANDLE.
+	//: the forced terminate, through the HANDLE; a process the first kill
+	//: already ended answers ACCESS_DENIED here, and is simply gone.
 	if err := f.SignalHandle(coreproc.Signal(syscall.SIGKILL)); err != nil {
-		//: the process could not be stopped.
-		return wrapStop(err, errs.Int("pid", f.pid))
+		event, wErr := syscall.WaitForSingleObject(f.handle, 0)
+		//: not ended after all: the process could not be stopped.
+		if wErr != nil || event != waitObject0 {
+			return wrapStop(err, errs.Int("pid", f.pid))
+		}
 	}
 	_, err := f.awaitExit(ctx, time.Time{})
 	//: nil once gone, ctx's error otherwise.
