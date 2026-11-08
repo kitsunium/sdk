@@ -9,7 +9,7 @@ sequences:
           init:
             bind: i
             eval: int(c)
-          when: i < 0 || i >= len(capabilityNames)
+          when: i < 0 || i >= len(capabilityNames) || capabilityNames[i] == ""
       - return: capabilityNames[c]
   - of: Supported
     participants:
@@ -28,6 +28,13 @@ sequences:
           when: "!ok"
       - return: slices.Contains(goss, runtime.GOOS)
         to: slices
+  - of: sandboxGOOS
+    steps:
+      - opt:
+          do:
+            - return: "[]string{\"linux\"}"
+          when: arch == "amd64" || arch == "arm64"
+      - return: nil
   - of: MustSupport
     participants:
       - id: caller

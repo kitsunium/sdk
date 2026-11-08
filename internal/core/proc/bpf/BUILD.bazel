@@ -1,0 +1,45 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit: proc/bpf declares the 0.2.58.* codes (ADR 0215).
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
+
+go_library(
+    name = "bpf",
+    srcs = [
+        "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
+        "validate.go",
+        "values.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/proc/bpf",
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":bpf",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "bpf_test",
+    srcs = [
+        "gen_api_test.go",
+        "validate_external_test.go",
+    ],
+    deps = [
+        ":bpf",
+        "//internal/kernel/errs",
+    ],
+)

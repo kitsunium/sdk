@@ -47,8 +47,8 @@ const int64Bits int = 64
 const maxWatchdogUsec int64 = math.MaxInt64 / int64(time.Microsecond)
 
 // wrapInvalid restates the InvalidNotification sentinel fields around a cause,
-// attaching the offending field for diagnostics.
-func wrapInvalid(cause error, field errs.FieldValue) error {
+// attaching the offending fields for diagnostics.
+func wrapInvalid(cause error, fields ...errs.FieldValue) error {
 	//: copy the exact sentinel strings so the wrapped error matches the code.
 	return errs.Wrap(cause, errs.WrapParams{
 		Code:     coreproc.CodeInvalidNotification,
@@ -56,7 +56,7 @@ func wrapInvalid(cause error, field errs.FieldValue) error {
 		Public:   "Received sd_notify datagram is malformed",
 		Private:  "service/proc/systemd/notify.Recv: datagram did not parse into NAME=value fields",
 		ExitCode: exitDataErr,
-	}, field)
+	}, fields...)
 }
 
 // resolveAddr turns a $NOTIFY_SOCKET value into the AF_UNIX name to bind/connect:
@@ -114,7 +114,9 @@ func encodePayload(state map[string]string) (body string, err error) {
 
 // parsePayload splits a received datagram body into a NotificationValue, lifting
 // STATUS / MAINPID into their typed fields. It returns InvalidNotification when a
-// non-empty line carries no '=' or MAINPID is not a base-10 integer.
+// non-empty line carries no '=', or an assignment sd_notify(3) defines carries a
+// value out of its bounds (checkAssignments). A name given twice keeps its last
+// value.
 func parsePayload(body string) (value coreproc.NotificationValue, err error) {
 	//: State is always non-nil so callers can index it without a guard.
 	state := make(map[string]string)
@@ -134,6 +136,11 @@ func parsePayload(body string) (value coreproc.NotificationValue, err error) {
 		}
 		//: preserve the raw field verbatim in State.
 		state[name] = val
+	}
+	//: every assignment sd_notify(3) defines, within its bounds (#730).
+	if err = checkAssignments(state); err != nil {
+		//: INVALID_NOTIFICATION naming the assignment.
+		return coreproc.NotificationValue{}, err
 	}
 	//: MAINPID, when present, must be a base-10 PID.
 	mainPID, err := mainPIDFromState(state)

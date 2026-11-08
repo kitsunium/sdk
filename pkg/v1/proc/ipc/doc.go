@@ -20,8 +20,10 @@
 //   - The PEER'S CREDENTIALS, where the kernel gives them: on Linux,
 //     SO_PEERCRED names the peer's user, group and process, and a peer that is
 //     neither this account nor in Config.AllowUIDs / AllowGIDs is closed
-//     before Accept returns it. On Windows each end reads the other's account
-//     from its process token ([Peer].SID) and refuses another one. Elsewhere
+//     before Accept returns it — and so, since #1093, do FreeBSD, DragonFly
+//     and NetBSD, where an unnamed peer is refused too. On Windows each end
+//     reads the other's account from its process token ([Peer].SID) and
+//     refuses another one. On darwin, OpenBSD, illumos and Solaris
 //     [Peer].Verified is false and the directory is the only gate.
 //
 // # The path to the directory is part of the gate

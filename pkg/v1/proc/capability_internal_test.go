@@ -7,6 +7,7 @@ package proc
 import (
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -32,8 +33,8 @@ func Test_unsupportedError(t *testing.T) {
 		{
 			name: "every capability at once overflows the ceiling",
 			missing: []Capability{
-				CapProcessSpawn, CapRlimit, CapUmaskNiceOOM, CapCgroup,
-				CapReaper, CapSignalRelay, CapSdNotify, CapSocketActivation,
+				CapProcessSpawn, CapRlimit, CapUmaskNice, CapCgroup,
+				CapReaper, CapSignalRelay, CapSdNotify, CapSocketActivation, CapOOMScoreAdj,
 			},
 			wantList: false,
 		},
@@ -87,6 +88,10 @@ func Test_capabilityGOOS(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s has a name but no GOOS row: it would be unsupported everywhere", c)
 		}
+		//: CapSandbox's row is written per architecture: empty off amd64 and arm64.
+		if c == CapSandbox && len(sandboxGOOS(runtime.GOARCH)) == 0 {
+			return
+		}
 		if len(targets) == 0 {
 			t.Errorf("%s has an empty GOOS row", c)
 		}
@@ -102,6 +107,17 @@ func Test_capabilityGOOS(t *testing.T) {
 	}
 	tests := make([]tc, 0, len(capabilityNames))
 	for i, name := range capabilityNames {
+		//: a value no capability holds (CapOOMScoreAdj is numbered apart) has no
+		//: row either, and String renders it as a number.
+		if name == "" {
+			if _, ok := capabilityGOOS[Capability(i)]; ok {
+				t.Errorf("Capability(%d) names nothing but has a GOOS row", i)
+			}
+			if got, want := Capability(i).String(), "Capability("+strconv.Itoa(i)+")"; got != want {
+				t.Errorf("Capability(%d).String() = %q, want %q", i, got, want)
+			}
+			continue
+		}
 		tests = append(tests, tc{name, Capability(i)})
 	}
 	for _, c := range tests {
@@ -109,5 +125,17 @@ func Test_capabilityGOOS(t *testing.T) {
 			t.Parallel()
 			runCase(t, c.cap)
 		})
+	}
+}
+
+// Test_sandboxGOOS pins CapSandbox's row per architecture: Linux on amd64 and
+// arm64, whose system call tables the sandbox is written against, and no GOOS
+// on any other.
+func Test_sandboxGOOS(t *testing.T) {
+	t.Parallel()
+	for arch, want := range map[string][]string{"amd64": {"linux"}, "arm64": {"linux"}, "386": nil, "riscv64": nil, "s390x": nil} {
+		if got := sandboxGOOS(arch); !slices.Equal(got, want) {
+			t.Errorf("sandboxGOOS(%q) = %q, want %q", arch, got, want)
+		}
 	}
 }

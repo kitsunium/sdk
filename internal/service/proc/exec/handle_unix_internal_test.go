@@ -22,6 +22,7 @@ import (
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/proc/childwait"
 )
 
 // startChild spawns a shell running program and returns its handle once the
@@ -1173,8 +1174,8 @@ func Test_readRusage(t *testing.T) {
 		if out.SystemTime != timevalToDuration(c.ru.Stime) {
 			t.Errorf("SystemTime = %v, want %v", out.SystemTime, timevalToDuration(c.ru.Stime))
 		}
-		if out.MaxRSS != maxRSSKB(&ru) {
-			t.Errorf("MaxRSS = %d, want %d", out.MaxRSS, maxRSSKB(&ru))
+		if out.MaxRSS != childwait.MaxRSSKB(&ru) {
+			t.Errorf("MaxRSS = %d, want %d", out.MaxRSS, childwait.MaxRSSKB(&ru))
 		}
 	}
 	for _, c := range tests {

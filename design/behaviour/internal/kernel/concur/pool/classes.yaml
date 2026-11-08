@@ -1,0 +1,186 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - Config
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Task
+      - Pool
+      - NewPool
+      - (*Pool).Submit
+      - (*Pool).Drain
+      - (*Pool).Stop
+      - (*Pool).close
+      - (*Pool).work
+      - (*Pool).next
+      - (*Pool).leftover
+      - (*Pool).serve
+      - (*Pool).run
+      - PanicValue
+      - PanicValue.String
+    name: pool.go
+functions:
+  - name: NewPool
+    params: ctx context.Context, cfg Config
+    results: "*Pool"
+imports:
+  atomic: sync/atomic
+  context: context
+  debug: runtime/debug
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  strings: strings
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/concur/pool
+  name: pool
+  purpose: "Package pool provides Pool, a bounded worker pool: a fixed set of long-lived workers consuming a bounded queue of tasks, with a refusal when there is no room, a drain, and a task's panic isolated on its worker."
+types:
+  - fields:
+      - doc: |-
+          Workers is how many tasks run at once, each on a long-lived worker; a
+          value below 1 is 1.
+        name: Workers
+        type: int
+      - doc: |-
+          Queue is how many submitted tasks may wait for a worker. Zero is no
+          queue: Submit refuses at once when every worker is busy. A positive
+          queue makes a Submit that finds it full wait, within its context. A
+          negative value is zero.
+        name: Queue
+        type: int
+      - doc: |-
+          OnPanic receives a task's panic, recovered on its worker, which then
+          serves the next task. Nil raises the panic again on the worker: a fault
+          nobody observes is not swallowed, and the process ends as it would for
+          a bare goroutine.
+        name: OnPanic
+        type: func(p PanicValue)
+      - doc: |-
+          OnError receives a task's non-nil error, which has no caller to return
+          to. Nil discards it.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    name: Config
+  - kind: named
+    name: Task
+    underlying: func(ctx context.Context) error
+  - fields:
+      - doc: |-
+          tasks carries submitted tasks to the workers: unbuffered when the pool
+          has no queue, so a send lands only on an idle worker. It is never
+          closed: stopped tells the workers the sends are over.
+        name: tasks
+        type: chan Task
+      - doc: |-
+          queued reports whether tasks is buffered: a full queue is waited on,
+          within the submitter's context, instead of refused at once.
+        name: queued
+        type: bool
+      - doc: ctx is every task's context; cancel ends it, on Stop.
+        name: ctx
+        type: context.Context
+      - name: cancel
+        type: context.CancelFunc
+      - doc: onPanic and onError observe what a task's worker cannot return.
+        name: onPanic
+        type: func(PanicValue)
+      - name: onError
+        type: func(err error)
+      - doc: |-
+          mu orders a send on tasks against the end of the sends: Submit sends
+          under the read lock with closed false, and closing sets closed under the
+          write lock before closing stopped, so once a worker sees stopped no task
+          will ever be sent again and what it finds queued is all there is.
+        name: mu
+        type: sync.RWMutex
+      - name: closed
+        type: bool
+      - doc: |-
+          quit is closed when the pool stops accepting, waking a Submit waiting
+          for room so that closing never waits on a submitter's context; stopped
+          is closed after the last send, telling the workers to empty the queue
+          and leave. closeOnce makes the two closes once.
+        name: quit
+        type: chan struct{}
+      - name: stopped
+        type: chan struct{}
+      - name: closeOnce
+        type: sync.Once
+      - doc: "abandon is set by Stop: a worker drops each task it takes from then on."
+        name: abandon
+        type: atomic.Bool
+      - doc: |-
+          workers counts the running workers; done is closed, once, when the last
+          one is out.
+        name: workers
+        type: sync.WaitGroup
+      - name: done
+        type: chan struct{}
+      - name: doneOnce
+        type: sync.Once
+    kind: struct
+    methods:
+      - name: Submit
+        params: ctx context.Context, task Task
+        recv: p *Pool
+        results: error
+      - name: Drain
+        params: ctx context.Context
+        recv: p *Pool
+        results: error
+      - name: Stop
+        params: ctx context.Context
+        recv: p *Pool
+        results: error
+      - doc: |-
+          close stops accepting: quit wakes a Submit waiting for room, the write
+          lock waits out every Submit inside its send, and stopped then tells the
+          workers that what is queued is all there will be. Idempotent.
+        name: close
+        recv: p *Pool
+      - doc: |-
+          work is one worker: it runs the tasks it receives until the sends are
+          over, then empties the queue and leaves — dropping the tasks unrun once
+          Stop has abandoned the queue.
+        name: work
+        recv: p *Pool
+      - doc: next waits for a task, or reports false once the sends are over.
+        name: next
+        recv: p *Pool
+        results: Task, bool
+      - doc: |-
+          leftover takes a task left in the queue without waiting, or reports false
+          when the queue is empty.
+        name: leftover
+        recv: p *Pool
+        results: Task, bool
+      - doc: serve runs task, unless Stop has abandoned the queue.
+        name: serve
+        params: task Task
+        recv: p *Pool
+      - doc: |-
+          run runs one task on this worker, recovering its panic into a PanicValue
+          for OnPanic so the worker serves the next task. With no OnPanic the panic
+          is raised again: a fault nobody observes is not swallowed.
+        name: run
+        params: task Task
+        recv: p *Pool
+    name: Pool
+  - fields:
+      - doc: Raised is the value the original panic carried, verbatim.
+        name: Raised
+        type: any
+      - doc: Stack is the stack of the worker goroutine, captured at recovery.
+        name: Stack
+        type: "[]byte"
+    kind: struct
+    methods:
+      - name: String
+        recv: p PanicValue
+        results: string
+    name: PanicValue

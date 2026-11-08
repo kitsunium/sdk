@@ -2,6 +2,7 @@ package buildinfo
 
 import (
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +26,18 @@ const (
 	settingVCSPrefix string = "vcs"
 	// settingTrue is how a boolean setting spells true.
 	settingTrue string = "true"
+	// The settings Go stamps for the toolchain that built the binary.
+	settingOS          string = "GOOS"
+	settingArch        string = "GOARCH"
+	settingCompiler    string = "-compiler"
+	settingBuildMode   string = "-buildmode"
+	settingTags        string = "-tags"
+	settingLDFlags     string = "-ldflags"
+	settingGODEBUG     string = "DefaultGODEBUG"
+	settingCgoEnabled  string = "CGO_ENABLED"
+	settingTrimpath    string = "-trimpath"
+	settingCgoOn       string = "1"
+	settingTagsJoining string = ","
 )
 
 // BuildValue is what the running binary was built from: the toolchain, the
@@ -44,7 +57,80 @@ type BuildValue struct {
 	// Deps are the dependencies linked into the binary, in the order the
 	// toolchain recorded them.
 	Deps []ModuleValue
+	// Toolchain is how the toolchain built the binary: the target, the
+	// compiler, the flags and the cgo setting, read from the build settings.
+	Toolchain ToolchainValue
+	// Settings are every build setting the toolchain recorded, verbatim and in
+	// its order — the vcs stamp and the toolchain's included, and a key a later
+	// toolchain adds that Toolchain does not name.
+	Settings []SettingValue
 }
+
+// SettingValue is one build setting as the toolchain recorded it: a key such
+// as "-trimpath", "CGO_ENABLED" or "vcs.revision", and its value.
+type SettingValue struct {
+	// Key names the setting, e.g. "-tags" or "GOAMD64".
+	Key string
+	// Value is the setting's value as recorded, e.g. "a,b" or "v3".
+	Value string
+}
+
+// ToolchainValue is how the toolchain built the binary, read by key from the
+// build settings it recorded. A setting the toolchain did not record leaves
+// its field zero: a build by the go command records the target and the
+// compiler, and one by Bazel records none of them.
+type ToolchainValue struct {
+	// OS is the target operating system, GOOS, e.g. "linux".
+	OS string
+	// Arch is the target architecture, GOARCH, e.g. "amd64".
+	Arch string
+	// ArchLevel is the architecture's feature level — GOAMD64, GOARM, GO386,
+	// GOARM64 and their siblings — e.g. "v3", which needs AVX2 on the host.
+	ArchLevel string
+	// Compiler is the compiler toolchain, -compiler, e.g. "gc".
+	Compiler string
+	// BuildMode is the -buildmode flag, e.g. "exe" or "pie".
+	BuildMode string
+	// Tags are the build tags, -tags, in the order given; none when the build
+	// named none.
+	Tags []string
+	// LDFlags is the -ldflags flag as given, e.g. "-s -w -X main.v=1".
+	LDFlags string
+	// DefaultGODEBUG is the GODEBUG default the binary runs with before its
+	// environment's, e.g. "httpmuxgo121=1".
+	DefaultGODEBUG string
+	// CgoEnabled reports that CGO_ENABLED was 1.
+	CgoEnabled bool
+	// Trimpath reports that -trimpath was set: file paths in panics and
+	// profiles are module paths, not the build machine's directories.
+	Trimpath bool
+}
+
+var (
+	// toolchainSettings reads each toolchain key the go command records into its
+	// field: a table, not a switch, so a key a later toolchain adds is one line.
+	toolchainSettings = map[string]func(*ToolchainValue, string){
+		settingOS:        func(d *ToolchainValue, v string) { d.OS = v },
+		settingArch:      func(d *ToolchainValue, v string) { d.Arch = v },
+		settingCompiler:  func(d *ToolchainValue, v string) { d.Compiler = v },
+		settingBuildMode: func(d *ToolchainValue, v string) { d.BuildMode = v },
+		//: the tags, comma-joined by the go command; an empty flag is no tag.
+		settingTags:    func(d *ToolchainValue, v string) { d.Tags = splitTags(v) },
+		settingLDFlags: func(d *ToolchainValue, v string) { d.LDFlags = v },
+		settingGODEBUG: func(d *ToolchainValue, v string) { d.DefaultGODEBUG = v },
+		//: cgo, which the go command records as 0 or 1.
+		settingCgoEnabled: func(d *ToolchainValue, v string) { d.CgoEnabled = v == settingCgoOn },
+		//: -trimpath, recorded only when set.
+		settingTrimpath: func(d *ToolchainValue, v string) { d.Trimpath = v == settingTrue },
+	}
+
+	// archLevelSettings are the keys the go command records the target
+	// architecture's feature level under — one per GOARCH that has one
+	// (cmd/go/internal/cfg.GetArchEnv).
+	archLevelSettings = [...]string{
+		"GO386", "GOAMD64", "GOARM", "GOARM64", "GOMIPS", "GOMIPS64", "GOPPC64", "GORISCV64", "GOWASM",
+	}
+)
 
 // ModuleValue is one module of the running binary, described by the code
 // that was actually built for it.
@@ -110,6 +196,16 @@ func (b *BuildValue) Module(path string) (found ModuleValue, ok bool) {
 	return ModuleValue{}, false
 }
 
+// Reproducible reports whether the build can be made again byte for byte
+// from its source: built with -trimpath, from a recorded revision, with no
+// uncommitted change. It is false for a build that does not say — one
+// outside version control, or a Bazel build, which stamps none of the
+// three.
+func (b *BuildValue) Reproducible() bool {
+	//: the three conditions together.
+	return b.Toolchain.Trimpath && b.Main.Revision != "" && !b.Main.Modified
+}
+
 // ReadBuild describes the running binary. It reports false when the binary
 // carries no build information — one built without module support — and
 // never fails otherwise.
@@ -139,6 +235,12 @@ func ParseBuild(info *debug.BuildInfo) BuildValue {
 		Path:      info.Path,
 		Main:      mainModule(&info.Main, info.Settings),
 		Deps:      make([]ModuleValue, 0, len(info.Deps)),
+		Settings:  make([]SettingValue, 0, len(info.Settings)),
+	}
+	//: every setting, verbatim, and the toolchain's read by key.
+	for _, setting := range info.Settings {
+		build.Settings = append(build.Settings, SettingValue{Key: setting.Key, Value: setting.Value})
+		toolchain(&build.Toolchain, setting)
 	}
 	//: in the order the toolchain recorded them.
 	for _, dep := range info.Deps {
@@ -190,6 +292,32 @@ func stamp(described *ModuleValue, setting debug.BuildSetting) {
 	//: every other setting describes the toolchain, not the module.
 	default:
 	}
+}
+
+// toolchain applies one build setting to the toolchain's description; a
+// setting that does not describe the toolchain leaves it unchanged.
+func toolchain(described *ToolchainValue, setting debug.BuildSetting) {
+	//: a key the go command records about how it built.
+	if apply, known := toolchainSettings[setting.Key]; known {
+		apply(described, setting.Value)
+		return
+	}
+	//: the feature level, under the key its architecture names: GOAMD64,
+	//: GOARM, GO386 and their siblings.
+	if slices.Contains(archLevelSettings[:], setting.Key) {
+		described.ArchLevel = setting.Value
+	}
+}
+
+// splitTags reads the go command's comma-joined -tags value.
+func splitTags(value string) []string {
+	//: no tag at all, rather than one empty tag.
+	if value == "" {
+		//: none.
+		return nil
+	}
+	//: in the order given.
+	return strings.Split(value, settingTagsJoining)
 }
 
 // dependency describes one dependency, following its replacement: the code

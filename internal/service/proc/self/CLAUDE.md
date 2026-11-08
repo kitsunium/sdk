@@ -14,7 +14,7 @@ What the binary was BUILT from was here too and is now
 start — about 0.03 ms of a status line's every render, for a figure it never
 reads.
 
-Stdlib only.
+Stdlib, plus `internal/core/proc` and `internal/kernel/errs` for the typed refusal of `SetOOMScoreAdj`, the one writer, and `internal/cgroupfs` for the container id (#938).
 
 ## Contents
 
@@ -23,14 +23,22 @@ Stdlib only.
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `stats.go` | `StatsValue`, `DistributionValue` + `Count` / `Quantile`, `ReadStats`, the runtime/metrics names, `lastGC`, `runtimeCPU` |
 | `cputime_unix.go` | `cpuTime` from `getrusage(RUSAGE_SELF)` — user plus system, every thread |
-| `cputime_other.go` | `cpuTime` as the runtime's estimate, flagged — Windows, Plan 9, wasm |
+| `cputime_other.go` | `cpuTime` as the runtime's estimate, flagged — Plan 9, wasm (Windows reads `GetProcessTimes`) |
+| `oomscore_linux.go` / `oomscore_other.go` | `SetOOMScoreAdj` (#940): the one writer here — the process's own `/proc/self/oom_score_adj`, `RlimitFailed` when the kernel refuses (out of range, lowering without `CAP_SYS_RESOURCE`), `UnsupportedPlatform` off Linux. Added by L4-exec; the read side (#938/#939) is L4-misc's |
+| `kernelmem_linux.go` / `kernelmem_unix.go` (+ `kernelmem_unit_darwin.go` / `kernelmem_unit_kib.go`) / `kernelmem_windows.go` / `kernelmem_other.go` | the kernel's view in `StatsValue` (#939): `RSSBytes`, `PeakRSSBytes`, `Threads`, `OpenFiles`, `KernelMemory` — `/proc/self/statm`, `status` (VmHWM, Threads) and `fd` on Linux; `ru_maxrss` for the peak on the other Unixes (bytes on darwin, KiB elsewhere); `K32GetProcessMemoryInfo` and `GetProcessHandleCount` on Windows |
+| `identity.go` / `identity_linux.go` / `identity_windows.go` / `identity_other.go` | `ReadIdentity`, `IdentityValue`, `StartSource` (#938): the kernel's start time (Linux `/proc/self/stat` field 22 in USER_HZ ticks after `/proc/stat` `btime`; Windows `GetProcessTimes`; the package init elsewhere, said by `StartedAtSource` — darwin/BSD `kinfo_proc` layouts are not bound), the binary's SHA-256 and Go build id (ELF `.note.go.buildid`, else the linker's raw mark in the first 32 KiB — `go tool buildid`'s two readings), the container id from the cgroup path through `internal/cgroupfs` (docker, cri-containerd, crio, libpod, kubepods), the pid namespace inode and NSpid 1, the boot id |
+| `cputime_windows.go` | `cpuTime` from `GetProcessTimes` (#938): `CPUEstimated` is false on Windows now |
 
 ## Why-this-shape
 
 - **The values live here, not in `core/proc`** (ADR 0074). No port of the proc
   domain speaks them and one mechanism produces them; hoisting them would put
   one reading of `runtime/debug` into the contract layer.
-- **No error anywhere.** Not being built with module support, a metric the
+- **One writer, one error.** `SetOOMScoreAdj` lets a supervisor that must
+  outlive its children lower its own OOM bias; a refused write is a fault the
+  caller acts on, so it alone returns an error. Its test runs in a helper
+  process: a raised bias cannot be lowered again without privilege.
+- **No error anywhere else.** Not being built with module support, a metric the
   toolchain does not export, a platform without `getrusage` — none is a fault a
   caller can act on. Each is a zero field, a `false`, or `CPUEstimated`, and
   each field's comment says which.

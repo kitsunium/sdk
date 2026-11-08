@@ -46,3 +46,13 @@ func TestPrepareUnsupportedOffUnix(t *testing.T) {
 		t.Fatalf("Prepare off Unix = %v, want CodeUnsupportedPlatform", err)
 	}
 }
+
+// TestPrepareFilesUnsupportedOffUnix asserts PrepareFiles refuses off Unix
+// (#739).
+func TestPrepareFilesUnsupportedOffUnix(t *testing.T) {
+	t.Parallel()
+	spec := listen.Spec{Path: "x"}
+	if err := listen.PrepareFiles(&spec, []listen.NamedFile{{Name: "web"}}); !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+		t.Fatalf("PrepareFiles off Unix = %v, want UNSUPPORTED_PLATFORM", err)
+	}
+}

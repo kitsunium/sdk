@@ -23,8 +23,9 @@ primitives the SDK's own services run on instead of rewriting them.
 The kernel's (`internal/kernel/concur/CLAUDE.md`): a primitive belongs here
 when what it is FOR is several goroutines — running them and waiting for them
 (`group`, `worker`), letting them share one execution or one value
-(`singleflight`, `snapshot`), coalescing what they hand it (`batcher`), or
-letting them reuse objects instead of allocating them (`recycler`). Being safe
+(`singleflight`, `snapshot`), coalescing what they hand it (`batcher`),
+bounding how many run (`pool`), or letting them reuse objects instead of
+allocating them (`recycler`). Being safe
 to call from several goroutines is not enough: a container lives in
 `collections/`.
 
@@ -32,16 +33,18 @@ to call from several goroutines is not enough: a container lives in
 
 | Package | What it publishes | Aliases onto | README |
 |---|---|---|---|
-| `batcher/` | `NewBatcher` → a `Batcher[T]` delivering through a `Sink[T]` at a count or weight cap, on a ticker on an injected clock, or on `Flush` / `Close`; `BatcherClosed`, `BatcherDeliverFailed` (ADR 0014) | `internal/kernel/concur/batcher` | `batcher/README.md` |
+| `batcher/` | `NewBatcher` → a `Batcher[T]` delivering through a `Sink[T]` at a count or weight cap — on the caller's goroutine or, `FlushBackground`, the batcher's —, on a ticker on an injected clock, or on `Flush` / `Close` (bounded by its context); `BatcherClosed`, `BatcherDeliverFailed`, `BatcherCloseTimedOut` (ADR 0014, ADR 0216) | `internal/kernel/concur/batcher` | `batcher/README.md` |
 | `group/` | `New` / `NewJoined` → a `Group` (`Go` / `Wait`), `Collect[T]` in submission order, `Unlimited`, `PanicValue` — structured concurrency, the first error or every error joined | `internal/kernel/concur/group` | `group/README.md` |
+| `pool/` | `NewPool` → a `Pool` (`Submit` / `Drain` / `Stop`) of long-lived workers over a bounded queue, `Config`, `Task`, `PanicValue`; `PoolFull`, `PoolClosed` (ADR 0216) | `internal/kernel/concur/pool` | `pool/README.md` |
 | `recycler/` | `NewPool` → a `Pool[T]`, `NewCappedPool` → a `CappedPool[T]` that resets on `Put` and drops past a capacity (ADR 0010) | `internal/kernel/concur/recycler` | `recycler/README.md` |
 | `singleflight/` | `Group[K, V]` (`Do` / `Forget` / `InFlight`), `PanicValue` — one execution per key, outliving any one caller (ADR 0049) | `internal/kernel/concur/singleflight` | `singleflight/README.md` |
 | `snapshot/` | `NewValue` → a `Value[T]`: lock-free `Load`, serialised `Store` / `Swap` / `Update` — copy-on-write (ADR 0011) | `internal/kernel/concur/snapshot` | `snapshot/README.md` |
 | `worker/` | `Start` / `NewLoopDaemon` → a `LoopDaemon` (`Stop` / `Done`), `Every` ticking on `WithClock`'s clock and ending with `WithDone` | `internal/kernel/concur/worker` | `worker/README.md` |
 
-`buffer`, the kernel's sixth member, is not published: it is
-`recycler.CappedPool[*[]byte]` with a byte threshold, and a program builds the
-same with `recycler.NewCappedPool` (ADR 0159 §4).
+`buffer` is not published: it is `recycler.CappedPool[*[]byte]` in size
+classes, and a program builds the same with `recycler.NewCappedPool` (ADR 0159
+§4). Neither are `commit` (ADR 0207) and `sema` (ADR 0216), kernel-only until a
+domain adopts them.
 
 ## Do NOT
 

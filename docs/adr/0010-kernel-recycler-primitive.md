@@ -4,6 +4,10 @@
 
 Accepted
 
+## Amended by
+
+[ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md) — `buffer`'s size classes (2026-11-03)
+
 ## Date
 
 2026-05-25
@@ -123,3 +127,15 @@ collapse commit and documented in the package `CLAUDE.md`.
 - `internal/kernel/CLAUDE.md` — kernel gate (stdlib-only AND generic)
 - ADR 0005 — error codes (recycler emits none)
 - Tracking issue #32 · Refs #18 (kernel/buffer benches), #23 (zero-alloc gate)
+
+## Amendment — 2026-11-03: `buffer` keeps a pool per size class ([#810](https://github.com/kitsunium/sdk/issues/810), [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md))
+
+The one 1 KiB pool that kept anything up to 64 KiB becomes five
+`recycler.CappedPool[*[]byte]`, of 1, 4, 16, 64 and 256 KiB: each factory makes
+exactly its class's size, and each keeps a returned buffer only while its
+capacity is at most twice the class. `GetSize(n)` serves the smallest class that
+fits (above 256 KiB, allocated to measure); `Put` routes a buffer by its
+capacity to the largest class it covers; `Get()` is the 1 KiB class. The
+mechanism stays recycler's and the thresholds stay `buffer`'s — what this ADR
+split — only there are five of each now. A buffer grown past twice its class is
+dropped where the shared pool kept it up to 64 KiB.

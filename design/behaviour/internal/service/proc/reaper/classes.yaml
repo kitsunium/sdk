@@ -37,13 +37,16 @@ files:
   - decls:
       - Option
       - config
+      - ExitEvent
       - WithOnReap
+      - WithOnExit
       - resolve
     name: reaper.go
   - decls:
       - exitOSErr
       - unixReaper
       - New
+      - (*unixReaper).reportExit
       - (*unixReaper).Start
       - (*unixReaper).loop
       - (*unixReaper).Stop
@@ -66,6 +69,9 @@ files:
 functions:
   - name: WithOnReap
     params: fn func(int)
+    results: Option
+  - name: WithOnExit
+    params: fn func(ExitEvent)
     results: Option
   - doc: resolve folds opts onto a zero config, returning the accumulated settings.
     name: resolve
@@ -115,8 +121,27 @@ types:
           there reports zero once a second.
         name: onReap
         type: func(int)
+      - doc: onExit, when non-nil, hears of every child a sweep collects.
+        name: onExit
+        type: func(ExitEvent)
     kind: struct
     name: config
+  - fields:
+      - doc: PID is the collected child's process id.
+        name: PID
+        type: int
+      - doc: |-
+          Exit is how the child ended, in the words Process.Wait uses: the exit
+          code, or -1 and the terminating signal, and its rusage.
+        name: Exit
+        type: coreproc.ExitValue
+      - doc: |-
+          Owned reports that a Process spawned the child and has been handed the
+          same status; false is an orphan, whose status ends here.
+        name: Owned
+        type: bool
+    kind: struct
+    name: ExitEvent
   - doc: |-
       unixReaper is the Unix coreproc.Reaper: a SIGCHLD-driven waitpid loop that
       drains every terminated child to ECHILD on each signal, with a final drain on
@@ -125,6 +150,15 @@ types:
       - doc: "onReap mirrors config.onReap: an optional post-sweep observer."
         name: onReap
         type: func(int)
+      - doc: "onExit mirrors config.onExit: an optional observer of each collection."
+        name: onExit
+        type: func(ExitEvent)
+      - doc: |-
+          observe is reportExit bound once at New when onExit is set, nil
+          otherwise, so a sweep passes childwait a ready function and allocates
+          nothing per child, and nothing at all with no observer.
+        name: observe
+        type: func(pid int, status *childwait.StatusValue, owned bool)
       - doc: |-
           clk is what the timer sweep ticks on: clock.System from New, a
           ManualClock in a white-box test. Set before Start and never after.
@@ -194,6 +228,10 @@ types:
         type: error
     kind: struct
     methods:
+      - doc: reportExit hands one collected child to the WithOnExit observer.
+        name: reportExit
+        params: pid int, status *childwait.StatusValue, owned bool
+        recv: r *unixReaper
       - doc: |-
           Start begins the background SIGCHLD loop. It is idempotent: a second Start
           while already running is a no-op.

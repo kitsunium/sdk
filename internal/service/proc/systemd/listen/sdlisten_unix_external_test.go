@@ -144,7 +144,10 @@ func runSpawningChild() int {
 // its exit status, or -1 when it could not be run.
 func probeStatus(extra []*os.File) int {
 	cmd := exec.Command(os.Getenv(selfEnv), "sdlisten-probe")
-	cmd.Env = append(os.Environ(), helperEnv+"="+helperProbe)
+	//: the role this spawner plays is taken out before the probe's is set.
+	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, helperEnv+"=")
+	}), helperEnv+"="+helperProbe)
 	cmd.ExtraFiles = extra
 	//: the probe's verdict is its exit status.
 	if rerr := cmd.Run(); rerr != nil && cmd.ProcessState == nil {
@@ -335,12 +338,11 @@ func dialAndRead(t *testing.T, addr string) string {
 
 // TestPrepare asserts the activator half sets up exactly what the service half
 // reads back: the sockets appended for inheritance, the count and names in the
-// env, and — deliberately — NO LISTEN_PID.
+// env, and LISTEN_PID in PIDEnv, not in Env (#739).
 //
-// The omission is the subtle part. A pre-fork activator cannot know the child's
-// pid, so writing one would either be wrong or force a post-fork rewrite of the
-// child's environment; the service side accepts an absent LISTEN_PID from a
-// trusted parent instead.
+// The PID is the subtle part. A pre-fork activator cannot know the child's
+// pid, so writing one in Env would be wrong; PIDEnv asks the spawn to set it
+// after the fork, to the child's own.
 func TestPrepare(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -406,9 +408,12 @@ func TestPrepare(t *testing.T) {
 		if !envHas(spec.Env, "PATH=/usr/bin") {
 			t.Errorf("Prepare dropped an unrelated env entry: %v", spec.Env)
 		}
-		//: a pre-fork activator cannot know the child pid, so it is omitted.
+		//: a pre-fork activator cannot know the child pid: not in Env, in PIDEnv.
 		if envHasKey(spec.Env, "LISTEN_PID") {
-			t.Errorf("Env carries LISTEN_PID, want it omitted: %v", spec.Env)
+			t.Errorf("Env carries LISTEN_PID, want it in PIDEnv: %v", spec.Env)
+		}
+		if !slices.Equal(spec.PIDEnv, []string{"LISTEN_PID"}) {
+			t.Errorf("PIDEnv = %q, want LISTEN_PID once", spec.PIDEnv)
 		}
 	}
 	for _, c := range tests {

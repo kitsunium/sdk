@@ -3,6 +3,7 @@ package batcher
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // BenchmarkAdd_CapFlush measures the producer-visible Add cost under a small
@@ -58,5 +59,54 @@ func BenchmarkFlush_Empty(b *testing.B) {
 		if err := bat.Flush(ctx); err != nil {
 			b.Fatalf("Flush: %v", err)
 		}
+	}
+}
+
+// BenchmarkAdd_CapFlush_SlowSink is #817's row: a 1 ms Sink — a network round
+// trip's order — at MaxItems 16. Under FlushCaller, the zero mode, every 16th
+// Add runs the Sink on the producer's goroutine, so the producer pays at
+// least 1 ms / 16 ≈ 62 µs per Add on average; under FlushBackground the
+// batcher's own goroutine runs it and the producer pays the append, until it
+// outruns the Sink by two batches and waits for room. The producer works in
+// bursts of two batches with the clock stopped between them, so the default
+// -benchtime would wait out ~2 ms of Sink per 32 timed Adds: run it with a
+// fixed count, -bench=SlowSink -benchtime=3200x (100 bursts).
+func BenchmarkAdd_CapFlush_SlowSink(b *testing.B) {
+	for _, mode := range []struct {
+		name string
+		on   FlushMode
+	}{{"Caller", FlushCaller}, {"Background", FlushBackground}} {
+		b.Run(mode.name, func(b *testing.B) { benchSlowSink(b, mode.on) })
+	}
+}
+
+// benchSlowSink measures one producer's Add against a 1 ms Sink in mode on,
+// over a bounded number of Adds so the Sink's backlog stays within reach.
+func benchSlowSink(b *testing.B, on FlushMode) {
+	slow := func(context.Context, []int) error {
+		time.Sleep(time.Millisecond)
+		return nil
+	}
+	bat := NewBatcher(slow, Config[int]{MaxItems: 16, FlushOn: on})
+	ctx := b.Context()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		if err := bat.Add(ctx, i); err != nil {
+			b.Fatalf("Add: %v", err)
+		}
+		//: one burst of 32 Adds — two batches — then the producer stops timing
+		//: while the Sink catches up, as a producer between bursts does.
+		if i%32 == 31 {
+			b.StopTimer()
+			if err := bat.Flush(ctx); err != nil {
+				b.Fatalf("Flush: %v", err)
+			}
+			b.StartTimer()
+		}
+	}
+	b.StopTimer()
+	if err := bat.Close(ctx); err != nil {
+		b.Fatalf("Close: %v", err)
 	}
 }

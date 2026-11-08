@@ -2,6 +2,22 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      unknownExitCode is the Code of the ExitValue an attached process's Wait
+      returns: no status is known, and a zero would read as success.
+    items:
+      - name: unknownExitCode
+        type: int
+        value: "-1"
+    name: unknownExitCode
+  - doc: |-
+      pidfdNonblock is PIDFD_NONBLOCK (Linux 5.10), O_NONBLOCK's value: the pidfd
+      is opened non-blocking, ready for the runtime's poller.
+    items:
+      - name: pidfdNonblock
+        type: uintptr
+        value: syscall.O_NONBLOCK
+    name: pidfdNonblock
+  - doc: |-
       prioProcess is the PRIO_PROCESS "which" selector for setpriority(2); it is not
       exported by package syscall on every Unix, so it is named here as the portable
       POSIX constant value 0.
@@ -10,6 +26,18 @@ constants:
         type: int
         value: "0"
     name: prioProcess
+  - doc: |-
+      cloneIntoCgroupMajor and cloneIntoCgroupMinor are the first Linux release
+      with clone3's CLONE_INTO_CGROUP (5.7), which SysProcAttr.UseCgroupFD uses.
+    grouped: true
+    items:
+      - name: cloneIntoCgroupMajor
+        type: int
+        value: "5"
+      - name: cloneIntoCgroupMinor
+        type: int
+        value: "7"
+    name: cloneIntoCgroupMajor
   - doc: |-
       cgroupProcsFile is the cgroup v2 control file that attaches a process to the
       group when its pid is written (one pid per write).
@@ -39,6 +67,15 @@ constants:
         value: "0o755"
     name: cgroupProcsPerm
   - doc: |-
+      sysCloseRange is __NR_close_range, 436 on every Linux architecture of the
+      unified syscall table (include/uapi/asm-generic/unistd.h and the x86 and
+      arm tables alike). The mips ABIs number it apart and walk instead.
+    items:
+      - name: sysCloseRange
+        type: uintptr
+        value: "436"
+    name: sysCloseRange
+  - doc: |-
       idBase / idBits are the strconv.ParseUint base and bit-size for parsing the
       32-bit decimal uid/gid strings os/user returns.
     grouped: true
@@ -50,6 +87,48 @@ constants:
         type: int
         value: "32"
     name: idBase
+  - doc: |-
+      reservedEnvPrefix begins the name of every variable of the SDK's own spawn
+      protocol — the trampoline's payload, its cgroup placement, its handshake
+      descriptor (reservedEnvKeys lists them). A child reads the FIRST of two equal
+      keys and the caller's Spec.Env comes first, so a caller naming one would
+      override what the spawn tells its child: Start refuses it (#726).
+    items:
+      - name: reservedEnvPrefix
+        type: string
+        value: "\"__KITSUNIUM_SDK_PROC_\""
+    name: reservedEnvPrefix
+  - doc: |-
+      fdDir lists the process's open descriptors: procfs's per-process fd
+      directory, complete on Linux, illumos and Solaris.
+    items:
+      - name: fdDir
+        type: string
+        value: "\"/proc/self/fd\""
+    name: fdDir
+  - doc: |-
+      sysPidfdSendSignal is __NR_pidfd_send_signal, 424 on every Linux
+      architecture of the unified syscall table (Linux 5.1); the stdlib exports no
+      number for it on amd64 or arm64, so it is cited here (ADR 0018).
+    items:
+      - name: sysPidfdSendSignal
+        type: uintptr
+        value: "424"
+    name: sysPidfdSendSignal
+  - doc: pollInEvent is POLLIN, the event a pidfd reports once its process has exited.
+    items:
+      - name: pollInEvent
+        type: int16
+        value: "0x1"
+    name: pollInEvent
+  - doc: |-
+      pollSlice bounds one ppoll on a pidfd, so a wait for an exit checks its
+      context and its timer between slices.
+    items:
+      - name: pollSlice
+        type: int64
+        value: int64(50 * 1000 * 1000)
+    name: pollSlice
   - doc: |-
       signalledCode is the ExitValue.Code reported for a signalled (non-normal)
       termination; the port reserves -1 for "died by signal, no status".
@@ -127,15 +206,52 @@ constants:
         value: "0o111"
     name: anyExecuteBit
   - doc: |-
-      rssUnitsPerKiB is 1 because Linux, FreeBSD, OpenBSD, NetBSD and DragonFly
-      report ru_maxrss in kilobytes, the unit the port documents. illumos and
-      Solaris define the field in pages but leave it 0, so the figure there is 0
-      whatever the unit.
+      oomScoreAdjNative reports that the kernel takes an OOM-killer bias through
+      /proc/<pid>/oom_score_adj.
     items:
-      - name: rssUnitsPerKiB
-        type: int64
-        value: "1"
-    name: rssUnitsPerKiB
+      - name: oomScoreAdjNative
+        type: bool
+        value: "true"
+    name: oomScoreAdjNative
+  - doc: |-
+      sysPidfdOpen is __NR_pidfd_open, 434 on every Linux architecture of the
+      unified syscall table (Linux 5.3).
+    items:
+      - name: sysPidfdOpen
+        type: uintptr
+        value: "434"
+    name: sysPidfdOpen
+  - doc: |-
+      maxSymlinks bounds the symbolic links one walk follows, as the kernel's
+      MAXSYMLINKS does (40 on Linux, 32 on the BSDs): past it the path loops.
+    items:
+      - name: maxSymlinks
+        type: int
+        value: "40"
+    name: maxSymlinks
+  - doc: |-
+      maxPIDFileBytes bounds what is read of a PID file: one decimal PID and its
+      blanks fit many times over; more is not a PID file.
+    items:
+      - name: maxPIDFileBytes
+        type: int
+        value: "64"
+    name: maxPIDFileBytes
+  - doc: groupOtherWrite is the group and others' write bits of a mode.
+    items:
+      - name: groupOtherWrite
+        type: uint32
+        value: "0o022"
+    name: groupOtherWrite
+  - doc: |-
+      oPath is O_PATH (Linux 2.6.39), 010000000 on every architecture this file
+      builds for; the stdlib exports no name for it. A directory opened so is a
+      position in the tree, not a read: walking needs search permission only.
+    items:
+      - name: oPath
+        type: int
+        value: "0x200000"
+    name: oPath
   - doc: |-
       procFileMode is the os.WriteFile mode for procfs control files; the kernel
       ignores it for existing procfs entries, so it only satisfies the signature.
@@ -144,6 +260,423 @@ constants:
         type: os.FileMode
         value: "0o644"
     name: procFileMode
+  - doc: |-
+      ptmxPath is the multiplexer a new terminal is allocated from, and ptsDir
+      the directory its slave side appears in.
+    grouped: true
+    items:
+      - name: ptmxPath
+        type: string
+        value: "\"/dev/ptmx\""
+      - name: ptsDir
+        type: string
+        value: "\"/dev/pts/\""
+    name: ptmxPath
+  - doc: |-
+      termSignal is SIGTERM: 15 on every Unix and in Go's Windows signal table,
+      named here so Run compiles on every GOOS, plan9 included.
+    items:
+      - name: termSignal
+        type: coreproc.Signal
+        value: "15"
+    name: termSignal
+  - doc: The kernel interfaces the parent reads before a sandboxed fork.
+    grouped: true
+    items:
+      - doc: |-
+          procSelfExe is the path the first stage re-executes: the running binary's
+          own inode, whatever has since replaced its file on disk. No fallback.
+        name: procSelfExe
+        type: string
+        value: "\"/proc/self/exe\""
+      - doc: procNSDir lists this process's namespaces, one link per kind the kernel has.
+        name: procNSDir
+        type: string
+        value: "\"/proc/self/ns\""
+      - doc: procCapLastCap is the highest capability number the kernel knows.
+        name: procCapLastCap
+        type: string
+        value: "\"/proc/sys/kernel/cap_last_cap\""
+      - doc: "landlockCreateRulesetVersion is LANDLOCK_CREATE_RULESET_VERSION: the call returns the ABI."
+        name: landlockCreateRulesetVersion
+        type: uintptr
+        value: "1"
+      - doc: clonenewtime is CLONE_NEWTIME, which only clone3 and unshare take.
+        name: cloneNewTime
+        type: uintptr
+        value: "0x80"
+      - doc: "maxCapability bounds a capability mask: bit 63."
+        name: maxCapability
+        type: uint32
+        value: "63"
+      - doc: mountKindLast is the highest MountKind.
+        name: mountKindLast
+        type: coreproc.MountKind
+        value: coreproc.MountTmpfsSticky
+      - doc: namespaceAll is every Namespace bit.
+        name: namespaceAll
+        type: coreproc.Namespace
+        value: "255"
+      - doc: landlockNewestABI is the newest Landlock ABI whose rights this build names.
+        name: landlockNewestABI
+        type: int
+        value: "6"
+    name: procSelfExe
+  - doc: |-
+      The sandbox payload's framing: a magic, a version, a length that must be the
+      sealed file's size, then the fields in one fixed order. A reader refuses any
+      other version, any byte past the last field, and any count or string longer
+      than its bound — so a payload is either the one the parent wrote or nothing.
+    grouped: true
+    items:
+      - doc: sandboxMagic opens every payload.
+        name: sandboxMagic
+        type: string
+        value: "\"KSBX\""
+      - doc: |-
+          sandboxVersion is the one layout this build reads and writes: 2 opens
+          the body with the cgroup namespace's flag.
+        name: sandboxVersion
+        type: uint16
+        value: "2"
+      - doc: sandboxHeaderLen is the magic, the version, a reserved half-word and the length.
+        name: sandboxHeaderLen
+        type: int
+        value: "12"
+      - doc: "sandboxMaxPayload bounds the whole payload: 1 MiB."
+        name: sandboxMaxPayload
+        type: int
+        value: 1 << 20
+      - doc: "sandboxMaxString bounds one path: PATH_MAX."
+        name: sandboxMaxString
+        type: int
+        value: "4096"
+      - doc: sandboxMaxItems bounds a count of mounts, groups or rules.
+        name: sandboxMaxItems
+        type: int
+        value: "65536"
+      - doc: sandboxMaxInsns is BPF_MAXINSNS, the longest filter the kernel loads.
+        name: sandboxMaxInsns
+        type: int
+        value: "4096"
+      - doc: sandboxNoTrace is the trace descriptor of a payload that records nothing.
+        name: sandboxNoTrace
+        type: int32
+        value: "-1"
+    name: sandboxMagic
+  - doc: |-
+      The memfd the payload travels in (linux/memfd.h, linux/fcntl.h): created
+      close-on-exec and sealable, then sealed against any change before the fork.
+    grouped: true
+    items:
+      - name: mfdCloexec
+        type: uintptr
+        value: "0x1"
+      - name: mfdAllowSealing
+        type: uintptr
+        value: "0x2"
+      - name: fAddSeals
+        type: uintptr
+        value: "1033"
+      - name: fGetSeals
+        type: uintptr
+        value: "1034"
+      - name: fSealSeal
+        type: uintptr
+        value: "0x1"
+      - name: fSealShrink
+        type: uintptr
+        value: "0x2"
+      - name: fSealGrow
+        type: uintptr
+        value: "0x4"
+      - name: fSealWrite
+        type: uintptr
+        value: "0x8"
+      - name: sandboxSealSet
+        type: uintptr
+        value: fSealSeal | fSealShrink | fSealGrow | fSealWrite
+      - name: sandboxMemfdName
+        type: string
+        value: "\"kitsunium-sandbox\""
+    name: mfdCloexec
+  - doc: |-
+      Classic BPF, as seccomp runs it (linux/filter.h, linux/seccomp.h): the four
+      instructions the filter is made of, the offsets of struct seccomp_data, and
+      the return values of the three actions.
+    grouped: true
+    items:
+      - doc: "bpfLdWAbs is BPF_LD|BPF_W|BPF_ABS: A = the 32-bit word at k."
+        name: bpfLdWAbs
+        type: uint16
+        value: "0x20"
+      - doc: "bpfJeqK is BPF_JMP|BPF_JEQ|BPF_K: jump jt if A == k, else jf."
+        name: bpfJeqK
+        type: uint16
+        value: "0x15"
+      - doc: "bpfJgeK is BPF_JMP|BPF_JGE|BPF_K: jump jt if A >= k, else jf."
+        name: bpfJgeK
+        type: uint16
+        value: "0x35"
+      - doc: "bpfRetK is BPF_RET|BPF_K: return k."
+        name: bpfRetK
+        type: uint16
+        value: "0x06"
+      - doc: seccompDataNr is the offset of seccomp_data.nr.
+        name: seccompDataNr
+        type: uint32
+        value: "0"
+      - doc: seccompDataArch is the offset of seccomp_data.arch.
+        name: seccompDataArch
+        type: uint32
+        value: "4"
+      - doc: seccompDataArg0Lo is the offset of the low word of seccomp_data.args[0], little-endian.
+        name: seccompDataArg0Lo
+        type: uint32
+        value: "16"
+      - doc: seccompDataArg0Hi is the offset of its high word.
+        name: seccompDataArg0Hi
+        type: uint32
+        value: "20"
+      - doc: seccompRetKillProcess is SECCOMP_RET_KILL_PROCESS (Linux 4.14).
+        name: seccompRetKillProcess
+        type: uint32
+        value: "0x80000000"
+      - doc: seccompRetErrno is SECCOMP_RET_ERRNO; the errno is its low 16 bits.
+        name: seccompRetErrno
+        type: uint32
+        value: "0x00050000"
+      - doc: seccompRetAllow is SECCOMP_RET_ALLOW.
+        name: seccompRetAllow
+        type: uint32
+        value: "0x7fff0000"
+      - doc: seccompErrnoMax is the largest errno a filter may return (MAX_ERRNO).
+        name: seccompErrnoMax
+        type: int
+        value: "4095"
+      - doc: seccompGetActionAvail is SECCOMP_GET_ACTION_AVAIL, the seccomp(2) operation that asks whether an action exists.
+        name: seccompGetActionAvail
+        type: uintptr
+        value: "2"
+      - doc: "reportSkip is how far the write check jumps when the call is no write: past its six instructions."
+        name: reportSkip
+        type: uint8
+        value: "6"
+      - doc: "reportFdSkip is how far it jumps when the descriptor's low word is not the handshake's: to the reload of nr."
+        name: reportFdSkip
+        type: uint8
+        value: "3"
+      - doc: syscallBase is the base the table's numbers are written in.
+        name: syscallBase
+        type: int
+        value: "10"
+      - doc: "syscallBits is their width: a seccomp_data.nr."
+        name: syscallBits
+        type: int
+        value: "32"
+    name: bpfLdWAbs
+  - doc: |-
+      The kernel constants the second stage passes (linux/prctl.h, linux/mount.h,
+      linux/capability.h, linux/landlock.h, linux/seccomp.h, linux/fcntl.h).
+    grouped: true
+    items:
+      - name: prSetPdeathsig
+        type: uintptr
+        value: "1"
+      - name: prSetKeepCaps
+        type: uintptr
+        value: "8"
+      - name: prSetSeccomp
+        type: uintptr
+        value: "22"
+      - name: prCapbsetRead
+        type: uintptr
+        value: "23"
+      - name: prCapbsetDrop
+        type: uintptr
+        value: "24"
+      - name: prSetSecureBits
+        type: uintptr
+        value: "28"
+      - name: prSetNoNewPrivs
+        type: uintptr
+        value: "38"
+      - name: prCapAmbient
+        type: uintptr
+        value: "47"
+      - name: prCapAmbientRaise
+        type: uintptr
+        value: "2"
+      - name: prCapAmbientClearAll
+        type: uintptr
+        value: "4"
+      - name: seccompModeFilter
+        type: uintptr
+        value: "2"
+      - name: capabilityVersion3
+        type: uint32
+        value: "0x20080522"
+      - name: msRdonly
+        type: uintptr
+        value: "0x1"
+      - name: msNosuid
+        type: uintptr
+        value: "0x2"
+      - name: msNodev
+        type: uintptr
+        value: "0x4"
+      - name: msBind
+        type: uintptr
+        value: "0x1000"
+      - name: msRec
+        type: uintptr
+        value: "0x4000"
+      - name: mntDetach
+        type: uintptr
+        value: "0x2"
+      - name: mountAttrRdonly
+        type: uint64
+        value: "0x1"
+      - name: mountAttrSizeVer0
+        type: uintptr
+        value: "32"
+      - name: atRecursive
+        type: uintptr
+        value: "0x8000"
+      - comment: AT_FDCWD, -100
+        name: atFDCWD
+        type: uintptr
+        value: ^uintptr(99)
+      - name: landlockRulePathBeneat
+        type: uintptr
+        value: "1"
+      - name: landlockRulesetAttrLen
+        type: uintptr
+        value: "8"
+      - name: stageInjectedErrno
+        type: syscall.Errno
+        value: syscall.ECANCELED
+      - name: tmpfsOptions
+        type: string
+        value: "\"mode=0755\""
+      - name: tmpfsStickyOptions
+        type: string
+        value: "\"mode=1777\""
+      - name: procSelfFD
+        type: string
+        value: "\"/proc/self/fd\""
+      - name: traceRecordLen
+        type: int
+        value: "5"
+    name: prSetPdeathsig
+  - doc: |-
+      trampolineSandboxEnv carries the descriptor number of the sealed memfd that
+      holds a sandboxed spawn's payload (Spec.Sandbox): it sits right after the
+      handshake pipe in the child's table. Stripped before the target runs.
+    items:
+      - name: trampolineSandboxEnv
+        type: string
+        value: "\"__KITSUNIUM_SDK_PROC_SANDBOX\""
+    name: trampolineSandboxEnv
+  - doc: |-
+      handshakeSandboxFail opens a sandbox failure report: the step's number and
+      the errno's two low-order bytes follow it.
+    items:
+      - name: handshakeSandboxFail
+        type: byte
+        value: "'S'"
+    name: handshakeSandboxFail
+  - doc: |-
+      sandboxReportLen is the length of a sandbox failure report: the tag, the
+      step and the errno.
+    items:
+      - name: sandboxReportLen
+        type: int
+        value: "4"
+    name: sandboxReportLen
+  - doc: |-
+      The steps of the sandbox's second stage, in the order the kernel imposes on
+      them: a step may need a privilege a later one gives up, Landlock and seccomp
+      need no_new_privs, and the seccomp filter, installed last, must not refuse
+      what the stage still does before execve. Step 0 is the reading of the
+      payload; the cgroup namespace comes first of all, the child already in its
+      group whichever placed it — the clone or the trampoline's write —, so the
+      namespace is rooted at that group. The numbers travel in a failure report
+      and in the tests' trace.
+    grouped: true
+    items:
+      - name: stepPayload
+        type: uint8
+        value: iota
+      - name: stepCgroupNamespace
+      - name: stepMounts
+      - name: stepRoot
+      - name: stepLandlockPaths
+      - name: stepBounding
+      - name: stepSecureBits
+      - name: stepIdentity
+      - name: stepCapabilities
+      - name: stepFDSweep
+      - name: stepNoNewPrivs
+      - name: stepLandlock
+      - name: stepSeccomp
+    name: stepPayload
+  - doc: |-
+      maxIOPriority is the lowest I/O level within a class: the kernel's eight
+      levels run from 0 (highest) to 7.
+    items:
+      - name: maxIOPriority
+        type: int
+        value: "7"
+    name: maxIOPriority
+  - doc: |-
+      ioprioWhoProcessSel is IOPRIO_WHO_PROCESS and ioprioClassShift the class's
+      place in an ioprio value, both from include/uapi/linux/ioprio.h.
+    grouped: true
+    items:
+      - name: ioprioWhoProcessSel
+        type: uintptr
+        value: "1"
+      - name: ioprioClassShift
+        type: int
+        value: "13"
+    name: ioprioWhoProcessSel
+  - doc: |-
+      closeRangeCloexec is CLOSE_RANGE_CLOEXEC, the close_range(2) flag that marks
+      the range close-on-exec instead of closing it: 1<<2 in Linux's
+      include/uapi/linux/close_range.h and FreeBSD's sys/unistd.h alike.
+    items:
+      - name: closeRangeCloexec
+        type: uintptr
+        value: 1 << 2
+    name: closeRangeCloexec
+  - doc: |-
+      closeRangeLast is the ~0U close_range(2) reads as "up to the highest
+      descriptor": the call takes unsigned ints.
+    items:
+      - name: closeRangeLast
+        type: uintptr
+        value: uintptr(^uint32(0))
+    name: closeRangeLast
+  - doc: |-
+      firstSealedFD is the lowest descriptor the seal marks: 0, 1 and 2 are the
+      child's stdio, which forkExec installs with dup2 whatever their flags.
+    items:
+      - name: firstSealedFD
+        type: int
+        value: "3"
+    name: firstSealedFD
+  - doc: |-
+      defaultDrainGrace is how long Wait waits for the capture copiers after the
+      exit when Spec.DrainGrace is zero: a bounded default (ADR 0031), of the same
+      order as Stop's SIGKILL resend, long enough for a child's last write to
+      cross the pipe and short enough that a daemonised grandchild does not hold
+      Wait for its lifetime.
+    items:
+      - name: defaultDrainGrace
+        type: time.Duration
+        value: time.Second
+    name: defaultDrainGrace
   - doc: |-
       Standard-stream fd indices and their count, named so the wiring carries no
       bare magic numbers. The values are the kernel's fixed fd numbers (0/1/2), so
@@ -157,6 +690,461 @@ constants:
       - name: fdStderr
       - name: stdioFdCount
     name: fdStdin
+  - doc: |-
+      The x86-64 numbers of the system calls the sandbox makes that the standard
+      library does not export, from arch/x86/entry/syscalls/syscall_64.tbl, and
+      the audit architecture its seccomp filter accepts (linux/audit.h). Each is
+      pinned by Test_sandboxSyscallTable on this architecture.
+    grouped: true
+    items:
+      - doc: "sandboxAuditArch is AUDIT_ARCH_X86_64: EM_X86_64 | __AUDIT_ARCH_64BIT | __AUDIT_ARCH_LE."
+        name: sandboxAuditArch
+        type: uint32
+        value: "0xC000003E"
+      - doc: "sandboxX32Bit is __X32_SYSCALL_BIT: a call numbered at or past it is the x32 ABI's."
+        name: sandboxX32Bit
+        type: uint32
+        value: "0x40000000"
+      - doc: sysSeccomp is __NR_seccomp.
+        name: sysSeccomp
+        type: uintptr
+        value: "317"
+      - doc: sysMemfdCreate is __NR_memfd_create.
+        name: sysMemfdCreate
+        type: uintptr
+        value: "319"
+      - doc: sysBPF is __NR_bpf.
+        name: sysBPF
+        type: uintptr
+        value: "321"
+      - doc: sysExecveat is __NR_execveat.
+        name: sysExecveat
+        type: uintptr
+        value: "322"
+      - doc: sysMountSetattr is __NR_mount_setattr.
+        name: sysMountSetattr
+        type: uintptr
+        value: "442"
+      - doc: sysLandlockCreateRuleset is __NR_landlock_create_ruleset.
+        name: sysLandlockCreateRuleset
+        type: uintptr
+        value: "444"
+      - doc: sysLandlockAddRule is __NR_landlock_add_rule.
+        name: sysLandlockAddRule
+        type: uintptr
+        value: "445"
+      - doc: sysLandlockRestrictSelf is __NR_landlock_restrict_self.
+        name: sysLandlockRestrictSelf
+        type: uintptr
+        value: "446"
+    name: sandboxAuditArch
+  - doc: |-
+      syscallTable is every system call of this architecture's table, one "name
+      number" pair per line, as SeccompValue.Syscalls names them; syscallNumbers
+      parses it the first time a filter is checked, never at start-up.
+    items:
+      - name: syscallTable
+        type: string
+        value: |-
+          `
+          read 0
+          write 1
+          open 2
+          close 3
+          stat 4
+          fstat 5
+          lstat 6
+          poll 7
+          lseek 8
+          mmap 9
+          mprotect 10
+          munmap 11
+          brk 12
+          rt_sigaction 13
+          rt_sigprocmask 14
+          rt_sigreturn 15
+          ioctl 16
+          pread64 17
+          pwrite64 18
+          readv 19
+          writev 20
+          access 21
+          pipe 22
+          select 23
+          sched_yield 24
+          mremap 25
+          msync 26
+          mincore 27
+          madvise 28
+          shmget 29
+          shmat 30
+          shmctl 31
+          dup 32
+          dup2 33
+          pause 34
+          nanosleep 35
+          getitimer 36
+          alarm 37
+          setitimer 38
+          getpid 39
+          sendfile 40
+          socket 41
+          connect 42
+          accept 43
+          sendto 44
+          recvfrom 45
+          sendmsg 46
+          recvmsg 47
+          shutdown 48
+          bind 49
+          listen 50
+          getsockname 51
+          getpeername 52
+          socketpair 53
+          setsockopt 54
+          getsockopt 55
+          clone 56
+          fork 57
+          vfork 58
+          execve 59
+          exit 60
+          wait4 61
+          kill 62
+          uname 63
+          semget 64
+          semop 65
+          semctl 66
+          shmdt 67
+          msgget 68
+          msgsnd 69
+          msgrcv 70
+          msgctl 71
+          fcntl 72
+          flock 73
+          fsync 74
+          fdatasync 75
+          truncate 76
+          ftruncate 77
+          getdents 78
+          getcwd 79
+          chdir 80
+          fchdir 81
+          rename 82
+          mkdir 83
+          rmdir 84
+          creat 85
+          link 86
+          unlink 87
+          symlink 88
+          readlink 89
+          chmod 90
+          fchmod 91
+          chown 92
+          fchown 93
+          lchown 94
+          umask 95
+          gettimeofday 96
+          getrlimit 97
+          getrusage 98
+          sysinfo 99
+          times 100
+          ptrace 101
+          getuid 102
+          syslog 103
+          getgid 104
+          setuid 105
+          setgid 106
+          geteuid 107
+          getegid 108
+          setpgid 109
+          getppid 110
+          getpgrp 111
+          setsid 112
+          setreuid 113
+          setregid 114
+          getgroups 115
+          setgroups 116
+          setresuid 117
+          getresuid 118
+          setresgid 119
+          getresgid 120
+          getpgid 121
+          setfsuid 122
+          setfsgid 123
+          getsid 124
+          capget 125
+          capset 126
+          rt_sigpending 127
+          rt_sigtimedwait 128
+          rt_sigqueueinfo 129
+          rt_sigsuspend 130
+          sigaltstack 131
+          utime 132
+          mknod 133
+          uselib 134
+          personality 135
+          ustat 136
+          statfs 137
+          fstatfs 138
+          sysfs 139
+          getpriority 140
+          setpriority 141
+          sched_setparam 142
+          sched_getparam 143
+          sched_setscheduler 144
+          sched_getscheduler 145
+          sched_get_priority_max 146
+          sched_get_priority_min 147
+          sched_rr_get_interval 148
+          mlock 149
+          munlock 150
+          mlockall 151
+          munlockall 152
+          vhangup 153
+          modify_ldt 154
+          pivot_root 155
+          _sysctl 156
+          prctl 157
+          arch_prctl 158
+          adjtimex 159
+          setrlimit 160
+          chroot 161
+          sync 162
+          acct 163
+          settimeofday 164
+          mount 165
+          umount2 166
+          swapon 167
+          swapoff 168
+          reboot 169
+          sethostname 170
+          setdomainname 171
+          iopl 172
+          ioperm 173
+          create_module 174
+          init_module 175
+          delete_module 176
+          get_kernel_syms 177
+          query_module 178
+          quotactl 179
+          nfsservctl 180
+          getpmsg 181
+          putpmsg 182
+          afs_syscall 183
+          tuxcall 184
+          security 185
+          gettid 186
+          readahead 187
+          setxattr 188
+          lsetxattr 189
+          fsetxattr 190
+          getxattr 191
+          lgetxattr 192
+          fgetxattr 193
+          listxattr 194
+          llistxattr 195
+          flistxattr 196
+          removexattr 197
+          lremovexattr 198
+          fremovexattr 199
+          tkill 200
+          time 201
+          futex 202
+          sched_setaffinity 203
+          sched_getaffinity 204
+          set_thread_area 205
+          io_setup 206
+          io_destroy 207
+          io_getevents 208
+          io_submit 209
+          io_cancel 210
+          get_thread_area 211
+          lookup_dcookie 212
+          epoll_create 213
+          epoll_ctl_old 214
+          epoll_wait_old 215
+          remap_file_pages 216
+          getdents64 217
+          set_tid_address 218
+          restart_syscall 219
+          semtimedop 220
+          fadvise64 221
+          timer_create 222
+          timer_settime 223
+          timer_gettime 224
+          timer_getoverrun 225
+          timer_delete 226
+          clock_settime 227
+          clock_gettime 228
+          clock_getres 229
+          clock_nanosleep 230
+          exit_group 231
+          epoll_wait 232
+          epoll_ctl 233
+          tgkill 234
+          utimes 235
+          vserver 236
+          mbind 237
+          set_mempolicy 238
+          get_mempolicy 239
+          mq_open 240
+          mq_unlink 241
+          mq_timedsend 242
+          mq_timedreceive 243
+          mq_notify 244
+          mq_getsetattr 245
+          kexec_load 246
+          waitid 247
+          add_key 248
+          request_key 249
+          keyctl 250
+          ioprio_set 251
+          ioprio_get 252
+          inotify_init 253
+          inotify_add_watch 254
+          inotify_rm_watch 255
+          migrate_pages 256
+          openat 257
+          mkdirat 258
+          mknodat 259
+          fchownat 260
+          futimesat 261
+          newfstatat 262
+          unlinkat 263
+          renameat 264
+          linkat 265
+          symlinkat 266
+          readlinkat 267
+          fchmodat 268
+          faccessat 269
+          pselect6 270
+          ppoll 271
+          unshare 272
+          set_robust_list 273
+          get_robust_list 274
+          splice 275
+          tee 276
+          sync_file_range 277
+          vmsplice 278
+          move_pages 279
+          utimensat 280
+          epoll_pwait 281
+          signalfd 282
+          timerfd_create 283
+          eventfd 284
+          fallocate 285
+          timerfd_settime 286
+          timerfd_gettime 287
+          accept4 288
+          signalfd4 289
+          eventfd2 290
+          epoll_create1 291
+          dup3 292
+          pipe2 293
+          inotify_init1 294
+          preadv 295
+          pwritev 296
+          rt_tgsigqueueinfo 297
+          perf_event_open 298
+          recvmmsg 299
+          fanotify_init 300
+          fanotify_mark 301
+          prlimit64 302
+          name_to_handle_at 303
+          open_by_handle_at 304
+          clock_adjtime 305
+          syncfs 306
+          sendmmsg 307
+          setns 308
+          getcpu 309
+          process_vm_readv 310
+          process_vm_writev 311
+          kcmp 312
+          finit_module 313
+          sched_setattr 314
+          sched_getattr 315
+          renameat2 316
+          seccomp 317
+          getrandom 318
+          memfd_create 319
+          kexec_file_load 320
+          bpf 321
+          execveat 322
+          userfaultfd 323
+          membarrier 324
+          mlock2 325
+          copy_file_range 326
+          preadv2 327
+          pwritev2 328
+          pkey_mprotect 329
+          pkey_alloc 330
+          pkey_free 331
+          statx 332
+          io_pgetevents 333
+          rseq 334
+          uretprobe 335
+          uprobe 336
+          pidfd_send_signal 424
+          io_uring_setup 425
+          io_uring_enter 426
+          io_uring_register 427
+          open_tree 428
+          move_mount 429
+          fsopen 430
+          fsconfig 431
+          fsmount 432
+          fspick 433
+          pidfd_open 434
+          clone3 435
+          close_range 436
+          openat2 437
+          pidfd_getfd 438
+          faccessat2 439
+          process_madvise 440
+          epoll_pwait2 441
+          mount_setattr 442
+          quotactl_fd 443
+          landlock_create_ruleset 444
+          landlock_add_rule 445
+          landlock_restrict_self 446
+          memfd_secret 447
+          process_mrelease 448
+          futex_waitv 449
+          set_mempolicy_home_node 450
+          cachestat 451
+          fchmodat2 452
+          map_shadow_stack 453
+          futex_wake 454
+          futex_wait 455
+          futex_requeue 456
+          statmount 457
+          listmount 458
+          lsm_get_self_attr 459
+          lsm_set_self_attr 460
+          lsm_list_modules 461
+          mseal 462
+          setxattrat 463
+          getxattrat 464
+          listxattrat 465
+          removexattrat 466
+          open_tree_attr 467
+          file_getattr 468
+          file_setattr 469
+          listns 470
+          rseq_slice_yield 471
+          `
+    name: syscallTable
+  - doc: |-
+      foreignTable is the names the other supported architecture's table has and
+      this one lacks, one per line: a filter naming one matches nothing here, and
+      is not refused as a name no architecture knows.
+    items:
+      - name: foreignTable
+        type: string
+        value: |-
+          `
+          `
+    name: foreignTable
   - doc: |-
       trampolineEnv is the sentinel environment variable carrying the encoded
       rlimit/umask payload to the trampoline child. Deliberately ugly + namespaced so
@@ -187,6 +1175,15 @@ constants:
         type: string
         value: "\"__KITSUNIUM_SDK_PROC_HSFD\""
     name: trampolineHsFdEnv
+  - doc: |-
+      trampolinePIDEnv carries Spec.PIDEnv, the names the trampoline sets to its
+      own PID — the target's, execve keeping it — before the target runs:
+      comma-separated, a name never holding a comma (checkPIDEnv).
+    items:
+      - name: trampolinePIDEnv
+        type: string
+        value: "\"__KITSUNIUM_SDK_PROC_PIDENV\""
+    name: trampolinePIDEnv
   - doc: |-
       Trampoline child exit codes (distinct from any the target could use before it
       execs, so a supervisor can tell a trampoline failure from a target failure).
@@ -226,6 +1223,14 @@ constants:
       wrapped Errors carry the same status as their bare-sentinel siblings.
     grouped: true
     items:
+      - comment: EX_USAGE — the caller's Spec is not usable as written.
+        name: exitUsage
+        type: int
+        value: "64"
+      - comment: EX_DATAERR — the input (a PID file) is malformed.
+        name: exitDataErr
+        type: int
+        value: "65"
       - comment: EX_NOUSER — a named user/group did not resolve.
         name: exitNoUser
         type: int
@@ -242,7 +1247,11 @@ constants:
         name: exitIOErr
         type: int
         value: "74"
-    name: exitNoUser
+      - comment: EX_NOPERM — the process may not be adopted.
+        name: exitNoPerm
+        type: int
+        value: "77"
+    name: exitUsage
   - doc: |-
       zombiesRefused is false: every other kernel counts a zombie when it signals
       a group, so a group of zombies is signalled and an emptied one is ESRCH.
@@ -253,11 +1262,62 @@ constants:
     name: zombiesRefused
 files:
   - decls:
+      - Attach
+      - AttachPIDFile
+      - refuseSelfOrInit
+      - bounded
+    name: attach.go
+  - decls:
+      - unknownExitCode
+      - attachPIDFile
+      - checkUsers
+      - (*adopted).PID
+      - (*adopted).Wait
+      - (*adopted).WaitContext
+      - (*adopted).Signal
+      - (*adopted).SignalGroup
+      - (*adopted).Stop
+      - (*adopted).awaitGrace
+      - (*adopted).signalAllowGone
+      - (*adopted).watch
+    name: attach_handle.go
+  - decls:
+      - pidfdNonblock
+      - pidfdOpener
+      - adopted
+      - attachProcess
+      - rawPidfdOpen
+      - openPollablePidfd
+      - classifyPidfdOpen
+      - newAdopted
+      - (*adopted).deliver
+      - (*adopted).SignalHandle
+      - (*adopted).Handle
+      - (*adopted).startWatcher
+      - awaitEnd
+      - (*adopted).exited
+      - checkScope
+      - withinCgroup
+      - procCgroup
+      - procUIDs
+      - procLine
+    name: attach_linux.go
+  - decls:
       - prioProcess
       - applyNice
       - applyOOMScoreAdj
       - containsESRCH
     name: attrs_unix.go
+  - decls:
+      - cloneIntoCgroupMajor
+      - cloneIntoCgroupProbe
+      - kernelClonesIntoCgroup
+      - releaseClonesIntoCgroup
+      - cgroupByClone
+      - attachCgroupFD
+      - cloneSpawnError
+      - cgroupByTrampoline
+    name: cgroup_clone_linux.go
   - decls:
       - cgroupProcsFile
       - cgroup2SuperMagic
@@ -265,6 +1325,9 @@ files:
       - validateCgroupPath
       - applyCgroupPlacement
     name: cgroup_placement_linux.go
+  - decls:
+      - sysCloseRange
+    name: closerange_linux.go
   - decls:
       - idBase
       - wantsIdentity
@@ -275,15 +1338,39 @@ files:
       - resolveGroup
       - resolveGroups
     name: creds_unix.go
+  - decls:
+      - checkDieWithParent
+      - setDieWithParent
+    name: diewithparent_pdeathsig.go
   - decls: []
     name: doc.go
   - decls:
+      - EnvAllow
+      - EnvDeny
+      - envFilter
+      - dedupEnv
+      - envKey
+      - namedKey
+      - repeatedLater
+    name: env.go
+  - decls:
+      - reservedEnvPrefix
       - validateSpec
+      - checkReservedEnv
+      - reservedEnvKey
+      - checkPIDEnv
     name: exec.go
   - decls:
       - Start
+      - prepareSpec
+      - checkSpawnable
+      - configure
       - teardown
       - spawn
+      - launch
+      - launch.release
+      - forkPrepared
+      - forkFailed
       - awaitTrampoline
       - forkClaimed
       - spawnFiles
@@ -294,6 +1381,25 @@ files:
       - buildArgv
       - applyPostStart
     name: exec_unix.go
+  - decls:
+      - fdDir
+    name: fddir_proc.go
+  - decls:
+      - wrapForeignWait
+    name: foreign_wait.go
+  - decls:
+      - sysPidfdSendSignal
+      - pollInEvent
+      - pollSlice
+      - withHandler
+      - pollFd
+      - (*handle).Handle
+      - (*handle).SignalHandle
+      - dupProcessHandle
+      - signalThrough
+      - pidfdSendSignal
+      - pidfdExited
+    name: handle_pidfd_linux.go
   - decls:
       - signalledCode
       - killResendInterval
@@ -308,6 +1414,7 @@ files:
       - collectExit
       - (*handle).releaseProc
       - (*handle).leaderReaped
+      - (*handle).WaitContext
       - (*handle).Signal
       - (*handle).SignalGroup
       - (*handle).Stop
@@ -359,21 +1466,263 @@ files:
       - executableMode
       - isPath
       - sameVariable
+      - variableKey
     name: lookpath_unix.go
   - decls:
-      - peakKiB
-    name: maxrss.go
+      - oomScoreAdjNative
+    name: oomadj_linux.go
   - decls:
-      - maxRSSKB
-    name: maxrss_rss64_unix.go
+      - Open
+    name: open.go
   - decls:
-      - rssUnitsPerKiB
-    name: maxrss_unit_kib_unix.go
+      - sysPidfdOpen
+      - foreign
+      - openProcess
+      - whyNoPidfd
+      - (*foreign).PID
+      - (*foreign).Wait
+      - (*foreign).WaitContext
+      - (*foreign).Signal
+      - (*foreign).SignalGroup
+      - (*foreign).SignalHandle
+      - (*foreign).Handle
+      - (*foreign).Stop
+      - (*foreign).signalAllowGone
+      - (*foreign).awaitExit
+    name: open_linux.go
+  - decls:
+      - maxSymlinks
+      - maxPIDFileBytes
+      - groupOtherWrite
+      - entryStat
+      - pidWalk
+      - readPIDFile
+      - parsePID
+      - openPIDFile
+      - (*pidWalk).walk
+      - refusePath
+      - splitPath
+      - newPIDWalk
+      - (*pidWalk).close
+      - (*pidWalk).top
+      - (*pidWalk).step
+      - (*pidWalk).descend
+      - (*pidWalk).up
+      - (*pidWalk).follow
+      - (*pidWalk).open
+      - fileRefusal
+      - entryTrusted
+      - vouched
+      - errorOr
+    name: pidfile.go
+  - decls:
+      - oPath
+      - heldDir
+      - heldEntry
+      - openWalkRoot
+      - heldDir.lstat
+      - heldDir.readlink
+      - heldDir.openDir
+      - heldDir.entry
+      - releaseDirs
+      - heldDir.close
+      - heldEntry.read
+      - heldEntry.close
+      - fstatEntry
+      - statOf
+      - procFDPath
+    name: pidfile_linux.go
   - decls:
       - procFileMode
       - writeProcFile
     name: procfile_unix.go
   - decls:
+      - ptmxPath
+      - openPTY
+    name: pty_linux.go
+  - decls:
+      - winsize
+      - buildPTYStdio
+      - checkPTY
+      - ioctlFile
+      - setWinsize
+      - (*handle).TTY
+      - (*handle).Resize
+      - (*handle).Size
+    name: pty_supported.go
+  - decls:
+      - Reclaim
+    name: reclaim.go
+  - decls:
+      - reclaimChild
+      - childOf
+    name: reclaim_linux.go
+  - decls:
+      - termSignal
+      - Run
+      - waitOrStop
+      - headBuffer
+      - (*headBuffer).Write
+      - (*headBuffer).grow
+      - (*headBuffer).bytes
+      - (*headBuffer).truncated
+    name: run.go
+  - decls:
+      - procSelfExe
+      - landlockRights
+      - sandboxHost
+      - currentHost
+      - LandlockABI
+      - landlockABIProbe
+      - mountSetattrProbe
+      - checkSandbox
+      - checkSandboxShape
+      - idMapsUsable
+      - rootUsable
+      - idMapsSized
+      - absClean
+      - checkSandboxMounts
+      - mountWellFormed
+      - checkCapabilities
+      - capLastCap
+      - landlockPlan
+      - checkLandlockShape
+      - trimLandlockRules
+      - landlockSupported
+      - landlockRightName
+      - checkSandboxKernel
+      - trampolineSelf
+      - attachSandbox
+      - setSandboxClone
+      - idMappings
+      - buildSandboxPayload
+      - parentToCheck
+      - sandboxCapsOf
+      - sandboxMounts
+      - sandboxIdentityOf
+    name: sandbox_linux.go
+  - decls:
+      - sandboxMagic
+      - mfdCloexec
+      - sandboxMount
+      - sandboxIdentity
+      - sandboxCaps
+      - sandboxRule
+      - sockFilter
+      - sandboxPayload
+      - payloadWriter
+      - (*payloadWriter).u8
+      - (*payloadWriter).u32
+      - (*payloadWriter).u64
+      - (*payloadWriter).flag
+      - (*payloadWriter).str
+      - encodeSandbox
+      - encodeMounts
+      - encodeCredentials
+      - encodeLandlock
+      - payloadReader
+      - (*payloadReader).take
+      - (*payloadReader).u8
+      - (*payloadReader).u16
+      - (*payloadReader).u32
+      - (*payloadReader).u64
+      - (*payloadReader).flag
+      - (*payloadReader).count
+      - (*payloadReader).str
+      - decodeSandbox
+      - sandboxHeaderOK
+      - decodeMounts
+      - decodeCredentials
+      - decodeLandlock
+      - sealedPayload
+      - writePayload
+      - readSealedPayload
+    name: sandbox_payload_linux.go
+  - decls:
+      - bpfLdWAbs
+      - seccompFloor
+      - parseSyscallTable
+      - checkSeccomp
+      - checkSyscallName
+      - seccompAvailable
+      - seccompReturn
+      - assembleSeccomp
+      - seccompNumbers
+    name: sandbox_seccomp_linux.go
+  - decls:
+      - prSetPdeathsig
+      - capHeader
+      - capData
+      - mountAttr
+      - landlockPathBeneath
+      - sockFprog
+      - sandboxStage
+      - execSandboxed
+      - (*sandboxStage).prepareExec
+      - (*sandboxStage).run
+      - (*sandboxStage).trace
+      - sandboxFail
+      - (*sandboxStage).cgroupNamespace
+      - (*sandboxStage).mount
+      - applyMount
+      - rawMount
+      - optionalCString
+      - mountReadOnly
+      - (*sandboxStage).pivot
+      - errnoOf
+      - (*sandboxStage).landlockPaths
+      - addLandlockRule
+      - (*sandboxStage).bounding
+      - (*sandboxStage).secureBits
+      - (*sandboxStage).identity
+      - setGroups
+      - (*sandboxStage).rearmDeathSignal
+      - (*sandboxStage).capabilities
+      - (*sandboxStage).sweep
+      - (*sandboxStage).noNewPrivs
+      - (*sandboxStage).landlock
+      - (*sandboxStage).filterAndExec
+      - rawWrite
+      - errnoError
+      - exitGroup
+    name: sandbox_stage_linux.go
+  - decls:
+      - trampolineSandboxEnv
+      - handshakeSandboxFail
+      - sandboxReportLen
+      - stepPayload
+      - sandboxStepNames
+      - sandboxStepName
+      - sandboxReport
+      - sandboxFailure
+    name: sandbox_steps_unix.go
+  - decls:
+      - maxIOPriority
+      - checkScheduling
+      - knownPolicy
+      - knownIOClass
+    name: scheduling.go
+  - decls:
+      - ioprioWhoProcessSel
+      - schedParam
+      - checkSchedulingPlatform
+      - applyScheduling
+    name: scheduling_linux.go
+  - decls:
+      - closeRangeCloexec
+      - closeRangeLast
+      - closeRangeAbsent
+      - sealFDs
+      - markRangeCloexec
+    name: seal_closerange.go
+  - decls:
+      - firstSealedFD
+      - sealInherited
+      - sealWith
+      - sealByWalk
+    name: seal_unix.go
+  - decls:
+      - defaultDrainGrace
       - fdStdin
       - stdioField
       - swallowErr
@@ -384,24 +1733,34 @@ files:
       - (*stdioState).build
       - (*stdioState).wireInput
       - (*stdioState).wireOutput
+      - sharedNull
+      - nullDevice
       - (*stdioState).wireNull
       - openNull
       - (*stdioState).afterStart
       - (*stdioState).drainOutput
+      - (*stdioState).recordHeld
       - (*stdioState).feedInput
-      - (*stdioState).wait
+      - (*stdioState).drainBounded
+      - (*stdioState).cutDrain
       - (*stdioState).closeAll
       - outName
     name: stdio.go
   - decls:
+      - sandboxAuditArch
+      - syscallTable
+      - foreignTable
+    name: sysnum_linux_amd64.go
+  - decls:
       - trampolineEnv
       - trampolineCgroupEnv
       - trampolineHsFdEnv
+      - trampolinePIDEnv
       - trampolineApplyExit
       - trampolineMinArgs
       - decimalRadix
       - uintBits
-      - _
+      - reservedEnvKeys
       - installTrampoline
       - runTrampoline
       - childHandshakeFD
@@ -414,11 +1773,13 @@ files:
       - applyRlimitToken
       - environWithout
       - needsTrampoline
+      - trampolined
       - encodeTrampoline
       - trampolineSpawn
+      - withPIDEnv
     name: trampoline_unix.go
   - decls:
-      - exitNoUser
+      - exitUsage
       - wrapSpawn
       - wrapWait
       - wrapSignal
@@ -428,12 +1789,115 @@ files:
       - wrapStdioCapture
       - wrapUnknownUser
       - wrapUnknownGroup
+      - wrapStdioDrainTimeout
+      - wrapHandleUnavailable
+      - wrapPTYFailed
+      - wrapReservedEnv
+      - wrapPIDFileRefused
+      - wrapAdoptionRefused
+      - wrapStatusUnknown
+      - wrapInvalidSpec
+      - wrapSandboxFailed
+      - wrapSandboxUnavailable
+      - wrapUnsupportedPlatform
     name: wrap.go
   - decls:
       - zombiesRefused
       - leaderIsZombie
     name: zombie_other.go
 functions:
+  - name: Attach
+    params: ctx context.Context, pid int
+    results: proc coreproc.Process, err error
+  - name: AttachPIDFile
+    params: ctx context.Context, path string, want coreproc.AttachValue
+    results: proc coreproc.Process, err error
+  - doc: |-
+      refuseSelfOrInit refuses PID 1 and this process: adopting either would let
+      a Stop kill the init system or the supervisor itself.
+    name: refuseSelfOrInit
+    params: pid int
+    results: error
+  - doc: bounded reports whether want constrains the process at all.
+    name: bounded
+    params: want coreproc.AttachValue
+    results: bool
+  - doc: |-
+      attachPIDFile reads the PID file, refuses what it may not adopt, and
+      adopts the rest.
+    name: attachPIDFile
+    params: path string, want coreproc.AttachValue
+    results: coreproc.Process, error
+  - doc: |-
+      checkUsers checks the users bound of want against the real and effective
+      uid read of the process pid; readErr is the read's fault, which refuses.
+    name: checkUsers
+    params: pid int, want coreproc.AttachValue, ruid, euid int, readErr error
+    results: error
+  - doc: |-
+      attachProcess opens a pollable pidfd on pid, checks want against the
+      process it holds, and proves the check concerned that process: it was still
+      running once the check was over, so its pid was not yet another's.
+    name: attachProcess
+    params: pid int, want coreproc.AttachValue
+    results: coreproc.Process, error
+  - doc: rawPidfdOpen is pidfd_open(2) itself (434, ADR 0018).
+    name: rawPidfdOpen
+    params: pid int, flags uintptr
+    results: int, syscall.Errno
+  - doc: |-
+      openPollablePidfd opens a non-blocking pidfd on pid: PIDFD_NONBLOCK where
+      the kernel has it (5.10), else — EINVAL for the unknown flag — a plain
+      pidfd made non-blocking with fcntl, which the poller accepts the same way.
+    name: openPollablePidfd
+    params: pid int, open pidfdOpener
+    results: int, error
+  - doc: |-
+      classifyPidfdOpen maps pidfd_open's refusal: ESRCH is a process gone
+      (SIGNAL_FAILED, as Open says), anything else no handle (HANDLE_UNAVAILABLE).
+    name: classifyPidfdOpen
+    params: err error, pid int
+    results: error
+  - doc: |-
+      newAdopted wraps a non-blocking pidfd: os.NewFile registers it with the
+      runtime's poller, so a read on it parks the goroutine, not a thread.
+    name: newAdopted
+    params: fd, pid int
+    results: "*adopted, error"
+  - doc: |-
+      awaitEnd parks on the pidfd raw lends in the runtime's poller until it
+      turns readable — the process has ended. A pidfd the poller refused is
+      watched one ppoll slice at a time instead.
+    name: awaitEnd
+    params: raw syscall.RawConn
+  - doc: |-
+      checkScope checks want against the process pid, from /proc: its cgroup v2
+      path at or below want.Cgroup, its real and effective uid among want.UIDs.
+    name: checkScope
+    params: pid int, want coreproc.AttachValue
+    results: error
+  - doc: withinCgroup reports whether the cgroup path cg is want or below it.
+    name: withinCgroup
+    params: cg, want string
+    results: bool
+  - doc: |-
+      procCgroup reads the process's cgroup v2 path: the "0::" line of
+      /proc/<pid>/cgroup.
+    name: procCgroup
+    params: pid int
+    results: string, error
+  - doc: |-
+      procUIDs reads the process's real and effective uid: the first two fields
+      of the Uid: line of /proc/<pid>/status.
+    name: procUIDs
+    params: pid int
+    results: ruid, euid int, err error
+  - doc: |-
+      procLine returns what follows prefix on the first line of the file at path
+      that starts with it.
+    name: procLine
+    params: path, prefix string
+    results: string, error
   - doc: |-
       applyNice sets the child's scheduling priority via setpriority(2). A nil Nice
       leaves the inherited value untouched; a refusal (e.g. lowering niceness
@@ -453,6 +1917,45 @@ functions:
       the "no such process" signal that a group already exited.
     name: containsESRCH
     params: err error
+    results: bool
+  - doc: kernelClonesIntoCgroup reads the running kernel's release from uname(2).
+    name: kernelClonesIntoCgroup
+    results: bool
+  - doc: |-
+      releaseClonesIntoCgroup reports whether a uname release names Linux 5.7 or
+      later. A release it cannot read is not trusted with the placement.
+    name: releaseClonesIntoCgroup
+    params: release string
+    results: bool
+  - doc: |-
+      cgroupByClone reports whether a placement in cgroupPath is made by the clone
+      itself (clone3 with CLONE_INTO_CGROUP) rather than by the trampoline.
+    name: cgroupByClone
+    params: cgroupPath string
+    results: bool
+  - doc: |-
+      attachCgroupFD opens spec's validated cgroup directory and asks the fork to
+      clone the child into it (#929): the child is a member from its first
+      instruction, with no re-exec and no handshake. The returned release closes
+      the directory once the fork returned.
+    name: attachCgroupFD
+    params: spec coreproc.Spec, attr *syscall.SysProcAttr
+    results: release func(), err error
+  - doc: |-
+      cloneSpawnError reads the failure of a fork that cloned into a group:
+      ENOSYS — clone3 filtered — is retried once through the trampoline (retry,
+      and the refusal is remembered in refused); a refusal by the group itself (EACCES or
+      EPERM when it is not delegated, EBUSY for a domain group with controllers,
+      EOPNOTSUPP for a threaded one) is CGROUP_WRITE_FAILED, as the trampoline's
+      refused cgroup.procs write was; anything else is SPAWN_FAILED.
+    name: cloneSpawnError
+    params: cause error, cgroupPath, path string, refused *atomic.Bool
+    results: retry bool, err error
+  - doc: |-
+      cgroupByTrampoline reports whether a placement in cgroupPath needs the
+      trampoline's pre-exec cgroup.procs write: a placement the clone cannot make.
+    name: cgroupByTrampoline
+    params: cgroupPath string
     results: bool
   - doc: |-
       validateCgroupPath checks, before any spawn, that a non-empty Spec.CgroupPath
@@ -528,11 +2031,90 @@ functions:
     params: names []string
     results: gids []uint32, err error
   - doc: |-
-      validateSpec rejects a malformed spec before any OS work happens. An empty
-      Path is the one structural invariant the port mandates; everything else is
-      resolved (and may fail with its own typed error) during the spawn.
+      checkDieWithParent accepts any DieWithParent: Linux and FreeBSD carry the
+      parent-death signal in SysProcAttr.Pdeathsig.
+    name: checkDieWithParent
+    params: _ coreproc.Signal
+    results: error
+  - doc: |-
+      setDieWithParent asks the forked child to receive sig when its parent
+      thread exits (PR_SET_PDEATHSIG on Linux, procctl(PROC_PDEATHSIG_CTL) on
+      FreeBSD). The stdlib sets it after the credential change and, on Linux,
+      signals the child at once if the parent died before it could, so no window
+      is left open. A zero sig leaves the field unset.
+    name: setDieWithParent
+    params: attr *syscall.SysProcAttr, sig coreproc.Signal
+  - name: EnvAllow
+    params: parent []string, keys ...string
+    results: "[]string"
+  - name: EnvDeny
+    params: parent []string, keys ...string
+    results: "[]string"
+  - doc: |-
+      envFilter keeps the entries of parent whose key's membership in keys equals
+      keep, dropping every occurrence of a key but its last. The result is a new
+      slice, never nil.
+    name: envFilter
+    params: parent, keys []string, keep bool
+    results: "[]string"
+  - doc: |-
+      dedupEnv returns env with each variable once: the value and the place of its
+      last occurrence, which is what os/exec hands a child of
+      append(os.Environ(), "K=v") and what searchPathOf, EnvAllow and EnvDeny read
+      already. A child's getenv reads the FIRST entry of a name, so a variable left
+      twice in the block would be the one the caller meant to replace. An entry
+      without "=" assigns nothing and stays as it is. Names compare as sameVariable
+      compares them. The result is a new slice, never nil; env is not modified.
+    name: dedupEnv
+    params: env []string
+    results: "[]string"
+  - doc: |-
+      envKey returns the name of one KEY=value entry; an entry without '=' is all
+      key. A leading '=' belongs to the name, as os/exec reads it: Windows keeps
+      each drive's current directory as "=C:=C:\dir", and "=C:" and "=D:" are two
+      variables.
+    name: envKey
+    params: kv string
+    results: string
+  - doc: |-
+      namedKey reports whether key is one of keys, compared as the platform
+      compares environment variable names (sameVariable).
+    name: namedKey
+    params: keys []string, key string
+    results: bool
+  - doc: repeatedLater reports whether any entry of rest has key.
+    name: repeatedLater
+    params: rest []string, key string
+    results: bool
+  - doc: |-
+      validateSpec rejects a malformed spec before any OS work happens: an empty
+      Path, the one structural invariant the port mandates, and an environment that
+      names a variable of the spawn protocol. Everything else is resolved (and may
+      fail with its own typed error) during the spawn.
     name: validateSpec
     params: spec coreproc.Spec
+    results: error
+  - doc: |-
+      checkReservedEnv refuses an environment naming a variable of the spawn
+      protocol with RESERVED_ENV, naming the key. It is its own function so
+      validateSpec stays inlinable.
+    name: checkReservedEnv
+    params: env []string
+    results: error
+  - doc: |-
+      reservedEnvKey returns the first key of env that begins reservedEnvPrefix,
+      compared without regard to case: Windows reads environment names that way,
+      and a near-miss on Unix is refused too, so the verdict never depends on the
+      platform or on how the caller spelled the prefix.
+    name: reservedEnvKey
+    params: env []string
+    results: key string, found bool
+  - doc: |-
+      checkPIDEnv refuses a Spec.PIDEnv name the trampoline cannot carry or the
+      child could not read: empty, or holding '=', ',' or NUL — INVALID_SPEC —,
+      or beginning the spawn protocol's prefix — RESERVED_ENV.
+    name: checkPIDEnv
+    params: names []string
     results: error
   - doc: |-
       Start spawns the process described by spec and returns a live coreproc.Process
@@ -543,6 +2125,28 @@ functions:
     name: Start
     params: ctx context.Context, spec coreproc.Spec
     results: proc coreproc.Process, err error
+  - doc: |-
+      prepareSpec validates spec, resolves a bare Path in the child's PATH, and
+      refuses every field this platform cannot honour — before any OS work, so a
+      request is refused, never dropped.
+    name: prepareSpec
+    params: spec coreproc.Spec
+    results: coreproc.Spec, error
+  - doc: |-
+      checkSpawnable runs, in order, the refusals of the fields a platform may not
+      honour: an unmapped rlimit or umask, a parent-death signal, a scheduling
+      class, a cgroup placement (missing, not a cgroup, off Linux), a
+      pseudo-terminal and a PIDEnv name. The first refusal is returned typed.
+    name: checkSpawnable
+    params: spec coreproc.Spec
+    results: error
+  - doc: |-
+      configure turns a forked child into the handle Start returns: the
+      post-start attributes on the live pid, then the capture copiers. A refused
+      attribute tears the child down.
+    name: configure
+    params: spec coreproc.Spec, started *os.Process, claim *childwait.Claim, sio *stdioState
+    results: coreproc.Process, error
   - doc: |-
       teardown kills and reaps a partially-configured child so a post-start
       attribute failure leaves no leaked process or zombie behind. The child has
@@ -561,6 +2165,22 @@ functions:
     name: spawn
     params: spec coreproc.Spec, sio *stdioState
     results: started *os.Process, claim *childwait.Claim, err error
+  - doc: |-
+      forkPrepared seals the supervisor's descriptor table, attaches the cgroup
+      the clone places the child in, forks, and reads the outcome: a failure
+      releases what the spawn holds (a clone into a filtered clone3 is retried
+      through the trampoline), a trampoline is awaited until it execs the target.
+    name: forkPrepared
+    params: spec coreproc.Spec, sio *stdioState, handshakePipe *handshake, l launch
+    results: "*os.Process, *childwait.Claim, error"
+  - doc: |-
+      forkFailed reads a fork/exec failure: a clone into a group that clone3's
+      filter refused is spawned again through the trampoline (the stdio is still
+      intact); any other failure releases the stdio and is typed —
+      CGROUP_WRITE_FAILED for a group that refused the member, SPAWN_FAILED else.
+    name: forkFailed
+    params: spec coreproc.Spec, sio *stdioState, cloned bool, cause error
+    results: "*os.Process, *childwait.Claim, error"
   - doc: |-
       awaitTrampoline blocks a trampolined spawn on its handshake until the child
       execs the target (EOF, nil) or reports a pre-exec failure, which it returns
@@ -626,11 +2246,40 @@ functions:
     results: "[]string"
   - doc: |-
       applyPostStart applies the best-effort scheduling attributes that can only be
-      set on a live pid (Nice, OOMScoreAdj). The first refusal returns its typed
+      set on a live pid (Nice, OOMScoreAdj, Scheduling). The first refusal returns its typed
       error so the caller can tear the child down.
     name: applyPostStart
     params: pid int, spec coreproc.Spec
     results: error
+  - doc: |-
+      wrapForeignWait is the WaitFailed an opened process answers: only a parent
+      collects an exit status, so there is none to wait for.
+    name: wrapForeignWait
+    params: pid int
+    results: error
+  - doc: dupProcessHandle duplicates p's pidfd with F_DUPFD_CLOEXEC.
+    name: dupProcessHandle
+    params: p withHandler
+    results: "*os.File, bool"
+  - doc: |-
+      signalThrough sends sig through p's pidfd. The runtime's answer for a
+      process it has waited is ESRCH; for a kernel without pidfd,
+      HandleUnavailable.
+    name: signalThrough
+    params: p withHandler, pid int, sig coreproc.Signal
+    results: error
+  - doc: |-
+      pidfdSendSignal issues pidfd_send_signal(fd, sig, NULL, 0) and returns its
+      errno: zero on delivery, ESRCH, EPERM or EINVAL as the kernel said.
+    name: pidfdSendSignal
+    params: fd uintptr, sig syscall.Signal
+    results: syscall.Errno
+  - doc: |-
+      pidfdExited reports whether the process behind fd has exited, waiting up to
+      one pollSlice for it (ppoll on POLLIN); a zero wait only reads the state.
+    name: pidfdExited
+    params: fd uintptr, wait bool
+    results: bool, error
   - doc: |-
       newHandle wraps a freshly started *os.Process and the claim on its exit
       status as a handle. setpgid records whether the child leads its own process
@@ -667,7 +2316,9 @@ functions:
     name: exitValue
     params: ws syscall.WaitStatus, ru *syscall.Rusage
     results: coreproc.ExitValue
-  - doc: readRusage fills out's CPU times and MaxRSS from the wait4 rusage ru.
+  - doc: |-
+      readRusage fills out's CPU times and MaxRSS from the wait4 rusage ru; the
+      remaining counters are childwait.UsageOf's.
     name: readRusage
     params: ru *syscall.Rusage, out *coreproc.ExitValue
   - doc: |-
@@ -699,8 +2350,11 @@ functions:
       returns the typed error the caller must surface. An Rlimits key naming a
       resource with no stdlib RLIMIT_* mapping (ResourceNProc / ResourceMemLock) is
       UnknownResource. Every mappable Rlimit and a non-nil Umask are honourable via
-      the trampoline, so they pass validation here and are applied pre-exec. A spec
-      requesting none of these returns nil and spawns unaffected.
+      the trampoline, so they pass validation here and are applied pre-exec. An
+      OOMScoreAdj off Linux is UnsupportedPlatform: the bias is a procfs write on
+      the live pid, so elsewhere it could only fail after the child had already
+      run (ADR 0018, amended 2026-11-04). A spec requesting none of these returns
+      nil and spawns unaffected.
     name: checkLimits
     params: spec coreproc.Spec
     results: error
@@ -783,29 +2437,586 @@ functions:
     params: left, right string
     results: bool
   - doc: |-
-      peakKiB converts a raw ru_maxrss figure into the KiB the
-      coreproc.ExitValue.MaxRSS port field documents. unitsPerKiB is how many of
-      the kernel's units make one KiB: 1 where getrusage(2) reports kilobytes
-      (Linux, the BSDs), so the figure passes through unchanged, and 1024 where it
-      reports bytes (darwin and ios), so the figure is divided and rounded up — a
-      child that touched any memory at all never reads as 0 KiB.
-
-      It is platform-neutral so its arithmetic is tested on every GOOS, not only on
-      the one host whose kernel reports bytes.
-    name: peakKiB
-    params: raw, unitsPerKiB int64
-    results: int64
+      variableKey is a name's spelling two names sameVariable takes for one share:
+      on Unix, the name itself.
+    name: variableKey
+    params: name string
+    results: string
+  - name: Open
+    params: pid int
+    results: proc coreproc.Process, err error
   - doc: |-
-      maxRSSKB reports the peak resident set size in KiB from the wait4 rusage. On
-      a 64-bit GOARCH Rusage.Maxrss is already int64, so no widening cast is
-      needed; the unit is normalised by peakKiB, which passes a kilobyte figure
-      through and converts darwin's bytes.
-    name: maxRSSKB
-    params: ru *syscall.Rusage
-    results: int64
+      openProcess opens pid through pidfd_open. A pid already gone is SIGNAL_FAILED
+      wrapping ESRCH; a kernel that gave no pidfd is HANDLE_UNAVAILABLE — the
+      runtime then holds only the number, which is the race Open exists to avoid.
+    name: openProcess
+    params: pid int
+    results: coreproc.Process, error
+  - doc: |-
+      whyNoPidfd classifies a pid os.FindProcess holds no pidfd for: ESRCH from
+      pidfd_open is a process gone (SIGNAL_FAILED), anything else — ENOSYS
+      before Linux 5.3, a filter's EPERM — is HANDLE_UNAVAILABLE.
+    name: whyNoPidfd
+    params: pid int
+    results: error
+  - doc: |-
+      readPIDFile reads the PID the file at path holds, safely (see
+      AttachPIDFile), and reports whether the file is trustworthy.
+    name: readPIDFile
+    params: path string
+    results: pid int, trusted bool, err error
+  - doc: |-
+      parsePID reads one decimal PID, blanks around it allowed, no sign: the
+      content of a PID file.
+    name: parsePID
+    params: buf []byte, path string
+    results: int, error
+  - doc: |-
+      openPIDFile walks path and opens the regular file at its end without
+      following a symbolic link or blocking, reporting whether the walk and the
+      file are trustworthy.
+    name: openPIDFile
+    params: path string
+    results: f *os.File, trusted bool, err error
+  - doc: refusePath is PID_FILE_REFUSED for a path refused as written.
+    name: refusePath
+    params: path, why string
+    results: error
+  - doc: |-
+      splitPath returns the components of an absolute or relative path, empty
+      ones dropped.
+    name: splitPath
+    params: path string
+    results: "[]string"
+  - doc: |-
+      newPIDWalk opens root — "/" for a PID file, a test's own directory in the
+      tests — and starts a walk there: an absolute link target restarts at it, and
+      its trust is its own stat's, as the real root's is.
+    name: newPIDWalk
+    params: root string
+    results: "*pidWalk, error"
+  - doc: |-
+      fileRefusal names why an entry of mode cannot be a PID file, and reports
+      whether it can.
+    name: fileRefusal
+    params: mode uint32
+    results: why string, ok bool
+  - doc: |-
+      entryTrusted reports whether an entry owned by uid, in the directory dir,
+      could only have been made by root or euid: both belong to one of them, and
+      nobody else may write the directory — or it is sticky, so another user may
+      add entries but not replace this one.
+    name: entryTrusted
+    params: dir entryStat, uid uint32, euid int
+    results: bool
+  - doc: vouched reports whether uid is root or euid.
+    name: vouched
+    params: uid uint32, euid int
+    results: bool
+  - doc: errorOr returns err, or alt when err is nil.
+    name: errorOr
+    params: err, alt error
+    results: error
+  - doc: openWalkRoot opens root as a walk's first directory, with its stat.
+    name: openWalkRoot
+    params: root string
+    results: heldDir, entryStat, error
+  - doc: |-
+      releaseDirs releases every directory of a walk. It is kept out of line:
+      inlined, the loop would push pidWalk.close past the inline budget, which a
+      walk's one close does not need it to be in.
+    name: releaseDirs
+    params: dirs []heldDir
+  - doc: fstatEntry is fstat(2) of fd, as the walk reads it.
+    name: fstatEntry
+    params: fd int
+    results: entryStat, error
+  - doc: statOf is what the walk reads of a Linux stat.
+    name: statOf
+    params: st *syscall.Stat_t
+    results: entryStat
+  - doc: |-
+      procFDPath names entry name in the directory held as fd, through
+      /proc/self/fd: resolution starts at that directory, not at a path. An empty
+      name names what fd holds.
+    name: procFDPath
+    params: fd int, name string
+    results: string
   - doc: writeProcFile writes data to a procfs control file at path.
     name: writeProcFile
     params: path, data string
+    results: error
+  - doc: |-
+      openPTY allocates a pseudo-terminal: /dev/ptmx opened without becoming the
+      supervisor's controlling terminal, its slave unlocked (TIOCSPTLCK 0) and
+      numbered (TIOCGPTN), then /dev/pts/<n> opened the same way. Both are
+      close-on-exec; the child gets the slave through dup2.
+    name: openPTY
+    results: master, slave *os.File, err error
+  - doc: |-
+      buildPTYStdio allocates a pseudo-terminal (openPTY, per kernel), sizes it
+      when size is set, and wires its slave side as the child's fd 0, 1 and 2.
+      The parent closes the slave after the spawn; the master stays, for TTY.
+    name: buildPTYStdio
+    params: s *stdioState, size *coreproc.PTYValue
+    results: error
+  - doc: "checkPTY accepts StdioPTY: this kernel has pseudo-terminals."
+    name: checkPTY
+    params: _ coreproc.Spec
+    results: error
+  - doc: |-
+      ioctlFile issues ioctl(req, arg) on f's descriptor without taking it out of
+      the runtime's poller (File.Fd would set it blocking, and a Read on the
+      master could then no longer be interrupted by Close).
+    name: ioctlFile
+    params: f *os.File, req uint, arg unsafe.Pointer
+    results: error
+  - doc: setWinsize sets the terminal's window size (TIOCSWINSZ).
+    name: setWinsize
+    params: master *os.File, size coreproc.PTYValue
+    results: error
+  - name: Reclaim
+    params: ctx context.Context, pid int
+    results: proc coreproc.Process, err error
+  - doc: |-
+      reclaimChild claims pid's exit status and wraps it in Start's handle, once
+      /proc says it is this process's child — before the claim and after it: a
+      child's pid is not reused until this process reaps it, so the second read
+      proves the claim holds the child the first one saw.
+    name: reclaimChild
+    params: pid int
+    results: coreproc.Process, error
+  - doc: |-
+      childOf reports whether /proc/<pid>/stat names parent as pid's parent: its
+      fourth field, after the command name's closing parenthesis.
+    name: childOf
+    params: pid, parent int
+    results: bool
+  - name: Run
+    params: ctx context.Context, spec coreproc.Spec, opts coreproc.RunValue
+    results: result coreproc.ResultValue, err error
+  - doc: |-
+      waitOrStop waits for p within ctx; when ctx ends first it stops p with
+      SIGTERM and grace, collects the exit, and reports ctx's error beside it.
+    name: waitOrStop
+    params: ctx context.Context, p coreproc.Process, grace time.Duration
+    results: exit coreproc.ExitValue, err error
+  - doc: currentHost returns the kernel a sandboxed spawn reads.
+    name: currentHost
+    results: "*sandboxHost"
+  - name: LandlockABI
+    results: abi int, err error
+  - doc: landlockABIProbe is landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION).
+    name: landlockABIProbe
+    results: int, syscall.Errno
+  - doc: |-
+      mountSetattrProbe calls mount_setattr(2) with a size it refuses: EINVAL
+      where the call exists, ENOSYS before Linux 5.12.
+    name: mountSetattrProbe
+    results: syscall.Errno
+  - doc: |-
+      checkSandbox refuses, before the Path is resolved and before any fork, a
+      Spec.Sandbox this spawn cannot apply: InvalidSpec for a malformed value,
+      SandboxUnavailable for a part this kernel lacks — the function is named in
+      the feature field. A nil Sandbox passes.
+    name: checkSandbox
+    params: spec coreproc.Spec
+    results: error
+  - doc: |-
+      checkSandboxShape refuses the combinations no kernel could apply: an
+      inherited descriptor table, unknown namespaces, id maps without a user
+      namespace or mapping nothing, groups in a user namespace, a root without a
+      mount namespace or a Path without a '/'.
+    name: checkSandboxShape
+    params: spec coreproc.Spec
+    results: error
+  - doc: |-
+      idMapsUsable reports whether sb's id maps can be written: none, or lines of
+      at least one id in a user namespace.
+    name: idMapsUsable
+    params: sb *coreproc.SandboxValue
+    results: bool
+  - doc: |-
+      rootUsable reports whether spec's root can be pivoted into: none, or an
+      absolute clean path in a mount namespace with a Path that is a path.
+    name: rootUsable
+    params: spec coreproc.Spec
+    results: bool
+  - doc: idMapsSized reports whether every line of maps maps at least one id.
+    name: idMapsSized
+    params: maps []coreproc.IDMapValue
+    results: bool
+  - doc: absClean reports whether p is an absolute path in its clean form.
+    name: absClean
+    params: p string
+    results: bool
+  - doc: |-
+      checkSandboxMounts refuses a mount the stage cannot make: no mount
+      namespace, an unknown kind, a relative path, a source on a kind that takes
+      none; and SandboxUnavailable for a read-only mount on a kernel without
+      mount_setattr(2).
+    name: checkSandboxMounts
+    params: sb *coreproc.SandboxValue, host *sandboxHost
+    results: error
+  - doc: |-
+      mountWellFormed reports whether m has a known kind, an absolute clean
+      target, and a source exactly when it binds one, absolute and clean.
+    name: mountWellFormed
+    params: m coreproc.MountValue
+    results: bool
+  - doc: |-
+      checkCapabilities refuses an ambient set outside the bounding set, or naming
+      a capability this kernel does not know.
+    name: checkCapabilities
+    params: c *coreproc.CapabilitiesValue, host *sandboxHost
+    results: error
+  - doc: capLastCap reads the highest capability number the kernel knows.
+    name: capLastCap
+    params: host *sandboxHost
+    results: uint32, error
+  - doc: |-
+      landlockPlan returns the rights restricted and the rules, trimmed to the
+      kernel's ABI: a right it lacks is dropped when ll names it best-effort and
+      refused with SandboxUnavailable otherwise; a rule left granting nothing is
+      dropped. InvalidSpec for no handled right, an unknown right, a relative
+      path or a rule granting what is not handled. A nil ll plans nothing.
+    name: landlockPlan
+    params: ll *coreproc.LandlockValue, host *sandboxHost
+    results: uint64, []sandboxRule, error
+  - doc: |-
+      checkLandlockShape refuses an inert or unknown handled set and a rule with a
+      relative path or a right that is not handled.
+    name: checkLandlockShape
+    params: ll *coreproc.LandlockValue
+    results: error
+  - doc: |-
+      trimLandlockRules keeps each rule's supported rights, and the rules left
+      granting any.
+    name: trimLandlockRules
+    params: rules []coreproc.LandlockRuleValue, supported coreproc.LandlockAccess
+    results: "[]sandboxRule"
+  - doc: landlockSupported returns the rights an ABI implements.
+    name: landlockSupported
+    params: abi int
+    results: coreproc.LandlockAccess
+  - doc: landlockRightName names the lowest right of set.
+    name: landlockRightName
+    params: set coreproc.LandlockAccess
+    results: string
+  - doc: |-
+      checkSandboxKernel refuses a sandbox this kernel cannot start: no
+      /proc/self/exe to re-execute — no fallback is taken — or a namespace kind it
+      lacks.
+    name: checkSandboxKernel
+    params: sb *coreproc.SandboxValue, host *sandboxHost
+    results: error
+  - doc: |-
+      trampolineSelf returns the binary the trampoline re-executes: /proc/self/exe
+      for a sandboxed spawn, which the stdlib's path-only StartProcess reaches,
+      checked by checkSandbox; os.Executable's answer otherwise.
+    name: trampolineSelf
+    params: spec coreproc.Spec
+    results: string, error
+  - doc: |-
+      attachSandbox prepares a sandboxed fork on attr: the namespaces on the
+      clone, the identity taken from the clone and handed to the second stage, and
+      the payload sealed in a memfd placed after the handshake pipe, its number in
+      trampolineSandboxEnv. It returns the memfd, which the caller closes once the
+      fork is done; nil, and attr untouched, for a spawn with no sandbox.
+    name: attachSandbox
+    params: spec coreproc.Spec, attr *os.ProcAttr
+    results: "*os.File, error"
+  - doc: |-
+      setSandboxClone puts the namespaces on the clone: every kind but the mount
+      and cgroup namespaces on the clone flags, the mount namespace unshared after
+      the clone — the stdlib then makes every mount private, so nothing propagates
+      back —, the cgroup namespace left to the second stage, and the user
+      namespace's maps, setgroups denied.
+    name: setSandboxClone
+    params: sys *syscall.SysProcAttr, sb *coreproc.SandboxValue
+  - doc: idMappings converts maps, or — empty — the namespace's 0 mapped to self.
+    name: idMappings
+    params: maps []coreproc.IDMapValue, self int
+    results: "[]syscall.SysProcIDMap"
+  - doc: |-
+      buildSandboxPayload assembles what the second stage applies: the cgroup
+      namespace, the mounts, root and directory, the identity cred carried, the capability sets, the
+      Landlock plan, the assembled filter, the parent-death signal to arm again
+      after the identity changes, and the test hooks.
+    name: buildSandboxPayload
+    params: spec coreproc.Spec, cred *syscall.Credential
+    results: "*sandboxPayload, error"
+  - doc: |-
+      parentToCheck is the supervisor's pid the stage compares its parent with
+      after arming the parent-death signal again: none without the signal, nor in
+      a PID namespace, where a child sees no parent's pid.
+    name: parentToCheck
+    params: spec coreproc.Spec
+    results: uint32
+  - doc: |-
+      sandboxCapsOf converts the capability sets, with the kernel's highest
+      capability; nil leaves them inherited.
+    name: sandboxCapsOf
+    params: c *coreproc.CapabilitiesValue, host *sandboxHost
+    results: "*sandboxCaps, error"
+  - doc: sandboxMounts converts the mounts to the payload's form.
+    name: sandboxMounts
+    params: mounts []coreproc.MountValue
+    results: "[]sandboxMount"
+  - doc: |-
+      sandboxIdentityOf converts the credential the spec resolved to, nil when it
+      names none; setGroups is false in the spawn's own user namespace.
+    name: sandboxIdentityOf
+    params: cred *syscall.Credential, setGroups bool
+    results: "*sandboxIdentity"
+  - doc: encodeSandbox writes p in the payload layout.
+    name: encodeSandbox
+    params: p *sandboxPayload
+    results: "[]byte"
+  - doc: encodeMounts writes the mounts, the root and the working directory.
+    name: encodeMounts
+    params: w *payloadWriter, p *sandboxPayload
+  - doc: encodeCredentials writes the identity, the capabilities and no_new_privs.
+    name: encodeCredentials
+    params: w *payloadWriter, p *sandboxPayload
+  - doc: encodeLandlock writes the handled rights and the rules.
+    name: encodeLandlock
+    params: w *payloadWriter, p *sandboxPayload
+  - doc: |-
+      decodeSandbox parses a payload, refusing with EINVAL anything but the exact
+      layout of sandboxVersion: a wrong magic, an unknown version, a length that is
+      not the data's, a count or string past its bound, a byte left over.
+    name: decodeSandbox
+    params: data []byte
+    results: "*sandboxPayload, syscall.Errno"
+  - doc: |-
+      sandboxHeaderOK reports whether data opens with the magic, this version, a
+      zero reserved half-word and its own length.
+    name: sandboxHeaderOK
+    params: data []byte
+    results: bool
+  - doc: decodeMounts reads the mounts, the root and the working directory.
+    name: decodeMounts
+    params: r *payloadReader, p *sandboxPayload
+  - doc: decodeCredentials reads the identity, the capabilities and no_new_privs.
+    name: decodeCredentials
+    params: r *payloadReader, p *sandboxPayload
+  - doc: decodeLandlock reads the handled rights and the rules.
+    name: decodeLandlock
+    params: r *payloadReader, p *sandboxPayload
+  - doc: |-
+      sealedPayload writes data into a new memfd and seals it against any write,
+      growth, shrink or further seal change, so what the child reads is what the
+      parent wrote. The descriptor is close-on-exec in the parent; the fork's dup2
+      gives the child its own copy without the flag.
+    name: sealedPayload
+    params: data []byte
+    results: fd int, errno syscall.Errno
+  - doc: writePayload writes data to fd until every byte is written.
+    name: writePayload
+    params: fd int, data []byte
+    results: syscall.Errno
+  - doc: |-
+      readSealedPayload reads the payload the parent sealed in fd: every seal must
+      be set and the file no longer than sandboxMaxPayload, and its bytes must
+      decode. The descriptor is closed whatever the outcome.
+    name: readSealedPayload
+    params: fd int
+    results: "*sandboxPayload, syscall.Errno"
+  - doc: parseSyscallTable reads "name number" lines into a map.
+    name: parseSyscallTable
+    params: table string
+    results: map[string]uint32
+  - doc: |-
+      checkSeccomp refuses a filter that cannot be written or would be inert:
+      InvalidSpec for an unknown action or name, an errno out of range, no call
+      named, a Default equal to Action, or a floor call denied; SandboxUnavailable
+      when the kernel has no seccomp or no SECCOMP_RET_KILL_PROCESS.
+    name: checkSeccomp
+    params: sc *coreproc.SeccompValue, available func() syscall.Errno
+    results: error
+  - doc: |-
+      checkSyscallName refuses a name no supported architecture knows, and a floor
+      call given an action other than SeccompAllow.
+    name: checkSyscallName
+    params: name string, action coreproc.SeccompAction
+    results: error
+  - doc: |-
+      seccompAvailable asks the kernel whether seccomp exists and can kill a
+      process: seccomp(SECCOMP_GET_ACTION_AVAIL, 0, &SECCOMP_RET_KILL_PROCESS).
+    name: seccompAvailable
+    results: syscall.Errno
+  - doc: seccompReturn is the filter's return value for action.
+    name: seccompReturn
+    params: action coreproc.SeccompAction, errno int
+    results: uint32
+  - doc: |-
+      assembleSeccomp writes sc as a classic BPF program: the architecture check
+      (another ABI is killed, and on amd64 the x32 one), the floor calls let
+      through, a write to the handshake descriptor hsfd let through, then one
+      comparison per named call taking Action, and Default for the rest. Every
+      jump is 0 or a few instructions forward, far below the 255 a jump can reach.
+      checkSeccomp has accepted sc.
+    name: assembleSeccomp
+    params: sc *coreproc.SeccompValue, hsfd int
+    results: "[]sockFilter"
+  - doc: |-
+      seccompNumbers returns the numbers of names on this architecture, sorted and
+      without repeats; a name it lacks, or a floor call, is left out.
+    name: seccompNumbers
+    params: numbers map[string]uint32, names []string
+    results: "[]uint32"
+  - doc: |-
+      execSandboxed runs the second stage and execs target, never returning: it
+      reads the sealed payload at the descriptor fdText names, applies each step
+      in order on this thread — locked to it, as the runtime keeps the main
+      goroutine during package initialisation — and installs the seccomp filter
+      immediately before the execve. A step that fails reports itself on the
+      handshake pipe and exits: the target never runs.
+    name: execSandboxed
+    params: fdText, target string, args, env []string
+  - doc: |-
+      sandboxFail reports step's failure with errno on the handshake descriptor
+      and exits: the target never runs.
+    name: sandboxFail
+    params: hsfd int, step uint8, errno syscall.Errno
+  - doc: applyMount makes one mount, then makes it read-only, recursively, when asked.
+    name: applyMount
+    params: m sandboxMount
+    results: syscall.Errno
+  - doc: rawMount is mount(2); an empty fstype or data passes NULL.
+    name: rawMount
+    params: source, target, fstype string, flags uintptr, data string
+    results: syscall.Errno
+  - doc: |-
+      optionalCString is s as a C string, nil — NULL to the kernel — when empty
+      or holding a NUL, which the stage's own constants never do.
+    name: optionalCString
+    params: s string
+    results: "*byte"
+  - doc: |-
+      mountReadOnly sets MOUNT_ATTR_RDONLY on target and every mount below it
+      with mount_setattr(2): a remount would need each one's locked flags.
+    name: mountReadOnly
+    params: target string
+    results: syscall.Errno
+  - doc: errnoOf returns err's errno, EIO for any other error, zero for nil.
+    name: errnoOf
+    params: err error
+    results: syscall.Errno
+  - doc: addLandlockRule opens r's path O_PATH and adds it to ruleset.
+    name: addLandlockRule
+    params: ruleset int, r sandboxRule
+    results: syscall.Errno
+  - doc: |-
+      setGroups sets the supplementary groups — cleared when none — unless the
+      spawn's own user namespace denies setgroups(2).
+    name: setGroups
+    params: id *sandboxIdentity
+    results: syscall.Errno
+  - doc: |-
+      rawWrite writes b to fd in one raw call, the one write the filter lets
+      through for the handshake descriptor.
+    name: rawWrite
+    params: fd int, b []byte
+    results: error
+  - doc: errnoError is errno as an error, nil for zero.
+    name: errnoError
+    params: errno syscall.Errno
+    results: error
+  - doc: |-
+      exitGroup ends the process with code through exit_group(2), which the filter
+      lets through, never returning.
+    name: exitGroup
+    params: code int
+  - doc: sandboxStepName returns the name of step, or its number when it is none.
+    name: sandboxStepName
+    params: step uint8
+    results: string
+  - doc: |-
+      sandboxReport is the failure report of step with errno, as the stage writes
+      it to the handshake pipe.
+    name: sandboxReport
+    params: step uint8, errno syscall.Errno
+    results: "[sandboxReportLen]byte"
+  - doc: |-
+      sandboxFailure maps a sandbox failure report — what follows the tag — to the
+      central SandboxFailed, naming the step and the errno.
+    name: sandboxFailure
+    params: rest []byte
+    results: error
+  - doc: |-
+      checkScheduling refuses a Spec.Scheduling that names no defined policy or
+      class, or an I/O level outside 0..7, with InvalidSpec, then one this platform
+      cannot apply with UnsupportedPlatform — both before anything is spawned. A
+      nil value asks for nothing.
+    name: checkScheduling
+    params: sched *coreproc.SchedulingValue
+    results: error
+  - doc: knownPolicy reports whether p is one of the defined SchedPolicy values.
+    name: knownPolicy
+    params: p coreproc.SchedPolicy
+    results: bool
+  - doc: knownIOClass reports whether c is one of the defined IOClass values.
+    name: knownIOClass
+    params: c coreproc.IOClass
+    results: bool
+  - doc: |-
+      checkSchedulingPlatform accepts every defined policy and class: Linux has
+      them all.
+    name: checkSchedulingPlatform
+    params: _ *coreproc.SchedulingValue
+    results: error
+  - doc: |-
+      applyScheduling sets sched's policy (sched_setscheduler) and, unless it is
+      IOClassNone, its I/O priority (ioprio_set) on the live pid. Both apply to
+      the child's main thread, which every thread it creates afterwards inherits:
+      the window is the one Nice has, between the exec and this call. A refusal —
+      a realtime policy or class without CAP_SYS_NICE / CAP_SYS_ADMIN, a priority
+      out of range — is RLIMIT_FAILED.
+    name: applyScheduling
+    params: pid int, sched *coreproc.SchedulingValue
+    results: error
+  - doc: |-
+      sealFDs marks the whole table from firstSealedFD up in one close_range(2)
+      call, falling back to the walk on a kernel without it.
+    name: sealFDs
+    results: error
+  - doc: |-
+      markRangeCloexec issues close_range(3, ~0U, CLOSE_RANGE_CLOEXEC) and returns
+      its errno, zero on success. The stdlib exports no number for it, so
+      sysCloseRange is cited per kernel (ADR 0018).
+    name: markRangeCloexec
+    results: syscall.Errno
+  - doc: |-
+      sealInherited marks every descriptor of the supervisor from firstSealedFD up
+      close-on-exec before a spawn, unless spec.FDs asks to inherit them (#1089). Go's
+      fork/exec installs the child's stdio, ExtraFiles and handshake pipe with
+      dup2, which clears the flag on the child's copy, and leaves every other
+      descriptor without FD_CLOEXEC open in the child: an activation socket a
+      systemd unit received, a descriptor the shell that started the supervisor
+      leaked, a raw syscall.Dup. The mark closes nothing and is process-wide.
+    name: sealInherited
+    params: spec coreproc.Spec
+    results: error
+  - doc: |-
+      sealWith marks the table with closeRange — one close_range(2) with
+      CLOSE_RANGE_CLOEXEC — and falls back to the walk of fdDir when the kernel
+      answers that it has no such call or no such flag (ENOSYS before Linux 5.9 or
+      FreeBSD 13, EINVAL on Linux 5.9 and 5.10, which lack the flag), remembering
+      the answer in missing so later spawns go straight to the walk.
+    name: sealWith
+    params: closeRange func() syscall.Errno, missing *atomic.Bool
+    results: error
+  - doc: |-
+      sealByWalk marks close-on-exec every descriptor from firstSealedFD up that
+      dir lists — /proc/self/fd on Linux, illumos and Solaris, /dev/fd on darwin
+      and the BSDs. syscall.CloseOnExec routes through libc where the kernel
+      refuses a raw fcntl (OpenBSD), and ignores a descriptor closed since the
+      listing. The directory's own descriptor, opened close-on-exec, is listed
+      too and marked again harmlessly.
+    name: sealByWalk
+    params: dir string
     results: error
   - doc: stdioField tags a wrapped stdio-setup failure with the stream it concerns.
     name: stdioField
@@ -824,6 +3035,11 @@ functions:
     name: buildStdio
     params: spec coreproc.Spec
     results: state *stdioState, err error
+  - doc: |-
+      nullDevice returns the process's shared null device, opening it on first
+      use. A failed open is not remembered: the next spawn tries again.
+    name: nullDevice
+    results: "*os.File, error"
   - doc: |-
       openNull opens the platform null device with flag and returns the descriptor;
       the caller owns and eventually closes it. Returning the fd (rather than storing
@@ -900,9 +3116,18 @@ functions:
     results: "[]string"
   - doc: |-
       needsTrampoline reports whether spec requests a pre-exec limit (any Rlimit or a
-      Umask) that the stdlib spawn cannot apply directly, so Start must route through
-      the re-exec trampoline.
+      Umask, a variable set to the child's PID, or a cgroup placement the kernel
+      cannot make at clone time) that the
+      stdlib spawn cannot apply directly, so Start must route through the re-exec
+      trampoline.
     name: needsTrampoline
+    params: spec coreproc.Spec
+    results: bool
+  - doc: |-
+      trampolined reports whether spec spawns through the trampoline: a sandbox,
+      whose second stage the trampoline is, or a pre-exec limit needsTrampoline
+      names. It is apart from needsTrampoline so that one stays inlinable.
+    name: trampolined
     params: spec coreproc.Spec
     results: bool
   - doc: |-
@@ -914,11 +3139,19 @@ functions:
     results: string
   - doc: |-
       trampolineSpawn returns the (path, argv, envAddon) that make os.StartProcess run
-      the trampoline: exec this binary (os.Executable()) with argv [self, target,
-      targetArgv...] and an extra env entry carrying the encoded limits.
+      the trampoline: exec this binary (os.Executable(), or /proc/self/exe for a
+      sandbox) with argv [self, target, targetArgv...] and an extra env entry
+      carrying the encoded limits.
     name: trampolineSpawn
     params: spec coreproc.Spec
     results: path string, argv, envAddon []string, err error
+  - doc: |-
+      withPIDEnv sets every name of the comma-separated list names to pid in env,
+      replacing an entry of the same name: the trampoline gives the target its own
+      PID, which no parent could know before the fork (Spec.PIDEnv).
+    name: withPIDEnv
+    params: env []string, names string, pid int
+    results: "[]string"
   - doc: wrapSpawn wraps a fork/exec cause onto the central SpawnFailed sentinel.
     name: wrapSpawn
     params: cause error, fields ...errs.FieldValue
@@ -967,6 +3200,73 @@ functions:
     params: cause error, fields ...errs.FieldValue
     results: error
   - doc: |-
+      wrapStdioDrainTimeout builds the central StdioDrainTimeout error a Wait
+      returns beside the real exit when the drain grace cut the capture pipes. It
+      has no cause: nothing failed, something still held the pipes.
+    name: wrapStdioDrainTimeout
+    params: fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapHandleUnavailable wraps the reason no kernel handle could be had for a
+      process onto the central HandleUnavailable sentinel.
+    name: wrapHandleUnavailable
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapPTYFailed wraps a pseudo-terminal fault onto the central PTYFailed
+      sentinel.
+    name: wrapPTYFailed
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapReservedEnv is the central ReservedEnv sentinel naming the Spec.Env key
+      that belongs to the spawn protocol.
+    name: wrapReservedEnv
+    params: key string
+    results: error
+  - doc: |-
+      wrapPIDFileRefused wraps the reason a PID file cannot be read safely onto
+      the central PIDFileRefused sentinel.
+    name: wrapPIDFileRefused
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapAdoptionRefused wraps the reason a process may not be adopted onto the
+      central AdoptionRefused sentinel.
+    name: wrapAdoptionRefused
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapStatusUnknown is the central StatusUnknown sentinel an attached
+      process's Wait returns once it has ended.
+    name: wrapStatusUnknown
+    params: pid int
+    results: error
+  - doc: |-
+      wrapInvalidSpec is the central InvalidSpec sentinel with fields naming the
+      malformed part of the Spec.
+    name: wrapInvalidSpec
+    params: fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapSandboxFailed wraps the errno of a sandbox step that failed in the
+      child onto the central SandboxFailed sentinel, naming the step.
+    name: wrapSandboxFailed
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapSandboxUnavailable wraps the reason this kernel cannot apply a part of
+      Spec.Sandbox onto the central SandboxUnavailable sentinel, naming it.
+    name: wrapSandboxUnavailable
+    params: cause error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      wrapUnsupportedPlatform is the central UnsupportedPlatform sentinel with
+      fields naming what this platform lacks.
+    name: wrapUnsupportedPlatform
+    params: fields ...errs.FieldValue
+    results: error
+  - doc: |-
       leaderIsZombie answers false: only darwin refuses a group of zombies with
       EPERM, so no other kernel consults it — and getpgid(2) still finds a zombie
       on Linux, where reading it would call a dead leader alive. solaris, illumos
@@ -975,8 +3275,12 @@ functions:
     params: _ int
     results: bool
 imports:
+  atomic: sync/atomic
+  binary: encoding/binary
+  bufio: bufio
   childwait: github.com/kitsunium/sdk/internal/service/proc/childwait
   clock: github.com/kitsunium/sdk/internal/kernel/clock
+  cmp: cmp
   context: context
   coreproc: github.com/kitsunium/sdk/internal/core/proc
   errors: errors
@@ -984,14 +3288,18 @@ imports:
   filepath: path/filepath
   fs: io/fs
   io: io
+  math: math
   os: os
   osexec: os/exec
   rlim: github.com/kitsunium/sdk/internal/service/proc/internal/rlim
+  runtime: runtime
+  slices: slices
   strconv: strconv
   strings: strings
   sync: sync
   syscall: syscall
   time: time
+  unsafe: unsafe
   user: os/user
 package:
   docFile: doc.go
@@ -999,6 +3307,156 @@ package:
   name: exec
   purpose: "Package exec — Unix best-effort post-start attributes: scheduling priority (Nice), OOM-killer bias (OOMScoreAdj)."
 types:
+  - doc: "pidfdOpener is pidfd_open(2): a descriptor for pid, or the errno."
+    kind: named
+    name: pidfdOpener
+    underlying: func(pid int, flags uintptr) (int, syscall.Errno)
+  - doc: |-
+      adopted is the handle Attach returns: a process this one did not spawn,
+      held through a non-blocking pidfd registered with the runtime's poller, so
+      its end is observed without a thread parked and without a poll loop.
+      Nothing in it addresses the pid by number.
+    fields:
+      - doc: file is the pidfd; the runtime closes it once the handle is collected.
+        name: file
+        type: "*os.File"
+      - doc: raw lends the pidfd for one call (Control) or waits on it (Read).
+        name: raw
+        type: syscall.RawConn
+      - doc: done is closed once the process has ended.
+        name: done
+        type: chan struct{}
+      - doc: "clk is what Stop's grace window runs on: clock.System from Attach."
+        name: clk
+        type: clock.Waiter
+      - doc: watching starts the one goroutine that observes the end.
+        name: watching
+        type: sync.Once
+      - name: pid
+        type: int
+    kind: struct
+    methods:
+      - doc: PID reports the process identifier the handle was attached from.
+        name: PID
+        recv: a *adopted
+        results: int
+      - doc: |-
+          Wait returns once the process has ended, with StatusUnknown and an
+          ExitValue whose Code is -1: its status is a parent's to read.
+        name: Wait
+        recv: a *adopted
+        results: exit coreproc.ExitValue, err error
+      - doc: |-
+          WaitContext waits like Wait until the process ends or ctx is done; when ctx
+          ends first it returns ctx's error, and a later wait still observes the end.
+        name: WaitContext
+        params: ctx context.Context
+        recv: a *adopted
+        results: exit coreproc.ExitValue, err error
+      - doc: |-
+          Signal delivers sig to the process held, never to one that reused its pid
+          (deliver).
+        name: Signal
+        params: sig coreproc.Signal
+        recv: a *adopted
+        results: error
+      - doc: |-
+          SignalGroup delivers sig to the process alone: a group addressed by number
+          is not race-free, and this handle holds no group.
+        name: SignalGroup
+        params: sig coreproc.Signal
+        recv: a *adopted
+        results: error
+      - doc: |-
+          Stop sends sig, waits for the end up to grace, then sends SIGKILL and waits
+          until the end or ctx's. A process already gone is success at either phase.
+        name: Stop
+        params: ctx context.Context, grace time.Duration, sig coreproc.Signal
+        recv: a *adopted
+        results: error
+      - doc: awaitGrace waits for the end up to grace on the handle's clock.
+        name: awaitGrace
+        params: ctx context.Context, grace time.Duration
+        recv: a *adopted
+        results: ended bool, err error
+      - doc: signalAllowGone delivers sig and treats ESRCH as success.
+        name: signalAllowGone
+        params: sig coreproc.Signal
+        recv: a *adopted
+        results: error
+      - doc: watch starts, once, the goroutine that closes done at the end.
+        name: watch
+        recv: a *adopted
+      - doc: |-
+          deliver is how Signal, SignalGroup and Stop reach the process: through the
+          pidfd, never by number.
+        name: deliver
+        params: sig coreproc.Signal
+        recv: a *adopted
+        results: error
+      - doc: |-
+          SignalHandle delivers sig through the pidfd (pidfd_send_signal); once the
+          process has ended it fails with SIGNAL_FAILED wrapping ESRCH.
+        name: SignalHandle
+        params: sig coreproc.Signal
+        recv: a *adopted
+        results: error
+      - doc: |-
+          Handle returns a duplicate of the pidfd, close-on-exec, owned by the caller.
+          It shares the handle's open file, hence its O_NONBLOCK.
+        name: Handle
+        recv: a *adopted
+        results: "*os.File, bool"
+      - doc: |-
+          startWatcher starts the goroutine that closes done once the process has
+          ended, and returns once it runs.
+        name: startWatcher
+        recv: a *adopted
+      - doc: exited reports, without waiting, whether the process has ended.
+        name: exited
+        recv: a *adopted
+        results: bool
+    name: adopted
+  - doc: |-
+      launch is what a prepared spawn hands os.StartProcess, and the sandbox
+      payload the fork hands the child, released once the fork is done.
+    fields:
+      - name: path
+        type: string
+      - name: argv
+        type: "[]string"
+      - name: attr
+        type: "*os.ProcAttr"
+      - name: payload
+        type: "*os.File"
+    kind: struct
+    methods:
+      - doc: |-
+          release closes the parent's copy of the sandbox payload, if any: the child
+          holds its own from the fork on.
+        name: release
+        recv: l launch
+    name: launch
+  - doc: |-
+      withHandler is what the pidfd helpers need of a process: the handle the
+      runtime holds for it, lent for the length of one call (os.Process).
+    kind: named
+    name: withHandler
+    underlying: |-
+      interface {
+      	// WithHandle calls f with the process's pidfd, valid until f returns.
+      	WithHandle(f func(handle uintptr)) error
+      }
+  - doc: pollFd is struct pollfd from poll.h.
+    fields:
+      - name: fd
+        type: int32
+      - name: events
+        type: int16
+      - name: revents
+        type: int16
+    kind: struct
+    name: pollFd
   - doc: |-
       handle is the live supervision handle for one spawned process. It owns the
       *os.Process and the claim on its exit status, remembers the leader pid and
@@ -1033,6 +3491,11 @@ types:
       - name: done
         type: chan struct{}
       - doc: |-
+          settled is closed once Wait has its whole outcome — the exit and the
+          drained (or cut) capture — so WaitContext never returns before it.
+        name: settled
+        type: chan struct{}
+      - doc: |-
           clk is what Stop's grace window and the SIGKILL resend interval are
           measured on: clock.System from newHandle, a ManualClock in a white-box
           test.
@@ -1045,6 +3508,22 @@ types:
         type: func(pid int, sig syscall.Signal) error
     kind: struct
     methods:
+      - doc: |-
+          Handle returns a duplicate of the pidfd the runtime holds for the child
+          (os.Process.WithHandle), close-on-exec, owned by the caller. It reports
+          false once the child is reaped — the runtime has released its pidfd — and
+          on a kernel that gave the runtime none (Linux < 5.4, or a filter).
+        name: Handle
+        recv: h *handle
+        results: "*os.File, bool"
+      - doc: |-
+          SignalHandle delivers sig through the child's pidfd (pidfd_send_signal),
+          never by pid: once the child is reaped it fails with SignalFailed wrapping
+          ESRCH. A kernel that gave the runtime no pidfd is HandleUnavailable.
+        name: SignalHandle
+        params: sig coreproc.Signal
+        recv: h *handle
+        results: error
       - doc: |-
           groupTarget returns the kill(2) target for group-directed operations: the
           negated pgid when the child leads its own group (Setpgid), otherwise the leader
@@ -1080,6 +3559,18 @@ types:
         name: leaderReaped
         recv: h *handle
         results: bool
+      - doc: |-
+          WaitContext waits like Wait until the process exits or ctx is done. When
+          ctx ends first it returns ctx's error and the child keeps running; a later
+          Wait or WaitContext still reports the real exit.
+
+          Goroutine lifecycle: it launches reapInBackground, which drives the
+          once-only Wait and returns once the child is reaped and its capture drained
+          — bounded by the drain grace — whether or not this call is still waiting.
+        name: WaitContext
+        params: ctx context.Context
+        recv: h *handle
+        results: exit coreproc.ExitValue, err error
       - doc: |-
           Signal delivers sig to the leader process only (kill(pid, sig)). A leader
           already reaped — by Wait or by a reaper sweep — is reported finished and
@@ -1213,6 +3704,23 @@ types:
           whoever calls h.Wait() directly, so this driver has nowhere to propagate it.
         name: reapInBackground
         recv: h *handle
+      - doc: |-
+          TTY returns the master side of the child's pseudo-terminal, which the caller
+          owns and closes, or nil for a child started without StdioPTY.
+        name: TTY
+        recv: h *handle
+        results: "*os.File"
+      - doc: |-
+          Resize sets the window size of the child's terminal; the kernel sends it
+          SIGWINCH. A child without a terminal is PTY_FAILED.
+        name: Resize
+        params: rows, cols uint16
+        recv: h *handle
+        results: error
+      - doc: Size reads the window size of the child's terminal (TIOCGWINSZ).
+        name: Size
+        recv: h *handle
+        results: coreproc.PTYValue, error
     name: handle
   - doc: |-
       waiter is what collectExit needs from the process it reaps: its own wait,
@@ -1268,6 +3776,647 @@ types:
         recv: h *handshake
     name: handshake
   - doc: |-
+      foreign is the handle Open returns on Linux: a process this one did not
+      spawn, held through the pidfd os.FindProcess opened (pidfd_open). Nothing in
+      it addresses the pid by number, so a pid reused after the process exits is
+      never reached. The runtime closes the pidfd when the handle is collected.
+    fields:
+      - name: proc
+        type: "*os.Process"
+      - name: pid
+        type: int
+      - doc: "clk is what Stop's grace window runs on: clock.System from Open."
+        name: clk
+        type: clock.Waiter
+    kind: struct
+    methods:
+      - doc: PID reports the process identifier given to Open.
+        name: PID
+        recv: f *foreign
+        results: int
+      - doc: "Wait is refused: only a parent collects an exit status."
+        name: Wait
+        recv: f *foreign
+        results: exit coreproc.ExitValue, err error
+      - doc: WaitContext is refused like Wait.
+        name: WaitContext
+        params: _ context.Context
+        recv: f *foreign
+        results: exit coreproc.ExitValue, err error
+      - doc: Signal delivers sig through the pidfd.
+        name: Signal
+        params: sig coreproc.Signal
+        recv: f *foreign
+        results: error
+      - doc: |-
+          SignalGroup delivers sig to the process alone: a group addressed by number
+          is not race-free, and this handle holds no group.
+        name: SignalGroup
+        params: sig coreproc.Signal
+        recv: f *foreign
+        results: error
+      - doc: |-
+          SignalHandle delivers sig through the pidfd (pidfd_send_signal); once the
+          process has exited it fails with SIGNAL_FAILED wrapping ESRCH.
+        name: SignalHandle
+        params: sig coreproc.Signal
+        recv: f *foreign
+        results: error
+      - doc: Handle returns a duplicate of the pidfd, owned by the caller.
+        name: Handle
+        recv: f *foreign
+        results: "*os.File, bool"
+      - doc: |-
+          Stop sends sig through the pidfd, watches the pidfd for the exit up to
+          grace, then sends SIGKILL and watches until the exit or ctx's end. A process
+          already gone is success at either phase.
+        name: Stop
+        params: ctx context.Context, grace time.Duration, sig coreproc.Signal
+        recv: f *foreign
+        results: error
+      - doc: signalAllowGone signals through the pidfd and treats ESRCH as success.
+        name: signalAllowGone
+        params: sig coreproc.Signal
+        recv: f *foreign
+        results: error
+      - doc: |-
+          awaitExit polls the pidfd one slice at a time until it reports the exit,
+          ctx ends, or deadline (nil: none) fires. exited reports the first.
+        name: awaitExit
+        params: ctx context.Context, deadline <-chan time.Time
+        recv: f *foreign
+        results: exited bool, err error
+    name: foreign
+  - doc: |-
+      entryStat is what the walk reads of an entry's stat: the identity a descent
+      is proven against, the owner and the mode its trust is judged on. Each
+      platform's directory holder (heldDir) fills it from its own syscall.Stat_t,
+      whose field types differ from one kernel to the next.
+    fields:
+      - doc: dev and ino name the inode.
+        name: dev
+        type: uint64
+      - doc: dev and ino name the inode.
+        name: ino
+        type: uint64
+      - doc: uid is the owner.
+        name: uid
+        type: uint32
+      - doc: "mode is st_mode: the type bits and the permissions."
+        name: mode
+        type: uint32
+    kind: struct
+    name: entryStat
+  - doc: |-
+      pidWalk walks a PID file's path from the root one component at a time, each
+      directory held open (heldDir) so a rename cannot move the walk elsewhere, and
+      records whether anyone but root and this process's user could have made what
+      it went through.
+    fields:
+      - doc: dirs are the directories descended into, the root first; ".." pops.
+        name: dirs
+        type: "[]heldDir"
+      - doc: stats are dirs' stats, index for index.
+        name: stats
+        type: "[]entryStat"
+      - doc: euid is this process's effective user.
+        name: euid
+        type: int
+      - doc: links counts the symbolic links followed.
+        name: links
+        type: int
+      - doc: trusted stays true while every step was made by root or euid.
+        name: trusted
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          walk takes the components todo, every one but the last a step, the last
+          the file; path names the PID file in errors.
+        name: walk
+        params: todo []string, path string
+        recv: w *pidWalk
+        results: f *os.File, trusted bool, err error
+      - doc: close releases every directory the walk holds.
+        name: close
+        recv: w *pidWalk
+      - doc: top is the directory the walk stands in, and its stat.
+        name: top
+        recv: w *pidWalk
+        results: heldDir, entryStat
+      - doc: |-
+          step takes one component that is not the last: "." stays, ".." climbs, a
+          directory is descended into, a symbolic link is read and returned. Every
+          step updates the walk's trust.
+        name: step
+        params: name string
+        recv: w *pidWalk
+        results: target string, isLink bool, err error
+      - doc: |-
+          descend opens the directory name — the entry whose stat is want — and makes
+          it the walk's position. A directory renamed between the stat and the open
+          is refused.
+        name: descend
+        params: name string, want entryStat
+        recv: w *pidWalk
+        results: error
+      - doc: up climbs one directory; the root's parent is the root.
+        name: up
+        recv: w *pidWalk
+      - doc: |-
+          follow continues the walk at a link's target: an absolute target restarts
+          at the walk's root, a relative one where the link lies.
+        name: follow
+        params: target string, rest []string
+        recv: w *pidWalk
+        results: "[]string"
+      - doc: |-
+          open opens the walk's last component as the file. The entry is first held
+          and examined without following a symbolic link (heldDir.entry), so a link
+          at the end, a FIFO or a device is refused by its type before anything reads
+          it; only a regular file is then read, through a read proven to reach the
+          inode examined (heldEntry.read).
+        name: open
+        params: name, path string
+        recv: w *pidWalk
+        results: "*os.File, bool, error"
+    name: pidWalk
+  - doc: |-
+      heldDir is one directory a PID-file walk stands in, held O_PATH: its
+      entries are examined through /proc/self/fd/<fd>/<name>, so resolution starts
+      at the directory held, never at a path a rename could move.
+    fields:
+      - doc: fd is the O_PATH descriptor.
+        name: fd
+        type: int
+    kind: struct
+    methods:
+      - doc: lstat examines the entry name of d without following a link.
+        name: lstat
+        params: name string
+        recv: d heldDir
+        results: entryStat, error
+      - doc: readlink reads the symbolic link name of d.
+        name: readlink
+        params: name string
+        recv: d heldDir
+        results: string, error
+      - doc: |-
+          openDir holds the directory name of d, O_PATH and without following a link
+          — one swapped in since the examination is refused by the kernel.
+        name: openDir
+        params: name string
+        recv: d heldDir
+        results: heldDir, entryStat, error
+      - doc: |-
+          entry holds the last component name of d as a position (O_PATH,
+          O_NOFOLLOW): a link at the end, a FIFO or a device is examined without
+          being opened at all.
+        name: entry
+        params: name string
+        recv: d heldDir
+        results: e heldEntry, st entryStat, why string, err error
+      - doc: close releases the held directory.
+        name: close
+        recv: d heldDir
+    name: heldDir
+  - doc: |-
+      heldEntry is the walk's last component held O_PATH|O_NOFOLLOW: examined by
+      fstat before anything is opened for reading.
+    fields:
+      - doc: fd is the O_PATH descriptor; the entry itself when it is a link.
+        name: fd
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          read reopens the held entry for reading through its position, which
+          reaches the very inode examined; path names the file.
+        name: read
+        params: path string
+        recv: e heldEntry
+        results: f *os.File, why string, err error
+      - doc: close releases the held entry.
+        name: close
+        recv: e heldEntry
+    name: heldEntry
+  - doc: winsize is struct winsize from sys/ttycom.h and asm-generic/termios.h.
+    fields:
+      - name: rows
+        type: uint16
+      - name: cols
+        type: uint16
+      - name: xpixel
+        type: uint16
+      - name: ypixel
+        type: uint16
+    kind: struct
+    name: winsize
+  - doc: |-
+      headBuffer is a capture sink that keeps the first limit bytes written to it
+      and accepts, then discards, the rest: the copier keeps draining the pipe, so
+      the child never blocks, and the memory held never exceeds limit.
+    fields:
+      - name: mu
+        type: sync.Mutex
+      - name: limit
+        type: int
+      - name: buf
+        type: "[]byte"
+      - name: over
+        type: bool
+    kind: struct
+    methods:
+      - doc: Write keeps what fits under the limit and reports every byte as written.
+        name: Write
+        params: p []byte
+        recv: b *headBuffer
+        results: int, error
+      - doc: |-
+          grow makes room for n more bytes by doubling, capped at the limit, so the
+          buffer's allocations total at most twice the limit — append's own growth,
+          a quarter at a time for a large slice, allocates five times what it keeps.
+        name: grow
+        params: n int
+        recv: b *headBuffer
+      - doc: bytes returns what was kept.
+        name: bytes
+        recv: b *headBuffer
+        results: "[]byte"
+      - doc: truncated reports whether more than limit bytes were written.
+        name: truncated
+        recv: b *headBuffer
+        results: bool
+    name: headBuffer
+  - doc: |-
+      sandboxHost is what a sandboxed spawn reads of this kernel, and the two
+      hooks the package's tests drive the second stage with. Production uses
+      hostKernel; a test swaps it through sandboxHostOverride.
+    fields:
+      - name: procSelfExe
+        type: string
+      - name: nsDir
+        type: string
+      - name: capLastCap
+        type: string
+      - name: landlockABI
+        type: func() (int, syscall.Errno)
+      - name: seccomp
+        type: func() syscall.Errno
+      - name: mountSetattr
+        type: func() syscall.Errno
+      - name: failStep
+        type: uint8
+      - name: traceFD
+        type: int32
+    kind: struct
+    name: sandboxHost
+  - doc: sandboxMount is one MountValue as the child applies it.
+    fields:
+      - name: kind
+        type: uint8
+      - name: readOnly
+        type: bool
+      - name: source
+        type: string
+      - name: target
+        type: string
+    kind: struct
+    name: sandboxMount
+  - doc: |-
+      sandboxIdentity is the credential the child takes itself (Spec.User, Group,
+      Groups resolved by the parent). setGroups is false in a user namespace the
+      spawn created, where setgroups(2) is denied and the groups stay as they are.
+    fields:
+      - name: uid
+        type: uint32
+      - name: gid
+        type: uint32
+      - name: setGroups
+        type: bool
+      - name: groups
+        type: "[]uint32"
+    kind: struct
+    name: sandboxIdentity
+  - doc: |-
+      sandboxCaps is CapabilitiesValue with the highest capability the kernel
+      knows (/proc/sys/kernel/cap_last_cap), read by the parent.
+    fields:
+      - name: bounding
+        type: uint64
+      - name: ambient
+        type: uint64
+      - name: secureBits
+        type: uint32
+      - name: lastCap
+        type: uint32
+    kind: struct
+    name: sandboxCaps
+  - doc: sandboxRule is one Landlock rule with its rights trimmed to the kernel's ABI.
+    fields:
+      - name: access
+        type: uint64
+      - name: path
+        type: string
+    kind: struct
+    name: sandboxRule
+  - doc: sockFilter is struct sock_filter, one classic BPF instruction.
+    fields:
+      - name: code
+        type: uint16
+      - name: jt
+        type: uint8
+      - name: jf
+        type: uint8
+      - name: k
+        type: uint32
+    kind: struct
+    name: sockFilter
+  - doc: sandboxPayload is everything the second stage applies, in its order.
+    fields:
+      - doc: |-
+          cgroupNS asks the stage to unshare a cgroup namespace (NamespaceCgroup),
+          which the clone does not: the child must be in its group first.
+        name: cgroupNS
+        type: bool
+      - name: mounts
+        type: "[]sandboxMount"
+      - name: root
+        type: string
+      - doc: dir is Spec.Dir, entered inside root after the pivot; unused without one.
+        name: dir
+        type: string
+      - name: identity
+        type: "*sandboxIdentity"
+      - name: caps
+        type: "*sandboxCaps"
+      - name: noNewPrivs
+        type: bool
+      - doc: handled is the Landlock rights restricted; zero means no Landlock.
+        name: handled
+        type: uint64
+      - name: rules
+        type: "[]sandboxRule"
+      - doc: filter is the assembled seccomp program; empty means no filter.
+        name: filter
+        type: "[]sockFilter"
+      - name: pdeathsig
+        type: uint32
+      - doc: |-
+          parentPID is the supervisor's pid, checked after the parent-death signal
+          is armed again; zero (a child in its own PID namespace) checks nothing.
+        name: parentPID
+        type: uint32
+      - doc: |-
+          failStep and traceFD serve the package's tests alone: the step failed by
+          injection (zero none) and the descriptor each step records itself on.
+        name: failStep
+        type: uint8
+      - name: traceFD
+        type: int32
+    kind: struct
+    name: sandboxPayload
+  - doc: payloadWriter appends the payload's fields little-endian.
+    fields:
+      - name: buf
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: u8 appends one byte.
+        name: u8
+        params: v uint8
+        recv: w *payloadWriter
+      - doc: u32 appends a 32-bit word.
+        name: u32
+        params: v uint32
+        recv: w *payloadWriter
+      - doc: u64 appends a 64-bit word.
+        name: u64
+        params: v uint64
+        recv: w *payloadWriter
+      - doc: flag appends a boolean as one byte.
+        name: flag
+        params: v bool
+        recv: w *payloadWriter
+      - doc: str appends a length-prefixed string.
+        name: str
+        params: s string
+        recv: w *payloadWriter
+    name: payloadWriter
+  - doc: payloadReader reads the payload's fields, refusing any read past its end.
+    fields:
+      - name: buf
+        type: "[]byte"
+      - name: bad
+        type: bool
+    kind: struct
+    methods:
+      - doc: take returns the next n bytes, or nil once the payload is short.
+        name: take
+        params: n int
+        recv: r *payloadReader
+        results: "[]byte"
+      - doc: u8 reads one byte.
+        name: u8
+        recv: r *payloadReader
+        results: uint8
+      - doc: u16 reads a 16-bit word.
+        name: u16
+        recv: r *payloadReader
+        results: uint16
+      - doc: u32 reads a 32-bit word.
+        name: u32
+        recv: r *payloadReader
+        results: uint32
+      - doc: u64 reads a 64-bit word.
+        name: u64
+        recv: r *payloadReader
+        results: uint64
+      - doc: flag reads a boolean byte, refusing any value but 0 and 1.
+        name: flag
+        recv: r *payloadReader
+        results: bool
+      - doc: count reads a count and refuses one past limit.
+        name: count
+        params: limit int
+        recv: r *payloadReader
+        results: int
+      - doc: str reads a length-prefixed string without NUL, at most sandboxMaxString long.
+        name: str
+        recv: r *payloadReader
+        results: string
+    name: payloadReader
+  - doc: capHeader is struct __user_cap_header_struct.
+    fields:
+      - name: version
+        type: uint32
+      - name: pid
+        type: int32
+    kind: struct
+    name: capHeader
+  - doc: capData is struct __user_cap_data_struct, two of which hold 64 capabilities.
+    fields:
+      - name: effective
+        type: uint32
+      - name: permitted
+        type: uint32
+      - name: inheritable
+        type: uint32
+    kind: struct
+    name: capData
+  - doc: mountAttr is struct mount_attr, MOUNT_ATTR_SIZE_VER0 long.
+    fields:
+      - name: attrSet
+        type: uint64
+      - name: attrClr
+        type: uint64
+      - name: propagation
+        type: uint64
+      - name: usernsFD
+        type: uint64
+    kind: struct
+    name: mountAttr
+  - doc: |-
+      landlockPathBeneath is struct landlock_path_beneath_attr: packed in C, 12
+      bytes, which this layout's first 12 bytes are.
+    fields:
+      - name: allowedAccess
+        type: uint64
+      - name: parentFD
+        type: int32
+    kind: struct
+    name: landlockPathBeneath
+  - doc: sockFprog is struct sock_fprog.
+    fields:
+      - name: length
+        type: uint16
+      - name: filter
+        type: "*sockFilter"
+    kind: struct
+    name: sockFprog
+  - doc: |-
+      sandboxStage is the second stage of a sandboxed spawn: the payload, the
+      handshake descriptor its failures are reported on, the Landlock ruleset
+      between its two steps, and the target's argv and environment, converted
+      before the filter so nothing is allocated after it.
+    fields:
+      - name: p
+        type: "*sandboxPayload"
+      - name: hsfd
+        type: int
+      - name: ruleset
+        type: int
+      - name: argv0
+        type: "*byte"
+      - name: argv
+        type: "[]*byte"
+      - name: envv
+        type: "[]*byte"
+    kind: struct
+    methods:
+      - doc: prepareExec converts the target's path, argv and environment.
+        name: prepareExec
+        params: target string, args, env []string
+        recv: st *sandboxStage
+        results: error
+      - doc: run traces step, fails it when a test injects a failure there, and runs it.
+        name: run
+        params: step uint8, fn func(*sandboxStage) syscall.Errno
+        recv: st *sandboxStage
+      - doc: trace records step and the thread running it on the tests' trace descriptor.
+        name: trace
+        params: step uint8
+        recv: st *sandboxStage
+      - doc: |-
+          cgroupNamespace unshares a cgroup namespace on this thread, the one that
+          execs the target, when the sandbox asks for one. The child is already in
+          its group — the clone placed it, or the trampoline wrote its PID — so the
+          namespace is rooted there, and the target sees that group as its root on
+          either path; the stage still holds the capabilities unshare needs.
+        name: cgroupNamespace
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: mount makes each mount in order.
+        name: mount
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: |-
+          pivot moves the child into its root: the root bound onto itself so it is a
+          mount point, pivot_root(".", ".") stacking the old root under the new one,
+          the old root detached, then the working directory entered inside.
+        name: pivot
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: |-
+          landlockPaths creates the ruleset and adds each rule, its path opened
+          O_PATH while the stage still holds its privileges and after its mounts and
+          pivot, so the rules name what the child will see.
+        name: landlockPaths
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: |-
+          bounding drops from the bounding set every capability the kernel knows that
+          is present and not kept.
+        name: bounding
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: secureBits sets the securebits asked.
+        name: secureBits
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: |-
+          identity takes the credential the spec names, on this thread alone — the
+          thread that execs —, keeping the permitted set when ambient capabilities are
+          to be raised, then arms the parent-death signal again, which the kernel
+          clears when the effective ids change.
+        name: identity
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: |-
+          rearmDeathSignal sets the parent-death signal again and, outside a PID
+          namespace, checks the supervisor did not die before it was set.
+        name: rearmDeathSignal
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: |-
+          capabilities sets the thread's sets — permitted and effective cut to the
+          bounding set, inheritable to the ambient one — then clears the ambient set
+          and raises each capability asked.
+        name: capabilities
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: |-
+          sweep marks close-on-exec every descriptor past the handshake pipe — the
+          target keeps its stdio and ExtraFiles, below it — with one
+          close_range(CLOSE_RANGE_CLOEXEC), or the walk of /proc/self/fd before Linux
+          5.11.
+        name: sweep
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: noNewPrivs sets no_new_privs, which Landlock and seccomp require.
+        name: noNewPrivs
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: landlock restricts this thread — and the target it execs — to the ruleset.
+        name: landlock
+        recv: st *sandboxStage
+        results: syscall.Errno
+      - doc: |-
+          filterAndExec installs the seccomp filter, if any, and execs the target in
+          the next system call: nothing is allocated between the two. A filter the
+          kernel refuses is the seccomp step's failure; an execve that fails is
+          reported as an exec failure through the write the filter lets through, and
+          the stage exits with the call the filter lets through.
+        name: filterAndExec
+        recv: st *sandboxStage
+    name: sandboxStage
+  - doc: "schedParam is struct sched_param: one int, the static priority."
+    fields:
+      - name: priority
+        type: int32
+    kind: struct
+    name: schedParam
+  - doc: |-
       stdioState carries the child's three standard-stream files and the parent-side
       machinery to manage them across the spawn. It is built before os.StartProcess,
       closed via closeAll on a spawn failure, or driven by afterStart on success;
@@ -1284,16 +4433,32 @@ types:
         type: "[]*os.File"
       - name: outSink
         type: "[]io.Writer"
+      - name: outNames
+        type: "[]string"
       - name: inDst
         type: "*os.File"
       - name: inSrc
         type: io.Reader
+      - name: drainGrace
+        type: time.Duration
+      - name: drainClk
+        type: clock.Waiter
+      - name: ptyMaster
+        type: "*os.File"
       - name: wg
         type: sync.WaitGroup
       - name: copyMu
         type: sync.RWMutex
       - name: copyErr
         type: error
+      - name: held
+        type: "[]string"
+      - name: cut
+        type: atomic.Bool
+      - name: inLive
+        type: atomic.Bool
+      - name: delivered
+        type: atomic.Int64
     kind: struct
     methods:
       - doc: recordCopyErr latches the first output-copier failure so Wait can surface it.
@@ -1330,9 +4495,13 @@ types:
         params: idx int, w io.Writer
         recv: s *stdioState
         results: error
-      - doc: wireNull points the child's fd idx at the platform null device opened with flag.
+      - doc: |-
+          wireNull points the child's fd idx at the shared null device, read-write so
+          it serves stdin and the outputs alike. It is on no cleanup list: the child
+          gets its own copy through dup2, and closing the parent's would take it from
+          every later spawn.
         name: wireNull
-        params: idx, flag int
+        params: idx int
         recv: s *stdioState
         results: error
       - doc: |-
@@ -1350,6 +4519,10 @@ types:
         name: drainOutput
         params: src io.ReadCloser, sink io.Writer
         recv: s *stdioState
+      - doc: recordHeld notes the stream of src as one the drain cut found still open.
+        name: recordHeld
+        params: src io.ReadCloser
+        recv: s *stdioState
       - doc: |-
           feedInput copies the caller's reader src into the pipe write end dst, then
           closes dst so the child's stdin sees EOF. It is fire-and-forget: never joined,
@@ -1358,11 +4531,29 @@ types:
         params: dst io.WriteCloser, src io.Reader
         recv: s *stdioState
       - doc: |-
-          wait blocks until every output copier has drained its pipe to EOF, so Handle.Wait
-          returns only after 100% of the child's stdout/stderr has reached the caller's
-          writers. It is a no-op for StdioInherit/StdioNull (no copiers).
-        name: wait
+          drainBounded joins the output copiers once the exit status is in hand,
+          within s.drainGrace on s.drainClk (#1088): the zero grace is defaultDrainGrace, a
+          negative one joins without a bound, as Wait always did. A copier blocks
+          until every holder of its pipe's write end is gone, and a process the child
+          left behind — a daemon, `sleep 60 &` — holds it past the child's exit. When
+          the grace closes first, the parent's read ends and stdin write end are
+          closed, so each copier returns at once (the pipes are pollable, and Windows
+          cancels a pipe's pending read on close), and cut reports it. held names the
+          streams that were still open; delivered counts the bytes the copiers handed
+          to the caller's writers.
+
+          Goroutine lifecycle: it launches one joiner, which returns once every copier
+          has — at EOF, or at once after the cut — so none outlives the call.
+        name: drainBounded
         recv: s *stdioState
+        results: cut bool, held []string, delivered int64
+      - doc: |-
+          cutDrain closes the parent's pipe ends after the drain grace closed and
+          waits for the copiers, which return at once; see drainBounded.
+        name: cutDrain
+        params: joined <-chan struct{}
+        recv: s *stdioState
+        results: cut bool, held []string, delivered int64
       - doc: |-
           closeAll releases every fd buildStdio opened. It is used only on the spawn
           failure path (before afterStart), so it never races the copiers and never
@@ -1371,6 +4562,21 @@ types:
         recv: s *stdioState
     name: stdioState
 vars:
+  - grouped: true
+    items:
+      - doc: |-
+          cloneIntoCgroupProbe reports, once per process, whether this kernel can
+          clone a child straight into a cgroup — a variable so a test can answer
+          for a kernel it does not run on.
+        name: cloneIntoCgroupProbe
+        value: sync.OnceValue(kernelClonesIntoCgroup)
+      - doc: |-
+          cloneIntoCgroupRefused records that a clone into a group answered ENOSYS
+          — a seccomp filter that blocks clone3 on a new kernel — so every later
+          spawn places its child through the trampoline.
+        name: cloneIntoCgroupRefused
+        type: atomic.Bool
+    name: cloneIntoCgroupProbe
   - doc: |-
       resourceLimits maps each coreproc.Resource to its platform RLIMIT_* constant,
       backing the spec validation. It is a flat lookup so checking a requested
@@ -1379,14 +4585,147 @@ vars:
       - name: resourceLimits
         value: buildResourceLimits()
     name: resourceLimits
-  - doc: |-
-      The blank-var initialiser fires the pre-main trampoline check via package-level
-      variable initialisation — the no-init idiom (KTN-FUNC-NOINIT). In any process
-      that links this package the initialiser runs before main, exactly as an init()
-      would but without an init() function: installTrampoline is a no-op unless the
-      sentinel env var is set (only the trampoline child sees it), in which case the
-      process applies the limits and execve()s the real target — never returning.
+  - grouped: true
     items:
-      - name: _
+      - doc: |-
+          landlockRights are the Landlock rights by the ABI that introduced them:
+          ABI 1 has the first thirteen, 2 adds REFER, 3 TRUNCATE, 5 IOCTL_DEV.
+        name: landlockRights
+        value: |-
+          [...]struct {
+          		right coreproc.LandlockAccess
+          		abi   int
+          		name  string
+          	}{
+          		{coreproc.LandlockExecute, 1, "execute"},
+          		{coreproc.LandlockWriteFile, 1, "write_file"},
+          		{coreproc.LandlockReadFile, 1, "read_file"},
+          		{coreproc.LandlockReadDir, 1, "read_dir"},
+          		{coreproc.LandlockRemoveDir, 1, "remove_dir"},
+          		{coreproc.LandlockRemoveFile, 1, "remove_file"},
+          		{coreproc.LandlockMakeChar, 1, "make_char"},
+          		{coreproc.LandlockMakeDir, 1, "make_dir"},
+          		{coreproc.LandlockMakeReg, 1, "make_reg"},
+          		{coreproc.LandlockMakeSock, 1, "make_sock"},
+          		{coreproc.LandlockMakeFifo, 1, "make_fifo"},
+          		{coreproc.LandlockMakeBlock, 1, "make_block"},
+          		{coreproc.LandlockMakeSym, 1, "make_sym"},
+          		{coreproc.LandlockRefer, 2, "refer"},
+          		{coreproc.LandlockTruncate, 3, "truncate"},
+          		{coreproc.LandlockIoctlDev, 5, "ioctl_dev"},
+          	}
+      - doc: |-
+          sandboxNamespaces maps each Namespace to its clone flag and its name
+          under /proc/self/ns.
+        name: sandboxNamespaces
+        value: |-
+          [...]struct {
+          		ns   coreproc.Namespace
+          		flag uintptr
+          		name string
+          	}{
+          		{coreproc.NamespaceUser, syscall.CLONE_NEWUSER, "user"},
+          		{coreproc.NamespacePID, syscall.CLONE_NEWPID, "pid"},
+          		{coreproc.NamespaceMount, syscall.CLONE_NEWNS, "mnt"},
+          		{coreproc.NamespaceIPC, syscall.CLONE_NEWIPC, "ipc"},
+          		{coreproc.NamespaceUTS, syscall.CLONE_NEWUTS, "uts"},
+          		{coreproc.NamespaceNet, syscall.CLONE_NEWNET, "net"},
+          		{coreproc.NamespaceCgroup, syscall.CLONE_NEWCGROUP, "cgroup"},
+          		{coreproc.NamespaceTime, cloneNewTime, "time"},
+          	}
+      - doc: hostKernel is the running kernel, as production reads it.
+        name: hostKernel
+        value: |-
+          sandboxHost{
+          		procSelfExe:  procSelfExe,
+          		nsDir:        procNSDir,
+          		capLastCap:   procCapLastCap,
+          		landlockABI:  landlockABIProbe,
+          		seccomp:      seccompAvailable,
+          		mountSetattr: mountSetattrProbe,
+          		traceFD:      sandboxNoTrace,
+          	}
+      - doc: |-
+          sandboxHostOverride, when set, replaces hostKernel: the tests' simulated
+          kernels, injected failures and trace. Never set outside a test.
+        name: sandboxHostOverride
+        type: atomic.Pointer[sandboxHost]
+    name: landlockRights
+  - grouped: true
+    items:
+      - doc: |-
+          seccompFloor are the calls every filter lets through: the stage's own
+          execve, its exit should that fail, and the return from a signal the
+          runtime may take between the filter and the execve.
+        name: seccompFloor
+        value: "[...]string{\"execve\", \"exit\", \"exit_group\", \"rt_sigreturn\"}"
+      - doc: |-
+          syscallNumbers is this architecture's table by name, parsed from
+          syscallTable the first time a filter needs it.
+        name: syscallNumbers
+        value: sync.OnceValue(func() map[string]uint32 { return parseSyscallTable(syscallTable) })
+      - doc: foreignSyscalls is the other architecture's names this one lacks.
+        name: foreignSyscalls
+        value: sync.OnceValue(func() []string { return strings.Fields(foreignTable) })
+    name: seccompFloor
+  - doc: |-
+      sandboxStepNames names each step in a SandboxFailed error's step field,
+      indexed by its number.
+    items:
+      - name: sandboxStepNames
+        value: |-
+          [...]string{
+          	stepPayload:         "payload",
+          	stepCgroupNamespace: "cgroup_namespace",
+          	stepMounts:          "mounts",
+          	stepRoot:            "pivot_root",
+          	stepLandlockPaths:   "landlock_paths",
+          	stepBounding:        "capbset_drop",
+          	stepSecureBits:      "securebits",
+          	stepIdentity:        "identity",
+          	stepCapabilities:    "capabilities",
+          	stepFDSweep:         "cloexec_sweep",
+          	stepNoNewPrivs:      "no_new_privs",
+          	stepLandlock:        "landlock_restrict_self",
+          	stepSeccomp:         "seccomp",
+          }
+    name: sandboxStepNames
+  - doc: |-
+      closeRangeAbsent records that this kernel refused close_range with
+      CLOSE_RANGE_CLOEXEC, so every later seal walks the descriptor directory.
+    items:
+      - name: closeRangeAbsent
+        type: atomic.Bool
+    name: closeRangeAbsent
+  - doc: |-
+      sharedNull is the null device every null stream of every spawn uses (#943):
+      opened once, read-write and close-on-exec, never closed. sharedNullMu
+      serialises the first open; later spawns read the pointer alone.
+    grouped: true
+    items:
+      - name: sharedNull
+        type: atomic.Pointer[os.File]
+      - name: sharedNullMu
+        type: sync.Mutex
+    name: sharedNull
+  - grouped: true
+    items:
+      - doc: |-
+          reservedEnvKeys is every variable of the spawn protocol, listed once: the
+          trampoline strips them before the target runs, Start refuses a Spec.Env
+          naming any key with their prefix (reservedEnvPrefix), and
+          TestReservedEnvKeysListed fails when a constant carrying the prefix is
+          declared without being listed here.
+        name: reservedEnvKeys
+        value: "[...]string{trampolineEnv, trampolineCgroupEnv, trampolineHsFdEnv, trampolinePIDEnv, trampolineSandboxEnv}"
+      - doc: |-
+          The blank-var initialiser fires the pre-main trampoline check via
+          package-level variable initialisation — the no-init idiom
+          (KTN-FUNC-NOINIT). In any process that links this package the initialiser
+          runs before main, exactly as an init() would but without an init()
+          function: installTrampoline is a no-op unless the sentinel env var is set
+          (only the trampoline child sees it), in which case the process applies the
+          limits and execve()s the real target — never returning.
+        name: _
         value: installTrampoline()
-    name: _
+    name: reservedEnvKeys

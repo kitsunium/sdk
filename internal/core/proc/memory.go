@@ -31,6 +31,27 @@ const (
 	MemorySourceCgroup
 )
 
+// MemoryBound names which control-group file bound a soft-memory-limit
+// derivation, so a log line says whether the throttle (memory.high) or the hard
+// cap (memory.max) set the allowance.
+//
+// The zero value is deliberately unclaimed, as MemorySource's is: it is the
+// Bound of every derivation that read no allowance.
+type MemoryBound uint8
+
+const (
+	// MemoryBoundHigh reports that a memory.high file bound the derivation: the
+	// throttle above which the kernel reclaims and slows the group's allocations,
+	// long before memory.max would kill it.
+	//
+	// The run starts at iota+1 so the zero stays unminted — see the type comment.
+	MemoryBoundHigh MemoryBound = iota + 1
+	// MemoryBoundMax reports that a hard cap bound the derivation: a cgroup v2
+	// memory.max file, or cgroup v1's memory.limit_in_bytes — v1 has no throttle
+	// to read beside it.
+	MemoryBoundMax
+)
+
 // String renders the source for a log line. A value this package never mints —
 // including the zero — renders as "unknown" rather than as a number, because it
 // is a defect worth reading as one.
@@ -60,6 +81,26 @@ func (s MemorySource) String() string {
 	}
 }
 
+// String renders the bound for a log line: "high", "max", or "unknown" for a
+// value this package never mints, the zero included.
+func (b MemoryBound) String() string {
+	//: a closed set of two, plus the honest answer for anything else.
+	switch b {
+	//: the throttle.
+	case MemoryBoundHigh:
+		//: memory.high.
+		return "high"
+	//: the hard cap.
+	case MemoryBoundMax:
+		//: memory.max or memory.limit_in_bytes.
+		return "max"
+	//: a value this package never mints, including the zero.
+	default:
+		//: name the absence rather than invent a bound.
+		return "unknown"
+	}
+}
+
 // MemoryLimitValue is an immutable record of one soft-memory-limit derivation:
 // the cgroup allowance it read, the limit it derived, and what decided the
 // outcome.
@@ -77,6 +118,9 @@ type MemoryLimitValue struct {
 	Limit int64
 	// Source names what decided the outcome.
 	Source MemorySource
+	// Bound names the file that set Allowance — memory.high or the hard cap —
+	// on every outcome that carries an Allowance, and is zero otherwise.
+	Bound MemoryBound
 }
 
 // Applied reports whether the derivation installed a limit. It is true for

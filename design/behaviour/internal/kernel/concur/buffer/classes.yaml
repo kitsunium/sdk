@@ -2,38 +2,78 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
-      initialCap is the starting capacity (in bytes) handed out by the pool;
-      chosen to comfortably hold a single log line without a re-alloc.
+      initialCap is the capacity Get asks for: the smallest class, chosen to hold
+      a single log line without a re-alloc.
     items:
       - name: initialCap
         type: int
         value: "1024"
     name: initialCap
-  - doc: |-
-      maxRetain bounds the capacity we are willing to keep alive in the pool;
-      buffers that grew past this threshold are dropped to prevent the pool
-      from retaining unbounded memory after a rare large log record.
+  - doc: "classes is how many size classes the pool keeps: 1, 4, 16, 64 and 256 KiB."
     items:
-      - name: maxRetain
+      - name: classes
         type: int
-        value: 64 * 1024
-    name: maxRetain
+        value: "5"
+    name: classes
+  - doc: |-
+      smallestShift is log2 of the smallest class's size (1 KiB); each class is
+      four times the one before it.
+    items:
+      - name: smallestShift
+        type: int
+        value: "10"
+    name: smallestShift
 files:
   - decls:
       - initialCap
-      - maxRetain
-      - bytePool
+      - classes
+      - smallestShift
+      - pools
+      - newPools
+      - classSize
+      - classFor
+      - classOf
       - Get
+      - GetSize
       - Put
+      - putClass
     name: buffer.go
   - decls: []
     name: doc.go
 functions:
+  - doc: newPools builds the classes' pools, smallest first.
+    name: newPools
+    results: "[classes]*recycler.CappedPool[*[]byte]"
+  - doc: "classSize is class k's size: 1 KiB times four to the k."
+    name: classSize
+    params: k int
+    results: int
+  - doc: |-
+      classFor is the smallest class whose size is at least n, or classes when
+      none is: n above the largest class.
+    name: classFor
+    params: n int
+    results: int
+  - doc: |-
+      classOf is the largest class whose size is at most capacity — the class a
+      returned buffer belongs to —, or -1 when capacity is below the smallest.
+    name: classOf
+    params: capacity int
+    results: int
   - name: Get
+    results: "*[]byte"
+  - name: GetSize
+    params: n int
     results: "*[]byte"
   - name: Put
     params: b *[]byte
+  - doc: |-
+      putClass routes b by its capacity to the largest class it covers; the
+      class's recycler drops it past twice the class's size.
+    name: putClass
+    params: b *[]byte
 imports:
+  bits: math/bits
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
 package:
   docFile: doc.go
@@ -43,18 +83,14 @@ package:
 types: []
 vars:
   - doc: |-
-      bytePool recycles *[]byte via the kernel CappedPool. Storing *[]byte
-      (rather than []byte) avoids boxing the slice header into sync.Pool's any
-      payload on every Put, which is what keeps the hot path allocation-free.
-      reset truncates length to zero; capOf reports cap so the recycler drops any
-      buffer grown past maxRetain (discard-before-reset).
+      pools holds one recycler.CappedPool per class. Each pool's factory makes a
+      buffer of exactly its class's size, and keeps a returned buffer only while
+      its capacity is at most twice that size: a buffer grown past its class is
+      dropped, so a class never pins more than twice what it hands out. Storing
+      *[]byte (rather than []byte) avoids boxing the slice header into
+      sync.Pool's any payload on every Put, which is what keeps the hot path
+      allocation-free.
     items:
-      - name: bytePool
-        value: |-
-          recycler.NewCappedPool[*[]byte](
-          	func() *[]byte { return new(make([]byte, 0, initialCap)) },
-          	func(b *[]byte) { *b = (*b)[:0] },
-          	func(b *[]byte) int { return cap(*b) },
-          	maxRetain,
-          )
-    name: bytePool
+      - name: pools
+        value: newPools()
+    name: pools

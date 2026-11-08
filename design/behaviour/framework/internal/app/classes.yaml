@@ -2159,6 +2159,7 @@ files:
       - (*App).Stop
       - (*App).stop
       - (*App).Run
+      - (*App).stopWithin
       - (*App).setPhase
       - (*App).currentPhase
       - (*App).problem
@@ -2582,12 +2583,10 @@ files:
       - labelNode
       - stopSignals
       - runtimeState
-      - signalCause
       - (*runtimeState).newRun
       - (*App).rememberPhase
       - (*App).failReason
       - mustSignal
-      - signalCause.Error
       - stopReason
       - (*App).describeRuntime
     name: daemon.go
@@ -10932,6 +10931,22 @@ types:
         recv: a *App
         results: error
       - doc: |-
+          stopWithin drains the product as stop does, unless hurried closes first: a
+          second stop signal abandons the drain's grace (#1096). Cancelling the
+          stop's context alone did nothing — the lifecycle reads it for its values,
+          never its cancellation, and a consumer's drain runs on its own clock — so
+          a handler blocked in a drain kept Run for the whole drain. Run now returns
+          at once, StopTimeout with a zero grace; the stop goes on in the
+          background, each component under its own budget, until the process ends.
+
+          Goroutine lifecycle: one goroutine carries the stop and reports on a
+          buffered channel; it ends when the stop does, whether or not this
+          function still waits for it.
+        name: stopWithin
+        params: ctx context.Context, hurried <-chan struct{}, reason string
+        recv: a *App
+        results: error
+      - doc: |-
           setPhase moves the process to phase p, remembers it with why, and streams
           it.
         name: setPhase
@@ -15929,17 +15944,6 @@ types:
         name: newRun
         recv: rt *runtimeState
     name: runtimeState
-  - doc: signalCause is the cause of the run's context when a signal ended it.
-    fields:
-      - name: sig
-        type: signal.Signal
-    kind: struct
-    methods:
-      - doc: Error says which signal ended the run.
-        name: Error
-        recv: c signalCause
-        results: string
-    name: signalCause
   - doc: |-
       httpStats is the HTTP server's live counters: the requests kit's handler
       sees. The connections are the SDK engine's to count (Server.State).

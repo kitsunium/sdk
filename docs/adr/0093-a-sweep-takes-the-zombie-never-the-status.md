@@ -187,6 +187,15 @@ pid 1 — exactly as it was.
 - **The PID-reuse window off pidfd** (§Consequences). Closing it means waiting
   through a handle rather than a number on every Unix, which the stdlib does
   not offer outside Linux.
+- **Telling an orphan's end — no longer deferred (2026-11-04, kitsunium/sdk#1136).**
+  The rule above refuses to STORE an orphan's status, because a stored status
+  would be handed to the next child that recycles its pid. An observer called
+  at the moment of collection stores nothing, so it does not cross that line:
+  `childwait.ReapAnyObserved` shows every collected status — pid, exit, owned —
+  after the hand-off and under the sweep lock, and `reaper.WithOnExit` reports
+  it as an `ExitEvent` in `Process.Wait`'s words. The status lives in the
+  ledger's one sweep buffer, reused by the next sweep; the observer must not
+  keep it, and must not block.
 
 ## Verification
 

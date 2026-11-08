@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/pkg/v1/proc"
 ```
 
-Package proc is the capability-preflight facade for the process-supervision domain. Some proc primitives have no native, secure mechanic on every OS (cgroup is Linux/Windows-only, rlimit/sd\_notify are Unix-only, …); the SDK honours those gaps by returning the typed [UnsupportedPlatform](#UnsupportedPlatform) error and NEVER panicking on its own. This package lets a CONSUMER instead choose to fail fast at its own startup — the idiomatic Go MustX pattern ([regexp.MustCompile](https://pkg.go.dev/regexp#MustCompile) / [text/template.Must](https://pkg.go.dev/text/template#Must)): the library offers the panic, it never imposes it.
+Package proc is the capability-preflight facade for the process-supervision domain. Some proc primitives have no native, secure mechanic on every OS (cgroup is Linux, Windows and FreeBSD only, rlimit/sd\_notify are Unix-only, the OOM bias Linux-only, …); the SDK honours those gaps by returning the typed [UnsupportedPlatform](#UnsupportedPlatform) error and NEVER panicking on its own. This package lets a CONSUMER instead choose to fail fast at its own startup — the idiomatic Go MustX pattern ([regexp.MustCompile](https://pkg.go.dev/regexp#MustCompile) / [text/template.Must](https://pkg.go.dev/text/template#Must)): the library offers the panic, it never imposes it.
 
 ### Why preflight instead of recover
 
@@ -27,21 +27,29 @@ if proc.Supported(proc.CapCgroup) {
 
 ### Capability × platform matrix
 
+Every row is the engines' own answer: a capability marked ❌ is refused with [UnsupportedPlatform](#UnsupportedPlatform) by its engine, and one marked ✅ is not, which a test of this package holds on every platform the SDK's runtime lanes run.
+
 ```
 Capability           linux darwin windows freebsd openbsd netbsd dragonfly illumos solaris
 CapProcessSpawn        ✅     ✅     ✅      ✅      ✅      ✅      ✅        ✅      ✅
 CapSignalRelay         ✅     ✅     ✅      ✅      ✅      ✅      ✅        ✅      ✅
 CapReaper              ✅     ✅     ✅¹     ✅      ✅      ✅      ✅        ✅⁴     ✅⁴
-CapCgroup              ✅     ❌     ✅²     ❌      ❌      ❌      ❌        ❌      ❌
+CapCgroup              ✅     ❌     ✅²     ✅²     ❌      ❌      ❌        ❌      ❌
 CapRlimit              ✅     ✅     ❌³     ✅      ✅      ✅      ✅        ✅      ✅
-CapUmaskNiceOOM        ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
+CapUmaskNice           ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
+CapOOMScoreAdj         ✅     ❌     ❌      ❌      ❌      ❌      ❌        ❌      ❌
 CapSdNotify            ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
 CapSocketActivation    ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
+CapDieWithParent       ✅     ❌     ✅      ✅      ❌      ❌      ❌        ❌      ❌
+CapScheduling          ✅     ❌     ❌⁵     ✅⁶     ❌      ❌      ❌        ❌      ❌
+CapPTY                 ✅     ✅     ❌      ✅      ❌      ❌      ❌        ❌      ❌
+CapProcessHandle       ✅     ❌     ✅      ❌      ❌      ❌      ❌        ❌      ❌
+CapSandbox             ✅⁷    ❌     ❌      ❌      ❌      ❌      ❌        ❌      ❌
 ```
 
-¹ Windows has no zombies; the reaper is a correct no-op there. ² Windows cgroup is the Job Object backend. ³ the Unix setrlimit-on-self model has no Windows analogue; Windows resource limits are applied through the cgroup (Job Object) container or at spawn via the process Spec, not a standalone rlimit. ⁴ illumos and Solaris have no reparent-here facility, like darwin, OpenBSD and NetBSD: SetChildSubreaper returns [UnsupportedPlatform](#UnsupportedPlatform). Their reaper also sweeps once a second, because the Go runtime forks every child there with FORK\_NOSIGCHLD and its exit posts no SIGCHLD. Both columns are proven on OmniOS r151054 and Oracle Solaris 11.4 (amd64) by the SDK's cross-platform runtime lane.
+¹ Windows has no zombies; the reaper is a correct no-op there. ² Windows cgroup is the Job Object backend; FreeBSD's is the rctl(8) backend, which needs a kernel carrying RACCT (kern.racct.enable=1): without it cgroup.Available reports false and cgroup.Create returns [UnsupportedPlatform](#UnsupportedPlatform). ³ the Unix setrlimit-on-self model has no Windows analogue; Windows resource limits are applied through the cgroup (Job Object) container or at spawn via the process Spec, not a standalone rlimit. ⁴ illumos and Solaris have no reparent-here facility, like darwin, OpenBSD and NetBSD: SetChildSubreaper returns [UnsupportedPlatform](#UnsupportedPlatform). Their reaper also sweeps once a second, because the Go runtime forks every child there with FORK\_NOSIGCHLD and its exit posts no SIGCHLD. Both columns are proven on OmniOS r151054 and Oracle Solaris 11.4 (amd64) by the SDK's cross-platform runtime lane. ⁵ Windows maps Spec.Nice onto a priority class, but has no scheduling policy or I/O class. ⁶ FreeBSD applies SchedFIFO, SchedRR and SchedIdle through rtprio(2); it has no batch policy and no per-process I/O class. ⁷ on amd64 and arm64, the architectures whose system call tables the sandbox's seccomp filter is written against; Linux on any other GOARCH refuses it.
 
-[Supported](#Supported) consults runtime.GOOS only — it is the platform-level matrix, not a runtime probe. A capability that is native on the GOOS may still be unavailable at runtime (e.g. cgroup present but not delegated); use the per-facade probe for that (e.g. cgroup.Available()).
+[Supported](#Supported) consults runtime.GOOS only — CapSandbox's row is written for the GOARCH the binary is built for — it is the platform-level matrix, not a runtime probe. A capability that is native on the GOOS may still be unavailable at runtime (e.g. cgroup present but not delegated); use the per-facade probe for that (e.g. cgroup.Available()).
 
 ## Index
 
@@ -61,6 +69,34 @@ const CapCgroup Capability = 3
 ```
 
 CapCgroup is a kernel-enforced resource container (cgroup.Create).
+
+<a name="CapDieWithParent"></a>
+```go
+const CapDieWithParent Capability = 8
+```
+
+CapDieWithParent is binding a child to the supervisor's life (Spec.DieWithParent).
+
+<a name="CapOOMScoreAdj"></a>
+```go
+const CapOOMScoreAdj Capability = 12
+```
+
+CapOOMScoreAdj is the spawn-time OOM-killer bias (Spec.OOMScoreAdj), a Linux procfs knob: elsewhere Start refuses it with UnsupportedPlatform before spawning anything. It is numbered 12, apart from the block above: 8 to 11 are the spawn's own capabilities (ADR 0217), and a value is never given twice.
+
+<a name="CapPTY"></a>
+```go
+const CapPTY Capability = 10
+```
+
+CapPTY is spawning a child on a pseudo-terminal (StdioPTY).
+
+<a name="CapProcessHandle"></a>
+```go
+const CapProcessHandle Capability = 11
+```
+
+CapProcessHandle is reaching a process through a kernel handle, not its pid (ProcessHandle, process.Open).
 
 <a name="CapProcessSpawn"></a>
 ```go
@@ -83,6 +119,20 @@ const CapRlimit Capability = 1
 
 CapRlimit is applying per-process setrlimit-style limits (rlimit.Apply).
 
+<a name="CapSandbox"></a>
+```go
+const CapSandbox Capability = 13
+```
+
+CapSandbox is spawning a child under Spec.Sandbox: namespaces, mounts, capabilities, Landlock and seccomp, applied before its program runs. Linux on amd64 and arm64 alone, where the system call tables are written; every other GOOS and GOARCH refuses it with UnsupportedPlatform before spawning anything. It is numbered 13, after CapOOMScoreAdj.
+
+<a name="CapScheduling"></a>
+```go
+const CapScheduling Capability = 9
+```
+
+CapScheduling is a child's CPU policy and I/O class (Spec.Scheduling).
+
 <a name="CapSdNotify"></a>
 ```go
 const CapSdNotify Capability = 6
@@ -104,12 +154,12 @@ const CapSocketActivation Capability = 7
 
 CapSocketActivation is inheriting a pre-opened listening socket (systemd/listen).
 
-<a name="CapUmaskNiceOOM"></a>
+<a name="CapUmaskNice"></a>
 ```go
-const CapUmaskNiceOOM Capability = 2
+const CapUmaskNice Capability = 2
 ```
 
-CapUmaskNiceOOM is the spawn-time umask / nice / oom\_score\_adj knobs.
+CapUmaskNice is the spawn-time umask and nice knobs (Spec.Umask, Spec.Nice), native on every Unix. The OOM-killer bias is CapOOMScoreAdj.
 
 ## Variables
 

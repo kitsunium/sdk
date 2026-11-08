@@ -57,6 +57,25 @@ func BenchmarkReapOnce_WithObserver(b *testing.B) {
 	intSink = seen
 }
 
+// BenchmarkReapOnce_WithOnExit adds the WithOnExit observer (#1136). It fires
+// once per COLLECTED child, so on an idle supervisor it costs nothing but the
+// pointer handed to childwait; the per-child cost is the ExitEvent built on
+// the stack, no allocation.
+func BenchmarkReapOnce_WithOnExit(b *testing.B) {
+	seen := 0
+	r := reaper.New(reaper.WithOnExit(func(e reaper.ExitEvent) { seen += e.PID }))
+	if _, err := r.ReapOnce(); err != nil {
+		b.Skipf("ReapOnce is not usable here: %v", err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		n, err := r.ReapOnce()
+		intSink, errSink = n, err
+	}
+	intSink = seen
+}
+
 // BenchmarkNew prices construction. A reaper creates no channels until Start, so
 // this should be one small allocation and nothing else.
 func BenchmarkNew(b *testing.B) {

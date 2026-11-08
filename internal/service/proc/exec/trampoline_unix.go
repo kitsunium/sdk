@@ -30,6 +30,11 @@ const trampolineCgroupEnv string = "__KITSUNIUM_SDK_PROC_CGROUP"
 // falls back to defaultHandshakeFD.
 const trampolineHsFdEnv string = "__KITSUNIUM_SDK_PROC_HSFD"
 
+// trampolinePIDEnv carries Spec.PIDEnv, the names the trampoline sets to its
+// own PID — the target's, execve keeping it — before the target runs:
+// comma-separated, a name never holding a comma (checkPIDEnv).
+const trampolinePIDEnv string = "__KITSUNIUM_SDK_PROC_PIDENV"
+
 // Trampoline child exit codes (distinct from any the target could use before it
 // execs, so a supervisor can tell a trampoline failure from a target failure).
 const (
@@ -47,13 +52,23 @@ const decimalRadix int = 10
 // matching coreproc.LimitValue's uint64 members.
 const uintBits int = 64
 
-// The blank-var initialiser fires the pre-main trampoline check via package-level
-// variable initialisation — the no-init idiom (KTN-FUNC-NOINIT). In any process
-// that links this package the initialiser runs before main, exactly as an init()
-// would but without an init() function: installTrampoline is a no-op unless the
-// sentinel env var is set (only the trampoline child sees it), in which case the
-// process applies the limits and execve()s the real target — never returning.
-var _ = installTrampoline()
+var (
+	// reservedEnvKeys is every variable of the spawn protocol, listed once: the
+	// trampoline strips them before the target runs, Start refuses a Spec.Env
+	// naming any key with their prefix (reservedEnvPrefix), and
+	// TestReservedEnvKeysListed fails when a constant carrying the prefix is
+	// declared without being listed here.
+	reservedEnvKeys = [...]string{trampolineEnv, trampolineCgroupEnv, trampolineHsFdEnv, trampolinePIDEnv, trampolineSandboxEnv}
+
+	// The blank-var initialiser fires the pre-main trampoline check via
+	// package-level variable initialisation — the no-init idiom
+	// (KTN-FUNC-NOINIT). In any process that links this package the initialiser
+	// runs before main, exactly as an init() would but without an init()
+	// function: installTrampoline is a no-op unless the sentinel env var is set
+	// (only the trampoline child sees it), in which case the process applies the
+	// limits and execve()s the real target — never returning.
+	_ = installTrampoline()
+)
 
 // installTrampoline acts as the trampoline when this process was spawned as one
 // (the sentinel env var is present), else returns a zero marker so the
@@ -111,8 +126,18 @@ func runTrampoline(payload string) {
 	target := os.Args[1]
 	//: strip ALL sentinel vars so the target never sees them (no re-trampoline,
 	//: no stray cgroup hint, no leaked handshake-fd number).
-	env := environWithout(environWithout(environWithout(os.Environ(),
-		trampolineEnv), trampolineCgroupEnv), trampolineHsFdEnv)
+	env := os.Environ()
+	//: the list is the protocol's, every key of it.
+	for _, key := range reservedEnvKeys {
+		env = environWithout(env, key)
+	}
+	//: the variables the target is given set to its own PID — this one's.
+	env = withPIDEnv(env, os.Getenv(trampolinePIDEnv), os.Getpid())
+	//: a sandboxed spawn: the second stage confines this thread, then execs.
+	if fdText, sandboxed := os.LookupEnv(trampolineSandboxEnv); sandboxed {
+		//: never returns: the target runs confined, or not at all.
+		execSandboxed(fdText, target, os.Args[trampolineMinArgs:], env)
+	}
 	//: replace this process image with the real target, now under its limits.
 	if err := syscall.Exec(target, os.Args[trampolineMinArgs:], env); err != nil {
 		//: the execve failed (e.g. target not found) — signal and report.
@@ -276,12 +301,23 @@ func environWithout(env []string, key string) []string {
 }
 
 // needsTrampoline reports whether spec requests a pre-exec limit (any Rlimit or a
-// Umask) that the stdlib spawn cannot apply directly, so Start must route through
-// the re-exec trampoline.
+// Umask, a variable set to the child's PID, or a cgroup placement the kernel
+// cannot make at clone time) that the
+// stdlib spawn cannot apply directly, so Start must route through the re-exec
+// trampoline.
 func needsTrampoline(spec coreproc.Spec) bool {
-	//: a mapped Rlimit, a non-nil Umask, or a cgroup placement is honourable only
-	//: in the child between fork and exec — i.e. via the re-exec trampoline.
-	return len(spec.Rlimits) > 0 || spec.Umask != nil || spec.CgroupPath != ""
+	//: a mapped Rlimit or a non-nil Umask is honourable only in the child between
+	//: fork and exec — i.e. via the re-exec trampoline; so is a cgroup placement,
+	//: unless the kernel clones the child straight into the group (#929).
+	return len(spec.Rlimits) > 0 || spec.Umask != nil || len(spec.PIDEnv) > 0 || cgroupByTrampoline(spec.CgroupPath)
+}
+
+// trampolined reports whether spec spawns through the trampoline: a sandbox,
+// whose second stage the trampoline is, or a pre-exec limit needsTrampoline
+// names. It is apart from needsTrampoline so that one stays inlinable.
+func trampolined(spec coreproc.Spec) bool {
+	//: a sandbox always; a limit when it asks for one.
+	return spec.Sandbox != nil || needsTrampoline(spec)
 }
 
 // encodeTrampoline builds the payload env value for spec: a ';'-separated list of
@@ -306,10 +342,11 @@ func encodeTrampoline(spec coreproc.Spec) string {
 }
 
 // trampolineSpawn returns the (path, argv, envAddon) that make os.StartProcess run
-// the trampoline: exec this binary (os.Executable()) with argv [self, target,
-// targetArgv...] and an extra env entry carrying the encoded limits.
+// the trampoline: exec this binary (os.Executable(), or /proc/self/exe for a
+// sandbox) with argv [self, target, targetArgv...] and an extra env entry
+// carrying the encoded limits.
 func trampolineSpawn(spec coreproc.Spec) (path string, argv, envAddon []string, err error) {
-	self, eErr := os.Executable()
+	self, eErr := trampolineSelf(spec)
 	//: without a path to re-exec, the limits cannot be honoured pre-exec.
 	if eErr != nil {
 		//: surface the failure so Start wraps it as RlimitFailed.
@@ -319,11 +356,34 @@ func trampolineSpawn(spec coreproc.Spec) (path string, argv, envAddon []string, 
 	argv = append([]string{self, spec.Path}, buildArgv(spec)...)
 	//: the sentinel env entry carries the encoded rlimit/umask payload.
 	envAddon = []string{trampolineEnv + "=" + encodeTrampoline(spec)}
-	//: a cgroup placement rides in its own sentinel var (no payload escaping).
+	//: a cgroup placement rides in its own sentinel var (no payload escaping);
+	//: when the clone already placed the child, the write is an idempotent no-op.
 	if spec.CgroupPath != "" {
 		//: the trampoline writes its pid to <CgroupPath>/cgroup.procs pre-exec.
 		envAddon = append(envAddon, trampolineCgroupEnv+"="+spec.CgroupPath)
 	}
+	//: the names the trampoline sets to its PID (checkPIDEnv: no comma in one).
+	if len(spec.PIDEnv) > 0 {
+		envAddon = append(envAddon, trampolinePIDEnv+"="+strings.Join(spec.PIDEnv, ","))
+	}
 	//: re-exec this binary as the trampoline.
 	return self, argv, envAddon, nil
+}
+
+// withPIDEnv sets every name of the comma-separated list names to pid in env,
+// replacing an entry of the same name: the trampoline gives the target its own
+// PID, which no parent could know before the fork (Spec.PIDEnv).
+func withPIDEnv(env []string, names string, pid int) []string {
+	//: nothing asked.
+	if names == "" {
+		//: env as it is.
+		return env
+	}
+	value := strconv.Itoa(pid)
+	//: each name, in the order given.
+	for name := range strings.SplitSeq(names, ",") {
+		env = append(environWithout(env, name), name+"="+value)
+	}
+	//: the target's environment.
+	return env
 }

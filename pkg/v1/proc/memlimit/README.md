@@ -35,6 +35,10 @@ Apply never fails and never panics: every outcome is a value. A caller that only
 
 The limit is SOFT and covers all memory mapped, managed and not released by the Go runtime — the heap, goroutine stacks, runtime metadata. It excludes memory the runtime does not manage: the binary image, C allocations, syscall.Mmap mappings, and kernel memory held on the process's behalf. Subprocesses are outside it entirely. Ninety percent of the cgroup allowance is handed to the runtime and the remainder covers those, so this reduces OOM pressure rather than eliminating it.
 
+### Which cap is the allowance
+
+The tightest on the way up. On cgroup v2 the allowance is the minimum of memory.max and memory.high over the process's own cgroup and every ancestor: the kernel reclaims and slows a group above memory.high long before memory.max kills it, so the throttle is the working cap. The result's Bound says which of the two file kinds set it (MemoryBoundHigh or MemoryBoundMax). cgroup v1 has no such file — memory.soft\_limit\_in\_bytes is a reclaim hint — and memory.limit\_in\_bytes alone binds there.
+
 ### Relation to cgroup and rlimit
 
 The three are distinct directions on one subject. cgroup WRITES a control group to bound a child process. rlimit applies a setrlimit(2) ceiling the kernel enforces by failing allocations. memlimit READS the cgroup cap already bounding THIS process and tunes the Go collector to live inside it — nothing is enforced, the collector simply works harder as the heap approaches the limit.
@@ -47,12 +51,35 @@ Control groups are a Linux facility. Off Linux no limit file is readable, so App
 
 - [Constants](<#constants>)
 - [func Apply\(\) Limit](<#Apply>)
+- [func ApplyWith\(cfg Config\) \(Limit, error\)](<#ApplyWith>)
+- [func Watch\(ctx context.Context, clk clock.Timed, every time.Duration, cfg Config, onChange func\(Limit\)\) error](<#Watch>)
+- [type Bound](<#Bound>)
+  - [func \(Bound\) String\(\) string](<#Bound.String>)
+- [type Config](<#Config>)
 - [type Limit](<#Limit>)
   - [func \(Limit\) Applied\(\) bool](<#Limit.Applied>)
 - [type Source](<#Source>)
   - [func \(Source\) String\(\) string](<#Source.String>)
 
 ## Constants
+
+<a name="MemoryBoundHigh"></a>
+```go
+const MemoryBoundHigh Bound = 1
+```
+
+MemoryBoundHigh reports that a memory.high file — the kernel's throttle — bound the derivation. It re-exports the core enum value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.MemoryBoundHigh`.
+
+<a name="MemoryBoundMax"></a>
+```go
+const MemoryBoundMax Bound = 2
+```
+
+MemoryBoundMax reports that the hard cap — memory.max, or cgroup v1's memory.limit\_in\_bytes — bound the derivation. It re-exports the core enum value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.MemoryBoundMax`.
 
 <a name="MemorySourceBelowFloor"></a>
 ```go
@@ -101,6 +128,77 @@ Apply derives the Go soft memory limit from the tightest control-group cap gover
 
 It stands aside — leaving the runtime default in place — when GOMEMLIMIT is already set, when no cgroup declares a cap, and when the derived limit is too small to be useful. Those three are told apart by Limit.Source.
 
+<a name="ApplyWith"></a>
+## func [ApplyWith](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/gen_facade.go>)
+
+```go
+func ApplyWith(cfg Config) (Limit, error)
+```
+
+ApplyWith is Apply with the caller's Config. It returns an error carrying MEMLIMIT\_MISCONFIGURED, and installs nothing, for a headroom outside (0, 100] percent or a negative floor.
+
+<a name="Watch"></a>
+## func [Watch](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/gen_facade.go>)
+
+```go
+func Watch(ctx context.Context, clk clock.Timed, every time.Duration, cfg Config, onChange func(Limit)) error
+```
+
+Watch applies the limit as ApplyWith does, then re-derives it every period on clk until ctx ends, installing and reporting it again only when it changed — a resize of the control group under the running process. A period under a second is clamped to a second; a lifted cap puts the runtime's default back. It blocks until ctx ends.
+
+<a name="Bound"></a>
+## type [Bound](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/gen_facade.go>)
+
+Bound names the control-group file that set a derivation's allowance. It aliases the core proc type.
+
+```go
+type Bound = coreproc.MemoryBound
+```
+
+Bound is an alias of `github.com/kitsunium/sdk/internal/core/proc.MemoryBound`, declared as:
+
+```go
+type Bound uint8
+```
+
+<a name="Bound.String"></a>
+### func \(Bound\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/memory.go>)
+
+```go
+func (Bound) String() string
+```
+
+String renders the bound for a log line: "high", "max", or "unknown" for a value this package never mints, the zero included.
+
+<a name="Config"></a>
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/gen_facade.go>)
+
+Config tunes a derivation: the share of the allowance handed to the runtime, the floor, and the GC percent installed with the limit. Its zero value is Apply's. It aliases the service value.
+
+```go
+type Config = svcmemlimit.ConfigValue
+```
+
+Config is an alias of `github.com/kitsunium/sdk/internal/service/proc/memlimit.ConfigValue`, declared as:
+
+```go
+type Config struct {
+	// HeadroomPercent is the share of the allowance handed to the runtime, in
+	// (0, 100]; zero means 90. The rest covers what counts against the cgroup
+	// outside the runtime — the binary, mapped files, C allocations — so a
+	// cgo- or mmap-heavy service lowers it.
+	HeadroomPercent int
+	// MinimumLimit is the floor in bytes under which a derived limit is
+	// declined (MemorySourceBelowFloor); zero means 64 MiB.
+	MinimumLimit    int64
+	// GCPercent, when not nil, is installed with debug.SetGCPercent at the
+	// moment a limit is — -1 runs the collector on the limit alone — and the
+	// previous percent is put back when Watch withdraws the limit. Nil leaves
+	// GOGC as it is.
+	GCPercent       *int
+}
+```
+
 <a name="Limit"></a>
 ## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/memlimit/gen_facade.go>)
 
@@ -122,6 +220,9 @@ type Limit struct {
 	Limit     int64
 	// Source names what decided the outcome.
 	Source    MemorySource
+	// Bound names the file that set Allowance — memory.high or the hard cap —
+	// on every outcome that carries an Allowance, and is zero otherwise.
+	Bound     MemoryBound
 }
 ```
 

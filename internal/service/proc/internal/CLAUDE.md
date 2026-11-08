@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T12:00:00Z -->
+<!-- updated: 2026-11-08T00:00:00Z -->
 # internal/service/proc/internal/
 
 ## Purpose
@@ -13,6 +13,8 @@ service domain, and not by `pkg/v1`.
 
 | Package | What it is | Importers |
 |---|---|---|
+| `bsdabi/` | the records the BSD kernels and darwin hand the family, decoded from their bytes: a process's `kinfo_proc` (`kinfo_proc2` on NetBSD) for its start time and users, every layout the header's under the ABI and proven by size and pid before a field is read (#729); FreeBSD's `sockcred2`, a datagram's sender (#730) — no system call, no build constraint, so every layout is tested on Linux | `proc/exec` (adoption off Linux), `proc/systemd/notify` (the FreeBSD listener) |
+| `cgroupfs/` | the one reading of where this process sits in the control-group filesystem: every mount of the unified and v1-memory hierarchies with what each exposes, the membership of `/proc/self/cgroup`, the translation between them, and the own unified cgroup's directory (`OwnGroup`) — moved from `memlimit` (#1097, #938) | `proc/memlimit` (the ancestor walk), `proc/cgroup` (`Probe`), `proc/self` (the container id) |
 | `rlim/` | the one constructor of the kernel's resource-limit struct: `Make(soft, hard)` → `syscall.Rlimit`, split by build tag because FreeBSD and DragonFly declare its fields `int64` where every other Unix declares `uint64`, so `LimitInfinity` lands as `RLIM_INFINITY` on both | `proc/exec` (the trampoline's pre-exec `setrlimit`), `proc/rlimit` (`setrlimit` and `prlimit64` on a running process) |
 
 It sits beside its importers, at the deepest directory that holds them both,

@@ -10,6 +10,7 @@
 package signal
 
 import (
+	"context"
 	"os"
 	"syscall"
 	"testing"
@@ -71,6 +72,20 @@ func BenchmarkNotify_Stop_Four(b *testing.B) {
 		ch, stop := Notify(benchSignals...)
 		stop()
 		chanSink, stopSink = ch, stop
+	}
+}
+
+// BenchmarkNotifyContext_Stop_One is Notify_Stop_One through NotifyContext
+// (#1096): the same registration plus a cancellable context and the bridge
+// goroutine that turns the signal into its cause, joined by stop.
+func BenchmarkNotifyContext_Stop_One(b *testing.B) {
+	sig := coreproc.Signal(benchQuietSignal)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_, stop := NotifyContext(context.Background(), sig)
+		stop()
+		stopSink = stop
 	}
 }
 

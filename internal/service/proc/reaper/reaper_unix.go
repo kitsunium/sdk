@@ -26,6 +26,12 @@ const exitOSErr int = 71
 type unixReaper struct {
 	// onReap mirrors config.onReap: an optional post-sweep observer.
 	onReap func(int)
+	// onExit mirrors config.onExit: an optional observer of each collection.
+	onExit func(ExitEvent)
+	// observe is reportExit bound once at New when onExit is set, nil
+	// otherwise, so a sweep passes childwait a ready function and allocates
+	// nothing per child, and nothing at all with no observer.
+	observe func(pid int, status *childwait.StatusValue, owned bool)
 	// clk is what the timer sweep ticks on: clock.System from New, a
 	// ManualClock in a white-box test. Set before Start and never after.
 	clk clock.Waiter
@@ -81,7 +87,19 @@ func New(opts ...Option) coreproc.Reaper {
 	cfg := resolve(opts)
 	//: hand back an idle reaper; channels are created lazily in Start. The
 	//: timer sweep runs on the wall clock, at this platform's period.
-	return &unixReaper{onReap: cfg.onReap, clk: clock.System, sweepEvery: timerSweepEvery, notify: signal.Notify}
+	r := &unixReaper{onReap: cfg.onReap, onExit: cfg.onExit, clk: clock.System, sweepEvery: timerSweepEvery, notify: signal.Notify}
+	//: one bound method for the reaper's life, only when someone listens.
+	if r.onExit != nil {
+		r.observe = r.reportExit
+	}
+	//: the idle reaper.
+	return r
+}
+
+// reportExit hands one collected child to the WithOnExit observer.
+func (r *unixReaper) reportExit(pid int, status *childwait.StatusValue, owned bool) {
+	//: the status in Wait's words, told once and kept nowhere.
+	r.onExit(ExitEvent{PID: pid, Exit: status.Exit(), Owned: owned})
 }
 
 // Start begins the background SIGCHLD loop. It is idempotent: a second Start
@@ -273,7 +291,7 @@ func (r *unixReaper) drainResult() (reaped int, err error) {
 	for {
 		//: non-blocking collection of any exited child, its status handed to
 		//: the Process that spawned it when there is one.
-		pid, waitErr := childwait.ReapAny()
+		pid, waitErr := childwait.ReapAnyObserved(r.observe)
 		//: a non-nil error needs classification: transient, benign, or fatal.
 		if waitErr != nil {
 			//: classify the errno; benign ECHILD ends the sweep cleanly.

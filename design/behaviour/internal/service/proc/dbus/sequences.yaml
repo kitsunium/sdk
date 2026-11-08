@@ -1,0 +1,2005 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: SystemBusAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: SystemBusAddress
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: a
+          init:
+            bind: a
+            eval: os.Getenv("DBUS_SYSTEM_BUS_ADDRESS")
+            to: os
+          when: a != ""
+      - return: systemBusDefault
+  - of: SessionBusAddress
+    participants:
+      - id: caller
+        kind: actor
+      - id: SessionBusAddress
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: a
+          init:
+            bind: a
+            eval: os.Getenv("DBUS_SESSION_BUS_ADDRESS")
+            to: os
+          when: a != ""
+      - bind: dir
+        eval: os.Getenv("XDG_RUNTIME_DIR")
+        to: os
+      - opt:
+          do:
+            - return: "\"\""
+          when: dir == ""
+      - return: "\"unix:path=\" + escapeValue(dir+sessionBusSocket)"
+  - of: socketOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: socketOf
+        kind: self
+      - id: unixSocket
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: socket, nil
+                init:
+                  bind: socket, ok
+                  eval: unixSocket(entry)
+                  to: unixSocket
+                when: ok
+          key: entry
+          range: strings.SplitSeq(address, ";")
+      - return: "\"\", errs.Wrap(coredbus.AddressInvalid, errs.WrapParams{}, errs.String(\"address\", address))"
+  - of: unixSocket
+    participants:
+      - id: caller
+        kind: actor
+      - id: unixSocket
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: unixKey
+        kind: internal
+    steps:
+      - bind: transport, params, found
+        eval: strings.Cut(entry, ":")
+        to: strings
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!found || transport != \"unix\""
+      - var:
+          name: socket
+          type: string
+      - loop:
+          do:
+            - bind: next, ok
+              eval: unixKey(kv, socket)
+              to: unixKey
+            - opt:
+                do:
+                  - return: "\"\", false"
+                when: "!ok"
+            - set: socket
+              value: next
+          key: kv
+          range: strings.SplitSeq(params, ",")
+      - return: socket, socket != ""
+  - of: unixKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: unixKey
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: unescape
+        kind: internal
+    steps:
+      - bind: key, raw, ok
+        eval: strings.Cut(kv, "=")
+        to: strings
+      - bind: value, vok
+        eval: unescape(raw)
+        to: unescape
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!ok || !vok || value == \"\""
+      - switch:
+          cases:
+            - case: key == "guid"
+              do:
+                - return: socket, true
+            - case: socket != ""
+              do:
+                - return: "\"\", false"
+            - case: key == "path"
+              do:
+                - return: value, true
+            - case: key == "abstract"
+              do:
+                - return: "\"@\" + value, true"
+            - default: true
+              do:
+                - return: "\"\", false"
+  - of: unescape
+    participants:
+      - id: caller
+        kind: actor
+      - id: unescape
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: b.WriteString
+        kind: value
+      - id: b.String
+        kind: value
+      - id: strconv
+        kind: stdlib
+      - id: b.WriteByte
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - loop:
+          do:
+            - bind: before, after, found
+              eval: strings.Cut(v, "%")
+              to: strings
+            - eval: b.WriteString(before)
+              to: b.WriteString
+            - opt:
+                do:
+                  - return: b.String(), true
+                    to: b.String
+                when: "!found"
+            - opt:
+                do:
+                  - return: "\"\", false"
+                when: len(after) < escapeDigits
+            - bind: c, err
+              eval: strconv.ParseUint(after[:escapeDigits], hexBase, byteBits)
+              to: strconv
+            - opt:
+                do:
+                  - return: "\"\", false"
+                when: err != nil
+            - eval: b.WriteByte(byte(c))
+              to: b.WriteByte
+            - set: v
+              value: after[escapeDigits:]
+          forever: true
+  - of: escapeValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: escapeValue
+        kind: self
+      - id: b.WriteByte
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - loop:
+          do:
+            - bind: c
+              eval: v[i]
+            - opt:
+                do:
+                  - eval: b.WriteByte(c)
+                    to: b.WriteByte
+                  - continue: true
+                when: busNameByte(c) || c == '/' || c == '.' || c == '\\' || c == '*'
+            - eval: b.WriteByte('%')
+              to: b.WriteByte
+            - eval: b.WriteByte(hexDigits[c>>4])
+              to: b.WriteByte
+            - eval: b.WriteByte(hexDigits[c&0xf])
+              to: b.WriteByte
+          key: i
+          range: len(v)
+      - return: b.String()
+        to: b.String
+  - of: authenticate
+    participants:
+      - id: caller
+        kind: actor
+      - id: authenticate
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: unreachable
+        kind: internal
+      - id: authAnswer
+        kind: internal
+      - id: noIdentity
+        kind: internal
+      - id: authVerdict
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: unreachable(err)
+              to: unreachable
+          init:
+            bind: _, err
+            eval: io.WriteString(w, "\x00AUTH EXTERNAL\r\n")
+            to: io
+          when: err != nil
+      - bind: verb, rest, err
+        eval: authAnswer(r)
+        to: authAnswer
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - set: verb, rest, err
+              to: noIdentity
+              value: noIdentity(w, r)
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+          when: verb == "DATA" && rest == ""
+      - return: authVerdict(w, verb, rest)
+        to: authVerdict
+  - of: noIdentity
+    participants:
+      - id: caller
+        kind: actor
+      - id: noIdentity
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: authAnswer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", \"\", unreachable(err)"
+          init:
+            bind: _, err
+            eval: io.WriteString(w, "DATA\r\n")
+            op: =
+            to: io
+          when: err != nil
+      - return: authAnswer(r)
+        to: authAnswer
+  - of: authVerdict
+    participants:
+      - id: caller
+        kind: actor
+      - id: authVerdict
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: unreachableOrNil
+        kind: internal
+      - id: errs
+        kind: package
+      - id: violation
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "\"OK\""
+              do:
+                - bind: _, err
+                  eval: io.WriteString(w, "BEGIN\r\n")
+                  to: io
+                - return: unreachableOrNil(err)
+                  to: unreachableOrNil
+            - case: "\"REJECTED\""
+              do:
+                - return: errs.Wrap(coredbus.AuthRefused, errs.WrapParams{}, errs.String("mechanisms", rest))
+                  to: errs
+            - default: true
+              do:
+                - return: violation("authentication")
+                  to: violation
+          "on": verb
+  - of: authAnswer
+    participants:
+      - id: caller
+        kind: actor
+      - id: authAnswer
+        kind: self
+      - id: authLine
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: line, err
+        eval: authLine(r)
+        to: authLine
+      - opt:
+          do:
+            - return: "\"\", \"\", err"
+          when: err != nil
+      - set: verb, rest, _
+        to: strings
+        value: strings.Cut(line, " ")
+      - return: verb, rest, nil
+  - of: authLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: authLine
+        kind: self
+      - id: r.ReadByte
+        kind: value
+      - id: strings
+        kind: stdlib
+      - id: b.WriteByte
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - loop:
+          cond: b.Len() <= maxAuthLine
+          do:
+            - bind: c, err
+              eval: r.ReadByte()
+              to: r.ReadByte
+            - opt:
+                do:
+                  - return: "\"\", unreachable(err)"
+                when: err != nil
+            - opt:
+                do:
+                  - return: strings.TrimSuffix(b.String(), "\r"), nil
+                    to: strings
+                when: c == '\n'
+            - eval: b.WriteByte(c)
+              to: b.WriteByte
+      - return: "\"\", violation(\"authentication line\")"
+  - of: unreachable
+    participants:
+      - id: caller
+        kind: actor
+      - id: unreachable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coredbus.CodeBusUnreachable,
+          		Reason:   "BUS_UNREACHABLE",
+          		Public:   "The message bus is unreachable",
+          		Private:  "service/proc/dbus: the socket could not be connected, or the bus hung up during the handshake; the cause is in the chain",
+          		ExitCode: exitUnavailable,
+          	})
+        to: errs
+  - of: unreachableOrNil
+    participants:
+      - id: caller
+        kind: actor
+      - id: unreachableOrNil
+        kind: self
+      - id: unreachable
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: unreachable(err)
+        to: unreachable
+  - of: NewConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewConn
+        kind: self
+      - id: socketOf
+        kind: internal
+      - id: d.DialContext
+        kind: value
+      - id: open
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(coreproc.UnsupportedPlatform, errs.WrapParams{}, errs.String("goos", runtime.GOOS))
+          when: runtime.GOOS != osLinux
+      - bind: socket, err
+        eval: socketOf(address)
+        to: socketOf
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - var:
+          name: d
+          type: net.Dialer
+      - bind: nc, err
+        eval: d.DialContext(ctx, "unix", socket)
+        to: d.DialContext
+      - opt:
+          do:
+            - return: nil, unreachable(err)
+          when: err != nil
+      - return: open(ctx, nc)
+        to: open
+  - of: open
+    participants:
+      - id: caller
+        kind: actor
+      - id: open
+        kind: self
+      - id: bufio
+        kind: stdlib
+      - id: handshake
+        kind: internal
+      - id: gone
+        kind: internal
+      - id: c.wg.Add
+        kind: value
+      - id: c.read
+        kind: internal
+      - id: c.call
+        kind: internal
+      - id: m.strings
+        kind: internal
+    steps:
+      - bind: r
+        eval: bufio.NewReaderSize(nc, readBuffer)
+        to: bufio
+      - opt:
+          do:
+            - eval: gone(nc.Close())
+              to: gone
+            - return: nil, err
+          init:
+            bind: err
+            eval: handshake(ctx, nc, r)
+            to: handshake
+          when: err != nil
+      - bind: c
+        eval: "&Conn{nc: nc, r: r, done: make(chan struct{}), pending: map[uint32]*pending{}, watches: map[string][]*watch{}}"
+      - eval: c.wg.Add(1)
+        to: c.wg.Add
+      - go: c.read()
+        to: c.read
+      - bind: m, err
+        eval: "c.call(ctx, &callValue{member: \"Hello\"})"
+        to: c.call
+      - opt:
+          do:
+            - eval: gone(c.Close())
+              to: gone
+            - return: nil, err
+          when: err != nil
+      - bind: names, ok
+        eval: m.strings(1)
+        to: m.strings
+      - opt:
+          do:
+            - eval: gone(c.Close())
+              to: gone
+            - return: nil, violation("Hello reply")
+          when: "!ok || names[0] == \"\""
+      - set: c.uniqueName
+        value: names[0]
+      - return: c, nil
+  - of: handshake
+    participants:
+      - id: caller
+        kind: actor
+      - id: handshake
+        kind: self
+      - id: time.Now().Add
+        kind: value
+      - id: ctx.Deadline
+        kind: value
+      - id: gone
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: authenticate
+        kind: internal
+      - id: ended
+        kind: internal
+      - id: timedOut
+        kind: internal
+    steps:
+      - bind: bound
+        eval: time.Now().Add(callTimeout)
+        to: time.Now().Add
+      - bind: deadline, byCtx
+        eval: ctx.Deadline()
+        to: ctx.Deadline
+      - opt:
+          do:
+            - set: deadline, byCtx
+              value: bound, false
+          when: "!byCtx || deadline.After(bound)"
+      - eval: gone(nc.SetDeadline(deadline))
+        to: gone
+      - bind: stop
+        eval: context.AfterFunc(ctx, func() { gone(nc.SetDeadline(time.Unix(1, 0))) })
+        to: context
+      - bind: err
+        eval: authenticate(nc, r)
+        to: authenticate
+      - bind: cut
+        eval: "!stop()"
+      - eval: gone(nc.SetDeadline(time.Time{}))
+        to: gone
+      - opt:
+          do:
+            - return: ended("AUTH", ctx.Err())
+              to: ended
+          when: cut || (err != nil && ctx.Err() != nil)
+      - opt:
+          do:
+            - return: timedOut("AUTH", deadlineCause(byCtx))
+              to: timedOut
+          when: err != nil && isTimeout(err)
+      - return: err
+  - of: deadlineCause
+    steps:
+      - opt:
+          do:
+            - return: context.DeadlineExceeded
+          when: byCtx
+      - return: nil
+  - of: isTimeout
+    steps:
+      - bind: ne, ok
+        eval: errors.AsType[net.Error](err)
+      - return: ok && ne.Timeout()
+  - of: (*Conn).UniqueName
+    steps:
+      - return: c.uniqueName
+  - of: (*Conn).NameOwner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).NameOwner
+        kind: self
+      - id: checkName
+        kind: internal
+      - id: c.roundTrip
+        kind: internal
+      - id: ownerOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\", err"
+          init:
+            bind: err
+            eval: checkName(name)
+            to: checkName
+          when: err != nil
+      - bind: m, err
+        eval: "c.roundTrip(ctx, &callValue{member: \"GetNameOwner\", sig: \"s\", strs: []string{name}}, nil)"
+        to: c.roundTrip
+      - opt:
+          do:
+            - return: "\"\", err"
+          when: err != nil
+      - return: ownerOf(m)
+        to: ownerOf
+  - of: (*Conn).RequestName
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).RequestName
+        kind: self
+      - id: checkName
+        kind: internal
+      - id: c.answer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: false, err
+          init:
+            bind: err
+            eval: checkName(name)
+            to: checkName
+          when: err != nil
+      - bind: reply, err
+        eval: "c.answer(ctx, &callValue{member: \"RequestName\", sig: \"su\", strs: []string{name}, u: requestDoNotQueue})"
+        to: c.answer
+      - return: reply == replyPrimaryOwner || reply == replyAlreadyOwner, err
+  - of: (*Conn).ReleaseName
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).ReleaseName
+        kind: self
+      - id: checkName
+        kind: internal
+      - id: c.answer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: false, err
+          init:
+            bind: err
+            eval: checkName(name)
+            to: checkName
+          when: err != nil
+      - bind: reply, err
+        eval: "c.answer(ctx, &callValue{member: \"ReleaseName\", sig: \"s\", strs: []string{name}})"
+        to: c.answer
+      - return: reply == releaseReleased, err
+  - of: (*Conn).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).Close
+        kind: self
+      - id: c.fail
+        kind: internal
+      - id: c.wg.Wait
+        kind: value
+    steps:
+      - eval: c.fail(nil)
+        to: c.fail
+      - eval: c.wg.Wait()
+        to: c.wg.Wait
+      - return: nil
+  - of: (*Conn).answer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).answer
+        kind: self
+      - id: c.call
+        kind: internal
+      - id: m.uint32
+        kind: internal
+    steps:
+      - bind: m, err
+        eval: c.call(ctx, cv)
+        to: c.call
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - bind: v, ok
+        eval: m.uint32()
+        to: m.uint32
+      - opt:
+          do:
+            - return: 0, violation(cv.member + " reply")
+          when: "!ok"
+      - return: v, nil
+  - of: (*Conn).call
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).call
+        kind: self
+      - id: c.roundTrip
+        kind: internal
+    steps:
+      - bind: m, err
+        eval: c.roundTrip(ctx, cv, nil)
+        to: c.roundTrip
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, callFailed(cv.member, m.errName)
+          when: m.typ == typeError
+      - return: m, nil
+  - of: (*Conn).roundTrip
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).roundTrip
+        kind: self
+      - id: c.nextSerial
+        kind: internal
+      - id: c.mu.Lock
+        kind: value
+      - id: c.mu.Unlock
+        kind: value
+      - id: c.send
+        kind: internal
+      - id: c.forget
+        kind: internal
+      - id: time
+        kind: stdlib
+      - id: bound.Stop
+        kind: value
+      - id: c.lateReply
+        kind: internal
+    steps:
+      - bind: serial
+        eval: c.nextSerial()
+        to: c.nextSerial
+      - bind: p
+        eval: "&pending{reply: make(chan *message, 1), onReply: onReply}"
+      - eval: c.mu.Lock()
+        to: c.mu.Lock
+      - opt:
+          do:
+            - eval: c.mu.Unlock()
+              to: c.mu.Unlock
+            - return: nil, coredbus.ConnClosed
+          when: c.closed
+      - set: c.pending[serial]
+        value: p
+      - eval: c.mu.Unlock()
+        to: c.mu.Unlock
+      - opt:
+          do:
+            - eval: c.forget(serial)
+              to: c.forget
+            - return: nil, err
+          init:
+            bind: err
+            eval: c.send(ctx, serial, cv)
+            to: c.send
+          when: err != nil
+      - bind: bound
+        eval: time.NewTimer(callTimeout)
+        to: time
+      - defer: bound.Stop()
+        to: bound.Stop
+      - select:
+          cases:
+            - comm: m := <-p.reply
+              do:
+                - return: m, nil
+            - comm: <-ctx.Done()
+              do:
+                - eval: c.forget(serial)
+                  to: c.forget
+                - return: nil, ended(cv.member, ctx.Err())
+            - comm: <-bound.C
+              do:
+                - eval: c.forget(serial)
+                  to: c.forget
+                - return: nil, timedOut(cv.member, nil)
+            - comm: <-c.done
+              do:
+                - return: c.lateReply(p)
+                  to: c.lateReply
+  - of: (*Conn).lateReply
+    steps:
+      - select:
+          cases:
+            - comm: m := <-p.reply
+              do:
+                - return: m, nil
+            - default: true
+              do:
+                - return: nil, coredbus.ConnClosed
+  - of: (*Conn).nextSerial
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).nextSerial
+        kind: self
+      - id: c.serial.Add
+        kind: value
+    steps:
+      - bind: s
+        eval: c.serial.Add(1)
+        to: c.serial.Add
+      - opt:
+          do:
+            - set: s
+              to: c.serial.Add
+              value: c.serial.Add(1)
+          when: s == 0
+      - return: s
+  - of: (*Conn).forget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).forget
+        kind: self
+      - id: c.mu.Lock
+        kind: value
+      - id: c.mu.Unlock
+        kind: value
+    steps:
+      - eval: c.mu.Lock()
+        to: c.mu.Lock
+      - eval: delete(c.pending, serial)
+      - eval: c.mu.Unlock()
+        to: c.mu.Unlock
+  - of: (*Conn).send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).send
+        kind: self
+      - id: encodeCall
+        kind: internal
+      - id: ctx.Deadline
+        kind: value
+      - id: gone
+        kind: internal
+      - id: c.nc.Write
+        kind: value
+      - id: c.fail
+        kind: internal
+    steps:
+      - bind: b
+        eval: encodeCall(serial, cv)
+        to: encodeCall
+      - lock:
+          mutex: c.wmu
+      - bind: deadline, _
+        eval: ctx.Deadline()
+        to: ctx.Deadline
+      - eval: gone(c.nc.SetWriteDeadline(deadline))
+        to: gone
+      - opt:
+          do:
+            - eval: c.fail(err)
+              to: c.fail
+            - return: coredbus.ConnClosed
+          init:
+            bind: _, err
+            eval: c.nc.Write(b)
+            to: c.nc.Write
+          when: err != nil
+      - return: nil
+  - of: (*Conn).fail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).fail
+        kind: self
+      - id: c.mu.Lock
+        kind: value
+      - id: c.mu.Unlock
+        kind: value
+      - id: gone
+        kind: internal
+    steps:
+      - eval: c.mu.Lock()
+        to: c.mu.Lock
+      - opt:
+          do:
+            - set: c.cause
+              value: cause
+          when: c.cause == nil
+      - set: c.closed
+        value: "true"
+      - eval: c.mu.Unlock()
+        to: c.mu.Unlock
+      - eval: gone(c.nc.Close())
+        to: gone
+  - of: (*Conn).read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).read
+        kind: self
+      - id: c.wg.Done
+        kind: value
+      - id: readMessage
+        kind: internal
+      - id: c.dispatch
+        kind: internal
+      - id: c.end
+        kind: internal
+    steps:
+      - defer: c.wg.Done()
+        to: c.wg.Done
+      - var:
+          name: err
+          type: error
+      - loop:
+          cond: err == nil
+          do:
+            - var:
+                name: m
+                type: "*message"
+            - set: m, err
+              to: readMessage
+              value: readMessage(c.r)
+            - opt:
+                do:
+                  - eval: c.dispatch(m)
+                    to: c.dispatch
+                when: err == nil
+      - eval: c.end(err)
+        to: c.end
+  - of: (*Conn).end
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).end
+        kind: self
+      - id: c.fail
+        kind: internal
+      - id: c.mu.Lock
+        kind: value
+      - id: c.mu.Unlock
+        kind: value
+      - id: c.doneOnce.Do
+        kind: value
+    steps:
+      - eval: c.fail(cause)
+        to: c.fail
+      - eval: c.mu.Lock()
+        to: c.mu.Lock
+      - set: c.pending, c.watches
+        value: nil, nil
+      - eval: c.mu.Unlock()
+        to: c.mu.Unlock
+      - eval: c.doneOnce.Do(func() { close(c.done) })
+        to: c.doneOnce.Do
+  - of: (*Conn).dispatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).dispatch
+        kind: self
+      - id: c.reply
+        kind: internal
+      - id: c.announced
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: typeMethodReturn, typeError
+              do:
+                - eval: c.reply(m)
+                  to: c.reply
+            - case: typeSignal
+              do:
+                - eval: c.announced(m)
+                  to: c.announced
+            - default: true
+          "on": m.typ
+  - of: (*Conn).reply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).reply
+        kind: self
+      - id: c.mu.Lock
+        kind: value
+      - id: c.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: m.sender != busDriver
+      - eval: c.mu.Lock()
+        to: c.mu.Lock
+      - bind: p
+        eval: c.pending[m.replySerial]
+      - eval: delete(c.pending, m.replySerial)
+      - eval: c.mu.Unlock()
+        to: c.mu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: p == nil
+      - opt:
+          do:
+            - eval: p.onReply(m)
+          when: p.onReply != nil
+      - send:
+          chan: p.reply
+          value: m
+  - of: (*Conn).announced
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).announced
+        kind: self
+      - id: m.strings
+        kind: internal
+      - id: w.push
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: m.sender != busDriver || m.path != busPath || m.iface != busInterface || m.member != "NameOwnerChanged"
+      - bind: args, ok
+        eval: m.strings(3)
+        to: m.strings
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - lock:
+          mutex: c.mu
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: w.push(args[2])
+                    to: w.push
+                when: w.ready
+          key: _
+          range: c.watches[args[0]]
+          value: w
+  - of: ownerOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: ownerOf
+        kind: self
+      - id: m.strings
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "\"\", nil"
+                when: m.errName == nameHasNoOwner
+            - return: "\"\", callFailed(\"GetNameOwner\", m.errName)"
+          when: m.typ == typeError
+      - bind: owner, ok
+        eval: m.strings(1)
+        to: m.strings
+      - opt:
+          do:
+            - return: "\"\", violation(\"GetNameOwner reply\")"
+          when: "!ok"
+      - return: owner[0], nil
+  - of: callFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: callFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(coredbus.CallFailed, errs.WrapParams{}, errs.String("method", method), errs.String("error", errName))
+        to: errs
+  - of: ended
+    participants:
+      - id: caller
+        kind: actor
+      - id: ended
+        kind: self
+      - id: timedOut
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: timedOut(method, cause)
+              to: timedOut
+          when: errors.Is(cause, context.DeadlineExceeded)
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coredbus.CodeCallCancelled,
+          		Reason:  "CALL_CANCELLED",
+          		Public:  "The message bus call was cancelled",
+          		Private: "service/proc/dbus: the caller's context was cancelled before the reply came; the method field says which call",
+          	}, errs.String("method", method))
+        to: errs
+  - of: timedOut
+    participants:
+      - id: caller
+        kind: actor
+      - id: timedOut
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coredbus.CallTimeout, errs.WrapParams{}, errs.String("method", method))
+              to: errs
+          when: cause == nil
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coredbus.CodeCallTimeout,
+          		Reason:   "CALL_TIMEOUT",
+          		Public:   "The message bus did not answer in time",
+          		Private:  "service/proc/dbus: no reply within the context's deadline or 25 seconds, the default reply timeout; the method field says which call",
+          		ExitCode: exitTempFail,
+          	}, errs.String("method", method))
+        to: errs
+  - of: gone
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: checkName
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkName
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: validName(name)
+      - return: errs.Wrap(coredbus.NameInvalid, errs.WrapParams{}, errs.String("name", name))
+        to: errs
+  - of: validName
+    participants:
+      - id: caller
+        kind: actor
+      - id: validName
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(name) > maxNameBytes || name == ""
+      - bind: elements
+        eval: strings.Split(name, ".")
+        to: strings
+      - return: len(elements) >= minElements && !slices.ContainsFunc(elements, badElement)
+  - of: badElement
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: e == "" || (e[0] >= '0' && e[0] <= '9')
+      - return: strings.IndexFunc(e, func(r rune) bool { return r >= utf8.RuneSelf || !busNameByte(byte(r)) }) >= 0
+  - of: busNameByte
+    steps:
+      - return: (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+  - of: (*Conn).WatchName
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).WatchName
+        kind: self
+      - id: checkName
+        kind: internal
+      - id: matchRule
+        kind: internal
+      - id: c.call
+        kind: internal
+      - id: c.unwatch
+        kind: internal
+      - id: c.roundTrip
+        kind: internal
+      - id: ownerOf
+        kind: internal
+      - id: c.removeMatch
+        kind: internal
+      - id: c.deliver
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: checkName(name)
+            to: checkName
+          when: err != nil
+      - bind: w
+        eval: "&watch{name: name, wake: make(chan struct{}, 1)}"
+      - opt:
+          do:
+            - return: nil, coredbus.ConnClosed
+          when: "!c.register(w)"
+      - bind: rule
+        eval: matchRule(name)
+        to: matchRule
+      - opt:
+          do:
+            - eval: c.unwatch(w)
+              to: c.unwatch
+            - return: nil, err
+          init:
+            bind: _, err
+            eval: "c.call(ctx, &callValue{member: \"AddMatch\", sig: \"s\", strs: []string{rule}})"
+            to: c.call
+          when: err != nil
+      - bind: m, err
+        eval: "c.roundTrip(ctx, &callValue{member: \"GetNameOwner\", sig: \"s\", strs: []string{name}}, func(m *message) { c.looked(w, m) })"
+        to: c.roundTrip
+      - opt:
+          do:
+            - set: _, err
+              to: ownerOf
+              value: ownerOf(m)
+          when: err == nil
+      - opt:
+          do:
+            - eval: c.unwatch(w)
+              to: c.unwatch
+            - eval: c.removeMatch(rule)
+              to: c.removeMatch
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: make(chan string)
+      - opt:
+          do:
+            - eval: close(out)
+            - return: out, nil
+          when: "!c.track()"
+      - go: c.deliver(ctx, w, out, rule)
+        to: c.deliver
+      - return: out, nil
+  - of: (*Conn).register
+    steps:
+      - lock:
+          mutex: c.mu
+      - opt:
+          do:
+            - return: "false"
+          when: c.closed
+      - set: c.watches[w.name]
+        value: append(c.watches[w.name], w)
+      - return: "true"
+  - of: (*Conn).track
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).track
+        kind: self
+      - id: c.wg.Add
+        kind: value
+    steps:
+      - lock:
+          mutex: c.mu
+      - opt:
+          do:
+            - return: "false"
+          when: c.closed
+      - eval: c.wg.Add(1)
+        to: c.wg.Add
+      - return: "true"
+  - of: (*Conn).looked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).looked
+        kind: self
+      - id: ownerOf
+        kind: internal
+      - id: c.mu.Lock
+        kind: value
+      - id: c.mu.Unlock
+        kind: value
+      - id: w.nudge
+        kind: internal
+    steps:
+      - bind: owner, err
+        eval: ownerOf(m)
+        to: ownerOf
+      - opt:
+          do:
+            - return: ""
+          when: err != nil
+      - eval: c.mu.Lock()
+        to: c.mu.Lock
+      - set: w.ready
+        value: "true"
+      - set: w.queue
+        value: append(w.queue[:0], owner)
+      - eval: c.mu.Unlock()
+        to: c.mu.Unlock
+      - eval: w.nudge()
+        to: w.nudge
+  - of: (*Conn).deliver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).deliver
+        kind: self
+      - id: c.wg.Done
+        kind: value
+      - id: c.head
+        kind: internal
+      - id: c.pop
+        kind: internal
+      - id: c.unwatch
+        kind: internal
+      - id: c.removeMatch
+        kind: internal
+    steps:
+      - defer: c.wg.Done()
+        to: c.wg.Done
+      - defer: close(out)
+      - loop:
+          do:
+            - bind: next, has
+              eval: c.head(w)
+              to: c.head
+            - var:
+                name: send
+                type: chan<- string
+            - opt:
+                do:
+                  - set: send
+                    value: out
+                when: has
+            - select:
+                cases:
+                  - comm: send <- next
+                    do:
+                      - eval: c.pop(w)
+                        to: c.pop
+                  - comm: _, open := <-w.wake
+                    do:
+                      - opt:
+                          do:
+                            - eval: c.unwatch(w)
+                              to: c.unwatch
+                            - return: ""
+                          when: "!open"
+                  - comm: <-ctx.Done()
+                    do:
+                      - eval: c.unwatch(w)
+                        to: c.unwatch
+                      - eval: c.removeMatch(rule)
+                        to: c.removeMatch
+                      - return: ""
+                  - comm: <-c.done
+                    do:
+                      - return: ""
+          forever: true
+  - of: (*Conn).head
+    steps:
+      - lock:
+          mutex: c.mu
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: len(w.queue) == 0
+      - return: w.queue[0], true
+  - of: (*Conn).pop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).pop
+        kind: self
+      - id: c.mu.Lock
+        kind: value
+      - id: c.mu.Unlock
+        kind: value
+    steps:
+      - eval: c.mu.Lock()
+        to: c.mu.Lock
+      - set: w.queue
+        value: w.queue[1:]
+      - eval: c.mu.Unlock()
+        to: c.mu.Unlock
+  - of: (*watch).push
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*watch).push
+        kind: self
+      - id: w.nudge
+        kind: internal
+    steps:
+      - alt:
+          - do:
+              - set: w.queue[len(w.queue)-1]
+                value: owner
+            when: len(w.queue) >= maxBacklog
+          - do:
+              - set: w.queue
+                value: append(w.queue, owner)
+            else: true
+      - eval: w.nudge()
+        to: w.nudge
+  - of: (*watch).nudge
+    steps:
+      - select:
+          cases:
+            - comm: w.wake <- struct{}{}
+            - default: true
+  - of: (*Conn).removeMatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Conn).removeMatch
+        kind: self
+      - id: gone
+        kind: internal
+    steps:
+      - bind: cv
+        eval: "&callValue{member: \"RemoveMatch\", sig: \"s\", strs: []string{rule}, flags: flagNoReplyExpected}"
+      - eval: gone(c.send(context.Background(), c.nextSerial(), cv))
+        to: gone
+  - of: matchRule
+    steps:
+      - return: |-
+          "type='signal',sender='" + busDriver + "',path='" + busPath + "',interface='" + busInterface +
+          		"',member='NameOwnerChanged',arg0='" + name + "'"
+  - of: (*encoder).pad
+    steps:
+      - loop:
+          cond: len(e.b)%n != 0
+          do:
+            - set: e.b
+              value: append(e.b, 0)
+  - of: (*encoder).u32
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).u32
+        kind: self
+      - id: e.pad
+        kind: internal
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - eval: e.pad(alignUint32)
+        to: e.pad
+      - set: e.b
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(e.b, v)
+  - of: (*encoder).str
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).str
+        kind: self
+      - id: e.u32
+        kind: internal
+    steps:
+      - eval: e.u32(uint32(len(s)))
+        to: e.u32
+      - set: e.b
+        value: append(e.b, s...)
+      - set: e.b
+        value: append(e.b, 0)
+  - of: (*encoder).sig
+    steps:
+      - set: e.b
+        value: append(e.b, byte(len(s)))
+      - set: e.b
+        value: append(e.b, s...)
+      - set: e.b
+        value: append(e.b, 0)
+  - of: (*encoder).field
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*encoder).field
+        kind: self
+      - id: e.pad
+        kind: internal
+      - id: e.sig
+        kind: internal
+      - id: e.str
+        kind: internal
+    steps:
+      - eval: e.pad(alignStruct)
+        to: e.pad
+      - set: e.b
+        value: append(e.b, code)
+      - eval: e.sig(string(rune(typ)))
+        to: e.sig
+      - opt:
+          do:
+            - eval: e.sig(value)
+              to: e.sig
+            - return: ""
+          when: typ == 'g'
+      - eval: e.str(value)
+        to: e.str
+  - of: encodeCall
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeCall
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+      - id: e.field
+        kind: internal
+      - id: binary.LittleEndian.PutUint32
+        kind: value
+      - id: e.pad
+        kind: internal
+      - id: e.str
+        kind: internal
+      - id: e.u32
+        kind: internal
+    steps:
+      - bind: e
+        eval: "&encoder{b: make([]byte, 0, callBuffer)}"
+      - set: e.b
+        value: append(e.b, littleEndian, typeMethodCall, c.flags, protocolVersion, 0, 0, 0, 0)
+      - set: e.b
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(e.b, serial)
+      - set: e.b
+        value: append(e.b, 0, 0, 0, 0)
+      - eval: e.field(fieldPath, 'o', busPath)
+        to: e.field
+      - eval: e.field(fieldInterface, 's', busInterface)
+        to: e.field
+      - eval: e.field(fieldMember, 's', c.member)
+        to: e.field
+      - eval: e.field(fieldDestination, 's', busDriver)
+        to: e.field
+      - opt:
+          do:
+            - eval: e.field(fieldSignature, 'g', c.sig)
+              to: e.field
+          when: c.sig != ""
+      - eval: binary.LittleEndian.PutUint32(e.b[12:], uint32(len(e.b)-fixedHeader))
+        to: binary.LittleEndian.PutUint32
+      - eval: e.pad(alignStruct)
+        to: e.pad
+      - bind: start
+        eval: len(e.b)
+      - loop:
+          do:
+            - eval: e.str(s)
+              to: e.str
+          key: _
+          range: c.strs
+          value: s
+      - opt:
+          do:
+            - eval: e.u32(c.u)
+              to: e.u32
+          when: len(c.sig) > len(c.strs)
+      - eval: binary.LittleEndian.PutUint32(e.b[4:], uint32(len(e.b)-start))
+        to: binary.LittleEndian.PutUint32
+      - return: e.b
+  - of: readMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: readMessage
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: parseFixed
+        kind: internal
+      - id: m.parseFields
+        kind: internal
+      - id: r.Discard
+        kind: internal
+      - id: body.Grow
+        kind: value
+      - id: body.Bytes
+        kind: value
+    steps:
+      - var:
+          name: head
+          type: "[fixedHeader]byte"
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: _, err
+            eval: io.ReadFull(r, head[:])
+            to: io
+          when: err != nil
+      - bind: m, err
+        eval: parseFixed(head[:])
+        to: parseFixed
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: fields
+        eval: make([]byte, int(m.fieldLen)+padding(fixedHeader+int(m.fieldLen), alignStruct))
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: _, err
+            eval: io.ReadFull(r, fields)
+            to: io
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: m.parseFields(fields[:m.fieldLen])
+            to: m.parseFields
+          when: err != nil
+      - opt:
+          do:
+            - bind: _, err
+              eval: r.Discard(int(m.bodyLen))
+              to: r.Discard
+            - return: m, err
+          when: m.bodyLen > maxBodyBytes
+      - var:
+          name: body
+          type: bytes.Buffer
+      - eval: body.Grow(int(m.bodyLen))
+        to: body.Grow
+      - set: _, err
+        to: io
+        value: io.CopyN(&body, r, int64(m.bodyLen))
+      - set: m.body
+        to: body.Bytes
+        value: body.Bytes()
+      - return: m, err
+  - of: parseFixed
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseFixed
+        kind: self
+      - id: m.order.Uint32
+        kind: value
+    steps:
+      - bind: m
+        eval: "&message{typ: head[1], flags: head[2]}"
+      - switch:
+          cases:
+            - case: littleEndian
+              do:
+                - set: m.order
+                  value: binary.LittleEndian
+            - case: bigEndian
+              do:
+                - set: m.order
+                  value: binary.BigEndian
+            - default: true
+              do:
+                - return: nil, violation("byte order")
+          "on": head[0]
+      - set: m.bodyLen, m.fieldLen
+        value: m.order.Uint32(head[4:]), m.order.Uint32(head[12:])
+      - set: m.serial
+        to: m.order.Uint32
+        value: m.order.Uint32(head[8:])
+      - opt:
+          do:
+            - return: nil, violation("header")
+          when: |-
+            head[3] != protocolVersion || m.serial == 0 || m.fieldLen > maxFieldBytes ||
+            		uint64(m.bodyLen)+uint64(m.fieldLen)+uint64(fixedHeader) > uint64(maxMessageBytes)
+      - return: m, nil
+  - of: padding
+    steps:
+      - return: (n - offset%n) % n
+  - of: (*message).parseFields
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*message).parseFields
+        kind: self
+      - id: violation
+        kind: internal
+      - id: d.byte
+        kind: internal
+      - id: d.signature
+        kind: internal
+      - id: m.field
+        kind: internal
+    steps:
+      - bind: d
+        eval: "&decoder{b: b, base: fixedHeader, order: m.order}"
+      - loop:
+          cond: d.off < len(b)
+          do:
+            - opt:
+                do:
+                  - return: violation("header field")
+                    to: violation
+                when: "!d.align(alignStruct)"
+            - bind: code, ok
+              eval: d.byte()
+              to: d.byte
+            - bind: typ, tok
+              eval: d.signature()
+              to: d.signature
+            - opt:
+                do:
+                  - return: violation("header field")
+                    to: violation
+                when: "!ok || !tok || len(typ) != 1"
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: m.field(d, code, typ[0])
+                  to: m.field
+                when: err != nil
+      - return: nil
+  - of: (*message).field
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*message).field
+        kind: self
+      - id: d.string
+        kind: internal
+      - id: okOr
+        kind: internal
+      - id: d.signature
+        kind: internal
+      - id: d.u32
+        kind: internal
+    steps:
+      - bind: strs
+        eval: |-
+          map[byte]*string{
+          		fieldPath: &m.path, fieldInterface: &m.iface, fieldMember: &m.member,
+          		fieldErrorName: &m.errName, fieldDestination: &m.dest, fieldSender: &m.sender,
+          	}
+      - switch:
+          cases:
+            - case: strs[code] != nil && (typ == 's' || typ == 'o')
+              do:
+                - bind: v, ok
+                  eval: d.string()
+                  to: d.string
+                - set: "*strs[code]"
+                  value: v
+                - return: okOr(ok, "header string")
+                  to: okOr
+            - case: code == fieldSignature && typ == 'g'
+              do:
+                - bind: v, ok
+                  eval: d.signature()
+                  to: d.signature
+                - set: m.sig
+                  value: v
+                - return: okOr(ok, "header signature")
+                  to: okOr
+            - case: code == fieldReplySerial && typ == 'u'
+              do:
+                - bind: v, ok
+                  eval: d.u32()
+                  to: d.u32
+                - set: m.replySerial
+                  value: v
+                - return: okOr(ok, "header reply serial")
+                  to: okOr
+            - default: true
+              do:
+                - return: okOr(d.skip(typ), "header field type")
+                  to: okOr
+  - of: okOr
+    participants:
+      - id: caller
+        kind: actor
+      - id: okOr
+        kind: self
+      - id: violation
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: ok
+      - return: violation(rule)
+        to: violation
+  - of: (*decoder).align
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).align
+        kind: self
+      - id: padding
+        kind: internal
+    steps:
+      - bind: p
+        eval: padding(d.base+d.off, n)
+        to: padding
+      - opt:
+          do:
+            - return: "false"
+          when: d.off+p > len(d.b)
+      - op: +=
+        set: d.off
+        value: p
+      - return: "true"
+  - of: (*decoder).byte
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: d.off >= len(d.b)
+      - op: ++
+        set: d.off
+      - return: d.b[d.off-1], true
+  - of: (*decoder).u32
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).u32
+        kind: self
+      - id: d.order.Uint32
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: "!d.align(alignUint32) || d.off+alignUint32 > len(d.b)"
+      - op: +=
+        set: d.off
+        value: alignUint32
+      - return: d.order.Uint32(d.b[d.off-alignUint32:]), true
+        to: d.order.Uint32
+  - of: (*decoder).string
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).string
+        kind: self
+      - id: d.u32
+        kind: internal
+      - id: d.text
+        kind: internal
+    steps:
+      - bind: n, ok
+        eval: d.u32()
+        to: d.u32
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!ok || uint64(d.off)+uint64(n)+1 > uint64(len(d.b))"
+      - return: d.text(int(n))
+        to: d.text
+  - of: (*decoder).signature
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).signature
+        kind: self
+      - id: d.byte
+        kind: internal
+      - id: d.text
+        kind: internal
+    steps:
+      - bind: n, ok
+        eval: d.byte()
+        to: d.byte
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!ok || d.off+int(n)+1 > len(d.b)"
+      - return: d.text(int(n))
+        to: d.text
+  - of: (*decoder).text
+    steps:
+      - bind: s
+        eval: "d.b[d.off : d.off+n]"
+      - op: +=
+        set: d.off
+        value: n + 1
+      - return: string(s), d.b[d.off-1] == 0 && utf8.Valid(s) && !slices.Contains(s, 0)
+  - of: (*decoder).skip
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decoder).skip
+        kind: self
+      - id: d.string
+        kind: internal
+      - id: d.signature
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: basicSizes[typ]
+      - switch:
+          cases:
+            - case: typ == 's' || typ == 'o'
+              do:
+                - bind: _, ok
+                  eval: d.string()
+                  to: d.string
+                - return: ok
+            - case: typ == 'g'
+              do:
+                - bind: _, ok
+                  eval: d.signature()
+                  to: d.signature
+                - return: ok
+            - case: n > 0
+              do:
+                - opt:
+                    do:
+                      - return: "false"
+                    when: "!d.align(n) || d.off+n > len(d.b)"
+                - op: +=
+                  set: d.off
+                  value: "n"
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+  - of: (*message).strings
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*message).strings
+        kind: self
+      - id: d.string
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, false
+          when: m.body == nil || len(m.sig) != n || !allOf(m.sig, 's')
+      - bind: d
+        eval: "&decoder{b: m.body, order: m.order}"
+      - bind: out
+        eval: make([]string, 0, n)
+      - loop:
+          do:
+            - bind: s, ok
+              eval: d.string()
+              to: d.string
+            - opt:
+                do:
+                  - return: nil, false
+                when: "!ok"
+            - set: out
+              value: append(out, s)
+          range: "n"
+      - return: out, true
+  - of: (*message).uint32
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*message).uint32
+        kind: self
+      - id: d.u32
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: m.body == nil || m.sig != "u"
+      - bind: d
+        eval: "&decoder{b: m.body, order: m.order}"
+      - return: d.u32()
+        to: d.u32
+  - of: violation
+    participants:
+      - id: caller
+        kind: actor
+      - id: violation
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(coredbus.ProtocolViolation, errs.WrapParams{}, errs.String("rule", rule))
+        to: errs

@@ -18,8 +18,10 @@ constants:
         value: iota
       - doc: CapRlimit is applying per-process setrlimit-style limits (rlimit.Apply).
         name: CapRlimit
-      - doc: CapUmaskNiceOOM is the spawn-time umask / nice / oom_score_adj knobs.
-        name: CapUmaskNiceOOM
+      - doc: |-
+          CapUmaskNice is the spawn-time umask and nice knobs (Spec.Umask, Spec.Nice),
+          native on every Unix. The OOM-killer bias is CapOOMScoreAdj.
+        name: CapUmaskNice
       - doc: CapCgroup is a kernel-enforced resource container (cgroup.Create).
         name: CapCgroup
       - doc: CapReaper is zombie reaping / subreaping (reaper.New).
@@ -30,15 +32,47 @@ constants:
         name: CapSdNotify
       - doc: CapSocketActivation is inheriting a pre-opened listening socket (systemd/listen).
         name: CapSocketActivation
+      - doc: CapDieWithParent is binding a child to the supervisor's life (Spec.DieWithParent).
+        name: CapDieWithParent
+      - doc: CapScheduling is a child's CPU policy and I/O class (Spec.Scheduling).
+        name: CapScheduling
+      - doc: CapPTY is spawning a child on a pseudo-terminal (StdioPTY).
+        name: CapPTY
+      - doc: CapProcessHandle is reaching a process through a kernel handle, not its pid (ProcessHandle, process.Open).
+        name: CapProcessHandle
     name: CapProcessSpawn
+  - doc: |-
+      CapOOMScoreAdj is the spawn-time OOM-killer bias (Spec.OOMScoreAdj), a Linux
+      procfs knob: elsewhere Start refuses it with UnsupportedPlatform before
+      spawning anything. It is numbered 12, apart from the block above: 8 to 11 are
+      the spawn's own capabilities (ADR 0217), and a value is never given twice.
+    items:
+      - name: CapOOMScoreAdj
+        type: Capability
+        value: "12"
+    name: CapOOMScoreAdj
+  - doc: |-
+      CapSandbox is spawning a child under Spec.Sandbox: namespaces, mounts,
+      capabilities, Landlock and seccomp, applied before its program runs. Linux on
+      amd64 and arm64 alone, where the system call tables are written; every other
+      GOOS and GOARCH refuses it with UnsupportedPlatform before spawning anything.
+      It is numbered 13, after CapOOMScoreAdj.
+    items:
+      - name: CapSandbox
+        type: Capability
+        value: "13"
+    name: CapSandbox
 files:
   - decls:
       - maxPublicLen
       - Capability
       - CapProcessSpawn
+      - CapOOMScoreAdj
+      - CapSandbox
       - capabilityNames
       - Capability.String
       - Supported
+      - sandboxGOOS
       - MissingCapabilities
       - MustSupport
       - unsupportedError
@@ -49,6 +83,13 @@ functions:
   - name: Supported
     params: c Capability
     results: bool
+  - doc: |-
+      sandboxGOOS is CapSandbox's row for the architecture arch the binary is built
+      for: Linux on amd64 and arm64, whose system call tables the sandbox's seccomp
+      filter is written against, and no GOOS on any other architecture.
+    name: sandboxGOOS
+    params: arch string
+    results: "[]string"
   - name: MissingCapabilities
     params: caps ...Capability
     results: "[]Capability"
@@ -87,18 +128,25 @@ vars:
     items:
       - doc: |-
           capabilityNames maps each capability to its stable diagnostic name, indexed
-          by the Capability value so String stays a flat O(1) lookup.
+          by the Capability value so String stays a flat O(1) lookup. A value no
+          capability holds is an empty entry.
         name: capabilityNames
         value: |-
           [...]string{
           		CapProcessSpawn:     "ProcessSpawn",
           		CapRlimit:           "Rlimit",
-          		CapUmaskNiceOOM:     "UmaskNiceOOM",
+          		CapUmaskNice:        "UmaskNice",
+          		CapOOMScoreAdj:      "OOMScoreAdj",
           		CapCgroup:           "Cgroup",
           		CapReaper:           "Reaper",
           		CapSignalRelay:      "SignalRelay",
           		CapSdNotify:         "SdNotify",
           		CapSocketActivation: "SocketActivation",
+          		CapDieWithParent:    "DieWithParent",
+          		CapScheduling:       "Scheduling",
+          		CapPTY:              "PTY",
+          		CapProcessHandle:    "ProcessHandle",
+          		CapSandbox:          "Sandbox",
           	}
       - doc: |-
           unixTargets is the SDK's Unix GOOS set (the capabilities gated to Unix).
@@ -118,11 +166,17 @@ vars:
           		CapProcessSpawn:     unixAndWindows,
           		CapSignalRelay:      unixAndWindows,
           		CapReaper:           unixAndWindows,
-          		CapCgroup:           {"linux", "windows"},
+          		CapCgroup:           {"linux", "windows", "freebsd"},
           		CapRlimit:           unixTargets,
-          		CapUmaskNiceOOM:     unixTargets,
+          		CapUmaskNice:        unixTargets,
+          		CapOOMScoreAdj:      {"linux"},
           		CapSdNotify:         unixTargets,
           		CapSocketActivation: unixTargets,
+          		CapDieWithParent:    {"linux", "freebsd", "windows"},
+          		CapScheduling:       {"linux", "freebsd"},
+          		CapPTY:              {"linux", "darwin", "freebsd"},
+          		CapProcessHandle:    {"linux", "windows"},
+          		CapSandbox:          sandboxGOOS(runtime.GOARCH),
           	}
       - doc: |-
           UnsupportedPlatform is the central sentinel a missing capability surfaces. A

@@ -1,5 +1,7 @@
 package proc
 
+import "os"
+
 // NotificationValue is a parsed sd_notify(3) datagram received by a Listener: the
 // raw newline-separated state fields plus the kernel-verified sender PID. It
 // carries no policy — a supervisor decides what READY or WATCHDOG means for
@@ -17,6 +19,33 @@ type NotificationValue struct {
 	// SO_PASSCRED, not a value the sender can forge; 0 when credentials were
 	// unavailable.
 	SenderPID int
+	// SenderUID is the sending process's user, as verified by the kernel with
+	// SenderPID; it means nothing when SenderPID is 0.
+	SenderUID int
+	// SenderGID is the sending process's group, as verified by the kernel with
+	// SenderPID; it means nothing when SenderPID is 0.
+	SenderGID int
+	// Descriptors are the descriptors the datagram brought — the ones it carried,
+	// a pidfd on its sender —, which the caller owns; nil when it brought none.
+	Descriptors *DescriptorsValue
+}
+
+// DescriptorsValue are the descriptors one sd_notify datagram brought
+// (NotificationValue.Descriptors): the caller owns every one and closes those
+// it does not keep. Descriptors that came with no assignment calling for them
+// are closed by the Listener, as systemd does.
+type DescriptorsValue struct {
+	// Files are the descriptors the datagram carried (SCM_RIGHTS): with
+	// FDSTORE=1 the ones to store, with BARRIER=1 the barrier, which the caller
+	// closes once every earlier datagram is processed.
+	Files []*os.File
+	// MainPIDFD is the pidfd a MAINPIDFD=1 datagram carried: its process is the
+	// new main process, and MainPID its PID; nil when none.
+	MainPIDFD *os.File
+	// SenderPIDFD is a pidfd on the sending process (SCM_PIDFD, Linux 6.5 and
+	// later): the sender itself, beyond the reach of a PID reuse; nil where the
+	// kernel attaches none.
+	SenderPIDFD *os.File
 }
 
 // Ready reports whether the datagram carried READY=1.

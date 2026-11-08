@@ -1,0 +1,155 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: ProcRequest
+    participants:
+      - id: caller
+        kind: actor
+      - id: ProcRequest
+        kind: self
+      - id: layoutOf
+        kind: internal
+    steps:
+      - bind: l
+        eval: layoutOf(goos, goarch)
+        to: layoutOf
+      - opt:
+          do:
+            - return: nil, 0, false
+          when: l == nil || pid < 1 || pid > math.MaxInt32
+      - set: mib
+        value: "[]int32{ctlKern, l.op, kernProcPID, int32(pid)}"
+      - opt:
+          do:
+            - set: mib
+              value: append(mib, int32(l.size), oneRecord)
+          when: l.sized
+      - return: mib, l.size, true
+  - of: ProcRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: ProcRecord
+        kind: self
+      - id: layoutOf
+        kind: internal
+    steps:
+      - bind: l
+        eval: layoutOf(goos, goarch)
+        to: layoutOf
+      - opt:
+          do:
+            - return: 0, 0, 0, false
+          when: l == nil || !l.fits(buf) || readInt32(buf, l.pid) != int64(pid)
+      - set: start
+        value: int64(readField(buf, l.sec))*usecPerSec + int64(readField(buf, l.usec))
+      - return: start, int(binary.NativeEndian.Uint32(buf[l.ruid:])), int(binary.NativeEndian.Uint32(buf[l.euid:])), true
+  - of: (*procLayout).fits
+    steps:
+      - opt:
+          do:
+            - return: len(buf) >= l.end()
+          when: "!l.exact"
+      - return: len(buf) == l.size && (l.structSize == noStructSize || readInt32(buf, l.structSize) == int64(l.size))
+  - of: (*procLayout).end
+    steps:
+      - return: max(l.pid+int32Bytes, l.ruid+int32Bytes, l.euid+int32Bytes, l.sec.off+l.sec.width, l.usec.off+l.usec.width)
+  - of: readInt32
+    steps:
+      - return: int64(int32(binary.NativeEndian.Uint32(buf[off:])))
+  - of: readField
+    participants:
+      - id: caller
+        kind: actor
+      - id: readField
+        kind: self
+      - id: binary.NativeEndian.Uint64
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: binary.NativeEndian.Uint64(buf[f.off:])
+              to: binary.NativeEndian.Uint64
+          when: f.width == int64Bytes
+      - return: uint64(binary.NativeEndian.Uint32(buf[f.off:]))
+  - of: layoutOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: layoutOf
+        kind: self
+      - id: freeBSDLayout
+        kind: internal
+      - id: pick
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "\"freebsd\""
+              do:
+                - return: freeBSDLayout(goarch)
+                  to: freeBSDLayout
+            - case: "\"dragonfly\""
+              do:
+                - return: pick(goarch == "amd64", &dragonFly)
+                  to: pick
+            - case: "\"darwin\", \"ios\""
+              do:
+                - return: pick(goarch == "amd64" || goarch == "arm64", &darwin)
+                  to: pick
+            - case: "\"openbsd\""
+              do:
+                - return: "&openBSD"
+            - case: "\"netbsd\""
+              do:
+                - return: "&netBSD"
+          "on": goos
+      - return: nil
+  - of: freeBSDLayout
+    steps:
+      - switch:
+          cases:
+            - case: "\"amd64\", \"arm64\", \"riscv64\""
+              do:
+                - return: "&freeBSDLP64"
+            - case: "\"386\""
+              do:
+                - return: "&freeBSD386"
+            - case: "\"arm\""
+              do:
+                - return: "&freeBSDArm"
+          "on": goarch
+      - return: nil
+  - of: pick
+    steps:
+      - opt:
+          do:
+            - return: l
+          when: ok
+      - return: nil
+  - of: Sockcred2
+    participants:
+      - id: caller
+        kind: actor
+      - id: Sockcred2
+        kind: self
+      - id: readInt32
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, 0, 0, false
+          when: len(data) < sockcred2Fixed
+      - bind: "n"
+        eval: readInt32(data, sockcred2NGroups)
+        to: readInt32
+      - bind: sender
+        eval: readInt32(data, sockcred2Pid)
+        to: readInt32
+      - opt:
+          do:
+            - return: 0, 0, 0, false
+          when: |-
+            readInt32(data, sockcred2Version) != sockcred2KnownVersion || n < 0 || n > cmGroupMax ||
+            		len(data) < sockcred2Fixed+int(n)*int32Bytes || sender < 1
+      - return: int(sender), int(binary.NativeEndian.Uint32(data[sockcred2UID:])), int(binary.NativeEndian.Uint32(data[sockcred2GID:])), true

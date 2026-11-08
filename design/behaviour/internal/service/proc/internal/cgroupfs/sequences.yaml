@@ -1,0 +1,298 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Membership
+    participants:
+      - id: caller
+        kind: actor
+      - id: Membership
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: v1MemoryPath
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: trimmed
+              eval: strings.TrimSpace(line)
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: trimmed == ""
+            - opt:
+                do:
+                  - set: v2Path
+                    value: after
+                  - continue: true
+                init:
+                  bind: after, found
+                  eval: strings.CutPrefix(trimmed, v2LinePrefix)
+                  to: strings
+                when: found
+            - opt:
+                do:
+                  - set: v1Path
+                    value: memPath
+                init:
+                  bind: memPath, found
+                  eval: v1MemoryPath(trimmed)
+                  to: v1MemoryPath
+                when: found
+          key: line
+          range: strings.SplitSeq(content, "\n")
+      - return: v2Path, v1Path
+  - of: v1MemoryPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: v1MemoryPath
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: parts
+        eval: strings.SplitN(line, ":", cgroupLineFields)
+        to: strings
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: len(parts) != cgroupLineFields
+      - opt:
+          do:
+            - return: parts[cgroupPathField], true
+          when: slices.Contains(strings.Split(parts[controllersField], ","), v1MemoryController)
+      - return: "\"\", false"
+  - of: UnderMountRoot
+    participants:
+      - id: caller
+        kind: actor
+      - id: UnderMountRoot
+        kind: self
+      - id: path
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: exposed
+        eval: path.Clean(rootCgroupPath + mountRoot)
+        to: path
+      - opt:
+          do:
+            - return: cgroupPath, true
+          when: exposed == rootCgroupPath
+      - opt:
+          do:
+            - return: rootCgroupPath, true
+          when: cgroupPath == exposed
+      - opt:
+          do:
+            - return: rootCgroupPath + below, true
+          init:
+            bind: below, found
+            eval: strings.CutPrefix(cgroupPath, exposed+rootCgroupPath)
+            to: strings
+          when: found
+      - return: "\"\", false"
+  - of: Mounts
+    participants:
+      - id: caller
+        kind: actor
+      - id: Mounts
+        kind: self
+      - id: scanCgroupMounts
+        kind: internal
+    steps:
+      - bind: content, err
+        eval: readFile(SelfMountinfoFile)
+      - opt:
+          do:
+            - set: v2, v1
+              to: scanCgroupMounts
+              value: scanCgroupMounts(string(content))
+          when: err == nil
+      - opt:
+          do:
+            - set: v2
+              value: "[]MountValue{{Point: cgroupMountRoot, Root: rootCgroupPath}}"
+          when: len(v2) == 0
+      - opt:
+          do:
+            - set: v1
+              value: "[]MountValue{{Point: cgroupV1MemoryRoot, Root: rootCgroupPath}}"
+          when: len(v1) == 0
+      - return: v2, v1
+  - of: scanCgroupMounts
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanCgroupMounts
+        kind: self
+      - id: parseMountinfoLine
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: mount, fstype, superOptions, ok
+              eval: parseMountinfoLine(line)
+              to: parseMountinfoLine
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - opt:
+                do:
+                  - set: v2
+                    value: append(v2, mount)
+                  - continue: true
+                when: fstype == fstypeCgroupV2
+            - opt:
+                do:
+                  - set: v1
+                    value: append(v1, mount)
+                when: fstype == fstypeCgroupV1 && slices.Contains(strings.Split(superOptions, ","), v1MemoryController)
+          key: line
+          range: strings.SplitSeq(content, "\n")
+      - return: v2, v1
+  - of: parseMountinfoLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseMountinfoLine
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: prefix, suffix, found
+        eval: strings.Cut(line, mountinfoSeparator)
+        to: strings
+      - opt:
+          do:
+            - return: MountValue{}, "", "", false
+          when: "!found"
+      - bind: prefixFields
+        eval: strings.Fields(prefix)
+        to: strings
+      - bind: suffixFields
+        eval: strings.Fields(suffix)
+        to: strings
+      - opt:
+          do:
+            - return: MountValue{}, "", "", false
+          when: len(prefixFields) <= mountpointField || len(suffixFields) < suffixFieldCount
+      - set: mount
+        value: |-
+          MountValue{
+          		Point: unmangleMountinfoPath(prefixFields[mountpointField]),
+          		Root:  unmangleMountinfoPath(prefixFields[mountRootField]),
+          	}
+      - return: mount, suffixFields[fstypeField], suffixFields[superOptionsField], true
+  - of: unmangleMountinfoPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: unmangleMountinfoPath
+        kind: self
+      - id: decoded.Grow
+        kind: value
+      - id: decodeMangledByte
+        kind: internal
+      - id: decoded.WriteByte
+        kind: value
+      - id: decoded.String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: field
+          when: "!strings.ContainsRune(field, rune(mangleEscape))"
+      - var:
+          name: decoded
+          type: strings.Builder
+      - eval: decoded.Grow(len(field))
+        to: decoded.Grow
+      - loop:
+          cond: index < len(field)
+          do:
+            - bind: escape, width
+              eval: decodeMangledByte(field, index)
+              to: decodeMangledByte
+            - eval: decoded.WriteByte(escape)
+              to: decoded.WriteByte
+            - op: +=
+              set: index
+              value: width
+          init: index := 0
+      - return: decoded.String()
+        to: decoded.String
+  - of: decodeMangledByte
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeMangledByte
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: field[index], 1
+          when: field[index] != mangleEscape || index+mangleDigits >= len(field)
+      - bind: parsed, err
+        eval: strconv.ParseUint(field[index+1:index+1+mangleDigits], octalBase, escapedByteBits)
+        to: strconv
+      - opt:
+          do:
+            - return: field[index], 1
+          when: err != nil
+      - return: byte(parsed), 1 + mangleDigits
+  - of: OwnGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: OwnGroup
+        kind: self
+      - id: Membership
+        kind: internal
+      - id: Mounts
+        kind: internal
+      - id: path
+        kind: stdlib
+      - id: UnderMountRoot
+        kind: internal
+    steps:
+      - bind: content, err
+        eval: readFile(SelfCgroupFile)
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil
+      - bind: v2Path, _
+        eval: Membership(string(content))
+        to: Membership
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: v2Path == ""
+      - bind: v2Mounts, _
+        eval: Mounts(readFile)
+        to: Mounts
+      - bind: cleaned
+        eval: path.Clean(rootCgroupPath + v2Path)
+        to: path
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: path.Join(mount.Point, relative), true
+                    to: path
+                init:
+                  bind: relative, reachable
+                  eval: UnderMountRoot(mount.Root, cleaned)
+                  to: UnderMountRoot
+                when: reachable
+          key: _
+          range: v2Mounts
+          value: mount
+      - return: "\"\", false"

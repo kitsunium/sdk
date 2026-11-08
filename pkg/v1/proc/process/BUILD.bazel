@@ -14,6 +14,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/proc",
+        "//internal/kernel/errs",
         "//internal/service/proc/buildinfo",
         "//internal/service/proc/exec",
         "//internal/service/proc/self",
@@ -29,11 +30,13 @@ alias(
 go_test(
     name = "process_test",
     srcs = [
+        "attach_linux_external_test.go",
         "gen_api_test.go",
         "process_external_test.go",
         "process_other_test.go",
         "process_unix_external_test.go",
         "process_windows_test.go",
+        "reservedenv_external_test.go",
         "self_external_test.go",
     ],
     deps = [

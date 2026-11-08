@@ -626,7 +626,7 @@ Int reports the raw platform signal number underlying s.
 func (Signal) Known() bool
 ```
 
-Known reports whether s names a signal in the platform table.
+Known reports whether s names a signal in the platform table or in its realtime range (Linux and FreeBSD).
 
 <a name="Signal.OS"></a>
 ### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/signal.go>)
@@ -644,7 +644,7 @@ OS bridges s to the os.Signal expected by os/signal and Process.Signal. It is a 
 func (Signal) String() string
 ```
 
-String reports the canonical upper-case name of s (e.g. "SIGTERM"). An unrecognised signal renders as "signal \<n>" so logs stay unambiguous.
+String reports the canonical upper-case name of s (e.g. "SIGTERM"). A realtime signal renders as "SIGRTMIN" or "SIGRTMIN+n" on Linux and FreeBSD. An unrecognised signal renders as "signal \<n>" so logs stay unambiguous.
 
 <a name="Start"></a>
 ## type [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)

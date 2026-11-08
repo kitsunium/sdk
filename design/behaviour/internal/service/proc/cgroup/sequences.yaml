@@ -23,6 +23,28 @@ sequences:
     steps:
       - return: createGroup(name, opts...)
         to: createGroup
+  - of: Probe
+    participants:
+      - id: caller
+        kind: actor
+      - id: Probe
+        kind: self
+      - id: probe
+        kind: internal
+    steps:
+      - return: probe(applyOptions(opts))
+        to: probe
+  - of: Membership
+    participants:
+      - id: caller
+        kind: actor
+      - id: Membership
+        kind: self
+      - id: membership
+        kind: internal
+    steps:
+      - return: membership(dir)
+        to: membership
   - of: available
     participants:
       - id: caller
@@ -31,6 +53,8 @@ sequences:
         kind: self
       - id: os
         kind: stdlib
+      - id: delegated
+        kind: internal
     steps:
       - opt:
           do:
@@ -40,8 +64,64 @@ sequences:
             eval: os.Stat(filepath.Join(mountRoot, controllersFile))
             to: os
           when: err != nil
+      - return: delegated(mountRoot)
+        to: delegated
+  - of: probe
+    participants:
+      - id: caller
+        kind: actor
+      - id: probe
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: cgroupfs
+        kind: package
+      - id: os
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+      - id: delegated
+        kind: internal
+    steps:
+      - bind: root
+        eval: filepath.Clean(cfg.root)
+        to: filepath
+      - bind: found
+        eval: "ProbeValue{Root: root}"
+      - set: found.OwnGroup, _
+        to: cgroupfs
+        value: cgroupfs.OwnGroup(os.ReadFile)
+      - bind: listed, err
+        eval: os.ReadFile(filepath.Join(root, controllersFile))
+        to: os
+      - opt:
+          do:
+            - return: found, nil
+          when: errors.Is(err, os.ErrNotExist)
+      - opt:
+          do:
+            - return: found, cgroupUnavailable(err, "root", root)
+          when: err != nil
+      - set: found.Mounted
+        value: "true"
+      - set: found.Controllers
+        to: strings
+        value: strings.Fields(string(listed))
+      - set: found.Delegated
+        to: delegated
+        value: delegated(root)
+      - return: found, nil
+  - of: delegated
+    participants:
+      - id: caller
+        kind: actor
+      - id: delegated
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
       - bind: probe, err
-        eval: os.MkdirTemp(mountRoot, ".sdk-cgroup-probe-")
+        eval: os.MkdirTemp(root, ".sdk-cgroup-probe-")
         to: os
       - opt:
           do:
@@ -86,8 +166,14 @@ sequences:
         kind: stdlib
       - id: validateName
         kind: internal
+      - id: validateControllers
+        kind: internal
       - id: os
         kind: stdlib
+      - id: rootOffers
+        kind: internal
+      - id: inTree
+        kind: internal
     steps:
       - bind: cfg
         eval: applyOptions(opts)
@@ -105,12 +191,28 @@ sequences:
           when: verr != nil
       - opt:
           do:
+            - return: nil, verr
+          init:
+            bind: verr
+            eval: validateControllers(cfg.controllers)
+            to: validateControllers
+          when: verr != nil
+      - opt:
+          do:
             - return: nil, cgroupUnavailable(serr, "root", root)
           init:
             bind: _, serr
             eval: os.Stat(filepath.Join(root, controllersFile))
             to: os
           when: serr != nil
+      - opt:
+          do:
+            - return: nil, oerr
+          init:
+            bind: oerr
+            eval: rootOffers(root, cfg.controllers)
+            to: rootOffers
+          when: oerr != nil
       - bind: dir
         eval: filepath.Join(root, name)
         to: filepath
@@ -123,8 +225,8 @@ sequences:
             - return: nil, classifyCreate(merr, dir)
           init:
             bind: merr
-            eval: os.Mkdir(dir, controllerPerm)
-            to: os
+            eval: inTree(root, func(tree *os.Root) error { return makeTree(tree, root, name, cfg.controllers) })
+            to: inTree
           when: merr != nil
       - return: "&controlGroup{dir: dir}, nil"
   - of: validateName
@@ -140,10 +242,16 @@ sequences:
           do:
             - return: invalidName(name)
               to: invalidName
-          when: |-
-            name == "" || name == "." || name == ".." ||
-            		strings.ContainsRune(name, os.PathSeparator) ||
-            		filepath.Clean(name) != name
+          when: name == "" || filepath.IsAbs(name) || filepath.Clean(name) != name
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: invalidName(name)
+                    to: invalidName
+                when: element == "." || element == ".."
+          key: element
+          range: strings.SplitSeq(name, string(os.PathSeparator))
       - return: nil
   - of: withinRoot
     participants:
@@ -442,6 +550,520 @@ sequences:
           when: v < 0
       - return: strconv.FormatInt(v, decimalBase)
         to: strconv
+  - of: (*controlGroup).Stat
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Stat
+        kind: self
+      - id: statFrom
+        kind: internal
+    steps:
+      - return: statFrom(os.ReadFile, g.dir)
+        to: statFrom
+  - of: (*controlGroup).Members
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Members
+        kind: self
+      - id: treeMembers
+        kind: internal
+    steps:
+      - return: treeMembers(g.dir)
+        to: treeMembers
+  - of: statFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: statFrom
+        kind: self
+      - id: flatKeyed
+        kind: internal
+    steps:
+      - var:
+          name: stat
+          type: coreproc.GroupStatValue
+      - bind: cpu, err
+        eval: readFile(filepath.Join(dir, cpuStatFile))
+      - opt:
+          do:
+            - return: stat, cgroupReadFailed(err, dir)
+          when: err != nil
+      - eval: flatKeyed(string(cpu), func(key string, value int64) { cpuStat(&stat, key, value) })
+        to: flatKeyed
+      - bind: optional
+        eval:
+          closure:
+            params: name string, read func(content string)
+            steps:
+              - bind: content, rerr
+                eval: readFile(filepath.Join(dir, name))
+              - opt:
+                  do:
+                    - set: stat.Partial
+                      value: "true"
+                    - return: ""
+                  when: rerr != nil
+              - eval: read(string(content))
+      - eval: optional(memoryCurrentFile, func(c string) { stat.MemoryCurrent = single(c) })
+      - eval: optional(memoryPeakFile, func(c string) { stat.MemoryPeak = single(c) })
+      - eval: optional(pidsCurrentFile, func(c string) { stat.PidsCurrent = single(c) })
+      - eval: |-
+          optional(memoryEventsFile, func(c string) {
+          		flatKeyed(c, func(key string, value int64) { memoryEvent(&stat.MemoryEvents, key, value) })
+          	})
+      - eval: optional(ioStatFile, func(c string) { stat.IO = ioStat(c) })
+      - return: stat, nil
+  - of: cpuStat
+    steps:
+      - switch:
+          cases:
+            - case: "\"usage_usec\""
+              do:
+                - set: stat.CPUUsage
+                  value: time.Duration(value) * time.Microsecond
+            - case: "\"user_usec\""
+              do:
+                - set: stat.CPUUser
+                  value: time.Duration(value) * time.Microsecond
+            - case: "\"system_usec\""
+              do:
+                - set: stat.CPUSystem
+                  value: time.Duration(value) * time.Microsecond
+            - case: "\"nr_throttled\""
+              do:
+                - set: stat.NrThrottled
+                  value: value
+            - case: "\"throttled_usec\""
+              do:
+                - set: stat.ThrottledTime
+                  value: time.Duration(value) * time.Microsecond
+            - default: true
+          "on": key
+  - of: memoryEvent
+    steps:
+      - switch:
+          cases:
+            - case: "\"low\""
+              do:
+                - set: events.Low
+                  value: value
+            - case: "\"high\""
+              do:
+                - set: events.High
+                  value: value
+            - case: "\"max\""
+              do:
+                - set: events.Max
+                  value: value
+            - case: "\"oom\""
+              do:
+                - set: events.OOM
+                  value: value
+            - case: "\"oom_kill\""
+              do:
+                - set: events.OOMKill
+                  value: value
+            - default: true
+          "on": key
+  - of: flatKeyed
+    participants:
+      - id: caller
+        kind: actor
+      - id: flatKeyed
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: key, raw, found
+              eval: strings.Cut(strings.TrimSpace(line), " ")
+              to: strings
+            - bind: value, err
+              eval: strconv.ParseInt(strings.TrimSpace(raw), decimalBase, int64Bits)
+              to: strconv
+            - opt:
+                do:
+                  - eval: visit(key, value)
+                when: found && err == nil
+          key: line
+          range: strings.Lines(content)
+  - of: single
+    participants:
+      - id: caller
+        kind: actor
+      - id: single
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: value, err
+        eval: strconv.ParseInt(strings.TrimSpace(content), decimalBase, int64Bits)
+        to: strconv
+      - opt:
+          do:
+            - return: "0"
+          when: err != nil
+      - return: value
+  - of: ioStat
+    participants:
+      - id: caller
+        kind: actor
+      - id: ioStat
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: ioDevice
+        kind: internal
+      - id: ioKey
+        kind: internal
+    steps:
+      - var:
+          name: devices
+          type: "[]coreproc.IOStatValue"
+      - loop:
+          do:
+            - bind: fields
+              eval: strings.Fields(line)
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: len(fields) == 0
+            - bind: device, ok
+              eval: ioDevice(fields[0])
+              to: ioDevice
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - loop:
+                do:
+                  - eval: ioKey(&device, field)
+                    to: ioKey
+                key: _
+                range: fields[1:]
+                value: field
+            - set: devices
+              value: append(devices, device)
+          key: line
+          range: strings.Lines(content)
+      - return: devices
+  - of: ioDevice
+    participants:
+      - id: caller
+        kind: actor
+      - id: ioDevice
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: majorText, minorText, found
+        eval: strings.Cut(field, devSeparator)
+        to: strings
+      - bind: major, merr
+        eval: strconv.ParseUint(majorText, decimalBase, uint32Bits)
+        to: strconv
+      - bind: minor, nerr
+        eval: strconv.ParseUint(minorText, decimalBase, uint32Bits)
+        to: strconv
+      - return: "coreproc.IOStatValue{Major: uint32(major), Minor: uint32(minor)}, found && merr == nil && nerr == nil"
+  - of: ioKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: ioKey
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: key, raw, _
+        eval: strings.Cut(field, keyValueSeparator)
+        to: strings
+      - bind: value, err
+        eval: strconv.ParseUint(raw, decimalBase, int64Bits)
+        to: strconv
+      - bind: targets
+        eval: "map[string]*uint64{\"rbytes\": &device.RBytes, \"wbytes\": &device.WBytes, \"rios\": &device.RIOs, \"wios\": &device.WIOs}"
+      - opt:
+          do:
+            - set: "*target"
+              value: value
+          init:
+            bind: target, known
+            eval: targets[key]
+          when: known && err == nil
+  - of: cgroupReadFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: cgroupReadFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeCgroupReadFailed,
+          		Reason:   "CGROUP_READ_FAILED",
+          		Public:   "Could not read the control group's counters",
+          		Private:  "service/proc/cgroup: reading the group's cpu.stat, cgroup.procs or job accounting failed",
+          		ExitCode: exitIOErr,
+          	}, errs.String("dir", dir))
+        to: errs
+  - of: (*controlGroup).Signal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Signal
+        kind: self
+      - id: signalTree
+        kind: internal
+    steps:
+      - return: |-
+          signalTree(func() ([]int, error) { return treeMembers(g.dir) },
+          		func(pid int) error { return syscall.Kill(pid, syscall.Signal(sig.Int())) }, os.Getpid())
+        to: signalTree
+  - of: (*signalPass).reach
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*signalPass).reach
+        kind: self
+      - id: signalFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: pid <= 0 || pid == p.self || p.signalled[pid]
+      - set: p.signalled[pid]
+        value: "true"
+      - bind: kerr
+        eval: p.kill(pid)
+      - opt:
+          do:
+            - set: p.failure
+              to: signalFailed
+              value: signalFailed(kerr, pid)
+          when: kerr != nil && !errors.Is(kerr, syscall.ESRCH) && p.failure == nil
+      - return: "true"
+  - of: (*controlGroup).Contains
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Contains
+        kind: self
+      - id: treeMembers
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: pids, err
+        eval: treeMembers(g.dir)
+        to: treeMembers
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - return: slices.Contains(pids, pid), nil
+        to: slices
+  - of: treeMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: treeMembers
+        kind: self
+      - id: procsOf
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: pids, err
+        eval: procsOf(dir)
+        to: procsOf
+      - opt:
+          do:
+            - return: nil, cgroupReadFailed(err, dir)
+          when: err != nil
+      - bind: entries, err
+        eval: os.ReadDir(dir)
+        to: os
+      - opt:
+          do:
+            - return: pids, nil
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!entry.IsDir()"
+            - bind: below, berr
+              eval: treeMembers(filepath.Join(dir, entry.Name()))
+              to: treeMembers
+            - opt:
+                do:
+                  - continue: true
+                when: berr != nil
+            - set: pids
+              value: append(pids, below...)
+          key: _
+          range: entries
+          value: entry
+      - return: pids, nil
+  - of: procsOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: procsOf
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: content, err
+        eval: os.ReadFile(filepath.Join(dir, procsFile))
+        to: os
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: fields
+        eval: strings.Fields(string(content))
+        to: strings
+      - bind: pids
+        eval: make([]int, 0, len(fields))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: pids
+                    value: append(pids, pid)
+                init:
+                  bind: pid, perr
+                  eval: strconv.Atoi(field)
+                  to: strconv
+                when: perr == nil
+          key: _
+          range: fields
+          value: field
+      - return: pids, nil
+  - of: signalFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: signalFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeSignalFailed,
+          		Reason:   "SIGNAL_FAILED",
+          		Public:   "Could not deliver the signal",
+          		Private:  "service/proc: kill(2) failed for the target pid or process group",
+          		ExitCode: exitOSErr,
+          	}, errs.Int("pid", pid))
+        to: errs
+  - of: membership
+    participants:
+      - id: caller
+        kind: actor
+      - id: membership
+        kind: self
+      - id: membershipIn
+        kind: internal
+    steps:
+      - return: membershipIn(os.ReadFile, dir)
+        to: membershipIn
+  - of: membershipIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: membershipIn
+        kind: self
+      - id: cgroupfs
+        kind: package
+      - id: underPoint
+        kind: internal
+      - id: path
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "\"\", notAGroupDir(dir)"
+          when: "!filepath.IsAbs(dir) || filepath.Clean(dir) != dir"
+      - bind: v2, _
+        eval: cgroupfs.Mounts(readFile)
+        to: cgroupfs
+      - bind: best, below, found
+        eval: cgroupfs.MountValue{}, "", false
+      - loop:
+          do:
+            - bind: rest, holds
+              eval: underPoint(mount.Point, dir)
+              to: underPoint
+            - opt:
+                do:
+                  - continue: true
+                when: "!holds || (found && len(mount.Point) <= len(best.Point))"
+            - set: best, below, found
+              value: mount, rest, true
+          key: _
+          range: v2
+          value: mount
+      - opt:
+          do:
+            - return: "\"\", notAGroupDir(dir)"
+          when: "!found"
+      - return: path.Join("/", best.Root, below), nil
+        to: path
+  - of: underPoint
+    participants:
+      - id: caller
+        kind: actor
+      - id: underPoint
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - set: point
+        to: filepath
+        value: filepath.Clean(point)
+      - opt:
+          do:
+            - return: "\"\", true"
+          when: dir == point
+      - bind: rest, below
+        eval: strings.CutPrefix(dir, strings.TrimSuffix(point, "/")+"/")
+        to: strings
+      - return: rest, below
+  - of: notAGroupDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: notAGroupDir
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(coreproc.InvalidSpec, errs.WrapParams{}, errs.String("dir", dir))
+        to: errs
   - of: defaultConfig
     steps:
       - return: "groupConfig{root: mountRoot}"
@@ -475,3 +1097,1202 @@ sequences:
             steps:
               - set: c.root
                 value: root
+  - of: WithControllers
+    participants:
+      - id: caller
+        kind: actor
+      - id: WithControllers
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: owned
+        eval: slices.Clone(ctrls)
+        to: slices
+      - return:
+          closure:
+            params: c *groupConfig
+            steps:
+              - set: c.controllers
+                value: append(c.controllers, owned...)
+  - of: inTree
+    participants:
+      - id: caller
+        kind: actor
+      - id: inTree
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: cmp
+        kind: stdlib
+    steps:
+      - bind: tree, err
+        eval: os.OpenRoot(root)
+        to: os
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: werr
+        eval: work(tree)
+      - return: cmp.Or(werr, tree.Close())
+        to: cmp
+  - of: makeTree
+    participants:
+      - id: caller
+        kind: actor
+      - id: makeTree
+        kind: self
+      - id: enableIn
+        kind: internal
+      - id: m.descend
+        kind: internal
+      - id: m.undo
+        kind: internal
+    steps:
+      - bind: m
+        eval: "&treeMaker{tree: tree, root: root, name: name, ctrls: ctrls}"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: enableIn(tree.WriteFile, ".", root, ctrls)
+            to: enableIn
+          when: err != nil
+      - opt:
+          do:
+            - eval: m.undo()
+              to: m.undo
+            - return: err
+          init:
+            bind: err
+            eval: m.descend()
+            to: m.descend
+          when: err != nil
+      - return: nil
+  - of: (*treeMaker).descend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*treeMaker).descend
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: filepath
+        kind: stdlib
+      - id: m.step
+        kind: internal
+      - id: enableIn
+        kind: internal
+    steps:
+      - bind: elements
+        eval: strings.Split(m.name, string(os.PathSeparator))
+        to: strings
+      - set: m.made
+        value: make([]string, 0, len(elements))
+      - loop:
+          do:
+            - bind: rel
+              eval: filepath.Join(elements[:i+1]...)
+              to: filepath
+            - bind: last
+              eval: i == len(elements)-1
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: m.step(rel, last)
+                  to: m.step
+                when: err != nil
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: err
+                      init:
+                        bind: err
+                        eval: enableIn(m.tree.WriteFile, rel, filepath.Join(m.root, rel), m.ctrls)
+                        to: enableIn
+                      when: err != nil
+                when: "!last"
+          key: i
+          range: elements
+      - return: nil
+  - of: (*treeMaker).step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*treeMaker).step
+        kind: self
+      - id: m.tree.Mkdir
+        kind: value
+      - id: m.tree.Lstat
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: err
+        eval: m.tree.Mkdir(rel, controllerPerm)
+        to: m.tree.Mkdir
+      - opt:
+          do:
+            - set: m.made
+              value: append(m.made, rel)
+            - return: nil
+          when: err == nil
+      - opt:
+          do:
+            - return: err
+          when: last || !errors.Is(err, fs.ErrExist)
+      - bind: info, lerr
+        eval: m.tree.Lstat(rel)
+        to: m.tree.Lstat
+      - opt:
+          do:
+            - return: lerr
+          when: lerr != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coreproc.InvalidSpec, errs.WrapParams{},
+                			errs.String("name", m.name), errs.String("element", rel))
+              to: errs
+          when: "!info.IsDir()"
+      - return: nil
+  - of: (*treeMaker).undo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*treeMaker).undo
+        kind: self
+      - id: m.tree.Remove
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: err
+                  eval: m.tree.Remove(rel)
+                  to: m.tree.Remove
+                when: err != nil
+          key: _
+          range: slices.Backward(m.made)
+          value: rel
+  - of: enableIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: enableIn
+        kind: self
+      - id: enableLine
+        kind: internal
+      - id: controllerAbsent
+        kind: internal
+      - id: writeFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(ctrls) == 0
+      - bind: line
+        eval: enableLine(ctrls)
+        to: enableLine
+      - bind: err
+        eval: write(filepath.Join(rel, subtreeControlFile), []byte(line), controllerPerm)
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - opt:
+          do:
+            - return: controllerAbsent(err, line, dir)
+              to: controllerAbsent
+          when: errors.Is(err, fs.ErrNotExist)
+      - return: writeFailed(err, subtreeControlFile, dir)
+        to: writeFailed
+  - of: enableLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: enableLine
+        kind: self
+      - id: line.WriteByte
+        kind: value
+      - id: line.WriteString
+        kind: value
+      - id: line.String
+        kind: value
+    steps:
+      - var:
+          name: line
+          type: strings.Builder
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: line.WriteByte(' ')
+                    to: line.WriteByte
+                when: i > 0
+            - eval: line.WriteString(enablePrefix)
+              to: line.WriteString
+            - eval: line.WriteString(c.String())
+              to: line.WriteString
+          key: i
+          range: ctrls
+          value: c
+      - return: line.String()
+        to: line.String
+  - of: validateControllers
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateControllers
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: errs.Wrap(coreproc.InvalidSpec, errs.WrapParams{}, errs.String("controller", c.String()))
+                    to: errs
+                when: "!c.Known()"
+          key: _
+          range: ctrls
+          value: c
+      - return: nil
+  - of: rootOffers
+    participants:
+      - id: caller
+        kind: actor
+      - id: rootOffers
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: controllerAbsent
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(ctrls) == 0
+      - bind: listed, err
+        eval: os.ReadFile(filepath.Join(dir, controllersFile))
+        to: os
+      - opt:
+          do:
+            - return: controllerAbsent(err, enableLine(ctrls), dir)
+              to: controllerAbsent
+          when: err != nil
+      - bind: offer
+        eval: strings.TrimSpace(string(listed))
+        to: strings
+      - bind: offered
+        eval: strings.Fields(offer)
+        to: strings
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(coreproc.CgroupControllerAbsent, errs.WrapParams{},
+                      				errs.String("controller", c.String()), errs.String("dir", dir), errs.String("offered", offer))
+                    to: errs
+                when: "!slices.Contains(offered, c.String())"
+          key: _
+          range: ctrls
+          value: c
+      - return: nil
+  - of: controllerAbsent
+    participants:
+      - id: caller
+        kind: actor
+      - id: controllerAbsent
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeCgroupControllerAbsent,
+          		Reason:   "CGROUP_CONTROLLER_ABSENT",
+          		Public:   "The cgroup controller is not available here",
+          		Private:  "service/proc/cgroup: the controller is absent from cgroup.controllers or refused by cgroup.subtree_control",
+          		ExitCode: exitUnavailable,
+          	}, errs.String("controllers", controllers), errs.String("dir", dir))
+        to: errs
+  - of: writeFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeCgroupWriteFailed,
+          		Reason:   "CGROUP_WRITE_FAILED",
+          		Public:   "Could not write the cgroup controller file",
+          		Private:  "service/proc/cgroup: writing a controller file failed (controller disabled or value rejected)",
+          		ExitCode: exitOSErr,
+          	}, errs.String("file", file), errs.String("dir", dir))
+        to: errs
+  - of: (*controlGroup).Path
+    steps:
+      - return: g.dir
+  - of: (*controlGroup).EnableControllers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).EnableControllers
+        kind: self
+      - id: validateControllers
+        kind: internal
+      - id: rootOffers
+        kind: internal
+      - id: enableIn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: validateControllers(ctrls)
+            to: validateControllers
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: rootOffers(g.dir, ctrls)
+            to: rootOffers
+          when: err != nil
+      - return: enableIn(os.WriteFile, g.dir, g.dir, ctrls)
+        to: enableIn
+  - of: (*controlGroup).Delegate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Delegate
+        kind: self
+      - id: errs
+        kind: package
+      - id: delegateIn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coreproc.InvalidSpec, errs.WrapParams{}, errs.Int("uid", uid), errs.Int("gid", gid))
+              to: errs
+          when: uid < -1 || gid < -1
+      - return: delegateIn(g.dir, delegationFiles(os.ReadFile), uid, gid, os.Lchown)
+        to: delegateIn
+  - of: delegationFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: delegationFiles
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: listed, err
+        eval: readFile(delegateList)
+      - opt:
+          do:
+            - return: slices.Clone(documentedDelegation)
+              to: slices
+          when: err != nil
+      - bind: files
+        eval: make([]string, 0, len(documentedDelegation))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: files
+                    value: append(files, name)
+                when: name != "." && name != ".." && filepath.Base(name) == name
+          key: name
+          range: strings.FieldsSeq(string(listed))
+      - opt:
+          do:
+            - return: slices.Clone(documentedDelegation)
+              to: slices
+          when: len(files) == 0
+      - return: files
+  - of: delegateIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: delegateIn
+        kind: self
+      - id: writeFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: writeFailed(err, ".", dir)
+              to: writeFailed
+          init:
+            bind: err
+            eval: chown(dir, uid, gid)
+          when: err != nil
+      - loop:
+          do:
+            - bind: err
+              eval: chown(filepath.Join(dir, name), uid, gid)
+            - opt:
+                do:
+                  - continue: true
+                when: err == nil || errors.Is(err, fs.ErrNotExist)
+            - return: writeFailed(err, name, dir)
+              to: writeFailed
+          key: _
+          range: files
+          value: name
+      - return: nil
+  - of: (*controlGroup).DeleteTree
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).DeleteTree
+        kind: self
+      - id: deleteSubtree
+        kind: internal
+    steps:
+      - return: deleteSubtree(g.dir, true)
+        to: deleteSubtree
+  - of: (*controlGroup).DeleteBeneath
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).DeleteBeneath
+        kind: self
+      - id: deleteSubtree
+        kind: internal
+    steps:
+      - return: deleteSubtree(g.dir, false)
+        to: deleteSubtree
+  - of: deleteSubtree
+    participants:
+      - id: caller
+        kind: actor
+      - id: deleteSubtree
+        kind: self
+      - id: subtreeOf
+        kind: internal
+      - id: deleteFailed
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: groups, err
+        eval: subtreeOf(dir)
+        to: subtreeOf
+      - opt:
+          do:
+            - return: deleteFailed(err, dir)
+              to: deleteFailed
+          when: err != nil
+      - opt:
+          do:
+            - set: groups
+              value: groups[1:]
+          when: "!withRoot"
+      - loop:
+          do:
+            - bind: rerr
+              eval: os.Remove(group)
+              to: os
+            - opt:
+                do:
+                  - continue: true
+                when: rerr == nil || (group != dir && errors.Is(rerr, fs.ErrNotExist))
+            - return: deleteFailed(rerr, group)
+              to: deleteFailed
+          key: _
+          range: slices.Backward(groups)
+          value: group
+      - return: nil
+  - of: subtreeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: subtreeOf
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - var:
+          name: groups
+          type: "[]string"
+      - bind: pending
+        eval: "[]string{dir}"
+      - loop:
+          cond: len(pending) > 0
+          do:
+            - bind: current
+              eval: pending[0]
+            - set: pending
+              value: pending[1:]
+            - bind: entries, err
+              eval: os.ReadDir(current)
+              to: os
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil && current != dir && errors.Is(err, fs.ErrNotExist)
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: groups
+              value: append(groups, current)
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: pending
+                          value: append(pending, filepath.Join(current, entry.Name()))
+                      when: entry.IsDir()
+                key: _
+                range: entries
+                value: entry
+      - return: groups, nil
+  - of: deleteFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: deleteFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeCgroupDeleteFailed,
+          		Reason:   "CGROUP_DELETE_FAILED",
+          		Public:   "Could not delete the control group",
+          		Private:  "service/proc/cgroup.Delete: rmdir of the control group failed (still populated?)",
+          		ExitCode: exitOSErr,
+          	}, errs.String("dir", dir))
+        to: errs
+  - of: (*controlGroup).SetMemoryMin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetMemoryMin
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController(memoryMinFile, maxOrValue(bytes))
+        to: g.writeController
+  - of: (*controlGroup).SetMemoryLow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetMemoryLow
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController(memoryLowFile, maxOrValue(bytes))
+        to: g.writeController
+  - of: (*controlGroup).SetMemoryHigh
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetMemoryHigh
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController(memoryHighFile, maxOrValue(bytes))
+        to: g.writeController
+  - of: (*controlGroup).SetMemorySwapMax
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetMemorySwapMax
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController(memorySwapMaxFile, maxOrValue(bytes))
+        to: g.writeController
+  - of: (*controlGroup).SetMemoryZswapMax
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetMemoryZswapMax
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController(memoryZswapMaxFile, maxOrValue(bytes))
+        to: g.writeController
+  - of: (*controlGroup).SetMemoryZswapWriteback
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetMemoryZswapWriteback
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController(memoryZswapWritebackFile, flagOf(enabled))
+        to: g.writeController
+  - of: (*controlGroup).SetMemoryOOMGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetMemoryOOMGroup
+        kind: self
+      - id: g.writeController
+        kind: internal
+    steps:
+      - return: g.writeController(memoryOOMGroupFile, flagOf(enabled))
+        to: g.writeController
+  - of: (*controlGroup).SetCPUWeight
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetCPUWeight
+        kind: self
+      - id: invalidValue
+        kind: internal
+      - id: g.writeController
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: invalidValue(cpuWeightFile, strconv.FormatInt(weight, decimalBase))
+              to: invalidValue
+          when: weight < weightMin || weight > weightMax
+      - return: g.writeController(cpuWeightFile, strconv.FormatInt(weight, decimalBase))
+        to: g.writeController
+  - of: (*controlGroup).SetCPUMaxBurst
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetCPUMaxBurst
+        kind: self
+      - id: invalidValue
+        kind: internal
+      - id: g.writeController
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: invalidValue(cpuMaxBurstFile, burst.String())
+              to: invalidValue
+          when: burst < 0
+      - return: g.writeController(cpuMaxBurstFile, strconv.FormatInt(burst.Microseconds(), decimalBase))
+        to: g.writeController
+  - of: (*controlGroup).SetCPUSetCPUs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetCPUSetCPUs
+        kind: self
+      - id: g.writeList
+        kind: internal
+    steps:
+      - return: g.writeList(cpusetCPUsFile, cpus)
+        to: g.writeList
+  - of: (*controlGroup).SetCPUSetMems
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetCPUSetMems
+        kind: self
+      - id: g.writeList
+        kind: internal
+    steps:
+      - return: g.writeList(cpusetMemsFile, nodes)
+        to: g.writeList
+  - of: (*controlGroup).SetIOWeight
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetIOWeight
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: invalidValue
+        kind: internal
+      - id: g.writeController
+        kind: internal
+    steps:
+      - bind: value
+        eval: strconv.FormatInt(weight, decimalBase)
+        to: strconv
+      - opt:
+          do:
+            - return: invalidValue(ioWeightFile, value)
+              to: invalidValue
+          when: weight < weightMin || weight > weightMax
+      - return: g.writeController(ioWeightFile, ioWeightDefault+value)
+        to: g.writeController
+  - of: (*controlGroup).SetIOLatency
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).SetIOLatency
+        kind: self
+      - id: invalidValue
+        kind: internal
+      - id: strconv
+        kind: stdlib
+      - id: g.writeController
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: invalidValue(ioLatencyFile, target.String())
+              to: invalidValue
+          when: target < 0
+      - bind: value
+        eval: unlimited
+      - opt:
+          do:
+            - set: value
+              to: strconv
+              value: strconv.FormatInt(int64((target+time.Microsecond-1)/time.Microsecond), decimalBase)
+          when: target > 0
+      - bind: device
+        eval: strconv.FormatUint(uint64(major), decimalBase) + devSeparator + strconv.FormatUint(uint64(minor), decimalBase)
+      - return: g.writeController(ioLatencyFile, device+ioLatencyTarget+value)
+        to: g.writeController
+  - of: (*controlGroup).writeList
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).writeList
+        kind: self
+      - id: listOf
+        kind: internal
+      - id: invalidValue
+        kind: internal
+      - id: g.writeController
+        kind: internal
+    steps:
+      - bind: list, ok
+        eval: listOf(values)
+        to: listOf
+      - opt:
+          do:
+            - return: invalidValue(file, list)
+              to: invalidValue
+          when: "!ok"
+      - return: g.writeController(file, list)
+        to: g.writeController
+  - of: listOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: listOf
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: intsText
+        kind: internal
+      - id: list.WriteString
+        kind: value
+      - id: list.String
+        kind: value
+    steps:
+      - bind: sorted
+        eval: slices.Clone(values)
+        to: slices
+      - eval: slices.Sort(sorted)
+        to: slices
+      - set: sorted
+        to: slices
+        value: slices.Compact(sorted)
+      - opt:
+          do:
+            - return: intsText(values), false
+              to: intsText
+          when: len(sorted) > 0 && sorted[0] < 0
+      - var:
+          name: list
+          type: strings.Builder
+      - loop:
+          cond: start < len(sorted)
+          do:
+            - bind: end
+              eval: start
+            - loop:
+                cond: end+1 < len(sorted) && sorted[end+1] == sorted[end]+1
+                do:
+                  - op: ++
+                    set: end
+            - opt:
+                do:
+                  - eval: list.WriteString(listSeparator)
+                    to: list.WriteString
+                when: list.Len() > 0
+            - eval: list.WriteString(strconv.Itoa(sorted[start]))
+              to: list.WriteString
+            - opt:
+                do:
+                  - eval: list.WriteString(rangeSeparator)
+                    to: list.WriteString
+                  - eval: list.WriteString(strconv.Itoa(sorted[end]))
+                    to: list.WriteString
+                when: end > start
+            - set: start
+              value: end + 1
+          init: start := 0
+      - return: list.String(), true
+        to: list.String
+  - of: intsText
+    participants:
+      - id: caller
+        kind: actor
+      - id: intsText
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: texts
+        eval: make([]string, len(values))
+      - loop:
+          do:
+            - set: texts[i]
+              to: strconv
+              value: strconv.Itoa(v)
+          key: i
+          range: values
+          value: v
+      - return: strings.Join(texts, listSeparator)
+        to: strings
+  - of: flagOf
+    steps:
+      - opt:
+          do:
+            - return: flagOn
+          when: enabled
+      - return: flagOff
+  - of: invalidValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: invalidValue
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(coreproc.InvalidSpec, errs.WrapParams{}, errs.String("file", file), errs.String("value", value))
+        to: errs
+  - of: (*controlGroup).Watch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*controlGroup).Watch
+        kind: self
+      - id: watchDir
+        kind: internal
+    steps:
+      - return: watchDir(ctx, g.dir)
+        to: watchDir
+  - of: watchDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: watchDir
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: w.close
+        kind: internal
+      - id: w.state
+        kind: internal
+      - id: w.run
+        kind: internal
+    steps:
+      - bind: fd, err
+        eval: syscall.InotifyInit1(syscall.IN_CLOEXEC | syscall.IN_NONBLOCK)
+        to: syscall
+      - opt:
+          do:
+            - return: nil, cgroupReadFailed(os.NewSyscallError("inotify_init1", err), dir)
+          when: err != nil
+      - bind: w
+        eval: "&watch{notes: os.NewFile(uintptr(fd), \"inotify\"), dir: dir, name: []byte(filepath.Base(dir)), events: noWatch, memory: noWatch, parent: noWatch}"
+      - bind: events, err
+        eval: syscall.InotifyAddWatch(fd, filepath.Join(dir, eventsFile), syscall.IN_MODIFY)
+        to: syscall
+      - opt:
+          do:
+            - eval: w.close()
+              to: w.close
+            - return: nil, cgroupReadFailed(os.NewSyscallError("inotify_add_watch", err), dir)
+          when: err != nil
+      - set: w.events
+        value: int32(events)
+      - opt:
+          do:
+            - set: w.memory
+              value: int32(memory)
+          init:
+            bind: memory, merr
+            eval: syscall.InotifyAddWatch(fd, filepath.Join(dir, memoryEventsFile), syscall.IN_MODIFY)
+            to: syscall
+          when: merr == nil
+      - opt:
+          do:
+            - set: w.parent
+              value: int32(parent)
+          init:
+            bind: parent, perr
+            eval: syscall.InotifyAddWatch(fd, filepath.Dir(dir), goneMask|syscall.IN_ONLYDIR)
+            to: syscall
+          when: perr == nil
+      - bind: first, err
+        eval: w.state()
+        to: w.state
+      - opt:
+          do:
+            - eval: w.close()
+              to: w.close
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: make(chan coreproc.GroupEventsValue, 1)
+      - send:
+          chan: out
+          value: first
+      - go: w.run(ctx, out, first)
+        to: w.run
+      - return: out, nil
+  - of: (*watch).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*watch).run
+        kind: self
+      - id: w.close
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: w.notes.Read
+        kind: value
+      - id: w.scan
+        kind: internal
+      - id: w.state
+        kind: internal
+      - id: publish
+        kind: internal
+    steps:
+      - defer: close(out)
+      - defer: w.close()
+        to: w.close
+      - bind: stop
+        eval: context.AfterFunc(ctx, func() { w.expire() })
+        to: context
+      - defer: stop()
+      - bind: buf
+        eval: make([]byte, eventsBuffer)
+      - loop:
+          do:
+            - bind: n, err
+              eval: w.notes.Read(buf)
+              to: w.notes.Read
+            - opt:
+                do:
+                  - return: ""
+                when: err != nil || ctx.Err() != nil
+            - bind: removed, announced
+              eval: w.scan(buf[:n])
+              to: w.scan
+            - bind: state, serr
+              eval: w.state()
+              to: w.state
+            - opt:
+                do:
+                  - eval: publish(out, coreproc.GroupEventsValue{})
+                    to: publish
+                  - return: ""
+                when: removed || serr != nil
+            - opt:
+                do:
+                  - eval: publish(out, state)
+                    to: publish
+                  - set: last
+                    value: state
+                when: state != last || announced
+          forever: true
+  - of: (*watch).expire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*watch).expire
+        kind: self
+      - id: w.notes.SetReadDeadline
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: err
+            eval: w.notes.SetReadDeadline(time.Unix(1, 0))
+            to: w.notes.SetReadDeadline
+          when: err != nil
+  - of: (*watch).close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*watch).close
+        kind: self
+      - id: w.notes.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: err
+            eval: w.notes.Close()
+            to: w.notes.Close
+          when: err != nil
+  - of: (*watch).scan
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*watch).scan
+        kind: self
+      - id: binary.NativeEndian.Uint32
+        kind: value
+    steps:
+      - loop:
+          cond: off+syscall.SizeofInotifyEvent <= len(records)
+          do:
+            - bind: wd
+              eval: int32(binary.NativeEndian.Uint32(records[off+recordWd:]))
+            - bind: mask
+              eval: binary.NativeEndian.Uint32(records[off+recordMask:])
+              to: binary.NativeEndian.Uint32
+            - bind: start
+              eval: off + syscall.SizeofInotifyEvent
+            - set: "off"
+              value: min(start+int(binary.NativeEndian.Uint32(records[off+recordLen:])), len(records))
+            - set: removed
+              value: w.gone(wd, mask, records[start:off]) || removed
+            - set: announced
+              value: announced || w.modified(wd, mask)
+          init: off := 0
+      - return: removed, announced
+  - of: (*watch).modified
+    steps:
+      - return: mask&syscall.IN_MODIFY != 0 && wd != noWatch && (wd == w.events || wd == w.memory)
+  - of: (*watch).gone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*watch).gone
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: bytes.Equal(bytes.TrimRight(name, "\x00"), w.name)
+              to: bytes
+          when: wd == w.parent && mask&goneMask != 0
+      - opt:
+          do:
+            - return: "false"
+          when: mask&syscall.IN_IGNORED == 0
+      - opt:
+          do:
+            - set: w.memory
+              value: noWatch
+          when: wd == w.memory
+      - return: wd == w.events
+  - of: (*watch).state
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*watch).state
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: flatKeyed
+        kind: internal
+    steps:
+      - var:
+          name: state
+          type: coreproc.GroupEventsValue
+      - bind: content, err
+        eval: os.ReadFile(filepath.Join(w.dir, eventsFile))
+        to: os
+      - opt:
+          do:
+            - return: state, cgroupReadFailed(err, w.dir)
+          when: err != nil
+      - eval: flatKeyed(string(content), func(key string, value int64) { eventKey(&state, key, value) })
+        to: flatKeyed
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: flatKeyed(string(memory), func(key string, value int64) { memoryEvent(&state.MemoryEvents, key, value) })
+                    to: flatKeyed
+                init:
+                  bind: memory, merr
+                  eval: os.ReadFile(filepath.Join(w.dir, memoryEventsFile))
+                  to: os
+                when: merr == nil
+          when: w.memory != noWatch
+      - return: state, nil
+  - of: eventKey
+    steps:
+      - switch:
+          cases:
+            - case: "\"populated\""
+              do:
+                - set: state.Populated
+                  value: value != 0
+            - case: "\"frozen\""
+              do:
+                - set: state.Frozen
+                  value: value != 0
+            - default: true
+          "on": strings.TrimSpace(key)
+  - of: publish
+    steps:
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: out <- v
+                    do:
+                      - return: ""
+                  - comm: _, open := <-out
+                    do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!open"
+          forever: true

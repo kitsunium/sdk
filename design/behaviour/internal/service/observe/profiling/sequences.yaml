@@ -82,14 +82,34 @@ sequences:
         kind: actor
       - id: captureCPU
         kind: self
+      - id: captureCPURaw
+        kind: internal
+      - id: Parse
+        kind: internal
+    steps:
+      - bind: raw, err
+        eval: captureCPURaw(ctx, clk, window)
+        to: captureCPURaw
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: Parse(raw)
+        to: Parse
+  - of: captureCPURaw
+    participants:
+      - id: caller
+        kind: actor
+      - id: captureCPURaw
+        kind: self
       - id: pprof
         kind: stdlib
       - id: clk.NewTimer
         kind: value
       - id: timer.Stop
         kind: value
-      - id: Parse
-        kind: internal
+      - id: buf.Bytes
+        kind: value
     steps:
       - opt:
           do:
@@ -121,8 +141,8 @@ sequences:
                 - return: nil, errors.Join(coreprofiling.CaptureCanceled, ctx.Err())
       - eval: pprof.StopCPUProfile()
         to: pprof
-      - return: Parse(buf.Bytes())
-        to: Parse
+      - return: buf.Bytes(), nil
+        to: buf.Bytes
   - of: CaptureHeap
     participants:
       - id: caller
@@ -926,6 +946,245 @@ sequences:
       - return: |-
           strings.HasPrefix(fn, "runtime.") || strings.HasPrefix(fn, "runtime/") ||
           		strings.HasPrefix(fn, "internal/") || strings.Contains(fn, ".runtime_")
+  - of: NewHandler
+    steps:
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: "&profileHandler{clk: clk}"
+  - of: (*profileHandler).ServeHTTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*profileHandler).ServeHTTP
+        kind: self
+      - id: w.Header().Set
+        kind: value
+      - id: path
+        kind: stdlib
+      - id: serveIndex
+        kind: internal
+      - id: h.serveWindow
+        kind: internal
+      - id: serveLookup
+        kind: internal
+      - id: http
+        kind: stdlib
+    steps:
+      - eval: w.Header().Set(headerNoSniff, noSniff)
+        to: w.Header().Set
+      - eval: w.Header().Set(headerCacheControl, noStore)
+        to: w.Header().Set
+      - bind: name
+        eval: path.Base(r.URL.Path)
+        to: path
+      - switch:
+          cases:
+            - case: strings.HasSuffix(r.URL.Path, "/")
+              do:
+                - eval: serveIndex(w)
+                  to: serveIndex
+            - case: name == endpointProfile
+              do:
+                - eval: h.serveWindow(w, r, name, defaultProfileSeconds, captureCPURaw)
+                  to: h.serveWindow
+            - case: name == endpointTrace
+              do:
+                - eval: h.serveWindow(w, r, name, defaultTraceSeconds, captureTrace)
+                  to: h.serveWindow
+            - case: slices.Contains(lookupProfiles[:], name)
+              do:
+                - eval: serveLookup(w, r, name)
+                  to: serveLookup
+            - default: true
+              do:
+                - eval: http.NotFound(w, r)
+                  to: http
+  - of: serveIndex
+    participants:
+      - id: caller
+        kind: actor
+      - id: serveIndex
+        kind: self
+      - id: w.Header().Set
+        kind: value
+      - id: index.WriteString
+        kind: value
+      - id: index.WriteByte
+        kind: value
+      - id: w.Write
+        kind: value
+    steps:
+      - eval: w.Header().Set(headerContentType, contentText)
+        to: w.Header().Set
+      - var:
+          name: index
+          type: strings.Builder
+      - loop:
+          do:
+            - eval: index.WriteString(name)
+              to: index.WriteString
+            - eval: index.WriteByte('\n')
+              to: index.WriteByte
+          key: _
+          range: append([]string{endpointProfile, endpointTrace}, lookupProfiles[:]...)
+          value: name
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, err
+            eval: w.Write([]byte(index.String()))
+            to: w.Write
+          when: err != nil
+  - of: (*profileHandler).serveWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*profileHandler).serveWindow
+        kind: self
+      - id: intParam
+        kind: internal
+      - id: refuse
+        kind: internal
+      - id: attach
+        kind: internal
+      - id: w.Write
+        kind: value
+    steps:
+      - bind: seconds, err
+        eval: intParam(r, secondsParam, defaultSeconds)
+        to: intParam
+      - opt:
+          do:
+            - eval: refuse(w, errs.Wrap(coreprofiling.WindowInvalid, errs.WrapParams{}, errs.String(secondsParam, r.URL.Query().Get(secondsParam))))
+              to: refuse
+            - return: ""
+          when: err != nil
+      - bind: data, err
+        eval: capture(r.Context(), h.clk, time.Duration(seconds)*time.Second)
+      - opt:
+          do:
+            - eval: refuse(w, err)
+              to: refuse
+            - return: ""
+          when: err != nil
+      - eval: attach(w, name)
+        to: attach
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, werr
+            eval: w.Write(data)
+            to: w.Write
+          when: werr != nil
+  - of: serveLookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: serveLookup
+        kind: self
+      - id: intParam
+        kind: internal
+      - id: attach
+        kind: internal
+      - id: w.Header().Set
+        kind: value
+      - id: pprof.Lookup(name).WriteTo
+        kind: value
+      - id: refuse
+        kind: internal
+    steps:
+      - bind: debug, err
+        eval: intParam(r, debugParam, 0)
+        to: intParam
+      - bind: ceiling
+        eval: maxLookupDebug
+      - opt:
+          do:
+            - set: ceiling
+              value: maxGoroutineDebug
+          when: name == endpointGoroutine
+      - opt:
+          do:
+            - set: debug
+              value: "0"
+          when: err != nil || debug < 0
+      - set: debug
+        value: min(debug, ceiling)
+      - alt:
+          - do:
+              - eval: attach(w, name)
+                to: attach
+            when: debug == 0
+          - do:
+              - eval: w.Header().Set(headerContentType, contentText)
+                to: w.Header().Set
+            else: true
+      - opt:
+          do:
+            - eval: |-
+                refuse(w, errs.Wrap(werr, errs.WrapParams{
+                			Code:    coreprofiling.CodeCaptureFailed,
+                			Reason:  "CAPTURE_FAILED",
+                			Public:  coreprofiling.CaptureFailed.Public(),
+                			Private: coreprofiling.CaptureFailed.Private(),
+                		}, errs.String("profile", name)))
+              to: refuse
+          init:
+            bind: werr
+            eval: pprof.Lookup(name).WriteTo(w, debug)
+            to: pprof.Lookup(name).WriteTo
+          when: werr != nil
+  - of: attach
+    participants:
+      - id: caller
+        kind: actor
+      - id: attach
+        kind: self
+      - id: w.Header().Set
+        kind: value
+    steps:
+      - eval: w.Header().Set(headerContentType, contentBinary)
+        to: w.Header().Set
+      - eval: w.Header().Set(headerDisposition, `attachment; filename="`+name+`"`)
+        to: w.Header().Set
+  - of: refuse
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuse
+        kind: self
+      - id: http
+        kind: stdlib
+    steps:
+      - eval: http.Error(w, errs.PublicOf(err), errs.HTTPStatusOf(err))
+        to: http
+  - of: intParam
+    participants:
+      - id: caller
+        kind: actor
+      - id: intParam
+        kind: self
+      - id: r.URL.Query().Get
+        kind: value
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: raw
+        eval: r.URL.Query().Get(name)
+        to: r.URL.Query().Get
+      - opt:
+          do:
+            - return: def, nil
+          when: raw == ""
+      - return: strconv.Atoi(raw)
+        to: strconv
   - of: parseTracebackLabels
     participants:
       - id: caller
@@ -2174,6 +2433,129 @@ sequences:
           key: i
           range: d.samples
       - return: p, nil
+  - of: CaptureTrace
+    participants:
+      - id: caller
+        kind: actor
+      - id: CaptureTrace
+        kind: self
+      - id: captureTrace
+        kind: internal
+    steps:
+      - return: captureTrace(ctx, clock.System, window)
+        to: captureTrace
+  - of: captureTrace
+    participants:
+      - id: caller
+        kind: actor
+      - id: captureTrace
+        kind: self
+      - id: trace
+        kind: stdlib
+      - id: clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: buf.Bytes
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(coreprofiling.WindowInvalid, errs.WrapParams{}, errs.String("window", window.String()))
+          when: window <= 0 || window > MaxTraceWindow
+      - var:
+          name: buf
+          type: bytes.Buffer
+      - opt:
+          do:
+            - return: nil, errors.Join(coreprofiling.TraceBusy, err)
+          init:
+            bind: err
+            eval: trace.Start(&buf)
+            to: trace
+          when: err != nil
+      - bind: timer
+        eval: clk.NewTimer(window)
+        to: clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-timer.C()
+            - comm: <-ctx.Done()
+              do:
+                - eval: trace.Stop()
+                  to: trace
+                - return: nil, errors.Join(coreprofiling.CaptureCanceled, ctx.Err())
+      - eval: trace.Stop()
+        to: trace
+      - return: buf.Bytes(), nil
+        to: buf.Bytes
+  - of: StartFlightRecorder
+    participants:
+      - id: caller
+        kind: actor
+      - id: StartFlightRecorder
+        kind: self
+      - id: trace
+        kind: stdlib
+      - id: recorder.Start
+        kind: value
+    steps:
+      - bind: recorder
+        eval: "trace.NewFlightRecorder(trace.FlightRecorderConfig{MinAge: max(cfg.MinAge, 0), MaxBytes: cfg.MaxBytes})"
+        to: trace
+      - opt:
+          do:
+            - return: nil, errors.Join(coreprofiling.TraceBusy, err)
+          init:
+            bind: err
+            eval: recorder.Start()
+            to: recorder.Start
+          when: err != nil
+      - return: "&flightRecorder{recorder: recorder}, nil"
+  - of: (*flightRecorder).Snapshot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*flightRecorder).Snapshot
+        kind: self
+      - id: r.writing.Unlock
+        kind: value
+      - id: r.recorder.WriteTo
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, coreprofiling.TraceBusy
+          when: "!r.writing.TryLock()"
+      - defer: r.writing.Unlock()
+        to: r.writing.Unlock
+      - bind: n, err
+        eval: r.recorder.WriteTo(w)
+        to: r.recorder.WriteTo
+      - opt:
+          do:
+            - return: |-
+                n, errs.Wrap(err, errs.WrapParams{
+                			Code:    coreprofiling.CodeCaptureFailed,
+                			Reason:  "CAPTURE_FAILED",
+                			Public:  coreprofiling.CaptureFailed.Public(),
+                			Private: coreprofiling.CaptureFailed.Private(),
+                		}, errs.String("profile", "trace"))
+          when: err != nil
+      - return: n, nil
+  - of: (*flightRecorder).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*flightRecorder).Stop
+        kind: self
+      - id: r.recorder.Stop
+        kind: value
+    steps:
+      - eval: r.recorder.Stop()
+        to: r.recorder.Stop
   - of: (*wire).more
     steps:
       - return: len(w.buf) > 0

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"time"
 
@@ -53,9 +52,6 @@ type runtimeState struct {
 	dbs []*databaseRun
 }
 
-// signalCause is the cause of the run's context when a signal ended it.
-type signalCause struct{ sig signal.Signal }
-
 // newRun forgets what belonged to the previous run: its counters, its
 // scheduler, its configuration and boot. The history stays. The caller holds
 // a.mu.
@@ -105,13 +101,10 @@ func mustSignal(name string) signal.Signal {
 	return s
 }
 
-// Error says which signal ended the run.
-func (c signalCause) Error() string { return c.sig.String() + " received" }
-
 // stopReason says why a run's context ended: the signal, or the caller.
 func stopReason(ctx context.Context) string {
-	if sc, ok := errors.AsType[signalCause](context.Cause(ctx)); ok {
-		return sc.sig.String()
+	if sig, ok := signal.CauseSignal(ctx); ok {
+		return sig.String()
 	}
 	return "the context ended"
 }

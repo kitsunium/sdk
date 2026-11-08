@@ -2324,27 +2324,23 @@ sequences:
         kind: internal
       - id: logger
         kind: package
-      - id: a.stop
+      - id: a.stopWithin
         kind: internal
     steps:
-      - bind: signals, unsubscribe
-        eval: signal.Notify(stopSignals...)
+      - bind: ctx, unsubscribe
+        eval: signal.NotifyContext(ctx, stopSignals...)
         to: signal
       - defer: unsubscribe()
-      - bind: ctx, cancel
-        eval: context.WithCancelCause(ctx)
+      - bind: hurried, hurry
+        eval: context.WithCancel(context.WithoutCancel(ctx))
         to: context
-      - defer: cancel(nil)
-      - go: |-
-          func() {
-          		select {
-          		case s, ok := <-signals:
-          			if ok {
-          				cancel(signalCause{sig: s})
-          			}
-          		case <-ctx.Done():
-          		}
-          	}()
+      - defer: hurry()
+      - bind: endEscalation
+        eval: |-
+          signal.Escalate(hurried, a.clock,
+          		signal.Escalation{OnRepeat: func(signal.Signal) { hurry() }}, stopSignals...)
+        to: signal
+      - defer: endEscalation()
       - opt:
           do:
             - return: err
@@ -2370,11 +2366,36 @@ sequences:
       - eval: logger.Info(context.WithoutCancel(ctx), a.log, "draining", logger.String("reason", reason))
         to: logger
       - bind: stopCtx, stopCancel
-        eval: context.WithTimeout(context.WithoutCancel(ctx), a.stopDeadline(runStopDeadline))
+        eval: context.WithTimeout(hurried, a.stopDeadline(runStopDeadline))
         to: context
       - defer: stopCancel()
-      - return: a.stop(stopCtx, reason)
-        to: a.stop
+      - return: a.stopWithin(stopCtx, hurried.Done(), reason)
+        to: a.stopWithin
+  - of: (*App).stopWithin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).stopWithin
+        kind: self
+      - id: logger
+        kind: package
+      - id: errs
+        kind: package
+    steps:
+      - bind: done
+        eval: make(chan error, 1)
+      - go: func() { done <- a.stop(ctx, reason) }()
+      - select:
+          cases:
+            - comm: err := <-done
+              do:
+                - return: err
+            - comm: <-hurried
+              do:
+                - eval: "logger.Warn(context.WithoutCancel(ctx), a.log, \"a second stop signal: the drain is abandoned\", logger.String(\"reason\", reason))"
+                  to: logger
+                - return: errs.Wrap(lifecycle.StopTimeout, errs.WrapParams{}, errs.String("grace", "0"), errs.String("cause", "a second stop signal"))
+                  to: errs
   - of: (*App).setPhase
     participants:
       - id: caller
@@ -8665,25 +8686,25 @@ sequences:
             - panic: "\"app: \" + name + \" is not a signal: \" + err.Error()"
           when: err != nil
       - return: s
-  - of: signalCause.Error
-    steps:
-      - return: c.sig.String() + " received"
   - of: stopReason
     participants:
       - id: caller
         kind: actor
       - id: stopReason
         kind: self
-      - id: sc.sig.String
+      - id: signal
+        kind: package
+      - id: sig.String
         kind: value
     steps:
       - opt:
           do:
-            - return: sc.sig.String()
-              to: sc.sig.String
+            - return: sig.String()
+              to: sig.String
           init:
-            bind: sc, ok
-            eval: errors.AsType[signalCause](context.Cause(ctx))
+            bind: sig, ok
+            eval: signal.CauseSignal(ctx)
+            to: signal
           when: ok
       - return: "\"the context ended\""
   - of: (*App).describeRuntime

@@ -38,15 +38,40 @@ Parse, String, and Notify are portable. Relay has a native backend on Unix (kill
 
 ## Index
 
+- [func CauseSignal\(ctx context.Context\) \(sig Signal, ok bool\)](<#CauseSignal>)
+- [func Escalate\(ctx context.Context, clk clock.Waiter, policy Escalation, sigs ...Signal\) \(stop func\(\)\)](<#Escalate>)
 - [func Notify\(sigs ...Signal\) \(ch \<-chan Signal, stop func\(\)\)](<#Notify>)
+- [func NotifyContext\(parent context.Context, sigs ...Signal\) \(ctx context.Context, stop func\(\)\)](<#NotifyContext>)
 - [func Parse\(name string\) \(sig Signal, err error\)](<#Parse>)
 - [func Relay\(src \<-chan Signal, target Target\) error](<#Relay>)
+- [func SendValue\(target Target, sig Signal, value int\) error](<#SendValue>)
+- [type Cause](<#Cause>)
+  - [func \(Cause\) Error\(\) string](<#Cause.Error>)
+- [type Escalation](<#Escalation>)
 - [type Signal](<#Signal>)
   - [func \(Signal\) Int\(\) int](<#Signal.Int>)
   - [func \(Signal\) Known\(\) bool](<#Signal.Known>)
   - [func \(Signal\) OS\(\) os.Signal](<#Signal.OS>)
   - [func \(Signal\) String\(\) string](<#Signal.String>)
 - [type Target](<#Target>)
+
+<a name="CauseSignal"></a>
+## func [CauseSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)
+
+```go
+func CauseSignal(ctx context.Context) (sig Signal, ok bool)
+```
+
+CauseSignal reports the signal a NotifyContext context was cancelled by.
+
+<a name="Escalate"></a>
+## func [Escalate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)
+
+```go
+func Escalate(ctx context.Context, clk clock.Waiter, policy Escalation, sigs ...Signal) (stop func())
+```
+
+Escalate runs policy.OnFirst at a delivery of one of sigs and policy.OnRepeat once at a second delivery within policy.Window on clk — zero meaning any later one — then stops relaying: the "second Ctrl-C stops at once" convention. stop is idempotent.
 
 <a name="Notify"></a>
 ## func [Notify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)
@@ -57,6 +82,15 @@ func Notify(sigs ...Signal) (ch <-chan Signal, stop func())
 
 Notify subscribes to sigs and returns a receive-only channel of typed Signals plus an idempotent, leak-free stop function. Each delivery is translated to a typed Signal; the channel is buffered so a burst is not dropped, and stop detaches the subscription and closes the channel.
 
+<a name="NotifyContext"></a>
+## func [NotifyContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)
+
+```go
+func NotifyContext(parent context.Context, sigs ...Signal) (ctx context.Context, stop func())
+```
+
+NotifyContext returns a copy of parent cancelled when one of sigs arrives, with a Cause naming it — os/signal's NotifyContext for the typed Signal. stop unsubscribes and ends the bridge; it is idempotent.
+
 <a name="Parse"></a>
 ## func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)
 
@@ -64,7 +98,7 @@ Notify subscribes to sigs and returns a receive-only channel of typed Signals pl
 func Parse(name string) (sig Signal, err error)
 ```
 
-Parse resolves a signal from its name or number — the canonical "SIGTERM", the bare "TERM", or the numeric "15", all case-insensitive — returning a typed UNKNOWN\_SIGNAL error for anything the platform table does not define.
+Parse resolves a signal from its name or number — the canonical "SIGTERM", the bare "TERM", or the numeric "15", all case-insensitive, and on Linux and FreeBSD the realtime "SIGRTMIN+n" / "SIGRTMAX-n" — returning a typed UNKNOWN\_SIGNAL error for anything the platform does not define.
 
 <a name="Relay"></a>
 ## func [Relay](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)
@@ -74,6 +108,66 @@ func Relay(src <-chan Signal, target Target) error
 ```
 
 Relay reads signals from src and forwards each to target until src closes — via kill(2) on Unix, via TerminateProcess or a console control event on Windows. A positive target is a pid; a target below -1 addresses the process group whose id is -target. It returns nil on a clean drain and a typed RELAY\_FAILED error on the first delivery failure (UNSUPPORTED\_PLATFORM on a platform that is neither Unix nor Windows).
+
+<a name="SendValue"></a>
+## func [SendValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)
+
+```go
+func SendValue(target Target, sig Signal, value int) error
+```
+
+SendValue queues sig with value to the process target (rt\_sigqueueinfo(2) on Linux, sigqueue(2) on FreeBSD): a realtime signal queues instead of coalescing, and a C receiver reads the value from si\_value — a Go one cannot. It returns SIGNAL\_FAILED wrapping the errno (ESRCH for a reaped pid), and UNSUPPORTED\_PLATFORM elsewhere.
+
+<a name="Cause"></a>
+## type [Cause](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)
+
+Cause is the cause a NotifyContext context is cancelled with: the signal that arrived. It aliases the service value.
+
+```go
+type Cause = svcsignal.ReceivedError
+```
+
+Cause is an alias of `github.com/kitsunium/sdk/internal/service/proc/signal.ReceivedError`, declared as:
+
+```go
+type Cause struct {
+	// Signal is the signal that arrived.
+	Signal coreproc.Signal
+}
+```
+
+<a name="Cause.Error"></a>
+### func \(Cause\) [Error](<https://github.com/kitsunium/sdk/blob/main/internal/service/proc/signal/context.go>)
+
+```go
+func (Cause) Error() string
+```
+
+Error names the signal that cancelled the context, e.g. "SIGTERM received".
+
+<a name="Escalation"></a>
+## type [Escalation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)
+
+Escalation is the policy Escalate applies: OnFirst, OnRepeat and the Window between them. It aliases the service value.
+
+```go
+type Escalation = svcsignal.EscalationValue
+```
+
+Escalation is an alias of `github.com/kitsunium/sdk/internal/service/proc/signal.EscalationValue`, declared as:
+
+```go
+type Escalation struct {
+	// OnFirst runs at a delivery that opens a window; nil runs nothing.
+	OnFirst  func(coreproc.Signal)
+	// OnRepeat runs once, at a delivery inside the window, and ends the relay;
+	// nil runs nothing.
+	OnRepeat func(coreproc.Signal)
+	// Window is how long after a first delivery a second one escalates. Zero
+	// is a window that never closes: any later delivery escalates.
+	Window   time.Duration
+}
+```
 
 <a name="Signal"></a>
 ## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)
@@ -106,7 +200,7 @@ Int reports the raw platform signal number underlying s.
 func (Signal) Known() bool
 ```
 
-Known reports whether s names a signal in the platform table.
+Known reports whether s names a signal in the platform table or in its realtime range (Linux and FreeBSD).
 
 <a name="Signal.OS"></a>
 ### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/signal.go>)
@@ -124,7 +218,7 @@ OS bridges s to the os.Signal expected by os/signal and Process.Signal. It is a 
 func (Signal) String() string
 ```
 
-String reports the canonical upper-case name of s (e.g. "SIGTERM"). An unrecognised signal renders as "signal \<n>" so logs stay unambiguous.
+String reports the canonical upper-case name of s (e.g. "SIGTERM"). A realtime signal renders as "SIGRTMIN" or "SIGRTMIN+n" on Linux and FreeBSD. An unrecognised signal renders as "signal \<n>" so logs stay unambiguous.
 
 <a name="Target"></a>
 ## type [Target](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/signal/gen_facade.go>)

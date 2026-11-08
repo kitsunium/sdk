@@ -22,87 +22,63 @@ go_library(
         "//:__subpackages__",
         "//internal/service:service_consumers",
     ],
-    deps = select({
+    deps = [
+        "//internal/core/proc",
+    ] + select({
         "@rules_go//go/platform:aix": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
         ],
         "@rules_go//go/platform:android": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
         ],
         "@rules_go//go/platform:darwin": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
         ],
         "@rules_go//go/platform:dragonfly": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
         ],
         "@rules_go//go/platform:freebsd": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
         ],
         "@rules_go//go/platform:illumos": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
         ],
         "@rules_go//go/platform:ios": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
         ],
-        "@rules_go//go/platform:js": [
-            "//internal/core/proc",
-        ],
         "@rules_go//go/platform:linux": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
         ],
         "@rules_go//go/platform:netbsd": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
         ],
         "@rules_go//go/platform:openbsd": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
-        ],
-        "@rules_go//go/platform:osx": [
-            "//internal/core/proc",
-        ],
-        "@rules_go//go/platform:plan9": [
-            "//internal/core/proc",
-        ],
-        "@rules_go//go/platform:qnx": [
-            "//internal/core/proc",
         ],
         "@rules_go//go/platform:solaris": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/childwait",
-        ],
-        "@rules_go//go/platform:windows": [
-            "//internal/core/proc",
         ],
         "//conditions:default": [],
     }),
@@ -127,6 +103,8 @@ go_test(
         "gen_api_5_test.go",
         "gen_api_test.go",
         "handoff_unix_external_test.go",
+        "onexit_alloc_unix_test.go",
+        "onexit_unix_internal_test.go",
         "reaper_external_test.go",
         "reaper_internal_test.go",
         "reaper_unix_bench_test.go",
@@ -135,87 +113,63 @@ go_test(
         "subreaper_linux_external_test.go",
     ],
     embed = [":reaper"],
-    deps = select({
+    deps = [
+        "//internal/core/proc",
+    ] + select({
         "@rules_go//go/platform:aix": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
         "@rules_go//go/platform:android": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
         "@rules_go//go/platform:darwin": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
         "@rules_go//go/platform:dragonfly": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
         "@rules_go//go/platform:freebsd": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
         "@rules_go//go/platform:illumos": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
         "@rules_go//go/platform:ios": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
-        "@rules_go//go/platform:js": [
-            "//internal/core/proc",
-        ],
         "@rules_go//go/platform:linux": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
         "@rules_go//go/platform:netbsd": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
         "@rules_go//go/platform:openbsd": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
-        ],
-        "@rules_go//go/platform:osx": [
-            "//internal/core/proc",
-        ],
-        "@rules_go//go/platform:plan9": [
-            "//internal/core/proc",
-        ],
-        "@rules_go//go/platform:qnx": [
-            "//internal/core/proc",
         ],
         "@rules_go//go/platform:solaris": [
-            "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
-        ],
-        "@rules_go//go/platform:windows": [
-            "//internal/core/proc",
         ],
         "//conditions:default": [],
     }),

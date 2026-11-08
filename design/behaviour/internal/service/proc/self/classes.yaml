@@ -1,6 +1,129 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - grouped: true
+    items:
+      - doc: |-
+          StartSourceInit is the package's initialisation: within it, not the kernel's
+          word.
+        name: StartSourceInit
+        type: StartSource
+        value: iota + 1
+      - doc: StartSourceKernel is the kernel's record of when it started the process.
+        name: StartSourceKernel
+    name: StartSourceInit
+  - doc: |-
+      The marks of a Go build id where the linker writes it raw, at the start of
+      the text of every binary format (cmd/internal/buildid): the ELF note holds
+      the same id.
+    grouped: true
+    items:
+      - name: buildIDPrefix
+        type: string
+        value: "\"\\xff Go build ID: \\\"\""
+      - name: buildIDSuffix
+        type: string
+        value: "\"\\\"\\n \\xff\""
+      - name: buildIDScanBytes
+        type: int64
+        value: 32 << 10
+      - name: goBuildIDNote
+        type: string
+        value: "\".note.go.buildid\""
+      - name: noteHeaderBytes
+        type: int
+        value: "16"
+      - name: bootIDFile
+        type: string
+        value: "\"/proc/sys/kernel/random/boot_id\""
+    name: buildIDPrefix
+  - doc: The procfs facts the kernel keeps about the process and the boot.
+    grouped: true
+    items:
+      - doc: selfStatFile's field 22 is the start time, in clock ticks since boot.
+        name: selfStatFile
+        type: string
+        value: "\"/proc/self/stat\""
+      - doc: systemStatFile's btime line is the boot time, in seconds since the epoch.
+        name: systemStatFile
+        type: string
+        value: "\"/proc/stat\""
+      - doc: pidNamespaceFile is the process's pid namespace, its inode the namespace id.
+        name: pidNamespaceFile
+        type: string
+        value: "\"/proc/self/ns/pid\""
+      - doc: "userHZ is the clock tick of /proc's times: USER_HZ, 100 on every Linux ABI."
+        name: userHZ
+        type: int64
+        value: "100"
+      - doc: startTimeIndex is field 22's index after the ")" ending field 2.
+        name: startTimeIndex
+        type: int
+        value: 22 - 3
+      - doc: btimeKey opens /proc/stat's boot-time line.
+        name: btimeKey
+        type: string
+        value: "\"btime\""
+      - doc: nsPidKey opens /proc/self/status's per-namespace pid line.
+        name: nsPidKey
+        type: string
+        value: "\"NSpid:\""
+      - doc: namespaceInit is a pid namespace's first process.
+        name: namespaceInit
+        type: string
+        value: "\"1\""
+    name: selfStatFile
+  - doc: The procfs files the kernel's view of the process is read from.
+    grouped: true
+    items:
+      - doc: statmFile's second field is the resident set, in pages.
+        name: statmFile
+        type: string
+        value: "\"/proc/self/statm\""
+      - doc: statusFile carries VmHWM (the peak resident set, kB) and Threads.
+        name: statusFile
+        type: string
+        value: "\"/proc/self/status\""
+      - doc: fdDir lists the open descriptors.
+        name: fdDir
+        type: string
+        value: "\"/proc/self/fd\""
+      - doc: statmResidentField is the resident set's index in statm.
+        name: statmResidentField
+        type: int
+        value: "1"
+      - doc: kibibyte is the unit status writes its sizes in.
+        name: kibibyte
+        type: uint64
+        value: "1024"
+      - doc: peakKey and threadsKey are the status lines read.
+        name: peakKey
+        type: string
+        value: "\"VmHWM:\""
+      - name: threadsKey
+        type: string
+        value: "\"Threads:\""
+    name: statmFile
+  - doc: oomScoreAdjPath is the running process's own OOM-killer bias in procfs.
+    items:
+      - name: oomScoreAdjPath
+        type: string
+        value: "\"/proc/self/oom_score_adj\""
+    name: oomScoreAdjPath
+  - doc: exitOSErr is sysexits.h EX_OSERR (71), the exit status of RLIMIT_FAILED.
+    items:
+      - name: exitOSErr
+        type: int
+        value: "71"
+    name: exitOSErr
+  - doc: |-
+      oomScoreAdjPerm is the mode os.WriteFile is given; the procfs file always
+      exists, so it is never used to create one.
+    items:
+      - name: oomScoreAdjPerm
+        type: os.FileMode
+        value: "0o644"
+    name: oomScoreAdjPerm
   - doc: |-
       The runtime/metrics a snapshot reads. Each is documented in
       runtime/metrics; a name the running toolchain does not know reads as
@@ -54,6 +177,43 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - StartSourceInit
+      - buildIDPrefix
+      - containerPrefixes
+      - StartSource
+      - StartSource.String
+      - IdentityValue
+      - ReadIdentity
+      - digestOf
+      - buildIDOf
+      - elfNoteBuildID
+      - rawBuildID
+      - closeQuietly
+      - containerOf
+      - isContainerID
+    name: identity.go
+  - decls:
+      - selfStatFile
+      - kernelStart
+      - bootTime
+      - pidNamespace
+    name: identity_linux.go
+  - decls:
+      - statmFile
+      - kernelMemory
+      - readStatus
+    name: kernelmem_linux.go
+  - decls:
+      - SetOOMScoreAdj
+    name: oomscore.go
+  - decls:
+      - oomScoreAdjPath
+      - exitOSErr
+      - oomScoreAdjPerm
+      - setOOMScoreAdj
+      - oomFailed
+    name: oomscore_linux.go
+  - decls:
       - metricGoroutines
       - maxDuration
       - started
@@ -77,6 +237,74 @@ functions:
       RUSAGE_SELF — it falls back to the runtime's estimate and reports true.
     name: cpuTime
     results: used time.Duration, estimated bool
+  - name: ReadIdentity
+    results: IdentityValue
+  - doc: digestOf hashes the file at name.
+    name: digestOf
+    params: name string
+    results: sum [sha256.Size]byte, ok bool
+  - doc: |-
+      buildIDOf reads the Go build id: the ELF note where there is one, the raw
+      mark at the start of the text otherwise, and "" when neither is there.
+    name: buildIDOf
+    params: name string
+    results: string
+  - doc: elfNoteBuildID reads the .note.go.buildid note of an ELF binary.
+    name: elfNoteBuildID
+    params: name string
+    results: id string, ok bool
+  - doc: rawBuildID scans the start of the file for the linker's raw mark.
+    name: rawBuildID
+    params: name string
+    results: id string, ok bool
+  - doc: |-
+      closeQuietly closes a file read to the end: a close failure on a read-only
+      file changes nothing the reading can say.
+    name: closeQuietly
+    params: f io.Closer
+  - doc: |-
+      containerOf finds a container id in a cgroup path: the deepest element that
+      is 64 hex digits once a runtime's scope prefix and ".scope" are dropped.
+    name: containerOf
+    params: cgroupPath string
+    results: string
+  - doc: isContainerID reports a 64-digit lower-case hex string.
+    name: isContainerID
+    params: s string
+    results: bool
+  - doc: |-
+      kernelStart reads when the kernel started the process: the boot time plus
+      the start tick.
+    name: kernelStart
+    results: time.Time, bool
+  - doc: bootTime reads /proc/stat's btime.
+    name: bootTime
+    params: stat string
+    results: int64, bool
+  - doc: |-
+      pidNamespace reads the pid namespace's inode and whether the process is its
+      pid 1 (the last NSpid entry: the innermost namespace's view).
+    name: pidNamespace
+    results: inode uint64, nsPid1 bool
+  - doc: |-
+      kernelMemory fills the kernel's view: the resident set from statm, its peak
+      and the thread count from status, the descriptors from /proc/self/fd.
+    name: kernelMemory
+    params: stats *StatsValue
+  - doc: readStatus reads VmHWM and Threads from /proc/self/status.
+    name: readStatus
+    params: stats *StatsValue, status string
+  - name: SetOOMScoreAdj
+    params: n int
+    results: error
+  - doc: setOOMScoreAdj writes n to /proc/self/oom_score_adj; see SetOOMScoreAdj.
+    name: setOOMScoreAdj
+    params: n int
+    results: error
+  - doc: oomFailed wraps a refused write onto the central RlimitFailed sentinel.
+    name: oomFailed
+    params: cause error, n int
+    results: error
   - doc: |-
       bucketBound returns the finite bound that stands for a bucket: its upper
       bound, or its lower one when the upper is infinite, or zero when neither is
@@ -119,11 +347,21 @@ functions:
     name: runtimeCPU
     results: time.Duration
 imports:
+  bytes: bytes
+  cgroupfs: github.com/kitsunium/sdk/internal/service/proc/internal/cgroupfs
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
   debug: runtime/debug
+  elf: debug/elf
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
   math: math
   metrics: runtime/metrics
   os: os
+  path: path
   runtime: runtime
+  sha256: crypto/sha256
+  strconv: strconv
+  strings: strings
   syscall: syscall
   time: time
 package:
@@ -132,6 +370,60 @@ package:
   name: self
   purpose: "Package self is what the running process is doing right now: the Go runtime's own metrics and the kernel's account of the CPU time used."
 types:
+  - kind: named
+    methods:
+      - name: String
+        recv: s StartSource
+        results: string
+    name: StartSource
+    underlying: uint8
+  - fields:
+      - doc: |-
+          StartedAt is when the process started: the kernel's record on Linux
+          (/proc/self/stat's start tick after /proc/stat's boot time) and Windows
+          (GetProcessTimes), the package's initialisation elsewhere —
+          StartedAtSource says which.
+        name: StartedAt
+        type: time.Time
+      - doc: Executable is the path of the running binary, as os.Executable reads it.
+        name: Executable
+        type: string
+      - doc: |-
+          BuildID is the Go build id of the running binary — its ELF
+          .note.go.buildid, or the raw mark the linker writes at the start of the
+          text of every format — what `go tool buildid` prints; empty when absent.
+        name: BuildID
+        type: string
+      - doc: |-
+          ContainerID is the 64-hex id of the container the process runs in, read
+          from its cgroup path in the docker, cri-containerd, crio, libpod and
+          kubepods shapes; empty outside one.
+        name: ContainerID
+        type: string
+      - doc: BootID is the kernel's id of the current boot (Linux); empty elsewhere.
+        name: BootID
+        type: string
+      - doc: |-
+          PIDNamespace is the inode of /proc/self/ns/pid, the pid namespace's id
+          (Linux); zero elsewhere.
+        name: PIDNamespace
+        type: uint64
+      - doc: Digest is the SHA-256 of the running binary's file, valid when DigestOK.
+        name: Digest
+        type: "[32]byte"
+      - doc: StartedAtSource says where StartedAt came from.
+        name: StartedAtSource
+        type: StartSource
+      - doc: DigestOK reports that the binary could be read whole and Digest holds its hash.
+        name: DigestOK
+        type: bool
+      - doc: |-
+          NSPid1 reports that the process is pid 1 of its pid namespace (the last
+          NSpid entry of /proc/self/status) — the init of a container.
+        name: NSPid1
+        type: bool
+    kind: struct
+    name: IdentityValue
   - fields:
       - doc: |-
           At is when the snapshot was taken, on the wall clock: this describes
@@ -203,9 +495,36 @@ types:
           idle time, which counts only threads running Go code and so misses time
           spent in C code or blocked in the kernel — and which the runtime
           refreshes only at a garbage collection, so it lags by up to one GC
-          cycle and reads zero before the first. It is true where getrusage(2)
-          does not exist — Windows, Plan 9, wasm — and wherever it failed.
+          cycle and reads zero before the first. It is true where the kernel's
+          count is not at hand — Plan 9, wasm: neither getrusage(2) nor
+          GetProcessTimes exists there — and wherever that call failed.
         name: CPUEstimated
+        type: bool
+      - doc: |-
+          RSSBytes is the kernel's resident set — what the OOM killer and the
+          cgroup count, where MemoryBytes is the runtime's mapping: /proc/self/statm
+          on Linux, the working set on Windows, zero elsewhere (KernelMemory).
+        name: RSSBytes
+        type: uint64
+      - doc: |-
+          PeakRSSBytes is the most resident memory the process has held: VmHWM on
+          Linux, getrusage(2)'s ru_maxrss on the other Unixes, the peak working set
+          on Windows; zero on illumos and Solaris, whose kernel leaves it so.
+        name: PeakRSSBytes
+        type: uint64
+      - doc: Threads is how many kernel threads the process runs (Linux); zero elsewhere.
+        name: Threads
+        type: int
+      - doc: |-
+          OpenFiles is how many descriptors the process holds open (Linux), or its
+          HANDLE count (Windows); zero elsewhere — rlimit.OpenFiles counts on more
+          platforms.
+        name: OpenFiles
+        type: int
+      - doc: |-
+          KernelMemory reports that RSSBytes is the kernel's count (Linux,
+          Windows); false where the platform gives the SDK no current resident set.
+        name: KernelMemory
         type: bool
     kind: struct
     name: StatsValue
@@ -229,6 +548,13 @@ types:
         results: time.Duration
     name: DistributionValue
 vars:
+  - doc: |-
+      containerPrefixes are the scope prefixes the container runtimes give a
+      container's cgroup: docker, containerd's CRI plugin, CRI-O and podman.
+    items:
+      - name: containerPrefixes
+        value: "[...]string{\"docker-\", \"cri-containerd-\", \"crio-\", \"libpod-\"}"
+    name: containerPrefixes
   - doc: |-
       started is when this package was initialised: the process's start, to
       within the initialisation of the packages linked before it. A program that

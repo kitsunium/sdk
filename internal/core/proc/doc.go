@@ -40,6 +40,10 @@
 //
 // Package proc — the Reaper port: collection of terminated child processes.
 //
+// Package proc — the SandboxValue value type and its parts: the namespaces,
+// mounts, root, capabilities, Landlock rules and seccomp filter a sandboxed child
+// is spawned under (Spec.Sandbox).
+//
 // Package proc — the Signal value type: a typed, platform-portable OS signal
 // with Parse / String / OS bridging. The name table is platform-specific and
 // lives in signal_unix.go / signal_other.go.

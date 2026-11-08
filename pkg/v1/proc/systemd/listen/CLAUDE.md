@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-11-07T00:00:00Z -->
 # pkg/v1/proc/systemd/listen
 
 Public facade for systemd-style **socket activation** (`sd_listen_fds(3)`) — the
@@ -16,7 +16,7 @@ so a caller writes `listen.Listeners(true)`. The package comment is in
 ## Why this shape
 
 - **Thin facade, delegation only.** `Files` / `Listeners` / `WithNames` /
-  `Prepare` delegate straight to `internal/service/proc/systemd/listen`; the facade adds
+  `Prepare` / `PrepareFiles` / `CheckName` delegate straight to `internal/service/proc/systemd/listen`; the facade adds
   zero behaviour. `Spec` is a type alias of the core port (so the same value drives
   `process.Start`).
 - **Symmetric, self-contained.** `Prepare` (activator) is the mirror of
@@ -25,10 +25,19 @@ so a caller writes `listen.Listeners(true)`. The package comment is in
   fd 3 onward, so any `ExtraFiles` already set shift after them — and sets
   `LISTEN_FDS` / `LISTEN_FDNAMES` in `Spec.Env`. This is
   what makes the family testable end-to-end without a real init system.
-- **LISTEN_PID convention.** A pre-fork activator cannot know the child's pid, so
-  `Prepare` omits `LISTEN_PID`. The receiving side accepts an absent `LISTEN_PID`
-  from a trusted parent while still validating a present one (the systemd case): a
-  set-but-mismatched `LISTEN_PID` yields no fds.
+- **LISTEN_PID is the child's own (#739).** A pre-fork activator cannot know the
+  child's pid, so `Prepare` and `PrepareFiles` put `LISTEN_PID` in
+  `Spec.PIDEnv`, which the spawn sets after the fork through the trampoline.
+  A caller that cannot afford the trampoline removes it from `PIDEnv`; the
+  receiving side accepts an absent `LISTEN_PID` from a trusted parent while
+  still validating a present one: a set-but-mismatched `LISTEN_PID` yields no
+  fds.
+- **Names are checked (#739).** `CheckName` is systemd's `fdname_is_valid`
+  (≤ 255 bytes, printable ASCII, no `:`), `InvalidFDName` otherwise, before
+  the `Spec` changes; an empty name is announced as `unknown`.
+- **A store's descriptors pass as they are (#739).** `PrepareFiles` takes
+  `NamedFile`s and puts the very files at fd 3 on — no dup, no close — so a
+  descriptor store (S0d) hands the same ones to every restart.
 
 - **Recovered sockets are close-on-exec (#449, a behaviour change).** `Files`
   sets `FD_CLOEXEC` on each, as `sd_listen_fds(3)` does, so a child the
@@ -44,14 +53,14 @@ so a caller writes `listen.Listeners(true)`. The package comment is in
   `FileDescriptorName=` (duplicate names group several fds).
 - **Do not** expect activation off Unix — fd inheritance is a Unix mechanism;
   every function returns `UnsupportedPlatform` elsewhere.
-- **Do not** add new exported types — the surface is the four functions + the
-  `Spec` alias.
+- **Do not** add new exported types — the surface is the six functions, the
+  `Spec` and `NamedFile` aliases and `InvalidFDName` with its code.
 
 ## Errors
 
 Every error is a central `internal/core/proc` sentinel: `LISTEN_FAILED` (a bad
-fd / unsupported listener kind / malformed `LISTEN_FDS`) or `UnsupportedPlatform`
-(non-Unix). An empty or foreign activation set is **not** an error — it returns
+fd / unsupported listener kind / malformed `LISTEN_FDS`), `INVALID_FD_NAME`
+(re-exported as `InvalidFDName`) or `UnsupportedPlatform` (non-Unix). An empty or foreign activation set is **not** an error — it returns
 nil.
 
 ## Platform

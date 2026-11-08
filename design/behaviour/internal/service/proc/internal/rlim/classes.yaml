@@ -5,6 +5,7 @@ files:
     name: doc.go
   - decls:
       - Make
+      - Pair
     name: value_default.go
 functions:
   - doc: |-
@@ -14,6 +15,12 @@ functions:
     name: Make
     params: soft, hard uint64
     results: syscall.Rlimit
+  - doc: |-
+      Pair reads a syscall.Rlimit back as the soft/hard pair Make built it from:
+      verbatim on these targets.
+    name: Pair
+    params: limit syscall.Rlimit
+    results: soft, hard uint64
 imports:
   syscall: syscall
 package:

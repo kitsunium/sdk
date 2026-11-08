@@ -1,13 +1,186 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
-  - of: New
+  - of: NewMulti
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMulti
+        kind: self
+      - id: newMultiRing
+        kind: internal
     steps:
       - opt:
           do:
             - return: nil, CapZero
           when: capacity <= 0
-      - return: "&queueRing[T]{slots: allocateSlots[T](capacity + 1), cap: uint64(capacity)}, nil"
+      - return: newMultiRing[T](capacity), nil
+        to: newMultiRing
+  - of: newMultiRing
+    participants:
+      - id: caller
+        kind: actor
+      - id: newMultiRing
+        kind: self
+      - id: slotCount
+        kind: internal
+      - id: r.slots[i].seq.Store
+        kind: value
+    steps:
+      - bind: "n"
+        eval: slotCount(capacity)
+        to: slotCount
+      - bind: r
+        eval: "&multiRing[T]{slots: allocateMultiSlots[T](n), mask: uint64(n - 1)}"
+      - loop:
+          do:
+            - eval: r.slots[i].seq.Store(uint64(i))
+              to: r.slots[i].seq.Store
+          key: i
+          range: r.slots
+      - return: r
+  - of: allocateMultiSlots
+    steps:
+      - return: make([]multiSlot[T], n)
+  - of: (*multiRing).Capacity
+    steps:
+      - return: len(r.slots)
+  - of: (*multiRing).Len
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiRing).Len
+        kind: self
+      - id: r.head.Load
+        kind: value
+      - id: r.tail.Load
+        kind: value
+    steps:
+      - bind: head
+        eval: r.head.Load()
+        to: r.head.Load
+      - bind: tail
+        eval: r.tail.Load()
+        to: r.tail.Load
+      - return: int(min(tail-head, uint64(len(r.slots))))
+  - of: (*multiRing).TryWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiRing).TryWrite
+        kind: self
+      - id: r.tail.Load
+        kind: value
+      - id: cell.seq.Load
+        kind: value
+      - id: cell.seq.Store
+        kind: value
+    steps:
+      - bind: pos
+        eval: r.tail.Load()
+        to: r.tail.Load
+      - loop:
+          do:
+            - bind: cell
+              eval: "&r.slots[pos&r.mask]"
+            - bind: seq
+              eval: cell.seq.Load()
+              to: cell.seq.Load
+            - switch:
+                cases:
+                  - case: dif == 0
+                    do:
+                      - opt:
+                          do:
+                            - set: cell.item
+                              value: item
+                            - eval: cell.seq.Store(pos + 1)
+                              to: cell.seq.Store
+                            - return: nil
+                          when: r.tail.CompareAndSwap(pos, pos+1)
+                      - set: pos
+                        to: r.tail.Load
+                        value: r.tail.Load()
+                  - case: dif < 0
+                    do:
+                      - return: Full
+                  - default: true
+                    do:
+                      - set: pos
+                        to: r.tail.Load
+                        value: r.tail.Load()
+                init:
+                  bind: dif
+                  eval: int64(seq - pos)
+          forever: true
+  - of: (*multiRing).TryRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiRing).TryRead
+        kind: self
+      - id: r.head.Load
+        kind: value
+      - id: cell.seq.Store
+        kind: value
+      - id: r.head.Store
+        kind: value
+    steps:
+      - bind: pos
+        eval: r.head.Load()
+        to: r.head.Load
+      - bind: cell
+        eval: "&r.slots[pos&r.mask]"
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: T
+            - return: zero, Empty
+          when: cell.seq.Load() != pos+1
+      - set: value
+        value: cell.item
+      - var:
+          name: zero
+          type: T
+      - set: cell.item
+        value: zero
+      - eval: cell.seq.Store(pos + r.mask + 1)
+        to: cell.seq.Store
+      - eval: r.head.Store(pos + 1)
+        to: r.head.Store
+      - return: value, nil
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: newQueueRing
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, CapZero
+          when: capacity <= 0
+      - return: newQueueRing[T](capacity), nil
+        to: newQueueRing
+  - of: newQueueRing
+    participants:
+      - id: caller
+        kind: actor
+      - id: newQueueRing
+        kind: self
+      - id: slotCount
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: slotCount(capacity)
+        to: slotCount
+      - return: "&queueRing[T]{slots: allocateSlots[T](n), mask: uint64(n - 1), cap: uint64(capacity)}"
+  - of: slotCount
+    steps:
+      - return: 1 << bits.Len(uint(capacity-1))
   - of: allocateSlots
     steps:
       - return: make([]T, n)
@@ -31,7 +204,7 @@ sequences:
       - bind: tail
         eval: b.tail.Load()
         to: b.tail.Load
-      - return: int((tail + b.cap + 1 - head) % (b.cap + 1))
+      - return: int(min(tail-head, b.cap))
   - of: (*queueRing).TryWrite
     participants:
       - id: caller
@@ -48,18 +221,19 @@ sequences:
       - bind: tail
         eval: b.tail.Load()
         to: b.tail.Load
-      - bind: head
-        eval: b.head.Load()
-        to: b.head.Load
-      - bind: next
-        eval: (tail + 1) % (b.cap + 1)
       - opt:
           do:
-            - return: Full
-          when: next == head
-      - set: b.slots[tail]
+            - set: b.cachedHead
+              to: b.head.Load
+              value: b.head.Load()
+            - opt:
+                do:
+                  - return: Full
+                when: tail-b.cachedHead >= b.cap
+          when: tail-b.cachedHead >= b.cap
+      - set: b.slots[tail&b.mask]
         value: item
-      - eval: b.tail.Store(next)
+      - eval: b.tail.Store(tail + 1)
         to: b.tail.Store
       - return: nil
   - of: (*queueRing).TryRead
@@ -78,24 +252,29 @@ sequences:
       - bind: head
         eval: b.head.Load()
         to: b.head.Load
-      - bind: tail
-        eval: b.tail.Load()
-        to: b.tail.Load
       - opt:
           do:
-            - var:
-                name: zero
-                type: T
-            - return: zero, Empty
-          when: head == tail
+            - set: b.cachedTail
+              to: b.tail.Load
+              value: b.tail.Load()
+            - opt:
+                do:
+                  - var:
+                      name: zero
+                      type: T
+                  - return: zero, Empty
+                when: head == b.cachedTail
+          when: head == b.cachedTail
+      - bind: slot
+        eval: "&b.slots[head&b.mask]"
       - set: value
-        value: b.slots[head]
+        value: "*slot"
       - var:
           name: zero
           type: T
-      - set: b.slots[head]
+      - set: "*slot"
         value: zero
-      - eval: b.head.Store((head + 1) % (b.cap + 1))
+      - eval: b.head.Store(head + 1)
         to: b.head.Store
       - return: value, nil
   - of: Drain

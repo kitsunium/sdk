@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit: proc/dbus declares the 0.3.108.* codes (ADR 0214's S0e amendment).
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
+
+go_library(
+    name = "dbus",
+    srcs = [
+        "doc.go",
+        "gen_codes.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/proc/dbus",
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":dbus",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "dbus_test",
+    srcs = ["gen_api_test.go"],
+    deps = [
+        ":dbus",
+        "//internal/kernel/errs",
+    ],
+)

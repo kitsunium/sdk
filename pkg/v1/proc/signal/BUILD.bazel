@@ -12,6 +12,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/proc",
+        "//internal/kernel/clock",
         "//internal/service/proc/signal",
     ],
 )
@@ -33,6 +34,7 @@ go_test(
     deps = [
         ":signal",
         "//internal/core/proc",
+        "//internal/kernel/clock",
         "//internal/service/proc/signal",
     ] + select({
         "@rules_go//go/platform:js": [

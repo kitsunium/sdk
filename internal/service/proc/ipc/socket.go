@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"slices"
 	"syscall"
 
 	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
@@ -26,7 +25,8 @@ func (s socketAcceptor) accept() (net.Conn, coreipc.PeerValue, error) {
 	if err != nil {
 		return nil, coreipc.PeerValue{}, err
 	}
-	return c, peerOf(c), nil
+	p := peerOf(c)
+	return withFiles(c, p), p, nil
 }
 
 // listen opens the Unix socket at cfg.Path, once its directory is private
@@ -105,17 +105,27 @@ func (l *Listener) admits(p coreipc.PeerValue) error { return admit(p, l.self, &
 // that does not exist is nobody listening — the first client of a daemon not
 // started yet —, DIAL_FAILED, not an unsafe directory.
 func dial(ctx context.Context, cfg *Config) (*coreipc.Conn, error) {
+	return dialWith(ctx, cfg, os.Lstat, os.Geteuid())
+}
+
+// dialWith is dial with the file-owner reading and the effective uid
+// injected, so a test can stand on either side of an account it cannot be.
+// The directory may be another account's (#1092, [checkDialDir]); the socket
+// file may be owned by this account, an allowed user or an allowed group, and
+// is ENDPOINT_FOREIGN otherwise.
+func dialWith(ctx context.Context, cfg *Config, lstat func(string) (os.FileInfo, error), euid int) (*coreipc.Conn, error) {
 	dir := filepath.Dir(cfg.Path)
-	if _, err := os.Lstat(dir); errors.Is(err, os.ErrNotExist) {
+	if _, err := lstat(dir); errors.Is(err, os.ErrNotExist) {
 		return nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path),
 			errs.String("cause", "nobody listens: the directory does not exist"))
 	}
-	if err := checkDir(dir); err != nil {
+	if err := checkDialDir(dir, lstat); err != nil {
 		return nil, err
 	}
-	if info, err := os.Lstat(cfg.Path); err == nil {
-		if uid, known := ownerOf(info); known && uid != os.Geteuid() && !slices.Contains(cfg.AllowUIDs, uid) {
-			return nil, errs.Wrap(coreipc.EndpointForeign, errs.WrapParams{}, errs.String("path", cfg.Path), errs.Int("uid", uid))
+	if info, err := lstat(cfg.Path); err == nil {
+		if uid, gid, known := ownersOf(info); known && !endpointAdmitted(uid, gid, euid, cfg) {
+			return nil, errs.Wrap(coreipc.EndpointForeign, errs.WrapParams{}, errs.String("path", cfg.Path),
+				errs.Int("uid", uid), errs.Int("gid", gid))
 		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
@@ -131,9 +141,9 @@ func dial(ctx context.Context, cfg *Config) (*coreipc.Conn, error) {
 		return nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", "not a unix connection"))
 	}
 	p := peerOf(uc)
-	if err := admit(p, os.Geteuid(), cfg); err != nil {
+	if err := admit(p, euid, cfg); err != nil {
 		closeBestEffort(c, cfg.Path)
 		return nil, err
 	}
-	return &coreipc.Conn{Conn: c, Peer: p}, nil
+	return &coreipc.Conn{Conn: withFiles(uc, p), Peer: p}, nil
 }

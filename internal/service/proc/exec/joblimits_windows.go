@@ -34,6 +34,7 @@ const (
 	jobObjectExtendedLimitInformation uintptr = 9
 	jobLimitActiveProcess             uint32  = 0x00000008
 	jobLimitProcessMemory             uint32  = 0x00000100
+	jobLimitKillOnJobClose            uint32  = 0x00002000
 	createSuspended                   uint32  = 0x00000004
 	th32csSnapThread                  uintptr = 0x00000004
 	threadSuspendResume               uintptr = 0x0002
@@ -81,16 +82,20 @@ type extendedLimitInformation struct {
 }
 
 // jobLimit owns a Job Object handle that confines the spawned child.
+// keepOpen marks a job carrying KILL_ON_JOB_CLOSE for Spec.DieWithParent: its
+// handle is held for the supervisor's life, so the kernel closes it — and
+// kills what the job holds — when the supervisor dies, however it dies.
 type jobLimit struct {
-	handle syscall.Handle
+	handle   syscall.Handle
+	keepOpen bool
 }
 
-// newJobLimit builds a Job Object from spec's mappable rlimits, or returns nil
-// when none are requested. An unmappable Resource is rejected with
-// UnknownResource before any handle is created.
+// newJobLimit builds a Job Object from spec's mappable rlimits and its
+// DieWithParent, or returns nil when neither is requested. An unmappable
+// Resource is rejected with UnknownResource before any handle is created.
 func newJobLimit(spec coreproc.Spec) (*jobLimit, error) {
-	//: no rlimits → no job to create.
-	if len(spec.Rlimits) == 0 {
+	//: no rlimits and no parent-death binding → no job to create.
+	if len(spec.Rlimits) == 0 && spec.DieWithParent == 0 {
 		//: the common, unconfined spawn path.
 		return nil, nil
 	}
@@ -100,6 +105,11 @@ func newJobLimit(spec coreproc.Spec) (*jobLimit, error) {
 		//: propagate the typed UNKNOWN_RESOURCE verbatim.
 		return nil, bErr
 	}
+	//: DieWithParent: the job's last handle closing kills what it holds, and
+	//: the supervisor's death closes it.
+	if spec.DieWithParent != 0 {
+		ext.basicLimitInformation.limitFlags |= jobLimitKillOnJobClose
+	}
 	//: CreateJobObjectW(NULL, NULL) → a fresh anonymous job handle.
 	h, _, errno := procCreateJobObjectW.Call(0, 0)
 	//: a zero handle means the job could not be created.
@@ -107,7 +117,7 @@ func newJobLimit(spec coreproc.Spec) (*jobLimit, error) {
 		//: surface the Win32 cause through the central RLIMIT_FAILED.
 		return nil, wrapRlimit(errno)
 	}
-	job := &jobLimit{handle: syscall.Handle(h)}
+	job := &jobLimit{handle: syscall.Handle(h), keepOpen: spec.DieWithParent != 0}
 	//: push the assembled limit struct to the kernel.
 	r1, _, serrno := procSetInformationJobObject.Call(h, jobObjectExtendedLimitInformation,
 		uintptr(unsafe.Pointer(&ext)), unsafe.Sizeof(ext))
@@ -242,6 +252,20 @@ func resumeThread(tid uint32, pid int) error {
 	}
 	//: the thread's suspend count is one lower.
 	return nil
+}
+
+// releaseAfterExit releases the job handle once the child is reaped, unless
+// the job carries Spec.DieWithParent: that handle is held until the supervisor
+// exits, so its leftover descendants still die with it — one handle per such
+// child for the supervisor's life, the price of the binding.
+func (j *jobLimit) releaseAfterExit() {
+	//: a parent-death job outlives its leader by design.
+	if j != nil && j.keepOpen {
+		//: the kernel closes it when the supervisor exits.
+		return
+	}
+	//: an rlimit-only job (or none) is released now.
+	j.close()
 }
 
 // close releases the job handle. Without a kill-on-close flag the assigned child

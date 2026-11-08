@@ -32,4 +32,22 @@ type Config[T any] struct {
 	// OnError observes deliver failures seen by the background ticker. A nil
 	// hook degrades to a no-op so the flush paths stay branch-free.
 	OnError func(err error)
+	// FlushOn says which goroutine delivers a batch a cap filled: FlushCaller,
+	// the zero value, the producer whose Add hit the cap; FlushBackground, the
+	// batcher's own goroutine, started by NewBatcher and joined by Close.
+	FlushOn FlushMode
 }
+
+// FlushMode says which goroutine runs the Sink for a batch a cap filled.
+type FlushMode uint8
+
+const (
+	// FlushCaller delivers a capped batch on the goroutine of the Add that
+	// filled it, which receives the delivery's error: the zero value.
+	FlushCaller FlushMode = iota
+	// FlushBackground hands a capped batch to the batcher's own goroutine and
+	// returns; the delivery's error goes to Config.OnError. One batch waits
+	// beside the one being delivered: an Add that fills another waits for it
+	// to be taken, so memory stays bounded.
+	FlushBackground
+)

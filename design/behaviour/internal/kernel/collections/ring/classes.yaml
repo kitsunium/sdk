@@ -1,12 +1,39 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      cacheLine is the coherence unit the ring's cursors are kept apart by: 64
+      bytes on amd64 and on most arm64 cores. Apple's arm64 cores move 128-byte
+      lines, where this pad is half of one — a known under-pad, measured in the
+      package's BENCH.md rather than paid on every other platform.
+    items:
+      - name: cacheLine
+        type: uintptr
+        value: "64"
+    name: cacheLine
 files:
   - decls: []
     name: doc.go
   - decls:
+      - MultiQueue
+      - multiSlot
+      - multiRing
+      - NewMulti
+      - newMultiRing
+      - allocateMultiSlots
+      - (*multiRing).Capacity
+      - (*multiRing).Len
+      - (*multiRing).TryWrite
+      - (*multiRing).TryRead
+    name: multi.go
+  - decls:
+      - cacheLine
       - Queue
+      - linePad
       - queueRing
       - New
+      - newQueueRing
+      - slotCount
       - allocateSlots
       - (*queueRing).Capacity
       - (*queueRing).Len
@@ -15,10 +42,39 @@ files:
       - Drain
     name: ring.go
 functions:
+  - name: NewMulti
+    params: capacity int
+    results: q MultiQueue[T], err error
+    typeParams: T any
+  - doc: |-
+      newMultiRing builds the ring NewMulti returns, for a positive capacity:
+      each cell's turn starts at its own index, free for the first lap's writer.
+    name: newMultiRing
+    params: capacity int
+    results: "*multiRing[T]"
+    typeParams: T any
+  - doc: |-
+      allocateMultiSlots returns the fixed-length, indexed-only cells of an MPSC
+      ring, behind a helper as allocateSlots is.
+    name: allocateMultiSlots
+    params: n int
+    results: "[]multiSlot[T]"
+    typeParams: T any
   - name: New
     params: capacity int
     results: q Queue[T], err error
     typeParams: T any
+  - doc: newQueueRing builds the ring New returns, for a positive capacity.
+    name: newQueueRing
+    params: capacity int
+    results: "*queueRing[T]"
+    typeParams: T any
+  - doc: |-
+      slotCount is the smallest power of two at least capacity, for a positive
+      capacity: the storage size a cursor is masked into.
+    name: slotCount
+    params: capacity int
+    results: int
   - doc: |-
       allocateSlots returns a freshly-made slice of length n. The make is
       isolated behind this helper so audits that scan for append-grown storage
@@ -33,6 +89,7 @@ functions:
     typeParams: T any
 imports:
   atomic: sync/atomic
+  bits: math/bits
   iter: iter
 package:
   docFile: doc.go
@@ -40,6 +97,98 @@ package:
   name: ring
   purpose: Package ring — range 0.1.3.* (ADR 0005 kernel/collections/ring block).
 types:
+  - kind: named
+    name: MultiQueue
+    typeParams: T any
+    underlying: |-
+      interface {
+      	// TryWrite enqueues item without blocking; returns Full when saturated.
+      	// Any number of goroutines may call it at once.
+      	TryWrite(item T) (err error)
+      	// TryRead dequeues the next item without blocking; returns Empty when no
+      	// item is available, including while the writer that claimed the next
+      	// slot has not finished storing into it. One goroutine only.
+      	TryRead() (item T, err error)
+      	// Capacity returns the number of usable slots in the ring.
+      	Capacity() (n int)
+      	// Len returns a snapshot count of items currently held, a claimed slot
+      	// still being written included.
+      	Len() (n int)
+      }
+  - doc: |-
+      multiSlot is one cell of the MPSC ring: the item and the sequence number
+      that says whose turn the cell is. A cell at index i holds seq == pos when
+      it is free for the writer of position pos, and seq == pos+1 once that
+      writer has stored into it, for the reader of position pos.
+    fields:
+      - doc: |-
+          seq is the cell's turn, stored with release after the item and loaded
+          with acquire before it.
+        name: seq
+        type: atomic.Uint64
+      - doc: item is the value the writer of the cell's turn stored.
+        name: item
+        type: T
+    kind: struct
+    name: multiSlot
+    typeParams: T any
+  - doc: |-
+      multiRing is the concrete MultiQueue: Dmitry Vyukov's bounded queue, its
+      many-consumer half reduced to one. Writers race for a position on tail with
+      a compare-and-swap, then publish the cell through its sequence number; the
+      one reader walks head without one. The writers' cursor and the reader's
+      are kept a cache line apart.
+    fields:
+      - doc: slots holds the cells; its length is a power of two.
+        name: slots
+        type: "[]multiSlot[T]"
+      - doc: mask is len(slots)-1.
+        name: mask
+        type: uint64
+      - name: _
+        type: linePad
+      - doc: tail is the next position a writer claims; contended by every writer.
+        name: tail
+        type: atomic.Uint64
+      - name: _
+        type: linePad
+      - doc: |-
+          head is the next position the reader reads, written by the reader
+          alone and loaded by Len.
+        name: head
+        type: atomic.Uint64
+      - name: _
+        type: linePad
+    kind: struct
+    methods:
+      - doc: Capacity returns the number of usable slots in the ring.
+        name: Capacity
+        recv: r *multiRing[T]
+        results: int
+      - doc: |-
+          Len returns the number of items currently held, a slot claimed and still
+          being written included. A snapshot: writers and the reader may move it
+          before the caller acts on it.
+        name: Len
+        recv: r *multiRing[T]
+        results: int
+      - doc: |-
+          TryWrite claims the next position and stores item into its cell, or
+          returns Full when the cell a lap ahead has not been read yet. Any number of
+          goroutines may call it at once.
+        name: TryWrite
+        params: item T
+        recv: r *multiRing[T]
+        results: error
+      - doc: |-
+          TryRead removes and returns the next item without blocking, or Empty when
+          the next cell has not been published — nothing written, or a writer between
+          its claim and its store. One goroutine only.
+        name: TryRead
+        recv: r *multiRing[T]
+        results: value T, err error
+    name: multiRing
+    typeParams: T any
   - kind: named
     name: Queue
     typeParams: T any
@@ -56,24 +205,59 @@ types:
       	Len() (n int)
       }
   - doc: |-
+      linePad is one cache line of nothing: the field between two groups of
+      fields that two different goroutines write, so a store by one never
+      invalidates the line the other reads.
+    kind: named
+    name: linePad
+    underlying: "[cacheLine]byte"
+  - doc: |-
       queueRing is the concrete Queue implementation. Unexported so the public
       surface stays narrow and the struct name can read as "ring" without the
       role-suffix convention that exported types must follow.
+
+      Its fields fall in three groups, each kept a full cache line from the next:
+      the storage and its sizes, which nobody writes after New; the consumer's
+      cursor with its copy of the producer's; and the producer's cursor with its
+      copy of the consumer's. head and tail count every item ever read and
+      written — they never wrap in practice (2^64 operations) — and a slot is the
+      cursor masked by the power-of-two storage size.
     fields:
       - doc: |-
-          slots holds the recycled storage; len(slots) is always exactly cap+1
-          (one slot is left empty so head == tail unambiguously means empty).
+          slots holds the recycled storage; its length is the power of two at
+          least cap, so a cursor finds its slot with a mask, never a division.
         name: slots
         type: "[]T"
+      - doc: mask is len(slots)-1.
+        name: mask
+        type: uint64
+      - doc: |-
+          cap is the logical capacity New was given: the ring is full when tail
+          is cap ahead of head, whatever the storage's length.
+        name: cap
+        type: uint64
+      - name: _
+        type: linePad
       - doc: head is the consumer's read cursor, advanced atomically by TryRead.
         name: head
         type: atomic.Uint64
+      - doc: |-
+          cachedTail is the consumer's last reading of tail, written by the
+          consumer alone: TryRead loads tail only when head has caught up with it.
+        name: cachedTail
+        type: uint64
+      - name: _
+        type: linePad
       - doc: tail is the producer's write cursor, advanced atomically by TryWrite.
         name: tail
         type: atomic.Uint64
-      - doc: cap is the number of usable slots (slots backing array is cap+1 long).
-        name: cap
+      - doc: |-
+          cachedHead is the producer's last reading of head, written by the
+          producer alone: TryWrite loads head only when the ring looks full.
+        name: cachedHead
         type: uint64
+      - name: _
+        type: linePad
     kind: struct
     methods:
       - doc: Capacity returns the number of usable slots in the ring.

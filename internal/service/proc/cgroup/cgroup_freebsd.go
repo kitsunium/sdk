@@ -282,3 +282,11 @@ func cgroupErr(cause error, code errs.Code, reason, public, private string) erro
 		ExitCode: exitOSErr,
 	})
 }
+
+// probe answers for rctl, which has no hierarchy: mounted and delegated when
+// the kernel carries RACCT, with no own group and no controllers to list.
+func probe(cfg groupConfig) (ProbeValue, error) {
+	usable := available()
+	//: WithRoot names nothing here; it is reported as given.
+	return ProbeValue{Root: cfg.root, Mounted: usable, Delegated: usable}, nil
+}

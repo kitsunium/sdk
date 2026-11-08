@@ -1,0 +1,50 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "pool",
+    srcs = [
+        "config.go",
+        "doc.go",
+        "gen_codes.go",
+        "pool.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/concur/pool",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":pool",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "pool_test",
+    srcs = [
+        "gen_api_test.go",
+        "gen_perf_test.go",
+        "perf_fixtures_test.go",
+        "pool_bench_test.go",
+        "pool_external_test.go",
+    ],
+    deps = [
+        ":pool",
+        "//internal/kernel/concur/group",
+        "//internal/kernel/errs",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

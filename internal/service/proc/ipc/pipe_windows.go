@@ -66,10 +66,58 @@ func (a pipeAddr) String() string { return string(a) }
 
 // pipeConn is a connected pipe instance: the os package's file, which reads,
 // writes and keeps deadlines on the runtime's poller, plus the addresses a
-// net.Conn has.
+// net.Conn has, the peer the kernel named, and — when it named one — a
+// handle on the peer's process, opened at the connection so the pid cannot
+// be another process's by the time files are received from it (#936).
 type pipeConn struct {
 	*os.File
 	addr pipeAddr
+	peer coreipc.PeerValue
+
+	procOnce sync.Once
+	proc     syscall.Handle
+}
+
+// newPipeConn wraps the connected instance h, naming its peer; connected is
+// when the connection completed, which the peer's process must predate.
+func newPipeConn(h syscall.Handle, name pipeAddr, peer coreipc.PeerValue, connected syscall.Filetime) *pipeConn {
+	c := &pipeConn{File: os.NewFile(uintptr(h), string(name)), addr: name, peer: peer, proc: syscall.InvalidHandle}
+	if peer.Verified {
+		c.proc = openPeerProcess(peer.PID, connected)
+	}
+	return c
+}
+
+// openPeerProcess opens the peer's process to duplicate handles out of it,
+// or returns InvalidHandle. A process created after the connection is not
+// the peer: the peer exited and its pid went to another process.
+func openPeerProcess(pid int, connected syscall.Filetime) syscall.Handle {
+	h, err := syscall.OpenProcess(processDupHandle|processQueryLimitedInfo, false, uint32(pid))
+	if err != nil {
+		return syscall.InvalidHandle
+	}
+	var created, exited, kernel, user syscall.Filetime
+	if err := syscall.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil || created.Nanoseconds() > connected.Nanoseconds() {
+		closeHandles(h)
+		return syscall.InvalidHandle
+	}
+	return h
+}
+
+// connectedNow is the time a connection completed.
+func connectedNow() syscall.Filetime {
+	var ft syscall.Filetime
+	syscall.GetSystemTimeAsFileTime(&ft)
+	return ft
+}
+
+// Close closes the pipe instance and the handle on the peer's process.
+func (c *pipeConn) Close() error {
+	c.procOnce.Do(func() {
+		closeHandles(c.proc)
+		c.proc = syscall.InvalidHandle
+	})
+	return c.File.Close()
 }
 
 // LocalAddr is the pipe's name.
@@ -212,7 +260,9 @@ func (a *pipeAcceptor) accept() (net.Conn, coreipc.PeerValue, error) {
 		case err != nil:
 			return nil, coreipc.PeerValue{}, err
 		}
-		return &pipeConn{File: os.NewFile(uintptr(h), string(a.name)), addr: a.name}, clientPeer(h), nil
+		connected := connectedNow()
+		peer := clientPeer(h)
+		return newPipeConn(h, a.name, peer, connected), peer, nil
 	}
 }
 
@@ -354,6 +404,7 @@ func dial(ctx context.Context, cfg *Config) (*coreipc.Conn, error) {
 	if err != nil {
 		return nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
 	}
+	connected := connectedNow()
 	pid, err := pipeProcess(procPipeServerProcess.Call, h)
 	var sid string
 	if err == nil {
@@ -368,8 +419,8 @@ func dial(ctx context.Context, cfg *Config) (*coreipc.Conn, error) {
 		closeHandles(h)
 		return nil, errs.Wrap(coreipc.EndpointForeign, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("sid", sid))
 	}
-	c := &pipeConn{File: os.NewFile(uintptr(h), string(name)), addr: name}
-	return &coreipc.Conn{Conn: c, Peer: coreipc.PeerValue{UID: -1, GID: -1, PID: int(pid), SID: sid, Verified: true}}, nil
+	peer := coreipc.PeerValue{UID: -1, GID: -1, PID: int(pid), SID: sid, Verified: true}
+	return &coreipc.Conn{Conn: newPipeConn(h, name, peer, connected), Peer: peer}, nil
 }
 
 // openPipe opens the pipe overlapped, retrying while every instance is

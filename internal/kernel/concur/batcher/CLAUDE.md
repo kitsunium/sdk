@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T11:00:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/kernel/concur/batcher/
 
 ## Purpose
@@ -25,17 +25,22 @@ type Config[T any] struct {
     WeightOf   func(T) int64       // nil => count-only (each item weighs 1, MaxWeight ignored)
     FlushEvery time.Duration       // >0 spawns a ticker joined by Close
     Clock      clock.Waiter        // the ticker's clock; nil => clock.System (a ManualClock in tests)
-    OnError    func(error)         // observes background ticker deliver failures (nil => no-op)
+    OnError    func(error)         // observes the batcher goroutine's deliver failures (nil => no-op)
+    FlushOn    FlushMode           // FlushCaller (zero) | FlushBackground — who delivers a capped batch
 }
+
+type FlushMode uint8
+const ( FlushCaller FlushMode = iota; FlushBackground )
 
 func NewBatcher[T any](deliver Sink[T], cfg Config[T]) *Batcher[T]
 func (b *Batcher[T]) Add(ctx context.Context, item T) error  // eager flush on cap; BatcherClosed after Close
 func (b *Batcher[T]) Flush(ctx context.Context) error        // synchronous; propagates deliver error
-func (b *Batcher[T]) Close(ctx context.Context) error        // stop ticker + final flush; idempotent
+func (b *Batcher[T]) Close(ctx context.Context) error        // stop the goroutine within ctx + final flush; idempotent
 
 // Sentinels (errs.Define-backed, kernel-range codes).
 var BatcherClosed        *errs.Error // 0.1.5.1 BATCHER_CLOSED
 var BatcherDeliverFailed *errs.Error // 0.1.5.2 BATCHER_DELIVER_FAILED
+var BatcherCloseTimedOut *errs.Error // 0.1.5.3 BATCHER_CLOSE_TIMED_OUT
 ```
 
 ## Conventions
@@ -54,13 +59,38 @@ var BatcherDeliverFailed *errs.Error // 0.1.5.2 BATCHER_DELIVER_FAILED
   closure concurrently. A `Sink` may assume serial invocation; cross-batch
   ordering is still not guaranteed. The separate mutex keeps a slow `Sink` from
   blocking producers appending into the next batch.
+- **A lifetime context for the batcher's own deliveries** (#1040, ADR 0216).
+  `NewBatcher` derives `life` from `context.Background()`; every delivery the
+  batcher's goroutine makes — a tick's, a background one's — runs under it,
+  and `Close` cancels it on every exit. `Close(ctx)` joins the goroutine
+  within `ctx` while it is inside a delivery (`busy`): when `ctx` ends first it
+  cancels `life`, returns `BatcherCloseTimedOut` wrapping `ctx`'s error with
+  the field `undelivered`, and leaves the final batch undelivered. An idle
+  goroutine is joined whatever `ctx` is: once `life` is cancelled, a delivery
+  it begins gives up before the Sink. The goroutine also waits for the Sink
+  within `life`, and `Close` within `ctx`: `acquire` takes `deliverMu` by
+  `TryLock`, then waits on `freed`, which `unlockDeliver` signals only while
+  such a bounded wait is counted — so a caller's `Add` / `Flush` keeps the
+  plain mutex path (`Add_CapFlush` unchanged; a channel semaphore measured
+  +11 %). A Sink that ignores its context cannot be stopped from outside.
+- **`FlushOn`** (#817, ADR 0216). `FlushCaller`, the zero value, delivers a
+  capped batch on the `Add` that filled it (the previous behaviour, its error
+  to that caller). `FlushBackground` makes the capped batch the `ready` one and
+  kicks the batcher's goroutine (started by `NewBatcher` even without a
+  `FlushEvery`); an `Add` that fills a second while `ready` is still waiting
+  waits for `room` within its context — memory bounded at the batch being
+  delivered, the ready one and the pending one —, its item staying pending
+  when its context ends. A background failure goes to `OnError`. `Flush` and
+  `Close` deliver `ready` before the pending batch, one `deliverMu` hold for
+  both.
 - **Closure carries the domain bits.** A pre-delivery reorder (CloudWatch's
   chronological `PutLogEvents` requirement) or a per-batch key (S3's object key)
   lives in the deliver closure — never in the batcher.
 - **`WeightOf` is the byte-vs-count axis.** Nil = count-only (each item weighs 1,
   `MaxWeight` ignored). Set it to a byte-size function for byte-capped batching.
-- **Two codes only.** `BatcherClosed` (Add/Flush after Close) and `BatcherDeliverFailed`
-  (the closure errored, wrapped so `errors.Is` reaches the cause).
+- **Three codes.** `BatcherClosed` (Add/Flush after Close), `BatcherDeliverFailed`
+  (the closure errored, wrapped so `errors.Is` reaches the cause) and
+  `BatcherCloseTimedOut` (Close's context ended first).
 
 ## Sentinels
 
@@ -68,6 +98,7 @@ var BatcherDeliverFailed *errs.Error // 0.1.5.2 BATCHER_DELIVER_FAILED
 |---|---|---|---|
 | `BatcherClosed` | `0x00_01_05_01` (0.1.5.1) | `BATCHER_CLOSED` | `Add` / `Flush` after `Close` |
 | `BatcherDeliverFailed` | `0x00_01_05_02` (0.1.5.2) | `BATCHER_DELIVER_FAILED` | `Add` / `Flush` / `Close` when the `Sink` errors |
+| `BatcherCloseTimedOut` | `0x00_01_05_03` (0.1.5.3) | `BATCHER_CLOSE_TIMED_OUT` | `Close` whose context ended before the goroutine stopped or the Sink was free |
 
 Match with `errs.HasCode(err, batcher.CodeBatcherDeliverFailed)` or
 `errors.Is(err, batcher.BatcherDeliverFailed)`.
@@ -95,5 +126,11 @@ Closed-after-Close + idempotent second Close, background ticker),
 when an injected `ManualClock` passes `FlushEvery`, concurrent
 producers + flusher race, serial `Sink` invocation (V6), every `Add` accepted
 while `Close` runs is delivered, deliver-closure-controls-order proof),
-`batcher_bench_test.go` (cap-flush `Add`, uncontended and contended, and the
-empty `Flush` fast path — the numbers are in `BENCH.md`).
+`lifetime_external_test.go` (#1040: a `Close` bounded while a tick flush is
+stuck in a Sink, the Sink cancelled and the ticker gone; the tick's context
+ended by `Close`; the final batch bounded behind a caller's flush; #817:
+`FlushBackground` never running the Sink on the producer, every item once
+and in order, concurrent producers losing nothing, a background failure to
+`OnError`), `batcher_bench_test.go` (cap-flush `Add`, uncontended and
+contended, the empty `Flush` fast path, and a 1 ms Sink under each
+`FlushMode` — the numbers are in `BENCH.md`).

@@ -47,10 +47,17 @@ The backend is cgroup v2 on Linux, a Job Object on Windows and rctl(8) on FreeBS
 
 ## Index
 
+- [Constants](<#constants>)
 - [func Available\(\) bool](<#Available>)
 - [func Create\(name string, opts ...Option\) \(g Group, err error\)](<#Create>)
+- [func Membership\(dir string\) \(string, error\)](<#Membership>)
 - [func MustCreate\(name string, opts ...Option\) Group](<#MustCreate>)
+- [func Probe\(opts ...Option\) \(ProbeResult, error\)](<#Probe>)
+- [func WithControllers\(ctrls ...Controller\) Option](<#WithControllers>)
 - [func WithRoot\(root string\) Option](<#WithRoot>)
+- [type Controller](<#Controller>)
+  - [func \(Controller\) Known\(\) bool](<#Controller.Known>)
+  - [func \(Controller\) String\(\) string](<#Controller.String>)
 - [type Group](<#Group>)
   - [func \(Group\) Add\(pid int\) error](<#Group.Add>)
   - [func \(Group\) Delete\(\) error](<#Group.Delete>)
@@ -61,7 +68,115 @@ The backend is cgroup v2 on Linux, a Job Object on Windows and rctl(8) on FreeBS
   - [func \(Group\) SetMemoryMax\(bytes int64\) error](<#Group.SetMemoryMax>)
   - [func \(Group\) SetPidsMax\(n int64\) error](<#Group.SetPidsMax>)
   - [func \(Group\) Thaw\(\) error](<#Group.Thaw>)
+- [type GroupEvents](<#GroupEvents>)
+- [type GroupReader](<#GroupReader>)
+  - [func \(GroupReader\) Members\(\) \(\[\]int, error\)](<#GroupReader.Members>)
+  - [func \(GroupReader\) Stat\(\) \(GroupStatValue, error\)](<#GroupReader.Stat>)
+- [type GroupSignaler](<#GroupSignaler>)
+  - [func \(GroupSignaler\) Contains\(pid int\) \(bool, error\)](<#GroupSignaler.Contains>)
+  - [func \(GroupSignaler\) Signal\(sig Signal\) error](<#GroupSignaler.Signal>)
+- [type GroupStat](<#GroupStat>)
+- [type GroupTree](<#GroupTree>)
+  - [func \(GroupTree\) Delegate\(uid int, gid int\) error](<#GroupTree.Delegate>)
+  - [func \(GroupTree\) DeleteTree\(\) error](<#GroupTree.DeleteTree>)
+  - [func \(GroupTree\) EnableControllers\(ctrls ...Controller\) error](<#GroupTree.EnableControllers>)
+  - [func \(GroupTree\) Path\(\) string](<#GroupTree.Path>)
+- [type GroupTuner](<#GroupTuner>)
+  - [func \(GroupTuner\) SetCPUMaxBurst\(burst time.Duration\) error](<#GroupTuner.SetCPUMaxBurst>)
+  - [func \(GroupTuner\) SetCPUSetCPUs\(cpus \[\]int\) error](<#GroupTuner.SetCPUSetCPUs>)
+  - [func \(GroupTuner\) SetCPUSetMems\(nodes \[\]int\) error](<#GroupTuner.SetCPUSetMems>)
+  - [func \(GroupTuner\) SetCPUWeight\(weight int64\) error](<#GroupTuner.SetCPUWeight>)
+  - [func \(GroupTuner\) SetIOLatency\(major uint32, minor uint32, target time.Duration\) error](<#GroupTuner.SetIOLatency>)
+  - [func \(GroupTuner\) SetIOWeight\(weight int64\) error](<#GroupTuner.SetIOWeight>)
+  - [func \(GroupTuner\) SetMemoryHigh\(bytes int64\) error](<#GroupTuner.SetMemoryHigh>)
+  - [func \(GroupTuner\) SetMemoryLow\(bytes int64\) error](<#GroupTuner.SetMemoryLow>)
+  - [func \(GroupTuner\) SetMemoryMin\(bytes int64\) error](<#GroupTuner.SetMemoryMin>)
+  - [func \(GroupTuner\) SetMemoryOOMGroup\(enabled bool\) error](<#GroupTuner.SetMemoryOOMGroup>)
+  - [func \(GroupTuner\) SetMemorySwapMax\(bytes int64\) error](<#GroupTuner.SetMemorySwapMax>)
+  - [func \(GroupTuner\) SetMemoryZswapMax\(bytes int64\) error](<#GroupTuner.SetMemoryZswapMax>)
+  - [func \(GroupTuner\) SetMemoryZswapWriteback\(enabled bool\) error](<#GroupTuner.SetMemoryZswapWriteback>)
+- [type GroupWatcher](<#GroupWatcher>)
+  - [func \(GroupWatcher\) Watch\(ctx context.Context\) \(\<-chan GroupEventsValue, error\)](<#GroupWatcher.Watch>)
+- [type IOStat](<#IOStat>)
+- [type JobLimiter](<#JobLimiter>)
+  - [func \(JobLimiter\) SetJobMemoryLimit\(bytes int64\) error](<#JobLimiter.SetJobMemoryLimit>)
+- [type MemoryEvents](<#MemoryEvents>)
 - [type Option](<#Option>)
+- [type ProbeResult](<#ProbeResult>)
+
+## Constants
+
+<a name="ControllerCPU"></a>
+```go
+const ControllerCPU Controller = 1
+```
+
+ControllerCPU distributes CPU time: cpu.weight, cpu.max, cpu.max.burst.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.ControllerCPU`.
+
+<a name="ControllerCPUSet"></a>
+```go
+const ControllerCPUSet Controller = 2
+```
+
+ControllerCPUSet pins tasks to CPUs and memory nodes: cpuset.cpus, cpuset.mems.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.ControllerCPUSet`.
+
+<a name="ControllerHugeTLB"></a>
+```go
+const ControllerHugeTLB Controller = 6
+```
+
+ControllerHugeTLB bounds huge-page use: hugetlb.\<size>.max.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.ControllerHugeTLB`.
+
+<a name="ControllerIO"></a>
+```go
+const ControllerIO Controller = 3
+```
+
+ControllerIO distributes block I/O: io.weight, io.max, io.latency.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.ControllerIO`.
+
+<a name="ControllerMemory"></a>
+```go
+const ControllerMemory Controller = 4
+```
+
+ControllerMemory bounds memory: memory.min/low/high/max, the swap and zswap limits, memory.oom.group.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.ControllerMemory`.
+
+<a name="ControllerMisc"></a>
+```go
+const ControllerMisc Controller = 8
+```
+
+ControllerMisc bounds scalar resources the kernel lists: misc.max.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.ControllerMisc`.
+
+<a name="ControllerPids"></a>
+```go
+const ControllerPids Controller = 5
+```
+
+ControllerPids bounds the number of tasks: pids.max.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.ControllerPids`.
+
+<a name="ControllerRDMA"></a>
+```go
+const ControllerRDMA Controller = 7
+```
+
+ControllerRDMA bounds RDMA resources: rdma.max.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.ControllerRDMA`.
 
 <a name="Available"></a>
 ## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
@@ -79,7 +194,16 @@ Available reports whether a kernel-enforced control-group backend is usable: on 
 func Create(name string, opts ...Option) (g Group, err error)
 ```
 
-Create makes a new control group named name and returns a Group bound to it — a cgroup v2 sub-group under the delegated root on Linux, a Job Object on Windows, a tracked rctl group on FreeBSD. It returns CgroupUnavailable when the Linux hierarchy is absent or not delegated, CgroupCreateFailed when creation fails, and UnsupportedPlatform on a platform with no control-group backend (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris).
+Create makes a new control group named name and returns a Group bound to it — a cgroup v2 sub-group under the delegated root on Linux, where name may be nested ("a/b") and never leaves the root, a Job Object on Windows, a tracked rctl group on FreeBSD. It returns CgroupUnavailable when the Linux hierarchy is absent or not delegated, CgroupControllerAbsent when WithControllers names a controller the root does not offer, CgroupCreateFailed when creation fails, and UnsupportedPlatform on a platform with no control-group backend (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris).
+
+<a name="Membership"></a>
+## func [Membership](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+```go
+func Membership(dir string) (string, error)
+```
+
+Membership returns the path /proc/\<pid>/cgroup names for a process of the group whose directory is dir — what process.AttachScope's Cgroup takes —: "/sys/fs/cgroup/system.slice/web.service" is "/system.slice/web.service". A group's Path is that directory, never this path. InvalidSpec when no cgroup2 mount holds dir; UnsupportedPlatform off Linux.
 
 <a name="MustCreate"></a>
 ## func [MustCreate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/cgroup.go>)
@@ -90,6 +214,24 @@ func MustCreate(name string, opts ...Option) Group
 
 MustCreate is like [Create](#Create) but panics with the typed error when creation fails — UnsupportedPlatform on a platform with no control-group backend (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris), or CgroupUnavailable when the Linux hierarchy is not delegated. It is the idiomatic Go MustX opt-in (like [regexp.MustCompile](https://pkg.go.dev/regexp#MustCompile)) for a consumer that chooses crash-on-unsupported at its own startup; the SDK itself never panics, and [Create](#Create) is the non-panicking form for normal use. The panic value is the typed error, so a top-level recover() can classify it via errs.CodeOf / HasCode.
 
+<a name="Probe"></a>
+## func [Probe](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+```go
+func Probe(opts ...Option) (ProbeResult, error)
+```
+
+Probe reports what the caller may do under a control-group root — WithRoot's, else the mount — where Available answers for the mount root alone. On a host that delegates a subtree, Probe(WithRoot(p.OwnGroup)) is the gate Create can be used behind. UnsupportedPlatform where no backend exists.
+
+<a name="WithControllers"></a>
+## func [WithControllers](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+```go
+func WithControllers(ctrls ...Controller) Option
+```
+
+WithControllers enables ctrls for the group Create makes, on Linux: they are written to the cgroup.subtree\_control of the root and of every group down to the new one before it is made, so its interface files for them exist. A controller the root does not offer is CgroupControllerAbsent before anything is made. Windows and FreeBSD accept it and ignore it.
+
 <a name="WithRoot"></a>
 ## func [WithRoot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
 
@@ -98,6 +240,39 @@ func WithRoot(root string) Option
 ```
 
 WithRoot overrides the parent directory under which Create makes the new control group, targeting a delegated sub-tree instead of the top-level mount. It is a cgroup v2 path: on Windows and FreeBSD, whose backends have no hierarchy, it is accepted and ignored.
+
+<a name="Controller"></a>
+## type [Controller](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+Controller is a cgroup v2 controller; String is its kernel name. It aliases the core value.
+
+```go
+type Controller = coreproc.Controller
+```
+
+Controller is an alias of `github.com/kitsunium/sdk/internal/core/proc.Controller`, declared as:
+
+```go
+type Controller uint8
+```
+
+<a name="Controller.Known"></a>
+### func \(Controller\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/groupctl.go>)
+
+```go
+func (Controller) Known() bool
+```
+
+Known reports whether c is one of the Controller constants.
+
+<a name="Controller.String"></a>
+### func \(Controller\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/groupctl.go>)
+
+```go
+func (Controller) String() string
+```
+
+String returns the controller's kernel name, "memory", or "controller(N)" for a value no constant holds.
 
 <a name="Group"></a>
 ## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
@@ -125,6 +300,12 @@ type Group interface {
 	// process-group kill, nothing escapes — a member that called setsid is still
 	// in the control group. Returns UnsupportedPlatform when cgroup.kill is absent
 	// (older kernels), so callers can fall back to SignalGroup.
+	//
+	// Kill a group nothing will be spawned into again: on Linux (measured on
+	// 6.12), after one cgroup.kill — an empty group's too — every child later
+	// cloned into the group (Spec.CgroupPath, CLONE_INTO_CGROUP) is SIGKILLed at
+	// its fork, while a process moved in by Add is not. To empty a group that
+	// will be reused, signal its members instead (GroupSignaler's Signal).
 	Kill() error
 	// SetCPUMax writes cpu.max as "quota period" (systemd CPUQuota=); a negative
 	// quota means "max".
@@ -180,6 +361,8 @@ func (Group) Kill() error
 
 Kill atomically SIGKILLs every process in the group by writing "1" to cgroup.kill (systemd KillMode=control-group; kernel >= 5.14). Unlike a process-group kill, nothing escapes — a member that called setsid is still in the control group. Returns UnsupportedPlatform when cgroup.kill is absent (older kernels), so callers can fall back to SignalGroup.
 
+Kill a group nothing will be spawned into again: on Linux (measured on 6.12), after one cgroup.kill — an empty group's too — every child later cloned into the group (Spec.CgroupPath, CLONE\_INTO\_CGROUP) is SIGKILLed at its fork, while a process moved in by Add is not. To empty a group that will be reused, signal its members instead (GroupSignaler's Signal).
+
 <a name="Group.SetCPUMax"></a>
 ### func \(Group\) [SetCPUMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
@@ -225,6 +408,527 @@ func (Group) Thaw() error
 
 Thaw resumes a frozen group by writing "0" to cgroup.freeze. Returns UnsupportedPlatform when cgroup.freeze is absent. Idempotent.
 
+<a name="GroupEvents"></a>
+## type [GroupEvents](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+GroupEvents is a group's state as GroupWatcher.Watch reads it: populated, frozen, the memory events. It aliases the core value.
+
+```go
+type GroupEvents = coreproc.GroupEventsValue
+```
+
+GroupEvents is an alias of `github.com/kitsunium/sdk/internal/core/proc.GroupEventsValue`, declared as:
+
+```go
+type GroupEvents struct {
+	// MemoryEvents counts what the group's memory limits did — memory.events,
+	// zero where the memory controller is not enabled for the group.
+	MemoryEvents MemoryEventsValue
+	// Populated reports that the group or a group beneath it holds a live
+	// process (cgroup.events "populated").
+	Populated    bool
+	// Frozen reports that the group is frozen (cgroup.events "frozen").
+	Frozen       bool
+}
+```
+
+<a name="GroupReader"></a>
+## type [GroupReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+GroupReader is the read half of a Group: Stat and Members. Assert it on the Group Create returns. It aliases the core port.
+
+```go
+type GroupReader = coreproc.GroupReader
+```
+
+GroupReader is an alias of `github.com/kitsunium/sdk/internal/core/proc.GroupReader`, declared as:
+
+```go
+type GroupReader interface {
+	// Members lists the pids of the group's processes and of the groups
+	// beneath it — the cgroup.procs of the subtree, the tracked set, the
+	// job's process list — in no promised order: a process a delegated
+	// service moved into a group of its own is still the group's.
+	Members() ([]int, error)
+	// Stat reads the group's counters: CPU time and throttling, memory now, at
+	// its peak and the events of its limits, the pid count, the I/O per device.
+	// It returns CgroupReadFailed when the group's own files cannot be read —
+	// the group was deleted.
+	Stat() (GroupStatValue, error)
+}
+```
+
+<a name="GroupReader.Members"></a>
+### func \(GroupReader\) [Members](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupReader) Members() ([]int, error)
+```
+
+Members lists the pids of the group's processes and of the groups beneath it — the cgroup.procs of the subtree, the tracked set, the job's process list — in no promised order: a process a delegated service moved into a group of its own is still the group's.
+
+<a name="GroupReader.Stat"></a>
+### func \(GroupReader\) [Stat](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupReader) Stat() (GroupStatValue, error)
+```
+
+Stat reads the group's counters: CPU time and throttling, memory now, at its peak and the events of its limits, the pid count, the I/O per device. It returns CgroupReadFailed when the group's own files cannot be read — the group was deleted.
+
+<a name="GroupSignaler"></a>
+## type [GroupSignaler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+GroupSignaler is the Linux sibling of a Group that signals every process of the group and of the groups beneath it, and says whether a pid is one of them: Signal and Contains. It aliases the core port.
+
+```go
+type GroupSignaler = coreproc.GroupSignaler
+```
+
+GroupSignaler is an alias of `github.com/kitsunium/sdk/internal/core/proc.GroupSignaler`, declared as:
+
+```go
+type GroupSignaler interface {
+	// Contains reports whether pid is a process of the group or of a group
+	// beneath it. CgroupReadFailed when the group's cgroup.procs cannot be read.
+	Contains(pid int) (bool, error)
+	// Signal sends sig to every process of the group and of the groups beneath
+	// it but the caller's own, reading cgroup.procs again until a pass finds no
+	// process it has not signalled, at most 64 passes. A process gone before the
+	// signal reached it is not an error; any other refusal is SignalFailed.
+	Signal(sig Signal) error
+}
+```
+
+<a name="GroupSignaler.Contains"></a>
+### func \(GroupSignaler\) [Contains](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupSignaler) Contains(pid int) (bool, error)
+```
+
+Contains reports whether pid is a process of the group or of a group beneath it. CgroupReadFailed when the group's cgroup.procs cannot be read.
+
+<a name="GroupSignaler.Signal"></a>
+### func \(GroupSignaler\) [Signal](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupSignaler) Signal(sig Signal) error
+```
+
+Signal sends sig to every process of the group and of the groups beneath it but the caller's own, reading cgroup.procs again until a pass finds no process it has not signalled, at most 64 passes. A process gone before the signal reached it is not an error; any other refusal is SignalFailed.
+
+<a name="GroupStat"></a>
+## type [GroupStat](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+GroupStat is what a group's tree has used, as GroupReader.Stat read it; Partial says some counters could not be. It aliases the core value.
+
+```go
+type GroupStat = coreproc.GroupStatValue
+```
+
+GroupStat is an alias of `github.com/kitsunium/sdk/internal/core/proc.GroupStatValue`, declared as:
+
+```go
+type GroupStat struct {
+	// CPUUsage is the CPU time the group's tasks used, user and system.
+	CPUUsage      time.Duration
+	// CPUUser is the user-mode share of CPUUsage.
+	CPUUser       time.Duration
+	// CPUSystem is the kernel-mode share of CPUUsage.
+	CPUSystem     time.Duration
+	// ThrottledTime is how long cpu.max held the group's tasks back.
+	ThrottledTime time.Duration
+	// NrThrottled is how many periods cpu.max throttled the group in.
+	NrThrottled   int64
+	// MemoryCurrent is the memory the group holds now, in bytes.
+	MemoryCurrent int64
+	// MemoryPeak is the most memory the group held, in bytes (Linux 5.19's
+	// memory.peak; Windows' peak job memory).
+	MemoryPeak    int64
+	// MemoryEvents counts what the group's memory limits did.
+	MemoryEvents  MemoryEventsValue
+	// PidsCurrent is how many tasks the group holds now.
+	PidsCurrent   int64
+	// IO is the I/O the group did, one entry per device.
+	IO            []IOStatValue
+	// Partial reports that at least one counter could not be read and is zero.
+	Partial       bool
+}
+```
+
+<a name="GroupTree"></a>
+## type [GroupTree](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+GroupTree is the Linux sibling of a Group for the group as a node of the hierarchy: Path, EnableControllers, Delegate and DeleteTree. It aliases the core port.
+
+```go
+type GroupTree = coreproc.GroupTree
+```
+
+GroupTree is an alias of `github.com/kitsunium/sdk/internal/core/proc.GroupTree`, declared as:
+
+```go
+type GroupTree interface {
+	// Delegate hands the group to the user uid and the group gid (systemd
+	// Delegate=yes): it changes the owner of the directory and of the files the
+	// kernel lists in /sys/kernel/cgroup/delegate — cgroup.procs,
+	// cgroup.threads and cgroup.subtree_control where that list is absent — so
+	// that user may create groups beneath it, move its processes and enable
+	// controllers. -1 keeps an owner unchanged. A file the group lacks is
+	// skipped; a refused change is CgroupWriteFailed.
+	Delegate(uid int, gid int) error
+	// DeleteTree removes the group and every group beneath it, deepest first:
+	// what a delegated unit made under its group goes with it, as systemd
+	// cleans a Delegate=yes unit up. A group still holding a process stops it
+	// with CgroupDeleteFailed naming that group — Kill, and wait for Watch to
+	// say the group is empty, first. A link is never followed.
+	DeleteTree() error
+	// EnableControllers writes ctrls to the group's cgroup.subtree_control, so
+	// the groups beneath it get their interface files. A controller the group's
+	// cgroup.controllers does not list is CgroupControllerAbsent, and a
+	// malformed name InvalidSpec, before anything is written; while the group
+	// itself holds a process the kernel refuses with EBUSY, CgroupWriteFailed
+	// (cgroup v2's no-internal-process rule).
+	EnableControllers(ctrls ...Controller) error
+	// Path is the group's directory: the CgroupPath a Spec spawns a child straight into.
+	Path() string
+}
+```
+
+<a name="GroupTree.Delegate"></a>
+### func \(GroupTree\) [Delegate](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTree) Delegate(uid int, gid int) error
+```
+
+Delegate hands the group to the user uid and the group gid (systemd Delegate=yes): it changes the owner of the directory and of the files the kernel lists in /sys/kernel/cgroup/delegate — cgroup.procs, cgroup.threads and cgroup.subtree\_control where that list is absent — so that user may create groups beneath it, move its processes and enable controllers. -1 keeps an owner unchanged. A file the group lacks is skipped; a refused change is CgroupWriteFailed.
+
+<a name="GroupTree.DeleteTree"></a>
+### func \(GroupTree\) [DeleteTree](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTree) DeleteTree() error
+```
+
+DeleteTree removes the group and every group beneath it, deepest first: what a delegated unit made under its group goes with it, as systemd cleans a Delegate=yes unit up. A group still holding a process stops it with CgroupDeleteFailed naming that group — Kill, and wait for Watch to say the group is empty, first. A link is never followed.
+
+<a name="GroupTree.EnableControllers"></a>
+### func \(GroupTree\) [EnableControllers](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTree) EnableControllers(ctrls ...Controller) error
+```
+
+EnableControllers writes ctrls to the group's cgroup.subtree\_control, so the groups beneath it get their interface files. A controller the group's cgroup.controllers does not list is CgroupControllerAbsent, and a malformed name InvalidSpec, before anything is written; while the group itself holds a process the kernel refuses with EBUSY, CgroupWriteFailed (cgroup v2's no-internal-process rule).
+
+<a name="GroupTree.Path"></a>
+### func \(GroupTree\) [Path](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTree) Path() string
+```
+
+Path is the group's directory: the CgroupPath a Spec spawns a child straight into.
+
+<a name="GroupTuner"></a>
+## type [GroupTuner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+GroupTuner is the Linux sibling of a Group that writes the cgroup v2 files Group does not: memory.min/low/high, the swap and zswap limits, memory.oom.group, cpu.weight, cpu.max.burst, the cpusets, io.weight and io.latency. Assert it on the Group Create returns. It aliases the core port.
+
+```go
+type GroupTuner = coreproc.GroupTuner
+```
+
+GroupTuner is an alias of `github.com/kitsunium/sdk/internal/core/proc.GroupTuner`, declared as:
+
+```go
+type GroupTuner interface {
+	// SetCPUMaxBurst writes cpu.max.burst, the CPU time the group may borrow
+	// above cpu.max's quota in a period, in microseconds; a negative burst is
+	// InvalidSpec.
+	SetCPUMaxBurst(burst time.Duration) error
+	// SetCPUSetCPUs writes cpuset.cpus (systemd AllowedCPUs=) in the kernel's
+	// list form, "0-3,8"; an empty list writes "", the parent's CPUs. A
+	// negative CPU is InvalidSpec.
+	SetCPUSetCPUs(cpus []int) error
+	// SetCPUSetMems writes cpuset.mems (systemd AllowedMemoryNodes=) in the
+	// list form SetCPUSetCPUs writes.
+	SetCPUSetMems(nodes []int) error
+	// SetCPUWeight writes cpu.weight (systemd CPUWeight=), the group's share of
+	// CPU against its siblings, 1 to 10000 (100 by default).
+	SetCPUWeight(weight int64) error
+	// SetIOLatency writes the io.latency line of the device major:minor
+	// (systemd IODeviceLatencyTargetSec=): the latency the group's I/O is
+	// protected to, in microseconds; zero removes it, and a negative target is
+	// InvalidSpec.
+	SetIOLatency(major uint32, minor uint32, target time.Duration) error
+	// SetIOWeight writes io.weight's default (systemd IOWeight=), the group's
+	// share of I/O against its siblings, 1 to 10000 (100 by default).
+	SetIOWeight(weight int64) error
+	// SetMemoryHigh writes memory.high (systemd MemoryHigh=), the throttle
+	// above which the group's allocations are slowed and reclaimed; a negative
+	// value writes "max".
+	SetMemoryHigh(bytes int64) error
+	// SetMemoryLow writes memory.low (systemd MemoryLow=), the memory reclaimed
+	// from the group only when nothing else can be; a negative value writes
+	// "max".
+	SetMemoryLow(bytes int64) error
+	// SetMemoryMin writes memory.min (systemd MemoryMin=), the memory the group
+	// keeps whatever the pressure; a negative value writes "max".
+	SetMemoryMin(bytes int64) error
+	// SetMemoryOOMGroup writes memory.oom.group: true makes the OOM killer end
+	// the whole group rather than one task of it (systemd OOMPolicy=kill).
+	SetMemoryOOMGroup(enabled bool) error
+	// SetMemorySwapMax writes memory.swap.max (systemd MemorySwapMax=); a
+	// negative value writes "max".
+	SetMemorySwapMax(bytes int64) error
+	// SetMemoryZswapMax writes memory.zswap.max (systemd MemoryZSwapMax=); a
+	// negative value writes "max".
+	SetMemoryZswapMax(bytes int64) error
+	// SetMemoryZswapWriteback writes memory.zswap.writeback (systemd
+	// MemoryZSwapWriteback=, Linux 6.8): false keeps the group's compressed
+	// pages from being written back to swap.
+	SetMemoryZswapWriteback(enabled bool) error
+}
+```
+
+<a name="GroupTuner.SetCPUMaxBurst"></a>
+### func \(GroupTuner\) [SetCPUMaxBurst](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetCPUMaxBurst(burst time.Duration) error
+```
+
+SetCPUMaxBurst writes cpu.max.burst, the CPU time the group may borrow above cpu.max's quota in a period, in microseconds; a negative burst is InvalidSpec.
+
+<a name="GroupTuner.SetCPUSetCPUs"></a>
+### func \(GroupTuner\) [SetCPUSetCPUs](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetCPUSetCPUs(cpus []int) error
+```
+
+SetCPUSetCPUs writes cpuset.cpus (systemd AllowedCPUs=) in the kernel's list form, "0-3,8"; an empty list writes "", the parent's CPUs. A negative CPU is InvalidSpec.
+
+<a name="GroupTuner.SetCPUSetMems"></a>
+### func \(GroupTuner\) [SetCPUSetMems](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetCPUSetMems(nodes []int) error
+```
+
+SetCPUSetMems writes cpuset.mems (systemd AllowedMemoryNodes=) in the list form SetCPUSetCPUs writes.
+
+<a name="GroupTuner.SetCPUWeight"></a>
+### func \(GroupTuner\) [SetCPUWeight](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetCPUWeight(weight int64) error
+```
+
+SetCPUWeight writes cpu.weight (systemd CPUWeight=), the group's share of CPU against its siblings, 1 to 10000 (100 by default).
+
+<a name="GroupTuner.SetIOLatency"></a>
+### func \(GroupTuner\) [SetIOLatency](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetIOLatency(major uint32, minor uint32, target time.Duration) error
+```
+
+SetIOLatency writes the io.latency line of the device major:minor (systemd IODeviceLatencyTargetSec=): the latency the group's I/O is protected to, in microseconds; zero removes it, and a negative target is InvalidSpec.
+
+<a name="GroupTuner.SetIOWeight"></a>
+### func \(GroupTuner\) [SetIOWeight](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetIOWeight(weight int64) error
+```
+
+SetIOWeight writes io.weight's default (systemd IOWeight=), the group's share of I/O against its siblings, 1 to 10000 (100 by default).
+
+<a name="GroupTuner.SetMemoryHigh"></a>
+### func \(GroupTuner\) [SetMemoryHigh](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetMemoryHigh(bytes int64) error
+```
+
+SetMemoryHigh writes memory.high (systemd MemoryHigh=), the throttle above which the group's allocations are slowed and reclaimed; a negative value writes "max".
+
+<a name="GroupTuner.SetMemoryLow"></a>
+### func \(GroupTuner\) [SetMemoryLow](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetMemoryLow(bytes int64) error
+```
+
+SetMemoryLow writes memory.low (systemd MemoryLow=), the memory reclaimed from the group only when nothing else can be; a negative value writes "max".
+
+<a name="GroupTuner.SetMemoryMin"></a>
+### func \(GroupTuner\) [SetMemoryMin](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetMemoryMin(bytes int64) error
+```
+
+SetMemoryMin writes memory.min (systemd MemoryMin=), the memory the group keeps whatever the pressure; a negative value writes "max".
+
+<a name="GroupTuner.SetMemoryOOMGroup"></a>
+### func \(GroupTuner\) [SetMemoryOOMGroup](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetMemoryOOMGroup(enabled bool) error
+```
+
+SetMemoryOOMGroup writes memory.oom.group: true makes the OOM killer end the whole group rather than one task of it (systemd OOMPolicy=kill).
+
+<a name="GroupTuner.SetMemorySwapMax"></a>
+### func \(GroupTuner\) [SetMemorySwapMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetMemorySwapMax(bytes int64) error
+```
+
+SetMemorySwapMax writes memory.swap.max (systemd MemorySwapMax=); a negative value writes "max".
+
+<a name="GroupTuner.SetMemoryZswapMax"></a>
+### func \(GroupTuner\) [SetMemoryZswapMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetMemoryZswapMax(bytes int64) error
+```
+
+SetMemoryZswapMax writes memory.zswap.max (systemd MemoryZSwapMax=); a negative value writes "max".
+
+<a name="GroupTuner.SetMemoryZswapWriteback"></a>
+### func \(GroupTuner\) [SetMemoryZswapWriteback](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupTuner) SetMemoryZswapWriteback(enabled bool) error
+```
+
+SetMemoryZswapWriteback writes memory.zswap.writeback (systemd MemoryZSwapWriteback=, Linux 6.8): false keeps the group's compressed pages from being written back to swap.
+
+<a name="GroupWatcher"></a>
+## type [GroupWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+GroupWatcher is the Linux sibling of a Group that follows cgroup.events and memory.events: Watch. It aliases the core port.
+
+```go
+type GroupWatcher = coreproc.GroupWatcher
+```
+
+GroupWatcher is an alias of `github.com/kitsunium/sdk/internal/core/proc.GroupWatcher`, declared as:
+
+```go
+type GroupWatcher interface {
+	// Watch returns a channel holding the group's state first, then its state
+	// after each change the kernel announces: populated, frozen, the memory
+	// events. The channel holds one value, and a burst coalesces into the
+	// latest — published even when the burst left the state as it was, so a
+	// reader that read the group meanwhile learns it changed back: the watch
+	// never blocks on its reader. It is closed when ctx ends, and when the
+	// group is gone, after a last value holding no process; a reader whose ctx
+	// is not done reads the close as the group's removal. CgroupReadFailed
+	// when the group's cgroup.events cannot be watched or read.
+	Watch(ctx context.Context) (<-chan GroupEventsValue, error)
+}
+```
+
+<a name="GroupWatcher.Watch"></a>
+### func \(GroupWatcher\) [Watch](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (GroupWatcher) Watch(ctx context.Context) (<-chan GroupEventsValue, error)
+```
+
+Watch returns a channel holding the group's state first, then its state after each change the kernel announces: populated, frozen, the memory events. The channel holds one value, and a burst coalesces into the latest — published even when the burst left the state as it was, so a reader that read the group meanwhile learns it changed back: the watch never blocks on its reader. It is closed when ctx ends, and when the group is gone, after a last value holding no process; a reader whose ctx is not done reads the close as the group's removal. CgroupReadFailed when the group's cgroup.events cannot be watched or read.
+
+<a name="IOStat"></a>
+## type [IOStat](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+IOStat is one device's I/O by a group. It aliases the core value.
+
+```go
+type IOStat = coreproc.IOStatValue
+```
+
+IOStat is an alias of `github.com/kitsunium/sdk/internal/core/proc.IOStatValue`, declared as:
+
+```go
+type IOStat struct {
+	// Major is the device's major number.
+	Major  uint32
+	// Minor is the device's minor number.
+	Minor  uint32
+	// RBytes is the bytes read.
+	RBytes uint64
+	// WBytes is the bytes written.
+	WBytes uint64
+	// RIOs is the read operations.
+	RIOs   uint64
+	// WIOs is the write operations.
+	WIOs   uint64
+}
+```
+
+<a name="JobLimiter"></a>
+## type [JobLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+JobLimiter is the Windows sibling of a Group that caps the memory of the whole Job Object, where SetMemoryMax caps each process: SetJobMemoryLimit. It aliases the core port.
+
+```go
+type JobLimiter = coreproc.JobLimiter
+```
+
+JobLimiter is an alias of `github.com/kitsunium/sdk/internal/core/proc.JobLimiter`, declared as:
+
+```go
+type JobLimiter interface {
+	// SetJobMemoryLimit caps the memory committed by every process of the job
+	// together (JOB_OBJECT_LIMIT_JOB_MEMORY); a negative value removes the cap.
+	// CgroupWriteFailed when the job refuses it.
+	SetJobMemoryLimit(bytes int64) error
+}
+```
+
+<a name="JobLimiter.SetJobMemoryLimit"></a>
+### func \(JobLimiter\) [SetJobMemoryLimit](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (JobLimiter) SetJobMemoryLimit(bytes int64) error
+```
+
+SetJobMemoryLimit caps the memory committed by every process of the job together (JOB\_OBJECT\_LIMIT\_JOB\_MEMORY); a negative value removes the cap. CgroupWriteFailed when the job refuses it.
+
+<a name="MemoryEvents"></a>
+## type [MemoryEvents](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+MemoryEvents counts what a group's memory limits did. It aliases the core value.
+
+```go
+type MemoryEvents = coreproc.MemoryEventsValue
+```
+
+MemoryEvents is an alias of `github.com/kitsunium/sdk/internal/core/proc.MemoryEventsValue`, declared as:
+
+```go
+type MemoryEvents struct {
+	// Low counts reclaims under memory.low's protection.
+	Low     int64
+	// High counts the times the group was throttled above memory.high.
+	High    int64
+	// Max counts the times the group hit memory.max.
+	Max     int64
+	// OOM counts the times the group ran out of memory.
+	OOM     int64
+	// OOMKill counts the tasks the OOM killer ended in the group.
+	OOMKill int64
+}
+```
+
 <a name="Option"></a>
 ## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
 
@@ -238,6 +942,35 @@ Option is an alias of `github.com/kitsunium/sdk/internal/service/proc/cgroup.Opt
 
 ```go
 type Option func(*groupConfig)
+```
+
+<a name="ProbeResult"></a>
+## type [ProbeResult](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
+
+ProbeResult is what Probe found under a control-group root: whether it is mounted, whether the caller may create a group there, its controllers, and the caller's own cgroup. It aliases the service value.
+
+```go
+type ProbeResult = svccgroup.ProbeValue
+```
+
+ProbeResult is an alias of `github.com/kitsunium/sdk/internal/service/proc/cgroup.ProbeValue`, declared as:
+
+```go
+type ProbeResult struct {
+	// Root is the directory probed.
+	Root        string
+	// OwnGroup is the directory of this process's own unified cgroup — the
+	// root a delegated caller passes back as WithRoot — or empty where there
+	// is none to name.
+	OwnGroup    string
+	// Controllers are the controllers Root's cgroup.controllers lists.
+	Controllers []string
+	// Mounted reports that Root is a cgroup v2 directory.
+	Mounted     bool
+	// Delegated reports that the caller may create a group under Root: a
+	// uniquely named one was created and removed.
+	Delegated   bool
+}
 ```
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

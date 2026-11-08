@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -38,7 +39,8 @@ const (
 	drainPolls int           = 100
 )
 
-// maxRSSKB (in maxrss_rss64_unix.go / maxrss_rss32_unix.go) reports the peak
+// childwait.MaxRSSKB (its maxrss_rss64_unix.go / maxrss_rss32_unix.go — moved
+// there by #1136, so a reaper reports an orphan in the same KiB) reports the peak
 // resident set size in KiB from the wait4 rusage. Rusage.Maxrss is int64
 // on a 64-bit GOARCH but int32 on 386/arm, so the widening lives in a per-width
 // file: the 64-bit path needs no cast, the 32-bit path widens to int64. Both
@@ -67,6 +69,9 @@ type handle struct {
 	waitVal  coreproc.ExitValue
 	waitErr  error
 	done     chan struct{}
+	// settled is closed once Wait has its whole outcome — the exit and the
+	// drained (or cut) capture — so WaitContext never returns before it.
+	settled chan struct{}
 
 	// clk is what Stop's grace window and the SIGKILL resend interval are
 	// measured on: clock.System from newHandle, a ManualClock in a white-box
@@ -88,7 +93,7 @@ func newHandle(p *os.Process, claim *childwait.Claim, setpgid bool, stdio *stdio
 	//: group and group operations degrade to the leader (see groupTarget).
 	return &handle{
 		proc: p, claim: claim, pid: p.Pid, pgid: p.Pid, setpgid: setpgid, stdio: stdio,
-		done: make(chan struct{}), clk: clock.System, kill: syscall.Kill,
+		done: make(chan struct{}), settled: make(chan struct{}), clk: clock.System, kill: syscall.Kill,
 	}
 }
 
@@ -122,6 +127,8 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 	//: the close(h.done) below is therefore executed at most once — the Once is
 	//: the guard against a double-close panic.
 	h.waitOnce.Do(func() {
+		//: WaitContext observes the whole outcome, never half of it.
+		defer close(h.settled)
 		ev, swept, wErr := collectExit(h.proc, h.claim)
 		//: a swept status leaves proc unwaited: free its handle now.
 		if swept {
@@ -131,8 +138,9 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 		close(h.done)
 		//: join the capture copiers so every byte the child wrote has reached the
 		//: caller's writers before Wait returns, and no copier goroutine leaks.
-		//: the child's exit closed its write ends, so the copiers drain to EOF.
-		h.stdio.wait()
+		//: the child's exit closed its write ends — but a process it left behind
+		//: may hold them still, so the join is bounded by the drain grace.
+		cut, held, delivered := h.stdio.drainBounded()
 		//: a status nobody could observe (not a non-zero exit) is a typed WAIT_FAILED.
 		if wErr != nil {
 			//: wrap the cause under the central WAIT_FAILED fields.
@@ -142,6 +150,13 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 		}
 		//: a collected status yields the translated exit outcome.
 		h.waitVal = ev
+		//: the grace closed on pipes still held: the exit stands, the drain did not.
+		if cut {
+			h.waitErr = wrapStdioDrainTimeout(errs.Int("pid", h.pid),
+				errs.String("held", strings.Join(held, ",")), errs.Int("bytes", int(delivered)))
+			//: the capture error, if any, is secondary to the cut.
+			return
+		}
 		//: a clean exit whose capture writer failed surfaces the typed capture
 		//: error (os/exec semantics) — the exit status still stands in waitVal.
 		if cErr := h.stdio.copyError(); cErr != nil {
@@ -239,6 +254,39 @@ func (h *handle) leaderReaped() bool {
 	_, collected := h.claim.Collected()
 	//: a status on the claim means a sweep reaped the leader.
 	return collected
+}
+
+// WaitContext waits like Wait until the process exits or ctx is done. When
+// ctx ends first it returns ctx's error and the child keeps running; a later
+// Wait or WaitContext still reports the real exit.
+//
+// Goroutine lifecycle: it launches reapInBackground, which drives the
+// once-only Wait and returns once the child is reaped and its capture drained
+// — bounded by the drain grace — whether or not this call is still waiting.
+func (h *handle) WaitContext(ctx context.Context) (exit coreproc.ExitValue, err error) {
+	//: a settled handle answers at once, whatever ctx says.
+	select {
+	case <-h.settled:
+		//: the memoised outcome.
+		return h.waitVal, h.waitErr
+	default:
+	}
+	//: an expired ctx returns before any goroutine starts.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		//: the child keeps running.
+		return coreproc.ExitValue{}, ctxErr
+	}
+	//: drive the reap in the background so this select can leave on ctx.
+	go h.reapInBackground()
+	//: race the whole outcome against ctx.
+	select {
+	case <-h.settled:
+		//: the memoised outcome.
+		return h.waitVal, h.waitErr
+	case <-ctx.Done():
+		//: the caller stops waiting; the child does not stop.
+		return coreproc.ExitValue{}, ctx.Err()
+	}
 }
 
 // Signal delivers sig to the leader process only (kill(pid, sig)). A leader
@@ -538,6 +586,8 @@ func exitValueFrom(state *os.ProcessState) coreproc.ExitValue {
 	if ru != nil {
 		//: translate the rusage accounting into the ExitValue.
 		readRusage(ru, &out)
+		//: and the faults, block I/O and context switches beside it.
+		out.Usage = childwait.UsageOf(ru)
 	}
 	//: the exit outcome that could be read.
 	return out
@@ -556,22 +606,27 @@ func exitValue(ws syscall.WaitStatus, ru *syscall.Rusage) coreproc.ExitValue {
 	if ws.Signaled() {
 		out.Signaled = true
 		out.Signal = coreproc.Signal(ws.Signal())
+		//: whether that death left a core image — a crash to collect, not a kill.
+		out.CoreDumped = ws.CoreDump()
 	}
 	//: CPU time and peak RSS live in the wait4 rusage when the platform supplies it.
 	if ru != nil {
 		//: translate the rusage accounting into the ExitValue.
 		readRusage(ru, &out)
+		//: and the faults, block I/O and context switches beside it.
+		out.Usage = childwait.UsageOf(ru)
 	}
 	//: a fully-populated exit outcome for Wait to memoise.
 	return out
 }
 
-// readRusage fills out's CPU times and MaxRSS from the wait4 rusage ru.
+// readRusage fills out's CPU times and MaxRSS from the wait4 rusage ru; the
+// remaining counters are childwait.UsageOf's.
 func readRusage(ru *syscall.Rusage, out *coreproc.ExitValue) {
 	//: combine user/system CPU time and peak RSS into the ExitValue.
 	out.UserTime = timevalToDuration(ru.Utime)
 	out.SystemTime = timevalToDuration(ru.Stime)
-	out.MaxRSS = maxRSSKB(ru)
+	out.MaxRSS = childwait.MaxRSSKB(ru)
 }
 
 // timevalToDuration converts a syscall.Timeval (seconds + microseconds) to a

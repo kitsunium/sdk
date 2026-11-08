@@ -2,6 +2,31 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      maxNameBytes is systemd's FDNAME_MAX: the longest name LISTEN_FDNAMES
+      carries.
+    items:
+      - name: maxNameBytes
+        type: int
+        value: "255"
+    name: maxNameBytes
+  - doc: |-
+      unknownName is what a descriptor handed without a name is announced as, as
+      sd_listen_fds_with_names(3) names every descriptor when LISTEN_FDNAMES is
+      absent.
+    items:
+      - name: unknownName
+        type: string
+        value: "\"unknown\""
+    name: unknownName
+  - doc: |-
+      exitUsage is sysexits.h EX_USAGE (64), restated to wrap the central
+      INVALID_FD_NAME sentinel without re-Defining the code.
+    items:
+      - name: exitUsage
+        type: int
+        value: "64"
+    name: exitUsage
+  - doc: |-
       listenFdStart is SD_LISTEN_FDS_START: the first inherited socket is fd 3, after
       stdin/stdout/stderr.
     items:
@@ -34,6 +59,15 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - maxNameBytes
+      - unknownName
+      - exitUsage
+      - NamedFileValue
+      - CheckName
+      - announced
+      - wrapInvalidName
+    name: names.go
+  - decls:
       - listenFdStart
       - exitOSErr
       - envFds
@@ -47,12 +81,29 @@ files:
       - Listeners
       - WithNames
       - Prepare
+      - PrepareFiles
+      - checkNames
+      - activate
+      - closeAll
       - listenerFile
       - fileOrWrap
       - envWithout
       - clearEnv
     name: sdlisten_unix.go
 functions:
+  - name: CheckName
+    params: name string
+    results: error
+  - doc: announced is the name LISTEN_FDNAMES gives a descriptor named name.
+    name: announced
+    params: name string
+    results: string
+  - doc: |-
+      wrapInvalidName is the central InvalidFDName sentinel naming the name and
+      why it was refused.
+    name: wrapInvalidName
+    params: name, why string
+    results: error
   - doc: |-
       dropErr intentionally discards a non-actionable cleanup error (a best-effort
       close or env unset), so the error audit treats the discard as deliberate.
@@ -104,6 +155,22 @@ functions:
   - name: Prepare
     params: child *coreproc.Spec, named map[string]net.Listener
     results: error
+  - name: PrepareFiles
+    params: child *coreproc.Spec, files []NamedFileValue
+    results: error
+  - doc: checkNames checks every name as CheckName does.
+    name: checkNames
+    params: names []string
+    results: error
+  - doc: |-
+      activate puts acts at fd 3 on in child and the protocol's variables in its
+      environment: LISTEN_FDS and LISTEN_FDNAMES in Env, LISTEN_PID in PIDEnv —
+      set by the spawn to the child's own PID after the fork.
+    name: activate
+    params: child *coreproc.Spec, acts []*os.File, names []string
+  - doc: closeAll closes files this package duplicated and no longer hands over.
+    name: closeAll
+    params: files []*os.File
   - doc: |-
       listenerFile returns the dup'd *os.File backing a TCP or Unix listener; other
       listener kinds have no portable fd and are rejected.
@@ -139,4 +206,13 @@ package:
   importPath: github.com/kitsunium/sdk/internal/service/proc/systemd/listen
   name: listen
   purpose: Package listen — non-Unix stub.
-types: []
+types:
+  - fields:
+      - doc: Name is the descriptor's name; empty is announced as "unknown".
+        name: Name
+        type: string
+      - doc: File is the descriptor; PrepareFiles neither duplicates nor closes it.
+        name: File
+        type: "*os.File"
+    kind: struct
+    name: NamedFileValue

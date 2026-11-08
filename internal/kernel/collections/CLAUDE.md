@@ -24,7 +24,7 @@ them is in `concur/`.
 |---|---|---|
 | `cache/` | `Cache[K, V]` — LRU and TTL on the kernel clock, `Fetch` because a hit mutates (ADR 0025) | `pkg/v1/data/cache`, beside the cache domain it underlies (ADR 0049) |
 | `heap/` | `Heap[T]` — a binary heap ordered by the caller's comparison, no `container/heap` interface | `pkg/v1/collections/heap`, an alias (ADR 0159 §4) |
-| `ring/` | a single-producer single-consumer lock-free bounded queue (ADR 0006); the only member with codes, `0.1.3.*` | `pkg/v1/collections/ring`, an alias (ADR 0159 §4) — single-producer still: published ahead of the multi-producer mode §2 plans, which arrives as another constructor returning the same, now frozen, `Queue` |
+| `ring/` | a single-producer single-consumer lock-free bounded queue (ADR 0006), and its multi-producer sibling `NewMulti` / `MultiQueue` (ADR 0216); the only member with codes, `0.1.3.*` | `pkg/v1/collections/ring`, an alias (ADR 0159 §4) — the multi-producer mode arrived as another constructor and a sibling interface, `Queue` frozen (ADR 0039) |
 
 A published member's exported shape is part of the public API: a
 `pkg/v1/collections/<name>` alias names the very type declared here, and
