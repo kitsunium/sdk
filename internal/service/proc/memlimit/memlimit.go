@@ -13,6 +13,11 @@ import (
 // either a byte count or the literal "max".
 const cgroupV2LimitFile string = "memory.max"
 
+// cgroupV2HighFile is the unified-hierarchy throttle filename: above it the
+// kernel reclaims and slows the group's allocations. Same format as
+// memory.max, "max" meaning none.
+const cgroupV2HighFile string = "memory.high"
+
 // cgroupV1LimitFile is the legacy hierarchy memory cap filename. Holds a byte
 // count, using a near-int64-max sentinel to mean "unlimited".
 const cgroupV1LimitFile string = "memory.limit_in_bytes"
@@ -59,7 +64,10 @@ const minimumLimitBytes int64 = 64 << 20
 //
 // The allowance is the tightest cap governing this process: resolved from
 // /proc/self/cgroup so a child cgroup is honoured, then minimised across its
-// ancestors and across both hierarchies on a hybrid host.
+// ancestors and across both hierarchies on a hybrid host. On cgroup v2 it is
+// minimised across memory.high as well as memory.max: the kernel throttles a
+// group above memory.high long before memory.max kills it, so the throttle is
+// the working cap. The result's Bound names which of the two set it.
 //
 // It leaves the runtime default untouched — and says which of the three reasons
 // applied — when the operator set GOMEMLIMIT to a non-empty value, when no
@@ -77,6 +85,22 @@ func applyFrom(
 	readFile func(string) ([]byte, error),
 	setLimit func(int64) int64,
 ) coreproc.MemoryLimitValue {
+	derived := deriveWith(defaultConfig(), lookup, readFile)
+	//: only a real derivation installs anything.
+	if derived.Applied() {
+		setLimit(derived.Limit)
+	}
+	//: what was read, derived and decided.
+	return derived
+}
+
+// deriveWith derives the soft memory limit cfg asks for from the files
+// readFile serves, without installing it.
+func deriveWith(
+	cfg resolvedConfig,
+	lookup func(string) (string, bool),
+	readFile func(string) ([]byte, error),
+) coreproc.MemoryLimitValue {
 	//: An explicit GOMEMLIMIT is the operator's decision and already in
 	//: effect; overriding it here would silently contradict them. An EMPTY
 	//: value is not a decision — the Go runtime ignores it and stays
@@ -87,81 +111,103 @@ func applyFrom(
 		return coreproc.MemoryLimitValue{Source: coreproc.MemorySourceOperator}
 	}
 
-	allowance, found := readCgroupAllowance(readFile)
+	allowance, bound, found := readCgroupAllowance(readFile)
 	//: No readable cap: not containerised, or not Linux at all.
 	if !found {
 		//: Nothing to derive a limit from.
 		return coreproc.MemoryLimitValue{Source: coreproc.MemorySourceUnconstrained}
 	}
 
-	derived := deriveLimit(allowance)
+	derived := shareOf(allowance, cfg.headroom)
 	//: Reject caps too small to host a real working set — capping the runtime
 	//: below this would thrash the collector without averting the kill.
-	if derived < minimumLimitBytes {
+	if derived < cfg.floor {
 		//: Carry the allowance: the refusal only reads as one next to the cap
 		//: that produced it.
 		return coreproc.MemoryLimitValue{
 			Allowance: allowance,
 			Source:    coreproc.MemorySourceBelowFloor,
+			Bound:     bound,
 		}
 	}
 
-	setLimit(derived)
-
-	//: Deliver the applied limit to the caller.
+	//: Deliver the limit to install.
 	return coreproc.MemoryLimitValue{
 		Allowance: allowance,
 		Limit:     derived,
 		Source:    coreproc.MemorySourceCgroup,
+		Bound:     bound,
 	}
 }
 
-// deriveLimit returns the share of a cgroup allowance handed to the Go runtime.
-// It is exact for every allowance an int64 can hold, and it cannot overflow.
+// shareOf returns percent percent of allowance — the share of a cgroup
+// allowance handed to the Go runtime. It is exact for every allowance an int64
+// can hold and every percent in (0, 100], and it cannot overflow.
 //
 // Both naive spellings fail somewhere. Dividing first discards up to
 // percentDivisor-1 bytes of the allowance before the share is taken, and within
 // a few bytes of the floor that under-computation declines a cap the exact value
 // accepts: an allowance of 74,565,405 derives 67,108,860 that way and exactly
 // the 67,108,864 floor the other. Multiplying first is exact but wraps above
-// math.MaxInt64/headroomPercent — reachable, since parseV1Limit accepts up to
+// math.MaxInt64/percent — reachable, since parseV1Limit accepts up to
 // 1<<62 and parseV2Limit up to math.MaxInt64.
 //
 // Splitting the allowance into whole hundreds and a remainder is both. The
-// identity is exact because 100q*headroomPercent divides by percentDivisor with
+// identity is exact because 100q*percent divides by percentDivisor with
 // no remainder of its own, so only the r term rounds — and neither term can
 // overflow, since q is at most math.MaxInt64/percentDivisor and r at most
 // percentDivisor-1.
-func deriveLimit(allowance int64) int64 {
+func shareOf(allowance, percent int64) int64 {
 	hundreds, remainder := allowance/percentDivisor, allowance%percentDivisor
 
 	//: Deliver the exact share, in two terms neither of which can wrap.
-	return hundreds*headroomPercent + remainder*headroomPercent/percentDivisor
+	return hundreds*percent + remainder*percent/percentDivisor
 }
 
 // readCgroupAllowance returns the most restrictive memory cap governing this
-// process, in bytes. Reports false when no candidate declares a real cap.
+// process, in bytes, and the file that set it. Reports false when no candidate
+// declares a real cap.
 //
 // Takes the minimum across the process's own cgroup and its ancestors: a
 // restrictive parent bounds the process just as effectively as its own cgroup,
-// and honouring only the nearest value would overshoot the real allowance.
-func readCgroupAllowance(readFile func(string) ([]byte, error)) (allowance int64, ok bool) {
-	best := int64(0)
+// and honouring only the nearest value would overshoot the real allowance. On
+// the unified hierarchy each memory.max is read with the memory.high beside
+// it: the kernel throttles above memory.high long before memory.max kills, so
+// the throttle is as much a cap as the kill. A tie keeps the hard cap, read
+// first.
+func readCgroupAllowance(readFile func(string) ([]byte, error)) (allowance int64, bound coreproc.MemoryBound, ok bool) {
+	tightest := allowanceReading{}
 	//: Consult every candidate; the tightest cap is the one that binds.
 	for _, candidate := range resolveCgroupPaths(readFile) {
-		limit, found := readLimitFile(readFile, candidate)
-		//: Absent files and unlimited caps contribute nothing.
-		if !found {
-			continue
-		}
-		//: Keep the smallest real cap seen so far.
-		if best == 0 || limit < best {
-			best = limit
+		tightest.consider(readFile, candidate, coreproc.MemoryBoundMax)
+		//: a unified-hierarchy cap has its throttle beside it.
+		if dir, isV2 := strings.CutSuffix(candidate, cgroupV2LimitFile); isV2 {
+			tightest.consider(readFile, dir+cgroupV2HighFile, coreproc.MemoryBoundHigh)
 		}
 	}
 
 	//: A zero best means no candidate declared a usable cap.
-	return best, best > 0
+	return tightest.allowance, tightest.bound, tightest.allowance > 0
+}
+
+// allowanceReading is the tightest cap read so far and the file kind that set
+// it.
+type allowanceReading struct {
+	// allowance is the smallest real cap seen, or zero before the first.
+	allowance int64
+	// bound is the kind of file that set allowance.
+	bound coreproc.MemoryBound
+}
+
+// consider reads one candidate file and keeps it when it is a real cap tighter
+// than every one before it.
+func (r *allowanceReading) consider(readFile func(string) ([]byte, error), candidate string, bound coreproc.MemoryBound) {
+	limit, found := readLimitFile(readFile, candidate)
+	//: Absent files and unlimited caps contribute nothing; a tie keeps the
+	//: first, which is the hard cap.
+	if found && (r.allowance == 0 || limit < r.allowance) {
+		r.allowance, r.bound = limit, bound
+	}
 }
 
 // readLimitFile reads one cgroup limit file, dispatching on its filename to

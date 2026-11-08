@@ -19,3 +19,9 @@ func createGroup(_ string, _ ...Option) (g coreproc.Group, err error) {
 	//: the bare sentinel carries the no-cause UNSUPPORTED_PLATFORM error.
 	return nil, coreproc.UnsupportedPlatform
 }
+
+// probe is refused where no control-group backend exists.
+func probe(_ groupConfig) (ProbeValue, error) {
+	//: the uniform answer of a platform without the mechanic.
+	return ProbeValue{}, coreproc.UnsupportedPlatform
+}

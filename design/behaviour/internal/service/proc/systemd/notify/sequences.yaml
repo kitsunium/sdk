@@ -1,69 +1,188 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
-  - of: Listen
+  - of: checkAssignments
     participants:
       - id: caller
         kind: actor
-      - id: Listen
+      - id: checkAssignments
         kind: self
-      - id: os
-        kind: stdlib
-      - id: filepath
-        kind: stdlib
-      - id: net
-        kind: stdlib
-      - id: enablePasscred
+      - id: wrapInvalid
         kind: internal
     steps:
-      - bind: dir, err
-        eval: os.MkdirTemp("", "sdnotify-")
-        to: os
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: wrapInvalid(nil, errs.String("name", name))
+                    to: wrapInvalid
+                when: name == ""
+            - bind: rule, defined
+              eval: assignmentRules[name]
+            - opt:
+                do:
+                  - return: wrapInvalid(nil, errs.String("name", name), errs.String("value", value))
+                    to: wrapInvalid
+                when: defined && !rule(value)
+          key: name
+          range: state
+          value: value
+      - return: nil
+  - of: isOne
+    steps:
+      - return: v == "1"
+  - of: isPID
+    participants:
+      - id: caller
+        kind: actor
+      - id: isPID
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: n, err
+        eval: strconv.ParseUint(v, decimalBase, pidBits)
+        to: strconv
+      - return: err == nil && n > 0
+  - of: isUint64
+    participants:
+      - id: caller
+        kind: actor
+      - id: isUint64
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: _, err
+        eval: strconv.ParseUint(v, decimalBase, int64Bits)
+        to: strconv
+      - return: err == nil
+  - of: isErrno
+    participants:
+      - id: caller
+        kind: actor
+      - id: isErrno
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: _, err
+        eval: strconv.ParseUint(v, decimalBase, pidBits)
+        to: strconv
+      - return: err == nil
+  - of: isWatchdog
+    steps:
+      - return: v == "1" || v == "trigger"
+  - of: isBoolDigit
+    steps:
+      - return: v == "0" || v == "1"
+  - of: isNotifyAccess
+    steps:
+      - switch:
+          cases:
+            - case: "\"none\", \"main\", \"exec\", \"all\""
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": v
+  - of: Detach
+    participants:
+      - id: caller
+        kind: actor
+      - id: Detach
+        kind: self
+      - id: ln.conn.File
+        kind: value
+    steps:
+      - bind: ln, ok
+        eval: l.(*listener)
       - opt:
           do:
-            - return: nil, "", wrapListen(err, "")
+            - return: nil, wrapListen(os.ErrInvalid, "")
+          when: "!ok || ln == nil"
+      - set: f, err
+        to: ln.conn.File
+        value: ln.conn.File()
+      - opt:
+          do:
+            - return: nil, wrapListen(err, ln.path)
           when: err != nil
-      - defer: |-
-          func() {
-          		//: the success path transfers ownership of the dir to the listener.
-          		if err != nil {
-          			//: join the cleanup error so a failed removal is not silently lost.
-          			err = errors.Join(err, os.RemoveAll(dir))
-          		}
-          	}()
-      - bind: path
-        eval: filepath.Join(dir, "notify")
-        to: filepath
-      - bind: conn, err
-        eval: "net.ListenUnixgram(\"unixgram\", &net.UnixAddr{Name: path, Net: \"unixgram\"})"
+      - set: ln.path, ln.tempDir
+        value: "\"\", \"\""
+      - return: f, nil
+  - of: Adopt
+    participants:
+      - id: caller
+        kind: actor
+      - id: Adopt
+        kind: self
+      - id: net
+        kind: stdlib
+      - id: swallowErr
+        kind: internal
+      - id: enableCreds
+        kind: internal
+      - id: filepath
+        kind: stdlib
+    steps:
+      - bind: c, err
+        eval: net.FileConn(f)
         to: net
       - opt:
           do:
-            - return: nil, "", wrapListen(err, path)
+            - return: nil, wrapListen(err, socketPath)
           when: err != nil
-      - defer: |-
-          func() {
-          		//: only tear the socket down when the constructor is failing.
-          		if err != nil {
-          			//: join the close error so a failed close is surfaced, not dropped.
-          			err = errors.Join(err, conn.Close())
-          		}
-          	}()
+      - bind: conn, ok
+        eval: c.(*net.UnixConn)
       - opt:
           do:
-            - return: nil, "", err
+            - eval: swallowErr(c.Close())
+              to: swallowErr
+            - return: nil, wrapListen(os.ErrInvalid, socketPath)
+          when: "!ok || conn.LocalAddr().Network() != \"unixgram\""
+      - opt:
+          do:
+            - eval: swallowErr(conn.Close())
+              to: swallowErr
+            - return: nil, err
           init:
             bind: err
-            eval: enablePasscred(conn)
+            eval: enableCreds(conn)
             op: =
-            to: enablePasscred
+            to: enableCreds
           when: err != nil
-      - return: "&listener{conn: conn, path: path, tempDir: dir}, path, nil"
-  - of: enablePasscred
+      - bind: ln
+        eval: "&listener{conn: conn, path: socketPath}"
+      - bind: dir
+        eval: filepath.Dir(socketPath)
+        to: filepath
+      - opt:
+          do:
+            - set: ln.tempDir
+              value: dir
+          when: strings.HasPrefix(filepath.Base(dir), tempDirPrefix) && filepath.Base(socketPath) == socketName
+      - return: ln, nil
+  - of: dialNotify
     participants:
       - id: caller
         kind: actor
-      - id: enablePasscred
+      - id: dialNotify
+        kind: self
+      - id: net
+        kind: stdlib
+    steps:
+      - return: net.DialUnix("unixgram", nil, addr)
+        to: net
+  - of: oobBufSize
+    steps:
+      - return: syscall.CmsgSpace(fdBytes*maxPassedFiles) + syscall.CmsgSpace(syscall.SizeofUcred) + syscall.CmsgSpace(fdBytes)
+  - of: enableCreds
+    participants:
+      - id: caller
+        kind: actor
+      - id: enableCreds
         kind: self
       - id: conn.SyscallConn
         kind: value
@@ -88,6 +207,9 @@ sequences:
           raw.Control(func(fd uintptr) {
           		//: SO_PASSCRED at SOL_SOCKET requests per-message sender credentials.
           		sockErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_PASSCRED, 1)
+          		//: SO_PASSPIDFD adds a pidfd on the sender; a kernel before 6.5 refuses
+          		//: the option, and the PID SO_PASSCRED names is all there is.
+          		swallowErr(syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, soPassPIDFD, 1))
           	})
         to: raw.Control
       - opt:
@@ -101,51 +223,506 @@ sequences:
               to: wrapListen
           when: sockErr != nil
       - return: nil
+  - of: (*listener).read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listener).read
+        kind: self
+      - id: l.conn.ReadMsgUnix
+        kind: value
+    steps:
+      - set: n, oobn, recvFlags, _, err
+        to: l.conn.ReadMsgUnix
+        value: l.conn.ReadMsgUnix(buf, oob)
+      - return: n, oobn, recvFlags, err
+  - of: (*control).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*control).take
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: scm.Header.Level != syscall.SOL_SOCKET
+      - switch:
+          cases:
+            - case: syscall.SCM_RIGHTS
+              do:
+                - bind: fds, err
+                  eval: syscall.ParseUnixRights(scm)
+                  to: syscall
+                - opt:
+                    do:
+                      - set: d.files
+                        value: append(d.files, fds...)
+                    when: err == nil
+            - case: syscall.SCM_CREDENTIALS
+              do:
+                - bind: cred, err
+                  eval: syscall.ParseUnixCredentials(scm)
+                  to: syscall
+                - opt:
+                    do:
+                      - set: d.cred
+                        value: "&sender{pid: int(cred.Pid), uid: int(cred.Uid), gid: int(cred.Gid)}"
+                    when: err == nil
+            - case: scmPIDFD
+              do:
+                - opt:
+                    do:
+                      - set: d.pidfd
+                        value: int(int32(binary.NativeEndian.Uint32(scm.Data)))
+                    when: len(scm.Data) >= fdBytes
+          "on": scm.Header.Type
+  - of: pidfdPID
+    participants:
+      - id: caller
+        kind: actor
+      - id: pidfdPID
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: raw, err
+        eval: os.ReadFile("/proc/self/fdinfo/" + strconv.Itoa(fd))
+        to: os
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - loop:
+          do:
+            - bind: rest, ok
+              eval: strings.CutPrefix(line, "Pid:")
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - bind: pid, pErr
+              eval: strconv.Atoi(strings.TrimSpace(rest))
+              to: strconv
+            - opt:
+                do:
+                  - return: pid, nil
+                when: pErr == nil && pid > 0
+            - return: 0, syscall.ESRCH
+          key: line
+          range: strings.SplitSeq(string(raw), "\n")
+      - return: 0, syscall.EBADF
+  - of: Listen
+    participants:
+      - id: caller
+        kind: actor
+      - id: Listen
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: filepath
+        kind: stdlib
+      - id: net
+        kind: stdlib
+      - id: enableCreds
+        kind: internal
+    steps:
+      - bind: dir, err
+        eval: os.MkdirTemp("", tempDirPrefix)
+        to: os
+      - opt:
+          do:
+            - return: nil, "", wrapListen(err, "")
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: the success path transfers ownership of the dir to the listener.
+          		if err != nil {
+          			//: join the cleanup error so a failed removal is not silently lost.
+          			err = errors.Join(err, os.RemoveAll(dir))
+          		}
+          	}()
+      - bind: path
+        eval: filepath.Join(dir, socketName)
+        to: filepath
+      - bind: conn, err
+        eval: "net.ListenUnixgram(\"unixgram\", &net.UnixAddr{Name: path, Net: \"unixgram\"})"
+        to: net
+      - opt:
+          do:
+            - return: nil, "", wrapListen(err, path)
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: only tear the socket down when the constructor is failing.
+          		if err != nil {
+          			//: join the close error so a failed close is surfaced, not dropped.
+          			err = errors.Join(err, conn.Close())
+          		}
+          	}()
+      - opt:
+          do:
+            - return: nil, "", err
+          init:
+            bind: err
+            eval: enableCreds(conn)
+            op: =
+            to: enableCreds
+          when: err != nil
+      - return: "&listener{conn: conn, path: path, tempDir: dir}, path, nil"
+  - of: ListenFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: ListenFor
+        kind: self
+      - id: Listen
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - set: l, socketPath, err
+        to: Listen
+        value: Listen()
+      - opt:
+          do:
+            - return: nil, "", err
+          when: err != nil
+      - bind: ln, _
+        eval: l.(*listener)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, "", errors.Join(wrapListen(cErr, ln.path), ln.Close())
+                init:
+                  bind: cErr
+                  eval: os.Lchown(p, uid, gid)
+                  to: os
+                when: cErr != nil
+          key: _
+          range: "[]string{ln.tempDir, ln.path}"
+          value: p
+      - return: l, socketPath, nil
   - of: (*listener).Recv
     participants:
       - id: caller
         kind: actor
       - id: (*listener).Recv
         kind: self
-      - id: l.conn.ReadMsgUnix
-        kind: value
-      - id: parsePayload
+      - id: l.recv
         kind: internal
-      - id: senderPID
+    steps:
+      - return: l.recv(oobBufSize())
+        to: l.recv
+  - of: (*listener).recv
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*listener).recv
+        kind: self
+      - id: l.read
+        kind: internal
+      - id: parseControl
+        kind: internal
+      - id: d.value
+        kind: internal
+      - id: d.closeAll
         kind: internal
     steps:
       - bind: buf
         eval: make([]byte, payloadBufSize)
       - bind: oob
-        eval: make([]byte, oobBufSize)
-      - bind: n, oobn, recvFlags, _, err
-        eval: l.conn.ReadMsgUnix(buf, oob)
-        to: l.conn.ReadMsgUnix
+        eval: make([]byte, oobSize)
+      - bind: n, oobn, recvFlags, err
+        eval: l.read(buf, oob)
+        to: l.read
       - opt:
           do:
             - return: coreproc.NotificationValue{}, wrapListen(err, l.path)
           when: err != nil
+      - bind: d
+        eval: parseControl(oob[:oobn])
+        to: parseControl
+      - set: value, err
+        to: d.value
+        value: d.value(buf[:n], recvFlags, n == len(buf))
       - opt:
           do:
-            - return: coreproc.NotificationValue{}, wrapInvalid(nil, errs.String("reason", "datagram truncated"))
-          when: recvFlags&syscall.MSG_TRUNC != 0 || n == len(buf)
-      - set: value, err
+            - eval: d.closeAll()
+              to: d.closeAll
+            - return: coreproc.NotificationValue{}, err
+          when: err != nil
+      - return: value, nil
+  - of: parseControl
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseControl
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: d.take
+        kind: internal
+    steps:
+      - bind: d
+        eval: "&control{pidfd: -1}"
+      - bind: scms, err
+        eval: syscall.ParseSocketControlMessage(oob)
+        to: syscall
+      - opt:
+          do:
+            - return: d
+          when: err != nil
+      - loop:
+          do:
+            - eval: d.take(&scms[i])
+              to: d.take
+          key: i
+          range: scms
+      - return: d
+  - of: (*control).closeAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*control).closeAll
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: swallowErr(syscall.Close(fd))
+              to: swallowErr
+          key: _
+          range: d.files
+          value: fd
+      - set: d.files
+        value: nil
+      - opt:
+          do:
+            - eval: swallowErr(syscall.Close(d.pidfd))
+              to: swallowErr
+            - set: d.pidfd
+              value: "-1"
+          when: d.pidfd >= 0
+  - of: (*control).value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*control).value
+        kind: self
+      - id: checkDatagram
+        kind: internal
+      - id: parsePayload
+        kind: internal
+      - id: d.handOverFiles
+        kind: internal
+      - id: os
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: coreproc.NotificationValue{}, err
+          init:
+            bind: err
+            eval: checkDatagram(body, recvFlags, full)
+            to: checkDatagram
+          when: err != nil
+      - opt:
+          do:
+            - return: coreproc.NotificationValue{}, wrapCredMismatch()
+          when: d.cred == nil
+      - bind: value, err
+        eval: parsePayload(string(body))
         to: parsePayload
-        value: parsePayload(string(buf[:n]))
       - opt:
           do:
             - return: coreproc.NotificationValue{}, err
           when: err != nil
-      - bind: pid, ok
-        eval: senderPID(oob[:oobn])
-        to: senderPID
       - opt:
           do:
-            - return: coreproc.NotificationValue{}, wrapCredMismatch()
-          when: "!ok"
+            - return: coreproc.NotificationValue{}, err
+          init:
+            bind: err
+            eval: d.handOverFiles(&value)
+            op: =
+            to: d.handOverFiles
+          when: err != nil
       - set: value.SenderPID
-        value: pid
+        value: d.cred.pid
+      - set: value.SenderUID
+        value: d.cred.uid
+      - set: value.SenderGID
+        value: d.cred.gid
+      - opt:
+          do:
+            - set: descriptorsOf(&value).SenderPIDFD
+              to: os
+              value: os.NewFile(uintptr(d.pidfd), "pidfd")
+            - set: d.pidfd
+              value: "-1"
+          when: d.pidfd >= 0
       - return: value, nil
+  - of: checkDatagram
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkDatagram
+        kind: self
+      - id: wrapInvalid
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapInvalid(nil, errs.String("reason", "datagram truncated"))
+              to: wrapInvalid
+          when: recvFlags&syscall.MSG_TRUNC != 0 || full
+      - opt:
+          do:
+            - return: wrapInvalid(nil, errs.String("reason", "control data truncated"))
+              to: wrapInvalid
+          when: recvFlags&syscall.MSG_CTRUNC != 0
+      - opt:
+          do:
+            - return: wrapInvalid(nil, errs.String("reason", "embedded NUL"))
+              to: wrapInvalid
+          when: bytes.IndexByte(body, 0) >= 0
+      - return: nil
+  - of: (*control).handOverFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*control).handOverFiles
+        kind: self
+      - id: wrapInvalid
+        kind: internal
+      - id: d.mainPIDFD
+        kind: internal
+      - id: d.takeAll
+        kind: internal
+      - id: d.closeAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: wrapInvalid(nil, errs.String("reason", "BARRIER=1 without exactly one descriptor"))
+                    to: wrapInvalid
+                when: len(d.files) != 1
+            - set: "*value"
+              value: |-
+                coreproc.NotificationValue{
+                			State:       map[string]string{"BARRIER": "1"},
+                			Descriptors: &coreproc.DescriptorsValue{Files: d.take1()},
+                		}
+            - return: nil
+          when: value.State["BARRIER"] == "1"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.mainPIDFD(value)
+                  to: d.mainPIDFD
+                when: err != nil
+          when: value.State["MAINPIDFD"] == "1"
+      - opt:
+          do:
+            - set: descriptorsOf(value).Files
+              to: d.takeAll
+              value: d.takeAll()
+          when: value.State["FDSTORE"] == "1" && len(d.files) > 0
+      - eval: d.closeAll()
+        to: d.closeAll
+      - return: nil
+  - of: (*control).mainPIDFD
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*control).mainPIDFD
+        kind: self
+      - id: wrapInvalid
+        kind: internal
+      - id: pidfdPID
+        kind: internal
+      - id: d.take1
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapInvalid(nil, errs.String("reason", "MAINPIDFD=1 without a descriptor"))
+              to: wrapInvalid
+          when: len(d.files) == 0
+      - bind: pid, err
+        eval: pidfdPID(d.files[0])
+        to: pidfdPID
+      - opt:
+          do:
+            - return: wrapInvalid(err, errs.String("reason", "MAINPIDFD=1 descriptor is no live pidfd"))
+              to: wrapInvalid
+          when: err != nil
+      - bind: f
+        eval: d.take1()
+        to: d.take1
+      - set: descriptorsOf(value).MainPIDFD
+        value: f[0]
+      - set: value.MainPID
+        value: pid
+      - return: nil
+  - of: descriptorsOf
+    steps:
+      - opt:
+          do:
+            - set: value.Descriptors
+              value: "&coreproc.DescriptorsValue{}"
+          when: value.Descriptors == nil
+      - return: value.Descriptors
+  - of: (*control).take1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*control).take1
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: f
+        eval: os.NewFile(uintptr(d.files[0]), "notify-fd")
+        to: os
+      - set: d.files
+        value: d.files[1:]
+      - return: "[]*os.File{f}"
+  - of: (*control).takeAll
+    steps:
+      - bind: out
+        eval: make([]*os.File, 0, len(d.files))
+      - loop:
+          do:
+            - set: out
+              value: append(out, os.NewFile(uintptr(fd), "notify-fd"))
+          key: _
+          range: d.files
+          value: fd
+      - set: d.files
+        value: nil
+      - return: out
+  - of: swallowErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
   - of: wrapCredMismatch
     participants:
       - id: caller
@@ -164,39 +741,6 @@ sequences:
           		ExitCode: exitNoPerm,
           	})
         to: errs
-  - of: senderPID
-    participants:
-      - id: caller
-        kind: actor
-      - id: senderPID
-        kind: self
-      - id: syscall
-        kind: stdlib
-    steps:
-      - opt:
-          do:
-            - return: 0, false
-          when: len(oob) == 0
-      - bind: scms, err
-        eval: syscall.ParseSocketControlMessage(oob)
-        to: syscall
-      - opt:
-          do:
-            - return: 0, false
-          when: err != nil
-      - loop:
-          do:
-            - bind: cred, perr
-              eval: syscall.ParseUnixCredentials(&scms[i])
-              to: syscall
-            - opt:
-                do:
-                  - continue: true
-                when: perr != nil
-            - return: int(cred.Pid), true
-          key: i
-          range: scms
-      - return: 0, false
   - of: (*listener).Close
     participants:
       - id: caller
@@ -268,8 +812,8 @@ sequences:
         kind: self
       - id: os
         kind: stdlib
-      - id: net
-        kind: stdlib
+      - id: dialNotify
+        kind: internal
       - id: wrapNotify
         kind: internal
       - id: encodePayload
@@ -287,8 +831,8 @@ sequences:
       - bind: addr
         eval: "&net.UnixAddr{Name: resolveAddr(raw), Net: \"unixgram\"}"
       - bind: conn, err
-        eval: net.DialUnix("unixgram", nil, addr)
-        to: net
+        eval: dialNotify(addr)
+        to: dialNotify
       - opt:
           do:
             - return: wrapNotify(err, raw)
@@ -509,7 +1053,7 @@ sequences:
           		Public:   "Received sd_notify datagram is malformed",
           		Private:  "service/proc/systemd/notify.Recv: datagram did not parse into NAME=value fields",
           		ExitCode: exitDataErr,
-          	}, field)
+          	}, fields...)
         to: errs
   - of: resolveAddr
     steps:
@@ -565,6 +1109,8 @@ sequences:
         kind: self
       - id: strings
         kind: stdlib
+      - id: checkAssignments
+        kind: internal
       - id: mainPIDFromState
         kind: internal
     steps:
@@ -587,6 +1133,15 @@ sequences:
               value: val
           key: line
           range: strings.SplitSeq(body, "\n")
+      - opt:
+          do:
+            - return: coreproc.NotificationValue{}, err
+          init:
+            bind: err
+            eval: checkAssignments(state)
+            op: =
+            to: checkAssignments
+          when: err != nil
       - bind: mainPID, err
         eval: mainPIDFromState(state)
         to: mainPIDFromState

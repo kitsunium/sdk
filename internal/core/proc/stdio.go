@@ -19,6 +19,11 @@ const (
 	// Stdin reader; a nil writer or reader for a given stream falls back to the
 	// null device for that one stream.
 	StdioCapture
+	// StdioPTY connects the child's stdin, stdout and stderr to the slave side of a
+	// new pseudo-terminal, which becomes its controlling terminal in a new session;
+	// the master is the handle's Terminal.TTY. Linux, darwin and FreeBSD; every
+	// other platform refuses it with UnsupportedPlatform before spawning.
+	StdioPTY
 )
 
 // stdioModeNames maps each defined mode to its canonical lowercase name.
@@ -26,10 +31,11 @@ var stdioModeNames = map[StdioMode]string{
 	StdioInherit: "inherit",
 	StdioNull:    "null",
 	StdioCapture: "capture",
+	StdioPTY:     "pty",
 }
 
-// String returns the lowercase mode name ("inherit", "null", "capture"), or
-// "stdiomode(N)" for an out-of-range value.
+// String returns the lowercase mode name ("inherit", "null", "capture", "pty"),
+// or "stdiomode(N)" for an out-of-range value.
 func (m StdioMode) String() string {
 	//: a known mode resolves to its canonical lowercase name.
 	if name, ok := stdioModeNames[m]; ok {
@@ -40,9 +46,9 @@ func (m StdioMode) String() string {
 	return "stdiomode(" + strconv.Itoa(int(m)) + ")"
 }
 
-// Known reports whether m is one of the defined StdioInherit/StdioNull/StdioCapture
-// modes (i.e. m <= StdioCapture).
+// Known reports whether m is one of the defined StdioInherit/StdioNull/StdioCapture/
+// StdioPTY modes (i.e. m <= StdioPTY).
 func (m StdioMode) Known() bool {
-	//: the defined modes are the contiguous range [StdioInherit, StdioCapture].
-	return m <= StdioCapture
+	//: the defined modes are the contiguous range [StdioInherit, StdioPTY].
+	return m <= StdioPTY
 }

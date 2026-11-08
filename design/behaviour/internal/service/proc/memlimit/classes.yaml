@@ -1,159 +1,12 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
-  - doc: |-
-      procSelfCgroup names the per-process cgroup membership file. Each line maps
-      a hierarchy to the path this process belongs to, relative to that
-      hierarchy's mount root.
+  - doc: procSelfCgroup names the per-process cgroup membership file (cgroupfs's).
     items:
       - name: procSelfCgroup
         type: string
-        value: "\"/proc/self/cgroup\""
+        value: cgroupfs.SelfCgroupFile
     name: procSelfCgroup
-  - doc: |-
-      cgroupMountRoot is where the unified hierarchy is conventionally mounted.
-      Used as a fallback when /proc/self/mountinfo cannot be read.
-    items:
-      - name: cgroupMountRoot
-        type: string
-        value: "\"/sys/fs/cgroup\""
-    name: cgroupMountRoot
-  - doc: |-
-      cgroupV1MemoryRoot is the v1 memory controller's conventional mount point,
-      used on the same fallback path.
-    items:
-      - name: cgroupV1MemoryRoot
-        type: string
-        value: "\"/sys/fs/cgroup/memory\""
-    name: cgroupV1MemoryRoot
-  - doc: |-
-      procSelfMountinfo lists this process's mounts, including where each cgroup
-      hierarchy is actually attached.
-    items:
-      - name: procSelfMountinfo
-        type: string
-        value: "\"/proc/self/mountinfo\""
-    name: procSelfMountinfo
-  - doc: |-
-      mountinfoSeparator delimits the variable-length prefix from the fstype and
-      source fields. The prefix has an optional-fields section of unbounded
-      length, so the separator is the only reliable anchor.
-    items:
-      - name: mountinfoSeparator
-        type: string
-        value: "\" - \""
-    name: mountinfoSeparator
-  - doc: |-
-      mountRootField is the index, in the prefix fields, of the mount's root
-      WITHIN its filesystem. A runtime that bind-mounts a container's own cgroup
-      subtree reports that subtree here, and a membership path read from
-      /proc/self/cgroup names a real file only once it is expressed relative to it.
-    items:
-      - name: mountRootField
-        type: int
-        value: "3"
-    name: mountRootField
-  - doc: mountpointField is the index of the mount point in the prefix fields.
-    items:
-      - name: mountpointField
-        type: int
-        value: "4"
-    name: mountpointField
-  - doc: fstypeField is the index of the filesystem type after the separator.
-    items:
-      - name: fstypeField
-        type: int
-        value: "0"
-    name: fstypeField
-  - doc: |-
-      superOptionsField is the index of the super-block options after the
-      separator, where a v1 mount lists the controllers it carries.
-    items:
-      - name: superOptionsField
-        type: int
-        value: "2"
-    name: superOptionsField
-  - doc: fstypeCgroupV2 is the filesystem type of the unified hierarchy.
-    items:
-      - name: fstypeCgroupV2
-        type: string
-        value: "\"cgroup2\""
-    name: fstypeCgroupV2
-  - doc: fstypeCgroupV1 is the filesystem type of a legacy controller mount.
-    items:
-      - name: fstypeCgroupV1
-        type: string
-        value: "\"cgroup\""
-    name: fstypeCgroupV1
-  - doc: |-
-      suffixFieldCount is the minimum number of fields expected after the
-      separator: fstype, source, and super options.
-    items:
-      - name: suffixFieldCount
-        type: int
-        value: "3"
-    name: suffixFieldCount
-  - doc: |-
-      mangleEscape is the byte the kernel's mangle_path writes before an octal
-      triple. Space, tab, newline and backslash cannot appear literally in a
-      whitespace-delimited field, so the kernel encodes them.
-    items:
-      - name: mangleEscape
-        type: byte
-        value: "'\\\\'"
-    name: mangleEscape
-  - doc: |-
-      mangleDigits is how many octal digits follow mangleEscape. The kernel always
-      writes three, zero-padded.
-    items:
-      - name: mangleDigits
-        type: int
-        value: "3"
-    name: mangleDigits
-  - doc: octalBase is the base mangle_path encodes an escaped byte in.
-    items:
-      - name: octalBase
-        type: int
-        value: "8"
-    name: octalBase
-  - doc: "escapedByteBits is the width one decoded escape parses into: a single byte."
-    items:
-      - name: escapedByteBits
-        type: int
-        value: "8"
-    name: escapedByteBits
-  - doc: v2LinePrefix marks the unified-hierarchy line in /proc/self/cgroup.
-    items:
-      - name: v2LinePrefix
-        type: string
-        value: "\"0::\""
-    name: v2LinePrefix
-  - doc: v1MemoryController is the controller name to match on a v1 line.
-    items:
-      - name: v1MemoryController
-        type: string
-        value: "\"memory\""
-    name: v1MemoryController
-  - doc: |-
-      cgroupLineFields is the number of colon-separated fields per line:
-      hierarchy ID, comma-separated controllers, and the path.
-    items:
-      - name: cgroupLineFields
-        type: int
-        value: "3"
-    name: cgroupLineFields
-  - doc: controllersField is the index of the comma-separated controller list.
-    items:
-      - name: controllersField
-        type: int
-        value: "1"
-    name: controllersField
-  - doc: cgroupPathField is the index of the membership path.
-    items:
-      - name: cgroupPathField
-        type: int
-        value: "2"
-    name: cgroupPathField
   - doc: |-
       rootCgroupPath is the path a process reports when it sits at the hierarchy
       root — the usual case inside a cgroup namespace, where the container's own
@@ -172,6 +25,22 @@ constants:
         value: "8"
     name: defaultCandidateCapacity
   - doc: |-
+      maxHeadroomPercent is the largest share of the allowance a caller may hand
+      to the runtime: all of it.
+    items:
+      - name: maxHeadroomPercent
+        type: int
+        value: "100"
+    name: maxHeadroomPercent
+  - doc: |-
+      runtimeDefaultLimit is the soft memory limit the runtime runs with when
+      GOMEMLIMIT is unset: none.
+    items:
+      - name: runtimeDefaultLimit
+        type: int64
+        value: math.MaxInt64
+    name: runtimeDefaultLimit
+  - doc: |-
       cgroupV2LimitFile is the unified-hierarchy memory cap filename. Holds
       either a byte count or the literal "max".
     items:
@@ -179,6 +48,15 @@ constants:
         type: string
         value: "\"memory.max\""
     name: cgroupV2LimitFile
+  - doc: |-
+      cgroupV2HighFile is the unified-hierarchy throttle filename: above it the
+      kernel reclaims and slows the group's allocations. Same format as
+      memory.max, "max" meaning none.
+    items:
+      - name: cgroupV2HighFile
+        type: string
+        value: "\"memory.high\""
+    name: cgroupV2HighFile
   - doc: |-
       cgroupV1LimitFile is the legacy hierarchy memory cap filename. Holds a byte
       count, using a near-int64-max sentinel to mean "unlimited".
@@ -253,49 +131,46 @@ constants:
         type: int64
         value: 64 << 20
     name: minimumLimitBytes
+  - doc: |-
+      minWatchPeriod is the shortest period Watch re-reads at: the files are read
+      on every period, and a cap that changes is an operator's act, not a
+      sub-second event.
+    items:
+      - name: minWatchPeriod
+        type: time.Duration
+        value: time.Second
+    name: minWatchPeriod
 files:
   - decls:
       - procSelfCgroup
-      - cgroupMountRoot
-      - cgroupV1MemoryRoot
-      - procSelfMountinfo
-      - mountinfoSeparator
-      - mountRootField
-      - mountpointField
-      - fstypeField
-      - superOptionsField
-      - fstypeCgroupV2
-      - fstypeCgroupV1
-      - suffixFieldCount
-      - mangleEscape
-      - mangleDigits
-      - octalBase
-      - escapedByteBits
-      - v2LinePrefix
-      - v1MemoryController
-      - cgroupLineFields
-      - controllersField
-      - cgroupPathField
       - rootCgroupPath
       - defaultCandidateCapacity
       - resolveCgroupPaths
       - mountPointFiles
       - dedupe
-      - cgroupMount
-      - parseCgroupMembership
-      - v1MemoryPath
       - ancestorLimitFiles
-      - underMountRoot
-      - resolveMounts
-      - scanCgroupMounts
-      - parseMountinfoLine
-      - unmangleMountinfoPath
-      - decodeMangledByte
     name: cgroup.go
+  - decls:
+      - maxHeadroomPercent
+      - runtimeDefaultLimit
+      - ConfigValue
+      - resolvedConfig
+      - environment
+      - defaultConfig
+      - systemEnvironment
+      - ConfigValue.validate
+      - ConfigValue.resolved
+      - ApplyWith
+      - applyWithFrom
+      - governor
+      - (*governor).derive
+      - (*governor).settle
+    name: config.go
   - decls: []
     name: doc.go
   - decls:
       - cgroupV2LimitFile
+      - cgroupV2HighFile
       - cgroupV1LimitFile
       - goMemLimitEnv
       - unlimitedV2
@@ -307,13 +182,22 @@ files:
       - minimumLimitBytes
       - Apply
       - applyFrom
-      - deriveLimit
+      - deriveWith
+      - shareOf
       - readCgroupAllowance
+      - allowanceReading
+      - (*allowanceReading).consider
       - readLimitFile
       - parseV2Limit
       - parseV1Limit
       - parsePositiveBytes
     name: memlimit.go
+  - decls:
+      - minWatchPeriod
+      - Watch
+      - watchFrom
+      - report
+    name: watch.go
 functions:
   - doc: |-
       resolveCgroupPaths returns the memory-limit files to consult, ordered from
@@ -335,7 +219,7 @@ functions:
       mountPointFiles returns the limit file directly under each mount point, which
       is the best guess available when the membership file cannot be read.
     name: mountPointFiles
-    params: v2Mounts, v1Mounts []cgroupMount
+    params: v2Mounts, v1Mounts []cgroupfs.MountValue
     results: "[]string"
   - doc: |-
       dedupe returns paths with repeats removed, preserving first-seen order.
@@ -348,97 +232,26 @@ functions:
     params: paths []string
     results: "[]string"
   - doc: |-
-      parseCgroupMembership extracts this process's path in the unified hierarchy
-      and in the v1 memory controller. Either may be empty when the hierarchy is
-      not mounted; both default to the root when present but unparseable.
-    name: parseCgroupMembership
-    params: content string
-    results: v2Path, v1Path string
-  - doc: |-
-      v1MemoryPath returns the path from a v1 line whose controller list includes
-      "memory". Controllers are comma-separated because a hierarchy can carry
-      several co-mounted controllers at once.
-    name: v1MemoryPath
-    params: line string
-    results: cgroupPath string, ok bool
-  - doc: |-
       ancestorLimitFiles returns the limit file for cgroupPath under mount, then
       for each ancestor up to the exposed root itself. Returns nil when the
       hierarchy is absent, so a v1-only or v2-only host contributes candidates from
       one side, and nil when the mount exposes a subtree this process is not in.
     name: ancestorLimitFiles
-    params: mount cgroupMount, cgroupPath, limitFile string
+    params: mount cgroupfs.MountValue, cgroupPath, limitFile string
     results: "[]string"
-  - doc: |-
-      underMountRoot re-expresses a /proc/self/cgroup membership path relative to
-      the part of the cgroup filesystem a mount exposes, reporting false when the
-      mount does not expose this process's cgroup at all.
-
-      The two files disagree on purpose. /proc/self/cgroup names the cgroup
-      relative to the reader's cgroup NAMESPACE; mountinfo field 3 names the mount's
-      root relative to the same namespace. When a runtime bind-mounts a container's
-      own subtree at /sys/fs/cgroup without a cgroup namespace — Docker's
-      --cgroupns=host — the two are "/docker/abc" and "/docker/abc", and joining
-      them verbatim repeats the subtree and names a file no cgroup answers to.
-
-      A mount whose root sits ABOVE the namespace root is rendered by the kernel
-      with ".." components ("/../../.." on a 6.12 kernel); path.Clean folds those
-      back to "/", which is the identity translation and exactly what shipped
-      before.
-    name: underMountRoot
-    params: mountRoot, cgroupPath string
-    results: relative string, ok bool
-  - doc: |-
-      resolveMounts returns EVERY attachment of the unified hierarchy and of the v1
-      memory controller, and what each exposes, falling back to the conventional
-      locations when /proc/self/mountinfo is unreadable or lists neither.
-
-      Limits are read relative to the mount point, so assuming /sys/fs/cgroup
-      silently reads nothing on a host that mounts the hierarchy elsewhere.
-
-      Every attachment is kept rather than the last one, because two mounts of one
-      hierarchy at DIFFERENT points do not shadow each other: a bind exposing only
-      this process's own subtree cannot name the ancestors a whole-hierarchy mount
-      still can, and discarding the latter would hide a restrictive parent. A mount
-      genuinely stacked on another needs no rule — the covered mount's paths simply
-      stop resolving, so its candidates read as absent.
-    name: resolveMounts
-    params: readFile func(string) ([]byte, error)
-    results: v2, v1 []cgroupMount
-  - doc: |-
-      scanCgroupMounts extracts every cgroup mount from /proc/self/mountinfo
-      content, split by hierarchy.
-    name: scanCgroupMounts
-    params: content string
-    results: v2, v1 []cgroupMount
-  - doc: |-
-      parseMountinfoLine extracts the mount, its filesystem type and its
-      super-block options from one /proc/self/mountinfo line.
-
-      The prefix carries a variable number of optional fields, so the " - "
-      separator is the only reliable way to find where the suffix begins.
-    name: parseMountinfoLine
-    params: line string
-    results: mount cgroupMount, fstype, superOptions string, ok bool
-  - doc: |-
-      unmangleMountinfoPath decodes the octal escapes the kernel's mangle_path
-      writes into a mountinfo path field.
-
-      The fields are whitespace-delimited, so space, tab, newline and backslash are
-      emitted as \040, \011, \012 and \134. Kept verbatim, a cgroup filesystem
-      mounted at a path containing one of them yields a candidate no file answers
-      to. Any three-digit octal triple is decoded rather than only those four: the
-      encoder escapes its own backslash, so a literal "\040" cannot reach this
-      function undecoded.
-    name: unmangleMountinfoPath
-    params: field string
-    results: string
-  - doc: |-
-      decodeMangledByte returns the byte at index and how many input bytes it
-      consumed: four for a well-formed octal escape, one for anything else.
-    name: decodeMangledByte
-    params: field string, index int
-    results: value byte, width int
+  - doc: defaultConfig is Apply's configuration.
+    name: defaultConfig
+    results: resolvedConfig
+  - doc: systemEnvironment is the running process's.
+    name: systemEnvironment
+    results: environment
+  - name: ApplyWith
+    params: cfg ConfigValue
+    results: coreproc.MemoryLimitValue, error
+  - doc: applyWithFrom is ApplyWith in env.
+    name: applyWithFrom
+    params: cfg ConfigValue, env environment
+    results: coreproc.MemoryLimitValue, error
   - name: Apply
     results: coreproc.MemoryLimitValue
   - doc: |-
@@ -452,35 +265,51 @@ functions:
       	setLimit func(int64) int64,
     results: coreproc.MemoryLimitValue
   - doc: |-
-      deriveLimit returns the share of a cgroup allowance handed to the Go runtime.
-      It is exact for every allowance an int64 can hold, and it cannot overflow.
+      deriveWith derives the soft memory limit cfg asks for from the files
+      readFile serves, without installing it.
+    name: deriveWith
+    params: |2
+
+      	cfg resolvedConfig,
+      	lookup func(string) (string, bool),
+      	readFile func(string) ([]byte, error),
+    results: coreproc.MemoryLimitValue
+  - doc: |-
+      shareOf returns percent percent of allowance — the share of a cgroup
+      allowance handed to the Go runtime. It is exact for every allowance an int64
+      can hold and every percent in (0, 100], and it cannot overflow.
 
       Both naive spellings fail somewhere. Dividing first discards up to
       percentDivisor-1 bytes of the allowance before the share is taken, and within
       a few bytes of the floor that under-computation declines a cap the exact value
       accepts: an allowance of 74,565,405 derives 67,108,860 that way and exactly
       the 67,108,864 floor the other. Multiplying first is exact but wraps above
-      math.MaxInt64/headroomPercent — reachable, since parseV1Limit accepts up to
+      math.MaxInt64/percent — reachable, since parseV1Limit accepts up to
       1<<62 and parseV2Limit up to math.MaxInt64.
 
       Splitting the allowance into whole hundreds and a remainder is both. The
-      identity is exact because 100q*headroomPercent divides by percentDivisor with
+      identity is exact because 100q*percent divides by percentDivisor with
       no remainder of its own, so only the r term rounds — and neither term can
       overflow, since q is at most math.MaxInt64/percentDivisor and r at most
       percentDivisor-1.
-    name: deriveLimit
-    params: allowance int64
+    name: shareOf
+    params: allowance, percent int64
     results: int64
   - doc: |-
       readCgroupAllowance returns the most restrictive memory cap governing this
-      process, in bytes. Reports false when no candidate declares a real cap.
+      process, in bytes, and the file that set it. Reports false when no candidate
+      declares a real cap.
 
       Takes the minimum across the process's own cgroup and its ancestors: a
       restrictive parent bounds the process just as effectively as its own cgroup,
-      and honouring only the nearest value would overshoot the real allowance.
+      and honouring only the nearest value would overshoot the real allowance. On
+      the unified hierarchy each memory.max is read with the memory.high beside
+      it: the kernel throttles above memory.high long before memory.max kills, so
+      the throttle is as much a cap as the kill. A tie keeps the hard cap, read
+      first.
     name: readCgroupAllowance
     params: readFile func(string) ([]byte, error)
-    results: allowance int64, ok bool
+    results: allowance int64, bound coreproc.MemoryBound, ok bool
   - doc: |-
       readLimitFile reads one cgroup limit file, dispatching on its filename to
       the matching format. v1 and v2 spell "unlimited" differently, so the parse
@@ -506,34 +335,161 @@ functions:
     name: parsePositiveBytes
     params: raw string
     results: allowance int64, ok bool
+  - name: Watch
+    params: |2
+
+      	ctx context.Context,
+      	clk clock.Timed,
+      	every time.Duration,
+      	cfg ConfigValue,
+      	onChange func(coreproc.MemoryLimitValue),
+    results: error
+  - doc: watchFrom is Watch in env.
+    name: watchFrom
+    params: |2
+
+      	ctx context.Context,
+      	clk clock.Timed,
+      	every time.Duration,
+      	cfg ConfigValue,
+      	env environment,
+      	onChange func(coreproc.MemoryLimitValue),
+    results: error
+  - doc: report hands a derivation to onChange, when there is one.
+    name: report
+    params: onChange func(coreproc.MemoryLimitValue), derived coreproc.MemoryLimitValue
 imports:
+  cgroupfs: github.com/kitsunium/sdk/internal/service/proc/internal/cgroupfs
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
   coreproc: github.com/kitsunium/sdk/internal/core/proc
   debug: runtime/debug
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  math: math
   os: os
   path: path
   slices: slices
   strconv: strconv
   strings: strings
+  time: time
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/proc/memlimit
   name: memlimit
   purpose: "Package memlimit — resolving WHICH cgroup limit files govern this process: where each hierarchy is mounted, which part of the filesystem that mount exposes, which cgroup the process belongs to, and the ancestors whose caps bound it just as effectively."
 types:
-  - doc: |-
-      cgroupMount is one attached cgroup hierarchy: where it is mounted, and which
-      part of the cgroup filesystem that mount exposes.
-
-      The two are not the same question. A whole-hierarchy mount exposes "/" and a
-      membership path from /proc/self/cgroup names a file directly under the mount
-      point. A bind mount of a subtree exposes that subtree, and the same membership
-      path has to be re-expressed relative to it first.
-    fields:
-      - doc: point is the directory the hierarchy is attached to.
-        name: point
-        type: string
-      - doc: root is the path WITHIN the cgroup filesystem this mount exposes.
-        name: root
-        type: string
+  - fields:
+      - doc: |-
+          HeadroomPercent is the share of the allowance handed to the runtime, in
+          (0, 100]; zero means 90. The rest covers what counts against the cgroup
+          outside the runtime — the binary, mapped files, C allocations — so a
+          cgo- or mmap-heavy service lowers it.
+        name: HeadroomPercent
+        type: int
+      - doc: |-
+          MinimumLimit is the floor in bytes under which a derived limit is
+          declined (MemorySourceBelowFloor); zero means 64 MiB.
+        name: MinimumLimit
+        type: int64
+      - doc: |-
+          GCPercent, when not nil, is installed with debug.SetGCPercent at the
+          moment a limit is — -1 runs the collector on the limit alone — and the
+          previous percent is put back when Watch withdraws the limit. Nil leaves
+          GOGC as it is.
+        name: GCPercent
+        type: "*int"
     kind: struct
-    name: cgroupMount
+    methods:
+      - doc: validate refuses a configuration no derivation can honour (ADR 0031).
+        name: validate
+        recv: c ConfigValue
+        results: error
+      - doc: resolved replaces the zeros with the defaults; the configuration is valid.
+        name: resolved
+        recv: c ConfigValue
+        results: resolvedConfig
+    name: ConfigValue
+  - doc: |-
+      resolvedConfig is a ConfigValue checked and with its zeros replaced by the
+      defaults.
+    fields:
+      - doc: headroom is the share of the allowance handed to the runtime, in percent.
+        name: headroom
+        type: int64
+      - doc: floor is the smallest limit worth installing, in bytes.
+        name: floor
+        type: int64
+      - doc: gcPercent is the GC percent installed with a limit, or nil.
+        name: gcPercent
+        type: "*int"
+    kind: struct
+    name: resolvedConfig
+  - doc: |-
+      environment is what an installation touches: the environment, the cgroup
+      files and the runtime's two knobs, injected so a test drives every branch.
+    fields:
+      - doc: lookup reads an environment variable.
+        name: lookup
+        type: func(string) (string, bool)
+      - doc: readFile reads a cgroup or /proc file.
+        name: readFile
+        type: func(string) ([]byte, error)
+      - doc: setLimit installs a soft memory limit and returns the previous one.
+        name: setLimit
+        type: func(int64) int64
+      - doc: setGC installs a GC percent and returns the previous one.
+        name: setGC
+        type: func(int) int
+    kind: struct
+    name: environment
+  - doc: |-
+      governor installs derivations one after the other, and withdraws its own
+      limit when a later derivation has none to install.
+    fields:
+      - doc: cfg is the configuration every derivation reads.
+        name: cfg
+        type: resolvedConfig
+      - doc: env is what installing touches.
+        name: env
+        type: environment
+      - doc: gcSaved is the GC percent in force before gcPercent was installed.
+        name: gcSaved
+        type: int
+      - doc: installed reports that a limit of this governor's is in force.
+        name: installed
+        type: bool
+      - doc: gcSet reports that gcPercent is installed and gcSaved holds the previous.
+        name: gcSet
+        type: bool
+    kind: struct
+    methods:
+      - doc: derive reads the files and derives, installing nothing.
+        name: derive
+        recv: g *governor
+        results: coreproc.MemoryLimitValue
+      - doc: |-
+          settle installs a derivation that carries a limit, and withdraws an earlier
+          one when it does not.
+        name: settle
+        params: derived coreproc.MemoryLimitValue
+        recv: g *governor
+    name: governor
+  - doc: |-
+      allowanceReading is the tightest cap read so far and the file kind that set
+      it.
+    fields:
+      - doc: allowance is the smallest real cap seen, or zero before the first.
+        name: allowance
+        type: int64
+      - doc: bound is the kind of file that set allowance.
+        name: bound
+        type: coreproc.MemoryBound
+    kind: struct
+    methods:
+      - doc: |-
+          consider reads one candidate file and keeps it when it is a real cap tighter
+          than every one before it.
+        name: consider
+        params: readFile func(string) ([]byte, error), candidate string, bound coreproc.MemoryBound
+        recv: r *allowanceReading
+    name: allowanceReading

@@ -1,6 +1,193 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: Get
+    participants:
+      - id: caller
+        kind: actor
+      - id: Get
+        kind: self
+      - id: getLimit
+        kind: internal
+    steps:
+      - return: getLimit(pid, r)
+        to: getLimit
+  - of: OpenFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: OpenFiles
+        kind: self
+      - id: openFiles
+        kind: internal
+    steps:
+      - return: openFiles()
+        to: openFiles
+  - of: getForeign
+    participants:
+      - id: caller
+        kind: actor
+      - id: getForeign
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: rlim
+        kind: package
+    steps:
+      - var:
+          name: old
+          type: syscall.Rlimit
+      - bind: _, _, errno
+        eval: syscall.Syscall6(syscall.SYS_PRLIMIT64, uintptr(pid), uintptr(rl), 0, uintptr(unsafe.Pointer(&old)), 0, 0)
+        to: syscall
+      - opt:
+          do:
+            - return: coreproc.LimitValue{}, readFailed(errno, pid, r.String(), syscallPrlimitRead)
+          when: errno != 0
+      - bind: soft, hard
+        eval: rlim.Pair(old)
+        to: rlim
+      - return: "coreproc.LimitValue{Soft: soft, Hard: hard}, nil"
+  - of: getLimit
+    participants:
+      - id: caller
+        kind: actor
+      - id: getLimit
+        kind: self
+      - id: resolve
+        kind: internal
+      - id: getForeign
+        kind: internal
+      - id: syscall
+        kind: stdlib
+      - id: rlim
+        kind: package
+    steps:
+      - bind: rl, err
+        eval: resolve(r)
+        to: resolve
+      - opt:
+          do:
+            - return: coreproc.LimitValue{}, err
+          when: err != nil
+      - opt:
+          do:
+            - return: getForeign(pid, rl, r)
+              to: getForeign
+          when: pid != 0 && pid != syscall.Getpid()
+      - var:
+          name: limit
+          type: syscall.Rlimit
+      - opt:
+          do:
+            - return: coreproc.LimitValue{}, readFailed(gerr, pid, r.String(), syscallGetrlimit)
+          init:
+            bind: gerr
+            eval: syscall.Getrlimit(rl, &limit)
+            to: syscall
+          when: gerr != nil
+      - bind: soft, hard
+        eval: rlim.Pair(limit)
+        to: rlim
+      - return: "coreproc.LimitValue{Soft: soft, Hard: hard}, nil"
+  - of: readFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: readFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeRlimitFailed,
+          		Reason:   "RLIMIT_FAILED",
+          		Public:   "Could not read the resource limit",
+          		Private:  "service/proc/rlimit.Get: reading the limit back failed",
+          		ExitCode: exitOSErr,
+          	}, errs.Int("pid", pid), errs.String("resource", resource), errs.String("syscall", call))
+        to: errs
+  - of: KeepRaisedNoFile
+    steps:
+      - return: keepRaised()
+  - of: keepRaisedNoFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: keepRaisedNoFile
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: limitValueOf
+        kind: internal
+    steps:
+      - var:
+          name: lim
+          type: syscall.Rlimit
+      - opt:
+          do:
+            - return: coreproc.LimitValue{}, keepRaisedFailed(gErr, "getrlimit")
+          init:
+            bind: gErr
+            eval: syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim)
+            to: syscall
+          when: gErr != nil
+      - opt:
+          do:
+            - return: coreproc.LimitValue{}, keepRaisedFailed(sErr, syscallSetrlimit)
+          init:
+            bind: sErr
+            eval: syscall.Setrlimit(syscall.RLIMIT_NOFILE, &lim)
+            to: syscall
+          when: sErr != nil
+      - return: limitValueOf(lim.Cur, lim.Max), nil
+        to: limitValueOf
+  - of: limitValueOf
+    steps:
+      - return: "coreproc.LimitValue{Soft: uint64(soft), Hard: uint64(hard)}"
+  - of: keepRaisedFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: keepRaisedFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeRlimitFailed,
+          		Reason:   "RLIMIT_FAILED",
+          		Public:   "Could not apply the resource limit",
+          		Private:  "service/proc/rlimit.KeepRaisedNoFile: " + syscallName + "(RLIMIT_NOFILE) failed",
+          		ExitCode: exitOSErr,
+          	}, errs.String("resource", coreproc.ResourceNoFile.String()), errs.String("syscall", syscallName))
+        to: errs
+  - of: openFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: openFiles
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: entries, err
+        eval: os.ReadDir(selfFDDir)
+        to: os
+      - opt:
+          do:
+            - return: |-
+                0, errs.Wrap(err, errs.WrapParams{
+                			Code:     coreproc.CodeRlimitFailed,
+                			Reason:   "RLIMIT_FAILED",
+                			Public:   "Could not read the resource limit",
+                			Private:  "service/proc/rlimit.OpenFiles: listing the descriptor directory failed",
+                			ExitCode: exitOSErr,
+                		}, errs.String("dir", selfFDDir))
+          when: err != nil
+      - return: len(entries) - 1, nil
   - of: Apply
     participants:
       - id: caller

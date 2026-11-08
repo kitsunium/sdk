@@ -9,6 +9,14 @@ sequences:
             steps:
               - set: c.onReap
                 value: fn
+  - of: WithOnExit
+    steps:
+      - return:
+          closure:
+            params: c *config
+            steps:
+              - set: c.onExit
+                value: fn
   - of: New
     participants:
       - id: caller
@@ -21,7 +29,17 @@ sequences:
       - bind: cfg
         eval: resolve(opts)
         to: resolve
-      - return: "&unixReaper{onReap: cfg.onReap, clk: clock.System, sweepEvery: timerSweepEvery, notify: signal.Notify}"
+      - bind: r
+        eval: "&unixReaper{onReap: cfg.onReap, onExit: cfg.onExit, clk: clock.System, sweepEvery: timerSweepEvery, notify: signal.Notify}"
+      - opt:
+          do:
+            - set: r.observe
+              value: r.reportExit
+          when: r.onExit != nil
+      - return: r
+  - of: (*unixReaper).reportExit
+    steps:
+      - eval: "r.onExit(ExitEvent{PID: pid, Exit: status.Exit(), Owned: owned})"
   - of: (*unixReaper).Start
     participants:
       - id: caller
@@ -243,7 +261,7 @@ sequences:
       - loop:
           do:
             - bind: pid, waitErr
-              eval: childwait.ReapAny()
+              eval: childwait.ReapAnyObserved(r.observe)
               to: childwait
             - opt:
                 do:

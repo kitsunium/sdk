@@ -1,6 +1,31 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - grouped: true
+    items:
+      - doc: "ControllerCPU distributes CPU time: cpu.weight, cpu.max, cpu.max.burst."
+        name: ControllerCPU
+        type: Controller
+        value: iota + 1
+      - doc: |-
+          ControllerCPUSet pins tasks to CPUs and memory nodes: cpuset.cpus,
+          cpuset.mems.
+        name: ControllerCPUSet
+      - doc: "ControllerIO distributes block I/O: io.weight, io.max, io.latency."
+        name: ControllerIO
+      - doc: |-
+          ControllerMemory bounds memory: memory.min/low/high/max, the swap and
+          zswap limits, memory.oom.group.
+        name: ControllerMemory
+      - doc: "ControllerPids bounds the number of tasks: pids.max."
+        name: ControllerPids
+      - doc: "ControllerHugeTLB bounds huge-page use: hugetlb.<size>.max."
+        name: ControllerHugeTLB
+      - doc: "ControllerRDMA bounds RDMA resources: rdma.max."
+        name: ControllerRDMA
+      - doc: "ControllerMisc bounds scalar resources the kernel lists: misc.max."
+        name: ControllerMisc
+    name: ControllerCPU
   - doc: |-
       LimitInfinity is the soft/hard value meaning "no limit" (RLIM_INFINITY). Use
       it in a LimitValue to lift a resource ceiling rather than setting a number.
@@ -39,13 +64,32 @@ constants:
     name: MemorySourceOperator
   - grouped: true
     items:
+      - doc: |-
+          MemoryBoundHigh reports that a memory.high file bound the derivation: the
+          throttle above which the kernel reclaims and slows the group's allocations,
+          long before memory.max would kill it.
+
+          The run starts at iota+1 so the zero stays unminted — see the type comment.
+        name: MemoryBoundHigh
+        type: MemoryBound
+        value: iota + 1
+      - doc: |-
+          MemoryBoundMax reports that a hard cap bound the derivation: a cgroup v2
+          memory.max file, or cgroup v1's memory.limit_in_bytes — v1 has no throttle
+          to read beside it.
+        name: MemoryBoundMax
+    name: MemoryBoundHigh
+  - grouped: true
+    items:
       - doc: "ResourceUnknown is the reserved zero value: no resource selected."
         name: ResourceUnknown
         type: Resource
         value: iota
       - doc: |-
           ResourceNoFile limits the highest open file descriptor (RLIMIT_NOFILE),
-          mapping systemd's LimitNOFILE=.
+          mapping systemd's LimitNOFILE=. A child spawned without it gets the
+          supervisor's ORIGINAL soft limit, not the one the Go runtime raised at start,
+          unless rlimit.KeepRaisedNoFile was called.
         name: ResourceNoFile
       - doc: |-
           ResourceNProc limits the number of processes for the real user id
@@ -82,6 +126,214 @@ constants:
     name: ResourceUnknown
   - grouped: true
     items:
+      - doc: NamespaceUser clones the child into a new user namespace (CLONE_NEWUSER).
+        name: NamespaceUser
+        type: Namespace
+        value: "1"
+      - doc: NamespacePID clones the child into a new PID namespace, as its PID 1 (CLONE_NEWPID).
+        name: NamespacePID
+        type: Namespace
+        value: "2"
+      - doc: NamespaceMount gives the child a private copy of the mount namespace (CLONE_NEWNS).
+        name: NamespaceMount
+        type: Namespace
+        value: "4"
+      - doc: NamespaceIPC clones the child into a new IPC namespace (CLONE_NEWIPC).
+        name: NamespaceIPC
+        type: Namespace
+        value: "8"
+      - doc: NamespaceUTS clones the child into a new UTS namespace (CLONE_NEWUTS).
+        name: NamespaceUTS
+        type: Namespace
+        value: "16"
+      - doc: NamespaceNet clones the child into a new network namespace, with a loopback only (CLONE_NEWNET).
+        name: NamespaceNet
+        type: Namespace
+        value: "32"
+      - doc: |-
+          NamespaceCgroup puts the child in a new cgroup namespace (CLONE_NEWCGROUP),
+          rooted at the group it runs in, Spec.CgroupPath's when one is set — unshared
+          once the child is placed there.
+        name: NamespaceCgroup
+        type: Namespace
+        value: "64"
+      - doc: NamespaceTime clones the child into a new time namespace (CLONE_NEWTIME, Linux 5.6).
+        name: NamespaceTime
+        type: Namespace
+        value: "128"
+      - doc: MountReadOnly binds Target onto itself and makes it read-only, recursively (systemd ReadOnlyPaths=) — the zero value.
+        name: MountReadOnly
+        type: MountKind
+        value: "0"
+      - doc: MountBind binds Source onto Target, recursively (systemd BindPaths=).
+        name: MountBind
+        type: MountKind
+        value: "1"
+      - doc: MountTmpfs mounts an empty tmpfs on Target, nosuid and nodev (systemd TemporaryFileSystem=).
+        name: MountTmpfs
+        type: MountKind
+        value: "2"
+      - doc: MountTmpfsSticky mounts an empty tmpfs on Target, mode 1777 — sticky, writable by all, as /tmp is —, nosuid and nodev (systemd PrivateTmp=).
+        name: MountTmpfsSticky
+        type: MountKind
+        value: "3"
+      - doc: LandlockExecute is LANDLOCK_ACCESS_FS_EXECUTE (ABI 1).
+        name: LandlockExecute
+        type: LandlockAccess
+        value: "1"
+      - doc: LandlockWriteFile is LANDLOCK_ACCESS_FS_WRITE_FILE (ABI 1).
+        name: LandlockWriteFile
+        type: LandlockAccess
+        value: "2"
+      - doc: LandlockReadFile is LANDLOCK_ACCESS_FS_READ_FILE (ABI 1).
+        name: LandlockReadFile
+        type: LandlockAccess
+        value: "4"
+      - doc: LandlockReadDir is LANDLOCK_ACCESS_FS_READ_DIR (ABI 1).
+        name: LandlockReadDir
+        type: LandlockAccess
+        value: "8"
+      - doc: LandlockRemoveDir is LANDLOCK_ACCESS_FS_REMOVE_DIR (ABI 1).
+        name: LandlockRemoveDir
+        type: LandlockAccess
+        value: "16"
+      - doc: LandlockRemoveFile is LANDLOCK_ACCESS_FS_REMOVE_FILE (ABI 1).
+        name: LandlockRemoveFile
+        type: LandlockAccess
+        value: "32"
+      - doc: LandlockMakeChar is LANDLOCK_ACCESS_FS_MAKE_CHAR (ABI 1).
+        name: LandlockMakeChar
+        type: LandlockAccess
+        value: "64"
+      - doc: LandlockMakeDir is LANDLOCK_ACCESS_FS_MAKE_DIR (ABI 1).
+        name: LandlockMakeDir
+        type: LandlockAccess
+        value: "128"
+      - doc: LandlockMakeReg is LANDLOCK_ACCESS_FS_MAKE_REG (ABI 1).
+        name: LandlockMakeReg
+        type: LandlockAccess
+        value: "256"
+      - doc: LandlockMakeSock is LANDLOCK_ACCESS_FS_MAKE_SOCK (ABI 1).
+        name: LandlockMakeSock
+        type: LandlockAccess
+        value: "512"
+      - doc: LandlockMakeFifo is LANDLOCK_ACCESS_FS_MAKE_FIFO (ABI 1).
+        name: LandlockMakeFifo
+        type: LandlockAccess
+        value: "1024"
+      - doc: LandlockMakeBlock is LANDLOCK_ACCESS_FS_MAKE_BLOCK (ABI 1).
+        name: LandlockMakeBlock
+        type: LandlockAccess
+        value: "2048"
+      - doc: LandlockMakeSym is LANDLOCK_ACCESS_FS_MAKE_SYM (ABI 1).
+        name: LandlockMakeSym
+        type: LandlockAccess
+        value: "4096"
+      - doc: LandlockRefer is LANDLOCK_ACCESS_FS_REFER (ABI 2, Linux 5.19).
+        name: LandlockRefer
+        type: LandlockAccess
+        value: "8192"
+      - doc: LandlockTruncate is LANDLOCK_ACCESS_FS_TRUNCATE (ABI 3, Linux 6.2).
+        name: LandlockTruncate
+        type: LandlockAccess
+        value: "16384"
+      - doc: LandlockIoctlDev is LANDLOCK_ACCESS_FS_IOCTL_DEV (ABI 5, Linux 6.10).
+        name: LandlockIoctlDev
+        type: LandlockAccess
+        value: "32768"
+      - doc: SeccompKill kills the whole process (SECCOMP_RET_KILL_PROCESS, Linux 4.14) — the zero value.
+        name: SeccompKill
+        type: SeccompAction
+        value: "0"
+      - doc: SeccompErrno fails the call with SeccompValue.Errno (SECCOMP_RET_ERRNO).
+        name: SeccompErrno
+        type: SeccompAction
+        value: "1"
+      - doc: SeccompAllow lets the call through (SECCOMP_RET_ALLOW).
+        name: SeccompAllow
+        type: SeccompAction
+        value: "2"
+    name: NamespaceUser
+  - grouped: true
+    items:
+      - doc: SchedOther is the normal time-sharing policy (SCHED_OTHER) — the zero value.
+        name: SchedOther
+        type: SchedPolicy
+        value: "0"
+      - doc: SchedFIFO is the first-in first-out realtime policy (SCHED_FIFO).
+        name: SchedFIFO
+        type: SchedPolicy
+        value: "1"
+      - doc: SchedRR is the round-robin realtime policy (SCHED_RR).
+        name: SchedRR
+        type: SchedPolicy
+        value: "2"
+      - doc: SchedBatch is the policy for CPU-bound batch work (SCHED_BATCH).
+        name: SchedBatch
+        type: SchedPolicy
+        value: "3"
+      - doc: SchedIdle runs the child only when nothing else wants the CPU (SCHED_IDLE).
+        name: SchedIdle
+        type: SchedPolicy
+        value: "5"
+      - doc: IOClassNone sets no I/O class, the kernel deriving one from the CPU niceness — the zero value.
+        name: IOClassNone
+        type: IOClass
+        value: "0"
+      - doc: IOClassRealTime is the realtime I/O class (IOPRIO_CLASS_RT).
+        name: IOClassRealTime
+        type: IOClass
+        value: "1"
+      - doc: IOClassBestEffort is the best-effort I/O class (IOPRIO_CLASS_BE).
+        name: IOClassBestEffort
+        type: IOClass
+        value: "2"
+      - doc: IOClassIdle gets I/O only when no other process wants the disk (IOPRIO_CLASS_IDLE).
+        name: IOClassIdle
+        type: IOClass
+        value: "3"
+    name: SchedOther
+  - doc: The realtime range's two names, as kill(1) and systemd spell them.
+    grouped: true
+    items:
+      - doc: rtMinName is the range's first signal.
+        name: rtMinName
+        type: string
+        value: "\"SIGRTMIN\""
+      - doc: rtMaxName is the range's last signal.
+        name: rtMaxName
+        type: string
+        value: "\"SIGRTMAX\""
+    name: rtMinName
+  - doc: |-
+      The realtime signal range as a Linux program linked against glibc sees it:
+      the kernel numbers 32 to 64, and glibc keeps 32 and 33 for its threads
+      (SIGCANCEL, SIGSETXID), so SIGRTMIN is 34. A cgo build linking another libc
+      may move SIGRTMIN; a pure Go program sees this range.
+    grouped: true
+    items:
+      - doc: rtMin is SIGRTMIN.
+        name: rtMin
+        type: Signal
+        value: "34"
+      - doc: rtMax is SIGRTMAX.
+        name: rtMax
+        type: Signal
+        value: "64"
+    name: rtMin
+  - grouped: true
+    items:
+      - doc: FDsSealed gives the child no descriptor of the supervisor's past its stdio and ExtraFiles — the zero value.
+        name: FDsSealed
+        type: FDPolicy
+        value: "0"
+      - doc: FDsInherited lets the child inherit every descriptor of the supervisor that lacks close-on-exec.
+        name: FDsInherited
+        type: FDPolicy
+        value: "1"
+    name: FDsSealed
+  - grouped: true
+    items:
       - doc: |-
           StdioInherit shares the parent's stdin/stdout/stderr with the child — the
           default, and the only behaviour that existed before per-process wiring.
@@ -97,14 +349,37 @@ constants:
           Stdin reader; a nil writer or reader for a given stream falls back to the
           null device for that one stream.
         name: StdioCapture
+      - doc: |-
+          StdioPTY connects the child's stdin, stdout and stderr to the slave side of a
+          new pseudo-terminal, which becomes its controlling terminal in a new session;
+          the master is the handle's Terminal.TTY. Linux, darwin and FreeBSD; every
+          other platform refuses it with UnsupportedPlatform before spawning.
+        name: StdioPTY
     name: StdioInherit
 files:
+  - decls:
+      - AttachValue
+    name: attach.go
   - decls: []
     name: doc.go
   - decls:
       - ExitValue
+      - UsageValue
       - ExitValue.Success
     name: exit.go
+  - decls:
+      - Controller
+      - ControllerCPU
+      - controllerNames
+      - Controller.String
+      - Controller.Known
+      - GroupEventsValue
+    name: groupctl.go
+  - decls:
+      - GroupStatValue
+      - MemoryEventsValue
+      - IOStatValue
+    name: groupstat.go
   - decls:
       - LimitInfinity
       - LimitValue
@@ -112,12 +387,16 @@ files:
   - decls:
       - MemorySource
       - MemorySourceOperator
+      - MemoryBound
+      - MemoryBoundHigh
       - MemorySource.String
+      - MemoryBound.String
       - MemoryLimitValue
       - MemoryLimitValue.Applied
     name: memory.go
   - decls:
       - NotificationValue
+      - DescriptorsValue
       - NotificationValue.Ready
       - NotificationValue.Reloading
       - NotificationValue.Stopping
@@ -131,18 +410,57 @@ files:
       - Resource.Known
     name: proc.go
   - decls:
+      - RunValue
+      - ResultValue
+    name: run.go
+  - decls:
+      - SandboxValue
+      - Namespace
+      - IDMapValue
+      - MountKind
+      - MountValue
+      - CapabilitiesValue
+      - LandlockAccess
+      - LandlockValue
+      - LandlockRuleValue
+      - SeccompAction
+      - SeccompValue
+      - NamespaceUser
+    name: sandbox.go
+  - decls:
+      - SchedPolicy
+      - IOClass
+      - SchedOther
+      - schedPolicyNames
+      - SchedulingValue
+      - SchedPolicy.String
+      - IOClass.String
+    name: scheduling.go
+  - decls:
+      - rtMinName
       - Signal
       - Signal.OS
       - Signal.Int
       - Signal.String
       - Signal.Known
+      - Signal.realtime
+      - realtimeName
+      - parseRealtime
+      - realtimeEnd
+      - realtimeOffset
       - Parse
     name: signal.go
+  - decls:
+      - rtMin
+    name: signal_rt_linux.go
   - decls:
       - signalNames
     name: signal_unix.go
   - decls:
       - Spec
+      - FDPolicy
+      - FDsSealed
+      - PTYValue
     name: spec.go
   - decls:
       - StdioMode
@@ -152,6 +470,29 @@ files:
       - StdioMode.Known
     name: stdio.go
 functions:
+  - doc: realtimeName renders a realtime signal as SIGRTMIN or SIGRTMIN+n.
+    name: realtimeName
+    params: s Signal
+    results: string
+  - doc: |-
+      parseRealtime reads SIGRTMIN, SIGRTMIN+n, SIGRTMAX and SIGRTMAX-n — the
+      spellings kill(1) and systemd use — reporting false for anything else or
+      for a signal outside the platform's range.
+    name: parseRealtime
+    params: canonical string
+    results: sig Signal, ok bool
+  - doc: |-
+      realtimeEnd splits a realtime spelling into the end of the range it counts
+      from, what follows the name, and the direction it counts in.
+    name: realtimeEnd
+    params: canonical string
+    results: base Signal, rest string, step int, ok bool
+  - doc: |-
+      realtimeOffset reads the "+n" (step 1) or "-n" (step -1) after a realtime
+      name as a signed offset; an empty rest is the range's own end.
+    name: realtimeOffset
+    params: rest string, step int
+    results: offset int, ok bool
   - name: Parse
     params: name string
     results: sig Signal, err error
@@ -168,6 +509,20 @@ package:
   name: proc
   purpose: Package proc — range 0.2.6.* (ADR 0016 core/proc block).
 types:
+  - fields:
+      - doc: |-
+          Cgroup is a cgroup v2 path as /proc/<pid>/cgroup names it —
+          "/system.slice/web.service" —: the process must be in it or below it. Empty
+          checks no cgroup.
+        name: Cgroup
+        type: string
+      - doc: |-
+          UIDs are the users the process may run as: its real and its effective uid
+          must both be one of them. Empty checks no user.
+        name: UIDs
+        type: "[]int"
+    kind: struct
+    name: AttachValue
   - fields:
       - doc: |-
           Code is the exit status (0–255) when the process exited normally; it is -1
@@ -197,12 +552,149 @@ types:
           the platform does not supply it (illumos, Solaris and Windows).
         name: MaxRSS
         type: int64
+      - doc: |-
+          CoreDumped reports whether the signalled death left a core image
+          (WaitStatus.CoreDump). It is false for a normal exit, and wherever the
+          platform cannot say (Windows).
+        name: CoreDumped
+        type: bool
+      - doc: |-
+          Usage is the rest of wait4's resource accounting — page faults, block I/O
+          and context switches — read from the same rusage as UserTime and MaxRSS.
+          It is nil where the platform does not supply it (illumos, Solaris and
+          Windows).
+        name: Usage
+        type: "*UsageValue"
     kind: struct
     methods:
       - name: Success
         recv: e ExitValue
         results: bool
     name: ExitValue
+  - fields:
+      - doc: MinorFaults counts the page faults served without I/O (ru_minflt).
+        name: MinorFaults
+        type: uint64
+      - doc: MajorFaults counts the page faults that needed I/O (ru_majflt).
+        name: MajorFaults
+        type: uint64
+      - doc: InBlock counts the block input operations (ru_inblock).
+        name: InBlock
+        type: uint64
+      - doc: OutBlock counts the block output operations (ru_oublock).
+        name: OutBlock
+        type: uint64
+      - doc: VoluntaryCtxSw counts the times the process gave up the CPU (ru_nvcsw).
+        name: VoluntaryCtxSw
+        type: uint64
+      - doc: InvoluntaryCtxSw counts the times the scheduler took the CPU away (ru_nivcsw).
+        name: InvoluntaryCtxSw
+        type: uint64
+    kind: struct
+    name: UsageValue
+  - kind: named
+    methods:
+      - name: String
+        recv: c Controller
+        results: string
+      - name: Known
+        recv: c Controller
+        results: bool
+    name: Controller
+    underlying: uint8
+  - fields:
+      - doc: |-
+          MemoryEvents counts what the group's memory limits did — memory.events,
+          zero where the memory controller is not enabled for the group.
+        name: MemoryEvents
+        type: MemoryEventsValue
+      - doc: |-
+          Populated reports that the group or a group beneath it holds a live
+          process (cgroup.events "populated").
+        name: Populated
+        type: bool
+      - doc: Frozen reports that the group is frozen (cgroup.events "frozen").
+        name: Frozen
+        type: bool
+    kind: struct
+    name: GroupEventsValue
+  - fields:
+      - doc: CPUUsage is the CPU time the group's tasks used, user and system.
+        name: CPUUsage
+        type: time.Duration
+      - doc: CPUUser is the user-mode share of CPUUsage.
+        name: CPUUser
+        type: time.Duration
+      - doc: CPUSystem is the kernel-mode share of CPUUsage.
+        name: CPUSystem
+        type: time.Duration
+      - doc: ThrottledTime is how long cpu.max held the group's tasks back.
+        name: ThrottledTime
+        type: time.Duration
+      - doc: NrThrottled is how many periods cpu.max throttled the group in.
+        name: NrThrottled
+        type: int64
+      - doc: MemoryCurrent is the memory the group holds now, in bytes.
+        name: MemoryCurrent
+        type: int64
+      - doc: |-
+          MemoryPeak is the most memory the group held, in bytes (Linux 5.19's
+          memory.peak; Windows' peak job memory).
+        name: MemoryPeak
+        type: int64
+      - doc: MemoryEvents counts what the group's memory limits did.
+        name: MemoryEvents
+        type: MemoryEventsValue
+      - doc: PidsCurrent is how many tasks the group holds now.
+        name: PidsCurrent
+        type: int64
+      - doc: IO is the I/O the group did, one entry per device.
+        name: IO
+        type: "[]IOStatValue"
+      - doc: Partial reports that at least one counter could not be read and is zero.
+        name: Partial
+        type: bool
+    kind: struct
+    name: GroupStatValue
+  - fields:
+      - doc: Low counts reclaims under memory.low's protection.
+        name: Low
+        type: int64
+      - doc: High counts the times the group was throttled above memory.high.
+        name: High
+        type: int64
+      - doc: Max counts the times the group hit memory.max.
+        name: Max
+        type: int64
+      - doc: OOM counts the times the group ran out of memory.
+        name: OOM
+        type: int64
+      - doc: OOMKill counts the tasks the OOM killer ended in the group.
+        name: OOMKill
+        type: int64
+    kind: struct
+    name: MemoryEventsValue
+  - fields:
+      - doc: Major is the device's major number.
+        name: Major
+        type: uint32
+      - doc: Minor is the device's minor number.
+        name: Minor
+        type: uint32
+      - doc: RBytes is the bytes read.
+        name: RBytes
+        type: uint64
+      - doc: WBytes is the bytes written.
+        name: WBytes
+        type: uint64
+      - doc: RIOs is the read operations.
+        name: RIOs
+        type: uint64
+      - doc: WIOs is the write operations.
+        name: WIOs
+        type: uint64
+    kind: struct
+    name: IOStatValue
   - fields:
       - doc: Soft is the enforced limit; it must not exceed Hard.
         name: Soft
@@ -219,6 +711,13 @@ types:
         results: string
     name: MemorySource
     underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: b MemoryBound
+        results: string
+    name: MemoryBound
+    underlying: uint8
   - fields:
       - doc: |-
           Allowance is the tightest cgroup memory cap governing this process, in
@@ -233,6 +732,11 @@ types:
       - doc: Source names what decided the outcome.
         name: Source
         type: MemorySource
+      - doc: |-
+          Bound names the file that set Allowance — memory.high or the hard cap —
+          on every outcome that carries an Allowance, and is zero otherwise.
+        name: Bound
+        type: MemoryBound
     kind: struct
     methods:
       - name: Applied
@@ -257,6 +761,21 @@ types:
           unavailable.
         name: SenderPID
         type: int
+      - doc: |-
+          SenderUID is the sending process's user, as verified by the kernel with
+          SenderPID; it means nothing when SenderPID is 0.
+        name: SenderUID
+        type: int
+      - doc: |-
+          SenderGID is the sending process's group, as verified by the kernel with
+          SenderPID; it means nothing when SenderPID is 0.
+        name: SenderGID
+        type: int
+      - doc: |-
+          Descriptors are the descriptors the datagram brought — the ones it carried,
+          a pidfd on its sender —, which the caller owns; nil when it brought none.
+        name: Descriptors
+        type: "*DescriptorsValue"
     kind: struct
     methods:
       - name: Ready
@@ -272,6 +791,26 @@ types:
         recv: n NotificationValue
         results: bool
     name: NotificationValue
+  - fields:
+      - doc: |-
+          Files are the descriptors the datagram carried (SCM_RIGHTS): with
+          FDSTORE=1 the ones to store, with BARRIER=1 the barrier, which the caller
+          closes once every earlier datagram is processed.
+        name: Files
+        type: "[]*os.File"
+      - doc: |-
+          MainPIDFD is the pidfd a MAINPIDFD=1 datagram carried: its process is the
+          new main process, and MainPID its PID; nil when none.
+        name: MainPIDFD
+        type: "*os.File"
+      - doc: |-
+          SenderPIDFD is a pidfd on the sending process (SCM_PIDFD, Linux 6.5 and
+          later): the sender itself, beyond the reach of a PID reuse; nil where the
+          kernel attaches none.
+        name: SenderPIDFD
+        type: "*os.File"
+    kind: struct
+    name: DescriptorsValue
   - kind: named
     methods:
       - name: String
@@ -282,6 +821,236 @@ types:
         results: bool
     name: Resource
     underlying: int
+  - fields:
+      - doc: |-
+          MaxOutputBytes is the number of bytes kept from each of stdout and stderr.
+          The child's output past it is read and discarded, so the child never blocks
+          on a full pipe and the caller never holds more. It must be positive: Run
+          refuses zero with InvalidSpec (ADR 0031).
+        name: MaxOutputBytes
+        type: int
+      - doc: |-
+          Grace is how long a child whose run was cancelled is given between SIGTERM
+          and SIGKILL; zero or less escalates at once.
+        name: Grace
+        type: time.Duration
+    kind: struct
+    name: RunValue
+  - fields:
+      - doc: Exit is the child's ExitValue.
+        name: Exit
+        type: ExitValue
+      - doc: Stdout is the first RunValue.MaxOutputBytes bytes the child wrote to its standard output.
+        name: Stdout
+        type: "[]byte"
+      - doc: Stderr is the first RunValue.MaxOutputBytes bytes the child wrote to its standard error.
+        name: Stderr
+        type: "[]byte"
+      - doc: |-
+          Truncated reports whether either stream wrote more than MaxOutputBytes, the
+          rest of it read and discarded.
+        name: Truncated
+        type: bool
+    kind: struct
+    name: ResultValue
+  - fields:
+      - doc: |-
+          Namespaces are the namespaces the child is cloned into (systemd
+          PrivateUsers=, PrivatePIDs=, PrivateMounts=, PrivateIPC=, ProtectHostname=,
+          PrivateNetwork=, ProtectControlGroups=). A mount namespace is unshared
+          with every mount of it made private first, so nothing the child mounts
+          propagates back. Without NamespaceUser, an unprivileged supervisor's
+          clone is refused by the kernel.
+        name: Namespaces
+        type: Namespace
+      - doc: |-
+          UIDMap maps the user namespace's uids to the supervisor's (NamespaceUser).
+          Empty maps the namespace's uid 0 to the supervisor's effective uid, one id
+          wide — the one mapping an unprivileged supervisor may write.
+        name: UIDMap
+        type: "[]IDMapValue"
+      - doc: |-
+          GIDMap maps the user namespace's gids, as UIDMap maps the uids; setgroups(2)
+          is denied in the namespace.
+        name: GIDMap
+        type: "[]IDMapValue"
+      - doc: |-
+          Mounts are made in order in the child's mount namespace, which they
+          require (NamespaceMount).
+        name: Mounts
+        type: "[]MountValue"
+      - doc: |-
+          Root, when not empty, is the absolute directory the child pivots into
+          after its Mounts (systemd RootDirectory=, through pivot_root(2)); the old
+          root is detached. Spec.Path and Spec.Dir are then paths inside it, and
+          Spec.Path must hold a '/'. It requires NamespaceMount.
+        name: Root
+        type: string
+      - doc: |-
+          Capabilities, when non-nil, bounds the child's capabilities; nil leaves
+          them as inherited.
+        name: Capabilities
+        type: "*CapabilitiesValue"
+      - doc: |-
+          NoNewPrivileges sets no_new_privs (systemd NoNewPrivileges=): no execve of
+          the child or its descendants gains a privilege. Landlock and Seccomp set
+          it whatever this says, as the kernel requires of an unprivileged caller.
+        name: NoNewPrivileges
+        type: bool
+      - doc: Landlock, when non-nil, restricts the child's access to the filesystem.
+        name: Landlock
+        type: "*LandlockValue"
+      - doc: Seccomp, when non-nil, filters the child's system calls.
+        name: Seccomp
+        type: "*SeccompValue"
+    kind: struct
+    name: SandboxValue
+  - kind: named
+    name: Namespace
+    underlying: uint32
+  - fields:
+      - doc: Inside is the first id in the namespace.
+        name: Inside
+        type: uint32
+      - doc: Outside is the id Inside maps to in the supervisor's namespace.
+        name: Outside
+        type: uint32
+      - doc: Size is the number of ids mapped; it must be at least 1.
+        name: Size
+        type: uint32
+    kind: struct
+    name: IDMapValue
+  - kind: named
+    name: MountKind
+    underlying: uint8
+  - fields:
+      - doc: Kind is what is mounted.
+        name: Kind
+        type: MountKind
+      - doc: |-
+          Source is the directory or file a MountBind binds; empty for every other
+          kind.
+        name: Source
+        type: string
+      - doc: Target is the absolute path mounted on; it must exist.
+        name: Target
+        type: string
+      - doc: |-
+          ReadOnly makes a MountBind or a MountTmpfs read-only, recursively (a
+          MountReadOnly always is).
+        name: ReadOnly
+        type: bool
+    kind: struct
+    name: MountValue
+  - fields:
+      - doc: |-
+          Bounding is the bounding set the child keeps (systemd
+          CapabilityBoundingSet=): every capability the kernel knows outside it is
+          dropped with PR_CAPBSET_DROP, which needs CAP_SETPCAP — as uid 0 in a user
+          namespace has. The zero value drops them all.
+        name: Bounding
+        type: uint64
+      - doc: |-
+          Ambient is raised in the child's ambient set (systemd
+          AmbientCapabilities=), so a program that is not root keeps them across
+          execve; its inheritable set becomes this one. It must lie within Bounding.
+        name: Ambient
+        type: uint64
+      - doc: |-
+          SecureBits, when non-zero, is set with PR_SET_SECUREBITS (systemd
+          SecureBits=), its bits those of linux/securebits.h.
+        name: SecureBits
+        type: uint32
+    kind: struct
+    name: CapabilitiesValue
+  - kind: named
+    name: LandlockAccess
+    underlying: uint64
+  - fields:
+      - doc: Handled is the set of rights restricted; it must not be empty.
+        name: Handled
+        type: LandlockAccess
+      - doc: Rules grant rights beneath paths.
+        name: Rules
+        type: "[]LandlockRuleValue"
+      - doc: |-
+          BestEffort is the set of rights dropped rather than refused when the
+          kernel's ABI lacks them.
+        name: BestEffort
+        type: LandlockAccess
+    kind: struct
+    name: LandlockValue
+  - fields:
+      - doc: |-
+          Path is the absolute file or directory the rule covers, opened by the
+          child after its mounts and its pivot.
+        name: Path
+        type: string
+      - doc: |-
+          Access is the set of rights granted beneath Path; it must lie within
+          LandlockValue.Handled.
+        name: Access
+        type: LandlockAccess
+    kind: struct
+    name: LandlockRuleValue
+  - kind: named
+    name: SeccompAction
+    underlying: uint8
+  - fields:
+      - doc: Default is the action of every call Syscalls does not name.
+        name: Default
+        type: SeccompAction
+      - doc: |-
+          Syscalls are the calls Action applies to, by their Linux names ("mkdirat").
+          A name no supported architecture knows is InvalidSpec; one this
+          architecture lacks matches nothing.
+        name: Syscalls
+        type: "[]string"
+      - doc: |-
+          Action is the action of the calls Syscalls names; it must differ from
+          Default.
+        name: Action
+        type: SeccompAction
+      - doc: Errno is the error number SeccompErrno returns, 1 to 4095; zero is EPERM.
+        name: Errno
+        type: int
+    kind: struct
+    name: SeccompValue
+  - kind: named
+    methods:
+      - name: String
+        recv: p SchedPolicy
+        results: string
+    name: SchedPolicy
+    underlying: int
+  - kind: named
+    methods:
+      - name: String
+        recv: c IOClass
+        results: string
+    name: IOClass
+    underlying: int
+  - fields:
+      - doc: Policy is the CPU scheduling policy.
+        name: Policy
+        type: SchedPolicy
+      - doc: |-
+          Priority is the static priority of SchedFIFO and SchedRR (1 to 99 on Linux,
+          0 to 31 on FreeBSD); it must be 0 for every other policy.
+        name: Priority
+        type: int
+      - doc: |-
+          IOClass is the I/O scheduling class; IOClassNone leaves the kernel's
+          default, derived from the CPU niceness.
+        name: IOClass
+        type: IOClass
+      - doc: |-
+          IOPriority is the level within IOClassRealTime or IOClassBestEffort, from 0
+          (highest) to 7 (lowest).
+        name: IOPriority
+        type: int
+    kind: struct
+    name: SchedulingValue
   - kind: named
     methods:
       - name: OS
@@ -294,6 +1063,10 @@ types:
         recv: s Signal
         results: string
       - name: Known
+        recv: s Signal
+        results: bool
+      - doc: realtime reports whether s lies in the platform's realtime range.
+        name: realtime
         recv: s Signal
         results: bool
     name: Signal
@@ -321,7 +1094,11 @@ types:
         type: string
       - doc: |-
           Env is the explicit environment; nil yields an empty environment, never
-          implicit inheritance, so a spawned service starts from a known state.
+          implicit inheritance, so a spawned service starts from a known state. A key
+          set more than once keeps its last value, at the place of its last
+          occurrence, as os/exec reads append(os.Environ(), "K=v"). A key beginning
+          __KITSUNIUM_SDK_PROC_, in any case, is the SDK's own spawn protocol and is
+          refused with ReservedEnv before any fork.
         name: Env
         type: "[]string"
       - doc: |-
@@ -348,13 +1125,28 @@ types:
         name: Setsid
         type: bool
       - doc: |-
+          DieWithParent, when non-zero, is the signal the child receives when the
+          supervisor dies — a SIGKILL or a crash included, where no Stop runs. Linux and
+          FreeBSD set the kernel's parent-death signal (PR_SET_PDEATHSIG, procctl
+          PROC_PDEATHSIG_CTL), which fires when the THREAD that forked the child exits:
+          the Go runtime keeps its threads, but one whose goroutine ends while locked to
+          it exits with it. Windows places the child in a Job Object with
+          KILL_ON_JOB_CLOSE whose handle stays open for the supervisor's life, so any
+          non-zero signal means termination there. Elsewhere a non-zero value surfaces
+          UnsupportedPlatform before anything is spawned. The zero Signal requests
+          nothing.
+        name: DieWithParent
+        type: Signal
+      - doc: |-
           Umask, when non-nil, is the file-creation mask applied to the child
           (systemd UMask=).
         name: Umask
         type: "*int"
       - doc: |-
           Nice, when non-nil, is the scheduling-priority adjustment applied to the
-          child (systemd Nice=).
+          child (systemd Nice=). On Windows it selects the child's priority class at
+          creation: -10 and below HIGH, below 0 ABOVE_NORMAL, 0 NORMAL, 1 to 10
+          BELOW_NORMAL, above 10 IDLE.
         name: Nice
         type: "*int"
       - doc: |-
@@ -363,9 +1155,24 @@ types:
         name: OOMScoreAdj
         type: "*int"
       - doc: |-
+          Scheduling, when non-nil, is the CPU scheduling policy and the I/O priority
+          applied to the child (systemd CPUSchedulingPolicy=, CPUSchedulingPriority=,
+          IOSchedulingClass=, IOSchedulingPriority=), on the live pid beside Nice. Linux
+          applies both (sched_setscheduler, ioprio_set); FreeBSD applies SchedFIFO,
+          SchedRR and SchedIdle through rtprio(2); every other platform refuses a Policy
+          other than SchedOther or an IOClass other than IOClassNone with
+          UnsupportedPlatform before spawning. An undefined policy or class, or an I/O
+          level past 7, is InvalidSpec; a refusal by the kernel (a realtime policy
+          without CAP_SYS_NICE) is RlimitFailed and the child is torn down.
+        name: Scheduling
+        type: "*SchedulingValue"
+      - doc: |-
           Rlimits are per-resource soft/hard limits applied post-fork, pre-exec
           (systemd Limit*=); resources unsupported on the platform surface a typed
-          error rather than silently no-op.
+          error rather than silently no-op. Without a ResourceNoFile entry the child
+          does not inherit the supervisor's open-file soft limit: the Go runtime
+          raises its own to the hard limit at start and puts the original back in
+          every child it forks, until rlimit.KeepRaisedNoFile is called.
         name: Rlimits
         type: map[Resource]LimitValue
       - doc: |-
@@ -373,8 +1180,10 @@ types:
           child is placed into BEFORE exec, so controller limits (MemoryMax/TasksMax/
           …) apply from its first instruction — closing the unconfined window that a
           post-spawn Group.Add(pid) leaves open (systemd places the unit's payload in
-          its cgroup the same way). The service writes the child's pid to
-          <CgroupPath>/cgroup.procs in the pre-exec trampoline. Linux-only: a non-empty
+          its cgroup the same way). On Linux 5.7 and later the child is cloned straight
+          into the group (clone3 with CLONE_INTO_CGROUP); on an older kernel, or one
+          whose filter refuses clone3, the pre-exec trampoline writes its pid to
+          <CgroupPath>/cgroup.procs. Linux-only: a non-empty
           value on any other GOOS surfaces UnsupportedPlatform; a path that is missing,
           not a cgroup v2 directory, or not delegated surfaces a typed cgroup error
           rather than spawning unconfined.
@@ -382,8 +1191,9 @@ types:
         type: string
       - doc: |-
           Stdio selects how the child's standard streams are wired: StdioInherit
-          (default — share the parent's), StdioNull (discard to the null device), or
-          StdioCapture (use the Stdout/Stderr/Stdin members below). systemd
+          (default — share the parent's), StdioNull (discard to the null device),
+          StdioCapture (use the Stdout/Stderr/Stdin members below), or StdioPTY (one
+          pseudo-terminal for all three, sized by PTY). systemd
           StandardOutput=/StandardError=/StandardInput= is the analogue.
         name: Stdio
         type: StdioMode
@@ -405,15 +1215,79 @@ types:
         name: Stdin
         type: io.Reader
       - doc: |-
+          PTY, when Stdio is StdioPTY, is the initial window size of the child's
+          pseudo-terminal; nil leaves the size a new terminal has (zero by zero). It is
+          ignored in every other mode.
+        name: PTY
+        type: "*PTYValue"
+      - doc: |-
+          DrainGrace bounds how long Wait waits for the StdioCapture copiers once the
+          exit status is in hand. A process the child left behind that inherited its
+          stdout or stderr — a daemon, `sleep 60 &` — keeps the pipe open after the
+          child exits; when the grace closes, Wait closes the parent's pipe ends and
+          returns the real ExitValue with StdioDrainTimeout. The zero value is the
+          bounded default of one second (ADR 0031); a negative value waits for every
+          byte however long the pipes stay open.
+        name: DrainGrace
+        type: time.Duration
+      - doc: |-
           ExtraFiles are additional open files inherited by the child, in order,
           starting at file descriptor 3 (after stdin/stdout/stderr). This is the
           mechanism behind socket activation (sd_listen_fds): an activator binds
           listening sockets and passes them here, then sets LISTEN_FDS/LISTEN_PID in
-          Env so the child finds them at fd 3..3+len-1. nil means no extra fds.
+          Env so the child finds them at fd 3..3+len-1. nil means no extra fds. They
+          are the only descriptors past stdio the child gets, unless FDs says otherwise.
         name: ExtraFiles
         type: "[]*os.File"
+      - doc: |-
+          PIDEnv names variables the child is given set to its own PID, in decimal:
+          the spawn sets them after the fork, before the program runs — what
+          LISTEN_PID and WATCHDOG_PID need, since no parent knows a child's PID
+          before forking it. A name here replaces the same name in Env. Setting one
+          routes the spawn through the trampoline, as Rlimits and Umask do; Windows
+          refuses it with UnsupportedPlatform. A name that is empty or holds '=',
+          ',' or NUL is InvalidSpec, one beginning __KITSUNIUM_SDK_PROC_ ReservedEnv.
+        name: PIDEnv
+        type: "[]string"
+      - doc: |-
+          FDs says which of the supervisor's descriptors the child inherits besides its
+          stdio and ExtraFiles. FDsSealed — the zero value — gives it none: Start first
+          marks every descriptor of the supervisor from 3 up close-on-exec, one
+          close_range(CLOSE_RANGE_CLOEXEC) on Linux 5.11 and later and on FreeBSD,
+          otherwise a walk of /proc/self/fd (Linux, illumos, Solaris) or /dev/fd (darwin
+          and the BSDs). The mark is process-wide and closes nothing: the supervisor keeps
+          using its descriptors. FDsInherited lets the child inherit every descriptor that
+          lacks close-on-exec, as fork/exec does by default — after a sealed spawn, only
+          those opened without close-on-exec since. Windows passes a child only the
+          handles it is given, so the field changes nothing there.
+        name: FDs
+        type: FDPolicy
+      - doc: |-
+          Sandbox, when non-nil, is the isolation the child is spawned under:
+          namespaces, mounts, a new root, capabilities, no_new_privs, Landlock and
+          seccomp, applied by the spawn's second stage before the program runs, the
+          seccomp filter last. The identity (User, Group, Groups) is then taken by
+          that stage too, after the capability bounding set is cut, and FDs must be
+          FDsSealed. Linux on amd64 and arm64 applies it; any other platform refuses
+          it with UnsupportedPlatform before anything is spawned, a kernel lacking a
+          part of it with SandboxUnavailable, and a step that fails in the child with
+          SandboxFailed — the program never runs unconfined.
+        name: Sandbox
+        type: "*SandboxValue"
     kind: struct
     name: Spec
+  - kind: named
+    name: FDPolicy
+    underlying: uint8
+  - fields:
+      - doc: Rows is the number of character rows.
+        name: Rows
+        type: uint16
+      - doc: Cols is the number of character columns.
+        name: Cols
+        type: uint16
+    kind: struct
+    name: PTYValue
   - kind: named
     methods:
       - name: String
@@ -425,6 +1299,23 @@ types:
     name: StdioMode
     underlying: uint8
 vars:
+  - doc: |-
+      controllerNames holds each controller's kernel name, indexed by its value;
+      the zero value's entry is empty.
+    items:
+      - name: controllerNames
+        value: |-
+          [...]string{
+          	ControllerCPU:     "cpu",
+          	ControllerCPUSet:  "cpuset",
+          	ControllerIO:      "io",
+          	ControllerMemory:  "memory",
+          	ControllerPids:    "pids",
+          	ControllerHugeTLB: "hugetlb",
+          	ControllerRDMA:    "rdma",
+          	ControllerMisc:    "misc",
+          }
+    name: controllerNames
   - doc: |-
       resourceNames maps each Resource to the lowercase suffix of its systemd
       Limit* directive. Declared as a literal (no init) so String stays a flat
@@ -444,6 +1335,28 @@ vars:
           	ResourceMemLock: "memlock",
           }
     name: resourceNames
+  - grouped: true
+    items:
+      - doc: schedPolicyNames maps each defined policy to its lowercase name.
+        name: schedPolicyNames
+        value: |-
+          map[SchedPolicy]string{
+          		SchedOther: "other",
+          		SchedFIFO:  "fifo",
+          		SchedRR:    "rr",
+          		SchedBatch: "batch",
+          		SchedIdle:  "idle",
+          	}
+      - doc: ioClassNames maps each defined class to its lowercase name.
+        name: ioClassNames
+        value: |-
+          map[IOClass]string{
+          		IOClassNone:       "none",
+          		IOClassRealTime:   "realtime",
+          		IOClassBestEffort: "besteffort",
+          		IOClassIdle:       "idle",
+          	}
+    name: schedPolicyNames
   - doc: |-
       signalNames maps each known Signal to its canonical SIG* name on Unix
       platforms (linux/darwin/bsd). Only POSIX-common signals are listed so the
@@ -492,5 +1405,6 @@ vars:
           	StdioInherit: "inherit",
           	StdioNull:    "null",
           	StdioCapture: "capture",
+          	StdioPTY:     "pty",
           }
     name: stdioModeNames

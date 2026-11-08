@@ -30,6 +30,7 @@ go_test(
     srcs = [
         "build_external_test.go",
         "gen_api_test.go",
+        "toolchain_external_test.go",
     ],
     deps = [":buildinfo"],
 )

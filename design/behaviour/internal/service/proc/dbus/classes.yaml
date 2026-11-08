@@ -1,0 +1,939 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: systemBusDefault is the system bus's well-known socket.
+        name: systemBusDefault
+        type: string
+        value: "\"unix:path=/run/dbus/system_bus_socket\""
+      - doc: sessionBusSocket is the session bus's socket under XDG_RUNTIME_DIR.
+        name: sessionBusSocket
+        type: string
+        value: "\"/bus\""
+      - doc: hexBase is the base of a %XX escape.
+        name: hexBase
+        type: int
+        value: "16"
+      - doc: escapeDigits is how many hex digits follow a % sign.
+        name: escapeDigits
+        type: int
+        value: "2"
+      - doc: byteBits is the size of the byte an escape stands for.
+        name: byteBits
+        type: int
+        value: "8"
+      - doc: hexDigits are the digits of an escape.
+        name: hexDigits
+        type: string
+        value: "\"0123456789abcdef\""
+    name: systemBusDefault
+  - grouped: true
+    items:
+      - doc: maxAuthLine bounds a line the bus sends during the authentication.
+        name: maxAuthLine
+        type: int
+        value: "512"
+    name: maxAuthLine
+  - grouped: true
+    items:
+      - doc: |-
+          busDriver is the bus driver's name: every call of this client goes to
+          it, and the signals it reads come from it.
+        name: busDriver
+        type: string
+        value: "\"org.freedesktop.DBus\""
+      - doc: busPath is the bus driver's object path.
+        name: busPath
+        type: string
+        value: "\"/org/freedesktop/DBus\""
+      - doc: busInterface is the bus driver's interface.
+        name: busInterface
+        type: string
+        value: "\"org.freedesktop.DBus\""
+      - doc: nameHasNoOwner is GetNameOwner's error for a name nobody owns.
+        name: nameHasNoOwner
+        type: string
+        value: "\"org.freedesktop.DBus.Error.NameHasNoOwner\""
+      - doc: requestDoNotQueue is RequestName's DBUS_NAME_FLAG_DO_NOT_QUEUE.
+        name: requestDoNotQueue
+        type: uint32
+        value: "4"
+      - doc: replyPrimaryOwner is RequestName's answer for a name just given.
+        name: replyPrimaryOwner
+        type: uint32
+        value: "1"
+      - doc: |-
+          replyAlreadyOwner is RequestName's answer for a name the connection
+          owned already.
+        name: replyAlreadyOwner
+        type: uint32
+        value: "4"
+      - doc: releaseReleased is ReleaseName's answer for a name given back.
+        name: releaseReleased
+        type: uint32
+        value: "1"
+      - doc: readBuffer is the connection's read buffer.
+        name: readBuffer
+        type: int
+        value: "4096"
+      - doc: exitUnavailable is EX_UNAVAILABLE.
+        name: exitUnavailable
+        type: int
+        value: "69"
+      - doc: exitTempFail is EX_TEMPFAIL.
+        name: exitTempFail
+        type: int
+        value: "75"
+      - doc: osLinux is the GOOS the client runs on.
+        name: osLinux
+        type: string
+        value: "\"linux\""
+      - doc: |-
+          callTimeout bounds every call and the authentication: sd-bus's and
+          libdbus's default reply timeout.
+        name: callTimeout
+        type: time.Duration
+        value: 25 * time.Second
+    name: busDriver
+  - grouped: true
+    items:
+      - doc: maxNameBytes is the longest bus name the specification allows.
+        name: maxNameBytes
+        type: int
+        value: "255"
+      - doc: minElements is how many dot-separated elements a name has at least.
+        name: minElements
+        type: int
+        value: "2"
+    name: maxNameBytes
+  - grouped: true
+    items:
+      - doc: |-
+          maxBacklog is how many owners a watch keeps for a reader that falls
+          behind; past it the newest are coalesced into the last, never the
+          oldest.
+        name: maxBacklog
+        type: int
+        value: "64"
+    name: maxBacklog
+  - grouped: true
+    items:
+      - doc: typeMethodCall is a method call.
+        name: typeMethodCall
+        type: byte
+        value: "1"
+      - doc: typeMethodReturn is a method's reply.
+        name: typeMethodReturn
+        type: byte
+        value: "2"
+      - doc: typeError is a method's error reply.
+        name: typeError
+        type: byte
+        value: "3"
+      - doc: typeSignal is a signal.
+        name: typeSignal
+        type: byte
+        value: "4"
+      - doc: flagNoReplyExpected asks the bus for no reply.
+        name: flagNoReplyExpected
+        type: byte
+        value: "0x1"
+      - doc: protocolVersion is the major protocol version.
+        name: protocolVersion
+        type: byte
+        value: "1"
+      - doc: littleEndian is the little-endian byte-order mark.
+        name: littleEndian
+        type: byte
+        value: "'l'"
+      - doc: bigEndian is the big-endian byte-order mark.
+        name: bigEndian
+        type: byte
+        value: "'B'"
+      - doc: fieldPath is the object path's header field.
+        name: fieldPath
+        type: byte
+        value: "1"
+      - doc: fieldInterface is the interface's header field.
+        name: fieldInterface
+        type: byte
+        value: "2"
+      - doc: fieldMember is the member's header field.
+        name: fieldMember
+        type: byte
+        value: "3"
+      - doc: fieldErrorName is an error's name's header field.
+        name: fieldErrorName
+        type: byte
+        value: "4"
+      - doc: fieldReplySerial is the header field of the serial a reply answers.
+        name: fieldReplySerial
+        type: byte
+        value: "5"
+      - doc: fieldDestination is the destination's header field.
+        name: fieldDestination
+        type: byte
+        value: "6"
+      - doc: fieldSender is the sender's header field, which the daemon stamps.
+        name: fieldSender
+        type: byte
+        value: "7"
+      - doc: fieldSignature is the body's signature's header field.
+        name: fieldSignature
+        type: byte
+        value: "8"
+      - doc: callBuffer is a method call's usual size, preallocated.
+        name: callBuffer
+        type: int
+        value: "256"
+      - doc: sizeByte is a byte's size; each basic type is aligned on its size.
+        name: sizeByte
+        type: int
+        value: "1"
+      - doc: sizeInt16 is a 16-bit integer's size.
+        name: sizeInt16
+        type: int
+        value: "2"
+      - doc: "sizeInt32 is a 32-bit value's size: an integer, a boolean, a handle."
+        name: sizeInt32
+        type: int
+        value: "4"
+      - doc: "sizeInt64 is a 64-bit value's size: an integer, a double."
+        name: sizeInt64
+        type: int
+        value: "8"
+      - doc: |-
+          fixedHeader is the header before its field array: the byte order, the
+          type, the flags, the version, the body's length, the serial and the
+          array's length.
+        name: fixedHeader
+        type: int
+        value: "16"
+      - doc: maxFieldBytes bounds a header's field array.
+        name: maxFieldBytes
+        type: uint32
+        value: 1 << 16
+      - doc: |-
+          maxBodyBytes is the largest body read; past it a body is read and
+          dropped, never allocated.
+        name: maxBodyBytes
+        type: uint32
+        value: 1 << 20
+      - doc: maxMessageBytes is the specification's largest message.
+        name: maxMessageBytes
+        type: uint32
+        value: 1 << 27
+      - doc: alignStruct is the alignment of a struct, a header field and a body.
+        name: alignStruct
+        type: int
+        value: "8"
+      - doc: alignUint32 is the alignment of a uint32 and of a string's length.
+        name: alignUint32
+        type: int
+        value: "4"
+    name: typeMethodCall
+files:
+  - decls:
+      - systemBusDefault
+      - SystemBusAddress
+      - SessionBusAddress
+      - socketOf
+      - unixSocket
+      - unixKey
+      - unescape
+      - escapeValue
+    name: address.go
+  - decls:
+      - maxAuthLine
+      - authenticate
+      - noIdentity
+      - authVerdict
+      - authAnswer
+      - authLine
+      - unreachable
+      - unreachableOrNil
+    name: auth.go
+  - decls:
+      - busDriver
+      - Conn
+      - pending
+      - NewConn
+      - open
+      - handshake
+      - deadlineCause
+      - isTimeout
+      - (*Conn).UniqueName
+      - (*Conn).NameOwner
+      - (*Conn).RequestName
+      - (*Conn).ReleaseName
+      - (*Conn).Close
+      - (*Conn).answer
+      - (*Conn).call
+      - (*Conn).roundTrip
+      - (*Conn).lateReply
+      - (*Conn).nextSerial
+      - (*Conn).forget
+      - (*Conn).send
+      - (*Conn).fail
+      - (*Conn).read
+      - (*Conn).end
+      - (*Conn).dispatch
+      - (*Conn).reply
+      - (*Conn).announced
+      - ownerOf
+      - callFailed
+      - ended
+      - timedOut
+      - gone
+    name: conn.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - maxNameBytes
+      - checkName
+      - validName
+      - badElement
+      - busNameByte
+    name: name.go
+  - decls:
+      - maxBacklog
+      - watch
+      - (*Conn).WatchName
+      - (*Conn).register
+      - (*Conn).track
+      - (*Conn).unwatch
+      - (*Conn).looked
+      - (*Conn).deliver
+      - (*Conn).head
+      - (*Conn).pop
+      - (*watch).push
+      - (*watch).nudge
+      - (*Conn).removeMatch
+      - matchRule
+    name: watch.go
+  - decls:
+      - typeMethodCall
+      - basicSizes
+      - message
+      - discarder
+      - encoder
+      - (*encoder).pad
+      - (*encoder).u32
+      - (*encoder).str
+      - (*encoder).sig
+      - (*encoder).field
+      - callValue
+      - encodeCall
+      - readMessage
+      - parseFixed
+      - padding
+      - (*message).parseFields
+      - (*message).field
+      - okOr
+      - decoder
+      - (*decoder).align
+      - (*decoder).byte
+      - (*decoder).u32
+      - (*decoder).string
+      - (*decoder).signature
+      - (*decoder).text
+      - (*decoder).skip
+      - (*message).strings
+      - (*message).uint32
+      - allOf
+      - violation
+    name: wire.go
+functions:
+  - name: SystemBusAddress
+    results: string
+  - name: SessionBusAddress
+    results: string
+  - doc: |-
+      socketOf is the socket the first usable entry of address names: a path, or
+      "@" and an abstract name, as package net dials it.
+    name: socketOf
+    params: address string
+    results: string, error
+  - doc: |-
+      unixSocket reads one entry: unix: with exactly one of path= and abstract=,
+      each value unescaped; any other transport or key is not one the client
+      dials.
+    name: unixSocket
+    params: entry string
+    results: string, bool
+  - doc: |-
+      unixKey reads one key=value of a unix entry over socket, the socket named
+      so far: path= and abstract= name it, once; guid= is not checked; a
+      listening key (tmpdir, dir, runtime), a second socket or a value that does
+      not unescape is refused.
+    name: unixKey
+    params: kv, socket string
+    results: string, bool
+  - doc: |-
+      unescape decodes a value's %XX escapes; a truncated or non-hex escape is
+      refused.
+    name: unescape
+    params: v string
+    results: string, bool
+  - doc: escapeValue escapes every byte of v outside [-0-9A-Za-z_/.\*].
+    name: escapeValue
+    params: v string
+    results: string
+  - doc: |-
+      authenticate runs AUTH EXTERNAL over w with no identity of its own,
+      reading the bus's answers from r: nil once the bus said OK and was told
+      BEGIN.
+    name: authenticate
+    params: w io.Writer, r io.ByteReader
+    results: error
+  - doc: |-
+      noIdentity answers the bus's DATA with an empty one — the identity the
+      kernel gives of the socket's peer — and returns the bus's next answer.
+    name: noIdentity
+    params: w io.Writer, r io.ByteReader
+    results: verb, rest string, err error
+  - doc: |-
+      authVerdict acts on the bus's verdict, verb and the rest of its line: OK
+      is answered BEGIN.
+    name: authVerdict
+    params: w io.Writer, verb, rest string
+    results: error
+  - doc: authAnswer reads one line of the bus as its verb and the rest.
+    name: authAnswer
+    params: r io.ByteReader
+    results: verb, rest string, err error
+  - doc: authLine reads one line of the bus, without its CRLF, within maxAuthLine.
+    name: authLine
+    params: r io.ByteReader
+    results: string, error
+  - doc: unreachable wraps a connection's failure as BUS_UNREACHABLE.
+    name: unreachable
+    params: cause error
+    results: error
+  - doc: unreachableOrNil is nil for nil, BUS_UNREACHABLE otherwise.
+    name: unreachableOrNil
+    params: err error
+    results: error
+  - name: NewConn
+    params: ctx context.Context, address string
+    results: "*Conn, error"
+  - doc: |-
+      open authenticates over nc, starts the reader and says Hello; a
+      failure closes nc.
+
+      Goroutine lifecycle: the reader, ended when nc is — Close, the bus's
+      hang-up, a message the client cannot read —; joined by Close.
+    name: open
+    params: ctx context.Context, nc net.Conn
+    results: "*Conn, error"
+  - doc: |-
+      handshake runs the authentication within ctx and callTimeout: the sooner
+      deadline, and ctx's cancellation through an expired one, end a read or a
+      write in flight.
+    name: handshake
+    params: ctx context.Context, nc net.Conn, r io.ByteReader
+    results: error
+  - doc: |-
+      deadlineCause is context.DeadlineExceeded when the deadline that passed was
+      the context's, nil when it was the client's own bound.
+    name: deadlineCause
+    params: byCtx bool
+    results: error
+  - doc: isTimeout reports a read or a write that passed its deadline.
+    name: isTimeout
+    params: err error
+    results: bool
+  - doc: "ownerOf reads GetNameOwner's reply: the owner, empty for NameHasNoOwner."
+    name: ownerOf
+    params: m *message
+    results: string, error
+  - doc: callFailed is CALL_FAILED naming the method and the bus's error.
+    name: callFailed
+    params: method, errName string
+    results: error
+  - doc: |-
+      ended is a call whose context ended: CALL_TIMEOUT for its deadline,
+      CALL_CANCELLED otherwise, ctx's error in the chain.
+    name: ended
+    params: method string, cause error
+    results: error
+  - doc: |-
+      timedOut is CALL_TIMEOUT naming the method, cause — a deadline that
+      passed — in the chain when there is one.
+    name: timedOut
+    params: method string, cause error
+    results: error
+  - doc: |-
+      gone takes an error nobody can act on: a deadline on a connection that is
+      closing, a socket closed whatever its close says.
+    name: gone
+    params: err error
+  - doc: checkName refuses a name that is not a well-known bus name (NAME_INVALID).
+    name: checkName
+    params: name string
+    results: error
+  - doc: |-
+      validName reports a well-known bus name: two elements or more separated by
+      dots, each of [A-Za-z0-9_-] and not opening with a digit, 255 bytes at
+      most. A unique name (":1.42") is not one.
+    name: validName
+    params: name string
+    results: bool
+  - doc: |-
+      badElement reports an element of a bus name that is empty, opens with a
+      digit, or holds a byte outside [A-Za-z0-9_-].
+    name: badElement
+    params: e string
+    results: bool
+  - doc: busNameByte reports a byte of [A-Za-z0-9_-].
+    name: busNameByte
+    params: c byte
+    results: bool
+  - doc: matchRule is the rule that has the bus announce name's changes of owner.
+    name: matchRule
+    params: name string
+    results: string
+  - doc: encodeCall writes a method call to the bus driver.
+    name: encodeCall
+    params: serial uint32, c *callValue
+    results: "[]byte"
+  - doc: |-
+      readMessage reads one message: the header bounded before it is read, the
+      body read whole or, past maxBodyBytes, read and dropped.
+    name: readMessage
+    params: r discarder
+    results: "*message, error"
+  - doc: |-
+      parseFixed reads the fixed part of a header: the byte order, the type, the
+      flags, the version, the lengths and the serial.
+    name: parseFixed
+    params: head []byte
+    results: "*message, error"
+  - doc: padding is how many bytes align offset on n.
+    name: padding
+    params: offset, n int
+    results: int
+  - doc: okOr is nil when ok, PROTOCOL_VIOLATION naming rule otherwise.
+    name: okOr
+    params: ok bool, rule string
+    results: error
+  - doc: allOf reports whether every byte of s is c.
+    name: allOf
+    params: s string, c byte
+    results: bool
+  - doc: violation is PROTOCOL_VIOLATION naming the rule broken.
+    name: violation
+    params: rule string
+    results: error
+imports:
+  atomic: sync/atomic
+  binary: encoding/binary
+  bufio: bufio
+  bytes: bytes
+  context: context
+  coredbus: github.com/kitsunium/sdk/internal/core/proc/dbus
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  net: net
+  os: os
+  runtime: runtime
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  time: time
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/dbus
+  name: dbus
+  purpose: "Package dbus is the SDK's message bus client (kitsunium/sdk#737, ADR 0214's S0e amendment): what a supervisor needs of a D-Bus daemon to run systemd's Type=dbus — who owns a well-known name, and every change of it — and what a supervised Go service needs to be one: owning its name."
+types:
+  - fields:
+      - name: nc
+        type: net.Conn
+      - name: r
+        type: "*bufio.Reader"
+      - doc: done closes once the connection ended.
+        name: done
+        type: chan struct{}
+      - doc: |-
+          pending are the calls waiting for a reply, by serial; watches the
+          names watched. Guarded by mu.
+        name: pending
+        type: map[uint32]*pending
+      - name: watches
+        type: map[string][]*watch
+      - doc: cause is why the connection ended. Guarded by mu.
+        name: cause
+        type: error
+      - doc: uniqueName is the connection's name on the bus, Hello's answer.
+        name: uniqueName
+        type: string
+      - doc: wg joins the reader and every watch's goroutine.
+        name: wg
+        type: sync.WaitGroup
+      - doc: doneOnce closes done.
+        name: doneOnce
+        type: sync.Once
+      - name: mu
+        type: sync.Mutex
+      - doc: wmu writes one message at a time.
+        name: wmu
+        type: sync.Mutex
+      - name: serial
+        type: atomic.Uint32
+      - doc: closed refuses every new call and watch. Guarded by mu.
+        name: closed
+        type: bool
+    kind: struct
+    methods:
+      - name: UniqueName
+        recv: c *Conn
+        results: string
+      - name: NameOwner
+        params: ctx context.Context, name string
+        recv: c *Conn
+        results: string, error
+      - name: RequestName
+        params: ctx context.Context, name string
+        recv: c *Conn
+        results: bool, error
+      - name: ReleaseName
+        params: ctx context.Context, name string
+        recv: c *Conn
+        results: bool, error
+      - name: Close
+        recv: c *Conn
+        results: error
+      - doc: answer sends a call whose reply is one uint32, and returns it.
+        name: answer
+        params: ctx context.Context, cv *callValue
+        recv: c *Conn
+        results: uint32, error
+      - doc: |-
+          call sends cv and returns its method return; an error message is
+          CALL_FAILED naming it.
+        name: call
+        params: ctx context.Context, cv *callValue
+        recv: c *Conn
+        results: "*message, error"
+      - doc: |-
+          roundTrip sends cv and returns its reply, a method return or an error
+          message; onReply runs in the reader as the reply is read.
+        name: roundTrip
+        params: ctx context.Context, cv *callValue, onReply func(*message)
+        recv: c *Conn
+        results: "*message, error"
+      - doc: lateReply is a reply read before the connection ended, or CONN_CLOSED.
+        name: lateReply
+        params: p *pending
+        recv: c *Conn
+        results: "*message, error"
+      - doc: nextSerial is the next serial, never 0.
+        name: nextSerial
+        recv: c *Conn
+        results: uint32
+      - doc: forget drops a call nobody waits for.
+        name: forget
+        params: serial uint32
+        recv: c *Conn
+      - doc: |-
+          send writes one call, within ctx's deadline. A message half written leaves
+          the stream unreadable: a failed write ends the connection.
+        name: send
+        params: ctx context.Context, serial uint32, cv *callValue
+        recv: c *Conn
+        results: error
+      - doc: |-
+          fail ends the connection for cause (nil for Close): no new call or watch,
+          the socket closed, which ends the reader.
+        name: fail
+        params: cause error
+        recv: c *Conn
+      - doc: read reads every message until the connection ends, and ends it.
+        name: read
+        recv: c *Conn
+      - doc: |-
+          end closes the connection after its reader stopped: every call waiting and
+          every watch learn it through done.
+        name: end
+        params: cause error
+        recv: c *Conn
+      - doc: |-
+          dispatch hands one message: a reply to its call, NameOwnerChanged to its
+          watches; a method call another peer sends is dropped, as is a type the
+          specification lets a reader ignore.
+        name: dispatch
+        params: m *message
+        recv: c *Conn
+      - doc: reply hands the bus driver's reply to the call it answers.
+        name: reply
+        params: m *message
+        recv: c *Conn
+      - doc: |-
+          announced hands the bus driver's NameOwnerChanged to the name's watches
+          that looked their owner up already: an announcement read before the lookup
+          is older than it.
+        name: announced
+        params: m *message
+        recv: c *Conn
+      - name: WatchName
+        params: ctx context.Context, name string
+        recv: c *Conn
+        results: <-chan string, error
+      - doc: register adds w to the name's watches, unless the connection is closed.
+        name: register
+        params: w *watch
+        recv: c *Conn
+        results: bool
+      - doc: |-
+          track counts one more goroutine for Close to join, unless the connection is
+          closed — under mu, so it happens before Close waits.
+        name: track
+        recv: c *Conn
+        results: bool
+      - doc: unwatch removes w from the name's watches.
+        name: unwatch
+        params: w *watch
+        recv: c *Conn
+      - doc: |-
+          looked takes the lookup's reply in the reader, before the next message is
+          read: the owner first, every announcement read from now on after it.
+        name: looked
+        params: w *watch, m *message
+        recv: c *Conn
+      - doc: deliver hands w's owners to out, in order, until ctx or the connection ends.
+        name: deliver
+        params: ctx context.Context, w *watch, out chan<- string, rule string
+        recv: c *Conn
+      - doc: head is w's oldest owner not delivered.
+        name: head
+        params: w *watch
+        recv: c *Conn
+        results: string, bool
+      - doc: pop drops w's oldest owner, delivered.
+        name: pop
+        params: w *watch
+        recv: c *Conn
+      - doc: |-
+          removeMatch asks the bus to stop announcing a watch's name, without
+          waiting for its answer.
+        name: removeMatch
+        params: rule string
+        recv: c *Conn
+    name: Conn
+  - doc: |-
+      pending is one call waiting for its reply; onReply, when set, runs in the
+      reader before the next message is read.
+    fields:
+      - name: reply
+        type: chan *message
+      - name: onReply
+        type: func(*message)
+    kind: struct
+    name: pending
+  - doc: |-
+      watch is one watch of a name: the owners not yet delivered, oldest first,
+      and whether its lookup was read — an announcement read before it is older
+      than it. Its queue and ready are guarded by the connection's mu.
+    fields:
+      - name: name
+        type: string
+      - name: queue
+        type: "[]string"
+      - name: wake
+        type: chan struct{}
+      - name: ready
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          push queues an owner announced, under the connection's mu: past
+          maxBacklog the newest is coalesced into the last, the oldest kept.
+        name: push
+        params: owner string
+        recv: w *watch
+      - doc: nudge wakes the watch's goroutine, once.
+        name: nudge
+        recv: w *watch
+    name: watch
+  - doc: |-
+      message is one message read: its header and its body, the body nil when it
+      was past maxBodyBytes and dropped; bodyLen and fieldLen are the lengths its
+      fixed header announced.
+    fields:
+      - name: order
+        type: binary.ByteOrder
+      - name: path
+        type: string
+      - name: iface
+        type: string
+      - name: member
+        type: string
+      - name: errName
+        type: string
+      - name: dest
+        type: string
+      - name: sender
+        type: string
+      - name: sig
+        type: string
+      - name: body
+        type: "[]byte"
+      - name: serial
+        type: uint32
+      - name: replySerial
+        type: uint32
+      - name: bodyLen
+        type: uint32
+      - name: fieldLen
+        type: uint32
+      - name: typ
+        type: byte
+      - name: flags
+        type: byte
+    kind: struct
+    methods:
+      - doc: |-
+          parseFields reads the header's field array: every field the client knows,
+          the others skipped when their value is a basic type.
+        name: parseFields
+        params: b []byte
+        recv: m *message
+        results: error
+      - doc: field reads one header field's value into the message.
+        name: field
+        params: d *decoder, code, typ byte
+        recv: m *message
+        results: error
+      - doc: strings reads a body of n strings, which its signature must say.
+        name: strings
+        params: n int
+        recv: m *message
+        results: "[]string, bool"
+      - doc: uint32 reads a body of one uint32.
+        name: uint32
+        recv: m *message
+        results: uint32, bool
+    name: message
+  - doc: |-
+      discarder is what a message is read from: bytes, and a body dropped
+      unread.
+    kind: named
+    name: discarder
+    underlying: |-
+      interface {
+      	io.Reader
+      	// Discard skips the next n bytes.
+      	Discard(n int) (discarded int, err error)
+      }
+  - doc: |-
+      encoder writes a message, little-endian, aligning each value on its
+      offset from the message's start.
+    fields:
+      - name: b
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: pad aligns the next value on n bytes.
+        name: pad
+        params: n int
+        recv: e *encoder
+      - doc: u32 writes a uint32.
+        name: u32
+        params: v uint32
+        recv: e *encoder
+      - doc: "str writes a string or an object path: its length, its bytes, a NUL."
+        name: str
+        params: s string
+        recv: e *encoder
+      - doc: "sig writes a signature: its length on one byte, its bytes, a NUL."
+        name: sig
+        params: s string
+        recv: e *encoder
+      - doc: |-
+          field writes one header field: its code and a variant holding a string
+          ('s'), an object path ('o') or a signature ('g').
+        name: field
+        params: code, typ byte, value string
+        recv: e *encoder
+    name: encoder
+  - doc: |-
+      callValue is one method call to the bus driver: its member, its body's
+      signature and the body's arguments — strings, then a uint32 when sig ends
+      in "u".
+    fields:
+      - name: member
+        type: string
+      - name: sig
+        type: string
+      - name: strs
+        type: "[]string"
+      - name: u
+        type: uint32
+      - name: flags
+        type: byte
+    kind: struct
+    name: callValue
+  - doc: |-
+      decoder reads values aligned on their offset from the message's start
+      (base is b's offset there).
+    fields:
+      - name: order
+        type: binary.ByteOrder
+      - name: b
+        type: "[]byte"
+      - name: base
+        type: int
+      - name: "off"
+        type: int
+    kind: struct
+    methods:
+      - doc: align skips the padding up to n bytes, which must lie within b.
+        name: align
+        params: n int
+        recv: d *decoder
+        results: bool
+      - doc: byte reads one byte.
+        name: byte
+        recv: d *decoder
+        results: byte, bool
+      - doc: u32 reads a uint32.
+        name: u32
+        recv: d *decoder
+        results: uint32, bool
+      - doc: |-
+          string reads a string or an object path: its length, valid UTF-8 without
+          NUL, and its terminating NUL.
+        name: string
+        recv: d *decoder
+        results: string, bool
+      - doc: "signature reads a signature: its length on one byte, its bytes, a NUL."
+        name: signature
+        recv: d *decoder
+        results: string, bool
+      - doc: text reads n bytes and the NUL that ends them.
+        name: text
+        params: n int
+        recv: d *decoder
+        results: string, bool
+      - doc: skip skips one value of a basic type; a container is not skipped.
+        name: skip
+        params: typ byte
+        recv: d *decoder
+        results: bool
+    name: decoder
+vars:
+  - doc: basicSizes are the fixed-size basic types a skipped header field may hold.
+    items:
+      - name: basicSizes
+        value: |-
+          map[byte]int{
+          	'y': sizeByte, 'n': sizeInt16, 'q': sizeInt16, 'b': sizeInt32, 'i': sizeInt32,
+          	'u': sizeInt32, 'h': sizeInt32, 'x': sizeInt64, 't': sizeInt64, 'd': sizeInt64,
+          }
+    name: basicSizes

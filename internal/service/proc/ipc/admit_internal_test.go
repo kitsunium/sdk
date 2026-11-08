@@ -20,11 +20,25 @@ func TestAdmit(t *testing.T) {
 		{coreipc.PeerValue{UID: 2000, GID: 9, Verified: true}, true},
 		{coreipc.PeerValue{UID: 7, GID: 3000, Verified: true}, true},
 		{coreipc.PeerValue{UID: 7, GID: 9, Verified: true}, false},
-		{coreipc.PeerValue{UID: -1, GID: -1}, true},
+		{coreipc.PeerValue{UID: -1, GID: -1}, !kernelNamesPeer},
 	} {
 		err := admit(c.peer, 1000, &cfg)
 		if c.ok != (err == nil) || (err != nil && !errs.HasCode(err, coreipc.CodePeerRefused)) {
 			t.Errorf("admit(%+v) = %v, want ok=%v", c.peer, err, c.ok)
 		}
+	}
+}
+
+// TestAdmitAnUnnamedPeer pins #1093: where the kernel names the peer, a peer
+// it did not name is refused with the reason; where it does not, the
+// directory admitted it.
+func TestAdmitAnUnnamedPeer(t *testing.T) {
+	cfg := Config{}
+	unnamed := coreipc.PeerValue{UID: -1, GID: -1}
+	if err := admitWhere(unnamed, 1000, &cfg, true); !errs.HasCode(err, coreipc.CodePeerRefused) {
+		t.Fatalf("an unnamed peer where the kernel names peers = %v, want PEER_REFUSED", err)
+	}
+	if err := admitWhere(unnamed, 1000, &cfg, false); err != nil {
+		t.Fatalf("an unnamed peer where the directory is the gate = %v, want nil", err)
 	}
 }

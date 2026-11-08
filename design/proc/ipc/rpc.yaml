@@ -1,0 +1,781 @@
+apiVersion: kit.kitsunium/design/v2
+domain: proc/ipc/rpc
+packages:
+  - codes:
+      - const:
+          - doc: |-
+              CodeMisconfigured identifies a configuration no endpoint can run with: a
+              MaxFrameBytes, MaxInFlight, FrameTimeout or CallTimeout that is not
+              positive, a body format no codec is registered under, no format at all,
+              or a format or method name its one-byte length cannot say.
+            name: CodeMisconfigured
+            note: "range: 0.3.106.0 - 0.3.106.255"
+            value: "0x00_03_6A_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeFrameTooLarge identifies a frame longer than the receiver's
+              MaxFrameBytes: refused on its length, before a byte of its body is read or
+              allocated, and the connection closed — or, on the sending side, refused
+              before a byte is written.
+            name: CodeFrameTooLarge
+            value: "0x00_03_6A_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCallTimeout identifies a call whose deadline passed — the caller's
+              context's, or CallTimeout on the client's clock — before its reply came.
+            name: CodeCallTimeout
+            value: "0x00_03_6A_03"
+        type: errs.Code
+      - const:
+          - doc: CodeCallCancelled identifies a call whose caller cancelled its context.
+            name: CodeCallCancelled
+            value: "0x00_03_6A_04"
+        type: errs.Code
+      - const:
+          - doc: CodeMethodUnknown identifies a call to a method the server's Router does not route.
+            name: CodeMethodUnknown
+            value: "0x00_03_6A_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeOverloaded identifies a call refused because MaxInFlight calls were
+              already running: answered at once, never queued.
+            name: CodeOverloaded
+            value: "0x00_03_6A_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeProtocolViolation identifies a peer that broke the protocol: a frame
+              shorter than its header, a kind out of place, an id reused while in flight,
+              a reply to a call never made, or a frame not completed within FrameTimeout.
+              The connection is closed.
+            name: CodeProtocolViolation
+            value: "0x00_03_6A_07"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeFormatRefused identifies a hello the server refused: a body format it
+              does not speak, or a protocol version it does not know.
+            name: CodeFormatRefused
+            value: "0x00_03_6A_08"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeConnClosed identifies a call on a client that was closed, or whose
+              connection ended while the call was in flight.
+            name: CodeConnClosed
+            value: "0x00_03_6A_09"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeRemoteFailed identifies a handler that failed with an error carrying no
+              SDK code: its text stays on the server, and the caller learns only that the
+              call failed.
+            name: CodeRemoteFailed
+            value: "0x00_03_6A_0A"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCodecFailed identifies a value the negotiated format could not encode,
+              or a body it could not decode into the value given.
+            name: CodeCodecFailed
+            value: "0x00_03_6A_0B"
+        type: errs.Code
+    doc: |-
+      Package rpc is the contract of a call between two processes over the private
+      socket (ADR 0218): the Caller a client is, the Handler that answers one
+      method, the Router that names it, the Request a handler reads, the Stream a
+      caller reads a server's items from, and the codes every refusal carries —
+      range 0.3.106.*, declared here at the engine's path (ADR 0160).
+
+      The engine is internal/service/proc/ipc/rpc: frames bounded before they are
+      read, a fixed number of calls in flight per connection, deadlines on an
+      injected clock, and a cancel frame for an abandoned call. Nothing here opens
+      a socket or reads a frame. The ports exist so a handler is written, and
+      tested, without one.
+
+      Package rpc — the sentinels the engine refuses with. Each var's name equals
+      its Reason in SCREAMING_SNAKE form; none quotes a method's body in its Public
+      or Private half.
+    imports:
+      coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/proc/ipc/rpc
+    ports:
+      - doc: |-
+          Caller is the calling end of a connection: what a client of the private
+          socket holds, and what a test of the code around it hands a double. It is
+          frozen at these four methods (ADR 0039).
+        methods:
+          - doc: |-
+              Call sends in to method and decodes the reply into out (nil drops it),
+              within ctx: CALL_TIMEOUT or CALL_CANCELLED when ctx, or the caller's own
+              bound, ends first; the server's refusals keep their code.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: method
+                type: string
+              - name: in
+              - name: out
+                type: any
+            name: Call
+            out:
+              - type: error
+          - doc: |-
+              Stream sends in to method and returns the items the server sends back,
+              until their end, ctx's or the stream's Close.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: method
+                type: string
+              - name: in
+                type: any
+            name: Stream
+            out:
+              - type: Stream
+              - type: error
+          - doc: Ping is a round trip that runs no handler.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Ping
+            out:
+              - type: error
+          - doc: Close ends the connection; every call in flight ends with CONN_CLOSED.
+            name: Close
+            out:
+              - type: error
+        name: Caller
+      - doc: |-
+          Handler answers the calls of one method. It is frozen at one method (ADR
+          0039).
+        methods:
+          - doc: |-
+              ServeRPC answers one call. ctx ends when the caller cancels, its deadline
+              passes on the server's clock, or the connection closes; context.Cause
+              says which. A Call is answered with reply, encoded in the connection's
+              format; a Stream with the items req.Send wrote, then its end — and reply,
+              when not nil, as one last item. An error carrying an SDK code reaches the
+              caller with that code, reason and public text; any other is REMOTE_FAILED
+              there, its text kept on this side.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: req
+                type: Request
+            name: ServeRPC
+            out:
+              - name: reply
+                type: any
+              - name: err
+                type: error
+        name: Handler
+      - doc: |-
+          Router names the handler of a method. It is frozen at one method (ADR 0039).
+        methods:
+          - doc: |-
+              Route returns the handler of method, and false for a method it does not
+              route: the caller then receives METHOD_UNKNOWN.
+            in:
+              - name: method
+                type: string
+            name: Route
+            out:
+              - name: h
+                type: Handler
+              - name: ok
+                type: bool
+        name: Router
+      - doc: |-
+          Request is one call as its handler sees it: who made it, which method, the
+          body to decode, and — for a Stream — the way to send an item.
+        methods:
+          - doc: Method is the method called.
+            name: Method
+            out:
+              - type: string
+          - doc: Peer is who called, as the private socket's kernel named it.
+            name: Peer
+            out:
+              - type: coreipc.PeerValue
+          - doc: |-
+              Decode decodes the call's body into v with the connection's format;
+              CODEC_FAILED when it does not decode.
+            in:
+              - name: v
+                type: any
+            name: Decode
+            out:
+              - type: error
+          - doc: |-
+              Send writes item to a Stream's caller, encoded in the connection's format.
+              An item longer than the caller's MaxFrameBytes is FRAME_TOO_LARGE and
+              nothing is written; a Send on a Call, which has no items, is
+              PROTOCOL_VIOLATION; one after the caller cancelled is CALL_CANCELLED.
+            in:
+              - name: item
+                type: any
+            name: Send
+            out:
+              - type: error
+        name: Request
+      - doc: |-
+          Stream is a server's items, as the caller of Client.Stream reads them.
+        methods:
+          - doc: |-
+              Recv decodes the next item into v and reports true; at the stream's end it
+              reports false and a nil error. The server's error, a cancelled context, a
+              deadline or a closed connection end it with that error.
+            in:
+              - name: v
+                type: any
+            name: Recv
+            out:
+              - name: more
+                type: bool
+              - name: err
+                type: error
+          - doc: |-
+              Close abandons the stream: the server is sent a cancel frame for it and
+              the items still on the way are dropped. It is idempotent.
+            name: Close
+            out:
+              - type: error
+        name: Stream
+    sentinels:
+      - var:
+          - code: CodeMisconfigured
+            doc: Misconfigured refuses a configuration no endpoint can run with.
+            exit: CONFIG
+            name: Misconfigured
+            private: "service/proc/ipc/rpc: a bound not positive, a format not registered, or a name its one-byte length cannot say; the rule field says which"
+            public: The RPC endpoint is misconfigured
+            reason: MISCONFIGURED
+          - code: CodeFrameTooLarge
+            doc: |-
+              FrameTooLarge refuses a frame longer than MaxFrameBytes, on its length
+              alone; the length and limit fields say by how much.
+            name: FrameTooLarge
+            private: "service/proc/ipc/rpc: a frame's length is past the receiver's MaxFrameBytes; refused before its body was read"
+            public: An RPC frame is larger than allowed
+            reason: FRAME_TOO_LARGE
+          - code: CodeCallTimeout
+            doc: CallTimeout reports a call whose deadline passed before its reply came.
+            name: CallTimeout
+            private: "service/proc/ipc/rpc: the call's deadline passed; a cancel frame was sent for its id"
+            public: The RPC call timed out
+            reason: CALL_TIMEOUT
+          - code: CodeCallCancelled
+            doc: CallCancelled reports a call its caller cancelled.
+            name: CallCancelled
+            private: "service/proc/ipc/rpc: the caller's context was cancelled; a cancel frame was sent for its id"
+            public: The RPC call was cancelled
+            reason: CALL_CANCELLED
+          - code: CodeMethodUnknown
+            doc: MethodUnknown reports a method the server does not route.
+            name: MethodUnknown
+            private: "service/proc/ipc/rpc: the Router returned false for the method"
+            public: The RPC method is unknown
+            reason: METHOD_UNKNOWN
+          - code: CodeOverloaded
+            doc: Overloaded refuses a call beyond MaxInFlight, at once.
+            exit: TEMPFAIL
+            name: Overloaded
+            private: "service/proc/ipc/rpc: MaxInFlight calls were already running on the connection"
+            public: The RPC server is overloaded
+            reason: OVERLOADED
+          - code: CodeProtocolViolation
+            doc: |-
+              ProtocolViolation reports a peer that broke the protocol; the rule field
+              says how, and the connection is closed.
+            exit: PROTOCOL
+            name: ProtocolViolation
+            private: "service/proc/ipc/rpc: a frame out of place, short, reused or not completed in time; the rule field says which"
+            public: The RPC peer broke the protocol
+            reason: PROTOCOL_VIOLATION
+          - code: CodeFormatRefused
+            doc: FormatRefused reports a hello the server refused.
+            exit: PROTOCOL
+            name: FormatRefused
+            private: "service/proc/ipc/rpc: the hello named a format the server does not speak, or a version it does not know"
+            public: The RPC server refused the body format
+            reason: FORMAT_REFUSED
+          - code: CodeConnClosed
+            doc: ConnClosed reports a call on a closed client or a connection that ended.
+            exit: UNAVAILABLE
+            name: ConnClosed
+            private: "service/proc/ipc/rpc: the client was closed, or its connection ended with the call in flight"
+            public: The RPC connection is closed
+            reason: CONN_CLOSED
+          - code: CodeRemoteFailed
+            doc: RemoteFailed reports a handler error that carried no SDK code.
+            name: RemoteFailed
+            private: "service/proc/ipc/rpc: the handler returned an error without an SDK code; its text stayed on the server"
+            public: The RPC call failed
+            reason: REMOTE_FAILED
+          - code: CodeCodecFailed
+            doc: CodecFailed reports a value or body the negotiated format refused.
+            exit: DATAERR
+            name: CodecFailed
+            private: "service/proc/ipc/rpc: the format's Marshal or Unmarshal failed; the cause is in the chain"
+            public: The RPC body could not be encoded or decoded
+            reason: CODEC_FAILED
+  - doc: |-
+      Package rpc is a call between two processes of one machine over the private
+      socket (ADR 0218): a request and its reply, or a request and the items a
+      server pushes, each framed, bounded and typed by a codec format both ends
+      agreed on.
+
+      # The wire
+
+      A client opens with a hello naming the body format, the protocol version and
+      the largest frame it accepts; the server answers with its own, or with
+      FORMAT_REFUSED. Then every frame is
+
+      	len:u32 | kind:u8 | id:u64 | mlen:u8 | method[mlen] | body
+
+      big-endian, len counting what follows it. A call's body opens with its budget
+      — the nanoseconds left on the caller's deadline, zero for none — before the
+      encoded value. The kinds are hello, call, stream, reply, item, end, error,
+      cancel, ping and pong.
+
+      # What a peer cannot do
+
+      A frame's length is checked against MaxFrameBytes before a byte of its body
+      is read or allocated: a length of 4 GiB closes the connection with
+      FRAME_TOO_LARGE. Once its first byte arrived, a frame must be whole within
+      FrameTimeout, on the injected clock, or the connection is closed: a peer
+      cannot hold one on half a frame. At most MaxInFlight calls run per
+      connection; the next is answered OVERLOADED at once, never queued — a server
+      connection runs at most MaxInFlight + 2 goroutines. A call's budget becomes a
+      deadline on the server's clock, and a client that gives up sends a cancel
+      frame: the handler's context ends, and its slot is freed when it returns.
+      What a handler's error says reaches the caller only through its SDK code,
+      reason and public text.
+    functions:
+      - doc: |-
+          NewServer validates cfg and returns a server routing calls through r. A
+          bound that is not positive, no format, a format no codec is registered
+          under, or a nil r is MISCONFIGURED.
+        in:
+          - name: cfg
+            type: ServerConfig
+          - name: r
+            type: corerpc.Router
+        name: NewServer
+        out:
+          - type: "*Server"
+          - type: error
+      - doc: |-
+          NewClient validates cfg, dials d within ctx and says hello: the format, the
+          protocol version and the largest frame each end accepts. A refused hello is
+          FORMAT_REFUSED; a dial that fails is the dialer's error.
+
+          Goroutine lifecycle: the client runs two, the connection's reader and its
+          keeper; both end when the connection does — Close, a broken connection, or
+          a peer that broke the protocol.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: d
+            type: coreipc.Dialer
+          - name: cfg
+            type: ClientConfig
+        name: NewClient
+        out:
+          - type: "*Client"
+          - type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+      coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
+      corerpc: github.com/kitsunium/sdk/internal/core/proc/ipc/rpc
+    path: github.com/kitsunium/sdk/internal/service/proc/ipc/rpc
+    types:
+      - doc: |-
+          ServerConfig bounds what one connection of a server may cost. Every bound
+          is the caller's decision: none has a default, and one that is not positive
+          is refused (ADR 0031).
+        name: ServerConfig
+        struct:
+          fields:
+            - doc: |-
+                Formats are the body formats the server speaks, by the name a codec is
+                registered under (core/data/codec): a client's hello names one of them.
+              name: Formats
+              type: "[]codec.Format"
+            - doc: |-
+                MaxFrameBytes is the longest frame the server reads — its kind, id,
+                method and body — checked on the length before anything is read.
+              name: MaxFrameBytes
+              type: int
+            - doc: |-
+                MaxInFlight is how many calls run at once on one connection; the next is
+                OVERLOADED.
+              name: MaxInFlight
+              type: int
+            - doc: |-
+                FrameTimeout is how long a frame may take, from its first byte to its
+                last, read or written; past it the connection is closed.
+              name: FrameTimeout
+              type: time.Duration
+            - doc: |-
+                Clock times the frames and the calls' budgets; nil is clock.System.
+              name: Clock
+              type: clock.Timed
+      - doc: |-
+          ClientConfig is how a client speaks and how long it waits. Every bound is
+          the caller's decision: none has a default, and one that is not positive is
+          refused (ADR 0031).
+        name: ClientConfig
+        struct:
+          fields:
+            - doc: Format is the body format, by the name a codec is registered under.
+              name: Format
+              type: codec.Format
+            - doc: |-
+                MaxFrameBytes is the longest frame the client reads, checked on the
+                length before anything is read; the server is told it in the hello.
+              name: MaxFrameBytes
+              type: int
+            - doc: |-
+                MaxInFlight is how many calls and streams the client keeps open at once;
+                the next is OVERLOADED, before a byte is sent.
+              name: MaxInFlight
+              type: int
+            - doc: |-
+                FrameTimeout is how long a frame may take, from its first byte to its
+                last, read or written; past it the connection is closed.
+              name: FrameTimeout
+              type: time.Duration
+            - doc: |-
+                CallTimeout is the longest a Call or a Ping waits, on Clock, when its
+                context allows longer; a Stream lives as long as its context.
+              name: CallTimeout
+              type: time.Duration
+            - doc: Clock times the frames and the calls; nil is clock.System.
+              name: Clock
+              type: clock.Timed
+      - doc: |-
+          Server answers the calls of every connection it is handed, through its
+          Router, within the bounds of its ServerConfig.
+        methods:
+          - doc: |-
+              Serve accepts ln's connections and serves each in a goroutine until ln is
+              closed, or the server is, then waits for those goroutines: it returns nil
+              after Close, the listener's error otherwise.
+
+              Goroutine lifecycle: one per accepted connection, running ServeConn; each
+              ends with its connection — the peer's hang-up, a violation, or Close,
+              which ends them all — and Serve returns only once every one has.
+            in:
+              - name: ln
+                type: coreipc.Listener
+            name: Serve
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              ServeConn serves one connection until it ends, ctx ends or the server is
+              closed, closes it, and returns once its handlers have — every handler's
+              context ends with the connection. A peer that broke the protocol is the
+              error, so is a frame past MaxFrameBytes; a peer that hung up is nil.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: c
+                type: "*coreipc.Conn"
+            name: ServeConn
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              InFlight is how many handlers run now, on every connection.
+            name: InFlight
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              Close stops Serve, closes every connection and ends every handler's
+              context. It is idempotent.
+            name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Server
+        struct:
+          unexported: true
+      - doc: |-
+          Client is one connection to a server, safe for concurrent use: its calls
+          and streams share the connection, each under its own id. It is the engine
+          behind the core Caller port.
+        methods:
+          - doc: |-
+              Call sends in to method and decodes the reply into out (nil drops it). It
+              waits for ctx and for CallTimeout on the client's clock, whichever ends
+              first: past either the server is sent a cancel frame and the call is
+              CALL_TIMEOUT or CALL_CANCELLED. The server's own refusals keep their code.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: method
+                type: string
+              - name: in
+                type: any
+              - name: out
+                type: any
+            name: Call
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Stream sends in to method and returns the items the server sends back,
+              until its end, ctx's or Close. Its items are bounded by MaxFrameBytes as
+              any frame; a reader slower than the server holds the connection's other
+              calls behind it, so a long stream wants a client of its own.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: method
+                type: string
+              - name: in
+                type: any
+            name: Stream
+            out:
+              - type: corerpc.Stream
+              - type: error
+            recv: pointer
+          - doc: |-
+              Ping is a round trip that runs no handler: nil when the server answered
+              within ctx and CallTimeout.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Ping
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Close closes the connection; every call in flight ends with CONN_CLOSED. It
+              is idempotent.
+            name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Client
+        struct:
+          unexported: true
+      - doc: |-
+          HandlerFunc is a function answering calls, as a Handler — what a Methods
+          table holds most of the time.
+        methods:
+          - doc: ServeRPC calls f.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: req
+                type: corerpc.Request
+            name: ServeRPC
+            out:
+              - name: reply
+                type: any
+              - name: err
+                type: error
+            recv: value
+        name: HandlerFunc
+        underlying: "func(ctx context.Context, req corerpc.Request) (reply any, err error)"
+      - doc: |-
+          Methods is a Router over a fixed table: a method's handler is its entry.
+          Build it before Serve and leave it alone: it is read without a lock.
+        methods:
+          - doc: Route returns the method's entry, and false when it has none.
+            in:
+              - name: method
+                type: string
+            name: Route
+            out:
+              - name: h
+                type: corerpc.Handler
+              - name: ok
+                type: bool
+            recv: value
+        name: Methods
+        underlying: "map[string]corerpc.Handler"
+  - doc: |-
+      Package rpc is a call between two processes of one machine over the private
+      socket of proc/ipc (ADR 0218): a request and its reply, or a request and the
+      items a server pushes, framed, bounded and encoded in a codec format both
+      ends agreed on.
+
+      	srv, err := rpc.NewServer(rpc.ServerConfig{
+      		Formats: []codec.Format{"json"}, MaxFrameBytes: 1 << 20,
+      		MaxInFlight: 64, FrameTimeout: 5 * time.Second,
+      	}, rpc.Methods{"status": rpc.HandlerFunc(status)})
+      	go srv.Serve(ln) // ln from ipc.Listen
+
+      	c, err := rpc.NewClient(ctx, dialer, rpc.ClientConfig{
+      		Format: "json", MaxFrameBytes: 1 << 20, MaxInFlight: 64,
+      		FrameTimeout: 5 * time.Second, CallTimeout: 2 * time.Second,
+      	})
+      	err = c.Call(ctx, "status", req, &resp)
+
+      A format is a codec registered under its name: import the codec's package
+      (pkg/v1/data/codec/json, say) for it to be there.
+
+      # Bounds, every one the caller's
+
+      A frame longer than MaxFrameBytes is refused on its length, before a byte of
+      its body is read or allocated ([CodeFrameTooLarge]); one not whole within
+      FrameTimeout of its first byte closes the connection. At most MaxInFlight
+      calls run per connection, the next answered [CodeOverloaded] at once. A call
+      carries its deadline to the server, which ends the handler's context on it;
+      a caller that gives up sends a cancel frame ([CodeCallTimeout],
+      [CodeCallCancelled]). None of these bounds has a default: zero is refused
+      ([CodeMisconfigured]).
+
+      # Errors across the socket
+
+      A handler's error carrying an SDK code reaches the caller with that code,
+      reason and public text, so errs.HasCode works on both sides; any other error
+      is [CodeRemoteFailed] there, its text kept on the server.
+    facade:
+      - const:
+          - name: CodeMisconfigured
+            reexport: corerpc.CodeMisconfigured
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_01"
+          - name: CodeFrameTooLarge
+            reexport: corerpc.CodeFrameTooLarge
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_02"
+          - name: CodeCallTimeout
+            reexport: corerpc.CodeCallTimeout
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_03"
+          - name: CodeCallCancelled
+            reexport: corerpc.CodeCallCancelled
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_04"
+          - name: CodeMethodUnknown
+            reexport: corerpc.CodeMethodUnknown
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_05"
+          - name: CodeOverloaded
+            reexport: corerpc.CodeOverloaded
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_06"
+          - name: CodeProtocolViolation
+            reexport: corerpc.CodeProtocolViolation
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_07"
+          - name: CodeFormatRefused
+            reexport: corerpc.CodeFormatRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_08"
+          - name: CodeConnClosed
+            reexport: corerpc.CodeConnClosed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_09"
+          - name: CodeRemoteFailed
+            reexport: corerpc.CodeRemoteFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_0A"
+          - name: CodeCodecFailed
+            reexport: corerpc.CodeCodecFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6A_0B"
+        doc: |-
+          The codes, range 0.3.106.*, for errs.HasCode: a caller tells "try later"
+          (OVERLOADED) from "the call took too long" (CALL_TIMEOUT) from "the server
+          does not know this method" (METHOD_UNKNOWN) from "the connection is gone"
+          (CONN_CLOSED, dial again).
+      - alias:
+          - doc: |-
+              Handler answers the calls of one method: ServeRPC(ctx, req) returns the
+              reply, or sends a Stream's items through req.Send.
+            name: Handler
+            target: corerpc.Handler
+          - doc: Router names the handler of a method.
+            name: Router
+            target: corerpc.Router
+          - doc: |-
+              Request is one call as its handler sees it: Method, Peer, Decode, and Send
+              for a Stream's items.
+            name: Request
+            target: corerpc.Request
+          - doc: Stream is a server's items, read with Recv until it reports false.
+            name: Stream
+            target: corerpc.Stream
+          - doc: |-
+              Caller is the calling end of a connection — Call, Stream, Ping, Close —
+              which a Client is and a test doubles.
+            name: Caller
+            target: corerpc.Caller
+          - doc: ServerConfig bounds what one connection of a server may cost.
+            name: ServerConfig
+            target: svcrpc.ServerConfig
+          - doc: ClientConfig is how a client speaks and how long it waits.
+            name: ClientConfig
+            target: svcrpc.ClientConfig
+          - doc: Server answers the calls of every connection it is handed.
+            name: Server
+            target: svcrpc.Server
+          - doc: Client is one connection to a server, safe for concurrent use.
+            name: Client
+            target: svcrpc.Client
+          - doc: HandlerFunc is a function answering calls, as a Handler.
+            name: HandlerFunc
+            target: svcrpc.HandlerFunc
+          - doc: Methods is a Router over a fixed table of handlers.
+            name: Methods
+            target: svcrpc.Methods
+      - func:
+          doc: |-
+            NewServer returns a server routing calls through r, or MISCONFIGURED.
+          forward: svcrpc.NewServer
+          in:
+            - name: cfg
+              type: ServerConfig
+            - name: r
+              type: Router
+          name: NewServer
+          out:
+            - type: "*Server"
+            - type: error
+      - func:
+          doc: |-
+            NewClient dials d within ctx and says hello, or returns MISCONFIGURED,
+            FORMAT_REFUSED or the dialer's error.
+          forward: svcrpc.NewClient
+          in:
+            - name: ctx
+              type: context.Context
+            - name: d
+              type: coreipc.Dialer
+            - name: cfg
+              type: ClientConfig
+          name: NewClient
+          out:
+            - type: "*Client"
+            - type: error
+    imports:
+      coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
+      corerpc: github.com/kitsunium/sdk/internal/core/proc/ipc/rpc
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcrpc: github.com/kitsunium/sdk/internal/service/proc/ipc/rpc
+    path: github.com/kitsunium/sdk/pkg/v1/proc/ipc/rpc

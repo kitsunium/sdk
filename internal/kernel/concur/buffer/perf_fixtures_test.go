@@ -33,3 +33,15 @@ func perfGetPut(testing.TB) func() {
 		buffer.Put(b)
 	}
 }
+
+// perfGetSizePut is GetSize's fixture: a 16 KiB borrow and its return — a
+// class above Get's —, the class warmed first so the factory is never the
+// call measured.
+func perfGetSizePut(testing.TB) func() {
+	buffer.Put(buffer.GetSize(16 << 10))
+	return func() {
+		b := buffer.GetSize(16 << 10)
+		perfBuf = b
+		buffer.Put(b)
+	}
+}

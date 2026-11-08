@@ -230,23 +230,21 @@ sequences:
         kind: self
       - id: signal
         kind: package
+      - id: ctx.Done
+        kind: value
     steps:
-      - var:
-          name: received
-          type: <-chan coreproc.Signal
       - opt:
           do:
-            - bind: channel, unsubscribe
-              eval: signal.Notify(sigs...)
+            - var:
+                name: unsubscribe
+                type: func()
+            - set: ctx, unsubscribe
               to: signal
+              value: signal.NotifyContext(ctx, sigs...)
             - defer: unsubscribe()
-            - set: received
-              value: channel
           when: len(sigs) > 0
-      - select:
-          cases:
-            - comm: <-ctx.Done()
-            - comm: <-received
+      - eval: <-ctx.Done()
+        to: ctx.Done
   - of: announce
     participants:
       - id: caller

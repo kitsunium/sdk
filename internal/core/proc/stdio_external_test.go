@@ -20,7 +20,8 @@ func Test_StdioMode_String(t *testing.T) {
 		{"the zero value is inherit", coreproc.StdioInherit, "inherit"},
 		{"null", coreproc.StdioNull, "null"},
 		{"capture", coreproc.StdioCapture, "capture"},
-		{"one past the range", coreproc.StdioCapture + 1, "stdiomode(3)"},
+		{"pty", coreproc.StdioPTY, "pty"},
+		{"one past the range", coreproc.StdioPTY + 1, "stdiomode(4)"},
 		{"far out of range", coreproc.StdioMode(200), "stdiomode(200)"},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -50,7 +51,8 @@ func Test_StdioMode_Known(t *testing.T) {
 		{"inherit", coreproc.StdioInherit, true},
 		{"null", coreproc.StdioNull, true},
 		{"capture", coreproc.StdioCapture, true},
-		{"the first value past the range", coreproc.StdioCapture + 1, false},
+		{"pty", coreproc.StdioPTY, true},
+		{"the first value past the range", coreproc.StdioPTY + 1, false},
 		{"the largest representable value", coreproc.StdioMode(255), false},
 	}
 	runCase := func(t *testing.T, c tc) {

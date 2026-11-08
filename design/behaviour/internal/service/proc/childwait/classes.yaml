@@ -2,6 +2,24 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      signalledCode is ExitValue.Code for a child a signal ended: it has no exit
+      status of its own.
+    items:
+      - name: signalledCode
+        type: int
+        value: "-1"
+    name: signalledCode
+  - doc: |-
+      rssUnitsPerKiB is 1 because Linux, FreeBSD, OpenBSD, NetBSD and DragonFly
+      report ru_maxrss in kilobytes, the unit the port documents. illumos and
+      Solaris define the field in pages but leave it 0, so the figure there is 0
+      whatever the unit.
+    items:
+      - name: rssUnitsPerKiB
+        type: int64
+        value: "1"
+    name: rssUnitsPerKiB
+  - doc: |-
       anyChildPID is the pid argument that makes wait4 collect ANY child: -1, as
       on Linux, darwin and the BSDs.
     items:
@@ -26,12 +44,28 @@ files:
       - (*ledger).forget
     name: childwait.go
   - decls:
+      - signalledCode
       - StatusValue
       - ReapAny
+      - ReapAnyObserved
       - (*ledger).reapAny
+      - (*StatusValue).Exit
     name: childwait_unix.go
   - decls: []
     name: doc.go
+  - decls:
+      - peakKiB
+    name: maxrss.go
+  - decls:
+      - MaxRSSKB
+    name: maxrss_rss64_unix.go
+  - decls:
+      - rssUnitsPerKiB
+    name: maxrss_unit_kib_unix.go
+  - decls:
+      - UsageOf
+      - counter
+    name: usage_rusage_unix.go
   - decls:
       - anyChildPID
     name: waitany_unix.go
@@ -44,10 +78,50 @@ functions:
     results: proc *os.Process, claim *Claim, err error
   - name: ReapAny
     results: pid int, err error
+  - name: ReapAnyObserved
+    params: observe func(pid int, status *StatusValue, owned bool)
+    results: pid int, err error
+  - doc: |-
+      peakKiB converts a raw ru_maxrss figure into the KiB the
+      coreproc.ExitValue.MaxRSS port field documents. unitsPerKiB is how many of
+      the kernel's units make one KiB: 1 where getrusage(2) reports kilobytes
+      (Linux, the BSDs), so the figure passes through unchanged, and 1024 where it
+      reports bytes (darwin and ios), so the figure is divided and rounded up — a
+      child that touched any memory at all never reads as 0 KiB.
+
+      It is platform-neutral so its arithmetic is tested on every GOOS, not only on
+      the one host whose kernel reports bytes.
+    name: peakKiB
+    params: raw, unitsPerKiB int64
+    results: int64
+  - doc: |-
+      MaxRSSKB reports the peak resident set size in KiB from a wait4 rusage. On a
+      64-bit GOARCH Rusage.Maxrss is already int64; the unit is normalised — a
+      kilobyte figure passes through, darwin's bytes are converted, rounding up.
+    name: MaxRSSKB
+    params: ru *syscall.Rusage
+    results: int64
+  - doc: |-
+      UsageOf reads the page-fault, block-I/O and context-switch counters of a
+      wait4 rusage into ExitValue.Usage. Linux, darwin and the BSDs fill them; a
+      counter that reads negative is reported as zero, not wrapped.
+    name: UsageOf
+    params: ru *syscall.Rusage
+    results: "*coreproc.UsageValue"
+  - doc: |-
+      counter widens one rusage counter — int64 on a 64-bit target, int32 on
+      386, arm and mips — to the port's uint64. A counter is never negative; one
+      that reads so is reported as zero rather than wrapped to a huge count.
+    name: counter
+    params: v T
+    results: uint64
+    typeParams: T int32 | int64
 imports:
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
   os: os
   sync: sync
   syscall: syscall
+  time: time
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/proc/childwait
@@ -102,6 +176,12 @@ types:
           for the hand-off by taking it.
         name: sweeping
         type: sync.Mutex
+      - doc: |-
+          collected is the buffer one sweep's wait4 fills, guarded by sweeping. It
+          lives here so the status shown to a ReapAnyObserved observer is not a
+          heap allocation per sweep; handOver copies it onto the claim.
+        name: collected
+        type: StatusValue
     kind: struct
     methods:
       - doc: spawn forks under the shared gate and claims the child before releasing it.
@@ -122,10 +202,12 @@ types:
           child: the zombie just collected is the NEWEST process to hold pid, and if a
           spawn forked it, that spawn's claim must be in place — replacing any older
           claim on a recycled pid — before the lookup can say whose status this is.
-          A pid still unclaimed then was an orphan's, and its status has no owner.
+          A pid still unclaimed then was an orphan's, and its status has no owner: it
+          reports false.
         name: deliver
         params: pid int, status *StatusValue
         recv: l *ledger
+        results: bool
       - doc: |-
           handOver stores a copy of status on the claim for pid and retires the claim
           from the ledger, reporting whether a claim existed. status is read, never
@@ -143,8 +225,11 @@ types:
         recv: l *ledger
       - doc: |-
           reapAny collects one child under the sweep lock and hands its status over
-          before the lock is released.
+          before the lock is released; each observer that is not nil hears of it
+          after the hand-off and before the lock is released. None is the plain
+          sweep, which ReapAny and the spawn and sweep benchmarks make.
         name: reapAny
+        params: observers ...func(pid int, status *StatusValue, owned bool)
         recv: l *ledger
         results: pid int, err error
     name: ledger
@@ -156,6 +241,10 @@ types:
         name: Rusage
         type: syscall.Rusage
     kind: struct
+    methods:
+      - name: Exit
+        recv: s *StatusValue
+        results: coreproc.ExitValue
     name: StatusValue
 vars:
   - doc: book is the process's single ledger.

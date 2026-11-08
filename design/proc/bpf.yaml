@@ -1,0 +1,964 @@
+apiVersion: kit.kitsunium/design/v2
+domain: proc/bpf
+packages:
+  - codes:
+      - const:
+          - doc: |-
+              CodePolicyInvalid identifies a policy, or a control-group path, refused
+              before anything is loaded: a verdict that is neither Allow nor Deny, a
+              rule out of its range, too many rules, a path that is not absolute.
+            name: CodePolicyInvalid
+            note: |-
+              range: 0.3.107.0 - 0.3.107.255
+
+              ADR 0215: the contract of the cgroup BPF programs, allocated to the
+              engine internal/service/proc/bpf; the backend is the vendor module
+              third-party/ebpf.
+            value: "0x00_03_6B_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeNotLinked identifies a program that asked for a cgroup BPF program
+              without linking a backend: it does not import third-party/ebpf/cgroup.
+            name: CodeNotLinked
+            value: "0x00_03_6B_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoadRefused identifies a program or a map the kernel refused to
+              create: no CAP_BPF (or CAP_SYS_ADMIN), RLIMIT_MEMLOCK before Linux 5.11,
+              a kernel without the program type, the verifier.
+            name: CodeLoadRefused
+            value: "0x00_03_6B_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeAttachFailed identifies a loaded program the control group did not
+              take: the directory could not be opened, is not a cgroup v2 directory, or
+              the kernel refused the attachment (CAP_NET_ADMIN, CAP_SYS_ADMIN).
+            name: CodeAttachFailed
+            value: "0x00_03_6B_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeProgramFailed identifies an attached program that could not be
+              detached, or whose counters could not be read.
+            name: CodeProgramFailed
+            value: "0x00_03_6B_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeBackendRefused identifies a backend Register refused at import: a
+              nil or non-comparable one, or a second one beside the first.
+            name: CodeBackendRefused
+            value: "0x00_03_6B_06"
+        type: errs.Code
+    constants:
+      - doc: |-
+          AnyNumber is the wildcard of a device rule's Major or Minor: it matches
+          every number, as "*" does in a devices.allow line.
+        name: AnyNumber
+        type: int64
+        value: "-1"
+      - doc: |-
+          MaxDeviceRules bounds a DevicePolicyValue's rules: each one is a few
+          instructions of a single program, compiled in a straight line.
+        name: MaxDeviceRules
+        type: int
+        value: "256"
+      - doc: MaxBindRules bounds a BindPolicyValue's rules, for the same reason.
+        name: MaxBindRules
+        type: int
+        value: "256"
+      - doc: |-
+          MaxPrefixRules bounds a SKBPolicyValue's rules: they become the entries
+          of two longest-prefix-match maps, one per address family.
+        name: MaxPrefixRules
+        type: int
+        value: "16384"
+      - doc: |-
+          Deny refuses: the device node is not opened, the packet is dropped, the
+          bind fails with EPERM.
+        name: Deny
+        type: Verdict
+        value: "1"
+      - doc: |-
+          Allow lets the operation through to the other programs attached to the
+          group and to its ancestors, which must allow it too.
+        name: Allow
+        type: Verdict
+        value: "2"
+      - doc: DeviceBlock matches block devices (devices.allow's "b").
+        name: DeviceBlock
+        type: DeviceType
+        value: "1"
+      - doc: DeviceChar matches character devices ("c").
+        name: DeviceChar
+        type: DeviceType
+        value: "2"
+      - doc: DeviceAny matches both ("a").
+        name: DeviceAny
+        type: DeviceType
+        value: "3"
+      - doc: AccessMknod is creating the node ("m").
+        name: AccessMknod
+        type: DeviceAccess
+        value: "1"
+      - doc: AccessRead is opening it for reading ("r").
+        name: AccessRead
+        type: DeviceAccess
+        value: "2"
+      - doc: AccessWrite is opening it for writing ("w").
+        name: AccessWrite
+        type: DeviceAccess
+        value: "4"
+      - doc: AccessAll is the three ("rwm").
+        name: AccessAll
+        type: DeviceAccess
+        value: "7"
+      - doc: FamilyIPv4 matches a bind of an AF_INET socket.
+        name: FamilyIPv4
+        type: Family
+        value: "1"
+      - doc: FamilyIPv6 matches a bind of an AF_INET6 socket.
+        name: FamilyIPv6
+        type: Family
+        value: "2"
+      - doc: FamilyAny matches both.
+        name: FamilyAny
+        type: Family
+        value: "3"
+      - doc: TransportTCP matches a TCP socket.
+        name: TransportTCP
+        type: Transport
+        value: "1"
+      - doc: TransportUDP matches a UDP socket.
+        name: TransportUDP
+        type: Transport
+        value: "2"
+      - doc: TransportAny matches every protocol, TCP and UDP included.
+        name: TransportAny
+        type: Transport
+        value: "3"
+    doc: |-
+      Package bpf is the contract of the BPF programs a supervisor attaches to a
+      control group (ADR 0215): the policies as plain values — a device policy
+      for cgroup_device, an IP policy with its counters for cgroup_skb, a bind
+      policy for cgroup_sock_addr —, their validation, the ports a vendor module
+      implements and an attachment satisfies, and the codes of the range
+      0.3.107.*.
+
+      The standard library cannot load a BPF program, so the backend is a vendor
+      module, third-party/ebpf, over cilium/ebpf, quarantined there (ADR 0157).
+      The engine, internal/service/proc/bpf, holds the one backend a program
+      links — the one that imports github.com/kitsunium/sdk/third-party/ebpf/cgroup
+      — and answers NOT_LINKED in every other program, never a silent no-op.
+
+      # What is refused before anything is loaded
+
+      A verdict is Allow or Deny, never the zero (ADR 0031), the default
+      included: a policy that forgot to say what it decides is refused, not read
+      as allow-all or deny-all. Validate names the rule and the field
+      (POLICY_INVALID); CheckCgroup refuses a path that is not absolute and clean.
+
+      # What the programs decide
+
+      A device policy is devices.allow's lines in order, the first that matches
+      deciding. An IP policy is a longest-prefix match over the peer's address,
+      one map per family, shared by the ingress and the egress programs. A bind
+      policy is rules over the family, the transport and a range of local ports,
+      in order. Every program is attached with BPF_F_ALLOW_MULTI: it runs beside
+      the programs already attached to the group, and an operation passes only
+      when every program of the group and of its ancestors lets it through.
+
+      # How long a program lives
+
+      Until Close, or until the group is removed. The attachment is the
+      kernel's, not the process's: a supervisor that exits leaves its services
+      under their policies.
+    functions:
+      - doc: |-
+          CheckCgroup refuses, with POLICY_INVALID, a control group a program cannot
+          be attached to by name: a path that is not absolute, not clean, or the
+          root of the filesystem. It does not look at the filesystem: the backend
+          opens the directory and refuses one that is not a cgroup v2 directory.
+        in:
+          - name: cgroup
+            type: string
+        name: CheckCgroup
+        out:
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      netip: net/netip
+    path: github.com/kitsunium/sdk/internal/core/proc/bpf
+    ports:
+      - doc: |-
+          Program is a program attached to a control group. It stays attached until
+          Close, or until the group is removed: the process that attached it may
+          exit first, and the group stays under the policy.
+        methods:
+          - doc: |-
+              Close detaches the program and releases it. A failure is
+              PROGRAM_FAILED; a second Close is nil.
+            name: Close
+            out:
+              - type: error
+        name: Program
+      - doc: |-
+          SKBProgram is the pair of cgroup_skb programs AttachSKB attaches, and
+          what they counted.
+        embeds:
+          - Program
+        methods:
+          - doc: |-
+              Counters reads what the two programs counted since they were
+              attached. A failed read is PROGRAM_FAILED; after Close it is too.
+            name: Counters
+            out:
+              - type: CountersValue
+              - type: error
+        name: SKBProgram
+      - doc: |-
+          Backend is the port a vendor module implements and hands to the
+          engine's Register (internal/service/proc/bpf) when it is imported
+          (third-party/ebpf/cgroup). It is frozen at these methods (ADR 0039).
+          Each method receives a policy and a path the engine already validated.
+        methods:
+          - doc: |-
+              Probe loads, then releases, the smallest cgroup_device program: nil
+              when this process may load cgroup programs on this kernel.
+            name: Probe
+            out:
+              - type: error
+          - doc: |-
+              AttachDevice attaches a cgroup_device program enforcing policy to the
+              control group at the directory cgroup.
+            in:
+              - name: cgroup
+                type: string
+              - name: policy
+                type: DevicePolicyValue
+            name: AttachDevice
+            out:
+              - type: Program
+              - type: error
+          - doc: |-
+              AttachSKB attaches a cgroup_skb program on ingress and one on egress,
+              enforcing and counting policy, to the control group at cgroup.
+            in:
+              - name: cgroup
+                type: string
+              - name: policy
+                type: SKBPolicyValue
+            name: AttachSKB
+            out:
+              - type: SKBProgram
+              - type: error
+          - doc: |-
+              AttachBind attaches a cgroup_sock_addr program on the IPv4 bind hook
+              and one on the IPv6 bind hook, enforcing policy, to the control group
+              at cgroup.
+            in:
+              - name: cgroup
+                type: string
+              - name: policy
+                type: BindPolicyValue
+            name: AttachBind
+            out:
+              - type: Program
+              - type: error
+        name: Backend
+    sentinels:
+      - var:
+          - code: CodePolicyInvalid
+            doc: |-
+              PolicyInvalid refuses a policy or a control-group path before anything
+              is loaded; the fields name the rule and the field.
+            exit: CONFIG
+            name: PolicyInvalid
+            private: "core/proc/bpf: a policy or a control-group path is refused before anything is loaded"
+            public: The BPF policy is invalid
+            reason: POLICY_INVALID
+          - code: CodeNotLinked
+            doc: |-
+              NotLinked refuses a call no backend can serve: the program does not
+              import third-party/ebpf/cgroup.
+            exit: CONFIG
+            name: NotLinked
+            private: "core/proc/bpf: no backend is registered; import github.com/kitsunium/sdk/third-party/ebpf/cgroup"
+            public: No BPF backend is linked into this program
+            reason: NOT_LINKED
+          - code: CodeLoadRefused
+            doc: LoadRefused wraps the kernel's refusal to create a program or a map.
+            exit: UNAVAILABLE
+            name: LoadRefused
+            private: "core/proc/bpf: BPF_PROG_LOAD or BPF_MAP_CREATE was refused: privileges, the memlock limit, the kernel or the verifier"
+            public: The kernel refused to load the BPF program
+            reason: LOAD_REFUSED
+          - code: CodeAttachFailed
+            doc: AttachFailed wraps a control group that did not take a program.
+            exit: UNAVAILABLE
+            name: AttachFailed
+            private: "core/proc/bpf: the cgroup could not be opened, is not cgroup v2, or BPF_PROG_ATTACH was refused"
+            public: The BPF program could not be attached to the control group
+            reason: ATTACH_FAILED
+          - code: CodeProgramFailed
+            doc: ProgramFailed wraps a detach or a counter read that failed.
+            exit: UNAVAILABLE
+            name: ProgramFailed
+            private: "core/proc/bpf: BPF_PROG_DETACH or a map lookup failed"
+            public: The attached BPF program could not be detached or read
+            reason: PROGRAM_FAILED
+          - code: CodeBackendRefused
+            doc: |-
+              BackendRefused is the panic Register raises at import for a backend it
+              cannot keep.
+            exit: SOFTWARE
+            name: BackendRefused
+            private: "service/proc/bpf.Register: a nil or non-comparable backend, or a second backend beside the first"
+            public: The BPF backend could not be registered
+            reason: BACKEND_REFUSED
+    types:
+      - doc: |-
+          Verdict is what a rule, or a policy's default, decides. The zero is no
+          verdict and is refused (ADR 0031): a policy that does not say whether it
+          allows or denies is a mistake, not a choice.
+        name: Verdict
+        underlying: uint8
+      - doc: |-
+          DeviceType is the kind of device node a device rule matches. The zero is
+          refused.
+        name: DeviceType
+        underlying: uint8
+      - doc: |-
+          DeviceAccess is a set of accesses to a device node. A rule whose set is
+          empty matches nothing and is refused.
+        name: DeviceAccess
+        underlying: uint8
+      - doc: Family is the address family a bind rule matches. The zero is refused.
+        name: Family
+        underlying: uint8
+      - doc: |-
+          Transport is the transport protocol a bind rule matches. The zero is
+          refused.
+        name: Transport
+        underlying: uint8
+      - doc: |-
+          DeviceRuleValue is one line of a device policy, as devices.allow writes
+          it: a type, a major and a minor number — AnyNumber for any —, the
+          accesses it covers, and its verdict. An Allow rule matches a request whose
+          every access it covers; a Deny rule matches a request one of whose
+          accesses it covers. So a read-write open is not allowed by a rule that
+          allows reading only, and it is denied by a rule that denies writing.
+        name: DeviceRuleValue
+        struct:
+          fields:
+            - doc: Type is the kind of node the rule matches.
+              name: Type
+              type: DeviceType
+            - doc: Major is the major number, 0 to 4294967295, or AnyNumber.
+              name: Major
+              type: int64
+            - doc: Minor is the minor number, 0 to 4294967295, or AnyNumber.
+              name: Minor
+              type: int64
+            - doc: Access is the set of accesses the rule covers; never empty.
+              name: Access
+              type: DeviceAccess
+            - doc: Verdict is the rule's decision when it matches.
+              name: Verdict
+              type: Verdict
+      - doc: |-
+          DevicePolicyValue is one cgroup_device program: its rules, tried in
+          order, the first that matches deciding, and the verdict when none does.
+        methods:
+          - doc: |-
+              Validate refuses a device policy no program can be built from, with
+              POLICY_INVALID naming the rule and the field: a default or a verdict that
+              is neither Allow nor Deny, more than MaxDeviceRules rules, a type out of
+              its enumeration, an empty access set or one with an unknown bit, a number
+              that is neither AnyNumber nor an unsigned 32-bit value.
+            name: Validate
+            out:
+              - type: error
+            recv: value
+        name: DevicePolicyValue
+        struct:
+          fields:
+            - doc: Rules are tried in order; at most MaxDeviceRules.
+              name: Rules
+              type: "[]DeviceRuleValue"
+            - doc: Default decides a request no rule matches.
+              name: Default
+              type: Verdict
+      - doc: |-
+          PrefixRuleValue is one prefix of an IP policy and its verdict: the
+          verdict of every peer address the prefix holds, unless a longer prefix of
+          the same policy holds it too.
+        name: PrefixRuleValue
+        struct:
+          fields:
+            - doc: |-
+                Prefix is an IPv4 or an IPv6 prefix; an IPv4-mapped IPv6 prefix is
+                refused, since the packets it means are IPv4 on the wire.
+              name: Prefix
+              type: netip.Prefix
+            - doc: Verdict is the rule's decision for an address the prefix holds.
+              name: Verdict
+              type: Verdict
+      - doc: |-
+          SKBPolicyValue is a pair of cgroup_skb programs, one on ingress and one on
+          egress. The peer's address — a received packet's source, a sent packet's
+          destination — is looked up among Rules, and the longest prefix holding it
+          decides; Default decides for an address no prefix holds and for a packet
+          that is neither IPv4 nor IPv6. Each program counts what it sees.
+        methods:
+          - doc: |-
+              Validate refuses an IP policy no pair of programs can be built from, with
+              POLICY_INVALID naming the rule and the field: a default or a verdict that
+              is neither Allow nor Deny, more than MaxPrefixRules rules, a prefix that
+              is not valid or is an IPv4-mapped IPv6 one, a prefix given twice.
+            name: Validate
+            out:
+              - type: error
+            recv: value
+        name: SKBPolicyValue
+        struct:
+          fields:
+            - doc: Rules are the prefixes, each at most once; at most MaxPrefixRules.
+              name: Rules
+              type: "[]PrefixRuleValue"
+            - doc: Default decides an address no prefix holds.
+              name: Default
+              type: Verdict
+      - doc: |-
+          PortRangeValue is the inclusive range of ports First to Last. {0, 0} is
+          the bind that leaves the port to the kernel.
+        name: PortRangeValue
+        struct:
+          fields:
+            - doc: First is the lowest port of the range.
+              name: First
+              type: uint16
+            - doc: Last is the highest port of the range, never below First.
+              name: Last
+              type: uint16
+      - doc: |-
+          BindRuleValue is one rule of a bind policy: an address family, a
+          transport, a range of ports, and its verdict.
+        name: BindRuleValue
+        struct:
+          fields:
+            - doc: Family is the address family the rule matches.
+              name: Family
+              type: Family
+            - doc: Transport is the protocol the rule matches.
+              name: Transport
+              type: Transport
+            - doc: Ports is the range of local ports the rule matches.
+              name: Ports
+              type: PortRangeValue
+            - doc: Verdict is the rule's decision when it matches.
+              name: Verdict
+              type: Verdict
+      - doc: |-
+          BindPolicyValue is a pair of cgroup_sock_addr programs, on the IPv4 and
+          the IPv6 bind hooks: the rules are tried in order, the first that matches
+          deciding, and Default decides a bind no rule matches.
+        methods:
+          - doc: |-
+              Validate refuses a bind policy no pair of programs can be built from, with
+              POLICY_INVALID naming the rule and the field: a default or a verdict that
+              is neither Allow nor Deny, more than MaxBindRules rules, a family or a
+              transport out of its enumeration, a range whose First is past its Last.
+            name: Validate
+            out:
+              - type: error
+            recv: value
+        name: BindPolicyValue
+        struct:
+          fields:
+            - doc: Rules are tried in order; at most MaxBindRules.
+              name: Rules
+              type: "[]BindRuleValue"
+            - doc: Default decides a bind no rule matches.
+              name: Default
+              type: Verdict
+      - doc: |-
+          TrafficValue is what one cgroup_skb program counted: every IP packet it
+          saw and their bytes, the network header included, and among them those it
+          dropped. A packet another program dropped after this one passed it is
+          counted as passed.
+        name: TrafficValue
+        struct:
+          fields:
+            - doc: Packets is the number of packets the program saw.
+              name: Packets
+              type: uint64
+            - doc: Bytes is the number of bytes of those packets.
+              name: Bytes
+              type: uint64
+            - doc: DroppedPackets is the number of packets the program dropped.
+              name: DroppedPackets
+              type: uint64
+            - doc: DroppedBytes is the number of bytes of those packets.
+              name: DroppedBytes
+              type: uint64
+      - doc: |-
+          CountersValue is what the two programs of a SKBProgram counted since they
+          were attached: the receiving program's count and the sending one's, read
+          together.
+        name: CountersValue
+        struct:
+          fields:
+            - doc: Ingress is the receiving program's count.
+              name: Ingress
+              type: TrafficValue
+            - doc: Egress is the sending program's count.
+              name: Egress
+              type: TrafficValue
+  - doc: |-
+      Package bpf is the engine of the cgroup BPF programs (ADR 0215): it holds
+      the one backend a program links and hands it the policies
+      core/proc/bpf validated.
+
+      A vendor module, third-party/ebpf/cgroup over cilium/ebpf, calls Register
+      when it is imported; a program that does not import it links nothing of
+      cilium/ebpf, and Probe and every Attach answer NOT_LINKED. Each Attach
+      validates the policy, then the path, then looks for the backend, so
+      POLICY_INVALID is answered whether a backend is linked or not. The registry
+      is kernel/plugin's (ADR 0159), one slot.
+    functions:
+      - doc: |-
+          Register publishes the backend a vendor module implements, at its import,
+          and returns it so the module can bind it to a variable. It panics with
+          BACKEND_REFUSED on a nil or non-comparable backend, or on a second backend
+          beside the first; registering the same backend again changes nothing.
+
+          IFACE-PLUGIN: the registry hands the plug-in back behind the port, so the
+          vendor's backend keeps its concrete type unexported.
+        in:
+          - name: b
+            type: corebpf.Backend
+        name: Register
+        out:
+          - type: corebpf.Backend
+      - doc: |-
+          Probe reports whether this process may load and attach cgroup programs:
+          NOT_LINKED when no backend is linked, UNSUPPORTED_PLATFORM off Linux on
+          amd64 and arm64, LOAD_REFUSED when the kernel refuses the smallest
+          program — no CAP_BPF, a kernel without cgroup programs —, nil otherwise.
+          It attaches nothing; call it once, at wiring time.
+        name: Probe
+        out:
+          - type: error
+      - doc: |-
+          AttachDevice validates policy and the path, then attaches a cgroup_device
+          program enforcing it to the control group at the directory cgroup — what
+          GroupTree.Path returns. POLICY_INVALID and NOT_LINKED are answered before
+          anything is loaded.
+
+          IFACE-PLUGIN: the attached programs are the linked backend's, behind the
+          Program port; the engine has no concrete type to return.
+        in:
+          - name: cgroup
+            type: string
+          - name: policy
+            type: corebpf.DevicePolicyValue
+        name: AttachDevice
+        out:
+          - type: corebpf.Program
+          - type: error
+      - doc: |-
+          AttachSKB validates policy and the path, then attaches a cgroup_skb
+          program on ingress and one on egress, enforcing and counting it, to the
+          control group at cgroup. POLICY_INVALID and NOT_LINKED are answered before
+          anything is loaded.
+
+          IFACE-PLUGIN: the attached programs are the linked backend's, behind the
+          SKBProgram port; the engine has no concrete type to return.
+        in:
+          - name: cgroup
+            type: string
+          - name: policy
+            type: corebpf.SKBPolicyValue
+        name: AttachSKB
+        out:
+          - type: corebpf.SKBProgram
+          - type: error
+      - doc: |-
+          AttachBind validates policy and the path, then attaches a
+          cgroup_sock_addr program on each bind hook, enforcing it, to the control
+          group at cgroup. POLICY_INVALID and NOT_LINKED are answered before
+          anything is loaded.
+
+          IFACE-PLUGIN: the attached programs are the linked backend's, behind the
+          Program port; the engine has no concrete type to return.
+        in:
+          - name: cgroup
+            type: string
+          - name: policy
+            type: corebpf.BindPolicyValue
+        name: AttachBind
+        out:
+          - type: corebpf.Program
+          - type: error
+    imports:
+      corebpf: github.com/kitsunium/sdk/internal/core/proc/bpf
+    path: github.com/kitsunium/sdk/internal/service/proc/bpf
+  - doc: |-
+      Package bpf attaches BPF programs to a control group: a device policy
+      (cgroup_device), an IP policy that also counts the traffic (cgroup_skb),
+      a bind policy (cgroup_sock_addr) — ADR 0215.
+
+      	import _ "github.com/kitsunium/sdk/third-party/ebpf/cgroup" // links the backend
+
+      	p, err := bpf.AttachDevice(tree.Path(), bpf.DevicePolicy{
+      		Default: bpf.Deny,
+      		Rules: []bpf.DeviceRule{
+      			{Type: bpf.DeviceChar, Major: 1, Minor: 3, Access: bpf.AccessAll, Verdict: bpf.Allow},
+      		},
+      	})
+
+      # The backend is linked by an import
+
+      Loading a BPF program takes a library the standard library does not have,
+      so the backend is the vendor module third-party/ebpf, over cilium/ebpf. A
+      program that imports github.com/kitsunium/sdk/third-party/ebpf/cgroup —
+      a blank import is enough — links it; any other program links nothing of
+      cilium/ebpf, and every call here answers [NotLinked]. Off Linux on amd64
+      and arm64 the backend answers [UnsupportedPlatform]; without CAP_BPF, or
+      on a kernel without cgroup programs, [LoadRefused]. Nothing is ever a
+      silent no-op. Call [Probe] once, at wiring time, to learn which.
+
+      # What is refused before anything is loaded
+
+      A policy is validated first ([PolicyInvalid], the fields naming the rule
+      and the field): a verdict is [Allow] or [Deny] and never the zero, the
+      default included, so a policy that does not say what it decides is
+      refused rather than read as allow-all or deny-all. The group is an
+      absolute directory on cgroup v2 below the hierarchy's root — what a
+      GroupTree's Path returns —; another one is [AttachFailed].
+
+      # Beside the other programs, and for how long
+
+      Every program is attached with BPF_F_ALLOW_MULTI: an operation passes
+      only when every program of the group and of its ancestors lets it
+      through. A program stays attached until its [Program].Close, or until the
+      group is removed: the supervisor may exit first, and its services stay
+      under their policies.
+    facade:
+      - const:
+          - name: CodePolicyInvalid
+            reexport: corebpf.CodePolicyInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6B_01"
+          - name: CodeNotLinked
+            reexport: corebpf.CodeNotLinked
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6B_02"
+          - name: CodeLoadRefused
+            reexport: corebpf.CodeLoadRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6B_03"
+          - name: CodeAttachFailed
+            reexport: corebpf.CodeAttachFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6B_04"
+          - name: CodeProgramFailed
+            reexport: corebpf.CodeProgramFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6B_05"
+          - name: CodeUnsupportedPlatform
+            reexport: coreproc.CodeUnsupportedPlatform
+            type: errs.Code
+            typed: true
+            value: "0x00_02_06_01"
+        doc: |-
+          The codes, for errs.HasCode: a caller must tell a policy to fix
+          (POLICY_INVALID) from a program that did not link the backend
+          (NOT_LINKED), a host that refuses (LOAD_REFUSED, UNSUPPORTED_PLATFORM)
+          and a group that does (ATTACH_FAILED).
+      - doc: |-
+          The sentinels, re-exported from the core so a caller matches them
+          without importing an internal package.
+        var:
+          - doc: |-
+              PolicyInvalid refuses a policy or a control-group path before anything
+              is loaded; the fields name the rule and the field.
+            name: PolicyInvalid
+            reexport: corebpf.PolicyInvalid
+            type: "*errs.Error"
+          - doc: |-
+              NotLinked refuses a call no backend can serve: the program does not
+              import third-party/ebpf/cgroup.
+            name: NotLinked
+            reexport: corebpf.NotLinked
+            type: "*errs.Error"
+          - doc: LoadRefused wraps the kernel's refusal to create a program or a map.
+            name: LoadRefused
+            reexport: corebpf.LoadRefused
+            type: "*errs.Error"
+          - doc: AttachFailed wraps a control group that did not take a program.
+            name: AttachFailed
+            reexport: corebpf.AttachFailed
+            type: "*errs.Error"
+          - doc: ProgramFailed wraps a detach or a counter read that failed.
+            name: ProgramFailed
+            reexport: corebpf.ProgramFailed
+            type: "*errs.Error"
+          - doc: |-
+              UnsupportedPlatform is the backend's answer off Linux on amd64 and
+              arm64.
+            name: UnsupportedPlatform
+            reexport: coreproc.UnsupportedPlatform
+            type: "*errs.Error"
+      - const:
+          - doc: AnyNumber is the wildcard of a device rule's Major or Minor.
+            name: AnyNumber
+            reexport: corebpf.AnyNumber
+            type: int64
+            typed: true
+            value: "-1"
+      - const:
+          - doc: MaxDeviceRules bounds a DevicePolicy's rules.
+            name: MaxDeviceRules
+            reexport: corebpf.MaxDeviceRules
+            type: int
+            typed: true
+            value: "256"
+          - doc: MaxBindRules bounds a BindPolicy's rules.
+            name: MaxBindRules
+            reexport: corebpf.MaxBindRules
+            type: int
+            typed: true
+            value: "256"
+          - doc: MaxPrefixRules bounds a SKBPolicy's rules.
+            name: MaxPrefixRules
+            reexport: corebpf.MaxPrefixRules
+            type: int
+            typed: true
+            value: "16384"
+        doc: The bounds of a policy's rules.
+      - alias:
+          - doc: |-
+              Verdict is what a rule, or a policy's default, decides; the zero is
+              refused.
+            name: Verdict
+            target: corebpf.Verdict
+          - doc: DeviceType is the kind of device node a device rule matches.
+            name: DeviceType
+            target: corebpf.DeviceType
+          - doc: DeviceAccess is a set of accesses to a device node.
+            name: DeviceAccess
+            target: corebpf.DeviceAccess
+          - doc: Family is the address family a bind rule matches.
+            name: Family
+            target: corebpf.Family
+          - doc: Transport is the transport protocol a bind rule matches.
+            name: Transport
+            target: corebpf.Transport
+          - doc: DeviceRule is one line of a device policy, as devices.allow writes it.
+            name: DeviceRule
+            target: corebpf.DeviceRuleValue
+          - doc: |-
+              DevicePolicy is one cgroup_device program: its rules in order, and its
+              default.
+            name: DevicePolicy
+            target: corebpf.DevicePolicyValue
+          - doc: PrefixRule is one prefix of an IP policy and its verdict.
+            name: PrefixRule
+            target: corebpf.PrefixRuleValue
+          - doc: |-
+              SKBPolicy is a pair of cgroup_skb programs: the longest prefix holding
+              the peer's address decides, and both count.
+            name: SKBPolicy
+            target: corebpf.SKBPolicyValue
+          - doc: PortRange is an inclusive range of ports.
+            name: PortRange
+            target: corebpf.PortRangeValue
+          - doc: BindRule is one rule of a bind policy.
+            name: BindRule
+            target: corebpf.BindRuleValue
+          - doc: BindPolicy is a pair of cgroup_sock_addr programs on the bind hooks.
+            name: BindPolicy
+            target: corebpf.BindPolicyValue
+          - doc: Traffic is what one cgroup_skb program counted.
+            name: Traffic
+            target: corebpf.TrafficValue
+          - doc: Counters is what the two programs of a SKBProgram counted.
+            name: Counters
+            target: corebpf.CountersValue
+          - doc: Program is a program attached to a control group; Close detaches it.
+            name: Program
+            target: corebpf.Program
+          - doc: SKBProgram is the pair AttachSKB attaches, and their counters.
+            name: SKBProgram
+            target: corebpf.SKBProgram
+      - const:
+          - doc: Deny refuses the operation.
+            name: Deny
+            reexport: corebpf.Deny
+            type: Verdict
+            typed: true
+            value: "1"
+      - const:
+          - doc: Allow lets the operation through to the group's other programs.
+            name: Allow
+            reexport: corebpf.Allow
+            type: Verdict
+            typed: true
+            value: "2"
+      - const:
+          - doc: DeviceBlock matches block devices.
+            name: DeviceBlock
+            reexport: corebpf.DeviceBlock
+            type: DeviceType
+            typed: true
+            value: "1"
+      - const:
+          - doc: DeviceChar matches character devices.
+            name: DeviceChar
+            reexport: corebpf.DeviceChar
+            type: DeviceType
+            typed: true
+            value: "2"
+      - const:
+          - doc: DeviceAny matches both kinds of device node.
+            name: DeviceAny
+            reexport: corebpf.DeviceAny
+            type: DeviceType
+            typed: true
+            value: "3"
+      - const:
+          - doc: AccessMknod is creating the node.
+            name: AccessMknod
+            reexport: corebpf.AccessMknod
+            type: DeviceAccess
+            typed: true
+            value: "1"
+      - const:
+          - doc: AccessRead is opening it for reading.
+            name: AccessRead
+            reexport: corebpf.AccessRead
+            type: DeviceAccess
+            typed: true
+            value: "2"
+      - const:
+          - doc: AccessWrite is opening it for writing.
+            name: AccessWrite
+            reexport: corebpf.AccessWrite
+            type: DeviceAccess
+            typed: true
+            value: "4"
+      - const:
+          - doc: AccessAll is the three accesses.
+            name: AccessAll
+            reexport: corebpf.AccessAll
+            type: DeviceAccess
+            typed: true
+            value: "7"
+      - const:
+          - doc: FamilyIPv4 matches a bind of an AF_INET socket.
+            name: FamilyIPv4
+            reexport: corebpf.FamilyIPv4
+            type: Family
+            typed: true
+            value: "1"
+      - const:
+          - doc: FamilyIPv6 matches a bind of an AF_INET6 socket.
+            name: FamilyIPv6
+            reexport: corebpf.FamilyIPv6
+            type: Family
+            typed: true
+            value: "2"
+      - const:
+          - doc: FamilyAny matches both families.
+            name: FamilyAny
+            reexport: corebpf.FamilyAny
+            type: Family
+            typed: true
+            value: "3"
+      - const:
+          - doc: TransportTCP matches a TCP socket.
+            name: TransportTCP
+            reexport: corebpf.TransportTCP
+            type: Transport
+            typed: true
+            value: "1"
+      - const:
+          - doc: TransportUDP matches a UDP socket.
+            name: TransportUDP
+            reexport: corebpf.TransportUDP
+            type: Transport
+            typed: true
+            value: "2"
+      - const:
+          - doc: TransportAny matches every protocol.
+            name: TransportAny
+            reexport: corebpf.TransportAny
+            type: Transport
+            typed: true
+            value: "3"
+      - func:
+          doc: |-
+            Probe reports whether this process may load and attach cgroup programs:
+            NotLinked, UnsupportedPlatform, LoadRefused, or nil. It attaches nothing.
+          forward: svcbpf.Probe
+          name: Probe
+          out:
+            - type: error
+      - func:
+          doc: |-
+            AttachDevice attaches a cgroup_device program enforcing policy to the
+            control group at the directory cgroup.
+          forward: svcbpf.AttachDevice
+          in:
+            - name: cgroup
+              type: string
+            - name: policy
+              type: DevicePolicy
+          name: AttachDevice
+          out:
+            - type: Program
+            - type: error
+      - func:
+          doc: |-
+            AttachSKB attaches a cgroup_skb program on ingress and one on egress,
+            enforcing and counting policy, to the control group at cgroup.
+          forward: svcbpf.AttachSKB
+          in:
+            - name: cgroup
+              type: string
+            - name: policy
+              type: SKBPolicy
+          name: AttachSKB
+          out:
+            - type: SKBProgram
+            - type: error
+      - func:
+          doc: |-
+            AttachBind attaches a cgroup_sock_addr program on each bind hook,
+            enforcing policy, to the control group at cgroup.
+          forward: svcbpf.AttachBind
+          in:
+            - name: cgroup
+              type: string
+            - name: policy
+              type: BindPolicy
+          name: AttachBind
+          out:
+            - type: Program
+            - type: error
+    imports:
+      corebpf: github.com/kitsunium/sdk/internal/core/proc/bpf
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcbpf: github.com/kitsunium/sdk/internal/service/proc/bpf
+    path: github.com/kitsunium/sdk/pkg/v1/proc/bpf

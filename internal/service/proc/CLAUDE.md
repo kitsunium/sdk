@@ -43,11 +43,13 @@ The two systemd protocols are grouped under `systemd/`, a directory of its own
 | `systemd/notify/` | sd_notify(3): the notifier, bounded by its caller's context (ADR 0072), and the supervisor's listener with the kernel-verified sender on Linux | `core/proc.Listener`, `NotificationValue` | none (core `0.2.6.*`) | `pkg/v1/proc/systemd/notify` |
 | `systemd/listen/` | socket activation, sd_listen_fds(3): the inherited listeners, and `Prepare` for the activator | `core/proc.Spec` (`ExtraFiles`) | none (core `0.2.6.*`) | `pkg/v1/proc/systemd/listen` |
 | `ipc/` | a private socket between processes of one machine: the directory gates it, the path above it is audited with `kernel/fs/pathchain`, `SO_PEERCRED` names the peer on Linux, a named pipe with its own DACL on Windows (ADR 0148) | `core/proc/ipc.Listener`, `Dialer`, `PeerValue`, `Conn` — its own core, at the mirrored path (ADR 0160) | `0.3.91.*`, declared in `core/proc/ipc` | `pkg/v1/proc/ipc` |
+| `ipc/rpc/` | a framed, bounded, codec-typed call over the private socket: frames refused on their length, `MaxInFlight` calls, budgets and cancel frames (ADR 0218) | `core/proc/ipc/rpc` (`Handler`, `Router`, `Request`, `Stream`) | none (core `0.3.106.*`) | `pkg/v1/proc/ipc/rpc` |
 
 No member declares a code. Every member that reports a failure wraps a
 `0.2.6.*` sentinel of `internal/core/proc`, the domain's one block (ADR 0016),
 except `ipc`, whose `0.3.91.*` sentinels are declared in `internal/core/proc/ipc`
-— the core path that mirrors it, beside its ports and values (ADR 0160).
+— the core path that mirrors it, beside its ports and values (ADR 0160) — and
+`ipc/rpc`, whose `0.3.106.*` are `internal/core/proc/ipc/rpc`'s (ADR 0218).
 `childwait` hands its causes to `exec` and `reaper`, which wrap them, and
 `memlimit` and `self` return values, not errors. `ipc`'s range kept its value
 through both of its moves — from the root of `internal/service` to this
@@ -62,6 +64,8 @@ the kernel's `syscall.Rlimit` whose field width FreeBSD and DragonFly declare
 differently: one function is not worth an edge from one engine to the other, so
 it sits under `internal/`, where Go's rule confines it to this family
 (`internal/CLAUDE.md`).
+`memlimit`, `cgroup` and `self` share `internal/cgroupfs` the same way: the
+one reading of `/proc/self/mountinfo` and `/proc/self/cgroup` (#1097, #938).
 Outside the family, `internal/service/app/health` and `internal/service/app/lifecycle`
 import `systemd/notify`, and `internal/service/net/server` imports
 `systemd/listen` to adopt a socket a supervisor passed.

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T12:00:00Z -->
+<!-- updated: 2026-11-03T22:00:00Z -->
 # internal/service/proc/rlimit/
 
 ## Purpose
@@ -20,6 +20,9 @@ family's own `internal/service/proc/internal/rlim`, which builds the
 | `rlimit_unix.go` | Darwin/BSD impl (`unix && !linux`): native `setrlimit(2)` on self; a foreign pid → `UnsupportedPlatform` (no portable `prlimit64`) |
 | `rlimit_table_as.go` / `rlimit_table_openbsd.go` | per-platform `RLIMIT_AS` split — present everywhere except OpenBSD (absent from its ABI → `UnknownResource`) |
 | `rlimit_other.go` | `!unix` stub (Windows, plan9, js/wasm): every entry point returns `UnsupportedPlatform` |
+| `keepraised.go` / `keepraised_unix.go` / `keepraised_other.go` | `KeepRaisedNoFile` (#1091): once per process (`sync.OnceValues`), `getrlimit` then `setrlimit` of the same `RLIMIT_NOFILE`, which ends the runtime's restore in children; `UnsupportedPlatform` off Unix |
+| `get.go` / `get_unix.go` / `get_linux.go` / `get_foreign_other.go` / `get_other.go` | `Get` (#939): `getrlimit(2)` for the caller, `prlimit64(2)` with `new = nil` for another pid on Linux, `UnsupportedPlatform` for another pid elsewhere and off Unix; `rlim.Pair` reads the struct back |
+| `openfiles_procfs.go` (+ `openfiles_dir_procfs.go` / `openfiles_dir_darwin.go`) / `openfiles_freebsd.go` / `openfiles_windows.go` / `openfiles_other.go` | `OpenFiles` (#939): `/proc/self/fd` (Linux, illumos, Solaris) or `/dev/fd` (darwin) less the listing's own descriptor; `sysctl kern.proc.nfds` on FreeBSD (its `/dev/fd` lists 0-2 without fdescfs); the HANDLE count on Windows; `UnsupportedPlatform` on OpenBSD, NetBSD and DragonFly, whose `/dev/fd` nodes are static |
 
 No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
 (`UnknownResource`, `RlimitFailed`, `UnsupportedPlatform`); this package mints no
@@ -39,6 +42,22 @@ codes and never calls `errs.Define`.
   declaratively before exec. The honest model is post-fork application (a pid-0
   `Apply` in the child, or `prlimit64` against the spawned pid from the
   supervisor). Call it at `Spec`-construction time to fail fast.
+
+- **KeepRaisedNoFile()** — what a CHILD gets as its open-file soft limit. The
+  Go runtime raises the process's soft `RLIMIT_NOFILE` to the hard limit at
+  start (`syscall/rlimit.go`) and, by design, puts the ORIGINAL soft limit back
+  in every child it forks (`exec_linux.go`, and `exec_unix.go` for the
+  trampoline's own `execve`) — 1024 on a stock distribution, 256 on macOS — so
+  a non-Go service a supervisor spawns meets `EMFILE` at 1024 while the
+  supervisor runs at the hard limit. The restore stops once the program itself
+  calls `syscall.Setrlimit(RLIMIT_NOFILE)`, which stores nil in the runtime's
+  saved original. `KeepRaisedNoFile` sets the value in force — no privilege,
+  no trampoline — once per process and returns it. `Apply(0, …)` with a
+  `ResourceNoFile` entry has the same side effect, through the same wrapper;
+  `Spec.Rlimits[ResourceNoFile]` still wins for a child, through the
+  trampoline. `TestKeepRaisedNoFile` runs a helper under a soft limit of 256:
+  its direct child prints 256 before the call and the helper's raised limit
+  after.
 
 ## Platform notes
 

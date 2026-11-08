@@ -1,0 +1,35 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: fdNameValid
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(name) > maxNameBytes
+      - loop:
+          do:
+            - bind: c
+              eval: name[i]
+            - opt:
+                do:
+                  - return: "false"
+                when: c < ' ' || c > '~' || c == ':'
+          key: i
+          range: len(name)
+      - return: "true"
+  - of: isErrorName
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: v == "" || len(v) > maxNameBytes
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: v[i] <= ' ' || v[i] > '~'
+          key: i
+          range: len(v)
+      - return: "true"

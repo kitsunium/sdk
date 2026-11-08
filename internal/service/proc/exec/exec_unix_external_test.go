@@ -637,3 +637,135 @@ func (w *boundedWriter) Write(p []byte) (int, error) {
 	w.got += len(p)
 	return len(p), nil
 }
+
+// TestStartRefusesReservedEnv pins #726 at the spawn: a Spec.Env naming a
+// variable of the spawn protocol is refused with ReservedEnv and NO process
+// runs. Each case names the trampoline's cgroup placement, the one variable
+// whose hijack is directly observable: before the fix the trampoline wrote its
+// pid into the caller's "cgroup" — here a witness directory — and the spawn
+// succeeded. A key that only resembles the prefix still reaches the child.
+func TestStartRefusesReservedEnv(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		key  string
+	}
+	tests := []tc{
+		{"the trampoline payload", "__KITSUNIUM_SDK_PROC_TRAMPOLINE"},
+		{"the cgroup placement", "__KITSUNIUM_SDK_PROC_CGROUP"},
+		{"the handshake descriptor", "__KITSUNIUM_SDK_PROC_HSFD"},
+		{"the names set to the child's PID", "__KITSUNIUM_SDK_PROC_PIDENV"},
+		{"the cgroup placement in lower case", "__kitsunium_sdk_proc_cgroup"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		witness := filepath.Join(t.TempDir(), "witness")
+		if err := os.Mkdir(witness, 0o700); err != nil {
+			t.Fatalf("creating the witness: %v", err)
+		}
+		spec := coreproc.Spec{
+			Path: shellPath,
+			//: the child would leave a mark if it ran.
+			Args: []string{"sh", "-c", "echo ran > " + filepath.Join(witness, "ran")},
+			//: a umask routes the spawn through the trampoline.
+			Umask: new(0o022),
+			Env:   []string{c.key + "=" + witness, "__KITSUNIUM_SDK_PROC_CGROUP=" + witness},
+		}
+		proc, err := svcexec.Start(t.Context(), spec)
+		if proc != nil {
+			_, _ = proc.Wait()
+		}
+		if !errors.Is(err, coreproc.ReservedEnv) {
+			t.Fatalf("Start(Env %s=…) = %v, want ReservedEnv", c.key, err)
+		}
+		left, rErr := os.ReadDir(witness)
+		if rErr != nil {
+			t.Fatalf("reading the witness: %v", rErr)
+		}
+		if len(left) != 0 {
+			t.Errorf("a process ran despite the refusal: the witness holds %v", left)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestStartAcceptsNeighbourEnv pins the other half of #726: a key that only
+// resembles the protocol's prefix is the caller's own, and reaches the child.
+func TestStartAcceptsNeighbourEnv(t *testing.T) {
+	t.Parallel()
+	var out strings.Builder
+	spec := coreproc.Spec{
+		Path:   shellPath,
+		Args:   []string{"sh", "-c", `printf '%s %s' "$__KITSUNIUM_SDK_PROCX" "$KITSUNIUM_SDK_PROC_X"`},
+		Env:    []string{"__KITSUNIUM_SDK_PROCX=a", "KITSUNIUM_SDK_PROC_X=b"},
+		Umask:  new(0o022),
+		Stdio:  coreproc.StdioCapture,
+		Stdout: &out,
+	}
+	proc, err := svcexec.Start(t.Context(), spec)
+	if err != nil {
+		t.Fatalf("Start = %v, want nil", spawnDetail(err))
+	}
+	if _, wErr := proc.Wait(); wErr != nil {
+		t.Fatalf("Wait = %v", wErr)
+	}
+	if got := out.String(); got != "a b" {
+		t.Errorf("the child saw %q, want %q", got, "a b")
+	}
+}
+
+// TestStartPIDEnv pins Spec.PIDEnv (#739): each name reaches the child set to
+// the child's own PID — which no parent knows before the fork —, replacing an
+// entry of Env with the same name, and none of the spawn protocol's variables
+// reaches the target.
+func TestStartPIDEnv(t *testing.T) {
+	t.Parallel()
+	var out strings.Builder
+	spec := coreproc.Spec{
+		Path:   shellPath,
+		Args:   []string{"sh", "-c", `printf '%s|%s|%s|%s' "$LISTEN_PID" "$WATCHDOG_PID" "$$" "$(env | grep -c __KITSUNIUM_SDK_PROC_)"`},
+		Env:    []string{"PATH=/usr/bin:/bin", "LISTEN_PID=1"},
+		PIDEnv: []string{"LISTEN_PID", "WATCHDOG_PID"},
+		Stdio:  coreproc.StdioCapture,
+		Stdout: &out,
+	}
+	p, err := svcexec.Start(t.Context(), spec)
+	if err != nil {
+		t.Fatalf("Start = %v", spawnDetail(err))
+	}
+	if _, wErr := p.Wait(); wErr != nil {
+		t.Fatalf("Wait = %v", wErr)
+	}
+	got := strings.Split(out.String(), "|")
+	if len(got) != 4 || got[0] != got[2] || got[1] != got[2] || got[2] != strconv.Itoa(p.PID()) {
+		t.Errorf("the child printed %q, want LISTEN_PID and WATCHDOG_PID equal to its pid %d", out.String(), p.PID())
+	}
+	if len(got) == 4 && got[3] != "0" {
+		t.Errorf("%s of the spawn protocol's variables reached the target", got[3])
+	}
+}
+
+// TestStartPIDEnvRefusals pins the names PIDEnv refuses before any fork.
+func TestStartPIDEnvRefusals(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		want errs.Code
+	}{
+		{"", coreproc.CodeInvalidSpec},
+		{"A=B", coreproc.CodeInvalidSpec},
+		{"A,B", coreproc.CodeInvalidSpec},
+		{"A\x00", coreproc.CodeInvalidSpec},
+		{"__kitsunium_sdk_proc_pidenv", coreproc.CodeReservedEnv},
+	} {
+		p, err := svcexec.Start(t.Context(), coreproc.Spec{Path: shellPath, PIDEnv: []string{c.name}})
+		if p != nil || !errs.HasCode(err, c.want) {
+			t.Errorf("PIDEnv %q: %v, %v, want code %v", c.name, p, err, c.want)
+		}
+	}
+}

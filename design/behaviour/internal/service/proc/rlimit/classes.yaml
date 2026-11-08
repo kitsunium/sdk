@@ -1,6 +1,24 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: syscallPrlimitRead names the read-back call for another pid.
+    items:
+      - name: syscallPrlimitRead
+        type: string
+        value: "\"prlimit64\""
+    name: syscallPrlimitRead
+  - doc: syscallGetrlimit names the call a read-back failure wraps.
+    items:
+      - name: syscallGetrlimit
+        type: string
+        value: "\"getrlimit\""
+    name: syscallGetrlimit
+  - doc: selfFDDir is the caller's descriptor directory in procfs.
+    items:
+      - name: selfFDDir
+        type: string
+        value: "\"/proc/self/fd\""
+    name: selfFDDir
   - doc: |-
       exitOSErr is sysexits.h EX_OSERR (71), the exit status the RLIMIT_FAILED
       sentinel carries; restated here to wrap a stdlib cause with matching
@@ -44,6 +62,34 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - Get
+      - OpenFiles
+    name: get.go
+  - decls:
+      - syscallPrlimitRead
+      - getForeign
+    name: get_linux.go
+  - decls:
+      - syscallGetrlimit
+      - getLimit
+      - readFailed
+    name: get_unix.go
+  - decls:
+      - keepRaised
+      - KeepRaisedNoFile
+    name: keepraised.go
+  - decls:
+      - keepRaisedNoFile
+      - limitValueOf
+      - keepRaisedFailed
+    name: keepraised_unix.go
+  - decls:
+      - selfFDDir
+    name: openfiles_dir_procfs.go
+  - decls:
+      - openFiles
+    name: openfiles_procfs.go
+  - decls:
       - Apply
       - PrepareSysProcAttr
     name: rlimit.go
@@ -62,6 +108,55 @@ files:
       - applyForeign
     name: rlimit_linux.go
 functions:
+  - name: Get
+    params: pid int, r coreproc.Resource
+    results: coreproc.LimitValue, error
+  - name: OpenFiles
+    results: int, error
+  - doc: getForeign reads another process's ceiling with prlimit64(2), new = nil.
+    name: getForeign
+    params: pid, rl int, r coreproc.Resource
+    results: coreproc.LimitValue, error
+  - doc: |-
+      getLimit reads r for the caller with getrlimit(2); another pid is foreign
+      (getForeign: prlimit64 on Linux, refused elsewhere).
+    name: getLimit
+    params: pid int, r coreproc.Resource
+    results: coreproc.LimitValue, error
+  - doc: readFailed wraps a failed read-back in the central RLIMIT_FAILED sentinel.
+    name: readFailed
+    params: cause error, pid int, resource, call string
+    results: error
+  - name: KeepRaisedNoFile
+    results: kept coreproc.LimitValue, err error
+  - doc: |-
+      keepRaisedNoFile reads the open-file limit in force and sets it again through
+      syscall.Setrlimit, whose RLIMIT_NOFILE case clears the original soft limit the
+      runtime saved at start (syscall/rlimit.go): forkExec then restores nothing,
+      and every direct spawn inherits the raised limit. The value is unchanged, so
+      the call never needs privilege.
+    name: keepRaisedNoFile
+    results: kept coreproc.LimitValue, err error
+  - doc: |-
+      limitValueOf turns an Rlimit's Cur and Max — int64 on FreeBSD and DragonFly,
+      uint64 elsewhere — into the port's pair. The int64 RLIM_INFINITY (-1) lands
+      on LimitInfinity, the inverse of rlim.Make.
+    name: limitValueOf
+    params: soft, hard T
+    results: coreproc.LimitValue
+    typeParams: T int64 | uint64
+  - doc: |-
+      keepRaisedFailed wraps a getrlimit/setrlimit failure of KeepRaisedNoFile as
+      the central RLIMIT_FAILED sentinel, naming the syscall that failed.
+    name: keepRaisedFailed
+    params: cause error, syscallName string
+    results: error
+  - doc: |-
+      openFiles counts the entries of the descriptor directory the kernel keeps
+      for the caller — /proc/self/fd on Linux, illumos and Solaris, /dev/fd on
+      darwin — less the one the listing itself holds open.
+    name: openFiles
+    results: int, error
   - name: Apply
     params: pid int, limits map[coreproc.Resource]coreproc.LimitValue
     results: error
@@ -117,7 +212,9 @@ functions:
 imports:
   coreproc: github.com/kitsunium/sdk/internal/core/proc
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  os: os
   rlim: github.com/kitsunium/sdk/internal/service/proc/internal/rlim
+  sync: sync
   syscall: syscall
   unsafe: unsafe
 package:
@@ -127,6 +224,13 @@ package:
   purpose: Package rlimit — applies per-process setrlimit(2) resource ceilings.
 types: []
 vars:
+  - doc: |-
+      keepRaised runs keepRaisedNoFile once per process and memoises its outcome:
+      once the runtime's restore is off, nothing remains to switch off.
+    items:
+      - name: keepRaised
+        value: sync.OnceValues(keepRaisedNoFile)
+    name: keepRaised
   - doc: |-
       resourceToRLIMIT maps each abstract Resource to the Linux RLIMIT_* constant.
       Declared as a var literal (no init) per KTN-FUNC-NOINIT; the two values absent

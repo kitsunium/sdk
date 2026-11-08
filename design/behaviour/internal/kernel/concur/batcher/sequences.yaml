@@ -7,6 +7,8 @@ sequences:
         kind: actor
       - id: NewBatcher
         kind: self
+      - id: context
+        kind: stdlib
       - id: b.loop
         kind: internal
     steps:
@@ -23,21 +25,28 @@ sequences:
             - set: cfg.Clock
               value: clock.System
           when: cfg.Clock == nil
+      - bind: life, lifeCancel
+        eval: context.WithCancel(context.Background())
+        to: context
       - bind: b
         eval: |-
           &Batcher[T]{
-          		deliver: deliver,
-          		cfg:     cfg,
-          		stop:    make(chan struct{}),
-          		done:    make(chan struct{}),
+          		deliver:    deliver,
+          		cfg:        cfg,
+          		freed:      make(chan struct{}, 1),
+          		life:       life,
+          		lifeCancel: lifeCancel,
+          		kick:       make(chan struct{}, 1),
+          		stop:       make(chan struct{}),
+          		done:       make(chan struct{}),
           	}
       - opt:
           do:
-            - set: b.ticking
+            - set: b.looping
               value: "true"
             - go: b.loop(cfg.FlushEvery)
               to: b.loop
-          when: cfg.FlushEvery > 0
+          when: cfg.FlushEvery > 0 || cfg.FlushOn == FlushBackground
       - return: b
   - of: (*Batcher).Add
     participants:
@@ -51,7 +60,7 @@ sequences:
         kind: value
       - id: b.weigh
         kind: internal
-      - id: b.full
+      - id: b.handOff
         kind: internal
       - id: b.flushOnce
         kind: internal
@@ -70,17 +79,70 @@ sequences:
         set: b.weight
         to: b.weigh
         value: b.weigh(item)
-      - bind: full
-        eval: b.full()
-        to: b.full
-      - eval: b.mu.Unlock()
-        to: b.mu.Unlock
       - opt:
           do:
-            - return: b.flushOnce(ctx)
-              to: b.flushOnce
-          when: full
-      - return: nil
+            - eval: b.mu.Unlock()
+              to: b.mu.Unlock
+            - return: nil
+          when: "!b.full()"
+      - opt:
+          do:
+            - return: b.handOff(ctx)
+              to: b.handOff
+          when: b.cfg.FlushOn == FlushBackground
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - return: b.flushOnce(ctx)
+        to: b.flushOnce
+  - of: (*Batcher).handOff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).handOff
+        kind: self
+      - id: newGate
+        kind: internal
+      - id: b.mu.Unlock
+        kind: value
+      - id: b.mu.Lock
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: b.ready, b.buf, b.weight
+                    value: b.buf, nil, 0
+                  - set: b.room
+                    to: newGate
+                    value: newGate()
+                  - eval: b.mu.Unlock()
+                    to: b.mu.Unlock
+                  - select:
+                      cases:
+                        - comm: b.kick <- struct{}{}
+                        - default: true
+                  - return: nil
+                when: b.ready == nil
+            - bind: room
+              eval: b.room.ch
+            - eval: b.mu.Unlock()
+              to: b.mu.Unlock
+            - select:
+                cases:
+                  - comm: <-room
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: nil
+            - eval: b.mu.Lock()
+              to: b.mu.Lock
+            - opt:
+                do:
+                  - eval: b.mu.Unlock()
+                    to: b.mu.Unlock
+                  - return: nil
+                when: b.closed || !b.full()
+          forever: true
   - of: (*Batcher).Flush
     participants:
       - id: caller
@@ -91,71 +153,15 @@ sequences:
         kind: value
       - id: b.mu.Unlock
         kind: value
-      - id: b.flushOnce
+      - id: b.takeReady
         kind: internal
-    steps:
-      - eval: b.mu.Lock()
-        to: b.mu.Lock
-      - bind: closed
-        eval: b.closed
-      - eval: b.mu.Unlock()
-        to: b.mu.Unlock
-      - opt:
-          do:
-            - return: BatcherClosed
-          when: closed
-      - return: b.flushOnce(ctx)
-        to: b.flushOnce
-  - of: (*Batcher).Close
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Batcher).Close
-        kind: self
-      - id: b.stopOnce.Do
-        kind: value
-      - id: b.mu.Lock
-        kind: value
-      - id: b.mu.Unlock
-        kind: value
-      - id: b.deliverBatch
+      - id: b.take
         kind: internal
-    steps:
-      - opt:
-          do:
-            - eval: b.stopOnce.Do(func() { close(b.stop) })
-              to: b.stopOnce.Do
-            - eval: <-b.done
-          when: b.ticking
-      - eval: b.mu.Lock()
-        to: b.mu.Lock
-      - set: b.closed
-        value: "true"
-      - bind: batch
-        eval: b.buf
-      - set: b.buf
-        value: nil
-      - set: b.weight
-        value: "0"
-      - eval: b.mu.Unlock()
-        to: b.mu.Unlock
-      - opt:
-          do:
-            - return: nil
-          when: len(batch) == 0
-      - return: b.deliverBatch(ctx, batch)
-        to: b.deliverBatch
-  - of: (*Batcher).flushOnce
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Batcher).flushOnce
-        kind: self
-      - id: b.mu.Lock
+      - id: b.deliverMu.Lock
         kind: value
-      - id: b.mu.Unlock
-        kind: value
-      - id: b.deliverBatch
+      - id: b.unlockDeliver
+        kind: internal
+      - id: either
         kind: internal
     steps:
       - eval: b.mu.Lock()
@@ -164,16 +170,238 @@ sequences:
           do:
             - eval: b.mu.Unlock()
               to: b.mu.Unlock
+            - return: BatcherClosed
+          when: b.closed
+      - bind: ready
+        eval: b.takeReady()
+        to: b.takeReady
+      - bind: batch
+        eval: b.take()
+        to: b.take
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - opt:
+          do:
             - return: nil
-          when: len(b.buf) == 0
+          when: len(ready)+len(batch) == 0
+      - eval: b.deliverMu.Lock()
+        to: b.deliverMu.Lock
+      - defer: b.unlockDeliver()
+        to: b.unlockDeliver
+      - return: either(b.deliverBatch(ctx, ready), b.deliverBatch(ctx, batch))
+        to: either
+  - of: (*Batcher).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).Close
+        kind: self
+      - id: b.join
+        kind: internal
+      - id: b.mu.Lock
+        kind: value
+      - id: b.takeReady
+        kind: internal
+      - id: b.take
+        kind: internal
+      - id: b.mu.Unlock
+        kind: value
+      - id: errs
+        kind: package
+      - id: b.unlockDeliver
+        kind: internal
+      - id: either
+        kind: internal
+    steps:
+      - defer: b.lifeCancel()
+      - bind: joinErr
+        eval: b.join(ctx)
+        to: b.join
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - set: b.closed
+        value: "true"
+      - bind: ready
+        eval: b.takeReady()
+        to: b.takeReady
+      - bind: batch
+        eval: b.take()
+        to: b.take
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - bind: undelivered
+        eval: len(ready) + len(batch)
+      - opt:
+          do:
+            - return: errs.Wrap(joinErr, BatcherCloseTimedOut.Params(), errs.Int("undelivered", undelivered))
+              to: errs
+          when: joinErr != nil
+      - opt:
+          do:
+            - return: nil
+          when: undelivered == 0
+      - opt:
+          do:
+            - return: errs.Wrap(ctx.Err(), BatcherCloseTimedOut.Params(), errs.Int("undelivered", undelivered))
+              to: errs
+          when: "!b.acquire(ctx)"
+      - defer: b.unlockDeliver()
+        to: b.unlockDeliver
+      - return: either(b.deliverBatch(ctx, ready), b.deliverBatch(ctx, batch))
+        to: either
+  - of: (*Batcher).join
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).join
+        kind: self
+      - id: b.stopOnce.Do
+        kind: value
+      - id: ctx.Err
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!b.looping"
+      - eval: b.stopOnce.Do(func() { close(b.stop) })
+        to: b.stopOnce.Do
+      - select:
+          cases:
+            - comm: <-b.done
+              do:
+                - return: nil
+            - default: true
+      - select:
+          cases:
+            - comm: <-b.done
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+      - eval: b.lifeCancel()
+      - opt:
+          do:
+            - eval: <-b.done
+            - return: nil
+          when: "!b.busy.Load()"
+      - return: ctx.Err()
+        to: ctx.Err
+  - of: (*Batcher).acquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).acquire
+        kind: self
+      - id: b.bounded.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: b.deliverMu.TryLock()
+      - eval: b.bounded.Add(1)
+        to: b.bounded.Add
+      - defer: b.bounded.Add(-1)
+        to: b.bounded.Add
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: b.deliverMu.TryLock()
+            - select:
+                cases:
+                  - comm: _, open := <-b.freed
+                    do:
+                      - opt:
+                          do:
+                            - return: "false"
+                          when: "!open"
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: "false"
+          forever: true
+  - of: (*Batcher).unlockDeliver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).unlockDeliver
+        kind: self
+      - id: b.deliverMu.Unlock
+        kind: value
+    steps:
+      - eval: b.deliverMu.Unlock()
+        to: b.deliverMu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: b.bounded.Load() == 0
+      - select:
+          cases:
+            - comm: b.freed <- struct{}{}
+            - default: true
+  - of: (*Batcher).take
+    steps:
       - bind: batch
         eval: b.buf
       - set: b.buf
         value: nil
       - set: b.weight
         value: "0"
+      - return: batch
+  - of: (*Batcher).takeReady
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).takeReady
+        kind: self
+      - id: b.room.open
+        kind: internal
+    steps:
+      - bind: batch
+        eval: b.ready
+      - opt:
+          do:
+            - set: b.ready
+              value: nil
+            - eval: b.room.open()
+              to: b.room.open
+          when: batch != nil
+      - return: batch
+  - of: (*Batcher).flushOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).flushOnce
+        kind: self
+      - id: b.mu.Lock
+        kind: value
+      - id: b.take
+        kind: internal
+      - id: b.mu.Unlock
+        kind: value
+      - id: b.deliverMu.Lock
+        kind: value
+      - id: b.unlockDeliver
+        kind: internal
+      - id: b.deliverBatch
+        kind: internal
+    steps:
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - bind: batch
+        eval: b.take()
+        to: b.take
       - eval: b.mu.Unlock()
         to: b.mu.Unlock
+      - opt:
+          do:
+            - return: nil
+          when: len(batch) == 0
+      - eval: b.deliverMu.Lock()
+        to: b.deliverMu.Lock
+      - defer: b.unlockDeliver()
+        to: b.unlockDeliver
       - return: b.deliverBatch(ctx, batch)
         to: b.deliverBatch
   - of: (*Batcher).deliverBatch
@@ -185,23 +413,52 @@ sequences:
       - id: errs
         kind: package
     steps:
-      - lock:
-          mutex: b.deliverMu
       - opt:
           do:
-            - return: |-
-                errs.Wrap(derr, errs.WrapParams{
-                			Code:    CodeBatcherDeliverFailed,
-                			Reason:  "BATCHER_DELIVER_FAILED",
-                			Public:  "Batcher delivery failed",
-                			Private: "internal/kernel/concur/batcher: the deliver closure returned an error",
-                		})
+            - return: nil
+          when: len(batch) == 0
+      - opt:
+          do:
+            - return: errs.Wrap(derr, BatcherDeliverFailed.Params())
               to: errs
           init:
             bind: derr
             eval: b.deliver(ctx, batch)
           when: derr != nil
       - return: nil
+  - of: newGate
+    steps:
+      - return: "&gate{ch: make(chan struct{})}"
+  - of: (*gate).open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*gate).open
+        kind: self
+      - id: g.once.Do
+        kind: value
+    steps:
+      - eval: g.once.Do(func() { close(g.ch) })
+        to: g.once.Do
+  - of: either
+    participants:
+      - id: caller
+        kind: actor
+      - id: either
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: second
+          when: first == nil
+      - opt:
+          do:
+            - return: first
+          when: second == nil
+      - return: errors.Join(first, second)
+        to: errors
   - of: (*Batcher).loop
     participants:
       - id: caller
@@ -216,37 +473,100 @@ sequences:
         kind: value
       - id: t.C
         kind: value
-      - id: b.flushOnce
+      - id: b.background
         kind: internal
     steps:
       - defer: b.doneOnce.Do(func() { close(b.done) })
         to: b.doneOnce.Do
-      - bind: t
-        eval: b.cfg.Clock.NewTicker(every)
-        to: b.cfg.Clock.NewTicker
-      - defer: t.Stop()
-        to: t.Stop
-      - bind: ticks
-        eval: t.C()
-        to: t.C
+      - var:
+          name: ticks
+          type: <-chan time.Time
+      - opt:
+          do:
+            - bind: t
+              eval: b.cfg.Clock.NewTicker(every)
+              to: b.cfg.Clock.NewTicker
+            - defer: t.Stop()
+              to: t.Stop
+            - set: ticks
+              to: t.C
+              value: t.C()
+          when: every > 0
       - loop:
           do:
             - select:
                 cases:
                   - comm: <-ticks
                     do:
+                      - eval: b.background(true)
+                        to: b.background
+                  - comm: _, open := <-b.kick
+                    do:
                       - opt:
                           do:
-                            - eval: b.cfg.OnError(ferr)
-                          init:
-                            bind: ferr
-                            eval: b.flushOnce(context.Background())
-                            to: b.flushOnce
-                          when: ferr != nil
+                            - return: ""
+                          when: "!open"
+                      - eval: b.background(false)
+                        to: b.background
                   - comm: <-b.stop
                     do:
                       - return: ""
           forever: true
+  - of: (*Batcher).background
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Batcher).background
+        kind: self
+      - id: b.busy.Store
+        kind: value
+      - id: b.unlockDeliver
+        kind: internal
+      - id: b.mu.Lock
+        kind: value
+      - id: b.takeReady
+        kind: internal
+      - id: b.take
+        kind: internal
+      - id: b.mu.Unlock
+        kind: value
+      - id: either
+        kind: internal
+    steps:
+      - eval: b.busy.Store(true)
+        to: b.busy.Store
+      - defer: b.busy.Store(false)
+        to: b.busy.Store
+      - opt:
+          do:
+            - return: ""
+          when: b.life.Err() != nil || !b.acquire(b.life)
+      - defer: b.unlockDeliver()
+        to: b.unlockDeliver
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - bind: ready
+        eval: b.takeReady()
+        to: b.takeReady
+      - var:
+          name: batch
+          type: "[]T"
+      - opt:
+          do:
+            - set: batch
+              to: b.take
+              value: b.take()
+          when: tick
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - opt:
+          do:
+            - eval: b.cfg.OnError(ferr)
+          init:
+            bind: ferr
+            eval: either(b.deliverBatch(b.life, ready), b.deliverBatch(b.life, batch))
+            to: either
+          when: ferr != nil
   - of: (*Batcher).weigh
     steps:
       - opt:

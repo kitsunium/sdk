@@ -24,7 +24,7 @@ and time — the kernel primitive that replaced `golang.org/x/mod/module` here
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `build.go` | `BuildValue` + `Module(path)`, `ModuleValue`, `ReadBuild`, `ParseBuild`, and the three readings of a recorded version (`fromVersion`, `mainModule`, `dependency`) |
+| `build.go` | `BuildValue` + `Module(path)` + `Reproducible()`, `ModuleValue`, `ToolchainValue`, `SettingValue`, `ReadBuild`, `ParseBuild`, the three readings of a recorded version (`fromVersion`, `mainModule`, `dependency`) and the toolchain's reading of the settings (`toolchain`, `splitTags`) |
 
 ## Why-this-shape
 
@@ -51,6 +51,22 @@ and time — the kernel primitive that replaced `golang.org/x/mod/module` here
   main module (`../lib` in `go.mod` read back as `./lib`), and a workspace
   module is recorded as `(devel)` with no directory at all. `Dir`'s comment
   says both.
+- **The toolchain's settings are read, not dropped (#1095).** `Toolchain`
+  reads by key what the go command records about HOW it built: `GOOS`,
+  `GOARCH`, the feature level (`GOAMD64`, `GOARM`, `GO386` and their
+  siblings, `cmd/go/internal/cfg.GetArchEnv`), `-compiler`, `-buildmode`,
+  `-tags` (comma-split, an empty flag is no tag), `-ldflags`, `DefaultGODEBUG`,
+  `CGO_ENABLED` (`1`) and `-trimpath` (`true`). `Settings` keeps every pair
+  verbatim and in order, the `vcs.*` stamp included, so a key a later toolchain
+  adds is still there. `Reproducible()` is the conjunction a release pipeline
+  asks for: `-trimpath`, a revision, no `vcs.modified`. No error path: a key
+  not recorded is a zero field.
+- **What a Bazel build leaves empty.** rules_go links the build information
+  without the go command's settings: no `vcs.*` stamp, no `GOOS`/`GOARCH`, no
+  `-trimpath` — so under Bazel `Toolchain` is zero, `Settings` is empty,
+  `Main.Revision` is empty and `Reproducible()` is false. The release stamp of a
+  Bazel build is `STABLE_VERSION` through `x_defs` (root `CLAUDE.md` rule 7),
+  not this value; `TestReadBuildToolchainTarget` skips there, saying so.
 ## Do NOT
 
 - Import `runtime/metrics`, the spawn engine, or anything a program that only

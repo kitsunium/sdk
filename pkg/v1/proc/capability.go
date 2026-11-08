@@ -24,8 +24,9 @@ const (
 	CapProcessSpawn Capability = iota
 	// CapRlimit is applying per-process setrlimit-style limits (rlimit.Apply).
 	CapRlimit
-	// CapUmaskNiceOOM is the spawn-time umask / nice / oom_score_adj knobs.
-	CapUmaskNiceOOM
+	// CapUmaskNice is the spawn-time umask and nice knobs (Spec.Umask, Spec.Nice),
+	// native on every Unix. The OOM-killer bias is CapOOMScoreAdj.
+	CapUmaskNice
 	// CapCgroup is a kernel-enforced resource container (cgroup.Create).
 	CapCgroup
 	// CapReaper is zombie reaping / subreaping (reaper.New).
@@ -36,20 +37,48 @@ const (
 	CapSdNotify
 	// CapSocketActivation is inheriting a pre-opened listening socket (systemd/listen).
 	CapSocketActivation
+	// CapDieWithParent is binding a child to the supervisor's life (Spec.DieWithParent).
+	CapDieWithParent
+	// CapScheduling is a child's CPU policy and I/O class (Spec.Scheduling).
+	CapScheduling
+	// CapPTY is spawning a child on a pseudo-terminal (StdioPTY).
+	CapPTY
+	// CapProcessHandle is reaching a process through a kernel handle, not its pid (ProcessHandle, process.Open).
+	CapProcessHandle
 )
+
+// CapOOMScoreAdj is the spawn-time OOM-killer bias (Spec.OOMScoreAdj), a Linux
+// procfs knob: elsewhere Start refuses it with UnsupportedPlatform before
+// spawning anything. It is numbered 12, apart from the block above: 8 to 11 are
+// the spawn's own capabilities (ADR 0217), and a value is never given twice.
+const CapOOMScoreAdj Capability = 12
+
+// CapSandbox is spawning a child under Spec.Sandbox: namespaces, mounts,
+// capabilities, Landlock and seccomp, applied before its program runs. Linux on
+// amd64 and arm64 alone, where the system call tables are written; every other
+// GOOS and GOARCH refuses it with UnsupportedPlatform before spawning anything.
+// It is numbered 13, after CapOOMScoreAdj.
+const CapSandbox Capability = 13
 
 var (
 	// capabilityNames maps each capability to its stable diagnostic name, indexed
-	// by the Capability value so String stays a flat O(1) lookup.
+	// by the Capability value so String stays a flat O(1) lookup. A value no
+	// capability holds is an empty entry.
 	capabilityNames = [...]string{
 		CapProcessSpawn:     "ProcessSpawn",
 		CapRlimit:           "Rlimit",
-		CapUmaskNiceOOM:     "UmaskNiceOOM",
+		CapUmaskNice:        "UmaskNice",
+		CapOOMScoreAdj:      "OOMScoreAdj",
 		CapCgroup:           "Cgroup",
 		CapReaper:           "Reaper",
 		CapSignalRelay:      "SignalRelay",
 		CapSdNotify:         "SdNotify",
 		CapSocketActivation: "SocketActivation",
+		CapDieWithParent:    "DieWithParent",
+		CapScheduling:       "Scheduling",
+		CapPTY:              "PTY",
+		CapProcessHandle:    "ProcessHandle",
+		CapSandbox:          "Sandbox",
 	}
 
 	// unixTargets is the SDK's Unix GOOS set (the capabilities gated to Unix).
@@ -65,11 +94,17 @@ var (
 		CapProcessSpawn:     unixAndWindows,
 		CapSignalRelay:      unixAndWindows,
 		CapReaper:           unixAndWindows,
-		CapCgroup:           {"linux", "windows"},
+		CapCgroup:           {"linux", "windows", "freebsd"},
 		CapRlimit:           unixTargets,
-		CapUmaskNiceOOM:     unixTargets,
+		CapUmaskNice:        unixTargets,
+		CapOOMScoreAdj:      {"linux"},
 		CapSdNotify:         unixTargets,
 		CapSocketActivation: unixTargets,
+		CapDieWithParent:    {"linux", "freebsd", "windows"},
+		CapScheduling:       {"linux", "freebsd"},
+		CapPTY:              {"linux", "darwin", "freebsd"},
+		CapProcessHandle:    {"linux", "windows"},
+		CapSandbox:          sandboxGOOS(runtime.GOARCH),
 	}
 
 	// UnsupportedPlatform is the central sentinel a missing capability surfaces. A
@@ -80,8 +115,8 @@ var (
 // String returns the capability's stable name, or its integer form when the
 // value is out of range.
 func (c Capability) String() string {
-	//: an out-of-range value renders with its integer for debuggability.
-	if i := int(c); i < 0 || i >= len(capabilityNames) {
+	//: a value no capability holds renders with its integer for debuggability.
+	if i := int(c); i < 0 || i >= len(capabilityNames) || capabilityNames[i] == "" {
 		//: unknown capability → its numeric form.
 		return "Capability(" + strconv.Itoa(int(c)) + ")"
 	}
@@ -101,6 +136,19 @@ func Supported(c Capability) bool {
 	}
 	//: present when the current GOOS is in the capability's native set.
 	return slices.Contains(goss, runtime.GOOS)
+}
+
+// sandboxGOOS is CapSandbox's row for the architecture arch the binary is built
+// for: Linux on amd64 and arm64, whose system call tables the sandbox's seccomp
+// filter is written against, and no GOOS on any other architecture.
+func sandboxGOOS(arch string) []string {
+	//: the tabulated architectures.
+	if arch == "amd64" || arch == "arm64" {
+		//: Linux alone.
+		return []string{"linux"}
+	}
+	//: refused everywhere else.
+	return nil
 }
 
 // MissingCapabilities returns the subset of caps with no native backend on the

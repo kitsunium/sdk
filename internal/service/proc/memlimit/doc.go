@@ -18,6 +18,14 @@
 // image, C allocations, syscall.Mmap mappings, and kernel memory held on the
 // process's behalf. Subprocesses are outside it entirely.
 //
+// The allowance is the tightest cap on the way up. On cgroup v2 every
+// memory.max is read with the memory.high beside it, at the process's own cgroup
+// and at each ancestor, and the minimum across both files binds: the kernel
+// reclaims and slows a group above memory.high long before memory.max kills it,
+// so the throttle is the working cap, and the result's Bound says which file
+// set it. cgroup v1 has no such file — memory.soft_limit_in_bytes is a reclaim
+// hint — and memory.limit_in_bytes alone binds there.
+//
 // So this reduces OOM pressure rather than eliminating it. It is also the one
 // direction the cgroup sibling does not cover: cgroup WRITES a control group to
 // bound a child, memlimit READS the one already bounding this process.

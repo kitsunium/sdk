@@ -214,3 +214,22 @@ above, including the one that turned out not to help.
 - `Accept_Sharded` is only meaningful while `TestShardedListenerReportsItsShardCount`
   passes. If sharding collapses to one listener, this benchmark measures nothing
   and will happily report parity.
+- `AcquireRelease_ReadBuffer16K` above 0 allocs/op means the scratch buffer
+  stopped coming from `kernel/concur/buffer`'s 16 KiB class — check that
+  `acquire` still calls `buffer.GetSize(size)`.
+
+## Edition 2026-11-03 — the read buffer from its size class (#810)
+
+`BenchmarkAcquireRelease_ReadBuffer16K` (`pool_bench_test.go`): a
+connection's wrapper taken and given back for a group whose `ReadBufferSize`
+is 16 KiB. One box, before and after (AMD EPYC 7351P, 8 vCPU, go1.27.3,
+`GOMAXPROCS=4`, `-benchmem -count 4`):
+
+| | ns/op | B/op | allocs/op |
+|---|---|---|---|
+| Before (`buffer.Get`, then its own 16 KiB when the 1 KiB one was short) | 6 422–6 971 | 17 487 | 4 |
+| After (`buffer.GetSize(16 KiB)`, the 16 KiB class) | 158.7–164.6 | 0 | 0 |
+
+#810's "acquire with ReadBufferSize = 16 KiB at 0 allocs/op in steady state"
+is met: the class keeps the buffer the release returns, and no 1 KiB consumer
+— the logger — is handed it in between.

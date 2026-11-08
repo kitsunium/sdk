@@ -1,5 +1,11 @@
 package cgroup
 
+import (
+	"slices"
+
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+)
+
 // mountRoot is the canonical mount point of the unified cgroup v2 hierarchy.
 // Exposed as the default root so Option can override it for tests against a
 // delegated sub-tree.
@@ -11,6 +17,8 @@ const mountRoot string = "/sys/fs/cgroup"
 type groupConfig struct {
 	// root is the cgroup v2 directory under which the new group is created.
 	root string
+	// controllers are enabled from the root down to the new group's parent.
+	controllers []coreproc.Controller
 }
 
 // Option customises a Create call (functional-option pattern). Construct
@@ -48,5 +56,21 @@ func WithRoot(root string) Option {
 	return func(c *groupConfig) {
 		//: override the parent directory for the new group.
 		c.root = root
+	}
+}
+
+// WithControllers enables ctrls for the group Create makes: they are written
+// to the cgroup.subtree_control of the root and of every group between the
+// root and the new one, top-down, before the group is made, so its interface
+// files for them exist. A controller the root's cgroup.controllers does not
+// list is CgroupControllerAbsent before anything is made. It is a cgroup
+// v2 option: the Job Object and rctl backends accept it and ignore it.
+func WithControllers(ctrls ...coreproc.Controller) Option {
+	//: the caller's slice is copied: a later change to it changes no option.
+	owned := slices.Clone(ctrls)
+	//: capture the copy in a closure that appends it to the accumulator.
+	return func(c *groupConfig) {
+		//: options accumulate: two WithControllers enable both sets.
+		c.controllers = append(c.controllers, owned...)
 	}
 }

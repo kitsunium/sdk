@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/concur/pool
+  name: pool
+  purpose: "Package pool runs tasks on a fixed set of long-lived workers fed by a bounded queue: a refusal when there is no room, a drain, and a task's panic kept on its worker instead of taking the process down."
+types: []

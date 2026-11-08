@@ -17,8 +17,11 @@ type PeerValue struct {
 	// empty elsewhere.
 	SID string
 	// Verified is true when the kernel named the peer — UID and GID by
-	// SO_PEERCRED on Linux, SID from the process token on Windows —, false
-	// when only the directory's permissions admitted it.
+	// SO_PEERCRED on Linux, LOCAL_PEERCRED on FreeBSD and DragonFly,
+	// LOCAL_PEEREID on NetBSD, SID from the process token on Windows —, false
+	// when only the directory's permissions admitted it (darwin, OpenBSD,
+	// illumos, Solaris). On Linux and the three BSDs an unnamed peer is
+	// refused, never admitted.
 	Verified bool
 }
 

@@ -5,11 +5,18 @@
 // same test asserts the typed refusal instead. That is deliberate: the degrade
 // path is the one most consumers actually hit, and skipping it would leave the
 // contract that matters most unexercised on the machines that most need it.
+//
+// "Available" is the host's answer, not Available()'s: a host that delegates a
+// SUBTREE — a unit with Delegate=yes, a user scope — answers false there while
+// Create(name, WithRoot(own)) works, so the live gate is liveHost, the root
+// the S1 suite works under (host_linux_external_test.go; #1097). The refusal
+// branch is asserted where no root is delegated at all.
 package cgroup_test
 
 import (
 	"os/exec"
 	"runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -107,7 +114,8 @@ func TestCreate(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		g, err := cgroup.Create(c.group)
+		_, opts, live := liveHost(t)
+		g, err := cgroup.Create(c.group, opts...)
 
 		//: a refused create must never hand back a usable handle, whatever the
 		//: reason for the refusal.
@@ -117,7 +125,7 @@ func TestCreate(t *testing.T) {
 
 		//: a valid name on a host with no delegated hierarchy must degrade to
 		//: the typed sentinel rather than panicking or half-succeeding.
-		if !cgroup.Available() {
+		if !live {
 			if !errs.HasCode(err, unavailableCode()) {
 				t.Fatalf("Create(%q) on an undelegated host = %v, want code %v",
 					c.group, err, unavailableCode())
@@ -126,7 +134,7 @@ func TestCreate(t *testing.T) {
 		}
 		//: on a delegated host the same call must simply work.
 		if err != nil {
-			t.Fatalf("Create(%q) = %v on a host where Available() is true", c.group, err)
+			t.Fatalf("Create(%q) = %v on a host that delegates a root", c.group, err)
 		}
 		//: leave nothing behind; the group is empty, so Delete succeeds.
 		if derr := g.Delete(); derr != nil {
@@ -141,25 +149,50 @@ func TestCreate(t *testing.T) {
 	}
 }
 
+// TestCreateWithoutARootFollowsAvailable pins that Available stays the mount
+// root's answer and Create without WithRoot its twin: where Available is true a
+// group is made at the mount, where it is false — a host that delegates only a
+// subtree included — Create is refused typed and hands back no handle, whatever
+// Probe says of another root.
+func TestCreateWithoutARootFollowsAvailable(t *testing.T) {
+	t.Parallel()
+	g, err := cgroup.Create("sdk-test-default-root")
+	//: the mount root's own answer decides which of the two must hold.
+	if cgroup.Available() {
+		if err != nil {
+			t.Fatalf("Create = %v on a host where Available() is true", err)
+		}
+		deleteGroup(t, g)
+		return
+	}
+	if err == nil || g != nil || !errs.HasCode(err, unavailableCode()) {
+		t.Fatalf("Create = %v, %v where Available() is false, want no handle and code %v", g, err, unavailableCode())
+	}
+}
+
 // TestGroupConfinement runs the full create → confine → attach → delete cycle
 // where a hierarchy is delegated, and asserts the typed refusal where it is not.
 func TestGroupConfinement(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
+		//: the controller the ceiling is written through, which the root must
+		//: enable for its children before a group under it has the file.
+		controller string
 		//: the ceiling to apply, expressed through the Group port so the case
 		//: names the controller rather than the file.
 		confine func(g coreproc.Group) error
 	}
 	tests := []tc{
-		{"a memory ceiling", func(g coreproc.Group) error { return g.SetMemoryMax(64 << 20) }},
-		{"a process ceiling", func(g coreproc.Group) error { return g.SetPidsMax(64) }},
-		{"an unlimited memory ceiling", func(g coreproc.Group) error { return g.SetMemoryMax(-1) }},
+		{"a memory ceiling", "memory", func(g coreproc.Group) error { return g.SetMemoryMax(64 << 20) }},
+		{"a process ceiling", "pids", func(g coreproc.Group) error { return g.SetPidsMax(64) }},
+		{"an unlimited memory ceiling", "memory", func(g coreproc.Group) error { return g.SetMemoryMax(-1) }},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		g, err := cgroup.Create("sdk-test-confine-" + sanitise(c.name))
-		if !cgroup.Available() {
+		root, opts, live := liveHost(t)
+		g, err := cgroup.Create("sdk-test-confine-"+sanitise(c.name), opts...)
+		if !live {
 			//: the degrade path: no handle, and a typed refusal.
 			if g != nil {
 				t.Fatalf("Create returned a handle on an undelegated host")
@@ -170,14 +203,27 @@ func TestGroupConfinement(t *testing.T) {
 			return
 		}
 		if err != nil {
-			t.Fatalf("Create = %v on a host where Available() is true", err)
+			t.Fatalf("Create = %v on a host that delegates a root", err)
 		}
 		defer deleteGroup(t, g)
 
+		enabled, eerr := childrenGet(root, c.controller)
+		if eerr != nil {
+			t.Fatalf("reading what %q enables for its children: %v", root, eerr)
+		}
+		cerr := c.confine(g)
+		switch {
 		//: a controller write proves the ceiling reaches the kernel rather
 		//: than being accepted and dropped.
-		if cerr := c.confine(g); cerr != nil {
+		case enabled && cerr != nil:
 			t.Fatalf("%s: %v", c.name, cerr)
+		//: a root that does not enable the controller — a delegated scope that
+		//: holds the test, which cgroup v2's no-internal-process rule keeps from
+		//: handing one down — has no file to write: the refusal is typed, and
+		//: the group stays usable for the attachment below.
+		case !enabled && !errs.HasCode(cerr, coreproc.CodeCgroupWriteFailed):
+			t.Fatalf("%s with %s not enabled under %q = %v, want code %v",
+				c.name, c.controller, root, cerr, coreproc.CodeCgroupWriteFailed)
 		}
 
 		child := startChild(t)
@@ -227,15 +273,16 @@ func TestGroupKillFreezeThaw(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		g, err := cgroup.Create("sdk-test-feature-" + sanitise(c.name))
-		if !cgroup.Available() {
+		_, opts, live := liveHost(t)
+		g, err := cgroup.Create("sdk-test-feature-"+sanitise(c.name), opts...)
+		if !live {
 			if !errs.HasCode(err, unavailableCode()) {
 				t.Fatalf("Create = %v, want code %v", err, unavailableCode())
 			}
 			return
 		}
 		if err != nil {
-			t.Fatalf("Create = %v on a host where Available() is true", err)
+			t.Fatalf("Create = %v on a host that delegates a root", err)
 		}
 		defer deleteGroup(t, g)
 
@@ -281,15 +328,16 @@ func TestKillTerminatesSetsidDescendant(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		g, err := cgroup.Create("sdk-test-killtree-" + sanitise(c.name))
-		if !cgroup.Available() {
+		_, opts, live := liveHost(t)
+		g, err := cgroup.Create("sdk-test-killtree-"+sanitise(c.name), opts...)
+		if !live {
 			if !errs.HasCode(err, unavailableCode()) {
 				t.Fatalf("Create = %v, want code %v", err, unavailableCode())
 			}
 			return
 		}
 		if err != nil {
-			t.Fatalf("Create = %v on a host where Available() is true", err)
+			t.Fatalf("Create = %v on a host that delegates a root", err)
 		}
 		defer deleteGroup(t, g)
 
@@ -410,7 +458,9 @@ func startChild(t *testing.T) *exec.Cmd {
 	if err != nil {
 		t.Fatalf("resolving sleep: %v", err)
 	}
-	cmd := exec.Command(path, childGrace.String())
+	//: seconds, as sleep(1) takes them: "200ms" is no interval to it, and the
+	//: child would exit 1 before the test attached it.
+	cmd := exec.Command(path, strconv.FormatFloat(childGrace.Seconds(), 'f', -1, 64))
 	if serr := cmd.Start(); serr != nil {
 		t.Fatalf("starting the helper child: %v", serr)
 	}

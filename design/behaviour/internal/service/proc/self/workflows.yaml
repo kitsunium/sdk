@@ -1,0 +1,19 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: isContainerID
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(s) != 2*sha256.Size
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: (c < '0' || c > '9') && (c < 'a' || c > 'f')
+          key: _
+          range: "[]byte(s)"
+          value: c
+      - return: "true"

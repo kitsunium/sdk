@@ -131,3 +131,40 @@ bazel test //internal/service/ipc:ipc_test //pkg/v1/ipc:ipc_test
 - `unix(7)` — "connecting to the socket object requires write permission on
   the socket"; search permission on the directories above it.
 - `SO_PEERCRED`, `socket(7)`.
+
+## Amendment — 2026-11-04: the dialling side, the BSDs, and the unnamed peer (kitsunium/sdk#1092, #1093)
+
+1. **The directory rule is split by side.** At Listen the socket directory
+   is this account's, unchanged. At Dial it is the LISTENER's, usually another
+   account's: its entry rules hold (a real directory writable by its owner
+   alone), its owner is not judged. The socket file's owner is: this account,
+   an `AllowUIDs` member or an `AllowGIDs` group, `ENDPOINT_FOREIGN` otherwise.
+   Before, Dial refused every directory another account owned
+   (`DIRECTORY_UNSAFE`), so the deployment §Decision describes — the daemon's
+   0750 directory, its on-call group in `AllowGIDs` — could not be dialled by
+   the group it admits, nor by root.
+2. **§Deferred narrowed.** FreeBSD and DragonFly answer
+   `getsockopt(SOL_LOCAL, LOCAL_PEERCRED)` with `struct xucred`, NetBSD
+   `LOCAL_PEEREID` with `struct unpcbid`, both reachable with
+   `syscall.Syscall6(SYS_GETSOCKOPT, …)` as `rctl` and `procctl` already are:
+   the peer is named there. darwin (raw syscalls deprecated), OpenBSD (pinned
+   syscalls) and illumos/Solaris (`getpeerucred` is libc's) stay deferred.
+3. **An unnamed peer is refused where the kernel names peers.** On Linux and
+   the three BSDs a peer the kernel did not name — a failed getsockopt — is
+   `PEER_REFUSED` with the reason, where it used to be admitted as if the
+   directory had been the gate (ADR 0031). Windows keeps its DACL rule.
+
+## Amendment — 2026-11-08: files over the Windows pipe (kitsunium/sdk#936)
+
+`FileSender` and `FileReceiver` (`FD_PASS_REFUSED`, `0.3.91.10`) shipped on
+Unix with `SCM_RIGHTS`; the pipe now offers them too. A pipe carries bytes,
+so the files travel in band, in a frame the receiver must read with
+`RecvFiles`. The issue asked the sender to `DuplicateHandle` into the
+receiver; the receiver takes each handle out of the sender's process
+instead (`DUPLICATE_CLOSE_SOURCE`), so it never wraps a value it was only
+told — pushed, a peer unable to open the receiver could name a handle the
+receiver already holds. The handle on the peer's process is opened when the
+connection completes and a process younger than the connection is refused,
+so a pid reused meanwhile is never reached. Still refused to a peer the
+kernel did not name. A TCP listener cannot be passed there: the standard
+library gives a Windows socket no `*os.File`.

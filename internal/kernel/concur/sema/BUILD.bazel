@@ -1,0 +1,48 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "sema",
+    srcs = [
+        "doc.go",
+        "gen_codes.go",
+        "sema.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/concur/sema",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":sema",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "sema_test",
+    srcs = [
+        "gen_api_test.go",
+        "gen_perf_test.go",
+        "perf_fixtures_test.go",
+        "sema_bench_test.go",
+        "sema_external_test.go",
+    ],
+    deps = [
+        ":sema",
+        "//internal/kernel/errs",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

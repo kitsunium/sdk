@@ -302,6 +302,22 @@ func Test_buildProcAttr(t *testing.T) {
 			wantEnv: []string{"A=1", trampolineEnv + "=x"},
 		},
 		{
+			name:    "a repeated name keeps its last value, at its last place",
+			spec:    coreproc.Spec{Path: "/bin/true", Env: []string{"A=1", "B=2", "A=3"}},
+			wantEnv: []string{"B=2", "A=3"},
+		},
+		{
+			name:    "an entry without = is kept as it is",
+			spec:    coreproc.Spec{Path: "/bin/true", Env: []string{"FLAG", "A=1", "FLAG"}},
+			wantEnv: []string{"FLAG", "A=1", "FLAG"},
+		},
+		{
+			name:    "the trampoline addon follows a deduplicated environment",
+			spec:    coreproc.Spec{Path: "/bin/true", Env: []string{"A=1", "A=2"}},
+			addon:   []string{trampolineEnv + "=x"},
+			wantEnv: []string{"A=2", trampolineEnv + "=x"},
+		},
+		{
 			name:     "an unresolvable user aborts the assembly",
 			spec:     coreproc.Spec{Path: "/bin/true", User: absentName},
 			wantCode: coreproc.CodeUnknownUser,

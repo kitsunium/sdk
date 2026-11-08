@@ -69,6 +69,11 @@ func (h *handshake) await() error {
 		//: the trampoline applied the limits and exec'd the target cleanly.
 		return nil
 	}
+	//: a sandbox step's report names the step and the errno.
+	if status[0] == handshakeSandboxFail {
+		//: the central SANDBOX_FAILED.
+		return sandboxFailure(status[1:])
+	}
 	//: map the trampoline's status byte to the central typed sentinel.
 	return handshakeError(status[0])
 }

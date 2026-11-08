@@ -97,3 +97,56 @@ func assertResetOnReuse(t *testing.T) {
 	}
 	t.Fatalf("the pool never handed back the buffer just Put, in %d round trips", roundTrips)
 }
+
+// TestGetSizeNeverHandsOutLess is #810's: every size is served with at least
+// the capacity asked for, an empty buffer, whatever the classes hold.
+func TestGetSizeNeverHandsOutLess(t *testing.T) {
+	t.Parallel()
+	for _, n := range []int{-5, 0, 1, 1000, 1024, 1025, 3000, 4096, 10 << 10, 16 << 10, 40 << 10, 64 << 10, 100 << 10, 256 << 10, 300 << 10} {
+		for range 3 {
+			b := buffer.GetSize(n)
+			if len(*b) != 0 || cap(*b) < n {
+				t.Errorf("GetSize(%d): len %d cap %d", n, len(*b), cap(*b))
+			}
+			*b = append(*b, 'x')
+			buffer.Put(b)
+		}
+	}
+}
+
+// TestPutRetainsWithinTwiceTheClass is #810's: a 70 KiB buffer belongs to the
+// 64 KiB class and is kept, as one of 128 KiB is; one of 130 KiB is dropped.
+// Retention is observed on the GetSize that hands the same buffer back — a
+// dropped one never comes back. The race detector's sync.Pool drops a Put at
+// random, so a kept buffer is looked for over many round trips.
+func TestPutRetainsWithinTwiceTheClass(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		capacity int
+		kept     bool
+	}{
+		{"70 KiB, within twice 64 KiB", 70 << 10, true},
+		{"128 KiB, exactly twice 64 KiB", 128 << 10, true},
+		{"130 KiB, past twice 64 KiB", 130 << 10, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			back := false
+			for range roundTrips {
+				b := new(make([]byte, 0, tc.capacity))
+				buffer.Put(b)
+				got := buffer.GetSize(64 << 10)
+				//: the pool may hand back another class member; the identity is what counts.
+				if got == b {
+					back = true
+					break
+				}
+				buffer.Put(got)
+			}
+			if back != tc.kept {
+				t.Errorf("a %d-byte buffer came back = %v, want %v", tc.capacity, back, tc.kept)
+			}
+		})
+	}
+}

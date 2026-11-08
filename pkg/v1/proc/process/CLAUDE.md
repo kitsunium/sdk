@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-11-08T00:00:00Z -->
 # pkg/v1/proc/process
 
 Public facade for the SDK's keystone process-spawn primitive (ADR 0016). Start a
@@ -37,7 +37,23 @@ the build it came from.
 | `SIGTERM` / `SIGKILL` / `SIGINT` / `SIGHUP` / `SIGQUIT` | typed `Signal` constants |
 | `ResourceNoFile` / `ResourceCore` / `ResourceCPU` / `ResourceAS` | the common `Spec.Rlimits` keys |
 | `Start`, `MustStart` | spawn; a bare `Spec.Path` is searched in the child's PATH (Spec.Env's, else the parent's), `exec.ErrDot`/`ErrNotFound` wrapped in `SpawnFailed` |
+| `StdioPTY`, `PTYSize`, `Terminal` | a child on a pseudo-terminal; the master is `Terminal.TTY` (Linux, darwin, FreeBSD — ADR 0217) |
+| `ContextWaiter`, `Run`, `RunOptions`, `Result` | a wait bounded by a context; a one-shot run keeping the first `MaxOutputBytes` of each stream (#935) |
+| `EnvAllow`, `EnvDeny` | environment allow/deny lists, parent order kept, a repeated key keeping its last value |
+| `ReservedEnv`, `CodeReservedEnv` | the refusal of a `Spec.Env` key beginning `__KITSUNIUM_SDK_PROC_`, any case — the SDK's own spawn protocol, which the key would override (#726); re-exported so a consumer matches it with `errors.Is` |
+| `ProcessHandle`, `Open` | signals through a pidfd/HANDLE, never a reused pid; `Open` holds a process not spawned here, its `Wait` refused (#928) |
+| `Attach`, `AttachPIDFile`, `AttachScope` | adopt a process not spawned here, its end observed — `Wait` returns `StatusUnknown` —, from a pid or a PID file read safely; an untrustworthy file adopts only within the scope's cgroup and users (#729; Linux through a pidfd, darwin and the BSDs through kqueue knotes — a signal by pid only while a knote proves the process alive, a cgroup scope refused — never run on the authoring host) |
+| `PIDFileRefused`, `AdoptionRefused`, `StatusUnknown` + their `Code*` | #729's refusals and end, re-exported for `errors.Is` |
+| `Scheduling`, `SchedPolicy`, `IOClass` + the `Sched*` / `IOClass*` constants | `Spec.Scheduling` (#940) |
+| `Sandbox`, `Namespace`, `IDMap`, `Mount`, `MountKind`, `Capabilities`, `Landlock`, `LandlockRule`, `LandlockAccess`, `Seccomp`, `SeccompAction` + the `Namespace*` / `Mount*` / `Landlock*` / `Seccomp*` constants | `Spec.Sandbox` (#728): the core port's values, re-exported |
+| `LandlockABI` | forwards `exec.LandlockABI`: the kernel's Landlock ABI, `SandboxUnavailable` without it, `UnsupportedPlatform` off Linux amd64/arm64 |
+| `SandboxFailed`, `SandboxUnavailable`, `CodeSandboxFailed`, `CodeSandboxUnavailable` | a sandbox step failed in the child (the program never ran) / a part the kernel lacks, refused before the fork (#728) |
+| `Usage` | `ExitResult.Usage`: faults, block I/O, context switches, nil where the platform gives none (#1090) |
+| `FDPolicy`, `FDsSealed`, `FDsInherited` | `Spec.FDs`: the child's descriptor table sealed by default (#1089) |
+| `SetOOMScoreAdj` | the running process's own OOM-killer bias (Linux; `internal/service/proc/self`) |
 | `Self`, `Build`, `ParseBuild`; `Stats`, `Distribution`, `BuildInfo`, `Module` | the running process and the build it came from — one-line delegations to, and aliases of, `internal/service/proc/self` (`Self`, `Stats`, `Distribution`) and `internal/service/proc/buildinfo` (`Build`, `ParseBuild`, `BuildInfo`, `Module`; ADR 0100, ADR 0172) |
+| `ReadIdentity`, `Identity`, `StartSource` + `StartSourceInit` / `StartSourceKernel` | what the kernel says the process is: start time, binary digest and build id, container, pid namespace, boot (#938) |
+| `Toolchain`, `Setting` | how the toolchain built the binary (`BuildInfo.Toolchain`: target, feature level, flags, cgo, trimpath) and every recorded setting verbatim (`BuildInfo.Settings`); `BuildInfo.Reproducible()` (#1095) |
 
 - **README is generated.** `README.md` is written by `tools/genindex` from the
   committed `docs/api` (`make docs-readme`, ADR 0167). The package comment is in
@@ -81,6 +97,7 @@ A `Module` keeps apart what a recorded version conflates: a release
 Every error is a central `internal/core/proc` sentinel; match with
 `errs.HasCode(err, coreproc.CodeX)` (or, downstream, the read-only
 `pkg/v1/errs` introspection helpers). `Start` surfaces `InvalidSpec`,
+`ReservedEnv` (re-exported here, #726),
 `UnknownUser`, `UnknownGroup`, `UnknownResource`, `RlimitFailed`, `SpawnFailed`,
 `CgroupUnavailable` / `CgroupWriteFailed` (a Linux `Spec.CgroupPath` that is
 not a cgroup v2 directory, or whose placement the kernel refused), or

@@ -25,6 +25,7 @@ alias(
 go_test(
     name = "proc_test",
     srcs = [
+        "capability_backend_external_test.go",
         "capability_external_test.go",
         "capability_internal_test.go",
         "gen_api_test.go",
@@ -33,5 +34,12 @@ go_test(
     deps = [
         "//internal/core/proc",
         "//pkg/v1/errs",
+        "//pkg/v1/proc/cgroup",
+        "//pkg/v1/proc/process",
+        "//pkg/v1/proc/reaper",
+        "//pkg/v1/proc/rlimit",
+        "//pkg/v1/proc/signal",
+        "//pkg/v1/proc/systemd/listen",
+        "//pkg/v1/proc/systemd/notify",
     ],
 )

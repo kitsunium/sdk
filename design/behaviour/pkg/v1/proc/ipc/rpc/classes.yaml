@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc/ipc/rpc
+  name: rpc
+  purpose: "Package rpc is a call between two processes of one machine over the private socket of proc/ipc (ADR 0218): a request and its reply, or a request and the items a server pushes, framed, bounded and encoded in a codec format both ends agreed on."
+types: []

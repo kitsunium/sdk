@@ -6,15 +6,22 @@ go_library(
     name = "memlimit",
     srcs = [
         "cgroup.go",
+        "config.go",
         "doc.go",
         "memlimit.go",
+        "watch.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/proc/memlimit",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
     ],
-    deps = ["//internal/core/proc"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/proc/internal/cgroupfs",
+    ],
 )
 
 alias(
@@ -31,8 +38,15 @@ go_test(
     srcs = [
         "cgroup_internal_test.go",
         "gen_api_test.go",
+        "high_internal_test.go",
         "memlimit_internal_test.go",
+        "watch_internal_test.go",
     ],
     embed = [":memlimit"],
-    deps = ["//internal/core/proc"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/proc/internal/cgroupfs",
+    ],
 )

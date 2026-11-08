@@ -1,0 +1,41 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/third-party/ebpf",
+  "dir": "third-party/ebpf",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/third-party/ebpf/cgroup",
+      "name": "cgroup",
+      "dir": "cgroup",
+      "layer": "thirdparty",
+      "doc": "Package cgroup is the backend of the cgroup BPF programs over\ncilium/ebpf, in the third-party/ebpf vendor module (ADR 0157, ADR 0215):\nimporting it — a blank import is enough — registers Backend with the\nengine, internal/service/proc/bpf, whose Probe and Attach functions, and\npkg/v1/proc/bpf's, then load and attach programs instead of answering\nNOT_LINKED. A program that does not import it links nothing of\ncilium/ebpf.\n\n# The programs are built in Go\n\nEach program is a few instructions written with cilium/ebpf's asm package\nfrom the policy at hand — no C, no clang, no object file committed: a\ndevice policy is its rules compiled in a straight line, one comparison per\nfield that is not a wildcard; a bind policy likewise, one program per\nfamily; an IP policy is two programs over two longest-prefix-match maps,\none per family, and an array of counters. A rule that compares nothing\nends the program, since the verifier refuses an unreachable instruction.\nEvery return is a constant 0 or 1.\n\n# Attached beside the others, until Close\n\nA program is attached with BPF_PROG_ATTACH and BPF_F_ALLOW_MULTI, never\nwith BPF_F_ALLOW_OVERRIDE: it runs beside the programs already attached to\nthe group, and replaces none. The attachment is the kernel's, so it\noutlives the process that made it, until Close detaches it by its own\ndescriptor or the group is removed. The group is opened first and refused,\nATTACH_FAILED, when it is not on cgroup2fs or when it is its hierarchy's\nroot — the machine's or a namespace's —, where a policy would bind\neverything.\n\n# Before 5.11\n\nA kernel before 5.11 charges BPF memory to RLIMIT_MEMLOCK. Before the\nfirst load, and only on such a kernel (uname's release), the limit is\nraised to infinity, once per process; without CAP_SYS_RESOURCE that is\nLOAD_REFUSED. cilium/ebpf's rlimit package is not imported: its init\nlowers the limit to zero and calls bpf() in every program that links it.\n\n# Off Linux amd64 and arm64\n\nThe programs are still built, and tested, everywhere; loading them is\nUNSUPPORTED_PLATFORM, core/proc's, never a silent no-op.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/ebpf/cgroup.Backend",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/ebpf/cgroup",
+      "name": "Backend",
+      "spelled": "corebpf.Backend",
+      "canonical": "github.com/kitsunium/sdk/internal/core/proc/bpf.Backend",
+      "doc": "Backend is the cgroup BPF backend this package registers with the\nengine, internal/service/proc/bpf, when it is imported: a program that\nimports it, even blank, is served by the engine's — and pkg/v1/proc/bpf's\n— Probe and Attach functions instead of NOT_LINKED.\n",
+      "file": "cgroup/backend.go",
+      "layer": "thirdparty"
+    }
+  ]
+}

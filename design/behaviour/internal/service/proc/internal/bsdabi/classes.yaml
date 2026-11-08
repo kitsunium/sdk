@@ -1,0 +1,485 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The sysctl(3) names a process record is asked by (sys/sysctl.h of each
+      kernel): CTL_KERN, then KERN_PROC on FreeBSD, DragonFly and darwin (14),
+      KERN_PROC on OpenBSD (66), KERN_PROC2 on NetBSD (47), then KERN_PROC_PID (1).
+    grouped: true
+    items:
+      - doc: ctlKern is CTL_KERN.
+        name: ctlKern
+        type: int32
+        value: "1"
+      - doc: kernProc is KERN_PROC on FreeBSD, DragonFly and darwin.
+        name: kernProc
+        type: int32
+        value: "14"
+      - doc: kernProcOpenBSD is KERN_PROC on OpenBSD.
+        name: kernProcOpenBSD
+        type: int32
+        value: "66"
+      - doc: kernProc2 is KERN_PROC2 on NetBSD.
+        name: kernProc2
+        type: int32
+        value: "47"
+      - doc: kernProcPID is KERN_PROC_PID on every one of them.
+        name: kernProcPID
+        type: int32
+        value: "1"
+      - doc: oneRecord is the element count OpenBSD and NetBSD take after the size.
+        name: oneRecord
+        type: int32
+        value: "1"
+    name: ctlKern
+  - doc: Widths and units.
+    grouped: true
+    items:
+      - doc: int32Bytes is the width of a pid_t, a uid_t and a structure size.
+        name: int32Bytes
+        type: int
+        value: "4"
+      - doc: int64Bytes is the width of a 64-bit field.
+        name: int64Bytes
+        type: int
+        value: "8"
+      - doc: usecPerSec converts the seconds of a start time to microseconds.
+        name: usecPerSec
+        type: int64
+        value: "1_000_000"
+      - doc: noStructSize marks a record without a field stating its own size.
+        name: noStructSize
+        type: int
+        value: "-1"
+    name: int32Bytes
+  - doc: |-
+      FreeBSD's struct kinfo_proc (sys/sys/user.h): its size is KINFO_PROC_SIZE
+      (machine/proc.h), stated again in ki_structsize at offset 0. The offsets are
+      the header's under each ABI: LP64 (amd64, arm64, riscv64); i386, whose
+      time_t has 32 bits; arm, whose time_t has 64 bits aligned to 8.
+    grouped: true
+    items:
+      - doc: freeBSDStructSize is ki_structsize's offset.
+        name: freeBSDStructSize
+        type: int
+        value: "0"
+      - doc: freeBSDLP64Size is KINFO_PROC_SIZE on amd64, arm64 and riscv.
+        name: freeBSDLP64Size
+        type: int
+        value: "1088"
+      - doc: freeBSDLP64Pid is ki_pid's offset on LP64.
+        name: freeBSDLP64Pid
+        type: int
+        value: "72"
+      - doc: freeBSDLP64Euid is ki_uid's (effective) offset on LP64.
+        name: freeBSDLP64Euid
+        type: int
+        value: "168"
+      - doc: freeBSDLP64Ruid is ki_ruid's offset on LP64.
+        name: freeBSDLP64Ruid
+        type: int
+        value: "172"
+      - doc: freeBSDLP64Sec is ki_start.tv_sec's offset on LP64 (64 bits).
+        name: freeBSDLP64Sec
+        type: int
+        value: "336"
+      - doc: freeBSDLP64Usec is ki_start.tv_usec's offset on LP64 (64 bits).
+        name: freeBSDLP64Usec
+        type: int
+        value: "344"
+      - doc: freeBSD386Size is KINFO_PROC_SIZE on i386.
+        name: freeBSD386Size
+        type: int
+        value: "768"
+      - doc: freeBSDArmSize is KINFO_PROC_SIZE on arm.
+        name: freeBSDArmSize
+        type: int
+        value: "816"
+      - doc: freeBSD32Pid is ki_pid's offset on i386 and arm.
+        name: freeBSD32Pid
+        type: int
+        value: "40"
+      - doc: freeBSD32Euid is ki_uid's offset on i386 and arm.
+        name: freeBSD32Euid
+        type: int
+        value: "136"
+      - doc: freeBSD32Ruid is ki_ruid's offset on i386 and arm.
+        name: freeBSD32Ruid
+        type: int
+        value: "140"
+      - doc: freeBSD32Sec is ki_start.tv_sec's offset on i386 (32 bits) and arm (64).
+        name: freeBSD32Sec
+        type: int
+        value: "280"
+      - doc: freeBSD386Usec is ki_start.tv_usec's offset on i386 (32 bits).
+        name: freeBSD386Usec
+        type: int
+        value: "284"
+      - doc: freeBSDArmUsec is ki_start.tv_usec's offset on arm (32 bits).
+        name: freeBSDArmUsec
+        type: int
+        value: "288"
+    name: freeBSDStructSize
+  - doc: |-
+      DragonFly's struct kinfo_proc (sys/sys/kinfo.h), amd64, the only
+      architecture DragonFly runs on. The record has grown between releases
+      (kp_syscaps), so the buffer is generous and the prefix read is checked by
+      its pid.
+    grouped: true
+    items:
+      - doc: dragonFlyBuffer holds the whole record.
+        name: dragonFlyBuffer
+        type: int
+        value: "4096"
+      - doc: dragonFlyPid is kp_pid's offset.
+        name: dragonFlyPid
+        type: int
+        value: "220"
+      - doc: dragonFlyEuid is kp_uid's (effective) offset.
+        name: dragonFlyEuid
+        type: int
+        value: "132"
+      - doc: dragonFlyRuid is kp_ruid's offset.
+        name: dragonFlyRuid
+        type: int
+        value: "204"
+      - doc: dragonFlySec is kp_start.tv_sec's offset (64 bits).
+        name: dragonFlySec
+        type: int
+        value: "96"
+      - doc: dragonFlyUsec is kp_start.tv_usec's offset (64 bits).
+        name: dragonFlyUsec
+        type: int
+        value: "104"
+    name: dragonFlyBuffer
+  - doc: |-
+      darwin's struct kinfo_proc (sys/sysctl.h): struct extern_proc, then struct
+      eproc, on its two 64-bit architectures.
+    grouped: true
+    items:
+      - doc: darwinSize is sizeof(struct kinfo_proc).
+        name: darwinSize
+        type: int
+        value: "648"
+      - doc: darwinPid is kp_proc.p_pid's offset.
+        name: darwinPid
+        type: int
+        value: "40"
+      - doc: darwinEuid is kp_eproc.e_ucred.cr_uid's (effective) offset.
+        name: darwinEuid
+        type: int
+        value: "420"
+      - doc: darwinRuid is kp_eproc.e_pcred.p_ruid's offset.
+        name: darwinRuid
+        type: int
+        value: "392"
+      - doc: darwinSec is kp_proc.p_starttime.tv_sec's offset (64 bits).
+        name: darwinSec
+        type: int
+        value: "0"
+      - doc: darwinUsec is kp_proc.p_starttime.tv_usec's offset (32 bits).
+        name: darwinUsec
+        type: int
+        value: "8"
+    name: darwinSize
+  - doc: |-
+      OpenBSD's struct kinfo_proc (sys/sys/sysctl.h), fixed-width fields laid out
+      alike on every architecture. The element size asked is the prefix read,
+      rounded to 8: the kernel copies min(asked, sizeof) (kern_sysctl.c,
+      sysctl_doproc).
+    grouped: true
+    items:
+      - doc: openBSDPrefix is the element size asked.
+        name: openBSDPrefix
+        type: int
+        value: "424"
+      - doc: openBSDPid is p_pid's offset.
+        name: openBSDPid
+        type: int
+        value: "108"
+      - doc: openBSDEuid is p_uid's (effective) offset.
+        name: openBSDEuid
+        type: int
+        value: "128"
+      - doc: openBSDRuid is p_ruid's offset.
+        name: openBSDRuid
+        type: int
+        value: "132"
+      - doc: openBSDSec is p_ustart_sec's offset (64 bits).
+        name: openBSDSec
+        type: int
+        value: "408"
+      - doc: openBSDUsec is p_ustart_usec's offset (32 bits).
+        name: openBSDUsec
+        type: int
+        value: "416"
+    name: openBSDPrefix
+  - doc: |-
+      NetBSD's struct kinfo_proc2 (sys/sys/sysctl.h), fixed-width fields laid out
+      alike on every architecture. The element size asked is the prefix read,
+      rounded to 8: the kernel copies min(asked, sizeof) (kern_proc.c,
+      sysctl_doeproc).
+    grouped: true
+    items:
+      - doc: netBSDPrefix is the element size asked.
+        name: netBSDPrefix
+        type: int
+        value: "464"
+      - doc: netBSDPid is p_pid's offset.
+        name: netBSDPid
+        type: int
+        value: "116"
+      - doc: netBSDEuid is p_uid's (effective) offset.
+        name: netBSDEuid
+        type: int
+        value: "136"
+      - doc: netBSDRuid is p_ruid's offset.
+        name: netBSDRuid
+        type: int
+        value: "140"
+      - doc: netBSDSec is p_ustart_sec's offset (32 bits).
+        name: netBSDSec
+        type: int
+        value: "456"
+      - doc: netBSDUsec is p_ustart_usec's offset (32 bits).
+        name: netBSDUsec
+        type: int
+        value: "460"
+    name: netBSDPrefix
+  - doc: |-
+      FreeBSD's struct sockcred2 (sys/sys/socket.h), the data of the SCM_CREDS2
+      control message LOCAL_CREDS_PERSISTENT attaches to every datagram: seven
+      32-bit fields — sc_version, sc_pid, sc_uid, sc_euid, sc_gid, sc_egid,
+      sc_ngroups — then sc_ngroups group ids. Its size is SOCKCRED2SIZE(n),
+      sizeof(struct sockcred2) + 4·(n − 1) = 28 + 4·n, and the kernel sends at
+      most CMGROUP_MAX groups (uipc_usrreq.c, unp_addsockcred).
+    grouped: true
+    items:
+      - doc: sockcred2Version is sc_version's offset; the kernel writes 0.
+        name: sockcred2Version
+        type: int
+        value: "0"
+      - doc: sockcred2Pid is sc_pid's offset.
+        name: sockcred2Pid
+        type: int
+        value: "4"
+      - doc: sockcred2UID is sc_uid's (real) offset.
+        name: sockcred2UID
+        type: int
+        value: "8"
+      - doc: sockcred2GID is sc_gid's (real) offset.
+        name: sockcred2GID
+        type: int
+        value: "16"
+      - doc: sockcred2NGroups is sc_ngroups' offset.
+        name: sockcred2NGroups
+        type: int
+        value: "24"
+      - doc: sockcred2Fixed is the size of the seven fields before the groups.
+        name: sockcred2Fixed
+        type: int
+        value: "28"
+      - doc: sockcred2KnownVersion is the one sc_version this package reads.
+        name: sockcred2KnownVersion
+        type: int64
+        value: "0"
+      - doc: "cmGroupMax is CMGROUP_MAX (sys/socket.h): the most groups sent."
+        name: cmGroupMax
+        type: int64
+        value: "16"
+    name: sockcred2Version
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - ctlKern
+      - int32Bytes
+      - freeBSDStructSize
+      - dragonFlyBuffer
+      - darwinSize
+      - openBSDPrefix
+      - netBSDPrefix
+      - field
+      - procLayout
+      - freeBSDLP64
+      - ProcRequest
+      - ProcRecord
+      - (*procLayout).fits
+      - (*procLayout).end
+      - readInt32
+      - readField
+      - layoutOf
+      - freeBSDLayout
+      - pick
+    name: proc.go
+  - decls:
+      - sockcred2Version
+      - Sockcred2
+    name: sockcred.go
+functions:
+  - name: ProcRequest
+    params: goos, goarch string, pid int
+    results: mib []int32, size int, ok bool
+  - name: ProcRecord
+    params: goos, goarch string, pid int, buf []byte
+    results: start int64, ruid, euid int, ok bool
+  - doc: readInt32 reads the signed 32-bit integer at off.
+    name: readInt32
+    params: buf []byte, off int
+    results: int64
+  - doc: readField reads an unsigned integer of f's width at f's offset.
+    name: readField
+    params: buf []byte, f field
+    results: uint64
+  - doc: |-
+      layoutOf returns the record layout of goos and goarch, nil where this
+      package holds none: Linux reads /proc, and illumos, Solaris and Windows
+      have no such record.
+    name: layoutOf
+    params: goos, goarch string
+    results: "*procLayout"
+  - doc: |-
+      freeBSDLayout returns FreeBSD's struct kinfo_proc on goarch, nil on an
+      architecture FreeBSD has no Go port for.
+    name: freeBSDLayout
+    params: goarch string
+    results: "*procLayout"
+  - doc: pick returns l when ok, nil otherwise.
+    name: pick
+    params: ok bool, l *procLayout
+    results: "*procLayout"
+  - name: Sockcred2
+    params: data []byte
+    results: pid, uid, gid int, ok bool
+imports:
+  binary: encoding/binary
+  math: math
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/internal/bsdabi
+  name: bsdabi
+  purpose: "Package bsdabi decodes, from their bytes, the records the BSD kernels and darwin hand the proc family: a process's kinfo_proc (kinfo_proc2 on NetBSD), read by sysctl(3) for its start time and its users, and the sockcred2 FreeBSD attaches to a datagram for its sender."
+types:
+  - doc: "field is one integer of a record: its offset and its width in bytes."
+    fields:
+      - doc: off is the offset from the record's start.
+        name: "off"
+        type: int
+      - doc: width is 4 or 8.
+        name: width
+        type: int
+    kind: struct
+    name: field
+  - doc: |-
+      procLayout is where one kernel's process record keeps what ProcRecord
+      reads: the record's size, a structure-size field to check it by, the pid
+      to check it against, the users and the start time.
+    fields:
+      - doc: "op is the second name of the sysctl: KERN_PROC or KERN_PROC2."
+        name: op
+        type: int32
+      - doc: sized is true where the name ends with the element size and count.
+        name: sized
+        type: bool
+      - doc: size is the buffer the record fills.
+        name: size
+        type: int
+      - doc: |-
+          exact is true where the record is exactly size bytes; false where it is
+          at least the prefix read (DragonFly).
+        name: exact
+        type: bool
+      - doc: |-
+          structSize is the offset of a field holding the record's own size,
+          noStructSize when there is none.
+        name: structSize
+        type: int
+      - doc: pid, ruid and euid are 32-bit fields.
+        name: pid
+        type: int
+      - doc: pid, ruid and euid are 32-bit fields.
+        name: ruid
+        type: int
+      - doc: pid, ruid and euid are 32-bit fields.
+        name: euid
+        type: int
+      - doc: sec and usec are the start time's halves.
+        name: sec
+        type: field
+      - doc: sec and usec are the start time's halves.
+        name: usec
+        type: field
+    kind: struct
+    methods:
+      - doc: |-
+          fits reports whether buf is a whole record of l: its size, and the size it
+          states where it states one.
+        name: fits
+        params: buf []byte
+        recv: l *procLayout
+        results: bool
+      - doc: end is the offset just past the farthest field l reads.
+        name: end
+        recv: l *procLayout
+        results: int
+    name: procLayout
+vars:
+  - grouped: true
+    items:
+      - doc: freeBSDLP64 is struct kinfo_proc on amd64, arm64 and riscv64.
+        name: freeBSDLP64
+        value: |-
+          procLayout{
+          		op: kernProc, size: freeBSDLP64Size, exact: true, structSize: freeBSDStructSize,
+          		pid: freeBSDLP64Pid, ruid: freeBSDLP64Ruid, euid: freeBSDLP64Euid,
+          		sec: field{freeBSDLP64Sec, int64Bytes}, usec: field{freeBSDLP64Usec, int64Bytes},
+          	}
+      - doc: freeBSD386 is struct kinfo_proc on i386.
+        name: freeBSD386
+        value: |-
+          procLayout{
+          		op: kernProc, size: freeBSD386Size, exact: true, structSize: freeBSDStructSize,
+          		pid: freeBSD32Pid, ruid: freeBSD32Ruid, euid: freeBSD32Euid,
+          		sec: field{freeBSD32Sec, int32Bytes}, usec: field{freeBSD386Usec, int32Bytes},
+          	}
+      - doc: freeBSDArm is struct kinfo_proc on arm.
+        name: freeBSDArm
+        value: |-
+          procLayout{
+          		op: kernProc, size: freeBSDArmSize, exact: true, structSize: freeBSDStructSize,
+          		pid: freeBSD32Pid, ruid: freeBSD32Ruid, euid: freeBSD32Euid,
+          		sec: field{freeBSD32Sec, int64Bytes}, usec: field{freeBSDArmUsec, int32Bytes},
+          	}
+      - doc: dragonFly is struct kinfo_proc's prefix on amd64.
+        name: dragonFly
+        value: |-
+          procLayout{
+          		op: kernProc, size: dragonFlyBuffer, structSize: noStructSize,
+          		pid: dragonFlyPid, ruid: dragonFlyRuid, euid: dragonFlyEuid,
+          		sec: field{dragonFlySec, int64Bytes}, usec: field{dragonFlyUsec, int64Bytes},
+          	}
+      - doc: darwin is struct kinfo_proc on amd64 and arm64.
+        name: darwin
+        value: |-
+          procLayout{
+          		op: kernProc, size: darwinSize, exact: true, structSize: noStructSize,
+          		pid: darwinPid, ruid: darwinRuid, euid: darwinEuid,
+          		sec: field{darwinSec, int64Bytes}, usec: field{darwinUsec, int32Bytes},
+          	}
+      - doc: openBSD is struct kinfo_proc's prefix on every architecture.
+        name: openBSD
+        value: |-
+          procLayout{
+          		op: kernProcOpenBSD, sized: true, size: openBSDPrefix, exact: true, structSize: noStructSize,
+          		pid: openBSDPid, ruid: openBSDRuid, euid: openBSDEuid,
+          		sec: field{openBSDSec, int64Bytes}, usec: field{openBSDUsec, int32Bytes},
+          	}
+      - doc: netBSD is struct kinfo_proc2's prefix on every architecture.
+        name: netBSD
+        value: |-
+          procLayout{
+          		op: kernProc2, sized: true, size: netBSDPrefix, exact: true, structSize: noStructSize,
+          		pid: netBSDPid, ruid: netBSDRuid, euid: netBSDEuid,
+          		sec: field{netBSDSec, int32Bytes}, usec: field{netBSDUsec, int32Bytes},
+          	}
+    name: freeBSDLP64

@@ -108,8 +108,8 @@ func Test_needsTrampoline(t *testing.T) {
 			true,
 		},
 		//: a cgroup placement also has to happen before execve, so it takes the
-		//: same route.
-		{"a cgroup placement", coreproc.Spec{CgroupPath: "/sys/fs/cgroup/app"}, true},
+		//: same route — unless the kernel clones the child into the group (#929).
+		{"a cgroup placement", coreproc.Spec{CgroupPath: "/sys/fs/cgroup/app"}, !cgroupByClone("/sys/fs/cgroup/app")},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

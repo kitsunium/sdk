@@ -27,12 +27,10 @@ func (s *Server) acquire(raw stdnet.Conn, group *StreamGroup) *conn {
 	//: only take a scratch buffer when the group asked for one, so a handler
 	//: that never calls Buffer costs nothing.
 	if size := group.limits.ReadBufferSize; size > 0 {
-		c.scratch = buffer.Get()
-		//: the pool guarantees a minimum capacity, not this group's size, so a
-		//: larger request needs its own allocation.
-		if cap(*c.scratch) < size {
-			c.scratch = new(make([]byte, size))
-		}
+		//: the smallest size class that holds this group's size (#810): a
+		//: steady accept loop reuses buffers of its own class, never one a
+		//: smaller consumer returned.
+		c.scratch = buffer.GetSize(size)
 		*c.scratch = (*c.scratch)[:size]
 	}
 	//: filled and registered, ready for the handler.

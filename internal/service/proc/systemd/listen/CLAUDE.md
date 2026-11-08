@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:55:00Z -->
+<!-- updated: 2026-11-07T00:00:00Z -->
 # internal/service/proc/systemd/listen
 
 Socket activation (`sd_listen_fds(3)`) for the OS process-supervision domain
@@ -16,11 +16,12 @@ facade imports it as `svclisten`, and `internal/service/net/server` as
 
 | File | Build tag | Role |
 |---|---|---|
-| `sdlisten_unix.go` | `unix` | `Files` / `Listeners` / `WithNames` (service side, fd 3..) + `Prepare` (activator side); `LISTEN_FDS`/`LISTEN_PID`/`LISTEN_FDNAMES` parsing |
-| `sdlisten_other.go` | `!unix` | stub: every entry point returns `UnsupportedPlatform` |
+| `sdlisten_unix.go` | `unix` | `Files` / `Listeners` / `WithNames` (service side, fd 3..) + `Prepare` / `PrepareFiles` (activator side, `activate`); `LISTEN_FDS`/`LISTEN_PID`/`LISTEN_FDNAMES` parsing |
+| `names.go` | all | `NamedFileValue`, `CheckName` (systemd's `fdname_is_valid`, `InvalidFDName`), `announced` (empty ⇒ `unknown`) — #739 |
+| `sdlisten_other.go` | `!unix` | stub: every entry point but `CheckName` returns `UnsupportedPlatform` |
 
 No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
-(`ListenFailed`, `UnsupportedPlatform`); this package mints none.
+(`ListenFailed`, `InvalidFDName`, `UnsupportedPlatform`); this package mints none.
 
 ## Behaviour
 
@@ -35,8 +36,21 @@ No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
   socket to `child.ExtraFiles` so the activation sockets occupy fd `3..3+N` (the
   protocol fixes them there); any `ExtraFiles` the caller already set shift to
   after them. It sets `LISTEN_FDS` + `LISTEN_FDNAMES` in `child.Env`, in
-  sorted-name order so the fd↔name pairing is deterministic, and omits
-  `LISTEN_PID` (unknowable pre-fork).
+  sorted-name order so the fd↔name pairing is deterministic, every name checked
+  first (`InvalidFDName`, nothing changed nor dup'd) and an empty one announced
+  as `unknown`. `LISTEN_PID` is unknowable pre-fork, so it goes to
+  `child.PIDEnv` (#739): the spawn's trampoline sets it to the child's own PID
+  after the fork — `TestPrepareFilesEndToEnd` reads it equal to the child's
+  `$$` and not the parent's. The cost is the trampoline's re-exec; a caller
+  that cannot afford it deletes the name, and `Files` accepts an absent
+  `LISTEN_PID`.
+- **Store descriptors (`PrepareFiles`, #739).** The same activation for
+  `NamedFileValue`s in the order given — a descriptor store's (S0d) at restart, or
+  an `Accept=yes` connection (S0f) as `LISTEN_FDS=1` —, the very `*os.File`
+  values placed at fd 3 on: never dup'd, never closed, so the store keeps them
+  across restarts (the spawn dup2's them into the child). On Linux the child
+  holds exactly fds 0–4 for two files (a scan of `/proc/self/fd` in the test):
+  the descriptor table is sealed (#1089), nothing outside the list leaks.
 - **Close-on-exec (#449).** `Files` SETS `FD_CLOEXEC` on each recovered fd
   (`syscall.CloseOnExec`), as `sd_listen_fds(3)` does. It used to clear it "so
   the socket survives a re-exec" — and then every process the service spawned,
@@ -72,7 +86,9 @@ speed.
 
 - Call `errs.Define` — all codes live in `core/proc`. Restate the sentinel fields
   in `errs.Wrap`.
-- Set `LISTEN_PID` in `Prepare` — a pre-fork activator cannot know the child pid.
+- Set `LISTEN_PID` in `child.Env` — a pre-fork activator cannot know the child
+  pid; it belongs in `child.PIDEnv`.
+- Dup or close a `NamedFileValue` in `PrepareFiles` — the store owns it.
 
 ## Verification
 

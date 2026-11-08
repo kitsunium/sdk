@@ -4,6 +4,7 @@
 **Date**: 2026-04-23
 **Deciders**: @kodflow
 **Amends**: ADR 0005 §Registry (dotted-quad error codes)
+**Amended by**: [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md) — the ring's MPSC sibling, its cursors on their own cache lines
 **Related**: ADR 0002 §Registry (superseded), post-audit plan `dreamy-nibbling-bear.md`
 
 ## Context
@@ -128,3 +129,13 @@ assigning it by analogy without checking.
 - ADR 0002 — SDK errors package — `docs/adr/0002-sdk-errors-package.md`
 - Registry audit — `internal/kernel/errs/registry_external_test.go`
 - Post-#12 audit findings #8, #33, #34 — plan `dreamy-nibbling-bear.md`
+
+## Amendment — 2026-11-03: the ring's MPSC sibling, and cursors on their own lines ([#805](https://github.com/kitsunium/sdk/issues/805), [#1034](https://github.com/kitsunium/sdk/issues/1034), [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md))
+
+The ring this ADR admitted gains a sibling and keeps its range. `NewMulti[T](capacity)`
+returns a `MultiQueue[T]` — `Queue`'s four methods under the wider contract of
+any number of `TryWrite` callers and exactly one `TryRead` caller — reusing
+`RING_FULL`, `RING_EMPTY` and `RING_CAP_ZERO` (`0.1.3.1`–`0.1.3.3`); no code is
+added to `0.1.3.*`. The SPSC ring's layout changes, its API does not: the
+header, the consumer's cursor and the producer's each a cache line from the
+next, a cached copy of the far cursor, a power-of-two storage indexed by mask.

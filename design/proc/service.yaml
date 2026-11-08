@@ -1,0 +1,3420 @@
+apiVersion: kit.kitsunium/design/v2
+domain: proc/service
+packages:
+  - aliases:
+      - doc: |-
+          Clock is the time every wait of a unit runs on: the kernel's clock.Timed,
+          so pkg/v1/clock's System and ManualClock are clocks here (ADR 0214 §5).
+        name: Clock
+        target: clock.Timed
+    codes:
+      - const:
+          - doc: |-
+              CodeConfigInvalid identifies a unit configuration the engine refuses: a
+              value out of its range, a combination systemd refuses; the directive field
+              names it.
+            name: CodeConfigInvalid
+            note: "range: 0.3.105.0 - 0.3.105.255"
+            value: "0x00_03_69_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeDirectiveUnsupported identifies a directive value the engine does not
+              run yet or not on this platform: a cgroup mode without a CgroupUnit,
+              Type=dbus off Linux, Type=forking on Windows or without a way to find its
+              main process, the descriptor store off Linux, a notification where no
+              socket is reliable.
+            name: CodeDirectiveUnsupported
+            value: "0x00_03_69_02"
+        type: errs.Code
+      - const:
+          - doc: CodeCommandInvalid identifies an Exec*= command ParseCommand refuses.
+            name: CodeCommandInvalid
+            value: "0x00_03_69_03"
+        type: errs.Code
+      - const:
+          - doc: CodeStartFailed identifies a start job that ended with the unit failed.
+            name: CodeStartFailed
+            value: "0x00_03_69_04"
+        type: errs.Code
+      - const:
+          - doc: CodeStartLimitHit identifies a start the start limiter refused.
+            name: CodeStartLimitHit
+            value: "0x00_03_69_05"
+        type: errs.Code
+      - const:
+          - doc: CodeReloadFailed identifies a reload that ended with a failure.
+            name: CodeReloadFailed
+            value: "0x00_03_69_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeReloadUnsupported identifies a reload of a unit with no ExecReload= that
+              is not Type=notify-reload.
+            name: CodeReloadUnsupported
+            value: "0x00_03_69_07"
+        type: errs.Code
+      - const:
+          - doc: CodeJobCanceled identifies a job a conflicting one replaced.
+            name: CodeJobCanceled
+            value: "0x00_03_69_08"
+        type: errs.Code
+      - const:
+          - doc: CodeUnitClosed identifies a call on a closed unit.
+            name: CodeUnitClosed
+            value: "0x00_03_69_09"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodePrivilegeRefused identifies a "+" or "!" command in a unit that does not
+              allow privileged control commands.
+            name: CodePrivilegeRefused
+            value: "0x00_03_69_0A"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeExitUnknown identifies an adopted process that is gone: it was not the
+              engine's child, so its exit status is not knowable.
+            name: CodeExitUnknown
+            value: "0x00_03_69_0B"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHandoverInvalid identifies a hand-over the incoming image cannot read:
+              cut short, corrupt, of a version it does not know, or holding no state
+              for the unit asked.
+            name: CodeHandoverInvalid
+            value: "0x00_03_69_0C"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHandoverMismatch identifies a descriptor a hand-over names that is
+              not the object the outgoing image recorded: absent, or another type,
+              device or inode by fstat.
+            name: CodeHandoverMismatch
+            value: "0x00_03_69_0D"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeReexecFailed identifies a re-exec the kernel refused: the outgoing
+              image goes on, its units frozen in the hand-over.
+            name: CodeReexecFailed
+            value: "0x00_03_69_0E"
+        type: errs.Code
+    constants:
+      - doc: |-
+          FlagArgv0 is "@": the second word is argv[0]; with FlagShell, the shell
+          is a login shell.
+        name: FlagArgv0
+        type: CommandFlags
+        value: "1"
+      - doc: "FlagIgnoreFailure is \"-\": a failure is recorded and read as a success."
+        name: FlagIgnoreFailure
+        type: CommandFlags
+        value: "2"
+      - doc: "FlagNoEnvExpand is \":\": $VAR and ${VAR} are not expanded."
+        name: FlagNoEnvExpand
+        type: CommandFlags
+        value: "4"
+      - doc: |-
+          FlagFullPrivileges is "+": the command runs without the unit's
+          credentials and confinement, on Config.AllowPrivilegedControl only.
+        name: FlagFullPrivileges
+        type: CommandFlags
+        value: "8"
+      - doc: |-
+          FlagNoCredentials is "!": the command runs without User=, Group= and
+          SupplementaryGroups=, on Config.AllowPrivilegedControl only.
+        name: FlagNoCredentials
+        type: CommandFlags
+        value: "16"
+      - doc: |-
+          FlagShell is "|": the command runs through the shell's -c, or is the
+          shell alone.
+        name: FlagShell
+        type: CommandFlags
+        value: "32"
+      - doc: |-
+          Infinity is systemd's "infinity" for a duration directive: no timeout, a
+          start-limit window that never ends, no ceiling on the restart delay.
+        name: Infinity
+        type: time.Duration
+        value: "9223372036854775807"
+      - doc: |-
+          Zero is systemd's literal 0 for a duration directive, where it differs
+          from the default the Go zero value asks for: RestartSec=0 restarts at
+          once, StartLimitIntervalSec=0 disables the limiter, and a timeout of 0 is
+          no timeout.
+        name: Zero
+        type: time.Duration
+        value: "-1"
+      - doc: |-
+          TypeDefault resolves to TypeDbus with a BusName=, else to TypeSimple with
+          an ExecStart=, to TypeOneshot without.
+        name: TypeDefault
+        type: Type
+        value: "0"
+      - doc: TypeSimple is up once its main process is spawned.
+        name: TypeSimple
+        type: Type
+        value: "1"
+      - doc: TypeExec is up once its main process has executed its binary.
+        name: TypeExec
+        type: Type
+        value: "2"
+      - doc: |-
+          TypeForking is up once the process it spawned exits cleanly, the daemon
+          that process forked adopted as the main process — from PIDFile=, or
+          guessed among the cgroup's members (GuessMainPID=).
+        name: TypeForking
+        type: Type
+        value: "3"
+      - doc: |-
+          TypeOneshot is up once its main processes ran to a successful end, one
+          ExecStart= after the other.
+        name: TypeOneshot
+        type: Type
+        value: "4"
+      - doc: |-
+          TypeDbus is up once its main process runs and its BusName= is owned on the
+          bus, and stops when the name is lost (Linux; a BusWatcher follows it).
+        name: TypeDbus
+        type: Type
+        value: "5"
+      - doc: TypeNotify is up once its main process sends READY=1.
+        name: TypeNotify
+        type: Type
+        value: "6"
+      - doc: |-
+          TypeNotifyReload is TypeNotify whose reload is ReloadSignal= followed by
+          RELOADING=1 and READY=1.
+        name: TypeNotifyReload
+        type: Type
+        value: "7"
+      - doc: |-
+          TypeIdle runs as TypeSimple: the job queue systemd delays it behind is
+          the caller's.
+        name: TypeIdle
+        type: Type
+        value: "8"
+      - doc: RestartNo never restarts.
+        name: RestartNo
+        type: Restart
+        value: "0"
+      - doc: RestartOnSuccess restarts after a clean end only.
+        name: RestartOnSuccess
+        type: Restart
+        value: "1"
+      - doc: |-
+          RestartOnFailure restarts after an unclean exit code, an unclean signal,
+          a timeout, a watchdog, an OOM kill.
+        name: RestartOnFailure
+        type: Restart
+        value: "2"
+      - doc: |-
+          RestartOnAbnormal restarts after an unclean signal, a timeout, a
+          watchdog, an OOM kill — not after an exit code.
+        name: RestartOnAbnormal
+        type: Restart
+        value: "3"
+      - doc: RestartOnWatchdog restarts after a watchdog only.
+        name: RestartOnWatchdog
+        type: Restart
+        value: "4"
+      - doc: RestartOnAbort restarts after an unclean signal only.
+        name: RestartOnAbort
+        type: Restart
+        value: "5"
+      - doc: RestartAlways restarts after every end but a skipped condition.
+        name: RestartAlways
+        type: Restart
+        value: "6"
+      - doc: |-
+          RestartModeNormal publishes the failed (or inactive) state, then
+          auto-restart.
+        name: RestartModeNormal
+        type: RestartMode
+        value: "0"
+      - doc: RestartModeDirect goes to auto-restart without publishing the failure.
+        name: RestartModeDirect
+        type: RestartMode
+        value: "1"
+      - doc: |-
+          RestartModeDebug is RestartModeNormal, and the restarted unit's processes
+          get DEBUG_INVOCATION=1.
+        name: RestartModeDebug
+        type: RestartMode
+        value: "2"
+      - doc: |-
+          KillModeDefault resolves to KillModeControlGroup when the unit's Cgroup
+          is a CgroupUnit, to KillModeProcess otherwise.
+        name: KillModeDefault
+        type: KillMode
+        value: "0"
+      - doc: KillModeProcess signals the main and control processes only.
+        name: KillModeProcess
+        type: KillMode
+        value: "1"
+      - doc: |-
+          KillModeControlGroup signals every process of the unit's cgroup and
+          waits for it to be empty. It needs a Cgroup that is a CgroupUnit.
+        name: KillModeControlGroup
+        type: KillMode
+        value: "2"
+      - doc: |-
+          KillModeMixed signals the main and control processes, then kills every
+          process of the cgroup at the kill. It needs a Cgroup that is a
+          CgroupUnit.
+        name: KillModeMixed
+        type: KillMode
+        value: "3"
+      - doc: |-
+          KillModeNone signals nothing: the stop commands run, the processes are
+          left.
+        name: KillModeNone
+        type: KillMode
+        value: "4"
+      - doc: ExitTypeMain ends the unit when its main process exits.
+        name: ExitTypeMain
+        type: ExitType
+        value: "0"
+      - doc: |-
+          ExitTypeCgroup ends the unit when its cgroup is empty, whether its main
+          process ended or not. It needs a Cgroup that is a CgroupUnit.
+        name: ExitTypeCgroup
+        type: ExitType
+        value: "1"
+      - doc: NotifyAccessNone reads no message.
+        name: NotifyAccessNone
+        type: NotifyAccess
+        value: "0"
+      - doc: NotifyAccessMain reads the main process's messages.
+        name: NotifyAccessMain
+        type: NotifyAccess
+        value: "1"
+      - doc: |-
+          NotifyAccessExec reads the main and the control processes' messages; it
+          needs the unit's cgroup.
+        name: NotifyAccessExec
+        type: NotifyAccess
+        value: "2"
+      - doc: |-
+          NotifyAccessAll reads the messages of every process of the unit's
+          cgroup; it needs the unit's cgroup.
+        name: NotifyAccessAll
+        type: NotifyAccess
+        value: "3"
+      - doc: |-
+          TimeoutTerminate sends KillSignal=, then FinalKillSignal= after
+          TimeoutStopSec=.
+        name: TimeoutTerminate
+        type: TimeoutMode
+        value: "0"
+      - doc: |-
+          TimeoutAbort sends WatchdogSignal=, then FinalKillSignal= after
+          TimeoutAbortSec=.
+        name: TimeoutAbort
+        type: TimeoutMode
+        value: "1"
+      - doc: TimeoutKill sends FinalKillSignal= at once.
+        name: TimeoutKill
+        type: TimeoutMode
+        value: "2"
+      - doc: |-
+          OOMPolicyDefault is stop, or continue under Delegate=; without a
+          CgroupUnit no OOM kill is seen.
+        name: OOMPolicyDefault
+        type: OOMPolicy
+        value: "0"
+      - doc: OOMPolicyContinue keeps the unit running after an OOM kill.
+        name: OOMPolicyContinue
+        type: OOMPolicy
+        value: "1"
+      - doc: OOMPolicyStop stops the unit, which ends with the result oom-kill.
+        name: OOMPolicyStop
+        type: OOMPolicy
+        value: "2"
+      - doc: |-
+          OOMPolicyKill has the kernel kill the whole cgroup (memory.oom.group,
+          which the engine sets at each start), the unit ending with the result
+          oom-kill.
+        name: OOMPolicyKill
+        type: OOMPolicy
+        value: "3"
+      - doc: |-
+          PreserveRestart keeps the store while the unit is neither inactive nor
+          failed, or is about to restart.
+        name: PreserveRestart
+        type: Preserve
+        value: "0"
+      - doc: PreserveNo releases the store when the unit stops.
+        name: PreserveNo
+        type: Preserve
+        value: "1"
+      - doc: PreserveYes keeps the store until the unit is removed.
+        name: PreserveYes
+        type: Preserve
+        value: "2"
+      - doc: |-
+          PreserveOnSuccess is PreserveYes, released once the unit is failed for
+          good.
+        name: PreserveOnSuccess
+        type: Preserve
+        value: "3"
+      - doc: ToggleDefault is the directive's default.
+        name: ToggleDefault
+        type: Toggle
+        value: "0"
+      - doc: ToggleYes is yes.
+        name: ToggleYes
+        type: Toggle
+        value: "1"
+      - doc: ToggleNo is no.
+        name: ToggleNo
+        type: Toggle
+        value: "2"
+      - doc: ProtectSystemNo leaves every tree writable — the zero, systemd's default.
+        name: ProtectSystemNo
+        type: ProtectSystem
+        value: "0"
+      - doc: ProtectSystemYes makes /usr read-only, and /boot and /efi where they exist.
+        name: ProtectSystemYes
+        type: ProtectSystem
+        value: "1"
+      - doc: ProtectSystemFull makes /etc read-only too.
+        name: ProtectSystemFull
+        type: ProtectSystem
+        value: "2"
+      - doc: |-
+          ProtectSystemStrict makes the whole hierarchy read-only but /dev, /proc and
+          /sys; the engine refuses it: a read-only root whose API trees stay writable
+          is a recursive read-only with exceptions, which the spawn's mounts do not
+          make.
+        name: ProtectSystemStrict
+        type: ProtectSystem
+        value: "3"
+      - doc: PrivateTmpNo shares the host's /tmp and /var/tmp — the zero, systemd's default.
+        name: PrivateTmpNo
+        type: PrivateTmp
+        value: "0"
+      - doc: |-
+          PrivateTmpYes is systemd's yes: directories on the host's /tmp and
+          /var/tmp, shared by every command of the unit and removed after its stop.
+          The engine refuses it.
+        name: PrivateTmpYes
+        type: PrivateTmp
+        value: "1"
+      - doc: |-
+          PrivateTmpDisconnected mounts a new tmpfs, mode 1777, on /tmp and on
+          /var/tmp for each command.
+        name: PrivateTmpDisconnected
+        type: PrivateTmp
+        value: "2"
+      - doc: StateInactive is not running, after a success or before any start.
+        name: StateInactive
+        type: State
+        value: "0"
+      - doc: |-
+          StateActivating is starting: a condition, the pre-start commands, the
+          main process before it is up, the post-start commands.
+        name: StateActivating
+        type: State
+        value: "1"
+      - doc: StateActive is up.
+        name: StateActive
+        type: State
+        value: "2"
+      - doc: StateReloading is reloading.
+        name: StateReloading
+        type: State
+        value: "3"
+      - doc: |-
+          StateDeactivating is stopping: the stop commands, the signals, the
+          post-stop commands.
+        name: StateDeactivating
+        type: State
+        value: "4"
+      - doc: StateFailed is not running, after a failure.
+        name: StateFailed
+        type: State
+        value: "5"
+      - doc: StateAutoRestart is waiting out the restart delay.
+        name: StateAutoRestart
+        type: State
+        value: "6"
+      - doc: "StateExited is up with no process left: RemainAfterExit=."
+        name: StateExited
+        type: State
+        value: "7"
+      - doc: StateConditionSkipped is not running because ExecCondition= said so.
+        name: StateConditionSkipped
+        type: State
+        value: "8"
+      - doc: SubDead is inactive.
+        name: SubDead
+        type: Sub
+        value: "0"
+      - doc: SubCondition runs ExecCondition=.
+        name: SubCondition
+        type: Sub
+        value: "1"
+      - doc: SubStartPre runs ExecStartPre=.
+        name: SubStartPre
+        type: Sub
+        value: "2"
+      - doc: SubStart runs ExecStart= until the unit is up.
+        name: SubStart
+        type: Sub
+        value: "3"
+      - doc: SubStartPost runs ExecStartPost=.
+        name: SubStartPost
+        type: Sub
+        value: "4"
+      - doc: SubRunning is up with its main process.
+        name: SubRunning
+        type: Sub
+        value: "5"
+      - doc: SubExited is up without a process (RemainAfterExit=).
+        name: SubExited
+        type: Sub
+        value: "6"
+      - doc: SubReload runs ExecReload=.
+        name: SubReload
+        type: Sub
+        value: "7"
+      - doc: SubReloadSignal waits for RELOADING=1 after ReloadSignal=.
+        name: SubReloadSignal
+        type: Sub
+        value: "8"
+      - doc: SubReloadNotify waits for READY=1 after RELOADING=1.
+        name: SubReloadNotify
+        type: Sub
+        value: "9"
+      - doc: SubReloadPost runs ExecReloadPost=.
+        name: SubReloadPost
+        type: Sub
+        value: "10"
+      - doc: SubStop runs ExecStop=.
+        name: SubStop
+        type: Sub
+        value: "11"
+      - doc: SubStopWatchdog waits after WatchdogSignal=.
+        name: SubStopWatchdog
+        type: Sub
+        value: "12"
+      - doc: SubStopSigterm waits after KillSignal=.
+        name: SubStopSigterm
+        type: Sub
+        value: "13"
+      - doc: SubStopSigkill waits after FinalKillSignal=.
+        name: SubStopSigkill
+        type: Sub
+        value: "14"
+      - doc: SubStopPost runs ExecStopPost=.
+        name: SubStopPost
+        type: Sub
+        value: "15"
+      - doc: |-
+          SubFinalWatchdog waits after WatchdogSignal= sent to what ExecStopPost=
+          left.
+        name: SubFinalWatchdog
+        type: Sub
+        value: "16"
+      - doc: SubFinalSigterm waits after KillSignal= sent to what ExecStopPost= left.
+        name: SubFinalSigterm
+        type: Sub
+        value: "17"
+      - doc: |-
+          SubFinalSigkill waits after FinalKillSignal= sent to what ExecStopPost=
+          left.
+        name: SubFinalSigkill
+        type: Sub
+        value: "18"
+      - doc: SubFailed is failed.
+        name: SubFailed
+        type: Sub
+        value: "19"
+      - doc: SubAutoRestart waits out the restart delay.
+        name: SubAutoRestart
+        type: Sub
+        value: "20"
+      - doc: |-
+          SubRunningRevalidating is a Type=dbus unit up without its BusName= owned,
+          given two seconds to own it again before it stops.
+        name: SubRunningRevalidating
+        type: Sub
+        value: "21"
+      - doc: ResultSuccess is a clean end.
+        name: ResultSuccess
+        type: Result
+        value: "0"
+      - doc: ResultResources is a command that could not be spawned.
+        name: ResultResources
+        type: Result
+        value: "1"
+      - doc: |-
+          ResultProtocol is a notify unit whose main process ended before
+          READY=1.
+        name: ResultProtocol
+        type: Result
+        value: "2"
+      - doc: ResultTimeout is a start, stop, reload or runtime limit that expired.
+        name: ResultTimeout
+        type: Result
+        value: "3"
+      - doc: ResultExitCode is an unclean exit code.
+        name: ResultExitCode
+        type: Result
+        value: "4"
+      - doc: ResultSignal is an unclean signal.
+        name: ResultSignal
+        type: Result
+        value: "5"
+      - doc: ResultCoreDump is an unclean signal that dumped core.
+        name: ResultCoreDump
+        type: Result
+        value: "6"
+      - doc: ResultWatchdog is a missed keep-alive, WATCHDOG=trigger, or Fail.
+        name: ResultWatchdog
+        type: Result
+        value: "7"
+      - doc: ResultStartLimitHit is a start the limiter refused.
+        name: ResultStartLimitHit
+        type: Result
+        value: "8"
+      - doc: ResultOOMKill is an OOM kill in the unit's cgroup (S0g).
+        name: ResultOOMKill
+        type: Result
+        value: "9"
+      - doc: ResultExecCondition is an ExecCondition= that said skip.
+        name: ResultExecCondition
+        type: Result
+        value: "10"
+    doc: |-
+      Package service is the contract of a service unit's life cycle (ADR 0214):
+      systemd.service(5)'s directives as typed values, the states a unit passes
+      through and the snapshot a consumer reads, the ports the engine reaches the
+      world through, and the codes of the range 0.3.105.*.
+
+      The engine is internal/service/proc/service: one actor per unit over a pure
+      reducer. Nothing here spawns, signals or waits. The ports exist so the
+      engine runs on the SDK's spawner, a PID adopter, a control group and an
+      sd_notify socket — and so a test hands it doubles of each:
+
+        - Spawner starts the unit's processes (proc/exec by default);
+        - Attacher adopts a process the engine did not start (MAINPID=, PIDFile=);
+        - CgroupKill is the unit's control group: who belongs, and a kill of all;
+        - NotifySource delivers the unit's sd_notify messages;
+        - BusWatcher follows who owns a Type=dbus unit's BusName= (proc/dbus);
+        - Clock, the kernel's clock.Timed, is what every wait runs on.
+
+      A directive's Go zero is its systemd default (ADR 0031); systemd's literal
+      0 and infinity are the constants Zero and Infinity. ParseCommand reads one
+      Exec*= command's prefixes, "@-:+!|".
+
+      The range 0.3.105.* was allocated to the engine and is declared here, at its
+      path in the core (ADR 0160).
+    functions:
+      - doc: |-
+          ParseCommand reads one Exec*= command from its words — the line already
+          split by systemd.syntax(7)'s quoting, its % specifiers already expanded,
+          which is the caller's. The first word may open with the prefixes
+          "@-:+!|", each at most once and in any order; "+" with "!", a repeated
+          prefix (so "!!"), a missing program, a program that is neither absolute
+          nor a bare file name, and "@" without the argv[0] word it names are
+          COMMAND_INVALID, the rule field saying which.
+        in:
+          - name: words
+            type: "[]string"
+        name: ParseCommand
+        out:
+          - type: CommandValue
+          - type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/proc/service
+    ports:
+      - doc: |-
+          Spawner starts the processes of a unit — its main process and every
+          command. The engine builds each spec from the unit's template and the
+          command; the default spawner is proc/exec's Start, which returns once the
+          program was executed. It is frozen at one method (ADR 0039).
+        methods:
+          - doc: |-
+              Spawn starts spec and returns the running process. ctx bounds the spawn
+              only, never the process.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: spec
+                type: coreproc.Spec
+            name: Spawn
+            out:
+              - type: coreproc.Process
+              - type: error
+        name: Spawner
+      - doc: |-
+          Attacher adopts a process the engine did not start: the PID a MAINPID=
+          names (S0b), the one a PIDFile= holds (S0c), the children a supervisor
+          re-executed keeps (S0h). The process it returns is not the engine's child:
+          its Wait returns ExitUnknown, or proc's StatusUnknown, once it is gone, its
+          status being unknowable. NewAttacher is the one over proc/exec. It is
+          frozen at these two methods (ADR 0039).
+        methods:
+          - doc: AttachPID adopts the live process pid, or refuses it.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: pid
+                type: int
+            name: AttachPID
+            out:
+              - type: coreproc.Process
+              - type: error
+          - doc: |-
+              AttachPIDFile adopts the process a PID file names, read safely, or
+              refuses it.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: path
+                type: string
+            name: AttachPIDFile
+            out:
+              - type: coreproc.Process
+              - type: error
+        name: Attacher
+      - doc: |-
+          CgroupKill is the unit's control group: who belongs to it, and every
+          process of it signalled at once. S0b asks it who belongs (MAINPID=,
+          NotifyAccess=all); KillMode=control-group and mixed signal through it
+          (S0g), with a CgroupUnit. It is frozen at these three methods (ADR 0039).
+        methods:
+          - doc: |-
+              Kill kills every process of the group at once, without a race with a
+              fork (cgroup.kill). On Linux every child later cloned into a group
+              killed this way is SIGKILLed at its fork, so the engine never calls
+              it: a unit's group is spawned into again at its next start, and its
+              kills go through Signal.
+            name: Kill
+            out:
+              - type: error
+          - doc: Signal sends sig to every process of the group.
+            in:
+              - name: sig
+                type: coreproc.Signal
+            name: Signal
+            out:
+              - type: error
+          - doc: Contains reports whether pid is a process of the group.
+            in:
+              - name: pid
+                type: int
+            name: Contains
+            out:
+              - type: bool
+              - type: error
+        name: CgroupKill
+      - doc: |-
+          CgroupMembers is the sibling of CgroupKill (ADR 0039) a control group
+          offers when it can list its processes — the cgroup.procs of the group and
+          of every group beneath it, as proc's GroupReader.Members lists them, so a
+          process a delegated service moved into a group of its own is still one.
+          The engine asserts it on Config.Cgroup: a Type=forking unit without
+          PIDFile= guesses its main process among the members (GuessMainPID=), and
+          learns whether anything is left to write a PID file it waits for (S0c).
+          It is frozen at this one method.
+        methods:
+          - doc: |-
+              Members lists the pids of the group's processes and of the groups
+              beneath it, in no promised order.
+            name: Members
+            out:
+              - type: "[]int"
+              - type: error
+        name: CgroupMembers
+      - doc: |-
+          CgroupUnit is the sibling of CgroupKill (ADR 0039) a unit's control group
+          offers when it runs the cgroup modes (S0g, kitsunium/sdk#734): its
+          directory, which every process of the unit is spawned into; its state
+          followed, and read again when the engine decides on it — populated, the
+          OOM kills —; its members at any depth; its delegation to the service's
+          user, and the groups the service made beneath it; memory.oom.group. The
+          group proc/cgroup's Create makes on Linux is one. The engine asserts it
+          on Config.Cgroup: with one, KillMode= defaults to control-group and
+          ExitType=cgroup, Delegate= and OOMPolicy= run; without one they are
+          refused. It is frozen at these methods.
+        methods:
+          - doc: |-
+              Path is the group's directory: the CgroupPath the engine spawns every
+              process of the unit into when its Spec names none.
+            name: Path
+            out:
+              - type: string
+          - doc: |-
+              Members lists the pids of the group's processes and of the groups
+              beneath it, in no promised order.
+            name: Members
+            out:
+              - type: "[]int"
+              - type: error
+          - doc: |-
+              Stat reads the group's counters; the engine reads its memory events'
+              OOM kills.
+            name: Stat
+            out:
+              - type: coreproc.GroupStatValue
+              - type: error
+          - doc: |-
+              Watch returns a channel holding the group's state, then its state after
+              each change the kernel announces, a burst coalesced into the latest; it
+              is closed when ctx ends or the group is gone.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Watch
+            out:
+              - type: <-chan coreproc.GroupEventsValue
+              - type: error
+          - doc: |-
+              Delegate hands the group to the user uid and the group gid, -1 keeping
+              either unchanged (Delegate=).
+            in:
+              - name: uid
+              - name: gid
+                type: int
+            name: Delegate
+            out:
+              - type: error
+          - doc: |-
+              DeleteBeneath removes every group beneath the group, deepest first; the
+              group itself stays.
+            name: DeleteBeneath
+            out:
+              - type: error
+          - doc: |-
+              SetMemoryOOMGroup writes memory.oom.group: true has the OOM killer end
+              the whole group (OOMPolicy=kill).
+            in:
+              - name: enabled
+                type: bool
+            name: SetMemoryOOMGroup
+            out:
+              - type: error
+        name: CgroupUnit
+      - doc: |-
+          NotifySource is where a unit's sd_notify messages come from: the socket its
+          processes are given as NOTIFY_SOCKET, and the messages sent to it. The unit
+          owns it once New returned: Close releases it. It is frozen at these three
+          methods (ADR 0039).
+        methods:
+          - doc: Socket is the NOTIFY_SOCKET value the unit's processes are given.
+            name: Socket
+            out:
+              - type: string
+          - doc: |-
+              Recv returns the next message. It returns an error once the source is
+              closed or ctx ends.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Recv
+            out:
+              - type: NotifyValue
+              - type: error
+          - doc: Close releases the socket and ends a Recv in flight.
+            name: Close
+            out:
+              - type: error
+        name: NotifySource
+      - doc: |-
+          BusWatcher follows who owns a name on a message bus — a Type=dbus unit's
+          BusName= (S0e, kitsunium/sdk#737): the unit is up once its main process
+          runs and the name is owned, and stops when the bus announces it lost.
+          proc/dbus's Conn is one; a test hands a double. It is frozen at this one
+          method (ADR 0039).
+        methods:
+          - doc: |-
+              WatchName returns a channel holding name's owner when the watch began —
+              the owner's unique name, empty for none, looked up once the bus
+              announces the name's changes to the watcher —, then the owner after each
+              change the bus announces (NameOwnerChanged), in order. It is closed when
+              ctx ends or the connection to the bus is lost; a watcher never reports a
+              lookup as a change. The engine waits for it, and for its first owner,
+              before a start's first spawn: a watcher bounds its own calls —
+              proc/dbus's wait 25 seconds at most.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: name
+                type: string
+            name: WatchName
+            out:
+              - type: <-chan string
+              - type: error
+        name: BusWatcher
+    sentinels:
+      - var:
+          - code: CodeConfigInvalid
+            doc: ConfigInvalid refuses a unit configuration.
+            exit: CONFIG
+            name: ConfigInvalid
+            private: "service/proc/service: New refused the configuration; the directive and value fields say which"
+            public: The service unit is misconfigured
+            reason: CONFIG_INVALID
+          - code: CodeDirectiveUnsupported
+            doc: |-
+              DirectiveUnsupported refuses a directive value the engine does not run
+              here.
+            exit: CONFIG
+            name: DirectiveUnsupported
+            private: "service/proc/service: the directive is not implemented yet or not on this platform; the directive, value and issue fields say which"
+            public: The service unit uses a directive not supported here
+            reason: DIRECTIVE_UNSUPPORTED
+          - code: CodeCommandInvalid
+            doc: CommandInvalid refuses an Exec*= command.
+            exit: CONFIG
+            name: CommandInvalid
+            private: "core/proc/service: ParseCommand refused the words; the rule field says why"
+            public: The service command line is invalid
+            reason: COMMAND_INVALID
+          - code: CodeStartFailed
+            doc: StartFailed reports a start job that ended with the unit failed.
+            name: StartFailed
+            private: "service/proc/service: the start job ended failed; the result field says why"
+            public: The service failed to start
+            reason: START_FAILED
+          - code: CodeStartLimitHit
+            doc: StartLimitHit reports a start the limiter refused.
+            name: StartLimitHit
+            private: "service/proc/service: StartLimitBurst starts within StartLimitIntervalSec; ResetFailed flushes the limiter"
+            public: The service was started too often
+            reason: START_LIMIT_HIT
+          - code: CodeReloadFailed
+            doc: ReloadFailed reports a reload that ended with a failure.
+            name: ReloadFailed
+            private: "service/proc/service: the reload job ended with a result other than success; the result field says which"
+            public: The service failed to reload
+            reason: RELOAD_FAILED
+          - code: CodeReloadUnsupported
+            doc: ReloadUnsupported refuses a reload the unit has no mechanism for.
+            name: ReloadUnsupported
+            private: "service/proc/service: no ExecReload= and not Type=notify-reload"
+            public: The service cannot reload
+            reason: RELOAD_UNSUPPORTED
+          - code: CodeJobCanceled
+            doc: JobCanceled reports a job a conflicting one replaced.
+            name: JobCanceled
+            private: "service/proc/service: a stop replaced the start, or the unit was closed, before the job completed"
+            public: The service operation was canceled by another
+            reason: JOB_CANCELED
+          - code: CodeUnitClosed
+            doc: UnitClosed refuses a call on a closed unit.
+            name: UnitClosed
+            private: "service/proc/service: the call came after Close"
+            public: The service unit is closed
+            reason: UNIT_CLOSED
+          - code: CodePrivilegeRefused
+            doc: PrivilegeRefused refuses a privileged control command.
+            exit: NOPERM
+            name: PrivilegeRefused
+            private: "service/proc/service: a '+' or '!' command and AllowPrivilegedControl is false; the directive field says where"
+            public: The service may not run privileged commands
+            reason: PRIVILEGE_REFUSED
+          - code: CodeExitUnknown
+            doc: ExitUnknown reports that an adopted process is gone, its status unknown.
+            name: ExitUnknown
+            private: "core/proc/service: an adopted process is not the engine's child; it is gone and its status cannot be read"
+            public: The process ended with an unknown status
+            reason: EXIT_UNKNOWN
+          - code: CodeHandoverInvalid
+            doc: HandoverInvalid refuses a hand-over the incoming image cannot read.
+            name: HandoverInvalid
+            private: "service/proc/service: the hand-over is cut short, corrupt, of another version, or holds no state for the unit; the why field says which"
+            public: The supervisor's hand-over cannot be read
+            reason: HANDOVER_INVALID
+          - code: CodeHandoverMismatch
+            doc: HandoverMismatch refuses a hand-over whose descriptor is not the one recorded.
+            name: HandoverMismatch
+            private: "service/proc/service: a descriptor the hand-over names is absent or not the object fstat recorded; the fd field says which"
+            public: The supervisor's hand-over names a wrong descriptor
+            reason: HANDOVER_MISMATCH
+          - code: CodeReexecFailed
+            doc: ReexecFailed reports a re-exec the kernel refused.
+            name: ReexecFailed
+            private: "service/proc/service: execve of the image failed; the units stay frozen in the hand-over"
+            public: The supervisor could not execute itself again
+            reason: REEXEC_FAILED
+    types:
+      - doc: |-
+          CommandFlags are the prefixes of one Exec*= command line
+          (systemd.service(5), Table 2), as bits.
+        methods:
+          - doc: String returns the prefixes the flags stand for, in the order "@-:+!|".
+            name: String
+            out:
+              - type: string
+            recv: value
+          - doc: Privileged reports whether the command asks for "+" or "!".
+            name: Privileged
+            out:
+              - type: bool
+            recv: value
+        name: CommandFlags
+        underlying: uint8
+      - doc: |-
+          CommandValue is one Exec*= command, its prefixes parsed: the program, the
+          argument vector it receives (argv[0] first) and the flags.
+        name: CommandValue
+        struct:
+          fields:
+            - doc: |-
+                Path is the program: an absolute path or a bare file name the engine
+                looks up. It is empty only for a FlagShell command that is the shell
+                alone.
+              name: Path
+              type: string
+            - doc: |-
+                Args is the program's argument vector, argv[0] first: Path, or the word
+                "@" named. $VAR and ${VAR} in it are expanded at spawn unless
+                FlagNoEnvExpand.
+              name: Args
+              type: "[]string"
+            - doc: Flags are the command's prefixes.
+              name: Flags
+              type: CommandFlags
+      - doc: |-
+          ExitStatusValue is a list of exit statuses — SuccessExitStatus=,
+          RestartPreventExitStatus=, RestartForceExitStatus= —: exit codes and
+          terminating signals. The zero is the empty set.
+        methods:
+          - doc: |-
+              Contains reports whether exit is in the set: its code when it exited, its
+              signal when one ended it.
+            in:
+              - name: exit
+                type: coreproc.ExitValue
+            name: Contains
+            out:
+              - type: bool
+            recv: value
+          - doc: Empty reports whether the set holds nothing.
+            name: Empty
+            out:
+              - type: bool
+            recv: value
+        name: ExitStatusValue
+        struct:
+          fields:
+            - doc: Codes are exit codes, 0–255.
+              name: Codes
+              type: "[]int"
+            - doc: Signals are terminating signals.
+              name: Signals
+              type: "[]coreproc.Signal"
+      - doc: |-
+          NotifyValue is one sd_notify message as a NotifySource hands it to the
+          engine: its assignments, who sent it, and the descriptors it carried.
+        name: NotifyValue
+        struct:
+          fields:
+            - doc: |-
+                Fields are the message's NAME=value assignments; a name given twice
+                keeps its last value.
+              name: Fields
+              type: map[string]string
+            - doc: |-
+                Files are the descriptors the message carried (SCM_RIGHTS), in order —
+                with MAINPIDFD=1 the first is the main process's pidfd —, which the
+                engine owns once Recv returned them: the store keeps those FDSTORE=1
+                hands it, and every other is closed when the message is taken, which is
+                what BARRIER=1 waits for.
+              name: Files
+              type: "[]*os.File"
+            - doc: PID is the sender's process, 0 when unknown.
+              name: PID
+              type: int
+            - doc: UID is the sender's user, -1 when unknown.
+              name: UID
+              type: int
+            - doc: |-
+                Verified is true when the kernel named PID (and UID, when known): a
+                message whose sender is not verified is dropped.
+              name: Verified
+              type: bool
+      - doc: |-
+          StateValue is a unit at one instant — the level a consumer resynchronises
+          on: what Unit.State returns and what every EventValue carries.
+        name: StateValue
+        struct:
+          fields:
+            - doc: At is when the snapshot was published, on the unit's clock.
+              name: At
+              type: time.Time
+            - doc: Changed is when State last changed.
+              name: Changed
+              type: time.Time
+            - doc: Name is the unit's name.
+              name: Name
+              type: string
+            - doc: Status is the last STATUS= the unit sent.
+              name: Status
+              type: string
+            - doc: BusError is the last BUSERROR= the unit sent.
+              name: BusError
+              type: string
+            - doc: VarlinkError is the last VARLINKERROR= the unit sent.
+              name: VarlinkError
+              type: string
+            - doc: ExitStatusText is the last EXIT_STATUS= the unit sent, informative only.
+              name: ExitStatusText
+              type: string
+            - doc: MainExit is the main process's last exit, valid when MainExited.
+              name: MainExit
+              type: coreproc.ExitValue
+            - doc: |-
+                Generation grows by one with every snapshot published; two events whose
+                generations are not consecutive have lost the ones between.
+              name: Generation
+              type: uint64
+            - doc: Dropped is how many events the unit's subscriptions have dropped.
+              name: Dropped
+              type: uint64
+            - doc: |-
+                NotifyRefused is how many notifications were refused: an unverified or
+                unadmitted sender, a MAINPID= that could not be accepted.
+              name: NotifyRefused
+              type: uint64
+            - doc: |-
+                FDStoreRefused is how many descriptors FDSTORE=1 handed that the store
+                refused and closed: past FileDescriptorStoreMax=, or to a unit without a
+                store.
+              name: FDStoreRefused
+              type: uint64
+            - doc: |-
+                FDStoreDiscarded is how many stored descriptors were closed because the
+                unit no longer runs what stored them — another ExecStart=, user or
+                group.
+              name: FDStoreDiscarded
+              type: uint64
+            - doc: MainPID is the main process, 0 when there is none.
+              name: MainPID
+              type: int
+            - doc: ControlPID is the command running, 0 when there is none.
+              name: ControlPID
+              type: int
+            - doc: Errno is the last ERRNO= the unit sent.
+              name: Errno
+              type: int
+            - doc: FDStore is how many descriptors the unit's store holds.
+              name: FDStore
+              type: int
+            - doc: |-
+                Restarts is how many automatic restarts ran since the last start the
+                caller asked for or RESTART_RESET=1.
+              name: Restarts
+              type: uint32
+            - doc: State is where the unit stands.
+              name: State
+              type: State
+            - doc: Sub is the step it is at.
+              name: Sub
+              type: Sub
+            - doc: Result is why its last run ended, or ResultSuccess while it runs well.
+              name: Result
+              type: Result
+            - doc: ReloadResult is how its last reload ended.
+              name: ReloadResult
+              type: Result
+            - doc: NotifyAccess is the effective NotifyAccess=, NOTIFYACCESS= included.
+              name: NotifyAccess
+              type: NotifyAccess
+            - doc: MainExited is true once the main process's exit is known.
+              name: MainExited
+              type: bool
+      - doc: |-
+          StoredFDValue is one descriptor of a unit's store (FileDescriptorStoreMax=,
+          FDSTORE=1), as Unit.FDStore lists it — systemd-analyze fdstore's columns:
+          what it is, never the descriptor itself.
+        name: StoredFDValue
+        struct:
+          fields:
+            - doc: Name is its FDNAME=, "stored" when the message named none.
+              name: Name
+              type: string
+            - doc: Device is the device of the object it refers to, as fstat names it.
+              name: Device
+              type: uint64
+            - doc: Inode is the inode of the object it refers to, as fstat names it.
+              name: Inode
+              type: uint64
+            - doc: Mode is the object's type and permissions, as fstat reads them.
+              name: Mode
+              type: os.FileMode
+            - doc: |-
+                Poll is true while a hangup or an error on it removes it from the store:
+                FDPOLL=0 clears it, and so does an object epoll cannot watch.
+              name: Poll
+              type: bool
+      - doc: |-
+          EventValue is one published change of a unit: the snapshot after it and the
+          state before it.
+        name: EventValue
+        struct:
+          fields:
+            - doc: StateValue is the unit after the change.
+              embedded: true
+              type: StateValue
+            - doc: Previous is the state before the change.
+              name: Previous
+              type: State
+            - doc: PreviousSub is the step before the change.
+              name: PreviousSub
+              type: Sub
+      - doc: |-
+          Type is a service's Type= — how the engine learns that its start-up is
+          complete. The zero, TypeDefault, is systemd's: dbus when the unit has a
+          BusName=, else simple when it has an ExecStart=, oneshot when it has none.
+        methods:
+          - doc: |-
+              String returns the Type= spelling ("notify-reload"), "" for TypeDefault, or
+              "type(N)" for a value no constant names.
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: Type
+        underlying: uint8
+      - doc: |-
+          Restart is a service's Restart= policy: which results of a run restart
+          it (systemd.service(5), Table 1). The zero is RestartNo.
+        methods:
+          - doc: String returns the Restart= spelling ("on-abnormal"), or "restart(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: Restart
+        underlying: uint8
+      - doc: |-
+          RestartMode is a service's RestartMode=: whether an automatic restart
+          passes through the failed state. The zero is RestartModeNormal.
+        methods:
+          - doc: String returns the RestartMode= spelling, or "restartmode(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: RestartMode
+        underlying: uint8
+      - doc: |-
+          KillMode is a service's KillMode=: which processes a stop signals. The
+          zero, KillModeDefault, is systemd's control-group for a unit whose Cgroup
+          is a CgroupUnit, process for any other (ADR 0214's S0g amendment).
+        methods:
+          - doc: |-
+              String returns the KillMode= spelling, "" for KillModeDefault, or
+              "killmode(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: KillMode
+        underlying: uint8
+      - doc: "ExitType is a service's ExitType=: what ends it. The zero is ExitTypeMain."
+        methods:
+          - doc: String returns the ExitType= spelling, or "exittype(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: ExitType
+        underlying: uint8
+      - doc: |-
+          NotifyAccess is a service's NotifyAccess=: whose sd_notify messages the
+          engine reads. The zero is NotifyAccessNone, which the engine reads as
+          NotifyAccessMain for a notify type, a watchdog or a descriptor store, as
+          systemd does.
+        methods:
+          - doc: String returns the NotifyAccess= spelling, or "notifyaccess(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: NotifyAccess
+        underlying: uint8
+      - doc: |-
+          TimeoutMode is TimeoutStartFailureMode= or TimeoutStopFailureMode=: what a
+          start or a stop that timed out does. The zero is TimeoutTerminate.
+        methods:
+          - doc: String returns the failure mode's spelling, or "timeoutmode(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: TimeoutMode
+        underlying: uint8
+      - doc: |-
+          OOMPolicy is a service's OOMPolicy=: what an OOM kill in the unit's cgroup
+          does. The zero, OOMPolicyDefault, is systemd's: stop, continue under
+          Delegate=. Any other value needs a Cgroup that is a CgroupUnit.
+        methods:
+          - doc: |-
+              String returns the OOMPolicy= spelling, "" for the default, or
+              "oompolicy(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: OOMPolicy
+        underlying: uint8
+      - doc: |-
+          Preserve is a service's FileDescriptorStorePreserve= (S0d). The zero is
+          PreserveRestart, systemd's default.
+        methods:
+          - doc: String returns the FileDescriptorStorePreserve= spelling, or "preserve(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: Preserve
+        underlying: uint8
+      - doc: |-
+          Toggle is a boolean directive whose systemd default is yes — SendSIGKILL=,
+          GuessMainPID= — so that its Go zero can be that default. The zero is
+          ToggleDefault.
+        methods:
+          - doc: On reports whether the toggle is yes, def standing for ToggleDefault.
+            in:
+              - name: def
+                type: bool
+            name: "On"
+            out:
+              - type: bool
+            recv: value
+        name: Toggle
+        underlying: uint8
+      - doc: |-
+          ProtectSystem is ProtectSystem=: which trees of the file system a unit's
+          processes see read-only. The zero is ProtectSystemNo.
+        methods:
+          - doc: String returns the ProtectSystem= spelling ("full"), or "protectsystem(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: ProtectSystem
+        underlying: uint8
+      - doc: |-
+          PrivateTmp is PrivateTmp=: whether a unit's processes get a /tmp and a
+          /var/tmp of their own. The zero is PrivateTmpNo.
+        methods:
+          - doc: String returns the PrivateTmp= spelling ("disconnected"), or "privatetmp(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: PrivateTmp
+        underlying: uint8
+      - doc: |-
+          BindPathValue is one entry of BindPaths= or BindReadOnlyPaths=: Source, a
+          path of the host, bound recursively onto Target, a path of the unit's view
+          — beneath its RootDirectory= when it has one.
+        name: BindPathValue
+        struct:
+          fields:
+            - doc: Source is the absolute file or directory bound.
+              name: Source
+              type: string
+            - doc: Target is where it appears, absolute; empty is Source. It must exist.
+              name: Target
+              type: string
+      - doc: |-
+          TemporaryFileSystemValue is one entry of TemporaryFileSystem=: an empty
+          tmpfs, mode 0755, nosuid and nodev, mounted on Path in the unit's view.
+        name: TemporaryFileSystemValue
+        struct:
+          fields:
+            - doc: Path is the absolute directory the tmpfs is mounted on; it must exist.
+              name: Path
+              type: string
+            - doc: ReadOnly is the ":ro" option.
+              name: ReadOnly
+              type: bool
+      - doc: |-
+          SystemCallFilterValue is SystemCallFilter=: the calls a unit's processes
+          may make, or with Deny — systemd's "~" — the ones they may not. The zero,
+          no call named, is no filter.
+        name: SystemCallFilterValue
+        struct:
+          fields:
+            - doc: |-
+                Syscalls are the calls by their Linux names ("mkdirat"); the @group names
+                are the caller's to expand.
+              name: Syscalls
+              type: "[]string"
+            - doc: "Deny inverts the list: the calls named are refused, every other passes."
+              name: Deny
+              type: bool
+      - doc: |-
+          State is where a unit stands, the nine states a supervisor reports. Its
+          ActiveState is systemd's coarser reading of it. The zero is
+          StateInactive.
+        methods:
+          - doc: String returns the state's spelling ("auto-restart"), or "state(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+          - doc: |-
+              ActiveState returns systemd's ActiveState for s: StateAutoRestart is
+              "activating", StateExited "active", StateConditionSkipped "inactive".
+            name: ActiveState
+            out:
+              - type: string
+            recv: value
+        name: State
+        underlying: uint8
+      - doc: Sub is the step a unit is at — systemd's SubState. The zero is SubDead.
+        methods:
+          - doc: String returns systemd's SubState spelling ("stop-sigterm"), or "sub(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: Sub
+        underlying: uint8
+      - doc: |-
+          Result is why a run of a unit ended — systemd's Result=, which Restart=
+          reads (systemd.service(5), Table 1). The zero is ResultSuccess.
+        methods:
+          - doc: String returns systemd's Result= spelling ("exit-code"), or "result(N)".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: Result
+        underlying: uint8
+  - doc: |-
+      Package service is the engine of a service unit's life cycle (ADR 0214):
+      systemd.service(5)'s state machine for one service — Type=, the Exec*=
+      commands and their prefixes, the timeouts and their failure modes, the
+      watchdog, the notification protocol, Restart=, RestartSec= on the
+      kernel's backoff curve, the start limiter, the stop's escalation.
+
+      # One actor over a pure reducer
+
+      A Unit is one goroutine reading one channel of events: a caller's request,
+      a process's end, a timer's fire, a notification. The decision is a pure
+      function, reduce(model, event) → (model', effects), which reads nothing
+      but its arguments; the actor runs the effects — a spawn, a signal, a
+      timer, an answer, a published snapshot — and hands the outcome of a spawn
+      or an adoption back as the next event. A recorded sequence of events
+      replays to the same states: Table 1 of systemd.service(5) is tested so.
+
+      # What a consumer sees
+
+      State is the unit's level — its state, step, result, processes and
+      generation. Subscribe hands out a bounded queue the actor never waits on:
+      a full queue drops the newest event and counts it, and the generation
+      shows the gap. Start, Stop, Restart and Reload return when their job is
+      done; Fail is a failed health check, the watchdog's path; ResetFailed is
+      reset-failed; Close ends the unit.
+
+      # A daemon that forks
+
+      Type=forking runs ExecStart= as a command and, once it exited cleanly,
+      adopts the daemon it left as the main process through the Attacher: the
+      PID PIDFile= names, read by the Attacher alone and retried until
+      TimeoutStartSec=, or the one process of the cgroup whose parent is not in
+      it (GuessMainPID=). An adopted process's end has no status, which the
+      reducer reads as a clean end.
+
+      # The descriptor store
+
+      FileDescriptorStoreMax= keeps what a service hands with FDSTORE=1 — named
+      by FDNAME=, a duplicate of a stored object dropped, past the maximum
+      closed and counted — in a table the shell owns, and hands it to the next
+      ExecStart= alone through proc/systemd/listen, never to a command. A
+      hangup removes a descriptor unless FDPOLL=0, FDSTOREREMOVE=1 removes a
+      name, FileDescriptorStorePreserve= says when the table is released, and
+      a store the unit no longer matches — its ExecStart=, user or group — is
+      closed whole.
+
+      # One instance per connection
+
+      SpawnInstance is Accept=yes's primitive: a unit of the template per
+      accepted connection, handed it as LISTEN_FDS=1 at fd 3 with its own
+      LISTEN_PID, ending on its own — the connection closed — once its run is
+      over. How many, and their names, are the caller's.
+
+      # The unit's control group
+
+      A Cgroup that is also a CgroupUnit — the group proc/cgroup makes on
+      Linux — runs the cgroup modes: every process of the unit is spawned into
+      it; a stop signals every process in it (KillMode=control-group, the
+      default there) or kills them all at the kill (mixed) — through Signal,
+      never cgroup.kill, after which Linux 6.12 kills every child cloned into
+      the group — and waits for it to be empty; ExitType=cgroup ends the unit
+      with the group's last process; Delegate= hands the group to the
+      service's user at each start and removes the groups the service made
+      beneath it at each end; OOMPolicy= acts on the OOM kills its memory
+      events count. Its state is watched, and read again whenever the reducer
+      decides on it, so an event that arrives late never ends a unit early.
+
+      # Type=dbus
+
+      A Type=dbus unit is up once its main process runs and its BusName= is
+      owned on the bus Config.BusWatcher follows — proc/dbus's Conn is one. The
+      watch begins at the first start, before the main process is spawned: the
+      owner it finds then is the level, and only a change the bus announces
+      after the spawn makes the unit ready, as systemd waits for one. A name the
+      bus announces lost while the unit runs stops it at once — ExecStop=, then
+      the signals; exited with RemainAfterExit= —; a unit that comes up again
+      without its name, lost while ExecStartPost= or a reload ran, is given two
+      seconds to own it (running-revalidating) before it is stopped, as
+      systemd 262 gives it. Linux only: Type=dbus is DIRECTIVE_UNSUPPORTED
+      elsewhere.
+
+      # The sandbox
+
+      The confinement directives of systemd.exec(5) — ProtectSystem=,
+      PrivateTmp=, ReadOnlyPaths=, BindPaths=, TemporaryFileSystem=,
+      RootDirectory=, the Private…= namespaces, ProtectHostname=,
+      NoNewPrivileges=, the capability sets, SecureBits= and the system call
+      filter — are resolved by New into one coreproc.SandboxValue added to
+      Spec's, which proc/exec applies before each command's program runs: on
+      Linux amd64 and arm64, DIRECTIVE_UNSUPPORTED elsewhere. A "+" command
+      runs without it, a "!" one keeps it; RootDirectoryStartOnly= gives the
+      root to ExecStart= alone. A sandbox that cannot be applied fails the
+      start with START_FAILED wrapping SANDBOX_FAILED (the result exit-code)
+      or SANDBOX_UNAVAILABLE (resources); a sandboxed unit's uid 0 names no
+      MAINPID= without a cgroup, and its store is keyed by its sandbox too.
+
+      # What a later issue brings
+
+      The supervisor's hand-over (S0h) builds on the model, which is plain
+      data.
+    functions:
+      - doc: |-
+          NewAttacher is the Attacher over proc/exec (kitsunium/sdk#729): AttachPID
+          adopts with exec.Attach, AttachPIDFile reads the file with exec.AttachPIDFile
+          bounded by scope — the cgroup and the users a process named by a PID file
+          nobody but root or this process's user vouches for must lie in; the unit's
+          own cgroup and user, typically, the cgroup as /proc/<pid>/cgroup names it:
+          proc/cgroup's Membership turns a group's directory into that path. The
+          processes it returns are held through a
+          pidfd on Linux, through kqueue knotes on darwin and the BSDs, and are not
+          the engine's children: their Wait returns STATUS_UNKNOWN once they are gone,
+          which the engine reads as it reads EXIT_UNKNOWN. Off Linux a scope naming a
+          cgroup is ADOPTION_REFUSED (there is none to lie in); each method is
+          UNSUPPORTED_PLATFORM on illumos, Solaris and Windows.
+        in:
+          - name: scope
+            type: coreproc.AttachValue
+        name: NewAttacher
+        out:
+          - type: coresvc.Attacher
+      - doc: |-
+          ListenNotify opens an sd_notify socket for one unit, over proc/systemd's
+          listener: the sender's PID and user are the kernel's (SO_PASSCRED on Linux,
+          LOCAL_CREDS_PERSISTENT on FreeBSD). It is UNSUPPORTED_PLATFORM elsewhere,
+          where no socket names its sender. The unit that takes it in Config.Notify
+          closes it.
+        name: ListenNotify
+        out:
+          - type: coresvc.NotifySource
+          - type: error
+      - doc: |-
+          NewUnit checks cfg, resolves its defaults and starts the unit's actor. The
+          unit is inactive: NewUnit spawns nothing, Start does. A configuration the
+          engine refuses is CONFIG_INVALID, DIRECTIVE_UNSUPPORTED or
+          PRIVILEGE_REFUSED, the directive named in the error's fields. cfg is copied;
+          the unit owns cfg.Notify from here on, refused or not.
+
+          Goroutine lifecycle: the actor, and the notification reader when cfg.Notify
+          is set, run until Close; Close joins them.
+        in:
+          - name: cfg
+            type: "*Config"
+        name: NewUnit
+        out:
+          - type: "*Unit"
+          - type: error
+      - doc: |-
+          SpawnInstance makes the unit of one accepted connection — systemd.socket(5)'s
+          Accept=yes — and starts it: a copy of template named instance, which owns
+          conn from the call on. Every ExecStart= process of it is handed conn at fd
+          3 — after the sockets template.Spec already activates —, LISTEN_FDS
+          counting it, LISTEN_FDNAMES naming it "connection", LISTEN_PID the
+          process's own; no other command gets it. The instance runs through the
+          same reducer as any unit, Restart= included, and ends on its own once its
+          run is over — dead, no job left, no restart due —: conn closed, its
+          goroutines joined, every later call UNIT_CLOSED. The instance's name, the
+          template and the limits on connections are the caller's.
+
+          The unit is returned with Start's error once it was made: START_FAILED
+          (the connection then closed, the unit ended, State saying why), or ctx's
+          error, the start going on. A configuration NewUnit refuses, a nil conn
+          (CONFIG_INVALID) or Windows (DIRECTIVE_UNSUPPORTED: no descriptor is
+          handed there) return no unit, conn and template.Notify closed. A
+          template.Notify is the instance's, as NewUnit takes it: each instance needs
+          its own. So does a template.Cgroup that is a coresvc.CgroupUnit: its modes
+          signal and watch the whole group, and instances sharing one would stop
+          one another. A Type=dbus template is CONFIG_INVALID naming Accept: its
+          instances would share one bus name, which systemd refuses to a second
+          unit.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: template
+            type: "*Config"
+          - name: instance
+            type: string
+          - name: conn
+            type: "*os.File"
+        name: SpawnInstance
+        out:
+          - type: "*Unit"
+          - type: error
+      - doc: |-
+          Freeze hands units over (S0h, kitsunium/sdk#738): each unit's actor ends
+          between two events without stopping a process — its model written down,
+          versioned, its processes, its descriptor store, an instance's connection
+          and the notification socket ListenNotify made kept in the hand-over —, and
+          the unit is closed: every later call, and every caller still waiting for
+          a job, is UNIT_CLOSED. The jobs themselves are in the model and go on in
+          the unit Resume makes. A unit closing or closed is UNIT_CLOSED and Freeze
+          stops there: the hand-over holds the units frozen before it, which the
+          caller resumes or closes. Off Linux it is UNSUPPORTED_PLATFORM.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: units
+            type: "[]*Unit"
+        name: Freeze
+        out:
+          - type: "*HandoverState"
+          - type: error
+      - doc: NewHandoverState is a hand-over holding no unit yet, what Freeze fills.
+        name: NewHandoverState
+        out:
+          - type: "*HandoverState"
+      - doc: |-
+          Resume makes the unit cfg names from the state h holds for it, as NewUnit
+          makes one from nothing: the model as it was frozen — its jobs, Restart=
+          due, the start limiter's count, the store —, each process held again (a
+          child through proc/exec's Reclaim, which reads its real status; an
+          adopted one through cfg.Attacher, checked against the handle the outgoing
+          image passed), each timer armed for its deadline, the group's and the bus
+          name's watches begun again — the bus's first answer a lookup, never a
+          loss —, the store's descriptors watched again, the notification socket
+          kept at its path. A process that cannot be held again is read as gone,
+          its status unknown. cfg is resolved as NewUnit resolves it, its refusals
+          the same; a cfg.Notify is closed when the hand-over carries the socket.
+          A state h does not hold, or cannot read, is HANDOVER_INVALID. Off Linux
+          it is UNSUPPORTED_PLATFORM.
+        in:
+          - name: cfg
+            type: "*Config"
+          - name: h
+            type: "*HandoverState"
+        name: Resume
+        out:
+          - type: "*Unit"
+          - type: error
+      - doc: |-
+          OpenImage opens the program a re-exec runs, O_PATH and close-on-exec,
+          as a supervisor does at its start: the descriptor names that file
+          whatever later happens to its path. Linux amd64 and arm64;
+          UNSUPPORTED_PLATFORM elsewhere.
+        in:
+          - name: path
+            type: string
+        name: OpenImage
+        out:
+          - type: "*os.File"
+          - type: error
+      - doc: |-
+          Reexec executes image — OpenImage's descriptor — again in this process,
+          with argv and env, handing it h: the payload is written to a sealed
+          memfd, every descriptor of the process is sealed close-on-exec, then,
+          under syscall.ForkLock, close-on-exec is lifted on the payload and on
+          h's descriptors alone and the image executed. The process keeps its PID,
+          so every child stays its child. It returns only when the kernel refused:
+          REEXEC_FAILED, the descriptors close-on-exec again, h unchanged — its
+          units resumed or closed by the caller. Linux amd64 and arm64;
+          UNSUPPORTED_PLATFORM elsewhere.
+        in:
+          - name: h
+            type: "*HandoverState"
+          - name: argv
+            type: "[]string"
+          - name: image
+            type: "*os.File"
+          - name: env
+            type: "[]string"
+        name: Reexec
+        out:
+          - type: error
+      - doc: |-
+          TakeHandover reads the hand-over the outgoing image left this one, once,
+          before anything else spawns: nil when there is none. The payload's
+          descriptor must be a memfd sealed whole, its version one this image
+          reads, its sum right; every descriptor it names is checked by fstat —
+          type, device, inode — and made close-on-exec again, and any other
+          descriptor the exec left open is closed. A hand-over refused —
+          HANDOVER_INVALID, HANDOVER_MISMATCH — leaves nothing behind: every
+          descriptor it carried is closed and every child this process has is
+          stopped in order (SIGTERM, grace, SIGKILL) and reaped, so none is left
+          unsupervised; the pid field names each one stopped. Linux amd64 and
+          arm64; nil elsewhere, where no image hands over.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: grace
+            type: time.Duration
+        name: TakeHandover
+        out:
+          - type: "*HandoverState"
+          - type: error
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+      coresvc: github.com/kitsunium/sdk/internal/core/proc/service
+    path: github.com/kitsunium/sdk/internal/service/proc/service
+    types:
+      - doc: |-
+          Config is one service unit: systemd.service(5)'s directives as typed
+          values, the template every command of the unit is spawned from, and the
+          ports the engine reaches the world through. A field's zero is the
+          directive's systemd default; coresvc.Zero and coresvc.Infinity are
+          systemd's literal 0 and infinity for a duration (ADR 0214 §9).
+        name: Config
+        struct:
+          fields:
+            - doc: Spawner starts the unit's processes. Nil is proc/exec's Start.
+              name: Spawner
+              type: coresvc.Spawner
+            - doc: |-
+                Attacher adopts a process the engine did not start: a MAINPID=, a
+                Type=forking daemon. Nil refuses every MAINPID= naming one, and
+                Type=forking.
+              name: Attacher
+              type: coresvc.Attacher
+            - doc: |-
+                Cgroup is the unit's control group. Nil is none: NotifyAccess=exec and
+                all are refused, MAINPID= is accepted from a privileged sender only, and
+                a Type=forking unit needs PIDFile=. One that is also a
+                coresvc.CgroupMembers lets such a unit guess its main process. One that
+                is also a coresvc.CgroupUnit — proc/cgroup's Linux group — runs the
+                cgroup modes: every process is spawned into it, KillMode= defaults to
+                control-group, ExitType=cgroup, Delegate= and OOMPolicy= run, and its
+                emptying ends a unit that was up on its members alone.
+              name: Cgroup
+              type: coresvc.CgroupKill
+            - doc: |-
+                Notify is the unit's sd_notify socket, which the unit owns and closes.
+                Nil is none: NOTIFY_SOCKET is not set, and a notify type, a watchdog or
+                a NotifyAccess= other than none is refused.
+              name: Notify
+              type: coresvc.NotifySource
+            - doc: |-
+                BusWatcher follows who owns BusName= on the bus: a Type=dbus unit needs
+                one, which the unit watches through from its first start to Close.
+                proc/dbus's Conn is one; the caller closes it after the unit. Every other
+                type ignores it.
+              name: BusWatcher
+              type: coresvc.BusWatcher
+            - doc: Clock is what every wait runs on. Nil is the system clock.
+              name: Clock
+              type: coresvc.Clock
+            - doc: |-
+                CapabilityBoundingSet is CapabilityBoundingSet=: the capabilities the
+                unit's processes keep in their bounding set, bit n capability n — every
+                other one is dropped, and cut from what root holds. Nil leaves the set as
+                inherited; systemd's "~" is the complement, the caller's to compute.
+              name: CapabilityBoundingSet
+              type: "*uint64"
+            - doc: Name names the unit in its snapshots and its errors. Required.
+              name: Name
+              type: string
+            - doc: |-
+                PIDFile is PIDFile=: for Type=forking, the absolute, clean path the daemon
+                writes its PID to, read through Attacher.AttachPIDFile once the process
+                the engine started exited — again every 100 ms, until TimeoutStartSec=,
+                while it cannot be read. Every other type ignores it, as systemd does,
+                and the engine never removes it.
+              name: PIDFile
+              type: string
+            - doc: |-
+                BusName is BusName=: the well-known name a Type=dbus unit is up on — owned
+                once its main process runs, lost to stop it. A unit with one and no Type=
+                is Type=dbus, as systemd reads it. Every other type accepts it and does
+                not watch it: systemd adopts the owner's PID as the main process when it
+                knows none, which the engine does not (ADR 0214's S0e amendment).
+              name: BusName
+              type: string
+            - doc: |-
+                Shell is the shell a "|" command runs through. Empty is /bin/sh: the
+                user database's shell is the caller's to look up.
+              name: Shell
+              type: string
+            - doc: |-
+                RootDirectory is RootDirectory=: the absolute directory every command
+                pivots into (pivot_root(2)), in a mount namespace, the old root detached;
+                a command's path must then hold a '/', and lies inside it. The paths of
+                ProtectSystem=, PrivateTmp=, TemporaryFileSystem= and BindPaths='s
+                targets are beneath it; ReadOnlyPaths= and BindPaths='s sources are the
+                host's. With RootDirectoryStartOnly it is ExecStart='s alone.
+              name: RootDirectory
+              type: string
+            - doc: |-
+                Spec is the template every command is spawned from: its working
+                directory, environment, credentials, process group, limits, cgroup and
+                standard streams. Its Path and Args are the command's. With a
+                coresvc.CgroupUnit its CgroupPath is the unit's group when empty, and
+                must lie within it. Its Sandbox is the base the sandbox directives add
+                to — its namespaces, its mounts first —; a "+" command runs without any
+                sandbox, a "!" one keeps it and drops the credentials alone.
+              name: Spec
+              type: coreproc.Spec
+            - doc: |-
+                ExecCondition is ExecCondition=: 1 to 254 skips the unit, 255 or an
+                abnormal end fails it.
+              name: ExecCondition
+              type: "[]coresvc.CommandValue"
+            - doc: ExecStartPre is ExecStartPre=.
+              name: ExecStartPre
+              type: "[]coresvc.CommandValue"
+            - doc: |-
+                ExecStart is ExecStart=: one command, several for TypeOneshot, none for a
+                TypeOneshot with RemainAfterExit and an ExecStop.
+              name: ExecStart
+              type: "[]coresvc.CommandValue"
+            - doc: ExecStartPost is ExecStartPost=.
+              name: ExecStartPost
+              type: "[]coresvc.CommandValue"
+            - doc: ExecReload is ExecReload=.
+              name: ExecReload
+              type: "[]coresvc.CommandValue"
+            - doc: ExecReloadPost is ExecReloadPost=, after a successful reload.
+              name: ExecReloadPost
+              type: "[]coresvc.CommandValue"
+            - doc: ExecStop is ExecStop=, after a successful start only.
+              name: ExecStop
+              type: "[]coresvc.CommandValue"
+            - doc: ExecStopPost is ExecStopPost=.
+              name: ExecStopPost
+              type: "[]coresvc.CommandValue"
+            - doc: |-
+                ReadOnlyPaths is ReadOnlyPaths=: absolute paths of the host made
+                read-only, recursively, in the unit's mount namespace.
+              name: ReadOnlyPaths
+              type: "[]string"
+            - doc: |-
+                BindPaths is BindPaths=: paths of the host bound, recursively and
+                writable, onto paths of the unit's view, which must exist.
+              name: BindPaths
+              type: "[]coresvc.BindPathValue"
+            - doc: "BindReadOnlyPaths is BindReadOnlyPaths=: as BindPaths, read-only."
+              name: BindReadOnlyPaths
+              type: "[]coresvc.BindPathValue"
+            - doc: |-
+                TemporaryFileSystem is TemporaryFileSystem=: an empty tmpfs, mode 0755,
+                on each directory of the unit's view, which must exist.
+              name: TemporaryFileSystem
+              type: "[]coresvc.TemporaryFileSystemValue"
+            - doc: |-
+                SystemCallArchitectures is SystemCallArchitectures=: "native" is the one
+                identifier taken, and only beside a SystemCallFilter=, whose filter kills
+                a call of any other ABI — x32 included — whatever this says.
+              name: SystemCallArchitectures
+              type: "[]string"
+            - doc: SuccessExitStatus is SuccessExitStatus=.
+              name: SuccessExitStatus
+              type: coresvc.ExitStatusValue
+            - doc: RestartPreventExitStatus is RestartPreventExitStatus=.
+              name: RestartPreventExitStatus
+              type: coresvc.ExitStatusValue
+            - doc: RestartForceExitStatus is RestartForceExitStatus=.
+              name: RestartForceExitStatus
+              type: coresvc.ExitStatusValue
+            - doc: |-
+                SystemCallFilter is SystemCallFilter=: a seccomp filter of named calls, an
+                allow-list, or a deny-list with Deny; a call it refuses kills the process,
+                unless SystemCallErrorNumber=. The names are taken as given: an
+                allow-list's implicit @default, as every @group, is the caller's to expand.
+              name: SystemCallFilter
+              type: coresvc.SystemCallFilterValue
+            - doc: RestartDelay is RestartSec=; zero is 100 ms.
+              name: RestartDelay
+              type: time.Duration
+            - doc: RestartMaxDelay is RestartMaxDelaySec=; zero is infinity.
+              name: RestartMaxDelay
+              type: time.Duration
+            - doc: RestartRandomizedDelay is RestartRandomizedDelaySec=.
+              name: RestartRandomizedDelay
+              type: time.Duration
+            - doc: |-
+                TimeoutStart is TimeoutStartSec=; zero is 90 s, infinity for a
+                TypeOneshot.
+              name: TimeoutStart
+              type: time.Duration
+            - doc: TimeoutStop is TimeoutStopSec=; zero is 90 s.
+              name: TimeoutStop
+              type: time.Duration
+            - doc: TimeoutAbort is TimeoutAbortSec=; zero is TimeoutStop.
+              name: TimeoutAbort
+              type: time.Duration
+            - doc: RuntimeMax is RuntimeMaxSec=; zero is infinity.
+              name: RuntimeMax
+              type: time.Duration
+            - doc: RuntimeRandomizedExtra is RuntimeRandomizedExtraSec=.
+              name: RuntimeRandomizedExtra
+              type: time.Duration
+            - doc: Watchdog is WatchdogSec=; zero is off.
+              name: Watchdog
+              type: time.Duration
+            - doc: |-
+                AmbientCapabilities is AmbientCapabilities=: the capabilities raised in
+                the ambient set, bit n capability n, which a process that is not root
+                keeps across execve; they must lie within CapabilityBoundingSet=.
+              name: AmbientCapabilities
+              type: uint64
+            - doc: |-
+                StartLimitInterval is StartLimitIntervalSec=; zero is 10 s, coresvc.Zero
+                no limit, coresvc.Infinity a window that never ends.
+              name: StartLimitInterval
+              type: time.Duration
+            - doc: StartLimitBurst is StartLimitBurst=; zero is 5.
+              name: StartLimitBurst
+              type: int
+            - doc: RestartSteps is RestartSteps=.
+              name: RestartSteps
+              type: int
+            - doc: |-
+                FileDescriptorStoreMax is FileDescriptorStoreMax=: how many descriptors
+                FDSTORE=1 may keep in the unit's store, handed back to every ExecStart=
+                process at fd 3 on — after the sockets Spec activates, newest first —
+                and $FDSTORE set to it for every command; zero is no store. It needs
+                Notify, implies NotifyAccess=main, and is Linux's only: no other
+                platform's notify socket carries descriptors.
+              name: FileDescriptorStoreMax
+              type: int
+            - doc: |-
+                SystemCallErrorNumber is SystemCallErrorNumber=: the errno, 1 to 4095, a
+                call SystemCallFilter= refuses fails with; zero kills the process,
+                systemd's default.
+              name: SystemCallErrorNumber
+              type: int
+            - doc: KillSignal is KillSignal=; zero is SIGTERM (SIGKILL on Windows).
+              name: KillSignal
+              type: coreproc.Signal
+            - doc: RestartKillSignal is RestartKillSignal=; zero is KillSignal.
+              name: RestartKillSignal
+              type: coreproc.Signal
+            - doc: FinalKillSignal is FinalKillSignal=; zero is SIGKILL.
+              name: FinalKillSignal
+              type: coreproc.Signal
+            - doc: WatchdogSignal is WatchdogSignal=; zero is SIGABRT (SIGKILL on Windows).
+              name: WatchdogSignal
+              type: coreproc.Signal
+            - doc: ReloadSignal is ReloadSignal=; zero is SIGHUP.
+              name: ReloadSignal
+              type: coreproc.Signal
+            - doc: |-
+                SecureBits is SecureBits=: the securebits set, as linux/securebits.h
+                numbers them (noroot 1<<0, keep-caps 1<<4, …); zero sets none.
+              name: SecureBits
+              type: uint32
+            - doc: Type is Type=.
+              name: Type
+              type: coresvc.Type
+            - doc: Restart is Restart=.
+              name: Restart
+              type: coresvc.Restart
+            - doc: RestartMode is RestartMode=.
+              name: RestartMode
+              type: coresvc.RestartMode
+            - doc: TimeoutStartFailureMode is TimeoutStartFailureMode=.
+              name: TimeoutStartFailureMode
+              type: coresvc.TimeoutMode
+            - doc: TimeoutStopFailureMode is TimeoutStopFailureMode=.
+              name: TimeoutStopFailureMode
+              type: coresvc.TimeoutMode
+            - doc: NotifyAccess is NotifyAccess=.
+              name: NotifyAccess
+              type: coresvc.NotifyAccess
+            - doc: |-
+                KillMode is KillMode=; its zero is control-group with a
+                coresvc.CgroupUnit, process without (ADR 0214's S0g amendment).
+              name: KillMode
+              type: coresvc.KillMode
+            - doc: ExitType is ExitType=; cgroup needs a coresvc.CgroupUnit.
+              name: ExitType
+              type: coresvc.ExitType
+            - doc: |-
+                OOMPolicy is OOMPolicy=: what an OOM kill in the cgroup does — stop by
+                default, continue under Delegate=. Continue, stop and kill need a
+                coresvc.CgroupUnit; kill sets memory.oom.group at each start.
+              name: OOMPolicy
+              type: coresvc.OOMPolicy
+            - doc: |-
+                FileDescriptorStorePreserve is FileDescriptorStorePreserve=: when the
+                store is released — PreserveRestart once the unit rests dead with no job
+                and no restart due, PreserveNo at every end of a run, PreserveYes at
+                Close only, PreserveOnSuccess at Close or once the unit is failed for
+                good. Close releases every store.
+              name: FileDescriptorStorePreserve
+              type: coresvc.Preserve
+            - doc: SendSIGKILL is SendSIGKILL=; its default is yes.
+              name: SendSIGKILL
+              type: coresvc.Toggle
+            - doc: |-
+                GuessMainPID is GuessMainPID=: for Type=forking without PIDFile=, the
+                main process is the one member of the Cgroup — a coresvc.CgroupMembers —
+                whose parent is not a member, when there is exactly one; no leaves the
+                main process unknown, the unit up while the cgroup has members. Every
+                other unit ignores it, as systemd does.
+              name: GuessMainPID
+              type: coresvc.Toggle
+            - doc: |-
+                ProtectSystem is ProtectSystem=: yes makes /usr read-only, and /boot and
+                /efi where they exist, full /etc too; strict is refused.
+              name: ProtectSystem
+              type: coresvc.ProtectSystem
+            - doc: |-
+                PrivateTmp is PrivateTmp=: disconnected mounts a tmpfs, mode 1777, on /tmp
+                and /var/tmp for each command; yes is refused.
+              name: PrivateTmp
+              type: coresvc.PrivateTmp
+            - doc: RemainAfterExit is RemainAfterExit=.
+              name: RemainAfterExit
+              type: bool
+            - doc: SendSIGHUP is SendSIGHUP=.
+              name: SendSIGHUP
+              type: bool
+            - doc: |-
+                SurviveFinalKillSignal is SurviveFinalKillSignal=: Close leaves the
+                unit's processes running.
+              name: SurviveFinalKillSignal
+              type: bool
+            - doc: |-
+                Delegate is Delegate=: at each start the unit's group is handed to the
+                user and the group Spec runs as, and at each end of a run the groups
+                the service made beneath it are removed. It needs a coresvc.CgroupUnit.
+              name: Delegate
+              type: bool
+            - doc: |-
+                NoNewPrivileges is NoNewPrivileges=: no execve of the unit's processes, or
+                of theirs, gains a privilege.
+              name: NoNewPrivileges
+              type: bool
+            - doc: |-
+                PrivateUsers is PrivateUsers=: a new user namespace, its root mapped to
+                the supervisor's effective uid and gid, one id wide, unless Spec's
+                Sandbox names the maps. A supervisor that is not root implies it beside
+                any other namespace, as systemd's per-user manager does.
+              name: PrivateUsers
+              type: bool
+            - doc: |-
+                PrivateNetwork is PrivateNetwork=: a new network namespace, with a
+                loopback alone.
+              name: PrivateNetwork
+              type: bool
+            - doc: |-
+                PrivatePIDs is PrivatePIDs=: a new PID namespace, each command its PID 1;
+                /proc is not mounted again. Type=forking refuses it, as systemd does.
+              name: PrivatePIDs
+              type: bool
+            - doc: |-
+                ProtectHostname is ProtectHostname=: a new UTS namespace — systemd's
+                private: the hostname changes there alone; filtering sethostname, as its
+                yes does, is SystemCallFilter='s.
+              name: ProtectHostname
+              type: bool
+            - doc: "PrivateIPC is PrivateIPC=: a new IPC namespace."
+              name: PrivateIPC
+              type: bool
+            - doc: |-
+                RootDirectoryStartOnly is RootDirectoryStartOnly=: RootDirectory= reaches
+                ExecStart= alone; every other command keeps the rest of the sandbox in the
+                host's view.
+              name: RootDirectoryStartOnly
+              type: bool
+            - doc: |-
+                AllowPrivilegedControl admits the "+" and "!" commands; false refuses
+                them (PRIVILEGE_REFUSED).
+              name: AllowPrivilegedControl
+              type: bool
+      - doc: |-
+          Unit is one service unit, driven by one actor over the pure reducer
+          (ADR 0214 §3). Build one with [NewUnit]. Its methods are safe for concurrent
+          use; Close ends it.
+        methods:
+          - doc: |-
+              Subscribe returns a channel that receives one EventValue per published
+              snapshot, and the function that ends the subscription and closes the
+              channel. The channel holds capacity events — 0 is 64, and the capacity is
+              held within 1 and 4096 —, and the unit never waits on it: when it is full
+              the newest event is dropped and counted in the unit's Dropped, and a
+              consumer that sees two events whose generations are not consecutive reads
+              State to resynchronise (ADR 0214 §4). The unit's end closes the channel; on
+              a closed unit it is closed already. cancel may be called more than once.
+            in:
+              - name: capacity
+                type: int
+            name: Subscribe
+            out:
+              - name: events
+                type: <-chan coresvc.EventValue
+              - name: cancel
+                type: func()
+            recv: pointer
+          - doc: |-
+              Start starts the unit, as systemctl start does, and returns once the start
+              job is done: nil when the unit is up — or, for a oneshot, ran to its end, or
+              its condition skipped it —, START_FAILED (its result in the fields) when it
+              failed or is restarting after a failure, START_LIMIT_HIT when the limiter
+              refused it, JOB_CANCELED when a stop replaced it. A unit up already returns
+              nil. When ctx ends first Start returns its error and the job goes on.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Start
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Stop stops the unit, as systemctl stop does — ExecStop=, the signals,
+              ExecStopPost= —, cancels a start running, and returns once the unit is dead.
+              The escalation runs on the unit's own deadlines: when ctx ends first Stop
+              returns its error and the stop goes on (ADR 0214 §7).
+            in:
+              - name: ctx
+                type: context.Context
+            name: Stop
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Restart stops the unit with RestartKillSignal=, then starts it, and returns
+              as Start does. A dead unit is started. The start counts against the limiter.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Restart
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Reload reloads an up unit — ExecReload=, the notify-reload protocol,
+              ExecReloadPost= — and returns once it ran: nil, RELOAD_FAILED with the
+              result, RELOAD_UNSUPPORTED when the unit has no mechanism, RELOAD_FAILED
+              naming the state when the unit is not up.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Reload
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Fail is a failed health check: WATCHDOG=trigger from outside. The unit is
+              aborted with WatchdogSignal= and its run ends with the result watchdog, so
+              Restart= decides as after a missed keep-alive. It returns once the abort
+              began; a unit not running ignores it.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Fail
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              ResetFailed is systemctl reset-failed: a failed or skipped unit is inactive
+              again, its restart counter and its start limiter are flushed.
+            in:
+              - name: ctx
+                type: context.Context
+            name: ResetFailed
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              State returns the unit's current snapshot: the level a consumer
+              resynchronises on after a gap in its events (ADR 0214 §4).
+            name: State
+            out:
+              - type: coresvc.StateValue
+            recv: pointer
+          - doc: |-
+              FDStore lists the unit's descriptor store in the order the next ExecStart=
+              receives it — newest first, as systemd hands it —, each by its name and
+              what it refers to; the descriptors stay the unit's.
+            name: FDStore
+            out:
+              - type: "[]coresvc.StoredFDValue"
+            recv: pointer
+          - doc: |-
+              Close ends the unit: the jobs canceled, the unit stopped as Stop does —
+              unless SurviveFinalKillSignal=, which leaves its processes running —, then
+              the actor ended, the notification socket closed and every subscription's
+              channel closed. When ctx ends first Close returns its error and the stop
+              goes on; a later Close waits again. Every call after Close is UNIT_CLOSED.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Unit
+        struct:
+          unexported: true
+      - doc: |-
+          HandoverState is what an outgoing image hands the incoming one (S0h):
+          each frozen unit's state, versioned, and the descriptors it keeps.
+          Freeze makes one, Reexec passes it, TakeHandover reads it, Resume takes
+          each unit from it. It is not safe for concurrent use.
+        methods:
+          - doc: Units names the units h holds that no Resume took yet.
+            name: Units
+            out:
+              - type: "[]string"
+            recv: pointer
+          - doc: |-
+              Close ends what no Resume took: each such unit's processes stopped in
+              order — SIGTERM, grace, SIGKILL — and reaped where they are children,
+              never left unsupervised, and every descriptor h still holds closed.
+              When ctx ends first the kills are sent at once.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: grace
+                type: time.Duration
+            name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: HandoverState
+        struct:
+          unexported: true
+  - doc: |-
+      Package service runs one service the way systemd.service(5) does (ADR 0214):
+      Type=, the Exec*= commands and their prefixes, the timeouts, the watchdog,
+      Restart= and the start limiter, as typed values in a Config, driven by one
+      actor per unit over a pure reducer.
+
+      	start, _ := service.ParseCommand([]string{"/usr/bin/daemon", "--foreground"})
+      	unit, err := service.NewUnit(&service.Config{
+      		Name:      "daemon",
+      		ExecStart: []service.Command{start},
+      		Restart:   service.RestartOnFailure,
+      	})
+      	err = unit.Start(ctx)      // up, or START_FAILED with its result
+      	events, cancel := unit.Subscribe(0) // every change, never waited on
+      	err = unit.Stop(ctx)        // ExecStop=, the signals, ExecStopPost=
+
+      # Directives are values
+
+      Config holds one typed field per directive; a field's zero is systemd's
+      default, and Zero and Infinity are systemd's literal 0 and infinity. The
+      unit-file syntax, the % specifiers, the graph between units and the
+      actions on the system (SuccessAction=, StartLimitAction=) are the
+      caller's. ParseCommand reads the prefixes "@-:+!|"; "+" and "!" run only
+      where Config.AllowPrivilegedControl allows them.
+
+      # Observing a unit
+
+      Unit.State is the level — state, step, result, processes, a generation
+      that grows with every change. Unit.Subscribe's queue is bounded and the
+      unit never waits on it: the newest event is dropped when it is full,
+      counted, and a consumer that sees a gap in the generations reads
+      Unit.State.
+
+      # A daemon that forks
+
+      Type=forking adopts the daemon its command leaves through an Attacher —
+      NewAttacher's, on Linux, darwin and the BSDs: the PID PIDFile= names, or,
+      on Linux, with a Cgroup that lists its members (CgroupMembers), the one
+      member whose parent is outside the cgroup (GuessMainPID=).
+
+      # The descriptor store
+
+      FileDescriptorStoreMax= keeps the descriptors a service hands with
+      FDSTORE=1 and gives them back to its next main process, at fd 3 on with
+      their FDNAME=; Unit.FDStore lists them. Linux only.
+
+      # One instance per connection
+
+      SpawnInstance runs a unit of a template for one accepted connection —
+      Accept=yes —, the connection at fd 3 (LISTEN_FDS=1), ended with its run.
+      Not on Windows.
+
+      # The unit's control group
+
+      A Cgroup that is a CgroupUnit — proc/cgroup's group, on Linux — runs
+      KillMode=control-group (then the default) and mixed, ExitType=cgroup,
+      Delegate= and OOMPolicy=, every process of the unit spawned into it.
+      NewAttacher's scope names a cgroup as /proc/<pid>/cgroup does:
+      proc/cgroup's Membership turns a group's directory into that path.
+
+      # Type=dbus
+
+      A Type=dbus unit is up once its main process runs and its BusName= is
+      owned — its Config.BusWatcher, pkg/v1/proc/dbus's Conn, follows the
+      name —, and stops when the bus announces the name lost. Linux only.
+
+      # The sandbox
+
+      ProtectSystem=, PrivateTmp=, ReadOnlyPaths=, BindPaths=,
+      TemporaryFileSystem=, RootDirectory=, the Private…= namespaces,
+      ProtectHostname=, NoNewPrivileges=, the capability sets, SecureBits= and
+      SystemCallFilter= are Config fields, resolved into proc/process's
+      Sandbox on Linux amd64 and arm64 — refused elsewhere —, added to the one
+      Config.Spec carries. A "+" command runs unconfined, a "!" one keeps the
+      sandbox; a start whose sandbox cannot be applied is START_FAILED
+      wrapping SANDBOX_FAILED or SANDBOX_UNAVAILABLE.
+
+      # Platforms
+
+      The reducer and every type that needs no notification run everywhere.
+      Notifications need a NotifySource — ListenNotify on Linux and FreeBSD.
+      Windows kills and does nothing else: a signal other than SIGKILL is
+      refused there.
+    facade:
+      - const:
+          - doc: |-
+              Infinity is systemd's "infinity" for a duration directive: no timeout, a
+              start-limit window that never ends, no ceiling on the restart delay.
+            name: Infinity
+            reexport: coresvc.Infinity
+            type: time.Duration
+            typed: true
+            value: "9223372036854775807"
+      - const:
+          - doc: |-
+              Zero is systemd's literal 0 for a duration directive, where it differs
+              from the default the Go zero value asks for: RestartSec=0 restarts at
+              once, StartLimitIntervalSec=0 disables the limiter, and a timeout of 0 is
+              no timeout.
+            name: Zero
+            reexport: coresvc.Zero
+            type: time.Duration
+            typed: true
+            value: "-1"
+      - const:
+          - doc: |-
+              TypeDefault resolves to TypeDbus with a BusName=, else to TypeSimple with
+              an ExecStart=, to TypeOneshot without.
+            name: TypeDefault
+            reexport: coresvc.TypeDefault
+            type: Type
+            typed: true
+            value: "0"
+      - const:
+          - doc: TypeSimple is up once its main process is spawned.
+            name: TypeSimple
+            reexport: coresvc.TypeSimple
+            type: Type
+            typed: true
+            value: "1"
+      - const:
+          - doc: TypeExec is up once its main process has executed its binary.
+            name: TypeExec
+            reexport: coresvc.TypeExec
+            type: Type
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              TypeForking is up once the process it spawned exits, the daemon it forked
+              adopted from PIDFile= (S0c; refused until then).
+            name: TypeForking
+            reexport: coresvc.TypeForking
+            type: Type
+            typed: true
+            value: "3"
+      - const:
+          - doc: |-
+              TypeOneshot is up once its main processes ran to a successful end, one
+              ExecStart= after the other.
+            name: TypeOneshot
+            reexport: coresvc.TypeOneshot
+            type: Type
+            typed: true
+            value: "4"
+      - const:
+          - doc: |-
+              TypeDbus is up once its main process runs and its BusName= is owned on the
+              bus, and stops when the name is lost (Linux; a BusWatcher follows it).
+            name: TypeDbus
+            reexport: coresvc.TypeDbus
+            type: Type
+            typed: true
+            value: "5"
+      - const:
+          - doc: TypeNotify is up once its main process sends READY=1.
+            name: TypeNotify
+            reexport: coresvc.TypeNotify
+            type: Type
+            typed: true
+            value: "6"
+      - const:
+          - doc: |-
+              TypeNotifyReload is TypeNotify whose reload is ReloadSignal= followed by
+              RELOADING=1 and READY=1.
+            name: TypeNotifyReload
+            reexport: coresvc.TypeNotifyReload
+            type: Type
+            typed: true
+            value: "7"
+      - const:
+          - doc: |-
+              TypeIdle runs as TypeSimple: the job queue systemd delays it behind is the
+              caller's.
+            name: TypeIdle
+            reexport: coresvc.TypeIdle
+            type: Type
+            typed: true
+            value: "8"
+      - const:
+          - doc: RestartNo never restarts.
+            name: RestartNo
+            reexport: coresvc.RestartNo
+            type: Restart
+            typed: true
+            value: "0"
+      - const:
+          - doc: RestartOnSuccess restarts after a clean end only.
+            name: RestartOnSuccess
+            reexport: coresvc.RestartOnSuccess
+            type: Restart
+            typed: true
+            value: "1"
+      - const:
+          - doc: |-
+              RestartOnFailure restarts after an unclean exit code, an unclean signal, a
+              timeout, a watchdog, an OOM kill.
+            name: RestartOnFailure
+            reexport: coresvc.RestartOnFailure
+            type: Restart
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              RestartOnAbnormal restarts after an unclean signal, a timeout, a watchdog,
+              an OOM kill — not after an exit code.
+            name: RestartOnAbnormal
+            reexport: coresvc.RestartOnAbnormal
+            type: Restart
+            typed: true
+            value: "3"
+      - const:
+          - doc: RestartOnWatchdog restarts after a watchdog only.
+            name: RestartOnWatchdog
+            reexport: coresvc.RestartOnWatchdog
+            type: Restart
+            typed: true
+            value: "4"
+      - const:
+          - doc: RestartOnAbort restarts after an unclean signal only.
+            name: RestartOnAbort
+            reexport: coresvc.RestartOnAbort
+            type: Restart
+            typed: true
+            value: "5"
+      - const:
+          - doc: RestartAlways restarts after every end but a skipped condition.
+            name: RestartAlways
+            reexport: coresvc.RestartAlways
+            type: Restart
+            typed: true
+            value: "6"
+      - const:
+          - doc: |-
+              RestartModeNormal publishes the failed (or inactive) state, then auto-
+              restart.
+            name: RestartModeNormal
+            reexport: coresvc.RestartModeNormal
+            type: RestartMode
+            typed: true
+            value: "0"
+      - const:
+          - doc: RestartModeDirect goes to auto-restart without publishing the failure.
+            name: RestartModeDirect
+            reexport: coresvc.RestartModeDirect
+            type: RestartMode
+            typed: true
+            value: "1"
+      - const:
+          - doc: |-
+              RestartModeDebug is RestartModeNormal, and the restarted unit's processes
+              get DEBUG_INVOCATION=1.
+            name: RestartModeDebug
+            reexport: coresvc.RestartModeDebug
+            type: RestartMode
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              KillModeDefault is control-group for a unit whose Cgroup is a
+              CgroupUnit, process for any other.
+            name: KillModeDefault
+            reexport: coresvc.KillModeDefault
+            type: KillMode
+            typed: true
+            value: "0"
+      - const:
+          - doc: KillModeProcess signals the main and control processes only.
+            name: KillModeProcess
+            reexport: coresvc.KillModeProcess
+            type: KillMode
+            typed: true
+            value: "1"
+      - const:
+          - doc: |-
+              KillModeControlGroup signals every process of the unit's cgroup and
+              waits for it to be empty; it needs a CgroupUnit.
+            name: KillModeControlGroup
+            reexport: coresvc.KillModeControlGroup
+            type: KillMode
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              KillModeMixed signals the main and control processes, then kills the
+              whole cgroup; it needs a CgroupUnit.
+            name: KillModeMixed
+            reexport: coresvc.KillModeMixed
+            type: KillMode
+            typed: true
+            value: "3"
+      - const:
+          - doc: |-
+              KillModeNone signals nothing: the stop commands run, the processes are
+              left.
+            name: KillModeNone
+            reexport: coresvc.KillModeNone
+            type: KillMode
+            typed: true
+            value: "4"
+      - const:
+          - doc: ExitTypeMain ends the unit when its main process exits.
+            name: ExitTypeMain
+            reexport: coresvc.ExitTypeMain
+            type: ExitType
+            typed: true
+            value: "0"
+      - const:
+          - doc: |-
+              ExitTypeCgroup ends the unit when its cgroup is empty; it needs a
+              CgroupUnit.
+            name: ExitTypeCgroup
+            reexport: coresvc.ExitTypeCgroup
+            type: ExitType
+            typed: true
+            value: "1"
+      - const:
+          - doc: NotifyAccessNone reads no message.
+            name: NotifyAccessNone
+            reexport: coresvc.NotifyAccessNone
+            type: NotifyAccess
+            typed: true
+            value: "0"
+      - const:
+          - doc: NotifyAccessMain reads the main process's messages.
+            name: NotifyAccessMain
+            reexport: coresvc.NotifyAccessMain
+            type: NotifyAccess
+            typed: true
+            value: "1"
+      - const:
+          - doc: |-
+              NotifyAccessExec reads the main and the control processes' messages; it
+              needs the unit's cgroup.
+            name: NotifyAccessExec
+            reexport: coresvc.NotifyAccessExec
+            type: NotifyAccess
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              NotifyAccessAll reads the messages of every process of the unit's cgroup;
+              it needs the unit's cgroup.
+            name: NotifyAccessAll
+            reexport: coresvc.NotifyAccessAll
+            type: NotifyAccess
+            typed: true
+            value: "3"
+      - const:
+          - doc: |-
+              TimeoutTerminate sends KillSignal=, then FinalKillSignal= after
+              TimeoutStopSec=.
+            name: TimeoutTerminate
+            reexport: coresvc.TimeoutTerminate
+            type: TimeoutMode
+            typed: true
+            value: "0"
+      - const:
+          - doc: |-
+              TimeoutAbort sends WatchdogSignal=, then FinalKillSignal= after
+              TimeoutAbortSec=.
+            name: TimeoutAbort
+            reexport: coresvc.TimeoutAbort
+            type: TimeoutMode
+            typed: true
+            value: "1"
+      - const:
+          - doc: TimeoutKill sends FinalKillSignal= at once.
+            name: TimeoutKill
+            reexport: coresvc.TimeoutKill
+            type: TimeoutMode
+            typed: true
+            value: "2"
+      - const:
+          - doc: OOMPolicyDefault is stop, or continue under Delegate=.
+            name: OOMPolicyDefault
+            reexport: coresvc.OOMPolicyDefault
+            type: OOMPolicy
+            typed: true
+            value: "0"
+      - const:
+          - doc: OOMPolicyContinue keeps the unit running after an OOM kill.
+            name: OOMPolicyContinue
+            reexport: coresvc.OOMPolicyContinue
+            type: OOMPolicy
+            typed: true
+            value: "1"
+      - const:
+          - doc: OOMPolicyStop stops the unit, which ends with the result oom-kill.
+            name: OOMPolicyStop
+            reexport: coresvc.OOMPolicyStop
+            type: OOMPolicy
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              OOMPolicyKill has the kernel kill the whole cgroup (memory.oom.group),
+              the unit ending with the result oom-kill.
+            name: OOMPolicyKill
+            reexport: coresvc.OOMPolicyKill
+            type: OOMPolicy
+            typed: true
+            value: "3"
+      - const:
+          - doc: ProtectSystemNo leaves every tree writable — the zero.
+            name: ProtectSystemNo
+            reexport: coresvc.ProtectSystemNo
+            type: ProtectSystem
+            typed: true
+            value: "0"
+      - const:
+          - doc: ProtectSystemYes makes /usr read-only, and /boot and /efi where they exist.
+            name: ProtectSystemYes
+            reexport: coresvc.ProtectSystemYes
+            type: ProtectSystem
+            typed: true
+            value: "1"
+      - const:
+          - doc: ProtectSystemFull makes /etc read-only too.
+            name: ProtectSystemFull
+            reexport: coresvc.ProtectSystemFull
+            type: ProtectSystem
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              ProtectSystemStrict, the whole hierarchy read-only but /dev, /proc and /sys,
+              is refused (DIRECTIVE_UNSUPPORTED).
+            name: ProtectSystemStrict
+            reexport: coresvc.ProtectSystemStrict
+            type: ProtectSystem
+            typed: true
+            value: "3"
+      - const:
+          - doc: PrivateTmpNo shares the host's /tmp and /var/tmp — the zero.
+            name: PrivateTmpNo
+            reexport: coresvc.PrivateTmpNo
+            type: PrivateTmp
+            typed: true
+            value: "0"
+      - const:
+          - doc: |-
+              PrivateTmpYes, directories on the host shared by every command of the unit,
+              is refused (DIRECTIVE_UNSUPPORTED).
+            name: PrivateTmpYes
+            reexport: coresvc.PrivateTmpYes
+            type: PrivateTmp
+            typed: true
+            value: "1"
+      - const:
+          - doc: |-
+              PrivateTmpDisconnected mounts a new tmpfs, mode 1777, on /tmp and on
+              /var/tmp for each command.
+            name: PrivateTmpDisconnected
+            reexport: coresvc.PrivateTmpDisconnected
+            type: PrivateTmp
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              PreserveRestart keeps the store while the unit is neither inactive nor
+              failed, or is about to restart.
+            name: PreserveRestart
+            reexport: coresvc.PreserveRestart
+            type: Preserve
+            typed: true
+            value: "0"
+      - const:
+          - doc: PreserveNo releases the store when the unit stops.
+            name: PreserveNo
+            reexport: coresvc.PreserveNo
+            type: Preserve
+            typed: true
+            value: "1"
+      - const:
+          - doc: PreserveYes keeps the store until the unit is removed.
+            name: PreserveYes
+            reexport: coresvc.PreserveYes
+            type: Preserve
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              PreserveOnSuccess is PreserveYes, released once the unit is failed for
+              good.
+            name: PreserveOnSuccess
+            reexport: coresvc.PreserveOnSuccess
+            type: Preserve
+            typed: true
+            value: "3"
+      - const:
+          - doc: ToggleDefault is the directive's default.
+            name: ToggleDefault
+            reexport: coresvc.ToggleDefault
+            type: Toggle
+            typed: true
+            value: "0"
+      - const:
+          - doc: ToggleYes is yes.
+            name: ToggleYes
+            reexport: coresvc.ToggleYes
+            type: Toggle
+            typed: true
+            value: "1"
+      - const:
+          - doc: ToggleNo is no.
+            name: ToggleNo
+            reexport: coresvc.ToggleNo
+            type: Toggle
+            typed: true
+            value: "2"
+      - const:
+          - doc: StateInactive is not running, after a success or before any start.
+            name: StateInactive
+            reexport: coresvc.StateInactive
+            type: State
+            typed: true
+            value: "0"
+      - const:
+          - doc: |-
+              StateActivating is starting: a condition, the pre-start commands, the main
+              process before it is up, the post-start commands.
+            name: StateActivating
+            reexport: coresvc.StateActivating
+            type: State
+            typed: true
+            value: "1"
+      - const:
+          - doc: StateActive is up.
+            name: StateActive
+            reexport: coresvc.StateActive
+            type: State
+            typed: true
+            value: "2"
+      - const:
+          - doc: StateReloading is reloading.
+            name: StateReloading
+            reexport: coresvc.StateReloading
+            type: State
+            typed: true
+            value: "3"
+      - const:
+          - doc: |-
+              StateDeactivating is stopping: the stop commands, the signals, the post-
+              stop commands.
+            name: StateDeactivating
+            reexport: coresvc.StateDeactivating
+            type: State
+            typed: true
+            value: "4"
+      - const:
+          - doc: StateFailed is not running, after a failure.
+            name: StateFailed
+            reexport: coresvc.StateFailed
+            type: State
+            typed: true
+            value: "5"
+      - const:
+          - doc: StateAutoRestart is waiting out the restart delay.
+            name: StateAutoRestart
+            reexport: coresvc.StateAutoRestart
+            type: State
+            typed: true
+            value: "6"
+      - const:
+          - doc: "StateExited is up with no process left: RemainAfterExit=."
+            name: StateExited
+            reexport: coresvc.StateExited
+            type: State
+            typed: true
+            value: "7"
+      - const:
+          - doc: StateConditionSkipped is not running because ExecCondition= said so.
+            name: StateConditionSkipped
+            reexport: coresvc.StateConditionSkipped
+            type: State
+            typed: true
+            value: "8"
+      - const:
+          - doc: SubDead is inactive.
+            name: SubDead
+            reexport: coresvc.SubDead
+            type: Sub
+            typed: true
+            value: "0"
+      - const:
+          - doc: SubCondition runs ExecCondition=.
+            name: SubCondition
+            reexport: coresvc.SubCondition
+            type: Sub
+            typed: true
+            value: "1"
+      - const:
+          - doc: SubStartPre runs ExecStartPre=.
+            name: SubStartPre
+            reexport: coresvc.SubStartPre
+            type: Sub
+            typed: true
+            value: "2"
+      - const:
+          - doc: SubStart runs ExecStart= until the unit is up.
+            name: SubStart
+            reexport: coresvc.SubStart
+            type: Sub
+            typed: true
+            value: "3"
+      - const:
+          - doc: SubStartPost runs ExecStartPost=.
+            name: SubStartPost
+            reexport: coresvc.SubStartPost
+            type: Sub
+            typed: true
+            value: "4"
+      - const:
+          - doc: SubRunning is up with its main process.
+            name: SubRunning
+            reexport: coresvc.SubRunning
+            type: Sub
+            typed: true
+            value: "5"
+      - const:
+          - doc: SubExited is up without a process (RemainAfterExit=).
+            name: SubExited
+            reexport: coresvc.SubExited
+            type: Sub
+            typed: true
+            value: "6"
+      - const:
+          - doc: SubReload runs ExecReload=.
+            name: SubReload
+            reexport: coresvc.SubReload
+            type: Sub
+            typed: true
+            value: "7"
+      - const:
+          - doc: SubReloadSignal waits for RELOADING=1 after ReloadSignal=.
+            name: SubReloadSignal
+            reexport: coresvc.SubReloadSignal
+            type: Sub
+            typed: true
+            value: "8"
+      - const:
+          - doc: SubReloadNotify waits for READY=1 after RELOADING=1.
+            name: SubReloadNotify
+            reexport: coresvc.SubReloadNotify
+            type: Sub
+            typed: true
+            value: "9"
+      - const:
+          - doc: SubReloadPost runs ExecReloadPost=.
+            name: SubReloadPost
+            reexport: coresvc.SubReloadPost
+            type: Sub
+            typed: true
+            value: "10"
+      - const:
+          - doc: SubStop runs ExecStop=.
+            name: SubStop
+            reexport: coresvc.SubStop
+            type: Sub
+            typed: true
+            value: "11"
+      - const:
+          - doc: SubStopWatchdog waits after WatchdogSignal=.
+            name: SubStopWatchdog
+            reexport: coresvc.SubStopWatchdog
+            type: Sub
+            typed: true
+            value: "12"
+      - const:
+          - doc: SubStopSigterm waits after KillSignal=.
+            name: SubStopSigterm
+            reexport: coresvc.SubStopSigterm
+            type: Sub
+            typed: true
+            value: "13"
+      - const:
+          - doc: SubStopSigkill waits after FinalKillSignal=.
+            name: SubStopSigkill
+            reexport: coresvc.SubStopSigkill
+            type: Sub
+            typed: true
+            value: "14"
+      - const:
+          - doc: SubStopPost runs ExecStopPost=.
+            name: SubStopPost
+            reexport: coresvc.SubStopPost
+            type: Sub
+            typed: true
+            value: "15"
+      - const:
+          - doc: |-
+              SubFinalWatchdog waits after WatchdogSignal= sent to what ExecStopPost=
+              left.
+            name: SubFinalWatchdog
+            reexport: coresvc.SubFinalWatchdog
+            type: Sub
+            typed: true
+            value: "16"
+      - const:
+          - doc: SubFinalSigterm waits after KillSignal= sent to what ExecStopPost= left.
+            name: SubFinalSigterm
+            reexport: coresvc.SubFinalSigterm
+            type: Sub
+            typed: true
+            value: "17"
+      - const:
+          - doc: |-
+              SubFinalSigkill waits after FinalKillSignal= sent to what ExecStopPost=
+              left.
+            name: SubFinalSigkill
+            reexport: coresvc.SubFinalSigkill
+            type: Sub
+            typed: true
+            value: "18"
+      - const:
+          - doc: SubFailed is failed.
+            name: SubFailed
+            reexport: coresvc.SubFailed
+            type: Sub
+            typed: true
+            value: "19"
+      - const:
+          - doc: SubAutoRestart waits out the restart delay.
+            name: SubAutoRestart
+            reexport: coresvc.SubAutoRestart
+            type: Sub
+            typed: true
+            value: "20"
+      - const:
+          - doc: |-
+              SubRunningRevalidating is a Type=dbus unit up without its BusName= owned,
+              given two seconds to own it again before it stops.
+            name: SubRunningRevalidating
+            reexport: coresvc.SubRunningRevalidating
+            type: Sub
+            typed: true
+            value: "21"
+      - const:
+          - doc: ResultSuccess is a clean end.
+            name: ResultSuccess
+            reexport: coresvc.ResultSuccess
+            type: Result
+            typed: true
+            value: "0"
+      - const:
+          - doc: ResultResources is a command that could not be spawned.
+            name: ResultResources
+            reexport: coresvc.ResultResources
+            type: Result
+            typed: true
+            value: "1"
+      - const:
+          - doc: ResultProtocol is a notify unit whose main process ended before READY=1.
+            name: ResultProtocol
+            reexport: coresvc.ResultProtocol
+            type: Result
+            typed: true
+            value: "2"
+      - const:
+          - doc: ResultTimeout is a start, stop, reload or runtime limit that expired.
+            name: ResultTimeout
+            reexport: coresvc.ResultTimeout
+            type: Result
+            typed: true
+            value: "3"
+      - const:
+          - doc: ResultExitCode is an unclean exit code.
+            name: ResultExitCode
+            reexport: coresvc.ResultExitCode
+            type: Result
+            typed: true
+            value: "4"
+      - const:
+          - doc: ResultSignal is an unclean signal.
+            name: ResultSignal
+            reexport: coresvc.ResultSignal
+            type: Result
+            typed: true
+            value: "5"
+      - const:
+          - doc: ResultCoreDump is an unclean signal that dumped core.
+            name: ResultCoreDump
+            reexport: coresvc.ResultCoreDump
+            type: Result
+            typed: true
+            value: "6"
+      - const:
+          - doc: ResultWatchdog is a missed keep-alive, WATCHDOG=trigger, or Fail.
+            name: ResultWatchdog
+            reexport: coresvc.ResultWatchdog
+            type: Result
+            typed: true
+            value: "7"
+      - const:
+          - doc: ResultStartLimitHit is a start the limiter refused.
+            name: ResultStartLimitHit
+            reexport: coresvc.ResultStartLimitHit
+            type: Result
+            typed: true
+            value: "8"
+      - const:
+          - doc: ResultOOMKill is an OOM kill in the unit's cgroup (S0g).
+            name: ResultOOMKill
+            reexport: coresvc.ResultOOMKill
+            type: Result
+            typed: true
+            value: "9"
+      - const:
+          - doc: ResultExecCondition is an ExecCondition= that said skip.
+            name: ResultExecCondition
+            reexport: coresvc.ResultExecCondition
+            type: Result
+            typed: true
+            value: "10"
+      - const:
+          - doc: |-
+              FlagArgv0 is "@": the second word is argv[0]; with FlagShell, the shell is
+              a login shell.
+            name: FlagArgv0
+            reexport: coresvc.FlagArgv0
+            type: CommandFlags
+            typed: true
+            value: "1"
+      - const:
+          - doc: "FlagIgnoreFailure is \"-\": a failure is recorded and read as a success."
+            name: FlagIgnoreFailure
+            reexport: coresvc.FlagIgnoreFailure
+            type: CommandFlags
+            typed: true
+            value: "2"
+      - const:
+          - doc: "FlagNoEnvExpand is \":\": $VAR and ${VAR} are not expanded."
+            name: FlagNoEnvExpand
+            reexport: coresvc.FlagNoEnvExpand
+            type: CommandFlags
+            typed: true
+            value: "4"
+      - const:
+          - doc: |-
+              FlagFullPrivileges is "+": the command runs without the unit's credentials
+              and confinement, on Config.AllowPrivilegedControl only.
+            name: FlagFullPrivileges
+            reexport: coresvc.FlagFullPrivileges
+            type: CommandFlags
+            typed: true
+            value: "8"
+      - const:
+          - doc: |-
+              FlagNoCredentials is "!": the command runs without User=, Group= and
+              SupplementaryGroups=, on Config.AllowPrivilegedControl only.
+            name: FlagNoCredentials
+            reexport: coresvc.FlagNoCredentials
+            type: CommandFlags
+            typed: true
+            value: "16"
+      - const:
+          - doc: |-
+              FlagShell is "|": the command runs through the shell's -c, or is the shell
+              alone.
+            name: FlagShell
+            reexport: coresvc.FlagShell
+            type: CommandFlags
+            typed: true
+            value: "32"
+      - const:
+          - name: CodeConfigInvalid
+            reexport: coresvc.CodeConfigInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_01"
+          - name: CodeDirectiveUnsupported
+            reexport: coresvc.CodeDirectiveUnsupported
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_02"
+          - name: CodeCommandInvalid
+            reexport: coresvc.CodeCommandInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_03"
+          - name: CodeStartFailed
+            reexport: coresvc.CodeStartFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_04"
+          - name: CodeStartLimitHit
+            reexport: coresvc.CodeStartLimitHit
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_05"
+          - name: CodeReloadFailed
+            reexport: coresvc.CodeReloadFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_06"
+          - name: CodeReloadUnsupported
+            reexport: coresvc.CodeReloadUnsupported
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_07"
+          - name: CodeJobCanceled
+            reexport: coresvc.CodeJobCanceled
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_08"
+          - name: CodeUnitClosed
+            reexport: coresvc.CodeUnitClosed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_09"
+          - name: CodePrivilegeRefused
+            reexport: coresvc.CodePrivilegeRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_0A"
+          - name: CodeExitUnknown
+            reexport: coresvc.CodeExitUnknown
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_0B"
+          - name: CodeHandoverInvalid
+            reexport: coresvc.CodeHandoverInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_0C"
+          - name: CodeHandoverMismatch
+            reexport: coresvc.CodeHandoverMismatch
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_0D"
+          - name: CodeReexecFailed
+            reexport: coresvc.CodeReexecFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_69_0E"
+        doc: |-
+          The codes, for errs.HasCode: a refused configuration (CONFIG_INVALID,
+          DIRECTIVE_UNSUPPORTED, PRIVILEGE_REFUSED, COMMAND_INVALID) is the caller's to
+          fix, a job's outcome (START_FAILED, START_LIMIT_HIT, RELOAD_FAILED,
+          RELOAD_UNSUPPORTED, JOB_CANCELED, UNIT_CLOSED) is the unit's, and
+          EXIT_UNKNOWN is an adopted process's end.
+      - alias:
+          - doc: |-
+              Config is one service unit: systemd.service(5)'s directives as typed
+              values, the template its commands are spawned from, and the ports — the
+              engine's configuration (ADR 0214 §9).
+            name: Config
+            target: svc.Config
+          - doc: |-
+              Unit is one service unit, driven by one actor over a pure reducer (ADR
+              0214 §3).
+            name: Unit
+            target: svc.Unit
+          - doc: |-
+              Handover is what an outgoing image hands the incoming one (S0h): Freeze,
+              Reexec, TakeHandover, Resume.
+            name: Handover
+            target: svc.HandoverState
+          - doc: Spawner starts the processes of a unit; proc/exec's Start by default.
+            name: Spawner
+            target: coresvc.Spawner
+          - doc: "Attacher adopts a process the engine did not start: MAINPID=, PIDFile=."
+            name: Attacher
+            target: coresvc.Attacher
+          - doc: |-
+              CgroupKill is the unit's control group: who belongs to it, and every
+              process of it signalled at once.
+            name: CgroupKill
+            target: coresvc.CgroupKill
+          - doc: |-
+              CgroupMembers is the sibling of CgroupKill a control group that lists its
+              processes offers: a Type=forking unit guesses its main process among them.
+            name: CgroupMembers
+            target: coresvc.CgroupMembers
+          - doc: |-
+              CgroupUnit is the sibling of CgroupKill a unit's control group offers
+              when it runs the cgroup modes — KillMode=control-group and mixed,
+              ExitType=cgroup, Delegate=, OOMPolicy=; proc/cgroup's Linux group is one.
+            name: CgroupUnit
+            target: coresvc.CgroupUnit
+          - doc: "StoredFD is one descriptor of a unit's store, as Unit.FDStore lists it."
+            name: StoredFD
+            target: coresvc.StoredFDValue
+          - doc: NotifySource is where a unit's sd_notify messages come from.
+            name: NotifySource
+            target: coresvc.NotifySource
+          - doc: |-
+              BusWatcher follows who owns a Type=dbus unit's BusName=; pkg/v1/proc/dbus's
+              Conn is one.
+            name: BusWatcher
+            target: coresvc.BusWatcher
+          - doc: |-
+              Clock is what every wait of a unit runs on: pkg/v1/clock's System and
+              ManualClock are clocks here.
+            name: Clock
+            target: coresvc.Clock
+          - doc: Type is Type=.
+            name: Type
+            target: coresvc.Type
+          - doc: Restart is Restart=.
+            name: Restart
+            target: coresvc.Restart
+          - doc: RestartMode is RestartMode=.
+            name: RestartMode
+            target: coresvc.RestartMode
+          - doc: KillMode is KillMode=; its zero is control-group with a CgroupUnit.
+            name: KillMode
+            target: coresvc.KillMode
+          - doc: ExitType is ExitType=.
+            name: ExitType
+            target: coresvc.ExitType
+          - doc: NotifyAccess is NotifyAccess=.
+            name: NotifyAccess
+            target: coresvc.NotifyAccess
+          - doc: TimeoutMode is TimeoutStartFailureMode= or TimeoutStopFailureMode=.
+            name: TimeoutMode
+            target: coresvc.TimeoutMode
+          - doc: OOMPolicy is OOMPolicy=.
+            name: OOMPolicy
+            target: coresvc.OOMPolicy
+          - doc: Preserve is FileDescriptorStorePreserve=.
+            name: Preserve
+            target: coresvc.Preserve
+          - doc: Toggle is a boolean directive whose default is yes.
+            name: Toggle
+            target: coresvc.Toggle
+          - doc: ProtectSystem is ProtectSystem=.
+            name: ProtectSystem
+            target: coresvc.ProtectSystem
+          - doc: PrivateTmp is PrivateTmp=.
+            name: PrivateTmp
+            target: coresvc.PrivateTmp
+          - doc: BindPath is one entry of BindPaths= or BindReadOnlyPaths=.
+            name: BindPath
+            target: coresvc.BindPathValue
+          - doc: TemporaryFileSystem is one entry of TemporaryFileSystem=.
+            name: TemporaryFileSystem
+            target: coresvc.TemporaryFileSystemValue
+          - doc: SystemCallFilter is SystemCallFilter=, an allow-list or a deny-list.
+            name: SystemCallFilter
+            target: coresvc.SystemCallFilterValue
+          - doc: State is where a unit stands.
+            name: State
+            target: coresvc.State
+          - doc: "Sub is the step a unit is at: systemd's SubState."
+            name: Sub
+            target: coresvc.Sub
+          - doc: "Result is why a run of a unit ended: systemd's Result=."
+            name: Result
+            target: coresvc.Result
+          - doc: CommandFlags are the prefixes of one Exec*= command.
+            name: CommandFlags
+            target: coresvc.CommandFlags
+          - doc: Command is one Exec*= command, its prefixes parsed.
+            name: Command
+            target: coresvc.CommandValue
+          - doc: |-
+              ExitStatusSet is SuccessExitStatus=, RestartPreventExitStatus= or
+              RestartForceExitStatus=.
+            name: ExitStatusSet
+            target: coresvc.ExitStatusValue
+          - doc: Notification is one sd_notify message as a NotifySource hands it over.
+            name: Notification
+            target: coresvc.NotifyValue
+          - doc: "Snapshot is a unit at one instant: what Unit.State returns."
+            name: Snapshot
+            target: coresvc.StateValue
+          - doc: Event is one published change of a unit.
+            name: Event
+            target: coresvc.EventValue
+      - func:
+          doc: NewUnit checks cfg and starts an inactive unit; Start starts it.
+          forward: svc.NewUnit
+          in:
+            - name: cfg
+              type: "*Config"
+          name: NewUnit
+          out:
+            - type: "*Unit"
+            - type: error
+      - func:
+          doc: |-
+            SpawnInstance makes and starts the unit of one accepted connection
+            (Accept=yes): a copy of template named instance, conn handed to its
+            ExecStart= at fd 3 and closed at its end; the unit is returned with
+            Start's error once it was made.
+          forward: svc.SpawnInstance
+          in:
+            - name: ctx
+              type: context.Context
+            - name: template
+              type: "*Config"
+            - name: instance
+              type: string
+            - name: conn
+              type: "*os.File"
+          name: SpawnInstance
+          out:
+            - type: "*Unit"
+            - type: error
+      - func:
+          doc: |-
+            Freeze hands units over (S0h): each unit's actor ends without stopping
+            a process, its state and descriptors kept in the hand-over.
+          forward: svc.Freeze
+          in:
+            - name: ctx
+              type: context.Context
+            - name: units
+              type: "[]*Unit"
+          name: Freeze
+          out:
+            - type: "*Handover"
+            - type: error
+      - func:
+          doc: |-
+            Resume makes the unit cfg names from the state h holds for it: its
+            processes held again, its timers, watches and store as they were.
+          forward: svc.Resume
+          in:
+            - name: cfg
+              type: "*Config"
+            - name: h
+              type: "*Handover"
+          name: Resume
+          out:
+            - type: "*Unit"
+            - type: error
+      - func:
+          doc: OpenImage opens the program a re-exec runs, O_PATH and close-on-exec.
+          forward: svc.OpenImage
+          in:
+            - name: path
+              type: string
+          name: OpenImage
+          out:
+            - type: "*os.File"
+            - type: error
+      - func:
+          doc: |-
+            Reexec executes image again in this process, handing it h; it returns
+            only when the kernel refused (REEXEC_FAILED).
+          forward: svc.Reexec
+          in:
+            - name: h
+              type: "*Handover"
+            - name: argv
+              type: "[]string"
+            - name: image
+              type: "*os.File"
+            - name: env
+              type: "[]string"
+          name: Reexec
+          out:
+            - type: error
+      - func:
+          doc: |-
+            TakeHandover reads the hand-over the outgoing image left this one; a
+            refused one leaves no descriptor open and no child unsupervised.
+          forward: svc.TakeHandover
+          in:
+            - name: ctx
+              type: context.Context
+            - name: grace
+              type: time.Duration
+          name: TakeHandover
+          out:
+            - type: "*Handover"
+            - type: error
+      - func:
+          doc: |-
+            ParseCommand reads one Exec*= command from its words, its prefixes
+            "@-:+!|" parsed.
+          forward: coresvc.ParseCommand
+          in:
+            - name: words
+              type: "[]string"
+          name: ParseCommand
+          out:
+            - type: Command
+            - type: error
+      - func:
+          doc: |-
+            ListenNotify opens an sd_notify socket for one unit; off Linux and
+            FreeBSD it is UNSUPPORTED_PLATFORM.
+          forward: svc.ListenNotify
+          name: ListenNotify
+          out:
+            - type: NotifySource
+            - type: error
+      - func:
+          doc: |-
+            NewAttacher is the Attacher over proc/process's Attach and AttachPIDFile, a
+            PID file nobody vouches for bounded by scope; on Linux, darwin and the
+            BSDs.
+          forward: svc.NewAttacher
+          in:
+            - name: scope
+              type: AttachScope
+          name: NewAttacher
+          out:
+            - type: Attacher
+      - alias:
+          - doc: |-
+              AttachScope bounds the process an untrustworthy PID file may name: a cgroup
+              v2 subtree and the users it may run as. It is the same type as
+              proc/process's AttachScope, an alias of the core port's AttachValue.
+            name: AttachScope
+            target: coreproc.AttachValue
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+      coresvc: github.com/kitsunium/sdk/internal/core/proc/service
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svc: github.com/kitsunium/sdk/internal/service/proc/service
+    path: github.com/kitsunium/sdk/pkg/v1/proc/service

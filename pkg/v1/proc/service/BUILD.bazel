@@ -1,0 +1,37 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "service",
+    srcs = [
+        "doc.go",
+        "gen_facade.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/proc/service",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/core/proc/service",
+        "//internal/kernel/errs",
+        "//internal/service/proc/service",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":service",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "service_test",
+    srcs = ["gen_api_test.go"],
+    deps = [
+        ":service",
+        "//internal/core/proc",
+        "//internal/core/proc/service",
+        "//internal/kernel/errs",
+        "//internal/service/proc/service",
+    ],
+)

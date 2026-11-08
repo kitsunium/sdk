@@ -1,0 +1,107 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Weighted
+      - waiter
+      - NewWeighted
+      - (*Weighted).Acquire
+      - (*Weighted).leave
+      - (*Weighted).TryAcquire
+      - (*Weighted).Release
+      - (*Weighted).grant
+      - (*Weighted).push
+      - (*Weighted).unlink
+    name: sema.go
+functions:
+  - name: NewWeighted
+    params: capacity int64
+    results: "*Weighted"
+imports:
+  context: context
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/concur/sema
+  name: sema
+  purpose: "Package sema provides Weighted, a weighted semaphore: a capacity of units, Acquire takes n of them, Release gives them back."
+types:
+  - fields:
+      - doc: mu guards held and the waiters.
+        name: mu
+        type: sync.Mutex
+      - doc: capacity is the number of units the semaphore holds, at least 1.
+        name: capacity
+        type: int64
+      - doc: held is the number of units acquired and not yet released.
+        name: held
+        type: int64
+      - doc: |-
+          head and tail are the waiters, oldest first: an intrusive list, so a
+          waiter that leaves is unlinked where it stands.
+        name: head
+        type: "*waiter"
+      - doc: |-
+          head and tail are the waiters, oldest first: an intrusive list, so a
+          waiter that leaves is unlinked where it stands.
+        name: tail
+        type: "*waiter"
+    kind: struct
+    methods:
+      - name: Acquire
+        params: ctx context.Context, n int64
+        recv: s *Weighted
+        results: error
+      - doc: |-
+          leave withdraws w after its context ended: unlinked if it still waits, its
+          units given back if they were granted in the meantime. Either way the
+          waiters behind it may now fit, so they are served.
+        name: leave
+        params: w *waiter, cause error
+        recv: s *Weighted
+        results: error
+      - name: TryAcquire
+        params: n int64
+        recv: s *Weighted
+        results: bool
+      - name: Release
+        params: n int64
+        recv: s *Weighted
+      - doc: |-
+          grant serves the waiters from the oldest while the oldest fits, and stops
+          at the first that does not: FIFO, so a large request at the head is not
+          starved by the small ones behind it. The caller holds mu.
+        name: grant
+        recv: s *Weighted
+      - doc: push appends w to the queue. The caller holds mu.
+        name: push
+        params: w *waiter
+        recv: s *Weighted
+      - doc: unlink removes w from the queue wherever it stands. The caller holds mu.
+        name: unlink
+        params: w *waiter
+        recv: s *Weighted
+    name: Weighted
+  - doc: |-
+      waiter is one Acquire waiting for its units: the weight it asked for, the
+      channel that receives the grant, and its neighbours in the queue.
+    fields:
+      - doc: n is the weight asked for.
+        name: "n"
+        type: int64
+      - doc: |-
+          granted receives one token, under mu, when the units are the waiter's:
+          one slot, so the grant never blocks, and a waiter that left finds it
+          there with a non-blocking receive.
+        name: granted
+        type: chan struct{}
+      - doc: prev and next link the waiter into the queue.
+        name: prev
+        type: "*waiter"
+      - doc: prev and next link the waiter into the queue.
+        name: next
+        type: "*waiter"
+    kind: struct
+    name: waiter

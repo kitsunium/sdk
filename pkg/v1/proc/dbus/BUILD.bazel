@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "dbus",
+    srcs = [
+        "doc.go",
+        "gen_facade.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/proc/dbus",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc/dbus",
+        "//internal/kernel/errs",
+        "//internal/service/proc/dbus",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":dbus",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "dbus_test",
+    srcs = [
+        "dbus_external_test.go",
+        "gen_api_test.go",
+    ],
+    deps = [
+        ":dbus",
+        "//internal/kernel/errs",
+        "//internal/service/proc/dbus",
+        "//pkg/v1/errs",
+        "//pkg/v1/proc/service",
+    ],
+)

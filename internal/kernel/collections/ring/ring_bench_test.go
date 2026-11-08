@@ -2,6 +2,7 @@ package ring
 
 import (
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 )
@@ -237,5 +238,139 @@ func sizeName(size int) string {
 		return "size1024"
 	default:
 		return "size65536"
+	}
+}
+
+// BenchmarkMPSC_Producers measures the MPSC sibling end to end: N producer
+// goroutines share b.N records and ONE consumer reads them all, through a
+// 1024-slot NewMulti ring. ns/op is per-record wall time across the hand-off,
+// spin-retries on Full and Empty included — the row #805's acceptance reads
+// beside SPSC_ProducerConsumer/size1024 (Producers1 is the same topology as
+// that row, through the MPSC claim instead of the SPSC store). A writer that
+// finds the ring full, and the reader that finds it empty, yield
+// (runtime.Gosched) before trying again, as the mutex row's do.
+func BenchmarkMPSC_Producers(b *testing.B) {
+	for _, producers := range []int{1, 4, 8} {
+		b.Run(producersName(producers), func(b *testing.B) { benchMPSC(b, producers) })
+	}
+}
+
+// benchMPSC runs producers writers and one reader over b.N records.
+func benchMPSC(b *testing.B, producers int) {
+	q, err := NewMulti[int](1024)
+	if err != nil {
+		b.Fatalf("NewMulti: %v", err)
+	}
+	n := b.N
+	var wg sync.WaitGroup
+	b.ReportAllocs()
+	b.ResetTimer()
+	for p := range producers {
+		//: each writer's share; the first takes the remainder.
+		share := n / producers
+		if p == 0 {
+			share += n % producers
+		}
+		wg.Go(func() {
+			for i := range share {
+				//: a full ring yields, as a producer with somewhere else to be does.
+				for q.TryWrite(i) != nil {
+					runtime.Gosched()
+				}
+			}
+		})
+	}
+	//: the one reader, until every record has crossed; an empty ring yields.
+	for read := 0; read < n; {
+		if _, rerr := q.TryRead(); rerr == nil {
+			read++
+		} else {
+			runtime.Gosched()
+		}
+	}
+	wg.Wait()
+}
+
+// BenchmarkMutexSPSC_Producers is the shape the MPSC sibling replaces: the
+// SPSC ring behind one mutex that every producer and the consumer take, as
+// the async logger middleware does (#805). Same topology and record count as
+// MPSC_Producers, so the two rows read side by side.
+func BenchmarkMutexSPSC_Producers(b *testing.B) {
+	for _, producers := range []int{1, 4, 8} {
+		b.Run(producersName(producers), func(b *testing.B) { benchMutexSPSC(b, producers) })
+	}
+}
+
+// benchMutexSPSC runs producers writers and one reader over b.N records
+// through a mutex-guarded SPSC ring.
+func benchMutexSPSC(b *testing.B, producers int) {
+	q, err := New[int](1024)
+	if err != nil {
+		b.Fatalf("New: %v", err)
+	}
+	var mu sync.Mutex
+	try := func(i int) error {
+		mu.Lock()
+		defer mu.Unlock()
+		return q.TryWrite(i)
+	}
+	n := b.N
+	var wg sync.WaitGroup
+	b.ReportAllocs()
+	b.ResetTimer()
+	for p := range producers {
+		share := n / producers
+		if p == 0 {
+			share += n % producers
+		}
+		wg.Go(func() {
+			for i := range share {
+				for try(i) != nil {
+					runtime.Gosched()
+				}
+			}
+		})
+	}
+	for read := 0; read < n; {
+		mu.Lock()
+		_, rerr := q.TryRead()
+		mu.Unlock()
+		if rerr == nil {
+			read++
+		} else {
+			runtime.Gosched()
+		}
+	}
+	wg.Wait()
+}
+
+// BenchmarkMPSC_TryWrite_Happy is the uncontended claim: one goroutine writes
+// then drains, as TryWrite_Happy does on the SPSC ring.
+func BenchmarkMPSC_TryWrite_Happy(b *testing.B) {
+	q, err := NewMulti[int](1024)
+	if err != nil {
+		b.Fatalf("NewMulti: %v", err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		if err := q.TryWrite(i); err != nil {
+			b.Fatalf("TryWrite: %v", err)
+		}
+		if _, err := q.TryRead(); err != nil {
+			b.Fatalf("drain TryRead: %v", err)
+		}
+	}
+}
+
+// producersName renders a producer count as a stable sub-benchmark label.
+func producersName(producers int) string {
+	switch producers {
+	case 1:
+		return "Producers1"
+	case 4:
+		return "Producers4"
+	default:
+		return "Producers8"
 	}
 }

@@ -36,11 +36,17 @@ func TestSupported(t *testing.T) {
 		{"ProcessSpawn", proc.CapProcessSpawn, unix || win},
 		{"SignalRelay", proc.CapSignalRelay, unix || win},
 		{"Reaper", proc.CapReaper, unix || win},
-		{"Cgroup", proc.CapCgroup, g == "linux" || win},
+		{"Cgroup", proc.CapCgroup, g == "linux" || win || g == "freebsd"},
 		{"Rlimit", proc.CapRlimit, unix},
-		{"UmaskNiceOOM", proc.CapUmaskNiceOOM, unix},
+		{"UmaskNice", proc.CapUmaskNice, unix},
+		{"OOMScoreAdj", proc.CapOOMScoreAdj, g == "linux"},
 		{"SdNotify", proc.CapSdNotify, unix},
 		{"SocketActivation", proc.CapSocketActivation, unix},
+		{"DieWithParent", proc.CapDieWithParent, g == "linux" || g == "freebsd" || win},
+		{"Scheduling", proc.CapScheduling, g == "linux" || g == "freebsd"},
+		{"PTY", proc.CapPTY, g == "linux" || g == "darwin" || g == "freebsd"},
+		{"ProcessHandle", proc.CapProcessHandle, g == "linux" || win},
+		{"Sandbox", proc.CapSandbox, g == "linux" && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64")},
 		{"an unknown capability", proc.Capability(0x7BAD), false},
 		{"a negative capability", proc.Capability(-1), false},
 	}
@@ -162,13 +168,15 @@ func Test_Capability_String(t *testing.T) {
 		cap  proc.Capability
 		want string
 	}
-	//: the table has eight entries; the ninth index is the first out of range.
-	const pastTheTable proc.Capability = 8
+	//: the table runs to CapSandbox, 13; 14 is the first value out of range.
+	const pastTheTable proc.Capability = 14
 	tests := []tc{
 		{"the first capability", proc.CapProcessSpawn, "ProcessSpawn"},
 		{"a middle capability", proc.CapCgroup, "Cgroup"},
-		{"the last capability", proc.CapSocketActivation, "SocketActivation"},
-		{"one past the table", pastTheTable, "Capability(8)"},
+		{"the last of the block", proc.CapProcessHandle, "ProcessHandle"},
+		{"the capability numbered apart", proc.CapOOMScoreAdj, "OOMScoreAdj"},
+		{"the last capability", proc.CapSandbox, "Sandbox"},
+		{"one past the table", pastTheTable, "Capability(14)"},
 		{"a negative value", proc.Capability(-1), "Capability(-1)"},
 	}
 	runCase := func(t *testing.T, c tc) {

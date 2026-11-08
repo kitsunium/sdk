@@ -5,9 +5,15 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "notify",
     srcs = [
+        "assignments.go",
+        "detach_unix.go",
+        "dial.go",
+        "dial_windows.go",
         "doc.go",
+        "listen_freebsd.go",
         "listen_linux.go",
         "listen_other.go",
+        "listen_unix.go",
         "notify.go",
         "sdnotify.go",
     ],
@@ -19,7 +25,12 @@ go_library(
     deps = [
         "//internal/core/proc",
         "//internal/kernel/errs",
-    ],
+    ] + select({
+        "@rules_go//go/platform:freebsd": [
+            "//internal/service/proc/internal/bsdabi",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 alias(
@@ -34,6 +45,7 @@ alias(
 go_test(
     name = "notify_test",
     srcs = [
+        "assignments_internal_test.go",
         "gen_api_1_test.go",
         "gen_api_2_test.go",
         "gen_api_test.go",
@@ -42,10 +54,14 @@ go_test(
         "notify_bounded_linux_external_test.go",
         "notify_external_test.go",
         "notify_internal_test.go",
+        "notify_windows_test.go",
         "sdnotify_bench_test.go",
         "sdnotify_external_test.go",
         "sdnotify_internal_test.go",
         "sdnotify_other_test.go",
+        "transport_freebsd_internal_test.go",
+        "transport_internal_test.go",
+        "transport_linux_internal_test.go",
     ],
     embed = [":notify"],
     deps = [

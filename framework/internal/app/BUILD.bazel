@@ -301,6 +301,7 @@ go_test(
         "devtools_internal_test.go",
         "devtools_test.go",
         "endpoint_test.go",
+        "escalate_unix_internal_test.go",
         "expose_test.go",
         "fakedb_internal_test.go",
         "fakequeue_internal_test.go",

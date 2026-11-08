@@ -1,11 +1,11 @@
-//go:build !linux
+//go:build !linux && !freebsd
 
-// Package notify_test — non-Linux listener contract mirror: the supervisor side
-// relies on SO_PASSCRED / SCM_CREDENTIALS, a Linux facility, so Listen returns
-// the central UnsupportedPlatform sentinel off Linux. The Linux round-trip is
-// covered by sdnotify_external_test.go; this complement is built and run off
-// Linux (darwin/windows/the BSDs) so the e2e-cross CI binary validates the
-// off-platform degrade on a real non-Linux kernel, with no runtime skip.
+// Package notify_test — the listener contract off Linux and FreeBSD: the
+// supervisor side relies on the kernel stamping every datagram with its sender
+// (SO_PASSCRED, LOCAL_CREDS_PERSISTENT), so Listen returns the central
+// UnsupportedPlatform sentinel elsewhere. This complement is built and run on
+// darwin, Windows, OpenBSD, NetBSD, illumos and Solaris so the e2e-cross CI
+// binary validates the degrade on a real kernel, with no runtime skip.
 package notify_test
 
 import (
@@ -39,5 +39,15 @@ func TestListenUnsupportedOffLinuxTagged(t *testing.T) {
 	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
 		//: a missing code breaks the degrade-gracefully contract off Linux.
 		t.Fatalf("Listen off Linux = %v, want CodeUnsupportedPlatform", err)
+	}
+}
+
+// TestListenForUnsupportedOffLinuxTagged asserts ListenFor's typed refusal
+// off Linux (#730).
+func TestListenForUnsupportedOffLinuxTagged(t *testing.T) {
+	t.Parallel()
+	l, path, err := notify.ListenFor(1000, 1000)
+	if l != nil || path != "" || !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+		t.Fatalf("ListenFor off Linux = %v, %q, %v, want UNSUPPORTED_PLATFORM", l, path, err)
 	}
 }

@@ -31,6 +31,9 @@ go_test(
     size = "small",
     srcs = [
         "gen_api_test.go",
+        "gen_perf_test.go",
+        "identity_internal_test.go",
+        "perf_fixtures_test.go",
         "singleflight_bench_test.go",
         "singleflight_external_test.go",
         "singleflight_internal_test.go",

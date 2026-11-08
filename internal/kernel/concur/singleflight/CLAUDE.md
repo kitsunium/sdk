@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T11:00:00Z -->
+<!-- updated: 2026-11-07T20:30:00Z -->
 # internal/kernel/concur/singleflight/
 
 ## Purpose
@@ -17,7 +17,7 @@ only failure of its own is a programming fault, which panics.
 | File | Surface |
 |---|---|
 | `singleflight.go` | `Group[K,V]` + `Do` / `Forget` / `InFlight`, its sixteen `shard`s, and the join/run/publish/await/abandon path |
-| `call.go` | `call[V]` — the in-flight record shared by every caller of one key |
+| `call.go` | `call[V]` — the in-flight record shared by every caller of one key — and `detached`, the root of its shared context (#813) |
 | `panic.go` | `PanicValue` — the panic carried out of the shared call into every waiter |
 
 `Group` has **no constructor**: its zero value is usable, as `sync.Mutex`,
@@ -33,9 +33,10 @@ first** — it has been waiting longest — and when its context is cancelled,
 every other caller inherits that cancellation. One abandoned request fails ten
 that were still willing to wait.
 
-So the shared call gets a context of its own:
-`context.WithCancel(context.WithoutCancel(leaderCtx))`. That is one decision
-with three named consequences:
+So the shared call gets a context of its own: `context.WithCancel` over the
+leader's context with its cancellation removed — what
+`context.WithoutCancel(leaderCtx)` returns, kept in the call record since #813
+(see Conventions). That is one decision with three named consequences:
 
 - **A caller that abandons is a departure, not a kill.** It stops waiting and
   receives its OWN `ctx.Err()`. The call continues.
@@ -109,7 +110,21 @@ system and not a kernel primitive.
   arriving now would join. A forgotten or fully abandoned call keeps running
   uncounted, so after `Forget` plus a re-issuing `Do` it reads 1 while two
   calls for that key run. Read it as a gauge, never as "how much work is live".
-- Cross-OS: 100 % portable (`sync`, `context`, `hash/maphash`, `runtime/debug`, `strings`).
+- **The shared context's root lives in the call record** (#813). `detached`
+  (`call.go`) answers as `context.WithoutCancel(leaderCtx)` does — the
+  leader's values, no deadline, a nil `Done`, a nil `Err`, the same name —
+  and `join` builds `context.WithCancel(&candidate.base)`: a leading call
+  allocates 5 objects where it allocated 6, B/op unchanged (`BENCH.md`; the
+  budget on `(*Group[...]).Do` in `design/sdk.yaml`, fixture
+  `perfDoLeading`). It is faithful only because fn never sees the root: the
+  `WithCancel` above it answers `Cause`, a child's lookup of its parent and
+  the private key `WithoutCancel` answers nil to, and finds `Done` nil so it
+  never watches it. `identity_internal_test.go` holds the equivalence
+  against the construction before #813, which it was written against and
+  passes on. The price is reachability: fn's context keeps the whole record
+  alive, so an fn that hands its context to work outliving the call keeps
+  the call's result alive with it.
+- Cross-OS: 100 % portable (`sync`, `context`, `hash/maphash`, `reflect`, `runtime/debug`, `strings`, `time`).
 
 ## Do NOT
 
@@ -122,10 +137,21 @@ system and not a kernel primitive.
   `TestAbandonedLeaderDoesNotCondemnTheFollowers` fails on it.
 - Add error codes. `fn`'s error is passed through untouched; the only failure
   the package owns is a panic.
+- Hand `&call.base` to anything but the `context.WithCancel` in `join`. Asked
+  directly, the root answers the context package's private key with the
+  leader's own cancel context when it has one, where `WithoutCancel` answers
+  nil — so `context.Cause` over it would read the leader's cause.
+- Replace the root and the `WithCancel` by one context type that cancels
+  itself (the shape #813 sketched). It cannot answer that private key as
+  `WithoutCancel` does, so `context.Cause` would leak the leader's cause; and
+  the context package wraps or watches, with a goroutine each, the children
+  of a cancelling context it does not know — their names and their cost
+  change. The saving is the same one allocation either way.
 
 ## Verification
 
 ```
 cd internal/kernel && GOWORK=off go test -race -count=10 ./concur/singleflight/
 bazel test --config=race //internal/kernel/concur/singleflight:singleflight_test
+go test -run Perf ./internal/kernel/concur/singleflight/   # race off: the allocs budget
 ```

@@ -13,6 +13,31 @@ packages:
             name: CodeBatcherDeliverFailed
             value: "0x00_01_05_02"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeBatcherCloseTimedOut identifies a Close whose context ended before
+              the batcher's goroutine stopped or before the final batch reached the
+              Sink.
+            name: CodeBatcherCloseTimedOut
+            value: "0x00_01_05_03"
+        type: errs.Code
+    constants:
+      - blockDoc: ""
+        doc: |-
+          FlushCaller delivers a capped batch on the goroutine of the Add that
+          filled it, which receives the delivery's error: the zero value.
+        name: FlushCaller
+        type: FlushMode
+        value: "0"
+      - blockDoc: ""
+        doc: |-
+          FlushBackground hands a capped batch to the batcher's own goroutine and
+          returns; the delivery's error goes to Config.OnError. One batch waits
+          beside the one being delivered: an Add that fills another waits for it
+          to be taken, so memory stays bounded.
+        name: FlushBackground
+        type: FlushMode
+        value: "1"
     doc: |-
       Package batcher provides a generic coalescing buffer: items are appended via
       Add and handed to a deliver closure in batches — flushed eagerly when an
@@ -50,10 +75,13 @@ packages:
       Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
     functions:
       - doc: |-
-          NewBatcher builds a Batcher over deliver with cfg. When cfg.FlushEvery > 0 it
-          spawns a ticker goroutine that flushes on the interval, ticking on cfg.Clock
-          (the wall clock when nil); the goroutine is joined by Close. A nil
-          cfg.OnError is degraded to a no-op so the flush paths stay branch-free.
+          NewBatcher builds a Batcher over deliver with cfg. When cfg.FlushEvery > 0
+          or cfg.FlushOn is FlushBackground it spawns the batcher's goroutine, which
+          flushes on the interval, ticking on cfg.Clock (the wall clock when nil),
+          and delivers the batches a cap made ready; Close joins it. Every delivery
+          that goroutine makes runs under the batcher's lifetime context, which
+          Close cancels. A nil cfg.OnError is degraded to a no-op so the flush paths
+          stay branch-free.
         in:
           - name: deliver
             type: Sink[T]
@@ -87,6 +115,17 @@ packages:
             private: "internal/kernel/concur/batcher: the deliver closure returned an error"
             public: Batcher delivery failed
             reason: BATCHER_DELIVER_FAILED
+          - code: CodeBatcherCloseTimedOut
+            doc: |-
+              BatcherCloseTimedOut is returned by Close when its context ended first:
+              before the batcher's goroutine, still inside a delivery, had stopped —
+              its context is then cancelled — or before the Sink was free for the
+              final batch. It wraps the context's error and carries, as the field
+              "undelivered", the number of items Close could not deliver.
+            name: BatcherCloseTimedOut
+            private: "internal/kernel/concur/batcher: Close's context ended before the batcher's goroutine stopped or the final batch was delivered"
+            public: Batcher close timed out
+            reason: BATCHER_CLOSE_TIMED_OUT
     types:
       - doc: |-
           Sink delivers one coalesced batch. A non-nil error fails the batch: it is
@@ -104,8 +143,12 @@ packages:
         methods:
           - doc: |-
               Add appends item to the pending batch and eagerly flushes when the batch
-              reaches MaxItems or MaxWeight. It returns BatcherClosed if Close has run; a
-              cap-triggered deliver failure is returned wrapped as DeliverFailed.
+              reaches MaxItems or MaxWeight. It returns BatcherClosed if Close has run.
+              Under FlushCaller the capped batch is delivered on this goroutine and a
+              deliver failure is returned wrapped as BatcherDeliverFailed; under
+              FlushBackground it is handed to the batcher's goroutine and Add returns
+              nil — waiting first, within ctx, while an earlier capped batch has not
+              been taken, the item staying pending when ctx ends.
             in:
               - name: ctx
                 type: context.Context
@@ -126,10 +169,14 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
-              Close stops the ticker (if any), delivers the final batch with ctx — the
-              caller's context, which bounds that last delivery — and marks the batcher
-              closed. It is idempotent: a second Close returns nil after the first has
-              drained the buffer.
+              Close stops the batcher's goroutine (if any), delivers the final batch
+              with ctx — the caller's context, which bounds the whole of Close — and
+              marks the batcher closed. The goroutine is joined within ctx: when ctx
+              ends while it is still inside a delivery, Close cancels that delivery's
+              context and returns BatcherCloseTimedOut without waiting further, the
+              final batch undelivered; a Sink that ignores its context keeps the
+              goroutine until it returns. It is idempotent: a second Close returns nil
+              after the first has drained the buffer.
             in:
               - name: ctx
                 type: context.Context
@@ -184,9 +231,18 @@ packages:
                 hook degrades to a no-op so the flush paths stay branch-free.
               name: OnError
               type: func(err error)
+            - doc: |-
+                FlushOn says which goroutine delivers a batch a cap filled: FlushCaller,
+                the zero value, the producer whose Add hit the cap; FlushBackground, the
+                batcher's own goroutine, started by NewBatcher and joined by Close.
+              name: FlushOn
+              type: FlushMode
         typeParams:
           - constraint: any
             name: T
+      - doc: FlushMode says which goroutine runs the Sink for a batch a cap filled.
+        name: FlushMode
+        underlying: uint8
   - codes:
       - const:
           - doc: CodeCommitClosed identifies a Do call made after Close.
@@ -321,24 +377,335 @@ packages:
                 clock.ManualClock makes the gathering deterministic in a test.
               name: Clock
               type: clock.Waiter
+  - codes:
+      - const:
+          - doc: CodePoolFull identifies a Submit that found no room for its task.
+            name: CodePoolFull
+            note: "range: 0.1.6.0 - 0.1.6.255"
+            value: "0x00_01_06_01"
+        type: errs.Code
+      - const:
+          - doc: CodePoolClosed identifies a Submit made after Drain or Stop.
+            name: CodePoolClosed
+            value: "0x00_01_06_02"
+        type: errs.Code
+    doc: |-
+      Package pool provides Pool, a bounded worker pool: a fixed set of
+      long-lived workers consuming a bounded queue of tasks, with a refusal when
+      there is no room, a drain, and a task's panic isolated on its worker.
+
+      It is the shape group and worker are not. group is a one-shot fan-out —
+      a goroutine per task, one wait, used once —, worker is one daemon. A
+      service that runs the same kind of work for as long as it lives — a probe
+      per check, a fire per scheduled job, a sender per batch — needs workers
+      that outlive a task, a queue that refuses when full instead of growing,
+      and a fault in one task that does not end the others.
+
+      Submit hands a task over: without a queue (Config.Queue 0) an idle worker
+      takes it or PoolFull answers at once — a refusal, never a park (ADR
+      0031) —; with one, a full queue is waited on within the submitter's
+      context. Drain stops accepting and runs what is queued; Stop abandons the
+      queue and cancels the context the running tasks received; both wait for
+      the workers within their own context. A task runs under the pool's
+      context — New's, cancelled by Stop —, not the submitter's: a per-task
+      context carrying the submitter's values would cost an allocation per
+      task, so the values a task needs travel in its closure.
+
+      A task's panic is recovered on its worker into a PanicValue with the
+      worker's stack and handed to Config.OnPanic, and the worker serves the
+      next task: unlike group, which re-raises because it is one-shot, the pool
+      outlives a task's fault. With no OnPanic the panic is raised again — a
+      fault nobody observes is not swallowed.
+
+      Stdlib-only and generic. Range 0.1.6.* (ADR 0005 kernel block, ADR 0216).
+
+      Package pool — the Config value type.
+
+      Package pool — declares the sentinels returned by Submit.
+    functions:
+      - doc: |-
+          NewPool starts a Pool of cfg.Workers workers — at least one — over a queue
+          of cfg.Queue tasks, its tasks running under a context derived from ctx: the
+          values ctx carries, its cancellation, and Stop's. Its goroutines — the
+          workers and one that waits for them — live until Drain or Stop, which join
+          them within their own context.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: Config
+        name: NewPool
+        out:
+          - type: "*Pool"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/kernel/concur/pool
+    sentinels:
+      - var:
+          - code: CodePoolFull
+            doc: |-
+              PoolFull is returned by Submit when there is no room for the task: every
+              worker busy and no queue, or a full queue waited on until the submitter's
+              context ended — then wrapping that context's error.
+            name: PoolFull
+            private: "internal/kernel/concur/pool: Submit found every worker busy and the queue full"
+            public: The worker pool is full
+            reason: POOL_FULL
+          - code: CodePoolClosed
+            doc: |-
+              PoolClosed is returned by Submit once Drain or Stop has begun: the pool
+              takes no more tasks.
+            name: PoolClosed
+            private: "internal/kernel/concur/pool: Submit called after Drain or Stop"
+            public: The worker pool is closed
+            reason: POOL_CLOSED
+    types:
+      - doc: |-
+          Task is one unit of work a Pool runs: it receives the pool's context,
+          cancelled by Stop, and its error goes to Config.OnError.
+        name: Task
+        underlying: func(ctx context.Context) error
+      - doc: |-
+          Pool is a fixed set of long-lived workers consuming a bounded queue of
+          tasks. Submit hands a task over — refused with PoolFull when there is no
+          room —, Drain stops accepting and runs what is queued, Stop abandons the
+          queue and cancels what runs. A task's panic is recovered on its worker and
+          handed to Config.OnPanic, and the worker serves the next task. Safe for
+          concurrent use; the zero value is NOT usable, build it with NewPool.
+        methods:
+          - doc: |-
+              Submit hands task to the pool. Without a queue it is taken by an idle
+              worker or refused with PoolFull at once — never parked. With one, a full
+              queue is waited on until ctx ends, which returns PoolFull wrapping ctx's
+              error. After Drain or Stop it returns PoolClosed. A task accepted runs
+              exactly once, unless Stop abandons it first. A nil task panics.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: task
+                type: Task
+            name: Submit
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Drain stops accepting tasks, lets the workers run every task already
+              queued, and waits for them to exit within ctx: nil once they have, ctx's
+              error when it ends first — the workers then go on until the queue is
+              empty; Stop abandons it. Idempotent.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Drain
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Stop stops accepting tasks, abandons those still queued — they never run
+              —, cancels the context the running ones received, and waits for them
+              within ctx: nil once every worker has exited, ctx's error when it ends
+              first. A task that ignores its context cannot be stopped from outside.
+              Idempotent.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Stop
+            out:
+              - type: error
+            recv: pointer
+        name: Pool
+        struct:
+          unexported: true
+      - doc: |-
+          Config sizes a Pool and names the observers of what its tasks cannot
+          return. The zero Config is usable: one worker, no queue, a task's error
+          discarded and its panic raised again.
+        name: Config
+        struct:
+          fields:
+            - doc: |-
+                Workers is how many tasks run at once, each on a long-lived worker; a
+                value below 1 is 1.
+              name: Workers
+              type: int
+            - doc: |-
+                Queue is how many submitted tasks may wait for a worker. Zero is no
+                queue: Submit refuses at once when every worker is busy. A positive
+                queue makes a Submit that finds it full wait, within its context. A
+                negative value is zero.
+              name: Queue
+              type: int
+            - doc: |-
+                OnPanic receives a task's panic, recovered on its worker, which then
+                serves the next task. Nil raises the panic again on the worker: a fault
+                nobody observes is not swallowed, and the process ends as it would for
+                a bare goroutine.
+              name: OnPanic
+              type: func(p PanicValue)
+            - doc: |-
+                OnError receives a task's non-nil error, which has no caller to return
+                to. Nil discards it.
+              name: OnError
+              type: func(err error)
+      - doc: |-
+          PanicValue carries a panic a task raised to Config.OnPanic: Raised is the
+          value the panic carried, verbatim, and Stack the stack of the worker that
+          ran the task, captured at recovery. It is not an error and carries no code:
+          a panic is a programming fault.
+        methods:
+          - doc: |-
+              String renders the original panic followed by the stack of the worker
+              that raised it, so a re-raise with no OnPanic prints the task's stack.
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: PanicValue
+        struct:
+          fields:
+            - doc: Raised is the value the original panic carried, verbatim.
+              name: Raised
+              type: any
+            - doc: Stack is the stack of the worker goroutine, captured at recovery.
+              name: Stack
+              type: "[]byte"
+  - codes:
+      - const:
+          - doc: CodeWeightTooLarge identifies an Acquire of more units than the semaphore holds.
+            name: CodeWeightTooLarge
+            note: "range: 0.1.7.0 - 0.1.7.255"
+            value: "0x00_01_07_01"
+        type: errs.Code
+    doc: |-
+      Package sema provides Weighted, a weighted semaphore: a capacity of units,
+      Acquire takes n of them, Release gives them back. Where a unit semaphore —
+      a buffered channel, a group's limit, a bulkhead — counts calls, this one
+      counts what each call costs: the bytes of a read buffer, the size of a
+      decompression, the weight of a batch.
+
+      Acquire is context-aware and first-in first-out: a waiting request is
+      served before every later one, so a large request is never starved by the
+      small ones behind it. A request heavier than the whole capacity could
+      never be served and is refused at once with WeightTooLarge rather than
+      parked forever (ADR 0031). Releasing more than is held panics: a
+      programmer's fault, as recycler treats one.
+
+      A mutex, a counter and an intrusive list of waiters, each with a channel:
+      stdlib-only and generic, nothing allocated on the uncontended path. Range
+      0.1.7.* (ADR 0005 kernel block, ADR 0216).
+
+      Package sema — declares the sentinel returned by Acquire.
+    functions:
+      - doc: |-
+          NewWeighted builds a Weighted holding capacity units; a capacity below 1 is
+          clamped to 1, a semaphore that admits nothing being no semaphore.
+        in:
+          - name: capacity
+            type: int64
+        name: NewWeighted
+        out:
+          - type: "*Weighted"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/kernel/concur/sema
+    sentinels:
+      - var:
+          - code: CodeWeightTooLarge
+            doc: |-
+              WeightTooLarge is returned by Acquire, at once, for a weight above the
+              semaphore's capacity: a request no Release could ever let through.
+            name: WeightTooLarge
+            private: "internal/kernel/concur/sema: Acquire of more units than the capacity"
+            public: The requested weight exceeds the semaphore's capacity
+            reason: WEIGHT_TOO_LARGE
+    types:
+      - doc: |-
+          Weighted is a weighted, context-aware, first-in first-out semaphore: a
+          capacity of units, Acquire takes n of them — waiting, within its context,
+          behind every Acquire that came first —, and Release gives them back. The
+          zero value is NOT usable; build it with NewWeighted.
+        methods:
+          - doc: |-
+              Acquire takes n units, waiting until they are free and every earlier
+              waiter has been served: a large request is never overtaken by smaller ones
+              behind it. It returns WeightTooLarge at once when n exceeds the capacity —
+              such a request could never be served —, and ctx's error, holding nothing,
+              when ctx ends first; a ctx already done fails even when the units are free.
+              An n of zero is served at once; a negative n panics.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: "n"
+                type: int64
+            name: Acquire
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              TryAcquire takes n units without waiting and reports whether it did: false
+              when they are not free, when an Acquire is already waiting — it would be
+              overtaken —, or when n exceeds the capacity. A negative n panics.
+            in:
+              - name: "n"
+                type: int64
+            name: TryAcquire
+            out:
+              - type: bool
+            recv: pointer
+          - doc: |-
+              Release gives back n units and serves the waiters they let through, in
+              order. Releasing more than is held, or a negative n, panics: a programmer's
+              fault, which a silent correction would turn into an admission bound that no
+              longer bounds.
+            in:
+              - name: "n"
+                type: int64
+            name: Release
+            recv: pointer
+        name: Weighted
+        struct:
+          unexported: true
   - doc: |-
       Package buffer provides a pooled *[]byte for zero-alloc formatting in hot
-      paths. Consumers acquire a reusable buffer via Get and return it via Put so
-      steady-state allocations tend toward zero. A buffer is its caller's from
-      [Get] until [Put] and must not be touched after Put. It is a thin byte-slice
-      specialisation over internal/kernel/concur/recycler.CappedPool (ADR 0010): the
-      recycling mechanism lives in recycler, the 64-KiB capacity threshold and the
-      *[]byte type live here.
+      paths. Consumers acquire a reusable buffer via Get or GetSize and return it
+      via Put so steady-state allocations tend toward zero. A buffer is its
+      caller's from [Get] until [Put] and must not be touched after Put. It is a
+      thin byte-slice specialisation over
+      internal/kernel/concur/recycler.CappedPool (ADR 0010): the recycling
+      mechanism lives in recycler, the size classes and the *[]byte type live
+      here.
+
+      Size classes (#810, ADR 0216): five pools, of 1, 4, 16, 64 and 256 KiB
+      buffers. GetSize serves a request from the smallest class that fits, and
+      Put routes a buffer by its capacity to the largest class it covers, which
+      keeps it only while its capacity is at most twice the class's size — a
+      buffer grown past that is dropped, so no class pins more than twice what
+      it hands out, and a 1 KiB caller is never handed a 64 KiB buffer another
+      returned.
     functions:
       - doc: Get borrows a reusable byte buffer with zero length and capacity >= initialCap.
         name: Get
         out:
           - type: "*[]byte"
       - doc: |-
-          Put returns a buffer to the pool after use; the recycler truncates its length
-          and drops it when cap exceeds maxRetain. A nil argument is a safe no-op so
-          call sites can always defer Put — the generic CappedPool cannot nil-check
-          a pointer-like T, so the guard lives here.
+          GetSize borrows a reusable byte buffer with zero length and capacity at
+          least n, from the smallest class that fits: 1, 4, 16, 64 or 256 KiB. A
+          buffer is never smaller than its class. Above 256 KiB the buffer is
+          allocated to measure, and Put drops it unless its capacity is at most 512
+          KiB. An n of zero or less is the smallest class.
+        in:
+          - name: "n"
+            type: int
+        name: GetSize
+        out:
+          - type: "*[]byte"
+      - doc: |-
+          Put returns a buffer to the pool after use: routed by its capacity to the
+          largest class it covers, its length truncated, and dropped when its
+          capacity is past twice that class's size or below the smallest class. A
+          nil argument is a safe no-op so call sites can always defer Put — the
+          generic CappedPool cannot nil-check a pointer-like T, so the guard lives
+          here.
 
           Put ends the caller's ownership of b. Once it returns, neither *b nor the
           bytes it points at may be read or written — not even len(*b) — and b must
@@ -1146,17 +1513,28 @@ packages:
 
       # When a batch is delivered
 
-        - Add delivers eagerly, on the caller's goroutine, once the pending batch
-          reaches [Config].MaxItems items or [Config].MaxWeight — the sum of
-          [Config].WeightOf over the batch; a nil WeightOf weighs every item 1 and
-          ignores MaxWeight.
+        - Add delivers eagerly once the pending batch reaches [Config].MaxItems
+          items or [Config].MaxWeight — the sum of [Config].WeightOf over the
+          batch; a nil WeightOf weighs every item 1 and ignores MaxWeight. Where
+          is [Config].FlushOn's choice: [FlushCaller], the zero, runs the delivery
+          on the goroutine of that Add, which gets its error; [FlushBackground]
+          hands the batch to the batcher's goroutine, Add returning at once, and
+          the error goes to [Config].OnError — an Add that fills a second batch
+          before the first was taken waits for it, within its context.
         - A positive [Config].FlushEvery starts one ticker goroutine that delivers
           whatever is pending on each tick, on [Config].Clock — the wall clock
           when nil, a pkg/v1/clock.ManualClock in a test. A failure on that path
           has no caller to return to and goes to [Config].OnError.
-        - Flush delivers what is pending now; Close stops the ticker and delivers
-          what is pending with the context it is given, then refuses every later
-          Add and Flush with [BatcherClosed].
+        - Flush delivers what is pending now; Close stops the batcher's goroutine
+          and delivers what is pending with the context it is given, then refuses
+          every later Add and Flush with [BatcherClosed].
+
+      Every delivery the batcher's own goroutine makes — a tick's, a background
+      one's — runs under a context Close cancels: Close waits for that goroutine
+      only as long as its own context lives, and returns [BatcherCloseTimedOut]
+      when it ended first, the delivery's context cancelled and the final batch
+      undelivered. A Sink that ignores its context cannot be stopped from
+      outside: bound it from the inside, with a deadline on the I/O it performs.
 
       The zero [Config] is usable: no cap, no ticker, so items wait for an
       explicit Flush or Close.
@@ -1174,18 +1552,21 @@ packages:
 
       [BatcherClosed] answers an Add or a Flush after Close. A deliver function's
       error comes back wrapped as [BatcherDeliverFailed], its cause still reachable
-      with errors.Is and errors.As.
+      with errors.Is and errors.As. [BatcherCloseTimedOut] answers a Close whose
+      context ended first.
     facade:
       - alias:
           - doc: |-
               Batcher coalesces added items into batches delivered through its [Sink].
 
-              [Batcher].Add appends an item and delivers the batch at once when a cap is
-              reached; [Batcher].Flush delivers what is pending; [Batcher].Close stops the
-              ticker, delivers what is pending with the context it is given, and closes
-              the batcher — idempotently, a second Close returning nil. Each takes a
-              context and returns the delivery's error, wrapped as
-              [BatcherDeliverFailed], or [BatcherClosed] after Close.
+              [Batcher].Add appends an item and delivers the batch when a cap is
+              reached — on its own goroutine or the batcher's, as [Config].FlushOn says;
+              [Batcher].Flush delivers what is pending; [Batcher].Close stops the
+              batcher's goroutine within its context, delivers what is pending with it,
+              and closes the batcher — idempotently, a second Close returning nil. Each
+              takes a context and returns the delivery's error, wrapped as
+              [BatcherDeliverFailed], [BatcherClosed] after Close, or
+              [BatcherCloseTimedOut] from a Close whose context ended first.
             name: Batcher
             target: kbatcher.Batcher[T]
             typeParams:
@@ -1197,8 +1578,10 @@ packages:
               eagerly (non-positive disables each); WeightOf, an item's weight (nil counts
               items); FlushEvery, the background delivery interval (non-positive starts no
               ticker); Clock, the clock.Waiter that ticker runs on (nil is the wall
-              clock); and OnError, which observes the ticker path's failures (nil ignores
-              them). The zero Config is usable.
+              clock); OnError, which observes the failures of the batcher's own
+              goroutine (nil ignores them); and FlushOn, which goroutine delivers a
+              capped batch ([FlushCaller], the zero, or [FlushBackground]). The zero
+              Config is usable.
             name: Config
             target: kbatcher.Config[T]
             typeParams:
@@ -1215,10 +1598,36 @@ packages:
             typeParams:
               - constraint: any
                 name: T
+      - alias:
+          - doc: |-
+              FlushMode says which goroutine delivers a batch a cap filled:
+              [FlushCaller] or [FlushBackground].
+            name: FlushMode
+            target: kbatcher.FlushMode
+      - const:
+          - doc: |-
+              FlushCaller delivers a capped batch on the goroutine of the Add that
+              filled it, which gets the delivery's error. It is the zero FlushMode.
+            name: FlushCaller
+            reexport: kbatcher.FlushCaller
+            type: FlushMode
+            typed: true
+            value: "0"
+          - doc: |-
+              FlushBackground hands a capped batch to the batcher's goroutine, Add
+              returning at once; the delivery's error goes to [Config].OnError. One
+              batch waits beside the one being delivered, so an Add that fills another
+              waits for room, within its context.
+            name: FlushBackground
+            reexport: kbatcher.FlushBackground
+            type: FlushMode
+            typed: true
+            value: "1"
       - func:
           doc: |-
             NewBatcher builds a [Batcher] over deliver with cfg. A positive
-            cfg.FlushEvery spawns the ticker goroutine, which Close joins.
+            cfg.FlushEvery, or cfg.FlushOn set to [FlushBackground], spawns the
+            batcher's goroutine, which Close joins.
           forward: kbatcher.NewBatcher
           in:
             - name: deliver
@@ -1247,10 +1656,131 @@ packages:
             name: BatcherDeliverFailed
             reexport: kbatcher.BatcherDeliverFailed
             type: "*errs.Error"
+          - blank: true
+            doc: |-
+              BatcherCloseTimedOut is returned by Close when its context ended before
+              the batcher's goroutine stopped — the delivery it was in has its context
+              cancelled — or before the final batch reached the deliver function. The
+              context's error stays reachable through errors.Is, and the field
+              "undelivered" counts the items left behind.
+            name: BatcherCloseTimedOut
+            reexport: kbatcher.BatcherCloseTimedOut
+            type: "*errs.Error"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       kbatcher: github.com/kitsunium/sdk/internal/kernel/concur/batcher
     path: github.com/kitsunium/sdk/pkg/v1/concur/batcher
+  - doc: |-
+      Package pool runs tasks on a fixed set of long-lived workers fed by a
+      bounded queue: a refusal when there is no room, a drain, and a task's
+      panic kept on its worker instead of taking the process down.
+
+      	p := pool.NewPool(ctx, pool.Config{Workers: 8, Queue: 64,
+      	    OnPanic: func(pv pool.PanicValue) { log.Print(pv) },
+      	})
+      	if err := p.Submit(ctx, handle); errors.Is(err, pool.PoolFull) {
+      	    // shed the load: every worker busy and the queue full
+      	}
+      	err := p.Drain(ctx) // runs what is queued, then the workers exit
+
+      It is the SDK's own worker pool, published as an alias of the kernel
+      package its services run on (ADR 0159 §4, ADR 0216).
+
+      # When to use it
+
+      When the same kind of work arrives for as long as a service lives — a
+      request pipeline, a probe per check, a send per batch — and its
+      concurrency must be bounded without a goroutine per task. For one fan-out
+      that is waited on once, the group package is the tool; for one daemon
+      goroutine, worker.
+
+      # Room, and the refusal
+
+      Without a queue ([Config].Queue 0) [Pool].Submit hands the task to an idle
+      worker or returns [PoolFull] at once: it never parks. With a queue, a full
+      one is waited on within the submitter's context, and PoolFull then wraps
+      that context's error. After [Pool].Drain or [Pool].Stop, Submit returns
+      [PoolClosed].
+
+      # Context
+
+      A task receives the pool's context — the one given to [NewPool], cancelled by
+      Stop —, not the submitter's: the values a task needs travel in its closure,
+      which is what keeps a Submit free of allocation.
+
+      # Faults
+
+      A task's panic is recovered on its worker into a [PanicValue] — the value
+      and the worker's stack — handed to [Config].OnPanic, and the worker serves
+      the next task. Without an OnPanic the panic is raised again: a fault nobody
+      observes is never swallowed. A task's error goes to [Config].OnError.
+    facade:
+      - alias:
+          - doc: |-
+              Pool is a fixed set of workers consuming a bounded queue of tasks.
+
+              [Pool].Submit hands a task over, or returns [PoolFull] when there is no
+              room and [PoolClosed] after Drain or Stop; [Pool].Drain stops accepting,
+              runs what is queued and waits for the workers within its context;
+              [Pool].Stop abandons the queue, cancels the running tasks' context and
+              waits for them within its context. Safe for concurrent use; the zero
+              value is NOT usable, build it with [NewPool].
+            name: Pool
+            target: kpool.Pool
+      - alias:
+          - doc: |-
+              Config sizes a [Pool]: Workers, how many tasks run at once (at least
+              one); Queue, how many may wait (zero refuses at once when every worker
+              is busy); OnPanic, which receives a task's recovered panic (nil raises
+              it again); and OnError, which receives a task's error (nil discards it).
+              The zero Config is usable.
+            name: Config
+            target: kpool.Config
+      - alias:
+          - doc: |-
+              Task is one unit of work: it receives the pool's context, cancelled by
+              [Pool].Stop, and its error goes to [Config].OnError.
+            name: Task
+            target: kpool.Task
+      - alias:
+          - doc: |-
+              PanicValue carries a task's panic to [Config].OnPanic: Raised, the value
+              the panic carried, and Stack, the stack of the worker that ran the task.
+              It is not an error: a panic is a programming fault.
+            name: PanicValue
+            target: kpool.PanicValue
+      - func:
+          doc: |-
+            NewPool starts a [Pool] of cfg.Workers workers over a queue of cfg.Queue
+            tasks, its tasks running under a context derived from ctx; Drain or Stop
+            joins its goroutines.
+          forward: kpool.NewPool
+          in:
+            - name: ctx
+              type: context.Context
+            - name: cfg
+              type: Config
+          name: NewPool
+          out:
+            - type: "*Pool"
+      - doc: The sentinels a caller matches with errors.Is or errs.HasCode.
+        var:
+          - doc: |-
+              PoolFull is returned by Submit when there is no room for the task: every
+              worker busy and no queue, or a full queue waited on until the
+              submitter's context ended.
+            name: PoolFull
+            reexport: kpool.PoolFull
+            type: "*errs.Error"
+          - blank: true
+            doc: PoolClosed is returned by Submit once Drain or Stop has begun.
+            name: PoolClosed
+            reexport: kpool.PoolClosed
+            type: "*errs.Error"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      kpool: github.com/kitsunium/sdk/internal/kernel/concur/pool
+    path: github.com/kitsunium/sdk/pkg/v1/concur/pool
   - constants:
       - build: "!(386 || arm)"
         doc: |-

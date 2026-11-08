@@ -1,7 +1,7 @@
 # design/sdk.yaml — the SDK's project file: its structure, and the rules kit
 # holds it to (ADR 0163). The other files of design/ are its surface: every
 # exported symbol of the SDK's modules (modules: below) — the root, internal,
-# the pkg/v1 families — and of the fifteen vendor modules, one
+# the pkg/v1 families — and of the sixteen vendor modules, one
 # file per domain or package group, each with its inputs and outputs —
 # `surface: closed` makes an exported symbol no file declares a finding. An
 # API change starts here, then `kit gen` writes the pins, the ports, the
@@ -91,6 +91,8 @@ modules:
   - dir: third-party/db/writer/mysql
     requires: [internal]
   - dir: third-party/db/writer/redis
+    requires: [internal]
+  - dir: third-party/ebpf
     requires: [internal]
   - dir: third-party/nats
     requires: [internal]
@@ -182,6 +184,12 @@ codes:
       owner: internal/kernel/concur/commit
     - range: 0.1.5
       owner: internal/kernel/concur/batcher
+    - range: 0.1.6
+      owner: internal/kernel/concur/pool
+      note: ADR 0216, the bounded worker pool (#804)
+    - range: 0.1.7
+      owner: internal/kernel/concur/sema
+      note: ADR 0216, the weighted semaphore (#812)
     - range: 0.2.2
       owner: internal/core/data/codec
     - range: 0.2.3
@@ -435,6 +443,18 @@ codes:
     - range: 0.3.104
       owner: internal/core/observe/logger/writer/otlpjson
       note: the OTLP/JSON logs writer, the third signal (#867)
+    - range: 0.3.105
+      owner: internal/core/proc/service
+      note: "ADR 0214, the service engine proc/service (#732, #733)"
+    - range: 0.3.106
+      owner: internal/core/proc/ipc/rpc
+      note: ADR 0218, a framed and bounded call over the private socket (#930)
+    - range: 0.3.107
+      owner: internal/core/proc/bpf
+      note: ADR 0215, the cgroup BPF programs, engine service/proc/bpf (#731)
+    - range: 0.3.108
+      owner: internal/core/proc/dbus
+      note: "ADR 0214's S0e amendment, the message bus client proc/dbus (#737)"
     - range: 0.4.1
       owner: framework/model/internal/core
       note: "ADR 0147: layer 4 is the framework's"
@@ -551,6 +571,25 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/buffer.Get
     allocs: 0
     fixture: GetPut
+  # The admission primitives of ADR 0216 and the MPSC ring (#804, #805, #810,
+  # #812): a warm class round trip, an MPSC write and read on both of their
+  # paths, a Submit into a running pool and an uncontended Acquire with its
+  # Release allocate nothing.
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/buffer.GetSize
+    allocs: 0
+    fixture: GetSizePut
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/ring.MultiQueue[...].TryWrite
+    allocs: 0
+    fixture: MultiTryWrite
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/ring.MultiQueue[...].TryRead
+    allocs: 0
+    fixture: MultiTryRead
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/pool.(*Pool).Submit
+    allocs: 0
+    fixture: Submit
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/sema.(*Weighted).Acquire
+    allocs: 0
+    fixture: AcquireRelease
   # The indexed heap in steady state (#1036): a push with its pop, an update
   # and a removal with its push back allocate nothing — every array keeps its
   # capacity and a freed id is reused before a new one is made.
@@ -698,6 +737,14 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/snapshot.(*Value[...]).Swap
     allocs: 0
     fixture: Swap
+  # A leading Do (#813): the call record, which carries the root of the
+  # shared context, its done channel, the context.WithCancel over that root
+  # and its cancel func, and the go statement fn runs on (ADR 0049). Not
+  # zero, and not meant to be: 5 is what #813 left of the 6 it measured, so
+  # a change that adds one back says so here first.
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/singleflight.(*Group[...]).Do
+    allocs: 5
+    fixture: DoLeading
   # The codecs' shared scratch: a warm round trip allocates nothing, and a
   # detach exactly once — the caller's own copy.
   - fn: go:github.com/kitsunium/sdk/internal/core/data/codec/scratch.AcquireBuffer
@@ -722,6 +769,18 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/service/data/queue.Consume
     allocs: 28
     fixture: ConsumeRoundTrip
+  # A call over the private socket (issue #930, ADR 0218): one small record
+  # sent through a net.Pipe, echoed by a handler and decoded back — both
+  # ends' frames, the codec both ways, the server's slot, context and handler
+  # goroutine, the client's wait. Not zero, and not meant to be: 22 is what
+  # a round trip measured on 2026-11-07 (660 000 over the 30 000 calls, five
+  # runs alike), so a change that adds an allocation to a call says so here
+  # first.
+  - fn: go:github.com/kitsunium/sdk/internal/service/proc/ipc/rpc.(*Client).Call
+    allocs: 22
+    fixture: CallRoundTrip
+    bench:
+      nsop: {maxDelta: 3%, vs: base}
   # The logger: an emit is not allocation-free (at least the handler's attrs
   # clone, V116 — the floor of "one alloc per emit"), and reading the span
   # off a context allocates nothing (ADR 0062).

@@ -1,0 +1,173 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: Register
+    participants:
+      - id: caller
+        kind: actor
+      - id: Register
+        kind: self
+      - id: plugin
+        kind: package
+    steps:
+      - opt:
+          do:
+            - panic: "corebpf.BackendRefused.Error() + \": \" + why"
+          init:
+            bind: why
+            eval: plugin.Unusable(b)
+            to: plugin
+          when: why != ""
+      - opt:
+          do:
+            - panic: "corebpf.BackendRefused.Error() + \": a backend is already registered\""
+          when: registry.Publish(slot, b)
+      - return: b
+  - of: Probe
+    participants:
+      - id: caller
+        kind: actor
+      - id: Probe
+        kind: self
+      - id: linked
+        kind: internal
+      - id: b.Probe
+        kind: value
+    steps:
+      - bind: b, err
+        eval: linked()
+        to: linked
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: b.Probe()
+        to: b.Probe
+  - of: AttachDevice
+    participants:
+      - id: caller
+        kind: actor
+      - id: AttachDevice
+        kind: self
+      - id: policy.Validate
+        kind: value
+      - id: backendFor
+        kind: internal
+      - id: b.AttachDevice
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: policy.Validate()
+            to: policy.Validate
+          when: err != nil
+      - bind: b, err
+        eval: backendFor(cgroup)
+        to: backendFor
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: b.AttachDevice(cgroup, policy)
+        to: b.AttachDevice
+  - of: AttachSKB
+    participants:
+      - id: caller
+        kind: actor
+      - id: AttachSKB
+        kind: self
+      - id: policy.Validate
+        kind: value
+      - id: backendFor
+        kind: internal
+      - id: b.AttachSKB
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: policy.Validate()
+            to: policy.Validate
+          when: err != nil
+      - bind: b, err
+        eval: backendFor(cgroup)
+        to: backendFor
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: b.AttachSKB(cgroup, policy)
+        to: b.AttachSKB
+  - of: AttachBind
+    participants:
+      - id: caller
+        kind: actor
+      - id: AttachBind
+        kind: self
+      - id: policy.Validate
+        kind: value
+      - id: backendFor
+        kind: internal
+      - id: b.AttachBind
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: policy.Validate()
+            to: policy.Validate
+          when: err != nil
+      - bind: b, err
+        eval: backendFor(cgroup)
+        to: backendFor
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: b.AttachBind(cgroup, policy)
+        to: b.AttachBind
+  - of: backendFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: backendFor
+        kind: self
+      - id: corebpf
+        kind: package
+      - id: linked
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: corebpf.CheckCgroup(cgroup)
+            to: corebpf
+          when: err != nil
+      - return: linked()
+        to: linked
+  - of: linked
+    participants:
+      - id: caller
+        kind: actor
+      - id: linked
+        kind: self
+      - id: registry.Lookup
+        kind: value
+    steps:
+      - bind: b, ok
+        eval: registry.Lookup(slot)
+        to: registry.Lookup
+      - opt:
+          do:
+            - return: nil, corebpf.NotLinked
+          when: "!ok"
+      - return: b, nil

@@ -1,8 +1,9 @@
 # ADR 0018 — Cross-platform portability strategy
 
-**Status**: Accepted (both bars extended to illumos and Solaris by [ADR 0144](0144-illumos-and-solaris-supervise-on-their-own-kernels-word.md))
+**Status**: Accepted (both bars extended to illumos and Solaris by [ADR 0144](0144-illumos-and-solaris-supervise-on-their-own-kernels-word.md); the `proc/exec` verdict gains the fd-table seal, `DieWithParent`, `Scheduling`, `StdioPTY`, `ProcessHandle` and placement-by-clone rows in [ADR 0217](0217-a-spawn-gives-the-child-only-what-it-names-and-waits-a-bounded-time.md), amended 2026-11-03; the adoption, notify-transport and `PIDEnv` rows in [ADR 0219](0219-a-supervisor-adopts-hears-and-hands-over-only-what-it-can-verify.md), amended 2026-11-07; adoption on darwin and the BSDs and the notify listener on FreeBSD, by ADR 0219's amendments of 2026-11-08; the `Spec.Sandbox` row — Linux amd64 and arm64 alone — by ADR 0217's amendment of 2026-11-08)
 **Date**: 2026-06-14
 **Deciders**: @kodflow
+**Amended**: 2026-11-04 — §Amendment (kitsunium/sdk#941): the verdict and roadmap tables restated as the backends that shipped, the capability matrix held to them by a test, the OOM bias refused off Linux before the spawn
 **Related**: ADR 0016 (process-supervision domain — the source of platform-specific calls),
 ADR 0004 (Bazel visibility / Linux CI lane), ADR 0005 (dotted-quad error codes — the `UnsupportedPlatform` sentinel)
 
@@ -177,3 +178,91 @@ behind one Go API — a model for the `Group` port's native backends, not a depe
 - `.github/workflows/e2e-cross.yml` — runtime-bar real-kernel gate
 - FreeBSD `rctl(8)` / RACCT/RCTL; `procctl(2)` `PROC_REAP_ACQUIRE`
 - Windows Job Objects — `SetInformationJobObject`, `JOBOBJECT_EXTENDED_LIMIT_INFORMATION`, `JOBOBJECT_CPU_RATE_CONTROL_INFORMATION`
+
+## Amendment — 2026-11-04: the tables describe the backends that shipped, and the matrix is held to them (kitsunium/sdk#941)
+
+The two tables of §Native-backend roadmap were written before the native
+backends existed, and kept naming as gaps the ones that had since shipped:
+the FreeBSD `rctl(8)` and Windows Job Object control groups, the BSD
+`procctl(2)` subreaper, the Windows spawn. Beside them, the capability matrix
+`pkg/v1/proc.Supported` answers per GOOS, and it had drifted the other way:
+`CapCgroup` said false on FreeBSD where `cgroup.Create` returns a working rctl
+group, and `CapUmaskNiceOOM` said true on darwin, the BSDs, illumos and
+Solaris where a `Spec.OOMScoreAdj` spawned the child, let it run unbiased, and
+tore it down with `RLIMIT_FAILED` once the `/proc/<pid>/oom_score_adj` write
+failed. The owner's decision (#941, option a): **the code and the capability
+matrix are the record**; this ADR is restated to them. The body above is kept
+as it was decided; where it and this section disagree, this section holds.
+
+1. **Per-domain verdict, as shipped.** illumos and Solaris are one column
+   (the `solaris` build tag selects both; ADR 0144).
+
+   | Package | Linux | Darwin | FreeBSD | OpenBSD | NetBSD | DragonFly | illumos / Solaris | Windows |
+   |---|---|---|---|---|---|---|---|---|
+   | `proc/exec` (spawn) | ✅ | ✅ | ✅ | ✅¹ | ✅ | ✅ | ✅ | ✅ `CreateProcess`; `Spec.Rlimits` through a Job Object; `Umask`, `Nice`, `OOMScoreAdj`, `User`/`Group`/`Groups`, `ExtraFiles` → `UnsupportedPlatform` |
+   | `Spec.OOMScoreAdj` | ✅ procfs | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+   | `proc/signal` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ `Relay`: a pid by `TerminateProcess`, a group by a console control event |
+   | `proc/rlimit` | ✅ `setrlimit`, `prlimit64` for another pid | ✅ self only | ✅ self only | ✅¹ self only | ✅ self only | ✅ self only | ✅ self only | ⚠️ `UnsupportedPlatform` (a spawn's `Spec.Rlimits` use the Job Object) |
+   | `proc/reaper` — reaping | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ SIGCHLD + a 1 s sweep (ADR 0144) | ✅ no-op: no zombies |
+   | `proc/reaper` — `SetChildSubreaper` | ✅ `prctl` | ❌ | ✅ `procctl(PROC_REAP_ACQUIRE)` | ❌ | ❌ | ✅ `procctl` | ❌ | ❌ |
+   | `proc/cgroup` | ✅ cgroup v2 | ❌ | ✅ `rctl(8)`² | ❌ | ❌ | ❌ | ❌ | ✅ Job Object³ |
+   | `proc/systemd/notify` — notifier | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ a named `NOTIFY_SOCKET`; an unset one is the no-op it is everywhere |
+   | `proc/systemd/notify` — `Listen` | ✅ `SO_PASSCRED` | ❌ | ✅⁴ `LOCAL_CREDS_PERSISTENT` | ❌ | ❌ | ❌ | ❌ | ❌ |
+   | `proc/systemd/listen` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+
+   ❌ is `UnsupportedPlatform`, every time — rule (a) of the Decision is
+   unchanged. ¹ no `RLIMIT_AS` (→ `UnknownResource`, §(c)). ² only on a kernel
+   carrying RACCT (`kern.racct.enable=1`); without it `cgroup.Available` is
+   false and `Create` is `UnsupportedPlatform`; `SetPidsMax`, `SetIOMax`,
+   `Freeze` and `Thaw` are `UnsupportedPlatform`, `SetMemoryMax` is
+   `vmemoryuse`, `SetCPUMax` is `pcpu`, each rule per member and applied again
+   on `Add`. ³ `SetIOMax`, `Freeze` and `Thaw` are `UnsupportedPlatform`.
+   `WithRoot` names a cgroup v2 directory: the rctl and Job Object backends
+   have no hierarchy, accept it and ignore it — documented on the option,
+   the one accepted-and-ignored input of the domain. ⁴ amended 2026-11-08 by
+   ADR 0219 (#730): the kernel's `SCM_CREDS2` names every datagram's sender;
+   never run on the authoring host, tested on the e2e-cross FreeBSD lane.
+
+2. **§Resource control and §Process reaping, as shipped.** FreeBSD `rctl` and
+   Windows Job Objects are implemented, not proposed: the rctl rules are
+   per-process strings bound through `rctl_add_rule(2)` /
+   `rctl_remove_rule(2)` and probed with `rctl_get_racct(2)`, the Job Object
+   through `kernel32` with the structs hand-declared and cited — §Dependency
+   constraint held. OpenBSD, NetBSD and DragonFly have `setrlimit` and no
+   grouping. FreeBSD and DragonFly arm `procctl(PROC_REAP_ACQUIRE)`; darwin,
+   OpenBSD, NetBSD, illumos and Solaris reap as PID 1 only. The remaining gaps
+   are exactly the ❌ cells above.
+
+3. **The capability matrix is the machine-read statement of the table, and a
+   test holds it to the engines.** `CapUmaskNiceOOM` is split:
+   `CapUmaskNice` (every Unix) keeps its slot, and `CapOOMScoreAdj` (Linux) is
+   new — under the v0 licence (ADR 0040) the old name is gone, not
+   deprecated. `CapOOMScoreAdj` is the value 12, declared apart from the
+   `iota` block: the spawn's own capabilities, decided in the same lot
+   (`CapDieWithParent`, `CapScheduling`, `CapPTY`, `CapProcessHandle`, ADR
+   0217), take 8 to 11, and a value is never given twice — `String` renders a
+   value no capability holds as a number. `CapCgroup` adds FreeBSD, its doc naming RACCT and
+   `cgroup.Available` as the runtime answer. `TestSupportedIsTheEnginesAnswer`
+   (`pkg/v1/proc`) asks each capability's engine for its smallest act on the
+   test's own process, a child it spawns, or its own temporary directory —
+   never the system's cgroup hierarchy — and requires `Supported(cap)` to be
+   true exactly when the engine does not answer `UnsupportedPlatform`, on every
+   runtime lane (Linux, darwin, Windows, the BSDs, illumos, Solaris).
+   FreeBSD without RACCT skips the cgroup row, saying so.
+   `TestEveryCapabilityHasABackendProbe` refuses a capability added without
+   a probe.
+
+4. **Where the code broke a refusal this ADR promises, the code moved.** Rule
+   (a) promises the typed `UnsupportedPlatform` where a platform has no
+   mechanic, and the spawn's own rule is that a field it cannot honour is
+   refused before the fork, never after the child ran without it. Two engines
+   did otherwise, and were changed rather than documented:
+   - `exec.Start` with `Spec.OOMScoreAdj` off Linux spawned the program, let
+     it run unbiased, failed the procfs write and tore it down with
+     `RLIMIT_FAILED`. `checkLimits` now refuses it with `UnsupportedPlatform`
+     before anything is spawned (`oomScoreAdjNative`, build-tagged).
+   - The notifier on Windows dialled a `unixgram` socket Windows' `AF_UNIX`
+     cannot open and answered `NOTIFY_FAILED` with the socket layer's text,
+     where the matrix and this table say unsupported. A named
+     `NOTIFY_SOCKET` is now refused with `UnsupportedPlatform` there.
+
