@@ -437,7 +437,7 @@ sdk/
 ├── tools/genindex/        docs/api (written and checked) + the doc-link check — auxiliary module, OUTSIDE go.work (GOWORK=off)
 ├── tools/netgate/         the network plan's merge gates: paired bench rounds, each threshold held on benchstat's interval of their ratios (ADR 0190) (net-kernel-gate.yml) — auxiliary module, OUTSIDE go.work (GOWORK=off)
 ├── .golangci.yml          code-quality second-opinion linters (the layer firewall is scripts/check-layer-deps.sh — ADR 0068)
-├── AGENTS.md, agent.toml  agent specs (not SDK)
+├── AGENTS.md              agent specs (not SDK)
 └── README.md              the SDK quickstart (packages, install, verification)
                            — per-package docs live next to their code
 ```
