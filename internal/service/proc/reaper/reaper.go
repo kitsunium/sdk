@@ -1,5 +1,7 @@
 package reaper
 
+import coreproc "github.com/kitsunium/sdk/internal/core/proc"
+
 // Option configures a reaper returned by New. Options are applied in order; an
 // unknown or zero option is a no-op. The set is intentionally small — a reaper
 // has little to tune beyond an optional sweep callback for observability.
@@ -14,6 +16,21 @@ type config struct {
 	// illumos and Solaris the loop also sweeps once a second, so an idle reaper
 	// there reports zero once a second.
 	onReap func(int)
+	// onExit, when non-nil, hears of every child a sweep collects.
+	onExit func(ExitEvent)
+}
+
+// ExitEvent is one child a sweep collected: an orphan re-parented to this
+// process, or a child a Process spawned and owns.
+type ExitEvent struct {
+	// PID is the collected child's process id.
+	PID int
+	// Exit is how the child ended, in the words Process.Wait uses: the exit
+	// code, or -1 and the terminating signal, and its rusage.
+	Exit coreproc.ExitValue
+	// Owned reports that a Process spawned the child and has been handed the
+	// same status; false is an orphan, whose status ends here.
+	Owned bool
 }
 
 // WithOnReap registers fn as a post-sweep callback receiving the count of
@@ -25,6 +42,21 @@ func WithOnReap(fn func(int)) Option {
 	return func(c *config) {
 		//: store the callback verbatim; nil disables the hook.
 		c.onReap = fn
+	}
+}
+
+// WithOnExit registers fn as an observer of every child a sweep collects:
+// its pid, its exit in the words a Process's Wait uses, and whether a Process
+// owned it. It is the one record of an orphan's end a subreaper or PID 1 can
+// give — the status is told once, synchronously, and stored nowhere (ADR
+// 0093). fn runs under the sweep lock, after the owner's status is handed
+// over: it must not block. Off Unix, where nothing is collected, it is
+// retained and never called.
+func WithOnExit(fn func(ExitEvent)) Option {
+	//: capture fn into the accumulator so New can copy it onto the reaper.
+	return func(c *config) {
+		//: store the observer verbatim; nil disables it.
+		c.onExit = fn
 	}
 }
 

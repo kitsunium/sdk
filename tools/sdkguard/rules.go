@@ -6,7 +6,10 @@
 // SDK's own .golangci.yml drops misspell for exactly that reason.
 package main
 
-import "go/ast"
+import (
+	"go/ast"
+	"strconv"
+)
 
 // slogPath is the stdlib structured-logging package (ADR 0032).
 const slogPath string = "log/slog"
@@ -22,6 +25,10 @@ const fmtPath string = "fmt"
 
 // errorsPath is the stdlib errors package, source of New (SDK rule 2).
 const errorsPath string = "errors"
+
+// pprofPath is the stdlib package that serves profiles over HTTP, and whose
+// import registers its handlers on http.DefaultServeMux (ADR 0121).
+const pprofPath string = "net/http/pprof"
 
 // loggerPath is the SDK's public logger facade.
 const loggerPath string = "github.com/kitsunium/sdk/pkg/v1/observe/logger"
@@ -80,6 +87,13 @@ var (
 			Title:  "no second logging pipeline via the legacy log package",
 			Source: "ADR 0032",
 			Check:  checkLegacyLog,
+		},
+		{
+			ID:     "SDK006",
+			Level:  LevelConvention,
+			Title:  "no net/http/pprof import, it serves profiles unadmitted",
+			Source: "ADR 0121",
+			Check:  checkPprofImport,
 		},
 	}
 
@@ -467,5 +481,29 @@ func checkLegacyLog(fc *fileCtx, file *ast.File) []findingEntity {
 		return true
 	})
 	//: every write this file makes through the stdlib global.
+	return out
+}
+
+// checkPprofImport implements SDK006.
+//
+// It reads the import block itself rather than the file context's resolved
+// names: the import IS the defect. net/http/pprof's init registers six handlers
+// on http.DefaultServeMux the moment the package is linked, so the usual
+// `import _ "net/http/pprof"` binds no name at all — which is exactly the
+// spelling importsOf drops, and a dot or aliased import registers just the same.
+func checkPprofImport(fc *fileCtx, file *ast.File) []findingEntity {
+	var out []findingEntity
+	for _, spec := range file.Imports {
+		path, err := strconv.Unquote(spec.Path.Value)
+		//: an unquotable path names no package; the compiler will say more.
+		if err != nil || path != pprofPath {
+			//: some other import.
+			continue
+		}
+		out = append(out, fc.at(spec, "SDK006", "importing net/http/pprof registers six handlers on "+
+			"http.DefaultServeMux at init, served under no admission; mount profiling.NewHandler "+
+			"(pkg/v1/observe/profiling) behind your own link instead (ADR 0121)"))
+	}
+	//: every import of it in this file, whatever its spelling.
 	return out
 }

@@ -58,6 +58,67 @@ constants:
         type: int
         value: "64"
     name: labelAbsent
+  - doc: The pprof wire's endpoints, as net/http/pprof names them.
+    grouped: true
+    items:
+      - name: endpointProfile
+        type: string
+        value: "\"profile\""
+      - name: endpointTrace
+        type: string
+        value: "\"trace\""
+      - name: endpointGoroutine
+        type: string
+        value: "\"goroutine\""
+      - doc: secondsParam and debugParam are the query parameters pprof clients send.
+        name: secondsParam
+        type: string
+        value: "\"seconds\""
+      - name: debugParam
+        type: string
+        value: "\"debug\""
+      - doc: defaultProfileSeconds and defaultTraceSeconds are net/http/pprof's.
+        name: defaultProfileSeconds
+        type: int
+        value: "30"
+      - name: defaultTraceSeconds
+        type: int
+        value: "1"
+      - doc: |-
+          maxLookupDebug is the highest debug a profile lookup takes; the
+          goroutine dump also takes maxGoroutineDebug, its stacks in full.
+        name: maxLookupDebug
+        type: int
+        value: "1"
+      - name: maxGoroutineDebug
+        type: int
+        value: "2"
+      - doc: The headers every response carries.
+        name: headerContentType
+        type: string
+        value: "\"Content-Type\""
+      - name: headerDisposition
+        type: string
+        value: "\"Content-Disposition\""
+      - name: headerNoSniff
+        type: string
+        value: "\"X-Content-Type-Options\""
+      - name: headerCacheControl
+        type: string
+        value: "\"Cache-Control\""
+      - name: contentBinary
+        type: string
+        value: "\"application/octet-stream\""
+      - name: contentText
+        type: string
+        value: "\"text/plain; charset=utf-8\""
+      - name: noSniff
+        type: string
+        value: "\"nosniff\""
+      - name: noStore
+        type: string
+        value: "\"no-store\""
+    name: endpointProfile
   - doc: |-
       joinDepth is how many innermost frames identify a stack when labels are
       matched from the counted profile onto the dump.
@@ -153,6 +214,14 @@ constants:
         type: int
         value: 1 << 22
     name: MaxFrames
+  - doc: |-
+      MaxTraceWindow is the longest window CaptureTrace records: a trace weighs
+      about a megabyte a second, held in memory until it is returned.
+    items:
+      - name: MaxTraceWindow
+        type: time.Duration
+        value: time.Minute
+    name: MaxTraceWindow
   - doc: Field numbers of the nested messages Parse reads.
     grouped: true
     items:
@@ -268,6 +337,7 @@ files:
   - decls:
       - CaptureCPU
       - captureCPU
+      - captureCPURaw
       - CaptureHeap
     name: capture.go
   - decls: []
@@ -323,6 +393,20 @@ files:
       - runtimeFrame
     name: group.go
   - decls:
+      - endpointProfile
+      - lookupProfiles
+      - HandlerConfig
+      - profileHandler
+      - NewHandler
+      - (*profileHandler).ServeHTTP
+      - serveIndex
+      - (*profileHandler).serveWindow
+      - serveLookup
+      - attach
+      - refuse
+      - intParam
+    name: handler.go
+  - decls:
       - joinDepth
       - countFunctionColumn
       - countRecord
@@ -369,6 +453,7 @@ files:
       - MaxCPUWindow
       - MaxProfileBytes
       - MaxFrames
+      - MaxTraceWindow
     name: profiling.go
   - decls:
       - resolver
@@ -390,6 +475,15 @@ files:
       - (*decoder).readFunction
       - (*decoder).resolve
     name: tables.go
+  - decls:
+      - CaptureTrace
+      - captureTrace
+      - FlightConfigValue
+      - flightRecorder
+      - StartFlightRecorder
+      - (*flightRecorder).Snapshot
+      - (*flightRecorder).Stop
+    name: trace.go
   - decls:
       - wireVarint
       - fixed64Size
@@ -424,6 +518,12 @@ functions:
     name: captureCPU
     params: ctx context.Context, clk clock.Waiter, window time.Duration
     results: "*coreprofiling.ProfileValue, error"
+  - doc: |-
+      captureCPURaw is captureCPU before the decoding: the runtime's gzipped
+      protocol-buffer bytes, which the pprof handler serves as they are.
+    name: captureCPURaw
+    params: ctx context.Context, clk clock.Waiter, window time.Duration
+    results: "[]byte, error"
   - name: CaptureHeap
     results: "*coreprofiling.ProfileValue, error"
   - name: Fold
@@ -537,6 +637,27 @@ functions:
     name: runtimeFrame
     params: fn string
     results: bool
+  - name: NewHandler
+    params: cfg HandlerConfig
+    results: http.Handler
+  - doc: serveIndex lists what the handler serves.
+    name: serveIndex
+    params: w http.ResponseWriter
+  - doc: |-
+      serveLookup writes runtime/pprof's profile name at ?debug= (0 binary, 1
+      text; the goroutine dump also 2).
+    name: serveLookup
+    params: w http.ResponseWriter, r *http.Request, name string
+  - doc: attach marks a binary download, as net/http/pprof does.
+    name: attach
+    params: w http.ResponseWriter, name string
+  - doc: refuse answers err's status with its Public text only.
+    name: refuse
+    params: w http.ResponseWriter, err error
+  - doc: intParam reads an integer query parameter, def when absent.
+    name: intParam
+    params: r *http.Request, name string, def int
+    results: int, error
   - doc: |-
       parseTracebackLabels reads a dump header's labels: `key: value, key:
       "quoted value"`. The runtime quotes a key or a value only when it holds
@@ -650,6 +771,18 @@ functions:
     name: readLine
     params: w *wire, kind uint64
     results: rawLine, error
+  - name: CaptureTrace
+    params: ctx context.Context, window time.Duration
+    results: "[]byte, error"
+  - doc: |-
+      captureTrace is CaptureTrace on clk, which a white-box test sets to a
+      ManualClock.
+    name: captureTrace
+    params: ctx context.Context, clk clock.Waiter, window time.Duration
+    results: "[]byte, error"
+  - name: StartFlightRecorder
+    params: cfg FlightConfigValue
+    results: FlightRecorder, error
   - doc: malformed builds [coreprofiling.ProfileMalformed] naming what could not be read.
     name: malformed
     params: what string
@@ -665,8 +798,11 @@ imports:
   coretransform: github.com/kitsunium/sdk/internal/core/data/transform
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  http: net/http
+  io: io
   maps: maps
   math: math
+  path: path
   pprof: runtime/pprof
   regexp: regexp
   runtime: runtime
@@ -675,6 +811,7 @@ imports:
   strings: strings
   sync: sync
   time: time
+  trace: runtime/trace
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/observe/profiling
@@ -847,6 +984,33 @@ types:
         type: int
     kind: struct
     name: GroupConfig
+  - fields:
+      - doc: Clock measures the profile and trace windows; nil is the wall clock.
+        name: Clock
+        type: clock.Waiter
+    kind: struct
+    name: HandlerConfig
+  - doc: profileHandler serves the pprof wire from the engine's captures.
+    fields:
+      - doc: clk measures the windows.
+        name: clk
+        type: clock.Waiter
+    kind: struct
+    methods:
+      - doc: ServeHTTP routes by the last path element, wherever the caller mounted it.
+        name: ServeHTTP
+        params: w http.ResponseWriter, r *http.Request
+        recv: h *profileHandler
+      - doc: |-
+          serveWindow captures over ?seconds= on the handler's clock; the client's
+          disconnect cancels the window.
+        name: serveWindow
+        params: |2
+
+          	w http.ResponseWriter, r *http.Request, name string, defaultSeconds int,
+          	capture func(context.Context, clock.Waiter, time.Duration) ([]byte, error),
+        recv: h *profileHandler
+    name: profileHandler
   - doc: |-
       countRecord is one record of the counted goroutine profile: goroutines
       sharing a stack and labels.
@@ -1079,6 +1243,41 @@ types:
         recv: r *resolver
         results: map[string][]string, map[string][]int64, error
     name: resolver
+  - fields:
+      - doc: |-
+          MinAge is how far back the window reaches at least; MaxBytes overrides
+          it when the two disagree.
+        name: MinAge
+        type: time.Duration
+      - doc: MaxBytes caps the window's size in bytes.
+        name: MaxBytes
+        type: uint64
+    kind: struct
+    name: FlightConfigValue
+  - doc: |-
+      flightRecorder is the runtime's flight recorder behind the FlightRecorder
+      port.
+    fields:
+      - doc: recorder is the runtime's.
+        name: recorder
+        type: "*trace.FlightRecorder"
+      - doc: "writing serialises Snapshot: a concurrent one is refused, not queued."
+        name: writing
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: |-
+          Snapshot writes the recorder's window to w, in the runtime's trace format.
+          A snapshot while another is being written is TraceBusy rather than the
+          runtime's text; a stopped recorder is CaptureFailed.
+        name: Snapshot
+        params: w io.Writer
+        recv: r *flightRecorder
+        results: int64, error
+      - doc: Stop ends the recording. It is idempotent.
+        name: Stop
+        recv: r *flightRecorder
+    name: flightRecorder
   - doc: |-
       wire reads one message's bytes, field by field. Every read is bounds-checked:
       a truncated or overlong varint, or a length past the end, is
@@ -1153,6 +1352,11 @@ vars:
       - name: stateFlags
         value: "[]string{\" (scan)\", \" (leaked)\", \" (durable)\"}"
     name: stateFlags
+  - doc: lookupProfiles are the runtime profiles served by name.
+    items:
+      - name: lookupProfiles
+        value: "[...]string{\"heap\", \"allocs\", \"block\", \"mutex\", \"threadcreate\", endpointGoroutine}"
+    name: lookupProfiles
   - grouped: true
     items:
       - doc: |-

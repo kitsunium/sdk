@@ -1,10 +1,11 @@
-//go:build !linux
+//go:build !linux && !freebsd
 
-// Package notify_test — non-Linux facade contract: the listener relies on
-// SO_PASSCRED, a Linux facility, so the facade Listen forwards the central
-// UnsupportedPlatform sentinel (and no listener/path) off Linux. Gated on the
-// same `!linux` tag as the service stub so the e2e-cross CI binary validates the
-// off-platform path on a real non-Linux kernel, not via a runtime.GOOS guess.
+// Package notify_test — the facade contract off Linux and FreeBSD: the
+// listener relies on the kernel stamping each datagram with its sender
+// (SO_PASSCRED, LOCAL_CREDS_PERSISTENT), so the facade Listen forwards the
+// central UnsupportedPlatform sentinel (and no listener/path) elsewhere. Gated
+// on the same tag as the service stub so the e2e-cross CI binary validates the
+// off-platform path on a real kernel, not via a runtime.GOOS guess.
 package notify_test
 
 import (
@@ -35,5 +36,15 @@ func TestListenUnsupportedOffLinux(t *testing.T) {
 	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
 		//: a missing code means the facade is not delegating faithfully off Linux.
 		t.Fatalf("Listen off Linux = %v, want CodeUnsupportedPlatform", err)
+	}
+}
+
+// TestListenForUnsupportedOffLinux asserts ListenFor refuses off Linux as
+// Listen does (#730).
+func TestListenForUnsupportedOffLinux(t *testing.T) {
+	t.Parallel()
+	l, path, err := notify.ListenFor(1000, 1000)
+	if l != nil || path != "" || !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+		t.Fatalf("ListenFor off Linux = %v, %q, %v, want UNSUPPORTED_PLATFORM", l, path, err)
 	}
 }

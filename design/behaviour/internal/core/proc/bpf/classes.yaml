@@ -1,0 +1,300 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          AnyNumber is the wildcard of a device rule's Major or Minor: it matches
+          every number, as "*" does in a devices.allow line.
+        name: AnyNumber
+        type: int64
+        value: "-1"
+      - doc: |-
+          MaxDeviceRules bounds a DevicePolicyValue's rules: each one is a few
+          instructions of a single program, compiled in a straight line.
+        name: MaxDeviceRules
+        type: int
+        value: "256"
+      - doc: MaxBindRules bounds a BindPolicyValue's rules, for the same reason.
+        name: MaxBindRules
+        type: int
+        value: "256"
+      - doc: |-
+          MaxPrefixRules bounds a SKBPolicyValue's rules: they become the entries
+          of two longest-prefix-match maps, one per address family.
+        name: MaxPrefixRules
+        type: int
+        value: "16384"
+    name: AnyNumber
+  - grouped: true
+    items:
+      - doc: |-
+          Deny refuses: the device node is not opened, the packet is dropped, the
+          bind fails with EPERM.
+        name: Deny
+        type: Verdict
+        value: 1 + iota
+      - doc: |-
+          Allow lets the operation through to the other programs attached to the
+          group and to its ancestors, which must allow it too.
+        name: Allow
+    name: Deny
+  - grouped: true
+    items:
+      - doc: DeviceBlock matches block devices (devices.allow's "b").
+        name: DeviceBlock
+        type: DeviceType
+        value: 1 + iota
+      - doc: DeviceChar matches character devices ("c").
+        name: DeviceChar
+      - doc: DeviceAny matches both ("a").
+        name: DeviceAny
+    name: DeviceBlock
+  - grouped: true
+    items:
+      - doc: AccessMknod is creating the node ("m").
+        name: AccessMknod
+        type: DeviceAccess
+        value: 1 << iota
+      - doc: AccessRead is opening it for reading ("r").
+        name: AccessRead
+      - doc: AccessWrite is opening it for writing ("w").
+        name: AccessWrite
+      - doc: AccessAll is the three ("rwm").
+        name: AccessAll
+        value: AccessMknod | AccessRead | AccessWrite
+    name: AccessMknod
+  - grouped: true
+    items:
+      - doc: FamilyIPv4 matches a bind of an AF_INET socket.
+        name: FamilyIPv4
+        type: Family
+        value: 1 + iota
+      - doc: FamilyIPv6 matches a bind of an AF_INET6 socket.
+        name: FamilyIPv6
+      - doc: FamilyAny matches both.
+        name: FamilyAny
+    name: FamilyIPv4
+  - grouped: true
+    items:
+      - doc: TransportTCP matches a TCP socket.
+        name: TransportTCP
+        type: Transport
+        value: 1 + iota
+      - doc: TransportUDP matches a UDP socket.
+        name: TransportUDP
+      - doc: TransportAny matches every protocol, TCP and UDP included.
+        name: TransportAny
+    name: TransportTCP
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - DevicePolicyValue.Validate
+      - DeviceRuleValue.invalidField
+      - SKBPolicyValue.Validate
+      - BindPolicyValue.Validate
+      - BindRuleValue.invalidField
+      - CheckCgroup
+      - Verdict.valid
+      - validNumber
+      - policyInvalid
+    name: validate.go
+  - decls:
+      - AnyNumber
+      - Verdict
+      - Deny
+      - DeviceType
+      - DeviceBlock
+      - DeviceAccess
+      - AccessMknod
+      - Family
+      - FamilyIPv4
+      - Transport
+      - TransportTCP
+      - DeviceRuleValue
+      - DevicePolicyValue
+      - PrefixRuleValue
+      - SKBPolicyValue
+      - PortRangeValue
+      - BindRuleValue
+      - BindPolicyValue
+      - TrafficValue
+      - CountersValue
+    name: values.go
+functions:
+  - name: CheckCgroup
+    params: cgroup string
+    results: error
+  - doc: validNumber reports whether n is AnyNumber or an unsigned 32-bit value.
+    name: validNumber
+    params: n int64
+    results: bool
+  - doc: |-
+      policyInvalid is POLICY_INVALID naming the rule — -1 for the policy
+      itself, the count for too many rules — and the field.
+    name: policyInvalid
+    params: rule int, field string
+    results: error
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  math: math
+  netip: net/netip
+  path: path
+  strings: strings
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/proc/bpf
+  name: bpf
+  purpose: "Package bpf is the contract of the BPF programs a supervisor attaches to a control group (ADR 0215): the policies as plain values — a device policy for cgroup_device, an IP policy with its counters for cgroup_skb, a bind policy for cgroup_sock_addr —, their validation, the ports a vendor module implements and an attachment satisfies, and the codes of the range 0.3.107.*."
+types:
+  - kind: named
+    methods:
+      - doc: valid reports whether v is Allow or Deny.
+        name: valid
+        recv: v Verdict
+        results: bool
+    name: Verdict
+    underlying: uint8
+  - kind: named
+    name: DeviceType
+    underlying: uint8
+  - kind: named
+    name: DeviceAccess
+    underlying: uint8
+  - kind: named
+    name: Family
+    underlying: uint8
+  - kind: named
+    name: Transport
+    underlying: uint8
+  - fields:
+      - doc: Type is the kind of node the rule matches.
+        name: Type
+        type: DeviceType
+      - doc: Major is the major number, 0 to 4294967295, or AnyNumber.
+        name: Major
+        type: int64
+      - doc: Minor is the minor number, 0 to 4294967295, or AnyNumber.
+        name: Minor
+        type: int64
+      - doc: Access is the set of accesses the rule covers; never empty.
+        name: Access
+        type: DeviceAccess
+      - doc: Verdict is the rule's decision when it matches.
+        name: Verdict
+        type: Verdict
+    kind: struct
+    methods:
+      - doc: |-
+          invalidField names the first field of a device rule that is out of its
+          range, "" when none is.
+        name: invalidField
+        recv: r DeviceRuleValue
+        results: string
+    name: DeviceRuleValue
+  - fields:
+      - doc: Rules are tried in order; at most MaxDeviceRules.
+        name: Rules
+        type: "[]DeviceRuleValue"
+      - doc: Default decides a request no rule matches.
+        name: Default
+        type: Verdict
+    kind: struct
+    methods:
+      - name: Validate
+        recv: p DevicePolicyValue
+        results: error
+    name: DevicePolicyValue
+  - fields:
+      - doc: |-
+          Prefix is an IPv4 or an IPv6 prefix; an IPv4-mapped IPv6 prefix is
+          refused, since the packets it means are IPv4 on the wire.
+        name: Prefix
+        type: netip.Prefix
+      - doc: Verdict is the rule's decision for an address the prefix holds.
+        name: Verdict
+        type: Verdict
+    kind: struct
+    name: PrefixRuleValue
+  - fields:
+      - doc: Rules are the prefixes, each at most once; at most MaxPrefixRules.
+        name: Rules
+        type: "[]PrefixRuleValue"
+      - doc: Default decides an address no prefix holds.
+        name: Default
+        type: Verdict
+    kind: struct
+    methods:
+      - name: Validate
+        recv: p SKBPolicyValue
+        results: error
+    name: SKBPolicyValue
+  - fields:
+      - doc: First is the lowest port of the range.
+        name: First
+        type: uint16
+      - doc: Last is the highest port of the range, never below First.
+        name: Last
+        type: uint16
+    kind: struct
+    name: PortRangeValue
+  - fields:
+      - doc: Family is the address family the rule matches.
+        name: Family
+        type: Family
+      - doc: Transport is the protocol the rule matches.
+        name: Transport
+        type: Transport
+      - doc: Ports is the range of local ports the rule matches.
+        name: Ports
+        type: PortRangeValue
+      - doc: Verdict is the rule's decision when it matches.
+        name: Verdict
+        type: Verdict
+    kind: struct
+    methods:
+      - doc: |-
+          invalidField names the first field of a bind rule that is out of its
+          range, "" when none is.
+        name: invalidField
+        recv: r BindRuleValue
+        results: string
+    name: BindRuleValue
+  - fields:
+      - doc: Rules are tried in order; at most MaxBindRules.
+        name: Rules
+        type: "[]BindRuleValue"
+      - doc: Default decides a bind no rule matches.
+        name: Default
+        type: Verdict
+    kind: struct
+    methods:
+      - name: Validate
+        recv: p BindPolicyValue
+        results: error
+    name: BindPolicyValue
+  - fields:
+      - doc: Packets is the number of packets the program saw.
+        name: Packets
+        type: uint64
+      - doc: Bytes is the number of bytes of those packets.
+        name: Bytes
+        type: uint64
+      - doc: DroppedPackets is the number of packets the program dropped.
+        name: DroppedPackets
+        type: uint64
+      - doc: DroppedBytes is the number of bytes of those packets.
+        name: DroppedBytes
+        type: uint64
+    kind: struct
+    name: TrafficValue
+  - fields:
+      - doc: Ingress is the receiving program's count.
+        name: Ingress
+        type: TrafficValue
+      - doc: Egress is the sending program's count.
+        name: Egress
+        type: TrafficValue
+    kind: struct
+    name: CountersValue

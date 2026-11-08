@@ -1,0 +1,61 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "dbus",
+    srcs = [
+        "address.go",
+        "auth.go",
+        "conn.go",
+        "doc.go",
+        "name.go",
+        "watch.go",
+        "wire.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/dbus",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/proc",
+        "//internal/core/proc/dbus",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":dbus",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "dbus_test",
+    srcs = [
+        "address_internal_test.go",
+        "conn_internal_test.go",
+        "fakebus_internal_test.go",
+        "gen_api_test.go",
+        "live_linux_external_test.go",
+        "live_userns_linux_external_test.go",
+    ],
+    embed = [":dbus"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/core/proc/dbus",
+        "//internal/kernel/errs",
+    ] + select({
+        "@rules_go//go/platform:android": [
+            "//internal/core/proc/service",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//internal/core/proc/service",
+        ],
+        "//conditions:default": [],
+    }),
+)

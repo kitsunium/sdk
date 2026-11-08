@@ -28,10 +28,13 @@ package directly.
 
 ## Platform
 
-`process`, `signal`, and `rlimit` are Unix-wide; `reaper` (subreaper), `cgroup`,
-and the `systemd/notify` listener's credential check are Linux-only. Non-supporting
-platforms return a no-op plus the `UNSUPPORTED_PLATFORM` sentinel — they never
-panic and always compile.
+`process`, `signal`, and `rlimit` are Unix-wide. The rest is per kernel, as ADR
+0018's verdict table states it: the `reaper`'s subreaper on Linux, FreeBSD and
+DragonFly; `cgroup` as cgroup v2 on Linux, rctl on FreeBSD and a Job Object on
+Windows; adoption (`Attach`, `AttachPIDFile`) on Linux, darwin and the BSDs (ADR
+0219); the `systemd/notify` listener's credential check on Linux and FreeBSD.
+Non-supporting platforms return a no-op plus the `UNSUPPORTED_PLATFORM` sentinel
+— they never panic and always compile.
 
 ## See also
 

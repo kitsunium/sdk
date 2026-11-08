@@ -1,0 +1,69 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      slot is the one name the backend is registered under: a process links one
+      BPF backend or none.
+    items:
+      - name: slot
+        value: "\"cgroup\""
+    name: slot
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - slot
+      - registry
+      - Register
+      - Probe
+      - AttachDevice
+      - AttachSKB
+      - AttachBind
+      - backendFor
+      - linked
+    name: register.go
+functions:
+  - name: Register
+    params: b corebpf.Backend
+    results: corebpf.Backend
+  - name: Probe
+    results: error
+  - name: AttachDevice
+    params: cgroup string, policy corebpf.DevicePolicyValue
+    results: corebpf.Program, error
+  - name: AttachSKB
+    params: cgroup string, policy corebpf.SKBPolicyValue
+    results: corebpf.SKBProgram, error
+  - name: AttachBind
+    params: cgroup string, policy corebpf.BindPolicyValue
+    results: corebpf.Program, error
+  - doc: |-
+      backendFor checks the path, then returns the linked backend.
+
+      IFACE-PLUGIN: the backend is the plug-in the vendor module registered.
+    name: backendFor
+    params: cgroup string
+    results: corebpf.Backend, error
+  - doc: |-
+      linked returns the registered backend, or NOT_LINKED.
+
+      IFACE-PLUGIN: the backend is the plug-in the vendor module registered.
+    name: linked
+    results: corebpf.Backend, error
+imports:
+  corebpf: github.com/kitsunium/sdk/internal/core/proc/bpf
+  plugin: github.com/kitsunium/sdk/internal/kernel/plugin
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/bpf
+  name: bpf
+  purpose: "Package bpf is the engine of the cgroup BPF programs (ADR 0215): it holds the one backend a program links and hands it the policies core/proc/bpf validated."
+types: []
+vars:
+  - doc: |-
+      registry holds the backend the vendor module registered at import; a
+      pointer, so a test can stand a fresh one in its place.
+    items:
+      - name: registry
+        value: new(plugin.Registry[string, corebpf.Backend])
+    name: registry

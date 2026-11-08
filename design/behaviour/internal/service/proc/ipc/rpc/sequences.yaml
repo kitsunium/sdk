@@ -1,0 +1,2578 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewClient
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewClient
+        kind: self
+      - id: clientCodec
+        kind: internal
+      - id: d.Dial
+        kind: value
+      - id: newKeeper
+        kind: internal
+      - id: c.keep.run
+        kind: internal
+      - id: c.hello
+        kind: internal
+      - id: c.fail
+        kind: internal
+      - id: c.read
+        kind: internal
+    steps:
+      - bind: cc, err
+        eval: clientCodec(cfg)
+        to: clientCodec
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: conn, err
+        eval: d.Dial(ctx)
+        to: d.Dial
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: c
+        eval: |-
+          &Client{
+          		cfg: cfg, format: wireFormat{cc}, clk: clockOr(cfg.Clock), conn: conn,
+          		r: bufio.NewReaderSize(conn, readBufferBytes), done: make(chan struct{}),
+          		pending: make(map[uint64]*pendingCall),
+          	}
+      - set: c.keep
+        to: newKeeper
+        value: newKeeper(c.clk, c.frameExpired, func(uint64) {})
+      - go: c.keep.run()
+        to: c.keep.run
+      - opt:
+          do:
+            - eval: c.fail(err)
+              to: c.fail
+            - return: nil, err
+          init:
+            bind: err
+            eval: c.hello(ctx)
+            to: c.hello
+          when: err != nil
+      - go: c.read()
+        to: c.read
+      - return: c, nil
+  - of: (*Client).hello
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).hello
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: c.write
+        kind: internal
+      - id: c.keep.armRead
+        kind: internal
+      - id: readFrame
+        kind: internal
+      - id: c.keep.disarmRead
+        kind: internal
+      - id: c.helloErr
+        kind: internal
+      - id: remoteError
+        kind: internal
+      - id: parseHello
+        kind: internal
+    steps:
+      - bind: stop
+        eval: context.AfterFunc(ctx, func() { swallowErr(c.conn.Close()) })
+        to: context
+      - defer: stop()
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: c.write(helloFrame(c.cfg.Format, c.cfg.MaxFrameBytes))
+            to: c.write
+          when: err != nil
+      - eval: c.keep.armRead(c.cfg.FrameTimeout)
+        to: c.keep.armRead
+      - bind: f, err
+        eval: readFrame(c.r, c.cfg.MaxFrameBytes, c.started)
+        to: readFrame
+      - eval: c.keep.disarmRead()
+        to: c.keep.disarmRead
+      - opt:
+          do:
+            - return: c.helloErr(ctx, err)
+              to: c.helloErr
+          when: err != nil
+      - opt:
+          do:
+            - return: remoteError(f)
+              to: remoteError
+          when: f.kind == kindError
+      - bind: peerMax, err
+        eval: parseHello(f)
+        to: parseHello
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: c.peerMax
+        value: peerMax
+      - return: nil
+  - of: (*Client).helloErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).helloErr
+        kind: self
+      - id: contextErr
+        kind: internal
+      - id: c.readErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: contextErr(ctx)
+              to: contextErr
+          when: ctx.Err() != nil
+      - return: c.readErr(err)
+        to: c.readErr
+  - of: (*Client).started
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).started
+        kind: self
+      - id: c.keep.armRead
+        kind: internal
+    steps:
+      - eval: c.keep.armRead(c.cfg.FrameTimeout)
+        to: c.keep.armRead
+  - of: (*Client).frameExpired
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).frameExpired
+        kind: self
+      - id: c.expired.Store
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: c.expired.Store(true)
+        to: c.expired.Store
+      - eval: swallowErr(c.conn.Close())
+        to: swallowErr
+  - of: (*Client).read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).read
+        kind: self
+      - id: readFrame
+        kind: internal
+      - id: c.keep.disarmRead
+        kind: internal
+      - id: c.fail
+        kind: internal
+      - id: c.deliver
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: f, err
+              eval: readFrame(c.r, c.cfg.MaxFrameBytes, c.started)
+              to: readFrame
+            - eval: c.keep.disarmRead()
+              to: c.keep.disarmRead
+            - opt:
+                do:
+                  - eval: c.fail(c.readErr(err))
+                    to: c.fail
+                  - return: ""
+                when: err != nil
+            - opt:
+                do:
+                  - eval: c.fail(err)
+                    to: c.fail
+                  - return: ""
+                init:
+                  bind: err
+                  eval: c.deliver(f)
+                  to: c.deliver
+                when: err != nil
+          forever: true
+  - of: (*Client).readErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).readErr
+        kind: self
+      - id: violation
+        kind: internal
+      - id: connClosedBy
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: c.expired.Load()
+              do:
+                - return: violation("a frame not whole within FrameTimeout")
+                  to: violation
+            - case: errs.HasCode(err, corerpc.CodeFrameTooLarge), errs.HasCode(err, corerpc.CodeProtocolViolation)
+              do:
+                - return: err
+            - case: errors.Is(err, io.ErrUnexpectedEOF)
+              do:
+                - return: violation("a frame cut short")
+                  to: violation
+            - default: true
+              do:
+                - return: connClosedBy(err)
+                  to: connClosedBy
+  - of: (*Client).deliver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).deliver
+        kind: self
+      - id: violation
+        kind: internal
+      - id: remoteError
+        kind: internal
+      - id: c.lookup
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: kindReply, kindPong, kindItem, kindEnd, kindError
+            - default: true
+              do:
+                - return: violation("a frame kind a server does not send")
+                  to: violation
+          "on": f.kind
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: violation("an answer to no call")
+                    to: violation
+                when: f.kind != kindError
+            - return: remoteError(f)
+              to: remoteError
+          when: f.id == 0
+      - bind: p, err
+        eval: c.lookup(f)
+        to: c.lookup
+      - opt:
+          do:
+            - return: err
+          when: p == nil
+      - opt:
+          do:
+            - send:
+                chan: p.answers
+                value: f
+            - return: nil
+          when: "!p.stream"
+      - select:
+          cases:
+            - comm: p.answers <- f
+            - comm: <-p.gone
+      - return: nil
+  - of: (*Client).lookup
+    steps:
+      - lock:
+          mutex: c.mu
+      - bind: p
+        eval: c.pending[f.id]
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, violation("an answer to a call never made")
+                when: f.id > c.lastID
+            - return: nil, nil
+          when: p == nil
+      - opt:
+          do:
+            - eval: delete(c.pending, f.id)
+          when: "!p.stream || f.kind != kindItem"
+      - return: p, nil
+  - of: (*Client).fail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).fail
+        kind: self
+      - id: c.once.Do
+        kind: value
+    steps:
+      - eval: |-
+          c.once.Do(func() {
+          		c.mu.Lock()
+          		c.err = err
+          		c.mu.Unlock()
+          		close(c.done)
+          		c.keep.close()
+          		swallowErr(c.conn.Close())
+          	})
+        to: c.once.Do
+  - of: (*Client).closedErr
+    steps:
+      - lock:
+          mutex: c.mu
+      - return: c.err
+  - of: (*Client).begin
+    steps:
+      - opt:
+          do:
+            - return: 0, nil, misconfigured("a method longer than 255 bytes")
+          when: len(method) > maxNameBytes
+      - lock:
+          mutex: c.mu
+      - opt:
+          do:
+            - return: 0, nil, c.err
+          when: c.err != nil
+      - opt:
+          do:
+            - return: |-
+                0, nil, errs.Wrap(corerpc.Overloaded, errs.WrapParams{},
+                			errs.Int("max_in_flight", c.cfg.MaxInFlight), errs.String("side", "client"))
+          when: len(c.pending) >= c.cfg.MaxInFlight
+      - op: ++
+        set: c.lastID
+      - bind: p
+        eval: "&pendingCall{answers: make(chan frameValue, answersFor(stream)), stream: stream}"
+      - opt:
+          do:
+            - set: p.gone
+              value: make(chan struct{})
+          when: stream
+      - set: c.pending[c.lastID]
+        value: p
+      - return: c.lastID, p, nil
+  - of: answersFor
+    steps:
+      - opt:
+          do:
+            - return: streamBuffer
+          when: stream
+      - return: "1"
+  - of: (*Client).forget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).forget
+        kind: self
+      - id: c.mu.Lock
+        kind: value
+      - id: c.mu.Unlock
+        kind: value
+    steps:
+      - eval: c.mu.Lock()
+        to: c.mu.Lock
+      - eval: delete(c.pending, id)
+      - eval: c.mu.Unlock()
+        to: c.mu.Unlock
+  - of: (*Client).abandon
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).abandon
+        kind: self
+      - id: c.forget
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: c.forget(id)
+        to: c.forget
+      - eval: swallowErr(c.write(emptyFrame(kindCancel, id)))
+        to: swallowErr
+  - of: (*Client).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).write
+        kind: self
+      - id: c.keep.armWrite
+        kind: internal
+      - id: c.conn.Write
+        kind: value
+      - id: c.keep.disarmWrite
+        kind: internal
+      - id: c.fail
+        kind: internal
+      - id: c.closedErr
+        kind: internal
+    steps:
+      - lock:
+          mutex: c.wmu
+      - eval: c.keep.armWrite(c.cfg.FrameTimeout)
+        to: c.keep.armWrite
+      - bind: _, err
+        eval: c.conn.Write(frame)
+        to: c.conn.Write
+      - eval: c.keep.disarmWrite()
+        to: c.keep.disarmWrite
+      - opt:
+          do:
+            - eval: c.fail(connClosedBy(err))
+              to: c.fail
+            - return: c.closedErr()
+              to: c.closedErr
+          when: err != nil
+      - return: nil
+  - of: head
+    participants:
+      - id: caller
+        kind: actor
+      - id: head
+        kind: self
+      - id: beginFrame
+        kind: internal
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - bind: frame
+        eval: beginFrame(make([]byte, 0, frameStartBytes), kind, id, method)
+        to: beginFrame
+      - return: binary.BigEndian.AppendUint64(frame, uint64(budget))
+        to: binary.BigEndian.AppendUint64
+  - of: (*Client).send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).send
+        kind: self
+      - id: c.forget
+        kind: internal
+      - id: finishFrame
+        kind: internal
+      - id: c.write
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: c.forget(id)
+              to: c.forget
+            - return: built
+          when: built != nil
+      - bind: frame, err
+        eval: finishFrame(frame, c.peerMax)
+        to: finishFrame
+      - opt:
+          do:
+            - eval: c.forget(id)
+              to: c.forget
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - eval: c.forget(id)
+              to: c.forget
+            - return: err
+          init:
+            bind: err
+            eval: c.write(frame)
+            to: c.write
+          when: err != nil
+      - return: nil
+  - of: (*Client).Call
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).Call
+        kind: self
+      - id: c.open
+        kind: internal
+      - id: c.format.Append
+        kind: internal
+      - id: c.send
+        kind: internal
+      - id: c.await
+        kind: internal
+      - id: c.answerBody
+        kind: internal
+      - id: c.format.Unmarshal
+        kind: value
+      - id: codecFailed
+        kind: internal
+    steps:
+      - bind: id, p, err
+        eval: c.open(ctx, method, false)
+        to: c.open
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: frame, err
+        eval: c.format.Append(head(kindCall, id, method, budgetOf(ctx, c.cfg.CallTimeout)), in)
+        to: c.format.Append
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: c.send(id, frame, err)
+            to: c.send
+          when: err != nil
+      - bind: f, err
+        eval: c.await(ctx, id, p)
+        to: c.await
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: body, err
+        eval: c.answerBody(f, kindReply)
+        to: c.answerBody
+      - opt:
+          do:
+            - return: err
+          when: err != nil || out == nil
+      - opt:
+          do:
+            - return: codecFailed("decode", err)
+              to: codecFailed
+          init:
+            bind: err
+            eval: c.format.Unmarshal(body, out)
+            to: c.format.Unmarshal
+          when: err != nil
+      - return: nil
+  - of: (*Client).open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).open
+        kind: self
+      - id: c.begin
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, nil, contextErr(ctx)
+          when: ctx.Err() != nil
+      - return: c.begin(method, stream)
+        to: c.begin
+  - of: (*Client).Ping
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).Ping
+        kind: self
+      - id: c.open
+        kind: internal
+      - id: c.write
+        kind: internal
+      - id: c.forget
+        kind: internal
+      - id: c.await
+        kind: internal
+      - id: c.answerBody
+        kind: internal
+    steps:
+      - bind: id, p, err
+        eval: c.open(ctx, "", false)
+        to: c.open
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - eval: c.forget(id)
+              to: c.forget
+            - return: err
+          init:
+            bind: err
+            eval: c.write(emptyFrame(kindPing, id))
+            to: c.write
+          when: err != nil
+      - bind: f, err
+        eval: c.await(ctx, id, p)
+        to: c.await
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: _, err
+        to: c.answerBody
+        value: c.answerBody(f, kindPong)
+      - return: err
+  - of: (*Client).await
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).await
+        kind: self
+      - id: c.clk.NewTimer
+        kind: value
+      - id: t.Stop
+        kind: value
+      - id: c.abandon
+        kind: internal
+    steps:
+      - bind: t
+        eval: c.clk.NewTimer(c.cfg.CallTimeout)
+        to: c.clk.NewTimer
+      - defer: t.Stop()
+        to: t.Stop
+      - select:
+          cases:
+            - comm: f := <-p.answers
+              do:
+                - return: f, nil
+            - comm: <-ctx.Done()
+              do:
+                - eval: c.abandon(id)
+                  to: c.abandon
+                - return: frameValue{}, contextErr(ctx)
+            - comm: <-t.C()
+              do:
+                - eval: c.abandon(id)
+                  to: c.abandon
+                - return: frameValue{}, errs.Wrap(corerpc.CallTimeout, errs.WrapParams{}, errs.String("by", "CallTimeout"))
+            - comm: <-c.done
+              do:
+                - return: frameValue{}, c.closedErr()
+  - of: (*Client).answerBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).answerBody
+        kind: self
+      - id: c.fail
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: want
+              do:
+                - return: f.body, nil
+            - case: kindError
+              do:
+                - return: nil, remoteError(f)
+            - default: true
+              do:
+                - eval: c.fail(violation("an answer of the wrong kind"))
+                  to: c.fail
+                - return: nil, c.closedErr()
+          "on": f.kind
+  - of: (*Client).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).Close
+        kind: self
+      - id: c.fail
+        kind: internal
+    steps:
+      - eval: c.fail(connClosed())
+        to: c.fail
+      - return: nil
+  - of: budgetOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: budgetOf
+        kind: self
+      - id: ctx.Deadline
+        kind: value
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: budget
+        eval: limit
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: budget
+                    value: max(left, 1)
+                init:
+                  bind: left
+                  eval: time.Until(dl)
+                  to: time
+                when: budget <= 0 || left < budget
+          init:
+            bind: dl, ok
+            eval: ctx.Deadline()
+            to: ctx.Deadline
+          when: ok
+      - return: budget
+  - of: contextErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: contextErr
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(corerpc.CallTimeout, errs.WrapParams{}, errs.String("by", "the context's deadline"))
+              to: errs
+          when: errors.Is(ctx.Err(), context.DeadlineExceeded)
+      - return: errs.Wrap(corerpc.CallCancelled, errs.WrapParams{}, errs.String("by", "the caller"))
+        to: errs
+  - of: bounds.check
+    participants:
+      - id: caller
+        kind: actor
+      - id: bounds.check
+        kind: self
+      - id: misconfigured
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: b.maxFrame < minFrameBytes
+              do:
+                - return: misconfigured("MaxFrameBytes below the smallest frame a call fits in")
+                  to: misconfigured
+            - case: int64(b.maxFrame) > maxFrameLimit
+              do:
+                - return: misconfigured("MaxFrameBytes past what a u32 length says")
+                  to: misconfigured
+            - case: b.inFlight <= 0
+              do:
+                - return: misconfigured("MaxInFlight not positive")
+                  to: misconfigured
+            - case: b.frameTimeout <= 0
+              do:
+                - return: misconfigured("FrameTimeout not positive")
+                  to: misconfigured
+      - return: nil
+  - of: checkFormat
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkFormat
+        kind: self
+      - id: codec
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("a format empty or longer than 255 bytes")
+          when: f == "" || len(f) > maxNameBytes
+      - bind: c, ok
+        eval: codec.Lookup(f)
+        to: codec
+      - opt:
+          do:
+            - return: nil, misconfigured("a format no codec is registered under")
+          when: "!ok"
+      - return: c, nil
+  - of: serverCodecs
+    participants:
+      - id: caller
+        kind: actor
+      - id: serverCodecs
+        kind: self
+      - id: (bounds{cfg.MaxFrameBytes, cfg.MaxInFlight, cfg.FrameTimeout}).check
+        kind: internal
+      - id: checkFormat
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: (bounds{cfg.MaxFrameBytes, cfg.MaxInFlight, cfg.FrameTimeout}).check()
+            to: (bounds{cfg.MaxFrameBytes, cfg.MaxInFlight, cfg.FrameTimeout}).check
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, misconfigured("no format")
+          when: len(cfg.Formats) == 0
+      - bind: codecs
+        eval: make(map[codec.Format]codec.Codec, len(cfg.Formats))
+      - loop:
+          do:
+            - bind: c, err
+              eval: checkFormat(f)
+              to: checkFormat
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - set: codecs[f]
+              value: c
+          key: _
+          range: slices.Clone(cfg.Formats)
+          value: f
+      - return: codecs, nil
+  - of: clientCodec
+    participants:
+      - id: caller
+        kind: actor
+      - id: clientCodec
+        kind: self
+      - id: (bounds{cfg.MaxFrameBytes, cfg.MaxInFlight, cfg.FrameTimeout}).check
+        kind: internal
+      - id: checkFormat
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: (bounds{cfg.MaxFrameBytes, cfg.MaxInFlight, cfg.FrameTimeout}).check()
+            to: (bounds{cfg.MaxFrameBytes, cfg.MaxInFlight, cfg.FrameTimeout}).check
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, misconfigured("CallTimeout not positive")
+          when: cfg.CallTimeout <= 0
+      - return: checkFormat(cfg.Format)
+        to: checkFormat
+  - of: clockOr
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: clk == nil
+      - return: clk
+  - of: readFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: readFrame
+        kind: self
+      - id: r.ReadByte
+        kind: value
+      - id: io
+        kind: stdlib
+      - id: binary.BigEndian.Uint32
+        kind: value
+      - id: parseFrame
+        kind: internal
+    steps:
+      - bind: first, err
+        eval: r.ReadByte()
+        to: r.ReadByte
+      - opt:
+          do:
+            - return: frameValue{}, err
+          when: err != nil
+      - eval: started()
+      - var:
+          name: prefix
+          type: "[lenBytes]byte"
+      - set: prefix[0]
+        value: first
+      - opt:
+          do:
+            - return: frameValue{}, unexpectedEOF(err)
+          init:
+            bind: _, err
+            eval: io.ReadFull(r, prefix[1:])
+            to: io
+          when: err != nil
+      - bind: "n"
+        eval: binary.BigEndian.Uint32(prefix[:])
+        to: binary.BigEndian.Uint32
+      - opt:
+          do:
+            - return: |-
+                frameValue{}, errs.Wrap(corerpc.FrameTooLarge, errs.WrapParams{},
+                			errs.Int64("length", int64(n)), errs.Int("limit", maxFrame))
+          when: uint64(n) > uint64(maxFrame)
+      - opt:
+          do:
+            - return: frameValue{}, violation("a frame shorter than its header")
+          when: int(n) < headerBytes
+      - bind: buf
+        eval: make([]byte, n)
+      - opt:
+          do:
+            - return: frameValue{}, unexpectedEOF(err)
+          init:
+            bind: _, err
+            eval: io.ReadFull(r, buf)
+            to: io
+          when: err != nil
+      - return: parseFrame(buf)
+        to: parseFrame
+  - of: parseFrame
+    steps:
+      - bind: end
+        eval: headerBytes + int(buf[mlenOffset])
+      - opt:
+          do:
+            - return: frameValue{}, violation("a method longer than its frame")
+          when: end > len(buf)
+      - return: |-
+          frameValue{
+          		kind:   buf[0],
+          		id:     binary.BigEndian.Uint64(buf[idOffset:mlenOffset]),
+          		method: string(buf[headerBytes:end]),
+          		body:   buf[end:],
+          	}, nil
+  - of: unexpectedEOF
+    steps:
+      - opt:
+          do:
+            - return: io.ErrUnexpectedEOF
+          when: err == io.EOF
+      - return: err
+  - of: beginFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: beginFrame
+        kind: self
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        value: append(dst, 0, 0, 0, 0, kind)
+      - set: dst
+        to: binary.BigEndian.AppendUint64
+        value: binary.BigEndian.AppendUint64(dst, id)
+      - set: dst
+        value: append(dst, byte(len(method)))
+      - return: append(dst, method...)
+  - of: finishFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: finishFrame
+        kind: self
+      - id: binary.BigEndian.PutUint32
+        kind: value
+    steps:
+      - bind: "n"
+        eval: len(frame) - lenBytes
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corerpc.FrameTooLarge, errs.WrapParams{},
+                			errs.Int("length", n), errs.Int("limit", peerMax), errs.String("side", "sending"))
+          when: n > peerMax
+      - eval: binary.BigEndian.PutUint32(frame, uint32(n))
+        to: binary.BigEndian.PutUint32
+      - return: frame, nil
+  - of: emptyFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: emptyFrame
+        kind: self
+      - id: beginFrame
+        kind: internal
+      - id: binary.BigEndian.PutUint32
+        kind: value
+    steps:
+      - bind: frame
+        eval: beginFrame(make([]byte, 0, lenBytes+headerBytes), kind, id, "")
+        to: beginFrame
+      - eval: binary.BigEndian.PutUint32(frame, uint32(headerBytes))
+        to: binary.BigEndian.PutUint32
+      - return: frame
+  - of: wireFormat.Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: wireFormat.Append
+        kind: self
+      - id: a.Append
+        kind: value
+      - id: f.Marshal
+        kind: value
+    steps:
+      - alt:
+          - do:
+              - set: appended, err
+                to: a.Append
+                value: a.Append(dst, v)
+            init:
+              bind: a, ok
+              eval: f.Codec.(codec.Appender)
+            when: ok
+          - do:
+              - var:
+                  name: b
+                  type: "[]byte"
+              - set: b, err
+                to: f.Marshal
+                value: f.Marshal(v)
+              - set: appended
+                value: append(dst, b...)
+            else: true
+      - opt:
+          do:
+            - return: nil, codecFailed("encode", err)
+          when: err != nil
+      - return: appended, nil
+  - of: helloFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: helloFrame
+        kind: self
+      - id: beginFrame
+        kind: internal
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+      - id: binary.BigEndian.PutUint32
+        kind: value
+    steps:
+      - bind: frame
+        eval: beginFrame(make([]byte, 0, lenBytes+headerBytes+len(format)+helloBodyBytes), kindHello, 0, string(format))
+        to: beginFrame
+      - set: frame
+        value: append(frame, protocolVersion)
+      - set: frame
+        to: binary.BigEndian.AppendUint32
+        value: binary.BigEndian.AppendUint32(frame, uint32(maxFrame))
+      - eval: binary.BigEndian.PutUint32(frame, uint32(len(frame)-lenBytes))
+        to: binary.BigEndian.PutUint32
+      - return: frame
+  - of: parseHello
+    steps:
+      - opt:
+          do:
+            - return: 0, violation("a connection that does not open with a hello")
+          when: f.kind != kindHello || f.id != 0 || len(f.body) != helloBodyBytes
+      - opt:
+          do:
+            - return: 0, errs.Wrap(corerpc.FormatRefused, errs.WrapParams{}, errs.Int("version", int(f.body[0])))
+          when: f.body[0] != protocolVersion
+      - set: peerMax
+        value: int(binary.BigEndian.Uint32(f.body[1:]))
+      - opt:
+          do:
+            - return: 0, violation("a hello naming a frame too small for any call")
+          when: peerMax < minFrameBytes
+      - return: peerMax, nil
+  - of: errorFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: errorFrame
+        kind: self
+      - id: errs
+        kind: package
+      - id: beginFrame
+        kind: internal
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+      - id: binary.BigEndian.PutUint32
+        kind: value
+    steps:
+      - bind: code, ok
+        eval: errs.CodeOf(err)
+        to: errs
+      - bind: reason, _
+        eval: errs.ReasonOf(err)
+        to: errs
+      - bind: public
+        eval: errs.PublicOf(err)
+        to: errs
+      - opt:
+          do:
+            - set: code, reason, public
+              value: corerpc.CodeRemoteFailed, corerpc.RemoteFailed.Reason(), corerpc.RemoteFailed.Public()
+          when: "!ok || reason == \"\" || len(reason) > maxNameBytes"
+      - bind: frame
+        eval: beginFrame(make([]byte, 0, lenBytes+headerBytes+errorFixedBytes+len(reason)+len(public)), kindError, id, "")
+        to: beginFrame
+      - set: frame
+        to: binary.BigEndian.AppendUint32
+        value: binary.BigEndian.AppendUint32(frame, uint32(code))
+      - set: frame
+        value: append(frame, byte(len(reason)))
+      - set: frame
+        value: append(frame, reason...)
+      - set: frame
+        value: append(frame, public...)
+      - eval: binary.BigEndian.PutUint32(frame, uint32(len(frame)-lenBytes))
+        to: binary.BigEndian.PutUint32
+      - return: frame
+  - of: remoteError
+    participants:
+      - id: caller
+        kind: actor
+      - id: remoteError
+        kind: self
+      - id: violation
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: violation("an error frame shorter than its code")
+              to: violation
+          when: len(f.body) < errorFixedBytes
+      - bind: code
+        eval: errs.Code(binary.BigEndian.Uint32(f.body))
+        to: errs
+      - bind: end
+        eval: errorFixedBytes + int(f.body[errorFixedBytes-1])
+      - opt:
+          do:
+            - return: violation("an error frame's reason longer than the frame")
+              to: violation
+          when: end > len(f.body)
+      - bind: reason, public
+        eval: string(f.body[errorFixedBytes:end]), string(f.body[end:])
+      - bind: rebuilt
+        eval: |-
+          errs.NewRuntime(code, reason, public, "service/proc/ipc/rpc: the peer answered this error",
+          		errs.Bool("remote", true))
+        to: errs
+      - opt:
+          do:
+            - return: errs.Wrap(corerpc.RemoteFailed, errs.WrapParams{}, errs.String("remote_code", code.String()))
+              to: errs
+          init:
+            bind: got, _
+            eval: errs.CodeOf(rebuilt)
+            to: errs
+          when: got != code
+      - return: rebuilt
+  - of: violation
+    participants:
+      - id: caller
+        kind: actor
+      - id: violation
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corerpc.ProtocolViolation, errs.WrapParams{}, errs.String("rule", rule))
+        to: errs
+  - of: codecFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: codecFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corerpc.CodecFailed, errs.WrapParams{},
+          		errs.String("direction", direction), errs.String("cause", cause.Error()))
+        to: errs
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corerpc.Misconfigured, errs.WrapParams{}, errs.String("rule", rule))
+        to: errs
+  - of: newKeeper
+    steps:
+      - return: |-
+          &keeper{
+          		clk: clk, frameExpired: frameExpired, callExpired: callExpired,
+          		wake: make(chan struct{}, 1), stop: make(chan struct{}),
+          		calls: make(map[uint64]time.Time),
+          	}
+  - of: (*keeper).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).run
+        kind: self
+      - id: k.clk.NewTimer
+        kind: value
+      - id: t.Stop
+        kind: value
+      - id: k.step
+        kind: internal
+    steps:
+      - bind: t
+        eval: k.clk.NewTimer(time.Hour)
+        to: k.clk.NewTimer
+      - eval: t.Stop()
+        to: t.Stop
+      - defer: t.Stop()
+        to: t.Stop
+      - loop:
+          cond: running
+          do:
+            - set: running
+              to: k.step
+              value: k.step(t)
+          init: running := true
+  - of: (*keeper).step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).step
+        kind: self
+      - id: k.earliest
+        kind: internal
+      - id: t.Reset
+        kind: value
+      - id: t.Stop
+        kind: value
+      - id: k.expire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: t.Reset(due.Sub(k.clk.Now()))
+              to: t.Reset
+          init:
+            bind: due, ok
+            eval: k.earliest()
+            to: k.earliest
+          when: ok
+      - select:
+          cases:
+            - comm: _, open := <-k.stop
+              do:
+                - return: open
+            - comm: _, open := <-k.wake
+              do:
+                - opt:
+                    do:
+                      - eval: t.Stop()
+                        to: t.Stop
+                    when: open
+            - comm: _, fired := <-t.C()
+              do:
+                - opt:
+                    do:
+                      - eval: k.expire(k.clk.Now())
+                        to: k.expire
+                    when: fired
+      - return: "true"
+  - of: (*keeper).close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).close
+        kind: self
+      - id: k.stopOnce.Do
+        kind: value
+    steps:
+      - eval: k.stopOnce.Do(func() { close(k.stop) })
+        to: k.stopOnce.Do
+  - of: (*keeper).earliest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).earliest
+        kind: self
+      - id: earlier
+        kind: internal
+    steps:
+      - lock:
+          mutex: k.mu
+      - var:
+          name: due
+          type: time.Time
+      - loop:
+          do:
+            - set: due
+              to: earlier
+              value: earlier(due, d)
+          key: _
+          range: "[...]time.Time{k.readDue, k.writeDue}"
+          value: d
+      - loop:
+          do:
+            - set: due
+              to: earlier
+              value: earlier(due, d)
+          key: _
+          range: k.calls
+          value: d
+      - return: due, !due.IsZero()
+  - of: earlier
+    steps:
+      - opt:
+          do:
+            - return: a
+          when: b.IsZero() || (!a.IsZero() && a.Before(b))
+      - return: b
+  - of: (*keeper).expire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).expire
+        kind: self
+      - id: k.mu.Lock
+        kind: value
+      - id: k.mu.Unlock
+        kind: value
+    steps:
+      - eval: k.mu.Lock()
+        to: k.mu.Lock
+      - bind: frame
+        eval: due(k.readDue, now) || due(k.writeDue, now)
+      - var:
+          name: ids
+          type: "[]uint64"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: ids
+                    value: append(ids, id)
+                  - eval: delete(k.calls, id)
+                when: due(d, now)
+          key: id
+          range: k.calls
+          value: d
+      - eval: k.mu.Unlock()
+        to: k.mu.Unlock
+      - opt:
+          do:
+            - eval: k.frameExpired()
+          when: frame
+      - loop:
+          do:
+            - eval: k.callExpired(id)
+          key: _
+          range: ids
+          value: id
+  - of: due
+    steps:
+      - return: "!d.IsZero() && !d.After(now)"
+  - of: (*keeper).armRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).armRead
+        kind: self
+      - id: k.set
+        kind: internal
+    steps:
+      - eval: k.set(&k.readDue, k.clk.Now().Add(d))
+        to: k.set
+  - of: (*keeper).disarmRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).disarmRead
+        kind: self
+      - id: k.set
+        kind: internal
+    steps:
+      - eval: k.set(&k.readDue, time.Time{})
+        to: k.set
+  - of: (*keeper).armWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).armWrite
+        kind: self
+      - id: k.set
+        kind: internal
+    steps:
+      - eval: k.set(&k.writeDue, k.clk.Now().Add(d))
+        to: k.set
+  - of: (*keeper).disarmWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).disarmWrite
+        kind: self
+      - id: k.set
+        kind: internal
+    steps:
+      - eval: k.set(&k.writeDue, time.Time{})
+        to: k.set
+  - of: (*keeper).armCall
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).armCall
+        kind: self
+      - id: k.mu.Lock
+        kind: value
+      - id: k.clk.Now().Add
+        kind: value
+      - id: k.mu.Unlock
+        kind: value
+      - id: k.poke
+        kind: internal
+    steps:
+      - eval: k.mu.Lock()
+        to: k.mu.Lock
+      - set: k.calls[id]
+        to: k.clk.Now().Add
+        value: k.clk.Now().Add(d)
+      - eval: k.mu.Unlock()
+        to: k.mu.Unlock
+      - eval: k.poke()
+        to: k.poke
+  - of: (*keeper).disarmCall
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).disarmCall
+        kind: self
+      - id: k.mu.Lock
+        kind: value
+      - id: k.mu.Unlock
+        kind: value
+    steps:
+      - eval: k.mu.Lock()
+        to: k.mu.Lock
+      - eval: delete(k.calls, id)
+      - eval: k.mu.Unlock()
+        to: k.mu.Unlock
+  - of: (*keeper).set
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*keeper).set
+        kind: self
+      - id: k.mu.Lock
+        kind: value
+      - id: k.mu.Unlock
+        kind: value
+      - id: k.poke
+        kind: internal
+    steps:
+      - eval: k.mu.Lock()
+        to: k.mu.Lock
+      - set: "*field"
+        value: d
+      - eval: k.mu.Unlock()
+        to: k.mu.Unlock
+      - opt:
+          do:
+            - eval: k.poke()
+              to: k.poke
+          when: "!d.IsZero()"
+  - of: (*keeper).poke
+    steps:
+      - select:
+          cases:
+            - comm: k.wake <- struct{}{}
+            - default: true
+  - of: HandlerFunc.ServeRPC
+    steps:
+      - return: f(ctx, req)
+  - of: Methods.Route
+    steps:
+      - set: h, ok
+        value: m[method]
+      - return: h, ok
+  - of: NewServer
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewServer
+        kind: self
+      - id: serverCodecs
+        kind: internal
+      - id: context
+        kind: stdlib
+    steps:
+      - bind: codecs, err
+        eval: serverCodecs(cfg)
+        to: serverCodecs
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, misconfigured("no Router")
+          when: r == nil
+      - bind: ctx, cancel
+        eval: context.WithCancelCause(context.Background())
+        to: context
+      - return: |-
+          &Server{
+          		cfg: cfg, codecs: codecs, router: r, clk: clockOr(cfg.Clock),
+          		ctx: ctx, cancel: cancel, lns: make(map[coreipc.Listener]struct{}),
+          	}, nil
+  - of: (*Server).Serve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).Serve
+        kind: self
+      - id: s.untrack
+        kind: internal
+      - id: conns.Wait
+        kind: value
+      - id: ln.Accept
+        kind: value
+      - id: s.acceptErr
+        kind: internal
+      - id: conns.Add
+        kind: value
+      - id: s.serveAccepted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!s.track(ln)"
+      - defer: s.untrack(ln)
+        to: s.untrack
+      - var:
+          name: conns
+          type: sync.WaitGroup
+      - defer: conns.Wait()
+        to: conns.Wait
+      - loop:
+          do:
+            - bind: c, err
+              eval: ln.Accept()
+              to: ln.Accept
+            - opt:
+                do:
+                  - return: s.acceptErr(err)
+                    to: s.acceptErr
+                when: err != nil
+            - eval: conns.Add(1)
+              to: conns.Add
+            - go: s.serveAccepted(&conns, c)
+              to: s.serveAccepted
+          forever: true
+  - of: (*Server).serveAccepted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).serveAccepted
+        kind: self
+      - id: conns.Done
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - defer: conns.Done()
+        to: conns.Done
+      - eval: swallowErr(s.ServeConn(s.ctx, c))
+        to: swallowErr
+  - of: (*Server).acceptErr
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: nil
+          when: s.closed
+      - return: err
+  - of: (*Server).track
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: "false"
+          when: s.closed
+      - set: s.lns[ln]
+        value: struct{}{}
+      - return: "true"
+  - of: (*Server).untrack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).untrack
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - eval: delete(s.lns, ln)
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+  - of: (*Server).ServeConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).ServeConn
+        kind: self
+      - id: newServerConn
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: sc.serve
+        kind: internal
+    steps:
+      - bind: sc
+        eval: newServerConn(s, c)
+        to: newServerConn
+      - bind: stopServer
+        eval: context.AfterFunc(s.ctx, func() { sc.teardown(context.Cause(s.ctx)) })
+        to: context
+      - defer: stopServer()
+      - bind: stopCaller
+        eval: context.AfterFunc(ctx, func() { sc.teardown(connClosed()) })
+        to: context
+      - defer: stopCaller()
+      - return: sc.serve()
+        to: sc.serve
+  - of: (*Server).InFlight
+    steps:
+      - return: int(s.inflight.Load())
+  - of: (*Server).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).Close
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: ln.Close
+        kind: value
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - opt:
+          do:
+            - eval: s.mu.Unlock()
+              to: s.mu.Unlock
+            - return: nil
+          when: s.closed
+      - set: s.closed
+        value: "true"
+      - bind: lns
+        eval: slices.Collect(maps.Keys(s.lns))
+        to: slices
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - eval: s.cancel(connClosed())
+      - var:
+          name: first
+          type: error
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: first
+                    value: err
+                init:
+                  bind: err
+                  eval: ln.Close()
+                  to: ln.Close
+                when: err != nil && first == nil
+          key: _
+          range: lns
+          value: ln
+      - return: first
+  - of: swallowErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: newServerConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: newServerConn
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: newKeeper
+        kind: internal
+    steps:
+      - bind: ctx, cancel
+        eval: context.WithCancelCause(context.Background())
+        to: context
+      - bind: sc
+        eval: |-
+          &serverConn{
+          		srv: s, conn: c, r: bufio.NewReaderSize(c, readBufferBytes),
+          		ctx: ctx, cancel: cancel, calls: make(map[uint64]*serverCall),
+          	}
+      - set: sc.keep
+        to: newKeeper
+        value: newKeeper(s.clk, sc.frameExpired, sc.callExpired)
+      - return: sc
+  - of: (*serverConn).serve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).serve
+        kind: self
+      - id: keeper.Go
+        kind: value
+      - id: keeper.Wait
+        kind: value
+      - id: sc.handlers.Wait
+        kind: value
+      - id: sc.teardown
+        kind: internal
+      - id: sc.hello
+        kind: internal
+      - id: readFrame
+        kind: internal
+      - id: sc.keep.disarmRead
+        kind: internal
+      - id: sc.readErr
+        kind: internal
+      - id: sc.dispatch
+        kind: internal
+      - id: sc.refuse
+        kind: internal
+    steps:
+      - var:
+          name: keeper
+          type: sync.WaitGroup
+      - eval: keeper.Go(sc.keep.run)
+        to: keeper.Go
+      - defer: keeper.Wait()
+        to: keeper.Wait
+      - defer: sc.handlers.Wait()
+        to: sc.handlers.Wait
+      - defer: sc.teardown(connClosed())
+        to: sc.teardown
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: sc.hello()
+            to: sc.hello
+          when: err != nil
+      - loop:
+          do:
+            - bind: f, err
+              eval: readFrame(sc.r, sc.srv.cfg.MaxFrameBytes, sc.started)
+              to: readFrame
+            - eval: sc.keep.disarmRead()
+              to: sc.keep.disarmRead
+            - opt:
+                do:
+                  - return: sc.readErr(err)
+                    to: sc.readErr
+                when: err != nil
+            - opt:
+                do:
+                  - eval: sc.refuse(err)
+                    to: sc.refuse
+                  - return: err
+                init:
+                  bind: err
+                  eval: sc.dispatch(f)
+                  to: sc.dispatch
+                when: err != nil
+          forever: true
+  - of: (*serverConn).hello
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).hello
+        kind: self
+      - id: sc.keep.armRead
+        kind: internal
+      - id: readFrame
+        kind: internal
+      - id: sc.keep.disarmRead
+        kind: internal
+      - id: sc.readErr
+        kind: internal
+      - id: parseHello
+        kind: internal
+      - id: sc.refuse
+        kind: internal
+      - id: errs
+        kind: package
+      - id: sc.send
+        kind: internal
+    steps:
+      - eval: sc.keep.armRead(sc.srv.cfg.FrameTimeout)
+        to: sc.keep.armRead
+      - bind: f, err
+        eval: readFrame(sc.r, sc.srv.cfg.MaxFrameBytes, sc.started)
+        to: readFrame
+      - eval: sc.keep.disarmRead()
+        to: sc.keep.disarmRead
+      - opt:
+          do:
+            - return: sc.readErr(err)
+              to: sc.readErr
+          when: err != nil
+      - bind: peerMax, err
+        eval: parseHello(f)
+        to: parseHello
+      - opt:
+          do:
+            - eval: sc.refuse(err)
+              to: sc.refuse
+            - return: err
+          when: err != nil
+      - bind: c, ok
+        eval: sc.srv.codecs[codec.Format(f.method)]
+      - opt:
+          do:
+            - bind: err
+              eval: errs.Wrap(corerpc.FormatRefused, errs.WrapParams{}, errs.String("format", f.method))
+              to: errs
+            - eval: sc.refuse(err)
+              to: sc.refuse
+            - return: err
+          when: "!ok"
+      - set: sc.format, sc.peerMax
+        value: wireFormat{c}, peerMax
+      - return: sc.send(helloFrame(codec.Format(f.method), sc.srv.cfg.MaxFrameBytes), nil)
+        to: sc.send
+  - of: (*serverConn).started
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).started
+        kind: self
+      - id: sc.keep.armRead
+        kind: internal
+    steps:
+      - eval: sc.keep.armRead(sc.srv.cfg.FrameTimeout)
+        to: sc.keep.armRead
+  - of: (*serverConn).readErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).readErr
+        kind: self
+      - id: violation
+        kind: internal
+      - id: connClosedBy
+        kind: internal
+      - id: sc.refuse
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: sc.expired.Load()
+              do:
+                - set: err
+                  to: violation
+                  value: violation("a frame not whole within FrameTimeout")
+            - case: errs.HasCode(err, corerpc.CodeFrameTooLarge), errs.HasCode(err, corerpc.CodeProtocolViolation)
+            - case: err == io.EOF, sc.ctx.Err() != nil
+              do:
+                - return: nil
+            - case: err == io.ErrUnexpectedEOF
+              do:
+                - set: err
+                  to: violation
+                  value: violation("a frame cut short")
+            - default: true
+              do:
+                - return: connClosedBy(err)
+                  to: connClosedBy
+      - eval: sc.refuse(err)
+        to: sc.refuse
+      - return: err
+  - of: (*serverConn).refuse
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).refuse
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: swallowErr(sc.send(errorFrame(0, err), nil))
+        to: swallowErr
+  - of: (*serverConn).dispatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).dispatch
+        kind: self
+      - id: sc.start
+        kind: internal
+      - id: sc.abandon
+        kind: internal
+      - id: sc.send
+        kind: internal
+      - id: violation
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: kindCall, kindStream
+              do:
+                - return: sc.start(f)
+                  to: sc.start
+            - case: kindCancel
+              do:
+                - eval: sc.abandon(f.id)
+                  to: sc.abandon
+                - return: nil
+            - case: kindPing
+              do:
+                - return: sc.send(emptyFrame(kindPong, f.id), nil)
+                  to: sc.send
+            - default: true
+              do:
+                - return: violation("a frame kind a client does not send")
+                  to: violation
+          "on": f.kind
+  - of: (*serverConn).start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).start
+        kind: self
+      - id: violation
+        kind: internal
+      - id: sc.srv.router.Route
+        kind: value
+      - id: sc.send
+        kind: internal
+      - id: sc.wmu.Lock
+        kind: value
+      - id: sc.admit
+        kind: internal
+      - id: sc.wmu.Unlock
+        kind: value
+      - id: sc.handlers.Add
+        kind: value
+      - id: call.run
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: violation("a call without an id or a budget")
+              to: violation
+          when: f.id == 0 || len(f.body) < budgetBytes
+      - bind: h, ok
+        eval: sc.srv.router.Route(f.method)
+        to: sc.srv.router.Route
+      - opt:
+          do:
+            - return: |-
+                sc.send(errorFrame(f.id, errs.Wrap(corerpc.MethodUnknown, errs.WrapParams{},
+                			errs.String("method", f.method))), nil)
+              to: sc.send
+          when: "!ok"
+      - eval: sc.wmu.Lock()
+        to: sc.wmu.Lock
+      - bind: call, refusal, fatal
+        eval: sc.admit(f)
+        to: sc.admit
+      - eval: sc.wmu.Unlock()
+        to: sc.wmu.Unlock
+      - opt:
+          do:
+            - return: fatal
+          when: fatal != nil
+      - opt:
+          do:
+            - return: sc.send(errorFrame(f.id, refusal), nil)
+              to: sc.send
+          when: refusal != nil
+      - eval: sc.handlers.Add(1)
+        to: sc.handlers.Add
+      - go: call.run(h)
+        to: call.run
+      - return: nil
+  - of: (*serverConn).admit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).admit
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: sc.srv.inflight.Add
+        kind: value
+      - id: binary.BigEndian.Uint64
+        kind: value
+      - id: sc.keep.armCall
+        kind: internal
+    steps:
+      - lock:
+          mutex: sc.mu
+      - opt:
+          do:
+            - return: nil, nil, violation("an id reused while in flight")
+          init:
+            bind: _, dup
+            eval: sc.calls[f.id]
+          when: dup
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corerpc.Overloaded, errs.WrapParams{},
+                			errs.Int("max_in_flight", sc.srv.cfg.MaxInFlight)), nil
+          when: len(sc.calls) >= sc.srv.cfg.MaxInFlight
+      - bind: ctx, cancel
+        eval: context.WithCancelCause(sc.ctx)
+        to: context
+      - set: call
+        value: |-
+          &serverCall{
+          		sc: sc, id: f.id, method: f.method, stream: f.kind == kindStream,
+          		body: f.body[budgetBytes:], ctx: ctx, cancel: cancel,
+          	}
+      - set: sc.calls[f.id]
+        value: call
+      - eval: sc.srv.inflight.Add(1)
+        to: sc.srv.inflight.Add
+      - opt:
+          do:
+            - eval: sc.keep.armCall(f.id, budgetDuration(budget))
+              to: sc.keep.armCall
+          init:
+            bind: budget
+            eval: binary.BigEndian.Uint64(f.body)
+            to: binary.BigEndian.Uint64
+          when: budget > 0
+      - return: call, nil, nil
+  - of: budgetDuration
+    participants:
+      - id: caller
+        kind: actor
+      - id: budgetDuration
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: time.Duration(math.MaxInt64)
+              to: time
+          when: ns > math.MaxInt64
+      - return: time.Duration(ns)
+        to: time
+  - of: (*serverConn).abandon
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).abandon
+        kind: self
+      - id: sc.mu.Lock
+        kind: value
+      - id: sc.mu.Unlock
+        kind: value
+      - id: call.abandoned.Store
+        kind: value
+    steps:
+      - eval: sc.mu.Lock()
+        to: sc.mu.Lock
+      - bind: call
+        eval: sc.calls[id]
+      - eval: sc.mu.Unlock()
+        to: sc.mu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: call == nil
+      - eval: call.abandoned.Store(true)
+        to: call.abandoned.Store
+      - eval: call.cancel(errs.Wrap(corerpc.CallCancelled, errs.WrapParams{}, errs.String("by", "the client")))
+  - of: (*serverConn).callExpired
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).callExpired
+        kind: self
+      - id: sc.mu.Lock
+        kind: value
+      - id: sc.mu.Unlock
+        kind: value
+    steps:
+      - eval: sc.mu.Lock()
+        to: sc.mu.Lock
+      - bind: call
+        eval: sc.calls[id]
+      - eval: sc.mu.Unlock()
+        to: sc.mu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: call == nil
+      - eval: call.cancel(errs.Wrap(corerpc.CallTimeout, errs.WrapParams{}, errs.String("by", "the budget")))
+  - of: (*serverConn).frameExpired
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).frameExpired
+        kind: self
+      - id: sc.expired.Store
+        kind: value
+      - id: sc.teardown
+        kind: internal
+    steps:
+      - eval: sc.expired.Store(true)
+        to: sc.expired.Store
+      - eval: sc.teardown(violation("a frame not whole within FrameTimeout"))
+        to: sc.teardown
+  - of: (*serverConn).send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).send
+        kind: self
+      - id: sc.keep.armWrite
+        kind: internal
+      - id: sc.conn.Write
+        kind: value
+      - id: sc.keep.disarmWrite
+        kind: internal
+      - id: sc.teardown
+        kind: internal
+      - id: connClosedBy
+        kind: internal
+    steps:
+      - lock:
+          mutex: sc.wmu
+      - var:
+          name: err
+          type: error
+      - opt:
+          do:
+            - eval: sc.keep.armWrite(sc.srv.cfg.FrameTimeout)
+              to: sc.keep.armWrite
+            - set: _, err
+              to: sc.conn.Write
+              value: sc.conn.Write(frame)
+            - eval: sc.keep.disarmWrite()
+              to: sc.keep.disarmWrite
+          when: frame != nil
+      - opt:
+          do:
+            - eval: after()
+          when: after != nil
+      - opt:
+          do:
+            - eval: sc.teardown(connClosedBy(err))
+              to: sc.teardown
+            - return: connClosedBy(err)
+              to: connClosedBy
+          when: err != nil
+      - return: nil
+  - of: (*serverConn).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).release
+        kind: self
+      - id: sc.mu.Lock
+        kind: value
+      - id: sc.mu.Unlock
+        kind: value
+      - id: sc.keep.disarmCall
+        kind: internal
+      - id: sc.srv.inflight.Add
+        kind: value
+    steps:
+      - eval: sc.mu.Lock()
+        to: sc.mu.Lock
+      - eval: delete(sc.calls, call.id)
+      - eval: sc.mu.Unlock()
+        to: sc.mu.Unlock
+      - eval: sc.keep.disarmCall(call.id)
+        to: sc.keep.disarmCall
+      - eval: call.cancel(nil)
+      - eval: sc.srv.inflight.Add(-1)
+        to: sc.srv.inflight.Add
+  - of: (*serverConn).teardown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverConn).teardown
+        kind: self
+      - id: sc.once.Do
+        kind: value
+    steps:
+      - eval: |-
+          sc.once.Do(func() {
+          		sc.cancel(cause)
+          		sc.keep.close()
+          		swallowErr(sc.conn.Close())
+          	})
+        to: sc.once.Do
+  - of: (*serverCall).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverCall).run
+        kind: self
+      - id: c.sc.handlers.Done
+        kind: value
+      - id: h.ServeRPC
+        kind: value
+      - id: c.Send
+        kind: internal
+      - id: c.sc.format.Append
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - defer: c.sc.handlers.Done()
+        to: c.sc.handlers.Done
+      - bind: reply, err
+        eval: h.ServeRPC(c.ctx, c)
+        to: h.ServeRPC
+      - opt:
+          do:
+            - set: err
+              to: c.Send
+              value: c.Send(reply)
+          when: err == nil && c.stream && reply != nil
+      - var:
+          name: frame
+          type: "[]byte"
+      - opt:
+          do:
+            - set: frame, err
+              to: c.sc.format.Append
+              value: c.sc.format.Append(c.head(kindReply), reply)
+          when: err == nil && !c.stream
+      - eval: swallowErr(c.sc.send(c.answer(frame, err), func() { c.sc.release(c) }))
+        to: swallowErr
+  - of: (*serverCall).answer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverCall).answer
+        kind: self
+      - id: errorFrame
+        kind: internal
+      - id: emptyFrame
+        kind: internal
+      - id: finishFrame
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: c.abandoned.Load()
+      - opt:
+          do:
+            - return: errorFrame(c.id, c.cause(err))
+              to: errorFrame
+          when: err != nil
+      - opt:
+          do:
+            - return: emptyFrame(kindEnd, c.id)
+              to: emptyFrame
+          when: c.stream
+      - bind: frame, err
+        eval: finishFrame(reply, c.sc.peerMax)
+        to: finishFrame
+      - opt:
+          do:
+            - return: errorFrame(c.id, err)
+              to: errorFrame
+          when: err != nil
+      - return: frame
+  - of: (*serverCall).cause
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverCall).cause
+        kind: self
+      - id: errs
+        kind: package
+      - id: context
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: _, ok
+            eval: errs.CodeOf(err)
+            to: errs
+          when: ok || c.ctx.Err() == nil
+      - return: context.Cause(c.ctx)
+        to: context
+  - of: (*serverCall).head
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverCall).head
+        kind: self
+      - id: beginFrame
+        kind: internal
+    steps:
+      - return: beginFrame(make([]byte, 0, frameStartBytes), kind, c.id, "")
+        to: beginFrame
+  - of: (*serverCall).Method
+    steps:
+      - return: c.method
+  - of: (*serverCall).Peer
+    steps:
+      - return: c.sc.conn.Peer
+  - of: (*serverCall).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverCall).Decode
+        kind: self
+      - id: c.sc.format.Unmarshal
+        kind: value
+      - id: codecFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: codecFailed("decode", err)
+              to: codecFailed
+          init:
+            bind: err
+            eval: c.sc.format.Unmarshal(c.body, v)
+            to: c.sc.format.Unmarshal
+          when: err != nil
+      - return: nil
+  - of: (*serverCall).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*serverCall).Send
+        kind: self
+      - id: violation
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: c.sc.format.Append
+        kind: internal
+      - id: finishFrame
+        kind: internal
+      - id: c.sc.send
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: violation("Send on a call that is not a stream")
+              to: violation
+          when: "!c.stream"
+      - opt:
+          do:
+            - return: context.Cause(c.ctx)
+              to: context
+          when: c.ctx.Err() != nil
+      - bind: frame, err
+        eval: c.sc.format.Append(c.head(kindItem), item)
+        to: c.sc.format.Append
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: frame, err
+        to: finishFrame
+        value: finishFrame(frame, c.sc.peerMax)
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: c.sc.send(frame, nil)
+        to: c.sc.send
+  - of: connClosed
+    participants:
+      - id: caller
+        kind: actor
+      - id: connClosed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corerpc.ConnClosed, errs.WrapParams{}, errs.String("by", "this end"))
+        to: errs
+  - of: connClosedBy
+    participants:
+      - id: caller
+        kind: actor
+      - id: connClosedBy
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corerpc.ConnClosed, errs.WrapParams{}, errs.String("cause", cause.Error()))
+        to: errs
+  - of: (*Client).Stream
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Client).Stream
+        kind: self
+      - id: c.open
+        kind: internal
+      - id: c.format.Append
+        kind: internal
+      - id: c.send
+        kind: internal
+      - id: context
+        kind: stdlib
+    steps:
+      - bind: id, p, err
+        eval: c.open(ctx, method, true)
+        to: c.open
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: frame, err
+        eval: c.format.Append(head(kindStream, id, method, budgetOf(ctx, 0)), in)
+        to: c.format.Append
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: c.send(id, frame, err)
+            to: c.send
+          when: err != nil
+      - bind: s
+        eval: "&clientStream{c: c, id: id, p: p, ctx: ctx}"
+      - set: s.stop
+        to: context
+        value: context.AfterFunc(ctx, s.abandon)
+      - return: s, nil
+  - of: (*clientStream).Recv
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clientStream).Recv
+        kind: self
+      - id: s.next
+        kind: internal
+      - id: s.c.format.Unmarshal
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: false, nil
+          when: s.ended.Load()
+      - bind: body, more, err
+        eval: s.next()
+        to: s.next
+      - opt:
+          do:
+            - return: false, err
+          when: "!more"
+      - opt:
+          do:
+            - return: true, codecFailed("decode", err)
+          init:
+            bind: err
+            eval: s.c.format.Unmarshal(body, v)
+            to: s.c.format.Unmarshal
+          when: err != nil
+      - return: true, nil
+  - of: (*clientStream).next
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clientStream).next
+        kind: self
+      - id: s.read
+        kind: internal
+      - id: s.ended.Store
+        kind: value
+    steps:
+      - select:
+          cases:
+            - comm: f := <-s.p.answers
+              do:
+                - return: s.read(f)
+                  to: s.read
+            - comm: <-s.p.gone
+              do:
+                - eval: s.ended.Store(true)
+                  to: s.ended.Store
+                - return: nil, false, s.goneErr()
+            - comm: <-s.c.done
+              do:
+                - eval: s.ended.Store(true)
+                  to: s.ended.Store
+                - return: nil, false, s.c.closedErr()
+  - of: (*clientStream).read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clientStream).read
+        kind: self
+      - id: s.ended.Store
+        kind: value
+      - id: s.c.answerBody
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: f.body, true, nil
+          when: f.kind == kindItem
+      - eval: s.ended.Store(true)
+        to: s.ended.Store
+      - eval: s.stop()
+      - opt:
+          do:
+            - return: nil, false, nil
+          when: f.kind == kindEnd
+      - set: _, err
+        to: s.c.answerBody
+        value: s.c.answerBody(f, kindEnd)
+      - return: nil, false, err
+  - of: (*clientStream).goneErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clientStream).goneErr
+        kind: self
+      - id: contextErr
+        kind: internal
+      - id: connClosed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: contextErr(s.ctx)
+              to: contextErr
+          when: s.ctx.Err() != nil
+      - return: connClosed()
+        to: connClosed
+  - of: (*clientStream).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clientStream).Close
+        kind: self
+      - id: s.abandon
+        kind: internal
+    steps:
+      - eval: s.stop()
+      - eval: s.abandon()
+        to: s.abandon
+      - return: nil
+  - of: (*clientStream).abandon
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clientStream).abandon
+        kind: self
+      - id: s.once.Do
+        kind: value
+    steps:
+      - eval: |-
+          s.once.Do(func() {
+          		close(s.p.gone)
+          		//: an ended stream has nothing left on the server.
+          		if !s.ended.Load() {
+          			s.c.abandon(s.id)
+          		}
+          	})
+        to: s.once.Do

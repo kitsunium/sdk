@@ -1,0 +1,23 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "smoke_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/kitsunium/sdk/third-party/ebpf/cgroup/testdata/smoke",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/core/proc/bpf",
+        "//internal/kernel/errs",
+        "//internal/service/proc/bpf",
+        "//third-party/ebpf/cgroup",
+    ],
+)
+
+go_binary(
+    name = "smoke",
+    embed = [":smoke_lib"],
+    visibility = ["//visibility:public"],
+)

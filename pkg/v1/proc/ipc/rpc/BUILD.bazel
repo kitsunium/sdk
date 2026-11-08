@@ -1,0 +1,42 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "rpc",
+    srcs = [
+        "doc.go",
+        "gen_facade.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/proc/ipc/rpc",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc/ipc",
+        "//internal/core/proc/ipc/rpc",
+        "//internal/kernel/errs",
+        "//internal/service/proc/ipc/rpc",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":rpc",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "rpc_test",
+    srcs = [
+        "gen_api_test.go",
+        "rpc_external_test.go",
+    ],
+    deps = [
+        ":rpc",
+        "//internal/core/proc/ipc",
+        "//internal/core/proc/ipc/rpc",
+        "//internal/kernel/errs",
+        "//internal/service/proc/ipc/rpc",
+        "//pkg/v1/errs",
+        "//pkg/v1/proc/ipc",
+    ],
+)

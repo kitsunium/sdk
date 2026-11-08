@@ -28,6 +28,590 @@ sequences:
           when: err != nil
       - return: time.Duration(usage.Utime.Nano() + usage.Stime.Nano()), false
         to: time
+  - of: StartSource.String
+    steps:
+      - switch:
+          cases:
+            - case: StartSourceInit
+              do:
+                - return: "\"init\""
+            - case: StartSourceKernel
+              do:
+                - return: "\"kernel\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": s
+  - of: ReadIdentity
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReadIdentity
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: digestOf
+        kind: internal
+      - id: buildIDOf
+        kind: internal
+      - id: kernelStart
+        kind: internal
+      - id: cgroupfs
+        kind: package
+      - id: containerOf
+        kind: internal
+      - id: pidNamespace
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: identity
+        eval: "IdentityValue{StartedAt: started, StartedAtSource: StartSourceInit}"
+      - opt:
+          do:
+            - set: identity.Executable
+              value: exe
+            - set: identity.Digest, identity.DigestOK
+              to: digestOf
+              value: digestOf(exe)
+            - set: identity.BuildID
+              to: buildIDOf
+              value: buildIDOf(exe)
+          init:
+            bind: exe, err
+            eval: os.Executable()
+            to: os
+          when: err == nil
+      - opt:
+          do:
+            - set: identity.StartedAt, identity.StartedAtSource
+              value: at, StartSourceKernel
+          init:
+            bind: at, ok
+            eval: kernelStart()
+            to: kernelStart
+          when: ok
+      - opt:
+          do:
+            - bind: v2Path, v1Path
+              eval: cgroupfs.Membership(string(membership))
+              to: cgroupfs
+            - set: identity.ContainerID
+              to: containerOf
+              value: containerOf(v2Path)
+            - opt:
+                do:
+                  - set: identity.ContainerID
+                    to: containerOf
+                    value: containerOf(v1Path)
+                when: identity.ContainerID == ""
+          init:
+            bind: membership, err
+            eval: os.ReadFile(cgroupfs.SelfCgroupFile)
+            to: os
+          when: err == nil
+      - set: identity.PIDNamespace, identity.NSPid1
+        to: pidNamespace
+        value: pidNamespace()
+      - opt:
+          do:
+            - set: identity.BootID
+              to: strings
+              value: strings.TrimSpace(string(boot))
+          init:
+            bind: boot, err
+            eval: os.ReadFile(bootIDFile)
+            to: os
+          when: err == nil
+      - return: identity
+  - of: digestOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: digestOf
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: sha256
+        kind: stdlib
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: f, err
+        eval: os.Open(name)
+        to: os
+      - opt:
+          do:
+            - return: sum, false
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: a close failure on a read-only file changes nothing the digest says.
+          		if cerr := f.Close(); cerr != nil {
+          			return
+          		}
+          	}()
+      - bind: hash
+        eval: sha256.New()
+        to: sha256
+      - opt:
+          do:
+            - return: sum, false
+          init:
+            bind: _, err
+            eval: io.Copy(hash, f)
+            to: io
+          when: err != nil
+      - eval: copy(sum[:], hash.Sum(nil))
+      - return: sum, true
+  - of: buildIDOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildIDOf
+        kind: self
+      - id: elfNoteBuildID
+        kind: internal
+      - id: rawBuildID
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: id
+          init:
+            bind: id, ok
+            eval: elfNoteBuildID(name)
+            to: elfNoteBuildID
+          when: ok
+      - opt:
+          do:
+            - return: id
+          init:
+            bind: id, ok
+            eval: rawBuildID(name)
+            to: rawBuildID
+          when: ok
+      - return: "\"\""
+  - of: elfNoteBuildID
+    participants:
+      - id: caller
+        kind: actor
+      - id: elfNoteBuildID
+        kind: self
+      - id: elf
+        kind: stdlib
+      - id: closeQuietly
+        kind: internal
+      - id: f.Section
+        kind: value
+      - id: section.Data
+        kind: value
+    steps:
+      - bind: f, err
+        eval: elf.Open(name)
+        to: elf
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil
+      - defer: closeQuietly(f)
+        to: closeQuietly
+      - bind: section
+        eval: f.Section(goBuildIDNote)
+        to: f.Section
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: section == nil
+      - bind: note, err
+        eval: section.Data()
+        to: section.Data
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil || len(note) < noteHeaderBytes
+      - bind: descSize
+        eval: int(f.ByteOrder.Uint32(note[4:8]))
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: len(note) < noteHeaderBytes+descSize
+      - return: "string(note[noteHeaderBytes : noteHeaderBytes+descSize]), true"
+  - of: rawBuildID
+    participants:
+      - id: caller
+        kind: actor
+      - id: rawBuildID
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: io
+        kind: stdlib
+      - id: bytes
+        kind: stdlib
+    steps:
+      - bind: f, err
+        eval: os.Open(name)
+        to: os
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: a close failure on a read-only file changes nothing the id says.
+          		if cerr := f.Close(); cerr != nil {
+          			return
+          		}
+          	}()
+      - bind: head, err
+        eval: io.ReadAll(io.LimitReader(f, buildIDScanBytes))
+        to: io
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil
+      - bind: _, after, found
+        eval: bytes.Cut(head, []byte(buildIDPrefix))
+        to: bytes
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!found"
+      - bind: raw, _, closed
+        eval: bytes.Cut(after, []byte(buildIDSuffix))
+        to: bytes
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!closed"
+      - return: string(raw), true
+  - of: closeQuietly
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeQuietly
+        kind: self
+      - id: f.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: err
+            eval: f.Close()
+            to: f.Close
+          when: err != nil
+  - of: containerOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: containerOf
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: path
+        kind: stdlib
+    steps:
+      - loop:
+          cond: element != "/" && element != "." && element != ""
+          do:
+            - bind: candidate
+              eval: strings.TrimSuffix(element, ".scope")
+              to: strings
+            - loop:
+                do:
+                  - set: candidate
+                    to: strings
+                    value: strings.TrimPrefix(candidate, prefix)
+                key: _
+                range: containerPrefixes
+                value: prefix
+            - opt:
+                do:
+                  - return: candidate
+                when: isContainerID(candidate)
+            - set: cgroupPath
+              to: path
+              value: path.Dir(cgroupPath)
+            - set: element
+              to: path
+              value: path.Base(cgroupPath)
+          init: element := path.Base(cgroupPath)
+      - return: "\"\""
+  - of: kernelStart
+    participants:
+      - id: caller
+        kind: actor
+      - id: kernelStart
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+      - id: bootTime
+        kind: internal
+      - id: time.Unix(bootSeconds, 0).Add
+        kind: value
+    steps:
+      - bind: stat, err
+        eval: os.ReadFile(selfStatFile)
+        to: os
+      - bind: boot, berr
+        eval: os.ReadFile(systemStatFile)
+        to: os
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: err != nil || berr != nil
+      - bind: line
+        eval: string(stat)
+      - bind: end
+        eval: strings.LastIndexByte(line, ')')
+        to: strings
+      - bind: fields
+        eval: strings.Fields(line[end+1:])
+        to: strings
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: end < 0 || len(fields) <= startTimeIndex
+      - bind: ticks, err
+        eval: strconv.ParseInt(fields[startTimeIndex], 10, 64)
+        to: strconv
+      - bind: bootSeconds, ok
+        eval: bootTime(string(boot))
+        to: bootTime
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: err != nil || !ok
+      - bind: at
+        eval: time.Unix(bootSeconds, 0).Add(time.Duration(ticks) * time.Second / time.Duration(userHZ))
+        to: time.Unix(bootSeconds, 0).Add
+      - return: at, true
+  - of: bootTime
+    participants:
+      - id: caller
+        kind: actor
+      - id: bootTime
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: fields
+              eval: strings.Fields(line)
+              to: strings
+            - opt:
+                do:
+                  - bind: seconds, err
+                    eval: strconv.ParseInt(fields[1], 10, 64)
+                    to: strconv
+                  - return: seconds, err == nil
+                when: len(fields) == 2 && fields[0] == btimeKey
+          key: line
+          range: strings.Lines(stat)
+      - return: 0, false
+  - of: pidNamespace
+    participants:
+      - id: caller
+        kind: actor
+      - id: pidNamespace
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: inode
+                    value: st.Ino
+                init:
+                  bind: st, ok
+                  eval: info.Sys().(*syscall.Stat_t)
+                when: ok
+          init:
+            bind: info, err
+            eval: os.Stat(pidNamespaceFile)
+            to: os
+          when: err == nil
+      - bind: status, err
+        eval: os.ReadFile(statusFile)
+        to: os
+      - opt:
+          do:
+            - return: inode, false
+          when: err != nil
+      - loop:
+          do:
+            - bind: fields
+              eval: strings.Fields(line)
+              to: strings
+            - opt:
+                do:
+                  - return: inode, fields[len(fields)-1] == namespaceInit
+                when: len(fields) > 1 && fields[0] == nsPidKey
+          key: line
+          range: strings.Lines(string(status))
+      - return: inode, false
+  - of: kernelMemory
+    participants:
+      - id: caller
+        kind: actor
+      - id: kernelMemory
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+      - id: readStatus
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: fields
+              eval: strings.Fields(string(statm))
+              to: strings
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - set: stats.RSSBytes
+                          value: pages * uint64(os.Getpagesize())
+                        - set: stats.KernelMemory
+                          value: "true"
+                      init:
+                        bind: pages, err
+                        eval: strconv.ParseUint(fields[statmResidentField], 10, 64)
+                        to: strconv
+                      when: err == nil
+                when: len(fields) > statmResidentField
+          init:
+            bind: statm, err
+            eval: os.ReadFile(statmFile)
+            to: os
+          when: err == nil
+      - opt:
+          do:
+            - eval: readStatus(stats, string(status))
+              to: readStatus
+          init:
+            bind: status, err
+            eval: os.ReadFile(statusFile)
+            to: os
+          when: err == nil
+      - opt:
+          do:
+            - set: stats.OpenFiles
+              value: len(entries) - 1
+          init:
+            bind: entries, err
+            eval: os.ReadDir(fdDir)
+            to: os
+          when: err == nil
+  - of: readStatus
+    participants:
+      - id: caller
+        kind: actor
+      - id: readStatus
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: fields
+              eval: strings.Fields(line)
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: len(fields) < 2
+            - bind: value, err
+              eval: strconv.ParseUint(fields[1], 10, 64)
+              to: strconv
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil
+            - switch:
+                cases:
+                  - case: peakKey
+                    do:
+                      - set: stats.PeakRSSBytes
+                        value: value * kibibyte
+                  - case: threadsKey
+                    do:
+                      - set: stats.Threads
+                        value: int(value)
+                  - default: true
+                "on": fields[0]
+          key: line
+          range: strings.Lines(status)
+  - of: SetOOMScoreAdj
+    participants:
+      - id: caller
+        kind: actor
+      - id: SetOOMScoreAdj
+        kind: self
+      - id: setOOMScoreAdj
+        kind: internal
+    steps:
+      - return: setOOMScoreAdj(n)
+        to: setOOMScoreAdj
+  - of: setOOMScoreAdj
+    participants:
+      - id: caller
+        kind: actor
+      - id: setOOMScoreAdj
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: oomFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: oomFailed(err, n)
+              to: oomFailed
+          init:
+            bind: err
+            eval: os.WriteFile(oomScoreAdjPath, []byte(strconv.Itoa(n)), oomScoreAdjPerm)
+            to: os
+          when: err != nil
+      - return: nil
+  - of: oomFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: oomFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeRlimitFailed,
+          		Reason:   "RLIMIT_FAILED",
+          		Public:   "Could not apply the resource limit",
+          		Private:  "service/proc/self.SetOOMScoreAdj: writing /proc/self/oom_score_adj failed",
+          		ExitCode: exitOSErr,
+          	}, errs.Int("oom_score_adj", n))
+        to: errs
   - of: DistributionValue.Count
     steps:
       - var:
@@ -137,6 +721,8 @@ sequences:
         kind: internal
       - id: cpuTime
         kind: internal
+      - id: kernelMemory
+        kind: internal
     steps:
       - bind: samples
         eval: |-
@@ -180,6 +766,8 @@ sequences:
       - set: stats.CPUTime, stats.CPUEstimated
         to: cpuTime
         value: cpuTime()
+      - eval: kernelMemory(&stats)
+        to: kernelMemory
       - return: stats
   - of: apply
     participants:

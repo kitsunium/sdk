@@ -26,8 +26,10 @@ func MainPID(pid int) error
 
 // supervisor + env
 type Listener     = coreproc.Listener            // Recv / Close
-type Notification = coreproc.NotificationValue    // State + Status/MainPID/SenderPID + Ready()/…
+type Notification = coreproc.NotificationValue    // State + Status/MainPID/SenderPID/UID/GID + Descriptors + Ready()/…
+type Descriptors  = coreproc.DescriptorsValue     // Files / MainPIDFD / SenderPIDFD, the caller's (#730)
 func Listen() (l Listener, socketPath string, err error)
+func ListenFor(uid, gid int) (l Listener, socketPath string, err error) // the socket handed to the service's user (#730)
 func WatchdogInterval() (d time.Duration, ok bool)
 ```
 
@@ -39,9 +41,12 @@ func WatchdogInterval() (d time.Duration, ok bool)
 - **No-op when unsupervised.** The notifier funcs return `nil` and send nothing
   when `$NOTIFY_SOCKET` is unset; this is intentional libsystemd behaviour, not a
   swallowed error. A set-but-unreachable socket still returns `NotifyFailed`.
-- **Listener is Linux-only.** It depends on `SO_PASSCRED` for the forge-proof
-  `SenderPID`; on other platforms `Listen` returns `UNSUPPORTED_PLATFORM`. The
-  notifier and `WatchdogInterval` are portable.
+- **Listener on Linux and FreeBSD only.** It depends on the kernel stamping
+  every datagram with its sender — `SO_PASSCRED` on Linux,
+  `LOCAL_CREDS_PERSISTENT` (`SCM_CREDS2`) on FreeBSD (#730) — for the
+  forge-proof `SenderPID`; elsewhere `Listen` returns `UNSUPPORTED_PLATFORM`.
+  The FreeBSD listener never ran on the authoring host: its tests run on the
+  e2e-cross FreeBSD lane. The notifier and `WatchdogInterval` are portable.
 - **`WatchdogInterval` reads `WATCHDOG_PID` and never returns a non-positive
   `d` with `ok`** (#451): a timeout addressed to another process, or one past a
   `time.Duration`'s range, reports the watchdog disabled, as

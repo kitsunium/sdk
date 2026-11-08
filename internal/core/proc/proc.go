@@ -10,7 +10,9 @@ const (
 	// ResourceUnknown is the reserved zero value: no resource selected.
 	ResourceUnknown Resource = iota
 	// ResourceNoFile limits the highest open file descriptor (RLIMIT_NOFILE),
-	// mapping systemd's LimitNOFILE=.
+	// mapping systemd's LimitNOFILE=. A child spawned without it gets the
+	// supervisor's ORIGINAL soft limit, not the one the Go runtime raised at start,
+	// unless rlimit.KeepRaisedNoFile was called.
 	ResourceNoFile
 	// ResourceNProc limits the number of processes for the real user id
 	// (RLIMIT_NPROC), mapping systemd's LimitNPROC=.

@@ -4,3 +4,6 @@ sequences:
   - of: Make
     steps:
       - return: "syscall.Rlimit{Cur: soft, Max: hard}"
+  - of: Pair
+    steps:
+      - return: limit.Cur, limit.Max

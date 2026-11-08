@@ -1,6 +1,82 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: dedupEnv
+    steps:
+      - bind: last
+        eval: make(map[string]int, len(env))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: last[variableKey(envKey(kv))]
+                    value: i
+                when: strings.Contains(kv, "=")
+          key: i
+          range: env
+          value: kv
+      - bind: out
+        eval: make([]string, 0, len(env))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, kv)
+                when: "!strings.Contains(kv, \"=\") || last[variableKey(envKey(kv))] == i"
+          key: i
+          range: env
+          value: kv
+      - return: out
+  - of: namedKey
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: sameVariable(k, key)
+          key: _
+          range: keys
+          value: k
+      - return: "false"
+  - of: repeatedLater
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: sameVariable(envKey(kv), key)
+          key: _
+          range: rest
+          value: kv
+      - return: "false"
+  - of: checkSpawnable
+    steps:
+      - bind: checks
+        eval: |-
+          [...]func(coreproc.Spec) error{
+          		checkLimits,
+          		func(s coreproc.Spec) error { return checkDieWithParent(s.DieWithParent) },
+          		func(s coreproc.Spec) error { return checkScheduling(s.Scheduling) },
+          		func(s coreproc.Spec) error { return validateCgroupPath(s.CgroupPath) },
+          		checkPTY,
+          		func(s coreproc.Spec) error { return checkPIDEnv(s.PIDEnv) },
+          	}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: check(spec)
+                when: err != nil
+          key: _
+          range: checks
+          value: check
+      - return: nil
   - of: checkLimits
     steps:
       - loop:
@@ -14,6 +90,10 @@ workflows:
                 when: "!ok"
           key: res
           range: spec.Rlimits
+      - opt:
+          do:
+            - return: coreproc.UnsupportedPlatform
+          when: spec.OOMScoreAdj != nil && !oomScoreAdjNative
       - return: nil
   - of: lookPath
     steps:
@@ -42,3 +122,76 @@ workflows:
           range: filepath.SplitList(searchPath)
           value: dir
       - return: "\"\", &osexec.Error{Name: name, Err: osexec.ErrNotFound}"
+  - of: idMapsSized
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: m.Size == 0
+          key: _
+          range: maps
+          value: m
+      - return: "true"
+  - of: trimLandlockRules
+    steps:
+      - bind: out
+        eval: make([]sandboxRule, 0, len(rules))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: "append(out, sandboxRule{access: uint64(access), path: r.Path})"
+                init:
+                  bind: access
+                  eval: r.Access & supported
+                when: access != 0
+          key: _
+          range: rules
+          value: r
+      - return: out
+  - of: landlockSupported
+    steps:
+      - var:
+          name: set
+          type: coreproc.LandlockAccess
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: "|="
+                    set: set
+                    value: r.right
+                when: r.abi <= abi
+          key: _
+          range: landlockRights
+          value: r
+      - return: set
+  - of: landlockRightName
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: r.name
+                when: set&r.right != 0
+          key: _
+          range: landlockRights
+          value: r
+      - return: "\"unknown\""
+  - of: (*stdioState).recordHeld
+    steps:
+      - lock:
+          mutex: s.copyMu
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: s.held
+                    value: append(s.held, s.outNames[i])
+                when: io.ReadCloser(out) == src
+          key: i
+          range: s.outSrc
+          value: out

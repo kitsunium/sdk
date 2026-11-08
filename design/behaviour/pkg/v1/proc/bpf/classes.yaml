@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc/bpf
+  name: bpf
+  purpose: "Package bpf attaches BPF programs to a control group: a device policy (cgroup_device), an IP policy that also counts the traffic (cgroup_skb), a bind policy (cgroup_sock_addr) — ADR 0215."
+types: []

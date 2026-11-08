@@ -429,8 +429,14 @@ MW_Async_PublishSaturated drop ratio  83–90 %        91–93 %
 The paced hand-off is ~15 % cheaper: the producer no longer competes for
 `ringMu` with a drainer polling an empty ring. **The unpaced producer still
 starves its drainer**, within noise of the base: that collapse is the
-`ringMu` handshake (§1 `async`), which parking does not change — the MPSC ring
-of #805 is the fix for it.
+`ringMu` handshake (§1 `async`), which parking does not change. The MPSC ring
+#805 proposed for it (`ring.NewMulti`, ADR 0216) was measured and is not
+adopted: four producers saturating it take ~417 ns a record against ~235
+behind `ringMu` (`internal/kernel/collections/ring/BENCH.md`), and a writer
+of it may not read, so `DropOldest` — evict the oldest record and store the
+new one under one lock, the newest always admitted — would become the
+drainer's, and a writer facing a full ring would wait for it or lose its own
+record.
 
 **A backlog is one write(2) (#807).** `Sink_File_Batch16` is one `WriteBatch`
 of 16 records against `Sink_File`'s one `Write` per record:

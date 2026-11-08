@@ -33,7 +33,11 @@ For anything else a buffered channel is the right tool: it blocks, it wakes the 
 
 ### One producer, one consumer — a precondition, not a hint
 
-EXACTLY ONE goroutine may call TryWrite at a time, and EXACTLY ONE may call TryRead. Concurrent producers, or concurrent consumers, corrupt the queue: serialise them upstream, as the SDK's async logger does with a mutex. A multi-producer mode is planned beside this one (ADR 0159 §2); publishing [Queue](#Queue) froze its four methods, so that mode arrives as another constructor and never as a change to them.
+EXACTLY ONE goroutine may call TryWrite at a time, and EXACTLY ONE may call TryRead. Concurrent producers, or concurrent consumers, corrupt the queue: serialise them upstream, or take the multi-producer sibling.
+
+### Many producers, one consumer
+
+[NewMulti](#NewMulti) returns a [MultiQueue](#MultiQueue): the same four methods, under the wider contract of any number of goroutines calling TryWrite at once and exactly one calling TryRead. Its capacity is rounded up to a power of two. A writer claims a slot, then stores into it: while it is between the two, the reader answers [Empty](#Empty) for that slot and every one behind it. Publishing [Queue](#Queue) froze its four methods, so this mode arrived as another constructor and a sibling interface (ADR 0039, ADR 0159 §2).
 
 ### Errors
 
@@ -44,6 +48,12 @@ EXACTLY ONE goroutine may call TryWrite at a time, and EXACTLY ONE may call TryR
 - [Variables](<#variables>)
 - [func Drain\[T any\]\(q Queue\[T\]\) iter.Seq\[T\]](<#Drain>)
 - [func New\[T any\]\(capacity int\) \(Queue\[T\], error\)](<#New>)
+- [func NewMulti\[T any\]\(capacity int\) \(MultiQueue\[T\], error\)](<#NewMulti>)
+- [type MultiQueue](<#MultiQueue>)
+  - [func \(MultiQueue\) Capacity\(\) \(n int\)](<#MultiQueue.Capacity>)
+  - [func \(MultiQueue\) Len\(\) \(n int\)](<#MultiQueue.Len>)
+  - [func \(MultiQueue\) TryRead\(\) \(item T, err error\)](<#MultiQueue.TryRead>)
+  - [func \(MultiQueue\) TryWrite\(item T\) \(err error\)](<#MultiQueue.TryWrite>)
 - [type Queue](<#Queue>)
   - [func \(Queue\) Capacity\(\) \(n int\)](<#Queue.Capacity>)
   - [func \(Queue\) Len\(\) \(n int\)](<#Queue.Len>)
@@ -140,6 +150,71 @@ then empty: true
 
 </p>
 </details>
+
+<a name="NewMulti"></a>
+## func [NewMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/gen_facade.go>)
+
+```go
+func NewMulti[T any](capacity int) (MultiQueue[T], error)
+```
+
+NewMulti returns an empty [MultiQueue](#MultiQueue) holding the power of two at least capacity, or [CapZero](#CapZero) when capacity is not positive. The storage is allocated once, here.
+
+<a name="MultiQueue"></a>
+## type [MultiQueue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/gen_facade.go>)
+
+MultiQueue is the multi-producer, single-consumer ring: TryWrite from any number of goroutines at once, TryRead from exactly one. The methods are [Queue](#Queue)'s, so a MultiQueue is also a Queue — [Drain](#Drain) reads it.
+
+```go
+type MultiQueue[T any] = kring.MultiQueue[T]
+```
+
+MultiQueue is an alias of `github.com/kitsunium/sdk/internal/kernel/collections/ring.MultiQueue`, declared as:
+
+```go
+type MultiQueue[T any] interface {
+	Capacity() (n int)
+	Len() (n int)
+	TryRead() (item T, err error)
+	TryWrite(item T) (err error)
+}
+```
+
+<a name="MultiQueue.Capacity"></a>
+### func \(MultiQueue\) [Capacity](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/multi.go>)
+
+```go
+func (MultiQueue) Capacity() (n int)
+```
+
+Capacity returns the number of usable slots in the ring.
+
+<a name="MultiQueue.Len"></a>
+### func \(MultiQueue\) [Len](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/multi.go>)
+
+```go
+func (MultiQueue) Len() (n int)
+```
+
+Len returns a snapshot count of items currently held, a claimed slot still being written included.
+
+<a name="MultiQueue.TryRead"></a>
+### func \(MultiQueue\) [TryRead](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/multi.go>)
+
+```go
+func (MultiQueue) TryRead() (item T, err error)
+```
+
+TryRead dequeues the next item without blocking; returns Empty when no item is available, including while the writer that claimed the next slot has not finished storing into it. One goroutine only.
+
+<a name="MultiQueue.TryWrite"></a>
+### func \(MultiQueue\) [TryWrite](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/ring/multi.go>)
+
+```go
+func (MultiQueue) TryWrite(item T) (err error)
+```
+
+TryWrite enqueues item without blocking; returns Full when saturated. Any number of goroutines may call it at once.
 
 <a name="Queue"></a>
 ## type [Queue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/collections/ring/gen_facade.go>)

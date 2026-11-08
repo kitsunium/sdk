@@ -582,10 +582,16 @@ packages:
 
       SPSC means EXACTLY ONE goroutine calls TryWrite at a time AND EXACTLY ONE
       goroutine calls TryRead at a time. Concurrent producers or concurrent
-      consumers are NOT safe — those callers should serialise upstream or wrap
-      this primitive with a mutex. The logger async sink takes the mutex-
-      serialisation route (see internal/service/observe/logger/middleware/async); other
-      domains pick whichever coordination fits their topology.
+      consumers are NOT safe on a Queue — those callers serialise upstream, or
+      take the MPSC sibling: NewMulti returns a MultiQueue, the same four
+      methods under the wider contract of any number of TryWrite callers and
+      exactly one TryRead caller (Vyukov's bounded queue, a sequence number per
+      cell, a power-of-two capacity).
+
+      The SPSC ring keeps its consumer's cursor and its producer's each on a
+      cache line of their own, with a cached copy of the other side's (read
+      again only when the ring looks full or empty), and masks a cursor into a
+      power-of-two storage instead of dividing (#1034).
     functions:
       - doc: |-
           Drain yields the items q holds, oldest first, reading each with TryRead
@@ -618,6 +624,37 @@ packages:
         out:
           - name: q
             type: Queue[T]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          NewMulti constructs a MultiQueue holding the power of two at least
+          capacity, which Capacity then reports: CapZero when capacity is not
+          positive.
+
+          IFACE-PLUGIN: callers receive a MultiQueue[T] handle; the concrete struct
+          is unexported. Its four methods are Queue's, so a MultiQueue is also a
+          Queue — Drain reads it — but its contract is the wider one.
+
+          It is not a drop-in for a Queue behind a mutex. Measured (BENCH.md), one
+          producer hands a record over in ~25 ns where the mutex takes ~85, but four
+          producers saturating the ring take ~417 ns a record where the mutex takes
+          ~235: every writer's claim contends on one cursor while the mutex parks
+          its losers. And no writer may read: behind a mutex, a writer that finds
+          the ring full can evict the oldest record and store its own in one
+          critical section, so the newest record is always admitted; here that
+          eviction can only be the reader's, and the writer waits for it or loses
+          its own record. Those two are why the SDK's async log sink keeps its Queue
+          behind a mutex, with its drop-oldest policy as it is (ADR 0216, #805).
+        in:
+          - name: capacity
+            type: int
+        name: NewMulti
+        out:
+          - name: q
+            type: MultiQueue[T]
           - name: err
             type: error
         typeParams:
@@ -685,6 +722,48 @@ packages:
                 - name: "n"
                   type: int
         name: Queue
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          MultiQueue is the lock-free MPSC ring contract: any number of goroutines
+          call TryWrite at once; exactly one calls TryRead. Capacity is fixed at
+          construction time, a power of two.
+        interface:
+          methods:
+            - doc: |-
+                TryWrite enqueues item without blocking; returns Full when saturated.
+                Any number of goroutines may call it at once.
+              in:
+                - name: item
+                  type: T
+              name: TryWrite
+              out:
+                - name: err
+                  type: error
+            - doc: |-
+                TryRead dequeues the next item without blocking; returns Empty when no
+                item is available, including while the writer that claimed the next
+                slot has not finished storing into it. One goroutine only.
+              name: TryRead
+              out:
+                - name: item
+                  type: T
+                - name: err
+                  type: error
+            - doc: Capacity returns the number of usable slots in the ring.
+              name: Capacity
+              out:
+                - name: "n"
+                  type: int
+            - doc: |-
+                Len returns a snapshot count of items currently held, a claimed slot
+                still being written included.
+              name: Len
+              out:
+                - name: "n"
+                  type: int
+        name: MultiQueue
         typeParams:
           - constraint: any
             name: T
@@ -802,10 +881,17 @@ packages:
 
       EXACTLY ONE goroutine may call TryWrite at a time, and EXACTLY ONE may call
       TryRead. Concurrent producers, or concurrent consumers, corrupt the queue:
-      serialise them upstream, as the SDK's async logger does with a mutex. A
-      multi-producer mode is planned beside this one (ADR 0159 §2); publishing
-      [Queue] froze its four methods, so that mode arrives as another constructor
-      and never as a change to them.
+      serialise them upstream, or take the multi-producer sibling.
+
+      # Many producers, one consumer
+
+      [NewMulti] returns a [MultiQueue]: the same four methods, under the wider
+      contract of any number of goroutines calling TryWrite at once and exactly
+      one calling TryRead. Its capacity is rounded up to a power of two. A writer
+      claims a slot, then stores into it: while it is between the two, the
+      reader answers [Empty] for that slot and every one behind it. Publishing
+      [Queue] froze its four methods, so this mode arrived as another
+      constructor and a sibling interface (ADR 0039, ADR 0159 §2).
 
       # Errors
 
@@ -843,6 +929,32 @@ packages:
           name: Drain
           out:
             - type: iter.Seq[T]
+          typeParams:
+            - constraint: any
+              name: T
+      - alias:
+          - doc: |-
+              MultiQueue is the multi-producer, single-consumer ring: TryWrite from any
+              number of goroutines at once, TryRead from exactly one. The methods are
+              [Queue]'s, so a MultiQueue is also a Queue — [Drain] reads it.
+            name: MultiQueue
+            target: kring.MultiQueue[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - func:
+          doc: |-
+            NewMulti returns an empty [MultiQueue] holding the power of two at least
+            capacity, or [CapZero] when capacity is not positive. The storage is
+            allocated once, here.
+          forward: kring.NewMulti[T]
+          in:
+            - name: capacity
+              type: int
+          name: NewMulti
+          out:
+            - type: MultiQueue[T]
+            - type: error
           typeParams:
             - constraint: any
               name: T

@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-05-30
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the scheme facades become children of `crypto` in a tree grouped by family
+- **Amended by**: [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md) — `batcher`'s lifetime context, its bounded `Close` and `FlushBackground`; [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the scheme facades become children of `crypto` in a tree grouped by family
 - **Related**: ADR 0001 (multi-module layout), ADR 0003 (codec registry — the pattern mirrored), ADR 0005 (dotted-quad codes), ADR 0010 (recycler), ADR 0011 (snapshot.Value), ADR 0012 (writer registry), ADR 0013 (crypto domain — the ports extended here)
 - **Amends**:
   - the `internal/core` purpose statement — admits a **fifth** sibling, `transform`, beside `codec` / `writer` / `crypto` / `logger`;
@@ -419,3 +419,20 @@ are silently unaudited.
 - Crypto domain precedent: `docs/adr/0013-sdk-crypto-domain.md`.
 - Writer registry precedent: `docs/adr/0012-logger-writer-registry.md`.
 - Code layout: `docs/adr/0005-sdk-error-codes-dotted-quad.md`.
+
+## Amendment — 2026-11-03: `batcher`'s own deliveries have a context `Close` cancels, and may leave the producer's goroutine ([#1040](https://github.com/kitsunium/sdk/issues/1040), [#817](https://github.com/kitsunium/sdk/issues/817), [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md))
+
+- Every delivery the batcher's own goroutine makes — a `FlushEvery` tick's,
+  and now a background one's — runs under a lifetime context that `Close`
+  cancels, instead of `context.Background()`.
+- `Close(ctx)` joins that goroutine within `ctx` while it is inside a delivery:
+  when `ctx` ends first it cancels the delivery's context and returns
+  `BATCHER_CLOSE_TIMED_OUT` (`0.1.5.3`), the field `undelivered` counting what
+  it left; a Sink held by a caller's flush is waited for within `ctx` too. An
+  idle goroutine is still joined, and the final batch still attempted under the
+  caller's context, as before.
+- `Config.FlushOn`: `FlushCaller`, the zero value and the previous behaviour,
+  delivers a capped batch on the producer's goroutine; `FlushBackground` hands it
+  to the batcher's goroutine — one batch waiting beside the one delivered, an
+  `Add` that fills a second waiting for room within its context —, the failure
+  going to `OnError`. The Sink stays serialized (V6).

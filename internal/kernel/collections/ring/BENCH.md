@@ -100,3 +100,73 @@ SPSC_ProducerConsumer/size65536-12          186.5     5.6%   177.0 – 187.4    
   back-pressure spin; the exact size-to-size ordering is scheduler-sensitive and
   jitters run-to-run on a shared machine, so read the magnitude (tens of ns per
   record), not a strictly monotonic curve.
+
+## Edition 2026-11-03 — padded cursors, cached far cursor, mask (#1034) and the MPSC sibling (#805)
+
+Measured before and after on ONE box, interleaved — the table above is another
+box and is not compared with this one: AMD EPYC 7351P (8 vCPU), Linux 6.12,
+go1.27.3, `-benchmem -count 6` (`-count 5` for the producer rows), medians.
+`GOMAXPROCS=4` unless the row says `-8`. Command:
+`cd internal && go test -run '^$' -bench . -benchmem -count 6 ./kernel/collections/ring/`
+(the producer rows with `-cpu 4,8`). Every row is 0 B/op and 0 allocs/op except `New`.
+
+| Row | Before (base `42143bf47`) | After | |
+|---|---|---|---|
+| `SPSC_ProducerConsumer/size4` | 297.7 ns | 254.3 ns | −15 % |
+| `SPSC_ProducerConsumer/size64` | 374.3 ns | 148.7 ns | −60 % |
+| `SPSC_ProducerConsumer/size1024` | 313.2 ns | 120.5 ns | −62 % (#1034: ≤ 60 % of before — met) |
+| `SPSC_ProducerConsumer/size65536` | 325.4 ns | 54.8 ns | −83 % |
+| `Len` | 4.97 ns | 2.88 ns | −42 % |
+| `TryWrite_Happy` | 20.7 ns | 19.8 ns | within noise |
+| `TryRead_Happy` | 20.7 ns | 20.5 ns | within noise |
+| `TryWrite_Full` | 11.9 ns | 13.7 ns | +16 %: the refusal now refreshes `cachedHead` before answering |
+| `TryRead_Empty` | 12.3 ns | 12.1 ns | within noise |
+| `New` | 1 826 ns, 9 472 B | 2 872 ns, 8 192 B | 1 024 slots instead of 1 025, plus the padded header |
+
+- **The hand-off is where the layout pays.** With `head` and `tail` on one
+  line, every write invalidated the line the consumer was reading and every
+  read the producer's; apart, and each side re-reading the far cursor only
+  when the ring looks full or empty, a record crossing between two cores costs
+  a third to a sixth of what it did.
+- **The happy rows did not move, and #1034's "≤ 50 %" for them is not met on
+  this box.** Each iteration is a write and a read, so two sequentially
+  consistent stores (`XCHG` on amd64) — the publication barriers the
+  ORDERING INVARIANT comments name. Go has no release-only store; the
+  division the mask replaced and the second load the cache saves are noise
+  beside them.
+
+### The MPSC sibling against the mutex it would replace
+
+`MPSC_Producers/ProducersN` moves `b.N` records from N producers to one
+consumer through `NewMulti[int](1024)`; `MutexSPSC_Producers/ProducersN` does
+the same through the SPSC ring behind one mutex every side takes — the async
+logger's shape. A producer that finds the ring full, and the consumer that
+finds it empty, yield (`runtime.Gosched`) before trying again. ns per record.
+
+| Producers | MPSC (`-4`) | Mutex + SPSC (`-4`) | MPSC (`-8`) | Mutex + SPSC (`-8`) |
+|---|---|---|---|---|
+| 1 | 26.6 | 84.0 | 24.3 | 85.7 |
+| 4 | 417.0 | 235.4 | 416.6 | 246.4 |
+| 8 | 452.7 | 518.4 | 714.5 | 384.6 |
+
+`MPSC_TryWrite_Happy` (one goroutine, a claim then a read): 41.5 ns, 0 allocs.
+
+- **One producer: three times faster than the mutex.** The claim is one CAS on
+  an uncontended line.
+- **Four and eight producers saturating the ring: slower than the mutex.**
+  Every writer CASes the same `tail` and polls the cell the reader is about to
+  free; Go's mutex parks the losers instead. #805's "four producers ≤ 2× the
+  SPSC row" (`SPSC_ProducerConsumer/size1024-8`: 132 ns) is NOT met: 417 ns,
+  3.2×. Padding each cell to a cache line (476–524 ns at four) and a writer's
+  full check on the reader's cursor (477–551 ns) were measured and are slower
+  still.
+- **So the async logger keeps its mutex and its SPSC ring** (ADR 0216, #805):
+  at four producers its hand-off would go from 235 to 417 ns a record. And
+  its `DropOldest` would change what it guarantees: behind the mutex, a writer
+  that finds the ring full reads the oldest record off and stores its own in
+  one critical section, so the newest record is always admitted; a
+  `MultiQueue` writer may not read, so the eviction would move to the
+  reader, and a writer facing a full ring would wait for it or lose its own
+  record. `MultiQueue` stays, with no adopter until a measurement of a
+  different MPSC shape — or of an adopter that is not saturated — shows it
+  winning.

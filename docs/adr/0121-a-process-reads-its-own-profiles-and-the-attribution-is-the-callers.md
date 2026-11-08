@@ -210,3 +210,33 @@ None. `profiling` is a new package in this change set.
 - [Protocol Buffers encoding](https://protobuf.dev/programming-guides/encoding/) — varints, wire types, packed repeated fields.
 - [`runtime/pprof`](https://pkg.go.dev/runtime/pprof) — the profilers, the labels, the goroutine profile's debug levels.
 - [`runtime` — GODEBUG tracebacklabels](https://pkg.go.dev/runtime#hdr-Environment_Variables) — labels in the dump's headers.
+
+## Amendment — 2026-11-04: execution traces and the pprof wire (kitsunium/sdk#1022, #1023)
+
+§Deferred named execution traces as another format and another question. Go
+1.25's `runtime/trace.FlightRecorder` made the question one this engine
+answers with its existing shapes: `CaptureTrace(ctx, window)` records a
+bounded window on the injected clock exactly as `CaptureCPU` does (≤ one
+minute — a trace weighs about a megabyte a second), and `StartFlightRecorder`
+keeps the last seconds in memory for `Snapshot`. The runtime's one-at-a-time
+rules surface as `TRACE_BUSY` (0.3.89.8, 409), the twin of `ProfilerBusy`; the
+bytes stay the runtime's format, unparsed. And `NewHandler` serves the pprof
+wire (`profile`, `trace`, the named profiles) as a plain `http.Handler` the
+caller mounts behind its own admission — never `net/http/pprof`, whose import
+registers handlers on `http.DefaultServeMux`; `cmdline` and `symbol` are not
+served.
+
+## Amendment — 2026-11-08: the repository imports `net/http/pprof` nowhere, and a rule holds it (kitsunium/sdk#1023)
+
+The amendment above said "never `net/http/pprof`" and nothing checked it. Its
+`init` registers six handlers on `http.DefaultServeMux` the moment the package
+is linked, under no admission, and `pprof.Handler(name)` does not spare the
+caller: the import runs the `init` anyway. `tools/sdkguard` gains SDK006, a
+convention for a consumer — a private debug listener may want the standard
+library's — that reads the import block itself, because the usual spelling is
+`import _ "net/http/pprof"`, which binds no name and which the resolution every
+other rule goes through drops. `make guard` holds the SDK to it in a third pass
+over `internal/`, `pkg/`, `third-party/`, `framework/`, `tools/` and `e2e/`, test
+files included, and refuses a `//sdkguard:allow SDK006` directive there as it
+does SDK002's.
+

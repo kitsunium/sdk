@@ -1,6 +1,57 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: CheckName
+    participants:
+      - id: caller
+        kind: actor
+      - id: CheckName
+        kind: self
+      - id: wrapInvalidName
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: wrapInvalidName(name, "longer than FDNAME_MAX")
+              to: wrapInvalidName
+          when: len(name) > maxNameBytes
+      - loop:
+          do:
+            - bind: c
+              eval: name[i]
+            - opt:
+                do:
+                  - return: wrapInvalidName(name, "not printable ASCII, or a ':'")
+                    to: wrapInvalidName
+                when: c < ' ' || c > '~' || c == ':'
+          key: i
+          range: len(name)
+      - return: nil
+  - of: announced
+    steps:
+      - opt:
+          do:
+            - return: unknownName
+          when: name == ""
+      - return: name
+  - of: wrapInvalidName
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapInvalidName
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(nil, errs.WrapParams{
+          		Code:     coreproc.CodeInvalidFDName,
+          		Reason:   "INVALID_FD_NAME",
+          		Public:   "The descriptor name is not valid",
+          		Private:  "service/proc/systemd/listen: a descriptor name is longer than FDNAME_MAX, not printable ASCII, or holds a ':'",
+          		ExitCode: exitUsage,
+          	}, errs.String("name", name), errs.String("why", why))
+        to: errs
   - of: dropErr
     steps:
       - opt:
@@ -251,7 +302,13 @@ sequences:
         kind: self
       - id: slices
         kind: stdlib
+      - id: checkNames
+        kind: internal
       - id: listenerFile
+        kind: internal
+      - id: closeAll
+        kind: internal
+      - id: activate
         kind: internal
     steps:
       - opt:
@@ -261,6 +318,14 @@ sequences:
       - bind: names
         eval: slices.Sorted(maps.Keys(named))
         to: slices
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkNames(names)
+            to: checkNames
+          when: err != nil
       - bind: acts
         eval: make([]*os.File, 0, len(names))
       - loop:
@@ -270,6 +335,8 @@ sequences:
               to: listenerFile
             - opt:
                 do:
+                  - eval: closeAll(acts)
+                    to: closeAll
                   - return: ferr
                 when: ferr != nil
             - set: acts
@@ -277,14 +344,110 @@ sequences:
           key: _
           range: names
           value: name
+      - eval: activate(child, acts, names)
+        to: activate
+      - return: nil
+  - of: PrepareFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: PrepareFiles
+        kind: self
+      - id: checkNames
+        kind: internal
+      - id: activate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(files) == 0
+      - bind: names
+        eval: make([]string, 0, len(files))
+      - bind: acts
+        eval: make([]*os.File, 0, len(files))
+      - loop:
+          do:
+            - set: names
+              value: append(names, nf.Name)
+            - set: acts
+              value: append(acts, nf.File)
+          key: _
+          range: files
+          value: nf
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkNames(names)
+            to: checkNames
+          when: err != nil
+      - eval: activate(child, acts, names)
+        to: activate
+      - return: nil
+  - of: checkNames
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkNames
+        kind: self
+      - id: CheckName
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: CheckName(name)
+                  to: CheckName
+                when: err != nil
+          key: _
+          range: names
+          value: name
+      - return: nil
+  - of: activate
+    steps:
       - set: child.ExtraFiles
         value: append(acts, child.ExtraFiles...)
+      - bind: announcedNames
+        eval: make([]string, 0, len(names))
+      - loop:
+          do:
+            - set: announcedNames
+              value: append(announcedNames, announced(name))
+          key: _
+          range: names
+          value: name
       - set: child.Env
         value: |-
           append(envWithout(child.Env, envFds, envPID, envFdNames),
-          		envFds+"="+strconv.Itoa(len(names)),
-          		envFdNames+"="+strings.Join(names, ":"))
-      - return: nil
+          		envFds+"="+strconv.Itoa(len(acts)),
+          		envFdNames+"="+strings.Join(announcedNames, ":"))
+      - opt:
+          do:
+            - set: child.PIDEnv
+              value: append(slices.Clone(child.PIDEnv), envPID)
+          when: "!slices.Contains(child.PIDEnv, envPID)"
+  - of: closeAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeAll
+        kind: self
+      - id: dropErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: dropErr(f.Close())
+              to: dropErr
+          key: _
+          range: files
+          value: f
   - of: listenerFile
     participants:
       - id: caller

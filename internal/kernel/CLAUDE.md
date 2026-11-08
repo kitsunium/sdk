@@ -16,7 +16,7 @@ directory holds no Go code — it is a prefix, not a package — and carries a
 ```
 internal/kernel/
 ├── errs/  clock/  backoff/  semver/  plugin/  swar/  jsonenc/     the root: no family describes them
-├── concur/        batcher, buffer, commit, group, recycler, singleflight, snapshot, worker
+├── concur/        batcher, buffer, commit, group, pool, recycler, sema, singleflight, snapshot, worker
 ├── collections/   cache, heap, ring
 └── fs/            flock, pathchain, winacl
 ```
@@ -37,11 +37,13 @@ internal/kernel/
 
 | Package | Purpose | Code range |
 |---|---|---|
-| `concur/batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014); the `FlushEvery` ticker runs on `Config.Clock` (`clock.System` when nil); published as `pkg/v1/concur/batcher` | `0.1.5.*` (BATCHER_CLOSED / BATCHER_DELIVER_FAILED) |
-| `concur/buffer/` | `sync.Pool` of `[]byte` — a `recycler.CappedPool[*[]byte]` specialisation | `0.1.1.*` (reserved) |
+| `concur/batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014); the `FlushEvery` ticker runs on `Config.Clock` (`clock.System` when nil); its own deliveries under a lifetime context `Close` cancels, `Close` bounded by its context, a capped batch delivered by the caller or — `FlushBackground` — by the batcher's goroutine (ADR 0216); published as `pkg/v1/concur/batcher` | `0.1.5.*` (BATCHER_CLOSED / BATCHER_DELIVER_FAILED / BATCHER_CLOSE_TIMED_OUT) |
+| `concur/buffer/` | `sync.Pool` of `[]byte` in five size classes (1, 4, 16, 64, 256 KiB; `Get`, `GetSize`, `Put`) — `recycler.CappedPool[*[]byte]` specialisations, each keeping a buffer to twice its class (ADR 0216) | `0.1.1.*` (reserved) |
 | `concur/commit/` | generic `Group[T]` group commit (#803, ADR 0207): concurrent `Do` calls each add an item, one goroutine runs the flush over the batch, every caller gets its verdict; batches gather for `MaxWait` on `Config.Clock` or up to `MaxItems`, flush one at a time in order; not published in `pkg/v1` | `0.1.4.*` (COMMIT_CLOSED) |
 | `concur/group/` | generic structured concurrency (`Group`, `Go`/`Wait`/`Collect`, `Unlimited`); first error — or every error joined in submission order (`NewJoined`) — bounded parallelism, and a child panic delivered to the waiter; published as `pkg/v1/concur/group` | (none — forwards the task's error; a panic is re-raised, not coded) |
+| `concur/pool/` | generic bounded worker pool (#804, ADR 0216): `Pool` from `NewPool(ctx, Config{Workers, Queue, OnPanic, OnError})`, `Submit` refusing when there is no room — never a park without a queue —, `Drain` / `Stop` joined within their context, a task's panic to `OnPanic`; published as `pkg/v1/concur/pool` | `0.1.6.*` (POOL_FULL / POOL_CLOSED) |
 | `concur/recycler/` | generic `Pool[T]` + `CappedPool[T]` object pools (ADR 0010); published as `pkg/v1/concur/recycler` | (none — panics on programmer error) |
+| `concur/sema/` | generic weighted semaphore (#812, ADR 0216): `Weighted`, FIFO and cancellable `Acquire(ctx, n)`, `TryAcquire`, `Release`; not published until a domain adopts it | `0.1.7.*` (WEIGHT_TOO_LARGE) |
 | `concur/singleflight/` | generic `Group[K,V]` call deduplication (ADR 0049); one execution per key however many callers arrive; published as `pkg/v1/concur/singleflight` | (none — transparent to `fn`'s error; a panic is re-raised, not coded) |
 | `concur/snapshot/` | generic `Value[T]` copy-on-write container (ADR 0011); published as `pkg/v1/concur/snapshot` | (none — never returns errors) |
 | `concur/worker/` | generic goroutine-lifecycle daemon (`LoopDaemon`, `Start`/`Every`/`Stop`); `Every` ticks on an injectable clock (`WithClock`) and can end with its owner (`WithDone`); published as `pkg/v1/concur/worker` | (none — emits no codes) |
@@ -52,7 +54,7 @@ internal/kernel/
 |---|---|---|
 | `collections/cache/` | generic `Cache[K,V]` LRU + TTL cache (ADR 0025); reuses `clock` for testable expiry | (none — `Fetch` returns `(V, bool)`) |
 | `collections/heap/` | generic `Heap[T]` binary heap ordered by a caller-supplied comparison; published as `pkg/v1/collections/heap` | (none — `Pop`/`Peek` return `(T, bool)`; a nil comparison panics) |
-| `collections/ring/` | SPSC lock-free bounded queue (ADR 0006); published as `pkg/v1/collections/ring` — single-producer, ahead of the multi-producer mode ADR 0159 §2 plans | `0.1.3.*` (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
+| `collections/ring/` | SPSC lock-free bounded queue (ADR 0006), its cursors on their own cache lines, and its MPSC sibling `NewMulti` / `MultiQueue` (ADR 0159 §2, ADR 0216); published as `pkg/v1/collections/ring` | `0.1.3.*` (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
 
 ### `fs/` — what the filesystem says, measured or called one primitive at a time, never decided (see `fs/CLAUDE.md`)
 

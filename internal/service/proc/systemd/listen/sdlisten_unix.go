@@ -223,11 +223,14 @@ func WithNames(unsetEnv bool) (byName map[string][]*os.File, err error) {
 	return out, nil
 }
 
-// Prepare is the activator side: it appends each listener's socket to child as an
-// inherited fd and sets LISTEN_FDS / LISTEN_FDNAMES in child.Env so the spawned
-// process recovers them via Files/Listeners. LISTEN_PID is intentionally omitted
-// (a pre-fork activator cannot know the child pid; Files accepts an absent
-// LISTEN_PID from a trusted parent). Sockets are passed in sorted-name order.
+// Prepare is the activator side: it prepends each listener's socket to child as
+// an inherited fd and sets LISTEN_FDS / LISTEN_FDNAMES in child.Env so the
+// spawned process recovers them via Files/Listeners. Sockets are passed in
+// sorted-name order, each name checked as CheckName does, the empty one
+// announced as "unknown". LISTEN_PID is the child's own: Prepare adds it to
+// child.PIDEnv, which the spawn sets after the fork (kitsunium/sdk#739) — a
+// spawn through the trampoline; a caller that cannot afford it removes the
+// name, and Files accepts an absent LISTEN_PID from a trusted parent.
 func Prepare(child *coreproc.Spec, named map[string]net.Listener) error {
 	//: nothing to pass means the child env is left untouched.
 	if len(named) == 0 {
@@ -236,27 +239,101 @@ func Prepare(child *coreproc.Spec, named map[string]net.Listener) error {
 	}
 	//: iterate in sorted-name order so the fd↔name pairing is deterministic.
 	names := slices.Sorted(maps.Keys(named))
+	//: every name first: a refusal leaves child as it was and dups nothing.
+	if err := checkNames(names); err != nil {
+		//: INVALID_FD_NAME.
+		return err
+	}
 	acts := make([]*os.File, 0, len(names))
 	//: collect each listener's socket fd in the same order as its name.
 	for _, name := range names {
 		f, ferr := listenerFile(named[name])
 		//: a listener with no recoverable fd aborts the whole preparation.
 		if ferr != nil {
+			//: the dups made so far are this call's: closed.
+			closeAll(acts)
 			//: propagate the typed LISTEN_FAILED verbatim.
 			return ferr
 		}
 		acts = append(acts, f)
 	}
+	activate(child, acts, names)
+	//: the child spec now carries the inherited sockets and their protocol env.
+	return nil
+}
+
+// PrepareFiles hands files to child as Prepare hands sockets: at fd 3 on, in the
+// order given, LISTEN_FDS, LISTEN_FDNAMES and LISTEN_PID set as Prepare sets
+// them. The files are passed as they are — never duplicated nor closed here, so
+// a descriptor store hands its descriptors to each restart and keeps them —
+// and a name LISTEN_FDNAMES cannot carry is InvalidFDName before child changes.
+// Any ExtraFiles child already had follow them.
+func PrepareFiles(child *coreproc.Spec, files []NamedFileValue) error {
+	//: nothing to pass means the child env is left untouched.
+	if len(files) == 0 {
+		//: a no-op activation.
+		return nil
+	}
+	names := make([]string, 0, len(files))
+	acts := make([]*os.File, 0, len(files))
+	//: the names and the files, in the order given.
+	for _, nf := range files {
+		names = append(names, nf.Name)
+		acts = append(acts, nf.File)
+	}
+	//: every name first: a refusal leaves child as it was.
+	if err := checkNames(names); err != nil {
+		//: INVALID_FD_NAME.
+		return err
+	}
+	activate(child, acts, names)
+	//: the child spec carries the files and their protocol env.
+	return nil
+}
+
+// checkNames checks every name as CheckName does.
+func checkNames(names []string) error {
+	//: each name.
+	for _, name := range names {
+		//: one LISTEN_FDNAMES cannot carry.
+		if err := CheckName(name); err != nil {
+			//: INVALID_FD_NAME naming it.
+			return err
+		}
+	}
+	//: all carried.
+	return nil
+}
+
+// activate puts acts at fd 3 on in child and the protocol's variables in its
+// environment: LISTEN_FDS and LISTEN_FDNAMES in Env, LISTEN_PID in PIDEnv —
+// set by the spawn to the child's own PID after the fork.
+func activate(child *coreproc.Spec, acts []*os.File, names []string) {
 	//: the sd_listen_fds protocol fixes the activation sockets at fd 3..3+N, so
 	//: PREPEND them — any ExtraFiles the caller already set shift to after them
 	//: (the child's Files() reads exactly the activation sockets at fd 3+).
 	child.ExtraFiles = append(acts, child.ExtraFiles...)
+	announcedNames := make([]string, 0, len(names))
+	//: an empty name is announced as libsystemd names it.
+	for _, name := range names {
+		announcedNames = append(announcedNames, announced(name))
+	}
 	//: publish the count and names so the child's Files() recovers them.
 	child.Env = append(envWithout(child.Env, envFds, envPID, envFdNames),
-		envFds+"="+strconv.Itoa(len(names)),
-		envFdNames+"="+strings.Join(names, ":"))
-	//: the child spec now carries the inherited sockets and their protocol env.
-	return nil
+		envFds+"="+strconv.Itoa(len(acts)),
+		envFdNames+"="+strings.Join(announcedNames, ":"))
+	//: LISTEN_PID, once, set after the fork.
+	if !slices.Contains(child.PIDEnv, envPID) {
+		child.PIDEnv = append(slices.Clone(child.PIDEnv), envPID)
+	}
+}
+
+// closeAll closes files this package duplicated and no longer hands over.
+func closeAll(files []*os.File) {
+	//: each dup.
+	for _, f := range files {
+		dropErr(f.Close())
+	}
 }
 
 // listenerFile returns the dup'd *os.File backing a TCP or Unix listener; other

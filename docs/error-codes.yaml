@@ -57,6 +57,22 @@ codes:
     const: CodeBatcherDeliverFailed
     hex: "0x00_01_05_02"
     package: internal/kernel/concur/batcher
+  - code: "0.1.5.3"
+    const: CodeBatcherCloseTimedOut
+    hex: "0x00_01_05_03"
+    package: internal/kernel/concur/batcher
+  - code: "0.1.6.1"
+    const: CodePoolFull
+    hex: "0x00_01_06_01"
+    package: internal/kernel/concur/pool
+  - code: "0.1.6.2"
+    const: CodePoolClosed
+    hex: "0x00_01_06_02"
+    package: internal/kernel/concur/pool
+  - code: "0.1.7.1"
+    const: CodeWeightTooLarge
+    hex: "0x00_01_07_01"
+    package: internal/kernel/concur/sema
   - code: "0.2.2.1"
     const: CodeDuplicateRegistration
     hex: "0x00_02_02_01"
@@ -304,6 +320,58 @@ codes:
   - code: "0.2.6.23"
     const: CodeStdioCaptureFailed
     hex: "0x00_02_06_17"
+    package: internal/core/proc
+  - code: "0.2.6.24"
+    const: CodeStdioDrainTimeout
+    hex: "0x00_02_06_18"
+    package: internal/core/proc
+  - code: "0.2.6.25"
+    const: CodeHandleUnavailable
+    hex: "0x00_02_06_19"
+    package: internal/core/proc
+  - code: "0.2.6.26"
+    const: CodePTYFailed
+    hex: "0x00_02_06_1A"
+    package: internal/core/proc
+  - code: "0.2.6.28"
+    const: CodeMemlimitMisconfigured
+    hex: "0x00_02_06_1C"
+    package: internal/core/proc
+  - code: "0.2.6.29"
+    const: CodeCgroupReadFailed
+    hex: "0x00_02_06_1D"
+    package: internal/core/proc
+  - code: "0.2.6.30"
+    const: CodeSandboxFailed
+    hex: "0x00_02_06_1E"
+    package: internal/core/proc
+  - code: "0.2.6.31"
+    const: CodeReservedEnv
+    hex: "0x00_02_06_1F"
+    package: internal/core/proc
+  - code: "0.2.6.32"
+    const: CodePIDFileRefused
+    hex: "0x00_02_06_20"
+    package: internal/core/proc
+  - code: "0.2.6.33"
+    const: CodeAdoptionRefused
+    hex: "0x00_02_06_21"
+    package: internal/core/proc
+  - code: "0.2.6.34"
+    const: CodeStatusUnknown
+    hex: "0x00_02_06_22"
+    package: internal/core/proc
+  - code: "0.2.6.35"
+    const: CodeInvalidFDName
+    hex: "0x00_02_06_23"
+    package: internal/core/proc
+  - code: "0.2.6.36"
+    const: CodeSandboxUnavailable
+    hex: "0x00_02_06_24"
+    package: internal/core/proc
+  - code: "0.2.6.37"
+    const: CodeCgroupControllerAbsent
+    hex: "0x00_02_06_25"
     package: internal/core/proc
   - code: "0.2.7.1"
     const: CodeUnknownScheme
@@ -3021,6 +3089,10 @@ codes:
     const: CodeSampleTypeMissing
     hex: "0x00_03_59_07"
     package: internal/core/observe/profiling
+  - code: "0.3.89.8"
+    const: CodeTraceBusy
+    hex: "0x00_03_59_08"
+    package: internal/core/observe/profiling
   - code: "0.3.90.1"
     const: CodeNotJSON
     hex: "0x00_03_5A_01"
@@ -3060,6 +3132,10 @@ codes:
   - code: "0.3.91.9"
     const: CodePathUnsafe
     hex: "0x00_03_5B_09"
+    package: internal/core/proc/ipc
+  - code: "0.3.91.10"
+    const: CodeFDPassRefused
+    hex: "0x00_03_5B_0A"
     package: internal/core/proc/ipc
   - code: "0.3.92.1"
     const: CodeLogCorrupt
@@ -3297,6 +3373,166 @@ codes:
     const: CodeOTLPLogsPartialSuccess
     hex: "0x00_03_68_04"
     package: internal/core/observe/logger/writer/otlpjson
+  - code: "0.3.105.1"
+    const: CodeConfigInvalid
+    hex: "0x00_03_69_01"
+    package: internal/core/proc/service
+  - code: "0.3.105.2"
+    const: CodeDirectiveUnsupported
+    hex: "0x00_03_69_02"
+    package: internal/core/proc/service
+  - code: "0.3.105.3"
+    const: CodeCommandInvalid
+    hex: "0x00_03_69_03"
+    package: internal/core/proc/service
+  - code: "0.3.105.4"
+    const: CodeStartFailed
+    hex: "0x00_03_69_04"
+    package: internal/core/proc/service
+  - code: "0.3.105.5"
+    const: CodeStartLimitHit
+    hex: "0x00_03_69_05"
+    package: internal/core/proc/service
+  - code: "0.3.105.6"
+    const: CodeReloadFailed
+    hex: "0x00_03_69_06"
+    package: internal/core/proc/service
+  - code: "0.3.105.7"
+    const: CodeReloadUnsupported
+    hex: "0x00_03_69_07"
+    package: internal/core/proc/service
+  - code: "0.3.105.8"
+    const: CodeJobCanceled
+    hex: "0x00_03_69_08"
+    package: internal/core/proc/service
+  - code: "0.3.105.9"
+    const: CodeUnitClosed
+    hex: "0x00_03_69_09"
+    package: internal/core/proc/service
+  - code: "0.3.105.10"
+    const: CodePrivilegeRefused
+    hex: "0x00_03_69_0A"
+    package: internal/core/proc/service
+  - code: "0.3.105.11"
+    const: CodeExitUnknown
+    hex: "0x00_03_69_0B"
+    package: internal/core/proc/service
+  - code: "0.3.105.12"
+    const: CodeHandoverInvalid
+    hex: "0x00_03_69_0C"
+    package: internal/core/proc/service
+  - code: "0.3.105.13"
+    const: CodeHandoverMismatch
+    hex: "0x00_03_69_0D"
+    package: internal/core/proc/service
+  - code: "0.3.105.14"
+    const: CodeReexecFailed
+    hex: "0x00_03_69_0E"
+    package: internal/core/proc/service
+  - code: "0.3.106.1"
+    const: CodeMisconfigured
+    hex: "0x00_03_6A_01"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.106.2"
+    const: CodeFrameTooLarge
+    hex: "0x00_03_6A_02"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.106.3"
+    const: CodeCallTimeout
+    hex: "0x00_03_6A_03"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.106.4"
+    const: CodeCallCancelled
+    hex: "0x00_03_6A_04"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.106.5"
+    const: CodeMethodUnknown
+    hex: "0x00_03_6A_05"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.106.6"
+    const: CodeOverloaded
+    hex: "0x00_03_6A_06"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.106.7"
+    const: CodeProtocolViolation
+    hex: "0x00_03_6A_07"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.106.8"
+    const: CodeFormatRefused
+    hex: "0x00_03_6A_08"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.106.9"
+    const: CodeConnClosed
+    hex: "0x00_03_6A_09"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.106.10"
+    const: CodeRemoteFailed
+    hex: "0x00_03_6A_0A"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.106.11"
+    const: CodeCodecFailed
+    hex: "0x00_03_6A_0B"
+    package: internal/core/proc/ipc/rpc
+  - code: "0.3.107.1"
+    const: CodePolicyInvalid
+    hex: "0x00_03_6B_01"
+    package: internal/core/proc/bpf
+  - code: "0.3.107.2"
+    const: CodeNotLinked
+    hex: "0x00_03_6B_02"
+    package: internal/core/proc/bpf
+  - code: "0.3.107.3"
+    const: CodeLoadRefused
+    hex: "0x00_03_6B_03"
+    package: internal/core/proc/bpf
+  - code: "0.3.107.4"
+    const: CodeAttachFailed
+    hex: "0x00_03_6B_04"
+    package: internal/core/proc/bpf
+  - code: "0.3.107.5"
+    const: CodeProgramFailed
+    hex: "0x00_03_6B_05"
+    package: internal/core/proc/bpf
+  - code: "0.3.107.6"
+    const: CodeBackendRefused
+    hex: "0x00_03_6B_06"
+    package: internal/core/proc/bpf
+  - code: "0.3.108.1"
+    const: CodeAddressInvalid
+    hex: "0x00_03_6C_01"
+    package: internal/core/proc/dbus
+  - code: "0.3.108.2"
+    const: CodeBusUnreachable
+    hex: "0x00_03_6C_02"
+    package: internal/core/proc/dbus
+  - code: "0.3.108.3"
+    const: CodeAuthRefused
+    hex: "0x00_03_6C_03"
+    package: internal/core/proc/dbus
+  - code: "0.3.108.4"
+    const: CodeProtocolViolation
+    hex: "0x00_03_6C_04"
+    package: internal/core/proc/dbus
+  - code: "0.3.108.5"
+    const: CodeCallFailed
+    hex: "0x00_03_6C_05"
+    package: internal/core/proc/dbus
+  - code: "0.3.108.6"
+    const: CodeCallCancelled
+    hex: "0x00_03_6C_06"
+    package: internal/core/proc/dbus
+  - code: "0.3.108.7"
+    const: CodeConnClosed
+    hex: "0x00_03_6C_07"
+    package: internal/core/proc/dbus
+  - code: "0.3.108.8"
+    const: CodeNameInvalid
+    hex: "0x00_03_6C_08"
+    package: internal/core/proc/dbus
+  - code: "0.3.108.9"
+    const: CodeCallTimeout
+    hex: "0x00_03_6C_09"
+    package: internal/core/proc/dbus
   - code: "0.4.1.1"
     const: CodeInvalidID
     hex: "0x00_04_01_01"

@@ -23,7 +23,7 @@
 // directory was created in, and on macOS an inheritable access-control entry
 // it puts there is inherited by the 0700 directory Listen creates and by the
 // 0600 socket bound inside — observed with ls -le — which no mode check sees.
-// Outside Linux the peer is not verified, so that entry is a way in.
+// On macOS the peer is not verified, so that entry is a way in.
 //
 // # The rule: who could have created a component, and who can replace it
 //
@@ -81,9 +81,16 @@
 //     created, or can replace, is refused (PATH_UNSAFE, chain_unix.go), since
 //     every lookup follows a link planted at a parent.
 //   - THE PEER'S CREDENTIALS, where the kernel gives them: SO_PEERCRED on
-//     Linux. There the listener refuses a peer whose UID is neither its own
-//     nor allowed, whatever the directory says. Elsewhere Peer.Verified is
-//     false and the directory is the only gate — stated, not papered over.
+//     Linux, LOCAL_PEERCRED on FreeBSD and DragonFly, LOCAL_PEEREID on NetBSD.
+//     There the listener refuses a peer whose UID is neither its own nor
+//     allowed, whatever the directory says, and a peer the kernel did not name.
+//     On darwin, OpenBSD, illumos and Solaris Peer.Verified is false and the
+//     directory is the only gate — stated, not papered over.
+//   - AT DIAL, the directory may be the listener's account's: its entry rules
+//     hold (a real directory nobody but its owner can write), not its owner;
+//     the socket file must be this account's, an allowed user's or an allowed
+//     group's (ENDPOINT_FOREIGN otherwise), so a 0750 directory and AllowGIDs
+//     admit an on-call group from the dialling side too.
 //
 // Windows has no search permission to gate a socket by its directory: there
 // the endpoint is a named pipe (pipe_windows.go) named after Config.Path,
@@ -106,8 +113,12 @@
 // Package ipc — the peer's credentials on Linux: SO_PEERCRED, what the peer
 // had when it connected or listened.
 //
-// Package ipc — no peer credentials outside Linux without x/sys: the peer is
-// unverified and the directory is the gate.
+// Package ipc — the peer's credentials on FreeBSD, DragonFly and NetBSD:
+// getsockopt(SOL_LOCAL) through the raw syscall, the struct decoded from a
+// byte buffer.
+//
+// Package ipc — no peer credentials on darwin, OpenBSD, illumos and Solaris
+// without x/sys or libc: the peer is unverified and the directory is the gate.
 //
 // Package ipc — the private endpoint on Windows: a named pipe.
 //

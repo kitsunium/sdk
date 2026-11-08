@@ -41,6 +41,9 @@ Only Linux is supported. RLIMIT\_NPROC and RLIMIT\_MEMLOCK are absent from Go's 
 
 - [Constants](<#constants>)
 - [func Apply\(pid int, limits map\[Resource\]Limit\) error](<#Apply>)
+- [func Get\(pid int, r Resource\) \(Limit, error\)](<#Get>)
+- [func KeepRaisedNoFile\(\) \(kept Limit, err error\)](<#KeepRaisedNoFile>)
+- [func OpenFiles\(\) \(int, error\)](<#OpenFiles>)
 - [func PrepareSysProcAttr\(limits map\[Resource\]Limit\) error](<#PrepareSysProcAttr>)
 - [type Limit](<#Limit>)
 - [type Resource](<#Resource>)
@@ -147,6 +150,33 @@ func Apply(pid int, limits map[Resource]Limit) error
 ```
 
 Apply sets the soft/hard ceilings in limits on the process identified by pid. A pid of 0 targets the calling process; any other pid targets that process via prlimit64(2) and needs CAP\_SYS\_RESOURCE. It returns UnknownResource for an unmapped resource, RlimitFailed on a syscall failure, and UnsupportedPlatform off Linux.
+
+<a name="Get"></a>
+## func [Get](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/gen_facade.go>)
+
+```go
+func Get(pid int, r Resource) (Limit, error)
+```
+
+Get reads the soft/hard ceiling of r for pid (0 is the caller): getrlimit for the caller, prlimit64 for another pid on Linux, UnsupportedPlatform for another pid elsewhere.
+
+<a name="KeepRaisedNoFile"></a>
+## func [KeepRaisedNoFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/gen_facade.go>)
+
+```go
+func KeepRaisedNoFile() (kept Limit, err error)
+```
+
+KeepRaisedNoFile makes every child this process spawns from now on inherit its raised open-file soft limit, instead of the original one the Go runtime puts back in each child it forks, and returns the limit in force. It acts once per process. It returns RlimitFailed on a syscall failure and UnsupportedPlatform off Unix.
+
+<a name="OpenFiles"></a>
+## func [OpenFiles](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/gen_facade.go>)
+
+```go
+func OpenFiles() (int, error)
+```
+
+OpenFiles counts the caller's open descriptors (HANDLES on Windows), to watch against Get(0, ResourceNoFile). UnsupportedPlatform on OpenBSD, NetBSD and DragonFly.
 
 <a name="PrepareSysProcAttr"></a>
 ## func [PrepareSysProcAttr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/rlimit/gen_facade.go>)

@@ -92,12 +92,23 @@ func TestARoundTripKnowsItsPeer(t *testing.T) {
 		t.Errorf("the echo: %q %v", got, err)
 	}
 	peer := <-done
-	if runtime.GOOS == "linux" {
+	//: each platform says what the kernel can name about a peer (#1093).
+	switch runtime.GOOS {
+	case "linux":
+		//: SO_PEERCRED: the uid and the pid, both ends.
 		if !peer.Verified || peer.UID != os.Geteuid() || peer.PID != os.Getpid() || !c.Peer.Verified {
 			t.Errorf("the kernel's word on the peers: listener saw %+v, dialer saw %+v", peer, c.Peer)
 		}
-	} else if peer.Verified {
-		t.Errorf("a peer claimed verified where the kernel says nothing: %+v", peer)
+	case "freebsd", "dragonfly", "netbsd":
+		//: LOCAL_PEERCRED or LOCAL_PEEREID: the uid, both ends.
+		if !peer.Verified || peer.UID != os.Geteuid() || !c.Peer.Verified {
+			t.Errorf("the kernel's word on the peers: listener saw %+v, dialer saw %+v", peer, c.Peer)
+		}
+	default:
+		//: nothing to go on: the directory alone gates.
+		if peer.Verified {
+			t.Errorf("a peer claimed verified where the kernel says nothing: %+v", peer)
+		}
 	}
 }
 

@@ -17,29 +17,3 @@ workflows:
           range: b.Deps
           value: dep
       - return: ModuleValue{}, false
-  - of: ParseBuild
-    steps:
-      - opt:
-          do:
-            - return: BuildValue{}
-          when: info == nil
-      - bind: build
-        eval: |-
-          BuildValue{
-          		GoVersion: info.GoVersion,
-          		Path:      info.Path,
-          		Main:      mainModule(&info.Main, info.Settings),
-          		Deps:      make([]ModuleValue, 0, len(info.Deps)),
-          	}
-      - loop:
-          do:
-            - opt:
-                do:
-                  - continue: true
-                when: dep == nil
-            - set: build.Deps
-              value: append(build.Deps, dependency(dep))
-          key: _
-          range: info.Deps
-          value: dep
-      - return: build

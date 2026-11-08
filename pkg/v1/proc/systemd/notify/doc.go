@@ -35,8 +35,11 @@
 // # Listener (supervisor)
 //
 // Listen creates a private datagram socket, enables SO_PASSCRED so the kernel
-// stamps each datagram with the sender's verified PID, and returns the socket
-// path to hand a child via NOTIFY_SOCKET:
+// stamps each datagram with the sender's verified PID, user and group, and
+// returns the socket path to hand a child via NOTIFY_SOCKET (ListenFor gives the
+// socket to the user a service runs as). Each Recv checks every assignment
+// sd_notify(3) defines and hands over the descriptors the datagram carried
+// (FDSTORE=1, BARRIER=1, MAINPIDFD=1), which the caller then owns:
 //
 //	l, path, err := notify.Listen()
 //	if err != nil {

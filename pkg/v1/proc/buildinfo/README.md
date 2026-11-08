@@ -25,7 +25,10 @@ The same values are re-exported by pkg/v1/proc/process, beside the spawning of c
 - [func ParseBuild\(info \*debug.BuildInfo\) BuildInfo](<#ParseBuild>)
 - [type BuildInfo](<#BuildInfo>)
   - [func \(\*BuildInfo\) Module\(path string\) \(found ModuleValue, ok bool\)](<#BuildInfo.Module>)
+  - [func \(\*BuildInfo\) Reproducible\(\) bool](<#BuildInfo.Reproducible>)
 - [type Module](<#Module>)
+- [type Setting](<#Setting>)
+- [type Toolchain](<#Toolchain>)
 
 <a name="Build"></a>
 ## func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/gen_facade.go>)
@@ -68,6 +71,13 @@ type BuildInfo struct {
 	// Deps are the dependencies linked into the binary, in the order the
 	// toolchain recorded them.
 	Deps      []ModuleValue
+	// Toolchain is how the toolchain built the binary: the target, the
+	// compiler, the flags and the cgo setting, read from the build settings.
+	Toolchain ToolchainValue
+	// Settings are every build setting the toolchain recorded, verbatim and in
+	// its order — the vcs stamp and the toolchain's included, and a key a later
+	// toolchain adds that Toolchain does not name.
+	Settings  []SettingValue
 }
 ```
 
@@ -79,6 +89,15 @@ func (*BuildInfo) Module(path string) (found ModuleValue, ok bool)
 ```
 
 Module returns the module whose path is path — the main module or one of the dependencies — and whether the build contains it.
+
+<a name="BuildInfo.Reproducible"></a>
+### func \(BuildInfo\) [Reproducible](<https://github.com/kitsunium/sdk/blob/main/internal/service/proc/buildinfo/build.go>)
+
+```go
+func (*BuildInfo) Reproducible() bool
+```
+
+Reproducible reports whether the build can be made again byte for byte from its source: built with -trimpath, from a recorded revision, with no uncommitted change. It is false for a build that does not say — one outside version control, or a Bazel build, which stamps none of the three.
 
 <a name="Module"></a>
 ## type [Module](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/gen_facade.go>)
@@ -126,6 +145,66 @@ type Module struct {
 	// module's vcs.modified stamp, or the "+dirty" its version carried. The
 	// toolchain records nothing of the kind for a dependency.
 	Modified    bool
+}
+```
+
+<a name="Setting"></a>
+## type [Setting](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/gen_facade.go>)
+
+Setting is one build setting as the toolchain recorded it, key and value. It is an alias of the service value, and the same type as pkg/v1/proc/process.Setting.
+
+```go
+type Setting = svcbuild.SettingValue
+```
+
+Setting is an alias of `github.com/kitsunium/sdk/internal/service/proc/buildinfo.SettingValue`, declared as:
+
+```go
+type Setting struct {
+	// Key names the setting, e.g. "-tags" or "GOAMD64".
+	Key   string
+	// Value is the setting's value as recorded, e.g. "a,b" or "v3".
+	Value string
+}
+```
+
+<a name="Toolchain"></a>
+## type [Toolchain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/buildinfo/gen_facade.go>)
+
+Toolchain is how the toolchain built the binary: its target, compiler, flags and cgo setting. It is an alias of the service value, and the same type as pkg/v1/proc/process.Toolchain.
+
+```go
+type Toolchain = svcbuild.ToolchainValue
+```
+
+Toolchain is an alias of `github.com/kitsunium/sdk/internal/service/proc/buildinfo.ToolchainValue`, declared as:
+
+```go
+type Toolchain struct {
+	// OS is the target operating system, GOOS, e.g. "linux".
+	OS             string
+	// Arch is the target architecture, GOARCH, e.g. "amd64".
+	Arch           string
+	// ArchLevel is the architecture's feature level — GOAMD64, GOARM, GO386,
+	// GOARM64 and their siblings — e.g. "v3", which needs AVX2 on the host.
+	ArchLevel      string
+	// Compiler is the compiler toolchain, -compiler, e.g. "gc".
+	Compiler       string
+	// BuildMode is the -buildmode flag, e.g. "exe" or "pie".
+	BuildMode      string
+	// Tags are the build tags, -tags, in the order given; none when the build
+	// named none.
+	Tags           []string
+	// LDFlags is the -ldflags flag as given, e.g. "-s -w -X main.v=1".
+	LDFlags        string
+	// DefaultGODEBUG is the GODEBUG default the binary runs with before its
+	// environment's, e.g. "httpmuxgo121=1".
+	DefaultGODEBUG string
+	// CgoEnabled reports that CGO_ENABLED was 1.
+	CgoEnabled     bool
+	// Trimpath reports that -trimpath was set: file paths in panics and
+	// profiles are module paths, not the build machine's directories.
+	Trimpath       bool
 }
 ```
 

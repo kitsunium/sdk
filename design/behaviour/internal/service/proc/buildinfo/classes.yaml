@@ -35,17 +35,57 @@ constants:
         name: settingTrue
         type: string
         value: "\"true\""
+      - doc: The settings Go stamps for the toolchain that built the binary.
+        name: settingOS
+        type: string
+        value: "\"GOOS\""
+      - name: settingArch
+        type: string
+        value: "\"GOARCH\""
+      - name: settingCompiler
+        type: string
+        value: "\"-compiler\""
+      - name: settingBuildMode
+        type: string
+        value: "\"-buildmode\""
+      - name: settingTags
+        type: string
+        value: "\"-tags\""
+      - name: settingLDFlags
+        type: string
+        value: "\"-ldflags\""
+      - name: settingGODEBUG
+        type: string
+        value: "\"DefaultGODEBUG\""
+      - name: settingCgoEnabled
+        type: string
+        value: "\"CGO_ENABLED\""
+      - name: settingTrimpath
+        type: string
+        value: "\"-trimpath\""
+      - name: settingCgoOn
+        type: string
+        value: "\"1\""
+      - name: settingTagsJoining
+        type: string
+        value: "\",\""
     name: develVersion
 files:
   - decls:
       - develVersion
       - BuildValue
+      - SettingValue
+      - ToolchainValue
+      - toolchainSettings
       - ModuleValue
       - (*BuildValue).Module
+      - (*BuildValue).Reproducible
       - ReadBuild
       - ParseBuild
       - mainModule
       - stamp
+      - toolchain
+      - splitTags
       - dependency
       - pseudoCommit
       - fromVersion
@@ -69,6 +109,15 @@ functions:
     name: stamp
     params: described *ModuleValue, setting debug.BuildSetting
   - doc: |-
+      toolchain applies one build setting to the toolchain's description; a
+      setting that does not describe the toolchain leaves it unchanged.
+    name: toolchain
+    params: described *ToolchainValue, setting debug.BuildSetting
+  - doc: splitTags reads the go command's comma-joined -tags value.
+    name: splitTags
+    params: value string
+    results: "[]string"
+  - doc: |-
       dependency describes one dependency, following its replacement: the code
       built for it is the replacement's, so the version and the directory are too.
     name: dependency
@@ -90,6 +139,7 @@ functions:
 imports:
   debug: runtime/debug
   semver: github.com/kitsunium/sdk/internal/kernel/semver
+  slices: slices
   strings: strings
   time: time
 package:
@@ -115,13 +165,77 @@ types:
           toolchain recorded them.
         name: Deps
         type: "[]ModuleValue"
+      - doc: |-
+          Toolchain is how the toolchain built the binary: the target, the
+          compiler, the flags and the cgo setting, read from the build settings.
+        name: Toolchain
+        type: ToolchainValue
+      - doc: |-
+          Settings are every build setting the toolchain recorded, verbatim and in
+          its order — the vcs stamp and the toolchain's included, and a key a later
+          toolchain adds that Toolchain does not name.
+        name: Settings
+        type: "[]SettingValue"
     kind: struct
     methods:
       - name: Module
         params: path string
         recv: b *BuildValue
         results: found ModuleValue, ok bool
+      - name: Reproducible
+        recv: b *BuildValue
+        results: bool
     name: BuildValue
+  - fields:
+      - doc: Key names the setting, e.g. "-tags" or "GOAMD64".
+        name: Key
+        type: string
+      - doc: Value is the setting's value as recorded, e.g. "a,b" or "v3".
+        name: Value
+        type: string
+    kind: struct
+    name: SettingValue
+  - fields:
+      - doc: OS is the target operating system, GOOS, e.g. "linux".
+        name: OS
+        type: string
+      - doc: Arch is the target architecture, GOARCH, e.g. "amd64".
+        name: Arch
+        type: string
+      - doc: |-
+          ArchLevel is the architecture's feature level — GOAMD64, GOARM, GO386,
+          GOARM64 and their siblings — e.g. "v3", which needs AVX2 on the host.
+        name: ArchLevel
+        type: string
+      - doc: Compiler is the compiler toolchain, -compiler, e.g. "gc".
+        name: Compiler
+        type: string
+      - doc: BuildMode is the -buildmode flag, e.g. "exe" or "pie".
+        name: BuildMode
+        type: string
+      - doc: |-
+          Tags are the build tags, -tags, in the order given; none when the build
+          named none.
+        name: Tags
+        type: "[]string"
+      - doc: LDFlags is the -ldflags flag as given, e.g. "-s -w -X main.v=1".
+        name: LDFlags
+        type: string
+      - doc: |-
+          DefaultGODEBUG is the GODEBUG default the binary runs with before its
+          environment's, e.g. "httpmuxgo121=1".
+        name: DefaultGODEBUG
+        type: string
+      - doc: CgoEnabled reports that CGO_ENABLED was 1.
+        name: CgoEnabled
+        type: bool
+      - doc: |-
+          Trimpath reports that -trimpath was set: file paths in panics and
+          profiles are module paths, not the build machine's directories.
+        name: Trimpath
+        type: bool
+    kind: struct
+    name: ToolchainValue
   - fields:
       - doc: |-
           Time is the commit's time, when known: the main module's vcs.time
@@ -174,3 +288,35 @@ types:
         type: bool
     kind: struct
     name: ModuleValue
+vars:
+  - grouped: true
+    items:
+      - doc: |-
+          toolchainSettings reads each toolchain key the go command records into its
+          field: a table, not a switch, so a key a later toolchain adds is one line.
+        name: toolchainSettings
+        value: |-
+          map[string]func(*ToolchainValue, string){
+          		settingOS:        func(d *ToolchainValue, v string) { d.OS = v },
+          		settingArch:      func(d *ToolchainValue, v string) { d.Arch = v },
+          		settingCompiler:  func(d *ToolchainValue, v string) { d.Compiler = v },
+          		settingBuildMode: func(d *ToolchainValue, v string) { d.BuildMode = v },
+          		//: the tags, comma-joined by the go command; an empty flag is no tag.
+          		settingTags:    func(d *ToolchainValue, v string) { d.Tags = splitTags(v) },
+          		settingLDFlags: func(d *ToolchainValue, v string) { d.LDFlags = v },
+          		settingGODEBUG: func(d *ToolchainValue, v string) { d.DefaultGODEBUG = v },
+          		//: cgo, which the go command records as 0 or 1.
+          		settingCgoEnabled: func(d *ToolchainValue, v string) { d.CgoEnabled = v == settingCgoOn },
+          		//: -trimpath, recorded only when set.
+          		settingTrimpath: func(d *ToolchainValue, v string) { d.Trimpath = v == settingTrue },
+          	}
+      - doc: |-
+          archLevelSettings are the keys the go command records the target
+          architecture's feature level under — one per GOARCH that has one
+          (cmd/go/internal/cfg.GetArchEnv).
+        name: archLevelSettings
+        value: |-
+          [...]string{
+          		"GO386", "GOAMD64", "GOARM", "GOARM64", "GOMIPS", "GOMIPS64", "GOPPC64", "GORISCV64", "GOWASM",
+          	}
+    name: toolchainSettings

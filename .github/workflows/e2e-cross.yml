@@ -447,6 +447,9 @@ jobs:
           compile internal/service $SERVICE_FILE_PKGS
           compile framework        $FRAMEWORK_PKGS
           compile pkg/v1/proc      ./
+          # The cgroup BPF backend's live suite (ADR 0215, #731): as root, in a
+          # group it creates under its own delegated one, never elsewhere.
+          compile third-party/ebpf ./cgroup
           (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
           # What runs inside the guest: POSIX sh, the same for all four legs.
           # A test binary run directly has no timeout of its own, so each gets

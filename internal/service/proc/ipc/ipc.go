@@ -153,7 +153,21 @@ func (l *Listener) Close() error {
 // admit says whether p may use a socket of account self under cfg. An
 // unverified peer passed the directory, which is the only gate there is.
 func admit(p coreipc.PeerValue, self int, cfg *Config) error {
-	if !p.Verified || p.UID == self || slices.Contains(cfg.AllowUIDs, p.UID) || slices.Contains(cfg.AllowGIDs, p.GID) {
+	return admitWhere(p, self, cfg, kernelNamesPeer)
+}
+
+// admitWhere is admit on a platform whose kernel names the peer (named) or
+// does not. Where it does, a peer it did not name is an anomaly and is
+// refused (#1093, ADR 0031) rather than let through as the directory's; where
+// it does not, the directory is the gate and admitted it.
+func admitWhere(p coreipc.PeerValue, self int, cfg *Config, named bool) error {
+	if !p.Verified {
+		if named {
+			return errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.String("reason", "kernel did not name the peer"))
+		}
+		return nil
+	}
+	if p.UID == self || slices.Contains(cfg.AllowUIDs, p.UID) || slices.Contains(cfg.AllowGIDs, p.GID) {
 		return nil
 	}
 	return errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.Int("uid", p.UID), errs.Int("gid", p.GID))

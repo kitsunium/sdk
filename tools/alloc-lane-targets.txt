@@ -58,6 +58,11 @@
 # package CLAUDE.md, and both were unguarded until 2026-09. Each is
 # mutation-checked in its own doc comment.
 //internal/service/net/websocket:websocket_test
+# An idle reaper sweep allocates nothing, with or without the WithOnExit
+# observer (#1136): the observer is bound once at New, and the status it is
+# shown is childwait's own sweep buffer, never a per-sweep heap copy — which a
+# status passed by address to an unknown function had made it.
+//internal/service/proc/reaper:reaper_test
 # The two allocation claims an event stream is sold on, neither of which had a
 # gate: initialFrameCapacity's "a steady-state send allocates nothing" (true,
 # but only above the buffer's high-water mark) and the price of the retention
@@ -192,7 +197,10 @@
 //internal/kernel/collections/heap:heap_test
 //internal/kernel/collections/ring:ring_test
 //internal/kernel/concur/buffer:buffer_test
+//internal/kernel/concur/pool:pool_test
 //internal/kernel/concur/recycler:recycler_test
+//internal/kernel/concur/sema:sema_test
+//internal/kernel/concur/singleflight:singleflight_test
 //internal/kernel/concur/snapshot:snapshot_test
 //internal/kernel/errs:errs_test
 //internal/kernel/jsonenc:jsonenc_test
@@ -201,5 +209,6 @@
 //internal/service/data/queue:queue_test
 //internal/service/net/http1:http1_test
 //internal/service/observe/logger/middleware/sample:sample_test
+//internal/service/proc/ipc/rpc:rpc_test
 //pkg/v1/observe/logger:logger_test
 # END kit gen

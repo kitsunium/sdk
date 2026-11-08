@@ -2,14 +2,14 @@ package ring
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 func mustQueue(tb testing.TB, capacity int) *queueRing[int] {
 	tb.Helper()
-	q := &queueRing[int]{slots: allocateSlots[int](capacity + 1), cap: uint64(capacity)}
-	return q
+	return newQueueRing[int](capacity)
 }
 
 func Test_queueRing_Capacity(t *testing.T) {
@@ -203,5 +203,92 @@ func Test_allocateSlots(t *testing.T) {
 				t.Errorf("allocateSlots len = %d, want %d", len(got), tc.n)
 			}
 		})
+	}
+}
+
+// Test_queueRing_CursorsOnTheirOwnLines pins the layout #1034 asked for: the
+// consumer's fields (head and its copy of tail), the producer's (tail and its
+// copy of head) and the read-only header are each at least a cache line from
+// the next, whatever address the allocator gives the ring — a store by one
+// side never invalidates the line the other side reads.
+func Test_queueRing_CursorsOnTheirOwnLines(t *testing.T) {
+	t.Parallel()
+	var q queueRing[int]
+	tests := []struct {
+		name       string
+		end, start uintptr
+	}{
+		{"header to the consumer's cursor", unsafe.Offsetof(q.cap) + unsafe.Sizeof(q.cap), unsafe.Offsetof(q.head)},
+		{"consumer's fields to the producer's cursor", unsafe.Offsetof(q.cachedTail) + unsafe.Sizeof(q.cachedTail), unsafe.Offsetof(q.tail)},
+		{"producer's fields to the next object", unsafe.Offsetof(q.cachedHead) + unsafe.Sizeof(q.cachedHead), unsafe.Sizeof(q)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if gap := tc.start - tc.end; gap < cacheLine {
+				t.Errorf("%d bytes apart, want at least %d", gap, cacheLine)
+			}
+		})
+	}
+	if got := (unsafe.Offsetof(q.tail) - unsafe.Offsetof(q.head)) / cacheLine; got < 1 {
+		t.Errorf("head and tail on the same %d-byte line", cacheLine)
+	}
+}
+
+// Test_slotCount pins the storage size: the smallest power of two at least
+// the capacity, so a cursor is masked into it.
+func Test_slotCount(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name           string
+		capacity, want int
+	}{
+		{"one", 1, 1},
+		{"two", 2, 2},
+		{"three rounds to four", 3, 4},
+		{"a power of two is itself", 1024, 1024},
+		{"one past a power of two", 1025, 2048},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := slotCount(tc.capacity); got != tc.want {
+				t.Errorf("slotCount(%d) = %d, want %d", tc.capacity, got, tc.want)
+			}
+		})
+	}
+}
+
+// Test_queueRing_CachedCursorsRefresh walks the two slow paths: a producer
+// whose copy of head is stale re-reads it before refusing, and a consumer
+// whose copy of tail is stale re-reads it before answering Empty.
+func Test_queueRing_CachedCursorsRefresh(t *testing.T) {
+	t.Parallel()
+	q := newQueueRing[int](2)
+	for i := range 2 {
+		if err := q.TryWrite(i); err != nil {
+			t.Fatalf("TryWrite %d: %v", i, err)
+		}
+	}
+	//: full against a fresh head: the refusal is real.
+	if err := q.TryWrite(9); !errs.HasCode(err, CodeRingFull) {
+		t.Fatalf("TryWrite on a full ring = %v, want Full", err)
+	}
+	if _, err := q.TryRead(); err != nil {
+		t.Fatalf("TryRead: %v", err)
+	}
+	//: the producer's copy of head is now one behind: the write re-reads it and lands.
+	if err := q.TryWrite(2); err != nil {
+		t.Errorf("TryWrite after a read freed a slot = %v, want nil", err)
+	}
+	for want := 1; want <= 2; want++ {
+		got, err := q.TryRead()
+		if err != nil || got != want {
+			t.Errorf("TryRead = %d, %v; want %d, nil", got, err, want)
+		}
+	}
+	//: drained against a fresh tail: Empty is real.
+	if _, err := q.TryRead(); !errs.HasCode(err, CodeRingEmpty) {
+		t.Errorf("TryRead on an empty ring = %v, want Empty", err)
 	}
 }

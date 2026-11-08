@@ -97,11 +97,16 @@ func Test_validateName(t *testing.T) {
 		{name: "the current directory", in: ".", wantErr: true},
 		{name: "the parent directory", in: "..", wantErr: true},
 		{name: "a traversal", in: "../escape", wantErr: true},
-		{name: "a nested path", in: "a/b", wantErr: true},
+		{name: "a nested path", in: "a/b"},
+		{name: "a deeper nested path", in: "a/b/c"},
 		{name: "an absolute path", in: "/abs", wantErr: true},
 		{name: "a trailing separator", in: "foo/", wantErr: true},
 		{name: "a doubled separator", in: "a//b", wantErr: true},
 		{name: "a non-canonical form", in: "./a", wantErr: true},
+		{name: "a climb in the middle", in: "a/../b", wantErr: true},
+		{name: "a dot in the middle", in: "a/./b", wantErr: true},
+		{name: "a climb at the end", in: "a/..", wantErr: true},
+		{name: "a climb out of a nested path", in: "a/../../b", wantErr: true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

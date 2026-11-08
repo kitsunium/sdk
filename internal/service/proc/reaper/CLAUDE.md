@@ -34,7 +34,7 @@ anywhere in the process, and every `Process.Wait` collects its own child.
 
 | File | Build tag | Role |
 |---|---|---|
-| `reaper.go` | (all) | `Option`/`config` surface; `WithOnReap`; `resolve` |
+| `reaper.go` | (all) | `Option`/`config` surface; `WithOnReap`; `WithOnExit` + `ExitEvent` (#1136): every collected child — an orphan included — reported once, in `Process.Wait`'s words, with `Owned`; nothing stored (ADR 0093 §Deferred); `resolve` |
 | `reaper_unix.go` | `unix` | `unixReaper` (its timer sweep's `clk` and `sweepEvery` set by `New` to `clock.System` and `timerSweepEvery`, its SIGCHLD subscription `notify` to `signal.Notify`), `New`, `Start`/`Stop`/`loop`, `ReapOnce`, `drain`/`drainResult` (over `childwait.ReapAny`)/`classifyWaitErr`, `LastError`, `IsPID1` |
 | `subreaper_linux.go` | `linux` | `SetChildSubreaper` via `prctl(PR_SET_CHILD_SUBREAPER, 1)` |
 | `subreaper_bsd.go` | `freebsd \|\| dragonfly` | `SetChildSubreaper` via `procctl(P_PID, 0, PROC_REAP_ACQUIRE, NULL)`, a raw `syscall.Syscall6` |

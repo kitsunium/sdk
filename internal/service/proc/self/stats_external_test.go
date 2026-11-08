@@ -55,8 +55,10 @@ func TestReadStats(t *testing.T) {
 	if stats.CPUTime <= 0 {
 		t.Errorf("CPUTime = %v after 50 ms of spinning", stats.CPUTime)
 	}
-	//: the kernel's count everywhere getrusage exists, the estimate elsewhere.
-	wantEstimate := runtime.GOOS == "windows" || runtime.GOOS == "plan9" || runtime.GOOS == "js" || runtime.GOOS == "wasip1"
+	//: the kernel's count wherever getrusage or GetProcessTimes exists, the
+	//: estimate elsewhere — Windows is no longer one of the estimates (#938),
+	//: unless the call fails, which for the current process it does not.
+	wantEstimate := runtime.GOOS == "plan9" || runtime.GOOS == "js" || runtime.GOOS == "wasip1"
 	if stats.CPUEstimated != wantEstimate {
 		t.Errorf("CPUEstimated = %v on %s, want %v", stats.CPUEstimated, runtime.GOOS, wantEstimate)
 	}
@@ -64,4 +66,33 @@ func TestReadStats(t *testing.T) {
 	if later.CPUTime < stats.CPUTime || later.TotalAllocBytes < stats.TotalAllocBytes || later.GCCycles < stats.GCCycles {
 		t.Errorf("a cumulative figure went backwards between two snapshots")
 	}
+}
+
+// TestReadStats_CPUTimeGrowsWithTheKernelsCount pins #938's Windows criterion
+// on every platform that has the kernel's count: CPUTime rises by at least
+// 40 ms across 50 ms of spinning, with no garbage collection between the two
+// snapshots — the runtime's estimate, refreshed only at one, would not.
+func TestReadStats_CPUTimeGrowsWithTheKernelsCount(t *testing.T) {
+	t.Parallel()
+	before := self.ReadStats()
+	if before.CPUEstimated {
+		t.Skipf("%s has no kernel count of the process's CPU time, only the runtime's estimate", runtime.GOOS)
+	}
+	//: a machine under load can deschedule the spinning thread for part of
+	//: its 50 ms, so the criterion is tried a few times: a count that does not
+	//: follow the work fails every one of them.
+	const (
+		attempts = 5
+		floor    = 40 * time.Millisecond
+	)
+	var grew time.Duration
+	for range attempts {
+		start := self.ReadStats()
+		spin(t)
+		grew = self.ReadStats().CPUTime - start.CPUTime
+		if grew >= floor {
+			return
+		}
+	}
+	t.Errorf("CPUTime grew by %v across 50 ms of spinning, want at least %v", grew, floor)
 }

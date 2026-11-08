@@ -17,6 +17,7 @@ package, `go get` names the module.
 | `third-party/db/writer/clickhouse` | the module root | `github.com/ClickHouse/clickhouse-go/v2` | `0.3.33.*` |
 | `third-party/db/writer/mysql` | the module root | `github.com/go-sql-driver/mysql` | `0.3.32.*` |
 | `third-party/db/writer/redis` | the module root | `github.com/redis/go-redis/v9` | `0.3.34.*` |
+| `third-party/ebpf` | `cgroup` (the backend `internal/service/proc/bpf` dispatches to: `cgroup_device`, `cgroup_skb` and `cgroup_sock_addr` programs built with `asm`, registered by a blank import) — ADR 0215 | `github.com/cilium/ebpf` (+ `golang.org/x/sys`) | none — `core/proc/bpf`'s sentinels (`0.3.107.*`) and `core/proc`'s `UNSUPPORTED_PLATFORM` |
 | `third-party/nats` | `queue` (a `queue.Broker` over JetStream) — ADR 0211 | `github.com/nats-io/nats.go` | `0.3.97.*` |
 | `third-party/transform` | the module root (zstd + s2) | `github.com/klauspost/compress` | `0.3.63.*` |
 | `third-party/x-crypto` | `argon2id`, `xchacha` | `golang.org/x/crypto` | none — the shared `core/crypto` sentinels |

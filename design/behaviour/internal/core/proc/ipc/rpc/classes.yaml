@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/proc/ipc/rpc
+  name: rpc
+  purpose: "Package rpc is the contract of a call between two processes over the private socket (ADR 0218): the Caller a client is, the Handler that answers one method, the Router that names it, the Request a handler reads, the Stream a caller reads a server's items from, and the codes every refusal carries — range 0.3.106.*, declared here at the engine's path (ADR 0160)."
+types: []

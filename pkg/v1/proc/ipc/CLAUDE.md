@@ -13,6 +13,7 @@ one. Its contract — the two ports, the values and the codes — is
 |---|---|---|
 | `Listener`, `Dialer` | type alias, port | `internal/core/proc/ipc`'s two ports — frozen, so a double written against them keeps compiling (ADR 0039) |
 | `Peer`, `Conn` | type alias, value | `internal/core/proc/ipc`'s `PeerValue` and `Conn` |
+| `FileSender`, `FileReceiver`, `CodeFDPassRefused` | type alias, const | pass open files over the connection (`SCM_RIGHTS`), asserted on `Conn.Conn`; only to a peer the kernel named (#936) |
 | `Config` | type alias | the engine's configuration, `internal/service/proc/ipc.Config` (ADR 0074 — one engine's configuration is the engine's) |
 | `Listen` | func | returns the socket engine behind the `Listener` port, or a nil port with the refusal |
 | `NewDialer` | func | returns the engine behind the `Dialer` port; the configuration is checked and copied once |

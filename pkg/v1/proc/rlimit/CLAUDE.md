@@ -16,6 +16,7 @@ this package; the service and `core/proc` stay internal.
 | `Resource*` | const | re-exported enum values, typed `Resource` |
 | `LimitInfinity` | const | `uint64` "no limit" (RLIM_INFINITY) |
 | `Apply(pid, limits)` | func | delegates verbatim to the service |
+| `Get(pid, r)`, `OpenFiles()` | read back a ceiling (getrlimit; prlimit64 for another pid on Linux) and count the open descriptors (#939) |
 | `PrepareSysProcAttr(limits)` | func | no-syscall validator; delegates |
 
 All types are **aliases**, so values cross the facade boundary without

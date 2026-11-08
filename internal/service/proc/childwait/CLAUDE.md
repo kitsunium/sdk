@@ -38,7 +38,9 @@ allocation and one map insert per spawn, removed by `Release` after the wait.
 |---|---|---|
 | `doc.go` | (all) | the package comment — kit writes it from the design (ADR 0167) |
 | `childwait.go` | (all) | `Claim`; the process-wide `ledger`; `Spawn`; `Claim.Collected` / `Reclaim` / `Release`; `deliver` / `handOver` / `forget` |
-| `childwait_unix.go` | `unix` | `StatusValue` (`syscall.WaitStatus` + `syscall.Rusage`); `ReapAny` |
+| `childwait_unix.go` | `unix` | `StatusValue` (`syscall.WaitStatus` + `syscall.Rusage`) + `Exit()` — the status in `Process.Wait`'s words, the core-dump bit and `Usage` included, so the reaper's `ExitEvent` reads an orphan as `exec`'s `exitValue` reads an owned child (`Test_exitValue_isTheSweepsExit` in `exec`); `ReapAny`, and `ReapAnyObserved(observe)` (#1136): the observer hears of every collection — pid, status, owned — after the hand-off, under the sweep lock; the status is the ledger's one buffer (`ledger.collected`), so showing it allocates nothing and the observer must not keep it |
+| `maxrss.go`, `maxrss_rss64_unix.go` / `maxrss_rss32_unix.go`, `maxrss_unit_darwin.go` / `maxrss_unit_kib_unix.go` | all / `unix` by width / by unit | `MaxRSSKB` and `peakKiB`: `Rusage.Maxrss` widened to `int64` and normalised to KiB (darwin reports bytes, Linux and the BSDs KiB, illumos and Solaris 0) — moved from `exec` by #1136, which calls it from its `readRusage` |
+| `usage_rusage_unix.go` / `usage_norusage_unix.go` | `unix && !illumos && !solaris` / `illumos \|\| solaris` | `UsageOf`: the page-fault, block-I/O and context-switch counters of `ExitValue.Usage` (#1090), nil where the kernel leaves them unfilled — moved from `exec`, which calls it, so `Exit()` reports them too |
 | `waitany_unix.go` | `unix && !solaris` | `anyChildPID = -1` |
 | `waitany_solaris.go` | `solaris` (illumos too) | `anyChildPID = 0`: libc's SunOS 4 `wait4` (see below) |
 | `childwait_other.go` | `!unix` | `StatusValue` as an empty struct: no `wait4`, no sweep, a claim is never filled |
@@ -50,7 +52,7 @@ allocation and one map insert per spawn, removed by `Release` after the wait.
 | `exec` (spawn) | `Spawn(start)` | every Unix fork/exec — returns the process AND its claim |
 | `exec` (`collectExit`) | `Collected`, then its own `os.Process.Wait`, then `Reclaim` on ECHILD, `Release` otherwise | every `Wait`, and the trampoline's aborted-spawn reap |
 | `exec` (`Signal`, `SignalGroup`) | `Collected` | a leader whose status a sweep took is never signalled by pid |
-| `reaper` (drain) | `ReapAny()` until 0 or ECHILD | every sweep, loop or `ReapOnce` |
+| `reaper` (drain) | `ReapAnyObserved(observe)` until 0 or ECHILD — `observe` nil without `WithOnExit`, which is exactly `ReapAny` | every sweep, loop or `ReapOnce` |
 
 ## How a claimed child gets its status
 

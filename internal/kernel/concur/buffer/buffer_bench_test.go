@@ -61,3 +61,32 @@ func BenchmarkGetPut_Parallel(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkGetSize_16K is a 16 KiB borrow and its return in steady state:
+// the class's own buffer, recycled — #810's acceptance reads 0 allocs/op.
+func BenchmarkGetSize_16K(b *testing.B) {
+	Put(GetSize(16 << 10))
+	b.ReportAllocs()
+	for b.Loop() {
+		Put(GetSize(16 << 10))
+	}
+}
+
+// BenchmarkMixedConsumers interleaves a 1 KiB consumer (a log line) and a
+// 16 KiB one (a server read buffer) on the shared pool: each takes its own
+// class, so neither is handed the other's buffer — the 16 KiB consumer
+// never allocates for a 1 KiB buffer it was given, the 1 KiB one never pins
+// a 16 KiB buffer.
+func BenchmarkMixedConsumers(b *testing.B) {
+	Put(Get())
+	Put(GetSize(16 << 10))
+	b.ReportAllocs()
+	for b.Loop() {
+		line := Get()
+		*line = append(*line, "a log line"...)
+		read := GetSize(16 << 10)
+		*read = (*read)[:16<<10]
+		Put(read)
+		Put(line)
+	}
+}

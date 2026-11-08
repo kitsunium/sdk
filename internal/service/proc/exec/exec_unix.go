@@ -24,46 +24,86 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		//: surface the cancellation as the spawn error verbatim.
 		return nil, ctxErr
 	}
-	//: reject a malformed spec (empty Path) before resolving anything.
-	if vErr := validateSpec(spec); vErr != nil {
-		//: propagate the typed INVALID_SPEC verbatim.
-		return nil, vErr
-	}
-	//: a bare name is searched in the child's PATH, before either spawn path
-	//: — fork/exec and the trampoline both need a file, not a name.
-	spec, err = resolveSpec(spec)
-	//: not found, or found only through a relative PATH entry.
+	spec, err = prepareSpec(spec)
+	//: a spec that cannot be honoured here never reaches a fork.
 	if err != nil {
-		//: SPAWN_FAILED carrying os/exec's ErrNotFound or ErrDot.
+		//: the typed refusal verbatim.
 		return nil, err
 	}
-	//: reject unhonourable umask/rlimit fields up front rather than dropping them.
-	if lErr := checkLimits(spec); lErr != nil {
-		//: propagate the typed UNKNOWN_RESOURCE / RLIMIT_FAILED verbatim.
-		return nil, lErr
-	}
-	//: reject a missing / non-cgroup / off-platform CgroupPath before spawning,
-	//: so a placement that cannot succeed never starts an unconfined child.
-	if cErr := validateCgroupPath(spec.CgroupPath); cErr != nil {
-		//: propagate the typed CGROUP_UNAVAILABLE / UNSUPPORTED_PLATFORM verbatim.
-		return nil, cErr
-	}
-
 	sio, ioErr := buildStdio(spec)
-	//: a stdio fd-setup failure (pipe/null) aborts before credential work.
+	//: a stdio fd-setup failure (pipe/null/pty) aborts before credential work.
 	if ioErr != nil {
-		//: propagate the typed SPAWN_FAILED from the stdio setup verbatim.
+		//: propagate the typed SPAWN_FAILED / PTY_FAILED from the stdio setup verbatim.
 		return nil, ioErr
 	}
-
 	started, claim, sErr := spawn(spec, sio)
 	//: a resolve/attr/fork-exec failure already released the stdio fds.
 	if sErr != nil {
 		//: propagate the typed RLIMIT_FAILED / UNKNOWN_USER / SPAWN_FAILED verbatim.
 		return nil, sErr
 	}
+	//: the post-start attributes, then the copiers.
+	return configure(spec, started, claim, sio)
+}
 
-	live := newHandle(started, claim, spec.Setpgid, sio)
+// prepareSpec validates spec, resolves a bare Path in the child's PATH, and
+// refuses every field this platform cannot honour — before any OS work, so a
+// request is refused, never dropped.
+func prepareSpec(spec coreproc.Spec) (coreproc.Spec, error) {
+	//: reject a malformed spec (empty Path) before resolving anything.
+	if vErr := validateSpec(spec); vErr != nil {
+		//: propagate the typed INVALID_SPEC verbatim.
+		return spec, vErr
+	}
+	//: a sandbox this platform or kernel cannot apply never reaches a fork —
+	//: nor a PATH search, which a Path inside a new root must not have.
+	if sErr := checkSandbox(spec); sErr != nil {
+		//: UNSUPPORTED_PLATFORM / SANDBOX_UNAVAILABLE / INVALID_SPEC.
+		return spec, sErr
+	}
+	//: a bare name is searched in the child's PATH, before either spawn path
+	//: — fork/exec and the trampoline both need a file, not a name.
+	resolved, rErr := resolveSpec(spec)
+	//: not found, or found only through a relative PATH entry.
+	if rErr != nil {
+		//: SPAWN_FAILED carrying os/exec's ErrNotFound or ErrDot.
+		return spec, rErr
+	}
+	//: the field-by-field refusals.
+	return resolved, checkSpawnable(resolved)
+}
+
+// checkSpawnable runs, in order, the refusals of the fields a platform may not
+// honour: an unmapped rlimit or umask, a parent-death signal, a scheduling
+// class, a cgroup placement (missing, not a cgroup, off Linux), a
+// pseudo-terminal and a PIDEnv name. The first refusal is returned typed.
+func checkSpawnable(spec coreproc.Spec) error {
+	checks := [...]func(coreproc.Spec) error{
+		checkLimits,
+		func(s coreproc.Spec) error { return checkDieWithParent(s.DieWithParent) },
+		func(s coreproc.Spec) error { return checkScheduling(s.Scheduling) },
+		func(s coreproc.Spec) error { return validateCgroupPath(s.CgroupPath) },
+		checkPTY,
+		func(s coreproc.Spec) error { return checkPIDEnv(s.PIDEnv) },
+	}
+	//: the first refusal wins; the rest would refuse the same spawn.
+	for _, check := range checks {
+		//: a field this platform cannot honour.
+		if err := check(spec); err != nil {
+			//: UNKNOWN_RESOURCE / INVALID_SPEC / UNSUPPORTED_PLATFORM / CGROUP_UNAVAILABLE.
+			return err
+		}
+	}
+	//: every requested field is honourable here.
+	return nil
+}
+
+// configure turns a forked child into the handle Start returns: the
+// post-start attributes on the live pid, then the capture copiers. A refused
+// attribute tears the child down.
+func configure(spec coreproc.Spec, started *os.Process, claim *childwait.Claim, sio *stdioState) (coreproc.Process, error) {
+	//: a terminal's child leads a new session, hence its own process group.
+	live := newHandle(started, claim, spec.Setpgid || spec.Stdio == coreproc.StdioPTY, sio)
 	//: best-effort scheduling attributes run post-start on the live pid. They run
 	//: BEFORE the capture copiers launch, so a teardown here never blocks on a
 	//: caller's sink: with no copiers started, Wait's copier-join is a no-op.
@@ -110,8 +150,7 @@ func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, claim *chi
 		//: propagate the typed RLIMIT_FAILED from the trampoline resolution.
 		return nil, nil, rErr
 	}
-
-	files, hs, hErr := spawnFiles(spec, sio)
+	files, handshakePipe, hErr := spawnFiles(spec, sio)
 	//: a handshake-pipe setup failure aborts before fork/exec.
 	if hErr != nil {
 		//: release the stdio fds so the aborted spawn leaks nothing.
@@ -119,35 +158,116 @@ func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, claim *chi
 		//: propagate the typed RLIMIT_FAILED wrapping the pipe cause.
 		return nil, nil, hErr
 	}
-
 	//: assemble stdio + ExtraFiles + handshake (last) and the handshake-fd env so
 	//: ExtraFiles keep fd 3.. and the trampoline still reports through the pipe.
-	childFiles, hsAddon := childFileTable(files, spec.ExtraFiles, hs)
+	childFiles, hsAddon := childFileTable(files, spec.ExtraFiles, handshakePipe)
 	attr, aErr := buildProcAttr(spec, childFiles, append(envAddon, hsAddon...))
 	//: a credential-resolution failure aborts before fork/exec.
 	if aErr != nil {
 		//: release the handshake pipe and stdio fds so nothing leaks.
-		closeHandshake(hs)
+		closeHandshake(handshakePipe)
 		sio.closeAll()
 		//: propagate the typed UNKNOWN_USER / UNKNOWN_GROUP verbatim.
 		return nil, nil, aErr
 	}
-	proc, claim, sErr := forkClaimed(path, argv, attr)
-	//: a fork/exec failure is a typed SPAWN_FAILED wrapping the OS cause.
-	if sErr != nil {
-		//: release the handshake pipe and stdio fds before surfacing the failure.
-		closeHandshake(hs)
+	payload, pErr := attachSandbox(spec, attr)
+	//: the sandbox's payload could not be sealed.
+	if pErr != nil {
+		//: release the handshake pipe and stdio fds so nothing leaks.
+		closeHandshake(handshakePipe)
 		sio.closeAll()
-		//: wrap the StartProcess cause under the central SPAWN_FAILED fields.
-		return nil, nil, wrapSpawn(sErr, errs.String("path", spec.Path))
+		//: SANDBOX_UNAVAILABLE naming memfd_create.
+		return nil, nil, pErr
+	}
+	//: seal, fork, and read the outcome.
+	return forkPrepared(spec, sio, handshakePipe, launch{path: path, argv: argv, attr: attr, payload: payload})
+}
+
+// launch is what a prepared spawn hands os.StartProcess, and the sandbox
+// payload the fork hands the child, released once the fork is done.
+type launch struct {
+	path    string
+	argv    []string
+	attr    *os.ProcAttr
+	payload *os.File
+}
+
+// release closes the parent's copy of the sandbox payload, if any: the child
+// holds its own from the fork on.
+func (l launch) release() {
+	//: no sandbox, no payload.
+	if l.payload != nil {
+		swallowErr(l.payload.Close())
+	}
+}
+
+// forkPrepared seals the supervisor's descriptor table, attaches the cgroup
+// the clone places the child in, forks, and reads the outcome: a failure
+// releases what the spawn holds (a clone into a filtered clone3 is retried
+// through the trampoline), a trampoline is awaited until it execs the target.
+func forkPrepared(spec coreproc.Spec, sio *stdioState, handshakePipe *handshake, l launch) (*os.Process, *childwait.Claim, error) {
+	//: the child's table is its stdio and ExtraFiles: every other descriptor of
+	//: the supervisor is marked close-on-exec first, unless Spec.FDs inherits.
+	if sealErr := sealInherited(spec); sealErr != nil {
+		//: release the handshake pipe and stdio fds before surfacing the failure.
+		l.release()
+		closeHandshake(handshakePipe)
+		sio.closeAll()
+		//: the typed SPAWN_FAILED naming the descriptor walk or range.
+		return nil, nil, sealErr
+	}
+	//: a cgroup placement the clone makes: the group's directory for the fork.
+	release, gErr := attachCgroupFD(spec, l.attr.Sys)
+	//: the group's directory vanished since it was validated.
+	if gErr != nil {
+		//: release the handshake pipe and stdio fds before surfacing the failure.
+		l.release()
+		closeHandshake(handshakePipe)
+		sio.closeAll()
+		//: the typed CGROUP_UNAVAILABLE.
+		return nil, nil, gErr
+	}
+	cloned := cgroupByClone(spec.CgroupPath)
+	proc, claim, sErr := forkClaimed(l.path, l.argv, l.attr)
+	//: the fork holds its own reference to the group's directory and payload.
+	release()
+	l.release()
+	//: a fork/exec failure is typed, or retried through the trampoline.
+	if sErr != nil {
+		//: release the handshake pipe before surfacing the failure.
+		closeHandshake(handshakePipe)
+		//: SPAWN_FAILED, CGROUP_WRITE_FAILED, or the trampoline's retry.
+		return forkFailed(spec, sio, cloned, sErr)
 	}
 	//: a trampolined spawn that failed before exec leaves nothing to hand back.
-	if awaitErr := awaitTrampoline(hs, proc, claim, sio); awaitErr != nil {
+	if awaitErr := awaitTrampoline(handshakePipe, proc, claim, sio); awaitErr != nil {
 		//: surface the trampoline's typed RLIMIT_FAILED / SPAWN_FAILED.
 		return nil, nil, awaitErr
 	}
 	//: the forked, live OS process, still awaiting post-start attributes.
 	return proc, claim, nil
+}
+
+// forkFailed reads a fork/exec failure: a clone into a group that clone3's
+// filter refused is spawned again through the trampoline (the stdio is still
+// intact); any other failure releases the stdio and is typed —
+// CGROUP_WRITE_FAILED for a group that refused the member, SPAWN_FAILED else.
+func forkFailed(spec coreproc.Spec, sio *stdioState, cloned bool, cause error) (*os.Process, *childwait.Claim, error) {
+	//: a plain fork/exec failure.
+	if !cloned {
+		sio.closeAll()
+		//: wrap the StartProcess cause under the central SPAWN_FAILED fields.
+		return nil, nil, wrapSpawn(cause, errs.String("path", spec.Path))
+	}
+	retry, cErr := cloneSpawnError(cause, spec.CgroupPath, spec.Path, &cloneIntoCgroupRefused)
+	//: clone3 is filtered: the trampoline places the child instead.
+	if retry {
+		//: the retry builds the trampoline's files.
+		return spawn(spec, sio)
+	}
+	sio.closeAll()
+	//: CGROUP_WRITE_FAILED or SPAWN_FAILED.
+	return nil, nil, cErr
 }
 
 // awaitTrampoline blocks a trampolined spawn on its handshake until the child
@@ -198,7 +318,7 @@ func forkClaimed(path string, argv []string, attr *os.ProcAttr) (started *os.Pro
 // positions (socket activation), with the handshake landing at fd 3+len(extras).
 func spawnFiles(spec coreproc.Spec, sio *stdioState) (files []*os.File, hs *handshake, err error) {
 	//: a direct spawn carries only the three wired std streams.
-	if !needsTrampoline(spec) {
+	if !trampolined(spec) {
 		//: no trampoline, so no handshake pipe is needed.
 		return sio.files[:], nil, nil
 	}
@@ -240,7 +360,7 @@ func childFileTable(stdio, extra []*os.File, hs *handshake) (files []*os.File, h
 // carrying the encoded limits, which applies them then execs the real target.
 func resolveSpawn(spec coreproc.Spec) (path string, argv, envAddon []string, err error) {
 	//: no rlimit/umask requested — spawn the target directly, no trampoline.
-	if !needsTrampoline(spec) {
+	if !trampolined(spec) {
 		//: direct spawn: target path, its argv, and no extra environment.
 		return spec.Path, buildArgv(spec), nil, nil
 	}
@@ -271,16 +391,22 @@ func buildProcAttr(spec coreproc.Spec, files []*os.File, envAddon []string) (att
 		Setsid:     spec.Setsid,
 		Credential: cred,
 	}
+	//: the parent-death signal, where the kernel has one (checked before).
+	setDieWithParent(sysAttr, spec.DieWithParent)
+	//: a terminal's child leads a new session with the slave (its fd 0) as its
+	//: controlling terminal; setpgid would fail for a session leader.
+	if spec.Stdio == coreproc.StdioPTY {
+		sysAttr.Setsid, sysAttr.Setctty, sysAttr.Ctty, sysAttr.Setpgid = true, true, fdStdin, false
+	}
 
 	//: os.StartProcess inherits the parent environment ONLY when Env is nil, so the
 	//: child's environment is always built on a fresh non-nil slice — even an empty
 	//: one — to honour the port's "explicit, never inherited" guarantee (a nil here
 	//: would leak the supervisor's environment, secrets included). Building anew
 	//: also keeps the trampoline's sentinel entry from mutating the caller's
-	//: immutable Spec.Env backing array.
-	env := make([]string, 0, len(spec.Env)+len(envAddon))
-	//: the caller's explicit environment first (a nil Spec.Env appends nothing).
-	env = append(env, spec.Env...)
+	//: immutable Spec.Env backing array. Each variable once, its last value: a
+	//: child's getenv reads the first entry of a name.
+	env := dedupEnv(spec.Env)
 	//: then the trampoline sentinel entry (if any); it is stripped before execve.
 	env = append(env, envAddon...)
 
@@ -318,7 +444,7 @@ func buildArgv(spec coreproc.Spec) []string {
 }
 
 // applyPostStart applies the best-effort scheduling attributes that can only be
-// set on a live pid (Nice, OOMScoreAdj). The first refusal returns its typed
+// set on a live pid (Nice, OOMScoreAdj, Scheduling). The first refusal returns its typed
 // error so the caller can tear the child down.
 func applyPostStart(pid int, spec coreproc.Spec) error {
 	//: scheduling priority first — a refusal here aborts before the OOM bias.
@@ -331,6 +457,6 @@ func applyPostStart(pid int, spec coreproc.Spec) error {
 		//: propagate the typed RLIMIT_FAILED from the procfs write.
 		return err
 	}
-	//: both attributes (or the absence of either) applied cleanly.
-	return nil
+	//: the scheduling policy and I/O priority last, beside Nice.
+	return applyScheduling(pid, spec.Scheduling)
 }

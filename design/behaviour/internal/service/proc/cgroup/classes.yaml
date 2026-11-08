@@ -99,6 +99,64 @@ constants:
         type: int
         value: "64"
     name: exitUsage
+  - doc: The cgroup v2 files Stat reads (Documentation/admin-guide/cgroup-v2.rst).
+    grouped: true
+    items:
+      - doc: cpuStatFile is the cpu controller's flat-keyed usage, present on every group.
+        name: cpuStatFile
+        type: string
+        value: "\"cpu.stat\""
+      - doc: memoryCurrentFile is the memory the group holds now.
+        name: memoryCurrentFile
+        type: string
+        value: "\"memory.current\""
+      - doc: memoryPeakFile is the most memory the group held (Linux 5.19).
+        name: memoryPeakFile
+        type: string
+        value: "\"memory.peak\""
+      - doc: memoryEventsFile counts what the group's memory limits did.
+        name: memoryEventsFile
+        type: string
+        value: "\"memory.events\""
+      - doc: pidsCurrentFile is how many tasks the group holds now.
+        name: pidsCurrentFile
+        type: string
+        value: "\"pids.current\""
+      - doc: ioStatFile is the I/O per device, one nested-keyed line each.
+        name: ioStatFile
+        type: string
+        value: "\"io.stat\""
+      - doc: devSeparator splits "MAJ:MIN" in io.stat.
+        name: devSeparator
+        type: string
+        value: "\":\""
+      - doc: keyValueSeparator splits "key=value" in io.stat.
+        name: keyValueSeparator
+        type: string
+        value: "\"=\""
+      - doc: int64Bits and uint32Bits are the widths the counters parse into.
+        name: int64Bits
+        type: int
+        value: "64"
+      - name: uint32Bits
+        type: int
+        value: "32"
+      - doc: |-
+          exitIOErr is sysexits.h EX_IOERR (74), the exit status CGROUP_READ_FAILED
+          carries; restated to wrap a cause without re-Defining the central code.
+        name: exitIOErr
+        type: int
+        value: "74"
+    name: cpuStatFile
+  - doc: |-
+      maxSignalPasses bounds Signal's re-reads of cgroup.procs: a tree that
+      forks faster than it is signalled, and ignores the signal, cannot hold the
+      caller forever.
+    items:
+      - name: maxSignalPasses
+        type: int
+        value: "64"
+    name: maxSignalPasses
   - doc: |-
       mountRoot is the canonical mount point of the unified cgroup v2 hierarchy.
       Exposed as the default root so Option can override it for tests against a
@@ -108,10 +166,163 @@ constants:
         type: string
         value: "\"/sys/fs/cgroup\""
     name: mountRoot
+  - doc: |-
+      The cgroup v2 files a group's place in the hierarchy is read and written
+      through (Documentation/admin-guide/cgroup-v2.rst).
+    grouped: true
+    items:
+      - doc: subtreeControlFile enables controllers for the groups beneath a group.
+        name: subtreeControlFile
+        type: string
+        value: "\"cgroup.subtree_control\""
+      - doc: threadsFile lists the group's threads; delegated with cgroup.procs.
+        name: threadsFile
+        type: string
+        value: "\"cgroup.threads\""
+      - doc: |-
+          delegateList is where the kernel lists the files a delegation hands over
+          (Linux 4.15).
+        name: delegateList
+        type: string
+        value: "\"/sys/kernel/cgroup/delegate\""
+      - doc: enablePrefix marks a controller enabled in cgroup.subtree_control.
+        name: enablePrefix
+        type: string
+        value: "\"+\""
+    name: subtreeControlFile
+  - doc: |-
+      The cgroup v2 interface files GroupTuner writes
+      (Documentation/admin-guide/cgroup-v2.rst).
+    grouped: true
+    items:
+      - doc: memoryMinFile is the hard memory protection.
+        name: memoryMinFile
+        type: string
+        value: "\"memory.min\""
+      - doc: memoryLowFile is the best-effort memory protection.
+        name: memoryLowFile
+        type: string
+        value: "\"memory.low\""
+      - doc: memoryHighFile is the memory throttle.
+        name: memoryHighFile
+        type: string
+        value: "\"memory.high\""
+      - doc: memorySwapMaxFile is the swap limit.
+        name: memorySwapMaxFile
+        type: string
+        value: "\"memory.swap.max\""
+      - doc: memoryZswapMaxFile is the zswap pool limit.
+        name: memoryZswapMaxFile
+        type: string
+        value: "\"memory.zswap.max\""
+      - doc: memoryZswapWritebackFile allows zswap writeback to swap (Linux 6.8).
+        name: memoryZswapWritebackFile
+        type: string
+        value: "\"memory.zswap.writeback\""
+      - doc: memoryOOMGroupFile makes the OOM killer take the whole group.
+        name: memoryOOMGroupFile
+        type: string
+        value: "\"memory.oom.group\""
+      - doc: cpuWeightFile is the group's CPU share.
+        name: cpuWeightFile
+        type: string
+        value: "\"cpu.weight\""
+      - doc: cpuMaxBurstFile is the CPU time borrowable above cpu.max's quota.
+        name: cpuMaxBurstFile
+        type: string
+        value: "\"cpu.max.burst\""
+      - doc: cpusetCPUsFile lists the CPUs the group may run on.
+        name: cpusetCPUsFile
+        type: string
+        value: "\"cpuset.cpus\""
+      - doc: cpusetMemsFile lists the memory nodes the group may allocate on.
+        name: cpusetMemsFile
+        type: string
+        value: "\"cpuset.mems\""
+      - doc: ioWeightFile is the group's I/O share.
+        name: ioWeightFile
+        type: string
+        value: "\"io.weight\""
+      - doc: ioLatencyFile is the I/O latency protection, per device.
+        name: ioLatencyFile
+        type: string
+        value: "\"io.latency\""
+      - doc: weightMin and weightMax bound cpu.weight and io.weight.
+        name: weightMin
+        type: int64
+        value: "1"
+      - name: weightMax
+        type: int64
+        value: "10000"
+      - doc: ioWeightDefault prefixes io.weight's default for every device.
+        name: ioWeightDefault
+        type: string
+        value: "\"default \""
+      - doc: ioLatencyTarget prefixes io.latency's target, in microseconds.
+        name: ioLatencyTarget
+        type: string
+        value: "\" target=\""
+      - doc: flagOn and flagOff are the boolean files' values.
+        name: flagOn
+        type: string
+        value: "\"1\""
+      - name: flagOff
+        type: string
+        value: "\"0\""
+      - doc: "listSeparator and rangeSeparator write a cpuset list: \"0-3,8\"."
+        name: listSeparator
+        type: string
+        value: "\",\""
+      - name: rangeSeparator
+        type: string
+        value: "\"-\""
+    name: memoryMinFile
+  - doc: The files and the inotify(7) record a watch reads.
+    grouped: true
+    items:
+      - doc: eventsFile is the group's populated and frozen keys (cgroup.events).
+        name: eventsFile
+        type: string
+        value: "\"cgroup.events\""
+      - doc: |-
+          eventsBuffer holds many records: a burst is read in few reads, and a
+          queue overflow is harmless because every read is followed by a fresh
+          read of the files.
+        name: eventsBuffer
+        type: int
+        value: "4096"
+      - doc: noWatch is the descriptor of a watch that was not added or is gone.
+        name: noWatch
+        type: int32
+        value: "-1"
+      - doc: |-
+          recordWd, recordMask and recordLen are the offsets of struct
+          inotify_event's wd, mask and len.
+        name: recordWd
+        type: int
+        value: "0"
+      - name: recordMask
+        type: int
+        value: "4"
+      - name: recordLen
+        type: int
+        value: "12"
+      - doc: |-
+          goneMask is what the parent's watch hears of the group's removal or
+          rename: cgroupfs removes a group's files without an IN_IGNORED for a
+          watch on them, and only the parent's IN_DELETE says the group went
+          (measured on Linux 6.12).
+        name: goneMask
+        type: uint32
+        value: syscall.IN_DELETE | syscall.IN_MOVED_FROM
+    name: eventsFile
 files:
   - decls:
       - Available
       - Create
+      - ProbeValue
+      - Probe
+      - Membership
     name: cgroup.go
   - decls:
       - controllersFile
@@ -128,6 +339,8 @@ files:
       - exitUsage
       - controlGroup
       - available
+      - probe
+      - delegated
       - cgroupUnavailable
       - createGroup
       - validateName
@@ -152,25 +365,141 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - cpuStatFile
+      - (*controlGroup).Stat
+      - (*controlGroup).Members
+      - statFrom
+      - cpuStat
+      - memoryEvent
+      - flatKeyed
+      - single
+      - ioStat
+      - ioDevice
+      - ioKey
+      - cgroupReadFailed
+    name: groupstat_linux.go
+  - decls:
+      - _
+    name: groupstat_linux_compliance.go
+  - decls:
+      - maxSignalPasses
+      - (*controlGroup).Signal
+      - signalTree
+      - signalPass
+      - (*signalPass).run
+      - (*signalPass).reach
+      - (*controlGroup).Contains
+      - treeMembers
+      - procsOf
+      - signalFailed
+    name: members_linux.go
+  - decls:
+      - membership
+      - membershipIn
+      - underPoint
+      - notAGroupDir
+    name: membership_linux.go
+  - decls:
       - mountRoot
       - groupConfig
       - Option
       - defaultConfig
       - applyOptions
       - WithRoot
+      - WithControllers
     name: option.go
+  - decls:
+      - subtreeControlFile
+      - documentedDelegation
+      - inTree
+      - treeMaker
+      - makeTree
+      - (*treeMaker).descend
+      - (*treeMaker).step
+      - (*treeMaker).undo
+      - enableIn
+      - enableLine
+      - validateControllers
+      - rootOffers
+      - controllerAbsent
+      - writeFailed
+      - (*controlGroup).Path
+      - (*controlGroup).EnableControllers
+      - (*controlGroup).Delegate
+      - delegationFiles
+      - delegateIn
+      - (*controlGroup).DeleteTree
+      - (*controlGroup).DeleteBeneath
+      - deleteSubtree
+      - subtreeOf
+      - deleteFailed
+    name: tree_linux.go
+  - decls:
+      - memoryMinFile
+      - (*controlGroup).SetMemoryMin
+      - (*controlGroup).SetMemoryLow
+      - (*controlGroup).SetMemoryHigh
+      - (*controlGroup).SetMemorySwapMax
+      - (*controlGroup).SetMemoryZswapMax
+      - (*controlGroup).SetMemoryZswapWriteback
+      - (*controlGroup).SetMemoryOOMGroup
+      - (*controlGroup).SetCPUWeight
+      - (*controlGroup).SetCPUMaxBurst
+      - (*controlGroup).SetCPUSetCPUs
+      - (*controlGroup).SetCPUSetMems
+      - (*controlGroup).SetIOWeight
+      - (*controlGroup).SetIOLatency
+      - (*controlGroup).writeList
+      - listOf
+      - intsText
+      - flagOf
+      - invalidValue
+    name: tune_linux.go
+  - decls:
+      - eventsFile
+      - watch
+      - (*controlGroup).Watch
+      - watchDir
+      - (*watch).run
+      - (*watch).expire
+      - (*watch).close
+      - (*watch).scan
+      - (*watch).modified
+      - (*watch).gone
+      - (*watch).state
+      - eventKey
+      - publish
+    name: watch_linux.go
 functions:
   - name: Available
     results: bool
   - name: Create
     params: name string, opts ...Option
     results: g coreproc.Group, err error
+  - name: Probe
+    params: opts ...Option
+    results: ProbeValue, error
+  - name: Membership
+    params: dir string
+    results: string, error
   - doc: |-
       available reports whether the unified cgroup v2 hierarchy is mounted and a
       sub-group can actually be created under it by the caller. It probes for the
       cgroup.controllers marker, then confirms write access by creating and
       removing a throwaway directory — the only honest test of delegation.
     name: available
+    results: bool
+  - doc: |-
+      probe reads cfg.root: the cgroup.controllers marker and its list, the
+      delegation test of available, and this process's own unified cgroup.
+    name: probe
+    params: cfg groupConfig
+    results: ProbeValue, error
+  - doc: |-
+      delegated reports whether a group can be created under root, by creating
+      and removing a uniquely named one — the only honest test of delegation.
+    name: delegated
+    params: root string
     results: bool
   - doc: |-
       cgroupUnavailable wraps cause in the central CGROUP_UNAVAILABLE sentinel,
@@ -180,17 +509,21 @@ functions:
     params: cause error, pathKey, pathVal string
     results: error
   - doc: |-
-      createGroup makes a new control-group directory named name under the
-      configured root and returns a controlGroup bound to it. It maps an absent
-      hierarchy to CgroupUnavailable and a failed mkdir to CgroupCreateFailed.
+      createGroup makes a new control group named name under the configured root
+      and returns a controlGroup bound to it. name may be nested: the groups on
+      the way are made when missing, and WithControllers' controllers are enabled
+      in each from the root down. It maps an absent hierarchy to
+      CgroupUnavailable, a controller the root does not offer to
+      CgroupControllerAbsent and a failed mkdir to CgroupCreateFailed.
     name: createGroup
     params: name string, opts ...Option
     results: g coreproc.Group, err error
   - doc: |-
-      validateName rejects a control-group name that is not a single safe path
-      element: empty, ".", "..", or one carrying a path separator or traversal
-      segment could resolve outside the delegated root, so it returns the bare
-      INVALID_SPEC sentinel rather than letting filepath.Join escape the subtree.
+      validateName rejects a control-group name that could resolve outside the
+      delegated root or alias another group: empty, absolute, not canonical (a
+      doubled or trailing separator, a "./" prefix), or carrying a "." or ".."
+      element. A nested name, "a/b", is a path of literal elements and passes; it
+      returns the bare INVALID_SPEC sentinel otherwise.
     name: validateName
     params: name string
     results: error
@@ -238,6 +571,90 @@ functions:
     params: v int64
     results: string
   - doc: |-
+      statFrom reads the counters of the group at dir through readFile: cpu.stat
+      must be there (the cpu controller's usage is on every group), every other
+      file is optional and a missing one sets Partial.
+    name: statFrom
+    params: readFile func(string) ([]byte, error), dir string
+    results: coreproc.GroupStatValue, error
+  - doc: cpuStat applies one cpu.stat key, whose times are microseconds.
+    name: cpuStat
+    params: stat *coreproc.GroupStatValue, key string, value int64
+  - doc: memoryEvent applies one memory.events key.
+    name: memoryEvent
+    params: events *coreproc.MemoryEventsValue, key string, value int64
+  - doc: flatKeyed calls visit for each "key value" line of a flat-keyed file.
+    name: flatKeyed
+    params: content string, visit func(key string, value int64)
+  - doc: single reads a one-value file; "max" or anything unparsable is zero.
+    name: single
+    params: content string
+    results: int64
+  - doc: "ioStat reads io.stat: \"MAJ:MIN rbytes=.. wbytes=.. rios=.. wios=.. ...\"."
+    name: ioStat
+    params: content string
+    results: "[]coreproc.IOStatValue"
+  - doc: ioDevice reads "MAJ:MIN".
+    name: ioDevice
+    params: field string
+    results: coreproc.IOStatValue, bool
+  - doc: ioKey applies one "key=value" of an io.stat line.
+    name: ioKey
+    params: device *coreproc.IOStatValue, field string
+  - doc: cgroupReadFailed wraps cause in the central CGROUP_READ_FAILED sentinel.
+    name: cgroupReadFailed
+    params: cause error, dir string
+    results: error
+  - doc: |-
+      signalTree signals, through kill, every pid members lists and has not been
+      signalled, until a pass finds none new or maxSignalPasses passes ran. A pid
+      of zero or below — a process group to kill(2) — and self are never
+      signalled; ESRCH, a process already gone, is no failure.
+    name: signalTree
+    params: members func() ([]int, error), kill func(pid int) error, self int
+    results: error
+  - doc: |-
+      treeMembers lists the pids of dir's cgroup.procs and of every group beneath
+      it. dir's own file must be read; a group beneath that goes during the walk
+      is skipped, and a link is never followed.
+    name: treeMembers
+    params: dir string
+    results: "[]int, error"
+  - doc: procsOf reads the pids of dir's cgroup.procs.
+    name: procsOf
+    params: dir string
+    results: "[]int, error"
+  - doc: |-
+      signalFailed wraps cause in the central SIGNAL_FAILED sentinel, with the
+      pid that refused.
+    name: signalFailed
+    params: cause error, pid int
+    results: error
+  - doc: |-
+      membership reads this process's mounts and re-expresses dir under the one
+      that holds it.
+    name: membership
+    params: dir string
+    results: string, error
+  - doc: |-
+      membershipIn is membership over readFile: the cgroup2 mount whose point is
+      the longest prefix of dir names the part of the cgroup filesystem it
+      exposes, and dir below that point is the same path below that part. A
+      directory is a path on this host's mounts; /proc/<pid>/cgroup names the
+      cgroup in the hierarchy itself — the two agree only where the hierarchy is
+      mounted at "/" of the filesystem, which a cgroup2 mount never is.
+    name: membershipIn
+    params: readFile func(string) ([]byte, error), dir string
+    results: string, error
+  - doc: underPoint reports whether dir is point or below it, and the path below.
+    name: underPoint
+    params: point, dir string
+    results: string, bool
+  - doc: notAGroupDir is INVALID_SPEC naming a path no cgroup2 mount holds.
+    name: notAGroupDir
+    params: dir string
+    results: error
+  - doc: |-
       defaultConfig returns the baseline groupConfig used when no Option overrides
       it: the new group is created directly under the unified cgroup v2 mount.
     name: defaultConfig
@@ -249,21 +666,182 @@ functions:
   - name: WithRoot
     params: root string
     results: Option
+  - name: WithControllers
+    params: ctrls ...coreproc.Controller
+    results: Option
+  - doc: |-
+      inTree runs work on root opened as an os.Root, so that every path work
+      resolves stays inside root — a ".." or a link out of it is refused by the
+      kernel's openat2 walk — and closes it.
+    name: inTree
+    params: root string, work func(tree *os.Root) error
+    results: error
+  - doc: |-
+      makeTree enables ctrls in root's cgroup.subtree_control, then makes the
+      groups of name top-down — an intermediate one kept when it exists, the last
+      one always new — and enables ctrls in each before its child. A group it
+      made is removed again when a later step fails.
+    name: makeTree
+    params: tree *os.Root, root, name string, ctrls []coreproc.Controller
+    results: error
+  - doc: |-
+      enableIn writes ctrls as "+a +b" to the cgroup.subtree_control of the group
+      rel, through write — os.Root's for a tree being made, the os package's for
+      a group's own directory. A controller the kernel refuses there (ENOENT) is
+      CgroupControllerAbsent; any other refusal, EBUSY while the group holds
+      a process among them, is CgroupWriteFailed.
+    name: enableIn
+    params: write func(name string, data []byte, perm os.FileMode) error, rel, dir string, ctrls []coreproc.Controller
+    results: error
+  - doc: "enableLine renders ctrls as cgroup.subtree_control takes them: \"+a +b\"."
+    name: enableLine
+    params: ctrls []coreproc.Controller
+    results: string
+  - doc: |-
+      validateControllers refuses a controller no constant holds: its name
+      would be "controller(N)", which cgroup.subtree_control would be told.
+    name: validateControllers
+    params: ctrls []coreproc.Controller
+    results: error
+  - doc: |-
+      rootOffers reports, as CgroupControllerAbsent, the first of ctrls the
+      cgroup.controllers of dir does not list.
+    name: rootOffers
+    params: dir string, ctrls []coreproc.Controller
+    results: error
+  - doc: |-
+      controllerAbsent wraps cause in the central CGROUP_CONTROLLER_ABSENT
+      sentinel, with the controllers asked for and the group.
+    name: controllerAbsent
+    params: cause error, controllers, dir string
+    results: error
+  - doc: |-
+      writeFailed wraps cause in the central CGROUP_WRITE_FAILED sentinel, with
+      the file and the group.
+    name: writeFailed
+    params: cause error, file, dir string
+    results: error
+  - doc: |-
+      delegationFiles reads the files a delegation hands over from the kernel's
+      list, keeping plain names only, or returns the three of cgroup-v2.rst's
+      "Delegation" where the list is absent (Linux before 4.15).
+    name: delegationFiles
+    params: readFile func(string) ([]byte, error)
+    results: "[]string"
+  - doc: |-
+      delegateIn changes the owner of dir, then of each of files under it,
+      through chown; a file dir lacks is skipped.
+    name: delegateIn
+    params: dir string, files []string, uid, gid int, chown func(name string, uid, gid int) error
+    results: error
+  - doc: |-
+      deleteSubtree removes the groups beneath dir, deepest first, and dir
+      itself when withRoot is set; a group beneath removed by another hand
+      meanwhile is no failure.
+    name: deleteSubtree
+    params: dir string, withRoot bool
+    results: error
+  - doc: |-
+      subtreeOf lists dir and every directory beneath it, each after its parent.
+      A link is not a directory here, so none is followed; a group removed during
+      the walk is skipped.
+    name: subtreeOf
+    params: dir string
+    results: "[]string, error"
+  - doc: |-
+      deleteFailed wraps cause in the central CGROUP_DELETE_FAILED sentinel, with
+      the group that would not go.
+    name: deleteFailed
+    params: cause error, dir string
+    results: error
+  - doc: |-
+      listOf renders values as the kernel's list — sorted, each run of
+      consecutive numbers written "a-b", the runs joined with commas — and
+      reports false with the values as given when one is negative.
+    name: listOf
+    params: values []int
+    results: string, bool
+  - doc: intsText renders values as given, comma-separated, for a refusal.
+    name: intsText
+    params: values []int
+    results: string
+  - doc: flagOf renders a boolean interface file's value.
+    name: flagOf
+    params: enabled bool
+    results: string
+  - doc: |-
+      invalidValue wraps the central INVALID_SPEC sentinel with the file a value
+      was refused for and the value.
+    name: invalidValue
+    params: file, value string
+    results: error
+  - doc: |-
+      watchDir installs the watches on dir's files, reads the first state after
+      they are in place — so no change between the two is missed — and starts
+      the goroutine that publishes every later one.
+
+      Goroutine lifecycle: one goroutine per call, reading the inotify
+      descriptor; it ends when ctx ends (a past read deadline ends the read), when
+      the group is removed, or when the descriptor fails, and closes the channel
+      and the descriptor as it goes.
+    name: watchDir
+    params: ctx context.Context, dir string
+    results: <-chan coreproc.GroupEventsValue, error
+  - doc: eventKey applies one cgroup.events key.
+    name: eventKey
+    params: state *coreproc.GroupEventsValue, key string, value int64
+  - doc: |-
+      publish puts v in out, replacing a value the reader has not taken: the
+      watch never blocks, and the reader always gets the latest state.
+    name: publish
+    params: out chan coreproc.GroupEventsValue, v coreproc.GroupEventsValue
 imports:
+  binary: encoding/binary
+  bytes: bytes
+  cgroupfs: github.com/kitsunium/sdk/internal/service/proc/internal/cgroupfs
+  cmp: cmp
+  context: context
   coreproc: github.com/kitsunium/sdk/internal/core/proc
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   filepath: path/filepath
+  fs: io/fs
   os: os
+  path: path
+  slices: slices
   strconv: strconv
   strings: strings
   syscall: syscall
+  time: time
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/proc/cgroup
   name: cgroup
   purpose: Package cgroup — creates and manages cgroup v2 control groups.
 types:
+  - fields:
+      - doc: Root is the directory probed.
+        name: Root
+        type: string
+      - doc: |-
+          OwnGroup is the directory of this process's own unified cgroup — the
+          root a delegated caller passes back as WithRoot — or empty where there
+          is none to name.
+        name: OwnGroup
+        type: string
+      - doc: Controllers are the controllers Root's cgroup.controllers lists.
+        name: Controllers
+        type: "[]string"
+      - doc: Mounted reports that Root is a cgroup v2 directory.
+        name: Mounted
+        type: bool
+      - doc: |-
+          Delegated reports that the caller may create a group under Root: a
+          uniquely named one was created and removed.
+        name: Delegated
+        type: bool
+    kind: struct
+    name: ProbeValue
   - doc: |-
       controlGroup is a handle to one cgroup v2 control group: its on-disk
       directory under the unified hierarchy. It satisfies coreproc.Group; all
@@ -315,7 +893,9 @@ types:
           cgroup.kill. Membership is tracked by control group, not process group, so a
           member that called setsid is still killed — nothing escapes. An absent
           cgroup.kill (kernel < 5.14) surfaces UnsupportedPlatform so callers can fall
-          back to a process-group kill.
+          back to a process-group kill. After it, every child later cloned into the
+          group is SIGKILLed at its fork (measured on 6.12): kill a group nothing will
+          be spawned into again, and Signal one that will be.
         name: Kill
         recv: g *controlGroup
         results: error
@@ -356,7 +936,232 @@ types:
         params: name, value string
         recv: g *controlGroup
         results: error
+      - doc: Stat reads the group's counters.
+        name: Stat
+        recv: g *controlGroup
+        results: coreproc.GroupStatValue, error
+      - doc: |-
+          Members lists the pids in the cgroup.procs of the group and of every group
+          beneath it — what Contains and Signal reach, and what cgroup.events'
+          populated counts: a process a delegated service moved into a group of its
+          own is still the group's (S0g, #734). The group's own file must be read; a
+          group beneath that goes during the walk is skipped.
+        name: Members
+        recv: g *controlGroup
+        results: "[]int, error"
+      - doc: |-
+          Signal sends sig to every process of the group and of the groups beneath
+          it but the caller's own, reading cgroup.procs again until a pass finds no
+          process it has not signalled, at most 64 passes. A process gone before the
+          signal reached it is not an error; any other refusal is SignalFailed.
+        name: Signal
+        params: sig coreproc.Signal
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          Contains reports whether pid is a process of the group or of a group
+          beneath it. CgroupReadFailed when the group's cgroup.procs cannot be read.
+        name: Contains
+        params: pid int
+        recv: g *controlGroup
+        results: bool, error
+      - doc: |-
+          Path is the group's directory: the CgroupPath a Spec spawns a child
+          straight into.
+        name: Path
+        recv: g *controlGroup
+        results: string
+      - doc: |-
+          EnableControllers writes ctrls to the group's cgroup.subtree_control, so
+          the groups beneath it get their interface files. A controller the group's
+          cgroup.controllers does not list is CgroupControllerAbsent, and a
+          malformed name InvalidSpec, before anything is written; while the group
+          itself holds a process the kernel refuses with EBUSY, CgroupWriteFailed
+          (cgroup v2's no-internal-process rule).
+        name: EnableControllers
+        params: ctrls ...coreproc.Controller
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          Delegate hands the group to the user uid and the group gid (systemd
+          Delegate=yes): it changes the owner of the directory and of the files the
+          kernel lists in /sys/kernel/cgroup/delegate — cgroup.procs,
+          cgroup.threads and cgroup.subtree_control where that list is absent — so
+          that user may create groups beneath it, move its processes and enable
+          controllers. -1 keeps an owner unchanged. A file the group lacks is
+          skipped; a refused change is CgroupWriteFailed.
+        name: Delegate
+        params: uid, gid int
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          DeleteTree removes the group and every group beneath it, deepest first:
+          what a delegated unit made under its group goes with it, as systemd
+          cleans a Delegate=yes unit up. A group still holding a process stops it
+          with CgroupDeleteFailed naming that group — Kill, and wait for Watch to
+          say the group is empty, first. A link is never followed.
+        name: DeleteTree
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          DeleteBeneath removes every group beneath the group, deepest first; the
+          group itself stays. It is proc/service's cleanup of a Delegate=yes unit at
+          the end of each run (S0g, #734): the unit's group is its caller's, what the
+          service made beneath it goes. A group still holding a process stops it with
+          CgroupDeleteFailed naming that group. A link is never followed.
+        name: DeleteBeneath
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetMemoryMin writes memory.min (systemd MemoryMin=), the memory the group
+          keeps whatever the pressure; a negative value writes "max".
+        name: SetMemoryMin
+        params: bytes int64
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetMemoryLow writes memory.low (systemd MemoryLow=), the memory reclaimed
+          from the group only when nothing else can be; a negative value writes
+          "max".
+        name: SetMemoryLow
+        params: bytes int64
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetMemoryHigh writes memory.high (systemd MemoryHigh=), the throttle
+          above which the group's allocations are slowed and reclaimed; a negative
+          value writes "max".
+        name: SetMemoryHigh
+        params: bytes int64
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetMemorySwapMax writes memory.swap.max (systemd MemorySwapMax=); a
+          negative value writes "max".
+        name: SetMemorySwapMax
+        params: bytes int64
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetMemoryZswapMax writes memory.zswap.max (systemd MemoryZSwapMax=); a
+          negative value writes "max".
+        name: SetMemoryZswapMax
+        params: bytes int64
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetMemoryZswapWriteback writes memory.zswap.writeback (systemd
+          MemoryZSwapWriteback=, Linux 6.8): false keeps the group's compressed
+          pages from being written back to swap.
+        name: SetMemoryZswapWriteback
+        params: enabled bool
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetMemoryOOMGroup writes memory.oom.group: true makes the OOM killer end
+          the whole group rather than one task of it (systemd OOMPolicy=kill).
+        name: SetMemoryOOMGroup
+        params: enabled bool
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetCPUWeight writes cpu.weight (systemd CPUWeight=), the group's share of
+          CPU against its siblings, 1 to 10000 (100 by default).
+        name: SetCPUWeight
+        params: weight int64
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetCPUMaxBurst writes cpu.max.burst, the CPU time the group may borrow
+          above cpu.max's quota in a period, in microseconds; a negative burst is
+          InvalidSpec.
+        name: SetCPUMaxBurst
+        params: burst time.Duration
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetCPUSetCPUs writes cpuset.cpus (systemd AllowedCPUs=) in the kernel's
+          list form, "0-3,8"; an empty list writes "", the parent's CPUs. A
+          negative CPU is InvalidSpec.
+        name: SetCPUSetCPUs
+        params: cpus []int
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetCPUSetMems writes cpuset.mems (systemd AllowedMemoryNodes=) in the
+          list form SetCPUSetCPUs writes.
+        name: SetCPUSetMems
+        params: nodes []int
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetIOWeight writes io.weight's default (systemd IOWeight=), the group's
+          share of I/O against its siblings, 1 to 10000 (100 by default).
+        name: SetIOWeight
+        params: weight int64
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          SetIOLatency writes the io.latency line of the device major:minor
+          (systemd IODeviceLatencyTargetSec=): the latency the group's I/O is
+          protected to, in microseconds; zero removes it, and a negative target is
+          InvalidSpec.
+        name: SetIOLatency
+        params: major, minor uint32, target time.Duration
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          writeList writes values to file in the kernel's list form, refusing a
+          negative entry before the write.
+        name: writeList
+        params: file string, values []int
+        recv: g *controlGroup
+        results: error
+      - doc: |-
+          Watch returns a channel holding the group's state first, then its state
+          after each change: populated, frozen, the memory events. The channel
+          holds one value, and a burst coalesces into the latest: the watch never
+          blocks on its reader. It is closed when ctx ends, and when the group is
+          gone, after a last value holding no process; a reader whose ctx is not
+          done reads the close as the group's removal. CgroupReadFailed when the
+          group's cgroup.events cannot be watched or read.
+        name: Watch
+        params: ctx context.Context
+        recv: g *controlGroup
+        results: <-chan coreproc.GroupEventsValue, error
     name: controlGroup
+  - doc: |-
+      signalPass is what signalTree's passes share: the kill, the caller kept out
+      of reach, the pids already signalled, and the first refusal.
+    fields:
+      - doc: kill signals one pid.
+        name: kill
+        type: func(pid int) error
+      - doc: self is the caller's own pid, never signalled.
+        name: self
+        type: int
+      - doc: signalled are the pids a pass already reached.
+        name: signalled
+        type: map[int]bool
+      - doc: failure is the first refusal other than ESRCH.
+        name: failure
+        type: error
+    kind: struct
+    methods:
+      - doc: run signals each of pids not signalled yet and returns how many it reached.
+        name: run
+        params: pids []int
+        recv: p *signalPass
+        results: int
+      - doc: |-
+          reach signals pid unless it is a process group, the caller, or already
+          reached, and reports whether it did; the first refusal other than ESRCH —
+          a process already gone — is kept.
+        name: reach
+        params: pid int
+        recv: p *signalPass
+        results: bool
+    name: signalPass
   - doc: |-
       groupConfig accumulates the options applied to a Create call. It is
       unexported (no public ROLE suffix needed) and built only via the Option
@@ -365,8 +1170,154 @@ types:
       - doc: root is the cgroup v2 directory under which the new group is created.
         name: root
         type: string
+      - doc: controllers are enabled from the root down to the new group's parent.
+        name: controllers
+        type: "[]coreproc.Controller"
     kind: struct
     name: groupConfig
   - kind: named
     name: Option
     underlying: func(*groupConfig)
+  - doc: |-
+      treeMaker makes the groups of one nested name under a root, enabling the
+      controllers asked for in each group above the last, and remembers what it
+      made so a failure can undo it.
+    fields:
+      - doc: tree is the root, opened as an os.Root.
+        name: tree
+        type: "*os.Root"
+      - doc: root is the root's path, for the errors; name is the nested name.
+        name: root
+        type: string
+      - name: name
+        type: string
+      - doc: ctrls are enabled from the root down to the last group's parent.
+        name: ctrls
+        type: "[]coreproc.Controller"
+      - doc: made are the groups this call made, outermost first.
+        name: made
+        type: "[]string"
+    kind: struct
+    methods:
+      - doc: |-
+          descend makes each group of the name from the root down, enabling the
+          controllers in every group above the last.
+        name: descend
+        recv: m *treeMaker
+        results: error
+      - doc: |-
+          step makes the group rel. An intermediate group that exists is kept when it
+          is a directory — a link is refused, even one inside the root — and the last
+          one must be new.
+        name: step
+        params: rel string, last bool
+        recv: m *treeMaker
+        results: error
+      - doc: |-
+          undo removes the groups this call made, deepest first. A group that will
+          not go is left: it is empty, and removing it is the caller's when it
+          retries.
+        name: undo
+        recv: m *treeMaker
+    name: treeMaker
+  - doc: |-
+      watch follows one group's cgroup.events and memory.events, and its
+      parent's directory for the group's removal, through one inotify
+      descriptor.
+    fields:
+      - doc: |-
+          notes is the inotify descriptor, non-blocking and on the runtime's
+          poller so a deadline ends a read.
+        name: notes
+        type: "*os.File"
+      - doc: |-
+          dir is the group's directory, and name its last element as the
+          parent's records spell it.
+        name: dir
+        type: string
+      - name: name
+        type: "[]byte"
+      - doc: |-
+          events, memory and parent are the watch descriptors of cgroup.events,
+          of memory.events and of the parent directory, noWatch for one absent or
+          gone.
+        name: events
+        type: int32
+      - name: memory
+        type: int32
+      - name: parent
+        type: int32
+    kind: struct
+    methods:
+      - doc: |-
+          run reads inotify records until ctx ends, the group goes or the
+          descriptor fails, publishing the files' state after each read that changed
+          it from last or followed a change the kernel announced.
+        name: run
+        params: ctx context.Context, out chan coreproc.GroupEventsValue, last coreproc.GroupEventsValue
+        recv: w *watch
+      - doc: expire sets a read deadline in the past, which ends the read in flight.
+        name: expire
+        recv: w *watch
+      - doc: close releases the inotify descriptor and, with it, every watch.
+        name: close
+        recv: w *watch
+      - doc: |-
+          scan walks the records of one read and reports whether the group is gone
+          — its parent's IN_DELETE or IN_MOVED_FROM naming it, or cgroup.events'
+          watch removed (IN_IGNORED) — and whether the kernel announced a change of
+          cgroup.events or memory.events (IN_MODIFY). memory.events' watch going
+          alone — the controller disabled — only forgets it.
+        name: scan
+        params: records []byte
+        recv: w *watch
+        results: removed, announced bool
+      - doc: |-
+          modified reports a record announcing a change of the group's
+          cgroup.events or memory.events.
+        name: modified
+        params: wd int32, mask uint32
+        recv: w *watch
+        results: bool
+      - doc: |-
+          gone applies one record: it reports whether the record says the group
+          went, and forgets memory.events' watch when that file alone went.
+        name: gone
+        params: wd int32, mask uint32, name []byte
+        recv: w *watch
+        results: bool
+      - doc: state reads cgroup.events, then memory.events where it is watched.
+        name: state
+        recv: w *watch
+        results: coreproc.GroupEventsValue, error
+    name: watch
+vars:
+  - doc: |-
+      Every control group of the proc family reads back what it confines (#932);
+      a Linux one is also a node of the cgroup v2 hierarchy with the interface
+      files Group leaves out, a state to watch and members to signal (#727).
+    grouped: true
+    items:
+      - name: _
+        type: coreproc.GroupReader
+        value: (*controlGroup)(nil)
+      - name: _
+        type: coreproc.GroupTuner
+        value: (*controlGroup)(nil)
+      - name: _
+        type: coreproc.GroupTree
+        value: (*controlGroup)(nil)
+      - name: _
+        type: coreproc.GroupWatcher
+        value: (*controlGroup)(nil)
+      - name: _
+        type: coreproc.GroupSignaler
+        value: (*controlGroup)(nil)
+    name: _
+  - doc: |-
+      documentedDelegation is what a delegation hands over where the kernel has
+      no list: cgroup-v2.rst's "Delegation" names the directory and these three.
+    items:
+      - name: documentedDelegation
+        value: "[]string{procsFile, threadsFile, subtreeControlFile}"
+    name: documentedDelegation

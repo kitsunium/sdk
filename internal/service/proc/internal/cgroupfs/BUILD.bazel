@@ -1,0 +1,34 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "cgroupfs",
+    srcs = [
+        "cgroupfs.go",
+        "doc.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/internal/cgroupfs",
+    visibility = [
+        "//internal/service:service_consumers",
+        "//internal/service/proc:__subpackages__",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":cgroupfs",
+    visibility = [
+        "//internal/service:service_consumers",
+        "//internal/service/proc:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "cgroupfs_test",
+    srcs = [
+        "cgroupfs_internal_test.go",
+        "gen_api_test.go",
+    ],
+    embed = [":cgroupfs"],
+)

@@ -92,9 +92,27 @@ type StatsValue struct {
 	// idle time, which counts only threads running Go code and so misses time
 	// spent in C code or blocked in the kernel — and which the runtime
 	// refreshes only at a garbage collection, so it lags by up to one GC
-	// cycle and reads zero before the first. It is true where getrusage(2)
-	// does not exist — Windows, Plan 9, wasm — and wherever it failed.
+	// cycle and reads zero before the first. It is true where the kernel's
+	// count is not at hand — Plan 9, wasm: neither getrusage(2) nor
+	// GetProcessTimes exists there — and wherever that call failed.
 	CPUEstimated bool
+	// RSSBytes is the kernel's resident set — what the OOM killer and the
+	// cgroup count, where MemoryBytes is the runtime's mapping: /proc/self/statm
+	// on Linux, the working set on Windows, zero elsewhere (KernelMemory).
+	RSSBytes uint64
+	// PeakRSSBytes is the most resident memory the process has held: VmHWM on
+	// Linux, getrusage(2)'s ru_maxrss on the other Unixes, the peak working set
+	// on Windows; zero on illumos and Solaris, whose kernel leaves it so.
+	PeakRSSBytes uint64
+	// Threads is how many kernel threads the process runs (Linux); zero elsewhere.
+	Threads int
+	// OpenFiles is how many descriptors the process holds open (Linux), or its
+	// HANDLE count (Windows); zero elsewhere — rlimit.OpenFiles counts on more
+	// platforms.
+	OpenFiles int
+	// KernelMemory reports that RSSBytes is the kernel's count (Linux,
+	// Windows); false where the platform gives the SDK no current resident set.
+	KernelMemory bool
 }
 
 // DistributionValue is one of the Go runtime's cumulative histograms, read
@@ -224,6 +242,7 @@ func ReadStats() StatsValue {
 	}
 	stats.LastGC = lastGC()
 	stats.CPUTime, stats.CPUEstimated = cpuTime()
+	kernelMemory(&stats)
 	//: the process, now.
 	return stats
 }

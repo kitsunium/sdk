@@ -15,6 +15,22 @@ import (
 // new console process group, the precondition for a CTRL_BREAK group signal.
 const createNewProcessGroup uint32 = 0x00000200
 
+// The CreateProcess priority-class flags (winbase.h) Spec.Nice selects from.
+const (
+	idlePriorityClass        uint32 = 0x00000040
+	belowNormalPriorityClass uint32 = 0x00004000
+	normalPriorityClass      uint32 = 0x00000020
+	aboveNormalPriorityClass uint32 = 0x00008000
+	highPriorityClass        uint32 = 0x00000080
+)
+
+// niceHigh and niceIdle bound the Nice ranges that map to HIGH and IDLE: -10
+// and below is HIGH, above 10 is IDLE.
+const (
+	niceHigh int = -10
+	niceIdle int = 10
+)
+
 // Start spawns spec as a supervised Windows process and returns its handle. A
 // cancelled context, a malformed Spec, or an unsupported Spec field short-circuit
 // before any process is created.
@@ -42,6 +58,11 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 	if uErr := checkUnsupportedSpec(spec); uErr != nil {
 		//: propagate the uniform UNSUPPORTED_PLATFORM verbatim.
 		return nil, uErr
+	}
+	//: a policy or an I/O class has no Windows path; the zero value passes.
+	if schErr := checkScheduling(spec.Scheduling); schErr != nil {
+		//: propagate the typed INVALID_SPEC / UNSUPPORTED_PLATFORM verbatim.
+		return nil, schErr
 	}
 	//: a non-empty CgroupPath is a Linux concept — reject before spawning.
 	if cErr := validateCgroupPath(spec.CgroupPath); cErr != nil {
@@ -146,16 +167,12 @@ func spawnWindows(spec coreproc.Spec, sio *stdioState, suspended bool) (*os.Proc
 }
 
 // spawnEnv honours the Spec.Env contract: a nil Env means an EMPTY environment
-// (the known-state guarantee), not the parent's. os.StartProcess inherits on a
-// nil Env, so nil is converted to a non-nil empty slice.
+// (the known-state guarantee), not the parent's, and each variable reaches the
+// child once, with its last value. os.StartProcess inherits on a nil Env;
+// dedupEnv never returns nil.
 func spawnEnv(env []string) []string {
-	//: nil Env must spawn with no environment, not inherit the supervisor's.
-	if env == nil {
-		//: an empty (non-nil) slice gives the child a clean, known environment.
-		return []string{}
-	}
-	//: a caller-supplied slice is used verbatim (pass os.Environ() to inherit).
-	return env
+	//: a new slice: an empty one for a nil Env, each name once otherwise.
+	return dedupEnv(env)
 }
 
 // creationFlags maps the Spec topology to CreateProcess flags. Setpgid starts a
@@ -166,6 +183,11 @@ func creationFlags(spec coreproc.Spec) uint32 {
 	if spec.Setpgid {
 		//: lead a fresh console process group.
 		flags |= createNewProcessGroup
+	}
+	//: Nice selects the priority class the child is created in, so it binds
+	//: from the child's first instruction.
+	if spec.Nice != nil {
+		flags |= priorityClass(*spec.Nice)
 	}
 	//: the assembled CreateProcess creation flags.
 	return flags
@@ -195,13 +217,26 @@ func checkUnsupportedSpec(spec coreproc.Spec) error {
 	case spec.Umask != nil:
 		//: degrade honestly rather than ignore the requested umask.
 		return coreproc.UnsupportedPlatform
-	//: nice / oom_score_adj are Unix scheduler/OOM knobs.
-	case spec.Nice != nil || spec.OOMScoreAdj != nil:
+	//: oom_score_adj is a Linux OOM-killer knob (Nice maps to a priority class).
+	case spec.OOMScoreAdj != nil:
 		//: no Windows analogue at this layer.
 		return coreproc.UnsupportedPlatform
 	//: POSIX user/group credentials do not map to Windows tokens here.
 	case spec.User != "" || spec.Group != "" || len(spec.Groups) > 0:
 		//: degrade honestly rather than spawn with the wrong identity.
+		return coreproc.UnsupportedPlatform
+	//: a pseudo-terminal needs ConPTY, which os.StartProcess cannot carry.
+	case spec.Stdio == coreproc.StdioPTY:
+		//: refused before anything is spawned.
+		return coreproc.UnsupportedPlatform
+	//: a variable set to the child's PID needs the Unix trampoline.
+	case len(spec.PIDEnv) > 0:
+		//: refused before anything is spawned.
+		return coreproc.UnsupportedPlatform
+	//: a sandbox (namespaces, capabilities, Landlock, seccomp) is Linux's:
+	//: refused before the spawn, never run unconfined.
+	case spec.Sandbox != nil:
+		//: refused before anything is spawned.
 		return coreproc.UnsupportedPlatform
 	//: ExtraFiles (fd inheritance / socket activation) is a Unix fd concept.
 	case len(spec.ExtraFiles) > 0:
@@ -211,5 +246,30 @@ func checkUnsupportedSpec(spec coreproc.Spec) error {
 	default:
 		//: nothing unsupported — proceed to spawn.
 		return nil
+	}
+}
+
+// priorityClass maps a Unix niceness onto a CreateProcess priority class:
+// -10 and below HIGH, below 0 ABOVE_NORMAL, 0 NORMAL, 1 to 10 BELOW_NORMAL,
+// above 10 IDLE. REALTIME is never chosen: it can starve the system's own
+// threads, and no niceness asks for that.
+func priorityClass(nice int) uint32 {
+	//: from the most favoured class to the least.
+	switch {
+	case nice <= niceHigh:
+		//: a strongly raised priority.
+		return highPriorityClass
+	case nice < 0:
+		//: a raised priority.
+		return aboveNormalPriorityClass
+	case nice == 0:
+		//: the default class, stated.
+		return normalPriorityClass
+	case nice <= niceIdle:
+		//: a lowered priority.
+		return belowNormalPriorityClass
+	default:
+		//: run only when the system is otherwise idle.
+		return idlePriorityClass
 	}
 }

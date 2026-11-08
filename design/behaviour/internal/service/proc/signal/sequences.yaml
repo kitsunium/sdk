@@ -1,6 +1,198 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: ReceivedError.Error
+    steps:
+      - return: c.Signal.String() + receivedSuffix
+  - of: CauseSignal
+    steps:
+      - bind: cause, found
+        eval: errors.AsType[ReceivedError](context.Cause(ctx))
+      - return: cause.Signal, found
+  - of: NotifyContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: NotifyContext
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: Notify
+        kind: internal
+      - id: cancelOnSignal
+        kind: internal
+      - id: once.Do
+        kind: value
+    steps:
+      - bind: ctx, cancel
+        eval: context.WithCancelCause(parent)
+        to: context
+      - bind: received, unsubscribe
+        eval: Notify(sigs...)
+        to: Notify
+      - bind: done
+        eval: make(chan struct{})
+      - go: cancelOnSignal(ctx, cancel, received, done)
+        to: cancelOnSignal
+      - var:
+          name: once
+          type: sync.Once
+      - set: stop
+        value:
+          closure:
+            steps:
+              - eval: |-
+                  once.Do(func() {
+                  			unsubscribe()
+                  			cancel(nil)
+                  			<-done
+                  		})
+                to: once.Do
+      - return: ctx, stop
+  - of: cancelOnSignal
+    steps:
+      - defer: close(done)
+      - select:
+          cases:
+            - comm: sig, ok := <-received
+              do:
+                - opt:
+                    do:
+                      - eval: "cancel(ReceivedError{Signal: sig})"
+                    when: ok
+            - comm: <-ctx.Done()
+  - of: Escalate
+    participants:
+      - id: caller
+        kind: actor
+      - id: Escalate
+        kind: self
+      - id: Notify
+        kind: internal
+      - id: once.Do
+        kind: value
+    steps:
+      - bind: received, unsubscribe
+        eval: Notify(sigs...)
+        to: Notify
+      - bind: done
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		defer close(done)
+          		escalate(ctx, clk, policy, received)
+          	}()
+      - var:
+          name: once
+          type: sync.Once
+      - return:
+          closure:
+            steps:
+              - eval: |-
+                  once.Do(func() {
+                  			unsubscribe()
+                  			<-done
+                  		})
+                to: once.Do
+  - of: escalate
+    participants:
+      - id: caller
+        kind: actor
+      - id: escalate
+        kind: self
+      - id: closeIfDue
+        kind: internal
+      - id: run
+        kind: internal
+      - id: arm
+        kind: internal
+    steps:
+      - var:
+          name: window
+          type: clock.Timer
+      - var:
+          name: windowEnds
+          type: <-chan time.Time
+      - defer: |-
+          func() {
+          		//: an armed window is released with the relay.
+          		if window != nil {
+          			window.Stop()
+          		}
+          	}()
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: ""
+                  - comm: <-windowEnds
+                    do:
+                      - set: windowEnds
+                        value: nil
+                  - comm: sig, ok := <-received
+                    do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!ok"
+                      - set: windowEnds
+                        to: closeIfDue
+                        value: closeIfDue(windowEnds)
+                      - opt:
+                          do:
+                            - eval: run(policy.OnRepeat, sig)
+                              to: run
+                            - return: ""
+                          when: windowEnds != nil
+                      - eval: run(policy.OnFirst, sig)
+                        to: run
+                      - set: window, windowEnds
+                        to: arm
+                        value: arm(clk, window, policy.Window)
+          forever: true
+  - of: arm
+    participants:
+      - id: caller
+        kind: actor
+      - id: arm
+        kind: self
+      - id: clk.NewTimer
+        kind: value
+      - id: timer.Reset
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: timer, make(chan time.Time)
+          when: window <= 0
+      - opt:
+          do:
+            - set: timer
+              to: clk.NewTimer
+              value: clk.NewTimer(window)
+            - return: timer, timer.C()
+          when: timer == nil
+      - eval: timer.Reset(window)
+        to: timer.Reset
+      - return: timer, timer.C()
+  - of: closeIfDue
+    steps:
+      - select:
+          cases:
+            - comm: <-windowEnds
+              do:
+                - return: nil
+            - default: true
+              do:
+                - return: windowEnds
+  - of: run
+    steps:
+      - opt:
+          do:
+            - eval: fn(sig)
+          when: fn != nil
   - of: Relay
     participants:
       - id: caller
@@ -50,6 +242,90 @@ sequences:
                 when: kerr != nil
           key: sig
           range: src
+      - return: nil
+  - of: SendValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: SendValue
+        kind: self
+      - id: sendFailed
+        kind: internal
+      - id: sendValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: sendFailed(syscall.EINVAL, target, sig)
+              to: sendFailed
+          when: target <= 0
+      - return: sendValue(target, sig, value)
+        to: sendValue
+  - of: sendFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: sendFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:     coreproc.CodeSignalFailed,
+          		Reason:   "SIGNAL_FAILED",
+          		Public:   "Could not deliver the signal to the process",
+          		Private:  "service/proc/signal.SendValue: queueing the signal with its value failed",
+          		ExitCode: sendValueExitCode,
+          	}, errs.Int("target", int(target)), errs.Int("signal", sig.Int()))
+        to: errs
+  - of: sendValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: sendValue
+        kind: self
+      - id: order.PutUint32
+        kind: value
+      - id: order.PutUint64
+        kind: value
+      - id: syscall
+        kind: stdlib
+      - id: sendFailed
+        kind: internal
+    steps:
+      - var:
+          name: info
+          type: "[siginfoSize]byte"
+      - bind: order
+        eval: binary.NativeEndian
+      - eval: order.PutUint32(info[siSignoOffset:], uint32(int32(sig.Int())))
+        to: order.PutUint32
+      - eval: order.PutUint32(info[siCodeOffset:], siQueue)
+        to: order.PutUint32
+      - eval: order.PutUint32(info[siRTPidOffset:], uint32(int32(syscall.Getpid())))
+        to: order.PutUint32
+      - eval: order.PutUint32(info[siRTUidOffset:], uint32(syscall.Getuid()))
+        to: order.PutUint32
+      - alt:
+          - do:
+              - eval: order.PutUint64(info[siRTValueOffset:], uint64(int64(value)))
+                to: order.PutUint64
+            when: pointerSize == wideWord
+          - do:
+              - eval: order.PutUint32(info[siRTValueOffset:], uint32(int32(value)))
+                to: order.PutUint32
+            else: true
+      - bind: _, _, errno
+        eval: |-
+          syscall.Syscall(syscall.SYS_RT_SIGQUEUEINFO,
+          		uintptr(target), uintptr(sig.Int()), uintptr(unsafe.Pointer(&info[0])))
+        to: syscall
+      - opt:
+          do:
+            - return: sendFailed(errno, target, sig)
+              to: sendFailed
+          when: errno != 0
       - return: nil
   - of: Notify
     participants:

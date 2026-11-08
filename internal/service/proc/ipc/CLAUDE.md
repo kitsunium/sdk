@@ -26,7 +26,8 @@ sentinels — this package returns them and declares none.
 | `ipc.go` | `Config` (the engine's, ADR 0074), `Listener` over an `acceptor` — the engine behind `coreipc.Listener` —, `NewListener`, `Accept` (refused peers closed and counted), `Dialer` + `NewDialer` — the engine behind `coreipc.Dialer`, its allow-lists copied —, `Dial`, `RuntimeDir` and `RuntimeDirOr` (the same chain ending on the caller's directory instead of `<tmp>/<app>-<uid>`, ADR 0182), `admit`, `closeBestEffort` |
 | `ipc_compliance.go` | the compile-time proof that `*Listener` satisfies `coreipc.Listener` and `*Dialer` satisfies `coreipc.Dialer` — a method renamed or retyped on either engine fails the build here, not in a caller holding the port |
 | `socket.go` (`!windows`) | the Unix socket: `listen` (dial-then-remove of a leftover socket — `nobodyListens`: refused or gone, nothing else —, `0600`), `socketAcceptor`, `admits`, `dial` (directory, path and owner checked before a byte is sent, within one second) |
-| `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName`, `pipeAcceptor` (DACL `D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused) |
+| `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName`, `pipeAcceptor` (DACL `D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused); `pipeConn` keeps its peer and, for a named one, a handle on its process (`newPipeConn`, `openPeerProcess` — a process younger than the connection refused —, closed by `Close`) |
+| `files.go` (`unix \|\| windows`), `files_unix.go`, `files_windows.go`, `files_other.go` | file passing (#936): `fdPassRefused`; `SCM_RIGHTS` on Unix (`fileConn`); a frame and `DuplicateHandle` out of the sender's process on Windows (`SendFiles`, `fileFrame`, `RecvFiles`, `take`); none elsewhere |
 | `dir_unix.go` / `dir_other.go` | `prepareDir` (path audited before AND after the `Mkdir`), `checkDir` (path above, own entry, holder), `checkEntry` (mode, owner, not a link), `ownerOf`: on Unix; a refusal elsewhere |
 | `chain_unix.go` | `checkChain` over `pathchain.Resolve` of the socket directory's parent, `checkHolder`, `steerable` (the rule), `ours`, `pathUnsafe` — see §Why-this-shape |
 | `peer_linux.go` / `peer_other.go` (`!linux && !windows`) | `peerOf`: `SO_PEERCRED`, or an unverified peer |
@@ -47,10 +48,22 @@ The codes — `0.3.91.1`–`9`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
   (ADR 0074), and the ports take none.
 - **The directory is the gate everywhere; the peer's credentials are a second
   one where they exist.** Connecting to a Unix socket needs search permission
-  on its directory, so a 0700 directory already keeps other accounts out; on
-  Linux `SO_PEERCRED` then names the peer and the allow-lists apply. Outside
-  Linux the standard library exposes no peer credential and `getpeereid` needs
-  `x/sys`, which the SDK bans — `Peer.Verified` says which world a caller is in.
+  on its directory, so a 0700 directory already keeps other accounts out; where
+  the kernel names the peer the allow-lists then apply: `SO_PEERCRED` on Linux,
+  and since #1093 `getsockopt(SOL_LOCAL, LOCAL_PEERCRED)` (`struct xucred`) on
+  FreeBSD and DragonFly and `LOCAL_PEEREID` (`struct unpcbid`) on NetBSD,
+  through `syscall.Syscall6(SYS_GETSOCKOPT, …)` and a struct decoded from a
+  byte buffer (`peer_bsd.go`, `peer_xucred.go`, `peer_unpcbid.go`; the
+  constants cited from `sys/un.h`). On those platforms (`kernelNamesPeer`,
+  `peer_named.go`) a peer the kernel did NOT name — a failed getsockopt — is
+  refused, `PEER_REFUSED` with `reason` "kernel did not name the peer", never
+  let through (ADR 0031). darwin (raw syscalls deprecated), OpenBSD (pinned
+  syscalls), illumos and Solaris (`getpeerucred` is libc's) stay unverified
+  and the directory is the gate there (`peer_other.go`, `peer_unnamed.go`) —
+  `Peer.Verified` says which world a caller is in. Windows keeps its own rule:
+  the pipe's DACL admits a client whose account could not be read. The BSD
+  readers never ran on this lot's VM: `peer_bsd_internal_test.go` runs on the
+  e2e-cross FreeBSD and NetBSD lanes.
 - **The gate is the whole PATH, not its last component.** `checkEntry`'s
   `Lstat` sees the socket directory's own entry only, and every lookup — the
   `Mkdir`, the `bind`, the `connect` — follows a link planted at a parent.
@@ -98,6 +111,57 @@ The codes — `0.3.91.1`–`9`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
 - **Group search is allowed, group write is not.** A deployment that admits an
   on-call group gives the directory `0750` and its group; nobody but the owner
   can plant an entry. This package never widens a directory.
+- **Files pass to a named peer only (#936).** On Unix `Conn.Conn` is a
+  `fileConn` (`files_unix.go`) embedding the `*net.UnixConn`, offering the core
+  siblings `FileSender` and `FileReceiver` (ADR 0039): `SendFiles` writes
+  `SCM_RIGHTS` with `WriteMsgUnix`, refused (`FD_PASS_REFUSED`, 0.3.91.10) to
+  a peer the kernel did not name — a descriptor never reaches an account
+  nobody vouched for — and for an empty payload; `RecvFiles` sizes the control
+  buffer for `max` (refused at zero), so the kernel closes the excess
+  (`MSG_CTRUNC`, reported as `FD_PASS_REFUSED` "truncated" beside the files
+  that fit) and none leaks into the process; the net package receives them
+  close-on-exec. `TestPassFiles` (Linux) pins a file, the 64 against `max=4`
+  with the descriptor count unchanged, and the unnamed peer;
+  `TestPassAListener` (`files_unix_internal_test.go`, every Unix) passes a bound
+  TCP listener, closes the sender's two descriptors, and has the receiver
+  accept a connection on it end to end — a message and its reply — where the
+  kernel names the peer; elsewhere (darwin, OpenBSD, illumos, Solaris) it
+  asserts the refusal and skips. The receiver there is the other end of the
+  socket in the same process, not a second one. **Windows (`files_windows.go`)**: a pipe carries bytes, so
+  the files travel in band, in a frame — `SDKF`, the count, the payload's
+  length, the handle values, the payload — and the receiver must call
+  `RecvFiles` where the sender called `SendFiles` (anything else is refused,
+  the stream then out of step). The sender duplicates each file into its own
+  table (private, not inheritable); the receiver duplicates each value OUT of
+  the sender's process with `DUPLICATE_CLOSE_SOURCE` and closes the excess
+  there the same way. That is the issue's `DuplicateHandle` turned round, on
+  purpose: pushed into the receiver, the values would be numbers the receiver
+  is told and wraps, and a peer that cannot open the receiver could name a
+  handle the receiver already holds; pulled, the receiver only ever gets
+  handles it made from what the sender holds. The handle on the peer's
+  process (`PROCESS_DUP_HANDLE`) is opened when the connection completes and
+  kept until `Close`, and a process created after the connection is refused,
+  so the pid cannot be another process's by then; without it (an unnamed
+  peer, a peer this account may not open) `RecvFiles` is `FD_PASS_REFUSED`
+  and the sender keeps what it sent. A send whose write failed after a byte
+  leaves the duplicates to the receiver rather than risk closing a handle
+  value this process reused. A TCP listener is not passed on Windows: Go's
+  net now hands a socket an `*os.File` there (`TestATCPListenerFileOnWindows`
+  records it), but this package's `DuplicateHandle` route for a socket is
+  not written, and no test passes one (Refs #936). None of this has run here
+  (e2e-cross's Windows lane runs it).
+- **The directory rule is split by side (#1092).** `NewListener` keeps
+  `checkDir`: the directory is this account's. `Dial` runs `checkDialDir`: the
+  same chain, holder and entry rules — a real directory nobody but its owner can
+  write — but NO owner rule, because the directory is the listener's, usually
+  another account's; refusing it made the documented on-call deployment
+  undiallable by the very group it admits, and root too. Who may be dialled is
+  then the socket FILE's owner: this account, an `AllowUIDs` member or an
+  `AllowGIDs` group, `ENDPOINT_FOREIGN` with `uid` and `gid` otherwise. A client
+  outside the group is refused by the kernel at the 0750 directory
+  (`DIAL_FAILED`). `dialWith` takes `lstat` and the effective uid so
+  `TestDialAnotherAccountsSocket` stands as euid 1001 before user 1000's
+  daemon; the root e2e row with two real accounts is not written.
 - **Dial, then remove.** A socket at the path is dialled first: one that
   answers belongs to a live process and is refused (`IN_USE`), one that does
   not is a leftover and is removed — only when it is a socket this account

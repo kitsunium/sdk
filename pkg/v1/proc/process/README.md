@@ -25,7 +25,7 @@ Spec.Rlimits                   Limit*=       (applied via trampoline)
 
 ### Environment, and finding the executable
 
-A nil Spec.Env yields an empty environment — the child never silently inherits the supervisor's, so a spawned service starts from a known state. Pass an explicit slice (including os.Environ()) to inherit deliberately.
+A nil Spec.Env yields an empty environment — the child never silently inherits the supervisor's, so a spawned service starts from a known state. Pass an explicit slice (including os.Environ()) to inherit deliberately. A key that begins \_\_KITSUNIUM\_SDK\_PROC\_, in any case, belongs to the SDK's own spawn protocol: Start refuses it with ReservedEnv before any fork.
 
 Spec.Path may be a bare name. "go" is searched in the PATH the CHILD will see — the PATH entry of Spec.Env whenever it names one, even empty, the parent's only when it names none — with os/exec's rules: the first executable in PATH order wins, and a match found only through a relative entry ("." or an empty one) is refused with exec.ErrDot, which the returned SpawnFailed wraps (errors.Is answers). A path with a separator is taken as written.
 
@@ -80,7 +80,7 @@ sdk, found := build.Module("github.com/kitsunium/sdk")
 // for a pseudo-version, or "" with sdk.Local for a directory.
 ```
 
-CPUTime is the kernel's count (getrusage) where the platform has one and the Go runtime's estimate elsewhere — refreshed only at a garbage collection; Stats.CPUEstimated says which. The distributions and every counter are cumulative since the process started — subtract two snapshots for a window.
+CPUTime is the kernel's count (getrusage, GetProcessTimes on Windows) where the platform has one and the Go runtime's estimate elsewhere — refreshed only at a garbage collection; Stats.CPUEstimated says which. The distributions and every counter are cumulative since the process started — subtract two snapshots for a window.
 
 A module's recorded version conflates three things, and [Module](#Module) keeps them apart: a RELEASE in Version, a COMMIT in Revision and Time (a pseudo-version names one, and so does the main module's version-control stamp), and a DIRECTORY in Local and Dir (a replace, a workspace module). What is in a local directory NOW is a question for the framework's git.Head (ADR 0158).
 
@@ -93,41 +93,460 @@ Package process — StdioMode re-exports for wiring a child's standard streams.
 ## Index
 
 - [Constants](<#constants>)
+- [Variables](<#variables>)
+- [func Attach\(ctx context.Context, pid int\) \(proc Process, err error\)](<#Attach>)
+- [func AttachPIDFile\(ctx context.Context, path string, want AttachScope\) \(proc Process, err error\)](<#AttachPIDFile>)
 - [func Build\(\) \(info BuildInfo, ok bool\)](<#Build>)
+- [func EnvAllow\(parent \[\]string, keys ...string\) \[\]string](<#EnvAllow>)
+- [func EnvDeny\(parent \[\]string, keys ...string\) \[\]string](<#EnvDeny>)
+- [func LandlockABI\(\) \(abi int, err error\)](<#LandlockABI>)
 - [func MustStart\(ctx context.Context, spec Spec\) Process](<#MustStart>)
+- [func Open\(pid int\) \(proc Process, err error\)](<#Open>)
 - [func ParseBuild\(info \*debug.BuildInfo\) BuildInfo](<#ParseBuild>)
+- [func ReadIdentity\(\) Identity](<#ReadIdentity>)
+- [func Run\(ctx context.Context, spec Spec, opts RunOptions\) \(result Result, err error\)](<#Run>)
 - [func Self\(\) Stats](<#Self>)
+- [func SetOOMScoreAdj\(n int\) error](<#SetOOMScoreAdj>)
 - [func Start\(ctx context.Context, spec Spec\) \(proc Process, err error\)](<#Start>)
+- [type AttachScope](<#AttachScope>)
 - [type BuildInfo](<#BuildInfo>)
   - [func \(\*BuildInfo\) Module\(path string\) \(found ModuleValue, ok bool\)](<#BuildInfo.Module>)
+  - [func \(\*BuildInfo\) Reproducible\(\) bool](<#BuildInfo.Reproducible>)
+- [type Capabilities](<#Capabilities>)
+- [type ContextWaiter](<#ContextWaiter>)
+  - [func \(ContextWaiter\) WaitContext\(ctx context.Context\) \(ExitValue, error\)](<#ContextWaiter.WaitContext>)
 - [type Distribution](<#Distribution>)
   - [func \(Distribution\) Count\(\) uint64](<#Distribution.Count>)
   - [func \(Distribution\) Quantile\(q float64\) time.Duration](<#Distribution.Quantile>)
 - [type ExitResult](<#ExitResult>)
   - [func \(ExitResult\) Success\(\) bool](<#ExitResult.Success>)
+- [type FDPolicy](<#FDPolicy>)
+- [type IDMap](<#IDMap>)
+- [type IOClass](<#IOClass>)
+  - [func \(IOClass\) String\(\) string](<#IOClass.String>)
+- [type Identity](<#Identity>)
+- [type Landlock](<#Landlock>)
+- [type LandlockAccess](<#LandlockAccess>)
+- [type LandlockRule](<#LandlockRule>)
 - [type Limit](<#Limit>)
 - [type Module](<#Module>)
+- [type Mount](<#Mount>)
+- [type MountKind](<#MountKind>)
+- [type Namespace](<#Namespace>)
+- [type PTYSize](<#PTYSize>)
 - [type Process](<#Process>)
   - [func \(Process\) PID\(\) int](<#Process.PID>)
   - [func \(Process\) Signal\(sig Signal\) error](<#Process.Signal>)
   - [func \(Process\) SignalGroup\(sig Signal\) error](<#Process.SignalGroup>)
   - [func \(Process\) Stop\(ctx context.Context, grace time.Duration, sig Signal\) error](<#Process.Stop>)
   - [func \(Process\) Wait\(\) \(ExitValue, error\)](<#Process.Wait>)
+- [type ProcessHandle](<#ProcessHandle>)
+  - [func \(ProcessHandle\) Handle\(\) \(\*os.File, bool\)](<#ProcessHandle.Handle>)
+  - [func \(ProcessHandle\) SignalHandle\(sig Signal\) error](<#ProcessHandle.SignalHandle>)
 - [type Resource](<#Resource>)
   - [func \(Resource\) Known\(\) bool](<#Resource.Known>)
   - [func \(Resource\) String\(\) string](<#Resource.String>)
+- [type Result](<#Result>)
+- [type RunOptions](<#RunOptions>)
+- [type Sandbox](<#Sandbox>)
+- [type SchedPolicy](<#SchedPolicy>)
+  - [func \(SchedPolicy\) String\(\) string](<#SchedPolicy.String>)
+- [type Scheduling](<#Scheduling>)
+- [type Seccomp](<#Seccomp>)
+- [type SeccompAction](<#SeccompAction>)
+- [type Setting](<#Setting>)
 - [type Signal](<#Signal>)
   - [func \(Signal\) Int\(\) int](<#Signal.Int>)
   - [func \(Signal\) Known\(\) bool](<#Signal.Known>)
   - [func \(Signal\) OS\(\) os.Signal](<#Signal.OS>)
   - [func \(Signal\) String\(\) string](<#Signal.String>)
 - [type Spec](<#Spec>)
+- [type StartSource](<#StartSource>)
+  - [func \(StartSource\) String\(\) string](<#StartSource.String>)
 - [type Stats](<#Stats>)
 - [type StdioMode](<#StdioMode>)
   - [func \(StdioMode\) Known\(\) bool](<#StdioMode.Known>)
   - [func \(StdioMode\) String\(\) string](<#StdioMode.String>)
+- [type Terminal](<#Terminal>)
+  - [func \(Terminal\) Resize\(rows uint16, cols uint16\) error](<#Terminal.Resize>)
+  - [func \(Terminal\) Size\(\) \(PTYValue, error\)](<#Terminal.Size>)
+  - [func \(Terminal\) TTY\(\) \*os.File](<#Terminal.TTY>)
+- [type Toolchain](<#Toolchain>)
+- [type Usage](<#Usage>)
 
 ## Constants
+
+<a name="CodeAdoptionRefused"></a>
+```go
+const CodeAdoptionRefused errs.Code = 132641
+```
+
+CodeAdoptionRefused is the code of AdoptionRefused.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.CodeAdoptionRefused`.
+
+Code `0.2.6.33`
+
+<a name="CodePIDFileRefused"></a>
+```go
+const CodePIDFileRefused errs.Code = 132640
+```
+
+CodePIDFileRefused is the code of PIDFileRefused.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.CodePIDFileRefused`.
+
+Code `0.2.6.32`
+
+<a name="CodeReservedEnv"></a>
+```go
+const CodeReservedEnv errs.Code = 132639
+```
+
+CodeReservedEnv is the code of ReservedEnv, the refusal of a Spec.Env that names a variable of the SDK's own spawn protocol.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.CodeReservedEnv`.
+
+Code `0.2.6.31`
+
+<a name="CodeSandboxFailed"></a>
+```go
+const CodeSandboxFailed errs.Code = 132638
+```
+
+CodeSandboxFailed is the code of SandboxFailed.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.CodeSandboxFailed`.
+
+Code `0.2.6.30`
+
+<a name="CodeSandboxUnavailable"></a>
+```go
+const CodeSandboxUnavailable errs.Code = 132644
+```
+
+CodeSandboxUnavailable is the code of SandboxUnavailable.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.CodeSandboxUnavailable`.
+
+Code `0.2.6.36`
+
+<a name="CodeStatusUnknown"></a>
+```go
+const CodeStatusUnknown errs.Code = 132642
+```
+
+CodeStatusUnknown is the code of StatusUnknown.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.CodeStatusUnknown`.
+
+Code `0.2.6.34`
+
+<a name="FDsInherited"></a>
+```go
+const FDsInherited FDPolicy = 1
+```
+
+FDsInherited lets the child inherit every descriptor of the supervisor that lacks close-on-exec.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.FDsInherited`.
+
+<a name="FDsSealed"></a>
+```go
+const FDsSealed FDPolicy = 0
+```
+
+FDsSealed gives the child no descriptor of the supervisor's past its stdio and ExtraFiles — the zero value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.FDsSealed`.
+
+<a name="IOClassBestEffort"></a>
+```go
+const IOClassBestEffort IOClass = 2
+```
+
+IOClassBestEffort is the best-effort I/O class (IOPRIO\_CLASS\_BE).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.IOClassBestEffort`.
+
+<a name="IOClassIdle"></a>
+```go
+const IOClassIdle IOClass = 3
+```
+
+IOClassIdle gets I/O only when no other process wants the disk (IOPRIO\_CLASS\_IDLE).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.IOClassIdle`.
+
+<a name="IOClassNone"></a>
+```go
+const IOClassNone IOClass = 0
+```
+
+IOClassNone sets no I/O class, the kernel deriving one from the CPU niceness — the zero value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.IOClassNone`.
+
+<a name="IOClassRealTime"></a>
+```go
+const IOClassRealTime IOClass = 1
+```
+
+IOClassRealTime is the realtime I/O class (IOPRIO\_CLASS\_RT).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.IOClassRealTime`.
+
+<a name="LandlockExecute"></a>
+```go
+const LandlockExecute LandlockAccess = 1
+```
+
+LandlockExecute is LANDLOCK\_ACCESS\_FS\_EXECUTE (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockExecute`.
+
+<a name="LandlockIoctlDev"></a>
+```go
+const LandlockIoctlDev LandlockAccess = 32768
+```
+
+LandlockIoctlDev is LANDLOCK\_ACCESS\_FS\_IOCTL\_DEV (ABI 5, Linux 6.10).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockIoctlDev`.
+
+<a name="LandlockMakeBlock"></a>
+```go
+const LandlockMakeBlock LandlockAccess = 2048
+```
+
+LandlockMakeBlock is LANDLOCK\_ACCESS\_FS\_MAKE\_BLOCK (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockMakeBlock`.
+
+<a name="LandlockMakeChar"></a>
+```go
+const LandlockMakeChar LandlockAccess = 64
+```
+
+LandlockMakeChar is LANDLOCK\_ACCESS\_FS\_MAKE\_CHAR (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockMakeChar`.
+
+<a name="LandlockMakeDir"></a>
+```go
+const LandlockMakeDir LandlockAccess = 128
+```
+
+LandlockMakeDir is LANDLOCK\_ACCESS\_FS\_MAKE\_DIR (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockMakeDir`.
+
+<a name="LandlockMakeFifo"></a>
+```go
+const LandlockMakeFifo LandlockAccess = 1024
+```
+
+LandlockMakeFifo is LANDLOCK\_ACCESS\_FS\_MAKE\_FIFO (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockMakeFifo`.
+
+<a name="LandlockMakeReg"></a>
+```go
+const LandlockMakeReg LandlockAccess = 256
+```
+
+LandlockMakeReg is LANDLOCK\_ACCESS\_FS\_MAKE\_REG (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockMakeReg`.
+
+<a name="LandlockMakeSock"></a>
+```go
+const LandlockMakeSock LandlockAccess = 512
+```
+
+LandlockMakeSock is LANDLOCK\_ACCESS\_FS\_MAKE\_SOCK (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockMakeSock`.
+
+<a name="LandlockMakeSym"></a>
+```go
+const LandlockMakeSym LandlockAccess = 4096
+```
+
+LandlockMakeSym is LANDLOCK\_ACCESS\_FS\_MAKE\_SYM (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockMakeSym`.
+
+<a name="LandlockReadDir"></a>
+```go
+const LandlockReadDir LandlockAccess = 8
+```
+
+LandlockReadDir is LANDLOCK\_ACCESS\_FS\_READ\_DIR (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockReadDir`.
+
+<a name="LandlockReadFile"></a>
+```go
+const LandlockReadFile LandlockAccess = 4
+```
+
+LandlockReadFile is LANDLOCK\_ACCESS\_FS\_READ\_FILE (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockReadFile`.
+
+<a name="LandlockRefer"></a>
+```go
+const LandlockRefer LandlockAccess = 8192
+```
+
+LandlockRefer is LANDLOCK\_ACCESS\_FS\_REFER (ABI 2, Linux 5.19).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockRefer`.
+
+<a name="LandlockRemoveDir"></a>
+```go
+const LandlockRemoveDir LandlockAccess = 16
+```
+
+LandlockRemoveDir is LANDLOCK\_ACCESS\_FS\_REMOVE\_DIR (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockRemoveDir`.
+
+<a name="LandlockRemoveFile"></a>
+```go
+const LandlockRemoveFile LandlockAccess = 32
+```
+
+LandlockRemoveFile is LANDLOCK\_ACCESS\_FS\_REMOVE\_FILE (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockRemoveFile`.
+
+<a name="LandlockTruncate"></a>
+```go
+const LandlockTruncate LandlockAccess = 16384
+```
+
+LandlockTruncate is LANDLOCK\_ACCESS\_FS\_TRUNCATE (ABI 3, Linux 6.2).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockTruncate`.
+
+<a name="LandlockWriteFile"></a>
+```go
+const LandlockWriteFile LandlockAccess = 2
+```
+
+LandlockWriteFile is LANDLOCK\_ACCESS\_FS\_WRITE\_FILE (ABI 1).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.LandlockWriteFile`.
+
+<a name="MountBind"></a>
+```go
+const MountBind MountKind = 1
+```
+
+MountBind binds Source onto Target, recursively (systemd BindPaths=).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.MountBind`.
+
+<a name="MountReadOnly"></a>
+```go
+const MountReadOnly MountKind = 0
+```
+
+MountReadOnly binds Target onto itself and makes it read-only, recursively (systemd ReadOnlyPaths=) — the zero value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.MountReadOnly`.
+
+<a name="MountTmpfs"></a>
+```go
+const MountTmpfs MountKind = 2
+```
+
+MountTmpfs mounts an empty tmpfs on Target, nosuid and nodev (systemd TemporaryFileSystem=).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.MountTmpfs`.
+
+<a name="MountTmpfsSticky"></a>
+```go
+const MountTmpfsSticky MountKind = 3
+```
+
+MountTmpfsSticky mounts an empty tmpfs on Target, mode 1777 — sticky, writable by all, as /tmp is —, nosuid and nodev (systemd PrivateTmp=).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.MountTmpfsSticky`.
+
+<a name="NamespaceCgroup"></a>
+```go
+const NamespaceCgroup Namespace = 64
+```
+
+NamespaceCgroup puts the child in a new cgroup namespace (CLONE\_NEWCGROUP), rooted at the group it runs in, Spec.CgroupPath's when one is set — unshared once the child is placed there.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.NamespaceCgroup`.
+
+<a name="NamespaceIPC"></a>
+```go
+const NamespaceIPC Namespace = 8
+```
+
+NamespaceIPC clones the child into a new IPC namespace (CLONE\_NEWIPC).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.NamespaceIPC`.
+
+<a name="NamespaceMount"></a>
+```go
+const NamespaceMount Namespace = 4
+```
+
+NamespaceMount gives the child a private copy of the mount namespace (CLONE\_NEWNS).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.NamespaceMount`.
+
+<a name="NamespaceNet"></a>
+```go
+const NamespaceNet Namespace = 32
+```
+
+NamespaceNet clones the child into a new network namespace, with a loopback only (CLONE\_NEWNET).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.NamespaceNet`.
+
+<a name="NamespacePID"></a>
+```go
+const NamespacePID Namespace = 2
+```
+
+NamespacePID clones the child into a new PID namespace, as its PID 1 (CLONE\_NEWPID).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.NamespacePID`.
+
+<a name="NamespaceTime"></a>
+```go
+const NamespaceTime Namespace = 128
+```
+
+NamespaceTime clones the child into a new time namespace (CLONE\_NEWTIME, Linux 5.6).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.NamespaceTime`.
+
+<a name="NamespaceUTS"></a>
+```go
+const NamespaceUTS Namespace = 16
+```
+
+NamespaceUTS clones the child into a new UTS namespace (CLONE\_NEWUTS).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.NamespaceUTS`.
+
+<a name="NamespaceUser"></a>
+```go
+const NamespaceUser Namespace = 1
+```
+
+NamespaceUser clones the child into a new user namespace (CLONE\_NEWUSER).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.NamespaceUser`.
 
 <a name="ResourceAS"></a>
 ```go
@@ -200,6 +619,96 @@ const SIGTERM Signal = 15
 
 SIGTERM is the polite termination request — the default Stop signal.
 
+<a name="SchedBatch"></a>
+```go
+const SchedBatch SchedPolicy = 3
+```
+
+SchedBatch is the policy for CPU-bound batch work (SCHED\_BATCH).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.SchedBatch`.
+
+<a name="SchedFIFO"></a>
+```go
+const SchedFIFO SchedPolicy = 1
+```
+
+SchedFIFO is the first-in first-out realtime policy (SCHED\_FIFO).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.SchedFIFO`.
+
+<a name="SchedIdle"></a>
+```go
+const SchedIdle SchedPolicy = 5
+```
+
+SchedIdle runs the child only when nothing else wants the CPU (SCHED\_IDLE).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.SchedIdle`.
+
+<a name="SchedOther"></a>
+```go
+const SchedOther SchedPolicy = 0
+```
+
+SchedOther is the normal time-sharing policy (SCHED\_OTHER) — the zero value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.SchedOther`.
+
+<a name="SchedRR"></a>
+```go
+const SchedRR SchedPolicy = 2
+```
+
+SchedRR is the round-robin realtime policy (SCHED\_RR).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.SchedRR`.
+
+<a name="SeccompAllow"></a>
+```go
+const SeccompAllow SeccompAction = 2
+```
+
+SeccompAllow lets the call through (SECCOMP\_RET\_ALLOW).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.SeccompAllow`.
+
+<a name="SeccompErrno"></a>
+```go
+const SeccompErrno SeccompAction = 1
+```
+
+SeccompErrno fails the call with SeccompValue.Errno (SECCOMP\_RET\_ERRNO).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.SeccompErrno`.
+
+<a name="SeccompKill"></a>
+```go
+const SeccompKill SeccompAction = 0
+```
+
+SeccompKill kills the whole process (SECCOMP\_RET\_KILL\_PROCESS, Linux 4.14) — the zero value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.SeccompKill`.
+
+<a name="StartSourceInit"></a>
+```go
+const StartSourceInit StartSource = 1
+```
+
+StartSourceInit is the package's initialisation, not the kernel's word.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/proc/self.StartSourceInit`.
+
+<a name="StartSourceKernel"></a>
+```go
+const StartSourceKernel StartSource = 2
+```
+
+StartSourceKernel is the kernel's record of when it started the process.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/proc/self.StartSourceKernel`.
+
 <a name="StdioCapture"></a>
 ```go
 const StdioCapture StdioMode = 2
@@ -227,6 +736,101 @@ StdioNull connects every stream to the null device: output is discarded and the 
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc.StdioNull`.
 
+<a name="StdioPTY"></a>
+```go
+const StdioPTY StdioMode = 3
+```
+
+StdioPTY gives the child one pseudo-terminal for stdin, stdout and stderr, as its controlling terminal in a new session; the master is Terminal.TTY. Linux, darwin and FreeBSD.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.StdioPTY`.
+
+## Variables
+
+<a name="AdoptionRefused"></a>
+```go
+var AdoptionRefused *errs.Error
+```
+
+AdoptionRefused is returned by Attach and AttachPIDFile for a process they may not adopt.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.AdoptionRefused`.
+
+Code `0.2.6.33` · reason `ADOPTION_REFUSED` · public "The process may not be adopted"
+
+<a name="PIDFileRefused"></a>
+```go
+var PIDFileRefused *errs.Error
+```
+
+PIDFileRefused is returned by AttachPIDFile for a PID file it cannot read safely: relative, a symbolic link, not regular, or not one PID.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.PIDFileRefused`.
+
+Code `0.2.6.32` · reason `PID_FILE_REFUSED` · public "The PID file cannot be read safely"
+
+<a name="ReservedEnv"></a>
+```go
+var ReservedEnv *errs.Error
+```
+
+ReservedEnv is returned by Start and Run, before any fork, when Spec.Env names a key that begins \_\_KITSUNIUM\_SDK\_PROC\_, in any case: the SDK's own spawn protocol, which such a key would override. errors.Is matches it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.ReservedEnv`.
+
+Code `0.2.6.31` · reason `RESERVED_ENV` · public "The environment names a variable reserved by the SDK"
+
+<a name="SandboxFailed"></a>
+```go
+var SandboxFailed *errs.Error
+```
+
+SandboxFailed is returned by Start when a step of Spec.Sandbox failed in the child before its program ran; the step and errno fields say which and why.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.SandboxFailed`.
+
+Code `0.2.6.30` · reason `SANDBOX_FAILED` · public "Could not confine the process"
+
+<a name="SandboxUnavailable"></a>
+```go
+var SandboxUnavailable *errs.Error
+```
+
+SandboxUnavailable is returned by Start, before any fork, for a part of Spec.Sandbox the running kernel lacks, and by LandlockABI without Landlock; the feature field names it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.SandboxUnavailable`.
+
+Code `0.2.6.36` · reason `SANDBOX_UNAVAILABLE` · public "The kernel cannot apply the requested confinement"
+
+<a name="StatusUnknown"></a>
+```go
+var StatusUnknown *errs.Error
+```
+
+StatusUnknown is what an attached process's Wait returns once it has ended: its exit status is not this process's to read.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc.StatusUnknown`.
+
+Code `0.2.6.34` · reason `STATUS_UNKNOWN` · public "The process ended with an unknown status"
+
+<a name="Attach"></a>
+## func [Attach](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+```go
+func Attach(ctx context.Context, pid int) (proc Process, err error)
+```
+
+Attach adopts a running process this one did not spawn, held through a pidfd on Linux and kqueue knotes on darwin and the BSDs: its Wait returns once the process has ended, with StatusUnknown — only a parent reads an exit status. PID 1 and this process are AdoptionRefused; illumos, Solaris and Windows return UnsupportedPlatform.
+
+<a name="AttachPIDFile"></a>
+## func [AttachPIDFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+```go
+func AttachPIDFile(ctx context.Context, path string, want AttachScope) (proc Process, err error)
+```
+
+AttachPIDFile reads the PID file at path safely — absolute, walked without a symbolic link at its end, a regular file holding one PID, else PIDFileRefused — and adopts the process it names as Attach does. A file another user could have written or redirected is trusted only through want: the process must lie in its cgroup and run as one of its users, and a want that bounds nothing is AdoptionRefused. Linux, darwin and the BSDs; off Linux a cgroup bound is AdoptionRefused, as there is no cgroup to check.
+
 <a name="Build"></a>
 ## func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
@@ -235,6 +839,33 @@ func Build() (info BuildInfo, ok bool)
 ```
 
 Build describes what the running binary was built from, and reports false when the binary carries no build information.
+
+<a name="EnvAllow"></a>
+## func [EnvAllow](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+```go
+func EnvAllow(parent []string, keys ...string) []string
+```
+
+EnvAllow returns the entries of parent whose key is one of keys, in parent's order, a repeated key keeping its last value: the environment for a child that must see those variables and no other. Keys compare case-insensitively on Windows.
+
+<a name="EnvDeny"></a>
+## func [EnvDeny](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+```go
+func EnvDeny(parent []string, keys ...string) []string
+```
+
+EnvDeny returns the entries of parent whose key is none of keys, in parent's order, a repeated key keeping its last value. Keys compare as in EnvAllow.
+
+<a name="LandlockABI"></a>
+## func [LandlockABI](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+```go
+func LandlockABI() (abi int, err error)
+```
+
+LandlockABI returns the Landlock ABI version the running kernel implements; a Landlock right newer than it is refused unless named best-effort. SandboxUnavailable without Landlock, UnsupportedPlatform off Linux amd64 and arm64.
 
 <a name="MustStart"></a>
 ## func [MustStart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/process.go>)
@@ -245,6 +876,15 @@ func MustStart(ctx context.Context, spec Spec) Process
 
 MustStart is like [Start](#Start) but panics with the typed error when the spawn fails — UnsupportedPlatform off Unix/Windows, InvalidSpec, RlimitFailed, … It is the idiomatic Go MustX opt-in (like [regexp.MustCompile](https://pkg.go.dev/regexp#MustCompile)) for a consumer that chooses crash-on-failure at its own startup; the SDK itself never panics, and [Start](#Start) is the non-panicking form for normal use. The panic value is the typed error, so a top-level recover() can classify it via errs.CodeOf / HasCode.
 
+<a name="Open"></a>
+## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+```go
+func Open(pid int) (proc Process, err error)
+```
+
+Open returns a handle on a process this one did not spawn, held through a kernel handle (a pidfd on Linux, a process HANDLE on Windows) so that no signal reaches another process that reuses the pid. Its Wait is refused with WaitFailed — only a parent collects an exit status — and every other platform returns UnsupportedPlatform.
+
 <a name="ParseBuild"></a>
 ## func [ParseBuild](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
@@ -253,6 +893,24 @@ func ParseBuild(info *debug.BuildInfo) BuildInfo
 ```
 
 ParseBuild describes a BuildInfo from elsewhere — one a test builds by hand, or debug.ParseBuildInfo's reading of another binary — exactly as Build describes the running one.
+
+<a name="ReadIdentity"></a>
+## func [ReadIdentity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+```go
+func ReadIdentity() Identity
+```
+
+ReadIdentity reads what the kernel says the running process is. It never fails: a fact the platform does not give is zero. It hashes the binary: call it once.
+
+<a name="Run"></a>
+## func [Run](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+```go
+func Run(ctx context.Context, spec Spec, opts RunOptions) (result Result, err error)
+```
+
+Run starts spec, waits for it, and returns its exit with the first opts.MaxOutputBytes bytes of each output stream, however much the child writes: the rest is read and discarded, so the child never blocks on a full pipe. When ctx ends first the child is stopped (SIGTERM, opts.Grace, SIGKILL) and Run returns what it had with ctx's error. A MaxOutputBytes that is not positive is refused with InvalidSpec.
 
 <a name="Self"></a>
 ## func [Self](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
@@ -263,6 +921,15 @@ func Self() Stats
 
 Self takes a snapshot of the running process. It never fails: a figure the platform cannot give is zero, and Stats.CPUEstimated says when CPUTime is the runtime's estimate rather than the kernel's count.
 
+<a name="SetOOMScoreAdj"></a>
+## func [SetOOMScoreAdj](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+```go
+func SetOOMScoreAdj(n int) error
+```
+
+SetOOMScoreAdj sets the running process's own OOM-killer bias (/proc/self/oom\_score\_adj, -1000 to 1000), so a supervisor can outlive its children; lowering it needs CAP\_SYS\_RESOURCE. RlimitFailed when refused, UnsupportedPlatform off Linux.
+
 <a name="Start"></a>
 ## func [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
@@ -271,6 +938,29 @@ func Start(ctx context.Context, spec Spec) (proc Process, err error)
 ```
 
 Start spawns the process described by spec and returns a live Process handle. It delegates to internal/service/proc/exec; ctx is honoured up to the fork/exec boundary. A bare Spec.Path is searched in the child's PATH (see the package documentation). On Windows the Unix-only Spec fields are refused with UnsupportedPlatform; on platforms that are neither Unix nor Windows, Start itself returns UnsupportedPlatform.
+
+<a name="AttachScope"></a>
+## type [AttachScope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+AttachScope bounds the process an untrustworthy PID file may name: a cgroup v2 subtree and the users it may run as. It is an alias of the core port's AttachValue.
+
+```go
+type AttachScope = coreproc.AttachValue
+```
+
+AttachScope is an alias of `github.com/kitsunium/sdk/internal/core/proc.AttachValue`, declared as:
+
+```go
+type AttachScope struct {
+	// Cgroup is a cgroup v2 path as /proc/<pid>/cgroup names it —
+	// "/system.slice/web.service" —: the process must be in it or below it. Empty
+	// checks no cgroup.
+	Cgroup string
+	// UIDs are the users the process may run as: its real and its effective uid
+	// must both be one of them. Empty checks no user.
+	UIDs   []int
+}
+```
 
 <a name="BuildInfo"></a>
 ## type [BuildInfo](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
@@ -295,6 +985,13 @@ type BuildInfo struct {
 	// Deps are the dependencies linked into the binary, in the order the
 	// toolchain recorded them.
 	Deps      []ModuleValue
+	// Toolchain is how the toolchain built the binary: the target, the
+	// compiler, the flags and the cgo setting, read from the build settings.
+	Toolchain ToolchainValue
+	// Settings are every build setting the toolchain recorded, verbatim and in
+	// its order — the vcs stamp and the toolchain's included, and a key a later
+	// toolchain adds that Toolchain does not name.
+	Settings  []SettingValue
 }
 ```
 
@@ -306,6 +1003,72 @@ func (*BuildInfo) Module(path string) (found ModuleValue, ok bool)
 ```
 
 Module returns the module whose path is path — the main module or one of the dependencies — and whether the build contains it.
+
+<a name="BuildInfo.Reproducible"></a>
+### func \(BuildInfo\) [Reproducible](<https://github.com/kitsunium/sdk/blob/main/internal/service/proc/buildinfo/build.go>)
+
+```go
+func (*BuildInfo) Reproducible() bool
+```
+
+Reproducible reports whether the build can be made again byte for byte from its source: built with -trimpath, from a recorded revision, with no uncommitted change. It is false for a build that does not say — one outside version control, or a Bazel build, which stamps none of the three.
+
+<a name="Capabilities"></a>
+## type [Capabilities](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Capabilities is the capability state a sandboxed child execs with. It is an alias of the core port's CapabilitiesValue.
+
+```go
+type Capabilities = coreproc.CapabilitiesValue
+```
+
+Capabilities is an alias of `github.com/kitsunium/sdk/internal/core/proc.CapabilitiesValue`, declared as:
+
+```go
+type Capabilities struct {
+	// Bounding is the bounding set the child keeps (systemd
+	// CapabilityBoundingSet=): every capability the kernel knows outside it is
+	// dropped with PR_CAPBSET_DROP, which needs CAP_SETPCAP — as uid 0 in a user
+	// namespace has. The zero value drops them all.
+	Bounding   uint64
+	// Ambient is raised in the child's ambient set (systemd
+	// AmbientCapabilities=), so a program that is not root keeps them across
+	// execve; its inheritable set becomes this one. It must lie within Bounding.
+	Ambient    uint64
+	// SecureBits, when non-zero, is set with PR_SET_SECUREBITS (systemd
+	// SecureBits=), its bits those of linux/securebits.h.
+	SecureBits uint32
+}
+```
+
+<a name="ContextWaiter"></a>
+## type [ContextWaiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+ContextWaiter is the sibling of Process that bounds a wait (WaitContext); the Process Start returns implements it. It is an alias of the core port.
+
+```go
+type ContextWaiter = coreproc.ContextWaiter
+```
+
+ContextWaiter is an alias of `github.com/kitsunium/sdk/internal/core/proc.ContextWaiter`, declared as:
+
+```go
+type ContextWaiter interface {
+	// WaitContext waits like Wait until the process exits or ctx is done. When
+	// ctx ends first it returns ctx's error and the child keeps running; a later
+	// Wait or WaitContext still reports the real exit.
+	WaitContext(ctx context.Context) (ExitValue, error)
+}
+```
+
+<a name="ContextWaiter.WaitContext"></a>
+### func \(ContextWaiter\) [WaitContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (ContextWaiter) WaitContext(ctx context.Context) (ExitValue, error)
+```
+
+WaitContext waits like Wait until the process exits or ctx is done. When ctx ends first it returns ctx's error and the child keeps running; a later Wait or WaitContext still reports the real exit.
 
 <a name="Distribution"></a>
 ## type [Distribution](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
@@ -377,6 +1140,15 @@ type ExitResult struct {
 	// rounding up; Linux and the BSDs report KiB, passed through. It is 0 when
 	// the platform does not supply it (illumos, Solaris and Windows).
 	MaxRSS     int64
+	// CoreDumped reports whether the signalled death left a core image
+	// (WaitStatus.CoreDump). It is false for a normal exit, and wherever the
+	// platform cannot say (Windows).
+	CoreDumped bool
+	// Usage is the rest of wait4's resource accounting — page faults, block I/O
+	// and context switches — read from the same rusage as UserTime and MaxRSS.
+	// It is nil where the platform does not supply it (illumos, Solaris and
+	// Windows).
+	Usage      *UsageValue
 }
 ```
 
@@ -388,6 +1160,172 @@ func (ExitResult) Success() bool
 ```
 
 Success reports whether the process exited normally with status zero.
+
+<a name="FDPolicy"></a>
+## type [FDPolicy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+FDPolicy says which of the supervisor's descriptors a child inherits besides its stdio and ExtraFiles (Spec.FDs). It is an alias of the core port type.
+
+```go
+type FDPolicy = coreproc.FDPolicy
+```
+
+FDPolicy is an alias of `github.com/kitsunium/sdk/internal/core/proc.FDPolicy`, declared as:
+
+```go
+type FDPolicy uint8
+```
+
+<a name="IDMap"></a>
+## type [IDMap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+IDMap is one line of a user namespace's uid\_map or gid\_map. It is an alias of the core port's IDMapValue.
+
+```go
+type IDMap = coreproc.IDMapValue
+```
+
+IDMap is an alias of `github.com/kitsunium/sdk/internal/core/proc.IDMapValue`, declared as:
+
+```go
+type IDMap struct {
+	// Inside is the first id in the namespace.
+	Inside  uint32
+	// Outside is the id Inside maps to in the supervisor's namespace.
+	Outside uint32
+	// Size is the number of ids mapped; it must be at least 1.
+	Size    uint32
+}
+```
+
+<a name="IOClass"></a>
+## type [IOClass](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+IOClass is an I/O scheduling class. It is an alias of the core port type.
+
+```go
+type IOClass = coreproc.IOClass
+```
+
+IOClass is an alias of `github.com/kitsunium/sdk/internal/core/proc.IOClass`, declared as:
+
+```go
+type IOClass int
+```
+
+<a name="IOClass.String"></a>
+### func \(IOClass\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/scheduling.go>)
+
+```go
+func (IOClass) String() string
+```
+
+String returns the lowercase class name ("none", "realtime", "besteffort", "idle"), or "ioclass(N)" for an undefined value.
+
+<a name="Identity"></a>
+## type [Identity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Identity is what the kernel says the running process is: its start, the digest and build id of its binary, its container, pid namespace and boot. It is an alias of the service value.
+
+```go
+type Identity = svcself.IdentityValue
+```
+
+Identity is an alias of `github.com/kitsunium/sdk/internal/service/proc/self.IdentityValue`, declared as:
+
+```go
+type Identity struct {
+	// StartedAt is when the process started: the kernel's record on Linux
+	// (/proc/self/stat's start tick after /proc/stat's boot time) and Windows
+	// (GetProcessTimes), the package's initialisation elsewhere —
+	// StartedAtSource says which.
+	StartedAt       time.Time
+	// Executable is the path of the running binary, as os.Executable reads it.
+	Executable      string
+	// BuildID is the Go build id of the running binary — its ELF
+	// .note.go.buildid, or the raw mark the linker writes at the start of the
+	// text of every format — what `go tool buildid` prints; empty when absent.
+	BuildID         string
+	// ContainerID is the 64-hex id of the container the process runs in, read
+	// from its cgroup path in the docker, cri-containerd, crio, libpod and
+	// kubepods shapes; empty outside one.
+	ContainerID     string
+	// BootID is the kernel's id of the current boot (Linux); empty elsewhere.
+	BootID          string
+	// PIDNamespace is the inode of /proc/self/ns/pid, the pid namespace's id
+	// (Linux); zero elsewhere.
+	PIDNamespace    uint64
+	// Digest is the SHA-256 of the running binary's file, valid when DigestOK.
+	Digest          [32]byte
+	// StartedAtSource says where StartedAt came from.
+	StartedAtSource StartSource
+	// DigestOK reports that the binary could be read whole and Digest holds its hash.
+	DigestOK        bool
+	// NSPid1 reports that the process is pid 1 of its pid namespace (the last
+	// NSpid entry of /proc/self/status) — the init of a container.
+	NSPid1          bool
+}
+```
+
+<a name="Landlock"></a>
+## type [Landlock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Landlock restricts a sandboxed child's filesystem access. It is an alias of the core port's LandlockValue.
+
+```go
+type Landlock = coreproc.LandlockValue
+```
+
+Landlock is an alias of `github.com/kitsunium/sdk/internal/core/proc.LandlockValue`, declared as:
+
+```go
+type Landlock struct {
+	// Handled is the set of rights restricted; it must not be empty.
+	Handled    LandlockAccess
+	// Rules grant rights beneath paths.
+	Rules      []LandlockRuleValue
+	// BestEffort is the set of rights dropped rather than refused when the
+	// kernel's ABI lacks them.
+	BestEffort LandlockAccess
+}
+```
+
+<a name="LandlockAccess"></a>
+## type [LandlockAccess](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+LandlockAccess is a set of Landlock filesystem rights. It is an alias of the core port type.
+
+```go
+type LandlockAccess = coreproc.LandlockAccess
+```
+
+LandlockAccess is an alias of `github.com/kitsunium/sdk/internal/core/proc.LandlockAccess`, declared as:
+
+```go
+type LandlockAccess uint64
+```
+
+<a name="LandlockRule"></a>
+## type [LandlockRule](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+LandlockRule grants rights beneath a path. It is an alias of the core port's LandlockRuleValue.
+
+```go
+type LandlockRule = coreproc.LandlockRuleValue
+```
+
+LandlockRule is an alias of `github.com/kitsunium/sdk/internal/core/proc.LandlockRuleValue`, declared as:
+
+```go
+type LandlockRule struct {
+	// Path is the absolute file or directory the rule covers, opened by the
+	// child after its mounts and its pivot.
+	Path   string
+	// Access is the set of rights granted beneath Path; it must lie within
+	// LandlockValue.Handled.
+	Access LandlockAccess
+}
+```
 
 <a name="Limit"></a>
 ## type [Limit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
@@ -458,6 +1396,82 @@ type Module struct {
 }
 ```
 
+<a name="Mount"></a>
+## type [Mount](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Mount is one mount a sandboxed child makes in its mount namespace. It is an alias of the core port's MountValue.
+
+```go
+type Mount = coreproc.MountValue
+```
+
+Mount is an alias of `github.com/kitsunium/sdk/internal/core/proc.MountValue`, declared as:
+
+```go
+type Mount struct {
+	// Kind is what is mounted.
+	Kind     MountKind
+	// Source is the directory or file a MountBind binds; empty for every other
+	// kind.
+	Source   string
+	// Target is the absolute path mounted on; it must exist.
+	Target   string
+	// ReadOnly makes a MountBind or a MountTmpfs read-only, recursively (a
+	// MountReadOnly always is).
+	ReadOnly bool
+}
+```
+
+<a name="MountKind"></a>
+## type [MountKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+MountKind is what a Mount mounts. It is an alias of the core port type.
+
+```go
+type MountKind = coreproc.MountKind
+```
+
+MountKind is an alias of `github.com/kitsunium/sdk/internal/core/proc.MountKind`, declared as:
+
+```go
+type MountKind uint8
+```
+
+<a name="Namespace"></a>
+## type [Namespace](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Namespace is a set of Linux namespaces (Sandbox.Namespaces). It is an alias of the core port type.
+
+```go
+type Namespace = coreproc.Namespace
+```
+
+Namespace is an alias of `github.com/kitsunium/sdk/internal/core/proc.Namespace`, declared as:
+
+```go
+type Namespace uint32
+```
+
+<a name="PTYSize"></a>
+## type [PTYSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+PTYSize is a pseudo-terminal's window size in character cells. It is an alias of the core port's PTYValue.
+
+```go
+type PTYSize = coreproc.PTYValue
+```
+
+PTYSize is an alias of `github.com/kitsunium/sdk/internal/core/proc.PTYValue`, declared as:
+
+```go
+type PTYSize struct {
+	// Rows is the number of character rows.
+	Rows uint16
+	// Cols is the number of character columns.
+	Cols uint16
+}
+```
+
 <a name="Process"></a>
 ## type [Process](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
@@ -477,17 +1491,26 @@ type Process interface {
 	Signal(sig Signal) error
 	// SignalGroup delivers sig to the leader's entire process group (kill(-pgid,
 	// sig)), reaching forked grandchildren — the KillMode=control-group analogue.
+	// On Windows a Setpgid child's console process group receives the matching
+	// console control event instead — CTRL_C for SIGINT, CTRL_BREAK for SIGTERM,
+	// SIGHUP and SIGQUIT — and SIGKILL, or any signal to a child without its own
+	// group, reaches the leader alone.
 	SignalGroup(sig Signal) error
 	// Stop terminates the process group gracefully: it sends sig, waits up to
 	// grace for exit, then escalates to SIGKILL. It returns when the process has
-	// exited or ctx is cancelled.
+	// exited or ctx is cancelled. On Windows sig reaches a Setpgid child as its
+	// console control event, as SignalGroup sends it, and the escalation is
+	// TerminateProcess.
 	Stop(ctx context.Context, grace time.Duration, sig Signal) error
 	// Wait blocks until the process exits and returns its ExitValue — the real
 	// one even when a running Reaper collected the child first. It is safe
 	// to call once; concurrent or repeated calls observe the same outcome. Under
 	// StdioCapture it returns only after every captured byte has reached the
 	// caller's writers; if a writer itself failed, the ExitValue still reports the
-	// real exit status and the error is StdioCaptureFailed.
+	// real exit status and the error is StdioCaptureFailed. A process the child
+	// left behind can hold its output pipe past the exit: Spec.DrainGrace bounds
+	// that wait, after which the pipes are closed and the error, beside the real
+	// ExitValue, is StdioDrainTimeout.
 	Wait() (ExitValue, error)
 }
 ```
@@ -517,7 +1540,7 @@ Signal delivers sig to the leader process only.
 func (Process) SignalGroup(sig Signal) error
 ```
 
-SignalGroup delivers sig to the leader's entire process group (kill(-pgid, sig)), reaching forked grandchildren — the KillMode=control-group analogue.
+SignalGroup delivers sig to the leader's entire process group (kill(-pgid, sig)), reaching forked grandchildren — the KillMode=control-group analogue. On Windows a Setpgid child's console process group receives the matching console control event instead — CTRL\_C for SIGINT, CTRL\_BREAK for SIGTERM, SIGHUP and SIGQUIT — and SIGKILL, or any signal to a child without its own group, reaches the leader alone.
 
 <a name="Process.Stop"></a>
 ### func \(Process\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
@@ -526,7 +1549,7 @@ SignalGroup delivers sig to the leader's entire process group (kill(-pgid, sig))
 func (Process) Stop(ctx context.Context, grace time.Duration, sig Signal) error
 ```
 
-Stop terminates the process group gracefully: it sends sig, waits up to grace for exit, then escalates to SIGKILL. It returns when the process has exited or ctx is cancelled.
+Stop terminates the process group gracefully: it sends sig, waits up to grace for exit, then escalates to SIGKILL. It returns when the process has exited or ctx is cancelled. On Windows sig reaches a Setpgid child as its console control event, as SignalGroup sends it, and the escalation is TerminateProcess.
 
 <a name="Process.Wait"></a>
 ### func \(Process\) [Wait](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
@@ -535,7 +1558,53 @@ Stop terminates the process group gracefully: it sends sig, waits up to grace fo
 func (Process) Wait() (ExitValue, error)
 ```
 
-Wait blocks until the process exits and returns its ExitValue — the real one even when a running Reaper collected the child first. It is safe to call once; concurrent or repeated calls observe the same outcome. Under StdioCapture it returns only after every captured byte has reached the caller's writers; if a writer itself failed, the ExitValue still reports the real exit status and the error is StdioCaptureFailed.
+Wait blocks until the process exits and returns its ExitValue — the real one even when a running Reaper collected the child first. It is safe to call once; concurrent or repeated calls observe the same outcome. Under StdioCapture it returns only after every captured byte has reached the caller's writers; if a writer itself failed, the ExitValue still reports the real exit status and the error is StdioCaptureFailed. A process the child left behind can hold its output pipe past the exit: Spec.DrainGrace bounds that wait, after which the pipes are closed and the error, beside the real ExitValue, is StdioDrainTimeout.
+
+<a name="ProcessHandle"></a>
+## type [ProcessHandle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+ProcessHandle is the sibling of Process that reaches the process through a kernel handle rather than its pid (Handle, SignalHandle). It is an alias of the core port.
+
+```go
+type ProcessHandle = coreproc.ProcessHandle
+```
+
+ProcessHandle is an alias of `github.com/kitsunium/sdk/internal/core/proc.ProcessHandle`, declared as:
+
+```go
+type ProcessHandle interface {
+	// Handle returns a new descriptor for the process, which the caller owns and
+	// closes: a pidfd on Linux — readable once the process exits, so it can be
+	// polled, or passed to another process — and a duplicated process HANDLE on
+	// Windows. It reports false where none is available: a kernel without pidfd,
+	// another platform, or a process already reaped.
+	Handle() (*os.File, bool)
+	// SignalHandle delivers sig through the process's kernel handle
+	// (pidfd_send_signal on Linux), never by pid: once the process is reaped it
+	// fails with SignalFailed wrapping ESRCH instead of reaching a process that
+	// reused the pid. It returns HandleUnavailable where the kernel gave no handle,
+	// and UnsupportedPlatform off Linux and Windows.
+	SignalHandle(sig Signal) error
+}
+```
+
+<a name="ProcessHandle.Handle"></a>
+### func \(ProcessHandle\) [Handle](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (ProcessHandle) Handle() (*os.File, bool)
+```
+
+Handle returns a new descriptor for the process, which the caller owns and closes: a pidfd on Linux — readable once the process exits, so it can be polled, or passed to another process — and a duplicated process HANDLE on Windows. It reports false where none is available: a kernel without pidfd, another platform, or a process already reaped.
+
+<a name="ProcessHandle.SignalHandle"></a>
+### func \(ProcessHandle\) [SignalHandle](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (ProcessHandle) SignalHandle(sig Signal) error
+```
+
+SignalHandle delivers sig through the process's kernel handle (pidfd\_send\_signal on Linux), never by pid: once the process is reaped it fails with SignalFailed wrapping ESRCH instead of reaching a process that reused the pid. It returns HandleUnavailable where the kernel gave no handle, and UnsupportedPlatform off Linux and Windows.
 
 <a name="Resource"></a>
 ## type [Resource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
@@ -570,6 +1639,217 @@ func (Resource) String() string
 
 String reports the canonical lowercase name of r (e.g. "nofile"), or "unknown" for an unrecognised value. The names match the suffix of the systemd Limit\* directives.
 
+<a name="Result"></a>
+## type [Result](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Result is what Run returns: the exit and the head of each output stream. It is an alias of the core port's ResultValue.
+
+```go
+type Result = coreproc.ResultValue
+```
+
+Result is an alias of `github.com/kitsunium/sdk/internal/core/proc.ResultValue`, declared as:
+
+```go
+type Result struct {
+	// Exit is the child's ExitValue.
+	Exit      ExitValue
+	// Stdout is the first RunValue.MaxOutputBytes bytes the child wrote to its standard output.
+	Stdout    []byte
+	// Stderr is the first RunValue.MaxOutputBytes bytes the child wrote to its standard error.
+	Stderr    []byte
+	// Truncated reports whether either stream wrote more than MaxOutputBytes, the
+	// rest of it read and discarded.
+	Truncated bool
+}
+```
+
+<a name="RunOptions"></a>
+## type [RunOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+RunOptions configures Run: the bytes kept from each output stream and the grace a cancelled run's child is given. It is an alias of the core port's RunValue.
+
+```go
+type RunOptions = coreproc.RunValue
+```
+
+RunOptions is an alias of `github.com/kitsunium/sdk/internal/core/proc.RunValue`, declared as:
+
+```go
+type RunOptions struct {
+	// MaxOutputBytes is the number of bytes kept from each of stdout and stderr.
+	// The child's output past it is read and discarded, so the child never blocks
+	// on a full pipe and the caller never holds more. It must be positive: Run
+	// refuses zero with InvalidSpec (ADR 0031).
+	MaxOutputBytes int
+	// Grace is how long a child whose run was cancelled is given between SIGTERM
+	// and SIGKILL; zero or less escalates at once.
+	Grace          time.Duration
+}
+```
+
+<a name="Sandbox"></a>
+## type [Sandbox](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Sandbox is the isolation a child is spawned under (Spec.Sandbox): namespaces, mounts, a new root, capabilities, no\_new\_privs, Landlock and seccomp. It is an alias of the core port's SandboxValue.
+
+```go
+type Sandbox = coreproc.SandboxValue
+```
+
+Sandbox is an alias of `github.com/kitsunium/sdk/internal/core/proc.SandboxValue`, declared as:
+
+```go
+type Sandbox struct {
+	// Namespaces are the namespaces the child is cloned into (systemd
+	// PrivateUsers=, PrivatePIDs=, PrivateMounts=, PrivateIPC=, ProtectHostname=,
+	// PrivateNetwork=, ProtectControlGroups=). A mount namespace is unshared
+	// with every mount of it made private first, so nothing the child mounts
+	// propagates back. Without NamespaceUser, an unprivileged supervisor's
+	// clone is refused by the kernel.
+	Namespaces      Namespace
+	// UIDMap maps the user namespace's uids to the supervisor's (NamespaceUser).
+	// Empty maps the namespace's uid 0 to the supervisor's effective uid, one id
+	// wide — the one mapping an unprivileged supervisor may write.
+	UIDMap          []IDMapValue
+	// GIDMap maps the user namespace's gids, as UIDMap maps the uids; setgroups(2)
+	// is denied in the namespace.
+	GIDMap          []IDMapValue
+	// Mounts are made in order in the child's mount namespace, which they
+	// require (NamespaceMount).
+	Mounts          []MountValue
+	// Root, when not empty, is the absolute directory the child pivots into
+	// after its Mounts (systemd RootDirectory=, through pivot_root(2)); the old
+	// root is detached. Spec.Path and Spec.Dir are then paths inside it, and
+	// Spec.Path must hold a '/'. It requires NamespaceMount.
+	Root            string
+	// Capabilities, when non-nil, bounds the child's capabilities; nil leaves
+	// them as inherited.
+	Capabilities    *CapabilitiesValue
+	// NoNewPrivileges sets no_new_privs (systemd NoNewPrivileges=): no execve of
+	// the child or its descendants gains a privilege. Landlock and Seccomp set
+	// it whatever this says, as the kernel requires of an unprivileged caller.
+	NoNewPrivileges bool
+	// Landlock, when non-nil, restricts the child's access to the filesystem.
+	Landlock        *LandlockValue
+	// Seccomp, when non-nil, filters the child's system calls.
+	Seccomp         *SeccompValue
+}
+```
+
+<a name="SchedPolicy"></a>
+## type [SchedPolicy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+SchedPolicy is a CPU scheduling policy. It is an alias of the core port type.
+
+```go
+type SchedPolicy = coreproc.SchedPolicy
+```
+
+SchedPolicy is an alias of `github.com/kitsunium/sdk/internal/core/proc.SchedPolicy`, declared as:
+
+```go
+type SchedPolicy int
+```
+
+<a name="SchedPolicy.String"></a>
+### func \(SchedPolicy\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/scheduling.go>)
+
+```go
+func (SchedPolicy) String() string
+```
+
+String returns the lowercase policy name ("other", "fifo", "rr", "batch", "idle"), or "schedpolicy(N)" for an undefined value.
+
+<a name="Scheduling"></a>
+## type [Scheduling](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Scheduling is the CPU scheduling policy and I/O priority of Spec.Scheduling. It is an alias of the core port's SchedulingValue.
+
+```go
+type Scheduling = coreproc.SchedulingValue
+```
+
+Scheduling is an alias of `github.com/kitsunium/sdk/internal/core/proc.SchedulingValue`, declared as:
+
+```go
+type Scheduling struct {
+	// Policy is the CPU scheduling policy.
+	Policy     SchedPolicy
+	// Priority is the static priority of SchedFIFO and SchedRR (1 to 99 on Linux,
+	// 0 to 31 on FreeBSD); it must be 0 for every other policy.
+	Priority   int
+	// IOClass is the I/O scheduling class; IOClassNone leaves the kernel's
+	// default, derived from the CPU niceness.
+	IOClass    IOClass
+	// IOPriority is the level within IOClassRealTime or IOClassBestEffort, from 0
+	// (highest) to 7 (lowest).
+	IOPriority int
+}
+```
+
+<a name="Seccomp"></a>
+## type [Seccomp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Seccomp is a sandboxed child's system call filter. It is an alias of the core port's SeccompValue.
+
+```go
+type Seccomp = coreproc.SeccompValue
+```
+
+Seccomp is an alias of `github.com/kitsunium/sdk/internal/core/proc.SeccompValue`, declared as:
+
+```go
+type Seccomp struct {
+	// Default is the action of every call Syscalls does not name.
+	Default  SeccompAction
+	// Syscalls are the calls Action applies to, by their Linux names ("mkdirat").
+	// A name no supported architecture knows is InvalidSpec; one this
+	// architecture lacks matches nothing.
+	Syscalls []string
+	// Action is the action of the calls Syscalls names; it must differ from
+	// Default.
+	Action   SeccompAction
+	// Errno is the error number SeccompErrno returns, 1 to 4095; zero is EPERM.
+	Errno    int
+}
+```
+
+<a name="SeccompAction"></a>
+## type [SeccompAction](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+SeccompAction is what a seccomp filter does with a call. It is an alias of the core port type.
+
+```go
+type SeccompAction = coreproc.SeccompAction
+```
+
+SeccompAction is an alias of `github.com/kitsunium/sdk/internal/core/proc.SeccompAction`, declared as:
+
+```go
+type SeccompAction uint8
+```
+
+<a name="Setting"></a>
+## type [Setting](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Setting is one build setting as the toolchain recorded it, key and value. It is an alias of the service value.
+
+```go
+type Setting = svcbuild.SettingValue
+```
+
+Setting is an alias of `github.com/kitsunium/sdk/internal/service/proc/buildinfo.SettingValue`, declared as:
+
+```go
+type Setting struct {
+	// Key names the setting, e.g. "-tags" or "GOAMD64".
+	Key   string
+	// Value is the setting's value as recorded, e.g. "a,b" or "v3".
+	Value string
+}
+```
+
 <a name="Signal"></a>
 ## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
@@ -601,7 +1881,7 @@ Int reports the raw platform signal number underlying s.
 func (Signal) Known() bool
 ```
 
-Known reports whether s names a signal in the platform table.
+Known reports whether s names a signal in the platform table or in its realtime range (Linux and FreeBSD).
 
 <a name="Signal.OS"></a>
 ### func \(Signal\) [OS](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/signal.go>)
@@ -619,7 +1899,7 @@ OS bridges s to the os.Signal expected by os/signal and Process.Signal. It is a 
 func (Signal) String() string
 ```
 
-String reports the canonical upper-case name of s (e.g. "SIGTERM"). An unrecognised signal renders as "signal \<n>" so logs stay unambiguous.
+String reports the canonical upper-case name of s (e.g. "SIGTERM"). A realtime signal renders as "SIGRTMIN" or "SIGRTMIN+n" on Linux and FreeBSD. An unrecognised signal renders as "signal \<n>" so logs stay unambiguous.
 
 <a name="Spec"></a>
 ## type [Spec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
@@ -642,78 +1922,177 @@ type Spec struct {
 	// names none (including when Env is nil). os/exec's rules apply: the first
 	// executable in PATH order wins, and a match found only through a relative
 	// entry ("." or an empty one) is refused with exec.ErrDot.
-	Path        string
+	Path          string
 	// Args is the full argv including argv[0]; when empty the service uses
 	// [Spec.Path] — the name as written, not the resolved file — as the sole
 	// argument.
-	Args        []string
+	Args          []string
 	// Dir is the working directory; empty means inherit the parent's.
-	Dir         string
+	Dir           string
 	// Env is the explicit environment; nil yields an empty environment, never
-	// implicit inheritance, so a spawned service starts from a known state.
-	Env         []string
+	// implicit inheritance, so a spawned service starts from a known state. A key
+	// set more than once keeps its last value, at the place of its last
+	// occurrence, as os/exec reads append(os.Environ(), "K=v"). A key beginning
+	// __KITSUNIUM_SDK_PROC_, in any case, is the SDK's own spawn protocol and is
+	// refused with ReservedEnv before any fork.
+	Env           []string
 	// User is the name or numeric uid to setuid to; empty leaves the parent's.
 	// The child takes the user's primary gid unless Group names one. A numeric
 	// uid with no passwd entry has no primary gid, so it needs an explicit
 	// Group: alone it fails with UnknownUser, never falling back to gid 0.
-	User        string
+	User          string
 	// Group is the name or numeric gid to setgid to. Empty leaves the user's
 	// primary gid when User is set, and the parent's when it is not.
-	Group       string
+	Group         string
 	// Groups are supplementary group names or gids (systemd SupplementaryGroups=).
-	Groups      []string
+	Groups        []string
 	// Setpgid places the child in its own process group, enabling group-kill of
 	// the whole tree (systemd KillMode=control-group without cgroups).
-	Setpgid     bool
+	Setpgid       bool
 	// Setsid starts the child in a new session detached from the controlling tty.
-	Setsid      bool
+	Setsid        bool
+	// DieWithParent, when non-zero, is the signal the child receives when the
+	// supervisor dies — a SIGKILL or a crash included, where no Stop runs. Linux and
+	// FreeBSD set the kernel's parent-death signal (PR_SET_PDEATHSIG, procctl
+	// PROC_PDEATHSIG_CTL), which fires when the THREAD that forked the child exits:
+	// the Go runtime keeps its threads, but one whose goroutine ends while locked to
+	// it exits with it. Windows places the child in a Job Object with
+	// KILL_ON_JOB_CLOSE whose handle stays open for the supervisor's life, so any
+	// non-zero signal means termination there. Elsewhere a non-zero value surfaces
+	// UnsupportedPlatform before anything is spawned. The zero Signal requests
+	// nothing.
+	DieWithParent Signal
 	// Umask, when non-nil, is the file-creation mask applied to the child
 	// (systemd UMask=).
-	Umask       *int
+	Umask         *int
 	// Nice, when non-nil, is the scheduling-priority adjustment applied to the
-	// child (systemd Nice=).
-	Nice        *int
+	// child (systemd Nice=). On Windows it selects the child's priority class at
+	// creation: -10 and below HIGH, below 0 ABOVE_NORMAL, 0 NORMAL, 1 to 10
+	// BELOW_NORMAL, above 10 IDLE.
+	Nice          *int
 	// OOMScoreAdj, when non-nil, is the /proc/<pid>/oom_score_adj value applied
 	// to the child (systemd OOMScoreAdjust=).
-	OOMScoreAdj *int
+	OOMScoreAdj   *int
+	// Scheduling, when non-nil, is the CPU scheduling policy and the I/O priority
+	// applied to the child (systemd CPUSchedulingPolicy=, CPUSchedulingPriority=,
+	// IOSchedulingClass=, IOSchedulingPriority=), on the live pid beside Nice. Linux
+	// applies both (sched_setscheduler, ioprio_set); FreeBSD applies SchedFIFO,
+	// SchedRR and SchedIdle through rtprio(2); every other platform refuses a Policy
+	// other than SchedOther or an IOClass other than IOClassNone with
+	// UnsupportedPlatform before spawning. An undefined policy or class, or an I/O
+	// level past 7, is InvalidSpec; a refusal by the kernel (a realtime policy
+	// without CAP_SYS_NICE) is RlimitFailed and the child is torn down.
+	Scheduling    *SchedulingValue
 	// Rlimits are per-resource soft/hard limits applied post-fork, pre-exec
 	// (systemd Limit*=); resources unsupported on the platform surface a typed
-	// error rather than silently no-op.
-	Rlimits     map[Resource]LimitValue
+	// error rather than silently no-op. Without a ResourceNoFile entry the child
+	// does not inherit the supervisor's open-file soft limit: the Go runtime
+	// raises its own to the hard limit at start and puts the original back in
+	// every child it forks, until rlimit.KeepRaisedNoFile is called.
+	Rlimits       map[Resource]LimitValue
 	// CgroupPath, when non-empty, is an already-created cgroup v2 directory the
 	// child is placed into BEFORE exec, so controller limits (MemoryMax/TasksMax/
 	// …) apply from its first instruction — closing the unconfined window that a
 	// post-spawn Group.Add(pid) leaves open (systemd places the unit's payload in
-	// its cgroup the same way). The service writes the child's pid to
-	// <CgroupPath>/cgroup.procs in the pre-exec trampoline. Linux-only: a non-empty
+	// its cgroup the same way). On Linux 5.7 and later the child is cloned straight
+	// into the group (clone3 with CLONE_INTO_CGROUP); on an older kernel, or one
+	// whose filter refuses clone3, the pre-exec trampoline writes its pid to
+	// <CgroupPath>/cgroup.procs. Linux-only: a non-empty
 	// value on any other GOOS surfaces UnsupportedPlatform; a path that is missing,
 	// not a cgroup v2 directory, or not delegated surfaces a typed cgroup error
 	// rather than spawning unconfined.
-	CgroupPath  string
+	CgroupPath    string
 	// Stdio selects how the child's standard streams are wired: StdioInherit
-	// (default — share the parent's), StdioNull (discard to the null device), or
-	// StdioCapture (use the Stdout/Stderr/Stdin members below). systemd
+	// (default — share the parent's), StdioNull (discard to the null device),
+	// StdioCapture (use the Stdout/Stderr/Stdin members below), or StdioPTY (one
+	// pseudo-terminal for all three, sized by PTY). systemd
 	// StandardOutput=/StandardError=/StandardInput= is the analogue.
-	Stdio       StdioMode
+	Stdio         StdioMode
 	// Stdout, when Stdio is StdioCapture, receives the child's standard output;
 	// a nil writer discards that stream to the null device.
-	Stdout      io.Writer
+	Stdout        io.Writer
 	// Stderr, when Stdio is StdioCapture, receives the child's standard error;
 	// a nil writer discards that stream to the null device.
-	Stderr      io.Writer
+	Stderr        io.Writer
 	// Stdin, when Stdio is StdioCapture, is copied to the child's standard input;
 	// a nil reader gives the child an immediate-EOF stdin. The reader should be
 	// EOF-terminating (a buffer, file, or strings.Reader); the copier closes the
 	// child's stdin at EOF and never blocks Wait.
-	Stdin       io.Reader
+	Stdin         io.Reader
+	// PTY, when Stdio is StdioPTY, is the initial window size of the child's
+	// pseudo-terminal; nil leaves the size a new terminal has (zero by zero). It is
+	// ignored in every other mode.
+	PTY           *PTYValue
+	// DrainGrace bounds how long Wait waits for the StdioCapture copiers once the
+	// exit status is in hand. A process the child left behind that inherited its
+	// stdout or stderr — a daemon, `sleep 60 &` — keeps the pipe open after the
+	// child exits; when the grace closes, Wait closes the parent's pipe ends and
+	// returns the real ExitValue with StdioDrainTimeout. The zero value is the
+	// bounded default of one second (ADR 0031); a negative value waits for every
+	// byte however long the pipes stay open.
+	DrainGrace    time.Duration
 	// ExtraFiles are additional open files inherited by the child, in order,
 	// starting at file descriptor 3 (after stdin/stdout/stderr). This is the
 	// mechanism behind socket activation (sd_listen_fds): an activator binds
 	// listening sockets and passes them here, then sets LISTEN_FDS/LISTEN_PID in
-	// Env so the child finds them at fd 3..3+len-1. nil means no extra fds.
-	ExtraFiles  []*os.File
+	// Env so the child finds them at fd 3..3+len-1. nil means no extra fds. They
+	// are the only descriptors past stdio the child gets, unless FDs says otherwise.
+	ExtraFiles    []*os.File
+	// PIDEnv names variables the child is given set to its own PID, in decimal:
+	// the spawn sets them after the fork, before the program runs — what
+	// LISTEN_PID and WATCHDOG_PID need, since no parent knows a child's PID
+	// before forking it. A name here replaces the same name in Env. Setting one
+	// routes the spawn through the trampoline, as Rlimits and Umask do; Windows
+	// refuses it with UnsupportedPlatform. A name that is empty or holds '=',
+	// ',' or NUL is InvalidSpec, one beginning __KITSUNIUM_SDK_PROC_ ReservedEnv.
+	PIDEnv        []string
+	// FDs says which of the supervisor's descriptors the child inherits besides its
+	// stdio and ExtraFiles. FDsSealed — the zero value — gives it none: Start first
+	// marks every descriptor of the supervisor from 3 up close-on-exec, one
+	// close_range(CLOSE_RANGE_CLOEXEC) on Linux 5.11 and later and on FreeBSD,
+	// otherwise a walk of /proc/self/fd (Linux, illumos, Solaris) or /dev/fd (darwin
+	// and the BSDs). The mark is process-wide and closes nothing: the supervisor keeps
+	// using its descriptors. FDsInherited lets the child inherit every descriptor that
+	// lacks close-on-exec, as fork/exec does by default — after a sealed spawn, only
+	// those opened without close-on-exec since. Windows passes a child only the
+	// handles it is given, so the field changes nothing there.
+	FDs           FDPolicy
+	// Sandbox, when non-nil, is the isolation the child is spawned under:
+	// namespaces, mounts, a new root, capabilities, no_new_privs, Landlock and
+	// seccomp, applied by the spawn's second stage before the program runs, the
+	// seccomp filter last. The identity (User, Group, Groups) is then taken by
+	// that stage too, after the capability bounding set is cut, and FDs must be
+	// FDsSealed. Linux on amd64 and arm64 applies it; any other platform refuses
+	// it with UnsupportedPlatform before anything is spawned, a kernel lacking a
+	// part of it with SandboxUnavailable, and a step that fails in the child with
+	// SandboxFailed — the program never runs unconfined.
+	Sandbox       *SandboxValue
 }
 ```
+
+<a name="StartSource"></a>
+## type [StartSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+StartSource says where Identity.StartedAt came from. It aliases the service type.
+
+```go
+type StartSource = svcself.StartSource
+```
+
+StartSource is an alias of `github.com/kitsunium/sdk/internal/service/proc/self.StartSource`, declared as:
+
+```go
+type StartSource uint8
+```
+
+<a name="StartSource.String"></a>
+### func \(StartSource\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/service/proc/self/identity.go>)
+
+```go
+func (StartSource) String() string
+```
+
+String renders the source for a log line, "unknown" for a value never minted.
 
 <a name="Stats"></a>
 ## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
@@ -774,9 +2153,27 @@ type Stats struct {
 	// idle time, which counts only threads running Go code and so misses time
 	// spent in C code or blocked in the kernel — and which the runtime
 	// refreshes only at a garbage collection, so it lags by up to one GC
-	// cycle and reads zero before the first. It is true where getrusage(2)
-	// does not exist — Windows, Plan 9, wasm — and wherever it failed.
+	// cycle and reads zero before the first. It is true where the kernel's
+	// count is not at hand — Plan 9, wasm: neither getrusage(2) nor
+	// GetProcessTimes exists there — and wherever that call failed.
 	CPUEstimated    bool
+	// RSSBytes is the kernel's resident set — what the OOM killer and the
+	// cgroup count, where MemoryBytes is the runtime's mapping: /proc/self/statm
+	// on Linux, the working set on Windows, zero elsewhere (KernelMemory).
+	RSSBytes        uint64
+	// PeakRSSBytes is the most resident memory the process has held: VmHWM on
+	// Linux, getrusage(2)'s ru_maxrss on the other Unixes, the peak working set
+	// on Windows; zero on illumos and Solaris, whose kernel leaves it so.
+	PeakRSSBytes    uint64
+	// Threads is how many kernel threads the process runs (Linux); zero elsewhere.
+	Threads         int
+	// OpenFiles is how many descriptors the process holds open (Linux), or its
+	// HANDLE count (Windows); zero elsewhere — rlimit.OpenFiles counts on more
+	// platforms.
+	OpenFiles       int
+	// KernelMemory reports that RSSBytes is the kernel's count (Linux,
+	// Windows); false where the platform gives the SDK no current resident set.
+	KernelMemory    bool
 }
 ```
 
@@ -802,7 +2199,7 @@ type StdioMode uint8
 func (StdioMode) Known() bool
 ```
 
-Known reports whether m is one of the defined StdioInherit/StdioNull/StdioCapture modes (i.e. m \<= StdioCapture).
+Known reports whether m is one of the defined StdioInherit/StdioNull/StdioCapture/ StdioPTY modes (i.e. m \<= StdioPTY).
 
 <a name="StdioMode.String"></a>
 ### func \(StdioMode\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/stdio.go>)
@@ -811,6 +2208,128 @@ Known reports whether m is one of the defined StdioInherit/StdioNull/StdioCaptur
 func (StdioMode) String() string
 ```
 
-String returns the lowercase mode name ("inherit", "null", "capture"), or "stdiomode(N)" for an out-of-range value.
+String returns the lowercase mode name ("inherit", "null", "capture", "pty"), or "stdiomode(N)" for an out-of-range value.
+
+<a name="Terminal"></a>
+## type [Terminal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Terminal is the sibling of Process for a child started with StdioPTY: TTY, Resize and Size. It is an alias of the core port.
+
+```go
+type Terminal = coreproc.Terminal
+```
+
+Terminal is an alias of `github.com/kitsunium/sdk/internal/core/proc.Terminal`, declared as:
+
+```go
+type Terminal interface {
+	// Resize sets the terminal's window size (TIOCSWINSZ), and the kernel sends
+	// the child SIGWINCH. It returns PTYFailed for a child started without
+	// StdioPTY or a size the kernel refuses.
+	Resize(rows uint16, cols uint16) error
+	// Size reads the terminal's current window size (TIOCGWINSZ).
+	Size() (PTYValue, error)
+	// TTY returns the master side of the child's pseudo-terminal: what the child
+	// writes is read from it, and what is written to it is the child's input. The
+	// caller owns it and closes it; it is nil for a child started without
+	// StdioPTY.
+	TTY() *os.File
+}
+```
+
+<a name="Terminal.Resize"></a>
+### func \(Terminal\) [Resize](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (Terminal) Resize(rows uint16, cols uint16) error
+```
+
+Resize sets the terminal's window size (TIOCSWINSZ), and the kernel sends the child SIGWINCH. It returns PTYFailed for a child started without StdioPTY or a size the kernel refuses.
+
+<a name="Terminal.Size"></a>
+### func \(Terminal\) [Size](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (Terminal) Size() (PTYValue, error)
+```
+
+Size reads the terminal's current window size (TIOCGWINSZ).
+
+<a name="Terminal.TTY"></a>
+### func \(Terminal\) [TTY](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
+
+```go
+func (Terminal) TTY() *os.File
+```
+
+TTY returns the master side of the child's pseudo-terminal: what the child writes is read from it, and what is written to it is the child's input. The caller owns it and closes it; it is nil for a child started without StdioPTY.
+
+<a name="Toolchain"></a>
+## type [Toolchain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Toolchain is how the toolchain built the binary: its target, compiler, flags and cgo setting. It is an alias of the service value.
+
+```go
+type Toolchain = svcbuild.ToolchainValue
+```
+
+Toolchain is an alias of `github.com/kitsunium/sdk/internal/service/proc/buildinfo.ToolchainValue`, declared as:
+
+```go
+type Toolchain struct {
+	// OS is the target operating system, GOOS, e.g. "linux".
+	OS             string
+	// Arch is the target architecture, GOARCH, e.g. "amd64".
+	Arch           string
+	// ArchLevel is the architecture's feature level — GOAMD64, GOARM, GO386,
+	// GOARM64 and their siblings — e.g. "v3", which needs AVX2 on the host.
+	ArchLevel      string
+	// Compiler is the compiler toolchain, -compiler, e.g. "gc".
+	Compiler       string
+	// BuildMode is the -buildmode flag, e.g. "exe" or "pie".
+	BuildMode      string
+	// Tags are the build tags, -tags, in the order given; none when the build
+	// named none.
+	Tags           []string
+	// LDFlags is the -ldflags flag as given, e.g. "-s -w -X main.v=1".
+	LDFlags        string
+	// DefaultGODEBUG is the GODEBUG default the binary runs with before its
+	// environment's, e.g. "httpmuxgo121=1".
+	DefaultGODEBUG string
+	// CgoEnabled reports that CGO_ENABLED was 1.
+	CgoEnabled     bool
+	// Trimpath reports that -trimpath was set: file paths in panics and
+	// profiles are module paths, not the build machine's directories.
+	Trimpath       bool
+}
+```
+
+<a name="Usage"></a>
+## type [Usage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
+
+Usage is the page-fault, block-I/O and context-switch accounting an ExitResult carries beside CPU time and peak RSS, nil where the platform does not supply it. It is an alias of the core port's UsageValue.
+
+```go
+type Usage = coreproc.UsageValue
+```
+
+Usage is an alias of `github.com/kitsunium/sdk/internal/core/proc.UsageValue`, declared as:
+
+```go
+type Usage struct {
+	// MinorFaults counts the page faults served without I/O (ru_minflt).
+	MinorFaults      uint64
+	// MajorFaults counts the page faults that needed I/O (ru_majflt).
+	MajorFaults      uint64
+	// InBlock counts the block input operations (ru_inblock).
+	InBlock          uint64
+	// OutBlock counts the block output operations (ru_oublock).
+	OutBlock         uint64
+	// VoluntaryCtxSw counts the times the process gave up the CPU (ru_nvcsw).
+	VoluntaryCtxSw   uint64
+	// InvoluntaryCtxSw counts the times the scheduler took the CPU away (ru_nivcsw).
+	InvoluntaryCtxSw uint64
+}
+```
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

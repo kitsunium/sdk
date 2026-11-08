@@ -12,6 +12,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/proc",
+        "//internal/kernel/errs",
         "//internal/service/proc/systemd/listen",
     ],
 )
@@ -25,6 +26,7 @@ alias(
 go_test(
     name = "listen_test",
     srcs = [
+        "checkname_external_test.go",
         "gen_api_test.go",
         "sdlisten_external_test.go",
         "sdlisten_other_test.go",
@@ -32,22 +34,7 @@ go_test(
     deps = [
         ":listen",
         "//internal/core/proc",
-    ] + select({
-        "@rules_go//go/platform:js": [
-            "//internal/kernel/errs",
-        ],
-        "@rules_go//go/platform:osx": [
-            "//internal/kernel/errs",
-        ],
-        "@rules_go//go/platform:plan9": [
-            "//internal/kernel/errs",
-        ],
-        "@rules_go//go/platform:qnx": [
-            "//internal/kernel/errs",
-        ],
-        "@rules_go//go/platform:windows": [
-            "//internal/kernel/errs",
-        ],
-        "//conditions:default": [],
-    }),
+        "//internal/kernel/errs",
+        "//internal/service/proc/systemd/listen",
+    ],
 )

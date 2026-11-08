@@ -6,6 +6,7 @@ package exec
 import (
 	"errors"
 	"os"
+	"slices"
 	"syscall"
 	"testing"
 
@@ -131,5 +132,58 @@ func Test_anExitedChildIsNotAssigned(t *testing.T) {
 
 	if !errors.Is(aErr, syscall.ERROR_ACCESS_DENIED) {
 		t.Fatalf("assign(exited child) = %v, want ERROR_ACCESS_DENIED", aErr)
+	}
+}
+
+// Test_spawnEnv pins Spec.Env's contract on Windows: a nil Env is an empty
+// environment, never the parent's; a name set twice — in any case, Windows names
+// have none — keeps its last value at its last place; "=C:" and "=D:" are two
+// variables; an entry without "=" is kept as it is.
+func Test_spawnEnv(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		env  []string
+		want []string
+	}
+	tests := []tc{
+		{"nil is empty", nil, []string{}},
+		{"empty stays empty", []string{}, []string{}},
+		{"the last of a name", []string{"A=1", "B=2", "A=3"}, []string{"B=2", "A=3"}},
+		{"names ignore case", []string{"Path=a", "X=1", "PATH=b"}, []string{"X=1", "PATH=b"}},
+		{"each drive its own", []string{`=C:=C:\x`, `=D:=D:\y`}, []string{`=C:=C:\x`, `=D:=D:\y`}},
+		{"the last of a drive", []string{`=C:=C:\x`, `=C:=C:\y`}, []string{`=C:=C:\y`}},
+		{"no assignment", []string{"FLAG", "A=1", "FLAG"}, []string{"FLAG", "A=1", "FLAG"}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := spawnEnv(c.env)
+		if got == nil {
+			t.Fatal("spawnEnv returned nil, which inherits the parent's environment")
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("spawnEnv(%q) = %q, want %q", c.env, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_variableKey_isSameVariable holds variableKey to sameVariable: two names
+// share a key exactly when sameVariable takes them for one, the runes whose
+// fold classes strings.ToLower would split included.
+func Test_variableKey_isSameVariable(t *testing.T) {
+	t.Parallel()
+	names := []string{"PATH", "Path", "pAtH", "SYSTEMROOT", "SystemRoot", "=C:", "=c:", "s", "S", "\u017f", "k", "K", "\u212a", "A1_", "a1_", "\u00e9", "\u00c9", ""}
+	for _, left := range names {
+		for _, right := range names {
+			if same, keyed := sameVariable(left, right), variableKey(left) == variableKey(right); same != keyed {
+				t.Errorf("%q and %q: sameVariable %v, keys equal %v", left, right, same, keyed)
+			}
+		}
 	}
 }

@@ -43,7 +43,9 @@ The real implementation is Unix-only. On platforms without SIGCHLD/waitpid (e.g.
 - [func IsPID1\(\) bool](<#IsPID1>)
 - [func New\(opts ...Option\) Reaper](<#New>)
 - [func SetChildSubreaper\(\) error](<#SetChildSubreaper>)
+- [func WithOnExit\(fn func\(ExitEvent\)\) Option](<#WithOnExit>)
 - [func WithOnReap\(fn func\(int\)\) Option](<#WithOnReap>)
+- [type ExitEvent](<#ExitEvent>)
 - [type Option](<#Option>)
 - [type Reaper](<#Reaper>)
   - [func \(Reaper\) ReapOnce\(\) \(int, error\)](<#Reaper.ReapOnce>)
@@ -112,6 +114,15 @@ func SetChildSubreaper() error
 
 SetChildSubreaper marks the calling process as a child subreaper so orphaned descendants reparent to it rather than to PID1. It returns [SubreaperFailed](#SubreaperFailed) on a prctl error and [UnsupportedPlatform](#UnsupportedPlatform) off Unix.
 
+<a name="WithOnExit"></a>
+## func [WithOnExit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/gen_facade.go>)
+
+```go
+func WithOnExit(fn func(ExitEvent)) Option
+```
+
+WithOnExit registers fn as an observer of every child a sweep collects, an orphan included: the one record of how a re-parented descendant ended. fn runs under the sweep lock and must not block; nothing is stored.
+
 <a name="WithOnReap"></a>
 ## func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/gen_facade.go>)
 
@@ -120,6 +131,30 @@ func WithOnReap(fn func(int)) Option
 ```
 
 WithOnReap registers fn as a post-sweep observer receiving the number of children reaped in each sweep (including zero). fn must not block. On illumos and Solaris the loop also sweeps once a second, so there an idle reaper calls fn with zero once a second.
+
+<a name="ExitEvent"></a>
+## type [ExitEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/gen_facade.go>)
+
+ExitEvent is one child a sweep collected — its pid, its exit and whether a Process owned it. It aliases the service value.
+
+```go
+type ExitEvent = svc.ExitEvent
+```
+
+ExitEvent is an alias of `github.com/kitsunium/sdk/internal/service/proc/reaper.ExitEvent`, declared as:
+
+```go
+type ExitEvent struct {
+	// PID is the collected child's process id.
+	PID   int
+	// Exit is how the child ended, in the words Process.Wait uses: the exit
+	// code, or -1 and the terminating signal, and its rusage.
+	Exit  coreproc.ExitValue
+	// Owned reports that a Process spawned the child and has been handed the
+	// same status; false is an orphan, whose status ends here.
+	Owned bool
+}
+```
 
 <a name="Option"></a>
 ## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/gen_facade.go>)

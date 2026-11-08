@@ -1,0 +1,234 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_test(
+    name = "service_test",
+    srcs = [
+        "attacher_internal_test.go",
+        "attacher_linux_external_test.go",
+        "cgroupmodes_external_test.go",
+        "cgroupmodes_internal_test.go",
+        "cgroupmodes_linux_external_test.go",
+        "cgroupmodes_live_linux_external_test.go",
+        "dbus_cgroup_linux_external_test.go",
+        "dbus_internal_test.go",
+        "dbus_linux_external_test.go",
+        "dbus_linux_internal_test.go",
+        "dbus_live_linux_external_test.go",
+        "dbus_sandbox_linux_external_test.go",
+        "descriptors_external_test.go",
+        "export_linux_internal_test.go",
+        "fdstore_internal_test.go",
+        "fdstore_linux_external_test.go",
+        "fdstore_other_internal_test.go",
+        "forking_cgroup_linux_external_test.go",
+        "forking_internal_test.go",
+        "forking_linux_external_test.go",
+        "gen_api_test.go",
+        "handover_codec_internal_test.go",
+        "handover_linux_external_test.go",
+        "handover_reexec_linux_external_test.go",
+        "harness_internal_test.go",
+        "helperguard_linux_external_test.go",
+        "instance_external_test.go",
+        "instance_internal_test.go",
+        "instance_unix_external_test.go",
+        "nosleep_external_test.go",
+        "notify_linux_external_test.go",
+        "notifysource_internal_test.go",
+        "reduce_internal_test.go",
+        "restart_internal_test.go",
+        "sandbox_linux_external_test.go",
+        "sandboxdirectives_internal_test.go",
+        "sandboxwire_internal_test.go",
+        "settings_internal_test.go",
+        "unit_external_test.go",
+        "unit_unix_external_test.go",
+        "windows_internal_test.go",
+    ],
+    # TestNoWallClockWait parses the engine's production files (ADR 0214 §5).
+    data = glob(["*.go"]),
+    embed = [":service"],
+    # 60 s is the suite's budget under --test_timeout (.bazelrc): real units,
+    # the descriptor-store and hand-over suites, take 50 s under race and
+    # overran it under coverage on the first CI run; eight shards deal them apart.
+    shard_count = 8,
+    deps = [
+        "//internal/core/proc",
+        "//internal/core/proc/service",
+        "//internal/kernel/errs",
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:android": [
+            "//internal/kernel/clock",
+            "//internal/service/proc/dbus",
+            "//internal/service/proc/systemd/notify",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:js": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//internal/kernel/clock",
+            "//internal/service/proc/dbus",
+            "//internal/service/proc/systemd/notify",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:osx": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:plan9": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:qnx": [
+            "//internal/kernel/clock",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//internal/kernel/clock",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "@rules_go//go/platform:android_386": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:android_amd64": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:android_arm": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:android_arm64": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:linux_386": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:linux_amd64": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:linux_arm": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:linux_arm64": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:linux_ppc64": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:linux_ppc64le": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:linux_riscv64": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:linux_s390x": [
+            "//internal/service/proc/cgroup",
+            "//internal/service/proc/exec",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
+go_library(
+    name = "service",
+    srcs = [
+        "actor.go",
+        "actor_cgroup.go",
+        "actor_dbus.go",
+        "actor_store.go",
+        "cgroupmodes.go",
+        "cgroupmodes_resolve.go",
+        "config.go",
+        "dbus.go",
+        "dbus_resolve.go",
+        "doc.go",
+        "enter.go",
+        "events.go",
+        "fdstore.go",
+        "fdstore_linux.go",
+        "fdstore_other.go",
+        "forking.go",
+        "guess.go",
+        "guess_linux.go",
+        "guess_other.go",
+        "handover.go",
+        "handover_codec.go",
+        "handover_linux.go",
+        "handover_other.go",
+        "instance.go",
+        "model.go",
+        "monotonic_linux.go",
+        "monotonic_other.go",
+        "notify.go",
+        "observe.go",
+        "reduce.go",
+        "reexec_linux.go",
+        "reexec_linux_amd64.go",
+        "reexec_linux_arm64.go",
+        "reexec_other.go",
+        "restart.go",
+        "sandbox.go",
+        "settings.go",
+        "signals.go",
+        "signals_unix.go",
+        "signals_windows.go",
+        "spawn.go",
+        "spawned.go",
+        "spawner.go",
+        "timeout.go",
+        "unit.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/service",
+    deps = [
+        "//internal/core/proc",
+        "//internal/core/proc/service",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/proc/exec",
+        "//internal/service/proc/systemd/listen",
+        "//internal/service/proc/systemd/notify",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":service",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)

@@ -262,6 +262,87 @@ sequences:
             to: ownerOf
           when: known && uid != os.Geteuid()
       - return: nil
+  - of: checkDialDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkDialDir
+        kind: self
+      - id: checkChain
+        kind: internal
+      - id: checkDialEntry
+        kind: internal
+      - id: checkHolder
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkChain(dir)
+            to: checkChain
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkDialEntry(dir, lstat)
+            to: checkDialEntry
+          when: err != nil
+      - return: checkHolder(dir)
+        to: checkHolder
+  - of: checkDialEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkDialEntry
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: info, err
+        eval: lstat(dir)
+      - switch:
+          cases:
+            - case: err != nil
+              do:
+                - return: |-
+                    errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory cannot be read"),
+                    			errs.String("path", dir), errs.String("cause", err.Error()))
+                  to: errs
+            - case: info.Mode()&os.ModeSymlink != 0
+              do:
+                - return: errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory is a link"), errs.String("path", dir))
+                  to: errs
+            - case: "!info.IsDir()"
+              do:
+                - return: errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "not a directory"), errs.String("path", dir))
+                  to: errs
+            - case: info.Mode().Perm()&groupOrWorldWritable != 0
+              do:
+                - return: |-
+                    errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "writable by its group or by anyone"),
+                    			errs.String("path", dir), errs.String("mode", info.Mode().Perm().String()))
+                  to: errs
+      - return: nil
+  - of: endpointAdmitted
+    steps:
+      - return: uid == euid || slices.Contains(cfg.AllowUIDs, uid) || slices.Contains(cfg.AllowGIDs, gid)
+  - of: ownersOf
+    steps:
+      - opt:
+          do:
+            - return: "-1, -1, false"
+          when: info == nil
+      - bind: st, ok
+        eval: info.Sys().(*syscall.Stat_t)
+      - opt:
+          do:
+            - return: "-1, -1, false"
+          when: "!ok"
+      - return: int(st.Uid), int(st.Gid), true
   - of: ownerOf
     steps:
       - opt:
@@ -275,6 +356,119 @@ sequences:
             - return: "-1, false"
           when: "!ok"
       - return: int(st.Uid), true
+  - of: fdPassRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: fdPassRefused
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(coreipc.FDPassRefused, errs.WrapParams{}, errs.String("reason", reason))
+              to: errs
+          when: cause == nil
+      - return: errs.Wrap(coreipc.FDPassRefused, errs.WrapParams{}, errs.String("reason", reason), errs.String("cause", cause.Error()))
+        to: errs
+  - of: withFiles
+    steps:
+      - return: "&fileConn{UnixConn: c, peer: peer}"
+  - of: (*fileConn).SendFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileConn).SendFiles
+        kind: self
+      - id: fdPassRefused
+        kind: internal
+      - id: c.WriteMsgUnix
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: "!c.peer.Verified"
+              do:
+                - return: fdPassRefused("the kernel did not name the peer", nil)
+                  to: fdPassRefused
+            - case: len(payload) == 0
+              do:
+                - return: fdPassRefused("an empty payload carries no descriptor", nil)
+                  to: fdPassRefused
+      - bind: fds
+        eval: make([]int, 0, len(files))
+      - loop:
+          do:
+            - set: fds
+              value: append(fds, int(f.Fd()))
+          key: _
+          range: files
+          value: f
+      - opt:
+          do:
+            - return: fdPassRefused("the send failed", err)
+              to: fdPassRefused
+          init:
+            bind: _, _, err
+            eval: c.WriteMsgUnix(payload, syscall.UnixRights(fds...), nil)
+            to: c.WriteMsgUnix
+          when: err != nil
+      - return: nil
+  - of: (*fileConn).RecvFiles
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileConn).RecvFiles
+        kind: self
+      - id: c.ReadMsgUnix
+        kind: value
+      - id: syscall
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, nil, fdPassRefused("max is not positive", nil)
+          when: max <= 0
+      - bind: oob
+        eval: make([]byte, syscall.CmsgSpace(max*fdBytes))
+      - bind: n, oobn, flags, _, rerr
+        eval: c.ReadMsgUnix(buf, oob)
+        to: c.ReadMsgUnix
+      - opt:
+          do:
+            - return: n, nil, fdPassRefused("the receive failed", rerr)
+          when: rerr != nil
+      - bind: messages, perr
+        eval: syscall.ParseSocketControlMessage(oob[:oobn])
+        to: syscall
+      - opt:
+          do:
+            - return: n, nil, fdPassRefused("the control message did not parse", perr)
+          when: perr != nil
+      - loop:
+          do:
+            - bind: fds, uerr
+              eval: syscall.ParseUnixRights(&messages[i])
+              to: syscall
+            - opt:
+                do:
+                  - continue: true
+                when: uerr != nil
+            - loop:
+                do:
+                  - set: files
+                    value: append(files, os.NewFile(uintptr(fd), "ipc-passed"))
+                key: _
+                range: fds
+                value: fd
+          key: i
+          range: messages
+      - opt:
+          do:
+            - return: n, files, fdPassRefused("truncated", nil)
+          when: flags&syscall.MSG_CTRUNC != 0
+      - return: n, files, nil
   - of: (*Config).validate
     participants:
       - id: caller
@@ -425,13 +619,33 @@ sequences:
         kind: actor
       - id: admit
         kind: self
+      - id: admitWhere
+        kind: internal
+    steps:
+      - return: admitWhere(p, self, cfg, kernelNamesPeer)
+        to: admitWhere
+  - of: admitWhere
+    participants:
+      - id: caller
+        kind: actor
+      - id: admitWhere
+        kind: self
       - id: errs
         kind: package
     steps:
       - opt:
           do:
+            - opt:
+                do:
+                  - return: errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.String("reason", "kernel did not name the peer"))
+                    to: errs
+                when: named
             - return: nil
-          when: "!p.Verified || p.UID == self || slices.Contains(cfg.AllowUIDs, p.UID) || slices.Contains(cfg.AllowGIDs, p.GID)"
+          when: "!p.Verified"
+      - opt:
+          do:
+            - return: nil
+          when: p.UID == self || slices.Contains(cfg.AllowUIDs, p.UID) || slices.Contains(cfg.AllowGIDs, p.GID)
       - return: errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.Int("uid", p.UID), errs.Int("gid", p.GID))
         to: errs
   - of: NewDialer
@@ -604,6 +818,10 @@ sequences:
         kind: self
       - id: s.AcceptUnix
         kind: value
+      - id: peerOf
+        kind: internal
+      - id: withFiles
+        kind: internal
     steps:
       - bind: c, err
         eval: s.AcceptUnix()
@@ -612,7 +830,11 @@ sequences:
           do:
             - return: nil, coreipc.PeerValue{}, err
           when: err != nil
-      - return: c, peerOf(c), nil
+      - bind: p
+        eval: peerOf(c)
+        to: peerOf
+      - return: withFiles(c, p), p, nil
+        to: withFiles
   - of: listen
     participants:
       - id: caller
@@ -759,13 +981,22 @@ sequences:
         kind: actor
       - id: dial
         kind: self
+      - id: dialWith
+        kind: internal
+    steps:
+      - return: dialWith(ctx, cfg, os.Lstat, os.Geteuid())
+        to: dialWith
+  - of: dialWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: dialWith
+        kind: self
       - id: filepath
         kind: stdlib
-      - id: os
-        kind: stdlib
-      - id: checkDir
+      - id: checkDialDir
         kind: internal
-      - id: ownerOf
+      - id: ownersOf
         kind: internal
       - id: context
         kind: stdlib
@@ -788,31 +1019,31 @@ sequences:
                 			errs.String("cause", "nobody listens: the directory does not exist"))
           init:
             bind: _, err
-            eval: os.Lstat(dir)
-            to: os
+            eval: lstat(dir)
           when: errors.Is(err, os.ErrNotExist)
       - opt:
           do:
             - return: nil, err
           init:
             bind: err
-            eval: checkDir(dir)
-            to: checkDir
+            eval: checkDialDir(dir, lstat)
+            to: checkDialDir
           when: err != nil
       - opt:
           do:
             - opt:
                 do:
-                  - return: nil, errs.Wrap(coreipc.EndpointForeign, errs.WrapParams{}, errs.String("path", cfg.Path), errs.Int("uid", uid))
+                  - return: |-
+                      nil, errs.Wrap(coreipc.EndpointForeign, errs.WrapParams{}, errs.String("path", cfg.Path),
+                      				errs.Int("uid", uid), errs.Int("gid", gid))
                 init:
-                  bind: uid, known
-                  eval: ownerOf(info)
-                  to: ownerOf
-                when: known && uid != os.Geteuid() && !slices.Contains(cfg.AllowUIDs, uid)
+                  bind: uid, gid, known
+                  eval: ownersOf(info)
+                  to: ownersOf
+                when: known && !endpointAdmitted(uid, gid, euid, cfg)
           init:
             bind: info, err
-            eval: os.Lstat(cfg.Path)
-            to: os
+            eval: lstat(cfg.Path)
           when: err == nil
       - bind: ctx, cancel
         eval: context.WithTimeout(ctx, dialTimeout)
@@ -846,7 +1077,7 @@ sequences:
             - return: nil, err
           init:
             bind: err
-            eval: admit(p, os.Geteuid(), cfg)
+            eval: admit(p, euid, cfg)
             to: admit
           when: err != nil
-      - return: "&coreipc.Conn{Conn: c, Peer: p}, nil"
+      - return: "&coreipc.Conn{Conn: withFiles(uc, p), Peer: p}, nil"

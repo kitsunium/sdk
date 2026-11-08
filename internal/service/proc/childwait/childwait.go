@@ -36,6 +36,10 @@ type ledger struct {
 	// been handed over, so an owner whose own wait failed with ECHILD can wait
 	// for the hand-off by taking it.
 	sweeping sync.Mutex
+	// collected is the buffer one sweep's wait4 fills, guarded by sweeping. It
+	// lives here so the status shown to a ReapAnyObserved observer is not a
+	// heap allocation per sweep; handOver copies it onto the claim.
+	collected StatusValue
 }
 
 // book is the process's single ledger.
@@ -90,14 +94,15 @@ func (l *ledger) track(pid int) *Claim {
 // child: the zombie just collected is the NEWEST process to hold pid, and if a
 // spawn forked it, that spawn's claim must be in place — replacing any older
 // claim on a recycled pid — before the lookup can say whose status this is.
-// A pid still unclaimed then was an orphan's, and its status has no owner.
-func (l *ledger) deliver(pid int, status *StatusValue) {
+// A pid still unclaimed then was an orphan's, and its status has no owner: it
+// reports false.
+func (l *ledger) deliver(pid int, status *StatusValue) bool {
 	//: wait out every spawn that may have forked pid without claiming it yet.
 	l.spawning.Lock()
 	//: reopen the gate once the lookup below is conclusive.
 	defer l.spawning.Unlock()
 	//: with no spawn in flight, the claim on pid is the collected child's.
-	l.handOver(pid, status)
+	return l.handOver(pid, status)
 }
 
 // handOver stores a copy of status on the claim for pid and retires the claim

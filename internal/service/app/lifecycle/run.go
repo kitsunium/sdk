@@ -71,24 +71,17 @@ func Run(ctx context.Context, lc corelc.Lifecycle, cfg RunConfig) error {
 // waitForStop blocks until the context is cancelled or a subscribed signal
 // arrives.
 func waitForStop(ctx context.Context, sigs []coreproc.Signal) {
-	var received <-chan coreproc.Signal
 	//: an empty set installs no handler — the caller's main keeps its signals.
 	if len(sigs) > 0 {
-		channel, unsubscribe := signal.Notify(sigs...)
+		var unsubscribe func()
+		//: the signal cancels the context it waits on (#1096): one wait, not two.
+		ctx, unsubscribe = signal.NotifyContext(ctx, sigs...)
 		//: torn down before Run returns, so sequential lifecycles do not
 		//: accumulate handlers on the same process.
 		defer unsubscribe()
-		received = channel
 	}
-	//: a nil channel blocks forever, so the signal arm simply never fires when
-	//: nothing was subscribed. The same right-absence idiom as
-	//: core/net.DrainSignal: no nil check, no second select, no duplicated arm.
-	select {
-	//: the caller asked to stop.
-	case <-ctx.Done():
-	//: the operating system asked to stop.
-	case <-received:
-	}
+	//: the caller asked to stop, or the operating system did.
+	<-ctx.Done()
 }
 
 // announce delivers one opt-in sd_notify state.

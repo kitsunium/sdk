@@ -29,8 +29,8 @@ both sit in the proc family, so the rule admits exactly the family's engines.
 | File | Build tag | Surface |
 |---|---|---|
 | `doc.go` | all | the package comment — kit writes it from the design (ADR 0167) — off Unix there is no rlimit struct and the package holds nothing else |
-| `value_default.go` | `unix && !freebsd && !dragonfly` | `Make`: the pair assigned verbatim |
-| `value_signed.go` | `freebsd \|\| dragonfly` | `Make`: the pair converted to `int64`, `^uint64(0)` → `-1` |
+| `value_default.go` | `unix && !freebsd && !dragonfly` | `Make`: the pair assigned verbatim; `Pair`, its reverse (#939, `rlimit.Get`) |
+| `value_signed.go` | `freebsd \|\| dragonfly` | `Make`: the pair converted to `int64`, `^uint64(0)` → `-1`; `Pair`, its reverse, `-1` → `^uint64(0)` |
 | `value_default_external_test.go` | as `value_default.go` | the pair unchanged, infinity included |
 | `value_signed_external_test.go` | as `value_signed.go` | the conversion, and infinity as `RLIM_INFINITY` |
 

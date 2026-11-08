@@ -40,6 +40,16 @@
 // runtime and the remainder covers those, so this reduces OOM pressure rather
 // than eliminating it.
 //
+// # Which cap is the allowance
+//
+// The tightest on the way up. On cgroup v2 the allowance is the minimum of
+// memory.max and memory.high over the process's own cgroup and every ancestor:
+// the kernel reclaims and slows a group above memory.high long before memory.max
+// kills it, so the throttle is the working cap. The result's Bound says which of
+// the two file kinds set it (MemoryBoundHigh or MemoryBoundMax). cgroup v1 has no
+// such file — memory.soft_limit_in_bytes is a reclaim hint — and
+// memory.limit_in_bytes alone binds there.
+//
 // # Relation to cgroup and rlimit
 //
 // The three are distinct directions on one subject. cgroup WRITES a control group

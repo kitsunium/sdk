@@ -41,7 +41,7 @@ func Test_stdioModeNames(t *testing.T) {
 			t.Errorf("mode %d is Known but unnamed", m)
 		}
 	}
-	if len(stdioModeNames) != int(StdioCapture)+1 {
-		t.Errorf("table holds %d names for %d modes", len(stdioModeNames), int(StdioCapture)+1)
+	if len(stdioModeNames) != int(StdioPTY)+1 {
+		t.Errorf("table holds %d names for %d modes", len(stdioModeNames), int(StdioPTY)+1)
 	}
 }

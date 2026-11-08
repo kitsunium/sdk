@@ -15,6 +15,7 @@ orphaned descendants instead of leaking zombies.
 | `Reaper` | alias of `coreproc.Reaper` (Start / Stop / ReapOnce) |
 | `Option` | alias of the service option type |
 | `WithOnReap(func(int)) Option` | post-sweep observer (count per sweep; must not block) |
+| `WithOnExit(func(ExitEvent)) Option`, `ExitEvent` | per-child observer: pid, exit, owned — how an orphan ended, told once and stored nowhere (#1136) |
 | `New(opts ...Option) Reaper` | construct an idle reaper; Unix loop or no-op |
 | `SetChildSubreaper() error` | `prctl(PR_SET_CHILD_SUBREAPER, 1)` on Linux, `procctl(PROC_REAP_ACQUIRE)` on FreeBSD / DragonFly; `UnsupportedPlatform` elsewhere |
 | `IsPID1() bool` | `os.Getpid() == 1` (false off Unix) |

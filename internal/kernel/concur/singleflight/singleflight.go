@@ -133,12 +133,20 @@ func (s *shard[K, V]) join(ctx context.Context, key K, fn func(ctx context.Conte
 		//: the caller learns its result was shared.
 		return existing, true
 	}
-	//: the shared call keeps this caller's VALUES and none of its
-	//: cancellation; the cancel below is the Group's own, fired when the last
-	//: waiter leaves rather than when this one does. Built outside the lock.
-	callCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	//: one waiter (this goroutine) and one goroutine about to run fn.
-	candidate := &call[V]{done: make(chan struct{}), cancel: cancel, refs: 1}
+	//: a nil context is refused with the very panic context.WithoutCancel
+	//: raised here before #813.
+	if ctx == nil {
+		panic("cannot create context from nil parent")
+	}
+	//: one waiter (this goroutine) and one goroutine about to run fn; the
+	//: record carries the root of the shared context — this caller's VALUES
+	//: and none of its cancellation — one allocation fewer than
+	//: context.WithoutCancel (#813).
+	candidate := &call[V]{base: detached{parent: ctx}, done: make(chan struct{}), refs: 1}
+	//: the cancel is the Group's own, fired when the last waiter leaves rather
+	//: than when this one does. Built outside the lock.
+	callCtx, cancel := context.WithCancel(&candidate.base)
+	candidate.cancel = cancel
 	//: insert, unless another leader got there since the first look.
 	if winner, inserted := s.insertOrJoin(key, candidate); !inserted {
 		//: the candidate never runs: its context goes, the winner is joined.

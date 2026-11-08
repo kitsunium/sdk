@@ -37,3 +37,10 @@ func sameVariable(left, right string) bool {
 	//: byte equality.
 	return left == right
 }
+
+// variableKey is a name's spelling two names sameVariable takes for one share:
+// on Unix, the name itself.
+func variableKey(name string) string {
+	//: byte equality needs no folding.
+	return name
+}

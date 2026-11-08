@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/proc/dbus
+  name: dbus
+  purpose: "Package dbus is the SDK's message bus client, on the standard library: who owns a well-known name on a D-Bus daemon and every change of it — what proc/service's Type=dbus is up on — and a name a Go service owns."
+types: []

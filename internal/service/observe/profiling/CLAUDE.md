@@ -19,7 +19,9 @@ Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.Sys
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `profiling.go` | `MaxCPUWindow`, `MaxProfileBytes`, `MaxFrames` — the bounds of the capture and the decoder, the engine's |
-| `capture.go` | `CaptureCPU`, `CaptureHeap` |
+| `capture.go` | `CaptureCPU`, `CaptureHeap`; `captureCPURaw`, the window before decoding, which the handler serves as is |
+| `trace.go` | `CaptureTrace` (#1022): `runtime/trace.Start` into a buffer for a window on the injected clock (≤ `MaxTraceWindow`, a minute), `TraceBusy` (0.3.89.8) when the runtime's one tracer runs; `StartFlightRecorder` / `FlightRecorder.Snapshot` / `Stop` over Go 1.25's `trace.FlightRecorder` — zero config = the runtime's 10 s / 10 MiB, a second recorder or a concurrent snapshot `TraceBusy`; the bytes are the runtime's format, not parsed |
+| `handler.go` | `NewHandler` (#1023): the pprof wire as a plain `http.Handler` the caller mounts — profile/trace windows on `HandlerConfig.Clock`, the runtime profiles by name (debug clamped to 0/1, the goroutine dump to 2), an index; `cmdline` and `symbol` 404; nosniff and no-store on every response; a refusal is its sentinel's status and Public text. Nothing is registered on `http.DefaultServeMux`, and the repository imports `net/http/pprof` nowhere: `tools/sdkguard`'s SDK006 refuses the import — blank included — in every tree and test file, `make guard`'s third pass, and the handler test asserts the mux is empty |
 | `wire.go` | the protocol-buffer wire reader: varints (a tenth byte past the 64th bit refused), length-delimited fields, skips, packed or unpacked repeated varints — every read bounds-checked |
 | `parse.go` | `Parse`: the bound, gzip or raw — gzip inflated through the registered `"gzip"` transform scheme, its refusal kept `PROFILE_MALFORMED` around the library's own error (`libraryCause`) — the Profile's top-level fields through a reader table |
 | `tables.go` | Sample, Label, Location, Line, Function; `resolve(frames)` |

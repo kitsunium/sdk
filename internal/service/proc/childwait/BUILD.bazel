@@ -9,6 +9,13 @@ go_library(
         "childwait_other.go",
         "childwait_unix.go",
         "doc.go",
+        "maxrss.go",
+        "maxrss_rss32_unix.go",
+        "maxrss_rss64_unix.go",
+        "maxrss_unit_darwin.go",
+        "maxrss_unit_kib_unix.go",
+        "usage_norusage_unix.go",
+        "usage_rusage_unix.go",
         "waitany_solaris.go",
         "waitany_unix.go",
     ],
@@ -17,6 +24,42 @@ go_library(
         "//:__subpackages__",
         "//internal/service:service_consumers",
     ],
+    deps = select({
+        "@rules_go//go/platform:aix": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:android": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//internal/core/proc",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 alias(
@@ -32,10 +75,55 @@ go_test(
     name = "childwait_test",
     srcs = [
         "childwait_internal_test.go",
+        "childwait_unix_bench_test.go",
         "childwait_unix_internal_test.go",
         "gen_api_1_test.go",
         "gen_api_2_test.go",
+        "gen_api_3_test.go",
+        "gen_api_4_test.go",
+        "gen_api_5_test.go",
+        "gen_api_6_test.go",
         "gen_api_test.go",
+        "maxrss_darwin_internal_test.go",
+        "maxrss_internal_test.go",
+        "maxrss_rss64_unix_internal_test.go",
+        "observed_unix_internal_test.go",
     ],
     embed = [":childwait"],
+    deps = select({
+        "@rules_go//go/platform:aix": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:android": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//internal/core/proc",
+        ],
+        "//conditions:default": [],
+    }),
 )

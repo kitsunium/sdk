@@ -82,3 +82,39 @@ Flush_Empty-12            41.70     5.4%   41.32 – 43.57      0           0
 - **`BenchmarkFlush_Empty`** — an empty `Flush` short-circuits under `mu` before
   reaching the deliver mutex, so it is the serialization-free floor (~42 ns/op, 0
   B/op) the cap-flush benches are measured against.
+
+## Edition 2026-11-03 — lifetime context, bounded `Close`, `FlushOn` (#1040, #817)
+
+One box, before and after interleaved (the table above is another box): AMD
+EPYC 7351P (8 vCPU), Linux 6.12, go1.27.3, `GOMAXPROCS=4`, `-benchmem -count
+8`, medians. Command:
+`cd internal && go test -run '^$' -bench . -benchmem -count 8 ./kernel/concur/batcher/`.
+
+| Row | Before (base `42143bf47`) | After | |
+|---|---|---|---|
+| `Add_CapFlush` | 38.0 ns, 15 B, 0 allocs | 38.1 ns, 15 B, 0 allocs | unchanged (#1040: within 3 %) |
+| `Add_Contended` | 106.6 ns (97.9–118.0), 15 B | 109.1 ns (107.9–115.7), 16 B | +2.3 %, within the before row's spread; a `RunParallel` row on a shared box |
+| `Flush_Empty` | 40.6 ns | 24.9 ns | −39 %: the closed check and the swap share one lock section |
+
+The delivery stays serialized by a mutex. A one-token channel semaphore,
+which any wait could leave, measured `Add_CapFlush` at 42.2 ns (+11 %), so the
+two waits that must be able to give up — the batcher's goroutine and `Close` —
+take the mutex by `TryLock` and wait on a wake-up a release sends only while
+one of them is counted.
+
+### `Add_CapFlush_SlowSink` — a 1 ms Sink at `MaxItems` 16 (#817)
+
+Bursts of 32 `Add`s (two batches), the clock stopped while a `Flush` waits
+the Sink out between bursts: `-bench=SlowSink -benchtime=3200x -count 6`.
+
+| `FlushOn` | Producer ns per `Add` |
+|---|---|
+| `FlushCaller` (the zero value, the previous behaviour) | 67 766 (67 647–71 802) |
+| `FlushBackground` | 353 (282–481), 22 B, 0 allocs |
+
+Under `FlushCaller` every 16th `Add` runs the 1 ms Sink: ≥ 62 µs per `Add`
+averaged, as #817 computed. Under `FlushBackground` the producer appends, hands
+the batch to the batcher's goroutine and returns — #817's "< 1 µs" is met. A
+producer that outruns the Sink by two batches waits for room, so sustained
+throughput is still the Sink's: background delivery moves the wait off the
+producer's path for a burst, it does not make the Sink faster.

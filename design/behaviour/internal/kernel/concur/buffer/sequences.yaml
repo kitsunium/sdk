@@ -1,29 +1,125 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: newPools
+    participants:
+      - id: caller
+        kind: actor
+      - id: newPools
+        kind: self
+      - id: classSize
+        kind: internal
+    steps:
+      - var:
+          name: out
+          type: "[classes]*recycler.CappedPool[*[]byte]"
+      - loop:
+          do:
+            - bind: size
+              eval: classSize(k)
+              to: classSize
+            - set: out[k]
+              value: |-
+                recycler.NewCappedPool[*[]byte](
+                			func() *[]byte { return new(make([]byte, 0, size)) },
+                			func(b *[]byte) { *b = (*b)[:0] },
+                			func(b *[]byte) int { return cap(*b) },
+                			2*size,
+                		)
+          key: k
+          range: out
+      - return: out
+  - of: classSize
+    steps:
+      - return: 1 << (smallestShift + 2*k)
+  - of: classFor
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: n <= initialCap
+      - return: (bits.Len(uint(n-1)) - smallestShift + 1) / 2
+  - of: classOf
+    steps:
+      - opt:
+          do:
+            - return: "-1"
+          when: capacity < initialCap
+      - return: min((bits.Len(uint(capacity))-smallestShift-1)/2, classes-1)
   - of: Get
     participants:
       - id: caller
         kind: actor
       - id: Get
         kind: self
-      - id: bytePool.Get
+      - id: pools[0].Get
         kind: value
     steps:
-      - return: bytePool.Get()
-        to: bytePool.Get
+      - return: pools[0].Get()
+        to: pools[0].Get
+  - of: GetSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: GetSize
+        kind: self
+      - id: classFor
+        kind: internal
+      - id: pools[k].Get
+        kind: value
+    steps:
+      - bind: k
+        eval: classFor(n)
+        to: classFor
+      - opt:
+          do:
+            - return: new(make([]byte, 0, n))
+          when: k >= classes
+      - return: pools[k].Get()
+        to: pools[k].Get
   - of: Put
     participants:
       - id: caller
         kind: actor
       - id: Put
         kind: self
-      - id: bytePool.Put
-        kind: value
+      - id: putClass
+        kind: internal
     steps:
       - opt:
           do:
             - return: ""
           when: b == nil
-      - eval: bytePool.Put(b)
-        to: bytePool.Put
+      - eval: putClass(b)
+        to: putClass
+  - of: putClass
+    participants:
+      - id: caller
+        kind: actor
+      - id: putClass
+        kind: self
+      - id: pools[0].Put
+        kind: value
+      - id: classOf
+        kind: internal
+      - id: pools[k].Put
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: pools[0].Put(b)
+              to: pools[0].Put
+            - return: ""
+          init:
+            bind: c
+            eval: cap(*b)
+          when: c >= initialCap && c <= 2*initialCap
+      - bind: k
+        eval: classOf(cap(*b))
+        to: classOf
+      - opt:
+          do:
+            - return: ""
+          when: k < 0
+      - eval: pools[k].Put(b)
+        to: pools[k].Put

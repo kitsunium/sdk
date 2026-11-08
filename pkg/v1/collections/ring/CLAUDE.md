@@ -19,6 +19,8 @@ beside the other kernel primitives so a program can reach it through
 |---|---|
 | `Queue[T]` | alias of the INTERFACE `TryWrite` / `TryRead` / `Capacity` / `Len` — frozen at four methods by this publication (ADR 0039, ADR 0159 §5) |
 | `New[T](capacity)` | `(Queue[T], error)`; the storage is allocated once, here |
+| `MultiQueue[T]` | alias of the MPSC sibling INTERFACE — `Queue`'s four methods under the wider contract: any number of `TryWrite` callers, one `TryRead` caller (ADR 0216) |
+| `NewMulti[T](capacity)` | `(MultiQueue[T], error)`; the capacity rounded up to a power of two, which `Capacity` reports |
 | `Drain[T](q)` | `iter.Seq[T]`: the consumer's `TryRead` loop as an iterator, oldest first, until `Empty` or a break — a function, never a fifth method of the frozen interface (issue #816) |
 | `Full` | `0.1.3.1` — `TryWrite` on a full ring |
 | `Empty` | `0.1.3.2` — `TryRead` on an empty ring |
@@ -29,19 +31,19 @@ except the three `Code*` constants: a caller matches the sentinels with
 `errors.Is`, or by code through `errs.CodeOf(ring.Full)` and
 `errs.HasCode` — the values stay the kernel's (ADR 0160 §3).
 
-## Published single-producer, and why that is safe
+## Published single-producer first, and the multi-producer sibling since
 
 ADR 0159 §5 asks that a primitive be widened BEFORE it is published, and §2
-plans a multi-producer mode for this ring that has not landed. It is
-published ahead of that mode, with the other §4 aliases, because the only
-thing publication freezes is `Queue`'s method set, and a multi-producer ring
-answers the same four methods: that mode arrives as another constructor
-returning this `Queue`, never as a change to it. The package comment says so
-to the consumer, and ADR 0159's "As implemented" records the order.
+planned a multi-producer mode for this ring. It was published ahead of that
+mode because publication freezes only `Queue`'s method set, and the mode
+arrived as promised (ADR 0216): another constructor, `NewMulti`, and a
+sibling interface, `MultiQueue`, with the same four methods — a `MultiQueue`
+is a `Queue`, so `Drain` reads it.
 
-Until it lands, the framework keeps its own lock-free multi-producer ring in
-`framework/telemetry`: this one is single-producer, and the exporter's
-`Emit` is called from any goroutine of a product, concurrently.
+`framework/telemetry` keeps its own lock-free multi-producer ring: moving the
+exporter's `Emit` onto `NewMulti` is the framework's change to make, and a
+measurement to take first — the multi-producer claim loses to a mutex when
+four or more producers saturate the ring (`internal/kernel/collections/ring/BENCH.md`).
 
 ## Conventions
 

@@ -19,14 +19,16 @@ published so a program — and the framework, which reaches the SDK through
 | Symbol | Notes |
 |---|---|
 | `Batcher[T]` | alias; `Add` / `Flush` / `Close`, each taking a context. Safe from any number of goroutines |
-| `Config[T]` | alias; `MaxItems`, `MaxWeight` + `WeightOf`, `FlushEvery` + `Clock`, `OnError`. The zero value is usable: no cap, no ticker |
+| `Config[T]` | alias; `MaxItems`, `MaxWeight` + `WeightOf`, `FlushEvery` + `Clock`, `OnError`, `FlushOn`. The zero value is usable: no cap, no ticker, a capped batch delivered by the caller |
+| `FlushMode`, `FlushCaller`, `FlushBackground` | alias and its two values: which goroutine delivers a capped batch (ADR 0216) |
 | `Sink[T]` | alias of `func(ctx, batch []T) error`; never entered concurrently, two racing batches unordered |
-| `NewBatcher[T](deliver, cfg)` | a positive `FlushEvery` spawns the ticker goroutine `Close` joins |
+| `NewBatcher[T](deliver, cfg)` | a positive `FlushEvery`, or `FlushBackground`, spawns the batcher's goroutine `Close` joins within its context |
 | `BatcherClosed` | `0.1.5.1` — `Add` / `Flush` after `Close` |
 | `BatcherDeliverFailed` | `0.1.5.2` — wraps the deliver function's error, the cause still reachable through `errors.Is` |
+| `BatcherCloseTimedOut` | `0.1.5.3` — `Close` whose context ended before the batcher's goroutine stopped or the Sink was free; field `undelivered` (ADR 0216) |
 
 That is the complete exported surface of `internal/kernel/concur/batcher`
-except the two `Code*` constants: as in every facade, a caller matches a
+except the three `Code*` constants: as in every facade, a caller matches a
 sentinel with `errors.Is`, or by code with `errs.HasCode(err, code)` after
 `errs.CodeOf(batcher.BatcherDeliverFailed)` — the code VALUES stay the
 kernel's, unchanged (ADR 0160 §3).
