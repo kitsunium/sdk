@@ -31,12 +31,19 @@ func pollIn(t *testing.T, fd uintptr, timeout time.Duration) bool {
 	}
 	const pollInFlag int16 = 0x1
 	pfd := pollFd{fd: int32(fd), events: pollInFlag}
-	ts := syscall.NsecToTimespec(int64(timeout))
-	n, _, errno := syscall.Syscall6(syscall.SYS_PPOLL, uintptr(unsafe.Pointer(&pfd)), 1, uintptr(unsafe.Pointer(&ts)), 0, 0, 0)
-	if errno != 0 {
-		t.Fatalf("ppoll = %v", errno)
+	deadline := time.Now().Add(timeout)
+	for {
+		ts := syscall.NsecToTimespec(int64(max(time.Until(deadline), 0)))
+		n, _, errno := syscall.Syscall6(syscall.SYS_PPOLL, uintptr(unsafe.Pointer(&pfd)), 1, uintptr(unsafe.Pointer(&ts)), 0, 0, 0)
+		//: a signal to this thread (the runtime's preemption) interrupted the wait: resume it.
+		if errno == syscall.EINTR && time.Now().Before(deadline) {
+			continue
+		}
+		if errno != 0 {
+			t.Fatalf("ppoll = %v", errno)
+		}
+		return n == 1 && pfd.revents&pollInFlag != 0
 	}
-	return n == 1 && pfd.revents&pollInFlag != 0
 }
 
 // Test_Handle_pollableExit pins #928's first acceptance row: a Start handle
