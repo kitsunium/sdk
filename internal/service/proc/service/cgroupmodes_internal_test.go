@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -47,6 +48,17 @@ func overUnit(t *testing.T, cfg Config) Config {
 // killedBy is an exit by sig.
 func killedBy(sig coreproc.Signal) coreproc.ExitValue {
 	return coreproc.ExitValue{Code: -1, Signal: sig, Signaled: true}
+}
+
+// signalsRunHere skips where a replay's signals do not exist: Windows delivers
+// a kill and nothing else and refuses Type=forking, which TestWindowsContract
+// holds; a kill mode's SIGTERM steps have nothing to assert there.
+func signalsRunHere(t *testing.T) {
+	t.Helper()
+	//: the signal suites' platform.
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows delivers a kill and nothing else, and refuses Type=forking: TestWindowsContract is its subset")
+	}
 }
 
 // TestCgroupSettings: KillMode='s zero is control-group with a CgroupUnit and
@@ -96,6 +108,7 @@ func TestCgroupSettings(t *testing.T) {
 // group that emptied at once is waited for by no step; an outcome for a step
 // the unit left is stale.
 func TestKillModeControlGroup(t *testing.T) {
+	signalsRunHere(t)
 	h := newHarness(t, overUnit(t, Config{TimeoutStop: 5 * time.Second}))
 	h.held = 1
 	h.start()
@@ -145,6 +158,7 @@ func TestKillModeControlGroup(t *testing.T) {
 // its handle; once it is gone the final kill reaches the whole group, and the
 // stop waits for it to be empty.
 func TestKillModeMixed(t *testing.T) {
+	signalsRunHere(t)
 	h := newHarness(t, overUnit(t, Config{KillMode: coresvc.KillModeMixed}))
 	h.held = 1
 	h.start()
@@ -169,6 +183,7 @@ func TestKillModeMixed(t *testing.T) {
 // process signals the main process alone and the stop ends with it, a child
 // left in the group; none signals nothing.
 func TestKillModeProcessAndNoneLeaveTheGroup(t *testing.T) {
+	signalsRunHere(t)
 	h := newHarness(t, overUnit(t, Config{KillMode: coresvc.KillModeProcess}))
 	h.held = 1
 	h.start()
@@ -228,6 +243,7 @@ func TestExitTypeCgroup(t *testing.T) {
 // stayed unknown is up while its cgroup has members; the cgroup's emptying,
 // which S0c left to a stop, ends it.
 func TestForkingUpOnItsCgroupEndsWhenEmpty(t *testing.T) {
+	signalsRunHere(t)
 	cfg := overUnit(t, Config{Type: coresvc.TypeForking, Attacher: stubAttacher{}})
 	h := newHarness(t, cfg)
 	h.adoptions = []adoption{{flags: flagPopulated}}
@@ -250,6 +266,7 @@ func TestForkingUpOnItsCgroupEndsWhenEmpty(t *testing.T) {
 // protocol once nobody is left; a forking unit waiting for a PID file
 // nobody is left to write gives it up at once.
 func TestCgroupEmptiedWhileStarting(t *testing.T) {
+	signalsRunHere(t)
 	h := newHarness(t, overUnit(t, Config{
 		Type: coresvc.TypeNotify, Notify: stubNotify{}, NotifyAccess: coresvc.NotifyAccessAll, RemainAfterExit: true,
 	}))

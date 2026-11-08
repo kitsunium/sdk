@@ -88,8 +88,7 @@ func TestEnableCredsFreeBSD(t *testing.T) {
 // stamped with no sender: a socket without LOCAL_CREDS_PERSISTENT delivers
 // none, and Recv answers CREDENTIAL_MISMATCH with the descriptors it carried
 // closed.
-func TestRecvWithoutCredentialsFreeBSD(t *testing.T) {
-	t.Parallel()
+func TestRecvWithoutCredentialsFreeBSD(t *testing.T) { // not parallel: openFDs counts the whole process
 	path := filepath.Join(t.TempDir(), "n.sock")
 	conn, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: path, Net: "unixgram"})
 	if err != nil {

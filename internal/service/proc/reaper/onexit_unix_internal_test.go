@@ -4,8 +4,6 @@ package reaper
 
 import (
 	"os"
-	osexec "os/exec"
-	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -44,6 +42,12 @@ func TestWithOnExitReportsAnOrphansEnd(t *testing.T) {
 	deadline := time.Now().Add(reapDeadline)
 	//: sweep until both are reported, as the loop does on each SIGCHLD.
 	for (len(events[exited.Pid]) == 0 || len(events[killed.Pid]) == 0) && time.Now().Before(deadline) {
+		//: SIGKILL again until it is collected: this test's own child, and a
+		//: kill landing in the child's exec window can be lost (seen on NetBSD,
+		//: where the process then ran its full sleep).
+		if len(events[killed.Pid]) == 0 {
+			_ = killed.Signal(syscall.SIGKILL)
+		}
 		//: a sweep's error is not this test's subject; the deadline is.
 		if _, rerr := r.ReapOnce(); rerr != nil {
 			t.Fatalf("ReapOnce: %v", rerr)
@@ -56,11 +60,7 @@ func TestWithOnExitReportsAnOrphansEnd(t *testing.T) {
 	}
 	got := events[killed.Pid]
 	if len(got) != 1 || got[0].Owned || !got[0].Exit.Signaled || got[0].Exit.Signal != coreproc.Signal(syscall.SIGKILL) || got[0].Exit.Code != -1 {
-		//: what the process and the kernel say, for the run that fails.
-		ps, _ := osexec.Command("ps", "-o", "pid,ppid,stat,command", "-p", strconv.Itoa(killed.Pid)).CombinedOutput()
-		var ws syscall.WaitStatus
-		wpid, werr := syscall.Wait4(killed.Pid, &ws, syscall.WNOHANG, nil)
-		t.Fatalf("the killed orphan reported %+v, want one unowned SIGKILL (ps %q, wait4 %d, %v, status %#x)", got, ps, wpid, werr, uint32(ws))
+		t.Fatalf("the killed orphan reported %+v, want one unowned SIGKILL", got)
 	}
 }
 

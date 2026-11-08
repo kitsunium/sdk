@@ -26,6 +26,10 @@ const (
 	terminatedExitCode             uint32 = 1
 )
 
+// forcedTerminateWait is how long Stop waits on the HANDLE when a forced
+// terminate is refused: the first kill may already be finishing the process.
+const forcedTerminateWait time.Duration = 5 * time.Second
+
 // errorInvalidParameter is ERROR_INVALID_PARAMETER (winerror.h), OpenProcess's
 // answer for a pid that names no process; syscall does not export it.
 const errorInvalidParameter syscall.Errno = 87
@@ -133,11 +137,11 @@ func (f *foreign) Stop(ctx context.Context, grace time.Duration, sig coreproc.Si
 		}
 	}
 	//: the forced terminate, through the HANDLE; a process the first kill
-	//: already ended answers ACCESS_DENIED here, and is simply gone.
+	//: already ended answers ACCESS_DENIED here while it finishes terminating.
 	if err := f.SignalHandle(coreproc.Signal(syscall.SIGKILL)); err != nil {
-		event, wErr := syscall.WaitForSingleObject(f.handle, 0)
-		//: not ended after all: the process could not be stopped.
-		if wErr != nil || event != waitObject0 {
+		exited, wErr := f.awaitExit(ctx, time.Now().Add(forcedTerminateWait))
+		//: not ended within the wait: the process could not be stopped.
+		if wErr != nil || !exited {
 			return wrapStop(err, errs.Int("pid", f.pid))
 		}
 	}
