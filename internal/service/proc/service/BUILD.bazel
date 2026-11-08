@@ -50,6 +50,10 @@ go_test(
     # TestNoWallClockWait parses the engine's production files (ADR 0214 §5).
     data = glob(["*.go"]),
     embed = [":service"],
+    # 60 s is the suite's budget under --test_timeout (.bazelrc): real units,
+    # the descriptor-store and hand-over suites, take 50 s under race and
+    # overran it under coverage on the first CI run; eight shards deal them apart.
+    shard_count = 8,
     deps = [
         "//internal/core/proc",
         "//internal/core/proc/service",
