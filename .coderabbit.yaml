@@ -1,6 +1,11 @@
 language: en-US
 early_access: false
 
+# inheritance: true merges the central kitsunium/coderabbit/.coderabbit.yaml under
+# this file: it carries the title keywords that keep the post-commit and
+# runner-template sync PRs out of review. Keys set here still win.
+inheritance: true
+
 reviews:
   profile: chill
   request_changes_workflow: false
