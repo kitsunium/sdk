@@ -202,6 +202,8 @@ func (b *circuitBreaker) succeed(adm admission, now time.Time, slow bool) {
 		}
 	//: an Open breaker of the same generation has nothing to learn.
 	case coreres.BreakerOpen:
+	//: neither has a phase this package never mints, the zero among them.
+	default:
 	}
 }
 
@@ -256,6 +258,8 @@ func (b *circuitBreaker) fail(now time.Time, slow bool) {
 		}
 	//: an Open breaker of the same generation has nothing to learn.
 	case coreres.BreakerOpen:
+	//: neither has a phase this package never mints, the zero among them.
+	default:
 	}
 }
 

@@ -204,7 +204,10 @@ var reservedTables = map[string]string{
 // database: two nodes whose names differ only by what the rule writes '_'
 // or lowers, a digest meeting another. Each is said at the app.Database.
 func (a *App) tableProblems(d *database) []string {
-	seen := maps.Clone(reservedTables)
+	// A map of its own, never maps.Clone's, which is nil for a nil source and
+	// is written below (KTN-VAR-CLONENIL).
+	seen := make(map[string]string, len(reservedTables))
+	maps.Copy(seen, reservedTables)
 	var out []string
 	for _, t := range a.frameworkTables(d) {
 		if owner, taken := seen[t.name]; taken && owner != t.node {

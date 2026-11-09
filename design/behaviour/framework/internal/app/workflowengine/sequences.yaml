@@ -260,8 +260,10 @@ sequences:
             - case: statemachine.TriggerGuard
               do:
                 - return: plug.WorkflowTriggerGuard
+            - default: true
+              do:
+                - return: plug.WorkflowTriggerEvent
           "on": t
-      - return: plug.WorkflowTriggerEvent
   - of: sdkTriggerOf
     steps:
       - switch:
@@ -292,8 +294,10 @@ sequences:
             - case: statemachine.WakeChange
               do:
                 - return: plug.WorkflowWakeChange
+            - default: true
+              do:
+                - return: plug.WorkflowWakeStart
           "on": w
-      - return: plug.WorkflowWakeStart
   - of: loopKindOf
     steps:
       - switch:
@@ -307,8 +311,10 @@ sequences:
             - case: statemachine.LoopWaiting
               do:
                 - return: plug.WorkflowLoopWaiting
+            - default: true
+              do:
+                - return: plug.WorkflowLoopOther
           "on": k
-      - return: plug.WorkflowLoopOther
   - of: Enable
     participants:
       - id: caller

@@ -190,16 +190,29 @@ func crash(t *testing.T, u *service.Unit, sub <-chan coresvc.EventValue) {
 	waitState(t, sub, coresvc.StateActive)
 }
 
+// storePhase is the budget of each phase of storeCycle — the start, the wait
+// for the store, the stop and the close — on its own: one context shared by
+// all four ran out under CI's load before Stop answered, and the test failed
+// on the time its earlier phases took (kitsunium/sdk#1320).
+const storePhase = 30 * time.Second
+
+// phaseContext is a context bounded by storePhase, cancelled when t ends.
+func phaseContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), storePhase)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 // storeCycle runs one unit through a start, a crash and its restart, then
-// closes it, and returns what the restarted process reported.
+// closes it, and returns what the restarted process reported. Each phase has
+// its own budget (storePhase).
 func storeCycle(t *testing.T) (handed string, listed []coresvc.StoredFDValue, refused uint64, pre string) {
 	t.Helper()
 	dir := t.TempDir()
 	u := storeUnit(t, "fdstore", dir, 2)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
 	sub, _ := u.Subscribe(256)
-	if err := u.Start(ctx); err != nil {
+	if err := u.Start(phaseContext(t)); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	crash(t, u, sub)
@@ -208,18 +221,18 @@ func storeCycle(t *testing.T) (handed string, listed []coresvc.StoredFDValue, re
 		t.Fatalf("the restarted service reported nothing: %v", err)
 	}
 	// FDSTOREREMOVE=1 follows the report: wait until the store took it.
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(storePhase)
 	for len(u.FDStore()) != 1 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	listed, refused = u.FDStore(), u.State().FDStoreRefused
-	if err = u.Stop(ctx); err != nil {
+	if err = u.Stop(phaseContext(t)); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
 	if left := u.FDStore(); len(left) != 0 {
 		t.Errorf("a stopped unit (FileDescriptorStorePreserve=restart) keeps %v", left)
 	}
-	if err = u.Close(ctx); err != nil {
+	if err = u.Close(phaseContext(t)); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 	preRaw, _ := os.ReadFile(filepath.Join(dir, "pre"))

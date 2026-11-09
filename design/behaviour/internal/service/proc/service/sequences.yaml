@@ -3826,16 +3826,14 @@ sequences:
         kind: actor
       - id: (*hangupWatch).start
         kind: self
-      - id: w.running.Add
+      - id: w.running.Go
         kind: value
     steps:
-      - eval: w.running.Add(1)
-        to: w.running.Add
-      - go: |-
-          func() {
-          		defer w.running.Done()
+      - eval: |-
+          w.running.Go(func() {
           		w.run(post)
-          	}()
+          	})
+        to: w.running.Go
   - of: (*hangupWatch).run
     participants:
       - id: caller
