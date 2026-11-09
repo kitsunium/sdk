@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T11:15:00Z -->
+<!-- updated: 2026-11-09T00:00:00Z -->
 # internal/core/proc/ipc/
 
 ## Purpose
@@ -38,7 +38,7 @@ moved there from `ipc.go`, content moved and never deleted.
 | `Conn` | value | a `net.Conn` with its `Peer` |
 | `Listener` | port, frozen at five | `Accept() (*Conn, error)`, `Addr`, `Close`, `Path`, `Refused` |
 | `Dialer` | port, frozen at one | `Dial(ctx) (*Conn, error)` |
-| `Code*` | `errs.Code` | `0.3.91.1` – `0.3.91.9` |
+| `Code*` | `errs.Code` | `0.3.91.1` – `0.3.91.11` |
 | `Misconfigured` … `PathUnsafe` | `*errs.Error` | each var's name is its Reason in SCREAMING_SNAKE form (ADR 0020) |
 
 The engines satisfy the ports by compile-time assertion in the service
@@ -76,8 +76,10 @@ service.
 | 0.3.91.7 | `EndpointForeign` | 78 | the socket file, or the pipe's server, is another account's |
 | 0.3.91.8 | `Closed` | 70 (default) | `Accept` after `Close` |
 | 0.3.91.9 | `PathUnsafe` | 78 | a component ABOVE the directory another account could steer (ADR 0148, the `pathchain` rule) |
+| 0.3.91.10 | `FDPassRefused` | 70 (default) | descriptors not passed: an unnamed peer, an empty payload, a max that is not positive, a platform that passes none, a failed send or receive (#936) |
+| 0.3.91.11 | `EndpointSquatted` | 78 | the Windows pipe's name exists and is another account's, or admits no instance of ours — not `IN_USE` (#1318) |
 
-`0.3.91.10` – `0.3.91.255` reserved. No Public string quotes a path: the path
+`0.3.91.12` – `0.3.91.255` reserved. No Public string quotes a path: the path
 travels in the `path` field. The Private strings name `service/proc/ipc`,
 where each condition is detected.
 

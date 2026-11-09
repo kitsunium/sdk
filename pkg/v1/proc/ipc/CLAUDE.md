@@ -18,7 +18,7 @@ one. Its contract — the two ports, the values and the codes — is
 | `Listen` | func | returns the socket engine behind the `Listener` port, or a nil port with the refusal |
 | `NewDialer` | func | returns the engine behind the `Dialer` port; the configuration is checked and copied once |
 | `Dial`, `RuntimeDir`, `RuntimeDirOr` (ADR 0182) | func | delegate verbatim |
-| `Code*` | const | the nine codes, for `errs.HasCode`, aliasing the core |
+| `Code*` | const | the eleven codes, for `errs.HasCode`, aliasing the core |
 
 ## The ports, and what changed for a caller
 
@@ -42,7 +42,9 @@ answers (start one), `DIRECTORY_UNSAFE` and `ENDPOINT_FOREIGN` mean the
 deployment is wrong (never retry), and `PATH_UNSAFE` means a component ABOVE
 the socket's directory is one another account could have planted or created,
 or can replace — a deployment to fix or an attack to look at, never a retry
-(the rule is `internal/service/proc/ipc/chain_unix.go`'s).
+(the rule is `internal/service/proc/ipc/chain_unix.go`'s). `ENDPOINT_SQUATTED`
+(Windows, #1318) means another account made the pipe's name first: find the
+process that holds it, never take it for a daemon of ours.
 
 ## README is generated
 

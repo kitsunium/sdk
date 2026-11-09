@@ -93,7 +93,8 @@ func negative(n int) bool { return n < 0 }
 // leftover of a dead process and is removed — provided it is a socket this
 // account owns. The socket file is made 0600. On Windows the
 // named pipe is created with FILE_FLAG_FIRST_PIPE_INSTANCE: a name that
-// exists is IN_USE, whoever made it.
+// exists is IN_USE when this account owns it, ENDPOINT_SQUATTED when
+// another account does or its DACL admits no instance of this account.
 func NewListener(cfg *Config) (*Listener, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err

@@ -18,7 +18,7 @@ c, err := ipc.Dial(ctx, cfg)        // a client; c.Peer says who listens
 
 Two gates, and the package says which one holds where:
 
-  - The DIRECTORY, everywhere. The socket lives in a directory its account owns and nobody else may write to — created 0700 when missing, refused otherwise ([CodeDirectoryUnsafe](#CodeDirectoryUnsafe)) — and the socket file is 0600. Connecting needs search permission on the directory, so only its owner (and root) get through. On Windows the endpoint is a named pipe named after the path, whose own DACL grants this account only, which refuses remote clients and which nobody can join once it exists.
+  - The DIRECTORY, everywhere. The socket lives in a directory its account owns and nobody else may write to — created 0700 when missing, refused otherwise ([CodeDirectoryUnsafe](#CodeDirectoryUnsafe)) — and the socket file is 0600. Connecting needs search permission on the directory, so only its owner (and root) get through. On Windows the endpoint is a named pipe named after this account and the path, whose own DACL grants this account only, which refuses remote clients and which nobody can join once it exists; a name another account took first is refused as squatted ([CodeEndpointSquatted](#CodeEndpointSquatted)), never mistaken for a daemon of ours.
   - The PEER'S CREDENTIALS, where the kernel gives them: on Linux, SO\_PEERCRED names the peer's user, group and process, and a peer that is neither this account nor in Config.AllowUIDs / AllowGIDs is closed before Accept returns it — and so, since #1093, do FreeBSD, DragonFly and NetBSD, where an unnamed peer is refused too. On Windows each end reads the other's account from its process token ([Peer](#Peer).SID) and refuses another one. On darwin, OpenBSD, illumos and Solaris [Peer](#Peer).Verified is false and the directory is the only gate.
 
 ### The path to the directory is part of the gate
@@ -68,7 +68,7 @@ Listen dials a socket already at the path first. One that answers is left alone 
 const CodeClosed errs.Code = 219912
 ```
 
-The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeClosed`.
 
@@ -79,7 +79,7 @@ Code `0.3.91.8`
 const CodeDialFailed errs.Code = 219910
 ```
 
-The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeDialFailed`.
 
@@ -90,7 +90,7 @@ Code `0.3.91.6`
 const CodeDirectoryUnsafe errs.Code = 219906
 ```
 
-The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeDirectoryUnsafe`.
 
@@ -101,18 +101,29 @@ Code `0.3.91.2`
 const CodeEndpointForeign errs.Code = 219911
 ```
 
-The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeEndpointForeign`.
 
 Code `0.3.91.7`
+
+<a name="CodeEndpointSquatted"></a>
+```go
+const CodeEndpointSquatted errs.Code = 219915
+```
+
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeEndpointSquatted`.
+
+Code `0.3.91.11`
 
 <a name="CodeFDPassRefused"></a>
 ```go
 const CodeFDPassRefused errs.Code = 219914
 ```
 
-The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeFDPassRefused`.
 
@@ -123,7 +134,7 @@ Code `0.3.91.10`
 const CodeInUse errs.Code = 219907
 ```
 
-The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeInUse`.
 
@@ -134,7 +145,7 @@ Code `0.3.91.3`
 const CodeListenFailed errs.Code = 219908
 ```
 
-The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeListenFailed`.
 
@@ -145,7 +156,7 @@ Code `0.3.91.4`
 const CodeMisconfigured errs.Code = 219905
 ```
 
-The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeMisconfigured`.
 
@@ -156,7 +167,7 @@ Code `0.3.91.1`
 const CodePathUnsafe errs.Code = 219913
 ```
 
-The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodePathUnsafe`.
 
@@ -167,7 +178,7 @@ Code `0.3.91.9`
 const CodePeerRefused errs.Code = 219909
 ```
 
-The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "another account holds the Windows pipe's name" (ENDPOINT\_SQUATTED: find the process that holds it) from "nobody answers" (start one).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodePeerRefused`.
 

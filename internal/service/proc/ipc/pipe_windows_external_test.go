@@ -88,16 +88,39 @@ func TestAPipeCarriesALineBothWays(t *testing.T) {
 	}
 }
 
-// A second listener on the same path is refused while the first lives:
-// FILE_FLAG_FIRST_PIPE_INSTANCE, whoever holds the name.
+// A second listener of this account on the same path is refused while the
+// first lives — IN_USE, not ENDPOINT_SQUATTED: the pipe's owner is this
+// account (#1318) —, and the instance it judged the holder by leaves the
+// first one serving.
+//
+// Goroutine lifecycle: one goroutine accepts once and reports on a buffered
+// channel, which the test reads.
 func TestASecondPipeListenerIsInUse(t *testing.T) {
 	cfg := pipeConfig(t)
 	ln, err := ipc.NewListener(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ipc.NewListener(cfg); !errs.HasCode(err, coreipc.CodeInUse) {
+	if _, err := ipc.NewListener(cfg); !errs.HasCode(err, coreipc.CodeInUse) || errs.HasCode(err, coreipc.CodeEndpointSquatted) {
 		t.Errorf("second listener: %v, want IN_USE", err)
+	}
+	accepted := make(chan error, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err == nil {
+			err = c.Close()
+		}
+		accepted <- err
+	}()
+	c, err := ipc.Dial(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("dial after the refused second listener: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Error(err)
+	}
+	if err := <-accepted; err != nil {
+		t.Fatalf("accept after the refused second listener: %v", err)
 	}
 	if err := ln.Close(); err != nil {
 		t.Fatal(err)

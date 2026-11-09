@@ -38,6 +38,8 @@ const (
 	pipePrefix                string        = `\\.\pipe\ipc-`
 	pipeBusyRetry             time.Duration = 10 * time.Millisecond
 	pipeHashBytes             int           = 8
+	seFileObject              uintptr       = 1 // SE_OBJECT_TYPE's SE_FILE_OBJECT (accctrl.h)
+	ownerSecurityInformation  uintptr       = 0x00000001
 )
 
 // The entry points the syscall package does not export, all in Windows since
@@ -53,6 +55,7 @@ var (
 	procCreateEvent       = modkernel32.NewProc("CreateEventW")
 	procOverlappedResult  = modkernel32.NewProc("GetOverlappedResult")
 	procSDDLToDescriptor  = modadvapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
+	procGetSecurityInfo   = modadvapi32.NewProc("GetSecurityInfo")
 )
 
 // pipeAddr is a named pipe's address.
@@ -140,10 +143,21 @@ type pipeAcceptor struct {
 	closed  bool
 }
 
-// pipeName is the pipe that stands for the socket path.
-func pipeName(path string) pipeAddr {
+// pipeName is the pipe that stands for the socket path for the account sid.
+// Two accounts with one path never meet on one name; a squatter can still
+// compute it — a SID is no secret —, which is why listen judges a name that
+// exists by its holder (#1318).
+func pipeName(path, sid string) pipeAddr {
 	sum := sha256.Sum256([]byte(strings.ToLower(filepath.Clean(path))))
-	return pipeAddr(pipePrefix + hex.EncodeToString(sum[:pipeHashBytes]) + "-" + filepath.Base(path))
+	return pipeAddr(pipePrefix + sid + "-" + hex.EncodeToString(sum[:pipeHashBytes]) + "-" + filepath.Base(path))
+}
+
+// pipeSDDL is the descriptor the pipe is created under: owned by the account
+// sid — never the token's default owner, Administrators for an elevated
+// process, so a later listen reads the account itself — and a DACL granting
+// it alone, protected from inheritance.
+func pipeSDDL(sid string) string {
+	return "O:" + sid + "D:P(A;;GA;;;" + sid + ")"
 }
 
 // accountOf is the account a process runs as, from its token; pid 0 is this
@@ -199,16 +213,73 @@ func listen(cfg *Config) (*Listener, error) {
 		return nil, errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", cfg.Path),
 			errs.String("cause", "this process's account cannot be read: "+err.Error()))
 	}
-	a := &pipeAcceptor{name: pipeName(cfg.Path), sddl: "D:P(A;;GA;;;" + self + ")"}
+	return listenAs(cfg, self)
+}
+
+// listenAs is listen for the account self, which names the pipe, owns it and
+// is the one its DACL grants.
+func listenAs(cfg *Config, self string) (*Listener, error) {
+	a := &pipeAcceptor{name: pipeName(cfg.Path, self), sddl: pipeSDDL(self)}
 	h, err := a.create(true)
 	switch {
 	case errors.Is(err, syscall.ERROR_ACCESS_DENIED), errors.Is(err, errorPipeBusy):
-		return nil, errs.Wrap(coreipc.InUse, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("pipe", string(a.name)))
+		return nil, a.taken(cfg.Path, self)
 	case err != nil:
 		return nil, errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
 	}
 	a.pending = h
 	return &Listener{cfg: *cfg, ln: a, self: -1, selfSID: self}, nil
+}
+
+// taken is the verdict on a name that exists: IN_USE when the pipe is this
+// account's — another daemon of ours —, ENDPOINT_SQUATTED when another
+// account owns it or it admits no instance of ours. Every pipe this package
+// makes grants its account a new instance (GA), so one that refuses it was
+// made by somebody else (#1318).
+func (a *pipeAcceptor) taken(path, self string) error {
+	owner, err := a.holder()
+	switch {
+	case err != nil:
+		return errs.Wrap(coreipc.EndpointSquatted, errs.WrapParams{}, errs.String("path", path), errs.String("pipe", string(a.name)),
+			errs.String("cause", "the pipe admits no instance of this account: "+err.Error()))
+	case owner != self:
+		return errs.Wrap(coreipc.EndpointSquatted, errs.WrapParams{}, errs.String("path", path), errs.String("pipe", string(a.name)),
+			errs.String("owner", owner))
+	}
+	return errs.Wrap(coreipc.InUse, errs.WrapParams{}, errs.String("path", path), errs.String("pipe", string(a.name)))
+}
+
+// holder is the owner of the pipe a.name names, read from one more instance
+// of it, which is closed at once. That instance listens for the moment it
+// lives: a client of a live daemon of ours that reaches it then sees its
+// pipe broken, and dials again. A pipe gone between the first create and
+// this one is made again here, under our descriptor, and read as ours:
+// IN_USE, which a retry clears.
+func (a *pipeAcceptor) holder() (string, error) {
+	h, err := a.create(false)
+	if err != nil {
+		return "", err
+	}
+	defer closeHandles(h)
+	return ownerOf(h)
+}
+
+// ownerOf is the account that owns the object h is a handle on, read with
+// GetSecurityInfo; a pipe's server end holds READ_CONTROL, part of the
+// GENERIC_READ every duplex instance is opened with.
+func ownerOf(h syscall.Handle) (string, error) {
+	var owner *syscall.SID
+	var sd uintptr
+	if r, _, _ := procGetSecurityInfo.Call(uintptr(h), seFileObject, ownerSecurityInformation,
+		uintptr(unsafe.Pointer(&owner)), 0, 0, 0, uintptr(unsafe.Pointer(&sd))); r != 0 {
+		return "", syscall.Errno(r)
+	}
+	defer func() {
+		if _, ferr := syscall.LocalFree(syscall.Handle(sd)); ferr != nil {
+			log.Printf("ipc: freeing a security descriptor: %v", ferr)
+		}
+	}()
+	return owner.String()
 }
 
 // create makes one overlapped instance of the pipe under its DACL; first
@@ -399,7 +470,7 @@ func dial(ctx context.Context, cfg *Config) (*coreipc.Conn, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	name := pipeName(cfg.Path)
+	name := pipeName(cfg.Path, self)
 	h, err := openPipe(ctx, name)
 	if err != nil {
 		return nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-20T00:00:00Z -->
+<!-- updated: 2026-11-09T00:00:00Z -->
 # internal/service/proc/ipc/
 
 ## Purpose
@@ -26,15 +26,15 @@ sentinels — this package returns them and declares none.
 | `ipc.go` | `Config` (the engine's, ADR 0074), `Listener` over an `acceptor` — the engine behind `coreipc.Listener` —, `NewListener`, `Accept` (refused peers closed and counted), `Dialer` + `NewDialer` — the engine behind `coreipc.Dialer`, its allow-lists copied —, `Dial`, `RuntimeDir` and `RuntimeDirOr` (the same chain ending on the caller's directory instead of `<tmp>/<app>-<uid>`, ADR 0182), `admit`, `closeBestEffort` |
 | `ipc_compliance.go` | the compile-time proof that `*Listener` satisfies `coreipc.Listener` and `*Dialer` satisfies `coreipc.Dialer` — a method renamed or retyped on either engine fails the build here, not in a caller holding the port |
 | `socket.go` (`!windows`) | the Unix socket: `listen` (dial-then-remove of a leftover socket — `nobodyListens`: refused or gone, nothing else —, `0600`), `socketAcceptor`, `admits`, `dial` (directory, path and owner checked before a byte is sent, within one second) |
-| `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName`, `pipeAcceptor` (DACL `D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused); `pipeConn` keeps its peer and, for a named one, a handle on its process (`newPipeConn`, `openPeerProcess` — a process younger than the connection refused —, closed by `Close`) |
+| `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName` (the account's SID in the name, #1318), `pipeSDDL`, `listenAs`, `taken`/`holder`/`ownerOf` (a name that exists judged by its owner: `IN_USE` or `ENDPOINT_SQUATTED`), `pipeAcceptor` (descriptor `O:<SID>D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused); `pipeConn` keeps its peer and, for a named one, a handle on its process (`newPipeConn`, `openPeerProcess` — a process younger than the connection refused —, closed by `Close`) |
 | `files.go` (`unix \|\| windows`), `files_unix.go`, `files_windows.go`, `files_other.go` | file passing (#936): `fdPassRefused`; `SCM_RIGHTS` on Unix (`fileConn`); a frame and `DuplicateHandle` out of the sender's process on Windows (`SendFiles`, `fileFrame`, `RecvFiles`, `take`); none elsewhere |
 | `dir_unix.go` / `dir_other.go` | `prepareDir` (path audited before AND after the `Mkdir`), `checkDir` (path above, own entry, holder), `checkEntry` (mode, owner, not a link), `ownerOf`: on Unix; a refusal elsewhere |
 | `chain_unix.go` | `checkChain` over `pathchain.Resolve` of the socket directory's parent, `checkHolder`, `steerable` (the rule), `ours`, `pathUnsafe` — see §Why-this-shape |
 | `peer_linux.go` / `peer_other.go` (`!linux && !windows`) | `peerOf`: `SO_PEERCRED`, or an unverified peer |
 
-The codes — `0.3.91.1`–`9`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
+The codes — `0.3.91.1`–`11`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
 `LISTEN_FAILED`, `PEER_REFUSED`, `DIAL_FAILED`, `ENDPOINT_FOREIGN`, `CLOSED`,
-`PATH_UNSAFE` — are `internal/core/proc/ipc`'s `codes.go` and `errors.go`.
+`PATH_UNSAFE`, `FD_PASS_REFUSED`, `ENDPOINT_SQUATTED` — are `internal/core/proc/ipc`'s `codes.go` and `errors.go`.
 
 ## Why-this-shape
 
@@ -150,6 +150,29 @@ The codes — `0.3.91.1`–`9`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
   records it), but this package's `DuplicateHandle` route for a socket is
   not written, and no test passes one (Refs #936). None of this has run here
   (e2e-cross's Windows lane runs it).
+- **A pipe name that exists is judged by its holder (#1318).** Named pipes
+  share one machine-wide namespace, and the name used to be derived from the
+  path alone, so another account could make it first and the listener read
+  that as `IN_USE` for as long as the squatter held it. The name now carries
+  the account's SID (`\\.\pipe\ipc-<SID>-<hash>-<base>`), so two accounts
+  with one path never meet, and the pipe is created OWNED by that SID
+  (`O:<SID>`) — an elevated token's default owner is Administrators, which
+  would make our own second listener look foreign. When the first-instance
+  create fails, `holder` creates one more instance (no
+  `FILE_FLAG_FIRST_PIPE_INSTANCE`), reads the owner with `GetSecurityInfo`
+  (the duplex server end holds `READ_CONTROL`) and closes it at once: this
+  account is `IN_USE`; another owner, or a pipe that admits no instance of
+  ours (every pipe this package makes grants its account `GA`), is
+  `ENDPOINT_SQUATTED` (`0.3.91.11`, exit 78), `owner` or `cause` field. What
+  it does NOT do: prevent the squat — a SID is no secret, the name stays
+  computable; it is now named instead of mistaken for our own daemon. Two
+  windows are accepted: the probe instance listens for the moment it lives (a
+  client of ours reaching it sees a broken pipe and dials again), and a pipe
+  gone between the two creates is made again by the probe and read as ours
+  (`IN_USE`, cleared by a retry). Tests: `pipe_windows_internal_test.go` (a
+  pipe pre-created under `D:P(A;;GR;;;WD)` and one owned by another account
+  through `listenAs`, the SID in the name, the owner read back) and
+  `TestASecondPipeListenerIsInUse`; they run on e2e-cross's Windows lane only.
 - **The directory rule is split by side (#1092).** `NewListener` keeps
   `checkDir`: the directory is this account's. `Dial` runs `checkDialDir`: the
   same chain, holder and entry rules — a real directory nobody but its owner can
