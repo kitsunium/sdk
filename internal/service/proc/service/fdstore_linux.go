@@ -63,13 +63,11 @@ func (w *hangupWatch) remove(f *os.File) {
 // Goroutine lifecycle: one, posting each hangup's id until the wake pipe or a
 // post the unit no longer takes ends it; stop joins it.
 func (w *hangupWatch) start(post func(uint64) bool) {
-	w.running.Add(1)
 	//: Goroutine lifecycle: ended by stop's wake, or a unit gone; joined by
 	//: stop.
-	go func() {
-		defer w.running.Done()
+	w.running.Go(func() {
 		w.run(post)
-	}()
+	})
 }
 
 // run posts each hangup's id until the wake pipe, or a post the unit no
