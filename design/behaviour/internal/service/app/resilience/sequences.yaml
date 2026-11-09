@@ -550,6 +550,7 @@ sequences:
                         to: b.trip
                     when: b.window != nil && b.window.add(now, false, slow)
             - case: coreres.BreakerOpen
+            - default: true
           "on": b.state
   - of: (*circuitBreaker).settleTrial
     participants:
@@ -616,6 +617,7 @@ sequences:
                         to: b.trip
                     when: b.failures >= b.threshold
             - case: coreres.BreakerOpen
+            - default: true
           "on": b.state
   - of: (*circuitBreaker).trip
     participants:
