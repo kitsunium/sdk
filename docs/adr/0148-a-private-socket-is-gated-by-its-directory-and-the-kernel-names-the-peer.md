@@ -168,3 +168,31 @@ connection completes and a process younger than the connection is refused,
 so a pid reused meanwhile is never reached. Still refused to a peer the
 kernel did not name. A TCP listener cannot be passed there: the standard
 library gives a Windows socket no `*os.File`.
+
+## Amendment — 2026-11-09: a pipe name another account holds (kitsunium/sdk#1318)
+
+Point 6 named the pipe after the path alone, in a namespace every account of
+the machine shares, and read a name that exists as `IN_USE`, "whoever made
+it". Another account could make it first and the listener then reported our
+own daemon running for as long as the squatter held the name.
+
+1. **The name carries the account**:
+   `\\.\pipe\ipc-<SID>-<16 hex digits of the path's SHA-256>-<base name>`, the
+   SID of the listening (or dialling) process. Two accounts with one path no
+   longer meet on one name; `Dial` reaches its own account's pipe only, which
+   is the only one point 6 ever let it trust.
+2. **The pipe is owned by that account** (`O:<SID>D:P(A;;GA;;;<SID>)`), not by
+   the token's default owner, which is Administrators for an elevated process.
+3. **A name that exists is judged by its holder.** One more instance is
+   created without `FILE_FLAG_FIRST_PIPE_INSTANCE`, its owner read with
+   `GetSecurityInfo` and the instance closed at once: this account's pipe is
+   `IN_USE`; one another account owns, or one whose DACL admits no instance
+   of ours, is `ENDPOINT_SQUATTED` (`0.3.91.11`, exit 78), a code of its own
+   because the remedy is a human finding the holder, not talking to it.
+4. **What it does not do**: prevent the squat. A SID is no secret, so the name
+   stays computable; Windows offers no per-account pipe namespace outside an
+   AppContainer. The squat is named, never mistaken for a daemon of ours, and
+   a client still refuses a server of another account before it sends a byte
+   (`ENDPOINT_FOREIGN`). The probe instance listens for the moment it lives,
+   and a pipe gone between the two creates is re-made by the probe and read
+   as ours (`IN_USE`, cleared by a retry).

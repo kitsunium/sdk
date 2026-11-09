@@ -15,8 +15,10 @@
 //     otherwise ([CodeDirectoryUnsafe]) — and the socket file is 0600.
 //     Connecting needs search permission on the directory, so only its owner
 //     (and root) get through. On Windows the endpoint is a named pipe named
-//     after the path, whose own DACL grants this account only, which refuses
-//     remote clients and which nobody can join once it exists.
+//     after this account and the path, whose own DACL grants this account
+//     only, which refuses remote clients and which nobody can join once it
+//     exists; a name another account took first is refused as squatted
+//     ([CodeEndpointSquatted]), never mistaken for a daemon of ours.
 //   - The PEER'S CREDENTIALS, where the kernel gives them: on Linux,
 //     SO_PEERCRED names the peer's user, group and process, and a peer that is
 //     neither this account nor in Config.AllowUIDs / AllowGIDs is closed

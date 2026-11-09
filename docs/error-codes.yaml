@@ -3137,6 +3137,10 @@ codes:
     const: CodeFDPassRefused
     hex: "0x00_03_5B_0A"
     package: internal/core/proc/ipc
+  - code: "0.3.91.11"
+    const: CodeEndpointSquatted
+    hex: "0x00_03_5B_0B"
+    package: internal/core/proc/ipc
   - code: "0.3.92.1"
     const: CodeLogCorrupt
     hex: "0x00_03_5C_01"

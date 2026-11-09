@@ -130,11 +130,17 @@
 //     inheritance (SDDL "D:P(A;;GA;;;<SID>)"), so no other account can open
 //     it — Everyone, Authenticated Users and Administrators included;
 //   - PIPE_REJECT_REMOTE_CLIENTS refuses a client of another machine;
-//   - the first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE: when
-//     the name exists — another daemon, or a squatter that made it first —
-//     the listen fails (IN_USE) rather than joining an instance somebody
-//     else controls, and the next instance is created before a connection is
-//     handed out, so the name never lapses while the listener lives;
+//   - the first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, so a
+//     name that exists is never joined as the listener's; the next instance
+//     is created before a connection is handed out, so the name never lapses
+//     while the listener lives;
+//   - a name that exists is judged by its holder: one more instance of it is
+//     created, its owner read and the instance closed at once. This
+//     account's pipe is another daemon of ours (IN_USE); a pipe another
+//     account owns, or whose DACL admits no instance of ours, is a squatter
+//     that made the name first (ENDPOINT_SQUATTED). The name is derived from
+//     the account, which is no secret, so a squatter can still take it:
+//     what changed is that it is named, never mistaken for our own daemon;
 //   - each end reads the other's account from its process token
 //     (GetNamedPipeClientProcessId / GetNamedPipeServerProcessId, then
 //     OpenProcessToken): a client refuses a server of another account before
@@ -142,9 +148,14 @@
 //     SECURITY_IDENTIFICATION, so the server can learn who it is but never
 //     act as it.
 //
-// The pipe is named after Config.Path, so one configuration serves every
-// platform: \\.\pipe\ipc-<16 hex digits of the path's SHA-256>-<base name>.
-// Nothing is created in the path's directory.
+// The pipe is named after this process's account and Config.Path, so one
+// configuration serves every platform and two accounts with the same path
+// never meet on one name:
+// \\.\pipe\ipc-<SID>-<16 hex digits of the path's SHA-256>-<base name>. The
+// owner it is created with is that account (O:<SID>), never the token's
+// default owner — Administrators, for an elevated process —, so the owner
+// read at a later listen is the account itself. Nothing is created in the
+// path's directory.
 //
 // The handles are opened overlapped and handed to os.NewFile, which puts
 // them on the runtime's poller: reads, writes and deadlines are the os
