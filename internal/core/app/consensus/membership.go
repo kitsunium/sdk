@@ -79,12 +79,9 @@ func (m MembershipValue) Voters() []NodeID {
 // under the engine.
 func (m MembershipValue) Clone() MembershipValue {
 	return MembershipValue{
-		Index: m.Index,
-		// append(s[:0:0], s...) is the copy slices.Clone makes, nil kept nil,
-		// written out because slices.Clone's own body would push the engine's
-		// ConfAt, which inlines this method, past the inliner's budget.
-		Members:     append(m.Members[:0:0], m.Members...),
-		Retired:     append(m.Retired[:0:0], m.Retired...),
-		RetiredKeys: append(m.RetiredKeys[:0:0], m.RetiredKeys...),
+		Index:       m.Index,
+		Members:     slices.Clone(m.Members),
+		Retired:     slices.Clone(m.Retired),
+		RetiredKeys: slices.Clone(m.RetiredKeys),
 	}
 }

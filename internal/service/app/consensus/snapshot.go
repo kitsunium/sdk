@@ -287,16 +287,14 @@ func (n *Node) cut(idx, term uint64, wait bool) error {
 		}
 		return nil
 	}
-	n.wg.Add(1)
-	go func() {
-		defer n.wg.Done()
+	n.wg.Go(func() {
 		if err := n.writeSnapshot(snap, meta); err != nil {
 			n.giveSinceBytes(taken)
 			n.cutFailed(err)
 			return
 		}
 		n.cutPending()
-	}()
+	})
 	return nil
 }
 
@@ -912,9 +910,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	offer := coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
 	ctx, cancel := context.WithCancel(context.Background())
 	n.sendStop[to] = cancel
-	n.wg.Add(1)
-	go func() {
-		defer n.wg.Done()
+	n.wg.Go(func() {
 		go func() {
 			select {
 			case <-n.stopc:
@@ -950,5 +946,5 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 			n.r.SnapshotDone(to, meta.Position.Index, err == nil)
 			n.handleReady()
 		})
-	}()
+	})
 }

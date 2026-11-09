@@ -1439,15 +1439,13 @@ func (t *TCPTransport) reserveAddresses(byID map[coreconsensus.NodeID]coreconsen
 	}
 	t.resvAddrs = addrs
 	seq := t.resvSeq.Add(1)
-	t.wg.Add(1)
-	go func() {
-		defer t.wg.Done()
+	t.wg.Go(func() {
 		t.resvMu.Lock()
 		defer t.resvMu.Unlock()
 		if t.resvSeq.Load() == seq {
 			t.admission.SetReserved(addrs)
 		}
-	}()
+	})
 }
 
 // Close stops the transport and joins its goroutines.

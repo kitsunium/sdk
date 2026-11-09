@@ -19660,7 +19660,7 @@ sequences:
         kind: value
       - id: n.writeSnapshot
         kind: internal
-      - id: n.wg.Add
+      - id: n.wg.Go
         kind: value
     steps:
       - opt:
@@ -19707,18 +19707,16 @@ sequences:
                 when: err != nil
             - return: nil
           when: n.cfg.SnapshotPausesApply || wait
-      - eval: n.wg.Add(1)
-        to: n.wg.Add
-      - go: |-
-          func() {
-          		defer n.wg.Done()
+      - eval: |-
+          n.wg.Go(func() {
           		if err := n.writeSnapshot(snap, meta); err != nil {
           			n.giveSinceBytes(taken)
           			n.cutFailed(err)
           			return
           		}
           		n.cutPending()
-          	}()
+          	})
+        to: n.wg.Go
       - return: nil
   - of: (*Node).takeSinceBytes
     steps:
@@ -20642,7 +20640,7 @@ sequences:
         kind: value
       - id: context
         kind: stdlib
-      - id: n.wg.Add
+      - id: n.wg.Go
         kind: value
     steps:
       - opt:
@@ -20691,11 +20689,8 @@ sequences:
         to: context
       - set: n.sendStop[to]
         value: cancel
-      - eval: n.wg.Add(1)
-        to: n.wg.Add
-      - go: |-
-          func() {
-          		defer n.wg.Done()
+      - eval: |-
+          n.wg.Go(func() {
           		go func() {
           			select {
           			case <-n.stopc:
@@ -20731,7 +20726,8 @@ sequences:
           			n.r.SnapshotDone(to, meta.Position.Index, err == nil)
           			n.handleReady()
           		})
-          	}()
+          	})
+        to: n.wg.Go
   - of: (*fileLog).segmentBytes
     steps:
       - opt:
@@ -23112,7 +23108,7 @@ sequences:
         kind: stdlib
       - id: t.resvSeq.Add
         kind: value
-      - id: t.wg.Add
+      - id: t.wg.Go
         kind: value
     steps:
       - bind: addrs
@@ -23138,17 +23134,15 @@ sequences:
       - bind: seq
         eval: t.resvSeq.Add(1)
         to: t.resvSeq.Add
-      - eval: t.wg.Add(1)
-        to: t.wg.Add
-      - go: |-
-          func() {
-          		defer t.wg.Done()
+      - eval: |-
+          t.wg.Go(func() {
           		t.resvMu.Lock()
           		defer t.resvMu.Unlock()
           		if t.resvSeq.Load() == seq {
           			t.admission.SetReserved(addrs)
           		}
-          	}()
+          	})
+        to: t.wg.Go
   - of: (*TCPTransport).Close
     participants:
       - id: caller

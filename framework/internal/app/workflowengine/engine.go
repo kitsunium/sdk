@@ -139,8 +139,9 @@ func triggerOf(t statemachine.Trigger) plug.WorkflowTrigger {
 		return plug.WorkflowTriggerDeadline
 	case statemachine.TriggerGuard:
 		return plug.WorkflowTriggerGuard
+	default:
+		return plug.WorkflowTriggerEvent
 	}
-	return plug.WorkflowTriggerEvent
 }
 
 // sdkTriggerOf is plug's trigger as the engine says it.
@@ -166,8 +167,9 @@ func wakeOf(w statemachine.Wake) plug.WorkflowWake {
 		return plug.WorkflowWakeDue
 	case statemachine.WakeChange:
 		return plug.WorkflowWakeChange
+	default:
+		return plug.WorkflowWakeStart
 	}
-	return plug.WorkflowWakeStart
 }
 
 // loopKindOf is what the engine's loop reports, as plug says it.
@@ -179,6 +181,7 @@ func loopKindOf(k statemachine.LoopEventKind) plug.WorkflowLoopEvent {
 		return plug.WorkflowLoopRunEnded
 	case statemachine.LoopWaiting:
 		return plug.WorkflowLoopWaiting
+	default:
+		return plug.WorkflowLoopOther
 	}
-	return plug.WorkflowLoopOther
 }
