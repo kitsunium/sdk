@@ -56969,7 +56969,8 @@ sequences:
         kind: stdlib
     steps:
       - bind: seen
-        eval: maps.Clone(reservedTables)
+        eval: make(map[string]string, len(reservedTables))
+      - eval: maps.Copy(seen, reservedTables)
         to: maps
       - var:
           name: out
