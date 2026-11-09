@@ -8499,12 +8499,7 @@ sequences:
           do:
             - set: c.scratch
               to: buffer
-              value: buffer.Get()
-            - opt:
-                do:
-                  - set: c.scratch
-                    value: new(make([]byte, size))
-                when: cap(*c.scratch) < size
+              value: buffer.GetSize(size)
             - set: "*c.scratch"
               value: (*c.scratch)[:size]
           init:

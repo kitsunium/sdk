@@ -16,8 +16,9 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `session` | security | Server-side sessions: a self-redacting 256-bit identifier, memory and file stores (the file store's directory audited for a planted link, then held, so nothing is read or locked through one), absolute and sliding expiry, `Regenerate` the only login | 0045, 0073 |
 | `authz` | security | RBAC and ABAC with no policy language; abstention is the zero verdict, deny-overrides the one combiner | 0057 |
 | `net` | net | TLS/mTLS identities, the guarded outbound client, the server engine and its drain signal, SSE, WebSocket (RFC 6455) and a static file tree; an opt-in plaintext loop engine (io_uring, epoll, portable) entered by `Group.HandleLoop`, the engine chosen by the handler's type and every group option judged by its kind, the operator's switches that only lower it (`KITSUNIUM_NET_ENGINE`, `KITSUNIUM_NET_DISABLE`) and a `State` that lists what the server runs without, and its restricted HTTP/1.1 profile, `net/http1`, with the links of a chain — routing, Bearer, response fields, an access log — judging one canonical target, loop middlewares (`UseLoop`) checked to forward every callback, `LoopsAuto` and a drain that stops the routing first and serves the listen queue, and datagrams read with UDP GRO and replies batched with `sendmmsg` and GSO on request (`BatchReplies`) | 0029, 0043, 0047, 0069, 0130, 0186, 0187, 0188, 0189, 0191, 0192, 0196, 0199, 0200, 0201, 0202 |
-| `proc` | proc | Spawn and wait, signals, the reaper, rlimits, cgroups and the cap already bounding the process, sd_notify and socket activation, what the program was built from | 0016, 0075, 0093, 0100, 0144 |
+| `proc` | proc | Spawn and wait, signals, the reaper, rlimits, cgroups — nested, their controllers and cgroup v2 files written by the SDK alone, `cgroup.events` watched — and the cap already bounding the process, sd_notify and socket activation, what the program was built from; a child gets only the descriptors it is named, a wait is bounded, a signal goes through a pidfd or HANDLE, a child may die with its parent, run on a pseudo-terminal or under a scheduling class, or be sandboxed — namespaces, mounts, a new root, capabilities, Landlock and a seccomp filter applied before its program runs; one service's life cycle as systemd.service(5) runs it — Type=, Exec*=, the timeouts, the watchdog, Restart= and the start limiter — one actor over a pure reducer (`proc/service`), a forking daemon adopted from its PID file or its cgroup, the descriptors a service stores handed back to its next main process, a unit per accepted connection, the cgroup modes on a unit's own group — `KillMode=control-group` its default there, `mixed`, `ExitType=cgroup`, `Delegate=`, `OOMPolicy=`, and `Type=dbus` up on its bus name, through `proc/dbus` — a message bus client on the standard library; a process adopted from a PID file read safely, the whole sd_notify transport, a child told its own `LISTEN_PID`; a device, IP or bind policy attached to a cgroup as a BPF program, the backend a vendor module (`third-party/ebpf`) a program links by importing it | 0016, 0075, 0093, 0100, 0144, 0214, 0215, 0217, 0219 |
 | `ipc` | proc | A private socket between processes of one machine: the directory gates it, the path above that directory is refused where another account could steer it, the kernel names the peer where it can | 0148, 0182 |
+| `rpc` | proc | A call between two processes over the private socket: a codec-named hello, frames refused on their length before anything is allocated, `MaxInFlight` calls answered `OVERLOADED` past it, a budget on the server's clock and a cancel frame, an SDK error's code across | 0218 |
 | `logger` | observe | Structured logger, one allocation per emit, trace-correlated; named writers (console, file, rotation, journald, database, network) and a `slog` bridge at the edge | 0012, 0015, 0030, 0032, 0062, 0070, 0132 |
 | `metrics` | observe | The OpenTelemetry metrics data model from its specification, zero OTel imports; text, Prometheus and OTLP/JSON exporters | 0027, 0044, 0048, 0067, 0208 |
 | `trace` | observe | The OTel span model and W3C Trace Context from their documents, sampled once at the root, exported as OTLP/JSON | 0051 |
@@ -58,12 +59,14 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 internal/
 ├── kernel/        stdlib-only AND generic primitives, by family (ADR 0155)
 │                  backoff, clock, errs, jsonenc, plugin, semver, swar,
-│                  concur/{batcher, buffer, commit, group, recycler,
-│                          singleflight, snapshot, worker},
+│                  concur/{batcher, buffer, commit, group, pool,
+│                          recycler, sema, singleflight, snapshot,
+│                          worker},
 │                  collections/{cache, heap, ring},
 │                  fs/{flock, pathchain, winacl}
 ├── core/          domain interfaces + domain values — each package by its path
-│                  crypto, crypto/key/jwk, net, proc, proc/ipc,
+│                  crypto, crypto/key/jwk, net,
+│                  proc, proc/bpf, proc/dbus, proc/ipc, proc/ipc/rpc, proc/service,
 │                  app/{cli, config, consensus, events, forward, health, i18n, id,
 │                       lifecycle, lock, mail, mail/spool, resilience,
 │                       scheduler, statemachine, validation, view},
@@ -154,6 +157,8 @@ internal/
                            reaper, rlimit, self, signal — process supervision,
                            ADR 0016; internal/rlim — the syscall.Rlimit
                            constructor exec and rlimit share;
+                           internal/bsdabi — the BSD and darwin process
+                           records exec reads off Linux, decoded from bytes;
                            systemd/{listen, notify} — socket activation and
                            sd_notify; ipc — a private socket between
                            processes of one machine, the engines behind
@@ -161,7 +166,16 @@ internal/
                            directory gates, the path above it audited with
                            pathchain (PATH_UNSAFE), SO_PEERCRED on Linux, a
                            named pipe with its own DACL on Windows —
-                           ADR 0148, ADR 0160)
+                           ADR 0148, ADR 0160; ipc/rpc — a framed,
+                           bounded, codec-typed call over that socket:
+                           frames refused on their length, MaxInFlight
+                           calls, budgets and cancel frames — ADR 0218;
+                           service — one service's life cycle as
+                           systemd.service(5) runs it, one actor over a
+                           pure reducer — ADR 0214; bpf — the cgroup BPF
+                           programs' engine: the one backend a vendor
+                           module registers at import, NOT_LINKED without
+                           it — ADR 0215)
                    net    (the family — ADR 0155; a directory, no Go code:
                            client, server, sse, static, tlsid, websocket —
                            one engine each over the one contract core/net;
@@ -213,10 +227,11 @@ pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
     ├── clock/     (the time port: Clock/Waiter/Timed + System + ManualClock + CoarseClock — ADR 0090)
     ├── concur/    (a family directory, no Go code — ADR 0159 §4: group/, singleflight/,
-    │                 worker/, batcher/, snapshot/, recycler/ — pure aliases of the
-    │                 kernel's concurrency primitives)
+    │                 worker/, batcher/, snapshot/, recycler/, pool/ — pure aliases
+    │                 of the kernel's concurrency primitives; pool/ — ADR 0216)
     ├── collections/ (a family directory, no Go code — ADR 0159 §4: heap/, ring/ —
-    │                 pure aliases of the kernel's containers, ring single-producer)
+    │                 pure aliases of the kernel's containers, ring single- and
+    │                 multi-producer — ADR 0216)
     ├── observe/   (a family directory, no Go code — ADR 0155:
     │                 logger/ — + ldflags-injected Version, + writer/, + slogbridge/;
     │                 metrics/ — the OTel data model, zero OTel imports — ADR 0044;
@@ -280,7 +295,15 @@ pkg/
     │                 memlimit/ — the cap already bounding this process — ADR 0075;
     │                 systemd/{notify, listen}/ — sd_notify and socket activation;
     │                 ipc/ — a private socket, the peer the kernel names — ADR 0148;
-    │                   Listener/Dialer ports a test can double — ADR 0160)
+    │                   Listener/Dialer ports a test can double — ADR 0160;
+    │                 ipc/rpc/ — a framed, bounded call over it — ADR 0218;
+    │                 service/ — one service's life cycle, systemd.service(5)
+    │                   as typed values — ADR 0214;
+    │                 bpf/ — device, IP and bind policies attached to a
+    │                   cgroup, the backend linked by importing
+    │                   third-party/ebpf/cgroup, NOT_LINKED otherwise — ADR 0215;
+    │                 dbus/ — a message bus client on the standard library:
+    │                   a name's owner watched, a name owned — ADR 0214 (S0e))
     └── app/       (a family directory, no Go code — ADR 0155:
                       config/ — env, file and fs.FS layering, schema, origins,
                         poll watch — ADR 0028, ADR 0061, ADR 0097;
@@ -318,6 +341,8 @@ third-party/       opt-in vendor integrations, one Go module per vendor
                    codec/yaml (yaml.v3 as the opt-in "yaml-full" Format,
                      beside the native "yaml" subset — ADR 0156),
                    db/writer/{clickhouse,mysql,redis},
+                   ebpf (cgroup — the cgroup BPF backend over cilium/ebpf,
+                     its programs built with asm — ADR 0215),
                    transform (zstd + s2 — ADR 0066),
                    x-crypto (argon2id, xchacha);
                    the SQL mechanisms' suites on real engines moved to
@@ -437,7 +462,7 @@ sdk/
 ├── tools/genindex/        docs/api (written and checked) + the doc-link check — auxiliary module, OUTSIDE go.work (GOWORK=off)
 ├── tools/netgate/         the network plan's merge gates: paired bench rounds, each threshold held on benchstat's interval of their ratios (ADR 0190) (net-kernel-gate.yml) — auxiliary module, OUTSIDE go.work (GOWORK=off)
 ├── .golangci.yml          code-quality second-opinion linters (the layer firewall is scripts/check-layer-deps.sh — ADR 0068)
-├── AGENTS.md, agent.toml  agent specs (not SDK)
+├── AGENTS.md              agent specs (not SDK)
 └── README.md              the SDK quickstart (packages, install, verification)
                            — per-package docs live next to their code
 ```
@@ -464,7 +489,7 @@ sdk/
 | `make vuln-install && make vuln-check` | every module: no REACHABLE known vulnerability (`govulncheck` source mode, pinned in the `Makefile`; needs `vuln.go.dev`). Blocking in CI's `bazel` job and run daily by `vuln-scan.yml` (ADR 0136) |
 | `go test ./pkg/v1/...` (in the workspace) | green; `pkg/v1/data/codec` completes in seconds — `TestGenerateBenchMD` self-skips unless named via `-run` |
 | `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + `make guard` + `make doclinks` + `make api-check` + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + core symmetry + platforms table + package docs + BENCH.md presence + error-code drift + README drift + layer firewall (`scripts/check-layer-deps.sh`) |
-| `make guard` | `tools/sdkguard` over the SDK's own tree: the invariants (ADR 0033), then SDK002 over `internal/`, `pkg/`, `third-party/` and `framework/` — rule 2, no exemption (ADR 0161); no network — `-version-check=off` |
+| `make guard` | `tools/sdkguard` over the SDK's own tree: the invariants (ADR 0033), then SDK002 over `internal/`, `pkg/`, `third-party/` and `framework/` — rule 2, no exemption (ADR 0161), then SDK006 over those and `tools/` and `e2e/`, test files too — no `net/http/pprof` import anywhere (ADR 0121, #1023); no network — `-version-check=off` |
 | `make doclinks` | every same-package doc link in the repository names a symbol its package declares — a member of an aliased type is written `[Type].Member` (ADR 0138); part of `make lint-check`, so CI runs it |
 | `make api-check` | exit 0 — `docs/api` regenerated from the code in memory, on every cell of `scripts/ci/platforms.sh`, equals what is committed byte for byte (a difference names each record added, changed or removed); on every cell the code's exported (id, kind, canonical signature) set equals the markers of the `gen_api*_test.go` pins kit writes from `design/`, and each symbol's doc and each package comment hash to the markers' doc digests (ADR 0167); and every generated file's header digests hold against its design file's bytes and its own body (ADR 0163). Part of `make lint-check`, so CI runs it, and named in `scripts/ci-gates-check.sh`'s GATES |
 | `kit gen -check && kit check` (needs kit; no CI lane runs it — ADR 0163 §7) | exit 0 — the generated files are the design's, and the SDK holds to every rule of `design/sdk.yaml` with no finding: the surface (`api`, `ports`) and the structure (`layers`, `stdlib`, `mirrors`, `codes`, `facade`, `budgets`, `exceptions`), the latter advisory beside the SDK's own scripts; `kit gen -check` also re-measures the inline budget of each budgeted forwarder (ADR 0166) |
@@ -667,5 +692,11 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0210 — a published JSON Schema is validated with the standard library, accepted on 2026-11-03 (kitsunium/sdk#882): `codec/jsonschema` (`0.3.103.*`, facade `pkg/v1/data/codec/jsonschema`) — `NewValidator(schema, Config)` compiles 2020-12's core, applicator and validation vocabularies, `$ref` within the document and to `Config.Resources`, never fetched, numbers exact, `format` asserted only for `AssertFormats` (date-time, uuid, email); another draft, `$dynamicRef`, `$vocabulary`, the unevaluated and content vocabularies refused by name; `Validate(doc, maxBytes)` reads through strictjson and returns a `validation.ReportValue` in its path grammar, never quoting the document; the official JSON-Schema-Test-Suite vendored and passed but the named groups
 - ADR 0211 — the data ports' vendor adapters, accepted on 2026-11-02: a Valkey cache tier and stream broker in `third-party/db/redis` (named by its vendor, #984), a JetStream broker in `third-party/nats`, an S3 `FullFS` and an SQS broker in `third-party/aws`; Valkey leases on the broker's clock, JetStream and SQS leases on the server's, refused at their deadline before anything is sent; the broker dead-letters with the cause — `docs/adr/0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md`
 - ADR 0213 — a compression stream is read under the caller's ceiling, accepted on 2026-11-03 (kitsunium/sdk#892): `core/data/transform`'s sibling port `StreamingCompressor` (`NewReader(r, max)`, `NewWriter(w)`) for gzip, flate, zlib, zstd and s2, at most `max` bytes then `DecompressedTooLarge`, the facade's `NewReader` / `NewWriter` and `STREAMING_UNSUPPORTED` `0.2.5.7`; closes ADR 0066's streaming deferral — `docs/adr/0213-a-compression-stream-is-read-under-the-callers-ceiling.md`
+- ADR 0214 — a service unit is one actor over a pure reducer, accepted on 2026-11-03 (kitsunium/sdk#732, S0a of supervizio/agent#326): the life cycle of ONE service moves into the SDK as `proc/service` (amends ADR 0016's Context), not a lifecycle `Component`, not `lifecycle.Supervisor`, not `statemachine`, and importing nothing of `app`; one goroutine per unit, a pure `reduce(model, event) → (model', effects)` and an I/O shell; observers on a bounded queue the unit never waits on, the newest event dropped and counted, `State()` a level with a generation; every wait on the kernel's `clock.Timed`; the ports `Spawner`, `Attacher`, `CgroupKill`, `NotifySource`, `Clock`; a stop escalates on the unit's own context; `Fail` is `WATCHDOG=trigger` from outside; Restart= Table 1 as the oracle, replayed; the coverage of every directive of `systemd.service(5)`, `systemd.kill(5)`, the launch part of `systemd.exec(5)` and the start limit of `systemd.unit(5)`; range `0.3.105.*`; amended 2026-11-08 (kitsunium/sdk#735, #736, #740 — S0c, S0d, S0f): `Type=forking` adopting its daemon from `PIDFile=` or guessing it among the cgroup's members (`CgroupMembers`), a descriptor store the shell owns handed back to the next main process, `SpawnInstance` — a unit per accepted connection, the connection at fd 3; amended 2026-11-08 again (kitsunium/sdk#734, S0g): the cgroup modes on a `CgroupUnit`, a sibling of `CgroupKill` the Linux group of `proc/cgroup` is — `KillMode`'s zero `KillModeDefault`, control-group with one and process without, the group's kill through `Signal` and never `cgroup.kill` (after which Linux 6.12 kills every child cloned into the group), `ExitType=cgroup`, `Delegate=` (the group handed, what the service made beneath it removed), `OOMPolicy=` on `memory.events`, the group read again whenever the reducer decides; `Members` over the subtree and `cgroup.Membership`, a group's directory as `/proc/<pid>/cgroup` names it; amended 2026-11-08 a third time (kitsunium/sdk#731, S6, ADR 0215): the BPF rows restated — `proc/bpf` attaches device, IP and bind policies to a group, a primitive the engine does not call yet, the agent attaching them to the unit's group; `RestrictFileSystems=`, `PrivateBPF=` and `BPFDelegate…=` no, none of them a cgroup program; amended 2026-11-08 a fourth time (kitsunium/sdk#728, S2, ADR 0217): the sandbox rows restated — `Spec.Sandbox` reaches every command through `Config.Spec`, no `Config` field takes a directive yet, `+` keeps the sandbox, the store's key ignores it; joining a namespace and the argument filters (`RestrictNamespaces=`, `RestrictAddressFamilies=`, `MemoryDenyWriteExecute=`…) no; amended 2026-11-08 a fifth time (kitsunium/sdk#737, S0e): `Type=dbus` up once its main process runs and its `BusName=` is owned, stopped when the bus announces it lost, systemd 262's two-second `running-revalidating` grace otherwise, through the `BusWatcher` port — the spike's option (a), `proc/dbus`, a message bus client on the standard library (AUTH EXTERNAL, `AddMatch`/`GetNameOwner`, every call bounded at 25 s, range `0.3.108.*`); amended 2026-11-08 a sixth time (kitsunium/sdk#728, #733): the sandbox wired into the engine — `ProtectSystem=` (`strict` no), `PrivateTmp=disconnected` (`yes` no), `ReadOnlyPaths=`, `BindPaths=`, `TemporaryFileSystem=`, `RootDirectory=` and `RootDirectoryStartOnly=`, the `Private…=` namespaces, `ProtectHostname=`, `NoNewPrivileges=`, the capability sets, `SecureBits=`, `SystemCallFilter=` and `SystemCallErrorNumber=`, `SystemCallArchitectures=native` as `Config` fields resolved into one `SandboxValue` added to `Config.Spec`'s, a user namespace implied for an unprivileged supervisor; `+` unconfined, `!` the sandbox kept; the store's key holding the sandbox; no uid-0 `MAINPID=` for a sandboxed unit; a sandbox's failure `START_FAILED` wrapping `SANDBOX_FAILED` (`exit-code`) or `SANDBOX_UNAVAILABLE` (`resources`); amended 2026-11-08 a seventh time (kitsunium/sdk#738, S0h): the supervisor's hand-over — `Freeze`, `Reexec` through `syscall.Exec` of the program's `O_PATH` descriptor (`execveat` replaced for the runtime's exec lock), `TakeHandover`, `Resume`, codes `0.3.105.12`–`14`, BSD, macOS and Windows refused, a refused hand-over stopping every child in order (no adoption), no migration while one version exists
+- ADR 0215 — a cgroup's BPF programs are built in Go, in a quarantined vendor module, accepted on 2026-11-08 (kitsunium/sdk#731, S6): `core/proc/bpf`, `service/proc/bpf` and `pkg/v1/proc/bpf` stay stdlib, the backend is `third-party/ebpf/cgroup` over cilium/ebpf, registered by a blank import — `docs/adr/0215-a-cgroups-bpf-programs-are-built-in-go-in-a-quarantined-vendor-module.md`
+- ADR 0216 — a pool bounds workers, a semaphore bounds weight, and the ring takes many producers, accepted on 2026-11-03 (kitsunium/sdk#804, #805, #810, #812, #817, #1034, #1040, #813): `kernel/concur/pool` (published as `pkg/v1/concur/pool`, `0.1.6.*`), `kernel/concur/sema` (`0.1.7.*`), `ring.NewMulti`, `buffer.GetSize`'s size classes, `batcher`'s lifetime context and `FlushBackground` (`0.1.5.3`), `singleflight`'s shared context rooted in its call record (one allocation fewer); amends ADR 0006, 0010, 0014, 0049 and 0159
+- ADR 0217 — a spawn gives the child only what it names, and waits a bounded time, accepted on 2026-11-03 (kitsunium/sdk#928, #929, #931, #933, #934, #935, #940, #943, #1088, #1089, #1090, #1091): the supervisor's descriptors sealed close-on-exec before every fork (`Spec.FDs = FDsInherited` opts out), `Spec.DrainGrace` bounding `Wait`'s copier join (`STDIO_DRAIN_TIMEOUT` `0.2.6.24`), the `ContextWaiter`, `ProcessHandle` (`HANDLE_UNAVAILABLE` `0.2.6.25`) and `Terminal` (`PTY_FAILED` `0.2.6.26`) sibling ports, `DieWithParent`, `Scheduling`, `ExitValue.CoreDumped` and `Usage`, a cgroup placement by `CLONE_INTO_CGROUP`; amends ADR 0016 and 0018; amended 2026-11-08 (#728, S2): `Spec.Sandbox`, a trampoline in two stages — the clone's namespaces, then in the child on one locked thread mounts, `pivot_root`, the bounding set, the identity, the capabilities, `no_new_privs`, Landlock and the seccomp filter last — from a sealed memfd payload, `SANDBOX_FAILED` `0.2.6.30`, `SANDBOX_UNAVAILABLE` `0.2.6.36`, `LandlockABI`, `CapSandbox`; amended again the same day: `MountTmpfsSticky`, a tmpfs of mode 1777 for `PrivateTmp=`, and (#738) a name `Spec.Env` repeats reaches the child once, with its last value, as `os/exec` reads it — `docs/adr/0217-a-spawn-gives-the-child-only-what-it-names-and-waits-a-bounded-time.md`
+- ADR 0218 — a call over the private socket is framed, bounded and typed, accepted on 2026-11-07 (kitsunium/sdk#930): `proc/ipc/rpc` — `internal/core/proc/ipc/rpc` (the `Handler`, `Router`, `Request` and `Stream` ports, range `0.3.106.*`), the engine `internal/service/proc/ipc/rpc` and the facade `pkg/v1/proc/ipc/rpc`; a length past `MaxFrameBytes` refused before anything is allocated, a frame whole within `FrameTimeout` on the injected clock, `MaxInFlight` calls per connection — `docs/adr/0218-a-call-over-the-private-socket-is-framed-bounded-and-typed.md`
+- ADR 0219 — a supervisor adopts, hears and hands over only what it can verify, accepted on 2026-11-07 (kitsunium/sdk#726, #729, #730, #739 — SB1, S3, S4, S5 of supervizio/agent#326): `Spec.Env` refusing `__KITSUNIUM_SDK_PROC_*` (`RESERVED_ENV` `0.2.6.31`), `exec.Attach` / `AttachPIDFile` adopting through a pidfd from a PID file walked safely, trusted only when root or this user made every step, else bounded by an `AttachValue` (`PID_FILE_REFUSED`, `ADOPTION_REFUSED`, `STATUS_UNKNOWN`, `0.2.6.32`–`34`), the sd_notify listener reading descriptors, `BARRIER=1`, `MAINPIDFD=1` and the sender's uid with every assignment bounded, `Spec.PIDEnv` giving a child its own `LISTEN_PID`, `systemd/listen`'s `PrepareFiles` and `CheckName` (`INVALID_FD_NAME` `0.2.6.35`); amends ADR 0016 and 0018; amended 2026-11-08: adoption on darwin and the BSDs through two kqueue knotes, a signal by pid only while one is silent, the process record decoded by `proc/internal/bsdabi`; the notify listener on FreeBSD through `LOCAL_CREDS_PERSISTENT` (`SCM_CREDS2`) — `docs/adr/0219-a-supervisor-adopts-hears-and-hands-over-only-what-it-can-verify.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

@@ -1,0 +1,193 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewWeighted
+    steps:
+      - return: "&Weighted{capacity: max(capacity, 1)}"
+  - of: (*Weighted).Acquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Weighted).Acquire
+        kind: self
+      - id: ctx.Done
+        kind: value
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: ctx.Err
+        kind: value
+      - id: s.push
+        kind: internal
+      - id: s.leave
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: "\"internal/kernel/concur/sema: Acquire of a negative weight\""
+          when: n < 0
+      - opt:
+          do:
+            - return: WeightTooLarge
+          when: n > s.capacity
+      - bind: done
+        eval: ctx.Done()
+        to: ctx.Done
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - select:
+          cases:
+            - comm: <-done
+              do:
+                - eval: s.mu.Unlock()
+                  to: s.mu.Unlock
+                - return: ctx.Err()
+                  to: ctx.Err
+            - default: true
+      - opt:
+          do:
+            - op: +=
+              set: s.held
+              value: "n"
+            - eval: s.mu.Unlock()
+              to: s.mu.Unlock
+            - return: nil
+          when: s.head == nil && s.capacity-s.held >= n
+      - bind: w
+        eval: "&waiter{n: n, granted: make(chan struct{}, 1)}"
+      - eval: s.push(w)
+        to: s.push
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - select:
+          cases:
+            - comm: <-w.granted
+              do:
+                - return: nil
+            - comm: <-done
+              do:
+                - return: s.leave(w, ctx.Err())
+                  to: s.leave
+  - of: (*Weighted).leave
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Weighted).leave
+        kind: self
+      - id: s.unlink
+        kind: internal
+      - id: s.grant
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - select:
+          cases:
+            - comm: <-w.granted
+              do:
+                - op: "-="
+                  set: s.held
+                  value: w.n
+            - default: true
+              do:
+                - eval: s.unlink(w)
+                  to: s.unlink
+      - eval: s.grant()
+        to: s.grant
+      - return: cause
+  - of: (*Weighted).TryAcquire
+    steps:
+      - opt:
+          do:
+            - panic: "\"internal/kernel/concur/sema: TryAcquire of a negative weight\""
+          when: n < 0
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - op: +=
+              set: s.held
+              value: "n"
+            - return: "true"
+          when: s.head == nil && s.capacity-s.held >= n
+      - return: "false"
+  - of: (*Weighted).Release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Weighted).Release
+        kind: self
+      - id: s.grant
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - panic: "\"internal/kernel/concur/sema: Release of more units than are held\""
+          when: n < 0 || n > s.held
+      - op: "-="
+        set: s.held
+        value: "n"
+      - eval: s.grant()
+        to: s.grant
+  - of: (*Weighted).grant
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Weighted).grant
+        kind: self
+      - id: s.unlink
+        kind: internal
+    steps:
+      - loop:
+          cond: w != nil && s.capacity-s.held >= w.n
+          do:
+            - op: +=
+              set: s.held
+              value: w.n
+            - eval: s.unlink(w)
+              to: s.unlink
+            - send:
+                chan: w.granted
+                value: struct{}{}
+          init: w := s.head
+          post: w = s.head
+  - of: (*Weighted).push
+    steps:
+      - set: w.prev
+        value: s.tail
+      - alt:
+          - do:
+              - set: s.head
+                value: w
+            when: s.tail == nil
+          - do:
+              - set: s.tail.next
+                value: w
+            else: true
+      - set: s.tail
+        value: w
+  - of: (*Weighted).unlink
+    steps:
+      - alt:
+          - do:
+              - set: s.head
+                value: w.next
+            when: w.prev == nil
+          - do:
+              - set: w.prev.next
+                value: w.next
+            else: true
+      - alt:
+          - do:
+              - set: s.tail
+                value: w.prev
+            when: w.next == nil
+          - do:
+              - set: w.next.prev
+                value: w.prev
+            else: true
+      - set: w.prev, w.next
+        value: nil, nil

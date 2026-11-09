@@ -32,3 +32,9 @@ func Prepare(_ *coreproc.Spec, _ map[string]net.Listener) error {
 	//: an activator cannot hand off fds where inheritance is unavailable.
 	return coreproc.UnsupportedPlatform
 }
+
+// PrepareFiles cannot pass descriptors off Unix and returns UnsupportedPlatform.
+func PrepareFiles(_ *coreproc.Spec, _ []NamedFileValue) error {
+	//: an activator cannot hand off fds where inheritance is unavailable.
+	return coreproc.UnsupportedPlatform
+}

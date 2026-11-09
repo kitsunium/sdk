@@ -17,6 +17,14 @@ magnitude larger than the work it wraps.
 |---|---:|---:|---:|
 | `Notify_Stop_One` — subscribe to 1 signal, then tear down | **7 324** | 655 | 10 |
 | `Notify_Stop_Four` — subscribe to 4 signals in one call | 13 440 | 744 | 10 |
+| `NotifyContext_Stop_One` — the same through `NotifyContext`, stop joining the bridge (#1096)¹ | 93 412 | 936 | 16 |
+
+¹ Measured 2026-11-04 on the L4 lot's Linux VM (4 vCPU, `go1.27.3`,
+`-benchtime=300ms`), where `Notify_Stop_One` read 6 635 ns / 657 B / 10 allocs in
+the same run. The ×14 is `stop` waiting for two goroutines to be scheduled and
+end — the bridge and Notify's translator — which is the price of returning
+with nothing left running; a `NotifyContext` is wired once per run, never per
+request. To refresh on the reference machine with the rest of the table.
 | `ToSignal` — the per-delivery translation | **2.982** | 0 | 0 |
 | `Forward` — the per-delivery send | 116.9 | 0 | 0 |
 | `Stop_Idempotent` — every `stop()` after the first | 3.104 | 0 | 0 |

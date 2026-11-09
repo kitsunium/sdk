@@ -13,8 +13,14 @@
 //
 // SPSC means EXACTLY ONE goroutine calls TryWrite at a time AND EXACTLY ONE
 // goroutine calls TryRead at a time. Concurrent producers or concurrent
-// consumers are NOT safe — those callers should serialise upstream or wrap
-// this primitive with a mutex. The logger async sink takes the mutex-
-// serialisation route (see internal/service/observe/logger/middleware/async); other
-// domains pick whichever coordination fits their topology.
+// consumers are NOT safe on a Queue — those callers serialise upstream, or
+// take the MPSC sibling: NewMulti returns a MultiQueue, the same four
+// methods under the wider contract of any number of TryWrite callers and
+// exactly one TryRead caller (Vyukov's bounded queue, a sequence number per
+// cell, a power-of-two capacity).
+//
+// The SPSC ring keeps its consumer's cursor and its producer's each on a
+// cache line of their own, with a cached copy of the other side's (read
+// again only when the ring looks full or empty), and masks a cursor into a
+// power-of-two storage instead of dividing (#1034).
 package ring

@@ -1264,19 +1264,17 @@ func (a *App) stop(ctx context.Context, reason string) error {
 // cancellation; it ends when a signal arrives or when the run returns, which
 // cancels the context it also watches.
 func (a *App) Run(ctx context.Context) error {
-	signals, unsubscribe := signal.Notify(stopSignals...)
+	ctx, unsubscribe := signal.NotifyContext(ctx, stopSignals...)
 	defer unsubscribe()
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
-	go func() {
-		select {
-		case s, ok := <-signals:
-			if ok {
-				cancel(signalCause{sig: s})
-			}
-		case <-ctx.Done():
-		}
-	}()
+	// A second stop signal during the drain abandons its grace (#1096): the
+	// operator who presses Ctrl-C twice gets a stop at once, not
+	// runStopDeadline later. The escalation outlives ctx, which the first
+	// signal cancels.
+	hurried, hurry := context.WithCancel(context.WithoutCancel(ctx))
+	defer hurry()
+	endEscalation := signal.Escalate(hurried, a.clock,
+		signal.Escalation{OnRepeat: func(signal.Signal) { hurry() }}, stopSignals...)
+	defer endEscalation()
 	if err := a.Start(ctx); err != nil {
 		return err
 	}
@@ -1289,9 +1287,32 @@ func (a *App) Run(ctx context.Context) error {
 		reason = "asked"
 	}
 	logger.Info(context.WithoutCancel(ctx), a.log, "draining", logger.String("reason", reason))
-	stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), a.stopDeadline(runStopDeadline))
+	stopCtx, stopCancel := context.WithTimeout(hurried, a.stopDeadline(runStopDeadline))
 	defer stopCancel()
-	return a.stop(stopCtx, reason)
+	return a.stopWithin(stopCtx, hurried.Done(), reason)
+}
+
+// stopWithin drains the product as stop does, unless hurried closes first: a
+// second stop signal abandons the drain's grace (#1096). Cancelling the
+// stop's context alone did nothing — the lifecycle reads it for its values,
+// never its cancellation, and a consumer's drain runs on its own clock — so
+// a handler blocked in a drain kept Run for the whole drain. Run now returns
+// at once, StopTimeout with a zero grace; the stop goes on in the
+// background, each component under its own budget, until the process ends.
+//
+// Goroutine lifecycle: one goroutine carries the stop and reports on a
+// buffered channel; it ends when the stop does, whether or not this
+// function still waits for it.
+func (a *App) stopWithin(ctx context.Context, hurried <-chan struct{}, reason string) error {
+	done := make(chan error, 1)
+	go func() { done <- a.stop(ctx, reason) }()
+	select {
+	case err := <-done:
+		return err
+	case <-hurried:
+		logger.Warn(context.WithoutCancel(ctx), a.log, "a second stop signal: the drain is abandoned", logger.String("reason", reason))
+		return errs.Wrap(lifecycle.StopTimeout, errs.WrapParams{}, errs.String("grace", "0"), errs.String("cause", "a second stop signal"))
+	}
 }
 
 // setPhase moves the process to phase p, remembers it with why, and streams

@@ -1,0 +1,295 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: NewPool
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewPool
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: p.workers.Add
+        kind: value
+      - id: p.work
+        kind: internal
+    steps:
+      - bind: workers
+        eval: max(cfg.Workers, 1)
+      - bind: queue
+        eval: max(cfg.Queue, 0)
+      - bind: taskCtx, cancel
+        eval: context.WithCancel(ctx)
+        to: context
+      - bind: p
+        eval: |-
+          &Pool{
+          		tasks:   make(chan Task, queue),
+          		queued:  queue > 0,
+          		ctx:     taskCtx,
+          		cancel:  cancel,
+          		onPanic: cfg.OnPanic,
+          		onError: cfg.OnError,
+          		quit:    make(chan struct{}),
+          		stopped: make(chan struct{}),
+          		done:    make(chan struct{}),
+          	}
+      - opt:
+          do:
+            - set: p.onError
+              value:
+                closure:
+                  params: error
+                  steps: null
+          when: p.onError == nil
+      - eval: p.workers.Add(workers)
+        to: p.workers.Add
+      - loop:
+          do:
+            - go: p.work()
+              to: p.work
+          range: workers
+      - go: |-
+          func() {
+          		p.workers.Wait()
+          		p.doneOnce.Do(func() { close(p.done) })
+          	}()
+      - return: p
+  - of: (*Pool).Submit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Pool).Submit
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - panic: "\"internal/kernel/concur/pool: Submit of a nil task\""
+          when: task == nil
+      - lock:
+          mutex: p.mu
+          read: true
+      - opt:
+          do:
+            - return: PoolClosed
+          when: p.closed
+      - select:
+          cases:
+            - comm: p.tasks <- task
+              do:
+                - return: nil
+            - default: true
+      - opt:
+          do:
+            - return: PoolFull
+          when: "!p.queued"
+      - select:
+          cases:
+            - comm: p.tasks <- task
+              do:
+                - return: nil
+            - comm: <-p.quit
+              do:
+                - return: PoolClosed
+            - comm: <-ctx.Done()
+              do:
+                - return: errs.Wrap(ctx.Err(), PoolFull.Params())
+                  to: errs
+  - of: (*Pool).Drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Pool).Drain
+        kind: self
+      - id: p.close
+        kind: internal
+      - id: ctx.Err
+        kind: value
+    steps:
+      - eval: p.close()
+        to: p.close
+      - select:
+          cases:
+            - comm: <-p.done
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
+  - of: (*Pool).Stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Pool).Stop
+        kind: self
+      - id: p.abandon.Store
+        kind: value
+      - id: p.close
+        kind: internal
+      - id: ctx.Err
+        kind: value
+    steps:
+      - eval: p.abandon.Store(true)
+        to: p.abandon.Store
+      - eval: p.cancel()
+      - eval: p.close()
+        to: p.close
+      - select:
+          cases:
+            - comm: <-p.done
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
+  - of: (*Pool).close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Pool).close
+        kind: self
+      - id: p.closeOnce.Do
+        kind: value
+    steps:
+      - eval: |-
+          p.closeOnce.Do(func() {
+          		close(p.quit)
+          		p.mu.Lock()
+          		p.closed = true
+          		p.mu.Unlock()
+          		close(p.stopped)
+          	})
+        to: p.closeOnce.Do
+  - of: (*Pool).work
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Pool).work
+        kind: self
+      - id: p.workers.Done
+        kind: value
+      - id: p.serve
+        kind: internal
+    steps:
+      - defer: p.workers.Done()
+        to: p.workers.Done
+      - loop:
+          cond: ok
+          do:
+            - eval: p.serve(task)
+              to: p.serve
+          init: task, ok := p.next()
+          post: task, ok = p.next()
+      - loop:
+          cond: ok
+          do:
+            - eval: p.serve(task)
+              to: p.serve
+          init: task, ok := p.leftover()
+          post: task, ok = p.leftover()
+  - of: (*Pool).next
+    steps:
+      - select:
+          cases:
+            - comm: task := <-p.tasks
+              do:
+                - return: task, true
+            - comm: <-p.stopped
+              do:
+                - return: nil, false
+  - of: (*Pool).leftover
+    steps:
+      - select:
+          cases:
+            - comm: task := <-p.tasks
+              do:
+                - return: task, true
+            - default: true
+              do:
+                - return: nil, false
+  - of: (*Pool).serve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Pool).serve
+        kind: self
+      - id: p.run
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: p.abandon.Load()
+      - eval: p.run(task)
+        to: p.run
+  - of: (*Pool).run
+    steps:
+      - defer: |-
+          func() {
+          		raised := recover()
+          		//: the task returned.
+          		if raised == nil {
+          			return
+          		}
+          		pv := PanicValue{Raised: raised, Stack: debug.Stack()}
+          		//: nobody watches: the fault takes the process down, as a bare goroutine's would.
+          		if p.onPanic == nil {
+          			panic(pv)
+          		}
+          		p.onPanic(pv)
+          	}()
+      - opt:
+          do:
+            - eval: p.onError(err)
+          init:
+            bind: err
+            eval: task(p.ctx)
+          when: err != nil
+  - of: PanicValue.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: PanicValue.String
+        kind: self
+      - id: out.WriteString
+        kind: value
+      - id: out.Write
+        kind: value
+      - id: out.String
+        kind: value
+    steps:
+      - var:
+          name: out
+          type: strings.Builder
+      - eval: "out.WriteString(\"kernel/concur/pool: panic in task: \")"
+        to: out.WriteString
+      - typeswitch:
+          bind: raised
+          cases:
+            - do:
+                - eval: out.WriteString(raised)
+                  to: out.WriteString
+              types: string
+            - do:
+                - eval: out.WriteString(raised.Error())
+                  to: out.WriteString
+              types: error
+            - do:
+                - eval: out.WriteString(raised.String())
+                  to: out.WriteString
+              types: interface{ String() string }
+            - default: true
+              do:
+                - eval: out.WriteString("non-textual panic value (see PanicValue.Raised)")
+                  to: out.WriteString
+          "on": p.Raised
+      - eval: out.WriteString("\noriginating goroutine stack:\n")
+        to: out.WriteString
+      - eval: out.Write(p.Stack)
+        to: out.Write
+      - return: out.String()
+        to: out.String

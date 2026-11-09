@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-06-14
 **Deciders**: @kodflow
-**Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the facades move under `pkg/v1/proc`, `sdnotify` and `sdlisten` as `systemd/notify` and `systemd/listen`
+**Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the facades move under `pkg/v1/proc`, `sdnotify` and `sdlisten` as `systemd/notify` and `systemd/listen`; [ADR 0214](0214-a-service-unit-is-one-actor-over-a-pure-reducer.md) (2026-11-03) — §Context: the life cycle of ONE service moves into the SDK as `proc/service`; [ADR 0217](0217-a-spawn-gives-the-child-only-what-it-names-and-waits-a-bounded-time.md) (2026-11-03) — codes `0.2.6.24`–`0.2.6.26` and the `ContextWaiter`, `ProcessHandle` and `Terminal` sibling ports; [ADR 0219](0219-a-supervisor-adopts-hears-and-hands-over-only-what-it-can-verify.md) (2026-11-07) — codes `0.2.6.31`–`0.2.6.35`, `AttachValue`, `DescriptorsValue` and `Spec.PIDEnv`; this ADR, §Amendment 2026-11-08 (kitsunium/sdk#727, S1) — nested control groups, controllers, typed cgroup v2 setters, the `cgroup.events` watch, `CGROUP_CONTROLLER_ABSENT` (`0.2.6.37`); [ADR 0215](0215-a-cgroups-bpf-programs-are-built-in-go-in-a-quarantined-vendor-module.md) (2026-11-08, kitsunium/sdk#731, S6) — the cgroup BPF programs: a contract `core/proc/bpf` (`0.3.107.*`), an engine `service/proc/bpf` and a facade `pkg/v1/proc/bpf`, whose backend is the vendor module `third-party/ebpf`; [ADR 0217](0217-a-spawn-gives-the-child-only-what-it-names-and-waits-a-bounded-time.md) §Amendment 2026-11-08 (#728, S2) — `Spec.Sandbox`, `SANDBOX_FAILED` (`0.2.6.30`), `SANDBOX_UNAVAILABLE` (`0.2.6.36`)
 **Related**: ADR 0001 (multi-module layout), ADR 0005 (dotted-quad error codes),
 ADR 0013 (crypto domain — sibling-admission precedent), ADR 0014 (the verb wave)
 
@@ -139,3 +139,44 @@ plus `internal/kernel/errs`. Service implementations stay stdlib-only too
   + `reason == screamingSnake(varName)`, identical to every other domain.
 - A `pkg/v1/<facade>` tag (ADR 0007 sub-directory convention) publishes the
   domain to downstreams; see issue #66.
+
+## Amendment — 2026-11-08: S1, the cgroup v2 mechanisms a supervisor writes through (kitsunium/sdk#727)
+
+**Context.** The agent (supervizio/agent#330) wrote `cgroup.subtree_control`
+itself and made a flat `svc-<pid>` group, because `cgroup.Create` refused a
+nested name and the SDK had no setter past `memory.max`, `cpu.max`,
+`pids.max` and `io.max`. S0g (#734) needs a group per unit it can kill,
+watch until empty and hand over.
+
+**Decision.** The SDK becomes the only writer of a group's interface files:
+
+- `Create` takes a nested name on Linux. Every element is literal; the
+  missing groups are made top-down through an `os.Root` opened on the root,
+  so a `..` or a link cannot take a write outside it; an existing element
+  that is not a directory is `INVALID_SPEC`; what a failed call made is
+  removed. `WithControllers` enables controllers in the
+  `cgroup.subtree_control` of the root and of every group on the way.
+- Five sibling ports of `Group` (ADR 0039), never methods added to it:
+  `GroupTuner` (`memory.min/low/high/swap.max/zswap.max/zswap.writeback/oom.group`,
+  `cpu.weight`, `cpu.max.burst`, `cpuset.cpus/mems`, `io.weight`,
+  `io.latency`, typed values, out-of-range ones `INVALID_SPEC`), `GroupTree`
+  (`Path`, `EnableControllers`, `Delegate`, `DeleteTree` — a delegated
+  unit's subtree removed at its stop), `GroupWatcher` (`Watch`: the
+  state, then each change, coalesced, never blocking), `GroupSignaler`
+  (`Signal`, `Contains` — with `Kill`, `proc/service`'s `CgroupKill`) on
+  Linux, and `JobLimiter` (`SetJobMemoryLimit`) on Windows, where
+  `SetMemoryMax` stays per-process. A platform without the mechanism has no
+  such port: the failed assertion is its refusal.
+- One code: `0.2.6.37` `CGROUP_CONTROLLER_ABSENT`, a controller the
+  parent does not offer. `0.2.6.38` is held in reserve.
+- The Job Object freeze and I/O rate stay refused (`design/proc.yaml`);
+  no systemd slice, no OOM policy: values only.
+
+**As built.** On cgroupfs an `rmdir` of a group raises no `IN_IGNORED` for a
+watch on its files — kernfs removes them without the VFS — so `Watch` also
+watches the parent directory for the group's `IN_DELETE` (measured on Linux
+6.12 in a `Delegate=yes` scope). Delegation chowns the files
+`/sys/kernel/cgroup/delegate` lists, the three of cgroup-v2.rst without it.
+The live suite runs in a delegated scope; io, cpuset and hugetlb are not
+delegated to a user manager, so their setters ran on the fake filesystem
+only.

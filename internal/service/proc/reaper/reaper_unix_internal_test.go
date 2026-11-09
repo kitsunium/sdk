@@ -14,7 +14,9 @@ package reaper
 import (
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -77,8 +79,12 @@ func runGrandchild(secs string) (code int) {
 // exits immediately, reparenting the grandchild onto the nearest subreaper.
 func runChild(secs string) (code int) {
 	cmd := exec.Command(os.Args[0])
+	//: what this child inherited of either role is taken out before it is set.
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, helperEnv+"=") || strings.HasPrefix(kv, grandchildEnv+"=")
+	})
 	//: tag the spawned process as the grandchild and clear the child gate.
-	cmd.Env = append(os.Environ(), helperEnv+"=", grandchildEnv+"="+secs)
+	cmd.Env = append(env, helperEnv+"=", grandchildEnv+"="+secs)
 	//: a fresh session fully detaches the grandchild from this child.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	//: start without waiting — we exit next, orphaning the grandchild.

@@ -1,6 +1,9 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: (*BuildValue).Reproducible
+    steps:
+      - return: b.Toolchain.Trimpath && b.Main.Revision != "" && !b.Main.Modified
   - of: ReadBuild
     participants:
       - id: caller
@@ -21,6 +24,49 @@ sequences:
           when: "!read"
       - return: ParseBuild(info), true
         to: ParseBuild
+  - of: ParseBuild
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseBuild
+        kind: self
+      - id: toolchain
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: BuildValue{}
+          when: info == nil
+      - bind: build
+        eval: |-
+          BuildValue{
+          		GoVersion: info.GoVersion,
+          		Path:      info.Path,
+          		Main:      mainModule(&info.Main, info.Settings),
+          		Deps:      make([]ModuleValue, 0, len(info.Deps)),
+          		Settings:  make([]SettingValue, 0, len(info.Settings)),
+          	}
+      - loop:
+          do:
+            - set: build.Settings
+              value: "append(build.Settings, SettingValue{Key: setting.Key, Value: setting.Value})"
+            - eval: toolchain(&build.Toolchain, setting)
+              to: toolchain
+          key: _
+          range: info.Settings
+          value: setting
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: dep == nil
+            - set: build.Deps
+              value: append(build.Deps, dependency(dep))
+          key: _
+          range: info.Deps
+          value: dep
+      - return: build
   - of: mainModule
     participants:
       - id: caller
@@ -82,6 +128,36 @@ sequences:
                   value: described.Modified || setting.Value == settingTrue
             - default: true
           "on": setting.Key
+  - of: toolchain
+    steps:
+      - opt:
+          do:
+            - eval: apply(described, setting.Value)
+            - return: ""
+          init:
+            bind: apply, known
+            eval: toolchainSettings[setting.Key]
+          when: known
+      - opt:
+          do:
+            - set: described.ArchLevel
+              value: setting.Value
+          when: slices.Contains(archLevelSettings[:], setting.Key)
+  - of: splitTags
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitTags
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: value == ""
+      - return: strings.Split(value, settingTagsJoining)
+        to: strings
   - of: dependency
     participants:
       - id: caller

@@ -49,7 +49,7 @@ func NotifyContext(ctx context.Context, state map[string]string) (err error) {
 	//: resolve the abstract-namespace marker before dialling.
 	addr := &net.UnixAddr{Name: resolveAddr(raw), Net: "unixgram"}
 	//: connect a datagram socket to the supervisor's notify endpoint.
-	conn, err := net.DialUnix("unixgram", nil, addr)
+	conn, err := dialNotify(addr)
 	//: a failure to reach the configured socket is a real error.
 	if err != nil {
 		//: wrap the dial fault as NotifyFailed.

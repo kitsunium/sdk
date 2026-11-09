@@ -92,7 +92,8 @@ The two expensive rows are expensive for one reason: **file descriptors**.
 | workload | ns/op | allocs/op |
 |---|---:|---:|
 | `BuildStdio_Inherit` — share the parent's streams, opens nothing | **113.7** | 1 |
-| `BuildStdio_Null` — 3 × open `/dev/null` + 3 × close | 13 560 | 16 |
+| `BuildStdio_Null` — 3 × open `/dev/null` + 3 × close (before #943) | 13 560 | 16 |
+| `BuildStdio_Null` — the shared null device, opened once per process (#943) | **196.2** | **1** |
 | `BuildStdio_Capture` — 2 pipes + 1 null, + closes | 28 540 | 22 |
 | `OSExecutable` — the `readlink("/proc/self/exe")` a trampolined spawn needs | 2 416 | 3 |
 
@@ -116,6 +117,61 @@ a successful `Start` closes the same five — three in `afterStart`, two in the
 copiers at EOF. Even so it is **4.9 % of the 626 µs launch measured in §1**,
 which makes `StdioCapture` the most expensive thing the SDK itself does on this
 path.
+
+### The null device is opened once per process (#943)
+
+`StdioNull` — and a nil writer or reader under `StdioCapture` — used to open
+`/dev/null` three times per spawn and close it three times after: 13.5 µs and
+16 of `Start_BinTrue_Null`'s 33 allocations. Every null stream of every spawn
+now uses one descriptor (`nullDevice`, `O_RDWR`, close-on-exec, opened under a
+mutex on first use and never closed; the child gets its own copy through
+`dup2`). Re-measured on 2026-11-03 (go1.27.3, `GOMAXPROCS=4`, the host of §1
+under another build, one run):
+
+| workload | before | after |
+|---|---:|---:|
+| `BuildStdio_Null` | 13 560 ns, 16 allocs | 196.2 ns, 1 alloc |
+| `Start_BinTrue_Null` | 33 allocs | 20 allocs (690 895 ns) |
+| `Start_BinTrue_Inherit` (reference) | — | 20 allocs (687 099 ns) |
+
+`Start_BinTrue_Null` now allocates what `Start_BinTrue_Inherit` does, at most
+27 as #943 asked; after the first spawn no `open` of `/dev/null` is issued.
+
+### The fd-table seal (#1089)
+
+| workload | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| `Seal_CloseRange` — one `close_range(3, ~0U, CLOSE_RANGE_CLOEXEC)` | 184.3 | 0 | 0 |
+| `Seal_Walk` — the fallback: `/proc/self/fd` read, one `fcntl` per descriptor (≈ 15 here) | 11 148 | 1 225 | 18 |
+
+The seal every spawn now pays is 0.03 % of a launch where the kernel has
+`close_range` (Linux ≥ 5.11, FreeBSD ≥ 13) and 1.6 % where it is walked.
+
+### A cgroup placement by clone (#929)
+
+`Start_BinTrue_CgroupFD` — the direct spawn cloned into a group (`clone3` with
+`CLONE_INTO_CGROUP`: one `open` of the group's directory, no re-exec, no
+handshake) — beside `Inherit` and the trampoline's row, which a Spec naming only
+a `CgroupPath` used to take. Measured 2026-11-08 on the host of §1 (AMD EPYC
+7351P, Linux 6.12.101, go1.27.3, `GOMAXPROCS=4`, `-benchmem`), inside a
+`systemd-run --user --scope -p Delegate=yes` scope whose own subtree the
+benchmark makes its group in (`delegatedSubtree`); eight interleaved rounds of
+the three rows, one run each, medians:
+
+| workload | ns/op (min–max) | B/op | allocs/op | against `Inherit` |
+|---|---:|---:|---:|---:|
+| `Start_BinTrue_Inherit` | 774 694 (742 348–855 105) | 1 800 | 21 | 1.00× |
+| `Start_BinTrue_CgroupFD` | 839 984 (772 421–905 246) | 2 408 | 26 | **1.08×** |
+| `Start_BinTrue_Trampoline` — one `RLIMIT_NOFILE`, for scale | 4 434 824 (3 853 674–4 836 363) | 3 272 | 43 | 5.72× |
+
+**Verdict on #929's criterion: within 1.2× of `Inherit`, met** — the ratio of the
+medians is 1.08×, the median of the eight per-round ratios 1.04× (rounds:
+0.995, 1.19, 1.08, 1.05, 1.07, 1.04, 1.02, 0.99). The placement costs the
+`open`/`close` of the directory and five allocations (the descriptor and its
+`SysProcAttr`), about 65 µs on a 775 µs launch; the trampoline's 5.7× is gone
+for a cgroup-only Spec. The row skips on a host with no delegated subtree and on
+a kernel below 5.7, and fails if the Spec still routes through the trampoline, so
+it can never be the trampoline's number in disguise.
 
 ## 4. Everything else is nanoseconds, and the table exists to prove it
 
@@ -172,6 +228,7 @@ nothing anybody can measure.
 | `Handle_Wait_Memoised` — 2nd and later `Wait` | 18.06 | 0 |
 | `Handle_SignalGroup_Live` — `kill(-pgid, sig)` | 390.0 | 0 |
 | `Handle_Signal_Live` — `kill(pid, sig)` via `os.Process` | 488.6 | 0 |
+| `Handle_SignalHandle_Live` — `pidfd_send_signal` through the child's pidfd (#928; 2026-11-03 run, where `Handle_Signal_Live` read 520.3) | 578.3 | 0 |
 
 `PID` is a field read and `Wait` after the first is a `sync.Once` fast path plus a
 struct copy — a supervisor may call either from as many goroutines as it likes.

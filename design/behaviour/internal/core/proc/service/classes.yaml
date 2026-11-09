@@ -1,0 +1,919 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          FlagArgv0 is "@": the second word is argv[0]; with FlagShell, the shell
+          is a login shell.
+        name: FlagArgv0
+        type: CommandFlags
+        value: 1 << iota
+      - doc: "FlagIgnoreFailure is \"-\": a failure is recorded and read as a success."
+        name: FlagIgnoreFailure
+      - doc: "FlagNoEnvExpand is \":\": $VAR and ${VAR} are not expanded."
+        name: FlagNoEnvExpand
+      - doc: |-
+          FlagFullPrivileges is "+": the command runs without the unit's
+          credentials and confinement, on Config.AllowPrivilegedControl only.
+        name: FlagFullPrivileges
+      - doc: |-
+          FlagNoCredentials is "!": the command runs without User=, Group= and
+          SupplementaryGroups=, on Config.AllowPrivilegedControl only.
+        name: FlagNoCredentials
+      - doc: |-
+          FlagShell is "|": the command runs through the shell's -c, or is the
+          shell alone.
+        name: FlagShell
+    name: FlagArgv0
+  - grouped: true
+    items:
+      - doc: ProtectSystemNo leaves every tree writable — the zero, systemd's default.
+        name: ProtectSystemNo
+        type: ProtectSystem
+        value: iota
+      - doc: ProtectSystemYes makes /usr read-only, and /boot and /efi where they exist.
+        name: ProtectSystemYes
+      - doc: ProtectSystemFull makes /etc read-only too.
+        name: ProtectSystemFull
+      - doc: |-
+          ProtectSystemStrict makes the whole hierarchy read-only but /dev, /proc and
+          /sys; the engine refuses it: a read-only root whose API trees stay writable
+          is a recursive read-only with exceptions, which the spawn's mounts do not
+          make.
+        name: ProtectSystemStrict
+    name: ProtectSystemNo
+  - grouped: true
+    items:
+      - doc: PrivateTmpNo shares the host's /tmp and /var/tmp — the zero, systemd's default.
+        name: PrivateTmpNo
+        type: PrivateTmp
+        value: iota
+      - doc: |-
+          PrivateTmpYes is systemd's yes: directories on the host's /tmp and
+          /var/tmp, shared by every command of the unit and removed after its stop.
+          The engine refuses it.
+        name: PrivateTmpYes
+      - doc: |-
+          PrivateTmpDisconnected mounts a new tmpfs, mode 1777, on /tmp and on
+          /var/tmp for each command.
+        name: PrivateTmpDisconnected
+    name: PrivateTmpNo
+  - grouped: true
+    items:
+      - doc: |-
+          Infinity is systemd's "infinity" for a duration directive: no timeout, a
+          start-limit window that never ends, no ceiling on the restart delay.
+        name: Infinity
+        type: time.Duration
+        value: math.MaxInt64
+      - doc: |-
+          Zero is systemd's literal 0 for a duration directive, where it differs
+          from the default the Go zero value asks for: RestartSec=0 restarts at
+          once, StartLimitIntervalSec=0 disables the limiter, and a timeout of 0 is
+          no timeout.
+        name: Zero
+        type: time.Duration
+        value: "-1"
+    name: Infinity
+  - grouped: true
+    items:
+      - doc: |-
+          TypeDefault resolves to TypeDbus with a BusName=, else to TypeSimple with
+          an ExecStart=, to TypeOneshot without.
+        name: TypeDefault
+        type: Type
+        value: iota
+      - doc: TypeSimple is up once its main process is spawned.
+        name: TypeSimple
+      - doc: TypeExec is up once its main process has executed its binary.
+        name: TypeExec
+      - doc: |-
+          TypeForking is up once the process it spawned exits cleanly, the daemon
+          that process forked adopted as the main process — from PIDFile=, or
+          guessed among the cgroup's members (GuessMainPID=).
+        name: TypeForking
+      - doc: |-
+          TypeOneshot is up once its main processes ran to a successful end, one
+          ExecStart= after the other.
+        name: TypeOneshot
+      - doc: |-
+          TypeDbus is up once its main process runs and its BusName= is owned on the
+          bus, and stops when the name is lost (Linux; a BusWatcher follows it).
+        name: TypeDbus
+      - doc: TypeNotify is up once its main process sends READY=1.
+        name: TypeNotify
+      - doc: |-
+          TypeNotifyReload is TypeNotify whose reload is ReloadSignal= followed by
+          RELOADING=1 and READY=1.
+        name: TypeNotifyReload
+      - doc: |-
+          TypeIdle runs as TypeSimple: the job queue systemd delays it behind is
+          the caller's.
+        name: TypeIdle
+    name: TypeDefault
+  - grouped: true
+    items:
+      - doc: RestartNo never restarts.
+        name: RestartNo
+        type: Restart
+        value: iota
+      - doc: RestartOnSuccess restarts after a clean end only.
+        name: RestartOnSuccess
+      - doc: |-
+          RestartOnFailure restarts after an unclean exit code, an unclean signal,
+          a timeout, a watchdog, an OOM kill.
+        name: RestartOnFailure
+      - doc: |-
+          RestartOnAbnormal restarts after an unclean signal, a timeout, a
+          watchdog, an OOM kill — not after an exit code.
+        name: RestartOnAbnormal
+      - doc: RestartOnWatchdog restarts after a watchdog only.
+        name: RestartOnWatchdog
+      - doc: RestartOnAbort restarts after an unclean signal only.
+        name: RestartOnAbort
+      - doc: RestartAlways restarts after every end but a skipped condition.
+        name: RestartAlways
+    name: RestartNo
+  - grouped: true
+    items:
+      - doc: |-
+          RestartModeNormal publishes the failed (or inactive) state, then
+          auto-restart.
+        name: RestartModeNormal
+        type: RestartMode
+        value: iota
+      - doc: RestartModeDirect goes to auto-restart without publishing the failure.
+        name: RestartModeDirect
+      - doc: |-
+          RestartModeDebug is RestartModeNormal, and the restarted unit's processes
+          get DEBUG_INVOCATION=1.
+        name: RestartModeDebug
+    name: RestartModeNormal
+  - grouped: true
+    items:
+      - doc: |-
+          KillModeDefault resolves to KillModeControlGroup when the unit's Cgroup
+          is a CgroupUnit, to KillModeProcess otherwise.
+        name: KillModeDefault
+        type: KillMode
+        value: iota
+      - doc: KillModeProcess signals the main and control processes only.
+        name: KillModeProcess
+      - doc: |-
+          KillModeControlGroup signals every process of the unit's cgroup and
+          waits for it to be empty. It needs a Cgroup that is a CgroupUnit.
+        name: KillModeControlGroup
+      - doc: |-
+          KillModeMixed signals the main and control processes, then kills every
+          process of the cgroup at the kill. It needs a Cgroup that is a
+          CgroupUnit.
+        name: KillModeMixed
+      - doc: |-
+          KillModeNone signals nothing: the stop commands run, the processes are
+          left.
+        name: KillModeNone
+    name: KillModeDefault
+  - grouped: true
+    items:
+      - doc: ExitTypeMain ends the unit when its main process exits.
+        name: ExitTypeMain
+        type: ExitType
+        value: iota
+      - doc: |-
+          ExitTypeCgroup ends the unit when its cgroup is empty, whether its main
+          process ended or not. It needs a Cgroup that is a CgroupUnit.
+        name: ExitTypeCgroup
+    name: ExitTypeMain
+  - grouped: true
+    items:
+      - doc: NotifyAccessNone reads no message.
+        name: NotifyAccessNone
+        type: NotifyAccess
+        value: iota
+      - doc: NotifyAccessMain reads the main process's messages.
+        name: NotifyAccessMain
+      - doc: |-
+          NotifyAccessExec reads the main and the control processes' messages; it
+          needs the unit's cgroup.
+        name: NotifyAccessExec
+      - doc: |-
+          NotifyAccessAll reads the messages of every process of the unit's
+          cgroup; it needs the unit's cgroup.
+        name: NotifyAccessAll
+    name: NotifyAccessNone
+  - grouped: true
+    items:
+      - doc: |-
+          TimeoutTerminate sends KillSignal=, then FinalKillSignal= after
+          TimeoutStopSec=.
+        name: TimeoutTerminate
+        type: TimeoutMode
+        value: iota
+      - doc: |-
+          TimeoutAbort sends WatchdogSignal=, then FinalKillSignal= after
+          TimeoutAbortSec=.
+        name: TimeoutAbort
+      - doc: TimeoutKill sends FinalKillSignal= at once.
+        name: TimeoutKill
+    name: TimeoutTerminate
+  - grouped: true
+    items:
+      - doc: |-
+          OOMPolicyDefault is stop, or continue under Delegate=; without a
+          CgroupUnit no OOM kill is seen.
+        name: OOMPolicyDefault
+        type: OOMPolicy
+        value: iota
+      - doc: OOMPolicyContinue keeps the unit running after an OOM kill.
+        name: OOMPolicyContinue
+      - doc: OOMPolicyStop stops the unit, which ends with the result oom-kill.
+        name: OOMPolicyStop
+      - doc: |-
+          OOMPolicyKill has the kernel kill the whole cgroup (memory.oom.group,
+          which the engine sets at each start), the unit ending with the result
+          oom-kill.
+        name: OOMPolicyKill
+    name: OOMPolicyDefault
+  - grouped: true
+    items:
+      - doc: |-
+          PreserveRestart keeps the store while the unit is neither inactive nor
+          failed, or is about to restart.
+        name: PreserveRestart
+        type: Preserve
+        value: iota
+      - doc: PreserveNo releases the store when the unit stops.
+        name: PreserveNo
+      - doc: PreserveYes keeps the store until the unit is removed.
+        name: PreserveYes
+      - doc: |-
+          PreserveOnSuccess is PreserveYes, released once the unit is failed for
+          good.
+        name: PreserveOnSuccess
+    name: PreserveRestart
+  - grouped: true
+    items:
+      - doc: ToggleDefault is the directive's default.
+        name: ToggleDefault
+        type: Toggle
+        value: iota
+      - doc: ToggleYes is yes.
+        name: ToggleYes
+      - doc: ToggleNo is no.
+        name: ToggleNo
+    name: ToggleDefault
+  - grouped: true
+    items:
+      - doc: StateInactive is not running, after a success or before any start.
+        name: StateInactive
+        type: State
+        value: iota
+      - doc: |-
+          StateActivating is starting: a condition, the pre-start commands, the
+          main process before it is up, the post-start commands.
+        name: StateActivating
+      - doc: StateActive is up.
+        name: StateActive
+      - doc: StateReloading is reloading.
+        name: StateReloading
+      - doc: |-
+          StateDeactivating is stopping: the stop commands, the signals, the
+          post-stop commands.
+        name: StateDeactivating
+      - doc: StateFailed is not running, after a failure.
+        name: StateFailed
+      - doc: StateAutoRestart is waiting out the restart delay.
+        name: StateAutoRestart
+      - doc: "StateExited is up with no process left: RemainAfterExit=."
+        name: StateExited
+      - doc: StateConditionSkipped is not running because ExecCondition= said so.
+        name: StateConditionSkipped
+    name: StateInactive
+  - grouped: true
+    items:
+      - doc: SubDead is inactive.
+        name: SubDead
+        type: Sub
+        value: iota
+      - doc: SubCondition runs ExecCondition=.
+        name: SubCondition
+      - doc: SubStartPre runs ExecStartPre=.
+        name: SubStartPre
+      - doc: SubStart runs ExecStart= until the unit is up.
+        name: SubStart
+      - doc: SubStartPost runs ExecStartPost=.
+        name: SubStartPost
+      - doc: SubRunning is up with its main process.
+        name: SubRunning
+      - doc: SubExited is up without a process (RemainAfterExit=).
+        name: SubExited
+      - doc: SubReload runs ExecReload=.
+        name: SubReload
+      - doc: SubReloadSignal waits for RELOADING=1 after ReloadSignal=.
+        name: SubReloadSignal
+      - doc: SubReloadNotify waits for READY=1 after RELOADING=1.
+        name: SubReloadNotify
+      - doc: SubReloadPost runs ExecReloadPost=.
+        name: SubReloadPost
+      - doc: SubStop runs ExecStop=.
+        name: SubStop
+      - doc: SubStopWatchdog waits after WatchdogSignal=.
+        name: SubStopWatchdog
+      - doc: SubStopSigterm waits after KillSignal=.
+        name: SubStopSigterm
+      - doc: SubStopSigkill waits after FinalKillSignal=.
+        name: SubStopSigkill
+      - doc: SubStopPost runs ExecStopPost=.
+        name: SubStopPost
+      - doc: |-
+          SubFinalWatchdog waits after WatchdogSignal= sent to what ExecStopPost=
+          left.
+        name: SubFinalWatchdog
+      - doc: SubFinalSigterm waits after KillSignal= sent to what ExecStopPost= left.
+        name: SubFinalSigterm
+      - doc: |-
+          SubFinalSigkill waits after FinalKillSignal= sent to what ExecStopPost=
+          left.
+        name: SubFinalSigkill
+      - doc: SubFailed is failed.
+        name: SubFailed
+      - doc: SubAutoRestart waits out the restart delay.
+        name: SubAutoRestart
+      - doc: |-
+          SubRunningRevalidating is a Type=dbus unit up without its BusName= owned,
+          given two seconds to own it again before it stops.
+        name: SubRunningRevalidating
+    name: SubDead
+  - grouped: true
+    items:
+      - doc: ResultSuccess is a clean end.
+        name: ResultSuccess
+        type: Result
+        value: iota
+      - doc: ResultResources is a command that could not be spawned.
+        name: ResultResources
+      - doc: |-
+          ResultProtocol is a notify unit whose main process ended before
+          READY=1.
+        name: ResultProtocol
+      - doc: ResultTimeout is a start, stop, reload or runtime limit that expired.
+        name: ResultTimeout
+      - doc: ResultExitCode is an unclean exit code.
+        name: ResultExitCode
+      - doc: ResultSignal is an unclean signal.
+        name: ResultSignal
+      - doc: ResultCoreDump is an unclean signal that dumped core.
+        name: ResultCoreDump
+      - doc: ResultWatchdog is a missed keep-alive, WATCHDOG=trigger, or Fail.
+        name: ResultWatchdog
+      - doc: ResultStartLimitHit is a start the limiter refused.
+        name: ResultStartLimitHit
+      - doc: ResultOOMKill is an OOM kill in the unit's cgroup (S0g).
+        name: ResultOOMKill
+      - doc: ResultExecCondition is an ExecCondition= that said skip.
+        name: ResultExecCondition
+    name: ResultSuccess
+files:
+  - decls:
+      - Clock
+    name: clock.go
+  - decls:
+      - CommandFlags
+      - FlagArgv0
+      - prefixes
+      - CommandFlags.String
+      - prefixFlag
+      - CommandFlags.Privileged
+      - CommandValue
+      - ParseCommand
+      - parsePrefixes
+      - checkProgram
+      - commandInvalid
+    name: command.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - typeNames
+      - Type.String
+      - Restart.String
+      - RestartMode.String
+      - KillMode.String
+      - ExitType.String
+      - NotifyAccess.String
+      - TimeoutMode.String
+      - OOMPolicy.String
+      - Preserve.String
+      - Toggle.On
+      - State.String
+      - State.ActiveState
+      - Sub.String
+      - Result.String
+    name: names.go
+  - decls:
+      - ProtectSystem
+      - ProtectSystemNo
+      - PrivateTmp
+      - PrivateTmpNo
+      - BindPathValue
+      - TemporaryFileSystemValue
+      - SystemCallFilterValue
+      - protectSystemNames
+      - ProtectSystem.String
+      - PrivateTmp.String
+    name: sandbox.go
+  - decls:
+      - ExitStatusValue
+      - ExitStatusValue.Contains
+      - ExitStatusValue.Empty
+      - NotifyValue
+      - StateValue
+      - StoredFDValue
+      - EventValue
+    name: status.go
+  - decls:
+      - Infinity
+      - Type
+      - TypeDefault
+      - Restart
+      - RestartNo
+      - RestartMode
+      - RestartModeNormal
+      - KillMode
+      - KillModeDefault
+      - ExitType
+      - ExitTypeMain
+      - NotifyAccess
+      - NotifyAccessNone
+      - TimeoutMode
+      - TimeoutTerminate
+      - OOMPolicy
+      - OOMPolicyDefault
+      - Preserve
+      - PreserveRestart
+      - Toggle
+      - ToggleDefault
+      - State
+      - StateInactive
+      - Sub
+      - SubDead
+      - Result
+      - ResultSuccess
+    name: values.go
+functions:
+  - doc: prefixFlag is the flag a prefix character stands for, and whether it is one.
+    name: prefixFlag
+    params: c byte
+    results: CommandFlags, bool
+  - name: ParseCommand
+    params: words []string
+    results: CommandValue, error
+  - doc: parsePrefixes splits the first word into its prefix flags and the program.
+    name: parsePrefixes
+    params: word string
+    results: CommandFlags, string, error
+  - doc: |-
+      checkProgram returns the rule a program breaks, "" when it breaks none: it
+      is an absolute path or a file name without a slash, and holds no control
+      character.
+    name: checkProgram
+    params: path string
+    results: string
+  - doc: commandInvalid is COMMAND_INVALID with the rule and the word.
+    name: commandInvalid
+    params: rule, word string
+    results: error
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  math: math
+  os: os
+  slices: slices
+  strconv: strconv
+  strings: strings
+  time: time
+  unicode: unicode
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/proc/service
+  name: service
+  purpose: "Package service is the contract of a service unit's life cycle (ADR 0214): systemd.service(5)'s directives as typed values, the states a unit passes through and the snapshot a consumer reads, the ports the engine reaches the world through, and the codes of the range 0.3.105.*."
+types:
+  - alias: true
+    doc: |-
+      Clock is the time every wait of a unit runs on: the kernel's clock.Timed,
+      so pkg/v1/clock's System and ManualClock are clocks here (ADR 0214 §5).
+    kind: alias
+    name: Clock
+    underlying: clock.Timed
+  - kind: named
+    methods:
+      - name: String
+        recv: f CommandFlags
+        results: string
+      - name: Privileged
+        recv: f CommandFlags
+        results: bool
+    name: CommandFlags
+    underlying: uint8
+  - fields:
+      - doc: |-
+          Path is the program: an absolute path or a bare file name the engine
+          looks up. It is empty only for a FlagShell command that is the shell
+          alone.
+        name: Path
+        type: string
+      - doc: |-
+          Args is the program's argument vector, argv[0] first: Path, or the word
+          "@" named. $VAR and ${VAR} in it are expanded at spawn unless
+          FlagNoEnvExpand.
+        name: Args
+        type: "[]string"
+      - doc: Flags are the command's prefixes.
+        name: Flags
+        type: CommandFlags
+    kind: struct
+    name: CommandValue
+  - kind: named
+    methods:
+      - name: String
+        recv: p ProtectSystem
+        results: string
+    name: ProtectSystem
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: p PrivateTmp
+        results: string
+    name: PrivateTmp
+    underlying: uint8
+  - fields:
+      - doc: Source is the absolute file or directory bound.
+        name: Source
+        type: string
+      - doc: Target is where it appears, absolute; empty is Source. It must exist.
+        name: Target
+        type: string
+    kind: struct
+    name: BindPathValue
+  - fields:
+      - doc: Path is the absolute directory the tmpfs is mounted on; it must exist.
+        name: Path
+        type: string
+      - doc: ReadOnly is the ":ro" option.
+        name: ReadOnly
+        type: bool
+    kind: struct
+    name: TemporaryFileSystemValue
+  - fields:
+      - doc: |-
+          Syscalls are the calls by their Linux names ("mkdirat"); the @group names
+          are the caller's to expand.
+        name: Syscalls
+        type: "[]string"
+      - doc: "Deny inverts the list: the calls named are refused, every other passes."
+        name: Deny
+        type: bool
+    kind: struct
+    name: SystemCallFilterValue
+  - fields:
+      - doc: Codes are exit codes, 0–255.
+        name: Codes
+        type: "[]int"
+      - doc: Signals are terminating signals.
+        name: Signals
+        type: "[]coreproc.Signal"
+    kind: struct
+    methods:
+      - name: Contains
+        params: exit coreproc.ExitValue
+        recv: s ExitStatusValue
+        results: bool
+      - name: Empty
+        recv: s ExitStatusValue
+        results: bool
+    name: ExitStatusValue
+  - fields:
+      - doc: |-
+          Fields are the message's NAME=value assignments; a name given twice
+          keeps its last value.
+        name: Fields
+        type: map[string]string
+      - doc: |-
+          Files are the descriptors the message carried (SCM_RIGHTS), in order —
+          with MAINPIDFD=1 the first is the main process's pidfd —, which the
+          engine owns once Recv returned them: the store keeps those FDSTORE=1
+          hands it, and every other is closed when the message is taken, which is
+          what BARRIER=1 waits for.
+        name: Files
+        type: "[]*os.File"
+      - doc: PID is the sender's process, 0 when unknown.
+        name: PID
+        type: int
+      - doc: UID is the sender's user, -1 when unknown.
+        name: UID
+        type: int
+      - doc: |-
+          Verified is true when the kernel named PID (and UID, when known): a
+          message whose sender is not verified is dropped.
+        name: Verified
+        type: bool
+    kind: struct
+    name: NotifyValue
+  - fields:
+      - doc: At is when the snapshot was published, on the unit's clock.
+        name: At
+        type: time.Time
+      - doc: Changed is when State last changed.
+        name: Changed
+        type: time.Time
+      - doc: Name is the unit's name.
+        name: Name
+        type: string
+      - doc: Status is the last STATUS= the unit sent.
+        name: Status
+        type: string
+      - doc: BusError is the last BUSERROR= the unit sent.
+        name: BusError
+        type: string
+      - doc: VarlinkError is the last VARLINKERROR= the unit sent.
+        name: VarlinkError
+        type: string
+      - doc: ExitStatusText is the last EXIT_STATUS= the unit sent, informative only.
+        name: ExitStatusText
+        type: string
+      - doc: MainExit is the main process's last exit, valid when MainExited.
+        name: MainExit
+        type: coreproc.ExitValue
+      - doc: |-
+          Generation grows by one with every snapshot published; two events whose
+          generations are not consecutive have lost the ones between.
+        name: Generation
+        type: uint64
+      - doc: Dropped is how many events the unit's subscriptions have dropped.
+        name: Dropped
+        type: uint64
+      - doc: |-
+          NotifyRefused is how many notifications were refused: an unverified or
+          unadmitted sender, a MAINPID= that could not be accepted.
+        name: NotifyRefused
+        type: uint64
+      - doc: |-
+          FDStoreRefused is how many descriptors FDSTORE=1 handed that the store
+          refused and closed: past FileDescriptorStoreMax=, or to a unit without a
+          store.
+        name: FDStoreRefused
+        type: uint64
+      - doc: |-
+          FDStoreDiscarded is how many stored descriptors were closed because the
+          unit no longer runs what stored them — another ExecStart=, user or
+          group.
+        name: FDStoreDiscarded
+        type: uint64
+      - doc: MainPID is the main process, 0 when there is none.
+        name: MainPID
+        type: int
+      - doc: ControlPID is the command running, 0 when there is none.
+        name: ControlPID
+        type: int
+      - doc: Errno is the last ERRNO= the unit sent.
+        name: Errno
+        type: int
+      - doc: FDStore is how many descriptors the unit's store holds.
+        name: FDStore
+        type: int
+      - doc: |-
+          Restarts is how many automatic restarts ran since the last start the
+          caller asked for or RESTART_RESET=1.
+        name: Restarts
+        type: uint32
+      - doc: State is where the unit stands.
+        name: State
+        type: State
+      - doc: Sub is the step it is at.
+        name: Sub
+        type: Sub
+      - doc: Result is why its last run ended, or ResultSuccess while it runs well.
+        name: Result
+        type: Result
+      - doc: ReloadResult is how its last reload ended.
+        name: ReloadResult
+        type: Result
+      - doc: NotifyAccess is the effective NotifyAccess=, NOTIFYACCESS= included.
+        name: NotifyAccess
+        type: NotifyAccess
+      - doc: MainExited is true once the main process's exit is known.
+        name: MainExited
+        type: bool
+    kind: struct
+    name: StateValue
+  - fields:
+      - doc: Name is its FDNAME=, "stored" when the message named none.
+        name: Name
+        type: string
+      - doc: Device is the device of the object it refers to, as fstat names it.
+        name: Device
+        type: uint64
+      - doc: Inode is the inode of the object it refers to, as fstat names it.
+        name: Inode
+        type: uint64
+      - doc: Mode is the object's type and permissions, as fstat reads them.
+        name: Mode
+        type: os.FileMode
+      - doc: |-
+          Poll is true while a hangup or an error on it removes it from the store:
+          FDPOLL=0 clears it, and so does an object epoll cannot watch.
+        name: Poll
+        type: bool
+    kind: struct
+    name: StoredFDValue
+  - fields:
+      - doc: StateValue is the unit after the change.
+        name: ""
+        role: embedded
+        type: StateValue
+      - doc: Previous is the state before the change.
+        name: Previous
+        type: State
+      - doc: PreviousSub is the step before the change.
+        name: PreviousSub
+        type: Sub
+    kind: struct
+    name: EventValue
+  - kind: named
+    methods:
+      - name: String
+        recv: t Type
+        results: string
+    name: Type
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: r Restart
+        results: string
+    name: Restart
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: m RestartMode
+        results: string
+    name: RestartMode
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: m KillMode
+        results: string
+    name: KillMode
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: e ExitType
+        results: string
+    name: ExitType
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: a NotifyAccess
+        results: string
+    name: NotifyAccess
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: m TimeoutMode
+        results: string
+    name: TimeoutMode
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: p OOMPolicy
+        results: string
+    name: OOMPolicy
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: p Preserve
+        results: string
+    name: Preserve
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: "On"
+        params: def bool
+        recv: t Toggle
+        results: bool
+    name: Toggle
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: s State
+        results: string
+      - name: ActiveState
+        recv: s State
+        results: string
+    name: State
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: s Sub
+        results: string
+    name: Sub
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: r Result
+        results: string
+    name: Result
+    underlying: uint8
+vars:
+  - doc: |-
+      prefixes are the prefix characters and their flags, in the order String
+      writes them.
+    items:
+      - name: prefixes
+        value: |-
+          [...]struct {
+          	char byte
+          	flag CommandFlags
+          }{
+          	{'@', FlagArgv0},
+          	{'-', FlagIgnoreFailure},
+          	{':', FlagNoEnvExpand},
+          	{'+', FlagFullPrivileges},
+          	{'!', FlagNoCredentials},
+          	{'|', FlagShell},
+          }
+    name: prefixes
+  - grouped: true
+    items:
+      - doc: typeNames are the Type= spellings.
+        name: typeNames
+        value: "[...]string{\"\", \"simple\", \"exec\", \"forking\", \"oneshot\", \"dbus\", \"notify\", \"notify-reload\", \"idle\"}"
+      - doc: restartNames are the Restart= spellings.
+        name: restartNames
+        value: "[...]string{\"no\", \"on-success\", \"on-failure\", \"on-abnormal\", \"on-watchdog\", \"on-abort\", \"always\"}"
+      - doc: restartModeNames are the RestartMode= spellings.
+        name: restartModeNames
+        value: "[...]string{\"normal\", \"direct\", \"debug\"}"
+      - doc: killModeNames are the KillMode= spellings.
+        name: killModeNames
+        value: "[...]string{\"\", \"process\", \"control-group\", \"mixed\", \"none\"}"
+      - doc: exitTypeNames are the ExitType= spellings.
+        name: exitTypeNames
+        value: "[...]string{\"main\", \"cgroup\"}"
+      - doc: notifyAccessNames are the NotifyAccess= spellings.
+        name: notifyAccessNames
+        value: "[...]string{\"none\", \"main\", \"exec\", \"all\"}"
+      - doc: timeoutModeNames are the failure modes' spellings.
+        name: timeoutModeNames
+        value: "[...]string{\"terminate\", \"abort\", \"kill\"}"
+      - doc: oomPolicyNames are the OOMPolicy= spellings.
+        name: oomPolicyNames
+        value: "[...]string{\"\", \"continue\", \"stop\", \"kill\"}"
+      - doc: preserveNames are the FileDescriptorStorePreserve= spellings.
+        name: preserveNames
+        value: "[...]string{\"restart\", \"no\", \"yes\", \"on-success\"}"
+      - doc: stateNames are the states' spellings.
+        name: stateNames
+        value: "[...]string{\"inactive\", \"activating\", \"active\", \"reloading\", \"deactivating\", \"failed\", \"auto-restart\", \"exited\", \"condition-skipped\"}"
+      - doc: activeStates are systemd's ActiveState of each State.
+        name: activeStates
+        value: "[...]string{\"inactive\", \"activating\", \"active\", \"reloading\", \"deactivating\", \"failed\", \"activating\", \"active\", \"inactive\"}"
+      - doc: subNames are systemd's SubState spellings.
+        name: subNames
+        value: |-
+          [...]string{
+          		"dead", "condition", "start-pre", "start", "start-post", "running", "exited",
+          		"reload", "reload-signal", "reload-notify", "reload-post", "stop", "stop-watchdog",
+          		"stop-sigterm", "stop-sigkill", "stop-post", "final-watchdog", "final-sigterm",
+          		"final-sigkill", "failed", "auto-restart", "running-revalidating",
+          	}
+      - doc: resultNames are systemd's Result= spellings.
+        name: resultNames
+        value: |-
+          [...]string{
+          		"success", "resources", "protocol", "timeout", "exit-code", "signal",
+          		"core-dump", "watchdog", "start-limit-hit", "oom-kill", "exec-condition",
+          	}
+    name: typeNames
+  - grouped: true
+    items:
+      - doc: protectSystemNames are the ProtectSystem= spellings.
+        name: protectSystemNames
+        value: "[...]string{\"no\", \"yes\", \"full\", \"strict\"}"
+      - doc: privateTmpNames are the PrivateTmp= spellings.
+        name: privateTmpNames
+        value: "[...]string{\"no\", \"yes\", \"disconnected\"}"
+    name: protectSystemNames

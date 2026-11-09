@@ -36,6 +36,18 @@ func CaptureCPU(ctx context.Context, window time.Duration) (*coreprofiling.Profi
 // white-box test sets to a ManualClock so a window ends when the test advances
 // it rather than after the test has slept through it.
 func captureCPU(ctx context.Context, clk clock.Waiter, window time.Duration) (*coreprofiling.ProfileValue, error) {
+	raw, err := captureCPURaw(ctx, clk, window)
+	//: refused, cancelled or failed.
+	if err != nil {
+		return nil, err
+	}
+	//: the runtime's bytes, decoded.
+	return Parse(raw)
+}
+
+// captureCPURaw is captureCPU before the decoding: the runtime's gzipped
+// protocol-buffer bytes, which the pprof handler serves as they are.
+func captureCPURaw(ctx context.Context, clk clock.Waiter, window time.Duration) ([]byte, error) {
 	//: a window with no length, or one that would hold the profiler too long.
 	if window <= 0 || window > MaxCPUWindow {
 		//: the window is a field; the bound is in the Public text.
@@ -60,8 +72,8 @@ func captureCPU(ctx context.Context, clk clock.Waiter, window time.Duration) (*c
 		return nil, errors.Join(coreprofiling.CaptureCanceled, ctx.Err())
 	}
 	pprof.StopCPUProfile()
-	//: the runtime's bytes, decoded.
-	return Parse(buf.Bytes())
+	//: the runtime's bytes.
+	return buf.Bytes(), nil
 }
 
 // CaptureHeap returns the live heap as the runtime's memory profiler last saw

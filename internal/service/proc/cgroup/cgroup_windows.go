@@ -40,6 +40,7 @@ const (
 const (
 	jobLimitActiveProcess uint32 = 0x00000008
 	jobLimitProcessMemory uint32 = 0x00000100
+	jobLimitJobMemory     uint32 = 0x00000200
 )
 
 // CPU-rate ControlFlags bits (winnt.h JOB_OBJECT_CPU_RATE_CONTROL_*).
@@ -163,6 +164,38 @@ func (g *controlGroupWindows) SetMemoryMax(bytes int64) error {
 	g.ext.processMemoryLimit = uintptr(bytes)
 	//: push the updated struct to the kernel.
 	return g.applyExtended()
+}
+
+// SetJobMemoryLimit caps the memory committed by every process of the job
+// together (JOB_OBJECT_LIMIT_JOB_MEMORY); a negative value removes the cap.
+// CgroupWriteFailed when the job refuses it.
+func (g *controlGroupWindows) SetJobMemoryLimit(bytes int64) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	//: a negative request means "no limit": drop the flag and the byte value.
+	if bytes < 0 {
+		//: clear the job-memory bit; any other accumulated limit stays.
+		g.ext.basicLimitInformation.limitFlags &^= jobLimitJobMemory
+		g.ext.jobMemoryLimit = 0
+		//: re-apply so the cleared cap takes effect.
+		return g.applyExtended()
+	}
+	g.ext.basicLimitInformation.limitFlags |= jobLimitJobMemory
+	g.ext.jobMemoryLimit = clampToUintptr(bytes)
+	//: push the updated struct to the kernel.
+	return g.applyExtended()
+}
+
+// clampToUintptr converts a non-negative byte count to the SIZE_T field it is
+// written to, capped at the largest the field holds on a 32-bit build rather
+// than wrapping to a small, wrong limit.
+func clampToUintptr(bytes int64) uintptr {
+	//: wider than the field: the field's maximum.
+	if uint64(bytes) > uint64(^uintptr(0)) {
+		return ^uintptr(0)
+	}
+	//: fits.
+	return uintptr(bytes)
 }
 
 // SetPidsMax caps the number of active processes in the job. A negative value
@@ -343,4 +376,11 @@ func cgroupErr(cause error, code errs.Code, reason, public, private string) erro
 		Private:  private,
 		ExitCode: exitOSErr,
 	})
+}
+
+// probe answers for Job Objects, which need no delegation and have no
+// hierarchy: always mounted and delegated, with no own group.
+func probe(cfg groupConfig) (ProbeValue, error) {
+	//: WithRoot names nothing here; it is reported as given.
+	return ProbeValue{Root: cfg.root, Mounted: true, Delegated: true}, nil
 }

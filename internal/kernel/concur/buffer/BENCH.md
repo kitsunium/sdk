@@ -77,3 +77,29 @@ GetPut_Parallel-12           6.518    47.9%   3.972 – 7.096      0           0
 - **`BenchmarkGetPut_Parallel`** — the round trip under `RunParallel`. `sync.Pool`'s
   per-P cache keeps each goroutine's borrow/return lock-free, so the per-op cost
   drops below the single-threaded number and stays 0-alloc under contention.
+
+## Edition 2026-11-03 — size classes (#810)
+
+One box, before and after (AMD EPYC 7351P, 8 vCPU, go1.27.3, `GOMAXPROCS=4`,
+`-benchmem -count 5`, medians):
+
+| Row | Before (base `42143bf47`) | After | allocs/op |
+|---|---|---|---|
+| `Get_Steadystate` | 26.2 ns | 30.0 ns | 0 → 0 |
+| `GetPut_RoundTrip` | 26.9 ns | 30.4 ns | 0 → 0 |
+| `GetPut_Parallel` | 11.9 ns | 13.1 ns | 0 → 0 |
+| `GetSize_16K` | — | 33.9 ns | 0 |
+| `MixedConsumers` (a 1 KiB and a 16 KiB consumer interleaved) | — | 62.7 ns | 0 |
+
+- **`GetSize_16K` at 0 allocs/op** is #810's acceptance and the design's
+  budget on `GetSize` (ADR 0165): a 16 KiB request is served from its own
+  class, where the shared pool handed out 1 KiB and the caller allocated 16 KiB
+  (`net/server`'s acquire: 4 allocations and 17 KiB per connection before,
+  none after — its `BENCH.md`).
+- **`MixedConsumers` at 0 allocs/op**: the two consumers never take each
+  other's buffers, so neither allocates and neither pins the other's size.
+- **The 1 KiB round trip costs ~4 ns more**: `Put` now routes by capacity
+  (`putClass`, out of line so `Put` stays inlinable; the 1 KiB class has a
+  fast path). That is the price of the classes on the logger's path, which
+  allocates as before (0 per round trip).
+

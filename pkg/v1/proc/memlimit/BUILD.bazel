@@ -12,6 +12,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/proc",
+        "//internal/kernel/clock",
         "//internal/service/proc/memlimit",
     ],
 )
@@ -31,5 +32,7 @@ go_test(
     deps = [
         ":memlimit",
         "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/service/proc/memlimit",
     ],
 )

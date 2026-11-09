@@ -271,13 +271,11 @@ func Test_openNull(t *testing.T) {
 	}
 }
 
-// Test_stdioState_wireNull pins the bookkeeping every wiring step shares: the
-// descriptor lands on the child's fd, it is recorded for cleanup, and it is
-// recorded as a child-side end the parent closes after the spawn.
-//
-// The last one is what makes EOF work. If the parent kept its copy of the
-// child's write end, the read end would never see EOF and the drain would hang
-// forever after the child exited.
+// Test_stdioState_wireNull pins the null stream's bookkeeping since #943: the
+// descriptor lands on the child's fd, and it is the shared null device, on no
+// cleanup list — closing it would take it from every later spawn. (A pipe's
+// child-side end is still closed after the spawn, which is what makes EOF
+// work; the null device has no reader waiting for one.)
 func Test_stdioState_wireNull(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -295,21 +293,19 @@ func Test_stdioState_wireNull(t *testing.T) {
 		s := &stdioState{}
 		defer s.closeAll()
 
-		if err := s.wireNull(c.idx, c.flag); err != nil {
+		if err := s.wireNull(c.idx); err != nil {
 			t.Fatalf("wireNull(%s) = %v, want nil", c.name, err)
 		}
 
 		if s.files[c.idx] == nil {
 			t.Fatalf("fd %d was left unwired", c.idx)
 		}
-		//: recorded for cleanup, or a failed spawn leaks it.
-		if len(s.opened) != 1 || s.opened[0] != s.files[c.idx] {
-			t.Errorf("the descriptor was not recorded for cleanup: %v", s.opened)
+		//: the shared null device, kept open for the next spawn.
+		if s.files[c.idx] != sharedNull.Load() {
+			t.Errorf("fd %d is not the shared null device", c.idx)
 		}
-		//: recorded as a child-side end, or the parent's copy keeps the pipe
-		//: alive and the drain never reaches EOF.
-		if len(s.closeChild) != 1 || s.closeChild[0] != s.files[c.idx] {
-			t.Errorf("the descriptor was not recorded as a child-side end: %v", s.closeChild)
+		if len(s.opened) != 0 || len(s.closeChild) != 0 {
+			t.Errorf("the shared null device is on a cleanup list: %v, %v", s.opened, s.closeChild)
 		}
 	}
 	for _, c := range tests {
@@ -500,25 +496,25 @@ func Test_buildStdio(t *testing.T) {
 			wantStdout: os.Stdout,
 		},
 		{
-			name:       "null opens three descriptors",
+			name:       "null opens nothing: the shared null device serves all three (#943)",
 			spec:       coreproc.Spec{Stdio: coreproc.StdioNull},
-			wantOpened: 3,
+			wantOpened: 0,
 		},
 		{
-			name: "capture with no writers opens three null descriptors",
+			name: "capture with no writers opens nothing: the shared null device",
 			spec: coreproc.Spec{Stdio: coreproc.StdioCapture},
 			//: three null devices, one per stream.
-			wantOpened: 3,
+			wantOpened: 0,
 		},
 		{
-			name: "capture with both outputs opens two pipes and a null stdin",
+			name: "capture with both outputs opens two pipes, the stdin is the shared null device",
 			spec: coreproc.Spec{
 				Stdio:  coreproc.StdioCapture,
 				Stdout: &bytes.Buffer{},
 				Stderr: &bytes.Buffer{},
 			},
 			//: one null (stdin) plus two pipes, two descriptors each.
-			wantOpened: 5,
+			wantOpened: 4,
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -607,7 +603,7 @@ func Test_stdioState_closeAll(t *testing.T) {
 // less than expected.
 //
 // Goroutine lifecycle: one drain goroutine per case, bounded by its pipe. It
-// returns when the write end is closed below, and s.wait() joins it before the
+// returns when the write end is closed below, and s.wg.Wait() joins it before the
 // assertions, so none can outlive the case that started it.
 func Test_stdioState_drainOutput(t *testing.T) {
 	t.Parallel()
@@ -636,7 +632,7 @@ func Test_stdioState_drainOutput(t *testing.T) {
 			t.Fatalf("os.Pipe = %v", err)
 		}
 		//: Goroutine lifecycle: one drain goroutine, bounded by the pipe — it
-		//: returns when the write end below is closed, and s.wait() joins it
+		//: returns when the write end below is closed, and s.wg.Wait() joins it
 		//: before the assertions.
 		s := &stdioState{}
 		s.wg.Add(1)
@@ -648,7 +644,7 @@ func Test_stdioState_drainOutput(t *testing.T) {
 		//: closing the write end is what the child's exit does; the drain then
 		//: reaches EOF and returns.
 		swallowErr(pw.Close())
-		s.wait()
+		s.wg.Wait()
 
 		if c.wantErr {
 			if s.copyError() == nil {
@@ -774,7 +770,7 @@ func Test_stdioState_afterStart(t *testing.T) {
 
 		done := make(chan struct{})
 		go func() {
-			s.wait()
+			s.wg.Wait()
 			close(done)
 		}()
 		select {
@@ -814,7 +810,7 @@ func Test_stdioState_wait(t *testing.T) {
 		t.Helper()
 		//: Goroutine lifecycle: two goroutines per drain, both bounded by their
 		//: own pipe. The writer closes its end after the payload, which ends
-		//: the drain; s.wait() joins every drain before the assertions.
+		//: the drain; s.wg.Wait() joins every drain before the assertions.
 		s := &stdioState{}
 		sinks := make([]*bytes.Buffer, c.drains)
 		for i := range c.drains {
@@ -831,7 +827,7 @@ func Test_stdioState_wait(t *testing.T) {
 			}(pw)
 		}
 
-		s.wait()
+		s.wg.Wait()
 
 		//: after the join every byte is in the caller's buffer, with no
 		//: further synchronisation needed.

@@ -4,6 +4,16 @@ sequences:
   - of: ExitValue.Success
     steps:
       - return: "!e.Signaled && e.Code == 0"
+  - of: Controller.String
+    steps:
+      - opt:
+          do:
+            - return: controllerNames[c]
+          when: c.Known()
+      - return: "\"controller(\" + strconv.Itoa(int(c)) + \")\""
+  - of: Controller.Known
+    steps:
+      - return: int(c) < len(controllerNames) && controllerNames[c] != ""
   - of: MemorySource.String
     steps:
       - switch:
@@ -24,6 +34,20 @@ sequences:
               do:
                 - return: "\"unknown\""
           "on": s
+  - of: MemoryBound.String
+    steps:
+      - switch:
+          cases:
+            - case: MemoryBoundHigh
+              do:
+                - return: "\"high\""
+            - case: MemoryBoundMax
+              do:
+                - return: "\"max\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": b
   - of: MemoryLimitValue.Applied
     steps:
       - return: m.Source == MemorySourceCgroup
@@ -52,6 +76,26 @@ sequences:
   - of: Resource.Known
     steps:
       - return: r > ResourceUnknown && r <= ResourceMemLock
+  - of: SchedPolicy.String
+    steps:
+      - opt:
+          do:
+            - return: name
+          init:
+            bind: name, ok
+            eval: schedPolicyNames[p]
+          when: ok
+      - return: "\"schedpolicy(\" + strconv.Itoa(int(p)) + \")\""
+  - of: IOClass.String
+    steps:
+      - opt:
+          do:
+            - return: name
+          init:
+            bind: name, ok
+            eval: ioClassNames[c]
+          when: ok
+      - return: "\"ioclass(\" + strconv.Itoa(int(c)) + \")\""
   - of: Signal.OS
     participants:
       - id: caller
@@ -67,6 +111,13 @@ sequences:
     steps:
       - return: int(s)
   - of: Signal.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: Signal.String
+        kind: self
+      - id: realtimeName
+        kind: internal
     steps:
       - opt:
           do:
@@ -75,12 +126,110 @@ sequences:
             bind: name, ok
             eval: signalNames[s]
           when: ok
+      - opt:
+          do:
+            - return: realtimeName(s)
+              to: realtimeName
+          when: s.realtime()
       - return: "\"signal \" + strconv.Itoa(int(s))"
   - of: Signal.Known
     steps:
       - bind: _, ok
         eval: signalNames[s]
-      - return: ok
+      - return: ok || s.realtime()
+  - of: Signal.realtime
+    steps:
+      - return: s >= rtMin && s <= rtMax
+  - of: realtimeName
+    steps:
+      - opt:
+          do:
+            - return: rtMinName
+          when: s == rtMin
+      - return: rtMinName + "+" + strconv.Itoa(int(s-rtMin))
+  - of: parseRealtime
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseRealtime
+        kind: self
+      - id: realtimeEnd
+        kind: internal
+      - id: realtimeOffset
+        kind: internal
+    steps:
+      - bind: base, rest, step, named
+        eval: realtimeEnd(canonical)
+        to: realtimeEnd
+      - opt:
+          do:
+            - return: 0, false
+          when: "!named"
+      - bind: offset, counted
+        eval: realtimeOffset(rest, step)
+        to: realtimeOffset
+      - bind: candidate
+        eval: base + Signal(offset)
+      - return: candidate, counted && candidate.realtime()
+  - of: realtimeEnd
+    participants:
+      - id: caller
+        kind: actor
+      - id: realtimeEnd
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: rtMin, after, 1, true
+          init:
+            bind: after, found
+            eval: strings.CutPrefix(canonical, rtMinName)
+            to: strings
+          when: found
+      - opt:
+          do:
+            - return: rtMax, after, -1, true
+          init:
+            bind: after, found
+            eval: strings.CutPrefix(canonical, rtMaxName)
+            to: strings
+          when: found
+      - return: 0, "", 0, false
+  - of: realtimeOffset
+    participants:
+      - id: caller
+        kind: actor
+      - id: realtimeOffset
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, true
+          when: rest == ""
+      - bind: op
+        eval: "\"+\""
+      - opt:
+          do:
+            - set: op
+              value: "\"-\""
+          when: step < 0
+      - bind: digits, found
+        eval: strings.CutPrefix(rest, op)
+        to: strings
+      - bind: n, err
+        eval: strconv.Atoi(digits)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, false
+          when: "!found || err != nil || digits != strconv.Itoa(n) || n < 0"
+      - return: step * n, true
   - of: Parse
     participants:
       - id: caller
@@ -91,6 +240,8 @@ sequences:
         kind: stdlib
       - id: strconv
         kind: stdlib
+      - id: parseRealtime
+        kind: internal
     steps:
       - bind: trimmed
         eval: strings.TrimSpace(name)
@@ -111,6 +262,14 @@ sequences:
           when: convErr == nil
       - bind: canonical
         eval: "\"SIG\" + strings.TrimPrefix(strings.ToUpper(trimmed), \"SIG\")"
+      - opt:
+          do:
+            - return: rt, nil
+          init:
+            bind: rt, ok
+            eval: parseRealtime(canonical)
+            to: parseRealtime
+          when: ok
       - loop:
           do:
             - opt:
@@ -133,4 +292,4 @@ sequences:
       - return: "\"stdiomode(\" + strconv.Itoa(int(m)) + \")\""
   - of: StdioMode.Known
     steps:
-      - return: m <= StdioCapture
+      - return: m <= StdioPTY

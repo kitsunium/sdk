@@ -63,3 +63,39 @@ func perfTryRead(tb testing.TB) func() {
 		perfInt, perfErr = empty.TryRead()
 	}
 }
+
+// perfMultiQueue is an MPSC ring of the given capacity, or the fixture fails.
+func perfMultiQueue(tb testing.TB, capacity int) ring.MultiQueue[int] {
+	tb.Helper()
+	q, err := ring.NewMulti[int](capacity)
+	//: a capacity NewMulti refuses leaves the fixture nothing to measure.
+	if err != nil {
+		tb.Fatalf("NewMulti(%d): %v", capacity, err)
+	}
+	return q
+}
+
+// perfMultiTryWrite is MultiQueue.TryWrite's fixture: a claim that lands,
+// drained at once, then a write into a full ring, which returns Full.
+func perfMultiTryWrite(tb testing.TB) func() {
+	q, full := perfMultiQueue(tb, 1024), perfMultiQueue(tb, 8)
+	//: fill the ring to capacity, so the call's second write returns Full.
+	for full.TryWrite(0) == nil {
+	}
+	return func() {
+		perfErr = q.TryWrite(1)
+		perfInt, perfErr = q.TryRead()
+		perfErr = full.TryWrite(1)
+	}
+}
+
+// perfMultiTryRead is MultiQueue.TryRead's fixture: a read of an item just
+// written, then a read of an empty ring, which returns Empty.
+func perfMultiTryRead(tb testing.TB) func() {
+	q, empty := perfMultiQueue(tb, 1024), perfMultiQueue(tb, 8)
+	return func() {
+		perfErr = q.TryWrite(1)
+		perfInt, perfErr = q.TryRead()
+		perfInt, perfErr = empty.TryRead()
+	}
+}

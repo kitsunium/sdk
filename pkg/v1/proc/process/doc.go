@@ -23,7 +23,9 @@
 //
 // A nil Spec.Env yields an empty environment — the child never silently inherits
 // the supervisor's, so a spawned service starts from a known state. Pass an
-// explicit slice (including os.Environ()) to inherit deliberately.
+// explicit slice (including os.Environ()) to inherit deliberately. A key that
+// begins __KITSUNIUM_SDK_PROC_, in any case, belongs to the SDK's own spawn
+// protocol: Start refuses it with ReservedEnv before any fork.
 //
 // Spec.Path may be a bare name. "go" is searched in the PATH the CHILD will
 // see — the PATH entry of Spec.Env whenever it names one, even empty, the
@@ -108,9 +110,9 @@
 //	// sdk.Version is a release ("v0.4.6"), or "" with sdk.Revision/sdk.Time
 //	// for a pseudo-version, or "" with sdk.Local for a directory.
 //
-// CPUTime is the kernel's count (getrusage) where the platform has one and the
-// Go runtime's estimate elsewhere — refreshed only at a garbage collection;
-// Stats.CPUEstimated says which. The
+// CPUTime is the kernel's count (getrusage, GetProcessTimes on Windows) where
+// the platform has one and the Go runtime's estimate elsewhere — refreshed
+// only at a garbage collection; Stats.CPUEstimated says which. The
 // distributions and every counter are cumulative since the process started —
 // subtract two snapshots for a window.
 //

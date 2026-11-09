@@ -13,6 +13,8 @@ decoded with the standard library, folded onto the owners you name, grouped.
 |---|---|---|
 | `CaptureCPU(ctx, window)` | func | a `*Profile`; one CPU profiler per process, so a second capture is `ProfilerBusy` |
 | `CaptureHeap()` | func | the live heap, after a collection |
+| `CaptureTrace(ctx, window)`, `StartFlightRecorder(cfg)`, `FlightConfig`, `FlightRecorder`, `MaxTraceWindow`, `TraceBusy`, `CodeTraceBusy` | func, alias, const, var | execution traces: a bounded window, and the flight recorder's last seconds on demand (#1022) |
+| `NewHandler(cfg)`, `HandlerConfig` | func, alias | the pprof wire as an `http.Handler` the caller mounts behind its own admission, no init registration (#1023) |
 | `Parse(data)` | func | a pprof profile, gzipped or not, bounded by `MaxProfileBytes` read and `MaxFrames` built |
 | `Fold(p, cfg)` | func | a `Folded`: per-owner costs, top functions, flame graph, in the profile's unit |
 | `Goroutines()`, `ParseGoroutines(dump)` | func | the process's goroutines; any dump, never failing |

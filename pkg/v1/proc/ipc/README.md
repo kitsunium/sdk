@@ -19,7 +19,7 @@ c, err := ipc.Dial(ctx, cfg)        // a client; c.Peer says who listens
 Two gates, and the package says which one holds where:
 
   - The DIRECTORY, everywhere. The socket lives in a directory its account owns and nobody else may write to — created 0700 when missing, refused otherwise ([CodeDirectoryUnsafe](#CodeDirectoryUnsafe)) — and the socket file is 0600. Connecting needs search permission on the directory, so only its owner (and root) get through. On Windows the endpoint is a named pipe named after the path, whose own DACL grants this account only, which refuses remote clients and which nobody can join once it exists.
-  - The PEER'S CREDENTIALS, where the kernel gives them: on Linux, SO\_PEERCRED names the peer's user, group and process, and a peer that is neither this account nor in Config.AllowUIDs / AllowGIDs is closed before Accept returns it. On Windows each end reads the other's account from its process token ([Peer](#Peer).SID) and refuses another one. Elsewhere [Peer](#Peer).Verified is false and the directory is the only gate.
+  - The PEER'S CREDENTIALS, where the kernel gives them: on Linux, SO\_PEERCRED names the peer's user, group and process, and a peer that is neither this account nor in Config.AllowUIDs / AllowGIDs is closed before Accept returns it — and so, since #1093, do FreeBSD, DragonFly and NetBSD, where an unnamed peer is refused too. On Windows each end reads the other's account from its process token ([Peer](#Peer).SID) and refuses another one. On darwin, OpenBSD, illumos and Solaris [Peer](#Peer).Verified is false and the directory is the only gate.
 
 ### The path to the directory is part of the gate
 
@@ -49,6 +49,10 @@ Listen dials a socket already at the path first. One that answers is left alone 
 - [type Conn](<#Conn>)
 - [type Dialer](<#Dialer>)
   - [func \(Dialer\) Dial\(ctx context.Context\) \(\*Conn, error\)](<#Dialer.Dial>)
+- [type FileReceiver](<#FileReceiver>)
+  - [func \(FileReceiver\) RecvFiles\(buf \[\]byte, max int\) \(n int, files \[\]\*os.File, err error\)](<#FileReceiver.RecvFiles>)
+- [type FileSender](<#FileSender>)
+  - [func \(FileSender\) SendFiles\(payload \[\]byte, files ...\*os.File\) error](<#FileSender.SendFiles>)
 - [type Listener](<#Listener>)
   - [func \(Listener\) Accept\(\) \(\*Conn, error\)](<#Listener.Accept>)
   - [func \(Listener\) Addr\(\) net.Addr](<#Listener.Addr>)
@@ -102,6 +106,17 @@ The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeEndpointForeign`.
 
 Code `0.3.91.7`
+
+<a name="CodeFDPassRefused"></a>
+```go
+const CodeFDPassRefused errs.Code = 219914
+```
+
+The codes, for errs.HasCode: a caller must tell "another daemon runs" (IN\_USE: talk to it) from "the directory or the path to it is not private" (fix the deployment, or look for whoever planted a component) from "nobody answers" (start one).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/proc/ipc.CodeFDPassRefused`.
+
+Code `0.3.91.10`
 
 <a name="CodeInUse"></a>
 ```go
@@ -285,6 +300,69 @@ func (Dialer) Dial(ctx context.Context) (*Conn, error)
 
 Dial connects within ctx. Peer names the listener where the kernel does; a listener of an account that is not admitted is refused.
 
+<a name="FileReceiver"></a>
+## type [FileReceiver](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
+
+FileReceiver receives the files a FileSender passed, at most max per message, the excess closed — by the kernel on Unix, in the sender on Windows; assert it on Conn.Conn.
+
+```go
+type FileReceiver = coreipc.FileReceiver
+```
+
+FileReceiver is an alias of `github.com/kitsunium/sdk/internal/core/proc/ipc.FileReceiver`, declared as:
+
+```go
+type FileReceiver interface {
+	// RecvFiles reads one message into buf and the descriptors attached to it,
+	// at most max (refused at zero), each close-on-exec — not inheritable on
+	// Windows — and wrapped as an *os.File the caller owns and closes.
+	// Descriptors beyond max are closed by the kernel on Unix and in the
+	// sender's process on Windows, never leaked into this process;
+	// FDPassRefused with the reason "truncated" says so, beside the files that
+	// fit.
+	RecvFiles(buf []byte, max int) (n int, files []*os.File, err error)
+}
+```
+
+<a name="FileReceiver.RecvFiles"></a>
+### func \(FileReceiver\) [RecvFiles](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/gen_ports.go>)
+
+```go
+func (FileReceiver) RecvFiles(buf []byte, max int) (n int, files []*os.File, err error)
+```
+
+RecvFiles reads one message into buf and the descriptors attached to it, at most max (refused at zero), each close-on-exec — not inheritable on Windows — and wrapped as an \*os.File the caller owns and closes. Descriptors beyond max are closed by the kernel on Unix and in the sender's process on Windows, never leaked into this process; FDPassRefused with the reason "truncated" says so, beside the files that fit.
+
+<a name="FileSender"></a>
+## type [FileSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
+
+FileSender passes open files to the peer's process (SCM\_RIGHTS on Unix, DuplicateHandle on Windows); assert it on Conn.Conn. Only to a peer the kernel named.
+
+```go
+type FileSender = coreipc.FileSender
+```
+
+FileSender is an alias of `github.com/kitsunium/sdk/internal/core/proc/ipc.FileSender`, declared as:
+
+```go
+type FileSender interface {
+	// SendFiles sends payload with files attached; the peer receives copies of
+	// the descriptors, and the sender keeps and closes its own. A peer the
+	// kernel did not name, or an empty payload, is FDPassRefused and nothing is
+	// written.
+	SendFiles(payload []byte, files ...*os.File) error
+}
+```
+
+<a name="FileSender.SendFiles"></a>
+### func \(FileSender\) [SendFiles](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/ipc/gen_ports.go>)
+
+```go
+func (FileSender) SendFiles(payload []byte, files ...*os.File) error
+```
+
+SendFiles sends payload with files attached; the peer receives copies of the descriptors, and the sender keeps and closes its own. A peer the kernel did not name, or an empty payload, is FDPassRefused and nothing is written.
+
 <a name="Listener"></a>
 ## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
 
@@ -386,8 +464,11 @@ type Peer struct {
 	// empty elsewhere.
 	SID      string
 	// Verified is true when the kernel named the peer — UID and GID by
-	// SO_PEERCRED on Linux, SID from the process token on Windows —, false
-	// when only the directory's permissions admitted it.
+	// SO_PEERCRED on Linux, LOCAL_PEERCRED on FreeBSD and DragonFly,
+	// LOCAL_PEEREID on NetBSD, SID from the process token on Windows —, false
+	// when only the directory's permissions admitted it (darwin, OpenBSD,
+	// illumos, Solaris). On Linux and the three BSDs an unnamed peer is
+	// refused, never admitted.
 	Verified bool
 }
 ```

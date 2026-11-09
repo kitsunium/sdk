@@ -1,0 +1,36 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "bsdabi",
+    srcs = [
+        "doc.go",
+        "proc.go",
+        "sockcred.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/internal/bsdabi",
+    visibility = [
+        "//internal/service:service_consumers",
+        "//internal/service/proc:__subpackages__",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":bsdabi",
+    visibility = [
+        "//internal/service:service_consumers",
+        "//internal/service/proc:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "bsdabi_test",
+    srcs = [
+        "gen_api_test.go",
+        "proc_external_test.go",
+        "sockcred_external_test.go",
+    ],
+    deps = [":bsdabi"],
+)

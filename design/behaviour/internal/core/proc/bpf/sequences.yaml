@@ -1,0 +1,200 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: DevicePolicyValue.Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: DevicePolicyValue.Validate
+        kind: self
+      - id: policyInvalid
+        kind: internal
+      - id: r.invalidField
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: policyInvalid(-1, "default")
+              to: policyInvalid
+          when: "!p.Default.valid()"
+      - opt:
+          do:
+            - return: policyInvalid(len(p.Rules), "rules")
+              to: policyInvalid
+          when: len(p.Rules) > MaxDeviceRules
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: policyInvalid(i, field)
+                    to: policyInvalid
+                init:
+                  bind: field
+                  eval: r.invalidField()
+                  to: r.invalidField
+                when: field != ""
+          key: i
+          range: p.Rules
+          value: r
+      - return: nil
+  - of: DeviceRuleValue.invalidField
+    steps:
+      - switch:
+          cases:
+            - case: r.Type < DeviceBlock || r.Type > DeviceAny
+              do:
+                - return: "\"type\""
+            - case: "!validNumber(r.Major)"
+              do:
+                - return: "\"major\""
+            - case: "!validNumber(r.Minor)"
+              do:
+                - return: "\"minor\""
+            - case: r.Access == 0 || r.Access&^AccessAll != 0
+              do:
+                - return: "\"access\""
+            - case: "!r.Verdict.valid()"
+              do:
+                - return: "\"verdict\""
+            - default: true
+              do:
+                - return: "\"\""
+  - of: SKBPolicyValue.Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: SKBPolicyValue.Validate
+        kind: self
+      - id: policyInvalid
+        kind: internal
+      - id: r.Prefix.Masked
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: policyInvalid(-1, "default")
+              to: policyInvalid
+          when: "!p.Default.valid()"
+      - opt:
+          do:
+            - return: policyInvalid(len(p.Rules), "rules")
+              to: policyInvalid
+          when: len(p.Rules) > MaxPrefixRules
+      - bind: seen
+        eval: make(map[netip.Prefix]struct{}, len(p.Rules))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: policyInvalid(i, "prefix")
+                    to: policyInvalid
+                when: "!r.Prefix.IsValid() || r.Prefix.Addr().Is4In6()"
+            - opt:
+                do:
+                  - return: policyInvalid(i, "verdict")
+                    to: policyInvalid
+                when: "!r.Verdict.valid()"
+            - bind: key
+              eval: r.Prefix.Masked()
+              to: r.Prefix.Masked
+            - opt:
+                do:
+                  - return: policyInvalid(i, "duplicate")
+                    to: policyInvalid
+                init:
+                  bind: _, dup
+                  eval: seen[key]
+                when: dup
+            - set: seen[key]
+              value: struct{}{}
+          key: i
+          range: p.Rules
+          value: r
+      - return: nil
+  - of: BindPolicyValue.Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: BindPolicyValue.Validate
+        kind: self
+      - id: policyInvalid
+        kind: internal
+      - id: r.invalidField
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: policyInvalid(-1, "default")
+              to: policyInvalid
+          when: "!p.Default.valid()"
+      - opt:
+          do:
+            - return: policyInvalid(len(p.Rules), "rules")
+              to: policyInvalid
+          when: len(p.Rules) > MaxBindRules
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: policyInvalid(i, field)
+                    to: policyInvalid
+                init:
+                  bind: field
+                  eval: r.invalidField()
+                  to: r.invalidField
+                when: field != ""
+          key: i
+          range: p.Rules
+          value: r
+      - return: nil
+  - of: BindRuleValue.invalidField
+    steps:
+      - switch:
+          cases:
+            - case: r.Family < FamilyIPv4 || r.Family > FamilyAny
+              do:
+                - return: "\"family\""
+            - case: r.Transport < TransportTCP || r.Transport > TransportAny
+              do:
+                - return: "\"transport\""
+            - case: r.Ports.First > r.Ports.Last
+              do:
+                - return: "\"ports\""
+            - case: "!r.Verdict.valid()"
+              do:
+                - return: "\"verdict\""
+            - default: true
+              do:
+                - return: "\"\""
+  - of: CheckCgroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: CheckCgroup
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(PolicyInvalid, errs.WrapParams{}, errs.String("field", "cgroup"), errs.String("cgroup", cgroup))
+              to: errs
+          when: "!strings.HasPrefix(cgroup, \"/\") || path.Clean(cgroup) != cgroup || cgroup == \"/\""
+      - return: nil
+  - of: Verdict.valid
+    steps:
+      - return: v == Allow || v == Deny
+  - of: validNumber
+    steps:
+      - return: n == AnyNumber || (n >= 0 && n <= math.MaxUint32)
+  - of: policyInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(PolicyInvalid, errs.WrapParams{}, errs.Int("rule", rule), errs.String("field", field))
+        to: errs

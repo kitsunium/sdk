@@ -1,6 +1,7 @@
 // Package notify — the supervisor (listener) side on Linux: SO_PASSCRED.
 //
-// Package notify — the supervisor (listener) side off Linux: unsupported.
+// Package notify — the supervisor (listener) side off Linux and FreeBSD:
+// unsupported.
 //
 // Package notify — the notifier (child) side: sending sd_notify datagrams.
 //
@@ -15,12 +16,14 @@
 //     libsystemd specifies, so an unsupervised binary stays silent rather than
 //     erroring;
 //   - the listener (Listen) is the supervisor side: it owns an AF_UNIX datagram
-//     socket, enables SO_PASSCRED so the kernel stamps each datagram with the
-//     sender's verified PID, and yields one parsed NotificationValue per Recv.
+//     socket, enables SO_PASSCRED (Linux) or LOCAL_CREDS_PERSISTENT (FreeBSD) so
+//     the kernel stamps each datagram with the sender's verified PID, and yields
+//     one parsed NotificationValue per Recv.
 //
 // $NOTIFY_SOCKET is an AF_UNIX address; a leading '@' selects the abstract
 // namespace and is replaced by a NUL byte before binding/connecting. The
-// credential-passing listener is Linux-only (SO_PASSCRED / SCM_CREDENTIALS); on
-// every other platform Listen returns coreproc.UnsupportedPlatform while the
-// notifier remains fully portable.
+// credential-passing listener runs on Linux (SO_PASSCRED / SCM_CREDENTIALS) and
+// FreeBSD (LOCAL_CREDS_PERSISTENT / SCM_CREDS2); on every other platform Listen
+// returns coreproc.UnsupportedPlatform while the notifier remains fully
+// portable.
 package notify

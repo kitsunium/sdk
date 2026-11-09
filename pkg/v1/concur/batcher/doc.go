@@ -26,17 +26,28 @@
 //
 // # When a batch is delivered
 //
-//   - Add delivers eagerly, on the caller's goroutine, once the pending batch
-//     reaches [Config].MaxItems items or [Config].MaxWeight — the sum of
-//     [Config].WeightOf over the batch; a nil WeightOf weighs every item 1 and
-//     ignores MaxWeight.
+//   - Add delivers eagerly once the pending batch reaches [Config].MaxItems
+//     items or [Config].MaxWeight — the sum of [Config].WeightOf over the
+//     batch; a nil WeightOf weighs every item 1 and ignores MaxWeight. Where
+//     is [Config].FlushOn's choice: [FlushCaller], the zero, runs the delivery
+//     on the goroutine of that Add, which gets its error; [FlushBackground]
+//     hands the batch to the batcher's goroutine, Add returning at once, and
+//     the error goes to [Config].OnError — an Add that fills a second batch
+//     before the first was taken waits for it, within its context.
 //   - A positive [Config].FlushEvery starts one ticker goroutine that delivers
 //     whatever is pending on each tick, on [Config].Clock — the wall clock
 //     when nil, a pkg/v1/clock.ManualClock in a test. A failure on that path
 //     has no caller to return to and goes to [Config].OnError.
-//   - Flush delivers what is pending now; Close stops the ticker and delivers
-//     what is pending with the context it is given, then refuses every later
-//     Add and Flush with [BatcherClosed].
+//   - Flush delivers what is pending now; Close stops the batcher's goroutine
+//     and delivers what is pending with the context it is given, then refuses
+//     every later Add and Flush with [BatcherClosed].
+//
+// Every delivery the batcher's own goroutine makes — a tick's, a background
+// one's — runs under a context Close cancels: Close waits for that goroutine
+// only as long as its own context lives, and returns [BatcherCloseTimedOut]
+// when it ended first, the delivery's context cancelled and the final batch
+// undelivered. A Sink that ignores its context cannot be stopped from
+// outside: bound it from the inside, with a deadline on the I/O it performs.
 //
 // The zero [Config] is usable: no cap, no ticker, so items wait for an
 // explicit Flush or Close.
@@ -54,5 +65,6 @@
 //
 // [BatcherClosed] answers an Add or a Flush after Close. A deliver function's
 // error comes back wrapped as [BatcherDeliverFailed], its cause still reachable
-// with errors.Is and errors.As.
+// with errors.Is and errors.As. [BatcherCloseTimedOut] answers a Close whose
+// context ended first.
 package batcher

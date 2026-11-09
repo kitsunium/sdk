@@ -33,10 +33,17 @@
 //
 // EXACTLY ONE goroutine may call TryWrite at a time, and EXACTLY ONE may call
 // TryRead. Concurrent producers, or concurrent consumers, corrupt the queue:
-// serialise them upstream, as the SDK's async logger does with a mutex. A
-// multi-producer mode is planned beside this one (ADR 0159 §2); publishing
-// [Queue] froze its four methods, so that mode arrives as another constructor
-// and never as a change to them.
+// serialise them upstream, or take the multi-producer sibling.
+//
+// # Many producers, one consumer
+//
+// [NewMulti] returns a [MultiQueue]: the same four methods, under the wider
+// contract of any number of goroutines calling TryWrite at once and exactly
+// one calling TryRead. Its capacity is rounded up to a power of two. A writer
+// claims a slot, then stores into it: while it is between the two, the
+// reader answers [Empty] for that slot and every one behind it. Publishing
+// [Queue] froze its four methods, so this mode arrived as another
+// constructor and a sibling interface (ADR 0039, ADR 0159 §2).
 //
 // # Errors
 //

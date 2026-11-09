@@ -1,0 +1,56 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit: proc/service declares the 0.3.105.* codes (ADR 0214).
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
+
+go_library(
+    name = "service",
+    srcs = [
+        "clock.go",
+        "command.go",
+        "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
+        "names.go",
+        "sandbox.go",
+        "status.go",
+        "values.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/proc/service",
+    deps = [
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":service",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "service_test",
+    srcs = [
+        "command_external_test.go",
+        "gen_api_test.go",
+        "values_external_test.go",
+    ],
+    deps = [
+        ":service",
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)

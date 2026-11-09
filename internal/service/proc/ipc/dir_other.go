@@ -21,3 +21,14 @@ func checkDir(dir string) error {
 }
 
 func ownerOf(os.FileInfo) (uid int, known bool) { return -1, false }
+
+// checkDialDir refuses as checkDir does: no private socket here.
+func checkDialDir(dir string, _ func(string) (os.FileInfo, error)) error {
+	return checkDir(dir)
+}
+
+// ownersOf knows no owner here.
+func ownersOf(os.FileInfo) (uid, gid int, known bool) { return -1, -1, false }
+
+// endpointAdmitted admits nothing it cannot read.
+func endpointAdmitted(_, _, _ int, _ *Config) bool { return false }

@@ -26,6 +26,36 @@ sequences:
             - return: ""
           when: c.panicked == nil
       - panic: "*c.panicked"
+  - of: (*detached).Deadline
+    steps:
+      - return: time.Time{}, false
+  - of: (*detached).Done
+    steps:
+      - return: nil
+  - of: (*detached).Err
+    steps:
+      - return: nil
+  - of: (*detached).Value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*detached).Value
+        kind: self
+      - id: d.parent.Value
+        kind: value
+    steps:
+      - return: d.parent.Value(key)
+        to: d.parent.Value
+  - of: (*detached).String
+    steps:
+      - opt:
+          do:
+            - return: named.String() + ".WithoutCancel"
+          init:
+            bind: named, ok
+            eval: d.parent.(interface{ String() string })
+          when: ok
+      - return: reflect.TypeOf(d.parent).String() + ".WithoutCancel"
   - of: newPanicValue
     steps:
       - return: "&PanicValue{Raised: raised, Stack: debug.Stack()}"
@@ -171,11 +201,17 @@ sequences:
             eval: s.joinExisting(key)
             to: s.joinExisting
           when: existing != nil
-      - bind: callCtx, cancel
-        eval: context.WithCancel(context.WithoutCancel(ctx))
-        to: context
+      - opt:
+          do:
+            - panic: "\"cannot create context from nil parent\""
+          when: ctx == nil
       - bind: candidate
-        eval: "&call[V]{done: make(chan struct{}), cancel: cancel, refs: 1}"
+        eval: "&call[V]{base: detached{parent: ctx}, done: make(chan struct{}), refs: 1}"
+      - bind: callCtx, cancel
+        eval: context.WithCancel(&candidate.base)
+        to: context
+      - set: candidate.cancel
+        value: cancel
       - opt:
           do:
             - eval: cancel()

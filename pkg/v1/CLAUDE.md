@@ -87,6 +87,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `proc/systemd/notify/` | systemd notification: `Ready` / `Reloading` / `Stopping` / `Status` / `Watchdog` / `MainPID` / `Notify`, `WatchdogInterval`, and `Listen` for the receiving side | `pkg/v1/proc/systemd/notify/README.md` |
 | `proc/signal/` | `Notify` → a signal channel and its stop, `Relay` to a `Target`, `Parse` a signal name | `pkg/v1/proc/signal/README.md` |
 | `proc/ipc/` | A private socket (ADR 0148): `Listen(Config)` returning the `Listener` port, `NewDialer(Config)` the `Dialer` port, `Dial(ctx, Config)` over a `0700` directory whose path above is refused where another account could steer it (`CodePathUnsafe`), `Conn.Peer` the kernel's word on the other end where it gives one (`Verified`), `RuntimeDir(app)`; the ports, `Peer` and `Conn` alias `internal/core/proc/ipc`, so a test can double either end (ADR 0160); the nine codes re-exported | `pkg/v1/proc/ipc/README.md` |
+| `proc/ipc/rpc/` | A call over the private socket (ADR 0218): `NewServer(ServerConfig, Router)` — `Serve(ln)` — and `NewClient(ctx, Dialer, ClientConfig)` — `Call`, `Stream`, `Ping` —, frames bounded on their length, `MaxInFlight` calls, budgets and cancel frames; `Methods` and `HandlerFunc` | `pkg/v1/proc/ipc/rpc/README.md` |
 
 The distribution packages — `git`, `selfupdate`, `entitlement` and `gate` — are
 the framework's since ADR 0158: `github.com/kitsunium/sdk/framework/<name>`,
@@ -302,6 +303,7 @@ for m in pkg/v1/*/go.mod; do (cd "${m%/go.mod}" && GOWORK=off go test -race -cov
 - `proc/systemd/notify/` — see `pkg/v1/proc/systemd/notify/CLAUDE.md`
 - `proc/signal/` — see `pkg/v1/proc/signal/CLAUDE.md`
 - `proc/ipc/` — see `pkg/v1/proc/ipc/CLAUDE.md`
+- `proc/ipc/rpc/` — see `pkg/v1/proc/ipc/rpc/CLAUDE.md`
 - `app/health/` — see `pkg/v1/app/health/CLAUDE.md`
 - `app/lock/` — see `pkg/v1/app/lock/CLAUDE.md`
 

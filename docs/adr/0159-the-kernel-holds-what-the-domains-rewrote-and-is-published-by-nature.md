@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md) §D10 — §4's table gains `swar` (not published) and `jsonenc` (published through `data/codec/json`)
+- **Amended by**: [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md) — §2's multi-producer ring delivered (`ring.NewMulti`), §4's table gains `pool` (published) and `sema` (not yet); [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md) §D10 — §4's table gains `swar` (not published) and `jsonenc` (published through `data/codec/json`)
 - **Amends**: [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md) (the backoff curve's home), [ADR 0071](0071-a-registry-refuses-what-it-cannot-store.md) (its "Why not: a generic registry primitive in the kernel" is reversed), [ADR 0045](0045-sdk-session-domain.md) §D5 (the reason its file store refuses Windows, restated once `flock` and `winacl` reached the kernel), [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) §D6 (a withholding kept per package, now one) and [ADR 0140](0140-sqlites-migration-lock-is-the-database-files-write-lock.md) (its private `fileLockSQL`, now exported) — each in §Consequences, as implemented
 - **Related**: [ADR 0006](0006-sdk-error-code-registry-extension.md) (`ring`), [ADR 0010](0010-kernel-recycler-primitive.md) (`recycler`), [ADR 0011](0011-kernel-snapshot-primitive.md) (`snapshot`), [ADR 0014](0014-sdk-transform-crypto-ports-config-topology.md) (`batcher`), [ADR 0025](0025-sdk-cache-kernel.md) (`cache`), [ADR 0049](0049-cache-becomes-a-domain.md) (`singleflight`), [ADR 0052](0052-sdk-lock-domain.md) / [ADR 0073](0073-session-waits-are-abandonable.md) / [ADR 0081](0081-the-windows-file-lock-is-a-different-primitive.md) (the two `flock` copies), [ADR 0053](0053-sdk-events-domain.md) (`topic` declined), [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) (`pathchain`), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (a kernel package published by alias), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework reaches only `pkg/v1`), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) (the families), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) (`semver`)
 
@@ -263,3 +263,15 @@ None for the published surface: the new `pkg/v1` packages are additions, and
 - `internal/core/crypto/registry_generic.go` — the generic registry that already
   existed, privately; its table is `internal/kernel/plugin/registry.go` now,
   and the file keeps the crypto domain's registrar, `schemeRegistry`.
+
+## Amendment — 2026-11-03: the multi-producer ring, and two new members ([ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md))
+
+- §2's multi-producer mode is delivered as a sibling, as §5 required of a
+  published interface: `ring.NewMulti` returning `MultiQueue`, aliased in
+  `pkg/v1/collections/ring`. The async logger, which §2 named as its user,
+  keeps its mutex: measured, the multi-producer claim loses to the mutex when
+  four or eight producers saturate the ring (ADR 0216).
+- §4's table gains `concur/pool`, published as `pkg/v1/concur/pool` by nature —
+  a program building a request pipeline is the consumer it was written for —,
+  and `concur/sema`, not published until a domain adopts it, as `commit` (ADR
+  0207).

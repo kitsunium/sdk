@@ -47,6 +47,12 @@ constants:
         type: os.FileMode
         value: "0o022"
     name: groupOrWorldWritable
+  - doc: fdBytes is the width of one descriptor in an SCM_RIGHTS message.
+    items:
+      - name: fdBytes
+        type: int
+        value: "4"
+    name: fdBytes
   - doc: |-
       maxPath is the longest socket path every supported kernel accepts: 104
       bytes of sun_path on the BSDs and macOS, 108 on Linux, and one for the NUL.
@@ -64,6 +70,15 @@ constants:
         type: time.Duration
         value: time.Second
     name: dialTimeout
+  - doc: |-
+      kernelNamesPeer: the kernel answers who is at the other end of a Unix
+      socket here — SO_PEERCRED on Linux, LOCAL_PEERCRED on FreeBSD and
+      DragonFly, LOCAL_PEEREID on NetBSD —, so a peer it did not name is refused.
+    items:
+      - name: kernelNamesPeer
+        type: bool
+        value: "true"
+    name: kernelNamesPeer
 files:
   - decls:
       - worldWritable
@@ -80,10 +95,27 @@ files:
       - prepareDir
       - checkDir
       - checkEntry
+      - checkDialDir
+      - checkDialEntry
+      - endpointAdmitted
+      - ownersOf
       - ownerOf
     name: dir_unix.go
   - decls: []
     name: doc.go
+  - decls:
+      - fdPassRefused
+    name: files.go
+  - decls:
+      - fdBytes
+      - fileConn
+      - withFiles
+      - (*fileConn).SendFiles
+      - (*fileConn).RecvFiles
+    name: files_unix.go
+  - decls:
+      - _
+    name: files_unix_compliance.go
   - decls:
       - maxPath
       - dialTimeout
@@ -99,6 +131,7 @@ files:
       - (*Listener).Path
       - (*Listener).Close
       - admit
+      - admitWhere
       - Dialer
       - NewDialer
       - (*Dialer).Dial
@@ -108,11 +141,14 @@ files:
       - closeBestEffort
     name: ipc.go
   - decls:
-      - _
+      - _#2
     name: ipc_compliance.go
   - decls:
       - peerOf
     name: peer_linux.go
+  - decls:
+      - kernelNamesPeer
+    name: peer_named.go
   - decls:
       - socketAcceptor
       - socketAcceptor.accept
@@ -121,6 +157,7 @@ files:
       - nobodyListens
       - (*Listener).admits
       - dial
+      - dialWith
     name: socket.go
 functions:
   - doc: |-
@@ -189,11 +226,49 @@ functions:
     params: dir string
     results: error
   - doc: |-
+      checkDialDir is checkDir from the dialling side (#1092): the same chain and
+      holder rules, and the same entry rules — a real directory that nobody but
+      its owner can write — but no owner rule: the directory is the LISTENER's,
+      usually another account's, and who may be dialled is the socket file's
+      owner, which dialWith checks next (ENDPOINT_FOREIGN). A deployment that
+      admits an on-call group gives the directory group search, and a client
+      outside the group is refused by the kernel at the directory. lstat is the
+      platform's, a test's double otherwise.
+    name: checkDialDir
+    params: dir string, lstat func(string) (os.FileInfo, error)
+    results: error
+  - doc: checkDialEntry is checkEntry without the owner rule.
+    name: checkDialEntry
+    params: dir string, lstat func(string) (os.FileInfo, error)
+    results: error
+  - doc: |-
+      endpointAdmitted is the dialling side's owner set for the socket file: this
+      account, an allowed user, or an allowed group.
+    name: endpointAdmitted
+    params: uid, gid, euid int, cfg *Config
+    results: bool
+  - doc: |-
+      ownersOf is the UID and GID owning the file info describes; unknown for a
+      nil info or one the platform does not describe with a Stat_t.
+    name: ownersOf
+    params: info os.FileInfo
+    results: uid, gid int, known bool
+  - doc: |-
       ownerOf is the UID owning the file info describes; unknown for a nil info
       or one the platform does not describe with a Stat_t.
     name: ownerOf
     params: info os.FileInfo
     results: uid int, known bool
+  - doc: |-
+      fdPassRefused wraps FDPassRefused with its reason and, when there is one,
+      the cause.
+    name: fdPassRefused
+    params: reason string, cause error
+    results: error
+  - doc: withFiles wraps a connection so Conn.Conn offers FileSender and FileReceiver.
+    name: withFiles
+    params: c *net.UnixConn, peer coreipc.PeerValue
+    results: net.Conn
   - doc: negative reports whether n cannot be a UID or a GID.
     name: negative
     params: n int
@@ -206,6 +281,14 @@ functions:
       unverified peer passed the directory, which is the only gate there is.
     name: admit
     params: p coreipc.PeerValue, self int, cfg *Config
+    results: error
+  - doc: |-
+      admitWhere is admit on a platform whose kernel names the peer (named) or
+      does not. Where it does, a peer it did not name is an anomaly and is
+      refused (#1093, ADR 0031) rather than let through as the directory's; where
+      it does not, the directory is the gate and admitted it.
+    name: admitWhere
+    params: p coreipc.PeerValue, self int, cfg *Config, named bool
     results: error
   - name: NewDialer
     params: cfg *Config
@@ -261,6 +344,15 @@ functions:
     name: dial
     params: ctx context.Context, cfg *Config
     results: "*coreipc.Conn, error"
+  - doc: |-
+      dialWith is dial with the file-owner reading and the effective uid
+      injected, so a test can stand on either side of an account it cannot be.
+      The directory may be another account's (#1092, [checkDialDir]); the socket
+      file may be owned by this account, an allowed user or an allowed group, and
+      is ENDPOINT_FOREIGN otherwise.
+    name: dialWith
+    params: ctx context.Context, cfg *Config, lstat func(string) (os.FileInfo, error), euid int
+    results: "*coreipc.Conn, error"
 imports:
   context: context
   coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
@@ -285,6 +377,31 @@ package:
   name: ipc
   purpose: "Package ipc — the components ABOVE the socket's directory, and who could steer them: ADR 0083's rule, applied where the directory is the whole of the access control (ADR 0148)."
 types:
+  - doc: |-
+      fileConn is a private connection that passes open files (#936): the Unix
+      connection, and the peer the kernel named for it.
+    fields:
+      - name: ""
+        role: embedded
+        type: "*net.UnixConn"
+      - name: peer
+        type: coreipc.PeerValue
+    kind: struct
+    methods:
+      - doc: SendFiles sends payload with files attached, to a named peer only.
+        name: SendFiles
+        params: payload []byte, files ...*os.File
+        recv: c *fileConn
+        results: error
+      - doc: |-
+          RecvFiles reads one message and at most max descriptors; the kernel closes
+          those beyond max (MSG_CTRUNC), and the net package receives them
+          close-on-exec.
+        name: RecvFiles
+        params: buf []byte, max int
+        recv: c *fileConn
+        results: n int, files []*os.File, err error
+    name: fileConn
   - fields:
       - doc: |-
           Path is the socket's absolute path. Its directory is created 0700 when
@@ -395,6 +512,16 @@ types:
         results: net.Conn, coreipc.PeerValue, error
     name: socketAcceptor
 vars:
+  - doc: Every private connection on Unix passes files both ways (#936).
+    grouped: true
+    items:
+      - name: _
+        type: coreipc.FileSender
+        value: (*fileConn)(nil)
+      - name: _
+        type: coreipc.FileReceiver
+        value: (*fileConn)(nil)
+    name: _
   - doc: |-
       The socket listener is the engine behind the Listener port, the dialer the
       engine behind the Dialer port.
@@ -406,4 +533,4 @@ vars:
       - name: _
         type: coreipc.Dialer
         value: (*Dialer)(nil)
-    name: _
+    name: _#2

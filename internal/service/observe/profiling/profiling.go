@@ -21,3 +21,7 @@ const MaxProfileBytes int = 64 << 20
 // million frames — some 230 MB of them — hold a profile of tens of thousands
 // of distinct stacks, as deep as the runtime records them.
 const MaxFrames int = 1 << 22
+
+// MaxTraceWindow is the longest window CaptureTrace records: a trace weighs
+// about a megabyte a second, held in memory until it is returned.
+const MaxTraceWindow time.Duration = time.Minute

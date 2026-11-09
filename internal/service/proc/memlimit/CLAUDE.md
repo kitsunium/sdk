@@ -16,8 +16,10 @@ bounding *us*.
 
 | File | Role |
 |---|---|
-| `memlimit.go` | `Apply` + the injected-seam `applyFrom`, the limit-file parsers, and every threshold constant |
-| `cgroup.go` | which limit files to consult: mount discovery (point AND root, octal escapes decoded), `/proc/self/cgroup` membership, the translation between the two, and the ancestor walk |
+| `memlimit.go` | `Apply` + the injected-seam `applyFrom`, the derivation `deriveWith` (installs nothing), the limit-file parsers, and every threshold constant |
+| `config.go` | `ConfigValue` + `ApplyWith` (#937): the headroom, the floor and the GC percent, checked (`MemlimitMisconfigured`, ADR 0031) and resolved; the `environment` seam; the `governor` that installs a derivation and withdraws its own limit — and GC percent — when a later one carries none |
+| `watch.go` | `Watch` (#937): apply, then re-derive every period on an injected `clock.Timed` (clamped to ≥ 1 s), installing and reporting only a changed derivation |
+| `cgroup.go` | which limit files to consult: the ancestor walk over the mounts and membership `internal/cgroupfs` reads (mount discovery — point AND root, octal escapes decoded —, `/proc/self/cgroup` membership and the translation between the two moved there with their tests, #1097/#938) |
 
 ## Why-this-shape
 
@@ -28,6 +30,35 @@ bounding *us*.
   cgroup namespaces, the root reports `max` while the real cap sits several
   levels down — so the feature silently disabled itself exactly where it was
   needed. `TestApplyFrom_NestedCgroup` pins all four shapes.
+- **A resize is followed on a clock, never on an event (#937).** A vertical
+  autoscaler, `systemctl set-property MemoryMax=` or an orchestrator rewrites
+  `memory.max` under a running process; `inotify` reports no write to a
+  cgroupfs (kernfs) file and `memory.max` raises no `cgroup.events`, so `Watch`
+  re-reads the same candidates every period on the injected clock (≥ 1 s) and
+  installs only a derivation that differs from the last. When the cap is lifted
+  or falls under the floor the governor puts the runtime's default back
+  (`math.MaxInt64`, and the GC percent it replaced): a limit no cap stands
+  behind would spin the collector, and `GOGC=off` with no limit would grow the
+  heap without bound. An operator's `GOMEMLIMIT` is never touched. A rising
+  `memory.events` `max` counter as a second trigger waits for #727's
+  `cgroup.events` watcher, which has not landed. `ConfigValue` is the knob
+  ADR 0075 hard-coded: `HeadroomPercent` (zero = 90, outside (0, 100] refused),
+  `MinimumLimit` (zero = 64 MiB, negative refused), `GCPercent` (nil =
+  untouched; installed with the first limit, put back on withdrawal).
+  `TestWatch_ReDerivesOncePerChange` drives 1 000 unchanged ticks of a
+  `ManualClock`, a resize and a lift.
+- **memory.high is a cap, not a hint (#1094).** On cgroup v2 every
+  `memory.max` candidate is read with the `memory.high` beside it, at every
+  depth, and the minimum across both files binds: above `memory.high` the
+  kernel reclaims and slows the group's allocations long before `memory.max`
+  kills it, and that is the file operators set as the working cap (systemd's
+  `MemoryHigh=`, Kubernetes memory QoS at 90 % of the limit). Deriving from
+  `memory.max` alone left the collector working above the throttle. The result's
+  `Bound` (`MemoryBoundHigh` / `MemoryBoundMax`) says which file set the
+  allowance; a tie keeps the hard cap. v1 has no throttle
+  (`memory.soft_limit_in_bytes` is a reclaim hint) and `memory.swap.max` is out
+  of scope — the Go limit is about memory the runtime can shrink.
+  `TestApplyFrom_MemoryHigh` pins both files at two depths and the floor.
 - **Both hierarchies are consulted.** A hybrid host mounts v1 and v2 at once and
   either can bind, so the tightest real cap across all candidates wins rather
   than the first one found.

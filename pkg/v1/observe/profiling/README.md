@@ -53,12 +53,19 @@ A heap profile is SAMPLED — about one allocation per 512 KiB is recorded and s
 - [func CanonicalName\(name string\) string](<#CanonicalName>)
 - [func CaptureCPU\(ctx context.Context, window time.Duration\) \(\*Profile, error\)](<#CaptureCPU>)
 - [func CaptureHeap\(\) \(\*Profile, error\)](<#CaptureHeap>)
+- [func CaptureTrace\(ctx context.Context, window time.Duration\) \(\[\]byte, error\)](<#CaptureTrace>)
 - [func Fold\(p \*Profile, cfg FoldConfig\) \(Folded, error\)](<#Fold>)
 - [func Goroutines\(\) \(\[\]Goroutine, error\)](<#Goroutines>)
 - [func GroupGoroutines\(gs \[\]Goroutine, cfg GroupConfig\) \[\]GoroutineGroup](<#GroupGoroutines>)
+- [func NewHandler\(cfg HandlerConfig\) http.Handler](<#NewHandler>)
 - [func Parse\(data \[\]byte\) \(\*Profile, error\)](<#Parse>)
 - [func ParseGoroutines\(dump \[\]byte\) \[\]Goroutine](<#ParseGoroutines>)
+- [func StartFlightRecorder\(cfg FlightConfig\) \(FlightRecorder, error\)](<#StartFlightRecorder>)
 - [type FlameNode](<#FlameNode>)
+- [type FlightConfig](<#FlightConfig>)
+- [type FlightRecorder](<#FlightRecorder>)
+  - [func \(FlightRecorder\) Snapshot\(w io.Writer\) \(int64, error\)](<#FlightRecorder.Snapshot>)
+  - [func \(FlightRecorder\) Stop\(\)](<#FlightRecorder.Stop>)
 - [type FoldConfig](<#FoldConfig>)
 - [type Folded](<#Folded>)
 - [type Frame](<#Frame>)
@@ -66,6 +73,7 @@ A heap profile is SAMPLED — about one allocation per 512 KiB is recorded and s
 - [type Goroutine](<#Goroutine>)
 - [type GoroutineGroup](<#GoroutineGroup>)
 - [type GroupConfig](<#GroupConfig>)
+- [type HandlerConfig](<#HandlerConfig>)
 - [type OwnerCost](<#OwnerCost>)
 - [type Profile](<#Profile>)
 - [type Sample](<#Sample>)
@@ -138,6 +146,17 @@ CodeSampleTypeMissing identifies a fold asked for a sample type the profile does
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/profiling.CodeSampleTypeMissing`.
 
 Code `0.3.89.7`
+
+<a name="CodeTraceBusy"></a>
+```go
+const CodeTraceBusy errs.Code = 219400
+```
+
+CodeTraceBusy identifies a trace, flight recorder or snapshot refused while the runtime's one is in use (0.3.89.8).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/profiling.CodeTraceBusy`.
+
+Code `0.3.89.8`
 
 <a name="CodeWindowInvalid"></a>
 ```go
@@ -222,6 +241,15 @@ MaxProfileBytes bounds what Parse reads, compressed and inflated alike.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/observe/profiling.MaxProfileBytes`.
 
+<a name="MaxTraceWindow"></a>
+```go
+const MaxTraceWindow time.Duration = 60000000000
+```
+
+MaxTraceWindow is the longest window CaptureTrace records.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/observe/profiling.MaxTraceWindow`.
+
 ## Variables
 
 <a name="CaptureCanceled"></a>
@@ -290,6 +318,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/observe/profiling.Sampl
 
 Code `0.3.89.7` · reason `SAMPLE_TYPE_MISSING` · public "The profile does not measure that"
 
+<a name="TraceBusy"></a>
+```go
+var TraceBusy *errs.Error
+```
+
+TraceBusy refuses a trace, a flight recorder or a snapshot while the runtime's one is in use (409).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/profiling.TraceBusy`.
+
+Code `0.3.89.8` · reason `TRACE_BUSY` · public "An execution trace is already being recorded"
+
 <a name="WindowInvalid"></a>
 ```go
 var WindowInvalid *errs.Error
@@ -328,6 +367,15 @@ func CaptureHeap() (*Profile, error)
 
 CaptureHeap returns the live heap, after a garbage collection.
 
+<a name="CaptureTrace"></a>
+## func [CaptureTrace](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
+
+```go
+func CaptureTrace(ctx context.Context, window time.Duration) ([]byte, error)
+```
+
+CaptureTrace records the process's execution trace for window and returns its bytes, in the runtime's format (go tool trace reads it).
+
 <a name="Fold"></a>
 ## func [Fold](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
@@ -355,6 +403,15 @@ func GroupGoroutines(gs []Goroutine, cfg GroupConfig) []GoroutineGroup
 
 GroupGoroutines groups goroutines by labels, state and top frame, largest first.
 
+<a name="NewHandler"></a>
+## func [NewHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
+
+```go
+func NewHandler(cfg HandlerConfig) http.Handler
+```
+
+NewHandler returns the pprof wire as a plain http.Handler the caller mounts behind its own admission — no registration on http.DefaultServeMux. cmdline and symbol are not served.
+
 <a name="Parse"></a>
 ## func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
@@ -372,6 +429,15 @@ func ParseGoroutines(dump []byte) []Goroutine
 ```
 
 ParseGoroutines reads a goroutine dump; it never fails.
+
+<a name="StartFlightRecorder"></a>
+## func [StartFlightRecorder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
+
+```go
+func StartFlightRecorder(cfg FlightConfig) (FlightRecorder, error)
+```
+
+StartFlightRecorder starts the process's flight recorder: the most recent execution trace kept in memory, snapshotted on demand.
 
 <a name="FlameNode"></a>
 ## type [FlameNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
@@ -394,6 +460,67 @@ type FlameNode struct {
 	Value    int64
 }
 ```
+
+<a name="FlightConfig"></a>
+## type [FlightConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
+
+FlightConfig sizes a flight recorder's window. It aliases the service value.
+
+```go
+type FlightConfig = svcprof.FlightConfigValue
+```
+
+FlightConfig is an alias of `github.com/kitsunium/sdk/internal/service/observe/profiling.FlightConfigValue`, declared as:
+
+```go
+type FlightConfig struct {
+	// MinAge is how far back the window reaches at least; MaxBytes overrides
+	// it when the two disagree.
+	MinAge   time.Duration
+	// MaxBytes caps the window's size in bytes.
+	MaxBytes uint64
+}
+```
+
+<a name="FlightRecorder"></a>
+## type [FlightRecorder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
+
+FlightRecorder keeps the most recent execution trace. It aliases the service port.
+
+```go
+type FlightRecorder = svcprof.FlightRecorder
+```
+
+FlightRecorder is an alias of `github.com/kitsunium/sdk/internal/service/observe/profiling.FlightRecorder`, declared as:
+
+```go
+type FlightRecorder interface {
+	// Snapshot writes the recorder's window to w, in the runtime's trace format.
+	// A snapshot while another is being written is TraceBusy rather than the
+	// runtime's text; a stopped recorder is CaptureFailed.
+	Snapshot(w io.Writer) (int64, error)
+	// Stop ends the recording. It is idempotent.
+	Stop()
+}
+```
+
+<a name="FlightRecorder.Snapshot"></a>
+### func \(FlightRecorder\) [Snapshot](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/profiling/gen_ports.go>)
+
+```go
+func (FlightRecorder) Snapshot(w io.Writer) (int64, error)
+```
+
+Snapshot writes the recorder's window to w, in the runtime's trace format. A snapshot while another is being written is TraceBusy rather than the runtime's text; a stopped recorder is CaptureFailed.
+
+<a name="FlightRecorder.Stop"></a>
+### func \(FlightRecorder\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/profiling/gen_ports.go>)
+
+```go
+func (FlightRecorder) Stop()
+```
+
+Stop ends the recording. It is idempotent.
 
 <a name="FoldConfig"></a>
 ## type [FoldConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
@@ -607,6 +734,24 @@ type GroupConfig struct {
 	// MaxStack cuts each group's stack to its innermost frames; not
 	// positive keeps it whole.
 	MaxStack  int
+}
+```
+
+<a name="HandlerConfig"></a>
+## type [HandlerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
+
+HandlerConfig configures NewHandler: the clock the windows run on. It aliases the service value.
+
+```go
+type HandlerConfig = svcprof.HandlerConfig
+```
+
+HandlerConfig is an alias of `github.com/kitsunium/sdk/internal/service/observe/profiling.HandlerConfig`, declared as:
+
+```go
+type HandlerConfig struct {
+	// Clock measures the profile and trace windows; nil is the wall clock.
+	Clock clock.Waiter
 }
 ```
 

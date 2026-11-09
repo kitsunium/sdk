@@ -12,3 +12,10 @@ func Make(soft, hard uint64) syscall.Rlimit {
 	//: FreeBSD/DragonFly type Rlimit.Cur/Max as int64 — convert; ^uint64(0) → -1.
 	return syscall.Rlimit{Cur: int64(soft), Max: int64(hard)}
 }
+
+// Pair reads a syscall.Rlimit back as the soft/hard pair Make built it from:
+// RLIM_INFINITY's int64(-1) wraps back to LimitInfinity (^uint64(0)).
+func Pair(limit syscall.Rlimit) (soft, hard uint64) {
+	//: the int64 fields, reinterpreted.
+	return uint64(limit.Cur), uint64(limit.Max)
+}

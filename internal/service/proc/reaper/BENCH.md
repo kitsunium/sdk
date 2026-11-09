@@ -13,6 +13,15 @@ the sweep it wraps, and none of that 86 µs belongs to this package.
 |---|---:|---:|---:|
 | `ReapOnce_NoChildren` — `wait4(-1, WNOHANG)` → `ECHILD` | **283.5** | **0** | **0** |
 | `ReapOnce_WithObserver` — same, plus the `WithOnReap` callback | 288.5 | 0 | 0 |
+| `ReapOnce_WithOnExit` — same, plus the `WithOnExit` observer (#1136)¹ | 359.4 | 0 | 0 |
+
+¹ Measured 2026-11-04 on the L4 lot's Linux VM (4 vCPU, `go1.27.3`,
+`-benchtime=300ms`), where the two rows above read 357.5 and 387.4 ns in the
+same run: the observer adds nothing to an idle sweep. Before its status
+buffer moved into the ledger, the same run measured 1 alloc / 160 B per sweep
+on every row — the status escaping to the heap once shown to an observer —
+and `TestReapOnceAllocatesNothingWithOrWithoutOnExit` (alloc lane) now holds
+the zero. To refresh on the reference machine with the rest of the table.
 
 This is the number a supervisor needs before putting `ReapOnce` on a timer, and
 it is unambiguous: an idle sweep is a single syscall with no Go-side allocation

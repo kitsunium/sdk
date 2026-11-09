@@ -1,0 +1,41 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*Conn).unwatch
+    steps:
+      - lock:
+          mutex: c.mu
+      - bind: kept
+        eval: c.watches[w.name][:0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: kept
+                    value: append(kept, o)
+                when: o != w
+          key: _
+          range: c.watches[w.name]
+          value: o
+      - opt:
+          do:
+            - return: ""
+          when: c.watches == nil
+      - opt:
+          do:
+            - eval: delete(c.watches, w.name)
+            - return: ""
+          when: len(kept) == 0
+      - set: c.watches[w.name]
+        value: kept
+  - of: allOf
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: s[i] != c
+          key: i
+          range: len(s)
+      - return: "true"

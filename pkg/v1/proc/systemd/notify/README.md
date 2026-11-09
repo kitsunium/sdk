@@ -37,7 +37,7 @@ Notify sends an arbitrary state map; Ready, Reloading, Stopping, Status, Watchdo
 
 ### Listener (supervisor)
 
-Listen creates a private datagram socket, enables SO\_PASSCRED so the kernel stamps each datagram with the sender's verified PID, and returns the socket path to hand a child via NOTIFY\_SOCKET:
+Listen creates a private datagram socket, enables SO\_PASSCRED so the kernel stamps each datagram with the sender's verified PID, user and group, and returns the socket path to hand a child via NOTIFY\_SOCKET (ListenFor gives the socket to the user a service runs as). Each Recv checks every assignment sd\_notify(3) defines and hands over the descriptors the datagram carried (FDSTORE=1, BARRIER=1, MAINPIDFD=1), which the caller then owns:
 
 ```
 l, path, err := notify.Listen()
@@ -64,6 +64,7 @@ A $NOTIFY\_SOCKET value beginning with '@' selects the abstract socket namespace
 ## Index
 
 - [func Listen\(\) \(l Listener, socketPath string, err error\)](<#Listen>)
+- [func ListenFor\(uid int, gid int\) \(l Listener, socketPath string, err error\)](<#ListenFor>)
 - [func MainPID\(pid int\) error](<#MainPID>)
 - [func Notify\(state map\[string\]string\) error](<#Notify>)
 - [func Ready\(\) error](<#Ready>)
@@ -72,6 +73,7 @@ A $NOTIFY\_SOCKET value beginning with '@' selects the abstract socket namespace
 - [func Stopping\(\) error](<#Stopping>)
 - [func Watchdog\(\) error](<#Watchdog>)
 - [func WatchdogInterval\(\) \(d time.Duration, ok bool\)](<#WatchdogInterval>)
+- [type Descriptors](<#Descriptors>)
 - [type Listener](<#Listener>)
   - [func \(Listener\) Close\(\) error](<#Listener.Close>)
   - [func \(Listener\) Recv\(\) \(NotificationValue, error\)](<#Listener.Recv>)
@@ -88,7 +90,16 @@ A $NOTIFY\_SOCKET value beginning with '@' selects the abstract socket namespace
 func Listen() (l Listener, socketPath string, err error)
 ```
 
-Listen creates a supervisor-side sd\_notify socket and returns the Listener plus the socketPath a child should be given via NOTIFY\_SOCKET. On non-Linux platforms it returns the UNSUPPORTED\_PLATFORM error.
+Listen creates a supervisor-side sd\_notify socket and returns the Listener plus the socketPath a child should be given via NOTIFY\_SOCKET. Off Linux and FreeBSD it returns the UNSUPPORTED\_PLATFORM error.
+
+<a name="ListenFor"></a>
+## func [ListenFor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
+
+```go
+func ListenFor(uid int, gid int) (l Listener, socketPath string, err error)
+```
+
+ListenFor is Listen for a service that runs as uid and gid: the socket's private directory and the socket belong to that user, so only it and root reach the socket. Off Linux and FreeBSD it returns the UNSUPPORTED\_PLATFORM error.
 
 <a name="MainPID"></a>
 ## func [MainPID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
@@ -162,6 +173,33 @@ func WatchdogInterval() (d time.Duration, ok bool)
 
 WatchdogInterval reports the watchdog ping interval the supervisor configured via $WATCHDOG\_USEC; ok is false when the variable is unset, malformed or out of a time.Duration's range, or when $WATCHDOG\_PID names another process. When ok is true, d is positive.
 
+<a name="Descriptors"></a>
+## type [Descriptors](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
+
+Descriptors are the descriptors one datagram brought — FDSTORE=1's, the BARRIER=1 one, the MAINPIDFD=1 pidfd, a pidfd on the sender —, the caller's to keep or close. It is an alias of the core port's DescriptorsValue.
+
+```go
+type Descriptors = coreproc.DescriptorsValue
+```
+
+Descriptors is an alias of `github.com/kitsunium/sdk/internal/core/proc.DescriptorsValue`, declared as:
+
+```go
+type Descriptors struct {
+	// Files are the descriptors the datagram carried (SCM_RIGHTS): with
+	// FDSTORE=1 the ones to store, with BARRIER=1 the barrier, which the caller
+	// closes once every earlier datagram is processed.
+	Files       []*os.File
+	// MainPIDFD is the pidfd a MAINPIDFD=1 datagram carried: its process is the
+	// new main process, and MainPID its PID; nil when none.
+	MainPIDFD   *os.File
+	// SenderPIDFD is a pidfd on the sending process (SCM_PIDFD, Linux 6.5 and
+	// later): the sender itself, beyond the reach of a PID reuse; nil where the
+	// kernel attaches none.
+	SenderPIDFD *os.File
+}
+```
+
 <a name="Listener"></a>
 ## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
@@ -205,7 +243,7 @@ Recv blocks until the next datagram arrives and returns it parsed, with the send
 <a name="Notification"></a>
 ## type [Notification](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/systemd/notify/gen_facade.go>)
 
-Notification is a parsed sd\_notify datagram: the raw State field set plus the typed Status, MainPID, and kernel-verified SenderPID, with Ready/Reloading/ Stopping/Watchdog lifecycle accessors.
+Notification is a parsed sd\_notify datagram: the raw State field set plus the typed Status, MainPID, and kernel-verified SenderPID, SenderUID and SenderGID, the Descriptors it brought, with Ready/Reloading/Stopping/Watchdog lifecycle accessors.
 
 ```go
 type Notification = coreproc.NotificationValue
@@ -217,15 +255,24 @@ Notification is an alias of `github.com/kitsunium/sdk/internal/core/proc.Notific
 type Notification struct {
 	// State is the raw NAME=value field set from the datagram (READY, STATUS,
 	// MAINPID, WATCHDOG, RELOADING, STOPPING, …), preserved verbatim.
-	State     map[string]string
+	State       map[string]string
 	// Status is the free-text STATUS= line, empty when absent.
-	Status    string
+	Status      string
 	// MainPID is the PID advertised by MAINPID=, or 0 when absent.
-	MainPID   int
+	MainPID     int
 	// SenderPID is the sending process's PID as verified by the kernel via
 	// SO_PASSCRED, not a value the sender can forge; 0 when credentials were
 	// unavailable.
-	SenderPID int
+	SenderPID   int
+	// SenderUID is the sending process's user, as verified by the kernel with
+	// SenderPID; it means nothing when SenderPID is 0.
+	SenderUID   int
+	// SenderGID is the sending process's group, as verified by the kernel with
+	// SenderPID; it means nothing when SenderPID is 0.
+	SenderGID   int
+	// Descriptors are the descriptors the datagram brought — the ones it carried,
+	// a pidfd on its sender —, which the caller owns; nil when it brought none.
+	Descriptors *DescriptorsValue
 }
 ```
 

@@ -1,0 +1,43 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "bpf",
+    srcs = [
+        "doc.go",
+        "register.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/bpf",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/proc/bpf",
+        "//internal/kernel/plugin",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":bpf",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "bpf_test",
+    srcs = [
+        "gen_api_test.go",
+        "register_internal_test.go",
+    ],
+    embed = [":bpf"],
+    deps = [
+        "//internal/core/proc/bpf",
+        "//internal/kernel/errs",
+        "//internal/kernel/plugin",
+    ],
+)

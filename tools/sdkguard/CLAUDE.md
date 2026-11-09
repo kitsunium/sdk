@@ -45,6 +45,7 @@ is identical either way: diagnostics and a non-zero exit.
 | SDK003 | invariant | stdout is a protocol channel, never a log destination | ADR 0030 |
 | SDK004 | invariant | `logger.Version` is stamped at link time, not assigned | `pkg/v1/observe/logger/CLAUDE.md` |
 | SDK005 | convention | no second logging pipeline via the legacy `log` package | ADR 0032 |
+| SDK006 | convention | no `net/http/pprof` import: it serves profiles from the default mux, unadmitted | ADR 0121 |
 
 **Invariant vs convention** is what makes incremental adoption possible. An
 invariant's violation is a correctness defect: records silently dropped, a
@@ -64,6 +65,21 @@ cannot import the errs package the rule sends a caller to (`errors.go` here is
 the example). The SDK grants itself no exemption — `make guard` fails on a
 `//sdkguard:allow SDK002` directive in that tree, and fails closed when it
 cannot scan for one.
+
+**The SDK holds itself to SDK006 too (#1023).** `net/http/pprof`'s `init`
+registers six handlers on `http.DefaultServeMux` the moment the package is
+linked, under no admission, and `pprof.Handler(name)` does not avoid it: the
+import runs the `init` anyway. The SDK serves the same wire through
+`profiling.NewHandler`, a plain `http.Handler` the caller mounts behind its own
+link, and a repository that imported the package once would hand every product
+built on it an open `/debug/pprof/`. For a consumer SDK006 stays a convention —
+a private debug listener may want the stdlib's — and `make guard` runs a
+third pass, `-rules=SDK006 -tests`, over every tree the SDK writes Go in
+(`internal/`, `pkg/`, `third-party/`, `framework/`, `tools/`, `e2e/`) and test
+files included, since a test binary that links it registers the same routes.
+The rule reads the import block itself, because the usual spelling is
+`import _ "net/http/pprof"`, which binds no name: `importsOf`, the resolution
+every other rule goes through, drops a blank import by design.
 
 ## Freshness probe
 
@@ -213,7 +229,7 @@ or the line above it, matching how `//nolint` is already written.
 | `main.go` | CLI entry, flags (`-tests`, `-rules`, `-level`, `-version-check`, `-list`), exit codes |
 | `analyze.go` | walking, parsing, import-alias resolution, shadowed names (`shadowedNames`, which skips a type's members — `memberFields`), suppression directives |
 | `file_ctx.go` | `fileCtx` — what every rule reads about one parsed file: its path, the local name of each import, the lines carrying an exemption |
-| `rules.go` | the rule table and the five checks |
+| `rules.go` | the rule table and the six checks |
 | `pipeline_call.go` | the `log/slog` entry points SDK001 watches, in reporting order |
 | `version.go` | the freshness probe: go.mod reading for the SDK module and, before it, `…/pkg` (ADR 0162), GOPROXY resolution, semver ordering, the floor of the SDK module's releases, the tombstones that are no half-migration, the migration and half-migration notices and their one removal |
 | `probe.go` | the module-proxy client behind the probe, its proxy and HTTP client fields so a test points it at `httptest` |

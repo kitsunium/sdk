@@ -24,6 +24,33 @@ type ExitValue struct {
 	// rounding up; Linux and the BSDs report KiB, passed through. It is 0 when
 	// the platform does not supply it (illumos, Solaris and Windows).
 	MaxRSS int64
+	// CoreDumped reports whether the signalled death left a core image
+	// (WaitStatus.CoreDump). It is false for a normal exit, and wherever the
+	// platform cannot say (Windows).
+	CoreDumped bool
+	// Usage is the rest of wait4's resource accounting — page faults, block I/O
+	// and context switches — read from the same rusage as UserTime and MaxRSS.
+	// It is nil where the platform does not supply it (illumos, Solaris and
+	// Windows).
+	Usage *UsageValue
+}
+
+// UsageValue is the resource accounting wait4 returns beside CPU time and peak
+// RSS: the page faults, block I/O operations and context switches of the
+// finished process. It is the value ExitValue.Usage carries.
+type UsageValue struct {
+	// MinorFaults counts the page faults served without I/O (ru_minflt).
+	MinorFaults uint64
+	// MajorFaults counts the page faults that needed I/O (ru_majflt).
+	MajorFaults uint64
+	// InBlock counts the block input operations (ru_inblock).
+	InBlock uint64
+	// OutBlock counts the block output operations (ru_oublock).
+	OutBlock uint64
+	// VoluntaryCtxSw counts the times the process gave up the CPU (ru_nvcsw).
+	VoluntaryCtxSw uint64
+	// InvoluntaryCtxSw counts the times the scheduler took the CPU away (ru_nivcsw).
+	InvoluntaryCtxSw uint64
 }
 
 // Success reports whether the process exited normally with status zero.

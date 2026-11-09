@@ -104,14 +104,14 @@ func Test_wrapCredMismatch(t *testing.T) {
 	}
 }
 
-// Test_senderPID pins the "no credentials means NO pid" rule, which is the whole
+// Test_parseControlCredentials pins the "no credentials means NO pid" rule, which is the whole
 // security property.
 //
 // Returning (0, true) for an unparseable control message would let an
 // unattributable datagram through as if pid 0 had sent it — and pid 0 is a value
 // a caller comparing against a known child pid would simply find unequal, or
 // worse, treat as "the kernel said so". The false is what makes Recv reject it.
-func Test_senderPID(t *testing.T) {
+func Test_parseControlCredentials(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
@@ -134,22 +134,27 @@ func Test_senderPID(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		pid, ok := senderPID(c.oob)
+		d := parseControl(c.oob)
+		ok := d.cred != nil
+		pid := 0
+		if ok {
+			pid = d.cred.pid
+		}
 
 		if ok != c.wantOK {
-			t.Fatalf("senderPID(%s) ok = %v, want %v", c.name, ok, c.wantOK)
+			t.Fatalf("parseControl(%s) credentials = %v, want %v", c.name, ok, c.wantOK)
 		}
 		if !ok {
 			//: a rejected credential must report NO pid, or a caller checking
 			//: only the value would attribute the datagram to pid 0.
 			if pid != 0 {
-				t.Errorf("senderPID(%s) returned pid %d beside the rejection", c.name, pid)
+				t.Errorf("parseControl(%s) returned pid %d beside the rejection", c.name, pid)
 			}
 			return
 		}
 		//: the kernel stamps the real sender, which here is this process.
 		if pid != os.Getpid() {
-			t.Errorf("senderPID = %d, want %d", pid, os.Getpid())
+			t.Errorf("parseControl pid = %d, want %d", pid, os.Getpid())
 		}
 	}
 	for _, c := range tests {
@@ -160,12 +165,12 @@ func Test_senderPID(t *testing.T) {
 	}
 }
 
-// Test_enablePasscred pins the setsockopt that makes every later credential
+// Test_enableCreds pins the setsockopt that makes every later credential
 // check possible. Without SO_PASSCRED the kernel attaches no ucred at all, so
-// senderPID would find nothing and Recv would reject every datagram — the
+// parseControl would find nothing and Recv would reject every datagram — the
 // listener would look broken rather than insecure, which is the better failure
 // but still a failure.
-func Test_enablePasscred(t *testing.T) {
+func Test_enableCreds(t *testing.T) {
 	t.Parallel()
 	type tc struct {
 		name string
@@ -184,8 +189,8 @@ func Test_enablePasscred(t *testing.T) {
 			}
 		}()
 
-		if perr := enablePasscred(conn); perr != nil {
-			t.Fatalf("enablePasscred = %v, want nil", perr)
+		if perr := enableCreds(conn); perr != nil {
+			t.Fatalf("enableCreds = %v, want nil", perr)
 		}
 
 		//: read the option back: it is what the kernel consults when it decides

@@ -3,13 +3,24 @@
 package exec
 
 import (
+	"errors"
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// defaultDrainGrace is how long Wait waits for the capture copiers after the
+// exit when Spec.DrainGrace is zero: a bounded default (ADR 0031), of the same
+// order as Stop's SIGKILL resend, long enough for a child's last write to
+// cross the pipe and short enough that a daemonised grandchild does not hold
+// Wait for its lifetime.
+const defaultDrainGrace time.Duration = time.Second
 
 // Standard-stream fd indices and their count, named so the wiring carries no
 // bare magic numbers. The values are the kernel's fixed fd numbers (0/1/2), so
@@ -50,11 +61,19 @@ type stdioState struct {
 	closeChild []*os.File             // the child's ends the parent closes after a successful spawn
 	outSrc     []*os.File             // capture pipe read ends, parallel to outSink
 	outSink    []io.Writer            // caller writers, parallel to outSrc
+	outNames   []string               // "stdout" / "stderr", parallel to outSrc
 	inDst      *os.File               // stdin pipe write end (nil when no capture stdin)
 	inSrc      io.Reader              // caller's stdin source
+	drainGrace time.Duration          // Spec.DrainGrace: the copier join's bound after the exit
+	drainClk   clock.Waiter           // what drainGrace runs on: clock.System, a ManualClock in a test
+	ptyMaster  *os.File               // StdioPTY: the terminal's master side, handed to the caller by TTY
 	wg         sync.WaitGroup
-	copyMu     sync.RWMutex // guards copyErr
+	copyMu     sync.RWMutex // guards copyErr and held
 	copyErr    error        // first output-copier failure (a caller writer erroring), surfaced by Wait
+	held       []string     // the streams a drain cut found still open
+	cut        atomic.Bool  // the drain grace closed and the parent's ends were closed
+	inLive     atomic.Bool  // the stdin feeder has not finished
+	delivered  atomic.Int64 // bytes the output copiers delivered to the caller's writers
 }
 
 // recordCopyErr latches the first output-copier failure so Wait can surface it.
@@ -86,37 +105,48 @@ func (s *stdioState) copyError() error {
 // (os.Pipe / opening the null device) closes whatever was opened and returns a
 // typed SPAWN_FAILED — the spawn cannot proceed without its standard streams.
 func buildStdio(spec coreproc.Spec) (state *stdioState, err error) {
-	s := &stdioState{}
+	wired := &stdioState{drainGrace: spec.DrainGrace, drainClk: clock.System}
 	//: dispatch on the requested stdio mode.
 	switch spec.Stdio {
 	//: capture mode connects pipes to the caller's writers/reader.
 	case coreproc.StdioCapture:
 		//: wire the caller's streams; nil members fall back to the null device.
-		if berr := s.build(spec.Stdin, spec.Stdout, spec.Stderr); berr != nil {
+		if berr := wired.build(spec.Stdin, spec.Stdout, spec.Stderr); berr != nil {
 			//: release any half-opened fds before surfacing the failure.
-			s.closeAll()
+			wired.closeAll()
 			//: propagate the typed SPAWN_FAILED verbatim.
 			return nil, berr
 		}
 		//: a fully-wired capture state.
-		return s, nil
+		return wired, nil
 	//: null mode points every stream at the platform null device.
 	case coreproc.StdioNull:
 		//: all-nil streams route every fd to the null device.
-		if berr := s.build(nil, nil, nil); berr != nil {
+		if berr := wired.build(nil, nil, nil); berr != nil {
 			//: release any half-opened null fds before surfacing the failure.
-			s.closeAll()
+			wired.closeAll()
 			//: propagate the typed SPAWN_FAILED verbatim.
 			return nil, berr
 		}
 		//: a fully-wired null state.
-		return s, nil
+		return wired, nil
+	//: pty mode gives all three streams one pseudo-terminal's slave side.
+	case coreproc.StdioPTY:
+		//: allocate the terminal; the platform says whether it can.
+		if berr := buildPTYStdio(wired, spec.PTY); berr != nil {
+			//: release a half-opened terminal before surfacing the failure.
+			wired.closeAll()
+			//: propagate the typed PTY_FAILED / UNSUPPORTED_PLATFORM verbatim.
+			return nil, berr
+		}
+		//: a terminal-wired state.
+		return wired, nil
 	//: inherit (the default and any unknown mode) shares the parent's streams.
 	default:
 		//: os.Std* are never closed by this state, so they carry no cleanup.
-		s.files = [stdioFdCount]*os.File{os.Stdin, os.Stdout, os.Stderr}
+		wired.files = [stdioFdCount]*os.File{os.Stdin, os.Stdout, os.Stderr}
 		//: an inherit state needs no copiers or cleanup.
-		return s, nil
+		return wired, nil
 	}
 }
 
@@ -145,7 +175,7 @@ func (s *stdioState) wireInput(reader io.Reader) error {
 	//: no reader means an empty stdin straight from the null device.
 	if reader == nil {
 		//: open the null device read-only for fd 0.
-		return s.wireNull(fdStdin, os.O_RDONLY)
+		return s.wireNull(fdStdin)
 	}
 	pr, pw, perr := os.Pipe()
 	//: a pipe-creation failure is a typed SPAWN_FAILED (fd exhaustion, etc.).
@@ -171,7 +201,7 @@ func (s *stdioState) wireOutput(idx int, w io.Writer) error {
 	//: no writer means the stream is discarded to the null device.
 	if w == nil {
 		//: open the null device write-only for this output fd.
-		return s.wireNull(idx, os.O_WRONLY)
+		return s.wireNull(idx)
 	}
 	pr, pw, perr := os.Pipe()
 	//: a pipe-creation failure is a typed SPAWN_FAILED.
@@ -188,22 +218,58 @@ func (s *stdioState) wireOutput(idx int, w io.Writer) error {
 	//: register the drain (read end + sink); afterStart launches it.
 	s.outSrc = append(s.outSrc, pr)
 	s.outSink = append(s.outSink, w)
+	s.outNames = append(s.outNames, outName(idx))
 	//: a wired output stream.
 	return nil
 }
 
-// wireNull points the child's fd idx at the platform null device opened with flag.
-func (s *stdioState) wireNull(idx, flag int) error {
-	f, oerr := openNull(flag)
+// sharedNull is the null device every null stream of every spawn uses (#943):
+// opened once, read-write and close-on-exec, never closed. sharedNullMu
+// serialises the first open; later spawns read the pointer alone.
+var (
+	sharedNull   atomic.Pointer[os.File]
+	sharedNullMu sync.Mutex
+)
+
+// nullDevice returns the process's shared null device, opening it on first
+// use. A failed open is not remembered: the next spawn tries again.
+func nullDevice() (*os.File, error) {
+	//: the common case: already open.
+	if f := sharedNull.Load(); f != nil {
+		//: no syscall.
+		return f, nil
+	}
+	sharedNullMu.Lock()
+	defer sharedNullMu.Unlock()
+	//: another spawn opened it while this one waited.
+	if f := sharedNull.Load(); f != nil {
+		//: theirs.
+		return f, nil
+	}
+	f, err := openNull(os.O_RDWR)
+	//: no null device to share.
+	if err != nil {
+		//: the typed SPAWN_FAILED.
+		return nil, err
+	}
+	sharedNull.Store(f)
+	//: open for the life of the process.
+	return f, nil
+}
+
+// wireNull points the child's fd idx at the shared null device, read-write so
+// it serves stdin and the outputs alike. It is on no cleanup list: the child
+// gets its own copy through dup2, and closing the parent's would take it from
+// every later spawn.
+func (s *stdioState) wireNull(idx int) error {
+	f, oerr := nullDevice()
 	//: a null-open failure aborts the wiring.
 	if oerr != nil {
 		//: propagate the typed SPAWN_FAILED verbatim.
 		return oerr
 	}
-	//: the child uses the null fd directly; the parent closes it after the spawn.
+	//: the child uses the shared null descriptor directly.
 	s.files[idx] = f
-	s.opened = append(s.opened, f)
-	s.closeChild = append(s.closeChild, f)
 	//: a wired null stream.
 	return nil
 }
@@ -241,6 +307,8 @@ func (s *stdioState) afterStart() {
 	}
 	//: feed stdin without joining when a capture feeder is registered.
 	if s.inDst != nil {
+		//: a drain cut reports stdin as held until the feeder ends.
+		s.inLive.Store(true)
 		//: fire-and-forget so Wait never blocks on the source reader.
 		go s.feedInput(s.inDst, s.inSrc)
 	}
@@ -253,11 +321,33 @@ func (s *stdioState) drainOutput(src io.ReadCloser, sink io.Writer) {
 	//: signal completion so wait() can join once the pipe drains.
 	defer s.wg.Done()
 	//: copy every byte the child emits into the caller's sink.
-	_, cerr := io.Copy(sink, src)
+	n, cerr := io.Copy(sink, src)
+	s.delivered.Add(n)
+	//: a read end the drain cut closed is the grace closing, not a writer fault.
+	if s.cut.Load() && errors.Is(cerr, os.ErrClosed) {
+		//: name the stream that was still held.
+		s.recordHeld(src)
+		//: the cut already released the read end.
+		return
+	}
 	//: latch a writer failure (e.g. a full disk) so Wait reports it, not silence.
 	s.recordCopyErr(cerr)
 	//: the child has closed its write end; release the read end.
 	swallowErr(src.Close())
+}
+
+// recordHeld notes the stream of src as one the drain cut found still open.
+func (s *stdioState) recordHeld(src io.ReadCloser) {
+	s.copyMu.Lock()
+	defer s.copyMu.Unlock()
+	//: the parallel slices name the read end's stream.
+	for i, out := range s.outSrc {
+		//: the copier's own read end.
+		if io.ReadCloser(out) == src {
+			//: its stream name, for the error's held field.
+			s.held = append(s.held, s.outNames[i])
+		}
+	}
 }
 
 // feedInput copies the caller's reader src into the pipe write end dst, then
@@ -270,14 +360,90 @@ func (s *stdioState) feedInput(dst io.WriteCloser, src io.Reader) {
 	swallowErr(cerr)
 	//: closing the write end propagates EOF to the child's stdin.
 	swallowErr(dst.Close())
+	//: the feeder is done: a later drain cut does not report stdin.
+	s.inLive.Store(false)
 }
 
-// wait blocks until every output copier has drained its pipe to EOF, so Handle.Wait
-// returns only after 100% of the child's stdout/stderr has reached the caller's
-// writers. It is a no-op for StdioInherit/StdioNull (no copiers).
-func (s *stdioState) wait() {
-	//: join the stdout/stderr drains; nothing to wait on in inherit/null mode.
-	s.wg.Wait()
+// drainBounded joins the output copiers once the exit status is in hand,
+// within s.drainGrace on s.drainClk (#1088): the zero grace is defaultDrainGrace, a
+// negative one joins without a bound, as Wait always did. A copier blocks
+// until every holder of its pipe's write end is gone, and a process the child
+// left behind — a daemon, `sleep 60 &` — holds it past the child's exit. When
+// the grace closes first, the parent's read ends and stdin write end are
+// closed, so each copier returns at once (the pipes are pollable, and Windows
+// cancels a pipe's pending read on close), and cut reports it. held names the
+// streams that were still open; delivered counts the bytes the copiers handed
+// to the caller's writers.
+//
+// Goroutine lifecycle: it launches one joiner, which returns once every copier
+// has — at EOF, or at once after the cut — so none outlives the call.
+func (s *stdioState) drainBounded() (cut bool, held []string, delivered int64) {
+	//: inherit / null stdio has no copier; a negative grace keeps the old join.
+	if len(s.outSrc) == 0 || s.drainGrace < 0 {
+		//: wait for EOF however long the pipes stay open.
+		s.wg.Wait()
+		//: nothing was cut.
+		return false, nil, s.delivered.Load()
+	}
+	grace := s.drainGrace
+	//: the zero grace is the bounded default, never an unbounded wait.
+	if grace == 0 {
+		//: one second (ADR 0031).
+		grace = defaultDrainGrace
+	}
+	joined := make(chan struct{})
+	//: the joiner turns the WaitGroup into something select can race.
+	go func() {
+		//: every copier returned.
+		s.wg.Wait()
+		close(joined)
+	}()
+	clk := s.drainClk
+	//: a state built by hand carries no clock: the system's.
+	if clk == nil {
+		clk = clock.System
+	}
+	timer := clk.NewTimer(grace)
+	defer timer.Stop()
+	//: the copiers reach EOF, or the grace closes.
+	select {
+	case <-joined:
+		//: every byte delivered within the grace.
+		return false, nil, s.delivered.Load()
+	case <-timer.C():
+		//: the pipes are still held — cut them below.
+	}
+	//: cut every read end and the stdin write end: the copiers return.
+	return s.cutDrain(joined)
+}
+
+// cutDrain closes the parent's pipe ends after the drain grace closed and
+// waits for the copiers, which return at once; see drainBounded.
+func (s *stdioState) cutDrain(joined <-chan struct{}) (cut bool, held []string, delivered int64) {
+	//: the copiers read a closed read end as the cut, not as a writer fault.
+	s.cut.Store(true)
+	//: closing a read end returns its blocked Read with os.ErrClosed.
+	for _, src := range s.outSrc {
+		//: a copier that reached EOF already closed it; the error is benign.
+		swallowErr(src.Close())
+	}
+	stdinHeld := s.inLive.Load()
+	//: the feeder may still be writing into a stdin the child no longer reads.
+	if stdinHeld {
+		//: its next write fails and it ends.
+		swallowErr(s.inDst.Close())
+	}
+	//: the copiers return now that their read ends are closed.
+	<-joined
+	s.copyMu.RLock()
+	held = append(held, s.held...)
+	s.copyMu.RUnlock()
+	//: the stdin feeder was still running.
+	if stdinHeld {
+		held = append(held, "stdin")
+	}
+	//: a copier that met EOF as the grace closed was not held after all.
+	return len(held) > 0, held, s.delivered.Load()
 }
 
 // closeAll releases every fd buildStdio opened. It is used only on the spawn

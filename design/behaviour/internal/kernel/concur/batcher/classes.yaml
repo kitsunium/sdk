@@ -1,21 +1,50 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          FlushCaller delivers a capped batch on the goroutine of the Add that
+          filled it, which receives the delivery's error: the zero value.
+        name: FlushCaller
+        type: FlushMode
+        value: iota
+      - doc: |-
+          FlushBackground hands a capped batch to the batcher's own goroutine and
+          returns; the delivery's error goes to Config.OnError. One batch waits
+          beside the one being delivered: an Add that fills another waits for it
+          to be taken, so memory stays bounded.
+        name: FlushBackground
+    name: FlushCaller
 files:
   - decls:
       - Sink
       - Batcher
       - NewBatcher
       - (*Batcher).Add
+      - (*Batcher).handOff
       - (*Batcher).Flush
       - (*Batcher).Close
+      - (*Batcher).join
+      - (*Batcher).acquire
+      - (*Batcher).unlockDeliver
+      - (*Batcher).take
+      - (*Batcher).takeReady
       - (*Batcher).flushOnce
       - (*Batcher).deliverBatch
+      - gate
+      - newGate
+      - (*gate).open
+      - either
       - (*Batcher).loop
+      - (*Batcher).background
       - (*Batcher).weigh
       - (*Batcher).full
     name: batcher.go
   - decls:
       - Config
+      - FlushMode
+      - FlushCaller
     name: config.go
   - decls: []
     name: doc.go
@@ -24,9 +53,21 @@ functions:
     params: deliver Sink[T], cfg Config[T]
     results: "*Batcher[T]"
     typeParams: T any
+  - doc: "newGate returns a closed gate's opposite: one nobody has opened."
+    name: newGate
+    results: "*gate"
+  - doc: |-
+      either returns the one failure of two deliveries as it is, and both joined
+      when both failed: a single failure keeps its own type for errors.As and a
+      caller comparing it.
+    name: either
+    params: first, second error
+    results: error
 imports:
+  atomic: sync/atomic
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
+  errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   sync: sync
   time: time
@@ -47,7 +88,9 @@ types:
       - doc: cfg holds the caps, weight function, interval and error hook.
         name: cfg
         type: Config[T]
-      - doc: mu guards buf + weight + closed against Add, Flush, Close and the ticker.
+      - doc: |-
+          mu guards buf + weight + closed + ready + room against Add, Flush, Close
+          and the batcher's goroutine.
         name: mu
         type: sync.Mutex
       - name: buf
@@ -57,15 +100,46 @@ types:
       - name: closed
         type: bool
       - doc: |-
-          deliverMu serializes Sink invocations (V6) so two flush paths never enter
-          the deliver closure concurrently. It is held only across the deliver call
-          and is deliberately separate from mu so a slow Sink never blocks a producer
-          appending into the next batch.
+          ready is the batch a cap filled under FlushBackground, waiting for the
+          batcher's goroutine to take it; nil when none is. room is opened when it
+          is taken, waking the producers that found it occupied.
+        name: ready
+        type: "[]T"
+      - name: room
+        type: "*gate"
+      - doc: |-
+          deliverMu serializes Sink invocations (V6) so two flush paths never
+          enter the deliver closure concurrently. It is held only across the call
+          and is deliberately separate from mu so a slow Sink never blocks a
+          producer appending into the next batch.
         name: deliverMu
         type: sync.Mutex
       - doc: |-
-          stop/done drive the optional FlushEvery ticker goroutine; the Once
-          guards make the channel closes safe under concurrent Close calls.
+          freed carries "deliverMu was released" to the waits that must be able
+          to give up — the batcher's goroutine and Close —, counted in bounded;
+          a release sends only while one is counted, so the common path pays an
+          atomic load. One buffered slot.
+        name: freed
+        type: chan struct{}
+      - name: bounded
+        type: atomic.Int32
+      - doc: |-
+          life is the context of every delivery the batcher's own goroutine makes —
+          the ticker's and FlushBackground's —, cancelled by Close: when Close's
+          context ends before the goroutine has stopped, and on every Close's exit.
+        name: life
+        type: context.Context
+      - name: lifeCancel
+        type: context.CancelFunc
+      - doc: |-
+          kick tells the batcher's goroutine a batch is ready. One buffered slot:
+          a second kick before the first is taken has nothing more to say.
+        name: kick
+        type: chan struct{}
+      - doc: |-
+          stop/done drive the batcher's goroutine; the Once guards make the
+          channel closes safe under concurrent Close calls. looping is set when
+          NewBatcher started it: a FlushEvery ticker, FlushBackground, or both.
         name: stop
         type: chan struct{}
       - name: stopOnce
@@ -74,12 +148,30 @@ types:
         type: chan struct{}
       - name: doneOnce
         type: sync.Once
-      - name: ticking
+      - name: looping
         type: bool
+      - doc: |-
+          busy is set while the batcher's goroutine is in a delivery — waiting for
+          the Sink or inside it —, the one state in which joining it may wait on
+          a Sink, and the one Close bounds by its context.
+        name: busy
+        type: atomic.Bool
     kind: struct
     methods:
       - name: Add
         params: ctx context.Context, item T
+        recv: b *Batcher[T]
+        results: error
+      - doc: |-
+          handOff is FlushBackground's cap path, entered with mu held and the pending
+          batch at a cap, and returns with it released: the batch becomes the ready
+          one and the batcher's goroutine is kicked — or, while a ready batch is
+          still waiting, the producer waits for it to be taken, so no more than one
+          batch waits beside the one being delivered. The item is accepted either
+          way: a producer whose ctx ends while it waits leaves it pending, delivered
+          with the next batch.
+        name: handOff
+        params: ctx context.Context
         recv: b *Batcher[T]
         results: error
       - name: Flush
@@ -91,6 +183,38 @@ types:
         recv: b *Batcher[T]
         results: error
       - doc: |-
+          join stops the batcher's goroutine and waits for it within ctx. When ctx
+          ends first it cancels the lifetime context — a Sink that honours its context
+          returns, and the goroutine exits after it — and returns ctx's error without
+          waiting further.
+        name: join
+        params: ctx context.Context
+        recv: b *Batcher[T]
+        results: error
+      - doc: |-
+          acquire takes deliverMu, or reports false when ctx ends first; a free
+          mutex is taken whatever state ctx is in. Between two attempts it waits on
+          freed, which every release signals while a bounded wait is counted.
+        name: acquire
+        params: ctx context.Context
+        recv: b *Batcher[T]
+        results: bool
+      - doc: |-
+          unlockDeliver releases deliverMu and, while a bounded wait is counted,
+          tells it so.
+        name: unlockDeliver
+        recv: b *Batcher[T]
+      - doc: take swaps out the pending batch. The caller holds mu.
+        name: take
+        recv: b *Batcher[T]
+        results: "[]T"
+      - doc: |-
+          takeReady takes the ready batch, if any, and wakes the producers waiting
+          for it to go. The caller holds mu.
+        name: takeReady
+        recv: b *Batcher[T]
+        results: "[]T"
+      - doc: |-
           flushOnce swaps out the pending batch under the lock and delivers it outside
           the lock. An empty batch is a no-op; a deliver error is wrapped as
           DeliverFailed with the cause reachable via errors.Is.
@@ -99,18 +223,29 @@ types:
         recv: b *Batcher[T]
         results: error
       - doc: |-
-          deliverBatch runs the Sink on batch outside b.mu and wraps a non-nil result
-          as the typed DeliverFailed sentinel (the cause stays reachable via
-          errors.Is). It is the shared delivery tail of flushOnce and Close. The Sink
-          is serialized under deliverMu (V6): concurrent flush paths queue here rather
-          than entering the closure together, so a non-reentrant Sink stays safe.
+          deliverBatch runs the Sink on batch and wraps a non-nil result as the typed
+          DeliverFailed sentinel (the cause stays reachable via errors.Is). The caller
+          holds deliverMu (V6), so a non-reentrant Sink stays safe. An empty batch is
+          not delivered.
         name: deliverBatch
         params: ctx context.Context, batch []T
         recv: b *Batcher[T]
         results: error
-      - doc: loop runs the FlushEvery ticker until Close signals stop.
+      - doc: |-
+          loop is the batcher's goroutine: it delivers on every FlushEvery tick and,
+          under FlushBackground, every batch a cap made ready, until Close signals
+          stop. Every delivery runs under the lifetime context and reports its
+          failure to OnError.
         name: loop
         params: every time.Duration
+        recv: b *Batcher[T]
+      - doc: |-
+          background is one delivery of the batcher's goroutine: the ready batch,
+          and on a tick the pending one too, under the lifetime context. It takes the
+          Sink BEFORE the batches, and gives up when Close cancels the lifetime
+          context while it waits — what it did not take stays pending for Close.
+        name: background
+        params: tick bool
         recv: b *Batcher[T]
       - doc: |-
           weigh reports item's contribution to the batch weight: WeightOf when set,
@@ -128,6 +263,22 @@ types:
         results: bool
     name: Batcher
     typeParams: T any
+  - doc: |-
+      gate is a one-shot broadcast: opened once, it wakes every goroutine
+      waiting on ch, and every later one at once.
+    fields:
+      - doc: once makes the close of ch happen once, whoever opens the gate.
+        name: once
+        type: sync.Once
+      - doc: ch is closed when the gate opens.
+        name: ch
+        type: chan struct{}
+    kind: struct
+    methods:
+      - doc: open opens the gate; a second call is a no-op.
+        name: open
+        recv: g *gate
+    name: gate
   - fields:
       - doc: |-
           MaxItems forces a flush once the pending batch reaches this many items;
@@ -161,6 +312,15 @@ types:
           hook degrades to a no-op so the flush paths stay branch-free.
         name: OnError
         type: func(err error)
+      - doc: |-
+          FlushOn says which goroutine delivers a batch a cap filled: FlushCaller,
+          the zero value, the producer whose Add hit the cap; FlushBackground, the
+          batcher's own goroutine, started by NewBatcher and joined by Close.
+        name: FlushOn
+        type: FlushMode
     kind: struct
     name: Config
     typeParams: T any
+  - kind: named
+    name: FlushMode
+    underlying: uint8

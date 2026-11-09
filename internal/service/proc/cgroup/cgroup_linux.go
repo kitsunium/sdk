@@ -12,6 +12,7 @@ import (
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/proc/internal/cgroupfs"
 )
 
 // controllersFile is the cgroup v2 marker: its presence under the mount proves
@@ -85,17 +86,49 @@ func available() bool {
 	}
 	//: a unique temp name is the only reliable delegation test that never
 	//: false-negatives on a leftover probe directory; a read-only root rejects it.
-	probe, err := os.MkdirTemp(mountRoot, ".sdk-cgroup-probe-")
+	return delegated(mountRoot)
+}
+
+// probe reads cfg.root: the cgroup.controllers marker and its list, the
+// delegation test of available, and this process's own unified cgroup.
+func probe(cfg groupConfig) (ProbeValue, error) {
+	root := filepath.Clean(cfg.root)
+	found := ProbeValue{Root: root}
+	//: this process's own cgroup, the root a delegated caller passes back.
+	found.OwnGroup, _ = cgroupfs.OwnGroup(os.ReadFile)
+	listed, err := os.ReadFile(filepath.Join(root, controllersFile))
+	//: no marker: not a cgroup v2 directory, so nothing can be created there.
+	if errors.Is(err, os.ErrNotExist) {
+		//: a v1 host, an unmounted root, or a plain directory.
+		return found, nil
+	}
+	//: a marker the caller may not read: nothing to say about the root.
 	if err != nil {
-		//: not delegated/writable to the caller.
+		//: CGROUP_UNAVAILABLE, with the root.
+		return found, cgroupUnavailable(err, "root", root)
+	}
+	found.Mounted = true
+	found.Controllers = strings.Fields(string(listed))
+	found.Delegated = delegated(root)
+	//: what the caller may do under root.
+	return found, nil
+}
+
+// delegated reports whether a group can be created under root, by creating
+// and removing a uniquely named one — the only honest test of delegation.
+func delegated(root string) bool {
+	probe, err := os.MkdirTemp(root, ".sdk-cgroup-probe-")
+	//: refused: not delegated to the caller.
+	if err != nil {
+		//: read-only to the caller.
 		return false
 	}
-	//: best-effort cleanup of the probe directory; a leaked probe is harmless.
+	//: the directory was created, so the answer is yes whether or not it goes.
 	if rerr := os.Remove(probe); rerr != nil {
-		//: the directory was created, so the caller can still create groups.
+		//: a leaked probe directory is harmless.
 		return true
 	}
-	//: mounted, v2, and writable — the caller may create groups.
+	//: writable.
 	return true
 }
 
@@ -113,15 +146,23 @@ func cgroupUnavailable(cause error, pathKey, pathVal string) error {
 	}, errs.String(pathKey, pathVal))
 }
 
-// createGroup makes a new control-group directory named name under the
-// configured root and returns a controlGroup bound to it. It maps an absent
-// hierarchy to CgroupUnavailable and a failed mkdir to CgroupCreateFailed.
+// createGroup makes a new control group named name under the configured root
+// and returns a controlGroup bound to it. name may be nested: the groups on
+// the way are made when missing, and WithControllers' controllers are enabled
+// in each from the root down. It maps an absent hierarchy to
+// CgroupUnavailable, a controller the root does not offer to
+// CgroupControllerAbsent and a failed mkdir to CgroupCreateFailed.
 func createGroup(name string, opts ...Option) (g coreproc.Group, err error) {
 	cfg := applyOptions(opts)
 	root := filepath.Clean(cfg.root)
-	//: reject a name that is not a single safe element before touching the FS.
+	//: reject a name that could leave the root before touching the FS.
 	if verr := validateName(name); verr != nil {
-		//: a traversing or empty name must never reach filepath.Join.
+		//: a traversing, absolute or empty name must never reach the FS.
+		return nil, verr
+	}
+	//: a malformed controller name is refused before anything is written.
+	if verr := validateControllers(cfg.controllers); verr != nil {
+		//: INVALID_SPEC, naming the controller.
 		return nil, verr
 	}
 	//: refuse early when the unified hierarchy is absent or not delegated.
@@ -129,35 +170,46 @@ func createGroup(name string, opts ...Option) (g coreproc.Group, err error) {
 		//: an absent controllers marker means there is nothing to delegate.
 		return nil, cgroupUnavailable(serr, "root", root)
 	}
+	//: every controller asked for must be one the root offers.
+	if oerr := rootOffers(root, cfg.controllers); oerr != nil {
+		//: CGROUP_CONTROLLER_ABSENT, nothing made.
+		return nil, oerr
+	}
 	dir := filepath.Join(root, name)
 	//: defence in depth — the cleaned join must stay inside the cleaned root.
 	if !withinRoot(root, dir) {
 		//: a dir that escaped the root is a rejected spec, not a create fault.
 		return nil, invalidName(name)
 	}
-	//: mkdir under the hierarchy materialises the new control group.
-	if merr := os.Mkdir(dir, controllerPerm); merr != nil {
-		//: a permission/read-only denial here means the root was not delegated.
+	//: every step resolves inside root: os.Root refuses a ".." or a link out of it.
+	if merr := inTree(root, func(tree *os.Root) error { return makeTree(tree, root, name, cfg.controllers) }); merr != nil {
+		//: a typed cause keeps its code; a denial means the root was not delegated.
 		return nil, classifyCreate(merr, dir)
 	}
 	//: the directory now exists — hand back a bound handle.
 	return &controlGroup{dir: dir}, nil
 }
 
-// validateName rejects a control-group name that is not a single safe path
-// element: empty, ".", "..", or one carrying a path separator or traversal
-// segment could resolve outside the delegated root, so it returns the bare
-// INVALID_SPEC sentinel rather than letting filepath.Join escape the subtree.
+// validateName rejects a control-group name that could resolve outside the
+// delegated root or alias another group: empty, absolute, not canonical (a
+// doubled or trailing separator, a "./" prefix), or carrying a "." or ".."
+// element. A nested name, "a/b", is a path of literal elements and passes; it
+// returns the bare INVALID_SPEC sentinel otherwise.
 func validateName(name string) error {
-	//: empty, dot-aliases, separators, and any non-canonical form can escape or
-	//: alias the parent, so reject anything that is not a single literal element.
-	if name == "" || name == "." || name == ".." ||
-		strings.ContainsRune(name, os.PathSeparator) ||
-		filepath.Clean(name) != name {
-		//: nothing here is a safe single element — reject before the FS sees it.
+	//: empty, absolute and non-canonical forms can escape or alias a group.
+	if name == "" || filepath.IsAbs(name) || filepath.Clean(name) != name {
+		//: nothing here is a safe path of literal elements.
 		return invalidName(name)
 	}
-	//: the name is a single safe element.
+	//: a canonical path can still be "." or climb with "..".
+	for element := range strings.SplitSeq(name, string(os.PathSeparator)) {
+		//: a dot element names the root or its parent, never a new group.
+		if element == "." || element == ".." {
+			//: refused before the FS sees it.
+			return invalidName(name)
+		}
+	}
+	//: every element is a literal directory name.
 	return nil
 }
 
@@ -262,7 +314,9 @@ func (g *controlGroup) Add(pid int) error {
 // cgroup.kill. Membership is tracked by control group, not process group, so a
 // member that called setsid is still killed — nothing escapes. An absent
 // cgroup.kill (kernel < 5.14) surfaces UnsupportedPlatform so callers can fall
-// back to a process-group kill.
+// back to a process-group kill. After it, every child later cloned into the
+// group is SIGKILLed at its fork (measured on 6.12): kill a group nothing will
+// be spawned into again, and Signal one that will be.
 func (g *controlGroup) Kill() error {
 	//: cgroup.kill SIGKILLs the whole subtree in one atomic, race-free write.
 	return g.writeFeature(killFile, killTrigger)

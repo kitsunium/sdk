@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:55:00Z -->
+<!-- updated: 2026-11-07T00:00:00Z -->
 # internal/service/proc/systemd/
 
 ## Purpose
@@ -29,7 +29,7 @@ and the path's last element agree. Their files keep the protocol's name
 
 | Package | Protocol | What it is | In `pkg/v1` |
 |---|---|---|---|
-| `notify/` | sd_notify(3) | the notifier — `Notify` and the `Ready` / `Reloading` / `Stopping` / `Status` / `Watchdog` / `MainPID` shorthands, a no-op when `$NOTIFY_SOCKET` is unset, and the `*Context` siblings that bound the write (ADR 0072) — plus `Listen`, the supervisor's side, with the kernel-verified sender on Linux | `pkg/v1/proc/systemd/notify` |
+| `notify/` | sd_notify(3) | the notifier — `Notify` and the `Ready` / `Reloading` / `Stopping` / `Status` / `Watchdog` / `MainPID` shorthands, a no-op when `$NOTIFY_SOCKET` is unset, and the `*Context` siblings that bound the write (ADR 0072) — plus `Listen` / `ListenFor`, the supervisor's side on Linux: the kernel-verified sender, the descriptors a datagram carries, every assignment bounded (#730) | `pkg/v1/proc/systemd/notify` |
 | `listen/` | sd_listen_fds(3) | socket activation — `Files` / `Listeners` / `WithNames` recover the inherited sockets from fd 3, `LISTEN_PID` honoured, and `Prepare` hands sockets to a child `Spec` | `pkg/v1/proc/systemd/listen` |
 
 Neither declares a code: both wrap the `0.2.6.*` sentinels of

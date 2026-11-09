@@ -179,6 +179,29 @@
 // var set will re-exec. Start sets it only on the trampoline child and strips it
 // before execve, so a normal run never has it; do not set it by hand.
 //
+// Package exec — the sandbox (Spec.Sandbox, #728), a trampoline in two stages on
+// Linux amd64 and arm64. Stage one is the clone: the namespaces, the mount
+// namespace unshared and made private, the user namespace's maps, and the exec of
+// /proc/self/exe — never a path that may since hold another binary; without
+// procfs the spawn is refused. Stage two runs in the child before main, on its one
+// locked thread, from a payload sealed in a memfd (a version, a length, every
+// seal): mounts, pivot_root, the Landlock paths, PR_CAPBSET_DROP, securebits,
+// setgroups/setresgid/setresuid through raw calls on that thread, capset and the
+// ambient set, the close-on-exec sweep, no_new_privs, landlock_restrict_self, and
+// the seccomp filter — an architecture check, x32 killed on amd64 — immediately
+// before execve. A step that fails reports itself on the handshake pipe and the
+// target never runs. The system call numbers and the seccomp name table are per
+// GOARCH (sysnum_linux_amd64.go, sysnum_linux_arm64.go); every other platform
+// refuses the field before the fork.
+//
+// Spikes, not implemented: OpenBSD's pledge(2) execpromises and unveil(2), and
+// Windows' restricted tokens and AppContainer. Verdict: neither maps onto the
+// Linux steps — pledge restricts by promise, not by system call or path tree, and
+// unveil does not survive execve; a restricted token or an AppContainer is set at
+// CreateProcessAsUser, with no namespace, mount, Landlock or seccomp equivalent.
+// Both stay refused with UnsupportedPlatform until a value of their own is
+// designed for them.
+//
 // Package exec — central wrap helpers. Every syscall/stdlib cause is wrapped
 // back onto a coreproc sentinel by restating that sentinel's exact
 // Reason/Public/Private/ExitCode here once, so call sites stay terse and the

@@ -1,0 +1,1220 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      streamBuffer is how many of a stream's frames wait for its reader before
+      the connection's reader waits too.
+    items:
+      - name: streamBuffer
+        type: int
+        value: "16"
+    name: streamBuffer
+  - doc: |-
+      protocolVersion is the version a hello says; a peer saying another is
+      refused (FORMAT_REFUSED).
+    items:
+      - name: protocolVersion
+        type: byte
+        value: "1"
+    name: protocolVersion
+  - doc: |-
+      The kinds of frame (ADR 0218), numbered from 1 in this order — the wire's,
+      never to be reordered: the hello, a call and a stream's request, the
+      answers — a reply, an item, a stream's end, an error —, a caller's cancel,
+      and a ping with its pong.
+    grouped: true
+    items:
+      - name: kindHello
+        type: byte
+        value: iota + 1
+      - name: kindCall
+      - name: kindStream
+      - name: kindReply
+      - name: kindItem
+      - name: kindEnd
+      - name: kindError
+      - name: kindCancel
+      - name: kindPing
+      - name: kindPong
+    name: kindHello
+  - doc: The widths of the wire's fixed parts, in bytes.
+    grouped: true
+    items:
+      - doc: lenBytes is the length prefix, which counts what follows it.
+        name: lenBytes
+        type: int
+        value: "4"
+      - doc: |-
+          headerBytes is kind:u8 | id:u64 | mlen:u8, what follows the length
+          before the method.
+        name: headerBytes
+        type: int
+        value: "10"
+      - doc: |-
+          idOffset and mlenOffset are where the id and the method's length sit in
+          the header.
+        name: idOffset
+        type: int
+        value: "1"
+      - name: mlenOffset
+        type: int
+        value: "9"
+      - doc: "budgetBytes is the budget a call's body opens with: nanoseconds, u64."
+        name: budgetBytes
+        type: int
+        value: "8"
+      - doc: "helloBodyBytes is a hello's body: version:u8 | maxFrame:u32."
+        name: helloBodyBytes
+        type: int
+        value: "5"
+      - doc: "errorFixedBytes is an error's body before its reason: code:u32 | rlen:u8."
+        name: errorFixedBytes
+        type: int
+        value: "5"
+      - doc: maxNameBytes is the longest method, format or reason a u8 length says.
+        name: maxNameBytes
+        type: int
+        value: math.MaxUint8
+      - doc: |-
+          minFrameBytes is the smallest MaxFrameBytes a configuration may set: a
+          header, a budget and room for a body.
+        name: minFrameBytes
+        type: int
+        value: "64"
+      - doc: maxFrameLimit is the largest a u32 length can say.
+        name: maxFrameLimit
+        type: int64
+        value: math.MaxUint32
+      - doc: |-
+          frameStartBytes is the capacity a frame being built starts with: a
+          small call fits, a larger one grows it.
+        name: frameStartBytes
+        type: int
+        value: "256"
+    name: lenBytes
+  - doc: |-
+      readBufferBytes is the buffered reader's size: a frame's header and a small
+      body in one read.
+    items:
+      - name: readBufferBytes
+        type: int
+        value: 4 << 10
+    name: readBufferBytes
+files:
+  - decls:
+      - streamBuffer
+      - ClientConfig
+      - Client
+      - pendingCall
+      - NewClient
+      - (*Client).hello
+      - (*Client).helloErr
+      - (*Client).started
+      - (*Client).frameExpired
+      - (*Client).read
+      - (*Client).readErr
+      - (*Client).deliver
+      - (*Client).lookup
+      - (*Client).fail
+      - (*Client).closedErr
+      - (*Client).begin
+      - answersFor
+      - (*Client).forget
+      - (*Client).abandon
+      - (*Client).write
+      - head
+      - (*Client).send
+      - (*Client).Call
+      - (*Client).open
+      - (*Client).Ping
+      - (*Client).await
+      - (*Client).answerBody
+      - (*Client).Close
+      - budgetOf
+      - contextErr
+    name: client.go
+  - decls:
+      - bounds
+      - bounds.check
+      - checkFormat
+      - serverCodecs
+      - clientCodec
+      - clockOr
+    name: config.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - protocolVersion
+      - kindHello
+      - lenBytes
+      - frameReader
+      - wireFormat
+      - frameValue
+      - readFrame
+      - parseFrame
+      - unexpectedEOF
+      - beginFrame
+      - finishFrame
+      - emptyFrame
+      - wireFormat.Append
+      - helloFrame
+      - parseHello
+      - errorFrame
+      - remoteError
+      - violation
+      - codecFailed
+      - misconfigured
+    name: frame.go
+  - decls:
+      - keeper
+      - newKeeper
+      - (*keeper).run
+      - (*keeper).step
+      - (*keeper).close
+      - (*keeper).earliest
+      - earlier
+      - (*keeper).expire
+      - due
+      - (*keeper).armRead
+      - (*keeper).disarmRead
+      - (*keeper).armWrite
+      - (*keeper).disarmWrite
+      - (*keeper).armCall
+      - (*keeper).disarmCall
+      - (*keeper).set
+      - (*keeper).poke
+    name: keeper.go
+  - decls:
+      - HandlerFunc
+      - Methods
+      - HandlerFunc.ServeRPC
+      - Methods.Route
+    name: router.go
+  - decls:
+      - _
+    name: rpc_compliance.go
+  - decls:
+      - ServerConfig
+      - Server
+      - NewServer
+      - (*Server).Serve
+      - (*Server).serveAccepted
+      - (*Server).acceptErr
+      - (*Server).track
+      - (*Server).untrack
+      - (*Server).ServeConn
+      - (*Server).InFlight
+      - (*Server).Close
+      - swallowErr
+    name: server.go
+  - decls:
+      - readBufferBytes
+      - serverConn
+      - serverCall
+      - newServerConn
+      - (*serverConn).serve
+      - (*serverConn).hello
+      - (*serverConn).started
+      - (*serverConn).readErr
+      - (*serverConn).refuse
+      - (*serverConn).dispatch
+      - (*serverConn).start
+      - (*serverConn).admit
+      - budgetDuration
+      - (*serverConn).abandon
+      - (*serverConn).callExpired
+      - (*serverConn).frameExpired
+      - (*serverConn).send
+      - (*serverConn).release
+      - (*serverConn).teardown
+      - (*serverCall).run
+      - (*serverCall).answer
+      - (*serverCall).cause
+      - (*serverCall).head
+      - (*serverCall).Method
+      - (*serverCall).Peer
+      - (*serverCall).Decode
+      - (*serverCall).Send
+      - connClosed
+      - connClosedBy
+    name: serverconn.go
+  - decls:
+      - clientStream
+      - (*Client).Stream
+      - (*clientStream).Recv
+      - (*clientStream).next
+      - (*clientStream).read
+      - (*clientStream).goneErr
+      - (*clientStream).Close
+      - (*clientStream).abandon
+    name: stream.go
+functions:
+  - name: NewClient
+    params: ctx context.Context, d coreipc.Dialer, cfg ClientConfig
+    results: "*Client, error"
+  - doc: |-
+      answersFor is how many frames a call's channel holds: one answer, or a
+      stream's buffer.
+    name: answersFor
+    params: stream bool
+    results: int
+  - doc: |-
+      head is a call's or a stream's frame up to its budget; the request's value
+      is appended to it.
+    name: head
+    params: kind byte, id uint64, method string, budget time.Duration
+    results: "[]byte"
+  - doc: |-
+      budgetOf is what a request tells the server it has: what is left of ctx's
+      deadline, at most limit when limit is positive; zero for none.
+    name: budgetOf
+    params: ctx context.Context, limit time.Duration
+    results: time.Duration
+  - doc: |-
+      contextErr is CALL_TIMEOUT for a context whose deadline passed and
+      CALL_CANCELLED for one cancelled.
+    name: contextErr
+    params: ctx context.Context
+    results: error
+  - doc: |-
+      checkFormat refuses no format, one longer than a hello carries, and one no
+      codec is registered under; it returns the codec.
+    name: checkFormat
+    params: f codec.Format
+    results: codec.Codec, error
+  - doc: serverCodecs validates cfg and looks up the codec of each format.
+    name: serverCodecs
+    params: cfg ServerConfig
+    results: map[codec.Format]codec.Codec, error
+  - doc: clientCodec validates cfg and looks up its format's codec.
+    name: clientCodec
+    params: cfg ClientConfig
+    results: codec.Codec, error
+  - doc: clockOr is clk, or clock.System for nil.
+    name: clockOr
+    params: clk clock.Timed
+    results: clock.Timed
+  - doc: |-
+      readFrame reads the next frame: it blocks for its first byte as long as the
+      connection is idle, then calls started — the caller arms FrameTimeout there
+      — and refuses a length past maxFrame before reading or allocating a byte of
+      the rest. A peer that hung up between frames is io.EOF, as the reader says.
+    name: readFrame
+    params: r frameReader, maxFrame int, started func()
+    results: frameValue, error
+  - doc: parseFrame splits a frame read whole into its parts.
+    name: parseFrame
+    params: buf []byte
+    results: frameValue, error
+  - doc: "unexpectedEOF reads an end inside a frame as what it is: a frame cut short."
+    name: unexpectedEOF
+    params: err error
+    results: error
+  - doc: |-
+      beginFrame appends a frame's length placeholder and header to dst; the
+      body follows, then finishFrame writes the length.
+    name: beginFrame
+    params: dst []byte, kind byte, id uint64, method string
+    results: "[]byte"
+  - doc: |-
+      finishFrame writes the frame's length and refuses one past what the peer
+      reads (peerMax): nothing of it is sent.
+    name: finishFrame
+    params: frame []byte, peerMax int
+    results: "[]byte, error"
+  - doc: "emptyFrame is a whole frame with no body: a cancel, an end, a ping, a pong."
+    name: emptyFrame
+    params: kind byte, id uint64
+    results: "[]byte"
+  - doc: |-
+      helloFrame is a hello: the format as its method, the version and the
+      largest frame this end reads as its body.
+    name: helloFrame
+    params: format codec.Format, maxFrame int
+    results: "[]byte"
+  - doc: |-
+      parseHello reads a hello's body: the peer's version, and the largest frame
+      it reads.
+    name: parseHello
+    params: f frameValue
+    results: peerMax int, err error
+  - doc: |-
+      errorFrame is an error answer for id: the code, reason and public text of
+      err when it carries an SDK code, REMOTE_FAILED's otherwise. Its Private
+      half and its fields never leave this process.
+    name: errorFrame
+    params: id uint64, err error
+    results: "[]byte"
+  - doc: |-
+      remoteError rebuilds the error an error frame carries: the same code,
+      reason and public text, so errs.HasCode answers on this side as on the
+      server's, and REMOTE_FAILED when what the frame says is not a valid SDK
+      error.
+    name: remoteError
+    params: f frameValue
+    results: error
+  - doc: violation is PROTOCOL_VIOLATION with its rule.
+    name: violation
+    params: rule string
+    results: error
+  - doc: |-
+      codecFailed is CODEC_FAILED for the direction that failed. The format's
+      own error — itself an SDK error, whose code would win a wrap — travels as a
+      field, for the log.
+    name: codecFailed
+    params: direction string, cause error
+    results: error
+  - doc: misconfigured is MISCONFIGURED with its rule.
+    name: misconfigured
+    params: rule string
+    results: error
+  - doc: newKeeper returns a keeper whose goroutine run starts.
+    name: newKeeper
+    params: clk clock.Timed, frameExpired func(), callExpired func(id uint64)
+    results: "*keeper"
+  - doc: earlier is the earlier of a and b, the zero time standing for none.
+    name: earlier
+    params: a, b time.Time
+    results: time.Time
+  - doc: due reports whether the deadline d is set and not after now.
+    name: due
+    params: d, now time.Time
+    results: bool
+  - name: NewServer
+    params: cfg ServerConfig, r corerpc.Router
+    results: "*Server, error"
+  - doc: |-
+      swallowErr drops an error nobody can act on: a connection served detached
+      ended, and its verdict was the peer's to read. It is an explicit, reviewed
+      no-op rather than a bare `_ =`.
+    name: swallowErr
+    params: err error
+  - doc: newServerConn readies a connection for serve.
+    name: newServerConn
+    params: s *Server, c *coreipc.Conn
+    results: "*serverConn"
+  - doc: |-
+      budgetDuration is a budget in nanoseconds as a duration, the longest one
+      standing for anything past it.
+    name: budgetDuration
+    params: ns uint64
+    results: time.Duration
+  - doc: connClosed is CONN_CLOSED, for a connection this end closed.
+    name: connClosed
+    results: error
+  - doc: |-
+      connClosedBy is CONN_CLOSED for a connection that failed, the failure in
+      the log fields.
+    name: connClosedBy
+    params: cause error
+    results: error
+imports:
+  atomic: sync/atomic
+  binary: encoding/binary
+  bufio: bufio
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  codec: github.com/kitsunium/sdk/internal/core/data/codec
+  context: context
+  coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
+  corerpc: github.com/kitsunium/sdk/internal/core/proc/ipc/rpc
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  maps: maps
+  math: math
+  slices: slices
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/proc/ipc/rpc
+  name: rpc
+  purpose: "Package rpc is a call between two processes of one machine over the private socket (ADR 0218): a request and its reply, or a request and the items a server pushes, each framed, bounded and typed by a codec format both ends agreed on."
+types:
+  - fields:
+      - doc: Format is the body format, by the name a codec is registered under.
+        name: Format
+        type: codec.Format
+      - doc: |-
+          MaxFrameBytes is the longest frame the client reads, checked on the
+          length before anything is read; the server is told it in the hello.
+        name: MaxFrameBytes
+        type: int
+      - doc: |-
+          MaxInFlight is how many calls and streams the client keeps open at once;
+          the next is OVERLOADED, before a byte is sent.
+        name: MaxInFlight
+        type: int
+      - doc: |-
+          FrameTimeout is how long a frame may take, from its first byte to its
+          last, read or written; past it the connection is closed.
+        name: FrameTimeout
+        type: time.Duration
+      - doc: |-
+          CallTimeout is the longest a Call or a Ping waits, on Clock, when its
+          context allows longer; a Stream lives as long as its context.
+        name: CallTimeout
+        type: time.Duration
+      - doc: Clock times the frames and the calls; nil is clock.System.
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    name: ClientConfig
+  - fields:
+      - doc: cfg is the validated configuration.
+        name: cfg
+        type: ClientConfig
+      - doc: format is the format's codec, as an Appender.
+        name: format
+        type: wireFormat
+      - doc: clk is the injected clock.
+        name: clk
+        type: clock.Timed
+      - doc: conn is the connection and the server's identity.
+        name: conn
+        type: "*coreipc.Conn"
+      - doc: r buffers the connection's reads; only the reader uses it.
+        name: r
+        type: "*bufio.Reader"
+      - doc: keep times the frames read and written.
+        name: keep
+        type: "*keeper"
+      - doc: peerMax is the longest frame the server said it reads.
+        name: peerMax
+        type: int
+      - doc: expired is set when a frame was not whole within FrameTimeout.
+        name: expired
+        type: atomic.Bool
+      - doc: done is closed when the connection ends; err says why.
+        name: done
+        type: chan struct{}
+      - doc: once closes done once.
+        name: once
+        type: sync.Once
+      - doc: wmu orders the frames written.
+        name: wmu
+        type: sync.Mutex
+      - doc: mu guards what follows.
+        name: mu
+        type: sync.Mutex
+      - doc: err is why the connection ended, set before done closes.
+        name: err
+        type: error
+      - doc: lastID is the last id issued; ids start at 1.
+        name: lastID
+        type: uint64
+      - doc: pending are the calls and streams waiting for an answer, by id.
+        name: pending
+        type: map[uint64]*pendingCall
+    kind: struct
+    methods:
+      - doc: |-
+          hello says this end's format, version and largest frame, and reads the
+          server's — within FrameTimeout, and within ctx.
+        name: hello
+        params: ctx context.Context
+        recv: c *Client
+        results: error
+      - doc: |-
+          helloErr says why no hello came: the context, a frame timeout, or what the
+          reader said.
+        name: helloErr
+        params: ctx context.Context, err error
+        recv: c *Client
+        results: error
+      - doc: started arms the frame's deadline once its first byte arrived.
+        name: started
+        recv: c *Client
+      - doc: frameExpired closes a connection a frame was not whole on in time.
+        name: frameExpired
+        recv: c *Client
+      - doc: |-
+          read is the connection's reader: each answer to the call it belongs to,
+          until the connection ends.
+        name: read
+        recv: c *Client
+      - doc: readErr says why reading stopped.
+        name: readErr
+        params: err error
+        recv: c *Client
+        results: error
+      - doc: deliver hands one frame to the call it answers.
+        name: deliver
+        params: f frameValue
+        recv: c *Client
+        results: error
+      - doc: |-
+          lookup finds the call f answers. An id never issued is a violation; one
+          whose caller gave up is dropped. A stream's end or error, and any call's
+          answer, release its slot here.
+        name: lookup
+        params: f frameValue
+        recv: c *Client
+        results: "*pendingCall, error"
+      - doc: fail ends the connection once, with err as every waiting call's error.
+        name: fail
+        params: err error
+        recv: c *Client
+      - doc: closedErr is why the connection ended.
+        name: closedErr
+        recv: c *Client
+        results: error
+      - doc: |-
+          begin registers a call or a stream and returns its id, or refuses it before
+          a byte is sent: a closed client, a method the wire cannot carry, or
+          MaxInFlight already open.
+        name: begin
+        params: method string, stream bool
+        recv: c *Client
+        results: uint64, *pendingCall, error
+      - doc: |-
+          forget drops a call this end no longer waits for; an answer still on its
+          way is dropped by the reader.
+        name: forget
+        params: id uint64
+        recv: c *Client
+      - doc: abandon forgets a call and tells the server, best effort.
+        name: abandon
+        params: id uint64
+        recv: c *Client
+      - doc: |-
+          write sends one whole frame within FrameTimeout; a connection that cannot
+          be written is over.
+        name: write
+        params: frame []byte
+        recv: c *Client
+        results: error
+      - doc: |-
+          send finishes a request built by head and Append and writes it; a request
+          that did not encode, that the server could not read, or that the
+          connection could not carry is forgotten and its error returned.
+        name: send
+        params: id uint64, frame []byte, built error
+        recv: c *Client
+        results: error
+      - name: Call
+        params: ctx context.Context, method string, in, out any
+        recv: c *Client
+        results: error
+      - doc: open refuses a context already over, then registers the call.
+        name: open
+        params: ctx context.Context, method string, stream bool
+        recv: c *Client
+        results: uint64, *pendingCall, error
+      - name: Ping
+        params: ctx context.Context
+        recv: c *Client
+        results: error
+      - doc: |-
+          await waits for a call's answer, its context, CallTimeout on the clock, or
+          the connection's end; giving up sends the server a cancel frame.
+        name: await
+        params: ctx context.Context, id uint64, p *pendingCall
+        recv: c *Client
+        results: frameValue, error
+      - doc: |-
+          answerBody is the body of an answer of the kind expected, or the server's
+          error; an answer of another kind ends the connection.
+        name: answerBody
+        params: f frameValue, want byte
+        recv: c *Client
+        results: "[]byte, error"
+      - name: Close
+        recv: c *Client
+        results: error
+      - name: Stream
+        params: ctx context.Context, method string, in any
+        recv: c *Client
+        results: corerpc.Stream, error
+    name: Client
+  - doc: pendingCall is a call, a ping or a stream waiting for its answer.
+    fields:
+      - doc: answers receives the call's answer, or a stream's items and its end.
+        name: answers
+        type: chan frameValue
+      - doc: |-
+          gone is closed when a stream's reader abandoned it: the reader drops
+          what still comes for it rather than wait. A call has none.
+        name: gone
+        type: chan struct{}
+      - doc: stream is set for a stream, whose answer is many frames.
+        name: stream
+        type: bool
+    kind: struct
+    name: pendingCall
+  - doc: bounds are the three bounds both ends share.
+    fields:
+      - doc: maxFrame, inFlight and frameTimeout are the configuration's.
+        name: maxFrame
+        type: int
+      - doc: maxFrame, inFlight and frameTimeout are the configuration's.
+        name: inFlight
+        type: int
+      - name: frameTimeout
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: |-
+          check refuses a bound that is not positive, or a frame bound a u32 cannot
+          say or no call fits in.
+        name: check
+        recv: b bounds
+        results: error
+    name: bounds
+  - doc: |-
+      frameReader is what a frame is read from: its first byte alone, so that
+      FrameTimeout starts with it, then the rest whole.
+    kind: named
+    name: frameReader
+    underlying: |-
+      interface {
+      	io.Reader
+      	io.ByteReader
+      }
+  - doc: |-
+      wireFormat is the format a connection agreed on, as a codec.Appender
+      whatever its codec: a frame is built in place through the codec's own
+      Append when it has one, through Marshal otherwise. Its errors are
+      CODEC_FAILED.
+    fields:
+      - name: ""
+        role: embedded
+        type: codec.Codec
+    kind: struct
+    methods:
+      - doc: |-
+          Append appends v, encoded, to dst: through the codec's Appender when it
+          has one, so the frame is the only buffer.
+        name: Append
+        params: dst []byte, v any
+        recv: f wireFormat
+        results: appended []byte, err error
+    name: wireFormat
+  - doc: |-
+      frameValue is one frame read off the wire. method and body come from one
+      allocation per frame, made only once the length was found within bounds.
+    fields:
+      - doc: kind is the frame's kind, one of the kind constants.
+        name: kind
+        type: byte
+      - doc: id is the call the frame belongs to; 0 for the connection itself.
+        name: id
+        type: uint64
+      - doc: method is a call's method, a hello's format; empty otherwise.
+        name: method
+        type: string
+      - doc: body is what follows the method.
+        name: body
+        type: "[]byte"
+    kind: struct
+    name: frameValue
+  - doc: |-
+      keeper is a connection's timekeeper: one goroutine and one timer on the
+      injected clock for every deadline the connection has — the frame being read,
+      the frame being written, and each call's budget. It is how a connection
+      stays at MaxInFlight + 2 goroutines: no call waits on a timer of its own.
+    fields:
+      - doc: clk is the injected clock every deadline is on.
+        name: clk
+        type: clock.Timed
+      - doc: |-
+          frameExpired runs, on the keeper's goroutine, when a frame was not whole
+          in time; the connection closes.
+        name: frameExpired
+        type: func()
+      - doc: callExpired runs, on the keeper's goroutine, when a call's budget passed.
+        name: callExpired
+        type: func(id uint64)
+      - doc: wake tells the goroutine a deadline moved earlier.
+        name: wake
+        type: chan struct{}
+      - doc: stop ends the goroutine.
+        name: stop
+        type: chan struct{}
+      - doc: stopOnce closes stop once, whoever tears the connection down.
+        name: stopOnce
+        type: sync.Once
+      - doc: mu guards the deadlines below.
+        name: mu
+        type: sync.Mutex
+      - doc: readDue and writeDue are the frames' deadlines; the zero time is none.
+        name: readDue
+        type: time.Time
+      - doc: readDue and writeDue are the frames' deadlines; the zero time is none.
+        name: writeDue
+        type: time.Time
+      - doc: calls are the calls' deadlines, by id.
+        name: calls
+        type: map[uint64]time.Time
+    kind: struct
+    methods:
+      - doc: run waits for the earliest deadline and expires what is due, until close.
+        name: run
+        recv: k *keeper
+      - doc: |-
+          step arms t for the earliest deadline — none leaves it stopped — and waits
+          for one event: false once close was called.
+        name: step
+        params: t clock.Timer
+        recv: k *keeper
+        results: bool
+      - doc: close ends the goroutine; a second close changes nothing.
+        name: close
+        recv: k *keeper
+      - doc: earliest is the earliest deadline, and false when there is none.
+        name: earliest
+        recv: k *keeper
+        results: time.Time, bool
+      - doc: |-
+          expire runs the callbacks of every deadline at or before now; a timer that
+          fired for a deadline since moved finds nothing.
+        name: expire
+        params: now time.Time
+        recv: k *keeper
+      - doc: |-
+          armRead and armWrite set the frame's deadline FrameTimeout from now; the
+          disarm twins clear it.
+        name: armRead
+        params: d time.Duration
+        recv: k *keeper
+      - doc: disarmRead clears the read frame's deadline.
+        name: disarmRead
+        recv: k *keeper
+      - doc: armWrite sets the written frame's deadline d from now.
+        name: armWrite
+        params: d time.Duration
+        recv: k *keeper
+      - doc: disarmWrite clears the written frame's deadline.
+        name: disarmWrite
+        recv: k *keeper
+      - doc: armCall sets call id's deadline d from now.
+        name: armCall
+        params: id uint64, d time.Duration
+        recv: k *keeper
+      - doc: disarmCall clears call id's deadline.
+        name: disarmCall
+        params: id uint64
+        recv: k *keeper
+      - doc: set writes one frame deadline and wakes the goroutine when it is set.
+        name: set
+        params: field *time.Time, d time.Time
+        recv: k *keeper
+      - doc: "poke wakes the goroutine without blocking: one pending wake is enough."
+        name: poke
+        recv: k *keeper
+    name: keeper
+  - kind: named
+    methods:
+      - name: ServeRPC
+        params: ctx context.Context, req corerpc.Request
+        recv: f HandlerFunc
+        results: reply any, err error
+    name: HandlerFunc
+    underlying: func(ctx context.Context, req corerpc.Request) (reply any, err error)
+  - kind: named
+    methods:
+      - name: Route
+        params: method string
+        recv: m Methods
+        results: h corerpc.Handler, ok bool
+    name: Methods
+    underlying: map[string]corerpc.Handler
+  - fields:
+      - doc: |-
+          Formats are the body formats the server speaks, by the name a codec is
+          registered under (core/data/codec): a client's hello names one of them.
+        name: Formats
+        type: "[]codec.Format"
+      - doc: |-
+          MaxFrameBytes is the longest frame the server reads — its kind, id,
+          method and body — checked on the length before anything is read.
+        name: MaxFrameBytes
+        type: int
+      - doc: |-
+          MaxInFlight is how many calls run at once on one connection; the next is
+          OVERLOADED.
+        name: MaxInFlight
+        type: int
+      - doc: |-
+          FrameTimeout is how long a frame may take, from its first byte to its
+          last, read or written; past it the connection is closed.
+        name: FrameTimeout
+        type: time.Duration
+      - doc: Clock times the frames and the calls' budgets; nil is clock.System.
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    name: ServerConfig
+  - fields:
+      - doc: cfg is the validated configuration, its formats in codecs.
+        name: cfg
+        type: ServerConfig
+      - doc: codecs is each format's codec, looked up once by NewServer.
+        name: codecs
+        type: map[codec.Format]codec.Codec
+      - doc: router names each method's handler.
+        name: router
+        type: corerpc.Router
+      - doc: clk is the injected clock.
+        name: clk
+        type: clock.Timed
+      - doc: inflight counts the handlers running, on every connection.
+        name: inflight
+        type: atomic.Int64
+      - doc: ctx ends with Close; every connection's context derives from it.
+        name: ctx
+        type: context.Context
+      - doc: cancel ends ctx.
+        name: cancel
+        type: context.CancelCauseFunc
+      - doc: mu guards closed and lns.
+        name: mu
+        type: sync.Mutex
+      - doc: closed is set by Close.
+        name: closed
+        type: bool
+      - doc: lns are the listeners Serve accepts on, which Close closes.
+        name: lns
+        type: map[coreipc.Listener]struct{}
+    kind: struct
+    methods:
+      - name: Serve
+        params: ln coreipc.Listener
+        recv: s *Server
+        results: error
+      - doc: |-
+          serveAccepted serves one accepted connection, then tells Serve, which waits
+          for it; its verdict was the peer's to read.
+        name: serveAccepted
+        params: conns *sync.WaitGroup, c *coreipc.Conn
+        recv: s *Server
+      - doc: |-
+          acceptErr is nil when the server was closed, the listener's error
+          otherwise.
+        name: acceptErr
+        params: err error
+        recv: s *Server
+        results: error
+      - doc: track records ln for Close, and false when the server is already closed.
+        name: track
+        params: ln coreipc.Listener
+        recv: s *Server
+        results: bool
+      - doc: untrack forgets ln.
+        name: untrack
+        params: ln coreipc.Listener
+        recv: s *Server
+      - name: ServeConn
+        params: ctx context.Context, c *coreipc.Conn
+        recv: s *Server
+        results: error
+      - name: InFlight
+        recv: s *Server
+        results: int
+      - name: Close
+        recv: s *Server
+        results: error
+    name: Server
+  - doc: |-
+      serverConn is one connection a server serves: the reader on the goroutine
+      that called ServeConn, the keeper on a second, and one goroutine per call
+      in flight — MaxInFlight + 2 at most.
+    fields:
+      - doc: srv is the server, for its configuration, router and count.
+        name: srv
+        type: "*Server"
+      - doc: conn is the connection and its peer.
+        name: conn
+        type: "*coreipc.Conn"
+      - doc: r buffers the connection's reads; only the reader uses it.
+        name: r
+        type: "*bufio.Reader"
+      - doc: keep times the frames and the calls' budgets.
+        name: keep
+        type: "*keeper"
+      - doc: format is the format the hello agreed on.
+        name: format
+        type: wireFormat
+      - doc: peerMax is the longest frame the client said it reads.
+        name: peerMax
+        type: int
+      - doc: ctx ends with the connection; every call's context derives from it.
+        name: ctx
+        type: context.Context
+      - doc: cancel ends ctx.
+        name: cancel
+        type: context.CancelCauseFunc
+      - doc: expired is set when a frame was not whole within FrameTimeout.
+        name: expired
+        type: atomic.Bool
+      - doc: once runs the teardown once.
+        name: once
+        type: sync.Once
+      - doc: |-
+          wmu orders the frames written, and admission against a call's release:
+          a call's answer and its slot's release happen under it, so a client that
+          waits for an answer before its next call never finds the slot taken.
+        name: wmu
+        type: sync.Mutex
+      - doc: mu guards calls.
+        name: mu
+        type: sync.Mutex
+      - doc: calls are the calls in flight, by id.
+        name: calls
+        type: map[uint64]*serverCall
+      - doc: handlers counts the calls' goroutines, which serve waits for.
+        name: handlers
+        type: sync.WaitGroup
+    kind: struct
+    methods:
+      - doc: |-
+          serve runs the hello, then reads and dispatches frames until the
+          connection ends.
+
+          Goroutine lifecycle: the keeper's, which ends with the teardown, and one
+          per call admitted (start), each ending when its handler returns — at the
+          latest once the teardown has ended its context. serve returns after both.
+        name: serve
+        recv: sc *serverConn
+        results: error
+      - doc: |-
+          hello reads the client's hello and answers it with this end's, or refuses
+          it with FORMAT_REFUSED.
+        name: hello
+        recv: sc *serverConn
+        results: error
+      - doc: started arms the frame's deadline once its first byte arrived.
+        name: started
+        recv: sc *serverConn
+      - doc: |-
+          readErr says why reading stopped: nil for a peer that hung up between
+          frames or a connection this end closed, the violation otherwise — told to
+          the peer before the connection closes.
+        name: readErr
+        params: err error
+        recv: sc *serverConn
+        results: error
+      - doc: |-
+          refuse tells the peer why the connection closes, best effort: the
+          connection may already be gone.
+        name: refuse
+        params: err error
+        recv: sc *serverConn
+      - doc: dispatch acts on one frame.
+        name: dispatch
+        params: f frameValue
+        recv: sc *serverConn
+        results: error
+      - doc: |-
+          start admits a call and runs its handler, or answers METHOD_UNKNOWN or
+          OVERLOADED at once.
+
+          Goroutine lifecycle: one per call admitted, counted by handlers; it ends
+          when the handler returns and the answer is written, and serve waits for it.
+        name: start
+        params: f frameValue
+        recv: sc *serverConn
+        results: error
+      - doc: |-
+          admit takes a slot for the call; the caller holds wmu, so a call answering
+          right now has released its slot first. refusal is OVERLOADED, fatal a
+          reused id.
+        name: admit
+        params: f frameValue
+        recv: sc *serverConn
+        results: call *serverCall, refusal, fatal error
+      - doc: |-
+          abandon ends the context of a call its client cancelled; its answer is
+          not sent. A cancel for a call that already answered changes nothing.
+        name: abandon
+        params: id uint64
+        recv: sc *serverConn
+      - doc: callExpired ends the context of a call whose budget passed.
+        name: callExpired
+        params: id uint64
+        recv: sc *serverConn
+      - doc: |-
+          frameExpired closes a connection a frame was not whole on in time: the
+          reader, or the writer, stops at once.
+        name: frameExpired
+        recv: sc *serverConn
+      - doc: |-
+          send writes one frame — under wmu, within FrameTimeout — then runs after,
+          still under wmu: a call's slot is released there.
+        name: send
+        params: frame []byte, after func()
+        recv: sc *serverConn
+        results: error
+      - doc: release frees a call's slot, its deadline and its context.
+        name: release
+        params: call *serverCall
+        recv: sc *serverConn
+      - doc: |-
+          teardown ends the connection once: every call's context with cause, the
+          keeper, and the connection itself.
+        name: teardown
+        params: cause error
+        recv: sc *serverConn
+    name: serverConn
+  - doc: serverCall is one call in flight, and the Request its handler reads.
+    fields:
+      - doc: sc is the connection the call came on.
+        name: sc
+        type: "*serverConn"
+      - doc: id is the call's, chosen by the client.
+        name: id
+        type: uint64
+      - doc: method is the method called.
+        name: method
+        type: string
+      - doc: stream is set for a Stream, whose answer is items then an end.
+        name: stream
+        type: bool
+      - doc: body is the encoded value, after the budget.
+        name: body
+        type: "[]byte"
+      - doc: ctx is the handler's context.
+        name: ctx
+        type: context.Context
+      - doc: cancel ends ctx, with the cause the handler reads.
+        name: cancel
+        type: context.CancelCauseFunc
+      - doc: "abandoned is set when the client sent a cancel: nothing is answered."
+        name: abandoned
+        type: atomic.Bool
+    kind: struct
+    methods:
+      - doc: |-
+          run is a call's goroutine: the handler, then the answer and the release;
+          serve waits for it through handlers.
+        name: run
+        params: h corerpc.Handler
+        recv: c *serverCall
+      - doc: |-
+          answer is the frame that answers the call — the reply built, the stream's
+          end, or the error —, nil when its client abandoned it.
+        name: answer
+        params: reply []byte, err error
+        recv: c *serverCall
+        results: "[]byte"
+      - doc: |-
+          cause is err, or — when err carries no SDK code and the context ended —
+          the cause that ended it: CALL_TIMEOUT, CALL_CANCELLED or CONN_CLOSED.
+        name: cause
+        params: err error
+        recv: c *serverCall
+        results: error
+      - doc: head is a frame of kind for this call, its body still to append.
+        name: head
+        params: kind byte
+        recv: c *serverCall
+        results: "[]byte"
+      - doc: Method is the method called.
+        name: Method
+        recv: c *serverCall
+        results: string
+      - doc: Peer is who called, as the private socket's kernel named it.
+        name: Peer
+        recv: c *serverCall
+        results: coreipc.PeerValue
+      - doc: Decode decodes the call's body into v with the connection's format.
+        name: Decode
+        params: v any
+        recv: c *serverCall
+        results: error
+      - doc: Send writes item to a Stream's caller.
+        name: Send
+        params: item any
+        recv: c *serverCall
+        results: error
+    name: serverCall
+  - doc: |-
+      clientStream is a Stream's reading end: the items the connection's reader
+      queued for it, until its end, its context's or Close.
+    fields:
+      - doc: c is the client the stream runs on.
+        name: c
+        type: "*Client"
+      - doc: id is the stream's.
+        name: id
+        type: uint64
+      - doc: p holds the queued frames and the gone signal.
+        name: p
+        type: "*pendingCall"
+      - doc: ctx is the caller's context; its end abandons the stream.
+        name: ctx
+        type: context.Context
+      - doc: stop releases the context's watch.
+        name: stop
+        type: func() bool
+      - doc: once abandons the stream once.
+        name: once
+        type: sync.Once
+      - doc: |-
+          ended is set once the end or an error was read; abandon reads it from
+          the context's goroutine.
+        name: ended
+        type: atomic.Bool
+    kind: struct
+    methods:
+      - doc: |-
+          Recv decodes the next item into v and reports true; at the stream's end it
+          reports false and a nil error.
+        name: Recv
+        params: v any
+        recv: s *clientStream
+        results: more bool, err error
+      - doc: |-
+          next waits for the stream's next frame: an item's body and true, or false
+          with the end's nil, the server's error, the abandonment's or the
+          connection's.
+        name: next
+        recv: s *clientStream
+        results: body []byte, more bool, err error
+      - doc: "read is one queued frame: an item's body, the end, or the server's error."
+        name: read
+        params: f frameValue
+        recv: s *clientStream
+        results: body []byte, more bool, err error
+      - doc: "goneErr is why a stream was abandoned: its context's end, or Close."
+        name: goneErr
+        recv: s *clientStream
+        results: error
+      - doc: |-
+          Close abandons the stream: the server is sent a cancel frame for it and the
+          items still on the way are dropped. It is idempotent.
+        name: Close
+        recv: s *clientStream
+        results: error
+      - doc: |-
+          abandon forgets the stream, tells the server unless it already ended, and
+          releases the connection's reader if it waits on this stream.
+        name: abandon
+        recv: s *clientStream
+    name: clientStream
+vars:
+  - doc: |-
+      A Client is the Caller port, a HandlerFunc a Handler, a Methods table a
+      Router, a server call the Request its handler reads, a client stream the
+      Stream its caller reads, and a connection's format a codec.Appender.
+    grouped: true
+    items:
+      - name: _
+        type: corerpc.Caller
+        value: (*Client)(nil)
+      - name: _
+        type: corerpc.Handler
+        value: HandlerFunc(nil)
+      - name: _
+        type: corerpc.Router
+        value: Methods(nil)
+      - name: _
+        type: corerpc.Request
+        value: (*serverCall)(nil)
+      - name: _
+        type: corerpc.Stream
+        value: (*clientStream)(nil)
+      - name: _
+        type: codec.Appender
+        value: wireFormat{}
+    name: _

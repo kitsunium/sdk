@@ -167,6 +167,7 @@ go_test(
         "packet_internal_test.go",
         "packet_listen_internal_test.go",
         "packet_loop_internal_test.go",
+        "pool_bench_test.go",
         "pool_internal_test.go",
         "protocols_external_test.go",
         "protocols_internal_test.go",

@@ -347,7 +347,7 @@ models:
 models-check:
 	bash scripts/models.sh -check
 
-# `guard` runs tools/sdkguard over the SDK's own tree, in two passes.
+# `guard` runs tools/sdkguard over the SDK's own tree, in three passes.
 #
 # sdkguard is the consumer-facing enforcement of the SDK's ADRs (0033). It is a
 # stdlib-only module OUTSIDE go.work, so it is invoked with GOWORK=off from its
@@ -373,6 +373,14 @@ models-check:
 # granted by editing this recipe — where a reviewer sees it — never by a
 # comment in a diff.
 #
+# The third is SDK006 alone, over every tree the SDK writes Go in, tools/ and
+# e2e/ included and _test.go files too (-tests): net/http/pprof's init puts six
+# handlers on http.DefaultServeMux under no admission, and a test binary that
+# links it registers the same routes. The SDK serves the wire through
+# profiling.NewHandler instead (#1023, ADR 0121). A `//sdkguard:allow SDK006
+# <reason>` directive is honoured for a consumer; like SDK002's, it fails this
+# target in the SDK's own tree (tools/ keeps its fixtures, which spell it).
+#
 # SDK005 (the legacy log package) does not run on the SDK: the tree still calls
 # log.Printf, and adopting that rule is its own change. Consumers choose their
 # own level; see tools/sdkguard/CLAUDE.md.
@@ -384,12 +392,15 @@ guard:
 	  $(CURDIR)/internal/... $(CURDIR)/pkg/... $(CURDIR)/framework/... $(CURDIR)/tools/...
 	cd tools/sdkguard && GOWORK=off go run . -rules=SDK002 -version-check=off \
 	  $(CURDIR)/internal/... $(CURDIR)/pkg/... $(CURDIR)/third-party/... $(CURDIR)/framework/...
-	@status=0; grep -rniE --include='*.go' 'sdkguard:allow[[:space:]]+sdk002' \
-	  internal pkg third-party framework || status=$$?; \
+	cd tools/sdkguard && GOWORK=off go run . -rules=SDK006 -tests -version-check=off \
+	  $(CURDIR)/internal/... $(CURDIR)/pkg/... $(CURDIR)/third-party/... $(CURDIR)/framework/... \
+	  $(CURDIR)/tools/... $(CURDIR)/e2e/...
+	@status=0; grep -rniE --include='*.go' 'sdkguard:allow[[:space:]]+sdk00(2|6)' \
+	  internal pkg third-party framework e2e || status=$$?; \
 	case $$status in \
-	  0) echo "guard: rule 2 has no exemption — remove the //sdkguard:allow SDK002 directive(s) above"; exit 1 ;; \
+	  0) echo "guard: rule 2 (SDK002) and SDK006 have no exemption — remove the //sdkguard:allow directive(s) above"; exit 1 ;; \
 	  1) ;; \
-	  *) echo "guard: could not scan internal/ pkg/ third-party/ framework/ for SDK002 exemptions"; exit 1 ;; \
+	  *) echo "guard: could not scan internal/ pkg/ third-party/ framework/ e2e/ for SDK002 and SDK006 exemptions"; exit 1 ;; \
 	esac
 
 # The two gates below are shell-only: no Bazel, no Go, seconds to run. They are

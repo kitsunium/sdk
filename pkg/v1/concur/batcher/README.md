@@ -29,9 +29,11 @@ When each item costs a round trip that many items could share — a bulk insert,
 
 ### When a batch is delivered
 
-  - Add delivers eagerly, on the caller's goroutine, once the pending batch reaches [Config](#Config).MaxItems items or [Config](#Config).MaxWeight — the sum of [Config](#Config).WeightOf over the batch; a nil WeightOf weighs every item 1 and ignores MaxWeight.
+  - Add delivers eagerly once the pending batch reaches [Config](#Config).MaxItems items or [Config](#Config).MaxWeight — the sum of [Config](#Config).WeightOf over the batch; a nil WeightOf weighs every item 1 and ignores MaxWeight. Where is [Config](#Config).FlushOn's choice: [FlushCaller](#FlushCaller), the zero, runs the delivery on the goroutine of that Add, which gets its error; [FlushBackground](#FlushBackground) hands the batch to the batcher's goroutine, Add returning at once, and the error goes to [Config](#Config).OnError — an Add that fills a second batch before the first was taken waits for it, within its context.
   - A positive [Config](#Config).FlushEvery starts one ticker goroutine that delivers whatever is pending on each tick, on [Config](#Config).Clock — the wall clock when nil, a pkg/v1/clock.ManualClock in a test. A failure on that path has no caller to return to and goes to [Config](#Config).OnError.
-  - Flush delivers what is pending now; Close stops the ticker and delivers what is pending with the context it is given, then refuses every later Add and Flush with [BatcherClosed](#BatcherClosed).
+  - Flush delivers what is pending now; Close stops the batcher's goroutine and delivers what is pending with the context it is given, then refuses every later Add and Flush with [BatcherClosed](#BatcherClosed).
+
+Every delivery the batcher's own goroutine makes — a tick's, a background one's — runs under a context Close cancels: Close waits for that goroutine only as long as its own context lives, and returns [BatcherCloseTimedOut](#BatcherCloseTimedOut) when it ended first, the delivery's context cancelled and the final batch undelivered. A Sink that ignores its context cannot be stopped from outside: bound it from the inside, with a deadline on the I/O it performs.
 
 The zero [Config](#Config) is usable: no cap, no ticker, so items wait for an explicit Flush or Close.
 
@@ -41,10 +43,11 @@ Add, Flush and Close are safe from any number of goroutines. The pending batch i
 
 ### Errors
 
-[BatcherClosed](#BatcherClosed) answers an Add or a Flush after Close. A deliver function's error comes back wrapped as [BatcherDeliverFailed](#BatcherDeliverFailed), its cause still reachable with errors.Is and errors.As.
+[BatcherClosed](#BatcherClosed) answers an Add or a Flush after Close. A deliver function's error comes back wrapped as [BatcherDeliverFailed](#BatcherDeliverFailed), its cause still reachable with errors.Is and errors.As. [BatcherCloseTimedOut](#BatcherCloseTimedOut) answers a Close whose context ended first.
 
 ## Index
 
+- [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func NewBatcher\[T any\]\(deliver Sink\[T\], cfg Config\[T\]\) \*Batcher\[T\]](<#NewBatcher>)
 - [type Batcher](<#Batcher>)
@@ -52,9 +55,41 @@ Add, Flush and Close are safe from any number of goroutines. The pending batch i
   - [func \(\*Batcher\) Close\(ctx context.Context\) error](<#Batcher.Close>)
   - [func \(\*Batcher\) Flush\(ctx context.Context\) error](<#Batcher.Flush>)
 - [type Config](<#Config>)
+- [type FlushMode](<#FlushMode>)
 - [type Sink](<#Sink>)
 
+## Constants
+
+<a name="FlushBackground"></a>
+```go
+const FlushBackground FlushMode = 1
+```
+
+FlushBackground hands a capped batch to the batcher's goroutine, Add returning at once; the delivery's error goes to [Config](#Config).OnError. One batch waits beside the one being delivered, so an Add that fills another waits for room, within its context.
+
+Initialised with `github.com/kitsunium/sdk/internal/kernel/concur/batcher.FlushBackground`.
+
+<a name="FlushCaller"></a>
+```go
+const FlushCaller FlushMode = 0
+```
+
+FlushCaller delivers a capped batch on the goroutine of the Add that filled it, which gets the delivery's error. It is the zero FlushMode.
+
+Initialised with `github.com/kitsunium/sdk/internal/kernel/concur/batcher.FlushCaller`.
+
 ## Variables
+
+<a name="BatcherCloseTimedOut"></a>
+```go
+var BatcherCloseTimedOut *errs.Error
+```
+
+BatcherCloseTimedOut is returned by Close when its context ended before the batcher's goroutine stopped — the delivery it was in has its context cancelled — or before the final batch reached the deliver function. The context's error stays reachable through errors.Is, and the field "undelivered" counts the items left behind.
+
+Initialised with `github.com/kitsunium/sdk/internal/kernel/concur/batcher.BatcherCloseTimedOut`.
+
+Code `0.1.5.3` · reason `BATCHER_CLOSE_TIMED_OUT` · public "Batcher close timed out"
 
 <a name="BatcherClosed"></a>
 ```go
@@ -85,7 +120,7 @@ Code `0.1.5.2` · reason `BATCHER_DELIVER_FAILED` · public "Batcher delivery fa
 func NewBatcher[T any](deliver Sink[T], cfg Config[T]) *Batcher[T]
 ```
 
-NewBatcher builds a [Batcher](#Batcher) over deliver with cfg. A positive cfg.FlushEvery spawns the ticker goroutine, which Close joins.
+NewBatcher builds a [Batcher](#Batcher) over deliver with cfg. A positive cfg.FlushEvery, or cfg.FlushOn set to [FlushBackground](#FlushBackground), spawns the batcher's goroutine, which Close joins.
 
 <details><summary>Example</summary>
 <p>
@@ -123,7 +158,7 @@ if err := b.Close(ctx); err != nil {
 
 Batcher coalesces added items into batches delivered through its [Sink](#Sink).
 
-[Batcher](#Batcher).Add appends an item and delivers the batch at once when a cap is reached; [Batcher](#Batcher).Flush delivers what is pending; [Batcher](#Batcher).Close stops the ticker, delivers what is pending with the context it is given, and closes the batcher — idempotently, a second Close returning nil. Each takes a context and returns the delivery's error, wrapped as [BatcherDeliverFailed](#BatcherDeliverFailed), or [BatcherClosed](#BatcherClosed) after Close.
+[Batcher](#Batcher).Add appends an item and delivers the batch when a cap is reached — on its own goroutine or the batcher's, as [Config](#Config).FlushOn says; [Batcher](#Batcher).Flush delivers what is pending; [Batcher](#Batcher).Close stops the batcher's goroutine within its context, delivers what is pending with it, and closes the batcher — idempotently, a second Close returning nil. Each takes a context and returns the delivery's error, wrapped as [BatcherDeliverFailed](#BatcherDeliverFailed), [BatcherClosed](#BatcherClosed) after Close, or [BatcherCloseTimedOut](#BatcherCloseTimedOut) from a Close whose context ended first.
 
 ```go
 type Batcher[T any] = kbatcher.Batcher[T]
@@ -142,7 +177,7 @@ type Batcher[T any] struct{}
 func (*Batcher) Add(ctx context.Context, item T) error
 ```
 
-Add appends item to the pending batch and eagerly flushes when the batch reaches MaxItems or MaxWeight. It returns BatcherClosed if Close has run; a cap-triggered deliver failure is returned wrapped as DeliverFailed.
+Add appends item to the pending batch and eagerly flushes when the batch reaches MaxItems or MaxWeight. It returns BatcherClosed if Close has run. Under FlushCaller the capped batch is delivered on this goroutine and a deliver failure is returned wrapped as BatcherDeliverFailed; under FlushBackground it is handed to the batcher's goroutine and Add returns nil — waiting first, within ctx, while an earlier capped batch has not been taken, the item staying pending when ctx ends.
 
 <a name="Batcher.Close"></a>
 ### func \(Batcher\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/concur/batcher/batcher.go>)
@@ -151,7 +186,7 @@ Add appends item to the pending batch and eagerly flushes when the batch reaches
 func (*Batcher) Close(ctx context.Context) error
 ```
 
-Close stops the ticker (if any), delivers the final batch with ctx — the caller's context, which bounds that last delivery — and marks the batcher closed. It is idempotent: a second Close returns nil after the first has drained the buffer.
+Close stops the batcher's goroutine (if any), delivers the final batch with ctx — the caller's context, which bounds the whole of Close — and marks the batcher closed. The goroutine is joined within ctx: when ctx ends while it is still inside a delivery, Close cancels that delivery's context and returns BatcherCloseTimedOut without waiting further, the final batch undelivered; a Sink that ignores its context keeps the goroutine until it returns. It is idempotent: a second Close returns nil after the first has drained the buffer.
 
 <a name="Batcher.Flush"></a>
 ### func \(Batcher\) [Flush](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/concur/batcher/batcher.go>)
@@ -165,7 +200,7 @@ Flush delivers the pending batch synchronously, returning any deliver error. It 
 <a name="Config"></a>
 ## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/gen_facade.go>)
 
-Config tunes a [Batcher](#Batcher): MaxItems and MaxWeight, the caps that deliver eagerly (non-positive disables each); WeightOf, an item's weight (nil counts items); FlushEvery, the background delivery interval (non-positive starts no ticker); Clock, the clock.Waiter that ticker runs on (nil is the wall clock); and OnError, which observes the ticker path's failures (nil ignores them). The zero Config is usable.
+Config tunes a [Batcher](#Batcher): MaxItems and MaxWeight, the caps that deliver eagerly (non-positive disables each); WeightOf, an item's weight (nil counts items); FlushEvery, the background delivery interval (non-positive starts no ticker); Clock, the clock.Waiter that ticker runs on (nil is the wall clock); OnError, which observes the failures of the batcher's own goroutine (nil ignores them); and FlushOn, which goroutine delivers a capped batch ([FlushCaller](#FlushCaller), the zero, or [FlushBackground](#FlushBackground)). The zero Config is usable.
 
 ```go
 type Config[T any] = kbatcher.Config[T]
@@ -195,7 +230,26 @@ type Config[T any] struct {
 	// OnError observes deliver failures seen by the background ticker. A nil
 	// hook degrades to a no-op so the flush paths stay branch-free.
 	OnError    func(err error)
+	// FlushOn says which goroutine delivers a batch a cap filled: FlushCaller,
+	// the zero value, the producer whose Add hit the cap; FlushBackground, the
+	// batcher's own goroutine, started by NewBatcher and joined by Close.
+	FlushOn    FlushMode
 }
+```
+
+<a name="FlushMode"></a>
+## type [FlushMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/gen_facade.go>)
+
+FlushMode says which goroutine delivers a batch a cap filled: [FlushCaller](#FlushCaller) or [FlushBackground](#FlushBackground).
+
+```go
+type FlushMode = kbatcher.FlushMode
+```
+
+FlushMode is an alias of `github.com/kitsunium/sdk/internal/kernel/concur/batcher.FlushMode`, declared as:
+
+```go
+type FlushMode uint8
 ```
 
 <a name="Sink"></a>

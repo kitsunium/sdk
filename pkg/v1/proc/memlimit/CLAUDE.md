@@ -12,16 +12,22 @@ internal.
 | Symbol | Kind | Notes |
 |---|---|---|
 | `Source` | type alias | `= coreproc.MemorySource` — never a new named type |
-| `Limit` | type alias | `= coreproc.MemoryLimitValue` (allowance + limit + source) |
+| `Limit` | type alias | `= coreproc.MemoryLimitValue` (allowance + limit + source + bound) |
 | `MemorySource*` | const | re-exported enum values, typed `Source` |
+| `Bound` | type alias | `= coreproc.MemoryBound` — which file set the allowance (#1094) |
+| `MemoryBound*` | const | `MemoryBoundHigh` (memory.high, the throttle) and `MemoryBoundMax` (the hard cap), typed `Bound` |
 | `Apply()` | func | delegates verbatim to the service |
+| `Config` | type alias | `= svcmemlimit.ConfigValue` — headroom, floor, GC percent (#937) |
+| `ApplyWith(cfg)` | func | `Apply` with a `Config`; `MEMLIMIT_MISCONFIGURED` for a value it cannot honour |
+| `Watch(ctx, clk, every, cfg, onChange)` | func | follows a live resize of the cgroup on the injected clock, until `ctx` ends |
 
 All types are **aliases**, so values cross the facade boundary without
 conversion. The function is a one-line delegation — no logic lives here.
 
 ## Why one function, and no error
 
-Every outcome is a value. Not being in a container is the normal state on a
+`ApplyWith` and `Watch` return an error for one reason only: a `Config` they
+cannot honour (ADR 0031). Every outcome is a value. Not being in a container is the normal state on a
 developer laptop, not a failure, so `Apply` cannot fail and cannot panic. A
 caller that only wants to know whether it acted reads `Applied()`; one that wants
 to log *why* it did not reads `Source`, which separates an operator-set

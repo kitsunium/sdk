@@ -1,4 +1,4 @@
-//go:build !linux && !windows
+//go:build !linux && !windows && !freebsd && !dragonfly && !netbsd
 
 package ipc
 
@@ -8,7 +8,8 @@ import (
 	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
 )
 
-// peerOf says nothing here: the standard library exposes no peer credential
-// outside Linux, and getpeereid/LOCAL_PEERCRED would need x/sys, which the
-// SDK bans (ADR 0148 §Deferred). The directory is the gate.
+// peerOf says nothing here: darwin's getpeereid and its raw syscalls are
+// deprecated, OpenBSD pins its syscalls, illumos and Solaris answer through
+// libc's getpeerucred — all out of the standard library's reach (ADR 0148
+// §Deferred, narrowed by #1093). The directory is the gate.
 func peerOf(_ *net.UnixConn) coreipc.PeerValue { return coreipc.PeerValue{UID: -1, GID: -1} }

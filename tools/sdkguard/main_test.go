@@ -513,6 +513,93 @@ func Test_checkLegacyLog(t *testing.T) {
 	}
 }
 
+// SDK006 reads the import block itself, because the import IS the defect: a
+// blank import of net/http/pprof binds no name and still registers its handlers
+// at init, so the resolution every other rule goes through would never see it.
+func Test_checkPprofImport(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		src  string
+		want int
+	}
+	tests := []tc{
+		{"a blank import, the one that registers silently", "package p\nimport _ \"net/http/pprof\"\n", 1},
+		{"a plain import", "package p\nimport \"net/http/pprof\"\nvar _ = pprof.Index\n", 1},
+		{"an aliased import", "package p\nimport prof \"net/http/pprof\"\nvar _ = prof.Index\n", 1},
+		{"a dot import", "package p\nimport . \"net/http/pprof\"\nvar _ = Index\n", 1},
+		{"one in a grouped block", "package p\nimport (\n\t\"net/http\"\n\t_ \"net/http/pprof\"\n)\nvar _ = http.StatusOK\n", 1},
+		{"runtime/pprof is the engine's own", "package p\nimport \"runtime/pprof\"\nvar _ = pprof.Lookup\n", 0},
+		{"net/http alone", "package p\nimport \"net/http\"\nvar _ = http.StatusOK\n", 0},
+		{"no import", "package p\nvar x = 1\n", 0},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		ctx, file := ctxFor(t, c.src)
+		got := checkPprofImport(ctx, file)
+		if len(got) != c.want {
+			t.Fatalf("findings = %d, want %d (%v)", len(got), c.want, got)
+		}
+		for _, f := range got {
+			if f.Rule != "SDK006" || f.Line != strings.Count(c.src[:strings.Index(c.src, "net/http/pprof")], "\n")+1 {
+				t.Errorf("finding %+v is not SDK006 on the import's own line", f)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// SDK006 goes through a whole scan like every rule: a convention a consumer
+// meets by default, suppressed only with a reason, and held on the SDK's own
+// tree by `make guard`'s third pass, which reads test files too.
+func Test_pprofImportInAScan(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		file      string
+		src       string
+		withTests bool
+		want      []string
+	}
+	const blank = "package p\nimport _ \"net/http/pprof\"\n"
+	tests := []tc{
+		{"found by the default scan", "a.go", blank, false, []string{"SDK006"}},
+		{"a test file is skipped by default", "a_test.go", blank, false, nil},
+		{"a test file with -tests", "a_test.go", blank, true, []string{"SDK006"}},
+		{
+			"a justified suppression removes it", "a.go",
+			"package p\nimport _ \"net/http/pprof\" //sdkguard:allow SDK006 a private debug listener\n", false, nil,
+		},
+		{
+			"a bare directive does not", "a.go",
+			"package p\nimport _ \"net/http/pprof\" //sdkguard:allow SDK006\n", false, []string{"SDK006"},
+		},
+		{"a build-ignored file", "a.go", "//go:build ignore\n\n" + blank, false, nil},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		dir := write(t, c.file, c.src)
+		got, err := scanDir(dir, allRules, c.withTests)
+		if err != nil {
+			t.Fatalf("scanDir: %v", err)
+		}
+		if ids := idsOf(got); !slices.Equal(ids, c.want) {
+			t.Errorf("rules = %v, want %v", ids, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // The walk prunes the trees nobody can act on, and skips test files unless
 // asked for them.
 func Test_scanDir(t *testing.T) {
@@ -1382,7 +1469,7 @@ func Test_filterLevel(t *testing.T) {
 	tests := []tc{
 		{"an empty level keeps them all", "", len(allRules), false},
 		{"invariants only", LevelInvariant, 3, false},
-		{"conventions only", LevelConvention, 2, false},
+		{"conventions only", LevelConvention, 3, false},
 		{"case is normalised", "INVARIANT", 3, false},
 		{"an unknown level is refused", "nonsense", 0, true},
 	}
@@ -1531,7 +1618,7 @@ func Test_printRules(t *testing.T) {
 	}
 	tests := []tc{
 		{"the first rule", "SDK001"},
-		{"the last rule", "SDK005"},
+		{"the last rule", "SDK006"},
 		{"the invariant level", LevelInvariant},
 		{"the convention level", LevelConvention},
 		{"an ADR reference", "ADR 0032"},

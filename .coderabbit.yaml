@@ -66,11 +66,24 @@ reviews:
         ADRs are authoritative for the decisions they cover. If an ADR and
         CLAUDE.md disagree, prefer the ADR and flag the CLAUDE.md mismatch.
 
+  # Sync PRs opened by kodflow-ci[bot] (post-commit enforce, runner-template) are
+  # excluded from review to save the CodeRabbit quota; the same lists live in
+  # kodflow/making.codes coderabbit/override-*.yaml.
+  auto_approvals:
+    allow_author_approval: false
+
   auto_review:
     enabled: true
     drafts: false
     base_branches:
       - main
+    ignore_usernames:
+      - "kodflow-ci[bot]"
+    ignore_title_keywords:
+      - "ci(post-commit): sync the gate workflow with the central stub"
+      - "ci(runner-template): sync the stubs with kodflow/post-commit"
+      - "ci: add the mandatory post-commit gate"
+      - "ci: run every job on the self-hosted kodflow-runner"
 
 chat:
   auto_reply: true

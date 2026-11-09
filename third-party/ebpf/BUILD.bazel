@@ -1,0 +1,9 @@
+# gazelle:prefix github.com/kitsunium/sdk/third-party/ebpf
+
+# third-party/ebpf is a Go module of its own (ADR 0157, ADR 0215): the cgroup
+# BPF programs' backend (cgroup/) and its one vendor, cilium/ebpf. This
+# directory holds no package; the file marks the module root as a Bazel
+# package so gazelle's go_deps extension can load //third-party/ebpf:go.mod,
+# which go.work names.
+
+package(default_visibility = ["//visibility:public"])

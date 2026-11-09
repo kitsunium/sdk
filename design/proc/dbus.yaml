@@ -1,0 +1,442 @@
+apiVersion: kit.kitsunium/design/v2
+domain: proc/dbus
+packages:
+  - codes:
+      - const:
+          - doc: |-
+              CodeAddressInvalid identifies a bus address the client cannot use: one
+              that does not parse, or whose every entry names a transport other than a
+              unix socket path or abstract name — tcp, nonce-tcp, unixexec, launchd and
+              autolaunch are refused, never tried.
+            name: CodeAddressInvalid
+            note: "range: 0.3.108.0 - 0.3.108.255"
+            value: "0x00_03_6C_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeBusUnreachable identifies a bus whose socket could not be connected, or
+              that hung up before the connection was ready.
+            name: CodeBusUnreachable
+            value: "0x00_03_6C_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeAuthRefused identifies a bus that refused the connection's
+              authentication: AUTH EXTERNAL, the kernel naming the connecting user.
+            name: CodeAuthRefused
+            value: "0x00_03_6C_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeProtocolViolation identifies a bus that broke the protocol: a line of
+              the authentication or a message header the specification does not allow,
+              a header past its bound, a reply whose body is not of its signature. The
+              connection is closed.
+            name: CodeProtocolViolation
+            value: "0x00_03_6C_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCallFailed identifies a call the bus answered with an error; the error
+              field names it (org.freedesktop.DBus.Error.AccessDenied, say).
+            name: CodeCallFailed
+            value: "0x00_03_6C_05"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCallCancelled identifies a call whose context was cancelled before its
+              reply came; the reply, if it comes, is dropped.
+            name: CodeCallCancelled
+            value: "0x00_03_6C_06"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeConnClosed identifies a call or a watch on a connection that was
+              closed, or that the bus hung up meanwhile.
+            name: CodeConnClosed
+            value: "0x00_03_6C_07"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCallTimeout identifies a call the bus did not answer in time: within
+              the context's deadline, or within 25 seconds — sd-bus's and libdbus's
+              default reply timeout — when the context has none or a later one. The
+              authentication is bounded the same.
+            name: CodeCallTimeout
+            value: "0x00_03_6C_09"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeNameInvalid identifies a name that is not a well-known bus name: at
+              least two elements separated by dots, each of [A-Za-z0-9_-] and not
+              opening with a digit, no longer than the specification allows; a unique
+              name (":1.42") is not one.
+            name: CodeNameInvalid
+            value: "0x00_03_6C_08"
+        type: errs.Code
+    doc: |-
+      Package dbus is the contract of the SDK's message bus client
+      (kitsunium/sdk#737, ADR 0214's S0e amendment): the codes its refusals
+      carry, range 0.3.108.*, declared here at the engine's path (ADR 0160).
+
+      The engine is internal/service/proc/dbus: a connection to a D-Bus daemon
+      over a unix socket, written on the standard library — the authentication
+      AUTH EXTERNAL, the messages the bus driver answers (Hello, AddMatch,
+      GetNameOwner, RequestName, ReleaseName) and the NameOwnerChanged signal.
+      It is what proc/service's Type=dbus watches a BusName= through; nothing
+      here dials a socket.
+
+      Package dbus — the sentinels the engine refuses with. Each var's name
+      equals its Reason in SCREAMING_SNAKE form; none quotes a message's body in
+      its Public or Private half.
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/proc/dbus
+    sentinels:
+      - var:
+          - code: CodeAddressInvalid
+            doc: AddressInvalid refuses a bus address the client cannot use.
+            exit: CONFIG
+            name: AddressInvalid
+            private: "service/proc/dbus: the address does not parse, or names no unix socket path or abstract name; the address field says which"
+            public: The message bus address is not usable
+            reason: ADDRESS_INVALID
+          - code: CodeBusUnreachable
+            doc: BusUnreachable reports a bus whose socket could not be connected.
+            exit: UNAVAILABLE
+            name: BusUnreachable
+            private: "service/proc/dbus: the socket could not be connected, or the bus hung up during the handshake; the cause is in the chain"
+            public: The message bus is unreachable
+            reason: BUS_UNREACHABLE
+          - code: CodeAuthRefused
+            doc: AuthRefused reports a bus that refused the connection's authentication.
+            exit: NOPERM
+            name: AuthRefused
+            private: "service/proc/dbus: the bus answered REJECTED to AUTH EXTERNAL; the mechanisms field lists what it offers"
+            public: The message bus refused the connection
+            reason: AUTH_REFUSED
+          - code: CodeProtocolViolation
+            doc: |-
+              ProtocolViolation reports a bus that broke the protocol; the rule field
+              says how, and the connection is closed.
+            exit: PROTOCOL
+            name: ProtocolViolation
+            private: "service/proc/dbus: an authentication line, a header or a reply body the specification does not allow; the rule field says which"
+            public: The message bus broke the protocol
+            reason: PROTOCOL_VIOLATION
+          - code: CodeCallFailed
+            doc: CallFailed reports a call the bus answered with an error.
+            name: CallFailed
+            private: "service/proc/dbus: the bus answered the call with an error message; the method and error fields say which"
+            public: The message bus refused the call
+            reason: CALL_FAILED
+          - code: CodeCallCancelled
+            doc: CallCancelled reports a call whose context was cancelled before its reply.
+            name: CallCancelled
+            private: "service/proc/dbus: the caller's context was cancelled before the reply came; the method field says which call"
+            public: The message bus call was cancelled
+            reason: CALL_CANCELLED
+          - code: CodeConnClosed
+            doc: ConnClosed reports a call or a watch on a closed connection.
+            exit: UNAVAILABLE
+            name: ConnClosed
+            private: "service/proc/dbus: the connection was closed, or the bus hung up, before the call was answered"
+            public: The message bus connection is closed
+            reason: CONN_CLOSED
+          - code: CodeCallTimeout
+            doc: CallTimeout reports a call the bus did not answer in time.
+            exit: TEMPFAIL
+            name: CallTimeout
+            private: "service/proc/dbus: no reply within the context's deadline or 25 seconds, the default reply timeout; the method field says which call"
+            public: The message bus did not answer in time
+            reason: CALL_TIMEOUT
+          - code: CodeNameInvalid
+            doc: NameInvalid refuses a name that is not a well-known bus name.
+            exit: USAGE
+            name: NameInvalid
+            private: "service/proc/dbus: the name is empty, unique, too long, or has an element that is empty, opens with a digit or holds a byte outside [A-Za-z0-9_-]; the name field says which"
+            public: The bus name is not valid
+            reason: NAME_INVALID
+  - doc: |-
+      Package dbus is the SDK's message bus client (kitsunium/sdk#737, ADR 0214's
+      S0e amendment): what a supervisor needs of a D-Bus daemon to run
+      systemd's Type=dbus — who owns a well-known name, and every change of it —
+      and what a supervised Go service needs to be one: owning its name. It is
+      written on the standard library (ADR 0156): no vendor, no cgo, no
+      reflection, no process launched.
+
+      # The wire
+
+      NewConn connects to the first unix socket the address names (unix:path=
+      or unix:abstract=), sends the credentials byte and authenticates with AUTH
+      EXTERNAL naming no identity — the kernel names the connecting user, a client
+      in a user namespace included, and nothing is sent the bus could not check —,
+      then says Hello and learns the connection's unique name.
+      Every message is the specification's: a little-endian header, its fields
+      as an array of (byte, variant), the body padded to 8; the client sends
+      method calls whose arguments are strings and a uint32, and reads method
+      returns, errors and signals of either byte order.
+
+      # What a bus cannot do
+
+      Hold a caller: every call waits for its reply 25 seconds at most —
+      sd-bus's and libdbus's default reply timeout — or until its context's
+      deadline when sooner (CALL_TIMEOUT); a cancelled context is
+      CALL_CANCELLED. The authentication is bounded the same.
+
+      # What a peer cannot do
+
+      A header's field array is bounded (64 KiB) and a body past 1 MiB is read
+      and dropped, never allocated: a peer that sends this connection a large
+      message costs it nothing. A message the client cannot parse closes the
+      connection (PROTOCOL_VIOLATION). A method call another peer sends this
+      connection is dropped. NameOwnerChanged is taken from the bus driver
+      alone — org.freedesktop.DBus, the sender the daemon itself stamps.
+
+      # Watching a name
+
+      WatchName asks the bus to announce the name's changes (AddMatch, its
+      arg0 the name), then looks its owner up (GetNameOwner): the bus answers
+      in order, so an announcement read before the lookup's reply is older than
+      it and dropped, one read after it is newer and kept. The channel holds the
+      lookup's owner, then every change in order; a watcher that falls behind
+      by more than 64 changes has its latest ones coalesced into the last,
+      never its oldest. It is closed when its context ends — the match removed
+      — or when the connection is.
+
+      # Platforms
+
+      Linux. NewConn is UNSUPPORTED_PLATFORM elsewhere: the BSDs' daemons want
+      the credentials byte carried with SCM_CREDS, macOS's bus is launchd's, and
+      Windows' is a TCP address with a nonce file — none of which this client
+      speaks.
+    functions:
+      - doc: |-
+          NewConn connects to the bus at address, authenticates with AUTH EXTERNAL
+          and says Hello, within ctx — and within 25 seconds a step, CALL_TIMEOUT
+          past them. An address with no unix socket entry is ADDRESS_INVALID; a socket
+          that cannot be connected BUS_UNREACHABLE; a refused authentication
+          AUTH_REFUSED; a reply the protocol forbids PROTOCOL_VIOLATION. It is
+          UNSUPPORTED_PLATFORM off Linux.
+
+          Goroutine lifecycle: the connection runs one reader, ended by Close or by
+          the bus hanging up, and one goroutine per watch, ended with its watch.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: address
+            type: string
+        name: NewConn
+        out:
+          - type: "*Conn"
+          - type: error
+      - doc: |-
+          SystemBusAddress is the system bus's address: $DBUS_SYSTEM_BUS_ADDRESS, else
+          unix:path=/run/dbus/system_bus_socket.
+        name: SystemBusAddress
+        out:
+          - type: string
+      - doc: |-
+          SessionBusAddress is the user's session bus's address:
+          $DBUS_SESSION_BUS_ADDRESS, else unix:path=$XDG_RUNTIME_DIR/bus when
+          XDG_RUNTIME_DIR is set, else empty — the client never launches a bus.
+        name: SessionBusAddress
+        out:
+          - type: string
+    path: github.com/kitsunium/sdk/internal/service/proc/dbus
+    types:
+      - doc: |-
+          Conn is one connection to a message bus, safe for concurrent use: its calls
+          and watches share the connection, each call answered by its serial. It is a
+          proc/service BusWatcher as it is. Close it once done.
+        methods:
+          - doc: UniqueName is the connection's unique name on the bus (":1.42").
+            name: UniqueName
+            out:
+              - type: string
+            recv: pointer
+          - doc: |-
+              NameOwner returns the unique name of name's owner, empty when it has none.
+              A name that is not well-known is NAME_INVALID.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: name
+                type: string
+            name: NameOwner
+            out:
+              - type: string
+              - type: error
+            recv: pointer
+          - doc: |-
+              WatchName returns a channel holding name's owner when the watch began —
+              its unique name, empty for none —, then the owner after each change the
+              bus announces, in order. It is closed when ctx ends, the match removed,
+              or when the connection is. A name that is not well-known is NAME_INVALID.
+
+              Goroutine lifecycle: one per watch, delivering its owners; ended by ctx
+              or by the connection's end, and joined by Close.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: name
+                type: string
+            name: WatchName
+            out:
+              - type: <-chan string
+              - type: error
+            recv: pointer
+          - doc: |-
+              RequestName asks the bus for name, never queued: true when the
+              connection owns it now — just given, or already its own —, false when
+              another owns it. A policy that forbids it is CALL_FAILED.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: name
+                type: string
+            name: RequestName
+            out:
+              - type: bool
+              - type: error
+            recv: pointer
+          - doc: |-
+              ReleaseName gives name back: true when the connection owned it, false when
+              it did not.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: name
+                type: string
+            name: ReleaseName
+            out:
+              - type: bool
+              - type: error
+            recv: pointer
+          - doc: |-
+              Close closes the connection: every call in flight ends with CONN_CLOSED,
+              every watch's channel is closed, and the names the connection owned are
+              released by the bus. It is idempotent.
+            name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Conn
+        struct:
+          unexported: true
+  - doc: |-
+      Package dbus is the SDK's message bus client, on the standard library: who
+      owns a well-known name on a D-Bus daemon and every change of it — what
+      proc/service's Type=dbus is up on — and a name a Go service owns.
+
+      	conn, err := dbus.NewConn(ctx, dbus.SystemBusAddress())
+      	cfg.BusWatcher = conn // proc/service: Type=dbus, BusName=
+      	defer conn.Close()
+
+      A service that is itself a Type=dbus unit owns its name with
+      RequestName once it is ready to answer on it.
+
+      # Bounds
+
+      Unix sockets only (unix:path=, unix:abstract=), AUTH EXTERNAL only, no
+      launched bus. A header past 64 KiB closes the connection
+      ([CodeProtocolViolation]); a body past 1 MiB is dropped unread. A call
+      waits for its context ([CodeCallCancelled]); the bus's own refusal is
+      [CodeCallFailed], its name in the error field. Every call, and the
+      authentication, waits 25 seconds at most — sd-bus's default reply timeout
+      — or its context's deadline when sooner ([CodeCallTimeout]). Linux only:
+      NewConn is UNSUPPORTED_PLATFORM elsewhere.
+    facade:
+      - const:
+          - name: CodeAddressInvalid
+            reexport: coredbus.CodeAddressInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6C_01"
+          - name: CodeBusUnreachable
+            reexport: coredbus.CodeBusUnreachable
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6C_02"
+          - name: CodeAuthRefused
+            reexport: coredbus.CodeAuthRefused
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6C_03"
+          - name: CodeProtocolViolation
+            reexport: coredbus.CodeProtocolViolation
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6C_04"
+          - name: CodeCallFailed
+            reexport: coredbus.CodeCallFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6C_05"
+          - name: CodeCallCancelled
+            reexport: coredbus.CodeCallCancelled
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6C_06"
+          - name: CodeConnClosed
+            reexport: coredbus.CodeConnClosed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6C_07"
+          - name: CodeNameInvalid
+            reexport: coredbus.CodeNameInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6C_08"
+          - name: CodeCallTimeout
+            reexport: coredbus.CodeCallTimeout
+            type: errs.Code
+            typed: true
+            value: "0x00_03_6C_09"
+        doc: |-
+          The codes, range 0.3.108.*, for errs.HasCode: a caller tells "no such bus"
+          (ADDRESS_INVALID, BUS_UNREACHABLE) from "not allowed" (AUTH_REFUSED,
+          CALL_FAILED) from "no answer" (CALL_TIMEOUT) from "the connection is gone"
+          (CONN_CLOSED, dial again).
+      - alias:
+          - doc: |-
+              Conn is one connection to a message bus, safe for concurrent use; a
+              proc/service BusWatcher as it is.
+            name: Conn
+            target: svcdbus.Conn
+      - func:
+          doc: |-
+            NewConn connects to the bus at address, authenticates and says Hello, or
+            returns ADDRESS_INVALID, BUS_UNREACHABLE, AUTH_REFUSED or
+            PROTOCOL_VIOLATION; UNSUPPORTED_PLATFORM off Linux.
+          forward: svcdbus.NewConn
+          in:
+            - name: ctx
+              type: context.Context
+            - name: address
+              type: string
+          name: NewConn
+          out:
+            - type: "*Conn"
+            - type: error
+      - func:
+          doc: |-
+            SystemBusAddress is $DBUS_SYSTEM_BUS_ADDRESS, else
+            unix:path=/run/dbus/system_bus_socket.
+          forward: svcdbus.SystemBusAddress
+          name: SystemBusAddress
+          out:
+            - type: string
+      - func:
+          doc: |-
+            SessionBusAddress is $DBUS_SESSION_BUS_ADDRESS, else
+            unix:path=$XDG_RUNTIME_DIR/bus, else empty.
+          forward: svcdbus.SessionBusAddress
+          name: SessionBusAddress
+          out:
+            - type: string
+    imports:
+      coredbus: github.com/kitsunium/sdk/internal/core/proc/dbus
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcdbus: github.com/kitsunium/sdk/internal/service/proc/dbus
+    path: github.com/kitsunium/sdk/pkg/v1/proc/dbus

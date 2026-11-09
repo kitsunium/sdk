@@ -3233,6 +3233,18 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.CaptureTrace",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
+      "name": "CaptureTrace",
+      "spelled": "func(ctx context.Context, window time.Duration) ([]byte, error)",
+      "canonical": "func(ctx context.Context, window time.Duration) ([]byte, error)",
+      "doc": "CaptureTrace records the process's execution trace for window and returns\nits bytes, in the runtime's format (go tool trace reads it).\n",
+      "file": "profiling/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.CodeCaptureCanceled",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
@@ -3335,6 +3347,23 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.CodeTraceBusy",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
+      "name": "CodeTraceBusy",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "219400",
+      "init": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.CodeTraceBusy",
+      "code": {
+        "value": "0.3.89.8"
+      },
+      "doc": "CodeTraceBusy identifies a trace, flight recorder or snapshot refused while\nthe runtime's one is in use (0.3.89.8).\n",
+      "file": "profiling/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.CodeWindowInvalid",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
@@ -3430,6 +3459,32 @@
       "value": "\"root\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.FlameRoot",
       "doc": "FlameRoot is the name of a flame graph's root frame.\n",
+      "file": "profiling/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.FlightConfig",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
+      "name": "FlightConfig",
+      "spelled": "svcprof.FlightConfigValue",
+      "canonical": "github.com/kitsunium/sdk/internal/service/observe/profiling.FlightConfigValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.FlightConfigValue",
+      "doc": "FlightConfig sizes a flight recorder's window. It aliases the service value.\n",
+      "file": "profiling/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.FlightRecorder",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
+      "name": "FlightRecorder",
+      "spelled": "svcprof.FlightRecorder",
+      "canonical": "github.com/kitsunium/sdk/internal/service/observe/profiling.FlightRecorder",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.FlightRecorder",
+      "doc": "FlightRecorder keeps the most recent execution trace. It aliases the service port.\n",
       "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
@@ -3562,6 +3617,19 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.HandlerConfig",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
+      "name": "HandlerConfig",
+      "spelled": "svcprof.HandlerConfig",
+      "canonical": "github.com/kitsunium/sdk/internal/service/observe/profiling.HandlerConfig",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.HandlerConfig",
+      "doc": "HandlerConfig configures NewHandler: the clock the windows run on. It\naliases the service value.\n",
+      "file": "profiling/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.MaxCPUWindow",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
@@ -3599,6 +3667,32 @@
       "value": "67108864",
       "init": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.MaxProfileBytes",
       "doc": "MaxProfileBytes bounds what Parse reads, compressed and inflated alike.\n",
+      "file": "profiling/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.MaxTraceWindow",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
+      "name": "MaxTraceWindow",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "60000000000",
+      "init": "go:github.com/kitsunium/sdk/internal/service/observe/profiling.MaxTraceWindow",
+      "doc": "MaxTraceWindow is the longest window CaptureTrace records.\n",
+      "file": "profiling/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.NewHandler",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
+      "name": "NewHandler",
+      "spelled": "func(cfg HandlerConfig) http.Handler",
+      "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/observe/profiling.HandlerConfig) net/http.Handler",
+      "doc": "NewHandler returns the pprof wire as a plain http.Handler the caller mounts\nbehind its own admission — no registration on http.DefaultServeMux.\ncmdline and symbol are not served.\n",
       "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"
@@ -3747,6 +3841,36 @@
         "public": "The profile does not measure that"
       },
       "doc": "SampleTypeMissing refuses a fold asked for a sample type the profile does\nnot measure.\n",
+      "file": "profiling/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.StartFlightRecorder",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
+      "name": "StartFlightRecorder",
+      "spelled": "func(cfg FlightConfig) (FlightRecorder, error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/observe/profiling.FlightConfig) (github.com/kitsunium/sdk/pkg/v1/observe/profiling.FlightRecorder, error)",
+      "doc": "StartFlightRecorder starts the process's flight recorder: the most recent\nexecution trace kept in memory, snapshotted on demand.\n",
+      "file": "profiling/gen_facade.go",
+      "layer": "public",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/observe/profiling.TraceBusy",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/observe/profiling",
+      "name": "TraceBusy",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/observe/profiling.TraceBusy",
+      "code": {
+        "value": "0.3.89.8",
+        "reason": "TRACE_BUSY",
+        "public": "An execution trace is already being recorded"
+      },
+      "doc": "TraceBusy refuses a trace, a flight recorder or a snapshot while the\nruntime's one is in use (409).\n",
       "file": "profiling/gen_facade.go",
       "layer": "public",
       "family": "observe"

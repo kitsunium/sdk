@@ -58,7 +58,7 @@ sequences:
     steps:
       - lock:
           mutex: l.spawning
-      - eval: l.handOver(pid, status)
+      - return: l.handOver(pid, status)
         to: l.handOver
   - of: (*ledger).handOver
     steps:
@@ -145,6 +145,17 @@ sequences:
     steps:
       - return: book.reapAny()
         to: book.reapAny
+  - of: ReapAnyObserved
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReapAnyObserved
+        kind: self
+      - id: book.reapAny
+        kind: internal
+    steps:
+      - return: book.reapAny(observe)
+        to: book.reapAny
   - of: (*ledger).reapAny
     participants:
       - id: caller
@@ -158,9 +169,10 @@ sequences:
     steps:
       - lock:
           mutex: l.sweeping
-      - var:
-          name: status
-          type: StatusValue
+      - bind: status
+        eval: "&l.collected"
+      - set: "*status"
+        value: StatusValue{}
       - set: pid, err
         to: syscall
         value: syscall.Wait4(anyChildPID, &status.WaitStatus, syscall.WNOHANG, &status.Rusage)
@@ -172,6 +184,114 @@ sequences:
           do:
             - return: 0, nil
           when: pid == 0
-      - eval: l.deliver(pid, &status)
+      - bind: owned
+        eval: l.deliver(pid, status)
         to: l.deliver
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: observe(pid, status, owned)
+                when: observe != nil
+          key: _
+          range: observers
+          value: observe
       - return: pid, nil
+  - of: (*StatusValue).Exit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StatusValue).Exit
+        kind: self
+      - id: s.WaitStatus.ExitStatus
+        kind: value
+      - id: coreproc
+        kind: package
+      - id: s.WaitStatus.CoreDump
+        kind: value
+      - id: time
+        kind: stdlib
+      - id: MaxRSSKB
+        kind: internal
+      - id: UsageOf
+        kind: internal
+    steps:
+      - bind: out
+        eval: "coreproc.ExitValue{Code: signalledCode}"
+      - opt:
+          do:
+            - set: out.Code
+              to: s.WaitStatus.ExitStatus
+              value: s.WaitStatus.ExitStatus()
+          when: s.WaitStatus.Exited()
+      - opt:
+          do:
+            - set: out.Signaled
+              value: "true"
+            - set: out.Signal
+              to: coreproc
+              value: coreproc.Signal(s.WaitStatus.Signal())
+            - set: out.CoreDumped
+              to: s.WaitStatus.CoreDump
+              value: s.WaitStatus.CoreDump()
+          when: s.WaitStatus.Signaled()
+      - set: out.UserTime
+        to: time
+        value: time.Duration(s.Rusage.Utime.Nano())
+      - set: out.SystemTime
+        to: time
+        value: time.Duration(s.Rusage.Stime.Nano())
+      - set: out.MaxRSS
+        to: MaxRSSKB
+        value: MaxRSSKB(&s.Rusage)
+      - set: out.Usage
+        to: UsageOf
+        value: UsageOf(&s.Rusage)
+      - return: out
+  - of: peakKiB
+    steps:
+      - opt:
+          do:
+            - return: raw
+          when: unitsPerKiB <= 1
+      - opt:
+          do:
+            - return: "0"
+          when: raw <= 0
+      - bind: kib
+        eval: raw / unitsPerKiB
+      - opt:
+          do:
+            - op: ++
+              set: kib
+          when: raw%unitsPerKiB != 0
+      - return: kib
+  - of: MaxRSSKB
+    participants:
+      - id: caller
+        kind: actor
+      - id: MaxRSSKB
+        kind: self
+      - id: peakKiB
+        kind: internal
+    steps:
+      - return: peakKiB(ru.Maxrss, rssUnitsPerKiB)
+        to: peakKiB
+  - of: UsageOf
+    steps:
+      - return: |-
+          &coreproc.UsageValue{
+          		MinorFaults:      counter(ru.Minflt),
+          		MajorFaults:      counter(ru.Majflt),
+          		InBlock:          counter(ru.Inblock),
+          		OutBlock:         counter(ru.Oublock),
+          		VoluntaryCtxSw:   counter(ru.Nvcsw),
+          		InvoluntaryCtxSw: counter(ru.Nivcsw),
+          	}
+  - of: counter
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: v < 0
+      - return: uint64(v)

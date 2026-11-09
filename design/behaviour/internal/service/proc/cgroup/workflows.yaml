@@ -1,0 +1,41 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: signalTree
+    steps:
+      - bind: pass
+        eval: "&signalPass{kill: kill, self: self}"
+      - loop:
+          do:
+            - bind: pids, err
+              eval: members()
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - opt:
+                do:
+                  - break: true
+                when: pass.run(pids) == 0
+          range: maxSignalPasses
+      - return: pass.failure
+  - of: (*signalPass).run
+    steps:
+      - opt:
+          do:
+            - set: p.signalled
+              value: make(map[int]bool, len(pids))
+          when: p.signalled == nil
+      - bind: fresh
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: fresh
+                when: p.reach(pid)
+          key: _
+          range: pids
+          value: pid
+      - return: fresh

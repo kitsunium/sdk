@@ -1,0 +1,32 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "pool",
+    srcs = [
+        "doc.go",
+        "gen_facade.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/concur/pool",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/kernel/concur/pool"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":pool",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "pool_test",
+    srcs = [
+        "gen_api_test.go",
+        "pool_external_test.go",
+    ],
+    deps = [
+        ":pool",
+        "//internal/kernel/concur/pool",
+    ],
+)

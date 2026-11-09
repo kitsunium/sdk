@@ -1,0 +1,277 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: CommandFlags.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: CommandFlags.String
+        kind: self
+      - id: b.WriteByte
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteByte(p.char)
+                    to: b.WriteByte
+                when: f&p.flag != 0
+          key: _
+          range: prefixes
+          value: p
+      - return: b.String()
+        to: b.String
+  - of: CommandFlags.Privileged
+    steps:
+      - return: f&(FlagFullPrivileges|FlagNoCredentials) != 0
+  - of: ParseCommand
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseCommand
+        kind: self
+      - id: parsePrefixes
+        kind: internal
+      - id: checkProgram
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: CommandValue{}, commandInvalid("empty", "")
+          when: len(words) == 0
+      - bind: flags, path, err
+        eval: parsePrefixes(words[0])
+        to: parsePrefixes
+      - opt:
+          do:
+            - return: CommandValue{}, err
+          when: err != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "CommandValue{Flags: flags}, nil"
+                when: flags&FlagShell != 0 && len(words) == 1
+            - return: CommandValue{}, commandInvalid("no-program", words[0])
+          when: path == ""
+      - opt:
+          do:
+            - return: CommandValue{}, commandInvalid(bad, path)
+          init:
+            bind: bad
+            eval: checkProgram(path)
+            to: checkProgram
+          when: bad != ""
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: CommandValue{}, commandInvalid("no-argv0", path)
+                when: len(words) < 2
+            - return: "CommandValue{Path: path, Args: append([]string{words[1]}, words[2:]...), Flags: flags}, nil"
+          when: flags&FlagArgv0 != 0 && flags&FlagShell == 0
+      - return: "CommandValue{Path: path, Args: append([]string{path}, words[1:]...), Flags: flags}, nil"
+  - of: parsePrefixes
+    participants:
+      - id: caller
+        kind: actor
+      - id: parsePrefixes
+        kind: self
+      - id: prefixFlag
+        kind: internal
+    steps:
+      - var:
+          name: flags
+          type: CommandFlags
+      - bind: i
+        eval: "0"
+      - loop:
+          cond: i < len(word)
+          do:
+            - bind: flag, ok
+              eval: prefixFlag(word[i])
+              to: prefixFlag
+            - opt:
+                do:
+                  - break: true
+                when: "!ok"
+            - opt:
+                do:
+                  - return: 0, "", commandInvalid("prefix-repeated", word)
+                when: flags&flag != 0
+            - op: "|="
+              set: flags
+              value: flag
+          post: i++
+      - opt:
+          do:
+            - return: 0, "", commandInvalid("prefix-conflict", word)
+          when: flags&FlagFullPrivileges != 0 && flags&FlagNoCredentials != 0
+      - return: flags, word[i:], nil
+  - of: checkProgram
+    steps:
+      - opt:
+          do:
+            - return: "\"control-character\""
+          when: strings.ContainsFunc(path, unicode.IsControl)
+      - opt:
+          do:
+            - return: "\"relative-path\""
+          when: "!strings.HasPrefix(path, \"/\") && strings.Contains(path, \"/\")"
+      - return: "\"\""
+  - of: commandInvalid
+    participants:
+      - id: caller
+        kind: actor
+      - id: commandInvalid
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(CommandInvalid, errs.WrapParams{}, errs.String("rule", rule), errs.String("word", word))
+        to: errs
+  - of: Type.String
+    steps:
+      - opt:
+          do:
+            - return: typeNames[t]
+          when: int(t) < len(typeNames)
+      - return: "\"type(\" + strconv.Itoa(int(t)) + \")\""
+  - of: Restart.String
+    steps:
+      - opt:
+          do:
+            - return: restartNames[r]
+          when: int(r) < len(restartNames)
+      - return: "\"restart(\" + strconv.Itoa(int(r)) + \")\""
+  - of: RestartMode.String
+    steps:
+      - opt:
+          do:
+            - return: restartModeNames[m]
+          when: int(m) < len(restartModeNames)
+      - return: "\"restartmode(\" + strconv.Itoa(int(m)) + \")\""
+  - of: KillMode.String
+    steps:
+      - opt:
+          do:
+            - return: killModeNames[m]
+          when: int(m) < len(killModeNames)
+      - return: "\"killmode(\" + strconv.Itoa(int(m)) + \")\""
+  - of: ExitType.String
+    steps:
+      - opt:
+          do:
+            - return: exitTypeNames[e]
+          when: int(e) < len(exitTypeNames)
+      - return: "\"exittype(\" + strconv.Itoa(int(e)) + \")\""
+  - of: NotifyAccess.String
+    steps:
+      - opt:
+          do:
+            - return: notifyAccessNames[a]
+          when: int(a) < len(notifyAccessNames)
+      - return: "\"notifyaccess(\" + strconv.Itoa(int(a)) + \")\""
+  - of: TimeoutMode.String
+    steps:
+      - opt:
+          do:
+            - return: timeoutModeNames[m]
+          when: int(m) < len(timeoutModeNames)
+      - return: "\"timeoutmode(\" + strconv.Itoa(int(m)) + \")\""
+  - of: OOMPolicy.String
+    steps:
+      - opt:
+          do:
+            - return: oomPolicyNames[p]
+          when: int(p) < len(oomPolicyNames)
+      - return: "\"oompolicy(\" + strconv.Itoa(int(p)) + \")\""
+  - of: Preserve.String
+    steps:
+      - opt:
+          do:
+            - return: preserveNames[p]
+          when: int(p) < len(preserveNames)
+      - return: "\"preserve(\" + strconv.Itoa(int(p)) + \")\""
+  - of: Toggle.On
+    steps:
+      - opt:
+          do:
+            - return: def
+          when: t == ToggleDefault
+      - return: t == ToggleYes
+  - of: State.String
+    steps:
+      - opt:
+          do:
+            - return: stateNames[s]
+          when: int(s) < len(stateNames)
+      - return: "\"state(\" + strconv.Itoa(int(s)) + \")\""
+  - of: State.ActiveState
+    participants:
+      - id: caller
+        kind: actor
+      - id: State.ActiveState
+        kind: self
+      - id: s.String
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: activeStates[s]
+          when: int(s) < len(activeStates)
+      - return: s.String()
+        to: s.String
+  - of: Sub.String
+    steps:
+      - opt:
+          do:
+            - return: subNames[s]
+          when: int(s) < len(subNames)
+      - return: "\"sub(\" + strconv.Itoa(int(s)) + \")\""
+  - of: Result.String
+    steps:
+      - opt:
+          do:
+            - return: resultNames[r]
+          when: int(r) < len(resultNames)
+      - return: "\"result(\" + strconv.Itoa(int(r)) + \")\""
+  - of: ProtectSystem.String
+    steps:
+      - opt:
+          do:
+            - return: protectSystemNames[p]
+          when: int(p) < len(protectSystemNames)
+      - return: "\"protectsystem(\" + strconv.Itoa(int(p)) + \")\""
+  - of: PrivateTmp.String
+    steps:
+      - opt:
+          do:
+            - return: privateTmpNames[p]
+          when: int(p) < len(privateTmpNames)
+      - return: "\"privatetmp(\" + strconv.Itoa(int(p)) + \")\""
+  - of: ExitStatusValue.Contains
+    participants:
+      - id: caller
+        kind: actor
+      - id: ExitStatusValue.Contains
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: slices.Contains(s.Signals, exit.Signal)
+              to: slices
+          when: exit.Signaled
+      - return: slices.Contains(s.Codes, exit.Code)
+        to: slices
+  - of: ExitStatusValue.Empty
+    steps:
+      - return: len(s.Codes) == 0 && len(s.Signals) == 0

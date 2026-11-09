@@ -50,6 +50,22 @@ func TestWindowsJobObjectLifecycle(t *testing.T) {
 	if perr := g.SetPidsMax(64); perr != nil {
 		t.Fatalf("SetPidsMax(64): %v", perr)
 	}
+	//: the job-wide memory cap (#727) is a sibling port of the Job Object
+	//: group: set, then cleared, beside SetMemoryMax's per-process one.
+	limiter, ok := g.(coreproc.JobLimiter)
+	if !ok {
+		t.Fatal("the Windows group is no JobLimiter")
+	}
+	if jerr := limiter.SetJobMemoryLimit(512 << 20); jerr != nil {
+		t.Fatalf("SetJobMemoryLimit(512MiB): %v", jerr)
+	}
+	if jerr := limiter.SetJobMemoryLimit(-1); jerr != nil {
+		t.Fatalf("SetJobMemoryLimit(-1 clear): %v", jerr)
+	}
+	//: the cgroup v2 siblings have no Job Object meaning: they are absent.
+	if _, tuner := g.(coreproc.GroupTuner); tuner {
+		t.Error("the Windows group claims GroupTuner")
+	}
 	//: CPU rate control is environment-sensitive: a NESTED job — e.g. the CI
 	//: runner's own job object that already constrains CPU — can reject it with
 	//: CGROUP_WRITE_FAILED. Accept that as the environmental outcome; only a wrong

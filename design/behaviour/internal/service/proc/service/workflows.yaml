@@ -1,0 +1,317 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*actor).dupsOf
+    steps:
+      - bind: out
+        eval: make([]uint64, len(files))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out[i]
+                    value: dupEarlier
+                  - continue: true
+                when: slices.ContainsFunc(files[:i], func(g *os.File) bool { return sameFile(f, g) })
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: out[i]
+                          value: id
+                        - break: true
+                      when: sameFile(f, h.file)
+                key: id
+                range: a.store
+                value: h
+          key: i
+          range: files
+          value: f
+      - return: out
+  - of: (*actor).stored
+    steps:
+      - bind: out
+        eval: make([]listen.NamedFileValue, 0, len(entries))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: "append(out, listen.NamedFileValue{Name: e.name, File: h.file})"
+                init:
+                  bind: h
+                  eval: a.store[e.id]
+                when: h != nil
+          key: _
+          range: entries
+          value: e
+      - return: out
+  - of: (*HandoverState).Units
+    steps:
+      - var:
+          name: out
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, fu.name)
+                when: "!fu.taken"
+          key: _
+          range: h.units
+          value: fu
+      - return: out
+  - of: (*HandoverState).unit
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: fu
+                when: fu.name == name && !fu.taken
+          key: _
+          range: h.units
+          value: fu
+      - return: nil
+  - of: (*frozenUnit).files
+    steps:
+      - var:
+          name: out
+          type: "[]*os.File"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, p.witness)
+                when: p.witness != nil
+          key: _
+          range: fu.procs
+          value: p
+      - loop:
+          do:
+            - set: out
+              value: append(out, fu.store[id])
+          key: _
+          range: slices.Sorted(mapKeys(fu.store))
+          value: id
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, f)
+                when: f != nil
+          key: _
+          range: "[]*os.File{fu.conn, fu.notify}"
+          value: f
+      - return: out
+  - of: checkRecords
+    steps:
+      - bind: seen
+        eval: map[int]bool{}
+      - bind: fds
+        eval: map[int]bool{}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, handoverInvalid("a descriptor listed twice, or at stdio", errs.Int("fd", f.fd))
+                when: f.index < 1 || seen[f.index] || fds[f.fd] || f.fd < firstPassedFD
+            - set: seen[f.index], fds[f.fd]
+              value: true, true
+          key: _
+          range: files
+          value: f
+      - return: seen, nil
+  - of: decodeModel
+    steps:
+      - var:
+          name: m
+          type: model
+      - bind: r
+        eval: "&reader{b: b}"
+      - loop:
+          cond: ok
+          do:
+            - opt:
+                do:
+                  - eval: read(r, &m, v)
+                init:
+                  bind: read
+                  eval: modelFields[tag]
+                when: read != nil
+          init: tag, v, ok := r.next()
+          post: tag, v, ok = r.next()
+      - opt:
+          do:
+            - return: model{}, r.err
+          when: r.err != nil
+      - return: m, checkModel(&m)
+  - of: sandboxDirectives
+    steps:
+      - bind: directives
+        eval: |-
+          []struct {
+          		name string
+          		on   bool
+          	}{
+          		{"CapabilityBoundingSet", cfg.CapabilityBoundingSet != nil},
+          		{"RootDirectory", cfg.RootDirectory != ""},
+          		{"ReadOnlyPaths", len(cfg.ReadOnlyPaths) > 0},
+          		{"BindPaths", len(cfg.BindPaths) > 0},
+          		{"BindReadOnlyPaths", len(cfg.BindReadOnlyPaths) > 0},
+          		{"TemporaryFileSystem", len(cfg.TemporaryFileSystem) > 0},
+          		{"SystemCallArchitectures", len(cfg.SystemCallArchitectures) > 0},
+          		{"SystemCallFilter", len(cfg.SystemCallFilter.Syscalls) > 0},
+          		{"AmbientCapabilities", cfg.AmbientCapabilities != 0},
+          		{"SecureBits", cfg.SecureBits != 0},
+          		{"ProtectSystem", cfg.ProtectSystem != coresvc.ProtectSystemNo},
+          		{"PrivateTmp", cfg.PrivateTmp != coresvc.PrivateTmpNo},
+          		{"NoNewPrivileges", cfg.NoNewPrivileges},
+          		{"PrivateUsers", cfg.PrivateUsers},
+          		{"PrivateNetwork", cfg.PrivateNetwork},
+          		{"PrivatePIDs", cfg.PrivatePIDs},
+          		{"ProtectHostname", cfg.ProtectHostname},
+          		{"PrivateIPC", cfg.PrivateIPC},
+          	}
+      - var:
+          name: set
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: set
+                    value: append(set, d.name)
+                when: d.on
+          key: _
+          range: directives
+          value: d
+      - return: set
+  - of: directiveNamespaces
+    steps:
+      - var:
+          name: ns
+          type: coreproc.Namespace
+      - bind: flags
+        eval: |-
+          []struct {
+          		ns coreproc.Namespace
+          		on bool
+          	}{
+          		{coreproc.NamespaceUser, cfg.PrivateUsers},
+          		{coreproc.NamespaceNet, cfg.PrivateNetwork},
+          		{coreproc.NamespacePID, cfg.PrivatePIDs},
+          		{coreproc.NamespaceUTS, cfg.ProtectHostname},
+          		{coreproc.NamespaceIPC, cfg.PrivateIPC},
+          		{coreproc.NamespaceMount, mounts || cfg.RootDirectory != ""},
+          	}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: "|="
+                    set: ns
+                    value: f.ns
+                when: f.on
+          key: _
+          range: flags
+          value: f
+      - opt:
+          do:
+            - op: "|="
+              set: ns
+              value: coreproc.NamespaceUser
+          when: ns != 0 && supervisorEUID() != 0
+      - return: ns
+  - of: binds
+    steps:
+      - bind: out
+        eval: make([]coreproc.MountValue, 0, len(paths))
+      - loop:
+          do:
+            - bind: target
+              eval: b.Target
+            - opt:
+                do:
+                  - set: target
+                    value: b.Source
+                when: target == ""
+            - set: out
+              value: "append(out, coreproc.MountValue{Kind: coreproc.MountBind, Source: b.Source, Target: root + target, ReadOnly: readOnly})"
+          key: _
+          range: paths
+          value: b
+      - return: out
+  - of: bindPaths
+    steps:
+      - bind: out
+        eval: make([]string, 0, 2*len(paths))
+      - loop:
+          do:
+            - set: out
+              value: append(out, b.Source)
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, b.Target)
+                when: b.Target != ""
+          key: _
+          range: paths
+          value: b
+      - return: out
+  - of: isName
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == "" || isDigit(s[0])
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isDigit(s[i]) && !isLetter(s[i])"
+          key: i
+          range: len(s)
+      - return: "true"
+  - of: (*step).noteSandboxFailure
+    steps:
+      - bind: m
+        eval: st.m
+      - opt:
+          do:
+            - return: ""
+          when: m.sandboxCause != 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: m.sandboxCause, m.sandboxFields
+                    value: c, errs.FieldsOf(err)
+                  - return: ""
+                when: errs.HasCode(err, c)
+          key: _
+          range: sandboxCodes
+          value: c
+  - of: (*Unit).answer
+    steps:
+      - lock:
+          mutex: u.mu
+      - loop:
+          do:
+            - opt:
+                do:
+                  - send:
+                      chan: ch
+                      value: err
+                  - eval: delete(u.waiters, id)
+                init:
+                  bind: ch, ok
+                  eval: u.waiters[id]
+                when: ok
+          key: _
+          range: ids
+          value: id

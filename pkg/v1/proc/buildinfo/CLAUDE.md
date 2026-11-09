@@ -20,6 +20,8 @@ start and never use (ADR 0172).
 |---|---|---|
 | `BuildInfo` | type alias | `= svcbuild.BuildValue`, the same type as `process.BuildInfo` |
 | `Module` | type alias | `= svcbuild.ModuleValue`, the same type as `process.Module` |
+| `Toolchain` | type alias | `= svcbuild.ToolchainValue`, the same type as `process.Toolchain` — target, feature level, compiler, build mode, tags, ldflags, DefaultGODEBUG, cgo, trimpath |
+| `Setting` | type alias | `= svcbuild.SettingValue`, the same type as `process.Setting` — one recorded build setting, verbatim |
 | `Build()` | func | the running binary; `false` without build information |
 | `ParseBuild(info)` | func | a `*debug.BuildInfo` from elsewhere, read the same way |
 

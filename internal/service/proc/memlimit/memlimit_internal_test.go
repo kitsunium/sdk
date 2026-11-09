@@ -39,6 +39,11 @@ func fakeFS(contents map[string]string) func(string) ([]byte, error) {
 	}
 }
 
+// deriveLimit is the default share of an allowance: headroomPercent of it.
+func deriveLimit(allowance int64) int64 {
+	return shareOf(allowance, headroomPercent)
+}
+
 // noEnv is a lookup stub reporting every variable as unset.
 func noEnv(string) (string, bool) {
 	//: Nothing is configured in this environment.
@@ -391,7 +396,7 @@ func TestReadCgroupAllowance_PropagatesReadErrors(t *testing.T) {
 				return []byte("2147483648"), nil
 			}
 
-			allowance, ok := readCgroupAllowance(readFile)
+			allowance, _, ok := readCgroupAllowance(readFile)
 			//: The readable hierarchy must still be honoured.
 			if !ok || allowance != 2147483648 {
 				t.Errorf("readCgroupAllowance() = (%d, %t), want (2147483648, true)", allowance, ok)

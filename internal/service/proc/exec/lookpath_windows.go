@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // pathExtVariable lists the extensions a bare name is tried with.
@@ -82,4 +83,24 @@ func isPath(name string) bool {
 func sameVariable(left, right string) bool {
 	//: "Path" and "PATH" are one variable.
 	return strings.EqualFold(left, right)
+}
+
+// variableKey is a name's spelling two names sameVariable takes for one share:
+// each rune replaced by the least of the runes it folds with, the classes
+// strings.EqualFold compares by. strings.ToLower would split a class EqualFold
+// joins: "ſ" folds with "s" and has no lower case of its own.
+func variableKey(name string) string {
+	//: an unchanged name allocates nothing.
+	return strings.Map(leastFold, name)
+}
+
+// leastFold is the least rune of r's simple case-folding orbit.
+func leastFold(r rune) rune {
+	least := r
+	//: around the orbit, which comes back to r.
+	for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+		least = min(least, f)
+	}
+	//: the orbit's representative.
+	return least
 }

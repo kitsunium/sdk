@@ -5,6 +5,7 @@ package exec
 import (
 	"context"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,9 @@ type handle struct {
 	waitVal  coreproc.ExitValue
 	waitErr  error
 	done     chan struct{}
+	// settled is closed once Wait has its whole outcome — the exit and the
+	// drained (or cut) capture — so WaitContext never returns before it.
+	settled chan struct{}
 
 	// clk is what Stop's grace window is measured on: clock.System from
 	// newHandle.
@@ -41,7 +45,7 @@ func newHandle(p *os.Process, setpgid bool, stdio *stdioState, job *jobLimit) *h
 	//: capture the pid once; Windows reuses pids only after the handle closes.
 	return &handle{
 		proc: p, pid: p.Pid, setpgid: setpgid, stdio: stdio, job: job,
-		done: make(chan struct{}), clk: clock.System,
+		done: make(chan struct{}), settled: make(chan struct{}), clk: clock.System,
 	}
 }
 
@@ -56,13 +60,17 @@ func (h *handle) PID() int {
 func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 	//: the reap runs exactly once; concurrent callers share the memoised result.
 	h.waitOnce.Do(func() {
+		//: WaitContext observes the whole outcome, never half of it.
+		defer close(h.settled)
 		state, wErr := h.proc.Wait()
 		//: signal late Stop goroutines that the process has been reaped.
 		close(h.done)
-		//: join the capture copiers so every byte reached the caller's writers.
-		h.stdio.wait()
-		//: release the rlimit Job Object now the child is reaped (no-op when nil).
-		h.job.close()
+		//: join the capture copiers so every byte reached the caller's writers,
+		//: within the drain grace: a process the child left behind may hold them.
+		cut, held, delivered := h.stdio.drainBounded()
+		//: release the rlimit Job Object now the child is reaped (no-op when nil),
+		//: unless it binds the child's tree to the supervisor's life.
+		h.job.releaseAfterExit()
 		//: a Wait host fault (not a non-zero exit) is a typed WAIT_FAILED.
 		if wErr != nil {
 			//: wrap the os.Process.Wait cause under the central WAIT_FAILED fields.
@@ -72,6 +80,13 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 		}
 		//: a clean reap yields the translated exit outcome.
 		h.waitVal = exitValueFrom(state)
+		//: the grace closed on pipes still held: the exit stands, the drain did not.
+		if cut {
+			h.waitErr = wrapStdioDrainTimeout(errs.Int("pid", h.pid),
+				errs.String("held", strings.Join(held, ",")), errs.Int("bytes", int(delivered)))
+			//: the capture error, if any, is secondary to the cut.
+			return
+		}
 		//: a clean exit whose capture writer failed surfaces the typed capture error.
 		if cErr := h.stdio.copyError(); cErr != nil {
 			//: wrap the writer failure under the central STDIO_CAPTURE_FAILED fields.
@@ -83,8 +98,9 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 }
 
 // exitValueFrom translates an *os.ProcessState into the port's ExitValue. Windows
-// has no terminating-signal or wait4 rusage concept, so Signal/Signaled stay zero
-// and MaxRSS is unset; only the exit code and CPU times are populated.
+// has no terminating-signal or wait4 rusage concept, so Signal/Signaled and
+// CoreDumped stay zero, MaxRSS is unset and Usage is not Known; only the exit
+// code and CPU times are populated.
 func exitValueFrom(state *os.ProcessState) coreproc.ExitValue {
 	//: ExitCode is -1 for a process killed without a normal exit; the port reads
 	//: the code directly and reports CPU times the os layer exposes.
@@ -92,6 +108,39 @@ func exitValueFrom(state *os.ProcessState) coreproc.ExitValue {
 		Code:       state.ExitCode(),
 		UserTime:   state.UserTime(),
 		SystemTime: state.SystemTime(),
+	}
+}
+
+// WaitContext waits like Wait until the process exits or ctx is done. When
+// ctx ends first it returns ctx's error and the child keeps running; a later
+// Wait or WaitContext still reports the real exit.
+//
+// Goroutine lifecycle: it launches reapInBackground, which drives the
+// once-only Wait and returns once the child is reaped and its capture drained
+// — bounded by the drain grace — whether or not this call is still waiting.
+func (h *handle) WaitContext(ctx context.Context) (exit coreproc.ExitValue, err error) {
+	//: a settled handle answers at once, whatever ctx says.
+	select {
+	case <-h.settled:
+		//: the memoised outcome.
+		return h.waitVal, h.waitErr
+	default:
+	}
+	//: an expired ctx returns before any goroutine starts.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		//: the child keeps running.
+		return coreproc.ExitValue{}, ctxErr
+	}
+	//: drive the reap in the background so this select can leave on ctx.
+	go h.reapInBackground()
+	//: race the whole outcome against ctx.
+	select {
+	case <-h.settled:
+		//: the memoised outcome.
+		return h.waitVal, h.waitErr
+	case <-ctx.Done():
+		//: the caller stops waiting; the child does not stop.
+		return coreproc.ExitValue{}, ctx.Err()
 	}
 }
 
@@ -107,20 +156,32 @@ func (h *handle) Signal(sig coreproc.Signal) error {
 	return nil
 }
 
-// SignalGroup degrades to the leader on Windows: there is no kill(-pgid). Console
-// process-group delivery (CTRL_BREAK) is the signal package's concern; here a
-// group request reaches the leader process so the contract never silently no-ops.
+// SignalGroup delivers sig to a Setpgid child's console process group as the
+// matching console control event (#933): SIGINT is CTRL_C_EVENT, SIGTERM,
+// SIGHUP and SIGQUIT are CTRL_BREAK_EVENT, so the group's handlers — a Go
+// child's os/signal included — get a real chance to exit. SIGKILL, and every
+// signal to a child without its own group, reach the leader alone through
+// Signal: CTRL_BREAK to the supervisor's own console group would reach the
+// supervisor.
 func (h *handle) SignalGroup(sig coreproc.Signal) error {
-	//: no Unix process-group fan-out exists — target the leader process.
+	event, mapped := consoleEvent(sig)
+	//: a private console group and a signal it has an event for.
+	if h.setpgid && mapped {
+		//: the event goes to the group the child leads.
+		return sendConsoleEvent(event, h.pid, sig)
+	}
+	//: no group of its own, or SIGKILL: the leader process alone.
 	return h.Signal(sig)
 }
 
-// Stop sends sig, waits up to grace for exit, then force-terminates. Windows has
-// no graceful SIGTERM, so a non-Kill sig is best-effort and the forced Kill
-// (TerminateProcess) is the reliable escalation.
+// Stop sends sig, waits up to grace for exit, then force-terminates. A Setpgid
+// child gets sig as its console control event (SignalGroup), so the grace is a
+// real window for a graceful exit; a child without its own group gets the
+// best-effort os.Process.Signal, which Windows refuses for anything but a
+// kill. The forced Kill (TerminateProcess) is the reliable escalation.
 func (h *handle) Stop(ctx context.Context, grace time.Duration, sig coreproc.Signal) error {
-	//: best-effort graceful nudge; Windows may reject a non-Kill signal.
-	swallowErr(h.proc.Signal(sig.OS()))
+	//: best-effort graceful nudge: the console event for a private group.
+	swallowErr(h.SignalGroup(sig))
 	//: wait up to grace for a voluntary exit before escalating.
 	settled, err := h.awaitExit(ctx, grace)
 	//: a cancelled context surfaces verbatim.
@@ -148,10 +209,7 @@ func (h *handle) Stop(ctx context.Context, grace time.Duration, sig coreproc.Sig
 // returning whether it settled. A cancelled ctx returns its error.
 func (h *handle) awaitExit(ctx context.Context, grace time.Duration) (settled bool, err error) {
 	//: drive the single Wait in the background so done closes on exit.
-	go func() {
-		//: the memoised Wait closes done; a second call here is harmless.
-		_, _ = h.Wait()
-	}()
+	go h.reapInBackground()
 	//: the grace window runs on the handle's clock, as on Unix.
 	timer := h.clk.NewTimer(grace)
 	defer timer.Stop()
@@ -169,5 +227,15 @@ func (h *handle) awaitExit(ctx context.Context, grace time.Duration) (settled bo
 	case <-ctx.Done():
 		//: surface the cancellation as the stop error.
 		return false, ctx.Err()
+	}
+}
+
+// reapInBackground drives the once-only Wait so a select can observe h.done
+// and h.settled; the outcome is memoised for whoever calls Wait.
+func (h *handle) reapInBackground() {
+	//: the reap fault, if any, is already memoised in h.waitErr.
+	if _, err := h.Wait(); err != nil {
+		//: nothing to propagate from here.
+		return
 	}
 }
