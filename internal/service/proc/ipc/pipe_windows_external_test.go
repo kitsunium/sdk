@@ -116,11 +116,13 @@ func TestASecondPipeListenerIsInUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial after the refused second listener: %v", err)
 	}
-	if err := c.Close(); err != nil {
-		t.Error(err)
-	}
+	// The client stays open until Accept returns: one that came and went
+	// before the wait saw it is skipped, and Accept would wait for the next.
 	if err := <-accepted; err != nil {
 		t.Fatalf("accept after the refused second listener: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Error(err)
 	}
 	if err := ln.Close(); err != nil {
 		t.Fatal(err)
