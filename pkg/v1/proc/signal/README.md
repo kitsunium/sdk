@@ -34,7 +34,7 @@ go signal.Relay(src, signal.Target(-childPGID)) // negative ⇒ process group
 
 ### Platform notes
 
-Parse, String, and Notify are portable. Relay has a native backend on Unix (kill(2)) and on Windows, which has no kill(2): a pid target is terminated with TerminateProcess, and a process-group target receives a console control event (CTRL\_C for SIGINT, CTRL\_BREAK otherwise). On the remaining platforms it returns the typed UNSUPPORTED\_PLATFORM sentinel rather than acting, so code compiles and degrades gracefully everywhere.
+Parse, String, and Notify are portable. Relay has a native backend on Unix (kill(2)) and on Windows, which has no kill(2): a pid target is terminated with TerminateProcess, and a process-group target receives a console control event: CTRL\_BREAK, SIGINT included, since Windows delivers no CTRL\_C to one group. On the remaining platforms it returns the typed UNSUPPORTED\_PLATFORM sentinel rather than acting, so code compiles and degrades gracefully everywhere.
 
 ## Index
 

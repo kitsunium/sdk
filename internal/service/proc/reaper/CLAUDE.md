@@ -100,7 +100,11 @@ disjoint, so exactly one definition of each exported symbol compiles per GOOS.
 this package's own code becomes the cost; `WithOnReap` adds 5 ns and can be wired
 unconditionally. The `childwait` sweep lock around each collection is one
 uncontended mutex, about 4 ns of an idle sweep (≈170 ns median on an Apple
-M-series, `go1.27.1`), and allocates nothing.
+M-series, `go1.27.1`), and allocates nothing. A collection allocates nothing
+either, `WithOnExit` wired: its `ExitEvent` carries `Usage` by value (#1136),
+and `TestReapOnceAllocatesNothingPerCollectedChild` — alloc lane, through
+`allocwindow_test.go` — releases and collects real children of the test, one
+per measured call, against holders of the `HoldRoleEnv` role.
 
 A `Start`/`Stop` cycle is **86 µs — 300× a sweep** — and a CPU profile puts 57 %
 of it in `runtime.futex` under the scheduler and 9 % in `runtime.ensureSigM`. That

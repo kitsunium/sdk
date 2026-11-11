@@ -89,6 +89,7 @@ go_test(
         "chain_external_test.go",
         "chain_internal_test.go",
         "dial_internal_test.go",
+        "files_handover_internal_test.go",
         "files_linux_internal_test.go",
         "files_unix_internal_test.go",
         "files_windows_external_test.go",

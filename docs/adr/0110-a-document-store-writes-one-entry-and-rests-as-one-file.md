@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
-- **Amended**: 2026-11-02 — the directories Open creates are flushed, and a refusal names no key on a decoding path (see the dated section at the end)
+- **Amended**: 2026-11-02 — the directories Open creates are flushed, and a refusal names no key on a decoding path (see the dated section at the end); 2026-11-11 — `GetInto`, a read into the caller's value (#813)
 - **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — §D1: `docstore` gains a core
 - **Related**: [ADR 0056](0056-sdk-vfs-domain.md) (the atomic publication every write is), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (no port, so the values are the engine's), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the clamps), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md)
 
@@ -260,3 +260,18 @@ the struct fields' JSON names, which are the program's; a path the type does
 not explain is `…`. The input is committed under
 `testdata/fuzz/FuzzOpenVersions/`.
 
+## Amendment (2026-11-11): `GetInto`, a read into the caller's value (#813)
+
+Every read hands back a copy, decoded into a fresh `T`; a loop over many
+documents pays that `T` each time (`json.Unmarshal` takes its address as an
+`any`, so it escapes). `GetInto(key, dst *T)` — on the file engine and,
+with a context, on the SQL engine, declared by the sibling ports
+`IntoGetter[T]` and `IntoGetterContext[T]` (ADR 0039) — decodes into a
+value the caller keeps. The copy is still the contract: `*dst` is set to
+`T`'s zero value before the decode, because `encoding/json` merges into a
+value it is given — an omitted field would keep the earlier document's,
+a map its entries, and a slice or pointer `dst` held would be written
+through. A failed read leaves `dst` zero. Measured on the bench's account:
+7 allocations for `Get`, 5 for `GetInto`, held by the budget `allocs: 5` in
+`design/sdk.yaml`; the 11 published for `Get` counted 4 of the benchmark's
+own key formatting.

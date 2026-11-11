@@ -121,6 +121,32 @@ func (s *Store[T]) Get(key string) (T, error) {
 	return s.decode(raw)
 }
 
+// GetInto decodes the document stored under key into dst, as
+// core/data/docstore.IntoGetter says: dst set to T's zero value first, so
+// it ends up equal to what Get returns and shares nothing with the store or
+// with what it held, without the fresh T Get returns. DocumentNotFound,
+// StoreClosed or DocumentUndecodable as Get, dst zero then.
+func (s *Store[T]) GetInto(key string, dst *T) error {
+	var zero T
+	*dst = zero
+	s.mu.RLock()
+	raw, found := s.docs[key]
+	closed := s.closed
+	s.mu.RUnlock()
+	//: a closed store answers nothing.
+	if closed {
+		//: StoreClosed.
+		return kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
+	}
+	//: a miss.
+	if !found {
+		//: DocumentNotFound, naming no key.
+		return kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+	}
+	//: a copy of the stored document, in the caller's value.
+	return decodeInto(s.path, raw, dst)
+}
+
 // List returns every document, in key order.
 func (s *Store[T]) List() ([]T, error) {
 	entries, closed := s.snapshotEntries(0)
@@ -346,15 +372,29 @@ func (s *Store[T]) decode(raw json.RawMessage) (T, error) {
 func decodeAs[T any](store string, raw []byte) (T, error) {
 	var v T
 	//: the type changed under data an older program wrote.
-	if err := json.Unmarshal(raw, &v); err != nil {
-		var zero T
-		//: DocumentUndecodable; what failed, never the document and never
-		//: the key.
-		return zero, kerrs.Wrap(coredocstore.DocumentUndecodable, kerrs.WrapParams{},
-			kerrs.String("store", store), kerrs.String("cause", jsonCause(err, reflect.TypeFor[T]())))
+	if err := decodeInto(store, raw, &v); err != nil {
+		//: DocumentUndecodable, v back to zero.
+		return v, err
 	}
 	//: the caller's own copy.
 	return v, nil
+}
+
+// decodeInto decodes one stored document into *dst, which holds T's zero
+// value, or refuses it as decodeAs does and leaves *dst zero: a document half
+// decoded is never handed back.
+func decodeInto[T any](store string, raw []byte, dst *T) error {
+	//: the type changed under data an older program wrote.
+	if err := json.Unmarshal(raw, dst); err != nil {
+		var zero T
+		*dst = zero
+		//: DocumentUndecodable; what failed, never the document and never
+		//: the key.
+		return kerrs.Wrap(coredocstore.DocumentUndecodable, kerrs.WrapParams{},
+			kerrs.String("store", store), kerrs.String("cause", jsonCause(err, reflect.TypeFor[T]())))
+	}
+	//: decoded.
+	return nil
 }
 
 // decodeAll decodes entries in order. It never returns nil for no entries.

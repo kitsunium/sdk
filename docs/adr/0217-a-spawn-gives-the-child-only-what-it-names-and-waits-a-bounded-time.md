@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
-- **Amended**: 2026-11-08 — §Amendment: the sandbox (#728, S2); §Amendment: a sticky tmpfs (#728, S2 wired into `proc/service`)
+- **Amended**: 2026-11-08 — §Amendment: the sandbox (#728, S2); §Amendment: a sticky tmpfs (#728, S2 wired into `proc/service`); 2026-11-11 — §Amendment: `Usage` by value (#1136); §Amendment: SIGINT reaches a group as CTRL_BREAK (#933); §Amendment: `StdioPTY` on OpenBSD (#934)
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0016](0016-sdk-process-supervision-domain.md) (three codes, `0.2.6.24`–`0.2.6.26`, and three sibling ports of `Process`), [ADR 0018](0018-sdk-cross-platform-portability.md) (the platform rows of the new `proc/exec` primitives)
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (sibling ports), [ADR 0093](0093-a-sweep-takes-the-zombie-never-the-status.md) (who collects a status), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md) (measured contracts)
@@ -82,10 +82,10 @@ generous in two ways and blind in a third:
 | Primitive | Linux | Darwin | FreeBSD | OpenBSD | NetBSD | DragonFly | illumos / Solaris | Windows |
 |---|---|---|---|---|---|---|---|---|
 | fd-table seal | `close_range` (≥ 5.11), else `/proc/self/fd` | `/dev/fd` | `close_range`, else `/dev/fd` | `/dev/fd` (to 63) | `/dev/fd` | `/dev/fd` | `/proc/self/fd` | nothing to seal |
-| `ExitValue.Usage` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ nil | ❌ nil |
+| `ExitValue.Usage` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ not `Known` | ❌ not `Known` |
 | `DieWithParent` | ✅ pdeathsig | ❌ | ✅ pdeathsig | ❌ | ❌ | ❌ | ❌ | ✅ Job Object |
 | `Scheduling` | ✅ | ❌ | ⚠️ FIFO/RR/Idle | ❌ | ❌ | ❌ | ❌ | ❌ (`Nice` ✅) |
-| `StdioPTY` | ✅ | ✅ | ✅ | ❌ pinsyscalls | ❌ unmeasured | ❌ unmeasured | ❌ STREAMS | ❌ ConPTY |
+| `StdioPTY` | ✅ | ✅ | ✅ | ✅ `PTMGET` (amended 2026-11-11) | ❌ unmeasured | ❌ unmeasured | ❌ STREAMS | ❌ ConPTY |
 | `ProcessHandle` / `Open` | ✅ pidfd ≥ 5.4 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ HANDLE |
 | placement by clone | ✅ ≥ 5.7 | — | — | — | — | — | — | — |
 
@@ -264,7 +264,80 @@ which kept the first of a name, and supervised in turn.
    on the base the direct path handed every occurrence on, the trampoline the
    first one's value, and `PATH` was the one not searched.
 
+## Amendment 2026-11-11 — `ExitValue.Usage` is carried by value (#1136)
+
+`ExitValue.Usage` was a `*UsageValue` (#1090), nil where the platform fills no
+counters. A reaper sweep that reports an orphan to `WithOnExit` converts its
+status with `childwait.StatusValue.Exit`, and that pointer was the one heap
+allocation of a collection: #1136 asks for none per collected child with an
+observer. Pointing into the sweep's own buffer would allocate nothing, but an
+observer that kept the event would see the next child's counters in it.
+
+1. **`Usage UsageValue`, and `UsageValue.Known`.** The counters travel by
+   value; `Known` says whether the platform filled them — false on illumos,
+   Solaris and Windows, where they read zero, so an unmeasured usage is still
+   never read as an idle process. `childwait.UsageOf` returns the value. A
+   published shape changes, which v0 permits (ADR 0040): a caller that tested
+   `Usage != nil` tests `Usage.Known`.
+2. **Nothing aliases.** An `ExitValue` copied, memoised by `Wait` or kept by an
+   observer owns its counters; no later collection changes them.
+3. **The hand-over's wire is unchanged.** `proc/service` writes the counters'
+   record exactly when `Known` is set, and a record read back sets it.
+4. **Consequences.** `ExitValue` grows by 56 bytes, to 112, so `Success`
+   takes a pointer receiver: a value receiver would copy it per question
+   (ktn's `KTN-VAR-BIGSTRUCT`). A call on an addressable value is unchanged;
+   `ExitValue{}.Success()` on a temporary no longer compiles. The alloc lane's
+   `TestReapOnceAllocatesNothingPerCollectedChild` releases holders of the test
+   one at a time and sweeps each up with `WithOnExit` wired: 8 collected
+   children, 0 allocations, where the base counted 8, all in `UsageOf`.
+
+## Amendment 2026-11-11 — SIGINT reaches a Windows group as CTRL_BREAK (#933)
+
+#933 asked that `SignalGroup(SIGINT)` on a `Setpgid` child be observed as
+`CTRL_C_EVENT`. Windows cannot do it: `GenerateConsoleCtrlEvent(CTRL_C_EVENT,
+pgid)` with a group id succeeds and no process of that group receives the
+event, and a group created with `CREATE_NEW_PROCESS_GROUP` starts with Ctrl-C
+ignored. The mapping shipped — CTRL_C for SIGINT, in `proc/exec` and in
+`proc/signal`'s `Relay` — therefore delivered nothing, and reported success.
+
+1. **Every signal a group can honour is CTRL_BREAK**: SIGINT, SIGTERM, SIGHUP
+   and SIGQUIT, in `exec.consoleEvent` and in `Relay`'s group delivery. CTRL_C
+   is never sent. SIGKILL stays TerminateProcess; a child without `Setpgid`
+   keeps the leader-only path.
+2. **What the criterion keeps.** A Go child reads CTRL_BREAK as `os.Interrupt`
+   — the value a Unix Go child reads for SIGINT — so `SignalGroup(SIGINT)` is
+   observed as an interrupt and the child, which handles it, keeps running. A
+   program with its own console handler that tells CTRL_C from CTRL_BREAK sees
+   CTRL_BREAK; none can see a CTRL_C sent to its group alone.
+3. **Consequences.** `TestConsoleEventIsBreakForEveryGroupSignal`,
+   `TestWindowsSignalGroupInterruptIsObserved` and
+   `TestRelayInterruptReachesAGroupWindows` run on the Windows lane of
+   e2e-cross, the two helpers skipping on a host without a console.
+
+## Amendment 2026-11-11 — `StdioPTY` on OpenBSD (#934)
+
+The verdict table refused `StdioPTY` on OpenBSD on the belief that pinsyscalls
+(OpenBSD 7.5) left `PTMGET` out of the standard library's reach. It does not:
+the standard library's `syscall.Syscall` on OpenBSD reroutes `SYS_IOCTL` to
+libc's `ioctl` (`syscallInternal` in `syscall/syscall_openbsd.go`, Go issue
+63900), the call pinsyscalls admits. Only `RawSyscall` answers ENOSYS there.
+
+1. **ptm(4).** `/dev/ptm` opened close-on-exec, one `PTMGET`
+   (`_IOR('t', 1, struct ptmget)`, `0x40287401`) through `ioctlFile`, which the
+   kernel answers with both sides already open; the two descriptors marked
+   close-on-exec under `syscall.ForkLock` and the master made non-blocking, as
+   FreeBSD's `posix_openpt` one is. `TIOCSWINSZ` and `TIOCGWINSZ` take the same
+   route. No `golang.org/x/sys`, no cgo, no `go:linkname` (ADR 0156).
+2. **Proof.** `Test_Start_onAPseudoTerminal` and `Test_Terminal_Resize` now
+   build for OpenBSD and run on the `bsd` lane of e2e-cross;
+   `Test_ptmget_layout` pins the hand-written struct and request.
+   `Test_Start_ptyRefused` keeps NetBSD, DragonFly, illumos and Solaris.
+3. **The capability row follows.** `pkg/v1/proc`'s `CapPTY` names OpenBSD
+   beside Linux, darwin and FreeBSD, in `capabilityGOOS` and in the matrix of
+   the package's doc: `TestSupportedIsTheEnginesAnswer` refused the row that
+   still said ❌ while the engine answered on the `bsd` lane.
+
 ## References
 
-- Issues #928, #929, #931, #933, #934, #935, #940, #943, #1088, #1089, #1090, #1091; #728, #738 (amendments)
+- Issues #928, #929, #931, #933, #934, #935, #940, #943, #1088, #1089, #1090, #1091; #728, #738, #933, #934, #1136 (amendments)
 - `internal/service/proc/exec/CLAUDE.md`, `BENCH.md`; `internal/service/proc/childwait/BENCH.md`

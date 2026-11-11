@@ -30,15 +30,21 @@ type ExitValue struct {
 	CoreDumped bool
 	// Usage is the rest of wait4's resource accounting — page faults, block I/O
 	// and context switches — read from the same rusage as UserTime and MaxRSS.
-	// It is nil where the platform does not supply it (illumos, Solaris and
+	// It is carried by value, so building an ExitValue allocates nothing and
+	// one an observer keeps is never changed by a later collection. Its Known
+	// is false where the platform does not supply it (illumos, Solaris and
 	// Windows).
-	Usage *UsageValue
+	Usage UsageValue
 }
 
 // UsageValue is the resource accounting wait4 returns beside CPU time and peak
 // RSS: the page faults, block I/O operations and context switches of the
 // finished process. It is the value ExitValue.Usage carries.
 type UsageValue struct {
+	// Known reports whether the platform filled the counters. It is false on
+	// illumos, Solaris and Windows, where every counter reads zero, so a usage
+	// nobody measured is never read as an idle process.
+	Known bool
 	// MinorFaults counts the page faults served without I/O (ru_minflt).
 	MinorFaults uint64
 	// MajorFaults counts the page faults that needed I/O (ru_majflt).
@@ -53,8 +59,10 @@ type UsageValue struct {
 	InvoluntaryCtxSw uint64
 }
 
-// Success reports whether the process exited normally with status zero.
-func (e ExitValue) Success() bool {
+// Success reports whether the process exited normally with status zero. Its
+// receiver is a pointer: an ExitValue carries Usage by value, past the size
+// worth copying for a question.
+func (e *ExitValue) Success() bool {
 	//: a clean exit is a normal (non-signalled) termination with status zero.
 	return !e.Signaled && e.Code == 0
 }

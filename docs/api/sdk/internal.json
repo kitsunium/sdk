@@ -1679,7 +1679,7 @@
       "dir": "service/proc/exec",
       "layer": "service",
       "family": "proc",
-      "doc": "Package exec — Unix best-effort post-start attributes: scheduling priority\n(Nice), OOM-killer bias (OOMScoreAdj). Each is applied after fork/exec and\nsurfaces a typed error when the host refuses, rather than silently dropping a\nrequested field.\n\nPackage exec — Linux pre-exec cgroup v2 placement. When a Spec sets\nCgroupPath, the child must join that control group BEFORE it execs the target,\nso the controller limits (memory.max, pids.max, …) bind from the first\ninstruction rather than after a post-spawn Group.Add(pid) race. The parent\nvalidates the path up front (validateCgroupPath); the trampoline then writes\nits own pid into <path>/cgroup.procs (applyCgroupPlacement) between the rlimit\nstep and execve. cgroups are Linux-only, so this file is the only place that\ntouches them; the !linux sibling rejects a non-empty path as UnsupportedPlatform.\n\nPackage exec — cgroup placement on Unix platforms that are NOT Linux (the\nBSDs, Darwin). cgroup v2 is a Linux mechanism with no portable equivalent, so\na non-empty Spec.CgroupPath is rejected up front with UnsupportedPlatform\nrather than silently ignored — silently dropping the placement would run the\ntarget unconfined, the exact failure the feature exists to prevent. The\ntrampoline never reaches applyCgroupPlacement here because validateCgroupPath\nfails the spawn first; it is defined only to keep the unix build self-contained.\n\nPackage exec — Windows cgroup-placement guard. A Spec.CgroupPath names a\ncgroup v2 directory, a Linux-only concept; Windows confines via Job Object\nassignment through the cgroup port (a handle, not a path), so a non-empty path\nat spawn has no meaning here and is rejected with the uniform sentinel.\n\nPackage exec — Unix credential resolution: maps Spec.User/Group/Groups (names\nor numeric ids) to a syscall.Credential via os/user, the systemd\nUser=/Group=/SupplementaryGroups= analogue.\n\nPackage exec — the keystone spawn primitive: turns a coreproc.Spec into a\nrunning, supervised process via fork/exec with credentials, a private process\ngroup/session, and best-effort scheduling attributes.\n\nThe platform-portable surface is Start; the concrete fork/exec lives in\nexec_unix.go (every Unix GOOS) with a degrading no-op in exec_other.go so the\npackage compiles on every target. Errors are the central coreproc sentinels,\nwrapped (never re-Defined) with errs.Wrap.\n\nPackage exec — the Unix spawn: validates the Spec, resolves credentials,\nbuilds the SysProcAttr (Setpgid/Setsid/Credential), forks/execs via\nos.StartProcess, then applies best-effort scheduling attributes. Returns a\n*Handle satisfying the coreproc.Process port.\n\nPackage exec — the Windows spawn primitive. Start turns a Spec into a running,\nsupervised process via os.StartProcess (CreateProcess under the hood) and\nreturns a coreproc.Process handle. Stdio (inherit/null/capture) reuses the\nportable stdioState; Setpgid maps to a new console process group so a later\nCTRL_BREAK can target the child. The Unix-only Spec fields — rlimits, umask,\nnice/oom, credentials, ExtraFiles, a cgroup path — have no Windows equivalent\nin this layer (resource confinement is the Job Object backend's job, applied at\nthe cgroup port), so they are rejected up front with the uniform sentinel\nrather than silently dropped.\n\nPackage exec — the process-handle value: a Unix supervision handle\nimplementing the coreproc.Process port over an *os.Process, with group-aware\nSignal/Stop and a once-only Wait that captures exit status plus wait4 rusage.\nThe concrete type is unexported; Start returns it as the coreproc.Process\ninterface.\n\nPackage exec — the Windows process-handle value implementing the\ncoreproc.Process port over an *os.Process. Windows has no Unix process groups\nor wait4 rusage, so SignalGroup degrades to the leader and the ExitValue\ncarries the exit code + CPU times the os layer exposes (no terminating signal,\nno MaxRSS). The concrete type is unexported; Start returns it as the interface.\n\nPackage exec — the parent<->trampoline handshake pipe. The re-exec trampoline\n(trampoline_unix.go) applies rlimits/umask in a forked child before exec'ing\nthe real target; if that application fails, or the execve itself fails, the\nchild exits with a distinct status — but Start could not otherwise tell that\napart from a legitimate target exit of the same code. This pipe closes the gap:\nthe child inherits the write end as handshakeFD and reports a one-byte status\nthrough it, so Start surfaces a typed RlimitFailed / SpawnFailed instead of a\nsilent spawn. It is the same self-pipe + close-on-exec trick os/exec uses for\nits own errpipe: a clean execve closes the fd (the parent reads EOF = success),\na failure writes a status byte first.\n\nPackage exec — spawn-time resource confinement via a Win32 Job Object: the\nWindows realisation of a Spec's rlimits. A child requesting a mappable Resource\nis assigned, right after spawn, to a Job Object carrying the limit, so the\nrlimit \"grafts onto\" the spawn (the cgroup port is the standalone equivalent).\nkernel32 is bound directly (syscall.NewLazyDLL, ABI cited, no x/sys).\n\nMappable: ResourceAS/ResourceData → ProcessMemoryLimit; ResourceNProc →\nActiveProcessLimit. Every other Resource (NoFile/Core/FSize/Stack/MemLock) has\nno Job Object analogue and is rejected with UnknownResource before the spawn,\nhonouring the no-silent-field-loss rule.\n\nPackage exec — Unix umask / rlimit validation for the spawn. The Go runtime\nexposes no SysProcAttr hook to run setrlimit(2)/umask(2) in the child between\nfork and exec, so Start honours both via the re-exec trampoline\n(trampoline_unix.go): a Spec requesting a mapped Rlimit or a Umask is spawned\nthrough a self-invocation that applies the limits then execs the target. This\nvalidator therefore only rejects a Resource with no platform RLIMIT_* mapping\n(the SDK's \"no silent field loss\" rule) — every mappable field is honoured.\n\nPackage exec — RLIMIT_AS mapping for the platforms whose stdlib syscall exports\nit (Linux, Darwin, FreeBSD, NetBSD, DragonFly). OpenBSD has no address-space\nrlimit — RLIMIT_AS is absent from its kernel ABI — so it provides the no-op in\nlimittable_openbsd.go instead, leaving ResourceAS unmapped (UnknownResource).\n\nPackage exec — OpenBSD has no address-space rlimit (RLIMIT_AS is absent from\nits kernel ABI), so it adds no resources beyond the common Unix set. ResourceAS\ntherefore stays unmapped on OpenBSD and a Spec requesting it surfaces the typed\nUnknownResource — the honest \"this platform cannot set that limit\" answer,\nrather than a build failure on the missing constant.\n\nPackage exec — Unix Resource→RLIMIT_* table. Only the constants the stdlib\nsyscall package exports are mapped; RLIMIT_NPROC and RLIMIT_MEMLOCK live in\ngolang.org/x/sys (banned here), so those resources stay unmapped and surface\nUnknownResource rather than a wrong limit. The address-space limit (RLIMIT_AS)\nis present on every supported target EXCEPT OpenBSD, so it is added by a\nbuild-tagged addPlatformLimits (limittable_as.go / limittable_openbsd.go)\nrather than referenced here — that keeps this file compiling on OpenBSD.\n\nPackage exec — resolving a bare executable name through the PATH the child\nwill run with.\n\nos.StartProcess does not search PATH: it hands its path to execve (or to\nCreateProcess) as written, so a bare \"go\" names a file in the current\ndirectory and fails with ENOENT. The port documents Spec.Path as \"absolute\nor PATH-resolvable\", which is what os/exec.Command gives a Go programmer, so\nthe resolution happens here, once, before either spawn path — the direct\nfork/exec and the limits trampoline, which execs the target itself.\n\nPackage exec — the Unix spellings of a PATH search: one candidate per\ndirectory, executable when any execute bit is set, variable names\ncase-sensitive.\n\nPackage exec — the Windows spellings of a PATH search: a name is tried with\neach PATHEXT extension unless it already carries one, a regular file is\nrunnable by its extension, and variable names are case-insensitive (\"Path\"\nis the usual spelling there).\n\nPackage exec — the peak-RSS unit: peakKiB turns a raw ru_maxrss into the KiB\nthe port documents, passing a kilobyte figure through and converting darwin's\nbytes rounding up. It is platform-neutral so its arithmetic is tested on every\nGOOS.\n\nPackage exec — peak-RSS read on a 32-bit GOARCH, where Rusage.Maxrss is int32\nand is widened to the int64 the port expects (see maxrss_rss64_unix.go for the\n64-bit counterpart).\n\nPackage exec — peak-RSS read on a 64-bit GOARCH, where Rusage.Maxrss is\nalready int64 and needs no widening cast (see maxrss_rss32_unix.go for the\n32-bit counterpart).\n\nPackage exec — darwin's ru_maxrss unit: its getrusage(2) and wait4(2) report\nbytes, so 1024 of them make one KiB. The darwin constraint also holds for\nGOOS=ios.\n\nPackage exec — the ru_maxrss unit of every other Unix: Linux and the BSDs\nreport kilobytes, so the figure passes through; illumos and Solaris define it\nin pages and leave it 0.\n\nPackage exec — Unix procfs writer: a tiny os.WriteFile shim used to set\n/proc/<pid>/oom_score_adj, isolated so the platform-specific path handling\nstays out of the attribute logic.\n\nPackage exec — per-process stdio wiring. buildStdio turns a Spec's Stdio mode\ninto the three *os.File the spawn passes as ProcAttr.Files, plus the\nparent-side lifecycle: the child-side ends to close once the child owns its\ndups (so EOF propagates on exit) and the copier goroutines that drain capture\npipes into the caller's writers. StdioInherit (default) shares the parent's\nstreams; StdioNull discards via the null device; StdioCapture connects pipes.\n\nPackage exec — the re-exec trampoline that honours Spec.Rlimits and Spec.Umask\npre-exec. The Go runtime exposes no SysProcAttr hook to run setrlimit(2)/\numask(2) in the child between fork and exec, so when a Spec requests either,\nStart does NOT exec the target directly: it execs this very binary\n(os.Executable()) as a tiny trampoline, passing the real target + an encoded\nlimits payload in a sentinel env var. The init() below detects that var,\napplies the limits in the fresh process (before main), then execve()s the real\ntarget — so the target starts already under its rlimits/umask, with no cgo and\nno dependency. The limits persist across the execve.\n\nFootgun: any binary that imports this package and is run with the sentinel env\nvar set will re-exec. Start sets it only on the trampoline child and strips it\nbefore execve, so a normal run never has it; do not set it by hand.\n\nPackage exec — the sandbox (Spec.Sandbox, #728), a trampoline in two stages on\nLinux amd64 and arm64. Stage one is the clone: the namespaces, the mount\nnamespace unshared and made private, the user namespace's maps, and the exec of\n/proc/self/exe — never a path that may since hold another binary; without\nprocfs the spawn is refused. Stage two runs in the child before main, on its one\nlocked thread, from a payload sealed in a memfd (a version, a length, every\nseal): mounts, pivot_root, the Landlock paths, PR_CAPBSET_DROP, securebits,\nsetgroups/setresgid/setresuid through raw calls on that thread, capset and the\nambient set, the close-on-exec sweep, no_new_privs, landlock_restrict_self, and\nthe seccomp filter — an architecture check, x32 killed on amd64 — immediately\nbefore execve. A step that fails reports itself on the handshake pipe and the\ntarget never runs. The system call numbers and the seccomp name table are per\nGOARCH (sysnum_linux_amd64.go, sysnum_linux_arm64.go); every other platform\nrefuses the field before the fork.\n\nSpikes, not implemented: OpenBSD's pledge(2) execpromises and unveil(2), and\nWindows' restricted tokens and AppContainer. Verdict: neither maps onto the\nLinux steps — pledge restricts by promise, not by system call or path tree, and\nunveil does not survive execve; a restricted token or an AppContainer is set at\nCreateProcessAsUser, with no namespace, mount, Landlock or seccomp equivalent.\nBoth stay refused with UnsupportedPlatform until a value of their own is\ndesigned for them.\n\nPackage exec — central wrap helpers. Every syscall/stdlib cause is wrapped\nback onto a coreproc sentinel by restating that sentinel's exact\nReason/Public/Private/ExitCode here once, so call sites stay terse and the\nmagic exit-code literals live in a single named place.\n\nPackage exec — darwin's word on whether this process's unreaped child has\ndied: the probe zombieGroupRefused needs because darwin's kill(2) answers a\ngroup of zombies with EPERM.\n\nPackage exec — the zombie probe where the kernel needs none.\n"
+      "doc": "Package exec — Unix best-effort post-start attributes: scheduling priority\n(Nice), OOM-killer bias (OOMScoreAdj). Each is applied after fork/exec and\nsurfaces a typed error when the host refuses, rather than silently dropping a\nrequested field.\n\nPackage exec — Linux pre-exec cgroup v2 placement. When a Spec sets\nCgroupPath, the child must join that control group BEFORE it execs the target,\nso the controller limits (memory.max, pids.max, …) bind from the first\ninstruction rather than after a post-spawn Group.Add(pid) race. The parent\nvalidates the path up front (validateCgroupPath); the trampoline then writes\nits own pid into <path>/cgroup.procs (applyCgroupPlacement) between the rlimit\nstep and execve. cgroups are Linux-only, so this file is the only place that\ntouches them; the !linux sibling rejects a non-empty path as UnsupportedPlatform.\n\nPackage exec — cgroup placement on Unix platforms that are NOT Linux (the\nBSDs, Darwin). cgroup v2 is a Linux mechanism with no portable equivalent, so\na non-empty Spec.CgroupPath is rejected up front with UnsupportedPlatform\nrather than silently ignored — silently dropping the placement would run the\ntarget unconfined, the exact failure the feature exists to prevent. The\ntrampoline never reaches applyCgroupPlacement here because validateCgroupPath\nfails the spawn first; it is defined only to keep the unix build self-contained.\n\nPackage exec — Windows cgroup-placement guard. A Spec.CgroupPath names a\ncgroup v2 directory, a Linux-only concept; Windows confines via Job Object\nassignment through the cgroup port (a handle, not a path), so a non-empty path\nat spawn has no meaning here and is rejected with the uniform sentinel.\n\nPackage exec — Unix credential resolution: maps Spec.User/Group/Groups (names\nor numeric ids) to a syscall.Credential via os/user, the systemd\nUser=/Group=/SupplementaryGroups= analogue.\n\nPackage exec — the keystone spawn primitive: turns a coreproc.Spec into a\nrunning, supervised process via fork/exec with credentials, a private process\ngroup/session, and best-effort scheduling attributes.\n\nThe platform-portable surface is Start; the concrete fork/exec lives in\nexec_unix.go (every Unix GOOS) with a degrading no-op in exec_other.go so the\npackage compiles on every target. Errors are the central coreproc sentinels,\nwrapped (never re-Defined) with errs.Wrap.\n\nPackage exec — the Unix spawn: validates the Spec, resolves credentials,\nbuilds the SysProcAttr (Setpgid/Setsid/Credential), forks/execs via\nos.StartProcess, then applies best-effort scheduling attributes. Returns a\n*Handle satisfying the coreproc.Process port.\n\nPackage exec — the Windows spawn primitive. Start turns a Spec into a running,\nsupervised process via os.StartProcess (CreateProcess under the hood) and\nreturns a coreproc.Process handle. Stdio (inherit/null/capture) reuses the\nportable stdioState; Setpgid maps to a new console process group so a later\nCTRL_BREAK can target the child. The Unix-only Spec fields — rlimits, umask,\nnice/oom, credentials, ExtraFiles, a cgroup path — have no Windows equivalent\nin this layer (resource confinement is the Job Object backend's job, applied at\nthe cgroup port), so they are rejected up front with the uniform sentinel\nrather than silently dropped.\n\nPackage exec — the process-handle value: a Unix supervision handle\nimplementing the coreproc.Process port over an *os.Process, with group-aware\nSignal/Stop and a once-only Wait that captures exit status plus wait4 rusage.\nThe concrete type is unexported; Start returns it as the coreproc.Process\ninterface.\n\nPackage exec — the Windows process-handle value implementing the\ncoreproc.Process port over an *os.Process. Windows has no Unix process groups\nor wait4 rusage, so SignalGroup sends a Setpgid child's console group\nCTRL_BREAK and degrades to the leader without one, and the ExitValue\ncarries the exit code + CPU times the os layer exposes (no terminating signal,\nno MaxRSS). The concrete type is unexported; Start returns it as the interface.\n\nPackage exec — the parent<->trampoline handshake pipe. The re-exec trampoline\n(trampoline_unix.go) applies rlimits/umask in a forked child before exec'ing\nthe real target; if that application fails, or the execve itself fails, the\nchild exits with a distinct status — but Start could not otherwise tell that\napart from a legitimate target exit of the same code. This pipe closes the gap:\nthe child inherits the write end as handshakeFD and reports a one-byte status\nthrough it, so Start surfaces a typed RlimitFailed / SpawnFailed instead of a\nsilent spawn. It is the same self-pipe + close-on-exec trick os/exec uses for\nits own errpipe: a clean execve closes the fd (the parent reads EOF = success),\na failure writes a status byte first.\n\nPackage exec — spawn-time resource confinement via a Win32 Job Object: the\nWindows realisation of a Spec's rlimits. A child requesting a mappable Resource\nis assigned, right after spawn, to a Job Object carrying the limit, so the\nrlimit \"grafts onto\" the spawn (the cgroup port is the standalone equivalent).\nkernel32 is bound directly (syscall.NewLazyDLL, ABI cited, no x/sys).\n\nMappable: ResourceAS/ResourceData → ProcessMemoryLimit; ResourceNProc →\nActiveProcessLimit. Every other Resource (NoFile/Core/FSize/Stack/MemLock) has\nno Job Object analogue and is rejected with UnknownResource before the spawn,\nhonouring the no-silent-field-loss rule.\n\nPackage exec — Unix umask / rlimit validation for the spawn. The Go runtime\nexposes no SysProcAttr hook to run setrlimit(2)/umask(2) in the child between\nfork and exec, so Start honours both via the re-exec trampoline\n(trampoline_unix.go): a Spec requesting a mapped Rlimit or a Umask is spawned\nthrough a self-invocation that applies the limits then execs the target. This\nvalidator therefore only rejects a Resource with no platform RLIMIT_* mapping\n(the SDK's \"no silent field loss\" rule) — every mappable field is honoured.\n\nPackage exec — RLIMIT_AS mapping for the platforms whose stdlib syscall exports\nit (Linux, Darwin, FreeBSD, NetBSD, DragonFly). OpenBSD has no address-space\nrlimit — RLIMIT_AS is absent from its kernel ABI — so it provides the no-op in\nlimittable_openbsd.go instead, leaving ResourceAS unmapped (UnknownResource).\n\nPackage exec — OpenBSD has no address-space rlimit (RLIMIT_AS is absent from\nits kernel ABI), so it adds no resources beyond the common Unix set. ResourceAS\ntherefore stays unmapped on OpenBSD and a Spec requesting it surfaces the typed\nUnknownResource — the honest \"this platform cannot set that limit\" answer,\nrather than a build failure on the missing constant.\n\nPackage exec — Unix Resource→RLIMIT_* table. Only the constants the stdlib\nsyscall package exports are mapped; RLIMIT_NPROC and RLIMIT_MEMLOCK live in\ngolang.org/x/sys (banned here), so those resources stay unmapped and surface\nUnknownResource rather than a wrong limit. The address-space limit (RLIMIT_AS)\nis present on every supported target EXCEPT OpenBSD, so it is added by a\nbuild-tagged addPlatformLimits (limittable_as.go / limittable_openbsd.go)\nrather than referenced here — that keeps this file compiling on OpenBSD.\n\nPackage exec — resolving a bare executable name through the PATH the child\nwill run with.\n\nos.StartProcess does not search PATH: it hands its path to execve (or to\nCreateProcess) as written, so a bare \"go\" names a file in the current\ndirectory and fails with ENOENT. The port documents Spec.Path as \"absolute\nor PATH-resolvable\", which is what os/exec.Command gives a Go programmer, so\nthe resolution happens here, once, before either spawn path — the direct\nfork/exec and the limits trampoline, which execs the target itself.\n\nPackage exec — the Unix spellings of a PATH search: one candidate per\ndirectory, executable when any execute bit is set, variable names\ncase-sensitive.\n\nPackage exec — the Windows spellings of a PATH search: a name is tried with\neach PATHEXT extension unless it already carries one, a regular file is\nrunnable by its extension, and variable names are case-insensitive (\"Path\"\nis the usual spelling there).\n\nPackage exec — the peak-RSS unit: peakKiB turns a raw ru_maxrss into the KiB\nthe port documents, passing a kilobyte figure through and converting darwin's\nbytes rounding up. It is platform-neutral so its arithmetic is tested on every\nGOOS.\n\nPackage exec — peak-RSS read on a 32-bit GOARCH, where Rusage.Maxrss is int32\nand is widened to the int64 the port expects (see maxrss_rss64_unix.go for the\n64-bit counterpart).\n\nPackage exec — peak-RSS read on a 64-bit GOARCH, where Rusage.Maxrss is\nalready int64 and needs no widening cast (see maxrss_rss32_unix.go for the\n32-bit counterpart).\n\nPackage exec — darwin's ru_maxrss unit: its getrusage(2) and wait4(2) report\nbytes, so 1024 of them make one KiB. The darwin constraint also holds for\nGOOS=ios.\n\nPackage exec — the ru_maxrss unit of every other Unix: Linux and the BSDs\nreport kilobytes, so the figure passes through; illumos and Solaris define it\nin pages and leave it 0.\n\nPackage exec — Unix procfs writer: a tiny os.WriteFile shim used to set\n/proc/<pid>/oom_score_adj, isolated so the platform-specific path handling\nstays out of the attribute logic.\n\nPackage exec — per-process stdio wiring. buildStdio turns a Spec's Stdio mode\ninto the three *os.File the spawn passes as ProcAttr.Files, plus the\nparent-side lifecycle: the child-side ends to close once the child owns its\ndups (so EOF propagates on exit) and the copier goroutines that drain capture\npipes into the caller's writers. StdioInherit (default) shares the parent's\nstreams; StdioNull discards via the null device; StdioCapture connects pipes.\n\nPackage exec — the re-exec trampoline that honours Spec.Rlimits and Spec.Umask\npre-exec. The Go runtime exposes no SysProcAttr hook to run setrlimit(2)/\numask(2) in the child between fork and exec, so when a Spec requests either,\nStart does NOT exec the target directly: it execs this very binary\n(os.Executable()) as a tiny trampoline, passing the real target + an encoded\nlimits payload in a sentinel env var. The init() below detects that var,\napplies the limits in the fresh process (before main), then execve()s the real\ntarget — so the target starts already under its rlimits/umask, with no cgo and\nno dependency. The limits persist across the execve.\n\nFootgun: any binary that imports this package and is run with the sentinel env\nvar set will re-exec. Start sets it only on the trampoline child and strips it\nbefore execve, so a normal run never has it; do not set it by hand.\n\nPackage exec — the sandbox (Spec.Sandbox, #728), a trampoline in two stages on\nLinux amd64 and arm64. Stage one is the clone: the namespaces, the mount\nnamespace unshared and made private, the user namespace's maps, and the exec of\n/proc/self/exe — never a path that may since hold another binary; without\nprocfs the spawn is refused. Stage two runs in the child before main, on its one\nlocked thread, from a payload sealed in a memfd (a version, a length, every\nseal): mounts, pivot_root, the Landlock paths, PR_CAPBSET_DROP, securebits,\nsetgroups/setresgid/setresuid through raw calls on that thread, capset and the\nambient set, the close-on-exec sweep, no_new_privs, landlock_restrict_self, and\nthe seccomp filter — an architecture check, x32 killed on amd64 — immediately\nbefore execve. A step that fails reports itself on the handshake pipe and the\ntarget never runs. The system call numbers and the seccomp name table are per\nGOARCH (sysnum_linux_amd64.go, sysnum_linux_arm64.go); every other platform\nrefuses the field before the fork.\n\nSpikes, not implemented: OpenBSD's pledge(2) execpromises and unveil(2), and\nWindows' restricted tokens and AppContainer. Verdict: neither maps onto the\nLinux steps — pledge restricts by promise, not by system call or path tree, and\nunveil does not survive execve; a restricted token or an AppContainer is set at\nCreateProcessAsUser, with no namespace, mount, Landlock or seccomp equivalent.\nBoth stay refused with UnsupportedPlatform until a value of their own is\ndesigned for them.\n\nPackage exec — central wrap helpers. Every syscall/stdlib cause is wrapped\nback onto a coreproc sentinel by restating that sentinel's exact\nReason/Public/Private/ExitCode here once, so call sites stay terse and the\nmagic exit-code literals live in a single named place.\n\nPackage exec — darwin's word on whether this process's unreaped child has\ndied: the probe zombieGroupRefused needs because darwin's kill(2) answers a\ngroup of zombies with EPERM.\n\nPackage exec — the zombie probe where the kernel needs none.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/proc/internal/bsdabi",
@@ -1767,7 +1767,7 @@
       "dir": "service/proc/signal",
       "layer": "service",
       "family": "proc",
-      "doc": "Package signal — Unix Relay: forwards each received signal to a pid or process\ngroup via kill(2), where a negative Target addresses the group whose id is its\nabsolute value.\n\nPackage signal — Windows Relay. There is no kill(2) on Windows, so signal\nforwarding maps onto the two native delivery primitives, bound directly from\nkernel32 (syscall.NewLazyDLL, ABI cited, no golang.org/x/sys):\n\n  - a process-group target (Target < -1) → GenerateConsoleCtrlEvent, the\n    console control event that reaches every process in the group (CTRL_C for\n    SIGINT, CTRL_BREAK otherwise — the only event that can target one group);\n  - a single-pid target (Target > 0) → OpenProcess + TerminateProcess, the\n    reliable per-process delivery (Windows has no per-pid interrupt).\n\nThe reserved targets 0 and -1 are refused before any delivery, exactly as the\nUnix build does, so a zero-value Target never fans out.\n\nPackage signal — typed signal toolbox over os/signal: Notify subscribes to a\nset of signals on a leak-free channel, and Relay forwards received signals to\na process or process group. The kill(2) path is platform-split into\nrelay_unix.go / relay_other.go; this file holds the cross-platform Notify and\nthe Target value, since os/signal itself is portable.\n"
+      "doc": "Package signal — Unix Relay: forwards each received signal to a pid or process\ngroup via kill(2), where a negative Target addresses the group whose id is its\nabsolute value.\n\nPackage signal — Windows Relay. There is no kill(2) on Windows, so signal\nforwarding maps onto the two native delivery primitives, bound directly from\nkernel32 (syscall.NewLazyDLL, ABI cited, no golang.org/x/sys):\n\n  - a process-group target (Target < -1) → GenerateConsoleCtrlEvent, the\n    console control event that reaches every process in the group: CTRL_BREAK\n    for every signal, SIGINT included — the only event that can target one\n    group, which a Go process reads as os.Interrupt;\n  - a single-pid target (Target > 0) → OpenProcess + TerminateProcess, the\n    reliable per-process delivery (Windows has no per-pid interrupt).\n\nThe reserved targets 0 and -1 are refused before any delivery, exactly as the\nUnix build does, so a zero-value Target never fans out.\n\nPackage signal — typed signal toolbox over os/signal: Notify subscribes to a\nset of signals on a leak-free channel, and Relay forwards received signals to\na process or process group. The kill(2) path is platform-split into\nrelay_unix.go / relay_other.go; this file holds the cross-platform Notify and\nthe Target value, since os/signal itself is portable.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/proc/systemd/listen",
@@ -15236,6 +15236,31 @@
       "family": "crypto"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/crypto.Binder",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/crypto",
+      "name": "Binder",
+      "spelled": "interface{Bind(key Key) (sealer Sealer, err error)}",
+      "canonical": "interface{Bind(key github.com/kitsunium/sdk/internal/core/crypto.Key) (sealer github.com/kitsunium/sdk/internal/core/crypto.Sealer, err error)}",
+      "doc": "Binder is the sibling of [AEAD] (ADR 0039) for a scheme that can bind a key\nonce and seal under it many times: [NewSealer] asks the registered scheme for\nit, and wraps a scheme without it.\n",
+      "file": "core/crypto/gen_ports.go",
+      "layer": "core",
+      "family": "crypto"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/crypto.Binder.Bind",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/crypto",
+      "name": "Bind",
+      "recv": "Binder",
+      "spelled": "func(key Key) (sealer Sealer, err error)",
+      "canonical": "func(key github.com/kitsunium/sdk/internal/core/crypto.Key) (sealer github.com/kitsunium/sdk/internal/core/crypto.Sealer, err error)",
+      "doc": "Bind builds the scheme's cipher from key and returns the Sealer that holds\nit, or InvalidKey for a key the cipher refuses.\n",
+      "file": "core/crypto/gen_ports.go",
+      "layer": "core",
+      "family": "crypto"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/crypto.CodeAgreementFailed",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/crypto",
@@ -16131,6 +16156,18 @@
       "family": "crypto"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/crypto.NewSealer",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/core/crypto",
+      "name": "NewSealer",
+      "spelled": "func(name Algorithm, key Key) (sealer Sealer, err error)",
+      "canonical": "func(name github.com/kitsunium/sdk/internal/core/crypto.Algorithm, key github.com/kitsunium/sdk/internal/core/crypto.Key) (sealer github.com/kitsunium/sdk/internal/core/crypto.Sealer, err error)",
+      "doc": "NewSealer binds key to the AEAD registered as name and returns a [Sealer]\nthat seals under it many times, with the cipher built once (#813). A scheme\nthat implements [Binder] builds it in Bind; any other is wrapped so each\nSealTo still calls its Seal. A name with no registered scheme returns\nUnknownAlgorithm; a key the scheme refuses, its error.\n\nThe Sealer keeps what the scheme derived from key — for AES-GCM its round\nkeys — for as long as it is referenced: Key.Zeroize does not reach it, so a\ncaller that zeroizes the key drops the Sealer with it.\n\nIFACE-PLUGIN: the scheme's own Sealer comes back behind the port, its\nconcrete type unexported in the scheme's package.\n",
+      "file": "core/crypto/seal.go",
+      "layer": "core",
+      "family": "crypto"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/crypto.Open",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/core/crypto",
@@ -16352,6 +16389,31 @@
       "canonical": "func(name github.com/kitsunium/sdk/internal/core/crypto.Algorithm, key github.com/kitsunium/sdk/internal/core/crypto.Key, dst io.Writer, aad []byte) (sealed io.WriteCloser, err error)",
       "doc": "SealStream wraps dst so writes are sealed under key with aad by the\nStreamSealer registered as name. Streaming extends the AEAD domain, so a name\nwith no registered sealer returns the shared UnknownAlgorithm sentinel; a\nscheme construction fault propagates unchanged.\n",
       "file": "core/crypto/stream_registry.go",
+      "layer": "core",
+      "family": "crypto"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/crypto.Sealer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/crypto",
+      "name": "Sealer",
+      "spelled": "interface{SealTo(dst []byte, plaintext []byte, aad []byte) (box []byte, err error)}",
+      "canonical": "interface{SealTo(dst []byte, plaintext []byte, aad []byte) (box []byte, err error)}",
+      "doc": "Sealer is an AEAD scheme bound to one key, which [NewSealer] returns: the\nbox SealTo appends is the one the scheme's Seal returns for that key —\nthe same framing, a fresh random nonce each call — so Open opens it.\nImplementations MUST be safe for concurrent use.\n",
+      "file": "core/crypto/gen_ports.go",
+      "layer": "core",
+      "family": "crypto"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/crypto.Sealer.SealTo",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/crypto",
+      "name": "SealTo",
+      "recv": "Sealer",
+      "spelled": "func(dst []byte, plaintext []byte, aad []byte) (box []byte, err error)",
+      "canonical": "func(dst []byte, plaintext []byte, aad []byte) (box []byte, err error)",
+      "doc": "SealTo encrypts plaintext, binding aad, appends the self-framed box\n(Version + id + random nonce + ciphertext||tag) to dst and returns the\nextended slice: no allocation when dst has the room. dst and plaintext\nmust not overlap. A host entropy fault returns EntropyFailed, and dst\nunextended.\n",
+      "file": "core/crypto/gen_ports.go",
       "layer": "core",
       "family": "crypto"
     },
@@ -23006,6 +23068,56 @@
       },
       "doc": "IndexUnknown refuses a lookup in an index the store never declared.\n",
       "file": "core/data/docstore/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.IntoGetter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "IntoGetter",
+      "spelled": "[T any] interface{GetInto(key string, dst *T) error}",
+      "canonical": "[T any] interface{GetInto(key string, dst *T) error}",
+      "doc": "IntoGetter is a read into a value the caller owns, on a store whose calls\ntake no context: the sibling of [Collection] the file engine implements\nbeside it (#813). A caller that reads in a loop keeps one value and\ndecodes each document into it, rather than receiving a fresh one per\nread.\n",
+      "file": "core/data/docstore/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.IntoGetter[...].GetInto",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "GetInto",
+      "recv": "IntoGetter",
+      "spelled": "func(key string, dst *T) error",
+      "canonical": "func(key string, dst *T) error",
+      "doc": "GetInto decodes the document stored under key into dst, which it\nfirst sets to T's zero value: dst ends up equal to what Get returns,\nsharing nothing with the store or with what dst held before — no\nfield of an earlier document survives, and no slice, map or pointer\ndst held is written through. DOCUMENT_NOT_FOUND, STORE_CLOSED and\nDOCUMENT_UNDECODABLE as Get; on any error dst holds T's zero value.\n",
+      "file": "core/data/docstore/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.IntoGetterContext",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "IntoGetterContext",
+      "spelled": "[T any] interface{GetInto(ctx context.Context, key string, dst *T) error}",
+      "canonical": "[T any] interface{GetInto(ctx context.Context, key string, dst *T) error}",
+      "doc": "IntoGetterContext is [IntoGetter] with a context on every call: the\nsibling of [CollectionContext] the SQL engine implements beside it.\n",
+      "file": "core/data/docstore/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.IntoGetterContext[...].GetInto",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "GetInto",
+      "recv": "IntoGetterContext",
+      "spelled": "func(ctx context.Context, key string, dst *T) error",
+      "canonical": "func(ctx context.Context, key string, dst *T) error",
+      "doc": "GetInto is IntoGetter.GetInto under ctx, read in one statement on the\ntransaction ctx carries for the store's database, and on the pool\notherwise.\n",
+      "file": "core/data/docstore/gen_ports.go",
       "layer": "core",
       "family": "data"
     },
@@ -45012,8 +45124,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/proc",
       "name": "ExitValue",
-      "spelled": "struct{Code int; Signal Signal; Signaled bool; UserTime time.Duration; SystemTime time.Duration; MaxRSS int64; CoreDumped bool; Usage *UsageValue}",
-      "canonical": "struct{Code int; Signal github.com/kitsunium/sdk/internal/core/proc.Signal; Signaled bool; UserTime time.Duration; SystemTime time.Duration; MaxRSS int64; CoreDumped bool; Usage *github.com/kitsunium/sdk/internal/core/proc.UsageValue}",
+      "spelled": "struct{Code int; Signal Signal; Signaled bool; UserTime time.Duration; SystemTime time.Duration; MaxRSS int64; CoreDumped bool; Usage UsageValue}",
+      "canonical": "struct{Code int; Signal github.com/kitsunium/sdk/internal/core/proc.Signal; Signaled bool; UserTime time.Duration; SystemTime time.Duration; MaxRSS int64; CoreDumped bool; Usage github.com/kitsunium/sdk/internal/core/proc.UsageValue}",
       "fields": [
         {
           "name": "Code",
@@ -45052,8 +45164,8 @@
         },
         {
           "name": "Usage",
-          "type": "*UsageValue",
-          "doc": "Usage is the rest of wait4's resource accounting — page faults, block I/O\nand context switches — read from the same rusage as UserTime and MaxRSS.\nIt is nil where the platform does not supply it (illumos, Solaris and\nWindows).\n"
+          "type": "UsageValue",
+          "doc": "Usage is the rest of wait4's resource accounting — page faults, block I/O\nand context switches — read from the same rusage as UserTime and MaxRSS.\nIt is carried by value, so building an ExitValue allocates nothing and\none an observer keeps is never changed by a later collection. Its Known\nis false where the platform does not supply it (illumos, Solaris and\nWindows).\n"
         }
       ],
       "doc": "ExitValue is the immutable outcome of a finished process: its exit status, the\nsignal that terminated it (if any), and resource-usage accounting. It is the\nvalue returned by Process.Wait.\n",
@@ -45062,14 +45174,14 @@
       "family": "proc"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/core/proc.ExitValue.Success",
+      "id": "go:github.com/kitsunium/sdk/internal/core/proc.(*ExitValue).Success",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/core/proc",
       "name": "Success",
       "recv": "ExitValue",
       "spelled": "func() bool",
       "canonical": "func() bool",
-      "doc": "Success reports whether the process exited normally with status zero.\n",
+      "doc": "Success reports whether the process exited normally with status zero. Its\nreceiver is a pointer: an ExitValue carries Usage by value, past the size\nworth copying for a question.\n",
       "file": "core/proc/exit.go",
       "layer": "core",
       "family": "proc"
@@ -46972,7 +47084,7 @@
       "recv": "Process",
       "spelled": "func(sig Signal) error",
       "canonical": "func(sig github.com/kitsunium/sdk/internal/core/proc.Signal) error",
-      "doc": "SignalGroup delivers sig to the leader's entire process group (kill(-pgid,\nsig)), reaching forked grandchildren — the KillMode=control-group analogue.\nOn Windows a Setpgid child's console process group receives the matching\nconsole control event instead — CTRL_C for SIGINT, CTRL_BREAK for SIGTERM,\nSIGHUP and SIGQUIT — and SIGKILL, or any signal to a child without its own\ngroup, reaches the leader alone.\n",
+      "doc": "SignalGroup delivers sig to the leader's entire process group (kill(-pgid,\nsig)), reaching forked grandchildren — the KillMode=control-group analogue.\nOn Windows a Setpgid child's console process group receives CTRL_BREAK for\nSIGINT, SIGTERM, SIGHUP and SIGQUIT instead — the one console event Windows\ndelivers to a single group, which a Go child reads as os.Interrupt; CTRL_C\nnever reaches one group — and SIGKILL, or any signal to a child without its\nown group, reaches the leader alone.\n",
       "file": "core/proc/gen_ports.go",
       "layer": "core",
       "family": "proc"
@@ -48066,7 +48178,7 @@
       "spelled": "StdioMode",
       "canonical": "github.com/kitsunium/sdk/internal/core/proc.StdioMode",
       "value": "3",
-      "doc": "StdioPTY connects the child's stdin, stdout and stderr to the slave side of a\nnew pseudo-terminal, which becomes its controlling terminal in a new session;\nthe master is the handle's Terminal.TTY. Linux, darwin and FreeBSD; every\nother platform refuses it with UnsupportedPlatform before spawning.\n",
+      "doc": "StdioPTY connects the child's stdin, stdout and stderr to the slave side of a\nnew pseudo-terminal, which becomes its controlling terminal in a new session;\nthe master is the handle's Terminal.TTY. Linux, darwin, FreeBSD and OpenBSD;\nevery other platform refuses it with UnsupportedPlatform before spawning.\n",
       "file": "core/proc/stdio.go",
       "layer": "core",
       "family": "proc"
@@ -48246,9 +48358,14 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/proc",
       "name": "UsageValue",
-      "spelled": "struct{MinorFaults uint64; MajorFaults uint64; InBlock uint64; OutBlock uint64; VoluntaryCtxSw uint64; InvoluntaryCtxSw uint64}",
-      "canonical": "struct{MinorFaults uint64; MajorFaults uint64; InBlock uint64; OutBlock uint64; VoluntaryCtxSw uint64; InvoluntaryCtxSw uint64}",
+      "spelled": "struct{Known bool; MinorFaults uint64; MajorFaults uint64; InBlock uint64; OutBlock uint64; VoluntaryCtxSw uint64; InvoluntaryCtxSw uint64}",
+      "canonical": "struct{Known bool; MinorFaults uint64; MajorFaults uint64; InBlock uint64; OutBlock uint64; VoluntaryCtxSw uint64; InvoluntaryCtxSw uint64}",
       "fields": [
+        {
+          "name": "Known",
+          "type": "bool",
+          "doc": "Known reports whether the platform filled the counters. It is false on\nillumos, Solaris and Windows, where every counter reads zero, so a usage\nnobody measured is never read as an idle process.\n"
+        },
         {
           "name": "MinorFaults",
           "type": "uint64",
@@ -49867,7 +49984,7 @@
       "recv": "FileReceiver",
       "spelled": "func(buf []byte, max int) (n int, files []*os.File, err error)",
       "canonical": "func(buf []byte, max int) (n int, files []*os.File, err error)",
-      "doc": "RecvFiles reads one message into buf and the descriptors attached to it,\nat most max (refused at zero), each close-on-exec — not inheritable on\nWindows — and wrapped as an *os.File the caller owns and closes.\nDescriptors beyond max are closed by the kernel on Unix and in the\nsender's process on Windows, never leaked into this process;\nFDPassRefused with the reason \"truncated\" says so, beside the files that\nfit.\n",
+      "doc": "RecvFiles reads one message into buf and the descriptors attached to it,\nat most max (refused at zero), each close-on-exec — not inheritable on\nWindows — and wrapped as an *os.File the caller owns and closes.\nDescriptors beyond max are closed by the kernel on Unix and on Windows in\nthe sender's process — a socket, already the peer's, closed here —, never\nleaked into this process;\nFDPassRefused with the reason \"truncated\" says so, beside the files that\nfit.\n",
       "file": "core/proc/ipc/gen_ports.go",
       "layer": "core",
       "family": "proc"
@@ -49879,7 +49996,7 @@
       "name": "FileSender",
       "spelled": "interface{SendFiles(payload []byte, files ...*os.File) error}",
       "canonical": "interface{SendFiles(payload []byte, files ...*os.File) error}",
-      "doc": "FileSender is the sibling a private connection may offer (ADR 0039),\nasserted on Conn.Conn: open files passed to the peer's process with\nSCM_RIGHTS on Unix, and on Windows in a frame the receiver takes each\nhandle out of the sender's process from, with DuplicateHandle.\n",
+      "doc": "FileSender is the sibling a private connection may offer (ADR 0039),\nasserted on Conn.Conn: open files passed to the peer's process with\nSCM_RIGHTS on Unix, and on Windows in a frame the receiver takes each\nhandle out of the sender's process from, with DuplicateHandle — a socket\nby WSADuplicateSocketW for the peer's process and WSASocketW there, since\na socket is not duplicated as a handle.\n",
       "file": "core/proc/ipc/gen_ports.go",
       "layer": "core",
       "family": "proc"
@@ -75947,6 +76064,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).GetInto",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "GetInto",
+      "recv": "SQLStore",
+      "spelled": "func(ctx context.Context, key string, dst *T) error",
+      "canonical": "func(ctx context.Context, key string, dst *T) error",
+      "doc": "GetInto decodes the document stored under key into dst, as\ncore/data/docstore.IntoGetterContext says: dst set to T's zero value\nfirst, so it ends up equal to what Get returns and shares nothing with\nwhat it held. DocumentNotFound, StatementFailed or DocumentUndecodable as\nGet, dst zero then.\n",
+      "file": "service/data/docstore/sql_store.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).Insert",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
@@ -76485,6 +76615,19 @@
       "spelled": "func(key string) (T, error)",
       "canonical": "func(key string) (T, error)",
       "doc": "Get returns the document stored under key, or DocumentNotFound.\n",
+      "file": "service/data/docstore/docstore.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*Store[...]).GetInto",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "GetInto",
+      "recv": "Store",
+      "spelled": "func(key string, dst *T) error",
+      "canonical": "func(key string, dst *T) error",
+      "doc": "GetInto decodes the document stored under key into dst, as\ncore/data/docstore.IntoGetter says: dst set to T's zero value first, so\nit ends up equal to what Get returns and shares nothing with the store or\nwith what it held, without the fresh T Get returns. DocumentNotFound,\nStoreClosed or DocumentUndecodable as Get, dst zero then.\n",
       "file": "service/data/docstore/docstore.go",
       "layer": "service",
       "family": "data"
@@ -80920,6 +81063,57 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Arena",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "Arena",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "Arena hands out the attribute sets and the oneof values of one export from\na few slices sized once, instead of a slice per set and a pointer per value\n(#813): what Attrs and KeyValueOf allocate per point, an Arena allocates\nper export. What it hands out is exactly what Attrs and KeyValueOf would\nbuild — the same KeyValues, the same oneof case — so a tree built through\nit renders byte for byte the same. Each set is a full slice expression:\nan append to it never writes into the next. Not safe for concurrent use;\none export, one goroutine.\n",
+      "file": "service/observe/internal/otlp/arena.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.(*Arena).Attrs",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "Attrs",
+      "recv": "Arena",
+      "spelled": "func(attrs []coreotel.AttrValue) []KeyValue",
+      "canonical": "func(attrs []github.com/kitsunium/sdk/internal/core/observe/otel.AttrValue) []github.com/kitsunium/sdk/internal/service/observe/internal/otlp.KeyValue",
+      "doc": "Attrs is the package's Attrs, the KeyValues and their values taken\nfrom the arena. An empty set stays nil.\n",
+      "file": "service/observe/internal/otlp/arena.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.(*Arena).Double",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "Double",
+      "recv": "Arena",
+      "spelled": "func(v float64) *Double",
+      "canonical": "func(v float64) *github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Double",
+      "doc": "Double returns a pointer to v, held in the arena.\n",
+      "file": "service/observe/internal/otlp/arena.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.(*Arena).Int64",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "Int64",
+      "recv": "Arena",
+      "spelled": "func(v int64) *Int64",
+      "canonical": "func(v int64) *github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Int64",
+      "doc": "Int64 returns a pointer to v, held in the arena.\n",
+      "file": "service/observe/internal/otlp/arena.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Attrs",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
@@ -81185,6 +81379,18 @@
       "canonical": "func[R any](request R, failure *github.com/kitsunium/sdk/internal/kernel/errs.WrapParams) (doc []byte, err error)",
       "doc": "Marshal renders request — a signal's whole payload tree — as ONE OTLP/JSON\ndocument: HTML escaping DISABLED and no trailing newline, exactly the bytes\nthat go in the body of a POST.\n\nencoding/json escapes '<', '>' and '&' into their \\u00xx forms by default, a\ndefence for JSON embedded in a <script> element. An OTLP body never is, and\nOTel-conventional attributes carry URLs (url.full, http.route) whose query\nseparator is exactly '&' — so the default turns a readable payload into an\nunreadable one for no gain, and makes this SDK's bytes differ from every\nother OTLP producer's for identical input. json.Encoder is the only way to\nturn it off, and it appends a newline a single-document body must not carry.\n\nfailure is the CALLER'S: the wrap a rendering fault leaves under, with the\nsignal's EXPORT_FAILED code and wording. The fault is near-impossible —\nevery field of a payload tree is a Go primitive or one of the Marshalers in\nthis package — and it is still typed rather than swallowed.\n\nThe two signals no longer export through it: each renders its tree with the\nappenders (AppendString, AppendKey, the AppendJSON methods), which write\nthese same bytes into one buffer without reflection. Marshal stays the\nreference — encoding/json's own rendering — that every appender is tested\nagainst, byte for byte.\n",
       "file": "service/observe/internal/otlp/marshal.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.NewArena",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "NewArena",
+      "spelled": "func(attrs int, values int) *Arena",
+      "canonical": "func(attrs int, values int) *github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Arena",
+      "doc": "NewArena returns an Arena for one export of at most attrs attributes in\nall and values more oneof values (a point's asInt or asDouble), its slices\nsized up front. A count too small costs a slice grown, never a wrong\ntree.\n",
+      "file": "service/observe/internal/otlp/arena.go",
       "layer": "service",
       "family": "observe"
     },
@@ -85767,9 +85973,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/proc/childwait",
       "name": "UsageOf",
-      "spelled": "func(ru *syscall.Rusage) *coreproc.UsageValue",
-      "canonical": "func(ru *syscall.Rusage) *github.com/kitsunium/sdk/internal/core/proc.UsageValue",
-      "doc": "UsageOf reads the page-fault, block-I/O and context-switch counters of a\nwait4 rusage into ExitValue.Usage. Linux, darwin and the BSDs fill them; a\ncounter that reads negative is reported as zero, not wrapped.\n",
+      "spelled": "func(ru *syscall.Rusage) coreproc.UsageValue",
+      "canonical": "func(ru *syscall.Rusage) github.com/kitsunium/sdk/internal/core/proc.UsageValue",
+      "doc": "UsageOf reads the page-fault, block-I/O and context-switch counters of a\nwait4 rusage into ExitValue.Usage, Known set. Linux, darwin and the BSDs\nfill them; a counter that reads negative is reported as zero, not wrapped.\nThe value is returned, not a pointer: a collection converts it without\nallocating.\n",
       "file": "service/proc/childwait/usage_rusage_unix.go",
       "layer": "service",
       "family": "proc",
@@ -85790,9 +85996,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/proc/childwait",
       "name": "UsageOf",
-      "spelled": "func(_ *syscall.Rusage) *coreproc.UsageValue",
-      "canonical": "func(_ *syscall.Rusage) *github.com/kitsunium/sdk/internal/core/proc.UsageValue",
-      "doc": "UsageOf reports no counters on illumos and Solaris: their wait4 leaves the\nrusage counters unfilled, as it leaves ru_maxrss at 0, so the value is nil\nrather than a row of zeros that would read as an idle process.\n",
+      "spelled": "func(_ *syscall.Rusage) coreproc.UsageValue",
+      "canonical": "func(_ *syscall.Rusage) github.com/kitsunium/sdk/internal/core/proc.UsageValue",
+      "doc": "UsageOf reports no counters on illumos and Solaris: their wait4 leaves the\nrusage counters unfilled, as it leaves ru_maxrss at 0, so the value's Known\nis false rather than a row of zeros that would read as an idle process.\n",
       "file": "service/proc/childwait/usage_norusage_unix.go",
       "layer": "service",
       "family": "proc",

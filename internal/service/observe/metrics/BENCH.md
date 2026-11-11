@@ -276,6 +276,23 @@ Measured on: AMD EPYC 7351P 16-Core, 8 vCPU visible, 11 GiB RAM, Linux
 `perf/otlp-json`, 2026-10-23, benchtime 1s. Reproduce with
 `cd internal && GOWORK=off go test -run '^$' -bench EncodeOTLPJSON -benchmem -count=10 ./service/observe/metrics/`.
 
+### The tree from one arena (#813, 2026-11-11)
+
+The ~5 000 allocations left above are gone: `otlpMetricList` counts the
+snapshot's attributes and points (`otlpArenaSize`) and builds every point's
+attributes, `asInt`, `asDouble` and histogram `sum` from one `otlp.Arena`.
+Same box, base `b5285df65`, `-benchmem -count 6`, benchstat:
+
+| Row | allocs/op | B/op | sec/op |
+|---|---|---|---|
+| `EncodeOTLPJSON_1000Sums` | 5 045 → **48** (−99 %) | 591 → 644 KiB (+9 %) | 901 → 675 µs (−25 %) |
+| `EncodeOTLPJSON_1000Histograms` | 7 045 → 2 049 (−71 %) | 1.08 → 1.16 MiB (+8 %) | 3.37 → 2.87 ms (−15 %) |
+
+A histogram point keeps its two bucket slices. The budget `allocs: 22` on
+`EncodeOTLPJSON` (`design/sdk.yaml`, fixture `perfEncodeOTLPJSON`: one name of
+eight series, 59 before) holds the count in the alloc lane; it does not grow
+with the points.
+
 ## The /metrics handler (#1020)
 
 `BenchmarkHandler_1000Series` is one GET through `NewPrometheusHandler` over a

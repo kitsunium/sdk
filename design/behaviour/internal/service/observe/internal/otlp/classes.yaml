@@ -196,6 +196,15 @@ files:
       - ResourceMessage.AppendJSON
       - ScopeMessage.AppendJSON
     name: append.go
+  - decls:
+      - Arena
+      - NewArena
+      - (*Arena).Attrs
+      - (*Arena).keyValue
+      - (*Arena).Int64
+      - (*Arena).Double
+      - grow
+    name: arena.go
   - decls: []
     name: doc.go
   - decls:
@@ -294,6 +303,16 @@ functions:
   - name: AppendKeyValues
     params: dst []byte, attrs []KeyValue
     results: "[]byte"
+  - name: NewArena
+    params: attrs, values int
+    results: "*Arena"
+  - doc: |-
+      grow allocates a kind's slice with the arena's capacity on its first use,
+      and returns it unchanged after.
+    name: grow
+    params: values []T, capacity int
+    results: "[]T"
+    typeParams: T any
   - name: Attrs
     params: attrs []coreotel.AttrValue
     results: "[]KeyValue"
@@ -499,6 +518,46 @@ types:
         recv: v AnyValue
         results: "[]byte"
     name: AnyValue
+  - fields:
+      - doc: pairs backs every attribute set handed out.
+        name: pairs
+        type: "[]KeyValue"
+      - doc: |-
+          strings, bools, ints and doubles back the oneof values, each allocated
+          on its kind's first use with the arena's whole capacity.
+        name: strings
+        type: "[]string"
+      - name: bools
+        type: "[]bool"
+      - name: ints
+        type: "[]Int64"
+      - name: doubles
+        type: "[]Double"
+      - doc: |-
+          capacity is what a kind's slice is allocated with: every attribute and
+          every extra value could be of that kind.
+        name: capacity
+        type: int
+    kind: struct
+    methods:
+      - name: Attrs
+        params: attrs []coreotel.AttrValue
+        recv: a *Arena
+        results: "[]KeyValue"
+      - doc: keyValue is KeyValueOf with the oneof value held in the arena.
+        name: keyValue
+        params: attr coreotel.AttrValue
+        recv: a *Arena
+        results: KeyValue
+      - name: Int64
+        params: v int64
+        recv: a *Arena
+        results: "*Int64"
+      - name: Double
+        params: v float64
+        recv: a *Arena
+        results: "*Double"
+    name: Arena
   - fields:
       - doc: |-
           Endpoint is the FULL URL the payload is POSTed to, used exactly as

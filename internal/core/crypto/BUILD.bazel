@@ -63,6 +63,7 @@ go_test(
         "registry_guard_external_test.go",
         "registry_internal_test.go",
         "seal_external_test.go",
+        "sealer_external_test.go",
         "signer_registry_external_test.go",
         "signer_registry_internal_test.go",
         "stream_registry_external_test.go",

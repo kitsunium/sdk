@@ -46,7 +46,7 @@
 //	CapSocketActivation    ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
 //	CapDieWithParent       ✅     ❌     ✅      ✅      ❌      ❌      ❌        ❌      ❌
 //	CapScheduling          ✅     ❌     ❌⁵     ✅⁶     ❌      ❌      ❌        ❌      ❌
-//	CapPTY                 ✅     ✅     ❌      ✅      ❌      ❌      ❌        ❌      ❌
+//	CapPTY                 ✅     ✅     ❌      ✅      ✅      ❌      ❌        ❌      ❌
 //	CapProcessHandle       ✅     ❌     ✅      ❌      ❌      ❌      ❌        ❌      ❌
 //	CapSandbox             ✅⁷    ❌     ❌      ❌      ❌      ❌      ❌        ❌      ❌
 //

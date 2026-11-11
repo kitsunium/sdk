@@ -44,7 +44,7 @@ func TestSupported(t *testing.T) {
 		{"SocketActivation", proc.CapSocketActivation, unix},
 		{"DieWithParent", proc.CapDieWithParent, g == "linux" || g == "freebsd" || win},
 		{"Scheduling", proc.CapScheduling, g == "linux" || g == "freebsd"},
-		{"PTY", proc.CapPTY, g == "linux" || g == "darwin" || g == "freebsd"},
+		{"PTY", proc.CapPTY, g == "linux" || g == "darwin" || g == "freebsd" || g == "openbsd"},
 		{"ProcessHandle", proc.CapProcessHandle, g == "linux" || win},
 		{"Sandbox", proc.CapSandbox, g == "linux" && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64")},
 		{"an unknown capability", proc.Capability(0x7BAD), false},
