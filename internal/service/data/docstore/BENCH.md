@@ -176,3 +176,24 @@ A batch of 100 costs what 100 `Put`s cost, give or take its group entry:
 pays its own flush. What it buys is that the 100 writes stand or fall
 together, as ADR 0209's amendment says; paying the keys' flushes once per
 batch is not this change.
+
+## `GetInto` — a read into the caller's value (#813, 2026-11-11)
+
+AMD EPYC 7351P VM (4 CPUs of the lane), Linux 6.12, go1.27.3, branch
+`wip/sdk-lot-4-suite`, `-benchmem -count 6`, medians. `BenchmarkGet` now
+formats its 10 000 keys once, before the loop, as `BenchmarkGetInto` does:
+the row above counted `benchDoc`'s two `fmt.Sprintf` and its `Teams` slice
+per read — 4 of its 11 allocations were the harness's, not the store's.
+
+| Row | ns/op | B/op | allocs/op |
+|---|---|---|---|
+| `Get`, keys formatted in the loop (before) | 2 889 | 335 | 11 |
+| `Get`, keys formatted once | 2 270 | 248 | 7 |
+| `GetInto` | 2 049 | 88 | **5** |
+
+The two allocations `GetInto` saves are the fresh `account` `Get` decodes
+into — `json.Unmarshal` takes its address as an `any`, so it escapes — and
+the `Teams` slice's growth from nil; the five left are the decoder's and the
+document's own strings and slice, which differ from one read to the next.
+The budget `allocs: 5` (`design/sdk.yaml`) holds that count in the alloc
+lane. Command: `cd internal && go test -run '^$' -bench '^BenchmarkGet$|^BenchmarkGetInto$' -benchmem -count 6 ./service/data/docstore/`.

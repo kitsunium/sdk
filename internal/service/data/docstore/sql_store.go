@@ -155,6 +155,31 @@ func (s *SQLStore[T]) Get(ctx context.Context, key string) (T, error) {
 	return decodeAs[T](s.table, raw)
 }
 
+// GetInto decodes the document stored under key into dst, as
+// core/data/docstore.IntoGetterContext says: dst set to T's zero value
+// first, so it ends up equal to what Get returns and shares nothing with
+// what it held. DocumentNotFound, StatementFailed or DocumentUndecodable as
+// Get, dst zero then.
+func (s *SQLStore[T]) GetInto(ctx context.Context, key string, dst *T) error {
+	var zero T
+	*dst = zero
+	ex, _ := s.tx.join.Join(ctx)
+	var raw []byte
+	err := ex.QueryRowContext(ctx, s.stmts.getDoc, []byte(key)).Scan(&raw)
+	//: no row is the miss; anything else is the database's failure.
+	if errors.Is(err, stdsql.ErrNoRows) {
+		//: DocumentNotFound, naming no key.
+		return kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+	}
+	//: the read did not complete.
+	if err != nil {
+		//: StatementFailed, the driver's text withheld.
+		return s.failed("read a document", err)
+	}
+	//: a copy of the stored document, in the caller's value.
+	return decodeInto(s.table, raw, dst)
+}
+
 // List returns every document, in key order — byte order, as Go compares
 // strings.
 func (s *SQLStore[T]) List(ctx context.Context) ([]T, error) {

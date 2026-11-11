@@ -181,6 +181,18 @@ packages:
         out:
           - type: KeyValue
       - doc: |-
+          NewArena returns an Arena for one export of at most attrs attributes in
+          all and values more oneof values (a point's asInt or asDouble), its slices
+          sized up front. A count too small costs a slice grown, never a wrong
+          tree.
+        in:
+          - name: attrs
+          - name: values
+            type: int
+        name: NewArena
+        out:
+          - type: "*Arena"
+      - doc: |-
           Marshal renders request — a signal's whole payload tree — as ONE OTLP/JSON
           document: HTML escaping DISABLED and no trailing newline, exactly the bytes
           that go in the body of a POST.
@@ -343,6 +355,45 @@ packages:
             - name: DoubleValue
               tag: json:"doubleValue,omitempty"
               type: "*Double"
+      - doc: |-
+          Arena hands out the attribute sets and the oneof values of one export from
+          a few slices sized once, instead of a slice per set and a pointer per value
+          (#813): what Attrs and KeyValueOf allocate per point, an Arena allocates
+          per export. What it hands out is exactly what Attrs and KeyValueOf would
+          build — the same KeyValues, the same oneof case — so a tree built through
+          it renders byte for byte the same. Each set is a full slice expression:
+          an append to it never writes into the next. Not safe for concurrent use;
+          one export, one goroutine.
+        methods:
+          - doc: |-
+              Attrs is the package's Attrs, the KeyValues and their values taken
+              from the arena. An empty set stays nil.
+            in:
+              - name: attrs
+                type: "[]coreotel.AttrValue"
+            name: Attrs
+            out:
+              - type: "[]KeyValue"
+            recv: pointer
+          - doc: Int64 returns a pointer to v, held in the arena.
+            in:
+              - name: v
+                type: int64
+            name: Int64
+            out:
+              - type: "*Int64"
+            recv: pointer
+          - doc: Double returns a pointer to v, held in the arena.
+            in:
+              - name: v
+                type: float64
+            name: Double
+            out:
+              - type: "*Double"
+            recv: pointer
+        name: Arena
+        struct:
+          unexported: true
       - doc: |-
           HTTPConfig configures an OTLP/HTTP sender. Every field has a resolved meaning
           when left unset except Endpoint, which has none that could be right.

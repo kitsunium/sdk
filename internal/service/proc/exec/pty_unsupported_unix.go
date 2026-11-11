@@ -1,4 +1,4 @@
-//go:build unix && !linux && !darwin && !freebsd
+//go:build unix && !linux && !darwin && !freebsd && !openbsd
 
 package exec
 
@@ -9,9 +9,9 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// checkPTY refuses StdioPTY: OpenBSD's PTMGET ioctl is refused outside libc
-// (pinsyscalls), NetBSD and DragonFly are unmeasured, and illumos and Solaris
-// unlock a terminal with libc's STREAMS pushes, which the stdlib cannot make.
+// checkPTY refuses StdioPTY: NetBSD and DragonFly are unmeasured, and illumos
+// and Solaris unlock a terminal with libc's STREAMS pushes, which the stdlib
+// cannot make.
 func checkPTY(spec coreproc.Spec) error {
 	//: only the terminal mode is refused.
 	if spec.Stdio == coreproc.StdioPTY {

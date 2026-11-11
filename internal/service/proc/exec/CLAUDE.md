@@ -223,8 +223,14 @@ SIGWINCH), `Size` `TIOCGWINSZ`; a child without a terminal answers
 longer be interrupted by `Close`. FreeBSD's `posix_openpt` descriptor is made
 non-blocking before `os.NewFile` for the same reason.
 
-Supported on Linux, darwin and FreeBSD. OpenBSD refuses an ioctl issued
-outside libc (pinsyscalls), so its `PTMGET` is out of reach; NetBSD and
+Supported on Linux, darwin, FreeBSD and OpenBSD. OpenBSD's ptm(4) opens both
+sides in one `PTMGET` ioctl (`pty_openbsd.go`, its ABI hand-written and pinned
+by `Test_ptmget_layout`); since 7.5 pinsyscalls refuses an ioctl issued outside
+libc, and `syscall.Syscall(SYS_IOCTL, …)` is the one call the standard library
+reroutes to libc's `ioctl` there (Go issue 63900) — so `ioctlFile` is the path,
+never `RawSyscall`, which answers ENOSYS. The kernel opens the two descriptors
+without close-on-exec: they are marked under `syscall.ForkLock` before a
+concurrent spawn can inherit them, and the master made non-blocking. NetBSD and
 DragonFly are unmeasured; illumos and Solaris unlock a terminal with libc's
 STREAMS pushes; Windows needs a ConPTY attribute `os.StartProcess` cannot
 carry — a later direct `CreateProcessW` backend. All refuse `StdioPTY` with
@@ -519,9 +525,12 @@ told apart from the OOM killer's or `Stop`'s SIGKILL), and `Minflt`, `Majflt`,
 `Inblock`, `Oublock`, `Nvcsw`, `Nivcsw` → `Usage` (`childwait.UsageOf`,
 widened from the int32 that 386, arm and mips declare by one generic
 `counter`), a
-`*UsageValue` on Linux, darwin and the BSDs and nil on illumos and Solaris,
-which leave the counters unfilled, and on Windows — a pointer, so `ExitValue`
-stays under ktn's 64-byte by-value bound. Both paths —
+`UsageValue` with `Known` set on Linux, darwin and the BSDs, and the zero
+value — `Known` false — on illumos and Solaris, which leave the counters
+unfilled, and on Windows. It was a `*UsageValue` until #1136: a reaper sweep
+converting an orphan's status for `WithOnExit` then allocated once per child,
+and a pointer an observer kept would have to be shared or copied; by value it
+costs nothing and nothing aliases it (ADR 0217, amendment 2026-11-11). Both paths —
 the handle's own wait and a sweep's `StatusValue` — go through `exitValue`,
 so `TestWait_coreDumpedAndUsageAgreeOnBothPaths` runs the same SIGSEGV child
 through each, with `RLIMIT_CORE` at the hard limit and at zero. The reaper
@@ -774,20 +783,28 @@ followed: no Windows child ever had a graceful shutdown through the port. A
 `Setpgid` child leads a console process group (`CREATE_NEW_PROCESS_GROUP`), so
 `SignalGroup` — and `Stop`'s first phase, which goes through it — now sends
 that group the console control event (`ctrlevent_windows.go`,
-`GenerateConsoleCtrlEvent(event, pid)`): CTRL_C for SIGINT, CTRL_BREAK for
-SIGTERM, SIGHUP and SIGQUIT, the mapping of `proc/signal`'s `Relay`, whose
-own copy that package may adopt from here. SIGKILL stays TerminateProcess,
-and a child without `Setpgid` keeps the leader-only path: CTRL_BREAK to the
-supervisor's own console group would reach the supervisor. Two caveats:
-Windows does not limit CTRL_C to one group, and a new group starts with CTRL_C
-ignored unless the child re-enables it, so CTRL_BREAK is the event a group
-surely receives; and the supervisor must share a console with the child —
-one without a console (a service) is refused, the refusal swallowed by `Stop`
-as before. **Never run here:** `TestWindowsStopDeliversCtrlBreak` (a helper,
-the test binary, exits 3 on `os.Interrupt`; `Stop(5s, SIGTERM)` must return
-in under a second with code 3) and `TestWindowsSignalGroupWithoutAGroup` run
-on the Windows lane of e2e-cross only, the first skipping on a host without a
-console.
+`GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid)`) for SIGINT, SIGTERM,
+SIGHUP and SIGQUIT alike, as `proc/signal`'s `Relay` does for a group target.
+SIGINT is CTRL_BREAK too (2026-11-11): Windows delivers no CTRL_C to one group
+— `GenerateConsoleCtrlEvent(CTRL_C_EVENT, pgid)` succeeds and no process of the
+group receives it — and a group `CREATE_NEW_PROCESS_GROUP` made starts with
+Ctrl-C ignored, so the first mapping, CTRL_C for SIGINT, delivered nothing. A
+Go child reads CTRL_BREAK as `os.Interrupt`, the SIGINT a Unix child reads, so
+#933's "observed as CTRL_C" is kept as "observed as os.Interrupt", and a
+program that tells CTRL_C from CTRL_BREAK with its own console handler sees
+CTRL_BREAK. SIGKILL stays TerminateProcess, and a child without `Setpgid`
+keeps the leader-only path: CTRL_BREAK to the supervisor's own console group
+would reach the supervisor. The supervisor must share a console with the child
+— one without a console (a service) is refused, the refusal swallowed by
+`Stop` as before. **Never run here:** `TestConsoleEventIsBreakForEveryGroupSignal`
+(the mapping), `TestWindowsStopDeliversCtrlBreak` (a helper, the test binary,
+exits 3 on `os.Interrupt`; `Stop(5s, SIGTERM)` must return in under a second
+with code 3), `TestWindowsSignalGroupInterruptIsObserved` (`SignalGroup(SIGINT)`
+acknowledged by the helper, which keeps running until `Stop`'s event) and
+`TestWindowsSignalGroupWithoutAGroup` run on the Windows lane of e2e-cross
+only, the helpers skipping on a host without a console. The helper role
+(`SDK_EXEC_CTRL_HELPER`) is taken out of the inherited environment before it
+is set, and a helper starts nothing and ends within 30 s.
 
 ### A confined Windows child is created suspended (#304)
 

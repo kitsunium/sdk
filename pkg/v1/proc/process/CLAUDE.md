@@ -48,7 +48,7 @@ the build it came from.
 | `Sandbox`, `Namespace`, `IDMap`, `Mount`, `MountKind`, `Capabilities`, `Landlock`, `LandlockRule`, `LandlockAccess`, `Seccomp`, `SeccompAction` + the `Namespace*` / `Mount*` / `Landlock*` / `Seccomp*` constants | `Spec.Sandbox` (#728): the core port's values, re-exported |
 | `LandlockABI` | forwards `exec.LandlockABI`: the kernel's Landlock ABI, `SandboxUnavailable` without it, `UnsupportedPlatform` off Linux amd64/arm64 |
 | `SandboxFailed`, `SandboxUnavailable`, `CodeSandboxFailed`, `CodeSandboxUnavailable` | a sandbox step failed in the child (the program never ran) / a part the kernel lacks, refused before the fork (#728) |
-| `Usage` | `ExitResult.Usage`: faults, block I/O, context switches, nil where the platform gives none (#1090) |
+| `Usage` | `ExitResult.Usage`: faults, block I/O, context switches, by value, `Known` false where the platform gives none (#1090, #1136) |
 | `FDPolicy`, `FDsSealed`, `FDsInherited` | `Spec.FDs`: the child's descriptor table sealed by default (#1089) |
 | `SetOOMScoreAdj` | the running process's own OOM-killer bias (Linux; `internal/service/proc/self`) |
 | `Self`, `Build`, `ParseBuild`; `Stats`, `Distribution`, `BuildInfo`, `Module` | the running process and the build it came from — one-line delegations to, and aliases of, `internal/service/proc/self` (`Self`, `Stats`, `Distribution`) and `internal/service/proc/buildinfo` (`Build`, `ParseBuild`, `BuildInfo`, `Module`; ADR 0100, ADR 0172) |

@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-05-30
 - **Deciders**: SDK maintainers
+- **Amended**: 2026-11-11 — `NewSealer`, a key bound once (#813; see the dated section at the end)
 - **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the scheme facades become children of `crypto` in a tree grouped by family
 - **Related**: ADR 0001 (multi-module layout), ADR 0003 (codec registry — the pattern mirrored), ADR 0005 (dotted-quad codes), ADR 0011 (snapshot.Value), ADR 0012 (writer registry — the gate precedent)
 - **Amends**: the `internal/core` purpose statement (admits a fourth sibling) and the ADR 0005 code-allocation table (new `0.2.4.*` and `1.3.0.*` blocks)
@@ -157,3 +158,27 @@ sentinels are enforced for Public-is-literal / reason / uniqueness from day one.
 
 - Feature roadmap: `docs/sdk-feature-ideation.md` (crypto domain section)
 - `internal/core/crypto/CLAUDE.md`, `internal/service/crypto/aesgcm/CLAUDE.md`, `pkg/v1/crypto/CLAUDE.md`
+
+## Amendment (2026-11-11): `NewSealer`, a key bound once (#813)
+
+`Seal(name, key, …)` resolves the scheme and builds its cipher from the key on
+every call: for AES-256-GCM a key copy, the AES key schedule and the GCM mode
+— four of the five allocations, and most of the 1.2 µs, the encrypting logger
+middleware paid per record. `NewSealer(name, key)` binds once:
+
+1. **Two ports in `core/crypto`.** `Binder` (`Bind(key) (Sealer, error)`),
+   the sibling of `AEAD` a scheme implements when it can build its cipher once
+   (ADR 0039), and `Sealer` (`SealTo(dst, plaintext, aad)`), which appends
+   the same self-framed box `Seal` returns — version, id, a fresh nonce from
+   `crypto/rand` each call, ciphertext and tag — so `Open` is unchanged. A
+   scheme without `Binder` is wrapped: each `SealTo` is its `Seal`, appended.
+   `aesgcm` implements `Binder`.
+2. **The key's lifetime.** The `Sealer` holds what the scheme derived from
+   the key — AES-GCM's round keys — while it is referenced; `Key.Zeroize`
+   does not reach it, so a caller that zeroizes the key drops the `Sealer`
+   too. `Bind` clears the key copy the cipher was built from. Before this, each
+   `Seal` left that copy and a schedule on the heap, never cleared.
+3. **Measured.** `encwrite` binds its subkey at construction and seals into a
+   pooled frame: `MW_EncWrite` 5 allocations and 1 163 ns → 0 and 338 ns
+   (`internal/service/observe/logger/BENCH.md`), held by `allocs: 0` in
+   `design/sdk.yaml`. The facade `pkg/v1/crypto` does not re-export them yet.

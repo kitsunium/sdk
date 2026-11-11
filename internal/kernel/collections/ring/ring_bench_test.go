@@ -4,6 +4,7 @@ import (
 	"errors"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -164,6 +165,27 @@ func BenchmarkLen(b *testing.B) {
 	//: assert the sink accumulated so the Len reads cannot be elided.
 	if sink == 0 {
 		b.Fatal("Len sink stayed zero")
+	}
+}
+
+// BenchmarkSCStorePair is the floor of the two happy rows: the two
+// sequentially consistent stores an iteration of TryWrite_Happy or
+// TryRead_Happy cannot do without — tail's publication of the slot and head's
+// release of it — on two padded words, and nothing else. sync/atomic offers no
+// weaker store (all its operations are sequentially consistent), and on amd64
+// such a store is an XCHG, a locked instruction that drains the store buffer.
+// The happy rows are read against this one, on the same box (#1034).
+func BenchmarkSCStorePair(b *testing.B) {
+	var words struct {
+		tail atomic.Uint64
+		_    linePad
+		head atomic.Uint64
+	}
+	b.ReportAllocs()
+	for i := uint64(0); b.Loop(); i++ {
+		//: what TryWrite publishes, then what TryRead releases.
+		words.tail.Store(i + 1)
+		words.head.Store(i + 1)
 	}
 }
 

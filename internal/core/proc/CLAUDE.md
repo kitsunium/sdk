@@ -52,7 +52,7 @@ the package comment is `doc.go`'s alone, written by kit from the design (ADR 016
 | `stdio.go` | `StdioMode` — how a child's stdin/stdout/stderr are wired (`StdioInherit`/`StdioNull`/`StdioCapture`/`StdioPTY`) + `String`/`Known` |
 | `scheduling.go` | `SchedulingValue`, `SchedPolicy` (`SchedOther`…`SchedIdle`, Linux's `SCHED_*` numbers) and `IOClass` (`IOClassNone`…`IOClassIdle`) + `String` (#940) |
 | `run.go` | `RunValue` and `ResultValue` — `exec.Run`'s ceiling and grace, and its exit with the head of each stream (#935) |
-| `exit.go` | `ExitValue` — exit code, terminating signal, **CoreDumped**, CPU times, max RSS, **Usage** (nil where the platform gives none) + `Success`; `UsageValue` — faults, block I/O, context switches (#1090) |
+| `exit.go` | `ExitValue` — exit code, terminating signal, **CoreDumped**, CPU times, max RSS, **Usage** (by value, `Known` false where the platform gives none — #1136) + `Success` (pointer receiver since #1136: 112 bytes); `UsageValue` — `Known`, faults, block I/O, context switches (#1090) |
 | `limit.go` | `LimitValue` — soft/hard rlimit pair + `LimitInfinity` |
 | `memory.go` | `MemoryLimitValue` — one soft-memory-limit derivation (`Allowance` / `Limit` / `Source` / `Bound`) + `Applied` — `MemorySource` (`MemorySourceOperator` / `MemorySourceUnconstrained` / `MemorySourceBelowFloor` / `MemorySourceCgroup`, the zero left unminted) + `String` (ADR 0075), and `MemoryBound` (`MemoryBoundHigh` / `MemoryBoundMax`, the zero unminted) + `String` — which file set the allowance (#1094) |
 | `groupstat.go` | `GroupStatValue` (CPU usage/user/system, throttling, memory current/peak, `MemoryEventsValue`, pids, `[]IOStatValue`, `Partial`) — what `GroupReader.Stat` reads (#932) |

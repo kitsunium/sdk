@@ -252,6 +252,9 @@ way anyone would ever find out; wire it.
 
 ### `encwrite` — 1 318 ns, 6 allocations, and the cause is not in this package
 
+> **Superseded 2026-11-11 (#813)**: 0 allocations and 338 ns — see
+> §`encwrite` after #813 at the end. The analysis below is the before.
+
 The most expensive middleware by two orders of magnitude. `-memprofile`:
 
 ```
@@ -607,3 +610,31 @@ BenchmarkEmit_FanOut2-8                    	 1304528	       914.5 ns/op	     128
 BenchmarkEmit_FanOut4-8                    	 1316478	       916.7 ns/op	     128 B/op	       1 allocs/op
 BenchmarkEmit_Depth4_AllocFree-8           	 1314613	       909.6 ns/op	     128 B/op	       1 allocs/op
 ```
+
+## `encwrite` after #813 (2026-11-11)
+
+AMD EPYC 7351P VM (4 CPUs of the lane), Linux 6.12, go1.27.3, branch
+`wip/sdk-lot-4-suite`, before (`b5285df65`) and after on the same box,
+`-benchmem -count 8`, benchstat:
+
+| | sec/op | B/op | allocs/op |
+|---|---|---|---|
+| `MW_EncWrite` before | 1 163 ns ± 3 % | 1 696 | 5 |
+| `MW_EncWrite` after | **337.6 ns ± 2 %** (−71 %, p = 0.000) | 0 | **0** |
+
+(5, not the 6 above: `bytes.Clone` of the key had already gone from `Key.Bytes`.)
+
+- **The cipher is built once.** `crypto.NewSealer` binds the subkey to
+  AES-256-GCM at construction (`aesgcm`'s `Bind`): no `aes.NewCipher`, no
+  `cipher.NewGCM`, no key copy per record — four of the five.
+- **The box is sealed straight after its prefix.** `Sealer.SealTo` appends
+  `[version][id][nonce][ciphertext||tag]` to a frame borrowed with
+  `buffer.GetSize` and given back once the downstream's `Write` has returned
+  — a sink never keeps `p`, since the handler recycles its own buffer the
+  same way. The fifth allocation, `frame`'s copy, is gone.
+- **The nonce is drawn into its place in the box**: a `[12]byte` of its own
+  escaped through the `cipher.AEAD` interface call, 16 B a box.
+
+The budget `allocs: 0` on `(*EncWriter).Write` (`design/sdk.yaml`, fixture
+`perfWrite`) holds it in the alloc lane. Command:
+`cd internal && go test -run '^$' -bench 'MW_EncWrite$' -benchmem -count 8 ./service/observe/logger/`.

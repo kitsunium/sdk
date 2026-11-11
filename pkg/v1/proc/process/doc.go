@@ -93,8 +93,9 @@
 // Job Object) and the PATH search (with PATHEXT) all work, while the fields
 // with no Windows meaning at this layer — User/Group/Groups, Umask, Nice,
 // OOMScoreAdj, ExtraFiles, CgroupPath — are refused with UnsupportedPlatform
-// rather than dropped. There, SignalGroup reaches the leader only and Stop's
-// escalation is TerminateProcess. Every other platform returns
+// rather than dropped. There, SignalGroup sends a Setpgid child's group
+// CTRL_BREAK, which a Go child reads as os.Interrupt, and reaches the leader
+// alone otherwise; Stop's escalation is TerminateProcess. Every other platform returns
 // UnsupportedPlatform from Start; the package compiles everywhere.
 //
 // # The process itself
