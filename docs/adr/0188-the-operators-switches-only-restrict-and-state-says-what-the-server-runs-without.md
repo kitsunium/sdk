@@ -230,3 +230,26 @@ Deliberate, and allowed while v0 (ADR 0040):
   `platform*.go`), `scripts/ci/check-net-default-change.sh`,
   `.github/workflows/net-default-change.yml`,
   `scripts/release/release-notes.sh`.
+
+## Amended 2026-11-09 — State's counters on a meter (kitsunium/sdk#847)
+
+`State` was a snapshot a program had to poll and convert. `Server.RegisterMetrics`,
+beside `RegisterHealth`, registers the server's counters on an `AsyncMeter` as
+observables read once per collection, one `State` read per round: the server's
+own (accept back-offs, truncated datagrams, oversized GSO batches, failed
+replies, suppressed log lines, `Degraded`), each goroutine stream group's
+connections by `group`, each loop ring's batches, completions, starved buffers
+and cut batches by `group`, `loop` and `ring`, and each loop group's drained
+rings, refused outbound jobs and batch p99. The names are the design's `Metric…`
+constants, the units UCUM. A nil meter, or the meter the server is already on,
+is refused with `MetricsRefused` (`0.2.11.69`); another meter is another
+destination.
+
+Amended 2026-11-11: `net_server_conns_total` counts the connections a group
+served — admitted, counted before the handler runs, so it never falls — and
+neither a connection its ceiling turned away, which
+`net_server_conns_rejected_total` counts, nor one whose PROXY header was
+refused. `StateValue.TotalConns` keeps its
+meaning and counts both, so after a `MaxConns(3)` group met four connections the
+export reads 3 and 1 while `State` reads 4. The first version read
+`TotalConns` and exported 4.

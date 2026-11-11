@@ -46,8 +46,8 @@ const initialWriteCapacity int = 512
 type Conn struct {
 	// raw is the socket taken over from net/http at the upgrade. It is ours
 	// from that moment: the engine no longer closes it, and neither does
-	// net/http.
-	raw stdnet.Conn
+	// net/http. Over HTTP/2 (RFC 8441) it is the stream, an h2Stream.
+	raw transport
 	// br is the reader the hijack handed back. It MUST be used rather than the
 	// socket: net/http may have buffered bytes into it while parsing the
 	// request, and reading past it would silently drop them.
@@ -116,6 +116,26 @@ type Conn struct {
 // option set, so nothing outside this package can call it. [Upgrade] is the
 // real entry point, and the public façade re-exports only that.
 func NewConn(socket stdnet.Conn, buffered *bufio.Reader, subprotocol string, cfg *config, draining <-chan struct{}) *Conn {
+	//: the hijacked socket, as every transport.
+	return newConn(socket, buffered, subprotocol, cfg, draining)
+}
+
+// transport is what a Conn writes frames to and closes: the hijacked socket
+// on HTTP/1.1, an extended CONNECT's stream on HTTP/2 (RFC 8441). Reads go
+// through the Conn's bufio.Reader over it.
+type transport interface {
+	// Write puts bytes on the wire, flushed.
+	Write(p []byte) (int, error)
+	// SetDeadline bounds reads and writes; the zero time removes the bound.
+	SetDeadline(t time.Time) error
+	// SetWriteDeadline bounds the writes.
+	SetWriteDeadline(t time.Time) error
+	// Close ends it, unblocking a read parked on it.
+	Close() error
+}
+
+// newConn is NewConn over any transport.
+func newConn(socket transport, buffered *bufio.Reader, subprotocol string, cfg *config, draining <-chan struct{}) *Conn {
 	c := &Conn{
 		raw:         socket,
 		br:          buffered,

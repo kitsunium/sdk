@@ -310,3 +310,96 @@ Deliberate, and allowed while v0 (ADR 0040):
   `multiwriter_linux.go`, `reply_queue.go`, `packet_bound.go`,
   `packet_loop.go`, `batch.go`, `sendmmsg_linux_*.go`,
   `load_l3_linux_internal_test.go`), `tools/netgate/gates.go`.
+
+## Amendment 2026-11-10 (#972): a datagram names its own destination
+
+A UDP socket bound to a wildcard address asks for IP_PKTINFO or
+IPV6_RECVPKTINFO, a registry row (`udp-pktinfo`, class A-kernel, resolving the
+§Deferred line for this mechanism). `Packet.To` reports the destination the
+sender used with the socket's port, and `Reply` leaves from it: `multiWriter`
+beside `UDP_SEGMENT`, `pinWriter` (one `sendmsg`) outside a batch. The source is
+the kernel's `ipi_spec_dst` on IPv4, the destination itself on IPv6 unless it is
+a group or a mapped broadcast; the interface index is left to the routing table.
+A source the kernel refuses is sent again from its own choice. Off Linux, and
+on a socket read one datagram a call, the row reads unprobed and `To` stays the
+bound address. The control room per message is the destination's own without
+GRO, GRO's otherwise; the L3 paired ratio is reported, not gated.
+
+## Amendment 2026-11-10 (#977): datagram shards
+
+`Shards` is honoured on a datagram group: `n` sockets per address through
+`SO_REUSEPORT` (the port of `:0` pinned from the first), one read loop, reader
+and sink each, the count on the first row; a group without the option keeps one
+socket and no `SO_REUSEPORT`, and the default stays one until the paired
+`recvmmsg:recvmmsg+shards` gate on the veth lane holds 1.8× datagrams/s at
+saturation. A Unix datagram socket refuses an explicit count above one
+(`PACKET_OPTION_UNSUPPORTED`). `Steer(SteerCPU)` attaches
+`SO_ATTACH_REUSEPORT_CBPF` once every socket of the address is bound — load CPU,
+modulo n, return A, three instructions, the modulo because a reuseport program
+that returns past the group falls back to the hash — on the first socket; a
+refused attach (`EPERM`, `EINVAL`) leaves the hash and the row absent. Darwin and
+the BSDs share a port by `SO_REUSEPORT` without Linux's load balancing: a count
+above one there delivers once, on one socket, reported as asked, the kernel's to
+spread.
+
+## Amendment 2026-11-11 (#852): datagrams on the loop engine
+
+A datagram group may be served by a `corenet.PacketLoopHandler`, the sibling of
+`PacketHandler` (ADR 0039) that `PacketGroup.HandleLoop` takes: one lane a
+socket — a shard, an adopted socket —, `OnPacket(io, from netip.AddrPort, buf)`
+a datagram and `OnBatchEnd` once a batch, `PacketLoopIO.Reply` queueing a reply
+that leaves after the batch, `Loop` the lane's index, `LoopStarter.OnStart` the
+lane count before any datagram. On Linux each lane first tries io_uring
+(`loop.StartPacket`, its own locked thread and ring): a multishot
+`IORING_OP_RECVMSG` with `IOSQE_BUFFER_SELECT` into 128 provided buffers of
+64 KiB of payload, each read as `io_uring_recvmsg_out`, the sender's address, the
+control messages — UDP GRO's segment size, SO_RXQ_OVFL's count — and the
+payload; replies are `IORING_OP_SENDMSG` records in a mapped arena, a run to one
+peer of one size, the last possibly shorter, at most 64 datagrams and 65 507
+bytes, one `UDP_SEGMENT` send (§D5's rules; EIO switches GSO off for the lane and
+raises the `gso` fault, EMSGSIZE counts in `GSOOversized`). §D1's guarantees hold
+there: a coalesced message split at its segment size, a message the kernel cut
+(MSG_TRUNC on a coalesced one, MSG_CTRUNC) counted in `TruncatedPackets` and
+dropped, a datagram past `MaxPacketSize` counted and dropped. §D4's handover
+holds: Shutdown cancels the receive, reads the socket to EAGAIN with recvmsg(2),
+serves it, sends the replies, then switches GRO off, within `handoverBudget`;
+past it the lane stops and GRO goes off. A probe that refuses at a stage, the
+operator's switch, or io_uring ruled out by the environment serves the lane on
+the batched reader of this ADR — recvmmsg, GRO, sendmmsg with its replies
+always batched —, the epoll lane, since the runtime's netpoller is epoll. A
+unixgram address, middlewares and a second handler are refused at Start. Not
+built: the IP_PKTINFO source of a reply on the io_uring lane (it leaves from the
+kernel's choice), and a panic in the handler is contained on the epoll lane only.
+
+## Amendment 2026-11-11 (the junction of #972 and #852): a lane's reply leaves from the destination
+
+The previous amendment left a datagram lane's reply to the kernel's source, on
+io_uring by design and, as measured, on the epoll lane too: `dispatchLoop` read
+each datagram's `IP_PKTINFO` into its slot and `PacketLoopIO.Reply` never used
+it. On a host with several addresses, a client that wrote to 127.0.0.2 got its
+answer from 127.0.0.1 (`TestPacketLoop_replyLeavesFromTheDestination`, every
+IPv4 and IPv4-mapped case of both lanes, red at 90089249a). Both lanes now hold
+#972's guarantee where it applies — a socket bound to a wildcard address that
+reads destinations, `udp-pktinfo` on:
+
+- **io_uring.** `control` reads `IP_PKTINFO` (`ipi_spec_dst`) or `IPV6_PKTINFO`
+  (the address, unless a group, a mapped broadcast or `::`) beside UDP GRO's
+  segment and SO_RXQ_OVFL; `deliver` remembers the sender and that source in a
+  ring of the batch's newest 128 senders, emptied once the batch's replies are
+  queued; `flush` gives each reply the newest source of its peer, an
+  IPv4-mapped peer matching its IPv4 form; a SENDMSG record (192 bytes now)
+  carries the source's cmsg first, then `UDP_SEGMENT`'s, a run being one peer
+  and one source. A source the kernel refuses (`EINVAL`) is sent again with the
+  source cut off the record's control data, from the kernel's choice, not
+  counted as failed — server's `pinWriter` rule. Zero allocations still
+  (`TestPacketLane_allocsPinned`).
+- **epoll.** `packetLoopLane.Reply` looks the peer up in the batch being handed
+  on, newest first, and sends through the batched sink's `replyFrom`, which
+  already writes the source beside `UDP_SEGMENT`.
+
+A reply to a peer that sent nothing in the batch leaves from the kernel's
+choice, and still leaves (`TestPacketLoop_replyToAnUnseenPeer`);
+`KITSUNIUM_NET_DISABLE=udp-pktinfo` and a socket bound to one address read no
+destination and keep the kernel's. A handler's panic is still contained on the
+epoll lane only: the io_uring lane follows the rule of every loop thread, which
+does not contain it.

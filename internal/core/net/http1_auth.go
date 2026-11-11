@@ -1,5 +1,29 @@
 package net
 
+import "github.com/kitsunium/sdk/internal/core/observe/trace"
+
+// The bytes an HTTP1RequestIDValue may hold: the visible ASCII range.
+const (
+	// visibleFirst is '!'.
+	visibleFirst byte = 0x21
+	// visibleLast is '~'.
+	visibleLast byte = 0x7E
+)
+
+const (
+	// HTTP1AccessAnswered is an answer written when the handler returned.
+	HTTP1AccessAnswered HTTP1AccessStage = iota
+	// HTTP1AccessDeferred is the first record of an answer deferred to the
+	// batch's end; its Status is zero.
+	HTTP1AccessDeferred
+	// HTTP1AccessPending is an answer handed to the lane's worker: the record's
+	// only one, its Status zero.
+	HTTP1AccessPending
+	// HTTP1AccessCompleted is a deferred answer's second record: Status and
+	// BodyLen are the answer's, Elapsed the time since it was deferred.
+	HTTP1AccessCompleted
+)
+
 // HTTP1AuthValue is what an authenticating link of the http1 chain
 // established about a request: a subject of at most HTTP1MaxSubject bytes,
 // held in an array, and 64 bits of claims the application gives meaning to.
@@ -53,6 +77,57 @@ func (a *HTTP1AuthValue) Reset() {
 	a.n, a.claims = 0, 0
 }
 
+// HTTP1RequestIDValue is a request's correlation identifier: at most
+// HTTP1MaxRequestID bytes of visible ASCII (0x21 to 0x7E), held in an array. It
+// is a value, so copying a request or a response copies it and it never
+// aliases the bytes it was read from. The zero value is no identifier.
+type HTTP1RequestIDValue struct {
+	// id holds the identifier's bytes, the first n of them.
+	id [HTTP1MaxRequestID]byte
+	// n is the identifier's length.
+	n uint8
+}
+
+// Set copies b into the value and reports true, or leaves the value as it is
+// and reports false when b is empty, longer than HTTP1MaxRequestID or holds a
+// byte outside 0x21 to 0x7E: the codec writes the value into a response head,
+// so what the wire cannot carry never enters it.
+func (v *HTTP1RequestIDValue) Set(b []byte) bool {
+	//: empty is absent, and a longer one is refused, never cut.
+	if len(b) == 0 || len(b) > HTTP1MaxRequestID {
+		//: left as it was.
+		return false
+	}
+	//: every byte must be one a field value carries without a question.
+	for _, c := range b {
+		//: a space, a control, DEL or a high byte.
+		if c < visibleFirst || c > visibleLast {
+			//: left as it was.
+			return false
+		}
+	}
+	v.n = uint8(copy(v.id[:], b))
+	//: copied.
+	return true
+}
+
+// Bytes returns the identifier, aliasing the value: valid while the value is,
+// and empty when none was set.
+func (v *HTTP1RequestIDValue) Bytes() []byte {
+	//: the bytes set, within the value.
+	return v.id[:v.n]
+}
+
+// Reset clears the identifier.
+func (v *HTTP1RequestIDValue) Reset() {
+	//: the length is the identifier's extent: the stale bytes past it are never read.
+	v.n = 0
+}
+
+// HTTP1AccessStage says which moment of an answer's life an access record
+// describes.
+type HTTP1AccessStage uint8
+
 // HTTP1AccessValue is one request's access-log record, as the http1 chain's
 // logging link hands it to an HTTP1AccessLogger: what the request asked, how
 // it was routed and answered, and the request fields the link allows, by
@@ -75,8 +150,27 @@ type HTTP1AccessValue struct {
 	BodyLen int
 	// Authenticated reports whether an authenticating link verified the request.
 	Authenticated bool
-	// Deferred reports whether the answer was deferred to the batch's end.
-	Deferred bool
+	// TraceID is the trace the request joined, read from its traceparent by a
+	// Trace link in the same chain; the zero value without one.
+	TraceID trace.TraceID
+	// Stage says what the record is: an answer written, one deferred or pending
+	// and so with no status yet, or a deferred answer's completion.
+	Stage HTTP1AccessStage
+	// ID is the request's number (HTTP1RequestValue.ID): what a sampling decision
+	// or a slow-request record is keyed on, the same on both records of a deferred
+	// answer.
+	ID uint64
+	// Elapsed is the time from the batch's start to this record, the wait behind
+	// the batch's earlier requests included; on a deferred answer's second record
+	// the time since it was deferred.
+	Elapsed DurationValue
+	// RequestID is the request's correlation identifier, the one its answer
+	// carries in X-Request-Id; empty without a RequestID link in the chain.
+	RequestID HTTP1RequestIDValue
+	// Proto is the request's HTTP major version, 1 or 2.
+	Proto uint8
+	// Stream is the HTTP/2 stream the request arrived on, zero on HTTP/1.1.
+	Stream uint32
 	// NFields is how many entries of Fields the record filled.
 	NFields int
 	// Fields holds the allowed request fields the request carried, in the order

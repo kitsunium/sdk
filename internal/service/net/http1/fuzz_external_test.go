@@ -94,6 +94,10 @@ func FuzzParseProperties(f *testing.F) {
 	for _, s := range fuzzSeeds() {
 		f.Add([]byte(s))
 	}
+	//: traceparent fields of every length, 0..64 (#855).
+	for n := 0; n <= 64; n++ {
+		f.Add([]byte("GET / HTTP/1.1\r\nHost: h\r\ntraceparent: " + strings.Repeat("a", n) + "\r\n\r\n"))
+	}
 	var p http1.Parser
 	small, err := http1.NewParser(corenet.HTTP1LimitsValue{Head: 96, Target: 24, Body: 16})
 	if err != nil {
@@ -102,7 +106,25 @@ func FuzzParseProperties(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in []byte) {
 		checkProperties(t, p, in)
 		checkProperties(t, small, in)
+		checkTraceField(t, p, in)
 	})
+}
+
+// checkTraceField runs a request through the Trace link when Parse accepts it:
+// the context is valid only for a traceparent the parser's rules admit, and the
+// link never changes what was framed.
+func checkTraceField(t *testing.T, p http1.Parser, in []byte) {
+	t.Helper()
+	var req corenet.HTTP1RequestValue
+	n, r := p.Parse(in, &req)
+	if r != http1.RefusalNone || n == 0 {
+		return
+	}
+	var res corenet.HTTP1ResponseValue
+	http1.Trace()(corenet.HTTP1HandlerFunc(func(*corenet.HTTP1RequestValue, *corenet.HTTP1ResponseValue) {})).ServeHTTP1(&req, &res)
+	if value, ok := req.Field("traceparent"); req.Trace.IsValid() && (!ok || len(value) < 55) {
+		t.Fatalf("%q: a valid trace from a traceparent of length %d (present: %v)", in, len(value), ok)
+	}
 }
 
 // TestMutations is the C reference's deterministic mutation fuzz (xorshift,
@@ -161,6 +183,10 @@ func FuzzDifferential(f *testing.F) {
 	for _, s := range fuzzSeeds() {
 		f.Add([]byte(s))
 	}
+	//: the field the RequestID link reads: valid, too long, and an invisible byte (#983).
+	f.Add([]byte("GET / HTTP/1.1\r\nHost: h\r\nX-Request-Id: abc-123\r\n\r\n"))
+	f.Add([]byte("GET / HTTP/1.1\r\nHost: h\r\nX-Request-Id: " + strings.Repeat("a", 65) + "\r\n\r\n"))
+	f.Add([]byte("GET / HTTP/1.1\r\nHost: h\r\nX-Request-Id: a b\r\n\r\n"))
 	var p http1.Parser
 	f.Fuzz(func(t *testing.T, in []byte) {
 		var req corenet.HTTP1RequestValue

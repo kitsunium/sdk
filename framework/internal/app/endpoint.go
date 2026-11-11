@@ -433,11 +433,9 @@ type outcome[Resp any] struct {
 // request joined, so a client — the Studio's Try it — can find it. A
 // malformed header starts a new trace.
 func (e *EndpointService[Req, Resp]) requestSpan(a *App, w http.ResponseWriter, r *http.Request, name string) (context.Context, *span) {
-	ctx := r.Context()
-	if sc := trace.Extract(r.Header); sc.IsValid() {
-		ctx = trace.ContextWithSpanContext(ctx, sc)
-	}
+	ctx := remoteTrace(r.Context(), r.Header)
 	ctx, sp := a.begin(ctx, &spanStart{node: e.id, from: a.clientOf(r), edge: model.EdgeCalls, op: model.OpRequest, name: name})
+	joinRequest(ctx, sp)
 	if h, ok := trace.FormatTraceParent(trace.SpanContextFromContext(ctx)); ok {
 		w.Header().Set("traceparent", h)
 	}
@@ -480,6 +478,7 @@ func (a *App) reply[T any](ctx context.Context, w http.ResponseWriter, resp T, e
 	h.Set("X-Content-Type-Options", "nosniff")
 	if err != nil {
 		status, body := describe(err)
+		body.RequestID = RequestID(ctx)
 		switch {
 		case status >= http.StatusInternalServerError:
 			logger.Error(ctx, a.log, "request failed", logger.Int("status", status), logger.String("error", err.Error()))

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin || freebsd || openbsd || netbsd || dragonfly
 
 package loop
 
@@ -21,12 +21,16 @@ const (
 	// arrivals outpace the drain — no grace let the routing stop —, and what
 	// is left in the queue meets the close.
 	queueTakeMax int = 1 << 16
-	// queueTakeBatch bounds what epoll's drain takes from one listener in one
-	// batch, so the loop serves between two takes.
-	queueTakeBatch int = 8 * epollAcceptBurst
+	// acceptBurst is the most connections one listener readiness accepts, on
+	// epoll and on kqueue, before the loop serves the events already in hand.
+	acceptBurst int = 128
+	// queueTakeBatch bounds what the drain of epoll or kqueue takes from one
+	// listener in one batch, so the loop serves between two takes.
+	queueTakeBatch int = 8 * acceptBurst
 )
 
-// What an accept's failure means for epoll's drain take (takeAfter).
+// What an accept's failure means for the drain take of epoll and kqueue
+// (takeAfter).
 const (
 	// takeOver ends the take: the queue is empty, or the listener failed.
 	takeOver uint8 = iota
@@ -58,15 +62,49 @@ type listenerSet struct {
 	accepts []atomic.Uint64
 }
 
-// newListenerSet shares fds among takers takers.
-func newListenerSet(fds []int, takers int) *listenerSet {
+// newListenerSet shares fds among their takers: takersOf(i) of them hand
+// listener i back.
+func newListenerSet(fds []int, takersOf func(i int) int) *listenerSet {
 	ls := &listenerSet{fds: fds, left: make([]atomic.Int32, len(fds)), closed: make([]atomic.Bool, len(fds)), accepts: make([]atomic.Uint64, len(fds))}
-	//: every listener waits on every taker.
+	//: every listener waits on every one of its takers.
 	for i := range ls.left {
-		ls.left[i].Store(int32(takers))
+		ls.left[i].Store(int32(takersOf(i)))
 	}
 	//: shared.
 	return ls
+}
+
+// takersOfShards counts the takers of a group whose listeners may each belong
+// to one loop: a shard is taken by that loop's rings, a shared listener by
+// every loop's.
+func takersOfShards(owners []int, loops, rings int) func(int) int {
+	//: by the listener's owner.
+	return func(i int) int {
+		//: one loop's rings, or all of them.
+		if owners[i] != 0 {
+			//: its one loop.
+			return rings
+		}
+		return loops * rings
+	}
+}
+
+// ownersOf is cfg's listeners' owners, in Config.Listeners' order.
+func ownersOf(ls []Listener) []int {
+	out := make([]int, len(ls))
+	//: each one.
+	for i, l := range ls {
+		out[i] = l.Loop
+	}
+	//: aligned with the listeners.
+	return out
+}
+
+// ownedBy reports whether loop index accepts on listener i: its shard, or a
+// listener every loop shares.
+func ownedBy(owners []int, i, index int) bool {
+	//: shared, or its owner.
+	return owners[i] == 0 || owners[i] == index+1
 }
 
 // handBack hands listener i back: its taker will accept on it no more. The
@@ -111,32 +149,16 @@ func (ls *listenerSet) close(i int) {
 	swallowErr(syscall.Close(ls.fds[i]))
 }
 
-// takeAfter says what an accept4 failure means for the drain's take, live
-// the connections the group still holds.
-func takeAfter(err error, live int64) uint8 {
-	//: by errno.
-	switch err {
-	//: out of descriptors: the drain's closes make room, unless the group has
-	//: no connection left to close — nothing would ever free one.
-	case syscall.EMFILE, syscall.ENFILE:
-		//: none to close: over, as the portable backend gives up.
-		if live == 0 {
-			//: over.
-			return takeOver
-		}
-		//: next batch.
-		return takeLater
-	//: one connection lost, the queue still there: the peer abandoned it, a
-	//: signal, or a network error accept(2) says to retry on.
-	case syscall.ECONNABORTED, syscall.EINTR, syscall.EPROTO, syscall.ENOPROTOOPT, syscall.EHOSTDOWN,
-		syscall.ENONET, syscall.EHOSTUNREACH, syscall.EOPNOTSUPP, syscall.ENETUNREACH, syscall.ENETDOWN:
-		//: the next one.
-		return takeNext
-	//: EAGAIN, the queue empty; anything else, the listener failed.
-	default:
-		//: over.
-		return takeOver
+// doneOutside is a taker's queueDone at the start: a shard of another loop
+// was never this one's to take, so it starts handed back (#856).
+func doneOutside(owners []int, index int) []bool {
+	done := make([]bool, len(owners))
+	//: each listener.
+	for i := range owners {
+		done[i] = !ownedBy(owners, i, index)
 	}
+	//: true for another loop's shards.
+	return done
 }
 
 // full reports whether the ring's table has no slot left for a connection.
@@ -164,6 +186,13 @@ func (lp *loop) closeSettled(r *ring) {
 		nxt := c.lruNext
 		//: settled, heard or quiet, and waiting on nobody.
 		if r.drainable(c) && !lp.waits(r, s) {
+			//: the handler's last word, once; the connection closes next batch.
+			if lp.drainer != nil && c.flags&fDrained == 0 {
+				c.flags |= fDrained
+				lp.drainer.OnDrain(lp, r.ref(s))
+				s = nxt
+				continue
+			}
 			c.state, c.reason = stClosing, rDrain
 			r.markDirty(s)
 		}

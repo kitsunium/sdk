@@ -181,6 +181,7 @@ files:
       - int64Bits
       - minimumLimitBytes
       - Apply
+      - Derive
       - applyFrom
       - deriveWith
       - shareOf
@@ -253,6 +254,8 @@ functions:
     params: cfg ConfigValue, env environment
     results: coreproc.MemoryLimitValue, error
   - name: Apply
+    results: coreproc.MemoryLimitValue
+  - name: Derive
     results: coreproc.MemoryLimitValue
   - doc: |-
       applyFrom is Apply with its three environment dependencies injected so tests

@@ -34,9 +34,12 @@ type Config struct {
 	// missing and refused when another account could write to it.
 	Path string
 	// AllowUIDs and AllowGIDs admit peers besides this process's own user:
-	// an on-call group declared at deployment, say. They are enforced where
-	// the kernel names the peer (Peer.Verified); the directory must still
-	// let those accounts reach the socket, which is the deployment's to
+	// an on-call group declared at deployment, say. The listener opens the
+	// socket file to them — 0660 and the group for one group, 0666 for
+	// another user or several groups — and, where the kernel names the
+	// peer (Peer.Verified), admits a peer by its user, its effective group
+	// or one of its supplementary groups. The directory must still let
+	// those accounts reach the socket, which is the deployment's to
 	// arrange — this package never widens a directory. Windows has no UID:
 	// there the pipe's DACL admits this account only, and the lists admit
 	// nobody more.
@@ -60,10 +63,10 @@ type Listener struct {
 
 // acceptor is the endpoint a Listener accepts on: a Unix socket
 // (socket.go), a named pipe on Windows (pipe_windows.go). accept returns the
-// next connection and what the kernel says of its peer; admission is the
-// Listener's.
+// next connection, what the kernel says of its peer and, where it reads
+// them, the peer's supplementary groups; admission is the Listener's.
 type acceptor interface {
-	accept() (net.Conn, coreipc.PeerValue, error)
+	accept() (conn net.Conn, peer coreipc.PeerValue, groups []int, err error)
 	Close() error
 	Addr() net.Addr
 }
@@ -91,7 +94,13 @@ func negative(n int) bool { return n < 0 }
 // queue, a timeout — since its owner may be alive. One the kernel refuses
 // the connection on (ECONNREFUSED), or that vanished meanwhile, is a
 // leftover of a dead process and is removed — provided it is a socket this
-// account owns. The socket file is made 0600. On Windows the
+// account owns. The socket file is made 0600, or — when cfg's lists name
+// other accounts — 0660 and the one group they name, or 0666 where they
+// name another user or several groups; a group the socket cannot be
+// given (this account is not in it) is LISTEN_FAILED, and so is
+// DIRECTORY_UNSAFE a 0666 socket in a directory anybody may search
+// where the kernel names no peer. The mode is set before the socket
+// listens. On Windows the
 // named pipe is created with FILE_FLAG_FIRST_PIPE_INSTANCE: a name that
 // exists is IN_USE when this account owns it, ENDPOINT_SQUATTED when
 // another account does or its DACL admits no instance of this account.
@@ -107,7 +116,7 @@ func NewListener(cfg *Config) (*Listener, error) {
 // (Refused), and never returned.
 func (l *Listener) Accept() (*coreipc.Conn, error) {
 	for {
-		c, p, err := l.ln.accept()
+		c, p, groups, err := l.ln.accept()
 		if err != nil {
 			l.mu.Lock()
 			closed := l.closed
@@ -117,7 +126,7 @@ func (l *Listener) Accept() (*coreipc.Conn, error) {
 			}
 			return nil, errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", l.cfg.Path), errs.String("cause", err.Error()))
 		}
-		if err := l.admits(p); err != nil {
+		if err := l.admits(p, groups); err != nil {
 			closeBestEffort(c, l.cfg.Path)
 			l.mu.Lock()
 			l.refused++
@@ -151,24 +160,29 @@ func (l *Listener) Close() error {
 	return l.ln.Close()
 }
 
-// admit says whether p may use a socket of account self under cfg. An
-// unverified peer passed the directory, which is the only gate there is.
-func admit(p coreipc.PeerValue, self int, cfg *Config) error {
-	return admitWhere(p, self, cfg, kernelNamesPeer)
+// admit says whether p, whose supplementary groups the kernel gave as
+// groups, may use a socket of account self under cfg. An unverified peer
+// passed the directory, which is the only gate there is.
+func admit(p coreipc.PeerValue, groups []int, self int, cfg *Config) error {
+	return admitWhere(p, groups, self, cfg, kernelNamesPeer)
 }
 
 // admitWhere is admit on a platform whose kernel names the peer (named) or
 // does not. Where it does, a peer it did not name is an anomaly and is
 // refused (#1093, ADR 0031) rather than let through as the directory's; where
-// it does not, the directory is the gate and admitted it.
-func admitWhere(p coreipc.PeerValue, self int, cfg *Config, named bool) error {
+// it does not, the directory is the gate and admitted it. A named peer is
+// admitted for its user, or for its effective group or one of its
+// supplementary groups (#1092) — the groups the kernel recorded with its
+// credentials when it connected, never read again from the process.
+func admitWhere(p coreipc.PeerValue, groups []int, self int, cfg *Config, named bool) error {
 	if !p.Verified {
 		if named {
 			return errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.String("reason", "kernel did not name the peer"))
 		}
 		return nil
 	}
-	if p.UID == self || slices.Contains(cfg.AllowUIDs, p.UID) || slices.Contains(cfg.AllowGIDs, p.GID) {
+	allowedGroup := func(gid int) bool { return slices.Contains(cfg.AllowGIDs, gid) }
+	if p.UID == self || slices.Contains(cfg.AllowUIDs, p.UID) || allowedGroup(p.GID) || slices.ContainsFunc(groups, allowedGroup) {
 		return nil
 	}
 	return errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.Int("uid", p.UID), errs.Int("gid", p.GID))

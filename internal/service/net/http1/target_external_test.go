@@ -131,3 +131,65 @@ func TestCanonicalTarget_pathIsTheRequests(t *testing.T) {
 		}
 	}
 }
+
+// TestCanonical_exported holds the exported reader to the parser's: every
+// accepted and refused target of the table comes out of Canonical with the
+// same verdict and the same Path and Query as out of Parse, for a request
+// whose fields a codec filled itself.
+func TestCanonical_exported(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		method, target, host string
+		want                 http1.Refusal
+		path, query          string
+	}{
+		{"GET", "/a/b", "h", http1.RefusalNone, "/a/b", ""},
+		{"GET", "/a?x=1&y=%2F", "h", http1.RefusalNone, "/a", "x=1&y=%2F"},
+		{"GET", "/caf%C3%A9/%41", "h", http1.RefusalNone, "/caf%C3%A9/%41", ""},
+		{"OPTIONS", "*", "h", http1.RefusalNone, "*", ""},
+		{"GET", "http://h/a/b?q", "h", http1.RefusalNone, "/a/b", "q"},
+		{"GET", "/a/../b", "h", http1.RefusalTargetPath, "", ""},
+		{"GET", "/a//b", "h", http1.RefusalTargetPath, "", ""},
+		{"GET", "/a%2Fb", "h", http1.RefusalTargetPath, "", ""},
+		{"GET", "*", "h", http1.RefusalTargetForm, "", ""},
+		{"GET", "http://x/a", "h", http1.RefusalTargetHost, "", ""},
+		{"GET", "", "h", http1.RefusalTarget, "", ""},
+	} {
+		req := corenet.HTTP1RequestValue{Method: []byte(tc.method), Target: []byte(tc.target), Host: []byte(tc.host), HasHost: true}
+		if r := http1.Canonical(&req); r != tc.want {
+			t.Errorf("%s %q: refusal %s, want %s", tc.method, tc.target, r, tc.want)
+			continue
+		}
+		if tc.want != http1.RefusalNone {
+			continue
+		}
+		if string(req.Path) != tc.path || string(req.Query) != tc.query {
+			t.Errorf("%s %q: Path %q Query %q, want %q %q", tc.method, tc.target, req.Path, req.Query, tc.path, tc.query)
+		}
+		if len(req.Path) > 0 && len(req.Target) > 0 && tc.target != "*" && tc.path != "/" && &req.Path[0] != &req.Target[len(req.Target)-len(tc.path)-queryTail(tc.query)] {
+			t.Errorf("%q: Path does not alias Target", tc.target)
+		}
+	}
+}
+
+// queryTail is the bytes of a target past its path: "?" and the query.
+func queryTail(query string) int {
+	if query == "" {
+		return 0
+	}
+	return len(query) + 1
+}
+
+// TestParse_setsProto pins what Parse leaves for a chain link: HTTP/1.1's
+// major version, no scheme and no stream.
+func TestParse_setsProto(t *testing.T) {
+	t.Parallel()
+	var p http1.Parser
+	req := corenet.HTTP1RequestValue{Scheme: []byte("stale"), Stream: 9, Proto: 2}
+	if _, r := p.Parse([]byte("GET / HTTP/1.1\r\nHost: h\r\n\r\n"), &req); r != http1.RefusalNone {
+		t.Fatal(r)
+	}
+	if req.Proto != 1 || req.Stream != 0 || req.Scheme != nil {
+		t.Fatalf("Proto %d Stream %d Scheme %q after Parse", req.Proto, req.Stream, req.Scheme)
+	}
+}

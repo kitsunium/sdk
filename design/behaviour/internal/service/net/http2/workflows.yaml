@@ -1,0 +1,211 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*Lane).find
+    steps:
+      - set: prev
+        value: noIndex
+      - loop:
+          cond: idx != noIndex
+          do:
+            - opt:
+                do:
+                  - return: idx, prev
+                when: l.streams[idx].id == id
+            - opt:
+                do:
+                  - return: noIndex, prev
+                when: l.streams[idx].id < id
+            - set: prev
+              value: idx
+          init: idx = c.head
+          post: idx = l.streams[idx].next
+      - return: noIndex, prev
+  - of: (*Lane).lowestHold
+    steps:
+      - bind: best
+        eval: noIndex
+      - loop:
+          cond: idx != noIndex
+          do:
+            - bind: st
+              eval: "&l.streams[idx]"
+            - opt:
+                do:
+                  - set: best
+                    value: idx
+                when: st.holdLen > 0 && st.holdOff >= from && (best == noIndex || st.holdOff < l.streams[best].holdOff)
+          init: idx := c.head
+          post: idx = l.streams[idx].next
+      - return: best
+  - of: isToken
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: tokenBits[c>>6]&(1<<(c&63)) == 0
+          key: _
+          range: name
+          value: c
+      - return: "true"
+  - of: isConnectionField
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: equalFold(name, c)
+          key: _
+          range: connectionFields
+          value: c
+      - return: "false"
+  - of: equalFold
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(name) != len(s)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: lowerByte(name[i]) != s[i]
+          key: i
+          range: len(name)
+      - return: "true"
+  - of: staticNameIndex
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: len(name) > staticNameMax
+      - bind: spanAt
+        eval: 2 * len(name)
+      - loop:
+          do:
+            - bind: at
+              eval: staticOffsetSlots * (int(index) - 1)
+            - bind: off, length
+              eval: int(staticOffsets[at]), int(staticOffsets[at+1])
+            - opt:
+                do:
+                  - return: int(index)
+                when: length == len(name) && equalFoldBytes(name, staticBytes[off:off+length])
+          key: _
+          range: staticSorted[staticSpans[spanAt]:staticSpans[spanAt+1]]
+          value: index
+      - return: "0"
+  - of: equalFoldBytes
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: lowerByte(name[i]) != b[i]
+          key: i
+          range: len(name)
+      - return: "true"
+  - of: validName
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(name) == 0
+      - bind: rest
+        eval: name
+      - opt:
+          do:
+            - set: rest
+              value: rest[1:]
+          when: rest[0] == asciiColon
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!nameByte(c)"
+          key: _
+          range: rest
+          value: c
+      - return: "true"
+  - of: (*laneState).findRequest
+    steps:
+      - set: prev
+        value: noIndex
+      - loop:
+          cond: idx != noIndex
+          do:
+            - opt:
+                do:
+                  - return: idx, prev
+                when: st.requests[idx].stream == stream
+            - set: prev
+              value: idx
+          init: idx = e.requests
+          post: idx = st.requests[idx].next
+      - return: noIndex, prev
+  - of: parseDecimal
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: len(b) == 0 || len(b) > maxDecimalDigits
+      - var:
+          name: "n"
+          type: int64
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: 0, false
+                when: c < '0' || c > '9'
+            - set: "n"
+              value: n*decimalBase + int64(c-'0')
+          key: _
+          range: b
+          value: c
+      - return: n, true
+  - of: joinCookies
+    steps:
+      - bind: start
+        eval: len(st.scratch)
+      - bind: first
+        eval: "-1"
+      - bind: write
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: req.Fields[write]
+                    value: req.Fields[i]
+                  - op: ++
+                    set: write
+                  - continue: true
+                when: "!bytes.Equal(req.Fields[i].Name, fieldCookie)"
+            - alt:
+                - do:
+                    - set: first
+                      value: write
+                    - set: req.Fields[write]
+                      value: req.Fields[i]
+                    - op: ++
+                      set: write
+                  when: first < 0
+                - do:
+                    - set: st.scratch
+                      value: append(st.scratch, cookieSep...)
+                  else: true
+            - set: st.scratch
+              value: append(st.scratch, req.Fields[i].Value...)
+          key: i
+          range: req.NFields
+      - set: req.Fields[first].Value
+        value: st.scratch[start:len(st.scratch):len(st.scratch)]
+      - set: req.NFields
+        value: write

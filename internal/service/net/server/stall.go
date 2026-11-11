@@ -42,10 +42,12 @@ const (
 const (
 	// classKernel is class A-kernel.
 	classKernel string = "a-kernel"
-	// statusOn, statusAbsent and statusDisabled are the rows server writes.
+	// statusOn, statusAbsent, statusDisabled and statusUnprobed are the rows
+	// server writes.
 	statusOn       string = "on"
 	statusAbsent   string = "absent"
 	statusDisabled string = "disabled"
+	statusUnprobed string = "unprobed"
 	// statusMissing is an opt-in the kernel lacks.
 	statusMissing string = "missing"
 )

@@ -1,5 +1,7 @@
 package net
 
+import corehttp2 "github.com/kitsunium/sdk/internal/core/net/http2"
+
 // StateValue is a snapshot of the server's lifecycle and listeners.
 //
 // It is a value, so a caller can hold it, log it, or compare it without racing
@@ -28,6 +30,11 @@ type StateValue struct {
 	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
 	// over. A count that keeps rising is a server that cannot accept.
 	AcceptBackoffs uint64 `json:"accept_backoffs"`
+	// SuppressedLogs counts the lines of net/http's own log the server did not
+	// write: over the cap of ten records a second, or with no logger to write
+	// them to (WithLogger). A count that rises is a port being probed, or a
+	// handler that panics.
+	SuppressedLogs uint64 `json:"suppressed_logs"`
 	// Datagrams counts what the batched datagram paths drop (ADR 0192).
 	Datagrams DatagramStateValue `json:"datagrams"`
 	// Loops reports every loop group (ADR 0186 §D8). It is empty while the
@@ -111,4 +118,52 @@ type ListenerStateValue struct {
 	// process's connections end, and the bind is retried, bounded. Zero when
 	// the first attempt bound.
 	BindWait DurationValue `json:"bind_wait"`
+	// H2C reports an HTTP group serving HTTP/2 in cleartext, by prior knowledge alone.
+	H2C bool `json:"h2c,omitempty"`
+	// HTTP2 is the HTTP/2 bounds the group serves with, resolved: a group given
+	// none reads ADR 0195's numbers. Nil for a listener that serves no HTTP.
+	HTTP2 *corehttp2.LimitsValue `json:"http2,omitempty"`
+	// MaxBodyBytes is the request-body bound an HTTP group served by net/http
+	// holds on this listener: the default's 1 MiB, the option's value, or -1
+	// for none. Zero on every other listener, which has no such bound.
+	MaxBodyBytes int64 `json:"max_body_bytes"`
+	// Backlog is the depth of the listener's accept queue as applied: the
+	// Backlog option's value, or the host's somaxconn for the default, and the
+	// clamp when the host's somaxconn is below what was asked (Degraded, with
+	// its reason). Zero for an adopted socket, whose queue the supervisor sized,
+	// and for a datagram socket.
+	Backlog int `json:"backlog"`
+	// ReceiveBuffer is the socket's receive buffer as the kernel holds it,
+	// read back after bind, or after the group's size was applied to an
+	// adopted socket (SO_RCVBUF): on Linux twice what was asked, clamped to
+	// rmem_max, the kernel's default when nothing was asked. Zero where the
+	// platform cannot say. A clamp is reported here and is no fault.
+	ReceiveBuffer int `json:"receive_buffer"`
+	// SendBuffer is the socket's send buffer as the kernel holds it, read back
+	// as ReceiveBuffer is (SO_SNDBUF, wmem_max).
+	SendBuffer int `json:"send_buffer"`
+	// ProxyRefused counts the connections a ProxyProtocol group refused — peers
+	// outside Trusted, and headers malformed or not finished within Timeout. It
+	// is the group's count, on each of its listeners' rows.
+	ProxyRefused uint64 `json:"proxy_refused,omitempty"`
+	// HTTP1Requests counts the HTTP/1.1 requests the group served since Start
+	// (#966): one count per request on net/http's engine, one per batch on the
+	// loop engine, whose adapter counts them. It is the group's count, on each
+	// of its listeners' rows; zero on a group that serves no HTTP.
+	HTTP1Requests uint64 `json:"http1_requests,omitempty"`
+	// HTTP2Requests counts the HTTP/2 requests the group served, as HTTP1Requests does.
+	HTTP2Requests uint64 `json:"http2_requests,omitempty"`
+	// HTTP2Errors counts the group's HTTP/2 protocol errors by type, a row for
+	// each type counted at least once, in the vocabulary's order: on net/http's
+	// engine what its CountError reports, an unanswered PING included; on the
+	// loop engine each RST_STREAM and GOAWAY its codec answers with an error
+	// and each header list past its bound. net/http counts neither a header
+	// list past MaxHeaderBytes, which it answers 431 itself, nor a frame past
+	// its frame bound.
+	HTTP2Errors []corehttp2.ErrorCountValue `json:"http2_errors,omitempty"`
+	// ALPN is the protocol list a TLS HTTP group's listeners offer, in the
+	// order offered (#964): the group's versions intersected with its
+	// identity's NextProtos, on net/http's engine and on a TLS loop codec
+	// group alike. Nil for a group that negotiates nothing.
+	ALPN []string `json:"alpn,omitempty"`
 }

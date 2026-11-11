@@ -78,6 +78,15 @@ func Apply() coreproc.MemoryLimitValue {
 	return applyFrom(os.LookupEnv, os.ReadFile, debug.SetMemoryLimit)
 }
 
+// Derive is what Apply would install, read and derived the same way, and
+// installs nothing: a caller that sizes memory outside the Go heap — a
+// network loop's slab (#809) — reads the allowance without touching the
+// runtime's limit.
+func Derive() coreproc.MemoryLimitValue {
+	//: Apply's derivation, never installed.
+	return deriveWith(defaultConfig(), os.LookupEnv, os.ReadFile)
+}
+
 // applyFrom is Apply with its three environment dependencies injected so tests
 // can drive every branch without a real cgroup filesystem.
 func applyFrom(

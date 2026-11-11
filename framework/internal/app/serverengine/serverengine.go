@@ -36,6 +36,10 @@ func newHTTPServer(cfg plug.HTTPConfig) plug.HTTPServer {
 		server.ReadHeaderTimeout(cfg.ReadHeader), server.ReadTimeout(cfg.Read),
 		server.WriteTimeout(cfg.Write), server.IdleTimeout(cfg.Idle),
 		server.MaxHeaderBytes(cfg.MaxHeaderBytes), server.Plaintext(),
+		// Each endpoint bounds its own body (app.MaxBody, 1 MiB by default), and
+		// may raise it past the group's default: the engine states no bound of
+		// its own, so an endpoint's is the one that holds.
+		server.MaxBodyBytes(-1),
 	).HandleHTTP(cfg.Handler)
 	return httpServer{srv: srv}
 }

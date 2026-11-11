@@ -67,8 +67,22 @@ type config struct {
 	logs         io.Writer
 	clock        clock.Timed
 	warnings     []phrase
-	// trustProxy lets app.ClientIP read X-Forwarded-For (<PRODUCT>_TRUST_PROXY=on).
+	// trustProxy is <PRODUCT>_TRUST_PROXY=on: the product is behind a proxy,
+	// and trustedProxies says which.
 	trustProxy bool
+	// trustedProxies are the peers whose X-Forwarded-For app.ClientIP reads:
+	// <PRODUCT>_TRUSTED_PROXIES, once <PRODUCT>_TRUST_PROXY is on. Empty
+	// trusts nobody.
+	trustedProxies trustedProxies
+	// trustErr is the refusal of the proxy trust the environment names: on
+	// with no list, or a list that is not one. The start returns it; the
+	// healthcheck, which only reads the address, does not.
+	trustErr error
+	// accessLog is <PRODUCT>_ACCESS_LOG: which requests the access record is
+	// written for. accessErr is its refusal, returned by the start as
+	// trustErr is.
+	accessLog accessPolicy
+	accessErr error
 	// secrets is <PRODUCT>_SECRETS: where the environment keeps its secrets.
 	secrets secretsConfig
 }
@@ -212,6 +226,8 @@ func resolveConfig(o *appOptions, name string, getenv func(string) string) confi
 		cfg.warnings = append(cfg.warnings, say("config.studio-production"))
 	}
 	cfg.trustProxy = own(varTrustProxy) == "on"
+	cfg.trustedProxies, cfg.trustErr = resolveTrust(name, own)
+	cfg.accessLog, cfg.accessErr = resolveAccessLog(name, own, dev)
 	cfg.secrets = resolveSecrets(o, own)
 	cfg.allowedHosts = slices.Clone(loopbackHosts)
 	for h := range strings.SplitSeq(own(varAllowedHosts), ",") {
@@ -371,15 +387,19 @@ func settings(o *appOptions, name string, getenv func(string) string, c *config)
 		dataOption = "app.InMemory"
 	}
 	env, addr, data := productVariable(name, varEnv), productVariable(name, varAddr), productVariable(name, varDataDir)
-	trust, hosts, level := productVariable(name, varTrustProxy), productVariable(name, varAllowedHosts), productVariable(name, varLogLevel)
+	trust, proxies := productVariable(name, varTrustProxy), productVariable(name, varTrustedProxies)
+	hosts, level := productVariable(name, varAllowedHosts), productVariable(name, varLogLevel)
+	access := productVariable(name, varAccessLog)
 	return slices.Concat([]model.Setting{
 		{Name: env, Value: c.env, From: src.from(o.env != nil, env), Option: "app.Env"},
 		{Name: addr, Value: c.addr, From: src.from(o.addr != nil, addr, "PORT"), Option: "app.Listen", Flag: "-addr"},
 		{Name: data, Value: cmp.Or(c.dataDir, "memory"), From: src.from(o.memory || o.dataDir != nil, data), Option: dataOption, Flag: "-data"},
 	}, studioSettings(o, getenv, c), []model.Setting{
 		{Name: trust, Value: onOff(c.trustProxy), From: src.from(false, trust)},
+		{Name: proxies, Value: c.trustedProxies.String(), From: src.from(false, proxies)},
 		{Name: hosts, Value: strings.Join(c.allowedHosts, ","), From: src.from(false, hosts)},
 		{Name: level, Value: cmp.Or(c.logLevel, "info"), From: src.from(false, level)},
+		{Name: access, Value: c.accessLog.String(), From: src.from(false, access)},
 	})
 }
 

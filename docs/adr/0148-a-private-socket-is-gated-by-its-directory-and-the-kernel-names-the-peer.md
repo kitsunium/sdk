@@ -196,3 +196,65 @@ own daemon running for as long as the squatter held the name.
    (`ENDPOINT_FOREIGN`). The probe instance listens for the moment it lives,
    and a pipe gone between the two creates is re-made by the probe and read
    as ours (`IN_USE`, cleared by a retry).
+
+## Amendment — 2026-11-11: the socket is opened to the accounts the lists name (kitsunium/sdk#1092)
+
+The 2026-11-04 amendment let a client dial a directory another account owns,
+and the allow-lists still admitted no client of another account but root: the
+socket was `0600`, and `connect(2)` needs write permission on it, so the
+kernel refused every account the lists named before the listener saw it. And
+the admission compared the peer's effective group alone, so the member of an
+on-call group — a supplementary group, as such a group is — was refused even
+once it got through. The owner decided on 2026-11-10 (option a of the issue)
+to open the socket's mode when a list is given, the directory staying the
+first gate.
+
+1. **The mode is the narrowest the lists need** (`socketPosture`): `0600`
+   when they name nobody but this account and root (whom no mode stops);
+   `0660` and the socket given that group when they name one group and no
+   other user — the kernel's own permission check then admits the group's
+   members, supplementary ones included, and nobody else, on every platform;
+   `0666` when they name another user or several groups, which no single
+   group can hold. Read bits grant nothing on a socket; `0660` and `0666` are
+   written as service managers write them. A group the socket cannot be given
+   — the listening account is not in it, and is not root — is
+   `LISTEN_FAILED`: left at its old group it would admit nobody the list
+   names, opened to everyone it would admit more than it names (ADR 0031).
+2. **No moment where the socket is wider than its posture.** `bind(2)`
+   creates the file with the mode the umask leaves (`0777` under a zero
+   umask); the group and the mode are set between `bind(2)` and `listen(2)`,
+   and a `connect(2)` to a socket that does not listen is refused
+   (`ECONNREFUSED`) on every Unix, so no connection completes before the file
+   has its posture. The umask is not touched — it is the process's, and Go
+   runs threads that create files meanwhile —; Linux's `fchmod` on an unbound
+   socket is not portable.
+3. **The directory stays the first gate, and is never widened.** A `0666`
+   socket in a directory anybody can search, where the kernel names no peer
+   (darwin, OpenBSD, illumos, Solaris), would admit anybody: neither the
+   directory, nor the mode, nor the admission — which admits an unnamed peer —
+   would refuse. `Listen` refuses it (`DIRECTORY_UNSAFE`, rule "searchable by
+   anyone…"); a directory whose group is the allowed accounts' (`0750`)
+   passes. Where the kernel names peers, the admission refuses who the lists
+   do not name, whatever the directory, and `Refused` counts them.
+4. **A peer is admitted by its supplementary groups too**, read from the
+   kernel, never from the process: Linux's `SO_PEERGROUPS` (4.13) returns the
+   group list of the very credentials `SO_PEERCRED` reads, recorded when the
+   peer connected or listened — `/proc/<pid>/status`, which the issue
+   offered, reads a process whose pid may since name another and whose groups
+   may have changed, and was not taken. FreeBSD and DragonFly read the
+   `xucred`'s `cr_groups` (sixteen at most); NetBSD's `unpcbid` carries the
+   effective gid alone, and there a supplementary group admits nobody. A
+   kernel that does not answer leaves the peer judged on its effective group:
+   fewer are admitted, never more.
+5. **Windows is unchanged and has the same limit**: the pipe's DACL grants
+   the listening account only, and a client refuses a server of another
+   account, so the lists admit nobody more there. Opening the pipe to other
+   accounts needs lists of SIDs, which `Config` does not have — another
+   decision, not taken here.
+6. **What it costs.** A socket opened to the lists is reachable by every
+   account the directory lets through; under a world-searchable directory on
+   Linux and the BSDs, every account may connect and be refused, counted, by
+   the listener. The deployment that wants the others kept out at the kernel
+   gives the directory the allowed accounts' group. A listener with
+   `AllowGIDs` naming a group its account is not in, which started before and
+   admitted only root, now fails to start.

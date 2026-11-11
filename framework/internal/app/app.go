@@ -279,6 +279,12 @@ func (a *App) readConfig() error {
 		return err
 	}
 	a.cfg = resolveConfig(&a.opts, a.name, os.Getenv)
+	if a.cfg.trustErr != nil {
+		return a.cfg.trustErr
+	}
+	if a.cfg.accessErr != nil {
+		return a.cfg.accessErr
+	}
 	// A mount given app.Only holds in the environment this run names.
 	a.remount(a.cfg.envName)
 	if a.cliRun {
@@ -776,8 +782,8 @@ func (r *routes) handle(pattern, owner string, h http.Handler) (problem phrase) 
 // of the panic in the body.
 func (a *App) protect(h http.Handler) http.Handler {
 	cop := http.NewCrossOriginProtection()
-	cop.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusForbidden, wireError{Error: wireBody{Code: WireForbidden, Message: "cross-origin request refused"}})
+	cop.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusForbidden, wireError{Error: wireBody{Code: WireForbidden, Message: "cross-origin request refused", RequestID: RequestID(r.Context())}})
 	}))
 	protected := cop.Handler(h)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -787,7 +793,7 @@ func (a *App) protect(h http.Handler) http.Handler {
 					panic(p)
 				}
 				logger.Error(r.Context(), a.log, "panic serving a request", logger.Any("panic", p), logger.String("stack", string(debug.Stack())))
-				writeJSON(w, http.StatusInternalServerError, wireError{Error: wireBody{Code: WireInternal, Message: "internal error"}})
+				writeJSON(w, http.StatusInternalServerError, wireError{Error: wireBody{Code: WireInternal, Message: "internal error", RequestID: RequestID(r.Context())}})
 			}
 		}()
 		protected.ServeHTTP(w, r)

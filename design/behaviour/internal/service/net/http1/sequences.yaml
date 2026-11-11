@@ -6,6 +6,9 @@ sequences:
       - bind: b, _
         eval: next.(corenet.HTTP1Batcher)
       - return: "link{next: next, batcher: b}"
+  - of: (*link).wrapped
+    steps:
+      - return: l.next
   - of: (*link).endBatch
     participants:
       - id: caller
@@ -106,8 +109,8 @@ sequences:
       - id: l.next.ServeHTTP1
         kind: value
     steps:
-      - set: req.Route
-        value: "0"
+      - set: req.Route, req.RoutePrefix
+        value: 0, 0
       - loop:
           do:
             - bind: r
@@ -116,6 +119,11 @@ sequences:
                 do:
                   - set: req.Route
                     value: r.id
+                  - opt:
+                      do:
+                        - set: req.RoutePrefix
+                          value: len(r.path)
+                      when: r.prefix
                   - break: true
                 when: |-
                   (len(r.method) == 0 || bytes.Equal(r.method, req.Method)) &&
@@ -338,73 +346,200 @@ sequences:
         kind: actor
       - id: Log
         kind: self
-      - id: slices
-        kind: stdlib
+      - id: newLogConfig
+        kind: internal
     steps:
       - opt:
           do:
             - return: nil, misconfigured("Log", "logger")
           when: l == nil
+      - bind: cfg, err
+        eval: newLogConfig(opts)
+        to: newLogConfig
       - opt:
           do:
-            - return: nil, misconfigured("Log", "allow")
-          when: len(allow) > corenet.HTTP1MaxAccessFields
-      - bind: names
-        eval: make([][]byte, 0, len(allow))
-      - loop:
-          do:
-            - opt:
-                do:
-                  - return: nil, misconfigured("Log", name)
-                when: "!token(name) || credential(name) || repeated(name, allow[:i])"
-            - set: names
-              value: append(names, []byte(name))
-          key: i
-          range: allow
-          value: name
-      - bind: kept
-        eval: slices.Clone(allow)
-        to: slices
+            - return: nil, err
+          when: err != nil
       - return: |-
           func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
           		//: the names are shared, read only.
-          		return &LogLayer{link: newLink(next), l: l, allow: kept, names: names}
+          		return &LogLayer{link: newLink(next), l: l, cfg: cfg}
           	}, nil
+  - of: LogAllow
+    participants:
+      - id: caller
+        kind: actor
+      - id: LogAllow
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: kept
+        eval: slices.Clone(names)
+        to: slices
+      - return: |-
+          LogOption{apply: func(c *logConfig) error {
+          		c.allow = append(c.allow, kept...)
+          		//: the names are judged together, once every one is known.
+          		return nil
+          	}}
+  - of: LogSlowerThan
+    steps:
+      - return: |-
+          LogOption{apply: func(c *logConfig) error {
+          		//: zero would keep everything, and a negative one means nothing.
+          		if d <= 0 {
+          			//: refused.
+          			return misconfigured("Log", "slower")
+          		}
+          		c.slower = d
+          		//: kept.
+          		return nil
+          	}}
+  - of: LogSample
+    steps:
+      - return: |-
+          LogOption{apply: func(c *logConfig) error {
+          		//: zero would divide by nothing.
+          		if n <= 0 {
+          			//: refused.
+          			return misconfigured("Log", "sample")
+          		}
+          		c.sample = uint64(n)
+          		//: kept.
+          		return nil
+          	}}
+  - of: LogClock
+    steps:
+      - return: |-
+          LogOption{apply: func(cfg *logConfig) error {
+          		//: a clock is what every record reads.
+          		if c == nil {
+          			//: refused.
+          			return misconfigured("Log", "clock")
+          		}
+          		cfg.clk = c
+          		//: kept.
+          		return nil
+          	}}
+  - of: CORS
+    participants:
+      - id: caller
+        kind: actor
+      - id: CORS
+        kind: self
+      - id: corenet
+        kind: package
+    steps:
+      - bind: policy, err
+        eval: corenet.NewCORSPolicy(cfg)
+        to: corenet
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: |-
+          func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+          		//: the policy is shared, read only.
+          		return &CORSLayer{link: newLink(next), policy: policy}
+          	}, nil
+  - of: (*CORSLayer).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CORSLayer).ServeHTTP1
+        kind: self
+      - id: req.Field
+        kind: value
+      - id: l.next.ServeHTTP1
+        kind: value
+    steps:
+      - bind: origin, _
+        eval: req.Field(corsOriginField)
+        to: req.Field
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: res.Status
+                    value: statusNoContent
+                  - set: res.CORS
+                    value: l.policy.Preflight(origin, method).Lines
+                  - return: ""
+                init:
+                  bind: method, ok
+                  eval: req.Field(corsRequestMethodField)
+                  to: req.Field
+                when: ok
+          when: len(origin) > 0 && bytes.Equal(req.Method, methodOptions)
+      - set: res.CORS
+        value: l.policy.Actual(origin).Lines
+      - eval: l.next.ServeHTTP1(req, res)
+        to: l.next.ServeHTTP1
+  - of: (*CORSLayer).EndBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CORSLayer).EndBatch
+        kind: self
+      - id: l.endBatch
+        kind: internal
+    steps:
+      - eval: l.endBatch(lane)
+        to: l.endBatch
   - of: (*LogLayer).ServeHTTP1
     participants:
       - id: caller
         kind: actor
       - id: (*LogLayer).ServeHTTP1
         kind: self
+      - id: l.lanes.get
+        kind: internal
       - id: l.next.ServeHTTP1
+        kind: value
+      - id: l.cfg.clk.Now
         kind: value
       - id: orDefault
         kind: internal
       - id: req.Field
         kind: value
-      - id: l.l.LogHTTP1
-        kind: value
+      - id: l.emit
+        kind: internal
     steps:
+      - bind: lane
+        eval: l.lanes.get(req.Lane)
+        to: l.lanes.get
+      - opt:
+          do:
+            - set: lane.start, lane.started
+              value: l.cfg.clk.Now(), true
+          when: "!lane.started"
       - eval: l.next.ServeHTTP1(req, res)
         to: l.next.ServeHTTP1
+      - bind: now
+        eval: l.cfg.clk.Now()
+        to: l.cfg.clk.Now
       - bind: rec
         eval: |-
           corenet.HTTP1AccessValue{
           		Lane: req.Lane, Route: req.Route, Method: req.Method, Path: req.Path,
-          		BodyLen: len(res.Body), Authenticated: req.Authenticated, Deferred: res.Defer,
+          		BodyLen: len(res.Body), Authenticated: req.Authenticated, Stage: stageOf(res),
+          		TraceID: req.Trace.TraceID, RequestID: req.RequestID, ID: req.ID,
+          		Proto: req.Proto, Stream: req.Stream,
+          		Elapsed: corenet.DurationValue(now.Sub(lane.start)),
           	}
       - opt:
           do:
             - set: rec.Status
               to: orDefault
               value: orDefault(res.Status, statusOK)
-          when: "!res.Defer"
+          when: "!res.Defer && !res.Pending"
       - loop:
           do:
             - opt:
                 do:
                   - set: rec.Fields[rec.NFields]
-                    value: "corenet.HTTP1FieldValue{Name: l.names[i], Value: v}"
+                    value: "corenet.HTTP1FieldValue{Name: l.cfg.names[i], Value: v}"
                   - op: ++
                     set: rec.NFields
                 init:
@@ -413,28 +548,2260 @@ sequences:
                   to: req.Field
                 when: ok
           key: i
-          range: l.allow
+          range: l.cfg.allow
           value: name
-      - eval: l.l.LogHTTP1(rec)
-        to: l.l.LogHTTP1
+      - opt:
+          do:
+            - set: lane.deferred
+              value: "append(lane.deferred, deferredAccess{rec: rec, at: now, res: res})"
+          when: res.Defer
+      - eval: l.emit(&rec)
+        to: l.emit
+  - of: stageOf
+    steps:
+      - switch:
+          cases:
+            - case: res.Defer
+              do:
+                - return: corenet.HTTP1AccessDeferred
+            - case: res.Pending
+              do:
+                - return: corenet.HTTP1AccessPending
+      - return: corenet.HTTP1AccessAnswered
+  - of: (*LogLayer).emit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LogLayer).emit
+        kind: self
+      - id: l.l.LogHTTP1
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: l.l.LogHTTP1(*rec)
+              to: l.l.LogHTTP1
+          when: l.keep(rec)
+  - of: (*LogLayer).keep
+    steps:
+      - bind: slow
+        eval: l.cfg.slower > 0 && rec.Elapsed.Duration() >= l.cfg.slower
+      - bind: sampled
+        eval: l.cfg.sample > 0 && (rec.ID&counterMask)%l.cfg.sample == 0
+      - return: (l.cfg.slower == 0 && l.cfg.sample == 0) || slow || sampled
   - of: (*LogLayer).EndBatch
     participants:
       - id: caller
         kind: actor
       - id: (*LogLayer).EndBatch
         kind: self
+      - id: l.finishBatch
+        kind: internal
+    steps:
+      - eval: l.finishBatch(lane)
+        to: l.finishBatch
+  - of: (*LogLayer).finishBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LogLayer).finishBatch
+        kind: self
+      - id: l.endBatch
+        kind: internal
+      - id: l.lanes.get
+        kind: internal
+      - id: l.cfg.clk.Now
+        kind: value
+      - id: completionStatus
+        kind: internal
+      - id: corenet
+        kind: package
+      - id: l.emit
+        kind: internal
+    steps:
+      - eval: l.endBatch(lane)
+        to: l.endBatch
+      - bind: ln
+        eval: l.lanes.get(lane)
+        to: l.lanes.get
+      - set: ln.started
+        value: "false"
+      - opt:
+          do:
+            - return: ""
+          when: len(ln.deferred) == 0
+      - bind: now
+        eval: l.cfg.clk.Now()
+        to: l.cfg.clk.Now
+      - loop:
+          do:
+            - bind: d
+              eval: "&ln.deferred[i]"
+            - set: d.rec.Stage
+              value: corenet.HTTP1AccessCompleted
+            - set: d.rec.BodyLen
+              value: len(d.res.Body)
+            - set: d.rec.Status
+              to: completionStatus
+              value: completionStatus(d.res)
+            - set: d.rec.Elapsed
+              to: corenet
+              value: corenet.DurationValue(now.Sub(d.at))
+            - eval: l.emit(&d.rec)
+              to: l.emit
+            - set: d.res
+              value: nil
+          key: i
+          range: ln.deferred
+      - set: ln.deferred
+        value: ln.deferred[:0]
+  - of: completionStatus
+    participants:
+      - id: caller
+        kind: actor
+      - id: completionStatus
+        kind: self
+      - id: orDefault
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: statusInternal
+          when: res.Defer
+      - return: orDefault(res.Status, statusOK)
+        to: orDefault
+  - of: Trace
+    steps:
+      - return:
+          closure:
+            params: next corenet.HTTP1Handler
+            results: corenet.HTTP1Handler
+            steps:
+              - return: "&TraceLayer{link: newLink(next)}"
+  - of: (*TraceLayer).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TraceLayer).ServeHTTP1
+        kind: self
+      - id: req.Field
+        kind: value
+      - id: coretrace
+        kind: package
+      - id: addHeader
+        kind: internal
+      - id: l.next.ServeHTTP1
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: req.Trace, _
+              to: coretrace
+              value: coretrace.ParseTraceParentBytes(value)
+          init:
+            bind: value, ok
+            eval: req.Field(traceFieldName)
+            to: req.Field
+          when: ok
+      - opt:
+          do:
+            - bind: line
+              eval: append(res.TraceLine[:0], traceLineStart...)
+            - set: line
+              to: coretrace
+              value: coretrace.AppendTraceParent(line, req.Trace)
+            - eval: addHeader(res, append(line, traceLineEnd...))
+              to: addHeader
+          when: req.Trace.IsValid()
+      - eval: l.next.ServeHTTP1(req, res)
+        to: l.next.ServeHTTP1
+  - of: (*TraceLayer).EndBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TraceLayer).EndBatch
+        kind: self
       - id: l.endBatch
         kind: internal
     steps:
       - eval: l.endBatch(lane)
         to: l.endBatch
+  - of: RequestIDMint
+    steps:
+      - return: "RequestIDOption{mint: true}"
+  - of: RequestID
+    steps:
+      - bind: mint
+        eval: "false"
+      - loop:
+          do:
+            - set: mint
+              value: mint || o.mint
+          key: _
+          range: opts
+          value: o
+      - return:
+          closure:
+            params: next corenet.HTTP1Handler
+            results: corenet.HTTP1Handler
+            steps:
+              - return: "&RequestIDLayer{link: newLink(next), mint: mint}"
+  - of: (*RequestIDLayer).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*RequestIDLayer).ServeHTTP1
+        kind: self
+      - id: mintRequestID
+        kind: internal
+      - id: l.next.ServeHTTP1
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: mintRequestID(req)
+              to: mintRequestID
+          when: "!l.accepted(req)"
+      - set: res.RequestID
+        value: req.RequestID
+      - eval: l.next.ServeHTTP1(req, res)
+        to: l.next.ServeHTTP1
+  - of: (*RequestIDLayer).accepted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*RequestIDLayer).accepted
+        kind: self
+      - id: req.Field
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: l.mint
+      - bind: v, ok
+        eval: req.Field(requestIDFieldName)
+        to: req.Field
+      - return: ok && req.RequestID.Set(v)
+  - of: mintRequestID
+    participants:
+      - id: caller
+        kind: actor
+      - id: mintRequestID
+        kind: self
+      - id: req.RequestID.Set
+        kind: value
+    steps:
+      - var:
+          name: digits
+          type: "[mintedIDLen]byte"
+      - bind: v
+        eval: req.ID
+      - loop:
+          cond: i >= 0
+          do:
+            - set: digits[i]
+              value: lowerHex[v&nibbleMask]
+            - op: ">>="
+              set: v
+              value: nibbleBits
+          init: i := mintedIDLen - 1
+          post: i--
+      - eval: req.RequestID.Set(digits[:])
+        to: req.RequestID.Set
+  - of: (*RequestIDLayer).EndBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*RequestIDLayer).EndBatch
+        kind: self
+      - id: l.endBatch
+        kind: internal
+    steps:
+      - eval: l.endBatch(lane)
+        to: l.endBatch
+  - of: RateKeySubject
+    steps:
+      - return: "RateKey{kind: rateKeySubject}"
+  - of: RateKeyRoute
+    steps:
+      - return: "RateKey{kind: rateKeyRoute}"
+  - of: RateKeyLane
+    steps:
+      - return: "RateKey{kind: rateKeyLane}"
+  - of: RateKeyField
+    steps:
+      - return: "RateKey{kind: rateKeyField, field: name}"
+  - of: RateExempt
+    participants:
+      - id: caller
+        kind: actor
+      - id: RateExempt
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: kept
+        eval: slices.Clone(ids)
+        to: slices
+      - return: |-
+          RateOption{apply: func(c *rateConfig) error {
+          		//: each named route.
+          		for _, id := range kept {
+          			//: zero is "no route": exempting it would exempt every unrouted request.
+          			if id <= 0 {
+          				//: refused.
+          				return misconfigured("RateLimit", "exempt")
+          			}
+          		}
+          		c.exempt = append(c.exempt, kept...)
+          		//: kept.
+          		return nil
+          	}}
+  - of: RateClock
+    steps:
+      - return: |-
+          RateOption{apply: func(cfg *rateConfig) error {
+          		//: a clock is what every batch reads.
+          		if c == nil {
+          			//: refused.
+          			return misconfigured("RateLimit", "clock")
+          		}
+          		cfg.clk = c
+          		//: kept.
+          		return nil
+          	}}
+  - of: (*RateLimitLayer).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*RateLimitLayer).ServeHTTP1
+        kind: self
+      - id: l.next.ServeHTTP1
+        kind: value
+      - id: l.lanes.get
+        kind: internal
+      - id: l.l.Allow
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: l.next.ServeHTTP1(req, res)
+              to: l.next.ServeHTTP1
+            - return: ""
+          when: slices.Contains(l.cfg.exempt, req.Route)
+      - bind: lane
+        eval: l.lanes.get(req.Lane)
+        to: l.lanes.get
+      - opt:
+          do:
+            - set: lane.now, lane.fresh
+              value: l.cfg.clk.Now().Sub(l.epoch).Nanoseconds(), true
+          when: "!lane.fresh"
+      - bind: ok, after
+        eval: l.l.Allow(l.keyOf(req, lane), lane.now)
+        to: l.l.Allow
+      - opt:
+          do:
+            - set: res.Status, res.RetryAfter, res.Close
+              value: statusTooManyRequests, after, true
+            - return: ""
+          when: "!ok"
+      - eval: l.next.ServeHTTP1(req, res)
+        to: l.next.ServeHTTP1
+  - of: (*RateLimitLayer).keyOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*RateLimitLayer).keyOf
+        kind: self
+      - id: req.Auth.Subject
+        kind: value
+      - id: req.Field
+        kind: value
+      - id: appendBE
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: rateKeySubject
+              do:
+                - return: req.Auth.Subject()
+                  to: req.Auth.Subject
+            - case: rateKeyField
+              do:
+                - bind: v, _
+                  eval: req.Field(l.key.field)
+                  to: req.Field
+                - return: v
+            - case: rateKeyRoute
+              do:
+                - return: appendBE(&lane.key, uint64(req.Route))
+                  to: appendBE
+            - default: true
+              do:
+                - return: appendBE(&lane.key, uint64(req.Lane))
+                  to: appendBE
+          "on": l.key.kind
+  - of: appendBE
+    steps:
+      - loop:
+          cond: i >= 0
+          do:
+            - set: buf[i]
+              value: byte(v)
+            - op: ">>="
+              set: v
+              value: byteBits
+          init: i := routeKeyLen - 1
+          post: i--
+      - return: buf[:]
+  - of: (*RateLimitLayer).EndBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*RateLimitLayer).EndBatch
+        kind: self
+      - id: l.finishRateBatch
+        kind: internal
+    steps:
+      - eval: l.finishRateBatch(lane)
+        to: l.finishRateBatch
+  - of: (*RateLimitLayer).finishRateBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*RateLimitLayer).finishRateBatch
+        kind: self
+      - id: l.endBatch
+        kind: internal
+    steps:
+      - eval: l.endBatch(lane)
+        to: l.endBatch
+      - set: l.lanes.get(lane).fresh
+        value: "false"
+  - of: (*fileBody).active
+    steps:
+      - return: b != nil && b.flags&bodyActive != 0
+  - of: (*connFlag).setFile
+    steps:
+      - opt:
+          do:
+            - set: f.file
+              value: "&b"
+            - return: ""
+          when: f.file == nil
+      - set: "*f.file"
+        value: b
+  - of: (*connFlag).clearFile
+    steps:
+      - opt:
+          do:
+            - set: "*f.file"
+              value: fileBody{}
+          when: f.file != nil
+  - of: findCanceller
+    participants:
+      - id: caller
+        kind: actor
+      - id: findCanceller
+        kind: self
+      - id: l.wrapped
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: c
+                init:
+                  bind: c, ok
+                  eval: h.(jobCanceller)
+                when: ok
+            - bind: l, ok
+              eval: h.(interface{ wrapped() corenet.HTTP1Handler })
+            - opt:
+                do:
+                  - return: nil
+                when: "!ok"
+            - set: h
+              to: l.wrapped
+              value: l.wrapped()
+          forever: true
+  - of: (*LoopHandler).cancelJob
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).cancelJob
+        kind: self
+      - id: a.canceller.CancelJob
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: a.canceller.CancelJob(lane, job)
+              to: a.canceller.CancelJob
+          when: a.canceller != nil
+  - of: closeFileReader
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeFileReader
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: swallowErr(c.Close())
+              to: swallowErr
+          init:
+            bind: c, ok
+            eval: r.(io.Closer)
+          when: ok
+  - of: (*LoopHandler).startFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).startFile
+        kind: self
+      - id: a.startCopy
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: ""
+                init:
+                  bind: fd, ok
+                  eval: s.file.R.(interface{ Fd() uintptr })
+                when: ok && a.startNative(s, fw, int(fd.Fd()))
+          init:
+            bind: fw, ok
+            eval: s.io.(corenet.LoopFileWriter)
+          when: ok
+      - eval: a.startCopy(s)
+        to: a.startCopy
+  - of: (*LoopHandler).startNative
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).startNative
+        kind: self
+      - id: fw.WriteFile
+        kind: value
+      - id: closeFileReader
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: s.st.dropHeld
+        kind: internal
+      - id: s.f.setFile
+        kind: internal
+    steps:
+      - bind: err
+        eval: "fw.WriteFile(s.ref, s.out, corenet.LoopFileSpanValue{FD: fd, Off: s.file.Off, Len: s.file.Len})"
+        to: fw.WriteFile
+      - opt:
+          do:
+            - return: "false"
+          when: errors.Is(err, corenet.LoopFileRefused)
+      - eval: closeFileReader(s.file.R)
+        to: closeFileReader
+      - opt:
+          do:
+            - set: s.f.dead
+              value: "true"
+            - eval: swallowErr(s.io.Close(s.ref))
+              to: swallowErr
+            - eval: s.st.dropHeld(s.f)
+              to: s.st.dropHeld
+            - return: "true"
+          when: err != nil
+      - eval: "s.f.setFile(fileBody{flags: bodyActive | bodyNative})"
+        to: s.f.setFile
+      - opt:
+          do:
+            - eval: swallowErr(s.io.Close(s.ref))
+              to: swallowErr
+          when: s.closing
+      - return: "true"
+  - of: (*LoopHandler).startCopy
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).startCopy
+        kind: self
+      - id: s.io.Write
+        kind: value
+      - id: closeFileReader
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: s.st.dropHeld
+        kind: internal
+      - id: s.f.setFile
+        kind: internal
+      - id: a.copyNext
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: closeFileReader(s.file.R)
+              to: closeFileReader
+            - set: s.f.dead
+              value: "true"
+            - eval: swallowErr(s.io.Close(s.ref))
+              to: swallowErr
+            - eval: s.st.dropHeld(s.f)
+              to: s.st.dropHeld
+            - return: ""
+          init:
+            bind: err
+            eval: s.io.Write(s.ref, s.out)
+            to: s.io.Write
+          when: err != nil
+      - bind: flags
+        eval: bodyActive
+      - opt:
+          do:
+            - op: "|="
+              set: flags
+              value: bodyClosing
+          when: s.closing
+      - eval: "s.f.setFile(fileBody{flags: flags, r: s.file.R, off: s.file.Off, left: s.file.Len})"
+        to: s.f.setFile
+      - eval: a.copyNext(s.io, s.ref, s.st, s.f)
+        to: a.copyNext
+  - of: (*LoopHandler).copyNext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).copyNext
+        kind: self
+      - id: a.endCopy
+        kind: internal
+      - id: st.takeSlot
+        kind: internal
+      - id: slotCopy
+        kind: internal
+      - id: st.freeSlot
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: a.endCopy(io, ref, st, f, true)
+              to: a.endCopy
+            - return: ""
+          when: st.outbound == nil
+      - bind: idx, slot
+        eval: st.takeSlot()
+        to: st.takeSlot
+      - set: slot.ref
+        value: ref
+      - set: slot.copy
+        to: slotCopy
+        value: slotCopy(slot, a.chunk())
+      - set: slot.copy.r, slot.copy.off, slot.copy.n, slot.copy.err
+        value: f.file.r, f.file.off, 0, nil
+      - set: slot.copy.buf
+        value: slot.copy.buf[:min(int64(cap(slot.copy.buf)), f.file.left)]
+      - opt:
+          do:
+            - op: "|="
+              set: f.file.flags
+              value: bodyBusy
+            - return: ""
+          when: "st.outbound.Send(io, corenet.LoopJobValue{Ref: ref, Slot: idx, Gen: slot.gen}) == nil"
+      - set: slot.copy
+        value: nil
+      - eval: st.freeSlot(idx)
+        to: st.freeSlot
+      - set: st.copyRetry
+        value: append(st.copyRetry, ref)
+  - of: slotCopy
+    steps:
+      - opt:
+          do:
+            - set: slot.buf
+              value: make([]byte, 0, chunk)
+          when: slot.buf == nil
+      - set: slot.job.buf
+        value: slot.buf[:0]
+      - return: "&slot.job"
+  - of: (*LoopHandler).chunk
+    steps:
+      - return: max(copyMinChunk, min(copyChunk, int64(a.holdCap)/2))
+  - of: workCopy
+    participants:
+      - id: caller
+        kind: actor
+      - id: workCopy
+        kind: self
+      - id: job.r.ReadAt
+        kind: value
+    steps:
+      - bind: job
+        eval: slot.copy
+      - opt:
+          do:
+            - return: ""
+          when: len(job.buf) == 0
+      - set: job.n, job.err
+        to: job.r.ReadAt
+        value: job.r.ReadAt(job.buf, job.off)
+  - of: (*LoopHandler).copyDone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).copyDone
+        kind: self
+      - id: st.peek
+        kind: internal
+      - id: closeFileReader
+        kind: internal
+      - id: st.freeSlot
+        kind: internal
+      - id: a.endCopy
+        kind: internal
+      - id: a.writeChunk
+        kind: internal
+    steps:
+      - bind: job, ref
+        eval: slot.copy, slot.ref
+      - bind: f
+        eval: st.peek(ref)
+        to: st.peek
+      - opt:
+          do:
+            - eval: closeFileReader(job.r)
+              to: closeFileReader
+            - set: slot.copy
+              value: nil
+            - eval: st.freeSlot(slot.idx)
+              to: st.freeSlot
+            - return: ""
+          when: slot.cancelled.Load() || f == nil || !f.file.active()
+      - op: "&^="
+        set: f.file.flags
+        value: bodyBusy
+      - opt:
+          do:
+            - set: slot.copy
+              value: nil
+            - eval: st.freeSlot(slot.idx)
+              to: st.freeSlot
+            - eval: a.endCopy(io, ref, st, f, true)
+              to: a.endCopy
+            - return: ""
+          when: job.n == 0 && f.file.left > 0
+      - set: f.file.slot
+        value: slot
+      - eval: a.writeChunk(io, ref, st, f)
+        to: a.writeChunk
+  - of: (*LoopHandler).writeChunk
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).writeChunk
+        kind: self
+      - id: io.Write
+        kind: value
+      - id: swallowErr
+        kind: internal
+      - id: st.freeSlot
+        kind: internal
+      - id: a.endCopy
+        kind: internal
+      - id: a.copyNext
+        kind: internal
+    steps:
+      - bind: slot
+        eval: f.file.slot
+      - bind: job
+        eval: slot.copy
+      - bind: err
+        eval: io.Write(ref, job.buf[:job.n])
+        to: io.Write
+      - opt:
+          do:
+            - eval: swallowErr(io.SetDeadline(ref, copyStall))
+              to: swallowErr
+            - return: ""
+          when: errors.Is(err, corenet.LoopOutputFull)
+      - eval: swallowErr(io.SetDeadline(ref, 0))
+        to: swallowErr
+      - set: f.file.slot
+        value: nil
+      - bind: "n"
+        eval: int64(job.n)
+      - set: slot.copy
+        value: nil
+      - eval: st.freeSlot(slot.idx)
+        to: st.freeSlot
+      - opt:
+          do:
+            - eval: a.endCopy(io, ref, st, f, true)
+              to: a.endCopy
+            - return: ""
+          when: err != nil
+      - op: +=
+        set: f.file.off
+        value: "n"
+      - op: "-="
+        set: f.file.left
+        value: "n"
+      - opt:
+          do:
+            - eval: a.endCopy(io, ref, st, f, false)
+              to: a.endCopy
+            - return: ""
+          when: f.file.left == 0
+      - eval: a.copyNext(io, ref, st, f)
+        to: a.copyNext
+  - of: (*LoopHandler).endCopy
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).endCopy
+        kind: self
+      - id: closeFileReader
+        kind: internal
+      - id: f.clearFile
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: st.dropHeld
+        kind: internal
+      - id: st.markReady
+        kind: internal
+    steps:
+      - eval: closeFileReader(f.file.r)
+        to: closeFileReader
+      - bind: closing
+        eval: f.file.flags&bodyClosing != 0
+      - eval: f.clearFile()
+        to: f.clearFile
+      - opt:
+          do:
+            - set: f.dead
+              value: "true"
+            - eval: swallowErr(io.Close(ref))
+              to: swallowErr
+            - eval: st.dropHeld(f)
+              to: st.dropHeld
+            - return: ""
+          when: failed || closing
+      - eval: st.markReady(ref, f)
+        to: st.markReady
+  - of: (*LoopHandler).fileWritable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).fileWritable
+        kind: self
+      - id: f.clearFile
+        kind: internal
+      - id: a.flushHeld
+        kind: internal
+      - id: a.writeChunk
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.clearFile()
+              to: f.clearFile
+            - eval: a.flushHeld(io, ref, st, f)
+              to: a.flushHeld
+            - return: ""
+          when: f.file.flags&bodyNative != 0
+      - opt:
+          do:
+            - eval: a.writeChunk(io, ref, st, f)
+              to: a.writeChunk
+          when: f.file.slot != nil
+  - of: (*LoopHandler).retryCopies
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).retryCopies
+        kind: self
+      - id: st.peek
+        kind: internal
+      - id: a.copyNext
+        kind: internal
+    steps:
+      - bind: retry
+        eval: st.copyRetry
+      - set: st.copyRetry
+        value: st.copyRetry[len(retry):]
+      - loop:
+          do:
+            - bind: f
+              eval: st.peek(ref)
+              to: st.peek
+            - opt:
+                do:
+                  - eval: a.copyNext(io, ref, st, f)
+                    to: a.copyNext
+                when: f != nil && f.file.active() && f.file.flags&(bodyNative|bodyBusy) == 0 && f.file.slot == nil
+          key: _
+          range: retry
+          value: ref
+      - opt:
+          do:
+            - set: st.copyRetry
+              value: retry[:0]
+          when: len(st.copyRetry) == 0
+  - of: closedFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: closedFile
+        kind: self
+      - id: f.clearFile
+        kind: internal
+      - id: closeFileReader
+        kind: internal
+      - id: st.freeSlot
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.clearFile()
+              to: f.clearFile
+            - return: ""
+          when: "!f.file.active() || f.file.flags&bodyNative != 0"
+      - opt:
+          do:
+            - eval: closeFileReader(f.file.r)
+              to: closeFileReader
+            - opt:
+                do:
+                  - set: s.copy
+                    value: nil
+                  - eval: st.freeSlot(s.idx)
+                    to: st.freeSlot
+                init:
+                  bind: s
+                  eval: f.file.slot
+                when: s != nil
+          when: f.file.flags&bodyBusy == 0
+      - eval: f.clearFile()
+        to: f.clearFile
+  - of: Files
+    participants:
+      - id: caller
+        kind: actor
+      - id: Files
+        kind: self
+      - id: static
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("Files", "route")
+          when: route <= 0
+      - opt:
+          do:
+            - return: nil, misconfigured("Files", "fsys")
+          when: fsys == nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: _, err
+            eval: static.NewHandler(fsys, cfg)
+            to: static
+          when: err != nil
+      - bind: tag
+        eval: filesTags.Add(1) << filesTagBits
+      - return: |-
+          func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+          		//: its own tag, the route and the fields every answer carries.
+          		return &FilesLayer{
+          			link: newLink(next), route: route, fsys: fsys, tag: tag, immutable: cfg.Immutable, spa: cfg.SinglePageApp,
+          			base: filesBase(cfg), allow: filesAllowField(filesBase(cfg)),
+          			nextWorker: findWorker(next), nextCanceller: findCanceller(next),
+          		}
+          	}, nil
+  - of: filesBase
+    participants:
+      - id: caller
+        kind: actor
+      - id: filesBase
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - bind: csp
+        eval: cmp.Or(cfg.ContentSecurityPolicy, static.DefaultContentSecurityPolicy)
+        to: cmp
+      - bind: ref
+        eval: cmp.Or(cfg.ReferrerPolicy, static.DefaultReferrerPolicy)
+        to: cmp
+      - return: "[]byte(\"Content-Security-Policy: \" + csp + \"\\r\\nX-Content-Type-Options: nosniff\\r\\nReferrer-Policy: \" + ref + \"\\r\\n\")"
+  - of: filesAllowField
+    steps:
+      - return: "append(append(make([]byte, 0, len(base)+32), base...), \"Allow: \"+filesAllow+\"\\r\\n\"...)"
+  - of: (*FilesLayer).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).ServeHTTP1
+        kind: self
+      - id: l.next.ServeHTTP1
+        kind: value
+      - id: l.laneOf
+        kind: internal
+      - id: lane.take
+        kind: internal
+      - id: job.fill
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: l.next.ServeHTTP1(req, res)
+              to: l.next.ServeHTTP1
+            - return: ""
+          when: req.Route != l.route
+      - opt:
+          do:
+            - set: res.Status, res.Header
+              value: statusNotAllowed, l.allow
+            - return: ""
+          when: "!bytes.Equal(req.Method, methodGet) && !bytes.Equal(req.Method, methodHead)"
+      - bind: lane
+        eval: l.laneOf(req.Lane)
+        to: l.laneOf
+      - bind: idx, job
+        eval: lane.take()
+        to: lane.take
+      - eval: job.fill(req)
+        to: job.fill
+      - set: res.Pending, res.Job
+        value: true, l.tag|uint64(idx)
+  - of: (*FilesLayer).EndBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).EndBatch
+        kind: self
+      - id: l.endBatch
+        kind: internal
+    steps:
+      - eval: l.endBatch(lane)
+        to: l.endBatch
+  - of: (*fileJob).fill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileJob).fill
+        kind: self
+      - id: appendDecoded
+        kind: internal
+      - id: bytes
+        kind: stdlib
+      - id: copyField
+        kind: internal
+      - id: req.Field
+        kind: value
+    steps:
+      - bind: p
+        eval: req.Path[min(req.RoutePrefix, len(req.Path)):]
+      - set: j.slash
+        value: len(p) > 0 && p[len(p)-1] == '/'
+      - set: j.name
+        to: appendDecoded
+        value: appendDecoded(j.name[:0], bytes.Trim(p, "/"))
+      - set: j.head
+        to: bytes
+        value: bytes.Equal(req.Method, methodHead)
+      - set: j.rangeSpec
+        to: copyField
+        value: copyField(j.rangeSpec[:0], req, "range")
+      - opt:
+          do:
+            - set: j.rangeSpec
+              value: j.rangeSpec[:0]
+          init:
+            bind: _, ok
+            eval: req.Field("if-range")
+            to: req.Field
+          when: ok
+      - set: j.ifNoneMatch
+        to: copyField
+        value: copyField(j.ifNoneMatch[:0], req, "if-none-match")
+      - set: j.ifModifiedSince
+        to: copyField
+        value: copyField(j.ifModifiedSince[:0], req, "if-modified-since")
+  - of: copyField
+    participants:
+      - id: caller
+        kind: actor
+      - id: copyField
+        kind: self
+      - id: req.Field
+        kind: value
+    steps:
+      - bind: v, ok
+        eval: req.Field(name)
+        to: req.Field
+      - opt:
+          do:
+            - return: dst
+          when: "!ok || len(v) > filesFieldCap"
+      - return: append(dst, v...)
+  - of: unhex
+    steps:
+      - switch:
+          cases:
+            - case: c >= 'a'
+              do:
+                - return: c - 'a' + 10
+            - case: c >= 'A'
+              do:
+                - return: c - 'A' + 10
+            - default: true
+              do:
+                - return: c - '0'
+  - of: (*FilesLayer).laneOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).laneOf
+        kind: self
+      - id: l.lanes.Load
+        kind: value
+      - id: l.growLane
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: (*p)[i]
+          init:
+            bind: p
+            eval: l.lanes.Load()
+            to: l.lanes.Load
+          when: p != nil && i < len(*p) && (*p)[i] != nil
+      - return: l.growLane(i)
+        to: l.growLane
+  - of: (*FilesLayer).growLane
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).growLane
+        kind: self
+      - id: l.lanes.Load
+        kind: value
+      - id: lane.grow
+        kind: internal
+      - id: l.lanes.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: l.mu
+      - var:
+          name: cur
+          type: "[]*filesLane"
+      - opt:
+          do:
+            - set: cur
+              value: "*p"
+          init:
+            bind: p
+            eval: l.lanes.Load()
+            to: l.lanes.Load
+          when: p != nil
+      - opt:
+          do:
+            - return: cur[i]
+          when: i < len(cur) && cur[i] != nil
+      - bind: next
+        eval: make([]*filesLane, max(len(cur), i+1))
+      - eval: copy(next, cur)
+      - bind: lane
+        eval: "&filesLane{}"
+      - eval: lane.grow()
+        to: lane.grow
+      - set: next[i]
+        value: lane
+      - eval: l.lanes.Store(&next)
+        to: l.lanes.Store
+      - return: lane
+  - of: (*filesLane).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filesLane).take
+        kind: self
+      - id: fl.mu.Lock
+        kind: value
+      - id: fl.grow
+        kind: internal
+      - id: fl.mu.Unlock
+        kind: value
+    steps:
+      - eval: fl.mu.Lock()
+        to: fl.mu.Lock
+      - opt:
+          do:
+            - eval: fl.grow()
+              to: fl.grow
+          when: len(fl.free) == 0
+      - bind: idx
+        eval: fl.free[len(fl.free)-1]
+      - set: fl.free
+        value: fl.free[:len(fl.free)-1]
+      - eval: fl.mu.Unlock()
+        to: fl.mu.Unlock
+      - return: idx, (*fl.table.Load())[idx]
+  - of: (*filesLane).put
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filesLane).put
+        kind: self
+      - id: fl.mu.Lock
+        kind: value
+      - id: fl.mu.Unlock
+        kind: value
+    steps:
+      - eval: fl.mu.Lock()
+        to: fl.mu.Lock
+      - set: fl.free
+        value: append(fl.free, idx)
+      - eval: fl.mu.Unlock()
+        to: fl.mu.Unlock
+  - of: (*filesLane).grow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filesLane).grow
+        kind: self
+      - id: fl.table.Load
+        kind: value
+      - id: fl.table.Store
+        kind: value
+    steps:
+      - var:
+          name: cur
+          type: "[]*fileJob"
+      - opt:
+          do:
+            - set: cur
+              value: "*p"
+          init:
+            bind: p
+            eval: fl.table.Load()
+            to: fl.table.Load
+          when: p != nil
+      - bind: "n"
+        eval: len(cur)
+      - bind: next
+        eval: make([]*fileJob, n, max(2*n, filesEntries))
+      - eval: copy(next, cur)
+      - loop:
+          cond: i < cap(next)
+          do:
+            - set: next
+              value: append(next, &fileJob{})
+            - set: fl.free
+              value: append(fl.free, uint32(i))
+          init: i := n
+          post: i++
+      - eval: fl.table.Store(&next)
+        to: fl.table.Store
+  - of: (*FilesLayer).CancelJob
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).CancelJob
+        kind: self
+      - id: l.nextCanceller.CancelJob
+        kind: internal
+      - id: l.laneOf(lane).put
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: l.nextCanceller.CancelJob(lane, job)
+                    to: l.nextCanceller.CancelJob
+                when: l.nextCanceller != nil
+            - return: ""
+          when: job&^filesEntryMask != l.tag
+      - eval: l.laneOf(lane).put(uint32(job & filesEntryMask))
+        to: l.laneOf(lane).put
+  - of: (*FilesLayer).WorkHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).WorkHTTP1
+        kind: self
+      - id: l.nextWorker.WorkHTTP1
+        kind: value
+      - id: l.laneOf
+        kind: internal
+      - id: l.resolve
+        kind: internal
+      - id: fl.put
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - alt:
+                - do:
+                    - eval: l.nextWorker.WorkHTTP1(lane, job, res)
+                      to: l.nextWorker.WorkHTTP1
+                  when: l.nextWorker != nil
+                - do:
+                    - set: res.Status
+                      value: statusInternal
+                  else: true
+            - return: ""
+          when: job&^filesEntryMask != l.tag
+      - bind: idx
+        eval: uint32(job & filesEntryMask)
+      - bind: fl
+        eval: l.laneOf(lane)
+        to: l.laneOf
+      - bind: j
+        eval: (*fl.table.Load())[idx]
+      - eval: l.resolve(j, res)
+        to: l.resolve
+      - eval: fl.put(idx)
+        to: fl.put
+  - of: (*FilesLayer).resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).resolve
+        kind: self
+      - id: cleanName
+        kind: internal
+      - id: l.openName
+        kind: internal
+      - id: l.resolveFound
+        kind: internal
+      - id: l.resolveAbsent
+        kind: internal
+    steps:
+      - bind: name
+        eval: cleanName(string(j.name))
+        to: cleanName
+      - set: res.Header
+        value: append(res.Header[:0], l.base...)
+      - bind: h
+        eval: l.openName(name)
+        to: l.openName
+      - alt:
+          - do:
+              - eval: l.resolveFound(j, res, name, h)
+                to: l.resolveFound
+            when: h.found
+          - do:
+              - eval: l.resolveAbsent(j, res, name, h)
+                to: l.resolveAbsent
+            else: true
+  - of: (*FilesLayer).resolveFound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).resolveFound
+        kind: self
+      - id: closeTreeFile
+        kind: internal
+      - id: l.resolveDir
+        kind: internal
+      - id: l.fileAnswer
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: h.info.IsDir()
+              do:
+                - eval: closeTreeFile(h.file)
+                  to: closeTreeFile
+                - eval: l.resolveDir(j, res, name)
+                  to: l.resolveDir
+            - case: h.info.Mode().IsRegular() && !j.slash
+              do:
+                - eval: l.fileAnswer(j, res, name, h)
+                  to: l.fileAnswer
+            - default: true
+              do:
+                - eval: closeTreeFile(h.file)
+                  to: closeTreeFile
+                - set: res.Status
+                  value: statusNotFound
+  - of: (*FilesLayer).resolveAbsent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).resolveAbsent
+        kind: self
+      - id: l.resolveShell
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: h.err == fs.ErrNotExist && l.spaRoute(name)
+              do:
+                - eval: l.resolveShell(j, res)
+                  to: l.resolveShell
+            - case: h.err == fs.ErrNotExist
+              do:
+                - set: res.Status
+                  value: statusNotFound
+            - default: true
+              do:
+                - set: res.Status
+                  value: statusInternal
+  - of: (*FilesLayer).spaRoute
+    steps:
+      - return: l.spa && path.Ext(name) == ""
+  - of: (*FilesLayer).openName
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).openName
+        kind: self
+      - id: checkLinks
+        kind: internal
+      - id: l.fsys.Open
+        kind: value
+      - id: f.Stat
+        kind: value
+      - id: closeTreeFile
+        kind: internal
+      - id: lfs.Lstat
+        kind: value
+    steps:
+      - bind: lfs, canLink
+        eval: l.fsys.(fs.ReadLinkFS)
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "treeFile{err: err}"
+                init:
+                  bind: err
+                  eval: checkLinks(lfs, name)
+                  to: checkLinks
+                when: err != nil
+          when: canLink && name != "."
+      - bind: f, err
+        eval: l.fsys.Open(name)
+        to: l.fsys.Open
+      - opt:
+          do:
+            - return: "treeFile{err: filesLookupErr(err)}"
+          when: err != nil
+      - bind: info, err
+        eval: f.Stat()
+        to: f.Stat
+      - opt:
+          do:
+            - eval: closeTreeFile(f)
+              to: closeTreeFile
+            - return: "treeFile{err: err}"
+          when: err != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: closeTreeFile(f)
+                    to: closeTreeFile
+                  - return: "treeFile{err: fs.ErrNotExist}"
+                init:
+                  bind: linfo, lerr
+                  eval: lfs.Lstat(name)
+                  to: lfs.Lstat
+                when: lerr != nil || !sameFile(linfo, info)
+          when: canLink
+      - return: "treeFile{file: f, info: info, found: true}"
+  - of: checkLinks
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkLinks
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: lfs.Lstat
+        kind: value
+      - id: filesLookupErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: next
+              eval: strings.IndexByte(name[i:], '/')
+              to: strings
+            - bind: end
+              eval: len(name)
+            - opt:
+                do:
+                  - set: end
+                    value: i + next
+                when: next >= 0
+            - bind: info, err
+              eval: lfs.Lstat(name[:end])
+              to: lfs.Lstat
+            - opt:
+                do:
+                  - return: filesLookupErr(err)
+                    to: filesLookupErr
+                when: err != nil
+            - opt:
+                do:
+                  - return: fs.ErrNotExist
+                when: info.Mode()&fs.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular())
+            - opt:
+                do:
+                  - return: nil
+                when: next < 0
+            - op: +=
+              set: i
+              value: next + 1
+          init: i := 0
+  - of: sameFile
+    steps:
+      - return: a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && a.Mode().Type() == b.Mode().Type()
+  - of: filesLookupErr
+    steps:
+      - opt:
+          do:
+            - return: fs.ErrNotExist
+          when: errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrInvalid)
+      - return: err
+  - of: (*FilesLayer).resolveDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).resolveDir
+        kind: self
+      - id: l.openName
+        kind: internal
+      - id: closeTreeFile
+        kind: internal
+      - id: redirectSlash
+        kind: internal
+      - id: l.fileAnswer
+        kind: internal
+    steps:
+      - bind: index
+        eval: filesIndex
+      - opt:
+          do:
+            - set: index
+              value: name + "/" + filesIndex
+          when: name != "."
+      - bind: h
+        eval: l.openName(index)
+        to: l.openName
+      - switch:
+          cases:
+            - case: h.found && h.info.Mode().IsRegular()
+              do:
+                - opt:
+                    do:
+                      - eval: closeTreeFile(h.file)
+                        to: closeTreeFile
+                      - eval: redirectSlash(res, name)
+                        to: redirectSlash
+                      - return: ""
+                    when: "!j.slash && name != \".\""
+                - eval: l.fileAnswer(j, res, index, h)
+                  to: l.fileAnswer
+            - case: h.found
+              do:
+                - eval: closeTreeFile(h.file)
+                  to: closeTreeFile
+                - set: res.Status
+                  value: statusNotFound
+            - case: h.err == fs.ErrNotExist
+              do:
+                - set: res.Status
+                  value: statusNotFound
+            - default: true
+              do:
+                - set: res.Status
+                  value: statusInternal
+  - of: (*FilesLayer).resolveShell
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).resolveShell
+        kind: self
+      - id: l.openName
+        kind: internal
+      - id: l.fileAnswer
+        kind: internal
+      - id: closeTreeFile
+        kind: internal
+    steps:
+      - bind: h
+        eval: l.openName(filesIndex)
+        to: l.openName
+      - switch:
+          cases:
+            - case: h.found && h.info.Mode().IsRegular()
+              do:
+                - eval: l.fileAnswer(j, res, filesIndex, h)
+                  to: l.fileAnswer
+            - case: h.found
+              do:
+                - eval: closeTreeFile(h.file)
+                  to: closeTreeFile
+                - set: res.Status
+                  value: statusNotFound
+            - case: h.err == fs.ErrNotExist
+              do:
+                - set: res.Status
+                  value: statusNotFound
+            - default: true
+              do:
+                - set: res.Status
+                  value: statusInternal
+  - of: redirectSlash
+    participants:
+      - id: caller
+        kind: actor
+      - id: redirectSlash
+        kind: self
+      - id: appendEscaped
+        kind: internal
+    steps:
+      - set: res.Status
+        value: statusMoved
+      - set: res.Header
+        value: "append(res.Header, \"Location: ./\"...)"
+      - set: res.Header
+        to: appendEscaped
+        value: appendEscaped(res.Header, path.Base(name))
+      - set: res.Header
+        value: append(res.Header, "/\r\n"...)
+  - of: unreservedByte
+    steps:
+      - bind: lower
+        eval: c | 0x20
+      - return: (lower >= 'a' && lower <= 'z') || (c >= '0' && c <= '9') || strings.IndexByte(unreservedSet, c) >= 0
+  - of: (*FilesLayer).fileAnswer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).fileAnswer
+        kind: self
+      - id: appendETag
+        kind: internal
+      - id: closeTreeFile
+        kind: internal
+      - id: l.appendCommon
+        kind: internal
+      - id: readerOf
+        kind: internal
+      - id: h.info.Size
+        kind: value
+      - id: parseRange
+        kind: internal
+      - id: strconv
+        kind: stdlib
+      - id: appendContentRange
+        kind: internal
+    steps:
+      - bind: etag
+        eval: appendETag(make([]byte, 0, 32), h.info)
+        to: appendETag
+      - opt:
+          do:
+            - eval: closeTreeFile(h.file)
+              to: closeTreeFile
+            - set: res.Status
+              value: statusNotModified
+            - set: res.Header
+              to: l.appendCommon
+              value: l.appendCommon(res.Header, name, h.info, etag)
+            - return: ""
+          when: j.notModified(etag, h.info)
+      - bind: ra, ranged
+        eval: readerOf(h.file)
+        to: readerOf
+      - bind: size
+        eval: h.info.Size()
+        to: h.info.Size
+      - bind: off, n, status
+        eval: int64(0), size, statusOK
+      - opt:
+          do:
+            - set: off, n, status
+              to: parseRange
+              value: parseRange(j.rangeSpec, size)
+          when: len(j.rangeSpec) > 0 && !j.head && ranged
+      - opt:
+          do:
+            - eval: closeTreeFile(h.file)
+              to: closeTreeFile
+            - set: res.Status
+              value: statusRangeBad
+            - set: res.Header
+              to: l.appendCommon
+              value: l.appendCommon(res.Header, name, h.info, etag)
+            - set: res.Header
+              value: "append(res.Header, \"Content-Range: bytes */\"...)"
+            - set: res.Header
+              to: strconv
+              value: strconv.AppendInt(res.Header, size, 10)
+            - set: res.Header
+              value: append(res.Header, "\r\n"...)
+            - return: ""
+          when: status == statusRangeBad
+      - set: res.Status
+        value: status
+      - set: res.Header
+        to: l.appendCommon
+        value: l.appendCommon(res.Header, name, h.info, etag)
+      - opt:
+          do:
+            - set: res.Header
+              to: appendContentRange
+              value: appendContentRange(res.Header, off, n, size)
+          when: status == statusPartial
+      - opt:
+          do:
+            - eval: closeTreeFile(h.file)
+              to: closeTreeFile
+            - return: ""
+          when: n == 0
+      - set: res.File
+        value: "corenet.HTTP1FileValue{R: ra, Off: off, Len: n}"
+  - of: readerOf
+    steps:
+      - opt:
+          do:
+            - return: ra, true
+          init:
+            bind: ra, ok
+            eval: f.(io.ReaderAt)
+          when: ok
+      - return: "&sequentialFile{f: f}, false"
+  - of: (*sequentialFile).ReadAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sequentialFile).ReadAt
+        kind: self
+      - id: s.f.Read
+        kind: value
+    steps:
+      - return: s.f.Read(p)
+        to: s.f.Read
+  - of: (*sequentialFile).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sequentialFile).Close
+        kind: self
+      - id: s.f.Close
+        kind: value
+    steps:
+      - return: s.f.Close()
+        to: s.f.Close
+  - of: (*FilesLayer).appendCommon
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*FilesLayer).appendCommon
+        kind: self
+      - id: info.ModTime().UTC().AppendFormat
+        kind: value
+    steps:
+      - set: dst
+        value: "append(dst, \"Cache-Control: \"...)"
+      - alt:
+          - do:
+              - set: dst
+                value: append(dst, static.ImmutableCacheControl...)
+            when: l.immutable != nil && l.immutable(name)
+          - do:
+              - set: dst
+                value: append(dst, static.RevalidateCacheControl...)
+            else: true
+      - set: dst
+        value: "append(dst, \"\\r\\nContent-Type: \"...)"
+      - set: dst
+        value: append(dst, contentTypeOf(name)...)
+      - set: dst
+        value: "append(dst, \"\\r\\nLast-Modified: \"...)"
+      - set: dst
+        to: info.ModTime().UTC().AppendFormat
+        value: info.ModTime().UTC().AppendFormat(dst, httpDate)
+      - set: dst
+        value: "append(dst, \"\\r\\nETag: \"...)"
+      - set: dst
+        value: append(dst, etag...)
+      - set: dst
+        value: "append(dst, \"\\r\\nAccept-Ranges: bytes\\r\\n\"...)"
+      - return: dst
+  - of: contentTypeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: contentTypeOf
+        kind: self
+      - id: path
+        kind: stdlib
+      - id: pinnedType
+        kind: internal
+      - id: mime
+        kind: stdlib
+    steps:
+      - bind: ext
+        eval: path.Ext(name)
+        to: path
+      - opt:
+          do:
+            - return: t
+          init:
+            bind: t, ok
+            eval: pinnedType(ext)
+            to: pinnedType
+          when: ok
+      - opt:
+          do:
+            - return: t
+          init:
+            bind: t
+            eval: mime.TypeByExtension(ext)
+            to: mime
+          when: t != ""
+      - return: filesOctet
+  - of: pinnedType
+    steps:
+      - switch:
+          cases:
+            - case: "\".html\", \".htm\""
+              do:
+                - return: "\"text/html; charset=utf-8\", true"
+            - case: "\".js\", \".mjs\""
+              do:
+                - return: "\"text/javascript; charset=utf-8\", true"
+            - case: "\".css\""
+              do:
+                - return: "\"text/css; charset=utf-8\", true"
+            - case: "\".json\", \".map\""
+              do:
+                - return: "\"application/json\", true"
+            - case: "\".wasm\""
+              do:
+                - return: "\"application/wasm\", true"
+            - case: "\".svg\""
+              do:
+                - return: "\"image/svg+xml\", true"
+            - case: "\".webmanifest\""
+              do:
+                - return: "\"application/manifest+json\", true"
+            - default: true
+              do:
+                - return: "\"\", false"
+          "on": strings.ToLower(extension)
+  - of: appendETag
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendETag
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: dst
+        value: append(dst, `W/"`...)
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, info.Size(), 16)
+      - set: dst
+        value: append(dst, '-')
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, info.ModTime().UnixNano(), 16)
+      - set: dst
+        value: append(dst, '"')
+      - return: dst
+  - of: (*fileJob).notModified
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileJob).notModified
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: info.ModTime().Truncate(time.Second).After
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: bytes.Equal(j.ifNoneMatch, wildcardMatch) || etagListed(j.ifNoneMatch, etag)
+          when: len(j.ifNoneMatch) > 0
+      - opt:
+          do:
+            - return: "false"
+          when: len(j.ifModifiedSince) == 0
+      - bind: t, err
+        eval: time.Parse(httpDate, string(j.ifModifiedSince))
+        to: time
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil
+      - return: "!info.ModTime().Truncate(time.Second).After(t)"
+        to: info.ModTime().Truncate(time.Second).After
+  - of: etagListed
+    participants:
+      - id: caller
+        kind: actor
+      - id: etagListed
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - set: etag
+        to: bytes
+        value: bytes.TrimPrefix(etag, []byte(`W/`))
+      - loop:
+          cond: len(list) > 0
+          do:
+            - var:
+                name: v
+                type: "[]byte"
+            - set: v, list, _
+              to: bytes
+              value: bytes.Cut(list, []byte(","))
+            - set: v
+              to: bytes
+              value: bytes.TrimPrefix(bytes.TrimSpace(v), []byte(`W/`))
+            - opt:
+                do:
+                  - return: "true"
+                when: bytes.Equal(v, etag)
+      - return: "false"
+  - of: parseRange
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseRange
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: suffixRange
+        kind: internal
+      - id: fromRange
+        kind: internal
+    steps:
+      - bind: after, ok
+        eval: bytes.CutPrefix(spec, []byte("bytes="))
+        to: bytes
+      - opt:
+          do:
+            - return: 0, size, statusOK
+          when: "!ok || bytes.IndexByte(after, ',') >= 0"
+      - bind: first, last, dash
+        eval: bytes.Cut(after, []byte("-"))
+        to: bytes
+      - set: first, last
+        value: bytes.TrimSpace(first), bytes.TrimSpace(last)
+      - opt:
+          do:
+            - return: 0, 0, statusRangeBad
+          when: "!dash || (len(first) == 0 && len(last) == 0)"
+      - opt:
+          do:
+            - return: suffixRange(last, size)
+              to: suffixRange
+          when: len(first) == 0
+      - return: fromRange(first, last, size)
+        to: fromRange
+  - of: suffixRange
+    participants:
+      - id: caller
+        kind: actor
+      - id: suffixRange
+        kind: self
+      - id: parseOffset
+        kind: internal
+    steps:
+      - bind: v, ok
+        eval: parseOffset(last)
+        to: parseOffset
+      - opt:
+          do:
+            - return: 0, 0, statusRangeBad
+          when: "!ok || v == 0 || size == 0"
+      - set: "n"
+        value: min(v, size)
+      - return: size - n, n, statusPartial
+  - of: fromRange
+    participants:
+      - id: caller
+        kind: actor
+      - id: fromRange
+        kind: self
+      - id: parseOffset
+        kind: internal
+    steps:
+      - bind: from, ok
+        eval: parseOffset(first)
+        to: parseOffset
+      - opt:
+          do:
+            - return: 0, 0, statusRangeBad
+          when: "!ok || from >= size"
+      - bind: to
+        eval: size - 1
+      - opt:
+          do:
+            - bind: v, ok
+              eval: parseOffset(last)
+              to: parseOffset
+            - opt:
+                do:
+                  - return: 0, 0, statusRangeBad
+                when: "!ok || v < from"
+            - set: to
+              value: min(v, size-1)
+          when: len(last) > 0
+      - return: from, to - from + 1, statusPartial
+  - of: appendContentRange
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendContentRange
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: dst
+        value: "append(dst, \"Content-Range: bytes \"...)"
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, off, 10)
+      - set: dst
+        value: append(dst, '-')
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, off+n-1, 10)
+      - set: dst
+        value: append(dst, '/')
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, size, 10)
+      - return: append(dst, "\r\n"...)
+  - of: cleanName
+    participants:
+      - id: caller
+        kind: actor
+      - id: cleanName
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: name
+        eval: strings.TrimPrefix(path.Clean("/"+p), "/")
+        to: strings
+      - opt:
+          do:
+            - return: "\".\""
+          when: name == ""
+      - return: name
+  - of: closeTreeFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeTreeFile
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: swallowErr(f.Close())
+        to: swallowErr
+  - of: (*laneTable).get
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneTable).get
+        kind: self
+      - id: t.states.Load
+        kind: value
+      - id: t.grow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: (*p)[i]
+          init:
+            bind: p
+            eval: t.states.Load()
+            to: t.states.Load
+          when: p != nil && i < len(*p) && (*p)[i] != nil
+      - return: t.grow(i)
+        to: t.grow
+  - of: (*laneTable).grow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneTable).grow
+        kind: self
+      - id: t.states.Load
+        kind: value
+      - id: t.states.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: t.mu
+      - var:
+          name: cur
+          type: "[]*T"
+      - opt:
+          do:
+            - set: cur
+              value: "*p"
+          init:
+            bind: p
+            eval: t.states.Load()
+            to: t.states.Load
+          when: p != nil
+      - opt:
+          do:
+            - return: cur[i]
+          when: i < len(cur) && cur[i] != nil
+      - bind: next
+        eval: make([]*T, max(len(cur), i+1))
+      - eval: copy(next, cur)
+      - set: next[i]
+        value: new(T)
+      - eval: t.states.Store(&next)
+        to: t.states.Store
+      - return: next[i]
   - of: HandleLoop
+    participants:
+      - id: caller
+        kind: actor
+      - id: HandleLoop
+        kind: self
+      - id: newLoopHandler
+        kind: internal
+    steps:
+      - return: newLoopHandler(h, p)
+        to: newLoopHandler
+  - of: newLoopHandler
+    participants:
+      - id: caller
+        kind: actor
+      - id: newLoopHandler
+        kind: self
+      - id: findWorker
+        kind: internal
+      - id: findStreamer
+        kind: internal
     steps:
       - bind: b, _
         eval: h.(corenet.HTTP1Batcher)
-      - bind: w, _
-        eval: h.(corenet.HTTP1Worker)
-      - return: "&LoopHandler{h: h, batcher: b, worker: w, p: p, holdCap: defaultHoldCap}"
+      - bind: w
+        eval: findWorker(h)
+        to: findWorker
+      - bind: r, _
+        eval: h.(corenet.HTTP1BodyReader)
+      - bind: ab, _
+        eval: h.(corenet.HTTP1BodyAborter)
+      - bind: streamer
+        eval: findStreamer(h)
+        to: findStreamer
+      - bind: up, _
+        eval: streamer.(corenet.HTTP1Upgrader)
+      - return: "&LoopHandler{h: h, batcher: b, worker: w, reader: r, aborter: ab, streamer: streamer, upgrader: up, canceller: findCanceller(h), p: p, holdCap: defaultHoldCap}"
+  - of: findStreamer
+    participants:
+      - id: caller
+        kind: actor
+      - id: findStreamer
+        kind: self
+      - id: l.wrapped
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: s
+                init:
+                  bind: s, ok
+                  eval: h.(corenet.HTTP1Streamer)
+                when: ok
+            - bind: l, ok
+              eval: h.(interface{ wrapped() corenet.HTTP1Handler })
+            - opt:
+                do:
+                  - return: nil
+                when: "!ok"
+            - set: h
+              to: l.wrapped
+              value: l.wrapped()
+          forever: true
+  - of: findWorker
+    participants:
+      - id: caller
+        kind: actor
+      - id: findWorker
+        kind: self
+      - id: l.wrapped
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: w
+                init:
+                  bind: w, ok
+                  eval: h.(corenet.HTTP1Worker)
+                when: ok
+            - bind: l, ok
+              eval: h.(interface{ wrapped() corenet.HTTP1Handler })
+            - opt:
+                do:
+                  - return: nil
+                when: "!ok"
+            - set: h
+              to: l.wrapped
+              value: l.wrapped()
+          forever: true
+  - of: strayFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: strayFile
+        kind: self
+      - id: closeFileReader
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: closing
+          when: res.File.R == nil || res.Pending
+      - eval: closeFileReader(res.File.R)
+        to: closeFileReader
+      - set: res.File
+        value: corenet.HTTP1FileValue{}
+      - set: res.Status, res.Body, res.Header
+        value: statusInternal, nil, nil
+      - set: res.Close
+        value: "true"
+      - return: "true"
+  - of: (*connFlag).holds
+    steps:
+      - return: res.Pending || len(f.held) > 0 || f.file.active()
   - of: (*LoopHandler).OnOpen
     participants:
       - id: caller
@@ -446,12 +2813,26 @@ sequences:
     steps:
       - eval: a.state(io.Loop()).flag(ref).reset(ref.Gen)
         to: a.state(io.Loop()).flag(ref).reset
+  - of: (*connFlag).endInput
+    steps:
+      - opt:
+          do:
+            - set: f.mode
+              value: connClosing
+          when: f.mode != connStreaming
   - of: (*connFlag).reset
     steps:
-      - bind: held, buf
-        eval: f.held[:0], f.buf[:0]
+      - bind: held, buf, head
+        eval: f.held[:0], f.buf[:0], f.head[:0]
+      - bind: file
+        eval: f.file
+      - opt:
+          do:
+            - set: "*file"
+              value: fileBody{}
+          when: file != nil
       - set: "*f"
-        value: "connFlag{gen: gen, held: held, buf: buf}"
+        value: "connFlag{gen: gen, held: held, buf: buf, head: head, request: f.request, file: file}"
   - of: (*LoopHandler).OnData
     participants:
       - id: caller
@@ -464,9 +2845,9 @@ sequences:
         kind: internal
       - id: st.flag
         kind: internal
-      - id: a.p.Parse
+      - id: a.step
         kind: internal
-      - id: AppendRefusal
+      - id: f.endInput
         kind: internal
     steps:
       - bind: loop
@@ -481,42 +2862,90 @@ sequences:
       - opt:
           do:
             - return: len(buf)
-          when: f.gen == ref.Gen && f.closing
+          when: f.gen == ref.Gen && (f.mode == connClosing || f.mode == connStreaming)
       - bind: used
         eval: "0"
+      - bind: c
+        eval: "dataCall{io: io, ref: ref, st: st, f: f, loop: loop}"
       - loop:
           cond: used < len(buf)
           do:
-            - bind: n, r
-              eval: a.p.Parse(buf[used:], &st.req)
-              to: a.p.Parse
-            - opt:
-                do:
-                  - bind: "off"
-                    eval: len(st.out)
-                  - set: st.out
-                    to: AppendRefusal
-                    value: AppendRefusal(st.out, r)
-                  - set: st.items
-                    value: "append(st.items, item{ref: ref, off: off, end: len(st.out), closing: true})"
-                  - set: f.closing
-                    value: "true"
-                  - return: len(buf)
-                when: r != RefusalNone
-            - opt:
-                do:
-                  - break: true
-                when: n == 0
+            - bind: n, next
+              eval: a.step(c, buf[used:])
+              to: a.step
             - op: +=
               set: used
               value: "n"
-            - opt:
-                do:
-                  - set: f.closing
-                    value: "true"
-                  - return: len(buf)
-                when: a.serve(io, ref, st, loop)
+            - switch:
+                cases:
+                  - case: stepClose
+                    do:
+                      - eval: f.endInput()
+                        to: f.endInput
+                      - return: len(buf)
+                  - case: stepWait
+                    do:
+                      - return: used
+                  - case: stepMore
+                "on": next
       - return: used
+  - of: (*LoopHandler).step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).step
+        kind: self
+      - id: a.feedUpgraded
+        kind: internal
+      - id: a.feedBody
+        kind: internal
+      - id: a.p.Parse
+        kind: internal
+      - id: AppendRefusal
+        kind: internal
+      - id: a.openBody
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: a.feedUpgraded(c, buf)
+              to: a.feedUpgraded
+          when: c.f.mode == connUpgraded
+      - opt:
+          do:
+            - return: a.feedBody(c, buf)
+              to: a.feedBody
+          when: c.f.bodyLeft > 0
+      - bind: st
+        eval: c.st
+      - bind: n, r
+        eval: a.p.Parse(buf, &st.req)
+        to: a.p.Parse
+      - opt:
+          do:
+            - bind: "off"
+              eval: len(st.out)
+            - set: st.out
+              to: AppendRefusal
+              value: AppendRefusal(st.out, r)
+            - set: st.items
+              value: "append(st.items, item{ref: c.ref, off: off, end: len(st.out), closing: true})"
+            - return: 0, stepClose
+          when: r != RefusalNone
+      - opt:
+          do:
+            - return: a.openBody(c, buf), stepMore
+              to: a.openBody
+          when: a.reader != nil && st.req.HeadLen > 0 && st.req.ContentLength > 0
+      - opt:
+          do:
+            - return: 0, stepWait
+          when: n == 0
+      - opt:
+          do:
+            - return: n, stepClose
+          when: a.serve(c.io, c.ref, st, c.loop)
+      - return: n, stepMore
   - of: (*LoopHandler).serve
     participants:
       - id: caller
@@ -527,17 +2956,27 @@ sequences:
         kind: internal
       - id: a.h.ServeHTTP1
         kind: value
+      - id: a.openStream
+        kind: internal
+      - id: strayFile
+        kind: internal
       - id: st.flag
         kind: internal
       - id: a.hold
         kind: internal
       - id: AppendResponse
         kind: internal
+      - id: appendInternalError
+        kind: internal
       - id: st.give
         kind: internal
     steps:
-      - set: st.req.Lane
-        value: loop
+      - set: st.req.Lane, st.req.Conn
+        value: loop, ref
+      - op: ++
+        set: st.count
+      - set: st.req.ID
+        value: uint64(loop)<<laneShift | st.count&counterMask
       - bind: res
         eval: st.take()
         to: st.take
@@ -549,13 +2988,21 @@ sequences:
         eval: st.req.Close || res.Close || io.Pressure(ref)
       - opt:
           do:
+            - return: a.openStream(ref, st, res)
+              to: a.openStream
+          when: res.Stream || res.Upgrade
+      - set: closing
+        to: strayFile
+        value: strayFile(res, closing)
+      - opt:
+          do:
             - return: "a.hold(st, &answer{io: io, ref: ref, f: f, res: res, closing: closing})"
               to: a.hold
           init:
             bind: f
             eval: st.flag(ref)
             to: st.flag
-          when: res.Pending || len(f.held) > 0
+          when: f.holds(res)
       - opt:
           do:
             - op: ++
@@ -575,7 +3022,8 @@ sequences:
       - opt:
           do:
             - set: out
-              value: append(st.out, internalError...)
+              to: appendInternalError
+              value: appendInternalError(st.out, res)
             - set: closing
               value: "true"
           when: err != nil
@@ -592,15 +3040,83 @@ sequences:
         kind: actor
       - id: (*LoopHandler).OnTimeout
         kind: self
+      - id: a.timeout
+        kind: internal
+    steps:
+      - eval: a.timeout(io, ref)
+        to: a.timeout
+  - of: (*LoopHandler).timeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).timeout
+        kind: self
+      - id: a.state(io.Loop()).peek
+        kind: internal
+      - id: a.streamer.OnStreamTimeout
+        kind: value
+      - id: a.endCopy
+        kind: internal
       - id: swallowErr
         kind: internal
     steps:
+      - opt:
+          do:
+            - eval: "a.streamer.OnStreamTimeout(corenet.HTTP1StreamValue{IO: io, Ref: ref})"
+              to: a.streamer.OnStreamTimeout
+            - return: ""
+          init:
+            bind: f
+            eval: a.state(io.Loop()).peek(ref)
+            to: a.state(io.Loop()).peek
+          when: f != nil && (f.mode == connStreaming || f.mode == connUpgraded)
+      - opt:
+          do:
+            - eval: a.endCopy(io, ref, a.state(io.Loop()), f, true)
+              to: a.endCopy
+            - return: ""
+          init:
+            bind: f
+            eval: a.state(io.Loop()).peek(ref)
+            to: a.state(io.Loop()).peek
+          when: f != nil && f.file.active() && f.file.flags&bodyNative == 0
       - eval: swallowErr(io.Close(ref))
         to: swallowErr
   - of: (*LoopHandler).OnWritable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnWritable
+        kind: self
+      - id: a.writable
+        kind: internal
     steps:
-      - set: _, _
-        value: io, ref
+      - eval: a.writable(io, ref)
+        to: a.writable
+  - of: (*LoopHandler).writable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).writable
+        kind: self
+      - id: a.state
+        kind: internal
+      - id: st.peek
+        kind: internal
+      - id: a.fileWritable
+        kind: internal
+    steps:
+      - bind: st
+        eval: a.state(io.Loop())
+        to: a.state
+      - bind: f
+        eval: st.peek(ref)
+        to: st.peek
+      - opt:
+          do:
+            - eval: a.fileWritable(io, ref, st, f)
+              to: a.fileWritable
+          when: f != nil && f.file.active()
   - of: (*LoopHandler).OnBatchEnd
     participants:
       - id: caller
@@ -619,7 +3135,11 @@ sequences:
         kind: internal
       - id: st.flush
         kind: internal
-      - id: st.flushReady
+      - id: a.flushReady
+        kind: internal
+      - id: a.retryCopies
+        kind: internal
+      - id: a.announceStreams
         kind: internal
     steps:
       - bind: loop
@@ -631,22 +3151,88 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: len(st.items) == 0 && len(st.ready) == 0 && len(st.deferHeld) == 0 && len(st.dropped) == 0
+          when: st.idle()
       - opt:
           do:
             - eval: a.batcher.EndBatch(loop)
               to: a.batcher.EndBatch
-          when: st.served > 0 && a.batcher != nil
+          when: st.endServed() && a.batcher != nil
       - eval: st.completeHeld()
         to: st.completeHeld
       - eval: st.complete()
         to: st.complete
       - eval: st.flush(io)
         to: st.flush
-      - eval: st.flushReady(io)
-        to: st.flushReady
-      - set: st.items, st.out, st.served
-        value: st.items[:0], st.out[:0], 0
+      - eval: a.flushReady(io, st)
+        to: a.flushReady
+      - eval: a.retryCopies(io, st)
+        to: a.retryCopies
+      - set: st.items, st.out
+        value: st.items[:0], st.out[:0]
+      - eval: a.announceStreams(io, st)
+        to: a.announceStreams
+  - of: (*loopState).endServed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).endServed
+        kind: self
+      - id: st.requests.Add
+        kind: value
+    steps:
+      - bind: ended
+        eval: st.served+st.marked > 0
+      - opt:
+          do:
+            - eval: st.requests.Add(uint64(st.served))
+              to: st.requests.Add
+          when: st.served > 0
+      - set: st.served, st.marked
+        value: 0, 0
+      - return: ended
+  - of: (*loopState).idle
+    steps:
+      - return: |-
+          st.served+st.marked == 0 && len(st.items) == 0 && len(st.ready) == 0 && len(st.deferHeld) == 0 &&
+          		len(st.dropped) == 0 && len(st.opened) == 0 && len(st.copyRetry) == 0
+  - of: (*LoopHandler).MarkServed
+    steps:
+      - op: ++
+        set: a.state(lane).marked
+  - of: (*LoopHandler).HTTPCounts
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).HTTPCounts
+        kind: self
+      - id: a.loops.Load
+        kind: value
+      - id: st.requests.Load
+        kind: value
+    steps:
+      - var:
+          name: v
+          type: corenet.HTTPCountsValue
+      - opt:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - op: +=
+                          set: v.HTTP1Requests
+                          to: st.requests.Load
+                          value: st.requests.Load()
+                      when: st != nil
+                key: _
+                range: "*p"
+                value: st
+          init:
+            bind: p
+            eval: a.loops.Load()
+            to: a.loops.Load
+          when: p != nil
+      - return: v
   - of: (*LoopHandler).Unwrap
     steps:
       - return: a.h
@@ -678,7 +3264,7 @@ sequences:
     steps:
       - eval: swallowErr(err)
         to: swallowErr
-      - eval: a.closed(io, ref)
+      - eval: a.closed(io, ref, err)
         to: a.closed
   - of: (*loopState).complete
     participants:
@@ -687,6 +3273,8 @@ sequences:
       - id: (*loopState).complete
         kind: self
       - id: AppendResponse
+        kind: internal
+      - id: appendInternalError
         kind: internal
       - id: st.give
         kind: internal
@@ -726,7 +3314,8 @@ sequences:
             - opt:
                 do:
                   - set: next
-                    value: append(out, internalError...)
+                    to: appendInternalError
+                    value: appendInternalError(out, res)
                   - set: it.closing
                     value: "true"
                 when: res.Defer || err != nil
@@ -935,12 +3524,121 @@ sequences:
           do:
             - return: ""
           when: err == nil
+  - of: (*LoopHandler).CheckSpill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).CheckSpill
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.reader != nil
+      - bind: room
+        eval: int64(spillCap) - int64(orDefault(a.p.head, corenet.HTTP1DefaultHead))
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.HTTP1Misconfigured, errs.WrapParams{},
+                			errs.String("option", "body"), errs.Int64("spill_room", room), errs.Int64("body", a.p.body))
+              to: errs
+          when: a.p.body != 0 && a.p.body > room
+      - opt:
+          do:
+            - set: a.p.body
+              value: max(room, minBodyBound)
+          when: a.p.body == 0 && room < corenet.HTTP1DefaultBody
+      - return: nil
+  - of: (*LoopHandler).openBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).openBody
+        kind: self
+      - id: a.p.Parse
+        kind: internal
+    steps:
+      - bind: st, f
+        eval: c.st, c.f
+      - bind: headLen
+        eval: st.req.HeadLen
+      - set: f.head
+        value: append(f.head[:0], buf[:headLen]...)
+      - opt:
+          do:
+            - set: f.request
+              value: new(corenet.HTTP1RequestValue)
+          when: f.request == nil
+      - eval: a.p.Parse(f.head, f.request)
+        to: a.p.Parse
+      - set: f.request.Lane
+        value: c.loop
+      - set: f.bodyLeft
+        value: f.request.ContentLength
+      - return: headLen
+  - of: (*LoopHandler).feedBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).feedBody
+        kind: self
+      - id: a.reader.OnBody
+        kind: value
+    steps:
+      - bind: f
+        eval: c.f
+      - bind: take
+        eval: int(min(int64(len(buf)), f.bodyLeft))
+      - op: "-="
+        set: f.bodyLeft
+        value: int64(take)
+      - bind: last
+        eval: f.bodyLeft == 0
+      - eval: a.reader.OnBody(f.request, buf[:take], last)
+        to: a.reader.OnBody
+      - opt:
+          do:
+            - return: take, stepMore
+          when: "!last"
+      - set: c.st.req
+        value: "*f.request"
+      - opt:
+          do:
+            - return: take, stepClose
+          when: a.serve(c.io, c.ref, c.st, c.loop)
+      - return: take, stepMore
+  - of: (*LoopHandler).abortBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).abortBody
+        kind: self
+      - id: a.aborter.AbortBody
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: f.bodyLeft
+              value: "0"
+            - opt:
+                do:
+                  - eval: a.aborter.AbortBody(f.request)
+                    to: a.aborter.AbortBody
+                when: a.aborter != nil
+          when: f.gen == ref.Gen && f.bodyLeft > 0
   - of: pendingWorker.Work
     participants:
       - id: caller
         kind: actor
       - id: pendingWorker.Work
         kind: self
+      - id: workCopy
+        kind: internal
+      - id: w.a.cancelJob
+        kind: internal
       - id: w.a.worker.WorkHTTP1
         kind: value
     steps:
@@ -948,6 +3646,14 @@ sequences:
         eval: (*w.a.state(lane).slots.Load())[job.Slot]
       - opt:
           do:
+            - eval: workCopy(slot)
+              to: workCopy
+            - return: ""
+          when: slot.copy != nil
+      - opt:
+          do:
+            - eval: w.a.cancelJob(lane, job.Arg)
+              to: w.a.cancelJob
             - return: ""
           when: slot.cancelled.Load()
       - eval: w.a.worker.WorkHTTP1(lane, job.Arg, &slot.res)
@@ -986,7 +3692,11 @@ sequences:
         kind: self
       - id: a.state
         kind: internal
+      - id: a.copyDone
+        kind: internal
       - id: st.peek
+        kind: internal
+      - id: closeFileReader
         kind: internal
       - id: st.freeSlot
         kind: internal
@@ -1000,6 +3710,12 @@ sequences:
         eval: (*st.slots.Load())[job.Slot]
       - opt:
           do:
+            - eval: a.copyDone(io, st, slot)
+              to: a.copyDone
+            - return: ""
+          when: slot.copy != nil
+      - opt:
+          do:
             - return: ""
           when: slot.gen != job.Gen
       - bind: f
@@ -1007,6 +3723,8 @@ sequences:
         to: st.peek
       - opt:
           do:
+            - eval: closeFileReader(slot.res.File.R)
+              to: closeFileReader
             - eval: st.freeSlot(job.Slot)
               to: st.freeSlot
             - return: ""
@@ -1027,7 +3745,7 @@ sequences:
       - bind: f
         eval: a.state(lane).peek(ref)
         to: a.state(lane).peek
-      - return: f != nil && len(f.held) > 0
+      - return: f != nil && (len(f.held) > 0 || f.file.active())
   - of: (*LoopHandler).hold
     participants:
       - id: caller
@@ -1088,9 +3806,13 @@ sequences:
         kind: self
       - id: st.give
         kind: internal
+      - id: appendInternalError
+        kind: internal
       - id: st.takeSlot
         kind: internal
       - id: st.freeSlot
+        kind: internal
+      - id: a.cancelJob
         kind: internal
       - id: st.holdBytes
         kind: internal
@@ -1103,10 +3825,13 @@ sequences:
           do:
             - set: an.closing
               value: "true"
+            - bind: "off"
+              eval: len(an.f.buf)
             - set: an.f.buf
-              value: append(an.f.buf, internalError...)
+              to: appendInternalError
+              value: appendInternalError(an.f.buf, res)
             - set: an.f.held
-              value: "append(an.f.held, heldItem{off: len(an.f.buf) - len(internalError), end: len(an.f.buf), closing: true})"
+              value: "append(an.f.held, heldItem{off: off, end: len(an.f.buf), closing: true})"
             - return: ""
           when: res.Defer || a.worker == nil || st.outbound == nil
       - bind: idx, slot
@@ -1114,6 +3839,8 @@ sequences:
         to: st.takeSlot
       - set: slot.ref
         value: an.ref
+      - set: slot.res.RequestID, slot.res.CORS
+        value: res.RequestID, res.CORS
       - set: slot.stub.Method, slot.stub.Close
         value: nil, an.closing
       - opt:
@@ -1129,6 +3856,10 @@ sequences:
           when: "st.outbound.Send(an.io, corenet.LoopJobValue{Ref: an.ref, Slot: idx, Gen: slot.gen, Arg: res.Job}) == nil"
       - eval: st.freeSlot(idx)
         to: st.freeSlot
+      - eval: a.cancelJob(an.io.Loop(), res.Job)
+        to: a.cancelJob
+      - set: st.unavailable.RequestID, st.unavailable.CORS
+        value: res.RequestID, res.CORS
       - eval: st.holdBytes(an, &st.unavailable)
         to: st.holdBytes
   - of: (*loopState).holdBytes
@@ -1138,6 +3869,8 @@ sequences:
       - id: (*loopState).holdBytes
         kind: self
       - id: AppendResponse
+        kind: internal
+      - id: appendInternalError
         kind: internal
     steps:
       - bind: f
@@ -1150,7 +3883,8 @@ sequences:
       - opt:
           do:
             - set: out
-              value: append(f.buf, internalError...)
+              to: appendInternalError
+              value: appendInternalError(f.buf, res)
             - set: an.closing
               value: "true"
           when: err != nil
@@ -1175,16 +3909,33 @@ sequences:
         kind: internal
       - id: st.peek
         kind: internal
+      - id: a.abortBody
+        kind: internal
+      - id: closedFile
+        kind: internal
       - id: st.dropHeld
         kind: internal
+      - id: a.streamer.OnStreamClose
+        kind: value
     steps:
       - bind: st
         eval: a.state(io.Loop())
         to: a.state
       - opt:
           do:
+            - eval: a.abortBody(f, ref)
+              to: a.abortBody
+            - eval: closedFile(f, st)
+              to: closedFile
             - eval: st.dropHeld(f)
               to: st.dropHeld
+            - opt:
+                do:
+                  - set: f.mode
+                    value: connClosing
+                  - eval: "a.streamer.OnStreamClose(corenet.HTTP1StreamValue{IO: io, Ref: ref}, err)"
+                    to: a.streamer.OnStreamClose
+                when: f.mode == connStreaming || f.mode == connUpgraded
           init:
             bind: f
             eval: st.peek(ref)
@@ -1377,7 +4128,7 @@ sequences:
                   - var:
                       name: closing
                       type: bool
-                  - set: f.buf, closing
+                  - set: f.buf, closing, _
                     to: appendHeld
                     value: appendHeld(f.buf, it.stub, it.res, it.closing)
                   - set: it.closing, it.off, it.end
@@ -1399,32 +4150,35 @@ sequences:
         kind: self
       - id: AppendResponse
         kind: internal
+      - id: appendInternalError
+        kind: internal
     steps:
       - bind: out, err
         eval: AppendResponse(dst, stub, res, closing)
         to: AppendResponse
       - opt:
           do:
-            - return: append(dst, internalError...), true
+            - return: appendInternalError(dst, res), true, true
+              to: appendInternalError
           when: res.Defer || res.Pending || err != nil
-      - return: out, closing || res.Close
-  - of: (*loopState).flushReady
+      - return: out, closing || res.Close, false
+  - of: (*LoopHandler).flushReady
     participants:
       - id: caller
         kind: actor
-      - id: (*loopState).flushReady
+      - id: (*LoopHandler).flushReady
         kind: self
       - id: st.peek
         kind: internal
-      - id: st.flushHeld
+      - id: a.flushHeld
         kind: internal
     steps:
       - loop:
           do:
             - opt:
                 do:
-                  - eval: st.flushHeld(io, ref, f)
-                    to: st.flushHeld
+                  - eval: a.flushHeld(io, ref, st, f)
+                    to: a.flushHeld
                 init:
                   bind: f
                   eval: st.peek(ref)
@@ -1437,27 +4191,36 @@ sequences:
         value: st.ready[:0]
       - op: ++
         set: st.readyEpoch
-  - of: (*loopState).flushHeld
+  - of: (*LoopHandler).flushHeld
     participants:
       - id: caller
         kind: actor
-      - id: (*loopState).flushHeld
+      - id: (*LoopHandler).flushHeld
         kind: self
       - id: st.appendItem
         kind: internal
       - id: f.compact
+        kind: internal
+      - id: a.startFile
         kind: internal
       - id: st.write
         kind: internal
       - id: st.dropHeld
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: ""
+          when: f.file.active()
       - bind: out, n, closing
         eval: st.held[:0], 0, false
+      - var:
+          name: file
+          type: corenet.HTTP1FileValue
       - loop:
-          cond: n < len(f.held) && !closing && f.held[n].ready()
+          cond: n < len(f.held) && !closing && file.R == nil && f.held[n].ready()
           do:
-            - set: out, closing
+            - set: out, closing, file
               to: st.appendItem
               value: st.appendItem(out, f, f.held[n])
           post: n++
@@ -1473,6 +4236,12 @@ sequences:
         value: f.held[:rest]
       - eval: f.compact()
         to: f.compact
+      - opt:
+          do:
+            - eval: "a.startFile(&fileStart{io: io, ref: ref, st: st, f: f, out: out, file: file, closing: closing})"
+              to: a.startFile
+            - return: ""
+          when: file.R != nil
       - eval: st.write(io, ref, out, closing)
         to: st.write
       - opt:
@@ -1493,17 +4262,27 @@ sequences:
         kind: internal
       - id: st.freeSlot
         kind: internal
+      - id: closeFileReader
+        kind: internal
     steps:
       - opt:
           do:
-            - return: append(out, f.buf[it.off:it.end]...), it.closing
+            - return: append(out, f.buf[it.off:it.end]...), it.closing, corenet.HTTP1FileValue{}
           when: it.slot == nil
-      - bind: next, closing
+      - bind: file
+        eval: it.slot.res.File
+      - bind: next, closing, refused
         eval: appendHeld(out, &it.slot.stub, &it.slot.res, it.slot.stub.Close)
         to: appendHeld
       - eval: st.freeSlot(it.slot.idx)
         to: st.freeSlot
-      - return: next, closing
+      - opt:
+          do:
+            - eval: closeFileReader(file.R)
+              to: closeFileReader
+            - return: next, closing, corenet.HTTP1FileValue{}
+          when: refused || isHead(it.slot.stub.Method)
+      - return: next, closing, file
   - of: tokenTable
     steps:
       - var:
@@ -1559,7 +4338,9 @@ sequences:
           Parser{
           		head:   head,
           		target: orDefault(l.Target, min(corenet.HTTP1DefaultTarget, head)),
-          		body:   orDefault(l.Body, corenet.HTTP1DefaultBody),
+          		//: kept as given: zero still means the default at Parse, and an
+          		//: explicit bound stays distinguishable from it (CheckSpill).
+          		body: l.Body,
           	}, nil
   - of: orDefault
     steps:
@@ -1590,13 +4371,15 @@ sequences:
         kind: internal
       - id: fields
         kind: internal
-      - id: canonical
+      - id: Canonical
         kind: internal
       - id: Continue
         kind: internal
     steps:
       - eval: reset(req)
         to: reset
+      - set: req.Scheme, req.Stream, req.Proto
+        value: nil, 0, protoMajor
       - bind: head
         eval: orDefault(p.head, corenet.HTTP1DefaultHead)
         to: orDefault
@@ -1620,8 +4403,8 @@ sequences:
             - return: 0, r
           init:
             bind: r
-            eval: canonical(req)
-            to: canonical
+            eval: Canonical(req)
+            to: Canonical
           when: r != RefusalNone
       - set: req.HeadLen
         value: end
@@ -1656,6 +4439,8 @@ sequences:
         kind: self
       - id: req.Auth.Reset
         kind: value
+      - id: req.RequestID.Reset
+        kind: value
     steps:
       - set: req.Method, req.Target, req.Host, req.Authorization, req.Body
         value: nil, nil, nil, nil, nil
@@ -1663,10 +4448,16 @@ sequences:
         value: nil, nil
       - set: req.ContentLength, req.HeadLen, req.Consumed, req.NFields, req.Route
         value: 0, 0, 0, 0, 0
+      - set: req.RoutePrefix
+        value: "0"
       - set: req.HasHost, req.HasAuthorization, req.Close, req.Authenticated
         value: false, false, false, false
       - eval: req.Auth.Reset()
         to: req.Auth.Reset
+      - set: req.Trace
+        value: coretrace.SpanContextValue{}
+      - eval: req.RequestID.Reset()
+        to: req.RequestID.Reset
   - of: requestLine
     participants:
       - id: caller
@@ -2216,6 +5007,262 @@ sequences:
   - of: isListSep
     steps:
       - return: c == ',' || c == ' ' || c == '\t'
+  - of: NewKeyedBuckets
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewKeyedBuckets
+        kind: self
+      - id: b.shards[i].init
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: cfg.Rate <= 0
+              do:
+                - return: nil, misconfigured("NewKeyedBuckets", "rate")
+            - case: cfg.Burst <= 0
+              do:
+                - return: nil, misconfigured("NewKeyedBuckets", "burst")
+            - case: cfg.Keys <= 0
+              do:
+                - return: nil, misconfigured("NewKeyedBuckets", "keys")
+      - bind: "n"
+        eval: "1"
+      - opt:
+          do:
+            - set: "n"
+              value: bucketShardsLarge
+          when: cfg.Keys >= bucketShardsThreshold
+      - bind: b
+        eval: "&KeyedBuckets{seed: maphash.MakeSeed(), shards: make([]bucketShard, n), rate: cfg.Rate / nanosPerSecond, burst: float64(cfg.Burst)}"
+      - bind: perShard
+        eval: max(1, cfg.Keys/n)
+      - loop:
+          do:
+            - eval: b.shards[i].init(perShard)
+              to: b.shards[i].init
+          key: i
+          range: b.shards
+      - return: b, nil
+  - of: (*bucketShard).init
+    steps:
+      - bind: size
+        eval: "1"
+      - loop:
+          cond: size < capacity*indexGrowth
+          do:
+            - op: "*="
+              set: size
+              value: indexGrowth
+      - set: s.entries
+        value: make([]bucketEntry, 0, capacity)[:capacity]
+      - set: s.index
+        value: make([]int32, 0, size)[:size]
+      - set: s.mask
+        value: uint64(size - 1)
+      - set: s.head, s.tail
+        value: noEntry, noEntry
+      - loop:
+          do:
+            - set: s.index[i]
+              value: noEntry
+          key: i
+          range: s.index
+  - of: (*KeyedBuckets).Allow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*KeyedBuckets).Allow
+        kind: self
+      - id: maphash
+        kind: stdlib
+      - id: s.mu.Lock
+        kind: value
+      - id: s.lookup
+        kind: internal
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - bind: h
+        eval: maphash.Bytes(b.seed, key)
+        to: maphash
+      - bind: s
+        eval: "&b.shards[h%uint64(len(b.shards))]"
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: e
+        eval: s.lookup(h, b.burst, now)
+        to: s.lookup
+      - bind: elapsed
+        eval: now - e.last
+      - opt:
+          do:
+            - set: e.tokens
+              value: min(b.burst, e.tokens+float64(elapsed)*b.rate)
+            - set: e.last
+              value: now
+          when: elapsed > 0
+      - opt:
+          do:
+            - op: "--"
+              set: e.tokens
+            - eval: s.mu.Unlock()
+              to: s.mu.Unlock
+            - return: true, 0
+          when: e.tokens >= 1
+      - bind: wait
+        eval: (1 - e.tokens) / (b.rate * nanosPerSecond)
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - return: false, max(1, ceilToInt(wait))
+  - of: ceilToInt
+    steps:
+      - bind: "n"
+        eval: int(v)
+      - opt:
+          do:
+            - op: ++
+              set: "n"
+          when: float64(n) < v
+      - return: "n"
+  - of: (*bucketShard).lookup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bucketShard).lookup
+        kind: self
+      - id: s.touch
+        kind: internal
+      - id: s.evictTail
+        kind: internal
+      - id: s.link
+        kind: internal
+    steps:
+      - bind: pos
+        eval: key & s.mask
+      - loop:
+          cond: s.index[pos] != noEntry
+          do:
+            - bind: e
+              eval: "&s.entries[s.index[pos]]"
+            - opt:
+                do:
+                  - eval: s.touch(s.index[pos])
+                    to: s.touch
+                  - return: e
+                when: e.key == key
+          post: pos = (pos + 1) & s.mask
+      - opt:
+          do:
+            - eval: s.evictTail()
+              to: s.evictTail
+            - set: pos
+              value: key & s.mask
+            - loop:
+                cond: s.index[pos] != noEntry
+                do:
+                  - set: pos
+                    value: (pos + 1) & s.mask
+          when: int(s.used) == len(s.entries)
+      - bind: id
+        eval: s.used
+      - op: ++
+        set: s.used
+      - set: s.index[pos]
+        value: id
+      - set: s.entries[id]
+        value: "bucketEntry{key: key, tokens: burst, last: now, prev: noEntry, next: s.head}"
+      - eval: s.link(id)
+        to: s.link
+      - return: "&s.entries[id]"
+  - of: (*bucketShard).touch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bucketShard).touch
+        kind: self
+      - id: s.unlink
+        kind: internal
+      - id: s.link
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.head == id
+      - eval: s.unlink(id)
+        to: s.unlink
+      - set: s.entries[id].prev, s.entries[id].next
+        value: noEntry, s.head
+      - eval: s.link(id)
+        to: s.link
+  - of: (*bucketShard).link
+    steps:
+      - alt:
+          - do:
+              - set: s.tail
+                value: id
+            when: s.head == noEntry
+          - do:
+              - set: s.entries[s.head].prev
+                value: id
+            else: true
+      - set: s.head
+        value: id
+  - of: (*bucketShard).unlink
+    steps:
+      - bind: e
+        eval: "&s.entries[id]"
+      - alt:
+          - do:
+              - set: s.entries[e.prev].next
+                value: e.next
+            when: e.prev != noEntry
+          - do:
+              - set: s.head
+                value: e.next
+            else: true
+      - alt:
+          - do:
+              - set: s.entries[e.next].prev
+                value: e.prev
+            when: e.next != noEntry
+          - do:
+              - set: s.tail
+                value: e.prev
+            else: true
+  - of: (*bucketShard).evictTail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*bucketShard).evictTail
+        kind: self
+      - id: s.unlink
+        kind: internal
+      - id: s.removeIndex
+        kind: internal
+      - id: s.moveEntry
+        kind: internal
+    steps:
+      - bind: id
+        eval: s.tail
+      - eval: s.unlink(id)
+        to: s.unlink
+      - eval: s.removeIndex(s.entries[id].key)
+        to: s.removeIndex
+      - bind: last
+        eval: s.used - 1
+      - opt:
+          do:
+            - eval: s.moveEntry(last, id)
+              to: s.moveEntry
+          when: id != last
+      - set: s.used
+        value: last
+  - of: (*bucketShard).movable
+    steps:
+      - return: (next-home)&s.mask >= (next-pos)&s.mask
   - of: Refusal.String
     steps:
       - opt:
@@ -2237,6 +5284,123 @@ sequences:
             - return: nil
           when: int(r) >= refusalCount
       - return: refusalErrs[r]
+  - of: (*LoopHandler).openStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).openStream
+        kind: self
+      - id: st.flag
+        kind: internal
+      - id: AppendResponse
+        kind: internal
+      - id: appendInternalError
+        kind: internal
+      - id: st.give
+        kind: internal
+    steps:
+      - bind: f
+        eval: st.flag(ref)
+        to: st.flag
+      - bind: "off"
+        eval: len(st.out)
+      - bind: out, err
+        eval: AppendResponse(st.out, &st.req, res, false)
+        to: AppendResponse
+      - opt:
+          do:
+            - set: st.out
+              to: appendInternalError
+              value: appendInternalError(st.out[:off], res)
+            - set: st.items
+              value: "append(st.items, item{ref: ref, off: off, end: len(st.out), closing: true})"
+            - eval: st.give(res)
+              to: st.give
+            - return: "true"
+          when: err != nil || res.Defer || res.Pending || a.streamer == nil || len(f.held) > 0 || (res.Upgrade && a.upgrader == nil)
+      - set: st.out
+        value: out
+      - set: st.items
+        value: "append(st.items, item{ref: ref, off: off, end: len(st.out)})"
+      - eval: st.give(res)
+        to: st.give
+      - set: f.mode
+        value: connStreaming
+      - bind: stop
+        eval: "!res.Upgrade"
+      - opt:
+          do:
+            - set: f.mode, f.upgradePending
+              value: connUpgraded, true
+          when: res.Upgrade
+      - set: st.opened
+        value: append(st.opened, ref)
+      - return: stop
+  - of: (*LoopHandler).feedUpgraded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).feedUpgraded
+        kind: self
+      - id: a.upgrader.OnUpgradedData
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, stepWait
+          when: c.f.upgradePending
+      - bind: "n"
+        eval: "a.upgrader.OnUpgradedData(corenet.HTTP1StreamValue{IO: c.io, Ref: c.ref}, buf)"
+        to: a.upgrader.OnUpgradedData
+      - return: n, stepWait
+  - of: (*LoopHandler).announceStreams
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).announceStreams
+        kind: self
+      - id: st.peek
+        kind: internal
+      - id: a.streamer.OnStreamOpen
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: f
+              eval: st.peek(ref)
+              to: st.peek
+            - opt:
+                do:
+                  - set: f.upgradePending
+                    value: "false"
+                  - eval: "a.streamer.OnStreamOpen(corenet.HTTP1StreamValue{IO: io, Ref: ref})"
+                    to: a.streamer.OnStreamOpen
+                when: f != nil && (f.mode == connStreaming || f.mode == connUpgraded) && !f.dead
+          key: _
+          range: st.opened
+          value: ref
+      - set: st.opened
+        value: st.opened[:0]
+  - of: (*LoopHandler).OnDrain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnDrain
+        kind: self
+      - id: a.state(io.Loop()).peek
+        kind: internal
+      - id: a.streamer.OnStreamDrain
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: "a.streamer.OnStreamDrain(corenet.HTTP1StreamValue{IO: io, Ref: ref})"
+              to: a.streamer.OnStreamDrain
+          init:
+            bind: f
+            eval: a.state(io.Loop()).peek(ref)
+            to: a.state(io.Loop()).peek
+          when: f != nil && (f.mode == connStreaming || f.mode == connUpgraded)
   - of: hexTable
     steps:
       - var:
@@ -2261,17 +5425,21 @@ sequences:
           key: i
           range: hexLetters
       - return: t
-  - of: canonical
+  - of: Canonical
     participants:
       - id: caller
         kind: actor
-      - id: canonical
+      - id: Canonical
         kind: self
       - id: splitPath
         kind: internal
       - id: absoluteForm
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: RefusalTarget
+          when: len(req.Target) == 0
       - bind: t
         eval: req.Target
       - switch:
@@ -2518,13 +5686,22 @@ sequences:
         kind: actor
       - id: AppendResponse
         kind: self
+      - id: appendUpgrade
+        kind: internal
       - id: orDefault
         kind: internal
       - id: AppendStatusLine
         kind: internal
+      - id: appendLinkFields
+        kind: internal
       - id: appendFraming
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: appendUpgrade(dst, res)
+              to: appendUpgrade
+          when: res.Upgrade
       - bind: status
         eval: orDefault(res.Status, statusOK)
         to: orDefault
@@ -2533,7 +5710,7 @@ sequences:
       - opt:
           do:
             - return: dst, corenet.HTTP1ResponseInvalid
-          when: bodiless && len(res.Body) > 0
+          when: refusedBody(res, req, bodiless)
       - bind: out, err
         eval: AppendStatusLine(dst, status)
         to: AppendStatusLine
@@ -2544,13 +5721,73 @@ sequences:
       - set: out
         value: append(out, res.Header...)
       - set: out
+        to: appendLinkFields
+        value: appendLinkFields(out, res)
+      - set: out
         to: appendFraming
-        value: appendFraming(out, len(res.Body), bodiless, closing || res.Close || req.Close)
+        value: appendFraming(out, bodyLength(res), bodiless || res.Stream, closing || res.Close || req.Close || res.Stream)
       - opt:
           do:
             - return: out, nil
           when: bytes.Equal(req.Method, methodHead)
       - return: append(out, res.Body...), nil
+  - of: appendUpgrade
+    steps:
+      - opt:
+          do:
+            - return: dst, corenet.HTTP1ResponseInvalid
+          when: len(res.Body) > 0 || (res.Status != 0 && res.Status != statusSwitching)
+      - set: dst
+        value: "append(dst, \"HTTP/1.1 101 Switching Protocols\\r\\nConnection: Upgrade\\r\\n\"...)"
+      - set: dst
+        value: append(dst, res.Header...)
+      - return: append(dst, "\r\n"...), nil
+  - of: refusedBody
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: res.File.R != nil && (bodiless || res.Stream || len(res.Body) > 0)
+      - return: (bodiless && len(res.Body) > 0) || (res.Stream && (bodiless || bytes.Equal(req.Method, methodHead)))
+  - of: bodyLength
+    steps:
+      - opt:
+          do:
+            - return: res.File.Len
+          when: res.File.R != nil
+      - return: int64(len(res.Body))
+  - of: appendLinkFields
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendLinkFields
+        kind: self
+      - id: appendRetryAfter
+        kind: internal
+      - id: res.RequestID.Bytes
+        kind: value
+      - id: appendRequestID
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, res.CORS...)
+      - opt:
+          do:
+            - set: dst
+              to: appendRetryAfter
+              value: appendRetryAfter(dst, res.RetryAfter)
+          when: res.RetryAfter > 0
+      - opt:
+          do:
+            - set: dst
+              to: appendRequestID
+              value: appendRequestID(dst, id)
+          init:
+            bind: id
+            eval: res.RequestID.Bytes()
+            to: res.RequestID.Bytes
+          when: len(id) > 0
+      - return: dst
   - of: appendFraming
     participants:
       - id: caller
@@ -2566,7 +5803,7 @@ sequences:
               value: "append(dst, \"Content-Length: \"...)"
             - set: dst
               to: strconv
-              value: strconv.AppendInt(dst, int64(n), decimal)
+              value: strconv.AppendInt(dst, n, decimal)
             - set: dst
               value: append(dst, "\r\n"...)
           when: "!bodiless"
@@ -2583,3 +5820,49 @@ sequences:
             - return: append(dst, refusalAnswers[RefusalNone]...)
           when: int(r) >= refusalCount
       - return: append(dst, refusalAnswers[r]...)
+  - of: appendInternalError
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendInternalError
+        kind: self
+      - id: res.RequestID.Bytes
+        kind: value
+      - id: appendRequestID
+        kind: internal
+    steps:
+      - bind: id
+        eval: res.RequestID.Bytes()
+        to: res.RequestID.Bytes
+      - opt:
+          do:
+            - return: append(dst, internalError...)
+          when: len(id) == 0
+      - set: dst
+        value: append(dst, statusLines[statusInternal]...)
+      - set: dst
+        to: appendRequestID
+        value: appendRequestID(dst, id)
+      - return: append(dst, internalErrorTail...)
+  - of: appendRequestID
+    steps:
+      - set: dst
+        value: "append(dst, \"X-Request-Id: \"...)"
+      - set: dst
+        value: append(dst, id...)
+      - return: append(dst, "\r\n"...)
+  - of: appendRetryAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendRetryAfter
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: dst
+        value: "append(dst, \"Retry-After: \"...)"
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(seconds), decimal)
+      - return: append(dst, "\r\n"...)

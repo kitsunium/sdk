@@ -979,21 +979,18 @@ func TestUTF8IsJudgedOnTheReassembledMessage(t *testing.T) {
 	})
 }
 
-// TestAdversarialFramesFailTheConnection is the table this package exists for.
-//
-// Each case is bytes a hostile or broken peer can put on the wire, and each
-// must produce a Close with the code the RFC names — not a tolerated frame, not
-// a silent drop, and not a server that keeps reading a stream it has already
-// misunderstood.
-func TestAdversarialFramesFailTheConnection(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name  string
-		write func(p *wsPeer)
-		code  uint16
-		why   string
-	}
-	tests := []tc{
+// adversarialCase is one row of the table a hostile or broken peer is judged by.
+type adversarialCase struct {
+	name  string
+	write func(p *wsPeer)
+	code  uint16
+	why   string
+}
+
+// adversarialTable is the table TestAdversarialFramesFailTheConnection runs and
+// the loop engine replays (TestAdversarial_onTheLoop).
+func adversarialTable() []adversarialCase {
+	return []adversarialCase{
 		{
 			name: "an unmasked client frame",
 			//: the single most important refusal in the whole protocol.
@@ -1140,6 +1137,17 @@ func TestAdversarialFramesFailTheConnection(t *testing.T) {
 			why:  "the length field is written by the peer; allocating from it is a DoS in one line",
 		},
 	}
+}
+
+// TestAdversarialFramesFailTheConnection is the table this package exists for.
+//
+// Each case is bytes a hostile or broken peer can put on the wire, and each
+// must produce a Close with the code the RFC names — not a tolerated frame, not
+// a silent drop, and not a server that keeps reading a stream it has already
+// misunderstood.
+func TestAdversarialFramesFailTheConnection(t *testing.T) {
+	t.Parallel()
+	tests := adversarialTable()
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

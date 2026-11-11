@@ -757,6 +757,38 @@ codes:
     const: CodePacketOptionUnsupported
     hex: "0x00_02_0B_43"
     package: internal/core/net
+  - code: "0.2.11.68"
+    const: CodeOptionValueInvalid
+    hex: "0x00_02_0B_44"
+    package: internal/core/net
+  - code: "0.2.11.69"
+    const: CodeMetricsRefused
+    hex: "0x00_02_0B_45"
+    package: internal/core/net
+  - code: "0.2.11.72"
+    const: CodeProxyHeaderInvalid
+    hex: "0x00_02_0B_48"
+    package: internal/core/net
+  - code: "0.2.11.73"
+    const: CodeCompressInvalid
+    hex: "0x00_02_0B_49"
+    package: internal/core/net
+  - code: "0.2.11.80"
+    const: CodeCORSMisconfigured
+    hex: "0x00_02_0B_50"
+    package: internal/core/net
+  - code: "0.2.11.81"
+    const: CodeLoopFileRefused
+    hex: "0x00_02_0B_51"
+    package: internal/core/net
+  - code: "0.2.11.82"
+    const: CodeLoopFileTruncated
+    hex: "0x00_02_0B_52"
+    package: internal/core/net
+  - code: "0.2.11.88"
+    const: CodeLoopValueInvalid
+    hex: "0x00_02_0B_58"
+    package: internal/core/net
   - code: "0.2.12.1"
     const: CodeInvalidEntry
     hex: "0x00_02_0C_01"
@@ -3537,6 +3569,26 @@ codes:
     const: CodeCallTimeout
     hex: "0x00_03_6C_09"
     package: internal/core/proc/dbus
+  - code: "0.3.109.1"
+    const: CodeFrameMalformed
+    hex: "0x00_03_6D_01"
+    package: internal/core/net/http2
+  - code: "0.3.109.2"
+    const: CodeHeadersTooLarge
+    hex: "0x00_03_6D_02"
+    package: internal/core/net/http2
+  - code: "0.3.109.3"
+    const: CodeCompressionFailed
+    hex: "0x00_03_6D_03"
+    package: internal/core/net/http2
+  - code: "0.3.109.4"
+    const: CodeFieldMalformed
+    hex: "0x00_03_6D_04"
+    package: internal/core/net/http2
+  - code: "0.3.109.5"
+    const: CodeLimitsRefused
+    hex: "0x00_03_6D_05"
+    package: internal/core/net/http2
   - code: "0.4.1.1"
     const: CodeInvalidID
     hex: "0x00_04_01_01"

@@ -12,7 +12,9 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/net",
+        "//internal/kernel/clock",
         "//internal/service/net/http1",
+        "//pkg/v1/net/static",
     ],
 )
 
@@ -31,7 +33,9 @@ go_test(
     deps = [
         ":http1",
         "//internal/core/net",
+        "//internal/kernel/clock",
         "//internal/service/net/http1",
         "//pkg/v1/net/server",
+        "//pkg/v1/net/static",
     ],
 )

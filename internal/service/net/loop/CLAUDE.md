@@ -7,33 +7,53 @@ The network domain's event-loop engine (ADR 0186): the native backends a
 plaintext stream group runs on when a `corenet.LoopHandler` serves it:
 io_uring on `linux && (amd64 || arm64 || riscv64 || loong64)` after a staged
 probe of the running kernel, and epoll on every Linux architecture and after
-any probe failure. The
+any probe failure; kqueue on darwin, FreeBSD, OpenBSD, NetBSD and DragonFly
+after its own staged probe (ADR 0222) — `server` hands it kqueue only when the
+code names it, its `auto` staying portable there until the paired gate holds
+(ADR 0222, amended 2026-11-11). The
 portable backend is not here: it needs the netpoller and `net.Conn`, so it lives
 in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
-(§D9 step 11); nothing of this package is published itself.
+(§D9 step 11); nothing of this package is published itself. Beside the
+stream groups, `StartPacket` runs one io_uring lane of a datagram group a
+`corenet.PacketLoopHandler` serves (#852, `server.PacketGroup.HandleLoop`).
 
 ## Contents
 
 | File | What |
 |---|---|
-| `group.go` | `Listener` (the one hand-off: a duplicated descriptor), `Config`, `Group` (`Shutdown`, `Close`, `State`, `Rejected`, `Live`) and `Start`, which resolves the sizing, starts the backend and writes the one start line |
+| `group.go` | `Listener` (the one hand-off: a duplicated descriptor, `Loop` naming the only loop that accepts on a shard, #856), `checkShards`, `Config`, `Group` (`Shutdown`, `Close`, `State`, `Rejected`, `Live`) and `Start`, which resolves the sizing, starts the backend and writes the one start line |
 | `sizing.go` | `resolve`: the defaults, `ResolveLoops` (`LoopsAuto` read as GOMAXPROCS less one, at least one, which server calls once per group, zero one, the source State reports — ADR 0196 §D1, ADR 0199), `batchWaitOf` (the grouped wait's bound and count) and `yieldFor` (the yield on only while GOMAXPROCS exceeds the loops), the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
 | `conn.go` | `connCtl`, one slot's pointer-free control state; its states, flags and close reasons |
 | `core.go` | the backend-neutral core: `ring` (slot table grown by `slotCap`: doubling to 2048 slots, then 2048 at a time up to the table — ADR 0201 §D2, free list, LRU, dirty and compaction lists, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build — its lane, ADR 0191: `server` calls the chain's `LoopStarter.OnStart(Loops)` before `Start`, so nothing here does), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
-| `slab.go` | the mmap'd slab: power-of-two size classes from 2 KiB, arenas mapped lazily, a global budget that sheds load by name |
+| `slab.go` | the mmap'd slab: power-of-two size classes from 2 KiB, arenas mapped lazily, a budget a loop that sheds load by name; `shrink` (#809), once a tick (`loop.shrinkSlab`), unmaps every wholly free arena of a class but one, `shrinkPerTick` (8) at most, highest first, an unmapped arena a hole the next `grow` fills; `reclaimable`, what keeps an epoll or kqueue loop with no connection on the tick; `release` at teardown. `slabBudgetFor` (`sizing.go`) resolves the budget: `LoopValue.SlabBudget`, else a quarter of `Config.Memory`'s cgroup allowance shared by the loops (at most 128 MiB, at least one connection's largest chunk), else 128 MiB, its source in State |
 | `wheel.go` | the hashed timer wheel, index-linked, one timer per slot, 10 ms ticks |
-| `caps.go` | the kernel capabilities a group reports (ADR 0189): `loopCaps` and their classes, `CheckCapabilities` (an engine, a class B capability or an unknown opt-in is `LoopCapabilityRefused`), `capSwitches` (the operator's `Disabled`, the code's opt-ins: the operator wins), `capReport` (one row each, `disabled` never overwritten, an absent opt-in `missing`), `Unprobed` (the portable backend's report) |
+| `peer_linux.go` | `LoopPeer` (#974, ADR 0148): `peerOf` reads `SO_PEERCRED` on a Unix socket with no allocation (the standard library's `GetsockoptUcred` returns a heap pointer; a TCP socket answers zeros, so `SO_DOMAIN` is checked first), `unixListener` |
+| `listener_linux.go` | the listener options of ADR 0189's rows (#971): `prepareListeners` sets `TCP_NODELAY`, `tcp-keepalive`, `tcp-user-timeout` and `tcp-defer-accept` on every TCP listener before any accept and reads each back into the report; `shardRow` reads `SO_REUSEPORT` back on the per-loop listeners into `reuseport-loops` (#856) |
+| `affinity_linux.go` | `loop-affinity` (#857): `loop.pin` sets the locked thread's mask to `LoopValue.Affinity[i]` (`sched_setaffinity`, a 8192-bit mask), before the loop reports ready; `reportAffinity` reads every loop's answer into the row |
+| `caps.go` | the kernel capabilities a group reports (ADR 0189): `loopCaps` and their classes, `CheckCapabilities` (an engine, a class B capability, an unknown opt-in or one of `optedElsewhere` — `reuseport-loops`, Shards(0)'s, and `reuseport-cbpf`, a datagram group's Steer's — is `LoopCapabilityRefused`; `checkValue` refuses an Affinity that is not one CPU a loop, from 0 to 8191, and a negative NotsentLowat with `LoopValueInvalid`), `capSwitches` (the operator's `Disabled`, the code's opt-ins: the operator wins), `capReport` (one row each, `disabled` never overwritten, an absent opt-in `missing`), `Unprobed` (the portable backend's report) |
+| `busypoll.go`, `busypoll_uring_linux.go`, `busypoll_epoll_linux.go`, `busypoll_ioc*_linux.go` | busy-poll, class A-code (#979): `busyPollOf` (the window rounded up to µs, 50 µs by default; the budget), `busyPollField` (`LoopValueInvalid` past a second or 16 bits); `probeBusyPoll` (`IORING_REGISTER_NAPI` on a throwaway ring, then on ring 0 opted in), `probeBusyPollEpoll` and `epollBusy.apply` (`EPIOCSPARAMS` on a throwaway instance, then on each loop's, `prefer_busy_poll` set); the ioctl's direction bits per architecture |
+| `zcrx.go`, `zcrx_uring_linux.go` | uring-zcrx, class B (#980): `zcrxField` (`LoopValueInvalid`), `zcrxOf` (4 MiB, page-rounded); the 6.15 ABI (`opRecvZC`, `regZCRXIfq`, `setupCQE32`, the register structs); `probeZCRX` on loop 0 (the opcode on a throwaway ring, then, an interface named, `zcrxRegister`: the queue on a `SINGLE_ISSUER|DEFER_TASKRUN|CQE32` ring of its own, closed at once); no `RECV_ZC` is ever submitted |
 | `uring_caps_linux.go` | the probe's stages 1 to 3 (ADR 0189 §D3): `openDescending` (every flag the switches allow, then on `EINVAL` `SQ_REWIND`, `NO_SQARRAY`, `DEFER_TASKRUN`, `SINGLE_ISSUER` given up in that order), `probeRingFDs` (register, unregister before close), `rewindSelfTest` (the partial submit), `settle` (the primary's and the secondaries' flags: `DEFER_TASKRUN` on ring 0 only), `reportSelfTest`, `registerRing` (16 a thread), `probeReason` (`EEXIST` is a probe defect) |
-| `drain_linux.go` | the drain's shared parts (ADR 0196 §D3): `listenerSet` (each taker — a loop on epoll, a ring on io_uring — hands each listener back once it took its queue; the last closes it, `closeRest` the others once every loop returned; it also counts each listener's accepts, every ring together, for the watchdog — ADR 0200 §D1), `drainable` (no partial input, and heard, or silent for `drainQuiet`), `queueTakeMax` |
+| `kqueue_bsd.go` | the kqueue backend (ADR 0222): epoll's shape on the shared core — one locked thread, one kqueue, one ring a loop, a 2 MiB mmap'd arena —, level-triggered filters (`EV_CLEAR` would need a read to `EAGAIN`), `EVFILT_READ` and a disabled `EVFILT_WRITE` registered at accept so every change is an enable or a disable, `fdSlot` mapping a descriptor to its slot (kqueue names no slot), a batch's connection events served before its listeners' accepts so no event names a connection accepted in it, `EV_EOF` failing a connection that no longer reads only with the socket error in `fflags`, a non-blocking pipe as the wake on every BSD, `unread` a one-byte `MSG_PEEK`; `probeKqueue`'s stages `kqueue`, `kqueue-wake`, `kqueue-socket` (a socket pair, not a loopback accept: a jail may have no loopback), the conformance hook `failStage` honoured. No `fileSender`, no `peerer`: `LoopFileWriter` refuses, `Peer` answers false |
+| `group_bsd.go`, `accept_darwin.go`, `accept_bsd4.go`, `keepalive_*.go`, `listener_bsd.go`, `affinity_bsd.go`, `debug_bsd.go`, `drain_take_bsd.go` | kqueue's platform half: `startNative` (auto and kqueue probed then started, io_uring and epoll `UnsupportedPlatform`), `RLIMIT_NOFILE` signed or not, `MAP_ANON`, `pipeCloexec` (no `pipe2` on darwin: close-on-exec under the fork lock); accept with `accept4`, or under the fork lock on darwin, with `SO_NOSIGPIPE`; the rows: `tcp-nodelay` and `tcp-keepalive` on the listener (the keepalive's parameters where the platform names them, OpenBSD none), `tcp-user-timeout`, `tcp-defer-accept`, `so-incoming-cpu` Linux's and `tcp-notsent-lowat` not built, each absent or missing when opted into; `loop-affinity` missing when `Affinity` names a CPU; `loopdebug` compiled out (no thread identifier in package `syscall`, OpenBSD's pinned system calls refuse a raw one); `takeAfter` without `ENONET` |
+| `listener_native.go` | what the listener options share on Linux and the BSDs: `listenerRow`, `tcpListener`, `shardRow` (`SO_REUSEPORT` read back, the per-platform value), `capReport.apply`, `refuseSeqpacket` |
+| `drain_native.go` (`drain_take_linux.go`) | the drain's shared parts (ADR 0196 §D3): `listenerSet` (each taker — a loop on epoll, a ring on io_uring — hands each listener back once it took its queue; the last closes it, `closeRest` the others once every loop returned; it also counts each listener's accepts, every ring together, for the watchdog — ADR 0200 §D1), `drainable` (no partial input, and heard, or silent for `drainQuiet`), `queueTakeMax` |
+| `*_bench_test.go` | every Benchmark of the package, by file name for `check-bench-md.sh` (#981): `loop_bench_test.go` (`Post`, `Wheel`, `Slab`, `Write`; `post_wake_linux_test.go` adds the eventfd wake), `batch_cost_bench_test.go`, `uring_cost_bench_test.go`, `bundle_/budget_/fill_/pbufinc_uring_bench_test.go`; their numbers are `BENCH.md` |
 | `postq.go` | the `Post` queue: preallocated, mutex, `pending` CAS false→true wakes once per drain |
-| `stats.go` | the per-ring counters (plain on the loop, atomic for `State`, published at the end of each batch) and the batch-duration histogram behind `BatchP99` |
+| `stats.go` | the per-ring counters (plain on the loop, atomic for `State`, published at the end of each batch) and the batch-duration histogram behind `BatchP99`. #975 adds `BytesIn` (`deliver`, `deliverSpill`), `BytesOut` (`wrote`: epoll's write, io_uring's `sendProgress`, a short send counted as it left), `OutputRefused` (`refuseOutput`, Write's three refusals), `SpillClosed` and `IdleClosed` (`countClose`), `Timeouts` (`expire`) and the gauge `PendingOutput` (Write adds, `wrote` subtracts, `finish` subtracts the unsent `out`, `release` the unsent `flight`: a closed connection owes nobody), and per loop `SlabInUse`/`SlabMapped` published at `endBatch`, summed with `SlabBudget` in `Group.State`; plain fields on the loop's thread, the atomics stored at a batch's end and only when the counter moved (`storeU`, `storeI`, against `ring.seen`): an atomic store is a full barrier, and storing the new counters as the old ones were cost a batch +22 % (`BenchmarkCore_batch`, benchstat, n=10), where storing what moved costs it 30 % less than the base. The portable backend fills the same fields from its lanes (server's) |
 | `epoll_linux.go` | the epoll backend: one thread, one epoll instance, one ring per loop; `EPOLLEXCLUSIVE` listeners; a 2 MiB mmap'd read arena per loop |
 | `uring_abi_linux.go` | the io_uring uapi in-tree (no `x/sys`, ADR 0018): syscall numbers 425–427, flags, opcodes, `sqe`/`cqe`/`uringBuf`/`uringParams`/… layouts, `fixedFd` (0-based) and `targetIndex` (index + 1), `FILE_INDEX_ALLOC` raw `0xFFFFFFFF`; one `Syscall6` per waiting enter, `RawSyscall6` to submit only |
 | `uring_ring_linux.go` | one io_uring: `SETUP_CLAMP`+`CQSIZE` with the granted sizes read back, the single mapping, the SQ/CQ views, the bounded submit (EINTR again; EBUSY/EAGAIN counted and left to the next batch), `flushOverflow` (an overflowed CQ moves into the ring only on an enter with GETEVENTS), the provided buffers (as many 2 KiB buffers as the table rounded up, 8192 to 65536, mapped at setup; 512 handed to the kernel at setup, more by `growBufs` as `uRing.provide` asks — ADR 0201, ADR 0203 §D2), their groups of 8192 (`pbufGroup`, registered as group 1+g when their first bid goes out) and each group's tail published by one 32-bit store of entry 0's bid and the tail, the sparse table, `REGISTER_PROBE`, the SQE encoders |
 | `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME; grouped by `waitArgs` once a batch reaped four or the arrivals come two within the bound, ADR 0199, ADR 0202), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the close: shutdown → count → `close_direct`, a user_data backstop after 1 s (ADR 0200); ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the rings filled in order (`fillStep`, ADR 0203 §D1); the accept watchdog, judged per listener |
 | `uring_probe_linux.go` | the last probe stage: a loopback multishot accept into a direct descriptor and a multishot recv through the buffer ring, on a ring of its own, then the release check (shutdown, the recv's end, then close_direct must show the peer the end; cancel→close without the shutdown tells whether puts are deferred) |
 | `uring_none_linux.go` | the Linux architectures outside io_uring's wave 1: `LoopBackendUnavailable`, epoll serves |
-| `group_linux.go`, `group_other.go` | backend choice, `RLIMIT_NOFILE`, `mmap`; elsewhere, `UnsupportedPlatform` |
+| `group_linux.go`, `group_other.go` | backend choice, `RLIMIT_NOFILE`, `mmap` (kqueue refused on Linux, `UnsupportedPlatform`); elsewhere but darwin and the BSDs, `UnsupportedPlatform` |
+| `packet.go`, `gen_ports.go` | the datagram lane's hand-off (#852): `PacketConfig` (the socket's duplicated descriptor, the lane's index, the ceiling, the handler, `PacketCountersValue` — server's counters, added once a batch), the lane's states, and the `PacketLane` port (`Handover`, `Stop`, `Done`) `StartPacket` returns |
+| `packet_uring_linux.go` | the io_uring datagram lane: one locked thread, one ring of 256 SQEs (`COOP_TASKRUN`+`SINGLE_ISSUER`, plain on EINVAL), the probe's stages (`setup`, `probe` — RECVMSG, SENDMSG, ASYNC_CANCEL, POLL_ADD —, `buf_ring`, `recvmsg`, a loopback multishot RECVMSG that must come back with a buffer and F_MORE, then `arena`, `socket`, `eventfd`; `startPacket`'s `failStage` plays each, `PacketConfig` carrying no injection), the multishot RECVMSG into 128 buffers of an `io_uring_recvmsg_out`, 32 bytes of name, 128 of control and 64 KiB of payload (`splitRecvmsgOut`, `control`: UDP_GRO's segment, SO_RXQ_OVFL's growth), `deliver` (a GRO train split, a cut one or one past the ceiling counted and dropped), `Reply` into a 1 MiB mapped arena and 1024 SENDMSG records, `flush` (a run to one peer of one size, the last shorter, ≤ 64 datagrams and 65 507 bytes, as one UDP_SEGMENT send — `runEnd`, `extendsRun`; EIO turns GSO off, EMSGSIZE counted), the arena reset once nothing is queued or in flight (`settle`), the wake eventfd polled multishot, the handover (cancel, `recvmsg(2)` to EAGAIN, replies, GRO off) |
+| `fanwake.go`, `uring_fanwake_linux.go` | #703, ADR 0199 amended 2026-11-11: whether a secondary ring's completion wakes the primary's wait. `slowFanWake` probes once a process, on the first io_uring loop with a secondary, before the group reports (`probeFanWake`: two rings as the loop's, the secondary's CQ notifying an eventfd the primary polls, a pipe written 2 ms into the primary's wait; later than half a tick, or never within 50 ms, is `slow`); `fanTickFor` bounds the plain wait of a loop with secondaries to `fanWakeTick` (1 ms) where slow, the tick otherwise, and `plainWait` keeps that bound only while a secondary holds a slot or an armed accept, so an idle loop waits the tick; `secondaryWakeVerdict` (portable, `unprobed` until then) is the group log line's `secondary_wake=`. `uring_fanwake_linux_test.go`: `_bounded` (#703's detector: 200 round trips on a secondary, p50 under half a tick), `_tickFor`, `_logged`, `_probeControls` (unregistered eventfd reads slow), `_idleKeepsTheTick` (forced slow, a two-ring loop serving nothing runs at most two batches a tick), `_plainWait` |
+| `uring_sendzc_linux.go` | #969, ADR 0189 amended 2026-11-11: `uring-send-zc`, class A-code. `probeSendZC` (after `probeBundle`: REGISTER_PROBE for opcode 47, then one zero-copy datagram on loopback whose CQE carries F_MORE and whose notification comes; `failStage=send_zc`), `ringUses.sendZCMin` (`LoopValue.SendZCMin`, 16 KiB by default, zero while off); `flush` marks a flight of at least that many bytes `zcFlight`, `sendFlight` sends every send of it with `prepSendZC`, counting the notification as one more operation and one `zcPend`; `zeroCopyDone` takes a notification (or a send's CQE without F_MORE) back, and `sendProgress` holds a flight sent whole until `zcPend` is zero, then `releaseFlight`. `sendzc_uring_linux_test.go`: `_opcodeBySize` (3 bytes by opcode 26, 64 KiB by 47, the row on), `_conformance` (the 8 MiB byte-exact response on 1 and 3 rings with every flight zero-copy, the stale-slot write on 1), `_notificationHoldsTheFlight` (CQEs played on the loop's thread: the chunk, the ops and the slot held past a failure until the notification; after it the slot closed and released, and the next connection open on it under a new generation), `_switchedOffAndRefused` (disabled, missing; 8 MiB by opcode 26 only), `_negativeMinRefused`. Not built: registered buffers, the L1 gate |
+| `packet_pktinfo_linux.go` | the junction of #972 and #852 (ADR 0192 amended 2026-11-11): `pktinfoSource` reads `IP_PKTINFO` (`ipi_spec_dst`) or `IPV6_PKTINFO` (the address unless a group, a mapped broadcast or `::`), `remember` / `sourceFor` / `forget` the batch's newest 128 senders and the destination each reached, `writePktinfo` the source's cmsg at the head of a SENDMSG record's control data (before `UDP_SEGMENT`'s), `unpin` a record whose source the kernel refused (EINVAL) sent again without it. `packet_pktinfo_linux_test.go`: `_answersFromTheDestination` (one reply and a GSO run of eight from 127.0.0.2 on a 0.0.0.0 socket), `_refusedSourceFallsBack` (a multicast source: every answer arrives, none failed), `_sourceFor`, `_pktinfoSource`, `_allocsPinned` (0 allocations with the cmsg) |
+| `packet_none.go`, `packet_close_{unix,other}.go` | elsewhere `StartPacket` closes what it was handed and refuses, `LoopBackendUnavailable` at stage `arch` |
 | `debug_on_linux.go`, `debug_off_linux.go` | the `loopdebug` build tag: `Gettid` recorded at loop start and checked in `Write`, `Close`, `SetDeadline` and the `Post` consumer |
 
 ## Why-this-shape
@@ -124,6 +144,20 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   `TestURingBudget_cutsBatches` checks the cut on a ring and on a secondary,
   `BenchmarkURingBatchBudget` measures a held burst's first, median and last
   echo.
+- `WriteFile` (#982, `corenet.LoopFileWriter`): head then n bytes of a file, the
+  descriptor duplicated (the engine's copy, so an SQE can name it until the file
+  is over). Epoll: `sendfile`, one 1 MiB step a turn, EPOLLOUT between. io_uring:
+  one pipe per file (never per ring: two connections' bytes would mix, and a stalled
+  client hold everyone's), a linked `IORING_OP_SPLICE` pair, file to pipe then pipe
+  to socket, non-blocking, POLLOUT when the socket is full. The output is frozen
+  while a file leaves (Write and a second WriteFile `LoopOutputFull`), the file's end
+  fires OnWritable; a file that ends early closes with `LoopFileTruncated`. `closeFDs`
+  on every path: a released slot closes its file and pipe (the pipe's bytes with it).
+- **A drain gives a handler one last word (#858, ADR 0186 amended).** `closeSettled`
+  asks a `corenet.LoopDrainer` once per connection before it closes it; the handler
+  may write a goodbye (an SSE `retry:`, a WebSocket 1001) and call `Close`, and the
+  connection closes at the next batch whatever it does: nothing can keep a drain
+  open from here.
 - **A batch pays its fixed cost once (ADR 0202).** `begin` reads the
   monotonic clock since the epoch once at a batch's start (the tick),
   `endBatch` once at its end (the histogram, the yield); `SetDeadline` reads
@@ -347,7 +381,7 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   (multishot recv, the buffer ring, its incremental consumption, direct
   descriptors, `EPOLLEXCLUSIVE`, `TCP_NODELAY`) is on once probed; class
   A-code (`DEFER_TASKRUN`, `NO_SQARRAY`, `RING_FDS`, `SQ_REWIND`, receive
-  bundles) only on `LoopValue.Capabilities`;
+  bundles, busy-poll) only on `LoopValue.Capabilities`;
   class B is declared and refused. `Config.Disabled` is never probed:
   `uring-pbuf` off rules io_uring out (auto runs epoll, not degraded),
   `uring-multishot-recv` off makes every recv single-shot (`singleShot`, the
@@ -357,6 +391,100 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   listeners plainly (probed on a throwaway epoll and eventfd otherwise).
   `State().Capabilities` holds one row per `loopCaps` entry, server appends
   its `tcp-nodelay` row.
+- **busy-poll (#979, ADR 0189 amended 2026-11-11).** Class A-code. Its stage runs
+  after the receive bundle's: io_uring registers a zero window
+  (`IORING_REGISTER_NAPI`, 27) on a throwaway ring (`EINVAL` before 6.9), epoll
+  sets zero parameters (`EPIOCSPARAMS`) on a throwaway instance (`ENOTTY` before
+  6.9); `failStage: "busy_poll"` plays both. Opted into, io_uring registers
+  `LoopValue.BusyPoll` (50 µs) with `prefer_busy_poll` on ring 0 only — the ring the
+  thread waits on, the only one whose `io_uring_enter` wait polls — and never
+  unregisters (the ring's close frees it); epoll sets it on each loop's instance,
+  with `BusyPollBudget`. The row's reason says what it polls: the NAPI ids the
+  kernel gave the sockets, none on loopback or a veth without GRO, so on CI's lanes
+  it is on and polls nothing. Switched off, no call is issued (`hooks.busyPoll`
+  counts them). `TestBusyPoll_*`, `TestURing_registerNAPI` (the kernel writes the
+  previous window back), `TestBusyPoll_epollParams` (`EPIOCGPARAMS` reads it).
+- **uring-zcrx (#980, ADR 0189 amended 2026-11-11).** Class B, refused as an opt-in,
+  and its row names its stage: `kernel: IORING_OP_RECV_ZC unsupported (before
+  6.15)`, `available: no interface configured`, or the register's answer for the
+  queue `LoopValue.ZCRX` names, registered on a throwaway ring (which restarts the
+  NIC queue twice) — loop 0 only. Nothing receives through it: the area and refill
+  design is the ADR's. The suite's kernels lack the opcode, so `TestZCRX_played`
+  plays the later stages (`hooks.zcrxKernel`, `zcrxErrno`) and
+  `TestZCRX_registerRefused` runs the real call only to see it refused.
+- **`Shards(0)`: a listener per loop (#856, ADR 0186 and ADR 0196 amended).**
+  `server.Shards(0)` on a loop group binds one `SO_REUSEPORT` listener per loop
+  (`Loops`, read once by `resolveLanes` before the bind; `:0` draws the port once,
+  `pinnedAddr`), and `Listener.Loop` hands each to its one loop (zero is every loop,
+  the former shared listener). epoll registers only its own shard; on io_uring only
+  the owning loop's rings arm accepts on it, the other rings of the other loops never
+  do (`ownedBy`, `doneOutside`), so each loop's accept queue is its own and the
+  four-tuple hash spreads the connections with no contention. Any other count is
+  refused (`shardsRefusal`, a Unix address too), `KITSUNIUM_NET_DISABLE=reuseport-loops`
+  falls back to one shared listener (`reuseport-loops`, class A-code, reads disabled),
+  and the portable backend, `Rings` apart, serves one listener: it has no loop that
+  owns one. The drain is ADR 0196 §D3's, each listener with one taker (`takersOfShards`:
+  its loop's rings), and a loop whose watchdog gave up closes its own shards
+  (`giveUpShards`: nobody else takes from their queues, and the kernel routes around
+  a closed one). `TestConformance_shards`, `TestConformance_drainTakesQueue/tcp+shards`.
+  `reuseport-cbpf` is the datagram group's Steer's: a loop group never reads it (#857).
+- **Steering rows (#857, ADR 0189 amended).** Three class A-code rows and one
+  class B. `loop-affinity`: `LoopValue.Affinity` names one CPU a loop and is its
+  opt-in; each loop's thread, once locked, is pinned (`loop.pin`), and a CPU the
+  kernel refuses (EINVAL offline or outside the set, EPERM under a filter) leaves
+  that loop unpinned and serving, the row `missing` — server's capability fault.
+  `so-incoming-cpu`: opted into through `Capabilities`, `SO_INCOMING_CPU` (49) set
+  and read back on each per-loop listener of `Shards(0)` whose loop Affinity pins,
+  so the kernel's reuseport lookup prefers the listener of the CPU that took the
+  connection; without Affinity or without per-loop listeners the row says which.
+  `tcp-notsent-lowat`: `TCP_NOTSENT_LOWAT` (25) on every TCP listener, inherited
+  by each accepted socket, `NotsentLowat` bytes or 128 KiB for a bare opt-in; a
+  write then leaves that much unsent in the kernel and at most one segment more
+  (sendmsg checks the lowat only as it opens a segment), and `OnWritable` fires
+  once the peer drained (`TestConformance_notsentLowat`: 4 MiB to a peer that
+  reads nothing, the unsent bytes — tcp_info's `tcpi_notsent_bytes` over
+  sock_diag, SIOCOUTQNSD's count, which a direct descriptor answers too — at
+  least the lowat and at most 64 KiB past it, there and at every `OnWritable`;
+  without the option 1 015 808 bytes queued and `OnWritable` fired with nothing
+  read). SIOCOUTQ's count, `/proc/net/tcp`'s tx_queue, adds the bytes sent and
+  not yet acknowledged, which the option does not bound; and "under the lowat"
+  is not what `OnWritable` sees: the kernel reports the socket writable under it,
+  the loop's flush fills it past it again, and `OnWritable` follows the flush
+  (141 504 bytes unsent for a lowat of 131 072, measured on epoll). `tcp-fastopen` is declared, class B: nothing sets it. A
+  refused option reads `missing`: every one of the four is an opt-in.
+  `setsockoptHook` plays a refusing kernel.
+- **Listener options (`listener_linux.go`, #971, ADR 0189's amendment).**
+  `prepareListeners` runs before any accept, on both native backends: on every
+  TCP listener (`tcpListener`: a Unix socket takes none, `TCP_NODELAY`
+  included) it sets `TCP_NODELAY` and the three rows below, which the kernel
+  copies into each accepted socket, and reads each back into the report
+  (`capReport.apply`). `tcp-keepalive` (class A-kernel) is `SO_KEEPALIVE` with
+  `Config.KeepAlive` as idle time and interval (zero 15 s, the stdlib's;
+  negative sets nothing) and 9 probes; `tcp-user-timeout` (class A-kernel) is
+  `TCP_USER_TIMEOUT` 18, declared in-tree, from `Config.UserTimeout`;
+  `tcp-defer-accept` (class A-code) is `TCP_DEFER_ACCEPT` from
+  `Config.ReadTimeout`, set only when opted in and a bound exists. A row not
+  asked for reads `available` (`unprobed` for defer-accept), a refusal
+  `absent` (`missing` for an opted-in one), a group without a TCP listener
+  `unprobed`. **`LoopPeer` (#974)**: `*loop` implements the sibling port
+  (`Peer(ref) (LoopPeerValue, bool)`, found by a type assertion on the `LoopIO`),
+  asking the backend through the optional `peerer`: epoll and an io_uring
+  group in the process table read `SO_PEERCRED` on the slot's descriptor, so the
+  uid, gid and pid of the connecting process come back `Verified`; a TCP
+  connection, a stale ref and a direct descriptor answer false. A group with a
+  Unix listener therefore runs io_uring in the process table (`uLoop.unix`,
+  `uring-direct` reads `unprobed`, the stage `self_test+fds`), the whole group,
+  its TCP connections included: asking the kernel for the credential of a direct
+  descriptor (`IORING_OP_URING_CMD` with `SOCKET_URING_OP_GETSOCKOPT`, 6.7) and
+  the `uring-sock-getsockopt` row that would switch it are not built.
+  `refuseSeqpacket` (#974) refuses a unixpacket listener at
+  `Start` with `LoopOptionUnsupported` naming `network=unixpacket`, on every
+  backend: both read a connection as a stream into a buffer that cuts a
+  longer record with no flag, so a record would reach `OnData` cut. Unix
+  streams (a path, or the abstract namespace) are served, pinned by
+  `unix_linux_test.go`. Not proved here: a blackholed peer with unsent output reaching
+  `OnClose` within `UserTimeout` (a veth lane, root), `Config` fed from
+  `TimeoutsValue` and the goroutine and portable engines' options (server).
 - **`DEFER_TASKRUN` on the primary only (P3a).** The thread waits on ring 0;
   a deferred secondary would post no completion until entered with
   `GETEVENTS`, which nothing does — `DEFER_TASKRUN` on every ring times out the
@@ -369,6 +497,28 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   SQ array. A ring registered with its thread (P3c) is entered by its index
   (`enterTarget`) and unregistered in `uring.close` before the descriptor
   closes: a ring still registered outlives its close.
+- **A datagram lane is a socket, its thread and its ring (#852, ADR 0192 and
+  0189 amended).** `StartPacket` probes on the lane's own locked thread, on the
+  ring it will serve with, and any stage that fails closes the descriptor and
+  returns `LoopBackendUnavailable` naming it: server serves that socket on its
+  batched reader, the row absent and no fault. One multishot RECVMSG holds the
+  socket: each completion's buffer is one message, laid out by the kernel as
+  `io_uring_recvmsg_out`, then the name and control rooms the msghdr declared,
+  then the payload; the buffers go back after `OnBatchEnd`, and a receive the
+  kernel ended (ENOBUFS) is armed again over them. A reply is copied at `Reply`
+  into mapped memory — the kernel reads the record and the bytes after the call
+  returned — and leaves at the batch's end; the arena is reused only once no
+  reply is queued or in flight, so a reply refused for room (`LoopOutputFull`)
+  is the backpressure of a socket whose sends wait. The handover is ADR 0192
+  §D4's: the receive cancelled, the socket read to EAGAIN with `recvmsg(2)`
+  into a mapped buffer, served, the replies' completions awaited (bounded), GRO
+  off. A handler's panic is not contained here, as on every loop thread.
+  `TestPacketLane_echo` (4 000 datagrams once each), `_gsoRuns` (UDP_SEGMENT
+  runs counted), `_groSplits` (a GSO train of eleven handed on as eleven),
+  `_ceiling`, `_failStage` (each stage, the descriptor closed), `_handover`
+  (every datagram once, the lane's then the successor's, GRO off) and `_allocs`
+  (a datagram handed on, answered and sent: 0 allocations); they fail, not
+  skip, where `requiredBackends` names `iouring`.
 - **A handler queues what `Write` refuses.** A line the handler stopped at
   stays in the spill and comes back only with the next bytes. A handler that
   answers a pipelined request behind a refused write must therefore queue it
@@ -376,6 +526,14 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 
 ## Conformance (one suite, every backend present)
 
+The backend-neutral cases live in `conformance_native_test.go` and
+`conformance_drain_native_test.go`, the idle-memory bound in
+`memory_native_test.go`: on Linux they run on `iouring` and `epoll`, on darwin
+and the BSDs on `kqueue` (ADR 0222), where `conformance_bsd_test.go` requires
+kqueue by default — the darwin lane and the BSD guests link no `-X`, and
+`test-binaries.sh` links its own `-ldflags` — and pins the probe's stages and
+the refusal of Linux's backends. There the drain cases queue 96 connections,
+below the default backlog of 128, and Shards(0)'s case stays Linux's.
 `conformance_linux_test.go` runs on `iouring` and `epoll`. `requiredBackends`
 and `requiredCaps` are linked in, and the suite fails closed on both
 (`TestBackendsRequired`, `TestCapsRequired`): unset fails, a backend or a
@@ -428,8 +586,48 @@ Not built yet: the forced-full CQ of 2, the `IOSQE_ASYNC` send cancelled into
 `-EALREADY`, the multishot that never completes, and a fallback with
 connections still live. These are named here so nobody believes them done.
 
+## Benchmarks and BENCH.md (#981, ADR 0165)
+
+`BENCH.md` beside this file is the package's report: the envelope (CPU, kernel,
+Go, commit, `-benchtime`, `-count`), one row per Benchmark function — the `Core_*`
+rows on a fake driver, `Post`, `Wheel`, `Slab` and `Write` (allocs 0 for `Write` and
+`Post`), the eight `URing*` rows on io_uring — and the class B rows of `caps.go`,
+each with the benchmark its ADR will read or "no row yet" (ADR 0189 §D1). It is
+hand-run, as `net/http1`'s is, and `make bench` does not write it:
+
+```
+cd internal && GOWORK=off go test -run='^$' -bench=. -benchmem -count=6 -benchtime=300ms ./service/net/loop/
+```
+
+`scripts/pre-commit/check-bench-md.sh` finds a benchmarked package by its
+`*_bench_test.go` file names, so every Benchmark function lives in a file of that
+name (`loop_bench_test.go`, `batch_cost_bench_test.go`, `uring_*_bench_test.go`,
+the io_uring ones with their explicit `//go:build linux && (amd64 || ...)` line,
+which a `_linux_bench_test.go` name would lose): a benchmark put in an
+`_internal_test.go` or `_linux_test.go` file hides from the check again.
+`TestBackendsRequired` and `TestCapsRequired` still need their `-ldflags` (above).
+
 ## Cost
 
+- **The slab follows its memory limit and gives a burst back (#809, ADR 0186
+  §D7 amended).** A loop's budget was 128 MiB whatever the cgroup, and an arena
+  stayed mapped until the loop stopped. Now server passes `memlimit.Derive()` (the
+  allowance, nothing installed) as `Config.Memory`; 512 MiB and four loops is
+  32 MiB a loop. The alloc and free path keeps no count: `shrink` counts each
+  arena's chunks on the free stack once a tick, and only in a class holding two
+  arenas' worth of free chunks, so `BenchmarkSlab`'s alloc+free is the base's
+  code (benchstat geomean +2.7 %, n=10, the noise of a shared VM). A 64 MiB burst
+  freed is back to one arena a class within 32 ticks
+  (`TestSlab_shrinkAfterBurst`, the mapper double, the ticks driven by hand: the
+  loop reads no clock port). An epoll or kqueue loop with no connection slept
+  until the next event, so its shrink never ran once a burst's clients had all
+  left — the usual end of a burst: such a loop now waits on the tick while
+  `slab.reclaimable` (a class with two wholly free arenas) holds, and sleeps
+  again once it does not, so it wakes for nothing; io_uring waits on the tick
+  anyway (`TestSlab_idleLoopGivesBack`, every native backend: 8 MiB of spills,
+  every client gone, back to one arena a class within a second with no event,
+  then no batch at all on epoll and kqueue). Under `GOMEMLIMIT` set by the
+  operator memlimit reads no allowance, and the budget is the default.
 - The LoopIO budget is allocs 0 for `Write`, `SetDeadline`, `Pressure` and a
   refused `Write` with a caller-owned `p` (`TestCore_allocs`).
 - An idle connection costs at most **256 B of Go heap** and no mapped byte
@@ -450,6 +648,9 @@ cd internal && GOWORK=off go test -race -tags loopdebug \
   ./service/net/loop/
 # without either -X the suite fails closed on Linux, by design; `none` requires nothing.
 bazel test //internal/service/net/loop:all
+# darwin and the BSDs (the macos-15 lane, the BSD guests): kqueue is required
+# by default; -X=…requiredBackends=none lifts it.
+cd internal && GOWORK=off go test ./service/net/loop/
 ```
 
 ## Do NOT

@@ -2,6 +2,9 @@ package server
 
 import (
 	"net/http"
+	"sync/atomic"
+
+	corehttp2 "github.com/kitsunium/sdk/internal/core/net/http2"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -39,7 +42,9 @@ type StreamGroup struct {
 	// httpProtos is what the group serves, computed at Start from protos and
 	// the identity (protocolsRefusal; a TLS codec group's ALPN alone,
 	// tlsCodecRefusal).
-	httpProtos httpProtocols
+	// http2Limits is the HTTP2 option's value, the zero value when unset.
+	http2Limits corehttp2.LimitsValue
+	httpProtos  httpProtocols
 	// limiter caps concurrent connections; nil when the group has no ceiling.
 	limiter *connLimiter
 	// adopt names inherited sockets to take over instead of binding.
@@ -47,6 +52,12 @@ type StreamGroup struct {
 	// admission counts connections against their address before their
 	// handshake; nil when the group has none (ADR 0174).
 	admission *Admission
+	// proxyProtocol is the ProxyProtocol option's value, as given;
+	// proxyPolicy is what Start parsed of it, nil without the option (#841).
+	proxyProtocol corenet.ProxyProtocolValue
+	proxyPolicy   *proxyPolicy
+	// steer is the Steer option's value (#977); a stream group refuses it.
+	steer corenet.SteerValue
 	// declErr is the group's first declaration error — a second handler,
 	// HandlerAlreadySet — surfaced by Start like the server's own (ADR 0186
 	// §D1). The group records it because a handler is declared on the group,
@@ -76,6 +87,13 @@ type StreamGroup struct {
 	// loopChain is loopHandler wrapped in loopMiddlewares, built and checked
 	// once at Start; the loop engine serves it.
 	loopChain corenet.LoopHandler
+	// loopOwners is, per listener handed to the engine, one more than the
+	// loop that alone accepts on it, zero when every loop does: Shards(0)'s
+	// per-loop listeners (#856).
+	loopOwners []int
+	// conns are the group's own connection counts, which State folds into the
+	// server's and RegisterMetrics reports by group (#847).
+	conns connCounters
 	// kinds is the set of option kinds the group was given, a zero value
 	// included, so a refusal reads what was posed rather than guessing from a
 	// non-zero field (ADR 0187).
@@ -86,6 +104,17 @@ type StreamGroup struct {
 	// optName is the Name option's value; it is read only when kinds holds
 	// OptionName.
 	optName string
+}
+
+// connCounters are one goroutine-engine stream group's connection counts.
+type connCounters struct {
+	// active is the connections being served now.
+	active atomic.Int64
+	// admitted is the connections the group served: taken, then past the
+	// PROXY header and the ceiling. MetricConnsTotal reads it (#847).
+	admitted atomic.Uint64
+	// rejected is the connections the group's ceiling turned away.
+	rejected atomic.Uint64
 }
 
 // Name returns the group's name.
@@ -208,6 +237,7 @@ func (g *StreamGroup) resolved() corenet.ConnHandler {
 		g.httpAdapter.timeouts = g.timeouts
 		g.httpAdapter.bounds = g.http
 		g.httpAdapter.protocols = &g.httpProtos.accepted
+		g.httpAdapter.http2 = g.effectiveHTTP2()
 	}
 	//: composed once at Start rather than per connection, so the middleware
 	//: chain costs nothing on the hot path.

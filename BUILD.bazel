@@ -94,6 +94,7 @@ filegroup(
         "//internal/core/data/transform:audit_srcs",
         "//internal/core/data/vfs:audit_srcs",
         "//internal/core/net:audit_srcs",
+        "//internal/core/net/http2:audit_srcs",
         "//internal/core/observe/logger:audit_srcs",
         "//internal/core/observe/logger/level:audit_srcs",
         "//internal/core/observe/logger/middleware/async:audit_srcs",

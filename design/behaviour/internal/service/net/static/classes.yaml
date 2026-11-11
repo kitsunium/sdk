@@ -104,6 +104,9 @@ files:
   - decls:
       - sniffBytes
       - (*Handler).serveFile
+      - (*Handler).serveSidecar
+      - sidecarCodings
+      - typeOf
       - stream
       - pinnedType
     name: serve.go
@@ -173,6 +176,12 @@ functions:
     name: platformNameRefused
     params: err error
     results: bool
+  - doc: |-
+      typeOf returns the identity file's Content-Type: the one already set, its
+      name's, or sniffed from its first bytes; known is false when none reads.
+    name: typeOf
+    params: header http.Header, name string, identity fs.File
+    results: contentType string, known bool
   - doc: |-
       stream answers with a file that cannot seek: the whole body with a 200, its
       length from its stat, its type from its name or its first bytes. A read that
@@ -275,6 +284,15 @@ types:
           nothing.
         name: Immutable
         type: func(name string) bool
+      - doc: |-
+          Precompressed serves a file's name.br or name.gz sidecar in its place when
+          the tree holds one and Accept-Encoding admits it: typed as the file,
+          sent with Content-Encoding and Vary: Accept-Encoding, ranged and
+          conditional as any file, and never a sidecar that is not a regular file.
+          A client that admits neither gets the file itself. brotli needs no encoder
+          here: the bytes are the tree's own.
+        name: Precompressed
+        type: bool
     kind: struct
     name: Config
   - fields:
@@ -288,6 +306,9 @@ types:
         type: bool
       - name: immutable
         type: func(name string) bool
+      - doc: precompressed serves a file's .br or .gz sidecar in its place.
+        name: precompressed
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -298,6 +319,16 @@ types:
         name: serveFile
         params: w http.ResponseWriter, r *http.Request, name string, file fs.File, info fs.FileInfo
         recv: h *Handler
+      - doc: |-
+          serveSidecar serves name.br or name.gz in name's place when the tree holds it,
+          a regular file, and the client admits its coding, typed as the identity file
+          is; it reports whether it answered. brotli first: where both exist it is the
+          smaller. The file's own type is read from it, sniffing at most 512 bytes, when
+          its name says nothing: the sidecar's bytes would type as gzip.
+        name: serveSidecar
+        params: w http.ResponseWriter, r *http.Request, name string, identity fs.File
+        recv: h *Handler
+        results: bool
       - name: ServeHTTP
         params: w http.ResponseWriter, r *http.Request
         recv: h *Handler
@@ -320,3 +351,17 @@ types:
         params: w http.ResponseWriter, r *http.Request, name string
         recv: h *Handler
     name: Handler
+vars:
+  - doc: |-
+      sidecarCodings are the codings a sidecar can carry, in the order they are
+      preferred.
+    items:
+      - name: sidecarCodings
+        value: |-
+          [...]struct {
+          	token, suffix string
+          }{
+          	{token: "br", suffix: ".br"},
+          	{token: "gzip", suffix: ".gz"},
+          }
+    name: sidecarCodings

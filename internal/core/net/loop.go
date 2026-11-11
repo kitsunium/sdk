@@ -91,6 +91,35 @@ const (
 	// it with LoopOptionUnsupported unless its handler or a layer honours it
 	// (LoopOptionHonourer), and any other group with ProtocolsRefused.
 	OptionProtocols
+	// OptionMaxBodyBytes is MaxBodyBytes. An HTTP group served by net/http
+	// honours it; a loop group refuses it with LoopOptionUnsupported, its body
+	// bound being the http1 profile's own, and a datagram group with
+	// PacketOptionUnsupported.
+	OptionMaxBodyBytes
+	// OptionBacklog is Backlog. A stream group honours it on both engines; a
+	// datagram group refuses it with PacketOptionUnsupported.
+	OptionBacklog
+	// OptionReceiveBuffer is ReceiveBuffer. A stream group honours it on both
+	// engines and a datagram group on its socket; the accepted sockets of a loop
+	// group inherit the listener's.
+	OptionReceiveBuffer
+	// OptionSendBuffer is SendBuffer, honoured as OptionReceiveBuffer is.
+	OptionSendBuffer
+	// OptionProxyProtocol is ProxyProtocol. A goroutine-engine TCP group honours it;
+	// a loop group refuses it with LoopOptionUnsupported, a datagram group with
+	// PacketOptionUnsupported.
+	OptionProxyProtocol
+	// OptionSteer is Steer. A datagram group honours it; every other group refuses it
+	// with LoopOptionUnsupported.
+	OptionSteer
+	// OptionKeepAlive is KeepAlive. Every stream engine honours it.
+	OptionKeepAlive
+	// OptionUserTimeout is UserTimeout. Every stream engine honours it.
+	OptionUserTimeout
+	// OptionHTTP2 is HTTP2. An HTTP group honours it; a loop group refuses it with
+	// LoopOptionUnsupported unless its handler honours it (the http2 adapter
+	// does), a datagram group with PacketOptionUnsupported.
+	OptionHTTP2
 )
 
 // optionNames holds each kind's constructor name, indexed by kind. Its length
@@ -119,6 +148,15 @@ var optionNames = [...]string{
 	OptionLoopMiddleware:    "UseLoop",
 	OptionBatchReplies:      "BatchReplies",
 	OptionProtocols:         "Protocols",
+	OptionMaxBodyBytes:      "MaxBodyBytes",
+	OptionBacklog:           "Backlog",
+	OptionReceiveBuffer:     "ReceiveBuffer",
+	OptionSendBuffer:        "SendBuffer",
+	OptionProxyProtocol:     "ProxyProtocol",
+	OptionSteer:             "Steer",
+	OptionKeepAlive:         "KeepAlive",
+	OptionUserTimeout:       "UserTimeout",
+	OptionHTTP2:             "HTTP2",
 }
 
 // String renders the option's name, as its constructor spells it.

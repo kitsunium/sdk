@@ -455,6 +455,9 @@ codes:
     - range: 0.3.108
       owner: internal/core/proc/dbus
       note: "ADR 0214's S0e amendment, the message bus client proc/dbus (#737)"
+    - range: 0.3.109
+      owner: internal/core/net/http2
+      note: "ADR 0220, the HTTP/2 codec the loop engine serves (#959, #960)"
     - range: 0.4.1
       owner: framework/model/internal/core
       note: "ADR 0147: layer 4 is the framework's"
@@ -663,6 +666,28 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.AppendRefusal
     allocs: 0
     fixture: AppendRefusal
+  # http2: the frame layer and HPACK (ADR 0220). The header is read from the
+  # caller's bytes, a field block is decoded into a reused request value and
+  # the caller's scratch, a response block is written into dst: none of them
+  # allocates once dst and scratch have room.
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http2.ParseFrameHeader
+    allocs: 0
+    fixture: ParseFrameHeader
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http2.(*Decoder).Decode
+    allocs: 0
+    fixture: DecoderDecode
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http2.Encoder.AppendHeaders
+    allocs: 0
+    fixture: EncoderAppendHeaders
+  # The connection state machine (#960): one batch of frames with sixteen
+  # streams in flight, no allocation once a lane's arenas have grown to its
+  # batches: events, stream states and credits are all pre-sized slices.
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http2.(*Lane).Feed
+    allocs: 0
+    fixture: LaneFeed
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http2.(*Lane).AppendCredits
+    allocs: 0
+    fixture: LaneAppendCredits
   # The loop adapter: a batch of requests framed into the loop's reused
   # request value, answered into the loop's reused buffer and written at the
   # batch's end. Once a loop's buffers and pools have grown to its batches,
@@ -685,12 +710,40 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*BearerLayer).ServeHTTP1
     allocs: 0
     fixture: BearerLayerServeHTTP1
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*FilesLayer).ServeHTTP1
+    allocs: 0
+    fixture: FilesLayerServeHTTP1
   - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*HeadersLayer).ServeHTTP1
     allocs: 0
     fixture: HeadersLayerServeHTTP1
   - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*LogLayer).ServeHTTP1
     allocs: 0
     fixture: LogLayerServeHTTP1
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*LogLayer).EndBatch
+    allocs: 0
+    fixture: LogLayerEndBatch
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*CORSLayer).ServeHTTP1
+    allocs: 0
+    fixture: CORSLayerServeHTTP1
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*RateLimitLayer).ServeHTTP1
+    allocs: 0
+    fixture: RateLimitLayerServeHTTP1
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*KeyedBuckets).Allow
+    allocs: 0
+    fixture: KeyedBucketsAllow
+  # sse.LoopStreamValue.Send frames into the lane's reused buffer and hands it to
+  # the loop's copying Write: nothing allocates once the buffer has grown.
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/sse.LoopStreamValue.Send
+    allocs: 0
+    fixture: LoopStreamValueSend
+  # websocket: a frame read on the loop is parsed and unmasked in place and
+  # handed out with no copy when it fits one read.
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/websocket.(*LoopHandler).OnUpgradedData
+    allocs: 0
+    fixture: LoopHandlerOnUpgradedData
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*RequestIDLayer).ServeHTTP1
+    allocs: 0
+    fixture: RequestIDLayerServeHTTP1
   # jsonenc: every appender writes into the caller's slice and allocates
   # nothing once it has the room. The string appenders read their string
   # through a view, not a copy, so none of them lets it escape; the object

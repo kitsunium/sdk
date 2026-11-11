@@ -48,3 +48,34 @@ workflows:
           key: i
           range: len(value)
       - return: "true"
+  - of: decodeHexID
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(hex) != 2*len(dst) || !decodeHex(dst, hex)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: b != 0
+          key: _
+          range: dst
+          value: b
+      - return: "false"
+  - of: decodeHex
+    steps:
+      - loop:
+          do:
+            - bind: high, low
+              eval: nibble(src[2*i]), nibble(src[2*i+1])
+            - opt:
+                do:
+                  - return: "false"
+                when: high == badNibble || low == badNibble
+            - set: dst[i]
+              value: high<<nibbleBits | low
+          key: i
+          range: dst
+      - return: "true"

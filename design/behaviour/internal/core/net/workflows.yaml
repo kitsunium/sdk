@@ -1,6 +1,70 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: (*CORSValue).originsValid
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(c.Origins) == 0
+      - opt:
+          do:
+            - return: len(c.Origins) == 1 && !c.Credentials
+          when: c.Origins[0] == corsWildcard
+      - bind: seen
+        eval: make(map[string]struct{}, len(c.Origins))
+      - loop:
+          do:
+            - bind: _, again
+              eval: seen[origin]
+            - opt:
+                do:
+                  - return: "false"
+                when: again || !validOrigin(origin)
+            - set: seen[origin]
+              value: struct{}{}
+          key: _
+          range: c.Origins
+          value: origin
+      - return: "true"
+  - of: originText
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!originByte(s[i], authority)"
+          key: i
+          range: len(s)
+      - return: "true"
+  - of: allTokens
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isToken(name)"
+          key: _
+          range: names
+          value: name
+      - return: "true"
+  - of: isToken
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!isTchar(s[i])"
+          key: i
+          range: len(s)
+      - return: "true"
   - of: (*HTTP1RequestValue).Field
     steps:
       - loop:
@@ -26,6 +90,24 @@ workflows:
                 when: foldByte(b[i]) != foldByte(s[i])
           key: i
           range: len(b)
+      - return: "true"
+  - of: (*HTTP1RequestIDValue).Set
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(b) == 0 || len(b) > HTTP1MaxRequestID
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: c < visibleFirst || c > visibleLast
+          key: _
+          range: b
+          value: c
+      - set: v.n
+        value: uint8(copy(v.id[:], b))
       - return: "true"
   - of: Chain
     steps:

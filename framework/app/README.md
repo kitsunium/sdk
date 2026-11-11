@@ -290,6 +290,7 @@ Package app — workflows: a state machine over the entities of one store.
 - [func RecordsOf\(ctx context.Context, store string\) \(Records, error\)](<#RecordsOf>)
 - [func RepeatableRead\(\) TransactOption](<#RepeatableRead>)
 - [func Replace\[Req, Resp any\]\(op iapp.Operation\[Req, Resp\], fn func\(context.Context, Req\) \(Resp, error\)\) AppOption](<#Replace>)
+- [func RequestID\(ctx context.Context\) string](<#RequestID>)
 - [func Required\(\) SettingOption](<#Required>)
 - [func Requires\(other \*Module\) ModulePart](<#Requires>)
 - [func RetentionByProduct\(limits string\) StoreOption](<#RetentionByProduct>)
@@ -2089,7 +2090,7 @@ ClearCookie tells the browser to forget the cookie called name.
 func ClientIP(ctx context.Context) string
 ```
 
-ClientIP returns the address of the client of the request ctx serves: the connection's peer, or — only when \<PRODUCT>\_TRUST\_PROXY=on — the last address of X-Forwarded-For, the one the trusted proxy appended. It is "" outside an HTTP request.
+ClientIP returns the address of the client of the request ctx serves: the connection's peer, or — only when \<PRODUCT>\_TRUST\_PROXY=on, and the peer is one of the proxies \<PRODUCT>\_TRUSTED\_PROXIES lists — the first address of X-Forwarded-For, read from its right, outside that list. A peer outside the list is the client, whatever header it sends. It is "" outside an HTTP request.
 
 <a name="Clock"></a>
 ## func [Clock](<https://github.com/kitsunium/sdk/blob/main/framework/app/config.go>)
@@ -3052,6 +3053,15 @@ app := App.With(app.Replace(apps.AppAPI, func(ctx context.Context, in apps.IDInp
 	return apps.Profile{ID: in.AppID}, nil
 }))
 ```
+
+<a name="RequestID"></a>
+## func [RequestID](<https://github.com/kitsunium/sdk/blob/main/framework/app/request.go>)
+
+```go
+func RequestID(ctx context.Context) string
+```
+
+RequestID returns the identifier of the request ctx serves: the X-Request-Id its caller sent — a short run of letters, digits, '.', '\_' and '-', else ignored — or a UUIDv7 the framework minted. The response carries it as X-Request-Id, an error body as requestId, the span as http.request\_id and the access record as request\_id. It is "" outside an HTTP request.
 
 <a name="Required"></a>
 ## func [Required](<https://github.com/kitsunium/sdk/blob/main/framework/app/setting.go>)

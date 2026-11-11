@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !darwin && !freebsd && !openbsd && !netbsd && !dragonfly
 
 package loop
 
@@ -7,15 +7,16 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// startNative refuses: no native backend exists off Linux in this wave
-// (ADR 0186 §D5); server serves the group on the portable backend.
+// startNative refuses: no native backend exists off Linux, darwin and the
+// BSDs (ADR 0186 §D5, ADR 0222); server serves the group on the portable
+// backend.
 func startNative(_ *Group, cfg *Config) error {
 	//: the shared sentinel, wrapped, never redeclared (ADR 0018 §(a)).
 	return errs.Wrap(coreproc.UnsupportedPlatform, errs.WrapParams{},
 		errs.String("group", cfg.Group), errs.String("backend", cfg.Value.Backend.String()))
 }
 
-// descriptorLimit has no native loop to size off Linux; one keeps resolve
+// descriptorLimit has no native loop to size here; one keeps resolve
 // past its zero check so the refusal is UnsupportedPlatform's.
 func descriptorLimit() uint64 {
 	//: any positive value.

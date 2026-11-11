@@ -28,3 +28,7 @@ func peerFromBuffer(b []byte, order binary.ByteOrder) (coreipc.PeerValue, bool) 
 		GID: int(order.Uint32(b[unpEGIDOffset:])), Verified: true,
 	}, true
 }
+
+// groupsFromBuffer reads no group: struct unpcbid carries the effective gid
+// alone, so on NetBSD a supplementary group admits nobody (#1092).
+func groupsFromBuffer([]byte, binary.ByteOrder) []int { return nil }

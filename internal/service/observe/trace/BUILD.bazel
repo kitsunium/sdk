@@ -79,6 +79,7 @@ go_test(
         "recorder_external_test.go",
         "sampler_external_test.go",
         "testhelpers_external_test.go",
+        "traceparent_bytes_external_test.go",
         "traceparent_external_test.go",
         "tracer_external_test.go",
         "tracestate_external_test.go",

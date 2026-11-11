@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,7 @@ import (
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/service/net/http1"
+	"github.com/kitsunium/sdk/internal/service/net/http2"
 	"github.com/kitsunium/sdk/internal/service/net/server"
 )
 
@@ -94,15 +96,15 @@ func TestLoadChild(t *testing.T) {
 // serveLoad declares engine's handler of load on g.
 func serveLoad(t *testing.T, g *server.StreamGroup, load, engine string) {
 	switch {
-	case load == "L1" && engine == "goroutine":
+	case (load == "L1" || load == "L1h2") && (engine == "goroutine" || engine == "goroutine-h2"):
 		g.HandleHTTP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Length", strconv.Itoa(loadBodySize))
 			_, _ = w.Write(loadBody)
 		}))
-	case load == "L1" && engine == "loop":
-		g.HandleLoop(http1.HandleLoop(corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
-			res.Status, res.Body = http.StatusOK, loadBody
-		}), http1.Parser{}))
+	case (load == "L1" || load == "L1h2") && engine == "loop":
+		g.HandleLoop(http1.HandleLoop(corenet.HTTP1HandlerFunc(loadL1Handler), http1.Parser{}))
+	case load == "L1h2" && engine == "loop-h2":
+		g.HandleLoop(http2.HandleLoop(corenet.HTTP1HandlerFunc(loadL1Handler), http1.Parser{}))
 	case load == "L2" && engine == "handwritten":
 		g.HandleLoop(http1.HandleLoop(corenet.HTTP1HandlerFunc(handwrittenL2), http1.Parser{}))
 	case load == "L2" && engine == "chain":
@@ -112,17 +114,26 @@ func serveLoad(t *testing.T, g *server.StreamGroup, load, engine string) {
 	}
 }
 
+// loadL1Handler is L1's answer on the loop, over either version.
+func loadL1Handler(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+	res.Status, res.Body = http.StatusOK, loadBody
+}
+
 // loadGroupOption is the engine's group option: a loop on the platform's best
 // backend, or none for the goroutine engine. L1's loop engine runs LoopsAuto,
 // one loop a P as the goroutine engine has every P (plan P6): its gate judges
 // the engine as a program sizes it, not one loop against the whole runtime.
 // L2 keeps one loop, both of P2's engines on it.
 func loadGroupOption(load, engine string) server.GroupOption {
-	if engine == "goroutine" {
+	switch engine {
+	case "goroutine":
 		return server.Plaintext()
+	case "goroutine-h2":
+		//: h2c by prior knowledge on net/http (#861).
+		return server.Protocols("h2")
 	}
 	v := corenet.LoopValue{Backend: corenet.LoopBackendAuto}
-	if load == "L1" {
+	if load == "L1" || load == "L1h2" {
 		v.Loops = corenet.LoopsAuto
 	}
 	return server.Loop(v)
@@ -236,7 +247,10 @@ func startLoadChild(b testing.TB, load string, engines ...string) *loadChild {
 	b.Helper()
 	spec := load + ":" + strings.Join(engines, ",")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestLoadChild$", "-test.count=1")
-	cmd.Env = append(os.Environ(), loadChildEnv+"="+spec)
+	//: the role variable an enclosing child inherited is dropped before it is
+	//: set, so a child's spec is always the one this call names.
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, loadChildEnv+"=") })
+	cmd.Env = append(env, loadChildEnv+"="+spec)
 	cmd.Stderr = os.Stderr
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -317,17 +331,24 @@ func BenchmarkLoadL2(b *testing.B) {
 // both engines alike and its linear part cancels.
 const pairedWindows = 8
 
-// loadSide is one engine of a pair: its kept-alive connections and their
-// readers.
+// pairSide is one engine of a pair: what sends a window's requests and
+// returns the child's CPU they took.
+type pairSide interface {
+	window(b testing.TB, child *loadChild, n int) uint64
+}
+
+// loadSide is one HTTP/1.1 engine of a pair: its kept-alive connections,
+// their readers, and the load's request.
 type loadSide struct {
 	conns   []stdnet.Conn
 	readers []*bufio.Reader
+	req     []byte
 }
 
 // dialSide opens loadConns kept-alive connections to addr and serves one
 // round trip on each, so every one is accepted and served before a window.
 func dialSide(b *testing.B, addr string, req []byte) *loadSide {
-	s := &loadSide{}
+	s := &loadSide{req: req}
 	for i := range loadConns {
 		c, err := stdnet.DialTimeout("tcp", addr, 5*time.Second)
 		if err != nil {
@@ -351,7 +372,7 @@ func dialSide(b *testing.B, addr string, req []byte) *loadSide {
 
 // window sends n requests over the side's connections, each connection one
 // at a time, and returns the child's CPU it took.
-func (s *loadSide) window(b *testing.B, child *loadChild, n int, req []byte) uint64 {
+func (s *loadSide) window(b testing.TB, child *loadChild, n int) uint64 {
 	before := child.sample(b)
 	var next atomic.Int64
 	var wg sync.WaitGroup
@@ -359,7 +380,7 @@ func (s *loadSide) window(b *testing.B, child *loadChild, n int, req []byte) uin
 	for i, c := range s.conns {
 		wg.Go(func() {
 			for next.Add(1) <= int64(n) {
-				if err := loadRoundTrip(c, s.readers[i], req); err != nil {
+				if err := loadRoundTrip(c, s.readers[i], s.req); err != nil {
 					errc <- err
 					return
 				}
@@ -383,7 +404,7 @@ func (s *loadSide) window(b *testing.B, child *loadChild, n int, req []byte) uin
 // the round's one paired sample.
 func benchPairedLoad(b *testing.B, load, engineA, engineB string, req []byte) {
 	child := startLoadChild(b, load, engineA, engineB)
-	sideA, sideB := dialSide(b, child.addrs[0], req), dialSide(b, child.addrs[1], req)
+	sideA, sideB := dialPairSide(b, engineA, child.addrs[0], req), dialPairSide(b, engineB, child.addrs[1], req)
 	per := max(b.N/(2*pairedWindows), 1)
 	b.ResetTimer()
 	var cpuA, cpuB uint64
@@ -393,7 +414,7 @@ func benchPairedLoad(b *testing.B, load, engineA, engineB string, req []byte) {
 		if w%2 == 1 {
 			first, second = sideB, sideA
 		}
-		c1, c2 := first.window(b, child, per, req), second.window(b, child, per, req)
+		c1, c2 := first.window(b, child, per), second.window(b, child, per)
 		if w%2 == 1 {
 			c1, c2 = c2, c1
 		}
@@ -405,6 +426,16 @@ func benchPairedLoad(b *testing.B, load, engineA, engineB string, req []byte) {
 	b.ReportMetric(perA, "a:cpu-ns/req")
 	b.ReportMetric(perB, "b:cpu-ns/req")
 	b.ReportMetric(perB/perA, "ratio:cpu-ns/req")
+}
+
+// dialPairSide opens an engine's side: h2c for an engine served over
+// HTTP/2, kept-alive HTTP/1.1 otherwise.
+func dialPairSide(b *testing.B, engine, addr string, req []byte) pairSide {
+	//: L1h2's engines speak HTTP/2.
+	if isH2Engine(engine) {
+		return dialH2Side(b, addr, loadConns)
+	}
+	return dialSide(b, addr, req)
 }
 
 // loadRoundTrip writes req on c and reads one 200 response with a 1 KiB body.

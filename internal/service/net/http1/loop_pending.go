@@ -2,6 +2,7 @@ package http1
 
 import (
 	"bytes"
+	"io"
 	"sync/atomic"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -41,6 +42,22 @@ type pendSlot struct {
 	// cancelled is set once the connection closed: the worker skips the work,
 	// and the answer is dropped.
 	cancelled atomic.Bool
+	// copy is a file chunk being read for the copy path, nil on an ordinary job.
+	copy *copyJob
+	// job and buf are the slot's chunk job and its read buffer, kept for reuse.
+	job copyJob
+	buf []byte
+}
+
+// copyJob is what one chunk's job carries to the lane's worker.
+type copyJob struct {
+	// r is the file, off the chunk's offset, buf where it lands.
+	r   io.ReaderAt
+	off int64
+	buf []byte
+	// n and err are the worker's answer.
+	n   int
+	err error
 }
 
 // heldItem is one answer a connection holds back behind a pending one, in
@@ -71,8 +88,15 @@ type pendingWorker struct {
 // fills the slot's response unless its connection has closed.
 func (w pendingWorker) Work(lane int, job corenet.LoopJobValue) {
 	slot := (*w.a.state(lane).slots.Load())[job.Slot]
+	//: a chunk of a copied file: read here, never on the lane's thread.
+	if slot.copy != nil {
+		workCopy(slot)
+		//: read.
+		return
+	}
 	//: a connection gone: no work for nobody.
 	if slot.cancelled.Load() {
+		w.a.cancelJob(lane, job.Arg)
 		//: skipped; OnDone frees the slot.
 		return
 	}
@@ -108,6 +132,12 @@ func (a *LoopHandler) OnOutbound(v corenet.LoopOutboundValue) {
 func (a *LoopHandler) OnDone(io corenet.LoopIO, job corenet.LoopJobValue) {
 	st := a.state(io.Loop())
 	slot := (*st.slots.Load())[job.Slot]
+	//: a chunk of a copied file.
+	if slot.copy != nil {
+		a.copyDone(io, st, slot)
+		//: the file's own.
+		return
+	}
 	//: a job of an older generation: the slot is another answer's now, and
 	//: freeing it again would hand it to two. The invariant excludes it.
 	if slot.gen != job.Gen {
@@ -117,6 +147,7 @@ func (a *LoopHandler) OnDone(io corenet.LoopIO, job corenet.LoopJobValue) {
 	f := st.peek(slot.ref)
 	//: the connection is gone, or the answer was given up on.
 	if slot.cancelled.Load() || f == nil {
+		closeFileReader(slot.res.File.R)
 		st.freeSlot(job.Slot)
 		//: dropped.
 		return
@@ -130,7 +161,7 @@ func (a *LoopHandler) OnDone(io corenet.LoopIO, job corenet.LoopJobValue) {
 func (a *LoopHandler) Pending(lane int, ref corenet.LoopConnRef) bool {
 	f := a.state(lane).peek(ref)
 	//: answers still held.
-	return f != nil && len(f.held) > 0
+	return f != nil && (len(f.held) > 0 || f.file.active())
 }
 
 // answer is one answer hold queues: the connection, its flag, the response
@@ -191,13 +222,15 @@ func (a *LoopHandler) holdPending(st *loopState, an *answer) {
 	//: a misuse: nothing can run it.
 	if res.Defer || a.worker == nil || st.outbound == nil {
 		an.closing = true
-		an.f.buf = append(an.f.buf, internalError...)
-		an.f.held = append(an.f.held, heldItem{off: len(an.f.buf) - len(internalError), end: len(an.f.buf), closing: true})
+		off := len(an.f.buf)
+		an.f.buf = appendInternalError(an.f.buf, res)
+		an.f.held = append(an.f.held, heldItem{off: off, end: len(an.f.buf), closing: true})
 		//: answered 500.
 		return
 	}
 	idx, slot := st.takeSlot()
 	slot.ref = an.ref
+	slot.res.RequestID, slot.res.CORS = res.RequestID, res.CORS
 	slot.stub.Method, slot.stub.Close = nil, an.closing
 	//: the one request field the writer reads besides Close.
 	if isHead(st.req.Method) {
@@ -210,6 +243,8 @@ func (a *LoopHandler) holdPending(st *loopState, an *answer) {
 		return
 	}
 	st.freeSlot(idx)
+	a.cancelJob(an.io.Loop(), res.Job)
+	st.unavailable.RequestID, st.unavailable.CORS = res.RequestID, res.CORS
 	st.holdBytes(an, &st.unavailable)
 }
 
@@ -221,7 +256,7 @@ func (st *loopState) holdBytes(an *answer, res *corenet.HTTP1ResponseValue) {
 	out, err := AppendResponse(f.buf, &st.req, res, an.closing)
 	//: refused by the writer: 500, and closed.
 	if err != nil {
-		out = append(f.buf, internalError...)
+		out = appendInternalError(f.buf, res)
 		an.closing = true
 	}
 	f.buf = out
@@ -241,11 +276,18 @@ func (st *loopState) stubOf(head bool) *corenet.HTTP1RequestValue {
 }
 
 // closed gives up the held answers of ref when the flag is still its own.
-func (a *LoopHandler) closed(io corenet.LoopIO, ref corenet.LoopConnRef) {
+func (a *LoopHandler) closed(io corenet.LoopIO, ref corenet.LoopConnRef, err error) {
 	st := a.state(io.Loop())
 	//: the connection's own flag, never a newer one's.
 	if f := st.peek(ref); f != nil {
+		a.abortBody(f, ref)
+		closedFile(f, st)
 		st.dropHeld(f)
+		//: a stream's handler is told last, so its state may go with it.
+		if f.mode == connStreaming || f.mode == connUpgraded {
+			f.mode = connClosing
+			a.streamer.OnStreamClose(corenet.HTTP1StreamValue{IO: io, Ref: ref}, err)
+		}
 	}
 }
 
@@ -356,7 +398,7 @@ func (st *loopState) completeConn(ref corenet.LoopConnRef, f *connFlag) {
 		if it.res != nil {
 			off := len(f.buf)
 			var closing bool
-			f.buf, closing = appendHeld(f.buf, it.stub, it.res, it.closing)
+			f.buf, closing, _ = appendHeld(f.buf, it.stub, it.res, it.closing)
 			it.closing, it.off, it.end = closing, off, len(f.buf)
 			st.give(it.res)
 			it.res = nil
@@ -368,38 +410,45 @@ func (st *loopState) completeConn(ref corenet.LoopConnRef, f *connFlag) {
 // appendHeld appends res's answer and reports whether the connection closes
 // after it: a response left deferred or pending, or one the writer refuses,
 // is a 500 that closes it.
-func appendHeld(dst []byte, stub *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue, closing bool) ([]byte, bool) {
+func appendHeld(dst []byte, stub *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue, closing bool) (appended []byte, closes, refused bool) {
 	out, err := AppendResponse(dst, stub, res, closing)
 	//: left deferred or pending, or refused by the writer: 500, and closed.
 	if res.Defer || res.Pending || err != nil {
 		//: closed.
-		return append(dst, internalError...), true
+		return appendInternalError(dst, res), true, true
 	}
 	//: as asked.
-	return out, closing || res.Close
+	return out, closing || res.Close, false
 }
 
 // flushReady writes, for each connection queued, the answers it holds from
 // the first up to the first still out, in one Write, then closes it when one
 // of them asked to.
-func (st *loopState) flushReady(io corenet.LoopIO) {
+func (a *LoopHandler) flushReady(io corenet.LoopIO, st *loopState) {
 	//: each connection once.
 	for _, ref := range st.ready {
 		//: closed meanwhile.
 		if f := st.peek(ref); f != nil {
-			st.flushHeld(io, ref, f)
+			a.flushHeld(io, ref, st, f)
 		}
 	}
 	st.ready = st.ready[:0]
 	st.readyEpoch++
 }
 
-// flushHeld writes f's ready answers, in order.
-func (st *loopState) flushHeld(io corenet.LoopIO, ref corenet.LoopConnRef, f *connFlag) {
+// flushHeld writes f's ready answers, in order, up to a file body, which it
+// starts behind them; a file still leaving holds everything behind it.
+func (a *LoopHandler) flushHeld(io corenet.LoopIO, ref corenet.LoopConnRef, st *loopState, f *connFlag) {
+	//: the file in front of the queue is not gone yet.
+	if f.file.active() {
+		//: waiting for it.
+		return
+	}
 	out, n, closing := st.held[:0], 0, false
-	//: from the first, while ready, up to one that closes.
-	for ; n < len(f.held) && !closing && f.held[n].ready(); n++ {
-		out, closing = st.appendItem(out, f, f.held[n])
+	var file corenet.HTTP1FileValue
+	//: from the first, while ready, up to one that closes or a file.
+	for ; n < len(f.held) && !closing && file.R == nil && f.held[n].ready(); n++ {
+		out, closing, file = st.appendItem(out, f, f.held[n])
 	}
 	st.held = out
 	//: nothing ready.
@@ -410,6 +459,12 @@ func (st *loopState) flushHeld(io corenet.LoopIO, ref corenet.LoopConnRef, f *co
 	rest := copy(f.held, f.held[n:])
 	f.held = f.held[:rest]
 	f.compact()
+	//: a file body starts behind the bytes before it.
+	if file.R != nil {
+		a.startFile(&fileStart{io: io, ref: ref, st: st, f: f, out: out, file: file, closing: closing})
+		//: the rest waits for it.
+		return
+	}
 	st.write(io, ref, out, closing)
 	//: closed: what it still holds goes with it.
 	if closing || f.dead {
@@ -457,14 +512,21 @@ func (it heldItem) ready() bool {
 
 // appendItem appends one ready held answer to out and reports whether the
 // connection closes after it; a pending one's slot is freed.
-func (st *loopState) appendItem(out []byte, f *connFlag, it heldItem) ([]byte, bool) {
+func (st *loopState) appendItem(out []byte, f *connFlag, it heldItem) ([]byte, bool, corenet.HTTP1FileValue) {
 	//: bytes already written.
 	if it.slot == nil {
 		//: copied.
-		return append(out, f.buf[it.off:it.end]...), it.closing
+		return append(out, f.buf[it.off:it.end]...), it.closing, corenet.HTTP1FileValue{}
 	}
-	next, closing := appendHeld(out, &it.slot.stub, &it.slot.res, it.slot.stub.Close)
+	file := it.slot.res.File
+	next, closing, refused := appendHeld(out, &it.slot.stub, &it.slot.res, it.slot.stub.Close)
 	st.freeSlot(it.slot.idx)
-	//: the worker's answer.
-	return next, closing
+	//: refused, or a HEAD: the file is not sent, its reader closed.
+	if refused || isHead(it.slot.stub.Method) {
+		closeFileReader(file.R)
+		//: the worker's answer, no body.
+		return next, closing, corenet.HTTP1FileValue{}
+	}
+	//: the worker's answer, its file to send behind it.
+	return next, closing, file
 }

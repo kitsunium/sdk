@@ -24,6 +24,11 @@ type packet struct {
 	id uint64
 	// group names the listener group that received it.
 	group string
+	// local is the datagram's own destination, when the read saw one (#972).
+	local localAddress
+	// port is the socket's own port, which a destination read from the
+	// datagram is reported with.
+	port int
 }
 
 // Data implements corenet.Packet.
@@ -45,6 +50,11 @@ func (p *packet) To() stdnet.Addr {
 	if p.conn == nil {
 		//: no local address to report.
 		return nil
+	}
+	//: the address the datagram named, on a wildcard socket that asked (#972).
+	if to := p.local.addrOf(p.port); to != nil {
+		//: the destination the sender used, with the socket's port.
+		return to
 	}
 	//: the local address the datagram arrived on.
 	return p.conn.LocalAddr()
@@ -82,6 +92,11 @@ func (p *packet) Reply(b []byte) (n int, err error) {
 		//: the closed-socket answer, without a socket to ask.
 		return 0, stdnet.ErrClosed
 	}
+	//: the destination the datagram named is the reply's source (#972).
+	if p.sink != nil && p.local.sourceLen != 0 {
+		//: queued or written, leaving from that address.
+		return p.sink.replyFrom(b, p.from, p.local)
+	}
 	//: the read loop's sink batches it.
 	if p.sink != nil {
 		//: queued, or written at once outside a batch.
@@ -101,4 +116,6 @@ func (p *packet) reset() {
 	p.sink = nil
 	p.id = 0
 	p.group = ""
+	p.local = localAddress{}
+	p.port = 0
 }

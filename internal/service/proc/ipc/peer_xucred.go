@@ -44,3 +44,18 @@ func peerFromBuffer(b []byte, order binary.ByteOrder) (coreipc.PeerValue, bool) 
 	}
 	return peer, true
 }
+
+// groupsFromBuffer decodes the groups of a struct xucred: cr_groups, the
+// effective gid first, at most XU_NGROUPS (16) — a peer in more groups is
+// judged on the first sixteen, which admits fewer, never more.
+func groupsFromBuffer(b []byte, order binary.ByteOrder) []int {
+	if len(b) < xuGroupsEnd || order.Uint32(b[xuVersionOffset:]) != xucredVersion {
+		return nil
+	}
+	n := min(max(int(int16(order.Uint16(b[xuNGroupsOffset:]))), 0), xuNGroups)
+	groups := make([]int, n)
+	for i := range n {
+		groups[i] = int(order.Uint32(b[xuGroupsOffset+4*i:]))
+	}
+	return groups
+}

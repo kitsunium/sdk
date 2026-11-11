@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"slices"
 	"strconv"
 	"strings"
@@ -8,14 +9,16 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
-// The ranks of the lattice iouring > epoll > portable > goroutine (ADR 0188
-// §D1). A rank is compared, never shown: State spells the capability.
+// The ranks of the lattice iouring > epoll = kqueue > portable > goroutine
+// (ADR 0188 §D1, ADR 0222). A rank is compared, never shown: State spells the
+// capability.
 const (
 	// rankGoroutine is the goroutine engine, the bottom.
 	rankGoroutine int = iota + 1
 	// rankPortable is the portable loop backend, the loop family's floor.
 	rankPortable
-	// rankEpoll is epoll.
+	// rankEpoll is epoll, and kqueue beside it: each the readiness poller of
+	// its platforms, never both on one.
 	rankEpoll
 	// rankIOURing is io_uring, the top.
 	rankIOURing
@@ -55,6 +58,7 @@ type capabilityEntry struct {
 var capabilityRegistry = [...]capabilityEntry{
 	{token: corenet.CapabilityIOURing, rank: rankIOURing, switchable: true},
 	{token: corenet.CapabilityEpoll, rank: rankEpoll, switchable: true},
+	{token: corenet.CapabilityKqueue, rank: rankEpoll, switchable: true},
 	{token: corenet.CapabilityPortable, rank: rankPortable, switchable: false},
 	{token: corenet.CapabilityGoroutine, rank: rankGoroutine, switchable: false},
 	{token: corenet.CapabilityURingMultishotRecv, rank: rankKernel, switchable: true, kernel: true},
@@ -63,18 +67,29 @@ var capabilityRegistry = [...]capabilityEntry{
 	{token: corenet.CapabilityURingDirect, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityEpollExclusive, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityTCPNoDelay, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityUDPRxqOvfl, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityUDPPktinfo, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingRecvmsg, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityTCPKeepAlive, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityTCPUserTimeout, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingDeferTaskrun, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingNoSQArray, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingRingFDs, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingSQRewind, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingRecvBundle, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityTCPDeferAccept, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityReuseportLoops, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityLoopAffinity, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilitySOIncomingCPU, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityTCPNotsentLowat, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityHTTP2Loop, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityBusyPoll, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingSendZC, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingBundle, rank: rankKernel, switchable: true, kernel: true},
-	{token: corenet.CapabilityBusyPoll, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingZCRX, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityReuseportCBPF, rank: rankKernel, switchable: true, kernel: true},
-	{token: corenet.CapabilityTCPDeferAccept, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingMinTimeout, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityTCPFastOpen, rank: rankKernel, switchable: true, kernel: true},
 }
 
 // operatorEnv is what KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE say, read
@@ -86,8 +101,9 @@ type operatorEnv struct {
 	faults []corenet.FaultValue
 	// ceiling is the highest rank the environment allows.
 	ceiling int
-	// disabled holds the ranks KITSUNIUM_NET_DISABLE switched off.
-	disabled [rankIOURing + 1]bool
+	// enginesOff are the engines KITSUNIUM_NET_DISABLE switched off, by token:
+	// epoll and kqueue share a rank and are switched off apart.
+	enginesOff []corenet.Capability
 	// kernelOff are the kernel capabilities it switched off; noOptional is
 	// set by an unknown token, which switches every one off (R5).
 	kernelOff  []corenet.Capability
@@ -162,8 +178,8 @@ func (e *operatorEnv) applyDisable(list string) {
 			continue
 		}
 		//: listed once in State, whatever the repetition.
-		if !e.disabled[entry.rank] {
-			e.disabled[entry.rank] = true
+		if !slices.Contains(e.enginesOff, entry.token) {
+			e.enginesOff = append(e.enginesOff, entry.token)
 			e.override.Disabled = append(e.override.Disabled, entry.token)
 		}
 	}
@@ -180,12 +196,19 @@ func (e *operatorEnv) unknown(variable, token string) {
 	})
 }
 
-// applied is the highest engine the environment allows, Disabled skipped.
+// applied is the highest engine the environment allows, Disabled skipped; at
+// epoll's rank, the poller of this platform (nativePoller), epoll where it
+// has neither.
 func (e *operatorEnv) applied() corenet.Capability {
+	poller := cmp.Or(nativePoller, corenet.CapabilityEpoll)
 	//: top first.
 	for _, entry := range capabilityRegistry {
+		//: the other platforms' poller.
+		if entry.rank == rankEpoll && entry.token != poller {
+			continue
+		}
 		//: the first engine the environment lets through.
-		if !entry.kernel && e.allows(entry.rank) {
+		if !entry.kernel && e.allows(entry.token) {
 			//: the ceiling, as State spells it.
 			return entry.token
 		}
@@ -194,17 +217,17 @@ func (e *operatorEnv) applied() corenet.Capability {
 	return corenet.CapabilityGoroutine
 }
 
-// allows reports whether the environment lets a group run on the engine of
-// rank r.
-func (e *operatorEnv) allows(r int) bool {
+// allows reports whether the environment lets a group run on engine.
+func (e *operatorEnv) allows(engine corenet.Capability) bool {
 	//: io_uring receives into provided buffers only: without them it is
 	//: never set up.
-	if r == rankIOURing && e.kernelDisabled(corenet.CapabilityURingPbuf) {
+	if engine == corenet.CapabilityIOURing && e.kernelDisabled(corenet.CapabilityURingPbuf) {
 		//: ruled out.
 		return false
 	}
+	entry, _ := lookupCapability(string(engine))
 	//: under the ceiling and not switched off.
-	return r <= e.ceiling && !e.disabled[r]
+	return entry.rank <= e.ceiling && !slices.Contains(e.enginesOff, engine)
 }
 
 // kernelDisabled reports whether the environment switched kernel capability c
@@ -262,27 +285,50 @@ type loopPlan struct {
 }
 
 // plan is min(code, environment) for a loop group whose code asked for code,
-// on a platform with the native backends when native is true (ADR 0187 §D8):
-// the highest backend at or below the code's that the environment allows. A
-// backend the environment rules out is never probed: epoll and portable never
-// reach io_uring_setup. Off Linux every loop group is portable, whatever the
+// on a platform whose readiness poller is poller — epoll on Linux, where
+// io_uring sits above it, kqueue on darwin and the BSDs, none elsewhere
+// (ADR 0187 §D8, ADR 0222): the highest backend at or below the code's that
+// the environment allows. A backend the environment rules out is never
+// probed: epoll and portable never reach io_uring_setup, portable never
+// reaches kqueue(2). With no poller every loop group is portable, whatever the
 // environment says, an explicit native backend having been refused already.
-func (e *operatorEnv) plan(code corenet.LoopBackend, native bool) loopPlan {
-	p := e.backendPlan(code, native)
+func (e *operatorEnv) plan(code corenet.LoopBackend, poller corenet.Capability) loopPlan {
+	p := e.backendPlan(code, poller)
 	p.disabled, p.disabledBy = e.kernelSwitches()
 	//: the backend and what it may not use.
 	return p
 }
 
-// backendPlan is plan's backend half.
-func (e *operatorEnv) backendPlan(code corenet.LoopBackend, native bool) loopPlan {
-	//: no native backend on this platform, or the code asked for portable.
-	if !native || code == corenet.LoopBackendPortable {
+// backendPlan is plan's backend half, by the platform's poller.
+func (e *operatorEnv) backendPlan(code corenet.LoopBackend, poller corenet.Capability) loopPlan {
+	//: by the platform.
+	switch poller {
+	//: darwin and the BSDs.
+	case corenet.CapabilityKqueue:
+		//: kqueue, or the floor.
+		return e.kqueuePlan(code)
+	//: Linux.
+	case corenet.CapabilityEpoll:
+		//: io_uring, epoll, or the floor.
+		return e.linuxPlan(code)
+	//: no native backend on this platform.
+	default:
 		//: the portable backend.
 		return loopPlan{backend: corenet.LoopBackendPortable}
 	}
-	iouring := code != corenet.LoopBackendEpoll && e.allows(rankIOURing)
-	epoll := e.allows(rankEpoll)
+}
+
+// linuxPlan is backendPlan on Linux: the highest of io_uring and epoll at or
+// below the code's choice that the environment allows, the floor otherwise.
+// kqueue, which startLoopEngine refuses before any plan runs, plans the floor.
+func (e *operatorEnv) linuxPlan(code corenet.LoopBackend) loopPlan {
+	//: the code asked for portable, or for darwin's and the BSDs' kqueue.
+	if code == corenet.LoopBackendPortable || code == corenet.LoopBackendKqueue {
+		//: the portable backend.
+		return loopPlan{backend: corenet.LoopBackendPortable}
+	}
+	iouring := code != corenet.LoopBackendEpoll && e.allows(corenet.CapabilityIOURing)
+	epoll := e.allows(corenet.CapabilityEpoll)
 	auto := code == corenet.LoopBackendAuto
 	//: the four answers, top first.
 	switch {
@@ -303,4 +349,20 @@ func (e *operatorEnv) backendPlan(code corenet.LoopBackend, native bool) loopPla
 		//: the floor of the loop family.
 		return loopPlan{backend: corenet.LoopBackendPortable}
 	}
+}
+
+// kqueuePlan is backendPlan on darwin and the BSDs: kqueue only when the code
+// named it and the environment allows it; the portable backend otherwise,
+// auto included. A backend that has never run on these platforms is not their
+// default: auto stays portable until the paired gate of ADR 0190 holds kqueue
+// (ADR 0222 §D6). io_uring and epoll, refused by startLoopEngine there, plan
+// the floor.
+func (e *operatorEnv) kqueuePlan(code corenet.LoopBackend) loopPlan {
+	//: kqueue, as the code named it: an explicit backend never falls back.
+	if code == corenet.LoopBackendKqueue && e.allows(corenet.CapabilityKqueue) {
+		//: the probe's refusal is the code's error, LoopBackendUnavailable.
+		return loopPlan{backend: corenet.LoopBackendKqueue}
+	}
+	//: the floor of the loop family.
+	return loopPlan{backend: corenet.LoopBackendPortable}
 }

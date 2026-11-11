@@ -1,7 +1,9 @@
 package loop
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"unsafe"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -31,11 +34,15 @@ const _ uintptr = idleSlotHeapBudget - (unsafe.Sizeof(connCtl{}) + 2*unsafe.Size
 type Listener struct {
 	// FD is the duplicated descriptor, close-on-exec.
 	FD int
+	// Loop is one more than the index of the only loop that accepts on it — a
+	// SO_REUSEPORT shard (#856) —, zero when every loop of the group does.
+	Loop int
 }
 
 // Config is what server gives a loop group to start: the group's name, its
-// LoopValue, the two options the engine honours itself — MaxConns and
-// IdleTimeout — its handler and its listeners.
+// LoopValue, the options the engine honours itself — MaxConns, IdleTimeout and
+// the socket options of ADR 0189's rows: ReadTimeout, KeepAlive, UserTimeout —,
+// its handler and its listeners.
 type Config struct {
 	// Group is the group's name, for the start line and State.
 	Group string
@@ -47,6 +54,18 @@ type Config struct {
 	// IdleTimeout closes a connection with no traffic for that long, its
 	// output sent. Zero sets none.
 	IdleTimeout time.Duration
+	// ReadTimeout is the group's read bound. TCP_DEFER_ACCEPT, once opted into,
+	// takes it in whole seconds, rounded up. Zero sets none, and the option is
+	// not set.
+	ReadTimeout time.Duration
+	// KeepAlive is the idle time before the first keepalive probe of an
+	// accepted socket, and the interval between probes: zero is 15 s, the
+	// standard library's, and negative sets no keepalive.
+	KeepAlive time.Duration
+	// UserTimeout is TCP_USER_TIMEOUT, the time sent output may stay
+	// unacknowledged before the kernel closes the connection with an error,
+	// rounded up to whole milliseconds. Zero sets none.
+	UserTimeout time.Duration
 	// Handler is the group's loop handler.
 	Handler corenet.LoopHandler
 	// Busy reports whether a connection of a lane waits on its worker (the
@@ -67,6 +86,10 @@ type Config struct {
 	// resolved it already: LoopsAuto read as GOMAXPROCS is "auto". Empty lets
 	// the group say it itself.
 	LoopsSource string
+	// Memory is the soft-memory-limit derivation server read (memlimit.Derive):
+	// its Allowance, when one was found, sizes a slab budget LoopValue leaves
+	// at zero (#809). The zero value derives nothing.
+	Memory coreproc.MemoryLimitValue
 	// tableCap, when positive, caps every ring's table below the descriptor
 	// limit: the conformance suite's tiny slot table.
 	tableCap int
@@ -104,6 +127,14 @@ type loopHooks struct {
 	// set, each buffer handed back to the kernel. The incremental and bundle
 	// tests check a buffer is returned only once the kernel let it go.
 	bufSeen func(bid uint16, off, n int, kept, first, returned bool)
+	// busyPoll sees each REGISTER_NAPI and EPIOCSPARAMS about to be issued,
+	// probe included: the switch's test counts none (#979).
+	busyPoll func(call string)
+	// zcrxKernel plays a kernel from 6.15 to uring-zcrx's probe, the
+	// register's answer zcrxErrno (zero accepted): no RECV_ZC exists on the
+	// suite's kernels (#980).
+	zcrxKernel bool
+	zcrxErrno  int
 }
 
 // Group is a running loop group: its loops, their threads and their rings.
@@ -174,6 +205,14 @@ func Start(cfg Config) (*Group, error) {
 		//: refused before any thread starts.
 		return nil, err
 	}
+	//: a listener of a loop the group does not have, or an Affinity that is
+	//: not one CPU a loop.
+	if err := errors.Join(checkShards(cfg, sz.loops), checkValue(cfg.Group, cfg.Value, sz.loops)); err != nil {
+		closeListeners(cfg.Listeners)
+		//: refused before any thread starts.
+		return nil, err
+	}
+	sz.slabBudget, sz.slabSource = slabBudgetFor(cfg.Value.SlabBudget, cfg.Memory, sz.loops, max(sz.outputCap, sz.spillCap))
 	//: server resolved LoopsAuto already and says so.
 	if cfg.LoopsSource != "" {
 		sz.loopsSource = cfg.LoopsSource
@@ -195,12 +234,29 @@ func Start(cfg Config) (*Group, error) {
 	if w == nil {
 		w = os.Stderr
 	}
-	_, werr := fmt.Fprintf(w, "net/loop: group=%q backend=%s probe=%s reason=%q loops=%d loops_source=%s rings=%d rings_source=%s table=%d cq_batch=%d spill_cap=%d output_cap=%d rlimit_nofile=%d gomaxprocs=%d batch_wait=%s batch_wait_min=%d yield=%s\n",
-		g.name, g.backend, g.stage, g.reason, g.sz.loops, g.sz.loopsSource, g.sz.rings, g.sz.ringsSource, g.sz.tableSize, g.sz.cqBatch, g.sz.spillCap, g.sz.outputCap, g.sz.rlimit, g.procs, g.sz.batchWait, g.sz.batchWaitMin, g.sz.yield)
+	_, werr := fmt.Fprintf(w, "net/loop: group=%q backend=%s probe=%s reason=%q loops=%d loops_source=%s rings=%d rings_source=%s table=%d cq_batch=%d spill_cap=%d output_cap=%d rlimit_nofile=%d gomaxprocs=%d batch_wait=%s batch_wait_min=%d yield=%s secondary_wake=%s\n",
+		g.name, g.backend, g.stage, g.reason, g.sz.loops, g.sz.loopsSource, g.sz.rings, g.sz.ringsSource, g.sz.tableSize, g.sz.cqBatch, g.sz.spillCap, g.sz.outputCap, g.sz.rlimit, g.procs, g.sz.batchWait, g.sz.batchWaitMin, g.sz.yield, secondaryWakeVerdict())
 	//: a log writer that fails changes nothing: the group serves either way.
 	swallowErr(werr)
 	//: serving.
 	return g, nil
+}
+
+// checkShards refuses a listener owned by a loop the group does not have
+// (server sizes the shards from the Loops the group resolved to).
+func checkShards(cfg Config, loops int) error {
+	//: each listener.
+	for _, l := range cfg.Listeners {
+		//: named past the last loop.
+		if l.Loop > loops {
+			//: refused by name.
+			return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+				errs.String("group", cfg.Group), errs.String("option", corenet.OptionShards.String()),
+				errs.Int("loops", loops), errs.Int("shard", l.Loop))
+		}
+	}
+	//: every owner exists.
+	return nil
 }
 
 // Shutdown drains the group, until ctx is done; then it closes the rest. The
@@ -248,8 +304,15 @@ func (g *Group) State() corenet.LoopStateValue {
 		Degraded: g.reason != "", DegradedReason: g.reason,
 		Loops: g.sz.loops, LoopsSource: g.sz.loopsSource, Rings: g.sz.rings, RingsSource: g.sz.ringsSource,
 		RLimitNoFile: g.sz.rlimit, GOMAXPROCS: g.procs,
-		BatchP99:     corenet.DurationValue(g.grp.batchP99()),
-		Capabilities: slices.Clone(g.caps.rows),
+		BatchP99:         corenet.DurationValue(g.grp.batchP99()),
+		SlabBudgetSource: g.sz.slabSource,
+		Capabilities:     slices.Clone(g.caps.rows),
+	}
+	//: each loop's slab, summed.
+	for _, lp := range g.loops {
+		st.SlabInUse += lp.slabInUse.Load()
+		st.SlabMapped += lp.slabMapped.Load()
+		st.SlabBudget += int64(lp.slab.budget)
 	}
 	//: loop by loop, ring by ring.
 	for _, lp := range g.loops {
@@ -264,6 +327,10 @@ func (g *Group) State() corenet.LoopStateValue {
 				AcceptPauses: p.pauses.Load(), Evicted: p.evicted.Load(),
 				WatchdogFires: p.watchdog.Load(), Draining: p.draining.Load(),
 				BatchesCut: p.cut.Load(),
+				BytesIn:    p.bytesIn.Load(), BytesOut: p.bytesOut.Load(),
+				OutputRefused: p.outRefused.Load(), SpillClosed: p.spillClosed.Load(),
+				Timeouts: p.timeouts.Load(), IdleClosed: p.idleClosed.Load(),
+				PendingOutput: p.pending.Load(),
 			})
 		}
 	}
@@ -284,7 +351,7 @@ func (g *Group) Live() int64 {
 }
 
 // newLoop builds loop i of g, its rings empty, its slab mapped by mapper.
-func newLoop(g *Group, cfg Config, i int, mapper func(int) ([]byte, error)) *loop {
+func newLoop(g *Group, cfg Config, i int, mapper func(int) ([]byte, error), unmapper func([]byte) error) *loop {
 	lp := &loop{
 		index: i, sz: g.sz, h: cfg.Handler, busy: cfg.Busy, grp: g.grp,
 		epoch:    time.Now(),
@@ -301,7 +368,14 @@ func newLoop(g *Group, cfg Config, i int, mapper func(int) ([]byte, error)) *loo
 	if d := time.Duration(cfg.Value.EvictIdle); d > 0 {
 		lp.evictIdle = int64((d + tickEvery - 1) / tickEvery)
 	}
-	lp.slab = newSlab(max(g.sz.outputCap, g.sz.spillCap), defaultSlabBudget, mapper)
+	lp.drainer, _ = cfg.Handler.(corenet.LoopDrainer)
+	lp.cpu = -1
+	//: pinned to its CPU, unless the operator switched it off.
+	if i < len(cfg.Value.Affinity) && !newSwitches(&cfg).disabled(corenet.CapabilityLoopAffinity) {
+		lp.cpu = cfg.Value.Affinity[i]
+	}
+	lp.slab = newSlab(max(g.sz.outputCap, g.sz.spillCap), cmp.Or(g.sz.slabBudget, defaultSlabBudget), mapper)
+	lp.slab.unmap = unmapper
 	lp.tick = 1
 	//: rings are added by the backend.
 	return lp

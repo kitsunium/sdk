@@ -1,8 +1,9 @@
-//go:build linux && !race
+//go:build (linux || darwin || freebsd || openbsd || netbsd || dragonfly) && !race
 
 // Package loop — the idle-connection memory budget, held by hand in the
 // race-off lane (ADR 0186 §D7): the race detector's shadow memory would
-// measure itself.
+// measure itself. It runs on every native backend, kqueue on the darwin lane
+// and the BSD guests included (ADR 0222).
 package loop
 
 import (
@@ -14,6 +15,8 @@ import (
 	"os/exec"
 	"runtime"
 	"runtime/metrics"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,7 +59,9 @@ func TestMemory_idleConnection(t *testing.T) {
 			g, addr := serve(t, b, h, nil)
 			before := heapLive()
 			cmd := exec.Command(os.Args[0], "-test.run=^$")
-			cmd.Env = append(os.Environ(), clientsEnv+"="+addr)
+			// The child's role is set once, any inherited one removed first, and
+			// the role relaunches nothing.
+			cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, clientsEnv+"=") }), clientsEnv+"="+addr)
 			stdin, _ := cmd.StdinPipe()
 			stdout, _ := cmd.StdoutPipe()
 			if err := cmd.Start(); err != nil {
