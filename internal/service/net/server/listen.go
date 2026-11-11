@@ -5,9 +5,11 @@ import (
 	"crypto/tls"
 	stdnet "net"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -17,6 +19,33 @@ import (
 // streamNetworks are the socket families the stream engine serves.
 var streamNetworks = map[string]struct{}{
 	"tcp": {}, "tcp4": {}, "tcp6": {}, "unix": {}, "unixpacket": {},
+}
+
+// withBoundPort returns addr with the port the kernel bound for local, its host
+// as asked, so every shard after the first joins the first's port instead of
+// drawing its own when the address was asked as host:0 (#1331): the streams',
+// the datagrams' and a loop group's shards alike. An address local names no
+// port for — a Unix socket — or that is not host:port is returned unchanged.
+func withBoundPort(addr corenet.AddressValue, local stdnet.Addr) corenet.AddressValue {
+	port := 0
+	//: the IP families carry a port.
+	switch a := local.(type) {
+	//: a stream's.
+	case *stdnet.TCPAddr:
+		port = a.Port
+	//: a datagram's.
+	case *stdnet.UDPAddr:
+		port = a.Port
+	}
+	host, _, err := stdnet.SplitHostPort(addr.Addr)
+	//: no port drawn, or an address that cannot be rewritten.
+	if port == 0 || err != nil {
+		//: unchanged.
+		return addr
+	}
+	addr.Addr = stdnet.JoinHostPort(host, strconv.Itoa(port))
+	//: the port the others share.
+	return addr
 }
 
 // shardable reports whether an address can carry several listeners.
@@ -105,17 +134,43 @@ func reusePortControl(network, address string, rawConn syscall.RawConn) error {
 	return setErr
 }
 
+// socketSpec is what a group asks of the sockets it binds beyond their
+// address: whether the address is shared by shards, whether a handler may take
+// a socket over while a ceiling still counts it, how many binds an address
+// still held gets, and the depth of the accept queue (#978).
+type socketSpec struct {
+	// sharded opens the socket with SO_REUSEPORT.
+	sharded bool
+	// trackCloses hands out sockets that report their own Close.
+	trackCloses bool
+	// attempts bounds the binds of one address.
+	attempts int
+	// backlog is LimitsValue.Backlog; zero keeps the host's.
+	backlog int
+	// receiveBuffer and sendBuffer are LimitsValue's: SO_RCVBUF and SO_SNDBUF
+	// asked before bind, zero keeping the kernel's default (#973).
+	receiveBuffer, sendBuffer int
+	// proxy is the group's ProxyProtocol, nil when it has none (#841).
+	proxy *proxyPolicy
+	// keepAlive is the accepted sockets' keepalive, as TimeoutsValue reads it
+	// and the operator's switch off (#971): zero the standard library's.
+	keepAlive time.Duration
+	// userTimeout is TCP_USER_TIMEOUT, set on the listener and inherited; zero
+	// sets none (#971).
+	userTimeout time.Duration
+}
+
 // listen binds one address, wrapping it in TLS when the group carries an
 // identity. TLS is applied here rather than inside the accept loop so the
 // handshake is driven by the connection's own goroutine, which is what keeps a
 // slow or hostile peer from stalling the accept path for everyone else.
 //
-// trackCloses hands out sockets that report their own Close (see trackedConn),
-// for a group whose ceiling must keep counting a connection a handler took
-// over. A unicast TCP socket holds its address exclusively where the platform
-// can (exclusiveApplies), and an address still held is bound again, at most
-// attempts binds (bindRetrying); the report says both.
-func listen(ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, sharded, trackCloses bool, attempts int) (ln stdnet.Listener, rep bindReport, err error) {
+// spec.trackCloses hands out sockets that report their own Close (see
+// trackedConn), for a group whose ceiling must keep counting a connection a
+// handler took over. A unicast TCP socket holds its address exclusively where
+// the platform can (exclusiveApplies), and an address still held is bound
+// again, at most spec.attempts binds (bindRetrying); the report says both.
+func listen(ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, spec socketSpec) (ln stdnet.Listener, rep bindReport, err error) {
 	//: reject an unserved family before touching the OS.
 	if _, ok := streamNetworks[addr.Network]; !ok {
 		//: refuse an unserved family before touching the OS.
@@ -134,8 +189,9 @@ func listen(ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, 
 			errs.String("address", addr.String()))
 	}
 	//: SO_REUSEPORT when sharded, SO_EXCLUSIVEADDRUSE where it applies.
-	cfg := stdnet.ListenConfig{Control: listenControl(sharded)}
-	raw, wait, lerr := bindRetrying(ctx, attempts, addrInUse, func() (stdnet.Listener, error) {
+	cfg := stdnet.ListenConfig{Control: listenControl(spec.sharded, spec)}
+	applyKeepAlive(&cfg, spec.keepAlive)
+	raw, wait, lerr := bindRetrying(ctx, spec.attempts, addrInUse, func() (stdnet.Listener, error) {
 		//: one attempt.
 		return cfg.Listen(ctx, addr.Network, addr.Addr)
 	})
@@ -147,8 +203,10 @@ func listen(ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, 
 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
 	}
 	rep.exclusive = exclusiveOf(listenerSocket(raw))
+	rep.backlog, rep.backlogReason = applyBacklog(raw, spec.backlog)
+	rep.receiveBuffer, rep.sendBuffer = socketBuffers(listenerSocket(raw))
 	//: the same layers an adopted socket gets, from the same function.
-	return layered(raw, cfgTLS, trackCloses), rep, nil
+	return layered(raw, cfgTLS, spec.trackCloses, spec.proxy), rep, nil
 }
 
 // familyUnavailable refuses a family the engine serves but this platform has
@@ -169,15 +227,20 @@ func familyUnavailable(addr corenet.AddressValue) error {
 		errs.String("network", addr.Network), errs.String("goos", runtime.GOOS))
 }
 
-// layered puts a group's layers over a raw stream listener: the close tracker
-// when the group has a ceiling to keep counting, then TLS when it carries an
-// identity. It is the ONE place that decides them, for a socket this process
-// bound and for one a supervisor handed over alike.
+// layered puts a group's layers over a raw stream listener: the PROXY protocol
+// reader when the group has one, the close tracker when it has a ceiling to keep
+// counting, then TLS when it carries an identity — the balancer's header is the
+// first thing on the wire. It is the ONE place that decides them, for a socket
+// this process bound and for one a supervisor handed over alike.
 //
 // The adopted path used to add the tracker and never TLS, so a group with an
 // identity served an inherited socket in plaintext and reported no error —
 // the supervisor passes a raw socket, and TLS is this process's layer to add.
-func layered(raw stdnet.Listener, cfgTLS *tls.Config, trackCloses bool) stdnet.Listener {
+func layered(raw stdnet.Listener, cfgTLS *tls.Config, trackCloses bool, proxy *proxyPolicy) stdnet.Listener {
+	//: first on the wire, so under the tracker and TLS.
+	if proxy != nil {
+		raw = &proxyListener{Listener: raw, policy: proxy}
+	}
 	//: the tracker goes UNDER TLS, so net/http still receives the concrete
 	//: *tls.Conn it type-asserts on to populate Request.TLS.
 	if trackCloses {

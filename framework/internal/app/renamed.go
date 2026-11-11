@@ -89,6 +89,7 @@ const (
 	varSMTPURL        string = model.VarSMTPURL
 	varRetention      string = model.VarRetention
 	varSecrets               = "SECRETS"
+	varTrustedProxies        = "TRUSTED_PROXIES"
 	varSecretsKey            = "SECRETS_KEY"
 	varTelemetry             = "TELEMETRY"
 	varTelemetryGIDs         = "TELEMETRY_GIDS"
@@ -107,7 +108,7 @@ var operatorStems = []string{
 	varAddr, varAllowedHosts, varDataDir, varDataKeyStem, varDataKeyStem + varFileSuffix, varEnv,
 	varIndexKeyStem, varIndexKeyStem + varFileSuffix, varLogLevel, varOTLPHeaders, varOTLPHeaders + varFileSuffix, varRetention, varSecrets,
 	varSecretsKey, varSecretsKeyFile, varSMTPURL, varSMTPURLFile, varTelemetry, varTelemetryGIDs,
-	varTrustProxy,
+	varTrustProxy, varTrustedProxies, varAccessLog,
 }
 
 // reservedPath reports whether a path lies in the framework's route space,

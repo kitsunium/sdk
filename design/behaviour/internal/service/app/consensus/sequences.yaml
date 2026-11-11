@@ -1690,6 +1690,8 @@ sequences:
         kind: self
       - id: reasonOf
         kind: internal
+      - id: fmt
+        kind: stdlib
       - id: os
         kind: stdlib
       - id: writeFileSync
@@ -1699,7 +1701,8 @@ sequences:
         eval: reasonOf(code)
         to: reasonOf
       - bind: body
-        eval: "[]byte(fmt.Sprintf(\"boot=%s\\n%s\\n\", bootID(), detail))"
+        eval: fmt.Appendf(nil, "boot=%s\n%s\n", bootID(), detail)
+        to: fmt
       - opt:
           do:
             - opt:

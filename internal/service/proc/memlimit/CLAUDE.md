@@ -17,6 +17,7 @@ bounding *us*.
 | File | Role |
 |---|---|
 | `memlimit.go` | `Apply` + the injected-seam `applyFrom`, the derivation `deriveWith` (installs nothing), the limit-file parsers, and every threshold constant |
+| `memlimit.go` `Derive` | #809: what `Apply` would install, derived the same way, never installed — net/loop sizes its off-heap slab from its `Allowance` (`TestDerive_installsNothing`, `TestDerive_allowanceForTheLoopSlab`) |
 | `config.go` | `ConfigValue` + `ApplyWith` (#937): the headroom, the floor and the GC percent, checked (`MemlimitMisconfigured`, ADR 0031) and resolved; the `environment` seam; the `governor` that installs a derivation and withdraws its own limit — and GC percent — when a later one carries none |
 | `watch.go` | `Watch` (#937): apply, then re-derive every period on an injected `clock.Timed` (clamped to ≥ 1 s), installing and reporting only a changed derivation |
 | `cgroup.go` | which limit files to consult: the ancestor walk over the mounts and membership `internal/cgroupfs` reads (mount discovery — point AND root, octal escapes decoded —, `/proc/self/cgroup` membership and the translation between the two moved there with their tests, #1097/#938) |

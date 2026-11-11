@@ -32,6 +32,13 @@ constants:
         name: CapabilityEpoll
         type: Capability
         value: "\"epoll\""
+      - doc: |-
+          CapabilityKqueue is kqueue, at epoll's rank on darwin and the BSDs (ADR 0222).
+          Switched off, or capped below, a loop group there runs on the portable backend
+          and no kqueue is probed.
+        name: CapabilityKqueue
+        type: Capability
+        value: "\"kqueue\""
     name: CapabilityIOURing
   - doc: The floors of the lattice, which KITSUNIUM_NET_ENGINE may name and nothing switches off (ADR 0188).
     grouped: true
@@ -93,6 +100,51 @@ constants:
         name: CapabilityTCPNoDelay
         type: Capability
         value: "\"tcp-nodelay\""
+      - doc: |-
+          CapabilityUDPRxqOvfl is SO_RXQ_OVFL on a batched UDP socket (Linux 2.6.33):
+          the kernel attaches its count of the datagrams it dropped for want of
+          receive-buffer room to each message read, which State reports as
+          DatagramStateValue.KernelDrops. Switched off, the option is not set and the
+          count stays zero.
+        name: CapabilityUDPRxqOvfl
+        type: Capability
+        value: "\"udp-rxq-ovfl\""
+      - doc: |-
+          CapabilityUDPPktinfo is IP_PKTINFO and IPV6_RECVPKTINFO on a UDP socket
+          bound to a wildcard address (#972): each datagram names its own destination,
+          read back by Packet.To, and Reply leaves from that address. Off Linux the row
+          reads unprobed. Switched off, the option is not set, Packet.To is the bound
+          address and the kernel chooses a reply's source.
+        name: CapabilityUDPPktinfo
+        type: Capability
+        value: "\"udp-pktinfo\""
+      - doc: |-
+          CapabilityURingRecvmsg is io_uring's multishot RECVMSG (6.0) on a
+          datagram group served by PacketGroup.HandleLoop (#852): each datagram, its
+          sender's address and UDP GRO's segment size land in a provided buffer, and
+          the replies of a batch leave as SENDMSG, UDP_SEGMENT runs included. Absent —
+          a probe stage refused — or switched off, the group's sockets are read by the
+          batched reader of ADR 0192 on the runtime's netpoller, the epoll lane.
+        name: CapabilityURingRecvmsg
+        type: Capability
+        value: "\"uring-multishot-recvmsg\""
+      - doc: |-
+          CapabilityTCPKeepAlive is SO_KEEPALIVE with TCP_KEEPIDLE, TCP_KEEPINTVL and
+          TCP_KEEPCNT on the listeners a loop group accepts on, inherited by every
+          accepted socket: 15 s, 15 s and 9 probes, the standard library's own, so a peer
+          that vanished frees its slot on both engines. Switched off, or set negative,
+          it is not set.
+        name: CapabilityTCPKeepAlive
+        type: Capability
+        value: "\"tcp-keepalive\""
+      - doc: |-
+          CapabilityTCPUserTimeout is TCP_USER_TIMEOUT on the listeners a loop group
+          accepts on, inherited by every accepted socket: the time output may stay
+          unacknowledged before the kernel closes the connection with an error. Switched
+          off, or with no timeout asked for, it is not set.
+        name: CapabilityTCPUserTimeout
+        type: Capability
+        value: "\"tcp-user-timeout\""
     name: CapabilityURingMultishotRecv
   - doc: The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
     grouped: true
@@ -131,11 +183,74 @@ constants:
         name: CapabilityURingRecvBundle
         type: Capability
         value: "\"uring-recv-bundle\""
+      - doc: |-
+          CapabilityTCPDeferAccept is TCP_DEFER_ACCEPT on the listeners a loop group
+          accepts on: a connection is handed to the group once its peer has sent, or the
+          group's read bound has run out, rounded up to whole seconds, so a peer that
+          connects and says nothing takes no slot. Opted into, it is set only where the
+          group has a read bound.
+        name: CapabilityTCPDeferAccept
+        type: Capability
+        value: "\"tcp-defer-accept\""
+      - doc: |-
+          CapabilityReuseportLoops is one SO_REUSEPORT listener per loop of a loop group
+          (#856): opted into with Shards(0), each loop accepts on its own queue, the
+          kernel's four-tuple hash spreading the connections, and the drain takes each
+          loop's queue. Switched off, the group serves one shared listener.
+        name: CapabilityReuseportLoops
+        type: Capability
+        value: "\"reuseport-loops\""
+      - doc: |-
+          CapabilityLoopAffinity pins each loop's thread to the CPU LoopValue.Affinity
+          names for it (#857): a refused CPU leaves the loop unpinned and the row
+          missing, a fault.
+        name: CapabilityLoopAffinity
+        type: Capability
+        value: "\"loop-affinity\""
+      - doc: |-
+          CapabilitySOIncomingCPU is SO_INCOMING_CPU on each per-loop listener of
+          Shards(0) whose loop LoopValue.Affinity pins (#857): the kernel prefers the
+          listener whose CPU received the connection. Opted into, it needs both.
+        name: CapabilitySOIncomingCPU
+        type: Capability
+        value: "\"so-incoming-cpu\""
+      - doc: |-
+          CapabilityTCPNotsentLowat is TCP_NOTSENT_LOWAT on a loop group's TCP
+          listeners, LoopValue.NotsentLowat bytes, 128 KiB when only opted into (#857).
+        name: CapabilityTCPNotsentLowat
+        type: Capability
+        value: "\"tcp-notsent-lowat\""
+      - doc: |-
+          CapabilityHTTP2Loop is the HTTP/2 adapter of a loop group (ADR 0220). Switched
+          off, the group serves HTTP/1.1 alone: the client preface is refused 400 and
+          closed, and State's row reads disabled. It leaves class A-code once its merge
+          gate holds (ADR 0189 §D1).
+        name: CapabilityHTTP2Loop
+        type: Capability
+        value: "\"http2-loop\""
+      - doc: |-
+          CapabilityBusyPoll is busy polling of the network device's receive queues while
+          a loop waits (#979): IORING_REGISTER_NAPI on each io_uring loop's ring 0 and
+          EPIOCSPARAMS on each epoll loop's instance, both Linux 6.9, for
+          LoopValue.BusyPoll with prefer_busy_poll set. It spends CPU to spare the
+          wake-up an interrupt costs; a socket the kernel gives no NAPI id — loopback, a
+          veth without GRO — is not polled. Before 6.9 the row reads absent, and
+          unprobed on the portable backend. It leaves class A-code only through the
+          paired gate of ADR 0189's amendment of 2026-11-11.
+        name: CapabilityBusyPoll
+        type: Capability
+        value: "\"busy-poll\""
     name: CapabilityURingDeferTaskrun
   - doc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
     grouped: true
     items:
-      - doc: CapabilityURingSendZC is io_uring's zero-copy send.
+      - doc: |-
+          CapabilityURingSendZC is io_uring's zero-copy send (IORING_OP_SEND_ZC, Linux
+          6.0), class A-code since #969 although it sits in this block: a group opts in
+          through LoopValue.Capabilities, every flight of at least LoopValue.SendZCMin
+          bytes then leaves zero-copy, released at the kernel's notification. The
+          probe asks REGISTER_PROBE for the opcode, then sends one datagram zero-copy
+          on loopback and waits for its notification.
         name: CapabilityURingSendZC
         type: Capability
         value: "\"uring-send-zc\""
@@ -145,31 +260,105 @@ constants:
         name: CapabilityURingBundle
         type: Capability
         value: "\"uring-bundle\""
-      - doc: CapabilityBusyPoll is busy polling of the network device's queue.
-        name: CapabilityBusyPoll
-        type: Capability
-        value: "\"busy-poll\""
-      - doc: CapabilityURingZCRX is io_uring's zero-copy receive.
+      - doc: |-
+          CapabilityURingZCRX is io_uring's zero-copy receive (#980): IORING_OP_RECV_ZC
+          (58) into an area registered with IORING_REGISTER_ZCRX_IFQ (32), Linux 6.15, on
+          a ring set up with DEFER_TASKRUN and CQE32, from a NIC receive queue with
+          header and data split that the operator steered to the group's port, the
+          queue registered under CAP_NET_ADMIN. The row names the stage that stops it —
+          the kernel without the opcode, no LoopValue.ZCRX interface, or the register's
+          answer on a throwaway ring — and stays class B, receiving nothing, until its
+          BENCH.md row and threshold exist (ADR 0189, amended 2026-11-11).
         name: CapabilityURingZCRX
         type: Capability
         value: "\"uring-zcrx\""
       - doc: |-
-          CapabilityReuseportCBPF is a classic BPF program steering SO_REUSEPORT
-          connections to their loop.
+          CapabilityReuseportCBPF is a classic BPF program steering a datagram group's
+          SO_REUSEPORT sockets (#977): opted into with Steer, it hands each datagram to
+          the socket of index cpu mod n, the softirq's CPU. Refused — EPERM under a
+          seccomp filter, EINVAL before Linux 4.5 — the row reads absent and the hash
+          spread serves. The stream side, #857, is the loop's to do.
         name: CapabilityReuseportCBPF
         type: Capability
         value: "\"reuseport-cbpf\""
-      - doc: CapabilityTCPDeferAccept is TCP_DEFER_ACCEPT on the listeners.
-        name: CapabilityTCPDeferAccept
-        type: Capability
-        value: "\"tcp-defer-accept\""
       - doc: |-
           CapabilityURingMinTimeout is io_uring's minimum wait (min_wait_usec), only where
           the kernel advertises IORING_FEAT_MIN_TIMEOUT.
         name: CapabilityURingMinTimeout
         type: Capability
         value: "\"uring-min-timeout\""
+      - doc: |-
+          CapabilityTCPFastOpen is TCP_FASTOPEN on a loop group's listeners (#857): one
+          round trip saved to a repeat client where net.ipv4.tcp_fastopen allows it.
+        name: CapabilityTCPFastOpen
+        type: Capability
+        value: "\"tcp-fastopen\""
     name: CapabilityURingSendZC
+  - grouped: true
+    items:
+      - doc: |-
+          acceptEncodingMaxBytes is the longest Accept-Encoding this reads: a
+          browser's is a few dozen bytes, and the field is the peer's.
+        name: acceptEncodingMaxBytes
+        type: int
+        value: 1 << 10
+      - doc: acceptEncodingMaxElements is the most elements of one it walks.
+        name: acceptEncodingMaxElements
+        type: int
+        value: "32"
+    name: acceptEncodingMaxBytes
+  - grouped: true
+    items:
+      - doc: corsMaxAge is the longest lifetime a preflight may be given.
+        name: corsMaxAge
+        type: time.Duration
+        value: 24 * time.Hour
+      - doc: corsWildcard is the one non-origin Origins may hold.
+        name: corsWildcard
+        type: string
+        value: "\"*\""
+      - doc: corsNullOrigin is the literal a sandboxed page or a local file sends.
+        name: corsNullOrigin
+        type: string
+        value: "\"null\""
+      - doc: fieldListSeparator joins a field's values, as RFC 9110 §5.6.1 spells a list.
+        name: fieldListSeparator
+        type: string
+        value: "\", \""
+      - doc: fieldEnd closes a field line.
+        name: fieldEnd
+        type: string
+        value: "\"\\r\\n\""
+      - doc: nameValueSeparator closes a field name.
+        name: nameValueSeparator
+        type: string
+        value: "\": \""
+    name: corsMaxAge
+  - doc: The CORS response fields.
+    grouped: true
+    items:
+      - name: corsVary
+        type: string
+        value: "\"Vary\""
+      - name: corsAllowOrigin
+        type: string
+        value: "\"Access-Control-Allow-Origin\""
+      - name: corsAllowMethods
+        type: string
+        value: "\"Access-Control-Allow-Methods\""
+      - name: corsAllowHeaders
+        type: string
+        value: "\"Access-Control-Allow-Headers\""
+      - name: corsExposeHeaders
+        type: string
+        value: "\"Access-Control-Expose-Headers\""
+      - name: corsAllowCredentials
+        type: string
+        value: "\"Access-Control-Allow-Credentials\""
+      - name: corsMaxAgeField
+        type: string
+        value: "\"Access-Control-Max-Age\""
+    name: corsVary
   - grouped: true
     items:
       - doc: decimalBase is the radix used to read a bare nanosecond count.
@@ -232,6 +421,25 @@ constants:
         value: "8"
     name: HTTP1MaxAccessFields
   - doc: |-
+      HTTP1TraceLineLen sizes HTTP1ResponseValue.TraceLine: the field name, a
+      version-00 traceparent and the line's end. Its array keeps a deferred
+      answer's trace field, so it never aliases the request.
+    items:
+      - name: HTTP1TraceLineLen
+        type: int
+        value: "70"
+    name: HTTP1TraceLineLen
+  - doc: |-
+      HTTP1MaxRequestID is the longest request identifier an HTTP1RequestIDValue
+      holds, in bytes. It sizes the value's array, so an identifier is copied by
+      value and never aliases the bytes it was read from; a longer one is treated
+      as absent by the chain's RequestID link.
+    items:
+      - name: HTTP1MaxRequestID
+        type: int
+        value: "64"
+    name: HTTP1MaxRequestID
+  - doc: |-
       HTTP1DefaultHead is the head bound a zero HTTP1LimitsValue.Head selects: the
       request line, every field line and the blank line that ends them, in bytes.
     items:
@@ -279,6 +487,37 @@ constants:
         type: int
         value: "10"
     name: HTTP1MaxContentLengthDigits
+  - doc: "The bytes an HTTP1RequestIDValue may hold: the visible ASCII range."
+    grouped: true
+    items:
+      - doc: visibleFirst is '!'.
+        name: visibleFirst
+        type: byte
+        value: "0x21"
+      - doc: visibleLast is '~'.
+        name: visibleLast
+        type: byte
+        value: "0x7E"
+    name: visibleFirst
+  - grouped: true
+    items:
+      - doc: HTTP1AccessAnswered is an answer written when the handler returned.
+        name: HTTP1AccessAnswered
+        type: HTTP1AccessStage
+        value: iota
+      - doc: |-
+          HTTP1AccessDeferred is the first record of an answer deferred to the
+          batch's end; its Status is zero.
+        name: HTTP1AccessDeferred
+      - doc: |-
+          HTTP1AccessPending is an answer handed to the lane's worker: the record's
+          only one, its Status zero.
+        name: HTTP1AccessPending
+      - doc: |-
+          HTTP1AccessCompleted is a deferred answer's second record: Status and
+          BodyLen are the answer's, Elapsed the time since it was deferred.
+        name: HTTP1AccessCompleted
+    name: HTTP1AccessAnswered
   - doc: |-
       defaultMinVersion is the floor applied when IdentityParams.MinVersion is zero.
       TLS 1.3 is the default rather than 1.2 because a new deployment has no legacy
@@ -360,6 +599,41 @@ constants:
           it with LoopOptionUnsupported unless its handler or a layer honours it
           (LoopOptionHonourer), and any other group with ProtocolsRefused.
         name: OptionProtocols
+      - doc: |-
+          OptionMaxBodyBytes is MaxBodyBytes. An HTTP group served by net/http
+          honours it; a loop group refuses it with LoopOptionUnsupported, its body
+          bound being the http1 profile's own, and a datagram group with
+          PacketOptionUnsupported.
+        name: OptionMaxBodyBytes
+      - doc: |-
+          OptionBacklog is Backlog. A stream group honours it on both engines; a
+          datagram group refuses it with PacketOptionUnsupported.
+        name: OptionBacklog
+      - doc: |-
+          OptionReceiveBuffer is ReceiveBuffer. A stream group honours it on both
+          engines and a datagram group on its socket; the accepted sockets of a loop
+          group inherit the listener's.
+        name: OptionReceiveBuffer
+      - doc: OptionSendBuffer is SendBuffer, honoured as OptionReceiveBuffer is.
+        name: OptionSendBuffer
+      - doc: |-
+          OptionProxyProtocol is ProxyProtocol. A goroutine-engine TCP group honours it;
+          a loop group refuses it with LoopOptionUnsupported, a datagram group with
+          PacketOptionUnsupported.
+        name: OptionProxyProtocol
+      - doc: |-
+          OptionSteer is Steer. A datagram group honours it; every other group refuses it
+          with LoopOptionUnsupported.
+        name: OptionSteer
+      - doc: OptionKeepAlive is KeepAlive. Every stream engine honours it.
+        name: OptionKeepAlive
+      - doc: OptionUserTimeout is UserTimeout. Every stream engine honours it.
+        name: OptionUserTimeout
+      - doc: |-
+          OptionHTTP2 is HTTP2. An HTTP group honours it; a loop group refuses it with
+          LoopOptionUnsupported unless its handler honours it (the http2 adapter
+          does), a datagram group with PacketOptionUnsupported.
+        name: OptionHTTP2
     name: OptionNone
   - doc: |-
       LoopsAuto, set as LoopValue.Loops, runs one loop per GOMAXPROCS but one, at
@@ -377,7 +651,9 @@ constants:
     items:
       - doc: |-
           LoopBackendAuto takes the best backend the platform's probe reaches:
-          io_uring, then epoll on Linux, the portable backend elsewhere.
+          io_uring, then epoll on Linux, the portable backend elsewhere. On darwin
+          and the BSDs it stays portable until kqueue's paired gate holds: kqueue
+          runs there when named, LoopBackendKqueue (ADR 0222).
         name: LoopBackendAuto
         type: LoopBackend
         value: iota
@@ -391,6 +667,11 @@ constants:
           LoopBackendPortable is the default engine's accept path and goroutines,
           serialised onto one handler goroutine, on every platform.
         name: LoopBackendPortable
+      - doc: |-
+          LoopBackendKqueue is kqueue, on darwin, FreeBSD, OpenBSD, NetBSD and
+          DragonFly, after a staged probe (ADR 0222). It runs only when named:
+          LoopBackendAuto does not choose it until its paired gate holds.
+        name: LoopBackendKqueue
     name: LoopBackendAuto
   - doc: |-
       minAcceptedVersion is the oldest TLS version the domain will serve or dial.
@@ -441,6 +722,17 @@ constants:
         type: string
         value: "\"Last-Event-ID\""
     name: SSELastEventIDHeader
+  - grouped: true
+    items:
+      - doc: SteerHash spreads a group's datagrams with the kernel's 4-tuple hash.
+        name: SteerHash
+        type: SteerValue
+        value: iota
+      - doc: |-
+          SteerCPU hands each datagram to shard cpu mod n, the softirq's CPU
+          (SO_ATTACH_REUSEPORT_CBPF, Linux 4.5).
+        name: SteerCPU
+    name: SteerHash
   - doc: |-
       WSGUID is the fixed string RFC 6455 §1.3 concatenates to Sec-WebSocket-Key
       before hashing. It is a constant of the protocol, not a secret and not a
@@ -682,9 +974,40 @@ files:
       - ClientConfig
     name: client_config.go
   - decls:
+      - acceptEncodingMaxBytes
+      - CompressValue
+      - AcceptsEncoding
+      - acceptElement
+    name: compress.go
+  - decls:
       - ConnHandlerFunc
       - ConnHandlerFunc.ServeConn
     name: conn.go
+  - decls:
+      - corsMaxAge
+      - corsVary
+      - CORSValue
+      - CORSFieldValue
+      - CORSAnswerValue
+      - corsSafeMethods
+      - corsOrigin
+      - CORSPolicy
+      - NewCORSPolicy
+      - (*CORSValue).answers
+      - newCORSAnswer
+      - (*CORSValue).check
+      - (*CORSValue).originsValid
+      - validOrigin
+      - originText
+      - originByte
+      - allTokens
+      - isToken
+      - isTchar
+      - corsRefusal
+      - (*CORSPolicy).Actual
+      - (*CORSPolicy).Preflight
+      - (*CORSPolicy).lookup
+    name: cors.go
   - decls: []
     name: doc.go
   - decls:
@@ -713,6 +1036,8 @@ files:
       - HTTP1MaxFields
       - HTTP1MaxSubject
       - HTTP1MaxAccessFields
+      - HTTP1TraceLineLen
+      - HTTP1MaxRequestID
       - HTTP1DefaultHead
       - HTTP1MaxHead
       - HTTP1DefaultTarget
@@ -726,16 +1051,29 @@ files:
       - foldEqual
       - foldByte
       - HTTP1ResponseValue
+      - HTTP1FileValue
+      - LoopFileSpanValue
+      - HTTP1StreamValue
+      - HTTP1StreamValue.Send
+      - HTTP1StreamValue.End
+      - HTTP1StreamValue.Deadline
       - HTTP1HandlerFunc
       - HTTP1HandlerFunc.ServeHTTP1
     name: http1.go
   - decls:
+      - visibleFirst
+      - HTTP1AccessAnswered
       - HTTP1AuthValue
       - (*HTTP1AuthValue).SetSubject
       - (*HTTP1AuthValue).Subject
       - (*HTTP1AuthValue).SetClaims
       - (*HTTP1AuthValue).Claims
       - (*HTTP1AuthValue).Reset
+      - HTTP1RequestIDValue
+      - (*HTTP1RequestIDValue).Set
+      - (*HTTP1RequestIDValue).Bytes
+      - (*HTTP1RequestIDValue).Reset
+      - HTTP1AccessStage
       - HTTP1AccessValue
     name: http1_auth.go
   - decls:
@@ -769,6 +1107,10 @@ files:
       - OptionKind.String
     name: loop.go
   - decls:
+      - LoopHTTPValue
+      - HTTPCountsValue
+    name: loop_http.go
+  - decls:
       - LoopLayer
       - NewLoopLayer
       - LoopLayer.Next
@@ -780,11 +1122,15 @@ files:
       - LoopLayer.OnClose
       - LoopLayer.Honours
       - LoopLayer.OnStart
+      - LoopLayer.OnDrain
     name: loop_layer.go
   - decls:
       - LoopJobValue
       - LoopOutboundValue
     name: loop_outbound.go
+  - decls:
+      - LoopPeerValue
+    name: loop_peer.go
   - decls:
       - LoopRingStateValue
       - LoopStateValue
@@ -795,6 +1141,7 @@ files:
       - LoopBackendAuto
       - LoopBackend.String
       - LoopValue
+      - ZCRXValue
     name: loop_value.go
   - decls:
       - minAcceptedVersion
@@ -823,6 +1170,9 @@ files:
       - _#2
     name: policy_compliance.go
   - decls:
+      - ProxyProtocolValue
+    name: proxy.go
+  - decls:
       - ResponseValue
       - RequestValue
     name: response.go
@@ -850,6 +1200,10 @@ files:
       - FallbacksValue
       - PlatformValue
     name: state_report.go
+  - decls:
+      - SteerValue
+      - SteerHash
+    name: steer.go
   - decls:
       - TimeoutsValue
     name: timeouts.go
@@ -883,6 +1237,59 @@ files:
       - wrapAs
     name: wrap.go
 functions:
+  - name: AcceptsEncoding
+    params: value, coding string
+    results: bool
+  - doc: |-
+      acceptElement splits one Accept-Encoding element into its coding and whether
+      its quality is positive.
+    name: acceptElement
+    params: element string
+    results: token string, quality bool
+  - name: NewCORSPolicy
+    params: cfg CORSValue
+    results: "*CORSPolicy, error"
+  - doc: newCORSAnswer spells fields as lines once, keeping both forms.
+    name: newCORSAnswer
+    params: fields []CORSFieldValue
+    results: CORSAnswerValue
+  - doc: |-
+      validOrigin reports whether s is one serialized origin (RFC 6454 §6.2):
+      a lower-case scheme, "://", a lower-case host, an optional port, and nothing
+      else. Anything looser could never equal what a browser sends, and "null" is
+      what an attacker's sandboxed page sends.
+    name: validOrigin
+    params: s string
+    results: bool
+  - doc: |-
+      originText reports whether s holds only a lower-case origin's bytes: a letter,
+      a digit, '+', '-' or '.', and, in the authority, ':' and the brackets of an
+      IPv6 literal.
+    name: originText
+    params: s string, authority bool
+    results: bool
+  - doc: |-
+      originByte reports whether c is one of an origin's bytes: the letters a to z,
+      the digits, '+', '-' and '.', and, in the authority, ':', '[' and ']'.
+    name: originByte
+    params: c byte, authority bool
+    results: bool
+  - doc: allTokens reports whether every name is an RFC 9110 token.
+    name: allTokens
+    params: names []string
+    results: bool
+  - doc: isToken reports whether s is a non-empty RFC 9110 token.
+    name: isToken
+    params: s string
+    results: bool
+  - doc: isTchar reports whether c is an RFC 9110 tchar.
+    name: isTchar
+    params: c byte
+    results: bool
+  - doc: corsRefusal names what the policy refused.
+    name: corsRefusal
+    params: option string
+    results: error
   - name: WithDrainSignal
     params: ctx context.Context, draining <-chan struct{}
     results: context.Context
@@ -952,13 +1359,16 @@ functions:
     results: error
 imports:
   context: context
+  corehttp2: github.com/kitsunium/sdk/internal/core/net/http2
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   http: net/http
+  io: io
   slices: slices
   strconv: strconv
   strings: strings
   time: time
   tls: crypto/tls
+  trace: github.com/kitsunium/sdk/internal/core/observe/trace
   x509: crypto/x509
 package:
   docFile: doc.go
@@ -1092,6 +1502,27 @@ types:
         type: map[string]string
     kind: struct
     name: ClientConfig
+  - fields:
+      - doc: |-
+          Types lists the Content-Types, without parameters, that may be compressed.
+          Empty selects text/plain, text/css, text/javascript, text/csv, text/xml,
+          application/json, application/javascript, application/xml, image/svg+xml
+          and application/wasm. text/html is not among them: a page that reflects a
+          request's input beside a secret is what BREACH reads, and a caller who
+          compresses HTML names it here, knowing it does not do that.
+        name: Types
+        type: "[]string"
+      - doc: Level is gzip's level, 1 to 9 or -1 for its default; zero selects -1.
+        name: Level
+        type: int
+      - doc: |-
+          MinBytes is the smallest body compressed: a smaller one is sent as it is,
+          as its gzip container would cost more than it saves. Zero selects 1024; a
+          negative value is refused.
+        name: MinBytes
+        type: int
+    kind: struct
+    name: CompressValue
   - kind: named
     methods:
       - name: ServeConn
@@ -1100,6 +1531,115 @@ types:
         results: error
     name: ConnHandlerFunc
     underlying: func(ctx context.Context, c Conn) error
+  - fields:
+      - doc: |-
+          Origins are the exact origins allowed, as a browser serializes them:
+          scheme://host[:port], in lower case, with no path. "*" allows any origin,
+          alone in the list and without Credentials. "null" is refused: it is what a
+          sandboxed page and a local file both send.
+        name: Origins
+        type: "[]string"
+      - doc: |-
+          Methods are the methods a preflight may ask for; empty selects the
+          CORS-safelisted GET, HEAD and POST, never every method.
+        name: Methods
+        type: "[]string"
+      - doc: |-
+          Headers are the request fields a preflight may ask for; empty allows only
+          the CORS-safelisted fields.
+        name: Headers
+        type: "[]string"
+      - doc: ExposeHeaders are the response fields a page may read.
+        name: ExposeHeaders
+        type: "[]string"
+      - doc: |-
+          Credentials lets a page send cookies and read the answer. It is refused
+          with "*": that combination publishes every user's answers to every site.
+        name: Credentials
+        type: bool
+      - doc: |-
+          MaxAge is how long a browser may keep a preflight's answer, clamped to 24
+          hours; zero writes no Access-Control-Max-Age, negative is refused.
+        name: MaxAge
+        type: DurationValue
+    kind: struct
+    methods:
+      - doc: answers builds what origin is answered.
+        name: answers
+        params: origin string, methods []string
+        recv: c *CORSValue
+        results: "*corsOrigin"
+      - doc: check refuses what the policy cannot honour.
+        name: check
+        params: methods []string
+        recv: c *CORSValue
+        results: error
+      - doc: |-
+          originsValid reports whether Origins is a list the policy can compare: one
+          exact origin after another, each once, or "*" alone without Credentials.
+        name: originsValid
+        recv: c *CORSValue
+        results: bool
+    name: CORSValue
+  - fields:
+      - doc: Name is the field name.
+        name: Name
+        type: string
+      - doc: Value is the field value.
+        name: Value
+        type: string
+    kind: struct
+    name: CORSFieldValue
+  - fields:
+      - doc: "Lines are the field lines, each \"Name: value\\r\\n\", for the http1 codec."
+        name: Lines
+        type: "[]byte"
+      - doc: Fields are the fields by name, for net/http's Header.
+        name: Fields
+        type: "[]CORSFieldValue"
+    kind: struct
+    name: CORSAnswerValue
+  - doc: corsOrigin is what one origin is answered, built once.
+    fields:
+      - doc: actual answers a request that is not a preflight.
+        name: actual
+        type: CORSAnswerValue
+      - doc: preflight answers a preflight.
+        name: preflight
+        type: CORSAnswerValue
+    kind: struct
+    name: corsOrigin
+  - fields:
+      - doc: |-
+          origins finds an exact origin's answers; a lookup by a []byte key converts
+          nothing.
+        name: origins
+        type: map[string]*corsOrigin
+      - doc: any answers every origin when the policy is "*"; nil otherwise.
+        name: any
+        type: "*corsOrigin"
+      - doc: methods are the methods a preflight may ask for.
+        name: methods
+        type: map[string]struct{}
+      - doc: "vary answers an origin not listed: Vary: Origin alone."
+        name: vary
+        type: CORSAnswerValue
+    kind: struct
+    methods:
+      - name: Actual
+        params: origin []byte
+        recv: p *CORSPolicy
+        results: CORSAnswerValue
+      - name: Preflight
+        params: origin, method []byte
+        recv: p *CORSPolicy
+        results: CORSAnswerValue
+      - doc: lookup returns origin's answers, nil when it is not allowed.
+        name: lookup
+        params: origin []byte
+        recv: p *CORSPolicy
+        results: "*corsOrigin"
+    name: CORSPolicy
   - doc: |-
       drainSignalKey types the context key so no other package can collide with it
       and no string constant can be typo'd into a silent miss.
@@ -1260,6 +1800,59 @@ types:
           request's credentials and filled Auth. Parse resets it to false.
         name: Authenticated
         type: bool
+      - doc: |-
+          Trace is the request's W3C trace context, as the http1 chain's Trace link
+          read it from the traceparent field: invalid (IsValid false) when no such
+          link ran, when the field is absent, or when it is malformed, a request
+          being served either way (§4.3). tracestate is not read: a request carries
+          the 25 bytes of the context and no list. Parse resets it.
+        name: Trace
+        type: trace.SpanContextValue
+      - doc: |-
+          Scheme is the :scheme pseudo-field of an HTTP/2 request, empty on HTTP/1.1.
+          An HTTP/2 codec maps a request before Canonical (ADR 0220): Method from
+          :method; Target from :path, origin-form or "*" (an absolute-form :path is
+          RefusalTargetForm); Host from :authority, else the Host field, both present
+          and different RefusalTargetHost, HasHost set; Fields the regular fields in
+          arrival order with HPACK's lowercase names; Authorization, ContentLength and
+          Body as on HTTP/1.1; Close, HeadLen and Consumed zero.
+        name: Scheme
+        type: "[]byte"
+      - doc: Proto is the request's HTTP major version, 1 or 2.
+        name: Proto
+        type: uint8
+      - doc: Stream is the HTTP/2 stream the request arrived on, zero on HTTP/1.1.
+        name: Stream
+        type: uint32
+      - doc: |-
+          ID identifies the request on its lane — the lane in the top 16 bits, a
+          counter from 1 in the rest — set by the loop adapter before the handler
+          runs, so two lanes never hold the same one. It is a number the client
+          never sees, what a sampling decision or a slow-request record is keyed on.
+          Parse leaves it as it is; outside the loop adapter it is what the caller
+          set.
+        name: ID
+        type: uint64
+      - doc: |-
+          Conn names the connection the request arrived on, set by the loop adapter
+          before the handler runs: what a handler keeps to find, at
+          HTTP1Streamer.OnStreamOpen, the stream this request opened. Parse leaves it
+          as it is.
+        name: Conn
+        type: LoopConnRef
+      - doc: |-
+          RoutePrefix is how many leading bytes of Path the Prefix route a router link
+          matched covers, zero for an exact route or none: what a file tree strips to
+          find the name under its route. Parse resets it; only a link sets it.
+        name: RoutePrefix
+        type: int
+      - doc: |-
+          RequestID is the request's correlation identifier, as the http1 chain's
+          RequestID link accepted it from X-Request-Id or minted it: copied by
+          value, so a handler that needs it past the batch copies this value into
+          its own job table. Parse resets it; it is empty when no such link ran.
+        name: RequestID
+        type: HTTP1RequestIDValue
     kind: struct
     methods:
       - name: Field
@@ -1312,8 +1905,107 @@ types:
           the request's bytes do not outlive the batch.
         name: Job
         type: uint64
+      - doc: |-
+          TraceLine holds the traceparent field line the http1 chain's Trace link
+          writes on this answer, Header pointing at it; a value, so a deferred
+          answer keeps it past the request. Only the link sets it.
+        name: TraceLine
+        type: "[HTTP1TraceLineLen]byte"
+      - doc: |-
+          RequestID is the identifier the codec writes as an X-Request-Id field after
+          Header, when set: a value, so a deferred or a pending answer keeps it past
+          the request, and a field written per request needs no slice to outlive the
+          batch. The chain's RequestID link sets it.
+        name: RequestID
+        type: HTTP1RequestIDValue
+      - doc: |-
+          Stream answers with a response delimited by the connection's close (RFC 9112
+          §6.3 item 8): the codec writes the status line and the fields with
+          Connection: close and no Content-Length, refusing HEAD, 204 and 304 with
+          HTTP1ResponseInvalid, and the handler keeps writing the body through
+          HTTP1Streamer. Requests pipelined behind it are dropped with the connection.
+          A Stream with Defer or Pending, behind a held answer, or with no
+          HTTP1Streamer in the handler is answered 500 and the connection closed. It
+          does not make a chunked answer: ADR 0186 §D6 still refuses every coding.
+        name: Stream
+        type: bool
+      - doc: |-
+          Upgrade answers 101 Switching Protocols: the codec writes the status line,
+          Connection: Upgrade and Header — which holds the protocol's own fields —
+          and no length, then every later byte of the connection goes to
+          HTTP1Upgrader. It carries no body; with one, or with no HTTP1Upgrader in the
+          handler, the answer is 500 and the connection closed.
+        name: Upgrade
+        type: bool
+      - doc: |-
+          RetryAfter, when above zero, is written by the codec as a Retry-After field
+          in seconds after Header: a value, so a refusal needs no slice of its own.
+          The chain's RateLimit link sets it.
+        name: RetryAfter
+        type: int
+      - doc: |-
+          CORS holds the field lines the chain's CORS link gives this answer, written
+          by the codec after Header: its own slot, so the link costs nothing beside a
+          Headers link, and its bytes are the policy's, shared and read only.
+        name: CORS
+        type: "[]byte"
+      - doc: |-
+          File, set by a pending answer's worker, makes the answer's body a file: the
+          codec writes the head with Content-Length File.Len and no body bytes, and
+          sends the file behind it. A HEAD answer closes File.R unsent. With Body, on a
+          204 or a 304, or outside a worker's answer it is answered 500 and the
+          connection closed.
+        name: File
+        type: HTTP1FileValue
     kind: struct
     name: HTTP1ResponseValue
+  - fields:
+      - doc: |-
+          R reads the file: *os.File where a descriptor is to be sent, or any other
+          io.ReaderAt (an embed.FS file) through the copy path. Nil means no file.
+        name: R
+        type: io.ReaderAt
+      - doc: Off is the offset of the first byte to send.
+        name: "Off"
+        type: int64
+      - doc: Len is how many bytes to send; what Content-Length says.
+        name: Len
+        type: int64
+    kind: struct
+    name: HTTP1FileValue
+  - fields:
+      - doc: FD is the open descriptor, read and never closed by the engine.
+        name: FD
+        type: int
+      - doc: Off is the offset of the first byte to send.
+        name: "Off"
+        type: int64
+      - doc: Len is how many bytes to send.
+        name: Len
+        type: int64
+    kind: struct
+    name: LoopFileSpanValue
+  - fields:
+      - doc: IO is the loop the connection lives on.
+        name: IO
+        type: LoopIO
+      - doc: Ref is the connection.
+        name: Ref
+        type: LoopConnRef
+    kind: struct
+    methods:
+      - name: Send
+        params: p []byte
+        recv: s HTTP1StreamValue
+        results: error
+      - name: End
+        recv: s HTTP1StreamValue
+        results: error
+      - name: Deadline
+        params: d time.Duration
+        recv: s HTTP1StreamValue
+        results: error
+    name: HTTP1StreamValue
   - kind: named
     methods:
       - name: ServeHTTP1
@@ -1350,6 +2042,28 @@ types:
         recv: a *HTTP1AuthValue
     name: HTTP1AuthValue
   - fields:
+      - doc: id holds the identifier's bytes, the first n of them.
+        name: id
+        type: "[HTTP1MaxRequestID]byte"
+      - doc: n is the identifier's length.
+        name: "n"
+        type: uint8
+    kind: struct
+    methods:
+      - name: Set
+        params: b []byte
+        recv: v *HTTP1RequestIDValue
+        results: bool
+      - name: Bytes
+        recv: v *HTTP1RequestIDValue
+        results: "[]byte"
+      - name: Reset
+        recv: v *HTTP1RequestIDValue
+    name: HTTP1RequestIDValue
+  - kind: named
+    name: HTTP1AccessStage
+    underlying: uint8
+  - fields:
       - doc: Lane is the request's lane.
         name: Lane
         type: int
@@ -1373,9 +2087,39 @@ types:
       - doc: Authenticated reports whether an authenticating link verified the request.
         name: Authenticated
         type: bool
-      - doc: Deferred reports whether the answer was deferred to the batch's end.
-        name: Deferred
-        type: bool
+      - doc: |-
+          TraceID is the trace the request joined, read from its traceparent by a
+          Trace link in the same chain; the zero value without one.
+        name: TraceID
+        type: trace.TraceID
+      - doc: |-
+          Stage says what the record is: an answer written, one deferred or pending
+          and so with no status yet, or a deferred answer's completion.
+        name: Stage
+        type: HTTP1AccessStage
+      - doc: |-
+          ID is the request's number (HTTP1RequestValue.ID): what a sampling decision
+          or a slow-request record is keyed on, the same on both records of a deferred
+          answer.
+        name: ID
+        type: uint64
+      - doc: |-
+          Elapsed is the time from the batch's start to this record, the wait behind
+          the batch's earlier requests included; on a deferred answer's second record
+          the time since it was deferred.
+        name: Elapsed
+        type: DurationValue
+      - doc: |-
+          RequestID is the request's correlation identifier, the one its answer
+          carries in X-Request-Id; empty without a RequestID link in the chain.
+        name: RequestID
+        type: HTTP1RequestIDValue
+      - doc: Proto is the request's HTTP major version, 1 or 2.
+        name: Proto
+        type: uint8
+      - doc: Stream is the HTTP/2 stream the request arrived on, zero on HTTP/1.1.
+        name: Stream
+        type: uint32
       - doc: NFields is how many entries of Fields the record filled.
         name: NFields
         type: int
@@ -1547,8 +2291,27 @@ types:
           like a complete message and the handler cannot tell the difference.
         name: MaxPacketSize
         type: int
-      - doc: Backlog is the listen backlog depth where the platform honours it.
+      - doc: |-
+          Backlog is the depth the kernel queues established connections at, before the
+          accept loop takes them (#978). Zero keeps the standard library's, the host's
+          somaxconn; the kernel clamps a larger value to it, and State says so. A
+          stream group sets it with the Backlog option, on both engines; Windows
+          keeps the platform's own.
         name: Backlog
+        type: int
+      - doc: |-
+          ReceiveBuffer is the receive buffer, in bytes, the kernel is asked for on
+          the group's sockets, before bind (SO_RCVBUF): a datagram group's, a stream
+          group's listeners and so the sockets they accept (#973). Zero keeps the
+          kernel's default. The kernel doubles the value and clamps it to rmem_max;
+          State reports what it holds, in ListenerStateValue.ReceiveBuffer, and a
+          clamp is no fault.
+        name: ReceiveBuffer
+        type: int
+      - doc: |-
+          SendBuffer is the send buffer, in bytes, asked as ReceiveBuffer is
+          (SO_SNDBUF, clamped to wmem_max).
+        name: SendBuffer
         type: int
       - doc: |-
           Shards is the number of independent listeners to open on one address with
@@ -1588,6 +2351,30 @@ types:
     name: OptionKind
     underlying: uint8
   - fields:
+      - doc: Protocols is the group's Protocols list, nil when the group gave none.
+        name: Protocols
+        type: "[]string"
+      - doc: HTTP2Off is set when KITSUNIUM_NET_DISABLE switched http2-loop off.
+        name: HTTP2Off
+        type: bool
+      - doc: HTTP2 is the HTTP2 option's bounds, the zero value when the group gave none.
+        name: HTTP2
+        type: corehttp2.LimitsValue
+    kind: struct
+    name: LoopHTTPValue
+  - fields:
+      - doc: HTTP1Requests counts the HTTP/1.1 requests served.
+        name: HTTP1Requests
+        type: uint64
+      - doc: HTTP2Requests counts the HTTP/2 requests served.
+        name: HTTP2Requests
+        type: uint64
+      - doc: HTTP2Errors counts the HTTP/2 errors by type, a row for each counted.
+        name: HTTP2Errors
+        type: "[]corehttp2.ErrorCountValue"
+    kind: struct
+    name: HTTPCountsValue
+  - fields:
       - doc: next is the handler the layer wraps.
         name: next
         type: LoopHandler
@@ -1622,6 +2409,9 @@ types:
       - name: OnStart
         params: lanes int
         recv: l LoopLayer
+      - name: OnDrain
+        params: io LoopIO, ref LoopConnRef
+        recv: l LoopLayer
     name: LoopLayer
   - fields:
       - doc: Ref is the connection the job answers.
@@ -1647,6 +2437,21 @@ types:
         type: int
     kind: struct
     name: LoopOutboundValue
+  - fields:
+      - doc: UID is the peer's user id.
+        name: UID
+        type: uint32
+      - doc: GID is the peer's group id.
+        name: GID
+        type: uint32
+      - doc: PID is the peer's process id.
+        name: PID
+        type: uint32
+      - doc: Verified is true when the kernel named the peer.
+        name: Verified
+        type: bool
+    kind: struct
+    name: LoopPeerValue
   - fields:
       - doc: Loop is the loop's index in its group.
         name: Loop
@@ -1697,6 +2502,35 @@ types:
           still had completions to reap (ADR 0206).
         name: BatchesCut
         type: uint64
+      - doc: BytesIn is the number of bytes the ring received and delivered to the handler.
+        name: BytesIn
+        type: uint64
+      - doc: |-
+          BytesOut is the number of bytes the ring sent: the answers the kernel took, a short
+          send counted as it left.
+        name: BytesOut
+        type: uint64
+      - doc: |-
+          OutputRefused is the number of Writes the ring refused with LoopOutputFull: the
+          connection's output ceiling, or the slab's budget, reached.
+        name: OutputRefused
+        type: uint64
+      - doc: |-
+          SpillClosed is the number of connections the ring closed with LoopSpillFull:
+          unconsumed input past SpillCap, or the slab's budget spent.
+        name: SpillClosed
+        type: uint64
+      - doc: Timeouts is the number of deadlines of SetDeadline that fired (OnTimeout calls).
+        name: Timeouts
+        type: uint64
+      - doc: IdleClosed is the number of connections the ring closed for IdleTimeout.
+        name: IdleClosed
+        type: uint64
+      - doc: |-
+          PendingOutput is the bytes written and not yet sent, a gauge: what the ring's
+          connections still owe their peers at the last batch's end.
+        name: PendingOutput
+        type: int64
       - doc: |-
           Draining reports a ring the watchdog judged sick: it accepts nothing new
           and closes its connections as they fall idle.
@@ -1761,6 +2595,30 @@ types:
           answered for them. Zero when the group offloads nothing.
         name: OutboundRefused
         type: uint64
+      - doc: |-
+          SlabInUse is the bytes of the spill and output chunks every loop's slab holds at
+          the last batches' end, chunk sizes counted, a gauge.
+        name: SlabInUse
+        type: int64
+      - doc: |-
+          SlabMapped is the bytes every loop's slab has mapped outside the Go heap. A size
+          class keeps one wholly free arena and unmaps the others on the loop's tick
+          (#809), so it falls back after a burst.
+        name: SlabMapped
+        type: int64
+      - doc: |-
+          SlabBudget is the ceiling of SlabInUse, every loop's summed: past it a Write is
+          refused and a spill closes its connection, by name, never by the kernel's OOM
+          killer.
+        name: SlabBudget
+        type: int64
+      - doc: |-
+          SlabBudgetSource says where each loop's slab budget came from (#809):
+          "explicit" for LoopValue.SlabBudget, "derived" from the cgroup allowance
+          memlimit read, "default" for 128 MiB a loop; empty on the portable
+          backend, which has no slab.
+        name: SlabBudgetSource
+        type: string
       - doc: RingStates reports every ring of every loop, loop by loop.
         name: RingStates
         type: "[]LoopRingStateValue"
@@ -1813,7 +2671,10 @@ types:
       - doc: |-
           SpillCap is the most unconsumed input, in bytes, one connection may hold
           between OnData calls. Past it the connection is closed with
-          LoopSpillFull. Zero selects the domain default.
+          LoopSpillFull. Zero selects the domain default. It is the ceiling on a
+          request's head and body together for an http1 handler that takes the
+          body whole (a LoopSpillChecker adapts to it at Start); an
+          HTTP1BodyReader's spill holds only the head.
         name: SpillCap
         type: int
       - doc: |-
@@ -1883,8 +2744,92 @@ types:
           portable backend ignore it.
         name: BatchBudget
         type: DurationValue
+      - doc: |-
+          SendZCMin is the smallest flight an io_uring loop sends zero-copy, in
+          bytes, once the group opted into uring-send-zc (#969): a flight of at least
+          that many bytes leaves by IORING_OP_SEND_ZC and its slab chunk stays the
+          kernel's until the notification says the pages are free, a shorter one by
+          IORING_OP_SEND as before. Zero selects 16 KiB; a negative value is refused
+          with LoopValueInvalid. epoll and the portable backend ignore it, and so
+          does a group that did not opt in.
+        name: SendZCMin
+        type: int
+      - doc: |-
+          Affinity pins each loop's thread to one CPU, Affinity[i] for loop i, with
+          sched_setaffinity once the thread is locked (loop-affinity, class A-code,
+          #857). Nil pins nothing; otherwise it names one CPU per loop, from 0 to
+          8191, or Start refuses it with LoopValueInvalid. A CPU the kernel refuses —
+          offline, outside the process's set, or a seccomp filter — leaves that loop
+          unpinned, serving, and the row missing, a fault. With Shards(0) and
+          so-incoming-cpu opted into, each loop's listener asks the kernel for the
+          connections its CPU received. The portable backend ignores it.
+        name: Affinity
+        type: "[]int"
+      - doc: |-
+          NotsentLowat is TCP_NOTSENT_LOWAT, in bytes, on the group's TCP listeners,
+          inherited by each accepted socket (tcp-notsent-lowat, class A-code, Linux
+          3.12, #857): the kernel takes at most that many unsent bytes, so a write
+          is short and OnWritable fires once the peer drained, not once megabytes
+          of socket buffer emptied. Zero sets nothing unless Capabilities opts into
+          tcp-notsent-lowat, which selects 128 KiB; a positive value opts in;
+          negative is refused with LoopValueInvalid. The portable backend ignores it.
+        name: NotsentLowat
+        type: int
+      - doc: |-
+          SlabBudget is the most payload memory, in bytes, one loop maps outside the
+          Go heap for its connections' spill and output together (#809): past it a
+          Write is refused with LoopOutputFull and a spill closes its connection
+          with LoopSpillFull. Zero derives it from the cgroup allowance the server
+          reads with memlimit, a quarter of the allowance shared by the loops and
+          at most 128 MiB, and is 128 MiB where no allowance is found; negative is
+          refused with LoopValueInvalid. A size class's wholly free arenas past the
+          first are unmapped on the loop's tick. The portable backend ignores it.
+        name: SlabBudget
+        type: int
+      - doc: |-
+          BusyPoll is busy-poll's window (class A-code, #979): how long a loop's wait
+          polls the device queues of its sockets before it sleeps, io_uring's
+          busy_poll_to and epoll's busy_poll_usecs, rounded up to whole
+          microseconds. Zero selects 50 µs once Capabilities opts into busy-poll; it
+          opts nothing in by itself. Negative, or past one second, is refused with
+          LoopValueInvalid. The portable backend ignores it.
+        name: BusyPoll
+        type: DurationValue
+      - doc: |-
+          BusyPollBudget is how many packets one poll of busy-poll may take, epoll's
+          busy_poll_budget: zero is the kernel's, and past 64 the kernel asks for
+          CAP_NET_ADMIN, its refusal reading the row missing. Negative, or past
+          65535, is refused with LoopValueInvalid. io_uring always takes the
+          kernel's; the portable backend ignores it.
+        name: BusyPollBudget
+        type: int
+      - doc: |-
+          ZCRX names the NIC receive queue uring-zcrx would serve (class B, #980). A
+          zero Interface keeps the row off. While the row is class B a named queue
+          is only probed — registered on a throwaway ring that is closed at once,
+          the kernel's answer in the row's reason — and no byte is received through
+          it.
+        name: ZCRX
+        type: ZCRXValue
     kind: struct
     name: LoopValue
+  - fields:
+      - doc: Interface is the network interface's name; empty names none.
+        name: Interface
+        type: string
+      - doc: |-
+          Queue is the index of the interface's receive queue; negative is refused
+          with LoopValueInvalid.
+        name: Queue
+        type: int
+      - doc: |-
+          AreaBytes is the size of the area the kernel lands payloads in, rounded up
+          to whole pages: zero selects 4 MiB, negative is refused with
+          LoopValueInvalid.
+        name: AreaBytes
+        type: int
+    kind: struct
+    name: ZCRXValue
   - kind: named
     name: Middleware
     typeParams: H any
@@ -1912,6 +2857,19 @@ types:
         results: error
     name: PolicyFunc
     underlying: func(req RequestValue) error
+  - fields:
+      - doc: |-
+          Trusted lists the CIDRs of the balancers. Empty, or a range that does not
+          parse, fails Start with OptionValueInvalid.
+        name: Trusted
+        type: "[]string"
+      - doc: |-
+          Timeout bounds the header's arrival, on the server's clock. Zero selects
+          3 s; a negative value fails Start with OptionValueInvalid.
+        name: Timeout
+        type: DurationValue
+    kind: struct
+    name: ProxyProtocolValue
   - fields:
       - doc: |-
           Status is the HTTP status code. It is set even when the call also returns
@@ -2023,6 +2981,13 @@ types:
           over. A count that keeps rising is a server that cannot accept.
         name: AcceptBackoffs
         type: uint64
+      - doc: |-
+          SuppressedLogs counts the lines of net/http's own log the server did not
+          write: over the cap of ten records a second, or with no logger to write
+          them to (WithLogger). A count that rises is a port being probed, or a
+          handler that panics.
+        name: SuppressedLogs
+        type: uint64
       - doc: Datagrams counts what the batched datagram paths drop (ADR 0192).
         name: Datagrams
         type: DatagramStateValue
@@ -2097,6 +3062,74 @@ types:
           the first attempt bound.
         name: BindWait
         type: DurationValue
+      - doc: H2C reports an HTTP group serving HTTP/2 in cleartext, by prior knowledge alone.
+        name: H2C
+        type: bool
+      - doc: |-
+          HTTP2 is the HTTP/2 bounds the group serves with, resolved: a group given
+          none reads ADR 0195's numbers. Nil for a listener that serves no HTTP.
+        name: HTTP2
+        type: "*corehttp2.LimitsValue"
+      - doc: |-
+          MaxBodyBytes is the request-body bound an HTTP group served by net/http
+          holds on this listener: the default's 1 MiB, the option's value, or -1
+          for none. Zero on every other listener, which has no such bound.
+        name: MaxBodyBytes
+        type: int64
+      - doc: |-
+          Backlog is the depth of the listener's accept queue as applied: the
+          Backlog option's value, or the host's somaxconn for the default, and the
+          clamp when the host's somaxconn is below what was asked (Degraded, with
+          its reason). Zero for an adopted socket, whose queue the supervisor sized,
+          and for a datagram socket.
+        name: Backlog
+        type: int
+      - doc: |-
+          ReceiveBuffer is the socket's receive buffer as the kernel holds it,
+          read back after bind, or after the group's size was applied to an
+          adopted socket (SO_RCVBUF): on Linux twice what was asked, clamped to
+          rmem_max, the kernel's default when nothing was asked. Zero where the
+          platform cannot say. A clamp is reported here and is no fault.
+        name: ReceiveBuffer
+        type: int
+      - doc: |-
+          SendBuffer is the socket's send buffer as the kernel holds it, read back
+          as ReceiveBuffer is (SO_SNDBUF, wmem_max).
+        name: SendBuffer
+        type: int
+      - doc: |-
+          ProxyRefused counts the connections a ProxyProtocol group refused — peers
+          outside Trusted, and headers malformed or not finished within Timeout. It
+          is the group's count, on each of its listeners' rows.
+        name: ProxyRefused
+        type: uint64
+      - doc: |-
+          HTTP1Requests counts the HTTP/1.1 requests the group served since Start
+          (#966): one count per request on net/http's engine, one per batch on the
+          loop engine, whose adapter counts them. It is the group's count, on each
+          of its listeners' rows; zero on a group that serves no HTTP.
+        name: HTTP1Requests
+        type: uint64
+      - doc: HTTP2Requests counts the HTTP/2 requests the group served, as HTTP1Requests does.
+        name: HTTP2Requests
+        type: uint64
+      - doc: |-
+          HTTP2Errors counts the group's HTTP/2 protocol errors by type, a row for
+          each type counted at least once, in the vocabulary's order: on net/http's
+          engine what its CountError reports, an unanswered PING included; on the
+          loop engine each RST_STREAM and GOAWAY its codec answers with an error
+          and each header list past its bound. net/http counts neither a header
+          list past MaxHeaderBytes, which it answers 431 itself, nor a frame past
+          its frame bound.
+        name: HTTP2Errors
+        type: "[]corehttp2.ErrorCountValue"
+      - doc: |-
+          ALPN is the protocol list a TLS HTTP group's listeners offer, in the
+          order offered (#964): the group's versions intersected with its
+          identity's NextProtos, on net/http's engine and on a TLS loop codec
+          group alike. Nil for a group that negotiates nothing.
+        name: ALPN
+        type: "[]string"
     kind: struct
     name: ListenerStateValue
   - fields:
@@ -2117,6 +3150,24 @@ types:
           a batch that did not leave: Reply had already reported them sent.
         name: ReplyFailures
         type: uint64
+      - doc: |-
+          KernelDrops is the number of datagrams the kernel dropped before a read
+          could see them, for want of room in a socket's receive buffer: the last
+          SO_RXQ_OVFL count of each batched UDP socket, summed (#973). A gauge of the
+          kernel's own counter, read from the messages that arrive, so a drop after
+          the last message is seen with the next one. The kernel counts what it
+          refused to queue, so under UDP GRO a coalesced message of N datagrams is
+          one drop: the count then stands below the datagrams lost. Zero where the
+          socket is not batched, and under KITSUNIUM_NET_DISABLE=udp-rxq-ovfl.
+        name: KernelDrops
+        type: uint64
+      - doc: |-
+          Capabilities reports the optional kernel capabilities of the datagram
+          sockets — udp-rxq-ovfl and udp-pktinfo, and uring-multishot-recvmsg for the
+          groups PacketGroup.HandleLoop serves — as a loop group's do: on, absent, disabled by the
+          operator, or unprobed while no batched socket exists.
+        name: Capabilities
+        type: "[]CapabilityValue"
     kind: struct
     name: DatagramStateValue
   - fields:
@@ -2189,6 +3240,9 @@ types:
         type: string
     kind: struct
     name: PlatformValue
+  - kind: named
+    name: SteerValue
+    underlying: uint8
   - fields:
       - doc: Read bounds one read from the peer.
         name: Read
@@ -2205,6 +3259,18 @@ types:
           the negotiation happens before any handler exists to notice it, so it
           falls back to the domain's default instead.
         name: Handshake
+        type: DurationValue
+      - doc: |-
+          KeepAlive is the idle time before the first keepalive probe of an accepted
+          socket, and the interval between probes: zero is 15 s, the standard
+          library's, and negative sets none.
+        name: KeepAlive
+        type: DurationValue
+      - doc: |-
+          UserTimeout is TCP_USER_TIMEOUT, the time sent output may stay
+          unacknowledged before the kernel closes the connection: zero is Write's
+          bound when one is set, otherwise none.
+        name: UserTimeout
         type: DurationValue
     kind: struct
     name: TimeoutsValue
@@ -2250,6 +3316,11 @@ types:
     name: WSOpCode
     underlying: byte
 vars:
+  - doc: corsSafeMethods are the CORS-safelisted methods, a policy's default.
+    items:
+      - name: corsSafeMethods
+        value: "[]string{\"GET\", \"HEAD\", \"POST\"}"
+    name: corsSafeMethods
   - doc: |-
       The func adapters must satisfy the ports they exist to adapt; an adapter that
       drifts from its interface is useless and the drift is silent until call time.
@@ -2278,6 +3349,9 @@ vars:
         value: LoopLayer{}
       - name: _
         type: LoopStarter
+        value: LoopLayer{}
+      - name: _
+        type: LoopDrainer
         value: LoopLayer{}
     name: _
   - doc: |-
@@ -2310,6 +3384,15 @@ vars:
           	OptionLoopMiddleware:    "UseLoop",
           	OptionBatchReplies:      "BatchReplies",
           	OptionProtocols:         "Protocols",
+          	OptionMaxBodyBytes:      "MaxBodyBytes",
+          	OptionBacklog:           "Backlog",
+          	OptionReceiveBuffer:     "ReceiveBuffer",
+          	OptionSendBuffer:        "SendBuffer",
+          	OptionProxyProtocol:     "ProxyProtocol",
+          	OptionSteer:             "Steer",
+          	OptionKeepAlive:         "KeepAlive",
+          	OptionUserTimeout:       "UserTimeout",
+          	OptionHTTP2:             "HTTP2",
           }
     name: optionNames
   - doc: |-

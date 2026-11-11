@@ -1,0 +1,1345 @@
+apiVersion: kit.kitsunium/design/v2
+domain: net/http2
+packages:
+  - codes:
+      - const:
+          - doc: |-
+              CodeFrameMalformed identifies an HTTP/2 frame that breaks the layout RFC
+              9113 §4 and §6 give it.
+            name: CodeFrameMalformed
+            note: "range: 0.3.109.0 - 0.3.109.255"
+            value: "0x00_03_6D_01"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHeadersTooLarge identifies a field block past the connection's header
+              list ceiling, or holding more fields than a request value has room for.
+            name: CodeHeadersTooLarge
+            value: "0x00_03_6D_02"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeCompressionFailed identifies a field block the connection's HPACK
+              state cannot survive: an index past the tables, a bad integer or string,
+              a size update out of its place or past what the server advertised.
+            name: CodeCompressionFailed
+            value: "0x00_03_6D_03"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeFieldMalformed identifies a decoded field RFC 9113 §8.2.1 calls
+              malformed; the block was decoded to its end, so the connection's HPACK
+              state is intact and only the stream is refused.
+            name: CodeFieldMalformed
+            value: "0x00_03_6D_04"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLimitsRefused identifies a LimitsValue that cannot be honoured.
+            name: CodeLimitsRefused
+            value: "0x00_03_6D_05"
+        type: errs.Code
+    constants:
+      - doc: FrameHeaderLen is the length of an HTTP/2 frame header, RFC 9113 §4.1.
+        name: FrameHeaderLen
+        type: int
+        value: "9"
+      - doc: |-
+          DefaultMaxStreams is how many streams a connection may hold open: a zero
+          LimitsValue.MaxStreams selects it.
+        name: DefaultMaxStreams
+        type: int
+        value: "100"
+      - doc: |-
+          DefaultMaxFrame is the largest frame the codec accepts by default, and the
+          protocol's minimum: a zero LimitsValue.MaxFrame selects it.
+        name: DefaultMaxFrame
+        type: int
+        value: "16384"
+      - doc: MaxFrameLimit is the largest frame the protocol can spell, RFC 9113 §4.2.
+        name: MaxFrameLimit
+        type: int
+        value: "16777215"
+      - doc: |-
+          DefaultHeaderTable is the HPACK dynamic table the server advertises by
+          default, RFC 7541 §4.2's own size.
+        name: DefaultHeaderTable
+        type: int
+        value: "4096"
+      - doc: |-
+          MaxHeaderTable is the largest HEADER_TABLE_SIZE a configuration may ask for:
+          the table's entries are measured with 16 bits.
+        name: MaxHeaderTable
+        type: int
+        value: "65535"
+      - doc: |-
+          NoDynamicTable, as LimitsValue.HeaderTable, advertises a table of size zero:
+          a zero field is never inert (ADR 0031), so -1 says it.
+        name: NoDynamicTable
+        type: int
+        value: "-1"
+      - doc: DefaultReceivePerStream is the window one stream's body may hold unread.
+        name: DefaultReceivePerStream
+        type: int
+        value: "262144"
+      - doc: |-
+          DefaultMaxHeaderList is the header list a request may carry, RFC 9113 §6.5.2's
+          measure: the bound of http1's head (ADR 0186).
+        name: DefaultMaxHeaderList
+        type: int
+        value: "8192"
+      - doc: DefaultWindow is the protocol's initial flow-control window, RFC 9113 §6.9.2.
+        name: DefaultWindow
+        type: int
+        value: "65535"
+      - doc: MaxWindow is the largest flow-control window, RFC 9113 §6.9.1.
+        name: MaxWindow
+        type: int
+        value: "2147483647"
+      - doc: FrameData carries a stream's content, RFC 9113 §6.1.
+        name: FrameData
+        type: FrameType
+        value: "0"
+      - doc: FrameHeaders opens a stream and carries its field block, §6.2.
+        name: FrameHeaders
+        type: FrameType
+        value: "1"
+      - doc: FramePriority is the deprecated priority signal, §6.3; ignored.
+        name: FramePriority
+        type: FrameType
+        value: "2"
+      - doc: FrameRSTStream ends a stream at once, §6.4.
+        name: FrameRSTStream
+        type: FrameType
+        value: "3"
+      - doc: FrameSettings carries or acknowledges a connection's settings, §6.5.
+        name: FrameSettings
+        type: FrameType
+        value: "4"
+      - doc: FramePushPromise reserves a server-initiated stream, §6.6.
+        name: FramePushPromise
+        type: FrameType
+        value: "5"
+      - doc: FramePing measures the round trip and checks liveness, §6.7.
+        name: FramePing
+        type: FrameType
+        value: "6"
+      - doc: FrameGoAway ends a connection gracefully or with an error, §6.8.
+        name: FrameGoAway
+        type: FrameType
+        value: "7"
+      - doc: FrameWindowUpdate grants flow-control credit, §6.9.
+        name: FrameWindowUpdate
+        type: FrameType
+        value: "8"
+      - doc: FrameContinuation extends a field block past one frame, §6.10.
+        name: FrameContinuation
+        type: FrameType
+        value: "9"
+      - doc: FlagAck acknowledges a SETTINGS or a PING frame.
+        name: FlagAck
+        type: FrameFlags
+        value: "1"
+      - doc: FlagEndStream marks the last frame of a stream on DATA and HEADERS.
+        name: FlagEndStream
+        type: FrameFlags
+        value: "1"
+      - doc: FlagEndHeaders marks the last frame of a field block.
+        name: FlagEndHeaders
+        type: FrameFlags
+        value: "4"
+      - doc: FlagPadded marks a frame carrying a pad length and padding.
+        name: FlagPadded
+        type: FrameFlags
+        value: "8"
+      - doc: FlagPriority marks a HEADERS frame carrying a priority field.
+        name: FlagPriority
+        type: FrameFlags
+        value: "32"
+      - doc: ErrCodeNoError is no error, a graceful shutdown or a discarded stream.
+        name: ErrCodeNoError
+        type: ErrCode
+        value: "0"
+      - doc: ErrCodeProtocol is an unspecific protocol violation.
+        name: ErrCodeProtocol
+        type: ErrCode
+        value: "1"
+      - doc: ErrCodeInternal is an unexpected internal failure of the endpoint.
+        name: ErrCodeInternal
+        type: ErrCode
+        value: "2"
+      - doc: ErrCodeFlowControl is a flow-control violation.
+        name: ErrCodeFlowControl
+        type: ErrCode
+        value: "3"
+      - doc: ErrCodeSettingsTimeout is a SETTINGS frame unanswered in time.
+        name: ErrCodeSettingsTimeout
+        type: ErrCode
+        value: "4"
+      - doc: ErrCodeStreamClosed is a frame received on a closed stream.
+        name: ErrCodeStreamClosed
+        type: ErrCode
+        value: "5"
+      - doc: ErrCodeFrameSize is a frame of the wrong size.
+        name: ErrCodeFrameSize
+        type: ErrCode
+        value: "6"
+      - doc: ErrCodeRefusedStream is a stream refused before any processing.
+        name: ErrCodeRefusedStream
+        type: ErrCode
+        value: "7"
+      - doc: ErrCodeCancel is a stream no longer wanted.
+        name: ErrCodeCancel
+        type: ErrCode
+        value: "8"
+      - doc: |-
+          ErrCodeCompression is a field block the connection's compression state
+          cannot survive.
+        name: ErrCodeCompression
+        type: ErrCode
+        value: "9"
+      - doc: ErrCodeConnect is a CONNECT tunnel's failure.
+        name: ErrCodeConnect
+        type: ErrCode
+        value: "10"
+      - doc: ErrCodeEnhanceYourCalm is a peer exhibiting excessive load.
+        name: ErrCodeEnhanceYourCalm
+        type: ErrCode
+        value: "11"
+      - doc: ErrCodeInadequateSecurity is a transport below the minimum.
+        name: ErrCodeInadequateSecurity
+        type: ErrCode
+        value: "12"
+      - doc: ErrCodeHTTP11Required asks the client to retry over HTTP/1.1.
+        name: ErrCodeHTTP11Required
+        type: ErrCode
+        value: "13"
+      - doc: SettingHeaderTableSize bounds the peer's HPACK dynamic table.
+        name: SettingHeaderTableSize
+        type: SettingID
+        value: "1"
+      - doc: SettingEnablePush says whether the peer may push.
+        name: SettingEnablePush
+        type: SettingID
+        value: "2"
+      - doc: SettingMaxConcurrentStreams bounds the peer's open streams.
+        name: SettingMaxConcurrentStreams
+        type: SettingID
+        value: "3"
+      - doc: SettingInitialWindowSize is the peer's initial stream window.
+        name: SettingInitialWindowSize
+        type: SettingID
+        value: "4"
+      - doc: SettingMaxFrameSize is the largest frame the peer accepts.
+        name: SettingMaxFrameSize
+        type: SettingID
+        value: "5"
+      - doc: SettingMaxHeaderListSize bounds the header list the peer accepts.
+        name: SettingMaxHeaderListSize
+        type: SettingID
+        value: "6"
+      - doc: SettingEnableConnectProtocol enables RFC 8441's extended CONNECT.
+        name: SettingEnableConnectProtocol
+        type: SettingID
+        value: "8"
+      - doc: ErrorTypeProtocol counts an error answered PROTOCOL_ERROR, an unspecific protocol violation.
+        name: ErrorTypeProtocol
+        type: ErrorType
+        value: "1"
+      - doc: ErrorTypeInternal counts an error answered INTERNAL_ERROR, the endpoint's own failure.
+        name: ErrorTypeInternal
+        type: ErrorType
+        value: "2"
+      - doc: ErrorTypeFlowControl counts an error answered FLOW_CONTROL_ERROR, a window overrun or overflowed.
+        name: ErrorTypeFlowControl
+        type: ErrorType
+        value: "3"
+      - doc: ErrorTypeSettingsTimeout counts an error answered SETTINGS_TIMEOUT, a SETTINGS frame unanswered in time.
+        name: ErrorTypeSettingsTimeout
+        type: ErrorType
+        value: "4"
+      - doc: ErrorTypeStreamClosed counts an error answered STREAM_CLOSED, a frame on a closed stream.
+        name: ErrorTypeStreamClosed
+        type: ErrorType
+        value: "5"
+      - doc: ErrorTypeFrameSize counts an error answered FRAME_SIZE_ERROR, a frame of the wrong length.
+        name: ErrorTypeFrameSize
+        type: ErrorType
+        value: "6"
+      - doc: ErrorTypeRefusedStream counts an error answered REFUSED_STREAM, a stream past the open-stream bound.
+        name: ErrorTypeRefusedStream
+        type: ErrorType
+        value: "7"
+      - doc: ErrorTypeCancel counts an error answered CANCEL, a stream the endpoint no longer wanted.
+        name: ErrorTypeCancel
+        type: ErrorType
+        value: "8"
+      - doc: ErrorTypeCompression counts an error answered COMPRESSION_ERROR, a field block HPACK refused.
+        name: ErrorTypeCompression
+        type: ErrorType
+        value: "9"
+      - doc: ErrorTypeConnect counts an error answered CONNECT_ERROR, a CONNECT request's failure.
+        name: ErrorTypeConnect
+        type: ErrorType
+        value: "10"
+      - doc: ErrorTypeEnhanceYourCalm counts an error answered ENHANCE_YOUR_CALM, a flood the codec cut short.
+        name: ErrorTypeEnhanceYourCalm
+        type: ErrorType
+        value: "11"
+      - doc: ErrorTypeInadequateSecurity counts an error answered INADEQUATE_SECURITY, a transport below the minimum.
+        name: ErrorTypeInadequateSecurity
+        type: ErrorType
+        value: "12"
+      - doc: ErrorTypeHTTP11Required counts an error answered HTTP_1_1_REQUIRED, a request HTTP/1.1 must carry.
+        name: ErrorTypeHTTP11Required
+        type: ErrorType
+        value: "13"
+      - doc: |-
+          ErrorTypeHeaderList counts a header list past the group's bound: answered 431
+          or refused, it is no RFC 9113 error code.
+        name: ErrorTypeHeaderList
+        type: ErrorType
+        value: "14"
+      - doc: |-
+          ErrorTypePingTimeout counts a connection closed because a PING sent on its
+          silence went unanswered (ADR 0195 §D3).
+        name: ErrorTypePingTimeout
+        type: ErrorType
+        value: "15"
+      - doc: ErrorTypeOther counts an error the engine named outside this vocabulary.
+        name: ErrorTypeOther
+        type: ErrorType
+        value: "16"
+      - doc: ErrorTypes bounds the ErrorType values, the length of a table indexed by one.
+        name: ErrorTypes
+        type: int
+        value: "17"
+    doc: |-
+      Package http2 is the contract of the SDK's HTTP/2 codec (ADR 0220): the
+      values both engines read — the frame header, the settings, the bounds of
+      ADR 0195 §D3 as a value — and the sentinels and codes its refusals carry,
+      range 0.3.109.*, declared here at the engine's path (ADR 0160). The wire
+      format itself, the frame layer and HPACK, is internal/service/net/http2's.
+      A wire error code (ErrCode) is the protocol's vocabulary and is not an
+      error of the SDK's; a sentinel is what a program branches on.
+    functions:
+      - doc: |-
+          ErrorTypeOf is the ErrorType counting an error answered with code: the
+          type of the same number for an RFC 9113 code, ErrorTypeOther for
+          NO_ERROR and any code outside the RFC.
+        in:
+          - name: code
+            type: ErrCode
+        name: ErrorTypeOf
+        out:
+          - type: ErrorType
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/net/http2
+    sentinels:
+      - var:
+          - code: CodeFrameMalformed
+            doc: FrameMalformed refuses a frame that breaks its layout.
+            exit: DATAERR
+            name: FrameMalformed
+            private: "core/net/http2: a frame breaks the layout RFC 9113 gives it; the wire code says how"
+            public: The HTTP/2 frame is malformed
+            reason: FRAME_MALFORMED
+          - code: CodeHeadersTooLarge
+            doc: HeadersTooLarge refuses a field block past the header list ceiling.
+            exit: DATAERR
+            http: 431
+            name: HeadersTooLarge
+            private: "core/net/http2: the field block passed the header list ceiling or the request value's field count"
+            public: The request header is too large
+            reason: HEADERS_TOO_LARGE
+          - code: CodeCompressionFailed
+            doc: CompressionFailed refuses a field block HPACK cannot decode.
+            exit: DATAERR
+            name: CompressionFailed
+            private: "core/net/http2: the field block holds a bad index, integer, string or size update (RFC 7541)"
+            public: The HTTP/2 header block cannot be decoded
+            reason: COMPRESSION_FAILED
+          - code: CodeFieldMalformed
+            doc: FieldMalformed refuses a decoded field RFC 9113 §8.2.1 calls malformed.
+            exit: DATAERR
+            name: FieldMalformed
+            private: "core/net/http2: a decoded field name or value is malformed (RFC 9113 §8.2.1); the block was decoded to its end"
+            public: The request header is malformed
+            reason: FIELD_MALFORMED
+          - code: CodeLimitsRefused
+            doc: LimitsRefused refuses a LimitsValue that cannot be honoured.
+            exit: CONFIG
+            name: LimitsRefused
+            private: "core/net/http2: a bound is out of its range; the reason field names it"
+            public: The HTTP/2 limits are not valid
+            reason: LIMITS_REFUSED
+    types:
+      - doc: |-
+          ErrCode is an HTTP/2 error code, RFC 9113 §7: what RST_STREAM and GOAWAY
+          carry. It is the wire's vocabulary, not an error of the SDK's: a refusal the
+          codec answers with on the wire is an ErrCode, one it returns to a program is
+          a sentinel of this package.
+        methods:
+          - doc: |-
+              String names the code as RFC 9113 §7 does; a code outside the RFC reads as
+              its number, as an unknown code must be treated (§7).
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: ErrCode
+        underlying: uint32
+      - doc: |-
+          ErrorCountValue is one row of a listener's HTTP/2 error table: an error type
+          and how many times the group's engine counted it since Start.
+        name: ErrorCountValue
+        struct:
+          fields:
+            - doc: Type is the error counted.
+              name: Type
+              tag: json:"type"
+              type: ErrorType
+            - doc: Count is how many times it was.
+              name: Count
+              tag: json:"count"
+              type: uint64
+      - doc: |-
+          ErrorType names an HTTP/2 error a group counts (#966): one per RFC 9113 code,
+          numbered as the code is, and three the codes do not spell — a header list
+          past its bound, a PING unanswered, and anything else. A fixed vocabulary, so
+          a peer cannot grow the table.
+        methods:
+          - doc: |-
+              String names the type in lower snake case — "frame_size", "header_list",
+              "ping_timeout" —, "other" for a value outside the vocabulary.
+            name: String
+            out:
+              - type: string
+            recv: value
+          - doc: |-
+              MarshalText implements encoding.TextMarshaler: the name String gives.
+            name: MarshalText
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: value
+        name: ErrorType
+        underlying: uint8
+      - doc: FrameFlags is a frame header's flags byte, RFC 9113 §4.1.
+        name: FrameFlags
+        underlying: uint8
+      - doc: |-
+          FrameType is an HTTP/2 frame's type, RFC 9113 §6. A type this package names
+          no constant for is an extension frame, which an endpoint ignores (§4.1).
+        name: FrameType
+        underlying: uint8
+      - doc: |-
+          FrameValue is a frame's nine-byte header, read by the frame layer of
+          internal/service/net/http2. The payload that follows is Length bytes.
+        name: FrameValue
+        struct:
+          fields:
+            - doc: Type is the frame's type.
+              name: Type
+              type: FrameType
+            - doc: Flags is the frame's flags byte.
+              name: Flags
+              type: FrameFlags
+            - doc: |-
+                StreamID is the stream the frame belongs to, the reserved top bit
+                cleared; zero is the connection itself.
+              name: StreamID
+              type: uint32
+            - doc: Length is the frame's payload length, in bytes.
+              name: Length
+              type: int
+      - doc: |-
+          LimitsValue bounds what one HTTP/2 connection may do, the numbers ADR 0195
+          §D3 chose. A zero field selects its default, never unbounded (ADR 0031); a
+          value it cannot honour is refused by Resolve, never narrowed in silence.
+        methods:
+          - doc: |-
+              Resolve returns v with each zero field replaced by its default. A negative
+              field, a MaxFrame outside the protocol's range or a ReceivePerConn below
+              ReceivePerStream is refused with LimitsRefused, naming the field in reason.
+            name: Resolve
+            out:
+              - type: LimitsValue
+              - type: error
+            recv: value
+        name: LimitsValue
+        struct:
+          fields:
+            - doc: |-
+                MaxStreams is how many streams a connection may hold open at once: the
+                next one is refused with REFUSED_STREAM. Zero selects DefaultMaxStreams.
+              name: MaxStreams
+              tag: json:"max_streams"
+              type: int
+            - doc: |-
+                ReceivePerStream is the window one stream's body may hold unread. Zero
+                selects DefaultReceivePerStream.
+              name: ReceivePerStream
+              tag: json:"receive_per_stream"
+              type: int
+            - doc: |-
+                ReceivePerConn is the window all of a connection's streams share. Zero
+                selects four ReceivePerStream, so a handler that never reads its body
+                does not stop the others.
+              name: ReceivePerConn
+              tag: json:"receive_per_conn"
+              type: int
+            - doc: |-
+                MaxFrame is the largest frame the codec accepts, between
+                DefaultMaxFrame and MaxFrameLimit. Zero selects DefaultMaxFrame.
+              name: MaxFrame
+              tag: json:"max_frame"
+              type: int
+            - doc: |-
+                HeaderTable is the HPACK dynamic table the server advertises, at most
+                MaxHeaderTable. Zero selects DefaultHeaderTable; NoDynamicTable
+                advertises none.
+              name: HeaderTable
+              tag: json:"header_table"
+              type: int
+            - doc: |-
+                MaxHeaderList bounds a request's header list as RFC 9113 §6.5.2 counts
+                it, the name and value of each field plus 32. Zero selects
+                DefaultMaxHeaderList.
+              name: MaxHeaderList
+              tag: json:"max_header_list"
+              type: int
+      - doc: SettingID is a SETTINGS parameter's identifier, RFC 9113 §6.5.2.
+        name: SettingID
+        underlying: uint16
+      - doc: |-
+          SettingValue is one SETTINGS parameter as RFC 9113 §6.5.1 lays it out: a
+          16-bit identifier and a 32-bit value.
+        name: SettingValue
+        struct:
+          fields:
+            - doc: ID identifies the parameter.
+              name: ID
+              type: SettingID
+            - doc: Val is the parameter's value.
+              name: Val
+              type: uint32
+  - constants:
+      - doc: EventHeaders is a whole field block for a stream, to decode with Lane.Decode.
+        name: EventHeaders
+        type: EventKind
+        value: "0"
+      - doc: EventData is a stream's DATA payload, padding removed.
+        name: EventData
+        type: EventKind
+        value: "1"
+      - doc: EventReset is a stream the peer or the state machine ended.
+        name: EventReset
+        type: EventKind
+        value: "2"
+      - doc: EventGoAway is the peer's GOAWAY; it opens no new stream.
+        name: EventGoAway
+        type: EventKind
+        value: "3"
+      - doc: EventEndStream reports the stream's last frame arrived with this event.
+        name: EventEndStream
+        type: EventFlags
+        value: "1"
+      - doc: |-
+          EventDiscard reports an EventHeaders whose stream was refused: decoded only
+          to keep the connection's table in step, RFC 9113 §4.3, and dropped.
+        name: EventDiscard
+        type: EventFlags
+        value: "2"
+      - doc: |-
+          EventOverBody reports an EventData whose bytes passed the body bound: the
+          adapter refuses the request (413) and the codec keeps nothing more.
+        name: EventOverBody
+        type: EventFlags
+        value: "4"
+    doc: |-
+      Package http2 is the SDK's HTTP/2 codec for the loop engine's sibling
+      profile (ADR 0220, amending ADR 0186 §D6): pure functions over []byte and
+      no I/O, the shape http1 has. The frame layer (ParseFrameHeader and the
+      Append family) reads and writes RFC 9113's frames; Decoder and Encoder are
+      HPACK (RFC 7541), written in the SDK because the standard library
+      exports none.
+
+      # The frame layer
+
+      ParseFrameHeader reads the nine-byte header and judges what those bytes
+      alone can: the length against the connection's frame bound and, for a
+      padded frame, the padding against the length — it reads the pad length
+      byte, so a padded frame's header needs ten bytes. Neither reads more,
+      and neither allocates. Whether a frame's stream may carry it is the
+      connection state machine's.
+
+      # HPACK
+
+      Decoder is one connection's decoder. Its table is a value with no pointer
+      in it: the bytes of the dynamic table are memory its caller hands to
+      Decode, so a connection's state fits a pointer-free slice and an idle
+      connection pays nothing until its first field block.
+
+      Decode fills a request value's Fields in arrival order, pseudo-fields
+      included, never allocating when its scratch has room: a value is aliased
+      from the block when it arrived as a plain literal, written into scratch
+      when it was Huffman-coded or came from the table. A field the list
+      ceiling refuses is refused before it is copied and before any insert, so a
+      block that expands through indexed fields costs the ceiling and nothing
+      more (RFC 7541 §7.3's bomb).
+
+      A block refused on the way (a bad index, a size update out of place, the
+      list ceiling, a Huffman string that breaks RFC 7541 §5.2) leaves the
+      table undefined: the caller ends the connection with
+      GOAWAY(COMPRESSION_ERROR), as RFC 9113 §4.3 demands. A field RFC 9113
+      §8.2.1 calls malformed is different: the block is decoded to its end, the
+      table is intact, Decode returns FieldMalformed, and only the stream is
+      refused.
+
+      Encoder writes response blocks: :status and the handler's own field lines
+      re-read as never-indexed literals, a name from the static table when it
+      has one and no Huffman coding, so the peer's table size needs no honouring
+      beyond zero. AppendHeaders splits a block past the peer's frame size over
+      HEADERS and CONTINUATION frames.
+    functions:
+      - doc: |-
+          ParseFrameHeader reads a frame's nine-byte header from buf, refusing what those
+          bytes alone can refuse: a length past maxFrame (FRAME_SIZE_ERROR) and a padded
+          frame whose padding is not shorter than its payload (PROTOCOL_ERROR). It returns the
+          header and the 9 bytes it consumed, or 0 while buf holds too few of them — a
+          padded frame's pad length is read here too, so it needs ten. A frame judged
+          whole by this call is not yet legal on any stream: that is the connection state
+          machine's. It allocates nothing.
+        in:
+          - name: buf
+            type: "[]byte"
+          - name: maxFrame
+            type: int
+        name: ParseFrameHeader
+        out:
+          - type: corehttp2.FrameValue
+          - type: int
+          - type: corehttp2.ErrCode
+      - doc: AppendFrameHeader appends h's nine bytes to dst.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: h
+            type: corehttp2.FrameValue
+        name: AppendFrameHeader
+        out:
+          - type: "[]byte"
+      - doc: AppendSettings appends a SETTINGS frame carrying settings, in order.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: settings
+            type: "[]corehttp2.SettingValue"
+        name: AppendSettings
+        out:
+          - type: "[]byte"
+      - doc: AppendSettingsAck appends the empty SETTINGS frame that acknowledges the peer's.
+        in:
+          - name: dst
+            type: "[]byte"
+        name: AppendSettingsAck
+        out:
+          - type: "[]byte"
+      - doc: AppendWindowUpdate appends a WINDOW_UPDATE granting increment on stream, zero for the connection.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: stream
+            type: uint32
+          - name: increment
+            type: uint32
+        name: AppendWindowUpdate
+        out:
+          - type: "[]byte"
+      - doc: AppendRSTStream appends an RST_STREAM ending stream with code.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: stream
+            type: uint32
+          - name: code
+            type: corehttp2.ErrCode
+        name: AppendRSTStream
+        out:
+          - type: "[]byte"
+      - doc: AppendGoAway appends a GOAWAY naming the last stream the sender processed and code.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: last
+            type: uint32
+          - name: code
+            type: corehttp2.ErrCode
+        name: AppendGoAway
+        out:
+          - type: "[]byte"
+      - doc: AppendPing appends a PING frame carrying data, the ACK flag set when ack.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: ack
+            type: bool
+          - name: data
+            type: "*[8]byte"
+        name: AppendPing
+        out:
+          - type: "[]byte"
+      - doc: |-
+          NewLane returns one lane's protocol state for the bounds v and a body bound
+          of maxBody bytes; holdCap is the most DATA one connection may hold unsent,
+          zero selecting one mebibyte. A bound it cannot honour refuses with
+          corehttp2.LimitsRefused, naming the bound.
+        in:
+          - name: v
+            type: corehttp2.LimitsValue
+          - name: maxBody
+            type: int64
+          - name: holdCap
+            type: int
+        name: NewLane
+        out:
+          - type: "*Lane"
+          - type: error
+      - doc: |-
+          NewDecoder returns a connection's decoder: table is the HEADER_TABLE_SIZE the
+          server advertises, zero when it advertises none, and maxList the header list
+          ceiling. The peer may use a table of the protocol's default size until it has
+          acknowledged that advertisement.
+        in:
+          - name: table
+            type: int
+          - name: maxList
+            type: int
+        name: NewDecoder
+        out:
+          - type: Decoder
+      - doc: |-
+          TableMem returns the bytes of memory a table advertised at size table takes:
+          the caller's Decode argument, one per connection, handed in only once the
+          connection's first field block arrives.
+        in:
+          - name: table
+            type: int
+        name: TableMem
+        out:
+          - type: int
+      - doc: |-
+          NewEncoder returns a response encoder writing at most maxFrame bytes a frame,
+          the MAX_FRAME_SIZE the peer accepts.
+        in:
+          - name: maxFrame
+            type: int
+        name: NewEncoder
+        out:
+          - type: Encoder
+      - doc: |-
+          HandleLoop adapts h to the loop engine for HTTP/2 beside HTTP/1.1: the
+          corenet.LoopHandler a group serves with StreamGroup.HandleLoop. Each
+          connection's first bytes decide: the 24-byte client preface makes it an
+          HTTP/2 connection, served by a state machine of this package and h on the
+          lane's thread; anything else goes to an embedded http1.HandleLoop(h, p),
+          with no cost to it past that one comparison.
+
+          One chain serves both versions: an HTTP/2 request is mapped onto h's
+          corenet.HTTP1RequestValue, :method to Method, :path to Target, :authority to
+          Host, its regular fields in Fields, and judged by the same canonical target
+          as HTTP/1.1, so Routes, Bearer, Headers and Log see one value. A request is
+          served once its last frame has arrived, its body handed whole, or chunk by
+          chunk when h is a corenet.HTTP1BodyReader. Answers are written at the batch's
+          end, after h's EndBatch when h is a corenet.HTTP1Batcher; a Pending answer is
+          the lane's worker's, the rest of the connection's streams going on meanwhile.
+
+          h2c is by prior knowledge only: the Upgrade: h2c form is not served, a
+          request carrying it answered as plain HTTP/1.1. The group's Protocols names
+          what it serves: h2 alone answers 400 and closes a connection that does not
+          open with the preface, http/1.1 alone answers 400 and closes one that does.
+          The operator's http2-loop switch has the second effect. Without a Protocols
+          option both versions are served.
+
+          On a TLS group (portable backend, ADR 0198) ALPN offers h2 then http/1.1,
+          or the Protocols list, narrowed by the identity's NextProtos, and the
+          adapter serves what ALPN offers; the version is still chosen by the
+          preface, the negotiated protocol not consulted, so RFC 9113 §3.3 is not
+          enforced: a client that negotiated h2 and speaks HTTP/1.1 is served
+          HTTP/1.1 when the list holds it, and answered 400 otherwise.
+        in:
+          - name: h
+            type: corenet.HTTP1Handler
+          - name: p
+            type: http1.Parser
+        name: HandleLoop
+        out:
+          - type: "*LoopHandler"
+      - doc: NewLoopHandler is HandleLoop, under the name constructors take; see it.
+        in:
+          - name: h
+            type: corenet.HTTP1Handler
+          - name: p
+            type: http1.Parser
+        name: NewLoopHandler
+        out:
+          - type: "*LoopHandler"
+    imports:
+      corehttp2: github.com/kitsunium/sdk/internal/core/net/http2
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      http1: github.com/kitsunium/sdk/internal/service/net/http1
+    path: github.com/kitsunium/sdk/internal/service/net/http2
+    types:
+      - doc: |-
+          Conn is one connection's protocol state: windows, settings and bounds, with
+          no pointer in it, so a slice of them holds nothing the collector scans. The
+          adapter keeps one per (ring, slot) and hands it to every call of its Lane;
+          zero is not ready, Lane.Open makes it a connection.
+        name: Conn
+        struct:
+          unexported: true
+      - doc: |-
+          Event is what Feed reports for the adapter's batch: a field block to decode,
+          body bytes to keep, a stream that ended. The bytes alias Feed's buf, or the
+          lane's scratch for a block that came across CONTINUATION frames; both are
+          valid until the batch's end.
+        name: Event
+        struct:
+          fields:
+            - doc: Kind says what the event is.
+              name: Kind
+              type: EventKind
+            - doc: Stream is the stream concerned; zero for an EventGoAway.
+              name: Stream
+              type: uint32
+            - doc: |-
+                Data is the field block of an EventHeaders, or the body bytes of an
+                EventData.
+              name: Data
+              type: "[]byte"
+            - doc: Flags carries what the frame said beside its bytes.
+              name: Flags
+              type: EventFlags
+            - doc: Code is the error code an EventReset or EventGoAway carried.
+              name: Code
+              type: corehttp2.ErrCode
+      - doc: |-
+          EventFlags are an Event's booleans: EventEndStream, EventDiscard and
+          EventOverBody.
+        name: EventFlags
+        underlying: uint8
+      - doc: EventKind says what an Event is about.
+        name: EventKind
+        underlying: uint8
+      - doc: |-
+          Lane is one lane's protocol state: the streams, tables and held bytes of
+          every connection of the lane, in arenas with no per-connection pointer. A
+          lane is used by one thread; nothing here takes a lock. One Lane serves all
+          the Conns of a loop.
+        methods:
+          - doc: |-
+              Open makes c a new connection on this lane; a Conn may be reused for a new
+              connection once Close released it.
+            in:
+              - name: c
+                type: "*Conn"
+            name: Open
+            recv: pointer
+          - doc: |-
+              Close releases what c holds in the lane's arenas: its streams, its table
+              and its held bytes. The connection's slot is reusable once Open is called
+              again.
+            in:
+              - name: c
+                type: "*Conn"
+            name: Close
+            recv: pointer
+          - doc: Events returns the events of the last Feed, in the order the frames came.
+            name: Events
+            out:
+              - type: "[]Event"
+            recv: pointer
+          - doc: |-
+              EndBatch ends the batch: the scratch of reassembled field blocks and the
+              control budgets reset. Call it once per batch, after the batch's last
+              Feed, once every byte it aliased has been handled.
+            name: EndBatch
+            recv: pointer
+          - doc: |-
+              TakeErrors adds into dst, indexed by corehttp2.ErrorType, the errors Feed
+              answered on the lane's connections since the last call — each RST_STREAM
+              and GOAWAY it wrote with an error code — and clears them; a dst shorter
+              than corehttp2.ErrorTypes takes the types that fit. What the caller
+              answers itself, with Abort, ResetStream or GoAway, is the caller's to count.
+            in:
+              - name: dst
+                type: "[]uint64"
+            name: TakeErrors
+            recv: pointer
+          - doc: |-
+              Decode decodes a field block of an EventHeaders into req; scratch receives
+              the bytes not aliased from the block and is returned grown. A block the
+              table cannot survive refuses with CompressionFailed or HeadersTooLarge: the
+              caller ends the connection with Abort. A FieldMalformed leaves the table
+              intact, and only the stream is refused.
+            in:
+              - name: c
+                type: "*Conn"
+              - name: block
+                type: "[]byte"
+              - name: scratch
+                type: "[]byte"
+              - name: req
+                type: "*corenet.HTTP1RequestValue"
+            name: Decode
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+          - doc: |-
+              Feed consumes whole frames from the start of buf and returns how many
+              bytes it took: a partial frame stays for the next call, the loop's spill
+              holding it. It appends to dst what the connection answers — SETTINGS, its
+              ACK, PING answers, RST_STREAM, GOAWAY, held DATA the peer's credit releases —
+              and reports the rest as Events. A connection the peer broke ends with a
+              GOAWAY and Closing reports it. It allocates nothing once the lane's arenas
+              have grown to its batches.
+            in:
+              - name: c
+                type: "*Conn"
+              - name: buf
+                type: "[]byte"
+              - name: dst
+                type: "[]byte"
+            name: Feed
+            out:
+              - type: int
+              - type: "[]byte"
+            recv: pointer
+          - doc: |-
+              Closing reports whether c ended with an error; the connection closes once
+              dst has been written.
+            in:
+              - name: c
+                type: "*Conn"
+            name: Closing
+            out:
+              - type: bool
+            recv: pointer
+          - doc: |-
+              Done reports whether c can close now: a GOAWAY went one way or the other
+              and no stream is left open. The answer is the adapter's to act on, after
+              writing dst.
+            in:
+              - name: c
+                type: "*Conn"
+            name: Done
+            out:
+              - type: bool
+            recv: pointer
+          - doc: |-
+              Headers appends a stream's response HEADERS, split over CONTINUATIONs at the
+              frame size the peer accepts, and closes our half when endStream. A stream
+              that already ended writes nothing. A response AppendHeaders refuses returns
+              its refusal, nothing appended.
+            in:
+              - name: c
+                type: "*Conn"
+              - name: stream
+                type: uint32
+              - name: res
+                type: "*corenet.HTTP1ResponseValue"
+              - name: endStream
+                type: bool
+              - name: dst
+                type: "[]byte"
+            name: Headers
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+          - doc: |-
+              Send appends DATA frames carrying body for stream, as many as the peer's
+              windows and frame size allow, and closes our half when endStream once all
+              of it is out. What the windows do not allow is held for the connection and
+              resumed when WINDOW_UPDATE opens them, bounded by the lane's holdCap: past
+              it the connection ends with GOAWAY(ENHANCE_YOUR_CALM). Nothing is written for
+              a stream that ended.
+            in:
+              - name: c
+                type: "*Conn"
+              - name: stream
+                type: uint32
+              - name: body
+                type: "[]byte"
+              - name: dst
+                type: "[]byte"
+              - name: endStream
+                type: bool
+            name: Send
+            out:
+              - type: "[]byte"
+            recv: pointer
+          - doc: |-
+              Consume records n body bytes of stream the handler has consumed, on the
+              stream if it is still open and always on the connection. A stream whose
+              peer half closed takes no credit: nothing more will arrive on it.
+            in:
+              - name: c
+                type: "*Conn"
+              - name: stream
+                type: uint32
+              - name: "n"
+                type: int
+            name: Consume
+            recv: pointer
+          - doc: |-
+              AppendCredits appends at most one WINDOW_UPDATE per stream and one per
+              connection, each crediting only bytes the handler consumed: the batch's
+              credits coalesce. A credit under a quarter of its window waits: a window
+              refilled a little at a time spends more frames than it saves.
+            in:
+              - name: c
+                type: "*Conn"
+              - name: dst
+                type: "[]byte"
+            name: AppendCredits
+            out:
+              - type: "[]byte"
+            recv: pointer
+          - doc: |-
+              GoAway appends a GOAWAY with code naming the last stream the connection
+              opened, and admits no new stream afterwards: the h2 reading of
+              Connection: close, ADR 0220. A second call writes nothing. The connection
+              closes when its streams end (Done).
+            in:
+              - name: c
+                type: "*Conn"
+              - name: code
+                type: corehttp2.ErrCode
+              - name: dst
+                type: "[]byte"
+            name: GoAway
+            out:
+              - type: "[]byte"
+            recv: pointer
+          - doc: |-
+              Abort ends the connection with a GOAWAY carrying code: the answer to a
+              field block Decode refused.
+            in:
+              - name: c
+                type: "*Conn"
+              - name: code
+                type: corehttp2.ErrCode
+              - name: dst
+                type: "[]byte"
+            name: Abort
+            out:
+              - type: "[]byte"
+            recv: pointer
+          - doc: |-
+              ResetStream appends RST_STREAM(code) for stream and closes it, so a further
+              answer is not written: the answer to a malformed request.
+            in:
+              - name: c
+                type: "*Conn"
+              - name: stream
+                type: uint32
+              - name: code
+                type: corehttp2.ErrCode
+              - name: dst
+                type: "[]byte"
+            name: ResetStream
+            out:
+              - type: "[]byte"
+            recv: pointer
+          - doc: OpenStreams reports how many streams c holds open.
+            in:
+              - name: c
+                type: "*Conn"
+            name: OpenStreams
+            out:
+              - type: int
+            recv: pointer
+        name: Lane
+        struct:
+          unexported: true
+      - doc: |-
+          Decoder is one connection's HPACK decoder: the dynamic table's bookkeeping,
+          with no pointer in it, so a connection's state fits a pointer-free slice.
+          The table's bytes are the mem a caller hands to Decode.
+        methods:
+          - doc: |-
+              Decode decodes block into req.Fields, in arrival order, pseudo-fields
+              included, at most corenet.HTTP1MaxFields of them. Values not aliased from
+              block are written into scratch, which is returned grown; it allocates
+              nothing when scratch has room, and every slice stays valid until the
+              caller reuses block or scratch. mem is TableMem(table) bytes of the
+              connection, or nil when the connection never needs one.
+
+              A list past the ceiling, charged before a field is copied or inserted,
+              refuses HeadersTooLarge; a block HPACK cannot decode refuses
+              CompressionFailed; both leave the table undefined, and the connection
+              ends. A malformed field refuses FieldMalformed after the block decoded
+              to its end, the table intact.
+            in:
+              - name: mem
+                type: "[]byte"
+              - name: block
+                type: "[]byte"
+              - name: scratch
+                type: "[]byte"
+              - name: req
+                type: "*corenet.HTTP1RequestValue"
+            name: Decode
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+        name: Decoder
+        struct:
+          unexported: true
+      - doc: |-
+          LoopHandler serves HTTP/2 and HTTP/1.1 on one loop group: the
+          corenet.LoopHandler HandleLoop returns. Its state is per lane and a lane
+          touches only its own, so the data path takes no lock.
+        methods:
+          - doc: |-
+              OnStart implements corenet.LoopStarter: it builds every lane's state
+              before the first callback.
+            in:
+              - name: lanes
+                type: int
+            name: OnStart
+            recv: pointer
+          - doc: |-
+              Honours implements corenet.LoopOptionHonourer: Protocols, which the group
+              hands over through SetHTTP.
+            in:
+              - name: k
+                type: corenet.OptionKind
+            name: Honours
+            out:
+              - type: bool
+            recv: pointer
+          - doc: |-
+              SetHTTP implements corenet.LoopHTTPCodec. It keeps the versions the group
+              serves; the operator's switch leaves HTTP/1.1 alone.
+            in:
+              - name: v
+                type: corenet.LoopHTTPValue
+            name: SetHTTP
+            recv: pointer
+          - doc: |-
+              CheckSpill implements corenet.LoopSpillChecker: HTTP/1.1's own bounds, and
+              the most one HTTP/2 frame or field block the spill must hold.
+            in:
+              - name: spillCap
+                type: int
+            name: CheckSpill
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Unwrap returns the HTTP1Handler the adapter serves.
+            name: Unwrap
+            out:
+              - type: corenet.HTTP1Handler
+            recv: pointer
+          - doc: |-
+              HTTPCounts implements corenet.LoopHTTPCounter: the requests served per
+              version — the HTTP/1.1 ones the embedded adapter's —, and the HTTP/2 errors
+              the codec answered with, each lane's added up at the batch's end.
+            name: HTTPCounts
+            out:
+              - type: corenet.HTTPCountsValue
+            recv: pointer
+          - doc: |-
+              OnOpen implements corenet.LoopHandler.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: ref
+                type: corenet.LoopConnRef
+            name: OnOpen
+            recv: pointer
+          - doc: |-
+              OnData implements corenet.LoopHandler: the first bytes decide the
+              connection's version, then every byte goes to its adapter.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: ref
+                type: corenet.LoopConnRef
+              - name: buf
+                type: "[]byte"
+            name: OnData
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              OnTimeout implements corenet.LoopHandler. The adapter arms no deadline, so
+              a timeout it did not ask for closes the connection.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: ref
+                type: corenet.LoopConnRef
+            name: OnTimeout
+            recv: pointer
+          - doc: |-
+              OnWritable implements corenet.LoopHandler. Nothing waits on it: an answer
+              the output refuses closes its connection.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: ref
+                type: corenet.LoopConnRef
+            name: OnWritable
+            recv: pointer
+          - doc: |-
+              OnBatchEnd implements corenet.LoopHandler. It runs the handler's EndBatch,
+              writes the batch's answers, credits the connections it fed, and closes
+              those that ended.
+            in:
+              - name: io
+                type: corenet.LoopIO
+            name: OnBatchEnd
+            recv: pointer
+          - doc: |-
+              OnClose implements corenet.LoopHandler: the connection's state is released
+              and a request still reading its body abandoned.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: ref
+                type: corenet.LoopConnRef
+              - name: err
+                type: error
+            name: OnClose
+            recv: pointer
+          - doc: |-
+              Worker implements corenet.LoopOffloader: the adapter offloads when its
+              handler is a corenet.HTTP1Worker, and nothing otherwise.
+            name: Worker
+            out:
+              - type: corenet.LoopWorker
+            recv: pointer
+          - doc: |-
+              OnOutbound implements corenet.LoopOffloader: each lane keeps its outbound,
+              the HTTP/1.1 adapter its own view of it.
+            in:
+              - name: v
+                type: corenet.LoopOutboundValue
+            name: OnOutbound
+            recv: pointer
+          - doc: |-
+              OnDone implements corenet.LoopOffloader, on the lane's thread: a job has
+              come back. An HTTP/2 answer is written at once, the streams being
+              independent; one whose stream or connection ended is dropped and its slot
+              freed, the reset path.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: job
+                type: corenet.LoopJobValue
+            name: OnDone
+            recv: pointer
+          - doc: |-
+              Pending implements corenet.LoopOffloader: a connection waiting for answers
+              on either version is still being served.
+            in:
+              - name: lane
+                type: int
+              - name: ref
+                type: corenet.LoopConnRef
+            name: Pending
+            out:
+              - type: bool
+            recv: pointer
+          - doc: |-
+              Draining implements corenet.LoopHTTPCodec, on the goroutine that drains
+              the group: each lane is told through its own thread, and writes
+              GOAWAY(NO_ERROR) on every HTTP/2 connection it holds.
+            name: Draining
+            recv: pointer
+          - doc: |-
+              InFlight implements corenet.LoopHTTPCodec, on the lane's thread: ref, a
+              connection of lane, must stay open while the drain's GOAWAY has not gone
+              out, or its streams are still being answered.
+            in:
+              - name: lane
+                type: int
+              - name: ref
+                type: corenet.LoopConnRef
+            name: InFlight
+            out:
+              - type: bool
+            recv: pointer
+        name: LoopHandler
+        struct:
+          unexported: true
+      - doc: |-
+          Encoder writes response field blocks: no dynamic table, no Huffman coding, so
+          a peer's HEADER_TABLE_SIZE needs no honouring beyond zero.
+        methods:
+          - doc: |-
+              AppendHeaders appends a HEADERS frame answering stream: :status, then
+              res.Header's lines re-read as never-indexed literals with lowercased names
+              (connection-specific fields dropped, RFC 9113 §8.2.2), then content-length
+              from len(res.Body) unless a 204 or a 304. END_STREAM is set when endStream.
+              A block past the peer's frame size is split over CONTINUATION frames. A
+              status outside 200..999, a body on a 204 or 304 or a malformed Header line
+              is refused with corenet.HTTP1ResponseInvalid, nothing appended. It
+              allocates nothing when dst has room.
+            in:
+              - name: dst
+                type: "[]byte"
+              - name: stream
+                type: uint32
+              - name: res
+                type: "*corenet.HTTP1ResponseValue"
+              - name: endStream
+                type: bool
+            name: AppendHeaders
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: value
+        name: Encoder
+        struct:
+          unexported: true
+  - doc: |-
+      Package http2 serves HTTP/2 beside HTTP/1.1 on the SDK's loop engine (ADR 0220):
+      HandleLoop adapts a Handler of package http1 to a loop group, the connection's
+      first bytes choosing the version, so one chain of Routes, Bearer, Headers and
+      Log serves both. h2c by prior knowledge, or h2 over TLS (ADR 0198); the
+      Upgrade: h2c form is not served.
+    facade:
+      - alias:
+          - doc: |-
+              LoopHandler serves HTTP/2 and HTTP/1.1 on one loop group: what HandleLoop
+              returns, given to server's Group.HandleLoop.
+            name: LoopHandler
+            target: svchttp2.LoopHandler
+      - func:
+          doc: |-
+            HandleLoop adapts h to the loop engine for HTTP/2 beside HTTP/1.1, each
+            connection's first bytes deciding its version. p frames HTTP/1.1 requests
+            and bounds both versions' heads; the zero Parser is the profile's defaults.
+          forward: svchttp2.HandleLoop
+          in:
+            - name: h
+              type: corenet.HTTP1Handler
+            - name: p
+              type: http1.Parser
+          name: HandleLoop
+          out:
+            - type: "*LoopHandler"
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      http1: github.com/kitsunium/sdk/internal/service/net/http1
+      svchttp2: github.com/kitsunium/sdk/internal/service/net/http2
+    path: github.com/kitsunium/sdk/pkg/v1/net/http2

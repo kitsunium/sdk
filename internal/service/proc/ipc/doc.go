@@ -80,10 +80,22 @@
 //     PATH to it: a component above it that anybody could have planted or
 //     created, or can replace, is refused (PATH_UNSAFE, chain_unix.go), since
 //     every lookup follows a link planted at a parent.
+//   - THE SOCKET'S MODE, which connect(2) checks for write: 0600 when the
+//     lists name nobody but this account and root; 0660 and the group when
+//     they name one group and no other user, so the kernel admits that
+//     group's members, supplementary ones included, and nobody else; 0666
+//     when they name another user or several groups, under the directory
+//     that gates them — refused where the kernel names no peer and anybody
+//     may search the directory. The mode and the group are set between
+//     bind(2) and listen(2), before any connection can complete (#1092).
 //   - THE PEER'S CREDENTIALS, where the kernel gives them: SO_PEERCRED on
 //     Linux, LOCAL_PEERCRED on FreeBSD and DragonFly, LOCAL_PEEREID on NetBSD.
 //     There the listener refuses a peer whose UID is neither its own nor
-//     allowed, whatever the directory says, and a peer the kernel did not name.
+//     allowed and none of whose groups is allowed — its effective group, and
+//     on Linux (SO_PEERGROUPS) and FreeBSD and DragonFly (the xucred's list)
+//     its supplementary groups as the kernel recorded them when it
+//     connected —, whatever the directory says, and a peer the kernel did
+//     not name.
 //     On darwin, OpenBSD, illumos and Solaris Peer.Verified is false and the
 //     directory is the only gate — stated, not papered over.
 //   - AT DIAL, the directory may be the listener's account's: its entry rules
@@ -163,7 +175,8 @@
 // lock domain binds LockFileEx and GetNamedSecurityInfoW — golang.org/x/sys
 // is banned SDK-wide (ADR 0018).
 //
-// Package ipc — the Unix socket: a 0700 directory, a 0600 socket, a leftover
-// removed only when nobody answers on it and it is ours, and the peer the
-// kernel names where it does.
+// Package ipc — the Unix socket: a 0700 directory, a socket 0600 unless the
+// lists name other accounts (0660 and the group, or 0666), its mode set
+// before it listens, a leftover removed only when nobody answers on it and
+// it is ours, and the peer the kernel names where it does.
 package ipc

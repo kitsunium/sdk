@@ -1,10 +1,12 @@
 package loop
 
 import (
+	"os"
 	"runtime"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -41,6 +43,11 @@ const (
 	defaultBatchWait time.Duration = 250 * time.Microsecond
 	// defaultBatchWaitMin is LoopValue.BatchWaitMin's default.
 	defaultBatchWaitMin int = 32
+	// defaultSendZCMin is LoopValue.SendZCMin's default: below about 10 KiB a
+	// zero-copy send's page pinning and notification cost more than the copy
+	// it saves (the kernel's MSG_ZEROCOPY guidance); the gate of #969 is to
+	// measure it.
+	defaultSendZCMin int = 16 << 10
 	// batchWaitFrom is the fewest completions a batch must have reaped for
 	// the next wait to be grouped: below it the loop is not loaded, and
 	// waiting would only add latency.
@@ -55,12 +62,29 @@ const (
 	yieldEvery time.Duration = 5 * time.Millisecond
 )
 
+// The sources LoopStateValue.SlabBudgetSource names (#809).
+const (
+	// slabExplicit is LoopValue.SlabBudget, as given.
+	slabExplicit string = "explicit"
+	// slabDerived is a quarter of the cgroup allowance, shared by the loops.
+	slabDerived string = "derived"
+	// slabDefault is defaultSlabBudget: no allowance was found.
+	slabDefault string = "default"
+	// slabAllowanceShare is the share of the allowance every loop's slab
+	// together may map: a quarter, the rest the Go heap's and the kernel's.
+	slabAllowanceShare int64 = 4
+)
+
 // sizing is a loop group's resolved configuration: every zero of the
 // LoopValue replaced by its default, the ring count derived once.
 type sizing struct {
 	// loops is the number of loops; loopsSource where it came from.
 	loops       int
 	loopsSource string
+	// slabBudget is each loop's slab ceiling, slabSource where it came from
+	// (#809); zero only in a test's hand-built sizing, read as the default.
+	slabBudget int
+	slabSource string
 	// rings is the number of rings per loop.
 	rings int
 	// ringsSource is where rings came from.
@@ -85,6 +109,15 @@ type sizing struct {
 	// batchBudget bounds one io_uring batch's reaping, zero for none (ADR
 	// 0206).
 	batchBudget time.Duration
+	// sendZCMin is the smallest flight sent zero-copy once uring-send-zc is
+	// on (#969).
+	sendZCMin int
+	// busyPoll is busy-poll's window and budget, used once the row is on
+	// (#979).
+	busyPoll busyPollPlan
+	// zcrx is the queue uring-zcrx's probe registers, its area resolved
+	// (#980).
+	zcrx corenet.ZCRXValue
 	// yield is the most serving time between two yields to the scheduler,
 	// zero for none: Start sets it (yieldFor), once GOMAXPROCS is read.
 	yield time.Duration
@@ -113,6 +146,9 @@ func resolve(v corenet.LoopValue, maxConns int, rlimit uint64) (sizing, error) {
 	}
 	sz.batchWait, sz.batchWaitMin = batchWaitOf(v, sz.cqBatch)
 	sz.batchBudget = max(time.Duration(v.BatchBudget), 0)
+	sz.sendZCMin = orDefault(v.SendZCMin, defaultSendZCMin)
+	sz.busyPoll = busyPollOf(v)
+	sz.zcrx = zcrxOf(v, os.Getpagesize())
 	sz.loops, sz.loopsSource = ResolveLoops(v.Loops)
 	sz.rings, sz.ringsSource = ringCount(v.Rings, max(sz.maxConns, sz.softConns), table)
 	//: resolved.
@@ -204,4 +240,25 @@ func orDefault(v, def int) int {
 	}
 	//: as configured.
 	return v
+}
+
+// slabBudgetFor is each loop's slab budget and where it came from (#809):
+// the caller's own, else a quarter of the cgroup allowance memlimit read
+// shared by loops loops, at most defaultSlabBudget and at least floor — one
+// connection's largest chunk, so a loop can serve one —, else
+// defaultSlabBudget.
+func slabBudgetFor(explicit int, mem coreproc.MemoryLimitValue, loops, floor int) (int, string) {
+	//: the caller's.
+	if explicit > 0 {
+		//: as given.
+		return explicit, slabExplicit
+	}
+	//: no allowance read: the default.
+	if mem.Allowance <= 0 {
+		//: 128 MiB.
+		return defaultSlabBudget, slabDefault
+	}
+	share := mem.Allowance / (slabAllowanceShare * int64(max(loops, 1)))
+	//: within the default and the floor.
+	return int(max(min(share, int64(defaultSlabBudget)), int64(floor))), slabDerived
 }

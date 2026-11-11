@@ -2,6 +2,7 @@ package loop
 
 import (
 	"math/bits"
+	"sync/atomic"
 	"time"
 )
 
@@ -46,19 +47,48 @@ func (g *shared) batchP99() time.Duration {
 	return time.Duration(uint64(1) << uint(batchBuckets-1))
 }
 
-// publish copies the ring's counters to its atomics.
+// storeU stores v to a, once it differs from what was published.
+func storeU(a *atomic.Uint64, was *uint64, v uint64) {
+	//: unchanged: nothing to publish.
+	if v != *was {
+		a.Store(v)
+		*was = v
+	}
+}
+
+// storeI is storeU for a gauge.
+func storeI(a *atomic.Int64, was *int64, v int64) {
+	//: unchanged: nothing to publish.
+	if v != *was {
+		a.Store(v)
+		*was = v
+	}
+}
+
+// publish copies the ring's counters to its atomics, those that moved.
 func (r *ring) publish() {
-	p, s := r.pub, &r.st
-	p.conns.Store(int64(r.live))
-	p.accepted.Store(s.accepted)
-	p.closed.Store(s.closed)
-	p.batches.Store(s.batches)
-	p.completions.Store(s.completions)
-	p.starved.Store(s.starved)
-	p.retries.Store(s.retries)
-	p.pauses.Store(s.pauses)
-	p.evicted.Store(s.evicted)
-	p.watchdog.Store(s.watchdog)
-	p.cut.Store(s.cut)
-	p.draining.Store(r.draining)
+	p, s, o := r.pub, &r.st, &r.seen
+	storeI(&p.conns, &o.conns, int64(r.live))
+	storeU(&p.accepted, &o.accepted, s.accepted)
+	storeU(&p.closed, &o.closed, s.closed)
+	storeU(&p.batches, &o.batches, s.batches)
+	storeU(&p.completions, &o.completions, s.completions)
+	storeU(&p.starved, &o.starved, s.starved)
+	storeU(&p.retries, &o.retries, s.retries)
+	storeU(&p.pauses, &o.pauses, s.pauses)
+	storeU(&p.evicted, &o.evicted, s.evicted)
+	storeU(&p.watchdog, &o.watchdog, s.watchdog)
+	storeU(&p.cut, &o.cut, s.cut)
+	storeU(&p.bytesIn, &o.bytesIn, s.bytesIn)
+	storeU(&p.bytesOut, &o.bytesOut, s.bytesOut)
+	storeU(&p.outRefused, &o.outRefused, s.outRefused)
+	storeU(&p.spillClosed, &o.spillClosed, s.spillClosed)
+	storeU(&p.timeouts, &o.timeouts, s.timeouts)
+	storeU(&p.idleClosed, &o.idleClosed, s.idleClosed)
+	storeI(&p.pending, &o.pending, s.pending)
+	//: published when it flips.
+	if r.draining != o.draining {
+		p.draining.Store(r.draining)
+		o.draining = r.draining
+	}
 }

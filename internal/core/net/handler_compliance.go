@@ -13,4 +13,5 @@ var (
 	_ LoopLayered        = LoopLayer{}
 	_ LoopOptionHonourer = LoopLayer{}
 	_ LoopStarter        = LoopLayer{}
+	_ LoopDrainer        = LoopLayer{}
 )

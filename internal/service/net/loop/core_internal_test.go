@@ -31,6 +31,7 @@ func (d *fakeDriver) flush(r *ring, slot int32) {
 	}
 	d.sent[slot].Write(data)
 	c.out.off += int32(len(data))
+	r.wrote(len(data))
 	if c.out.off == c.out.len {
 		r.lp.slab.free(c.out)
 		c.out = chunkRef{idx: noChunk}
@@ -86,7 +87,7 @@ func newTestLoop(h corenet.LoopHandler, v corenet.LoopValue, idle time.Duration)
 		panic(err)
 	}
 	g := &Group{sz: sz, grp: &shared{}}
-	lp := newLoop(g, Config{Handler: h, IdleTimeout: idle, Value: v}, 0, heapMapper)
+	lp := newLoop(g, Config{Handler: h, IdleTimeout: idle, Value: v}, 0, heapMapper, nil)
 	lp.post = newPostQueue(func() {})
 	d := &fakeDriver{sent: map[int32]*bytes.Buffer{}}
 	r := newRing(lp, 0, d)

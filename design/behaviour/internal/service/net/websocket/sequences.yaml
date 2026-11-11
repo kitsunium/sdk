@@ -413,6 +413,186 @@ sequences:
           		Length: uint64(size),
           	})
         to: validateControlShape
+  - of: isExtendedConnect
+    steps:
+      - return: r.ProtoMajor == 2 && r.Method == methodConnect && r.Header.Get(protocolPseudo) == protocolWebSocket
+  - of: verifyExtendedConnect
+    participants:
+      - id: caller
+        kind: actor
+      - id: verifyExtendedConnect
+        kind: self
+      - id: r.Header.Get
+        kind: value
+      - id: w.Header().Set
+        kind: value
+      - id: http
+        kind: stdlib
+      - id: errs
+        kind: package
+      - id: verifyOrigin
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: w.Header().Set(corenet.WSVersionHeader, corenet.WSVersion)
+              to: w.Header().Set
+            - eval: http.Error(w, "unsupported websocket version", http.StatusUpgradeRequired)
+              to: http
+            - return: |-
+                errs.Wrap(corenet.WSHandshakeFailed, errs.WrapParams{},
+                			errs.String("header", corenet.WSVersionHeader),
+                			errs.String("offered", version),
+                			errs.String("why", "this server speaks only version 13"))
+              to: errs
+          init:
+            bind: version
+            eval: r.Header.Get(corenet.WSVersionHeader)
+            to: r.Header.Get
+          when: version != corenet.WSVersion
+      - return: verifyOrigin(w, r, cfg)
+        to: verifyOrigin
+  - of: upgradeExtendedConnect
+    participants:
+      - id: caller
+        kind: actor
+      - id: upgradeExtendedConnect
+        kind: self
+      - id: verifyExtendedConnect
+        kind: internal
+      - id: acceptExtendedConnect
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: verifyExtendedConnect(w, r, cfg)
+            to: verifyExtendedConnect
+          when: err != nil
+      - return: acceptExtendedConnect(w, r, cfg)
+        to: acceptExtendedConnect
+  - of: acceptExtendedConnect
+    participants:
+      - id: caller
+        kind: actor
+      - id: acceptExtendedConnect
+        kind: self
+      - id: http
+        kind: stdlib
+      - id: rc.EnableFullDuplex
+        kind: value
+      - id: chooseSubprotocol
+        kind: internal
+      - id: w.Header().Set
+        kind: value
+      - id: w.WriteHeader
+        kind: value
+      - id: rc.Flush
+        kind: value
+      - id: newConn
+        kind: internal
+    steps:
+      - bind: rc
+        eval: http.NewResponseController(w)
+        to: http
+      - opt:
+          do:
+            - eval: http.Error(w, "websocket unavailable", http.StatusInternalServerError)
+              to: http
+            - return: |-
+                nil, errs.Wrap(corenet.WSUpgradeUnsupported, errs.WrapParams{},
+                			errs.String("why", "the ResponseWriter cannot run full duplex"), errs.String("cause", err.Error()))
+          init:
+            bind: err
+            eval: rc.EnableFullDuplex()
+            to: rc.EnableFullDuplex
+          when: err != nil
+      - bind: subprotocol, _
+        eval: chooseSubprotocol(cfg.subprotocols, r)
+        to: chooseSubprotocol
+      - opt:
+          do:
+            - eval: w.Header().Set(corenet.WSProtocolHeader, subprotocol)
+              to: w.Header().Set
+          when: subprotocol != ""
+      - eval: w.WriteHeader(http.StatusOK)
+        to: w.WriteHeader
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.WSHandshakeFailed, errs.WrapParams{},
+                			errs.String("why", "the 200 could not be sent"), errs.String("cause", err.Error()))
+          init:
+            bind: err
+            eval: rc.Flush()
+            to: rc.Flush
+          when: err != nil
+      - bind: stream
+        eval: "&h2Stream{w: w, rc: rc, body: r.Body}"
+      - return: newConn(stream, bufio.NewReaderSize(r.Body, h2ReadBuffer), subprotocol, cfg, corenet.DrainSignal(r.Context())), nil
+        to: newConn
+  - of: (*h2Stream).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Stream).Write
+        kind: self
+      - id: s.w.Write
+        kind: value
+    steps:
+      - bind: n, err
+        eval: s.w.Write(p)
+        to: s.w.Write
+      - opt:
+          do:
+            - return: n, err
+          when: err != nil
+      - return: n, s.rc.Flush()
+  - of: (*h2Stream).SetDeadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Stream).SetDeadline
+        kind: self
+      - id: s.rc.SetReadDeadline
+        kind: value
+      - id: s.rc.SetWriteDeadline
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.rc.SetReadDeadline(t)
+            to: s.rc.SetReadDeadline
+          when: err != nil
+      - return: s.rc.SetWriteDeadline(t)
+        to: s.rc.SetWriteDeadline
+  - of: (*h2Stream).SetWriteDeadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Stream).SetWriteDeadline
+        kind: self
+      - id: s.rc.SetWriteDeadline
+        kind: value
+    steps:
+      - return: s.rc.SetWriteDeadline(t)
+        to: s.rc.SetWriteDeadline
+  - of: (*h2Stream).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Stream).Close
+        kind: self
+      - id: s.body.Close
+        kind: value
+    steps:
+      - return: s.body.Close()
+        to: s.body.Close
   - of: Upgrade
     participants:
       - id: caller
@@ -423,6 +603,8 @@ sequences:
         kind: internal
       - id: http
         kind: stdlib
+      - id: upgradeExtendedConnect
+        kind: internal
       - id: verifyHandshake
         kind: internal
       - id: chooseSubprotocol
@@ -445,6 +627,11 @@ sequences:
               to: http
             - return: nil, cerr
           when: cerr != nil
+      - opt:
+          do:
+            - return: upgradeExtendedConnect(w, r, &cfg)
+              to: upgradeExtendedConnect
+          when: isExtendedConnect(r)
       - opt:
           do:
             - return: nil, verr
@@ -526,12 +713,12 @@ sequences:
           do:
             - eval: w.Header().Set(corenet.WSVersionHeader, corenet.WSVersion)
               to: w.Header().Set
-            - eval: http.Error(w, "websocket requires HTTP/1.1", http.StatusUpgradeRequired)
+            - eval: http.Error(w, "websocket requires HTTP/1.1 or an extended CONNECT", http.StatusUpgradeRequired)
               to: http
             - return: |-
                 errs.Wrap(corenet.WSUpgradeUnsupported, errs.WrapParams{},
                 			errs.String("proto", r.Proto),
-                			errs.String("why", "the opening handshake requires HTTP/1.1; RFC 8441 is not implemented"))
+                			errs.String("why", "the opening handshake requires HTTP/1.1, or RFC 8441's extended CONNECT over HTTP/2"))
               to: errs
           when: r.ProtoMajor != 1 || r.ProtoMinor < 1
       - opt:
@@ -889,6 +1076,880 @@ sequences:
               to: errs
           when: len(raw) != corenet.WSKeyLen
       - return: nil
+  - of: NewLoopHandler
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewLoopHandler
+        kind: self
+      - id: resolve
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(corenet.WSConnMisconfigured, errs.WrapParams{}, errs.String("option", "source"))
+          when: src == nil
+      - var:
+          name: probe
+          type: config
+      - loop:
+          do:
+            - eval: opt(&probe)
+          key: _
+          range: opts
+          value: opt
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.WSConnMisconfigured, errs.WrapParams{}, errs.String("option", "WriteTimeout"),
+                			errs.String("why", "a loop's OutputCap bounds a connection that stopped reading"))
+          when: probe.writeTimeout != 0
+      - bind: cfg, err
+        eval: resolve(opts)
+        to: resolve
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&LoopHandler{src: src, cfg: cfg}, nil"
+  - of: (*statusRecorder).Header
+    steps:
+      - return: r.header
+  - of: (*statusRecorder).Write
+    steps:
+      - return: len(p), nil
+  - of: (*statusRecorder).WriteHeader
+    steps:
+      - set: r.status
+        value: status
+  - of: shimRequest
+    participants:
+      - id: caller
+        kind: actor
+      - id: shimRequest
+        kind: self
+      - id: copyField
+        kind: internal
+    steps:
+      - bind: h
+        eval: make(http.Header, 6)
+      - loop:
+          do:
+            - eval: copyField(h, req, name)
+              to: copyField
+          key: _
+          range: handshakeFields
+          value: name
+      - bind: method, host
+        eval: string(req.Method), string(req.Host)
+      - return: "&http.Request{Method: method, Host: host, Header: h, ProtoMajor: 1, ProtoMinor: 1}"
+  - of: copyField
+    participants:
+      - id: caller
+        kind: actor
+      - id: copyField
+        kind: self
+      - id: req.Field
+        kind: value
+      - id: h.Add
+        kind: value
+    steps:
+      - bind: value, ok
+        eval: req.Field(name)
+        to: req.Field
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - eval: h.Add(name, string(value))
+        to: h.Add
+  - of: (*LoopHandler).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).ServeHTTP1
+        kind: self
+      - id: shimRequest
+        kind: internal
+      - id: verifyHandshake
+        kind: internal
+      - id: appendRefusalFields
+        kind: internal
+      - id: h.src.OpenWS
+        kind: internal
+      - id: r.Header.Get
+        kind: value
+      - id: chooseSubprotocol
+        kind: internal
+      - id: h.markSubprotocol
+        kind: internal
+    steps:
+      - bind: r
+        eval: shimRequest(req)
+        to: shimRequest
+      - bind: rec
+        eval: "&statusRecorder{header: http.Header{}, status: http.StatusBadRequest}"
+      - opt:
+          do:
+            - set: res.Status
+              value: rec.status
+            - set: res.Header
+              to: appendRefusalFields
+              value: appendRefusalFields(res.Header, rec.header)
+            - return: ""
+          init:
+            bind: err
+            eval: verifyHandshake(rec, r, &h.cfg)
+            to: verifyHandshake
+          when: err != nil
+      - bind: status
+        eval: h.src.OpenWS(req)
+        to: h.src.OpenWS
+      - opt:
+          do:
+            - set: res.Status
+              value: status
+            - return: ""
+          when: status != 0
+      - bind: key
+        eval: r.Header.Get(corenet.WSKeyHeader)
+        to: r.Header.Get
+      - bind: chosen, agreed
+        eval: chooseSubprotocol(h.cfg.subprotocols, r)
+        to: chooseSubprotocol
+      - bind: out
+        eval: append(res.Header, upgradeField...)
+      - set: out
+        value: append(out, AcceptKey(key)...)
+      - set: out
+        value: append(out, fieldEnd...)
+      - opt:
+          do:
+            - set: out
+              value: append(out, protocolField...)
+            - set: out
+              value: append(out, chosen...)
+            - set: out
+              value: append(out, fieldEnd...)
+          when: agreed
+      - set: res.Upgrade, res.Header
+        value: true, out
+      - eval: h.markSubprotocol(req, chosen, agreed)
+        to: h.markSubprotocol
+  - of: appendRefusalFields
+    steps:
+      - loop:
+          do:
+            - loop:
+                do:
+                  - set: dst
+                    value: append(dst, name...)
+                  - set: dst
+                    value: "append(dst, \": \"...)"
+                  - set: dst
+                    value: append(dst, v...)
+                  - set: dst
+                    value: append(dst, fieldEnd...)
+                key: _
+                range: values
+                value: v
+          key: name
+          range: h
+          value: values
+      - return: dst
+  - of: (*LoopHandler).markSubprotocol
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).markSubprotocol
+        kind: self
+      - id: h.conn
+        kind: internal
+    steps:
+      - bind: ws
+        eval: h.conn(req.Lane, req.Conn)
+        to: h.conn
+      - set: ws.subprotocol
+        value: "0"
+      - opt:
+          do:
+            - return: ""
+          when: "!agreed"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: ws.subprotocol
+                    value: uint8(i + 1)
+                  - return: ""
+                when: name == chosen
+          key: i
+          range: h.cfg.subprotocols
+          value: name
+  - of: (*LoopHandler).OnStreamOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnStreamOpen
+        kind: self
+      - id: h.conn
+        kind: internal
+      - id: h.armHeartbeat
+        kind: internal
+      - id: h.src.WSOpened
+        kind: internal
+    steps:
+      - bind: ws
+        eval: h.conn(s.IO.Loop(), s.Ref)
+        to: h.conn
+      - bind: sub
+        eval: "\"\""
+      - opt:
+          do:
+            - set: sub
+              value: h.cfg.subprotocols[ws.subprotocol-1]
+          when: ws.subprotocol > 0
+      - eval: h.armHeartbeat(s)
+        to: h.armHeartbeat
+      - eval: "h.src.WSOpened(LoopConnValue{h: h, s: s}, sub)"
+        to: h.src.WSOpened
+  - of: (*LoopHandler).armHeartbeat
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).armHeartbeat
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: swallowErr(s.Deadline(h.cfg.pingInterval))
+              to: swallowErr
+          when: "!h.cfg.noPing && h.cfg.pingInterval > 0"
+  - of: (*LoopHandler).OnStreamTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnStreamTimeout
+        kind: self
+      - id: h.conn
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: h.armHeartbeat
+        kind: internal
+    steps:
+      - bind: ws
+        eval: h.conn(s.IO.Loop(), s.Ref)
+        to: h.conn
+      - opt:
+          do:
+            - set: ws.dead
+              value: "true"
+            - eval: swallowErr(s.End())
+              to: swallowErr
+            - return: ""
+          when: ws.awaiting
+      - set: ws.awaiting
+        value: "true"
+      - eval: "swallowErr(LoopConnValue{h: h, s: s}.Ping(nil))"
+        to: swallowErr
+      - eval: h.armHeartbeat(s)
+        to: h.armHeartbeat
+  - of: (*LoopHandler).OnStreamDrain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnStreamDrain
+        kind: self
+      - id: h.conn
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: ws
+        eval: h.conn(s.IO.Loop(), s.Ref)
+        to: h.conn
+      - eval: swallowErr(h.closeWith(s, ws, corenet.WSCloseGoingAway, ""))
+        to: swallowErr
+  - of: (*LoopHandler).OnStreamClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnStreamClose
+        kind: self
+      - id: h.src.WSClosed
+        kind: internal
+      - id: h.conn
+        kind: internal
+    steps:
+      - eval: "h.src.WSClosed(LoopConnValue{h: h, s: s}, err)"
+        to: h.src.WSClosed
+      - bind: ws
+        eval: h.conn(s.IO.Loop(), s.Ref)
+        to: h.conn
+      - set: "*ws"
+        value: "wsConn{gen: ws.gen}"
+  - of: (*LoopHandler).lane
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).lane
+        kind: self
+      - id: h.lanes.Load
+        kind: value
+      - id: h.growLane
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: (*p)[i]
+          init:
+            bind: p
+            eval: h.lanes.Load()
+            to: h.lanes.Load
+          when: p != nil && i < len(*p) && (*p)[i] != nil
+      - return: h.growLane(i)
+        to: h.growLane
+  - of: (*LoopHandler).growLane
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).growLane
+        kind: self
+      - id: h.lanes.Load
+        kind: value
+      - id: h.lanes.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: h.mu
+      - var:
+          name: cur
+          type: "[]*wsLane"
+      - opt:
+          do:
+            - set: cur
+              value: "*p"
+          init:
+            bind: p
+            eval: h.lanes.Load()
+            to: h.lanes.Load
+          when: p != nil
+      - opt:
+          do:
+            - return: cur[i]
+          when: i < len(cur) && cur[i] != nil
+      - bind: next
+        eval: make([]*wsLane, max(len(cur), i+1))
+      - eval: copy(next, cur)
+      - set: next[i]
+        value: "&wsLane{}"
+      - eval: h.lanes.Store(&next)
+        to: h.lanes.Store
+      - return: next[i]
+  - of: (*LoopHandler).conn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).conn
+        kind: self
+      - id: h.lane
+        kind: internal
+    steps:
+      - bind: st
+        eval: h.lane(lane)
+        to: h.lane
+      - bind: ring, slot
+        eval: int(ref.Ring), int(ref.Slot)
+      - opt:
+          do:
+            - set: st.conns
+              value: append(st.conns, make([][]wsConn, ring+1-len(st.conns))...)
+          when: ring >= len(st.conns)
+      - opt:
+          do:
+            - bind: grown
+              eval: make([]wsConn, max(slot+1, 2*len(st.conns[ring])))
+            - eval: copy(grown, st.conns[ring])
+            - set: st.conns[ring]
+              value: grown
+          when: slot >= len(st.conns[ring])
+      - bind: ws
+        eval: "&st.conns[ring][slot]"
+      - opt:
+          do:
+            - set: "*ws"
+              value: "wsConn{gen: ref.Gen}"
+          when: ws.gen != ref.Gen
+      - return: ws
+  - of: NewLoopConnValue
+    steps:
+      - return: "LoopConnValue{h: h, s: s}"
+  - of: LoopConnValue.Conn
+    steps:
+      - return: c.s.Ref
+  - of: LoopConnValue.Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopConnValue.Send
+        kind: self
+      - id: c.frame
+        kind: internal
+    steps:
+      - bind: op
+        eval: corenet.WSText
+      - opt:
+          do:
+            - set: op
+              value: corenet.WSBinary
+          when: m.Binary
+      - return: c.frame(op, m.Data)
+        to: c.frame
+  - of: LoopConnValue.Ping
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopConnValue.Ping
+        kind: self
+      - id: c.frame
+        kind: internal
+    steps:
+      - return: c.frame(corenet.WSPing, payload)
+        to: c.frame
+  - of: LoopConnValue.frame
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopConnValue.frame
+        kind: self
+      - id: c.h.lane
+        kind: internal
+      - id: AppendFrame
+        kind: internal
+      - id: c.s.Send
+        kind: value
+    steps:
+      - bind: lane
+        eval: c.h.lane(c.s.IO.Loop())
+        to: c.h.lane
+      - bind: wire, err
+        eval: AppendFrame(lane.out[:0], op, true, payload)
+        to: AppendFrame
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: lane.out
+        value: wire
+      - return: c.s.Send(wire)
+        to: c.s.Send
+  - of: LoopConnValue.CloseWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopConnValue.CloseWith
+        kind: self
+      - id: c.h.conn
+        kind: internal
+      - id: c.h.closeWith
+        kind: internal
+    steps:
+      - bind: ws
+        eval: c.h.conn(c.s.IO.Loop(), c.s.Ref)
+        to: c.h.conn
+      - return: c.h.closeWith(c.s, ws, code, reason)
+        to: c.h.closeWith
+  - of: (*LoopHandler).closeWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).closeWith
+        kind: self
+      - id: h.lane
+        kind: internal
+      - id: AppendClosePayload
+        kind: internal
+      - id: AppendFrame
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: s.End
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: ws.dead
+      - set: ws.dead
+        value: "true"
+      - bind: lane
+        eval: h.lane(s.IO.Loop())
+        to: h.lane
+      - bind: payload, err
+        eval: AppendClosePayload(lane.out[:0], code, reason)
+        to: AppendClosePayload
+      - opt:
+          do:
+            - bind: wire, ferr
+              eval: AppendFrame(nil, corenet.WSClose, true, payload)
+              to: AppendFrame
+            - opt:
+                do:
+                  - eval: swallowErr(s.Send(wire))
+                    to: swallowErr
+                when: ferr == nil
+          when: err == nil
+      - return: s.End()
+        to: s.End
+  - of: (*LoopHandler).OnUpgradedData
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnUpgradedData
+        kind: self
+      - id: h.conn
+        kind: internal
+      - id: h.step
+        kind: internal
+    steps:
+      - bind: ws
+        eval: h.conn(s.IO.Loop(), s.Ref)
+        to: h.conn
+      - opt:
+          do:
+            - return: len(buf)
+          when: ws.dead
+      - set: ws.awaiting
+        value: "false"
+      - bind: used
+        eval: "0"
+      - loop:
+          cond: used < len(buf) && !ws.dead
+          do:
+            - bind: n, more
+              eval: h.step(s, ws, buf[used:])
+              to: h.step
+            - op: +=
+              set: used
+              value: "n"
+            - opt:
+                do:
+                  - break: true
+                when: "!more"
+      - opt:
+          do:
+            - return: len(buf)
+          when: ws.dead
+      - return: used
+  - of: (*LoopHandler).step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).step
+        kind: self
+      - id: h.payload
+        kind: internal
+      - id: FrameHeaderLen
+        kind: internal
+      - id: ParseFrameHeader
+        kind: internal
+      - id: h.fail
+        kind: internal
+      - id: header.ValidateFromClient
+        kind: internal
+      - id: h.control
+        kind: internal
+      - id: h.payloadFrom
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: h.payload(s, ws, buf)
+              to: h.payload
+          when: ws.frameLeft > 0
+      - opt:
+          do:
+            - return: 0, false
+          when: len(buf) < MinHeaderLen
+      - bind: want
+        eval: FrameHeaderLen(buf[:MinHeaderLen])
+        to: FrameHeaderLen
+      - opt:
+          do:
+            - return: 0, false
+          when: len(buf) < want
+      - bind: header, herr
+        eval: ParseFrameHeader(buf[:want])
+        to: ParseFrameHeader
+      - opt:
+          do:
+            - eval: h.fail(s, ws, corenet.WSCloseProtocolError)
+              to: h.fail
+            - return: len(buf), false
+          when: herr != nil
+      - opt:
+          do:
+            - eval: h.fail(s, ws, corenet.WSCloseProtocolError)
+              to: h.fail
+            - return: len(buf), false
+          init:
+            bind: merr
+            eval: header.ValidateFromClient()
+            to: header.ValidateFromClient
+          when: merr != nil
+      - opt:
+          do:
+            - eval: h.fail(s, ws, corenet.WSCloseTooLarge)
+              to: h.fail
+            - return: len(buf), false
+          when: "!header.OpCode.IsControl() && header.Length > uint64(h.cfg.maxFrameSize)"
+      - opt:
+          do:
+            - return: h.control(s, ws, buf, want, header)
+              to: h.control
+          when: header.OpCode.IsControl()
+      - opt:
+          do:
+            - return: len(buf), false
+          when: "!h.startData(s, ws, header)"
+      - return: h.payloadFrom(s, ws, buf, want)
+        to: h.payloadFrom
+  - of: (*LoopHandler).startData
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).startData
+        kind: self
+      - id: h.fail
+        kind: internal
+      - id: h.complete
+        kind: internal
+    steps:
+      - alt:
+          - do:
+              - opt:
+                  do:
+                    - eval: h.fail(s, ws, corenet.WSCloseProtocolError)
+                      to: h.fail
+                    - return: "false"
+                  when: ws.msgState == 0
+            when: header.OpCode == corenet.WSContinuation
+          - do:
+              - opt:
+                  do:
+                    - eval: h.fail(s, ws, corenet.WSCloseProtocolError)
+                      to: h.fail
+                    - return: "false"
+                  when: ws.msgState != 0
+              - set: ws.op, ws.msg
+                value: header.OpCode, ws.msg[:0]
+            else: true
+      - opt:
+          do:
+            - eval: h.fail(s, ws, corenet.WSCloseTooLarge)
+              to: h.fail
+            - return: "false"
+          when: int64(len(ws.msg))+int64(header.Length) > h.cfg.maxMessageSize
+      - set: ws.frameLeft, ws.key, ws.maskPos
+        value: header.Length, header.MaskKey, 0
+      - set: ws.msgState
+        value: msgOpen
+      - opt:
+          do:
+            - set: ws.msgState
+              value: msgOpenFinal
+          when: header.Final
+      - opt:
+          do:
+            - eval: h.complete(s, ws, nil)
+              to: h.complete
+          when: header.Length == 0 && header.Final
+      - return: "true"
+  - of: (*LoopHandler).payloadFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).payloadFrom
+        kind: self
+      - id: h.payload
+        kind: internal
+    steps:
+      - bind: n, more
+        eval: h.payload(s, ws, buf[header:])
+        to: h.payload
+      - return: header + n, more
+  - of: (*LoopHandler).payload
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).payload
+        kind: self
+      - id: applyMaskAt
+        kind: internal
+      - id: h.complete
+        kind: internal
+    steps:
+      - bind: take
+        eval: int(min(uint64(len(buf)), ws.frameLeft))
+      - bind: chunk
+        eval: buf[:take]
+      - eval: applyMaskAt(chunk, ws.key, ws.maskPos)
+        to: applyMaskAt
+      - op: "-="
+        set: ws.frameLeft
+        value: uint64(take)
+      - op: +=
+        set: ws.maskPos
+        value: uint64(take)
+      - opt:
+          do:
+            - set: ws.msg
+              value: append(ws.msg, chunk...)
+            - return: take, false
+          when: ws.frameLeft > 0
+      - opt:
+          do:
+            - set: ws.msg
+              value: append(ws.msg, chunk...)
+            - return: take, true
+          when: ws.msgState != msgOpenFinal
+      - alt:
+          - do:
+              - eval: h.complete(s, ws, chunk)
+                to: h.complete
+            when: len(ws.msg) == 0
+          - do:
+              - set: ws.msg
+                value: append(ws.msg, chunk...)
+              - eval: h.complete(s, ws, ws.msg)
+                to: h.complete
+            else: true
+      - return: take, !ws.dead
+  - of: (*LoopHandler).complete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).complete
+        kind: self
+      - id: h.fail
+        kind: internal
+      - id: h.src.WSMessage
+        kind: internal
+    steps:
+      - set: ws.msgState
+        value: "0"
+      - opt:
+          do:
+            - eval: h.fail(s, ws, corenet.WSCloseInvalidPayload)
+              to: h.fail
+            - return: ""
+          when: ws.op == corenet.WSText && ValidateText(data) != nil
+      - eval: "h.src.WSMessage(LoopConnValue{h: h, s: s}, corenet.WSMessageValue{Binary: ws.op == corenet.WSBinary, Data: data})"
+        to: h.src.WSMessage
+      - alt:
+          - do:
+              - set: ws.msg
+                value: nil
+            when: cap(ws.msg) > smallMessageCap
+          - do:
+              - set: ws.msg
+                value: ws.msg[:0]
+            else: true
+  - of: (*LoopHandler).control
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).control
+        kind: self
+      - id: ApplyMask
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: h.serveClose
+        kind: internal
+    steps:
+      - bind: end
+        eval: header + int(f.Length)
+      - opt:
+          do:
+            - return: 0, false
+          when: len(buf) < end
+      - bind: payload
+        eval: buf[header:end]
+      - eval: ApplyMask(payload, f.MaskKey)
+        to: ApplyMask
+      - switch:
+          cases:
+            - case: corenet.WSPing
+              do:
+                - eval: "swallowErr(LoopConnValue{h: h, s: s}.frame(corenet.WSPong, payload))"
+                  to: swallowErr
+            - case: corenet.WSPong
+            - case: corenet.WSClose
+              do:
+                - eval: h.serveClose(s, ws, payload)
+                  to: h.serveClose
+            - default: true
+          "on": f.OpCode
+      - return: end, !ws.dead
+  - of: (*LoopHandler).serveClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).serveClose
+        kind: self
+      - id: ParseClosePayload
+        kind: internal
+      - id: h.fail
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: code, _, perr
+        eval: ParseClosePayload(payload)
+        to: ParseClosePayload
+      - opt:
+          do:
+            - eval: h.fail(s, ws, closeCodeFor(perr))
+              to: h.fail
+            - return: ""
+          when: perr != nil
+      - eval: swallowErr(h.closeWith(s, ws, code.Echoable(), ""))
+        to: swallowErr
+  - of: (*LoopHandler).fail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).fail
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: swallowErr(h.closeWith(s, ws, code, ""))
+        to: swallowErr
+  - of: applyMaskAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: applyMaskAt
+        kind: self
+      - id: ApplyMask
+        kind: internal
+    steps:
+      - var:
+          name: rotated
+          type: "[MaskLen]byte"
+      - loop:
+          do:
+            - set: rotated[i]
+              value: key[(uint64(i)+pos)%uint64(MaskLen)]
+          key: i
+          range: rotated
+      - eval: ApplyMask(payload, rotated)
+        to: ApplyMask
   - of: Subprotocols
     participants:
       - id: caller
@@ -1143,6 +2204,17 @@ sequences:
       - id: caller
         kind: actor
       - id: NewConn
+        kind: self
+      - id: newConn
+        kind: internal
+    steps:
+      - return: newConn(socket, buffered, subprotocol, cfg, draining)
+        to: newConn
+  - of: newConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: newConn
         kind: self
       - id: swallowErr
         kind: internal
@@ -1740,7 +2812,7 @@ sequences:
       - id: swallowErr
         kind: internal
       - id: c.raw.Write
-        kind: value
+        kind: internal
       - id: c.terminate
         kind: internal
       - id: errs

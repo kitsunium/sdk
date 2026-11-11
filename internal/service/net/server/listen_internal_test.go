@@ -358,7 +358,7 @@ func Test_listen(t *testing.T) {
 			cfg = testIdentity(t).ServerConfig()
 		}
 
-		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: c.network, Addr: addr}, cfg, false, false, 1)
+		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: c.network, Addr: addr}, cfg, socketSpec{attempts: 1})
 
 		if c.wantCode != 0 {
 			if !errs.HasCode(err, c.wantCode) {

@@ -26,9 +26,11 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	stdnet "net"
 	"os"
 	"os/exec"
@@ -39,6 +41,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
 // The load, as the plan fixes it.
@@ -83,8 +87,19 @@ const (
 const (
 	// l3EngineA is the recvmmsg reader with GRO off.
 	l3EngineA = "recvmmsg"
+	// l3EnginePktinfo is the recvmmsg reader with GRO off and the destination
+	// control message asked for (#972).
+	l3EnginePktinfo = "recvmmsg+pktinfo"
+	// l3EngineShards is the recvmmsg reader on four SO_REUSEPORT sockets of one
+	// port (#977).
+	l3EngineShards = "recvmmsg+shards"
+	// l3Shards is how many sockets that engine reads.
+	l3Shards = 4
 	// l3EngineB is the recvmmsg reader with GRO on.
 	l3EngineB = "gro"
+	// l3EngineURing is the io_uring datagram lane, GRO on (#852): its
+	// receives are its batches, one io_uring_enter each.
+	l3EngineURing = "uring-recvmsg"
 )
 
 // TestLoadL3Child is the receiving half of BenchmarkLoadL3, and runs only in
@@ -113,7 +128,7 @@ func TestLoadL3Child(t *testing.T) {
 	l3Answer(os.Stdin, os.Stdout, func() []uint64 {
 		var vs []uint64
 		for _, r := range readers {
-			vs = append(vs, r.datagrams.Load(), r.receives.Load(), r.truncated.Load())
+			vs = append(vs, r.datagrams.Load(), r.receives.Load(), r.truncated.Load(), r.kernel.Load())
 		}
 		return vs
 	})
@@ -127,12 +142,23 @@ var l3Sources = map[string]struct {
 }{
 	l3EngineA: {build: func(pc stdnet.PacketConn) datagramSource { return newDatagramSource(pc, false) }},
 	l3EngineB: {build: func(pc stdnet.PacketConn) datagramSource { return newDatagramSource(pc, true) }, gro: true},
+	// Four SO_REUSEPORT sockets, each one reader of its own (#977).
+	l3EngineShards: {build: func(pc stdnet.PacketConn) datagramSource { return newDatagramSource(pc, false) }},
+	// The destination read beside every message (#972): one control message more
+	// per message, reported on the paired ratio, not gated.
+	l3EnginePktinfo: {build: func(pc stdnet.PacketConn) datagramSource {
+		source := newDatagramSource(pc, false)
+		if reader, ok := source.(*multiReader); ok {
+			_ = reader.enablePktinfo(pc.LocalAddr().(*stdnet.UDPAddr))
+		}
+		return source
+	}},
 }
 
 // l3Reader is one engine's socket in the receiver, and what it counted.
 type l3Reader struct {
-	pc                             stdnet.PacketConn
-	datagrams, receives, truncated atomic.Uint64
+	pc                                     stdnet.PacketConn
+	datagrams, receives, truncated, kernel atomic.Uint64
 }
 
 // listenL3 binds a socket for engine and reads it through the engine's
@@ -143,23 +169,56 @@ type l3Reader struct {
 // Goroutine lifecycle: it launches the reader, which returns once the socket
 // is closed.
 func listenL3(engine, bind string) (*l3Reader, error) {
+	if engine == l3EngineURing {
+		return listenL3URing(bind)
+	}
 	source, ok := l3Sources[engine]
 	if !ok {
 		return nil, fmt.Errorf("no L3 engine %q", engine)
 	}
-	pc, err := stdnet.ListenPacket("udp", bind)
-	if err != nil {
-		return nil, err
+	count := 1
+	cfg := stdnet.ListenConfig{}
+	if engine == l3EngineShards {
+		count = l3Shards
+		cfg.Control = listenControl(true, socketSpec{})
 	}
+	r := &l3Reader{}
+	bindTo := bind
+	for i := range count {
+		pc, err := cfg.ListenPacket(context.Background(), "udp", bindTo)
+		if err != nil {
+			return nil, err
+		}
+		if i == 0 {
+			r.pc = pc
+			bindTo = pinPort(corenet.AddressValue{Network: "udp", Addr: bind}, pc).Addr
+		}
+		if err := r.readWith(engine, source.build, source.gro, pc); err != nil {
+			_ = pc.Close()
+			return nil, err
+		}
+	}
+	return r, nil
+}
+
+// readWith starts one reader on one of the engine's sockets, adding to r.
+//
+// Goroutine lifecycle: it launches the reader, which returns once the socket
+// is closed.
+func (r *l3Reader) readWith(engine string, build func(stdnet.PacketConn) datagramSource, gro bool, pc stdnet.PacketConn) error {
 	if udp, ok := pc.(*stdnet.UDPConn); ok {
 		_ = udp.SetReadBuffer(l3ReadBuffer)
 	}
-	src := source.build(pc)
-	if mr, batched := src.(*multiReader); !batched || mr.gro != source.gro {
-		_ = pc.Close()
-		return nil, fmt.Errorf("engine %s read through %T, GRO %v", engine, src, batched && mr.gro)
+	src := build(pc)
+	mr, batched := src.(*multiReader)
+	if !batched || mr.gro != gro {
+		return fmt.Errorf("engine %s read through %T, GRO %v", engine, src, batched && mr.gro)
 	}
-	r := &l3Reader{pc: pc}
+	// The kernel's own count of what it dropped, beside lost/op (#973): the
+	// control room then holds two messages under GRO, and must still cut none.
+	if rerr := mr.enableRxqOvfl(&r.kernel); rerr != nil {
+		return fmt.Errorf("engine %s: SO_RXQ_OVFL: %w", engine, rerr)
+	}
 	go func() {
 		slots := newSlots(l3Slots, src.slotSize(l3DatagramSize))
 		for {
@@ -177,7 +236,7 @@ func listenL3(engine, bind string) (*l3Reader, error) {
 			}
 		}
 	}()
-	return r, nil
+	return nil
 }
 
 // l3Answer answers each line read from in with the process's CPU (user+system,
@@ -256,11 +315,12 @@ func startL3Child(tb testing.TB, prefix, bind string, engines ...string) *l3Chil
 	return c
 }
 
-// l3Sample is the receiver's CPU, then each socket's datagrams, receives and
-// messages cut short, in the order of the engines it was started with.
+// l3Sample is the receiver's CPU, then each socket's datagrams, receives,
+// messages cut short and kernel drops, in the order of the engines it was
+// started with.
 type l3Sample struct {
-	cpu                            uint64
-	datagrams, receives, truncated []uint64
+	cpu                                    uint64
+	datagrams, receives, truncated, kernel []uint64
 }
 
 // sample reads the receiver's CPU and each socket's counts.
@@ -271,7 +331,7 @@ func (c *l3Child) sample(tb testing.TB) l3Sample {
 	}
 	line, err := c.out.ReadString('\n')
 	f := strings.Fields(line)
-	if err != nil || len(f) != 1+3*len(c.addrs) {
+	if err != nil || len(f) != 1+4*len(c.addrs) {
 		tb.Fatalf("L3 receiver sample %q, %v", line, err)
 	}
 	vs := make([]uint64, len(f))
@@ -284,9 +344,10 @@ func (c *l3Child) sample(tb testing.TB) l3Sample {
 	}
 	s := l3Sample{cpu: vs[0]}
 	for i := range c.addrs {
-		s.datagrams = append(s.datagrams, vs[1+3*i])
-		s.receives = append(s.receives, vs[2+3*i])
-		s.truncated = append(s.truncated, vs[3+3*i])
+		s.datagrams = append(s.datagrams, vs[1+4*i])
+		s.receives = append(s.receives, vs[2+4*i])
+		s.truncated = append(s.truncated, vs[3+4*i])
+		s.kernel = append(s.kernel, vs[4+4*i])
 	}
 	return s
 }
@@ -451,6 +512,8 @@ func settle(tb testing.TB, c *l3Child, i int, want uint64) l3Sample {
 type l3Count struct {
 	cpu                                 l3CPU
 	got, sent, receives, truncated, win uint64
+	// kernel is what the socket's SO_RXQ_OVFL count grew by (#973).
+	kernel uint64
 }
 
 // plus is c and d, field by field.
@@ -458,6 +521,7 @@ func (c l3Count) plus(d l3Count) l3Count {
 	return l3Count{
 		cpu: c.cpu.plus(d.cpu), got: c.got + d.got, sent: c.sent + d.sent,
 		receives: c.receives + d.receives, truncated: c.truncated + d.truncated, win: c.win + d.win,
+		kernel: c.kernel + d.kernel,
 	}
 }
 
@@ -512,6 +576,13 @@ func l3Metrics(sides [2]l3Count) (map[string]float64, error) {
 		if s.truncated != 0 {
 			return nil, fmt.Errorf("engine %c dropped %d messages cut short (MSG_TRUNC/MSG_CTRUNC)", "ab"[k], s.truncated)
 		}
+		// A drop the kernel counted is a datagram that did not arrive, so the
+		// count can reach what is lost but not pass it; the sender's own loss
+		// (a full veth queue) is the gap. A check on the two counts, no
+		// threshold on either (#973).
+		if lost := s.sent - s.got; s.kernel > lost {
+			return nil, fmt.Errorf("engine %c: the kernel counted %d drops of a loss of %d", "ab"[k], s.kernel, lost)
+		}
 		got, sent := float64(s.got), float64(s.sent)
 		cpu[k] = float64(s.cpu.total()) / sent
 		dps[k] = got / float64(s.receives)
@@ -521,6 +592,7 @@ func l3Metrics(sides [2]l3Count) (map[string]float64, error) {
 		m[p+"irq-cpu-ns/datagram"] = float64(s.cpu.irq) / sent
 		m[p+"datagrams/syscall"] = dps[k]
 		m[p+"lost/op"] = 1 - got/sent
+		m[p+"kernel-drops/op"] = float64(s.kernel) / sent
 	}
 	m["ratio:cpu-ns/datagram"] = cpu[1] / cpu[0]
 	m["ratio:datagrams/syscall"] = dps[1] / dps[0]
@@ -531,7 +603,7 @@ func l3Metrics(sides [2]l3Count) (map[string]float64, error) {
 // calibration of the P4a gate, and against itself with GRO, P4a's gate. It
 // runs over the veth pair scripts/ci/net-veth.sh sets up, or is skipped.
 func BenchmarkLoadL3(b *testing.B) {
-	for _, p := range [][2]string{{l3EngineA, l3EngineA}, {l3EngineA, l3EngineB}} {
+	for _, p := range [][2]string{{l3EngineA, l3EngineA}, {l3EngineA, l3EngineB}, {l3EngineA, l3EnginePktinfo}, {l3EngineA, l3EngineShards}, {l3EngineA, l3EngineURing}} {
 		b.Run("pair="+p[0]+":"+p[1], func(b *testing.B) { benchPairedL3(b, p[0], p[1]) })
 	}
 }
@@ -586,6 +658,7 @@ func l3Meter(child *l3Child, flows [2][]*stdnet.UDPConn) l3Window {
 		return l3Count{
 			cpu: cpu, got: after.datagrams[i] - before.datagrams[i], sent: uint64(sent),
 			receives: after.receives[i] - before.receives[i], truncated: after.truncated[i] - before.truncated[i], win: 1,
+			kernel: after.kernel[i] - before.kernel[i],
 		}
 	}
 }
@@ -599,7 +672,15 @@ func TestLoadL3_wired(t *testing.T) {
 	if l3Segments*l3DatagramSize > 65507 {
 		t.Fatalf("a GSO send of %d bytes exceeds UDP's", l3Segments*l3DatagramSize)
 	}
-	engines := []string{l3EngineA, l3EngineB}
+	for _, pair := range [][]string{{l3EngineA, l3EngineB}, {l3EnginePktinfo, l3EngineB}, {l3EngineShards, l3EngineB}} {
+		t.Run(pair[0], func(t *testing.T) { wireL3(t, pair) })
+	}
+}
+
+// wireL3 is TestLoadL3_wired on one pair of engines: the widened control room
+// of a destination asked for must cut nothing either (#972).
+func wireL3(t *testing.T, engines []string) {
+	t.Helper()
 	child := startL3Child(t, "", "127.0.0.1:0", engines...)
 	for i, addr := range child.addrs {
 		flow, err := dialGSO("", addr)
@@ -735,5 +816,18 @@ func TestL3Round_symmetric(t *testing.T) {
 	cut := [2]l3Count{{got: 1, receives: 1, sent: 1}, {got: 1, receives: 1, sent: 1, truncated: 1}}
 	if _, err := l3Metrics(cut); err == nil {
 		t.Fatal("a round with a message cut short gave metrics")
+	}
+	// The kernel's count within the loss is reported beside it; past the loss
+	// it refuses the round.
+	lossy[0].kernel = lossy[0].sent - lossy[0].got
+	if m, err = l3Metrics(lossy); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := m["a:kernel-drops/op"], m["a:lost/op"]; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("kernel-drops/op = %g, want the loss %g", got, want)
+	}
+	lossy[0].kernel++
+	if _, err = l3Metrics(lossy); err == nil {
+		t.Fatal("more kernel drops than datagrams lost gave metrics")
 	}
 }

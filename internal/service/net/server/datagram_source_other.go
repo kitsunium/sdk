@@ -21,7 +21,7 @@ func newDatagramSource(pc stdnet.PacketConn, _ bool) datagramSource {
 // one WriteTo each, unless batched — BatchReplies —, then queued and sent at
 // the batch's end, one WriteTo each still: darwin's answer, as every other
 // platform's without sendmmsg (ADR 0192).
-func newDatagramSink(pc stdnet.PacketConn, batched bool, counters *datagramCounters, _ func()) datagramSink {
+func newDatagramSink(pc stdnet.PacketConn, batched, _ bool, counters *datagramCounters, _ func()) datagramSink {
 	//: the default: Reply writes at once and returns the write's error.
 	if !batched {
 		//: one datagram a call.

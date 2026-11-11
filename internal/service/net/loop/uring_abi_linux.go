@@ -64,12 +64,28 @@ const (
 	opAsyncCancel uint8 = 14
 	opClose       uint8 = 19
 	opRead        uint8 = 22
+	opSplice      uint8 = 30
 	opSend        uint8 = 26
-	opRecv        uint8 = 27
-	opShutdown    uint8 = 34
+	// opSendZC is IORING_OP_SEND_ZC (6.0): its first CQE carries the result
+	// and F_MORE, a second one flagged F_NOTIF frees the pages (#969).
+	opSendZC   uint8 = 47
+	opRecv     uint8 = 27
+	opShutdown uint8 = 34
+
+	// spliceNonblock is SPLICE_F_NONBLOCK: a pipe-to-socket splice returns
+	// EAGAIN on a full socket, and the loop waits for POLLOUT rather than a kernel
+	// thread blocked per connection.
+	spliceNonblock uint32 = 1 << 1
+	// spliceMove is SPLICE_F_MOVE, a hint the kernel may ignore.
+	spliceMove uint32 = 1 << 0
+	// spliceNoOffset is the off_in or off_out of a splice on a pipe, -1.
+	spliceNoOffset uint64 = 1<<64 - 1
 
 	// SQE flags.
 	sqeFixedFile uint8 = 1 << 0
+	// sqeIOLink is IOSQE_IO_LINK: the next SQE runs only if this one succeeds
+	// in full.
+	sqeIOLink uint8 = 1 << 2
 	// sqeIOHardlink is IOSQE_IO_HARDLINK: the next SQE starts once this one
 	// completed, whatever its result.
 	sqeIOHardlink   uint8 = 1 << 3
@@ -94,6 +110,8 @@ const (
 	// CQE flags.
 	cqeFBuffer uint32 = 1 << 0
 	cqeFMore   uint32 = 1 << 1
+	// cqeFNotif is IORING_CQE_F_NOTIF: a zero-copy send's notification.
+	cqeFNotif uint32 = 1 << 3
 	// cqeFBufMore is IORING_CQE_F_BUF_MORE (6.12): the completion's buffer
 	// stays the kernel's, partly consumed, for more completions.
 	cqeFBufMore    uint32 = 1 << 4

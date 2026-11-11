@@ -20,12 +20,31 @@ Everything is stdlib. There is no `gorilla/websocket`, no `nhooyr`, and no
 and the parts that are hard are the refusals, which no dependency can be trusted
 to get right on this SDK's behalf.
 
+## On a loop group (#859, ADR 0186 amended)
+
+`NewLoopHandler` is WebSocket on the loop: the handshake `Upgrade` runs, judged
+through `verifyHandshake` over a shim request, so a handshake answers alike on both
+engines; a 101 written by the http1 adapter; then every later byte goes to
+`OnUpgradedData`, a frame reader with one `wsConn` per connection (no goroutine, the
+reassembly buffer present only while a message spans reads). The rules are the
+goroutine engine's: masked frames, the announced length judged before anything is
+held, fragmentation, UTF-8 on the whole message, the closing handshake.
+`TestAdversarial_onTheLoop` replays `TestAdversarialFramesFailTheConnection`'s table
+on epoll and io_uring. `LoopConnValue` writes through the adapter's `HTTP1StreamValue`,
+the drain is a 1001, the heartbeat runs on the loop's timer. A frame larger than the
+connection's buffered input is reassembled from the heap; a message whole in one
+read is handed out in place, with no copy.
+
 ## Contents
 
 | File | Surface |
 |---|---|
 | `websocket.go` | `Conn` — `NewConn`, `Receive`, `Send`, `SendText`, `SendBinary`, `Ping`, `Close`, `CloseWith`, `Done`, `Subprotocol`, `PeerCloseCode`; the frame reader, the message assembler, the write path, the drain watcher and the heartbeat |
+| `loop.go` | #859: `NewLoopHandler`, `LoopHandler`, `LoopConnValue`, and the port `LoopConnHandler` in `gen_ports.go`: the frame reader over `OnUpgradedData`, per-lane state by ring and slot |
+| `loop_engine_linux_test.go`, `loop_memory_linux_test.go`, `loop_bench_test.go`, `perf_fixtures_test.go` | echo, ping, a fragmented message and the closing handshake on epoll, io_uring and the portable backend; `TestAdversarial_onTheLoop`; the drain's 1001; the handshake refusals; (race off) 10 000 idle connections under 512 B each with no goroutine; `BenchmarkWSLoopReceive4KiB` |
 | `handshake.go` | `Upgrade` — RFC 6455 §4.2 validation, the origin policy, the hijack probe, the 101 response |
+| `h2stream.go` | #967: RFC 8441's extended CONNECT — `isExtendedConnect` (HTTP/2, CONNECT, `:protocol` exactly `websocket`), the version and origin checks, the 200 (never 101), `EnableFullDuplex`; `h2Stream`, the stream as the Conn's `transport` (Write flushed into DATA, deadlines through the ResponseController, Close ends the body) |
+| `h2_external_test.go` | #967: `TestExtendedConnect` re-runs the `TestXConnect*` tests in a child with `GODEBUG=http2xconnect=1` (net/http reads it at init; the role variable removed before it is set, the child bounded at 120 s and never starting another): 1 000 masked frames echoed, the adversarial table over h2 streams, the drain's 1001 then END_STREAM, a `connect-udp` CONNECT refused; and in the default binary the CONNECT refused by net/http with RST_STREAM and an HTTP/2 GET answered 426. A raw HTTP/2 client: net/http's refuses a `:protocol` field |
 | `options.go` | `Option` — `Subprotocols`, `MaxMessageSize`, `MaxFrameSize`, `PingInterval`, `WithoutPing`, `WriteTimeout`, `AllowOrigins`, `AllowAnyOrigin`; `resolve` and the ADR 0031 clamp/refuse split |
 | `frame.go` | the frame codec — `MaskLen` / `MinHeaderLen` / `MaxHeaderLen`, `FrameHeaderValue` (+ `ValidateFromClient`), `FrameHeaderLen`, `ParseFrameHeader`, `ApplyMask` (word at a time), `AppendFrame` |
 | `close.go` | the close payload — `CloseCodeLen`, `AppendClosePayload`, `ParseClosePayload` |
@@ -395,6 +414,21 @@ buffer size), and skipping the per-frame `rx.Add(1)` when the heartbeat is off
 (unmeasurable — two of three rows got *slower* with the work removed). Neither
 was refused on security grounds, because no candidate that weakened a refusal
 was entertained.
+
+## WebSocket over HTTP/2 (RFC 8441, #967)
+
+- **A stream, not a socket.** `Conn` writes to a `transport` — the hijacked
+  socket, or the extended CONNECT's stream — and reads through its
+  `bufio.Reader`; framing, masking, the heartbeat and the drain are the same.
+- **The handler holds the stream.** The stream ends when the handler returns,
+  so it must not return before `Done`; `Close` ends the request body, which
+  unblocks a parked read.
+- **Opt-in in the process, not here.** net/http announces
+  SETTINGS_ENABLE_CONNECT_PROTOCOL only with `GODEBUG=http2xconnect=1`, read
+  at its init; a consumer's main package writes `//go:debug http2xconnect=1`.
+- **No other tunnel.** Only `:protocol` = `websocket` takes this path; any
+  other CONNECT is a non-GET (405). The loop's HTTP/2 adapter refuses CONNECT
+  and announces no extended CONNECT.
 
 ## Do NOT
 

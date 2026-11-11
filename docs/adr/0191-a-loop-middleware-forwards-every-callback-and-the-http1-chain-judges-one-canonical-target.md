@@ -202,3 +202,80 @@ Deliberate, and allowed while v0 (ADR 0040):
   `internal/service/net/http1/` (`target.go`, `chain.go`),
   `internal/service/net/server/` (`loop_chain.go`, `loop_portable.go`),
   `tools/netgate/gates.go`, `design/net.yaml`, `design/sdk.yaml`.
+
+## Amended 2026-11-10 — a traceparent link (kitsunium/sdk#855)
+
+The http1 profile is the one engine built for the hot path and the one with no
+trace continuity: a request carrying a W3C `traceparent` started a fresh trace on
+the loop. `http1.Trace()` is a chain link that reads the field once, with no
+allocation, through `trace.ParseTraceParentBytes` (the rules of
+`service/observe/trace.ParseTraceParent`, held in the core so the http1 codec does
+not import the tracer), into `HTTP1RequestValue.Trace`, a `trace.SpanContextValue`
+reset by `Parse` like `Auth`. A malformed field leaves it invalid and the request
+is served; tracestate is not read. The link writes a version-00 `traceparent` of
+the same trace on the answer through `trace.AppendTraceParent`, into
+`HTTP1ResponseValue.TraceLine`, so a deferred answer keeps it past the request
+value's next parse; a `Pending` answer, written from the worker's own response
+value, does not carry it. `Log` records the trace id (`HTTP1AccessValue.TraceID`).
+The link neither samples nor exports: the handler or the framework's tracer
+decides from the value.
+
+
+## Amended 2026-11-10 — a request's number and its correlation identifier (kitsunium/sdk#983)
+
+`HTTP1RequestValue.ID` is the loop adapter's: the lane in the top 16 bits and the
+lane's own count of requests below, set once before the handler runs, so a link
+that needs a number per request keeps no counter and two lanes never produce the
+same one. `RequestID()` is a link in this ADR's sense: `HTTP1RequestValue.RequestID`
+holds the client's `X-Request-Id`, 1 to `HTTP1MaxRequestID` bytes of 0x21 to 0x7E,
+or `ID` in sixteen hexadecimal digits for anything else, the request served either
+way; `RequestIDMint` mints always, for an edge. The identifier travels by value —
+`HTTP1RequestIDValue` is an array — onto the answer, which the codec writes after
+`Header`, a deferred, a pending and an adapter's 500 included, and into
+`HTTP1AccessValue`. A control byte other than the tab, in that field as in any
+other, stays the codec's refusal (400) and never reaches the link: §D6 of ADR 0186
+is not relaxed for it.
+
+## Amended 2026-11-10 — an access record names its time and its request (kitsunium/sdk#848)
+
+`HTTP1AccessValue` gains `ID`, `Elapsed` (a `DurationValue`) and `Stage`, whose
+`HTTP1AccessStage` replaces the `Deferred` boolean: the moment of the answer's life
+the record describes (answered, deferred, pending, completed). `Elapsed` runs from the batch's start to the record's own reading of an
+injected clock (`LogClock`, the system's by default): one stamp a batch, kept per
+lane by the link and reset at `EndBatch`, and one read per record, the issue's zero
+extra reads being a read the record has to make all the same if `Elapsed` is to
+measure an immediate answer. A deferred answer has a second record when the batch's
+end completes it, of stage `Completed`, carrying its status and the time since it was
+deferred; it is the same request, the same `ID` and `RequestID`. `Log`'s variadic
+names become `LogOption`s, because a variadic takes one type: `LogAllow(names...)`,
+`LogSlowerThan(d)` and `LogSample(n)` (one in n by the request's counter, so both
+records of a deferred answer agree). With both filters every slow record is kept
+and one in n of the rest. `Log(l, "X-Field")` was a source-breaking shape, which
+ADR 0040 allows while the SDK is v0.
+
+## Amended 2026-11-10 — a CORS link (kitsunium/sdk#854)
+
+`http1.CORS` and `server.CORS` answer from one `corenet.CORSPolicy`, built and
+judged at construction (`CORSMisconfigured`, `0.2.11.80`, the option named). An
+origin is compared byte for byte and the fields sent are the list's bytes, so a
+request's bytes are never echoed; an origin not listed gets `Vary: Origin` and
+nothing else, and is still served, the browser being what enforces it. `*` with
+`Credentials`, `null`, an origin that is not one exact lower-case
+`scheme://host[:port]`, no origin at all, and a method or field name that is not a
+token are refused by name. The http1 link answers a preflight itself, ahead of
+every link behind it, and its fields live in their own response slot,
+`HTTP1ResponseValue.CORS`, so a `Headers` link costs it nothing.
+
+## Amended 2026-11-10 — a per-key request limit (kitsunium/sdk#860)
+
+`HTTP1Limiter` is a sibling port (ADR 0039): `Allow(key, now)` reports a verdict and
+a delay in whole seconds. `http1.RateLimit` keys on a subject, a route, a lane or a
+field, answers 429 with `Retry-After` and `Connection: close`, and reads its clock
+once a batch, the stamp shared by the batch's requests and the only cost that does
+not scale with the batch. `server.RateLimit` is the same port for `HandleHTTP`,
+keyed on the peer's address, port removed, or a header. `http1.KeyedBuckets` is the
+SDK's own limiter: fixed entries and an open-addressed index, the least recently
+used key evicted, the key held only as a 64-bit hash under a random seed; below
+8 192 keys one lock and an exact LRU, above it 64 shards, each its own LRU. A key
+is only as trustworthy as what it is read from: a field a client controls (`Field`)
+buckets per value, so the link's documentation says it needs a proxy in front.

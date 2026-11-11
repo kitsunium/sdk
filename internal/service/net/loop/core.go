@@ -82,7 +82,19 @@ type ring struct {
 	// st is the ring's counters, published at the end of each batch.
 	st  ringCounters
 	pub *ringStats
+	// seen is what pub last held: publish stores only what moved.
+	seen seen
 	// draining is a ring that accepts nothing more.
+	draining bool
+}
+
+// seen is what a ring last published. A counter is stored to its atomic only
+// when it moved: an atomic store is a full barrier, a counter that did not move
+// in a batch (most of them, in most batches) is not worth one, and the
+// batch's cost does not grow with the counters State reads (#975).
+type seen struct {
+	ringCounters
+	conns    int64
 	draining bool
 }
 
@@ -91,6 +103,15 @@ type ringCounters struct {
 	accepted, closed, batches, completions uint64
 	starved, retries, pauses, evicted      uint64
 	watchdog, cut                          uint64
+	// bytesIn and bytesOut count the bytes delivered to the handler and sent;
+	// outRefused the Writes refused with LoopOutputFull; spillClosed,
+	// timeouts and idleClosed the closes for rSpill and rIdle and the
+	// deadlines fired (#975).
+	bytesIn, bytesOut, outRefused     uint64
+	spillClosed, timeouts, idleClosed uint64
+	// pending is the bytes written and not yet sent: Write adds, a send
+	// subtracts, and a close or a release subtracts what the slot still held.
+	pending int64
 }
 
 // ringStats are a ring's counters as State reads them, published at the
@@ -100,6 +121,9 @@ type ringStats struct {
 	accepted, closed, batches, completions atomic.Uint64
 	starved, retries, pauses, evicted      atomic.Uint64
 	watchdog, cut                          atomic.Uint64
+	bytesIn, bytesOut, outRefused          atomic.Uint64
+	spillClosed, timeouts, idleClosed      atomic.Uint64
+	pending                                atomic.Int64
 	draining                               atomic.Bool
 }
 
@@ -109,6 +133,15 @@ type ringStats struct {
 type loop struct {
 	// index is the loop's place in its group.
 	index int
+	// cpu is the CPU LoopValue.Affinity pins the loop's thread to, -1 for
+	// none; pinErr is the kernel's refusal, set on the loop's thread before it
+	// reports ready (#857).
+	cpu    int
+	pinErr error
+	// tid is the loop's thread, set as pin runs on it.
+	tid int
+	// shrunkAt is the tick the slab last shrank at (#809).
+	shrunkAt int64
 	// sz is the group's resolved configuration; idle its idle bound in
 	// ticks, zero for none; evictIdle the idle age eviction waits for.
 	sz        sizing
@@ -116,6 +149,8 @@ type loop struct {
 	evictIdle int64
 	// h is the handler.
 	h corenet.LoopHandler
+	// drainer is h as a LoopDrainer, nil when it is not one.
+	drainer corenet.LoopDrainer
 	// busy is Config.Busy, nil when nothing offloads.
 	busy func(lane int, ref corenet.LoopConnRef) bool
 	// grp is what the group's loops share.
@@ -124,6 +159,11 @@ type loop struct {
 	rings []*ring
 	// slab holds every spill and output byte of the loop.
 	slab *slab
+	// slabInUse and slabMapped are the slab's gauges as State reads them,
+	// published at the end of each batch.
+	slabInUse, slabMapped atomic.Int64
+	// seenInUse and seenMapped are what they last held.
+	seenInUse, seenMapped int64
 	// post is the loop's queue of posted operations.
 	post *postQueue
 	// deferred are chunks released once OnBatchEnd has returned, since a
@@ -241,7 +281,7 @@ func (r *ring) abandon(slot int32) {
 func (lp *loop) evictable(r *ring, slot int32) bool {
 	c := &r.conns[slot]
 	//: mid-request, with output, or waiting on a worker: it keeps its place.
-	return c.state == stOpen && c.spill.empty() && c.pending() == 0 && !r.drv.unread(r, slot) && !lp.waits(r, slot)
+	return c.state == stOpen && c.spill.empty() && c.pending() == 0 && c.fileFD < 0 && !r.drv.unread(r, slot) && !lp.waits(r, slot)
 }
 
 // waits reports whether slot of r waits on the handler's worker (R3).
@@ -268,6 +308,7 @@ func (r *ring) deliver(slot int32, data []byte) {
 	}
 	c.lastIO = r.lp.tick
 	c.flags |= fHeard
+	r.st.bytesIn += uint64(len(data))
 	r.lruTouch(slot)
 	lp := r.lp
 	//: no spill: the handler reads the received bytes in place.
@@ -387,6 +428,7 @@ func (r *ring) deliverSpill(slot int32, n int) {
 	c.spill.len += int32(n)
 	c.lastIO = r.lp.tick
 	c.flags |= fHeard
+	r.st.bytesIn += uint64(n)
 	r.lruTouch(slot)
 	lp := r.lp
 	buf := lp.slab.data(c.spill)
@@ -491,13 +533,13 @@ func (r *ring) settle(slot int32) {
 		//: done.
 		return
 	}
-	//: output to send.
-	if c.pending() > 0 {
+	//: output, or a file, to send.
+	if c.sending() {
 		r.drv.flush(r, slot)
 		c = &r.conns[slot]
 	}
-	//: a close, or a peer that finished, waits only for the output.
-	if (c.state == stClosing || c.flags&fPeerDone != 0) && c.pending() == 0 && c.state != stDead {
+	//: a close, or a peer that finished, waits only for the output and the file.
+	if (c.state == stClosing || c.flags&fPeerDone != 0) && !c.sending() && c.state != stDead {
 		r.finish(slot, c.reason, c.errno)
 	}
 }
@@ -509,7 +551,7 @@ func (r *ring) sent(slot int32, _ int) {
 	c := &r.conns[slot]
 	c.lastIO = r.lp.tick
 	//: someone waits for room.
-	if c.flags&fWantWritable != 0 && c.state == stOpen && c.pending() < r.lp.lowWater {
+	if c.flags&fWantWritable != 0 && c.state == stOpen && c.pending() < r.lp.lowWater && c.fileFD < 0 {
 		c.flags &^= fWantWritable
 		r.lp.h.OnWritable(r.lp, r.ref(slot))
 	}
@@ -535,9 +577,11 @@ func (r *ring) finish(slot int32, reason uint8, errno int32) {
 	r.lruUnlink(slot)
 	lp := r.lp
 	lp.deferred = append(lp.deferred, c.spill, c.out)
+	r.st.pending -= int64(c.out.len - c.out.off)
 	c.spill, c.out = chunkRef{idx: noChunk}, chunkRef{idx: noChunk}
 	r.live--
 	r.st.closed++
+	r.countClose(reason)
 	lp.grp.live.Add(-1)
 	lp.h.OnClose(lp, ref, closeErr(reason, errno))
 	r.drv.shutdown(r, slot)
@@ -548,8 +592,10 @@ func (r *ring) finish(slot int32, reason uint8, errno int32) {
 // slot's memory and generation move on only then.
 func (r *ring) release(slot int32) {
 	c := &r.conns[slot]
-	//: the flight chunk may still have been the kernel's until now.
+	//: the flight chunk may still have been the kernel's until now, and what
+	//: of it was never sent is owed to nobody.
 	r.lp.deferred = append(r.lp.deferred, c.flight)
+	r.st.pending -= int64(c.flight.len - c.flight.off)
 	*c = emptyConn(c.gen)
 	r.free = append(r.free, slot)
 }
@@ -575,6 +621,10 @@ func closeErr(reason uint8, errno int32) error {
 	case rEvict:
 		//: the connection made room for another.
 		return corenet.ConnLimitReached
+	//: the file shrank during its send.
+	case rFile:
+		//: the truncation sentinel.
+		return corenet.LoopFileTruncated
 	//: the socket failed.
 	case rErrno:
 		//: the kernel's own error.
@@ -628,6 +678,7 @@ func (r *ring) expire(slot int32) {
 	if c.deadline != 0 && c.deadline <= now {
 		c.deadline = 0
 		r.armTimer(slot)
+		r.st.timeouts++
 		r.lp.h.OnTimeout(r.lp, r.ref(slot))
 		//: fired.
 		return
@@ -717,6 +768,18 @@ func (lp *loop) begin() {
 	lp.tick = int64(lp.started/tickEvery) + 1
 }
 
+// shrinkSlab lets the slab give back, once a tick, what a burst left idle
+// (#809).
+func (lp *loop) shrinkSlab() {
+	//: this tick shrank already.
+	if lp.tick == lp.shrunkAt {
+		//: nothing.
+		return
+	}
+	lp.shrunkAt = lp.tick
+	lp.slab.shrink()
+}
+
 // overBudget reports whether the batch has run for sz.batchBudget, never
 // without one: one read of the monotonic clock (ADR 0206).
 func (lp *loop) overBudget() bool {
@@ -742,6 +805,8 @@ func (lp *loop) endBatch() {
 		r.st.batches++
 		r.publish()
 	}
+	storeI(&lp.slabInUse, &lp.seenInUse, int64(lp.slab.inUse))
+	storeI(&lp.slabMapped, &lp.seenMapped, int64(lp.slab.mappedBytes))
 	lp.ended = time.Since(lp.epoch)
 	lp.grp.observe(lp.ended - lp.started)
 }
@@ -818,34 +883,40 @@ func (lp *loop) Write(ref corenet.LoopConnRef, p []byte) error {
 		return nil
 	}
 	c := &r.conns[slot]
-	//: the per-connection ceiling counts what is still the kernel's too.
-	if c.pending()+len(p) > lp.sz.outputCap {
-		c.flags |= fWantWritable
+	//: a file in flight goes first; the per-connection ceiling counts what is
+	//: still the kernel's too; the budget may be spent.
+	if c.fileFD >= 0 || c.pending()+len(p) > lp.sz.outputCap || !lp.queue(r, slot, c, p) {
 		//: refused; OnWritable says when to retry.
-		return corenet.LoopOutputFull
+		return r.refuseOutput(c)
 	}
+	//: queued, in order.
+	return nil
+}
+
+// queue copies p into slot's output, which the caller checked may hold it,
+// and reports false when the slab's budget is spent.
+func (lp *loop) queue(r *ring, slot int32, c *connCtl, p []byte) bool {
 	//: no chunk yet: attached at the first Write.
 	if c.out.empty() {
 		ch, ok := lp.slab.alloc(len(p))
 		//: the loop's budget is spent.
 		if !ok {
-			c.flags |= fWantWritable
 			//: refused.
-			return corenet.LoopOutputFull
+			return false
 		}
 		c.out = ch
 	} else if lp.slab.size(c.out)-int(c.out.len) < len(p) {
 		//: not enough room behind: moved to a chunk that holds it all.
 		if !lp.growOut(c, len(p)) {
-			c.flags |= fWantWritable
 			//: refused.
-			return corenet.LoopOutputFull
+			return false
 		}
 	}
 	c.out.len += int32(copy(lp.slab.bytes(c.out)[c.out.len:], p))
+	r.st.pending += int64(len(p))
 	r.markDirty(slot)
-	//: queued, in order.
-	return nil
+	//: copied.
+	return true
 }
 
 // growOut moves c's unsent output to a chunk with room for n more bytes. The
@@ -944,9 +1015,73 @@ func (lp *loop) Post(op corenet.PostFunc, arg uintptr) error {
 	return lp.post.post(op, arg)
 }
 
+// peerer is the optional side of a driver that can name a connection's
+// peer: the backends whose slot holds a process descriptor to ask.
+type peerer interface {
+	// peer returns the credentials of slot's peer, false when slot is not a
+	// Unix connection or its descriptor cannot be asked.
+	peer(r *ring, slot int32) (corenet.LoopPeerValue, bool)
+}
+
+// Peer implements corenet.LoopPeer (ADR 0148, #974): who is on the other side
+// of a Unix connection, as SO_PEERCRED recorded it. It answers false for a TCP
+// connection, a stale ref, a connection whose descriptor the backend holds in
+// a ring's table — a direct descriptor has no process descriptor to ask — and
+// off the loop's thread, under loopdebug.
+func (lp *loop) Peer(ref corenet.LoopConnRef) (corenet.LoopPeerValue, bool) {
+	//: the loop's thread only, checked under loopdebug.
+	if lp.threadOK != nil && !lp.threadOK() {
+		//: refused.
+		return corenet.LoopPeerValue{}, false
+	}
+	r, slot, ok := lp.lookup(ref)
+	//: a closed connection has no peer to name.
+	if !ok {
+		//: stale.
+		return corenet.LoopPeerValue{}, false
+	}
+	pr, ok := r.drv.(peerer)
+	//: a backend with no descriptor to ask.
+	if !ok {
+		//: unknown.
+		return corenet.LoopPeerValue{}, false
+	}
+	//: the backend's answer.
+	return pr.peer(r, slot)
+}
+
 // Loop implements corenet.LoopIO: the loop's index in its group, set at build
 // and never written again, so any goroutine may read it.
 func (lp *loop) Loop() int {
 	//: fixed for the loop's life.
 	return lp.index
+}
+
+// countClose counts a close the engine decided itself: the input past its
+// ceiling and the idle bound (#975).
+func (r *ring) countClose(reason uint8) {
+	//: by why it closed.
+	switch reason {
+	//: unconsumed input past SpillCap, or the slab's budget spent.
+	case rSpill:
+		r.st.spillClosed++
+	//: no traffic for IdleTimeout.
+	case rIdle:
+		r.st.idleClosed++
+	}
+}
+
+// refuseOutput counts a Write refused with LoopOutputFull, asks for
+// OnWritable, and returns the refusal.
+func (r *ring) refuseOutput(c *connCtl) error {
+	c.flags |= fWantWritable
+	r.st.outRefused++
+	//: retried once there is room.
+	return corenet.LoopOutputFull
+}
+
+// wrote records n bytes of output the kernel took.
+func (r *ring) wrote(n int) {
+	r.st.bytesOut += uint64(n)
+	r.st.pending -= int64(n)
 }

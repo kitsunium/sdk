@@ -28,6 +28,9 @@ const (
 	udAcceptCancel
 	udOrphanClose
 	udShutdown
+	udFileIn
+	udFileOut
+	udFilePoll
 )
 
 const (
@@ -74,6 +77,12 @@ const (
 	// closeBackstopTicks is how long a closed slot may wait on an operation
 	// after its shutdown was issued before closeBackstop cancels it.
 	closeBackstopTicks int64 = 100
+	// ulSplice is uLoop.features' bit for IORING_OP_SPLICE (5.7): WriteFile is
+	// refused without it, and the codec falls back to its copy path.
+	ulSplice uint8 = 1 << 0
+	// fileStepBytes bounds a file step, the pipe's capacity by default: each is
+	// one splice in and one splice out, chained.
+	fileStepBytes int64 = 64 << 10
 	// budgetChunk is how many completions a ring reaps between two looks at
 	// the clock while LoopValue.BatchBudget bounds the batch (ADR 0206): a
 	// clock read each, at a few dozen nanoseconds, against a few
@@ -246,9 +255,14 @@ type uLoop struct {
 	lp    *loop
 	rings []*uRing
 	lfds  []int
+	// owners says which of lfds this loop accepts on: a SO_REUSEPORT shard
+	// belongs to one loop (#856).
+	owners []int
 	// set is the group's hold on the listeners through the drain.
 	set   *listenerSet
 	hooks loopHooks
+	// features holds ulSplice.
+	features uint8
 	// wakefd is the Post eventfd, polled by the primary ring; fanfd the
 	// secondary rings' completion eventfd, polled by the primary too.
 	wakefd int
@@ -295,6 +309,13 @@ type uLoop struct {
 	// bufBytes is the bytes of provided buffers the loop's rings handed
 	// their kernels so far, bounded by bufBudget (bufBudgetFor).
 	bufBytes uint64
+	// fan is the primary's plain wait while a secondary has a completion to
+	// come (plainWait): the tick, or fanWakeTick once the start's probe or
+	// the loop's own waits (watchFan) found the secondaries' wake slow, and
+	// fanMissed the waits in a row that ended on the timeout with a
+	// secondary's completions pending (#703).
+	fan       kernelTimespec
+	fanMissed int
 }
 
 // ringUses is what a loop's rings use beyond their setup flags.
@@ -305,6 +326,9 @@ type ringUses struct {
 	// recvFlags are ioprio flags every recv carries: recvBundle when a recv
 	// fills several buffers in one completion (ADR 0205).
 	recvFlags uint16
+	// sendZCMin is the smallest flight sent zero-copy, zero while
+	// uring-send-zc is off (#969).
+	sendZCMin int
 }
 
 // uringRunner runs the group's io_uring loops.
@@ -364,7 +388,7 @@ func (ul *uLoop) wake() {
 // thread, which returns once the loop stopped or drained; one reaper that
 // waits for them all and closes fin; and, once the group runs, one goroutine
 // that waits on fin, closes the listeners the drain did not and returns.
-func startIOURing(g *Group, cfg *Config, hooks loopHooks) error {
+func startIOURing(g *Group, cfg *Config) error {
 	sw := newSwitches(cfg)
 	//: the backend receives into provided buffers only: switched off, it is
 	//: never set up.
@@ -374,20 +398,20 @@ func startIOURing(g *Group, cfg *Config, hooks loopHooks) error {
 	}
 	fin := make(chan struct{})
 	runner := &uringRunner{fin: fin}
-	//: TCP_NODELAY on the listener, inherited by every accepted socket; a
-	//: socket that refuses it still serves.
-	for _, l := range cfg.Listeners {
-		noDelay(l.FD, sw)
-		runner.lfds = append(runner.lfds, l.FD)
-	}
+	//: TCP_NODELAY and the listener options on every TCP listener, inherited
+	//: by every accepted socket; a socket that refuses one still serves.
+	lfds, rows := listenerRows(cfg, sw)
+	runner.lfds = lfds
 	//: every ring of every loop takes each listener's queue once, as the
 	//: group drains.
-	runner.set = newListenerSet(runner.lfds, g.sz.loops*g.sz.rings)
+	owners := ownersOf(cfg.Listeners)
+	runner.set = newListenerSet(runner.lfds, takersOfShards(owners, g.sz.loops, g.sz.rings))
 	ready := make(chan error, g.sz.loops)
 	//: one thread per loop, each building its rings after it locked itself.
 	for i := range g.sz.loops {
-		lp := newLoop(g, *cfg, i, mmapAnon)
-		ul := &uLoop{lp: lp, lfds: runner.lfds, set: runner.set, hooks: hooks, wakefd: -1, fanfd: -1, sw: sw, rep: newReport(sw, "iouring"), spacing: tickEvery}
+		lp := newLoop(g, *cfg, i, mmapAnon, syscall.Munmap)
+		ul := &uLoop{lp: lp, lfds: runner.lfds, owners: owners, set: runner.set, hooks: cfg.hooks, wakefd: -1, fanfd: -1, sw: sw, rep: newReport(sw, "iouring"), spacing: tickEvery}
+		ul.rep.apply(rows)
 		runner.loops = append(runner.loops, ul)
 		g.loops = append(g.loops, lp)
 		runner.wg.Add(1)
@@ -424,6 +448,7 @@ func startIOURing(g *Group, cfg *Config, hooks loopHooks) error {
 	g.backend = corenet.LoopBackendIOURing
 	g.stage = runner.loops[0].stage
 	g.caps = runner.loops[0].rep
+	reportAffinity(&g.caps, g.loops)
 	//: running.
 	return nil
 }
@@ -441,12 +466,18 @@ func (ul *uLoop) run(wg *sync.WaitGroup, ready chan<- error, rings int) {
 	runtime.LockOSThread()
 	ul.tid = syscall.Gettid()
 	ul.lp.threadOK = threadCheck(ul.tid)
+	ul.lp.pin()
 	//: every ring is created on this thread, after the lock.
 	if err := ul.setup(rings); err != nil {
 		ul.teardown()
 		ready <- err
 		//: never served.
 		return
+	}
+	//: a loop with secondaries learns, before the group reports, whether
+	//: their completions wake the primary (#703).
+	if rings > 1 {
+		slowFanWake()
 	}
 	ready <- nil
 	ul.serve()
@@ -505,6 +536,9 @@ func (ul *uLoop) build(rings int, sweep bool) error {
 	}
 	ul.reportPbufInc()
 	ul.probeBundle()
+	ul.probeSendZC()
+	ul.probeBusyPoll()
+	ul.probeZCRX()
 	primary := ul.rings[0]
 	primary.pollFD(ul.wakefd, udWake)
 	//: secondaries signal the primary through one registered eventfd.
@@ -544,7 +578,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 	lp := ul.lp
 	rr := &uRing{
 		ul: ul, u: u, armed: make([]int, len(ul.lfds)),
-		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
+		queueDone: doneOutside(ul.owners, lp.index), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
 	}
 	rr.r = newRing(lp, i, rr)
 	//: stage 4: provided buffers and the sparse table.
@@ -636,8 +670,8 @@ func bufCountFor(table int) uint32 {
 // registerFan registers the secondaries' eventfd as ring i's CQ notifier,
 // never the Post eventfd; the primary, ring 0, needs none.
 func (ul *uLoop) registerFan(i int, u *uring) error {
-	//: the primary is the one woken.
-	if i == 0 {
+	//: the primary is the one woken; a test leaves the secondaries unheard.
+	if i == 0 || ul.hooks.fanSilent {
 		//: nothing to register.
 		return nil
 	}
@@ -718,6 +752,10 @@ func (rr *uRing) armAccepts() {
 	room := rr.acceptRoom()
 	//: each listener, up to its depth, within the room.
 	for i, fd := range rr.ul.lfds {
+		//: another loop's shard.
+		if !ownedBy(rr.ul.owners, i, rr.ul.lp.index) {
+			continue
+		}
 		//: topped up one SQE at a time.
 		for rr.armed[i] < acceptDepth && room > 0 {
 			s := rr.u.get()
@@ -996,11 +1034,16 @@ func (rr *uRing) pace() {
 // serve is the loop: one wait on the primary, every ring reaped, one batch.
 func (ul *uLoop) serve() {
 	lp := ul.lp
-	tick := kernelTimespec{nsec: int64(tickEvery)}
+	// The plain wait: the tick, or less where a secondary's completion does
+	// not wake it (#703, fanTickFor) while a secondary has one to come
+	// (plainWait).
+	ul.fan = fanTickFor(len(ul.rings))
+	tick := ul.fan
 	grouped := kernelTimespec{nsec: int64(lp.sz.batchWait)}
 	//: until stopped, or drained to the last connection, the listeners'
 	//: queues taken first.
 	for {
+		tick = ul.plainWait(ul.fan)
 		ts, want := ul.waitArgs(&tick, &grouped)
 		ul.batch(ts, want, &tick)
 		//: finished.
@@ -1062,9 +1105,11 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
 	}
 	ul.await(ts, want, tick)
 	lp.begin()
+	ul.watchFan(want)
 	ul.reapRings()
 	ul.woke()
 	ul.control()
+	lp.shrinkSlab()
 	//: timers, pacing and the watchdog, ring by ring.
 	for _, rr := range ul.rings {
 		rr.r.wheel.advance(lp.tick, rr.r.expire)
@@ -1212,7 +1257,7 @@ func (rr *uRing) handle(c *cqe) {
 	case udAccept:
 		rr.onAccept(int(udSlot(ud)), c)
 	//: a connection's own operation.
-	case udRecv, udSend, udCancel, udClose, udShutdown:
+	case udRecv, udSend, udCancel, udClose, udShutdown, udFileIn, udFileOut, udFilePoll:
 		rr.onConnOp(op, int32(udSlot(ud)), udGen(ud), c)
 	//: posted work.
 	case udWake:
@@ -1243,6 +1288,15 @@ func (rr *uRing) onConnOp(op uint64, slot int32, gen uint32, c *cqe) {
 	//: a close finished.
 	case udClose:
 		rr.onClose(slot, gen)
+	//: a file's bytes went in the pipe.
+	case udFileIn:
+		rr.onFileIn(slot, gen, c)
+	//: a file's bytes went to the socket.
+	case udFileOut:
+		rr.onFileOut(slot, gen, c)
+	//: the socket has room again.
+	case udFilePoll:
+		rr.onFilePoll(slot, gen, c)
 	}
 }
 
@@ -1597,6 +1651,11 @@ func (rr *uRing) onSend(slot int32, gen uint32, c *cqe) {
 		return
 	}
 	cc := &rr.r.conns[slot]
+	//: a zero-copy send's notification, or its first CQE (#969).
+	if cc.zcFlight && rr.zeroCopyDone(slot, c) {
+		//: the notification settled it.
+		return
+	}
 	cc.ops--
 	//: by result.
 	switch {
@@ -1632,6 +1691,7 @@ func (rr *uRing) sendProgress(slot, n int32) bool {
 	r := rr.r
 	cc := &r.conns[slot]
 	cc.flight.off += n
+	r.wrote(int(n))
 	alive := cc.state == stOpen || cc.state == stClosing
 	//: a short send: the rest of the same flight, never grown.
 	if cc.flight.off < cc.flight.len && alive {
@@ -1639,16 +1699,31 @@ func (rr *uRing) sendProgress(slot, n int32) bool {
 		//: in flight again.
 		return true
 	}
+	//: sent, its pages still the kernel's: released at the last notification.
+	if cc.zcPend > 0 {
+		//: held.
+		return true
+	}
+	rr.releaseFlight(slot, alive)
+	//: settled.
+	return false
+}
+
+// releaseFlight frees slot's sent flight; an alive connection is flushed
+// again.
+func (rr *uRing) releaseFlight(slot int32, alive bool) {
+	r := rr.r
+	cc := &r.conns[slot]
+	n := int(cc.flight.len)
 	rr.ul.lp.slab.free(cc.flight)
 	cc.flight = chunkRef{idx: noChunk}
+	cc.zcFlight = false
 	cc.flags &^= fSending
 	//: alive: more output may wait, and a producer for room.
 	if alive {
-		r.sent(slot, int(n))
+		r.sent(slot, n)
 		r.markDirty(slot)
 	}
-	//: settled.
-	return false
 }
 
 // opDone counts a cancel's completion.
@@ -1705,6 +1780,7 @@ func (rr *uRing) onClose(slot int32, gen uint32) {
 	if index >= 0 && int(index) < len(rr.slotOf) {
 		rr.slotOf[index] = -1
 	}
+	rr.r.dropFile(slot)
 	rr.r.release(slot)
 }
 
@@ -1920,12 +1996,21 @@ func (rr *uRing) rearmStarved() {
 // sent. The flight never grows while the kernel holds it.
 func (rr *uRing) flush(r *ring, slot int32) {
 	c := &r.conns[slot]
-	//: a flight is still the kernel's: its completion flushes again.
-	if c.flags&fSending != 0 || c.out.empty() || c.out.off == c.out.len {
-		//: later, or nothing.
+	//: a flight, or a file step, is still the kernel's.
+	if c.flags&fSending != 0 {
+		//: its completion flushes again.
+		return
+	}
+	//: no output left: a file behind it, or nothing.
+	if c.out.empty() || c.out.off == c.out.len {
+		//: a file to send.
+		if c.fileFD >= 0 {
+			rr.fileStep(slot)
+		}
 		return
 	}
 	c.flight, c.out = c.out, chunkRef{idx: noChunk}
+	c.zcFlight = rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin
 	rr.sendFlight(slot)
 }
 
@@ -1940,7 +2025,15 @@ func (rr *uRing) sendFlight(slot int32) {
 		//: closed.
 		return
 	}
-	prepSend(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), udPack(udSend, c.gen, uint32(slot)))
+	ud := udPack(udSend, c.gen, uint32(slot))
+	//: plain, or zero-copy: its notification is one more operation (#969).
+	if c.zcFlight {
+		prepSendZC(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), ud)
+		c.ops++
+		c.zcPend++
+	} else {
+		prepSend(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), ud)
+	}
 	rr.ul.onFD(s)
 	c.ops++
 	c.flags |= fSending
@@ -2040,7 +2133,7 @@ func (rr *uRing) backstop(w closeWait) bool {
 	}
 	rr.backstops++
 	//: the recv, then the send when one is the kernel's.
-	return rr.cancelOp(w.slot, udRecv) && (c.flags&fSending == 0 || rr.cancelOp(w.slot, udSend))
+	return rr.cancelOp(w.slot, udRecv) && (c.flags&fSending == 0 || rr.cancelOp(w.slot, udSend)) && (c.fileBits&ffPoll == 0 || rr.cancelOp(w.slot, udFilePoll))
 }
 
 // cancelOp cancels slot's operation op by its user_data, counted, and
@@ -2148,6 +2241,18 @@ func (rr *uRing) cancelOld(slot int32) bool {
 	return true
 }
 
+// peer implements peerer. A direct descriptor has no process descriptor to
+// ask, so it answers false; a process descriptor is asked, as epoll's is.
+func (rr *uRing) peer(r *ring, slot int32) (corenet.LoopPeerValue, bool) {
+	//: a direct descriptor has no process descriptor to ask.
+	if rr.ul.direct {
+		//: unknown.
+		return corenet.LoopPeerValue{}, false
+	}
+	//: a process descriptor: asked as epoll's is.
+	return peerOf(int(r.conns[slot].fd))
+}
+
 // unread implements driver. A direct descriptor has no process descriptor
 // to ask SIOCINQ of, so it is never evicted blind: it reports unread. A
 // process descriptor is asked, as epoll asks it.
@@ -2192,9 +2297,26 @@ func (rr *uRing) watchdog() {
 		//: past the re-arms: the ring drains; the others keep accepting.
 		if rr.stalls > watchdogFires {
 			rr.r.draining = true
+			rr.giveUpShards()
 		}
 		//: re-armed when the cancels complete, or drained.
 		return
+	}
+}
+
+// giveUpShards hands back the shards only this loop accepts on once the
+// watchdog drained the ring: nobody else takes from their queues, so the last
+// ring of the loop to give up closes the shard and the kernel routes around
+// it (#856). A shared listener stays, the group's other loops accept on it.
+func (rr *uRing) giveUpShards() {
+	//: each listener.
+	for i, owner := range rr.ul.owners {
+		//: not this loop's own, or already handed back.
+		if owner != rr.ul.lp.index+1 || rr.queueDone[i] {
+			continue
+		}
+		rr.queueDone[i] = true
+		rr.ul.set.handBack(i)
 	}
 }
 
@@ -2352,14 +2474,254 @@ func (ul *uLoop) teardown() {
 	//: descriptor still in its table.
 	for _, rr := range ul.rings {
 		rr.u.close()
+		rr.releaseFiles()
 	}
 	ul.wakeMu.Lock()
 	closeFDs([]int{ul.wakefd, ul.fanfd})
 	ul.evClosed = true
 	ul.wakeMu.Unlock()
 	//: the slab's mappings.
-	for _, m := range lp.slab.mapped {
-		swallowErr(syscall.Munmap(m))
+	lp.slab.release()
+}
+
+// beginFile implements fileSender: the file's duplicate and the pipe it
+// crosses, one for this connection alone so that a slow client's unread bytes
+// can never mix with another's on the ring (a ring-wide pipe would interleave
+// two connections, and a stalled one would hold everyone's up). A kernel with
+// no IORING_OP_SPLICE refuses, and no descriptor is left taken.
+func (rr *uRing) beginFile(r *ring, slot int32, fd int) error {
+	//: the kernel has no splice to offer.
+	if rr.ul.features&ulSplice == 0 {
+		//: refused, the copy path answers.
+		return corenet.LoopFileRefused
 	}
-	lp.slab.mapped = nil
+	dup, err := dupCloexec(fd)
+	//: out of descriptors.
+	if err != nil {
+		//: refused.
+		return corenet.LoopFileRefused
+	}
+	var pipe [2]int
+	//: its capacity bounds one step; non-blocking so a step never waits on a
+	//: full pipe.
+	if err := syscall.Pipe2(pipe[:], syscall.O_NONBLOCK|syscall.O_CLOEXEC); err != nil {
+		closeFDs([]int{dup})
+		//: refused.
+		return corenet.LoopFileRefused
+	}
+	c := &r.conns[slot]
+	c.fileFD, c.pipeR, c.pipeW = int32(dup), int32(pipe[0]), int32(pipe[1])
+	c.pipeHeld, c.fileOps, c.fileBits, c.fileErr = 0, 0, 0, 0
+	//: held.
+	return nil
+}
+
+// endFile implements fileSender: the duplicate and the pipe close. Closing a
+// pipe discards what it holds, so a file given up in mid-step leaves no byte
+// behind, and no operation names them any more (fileOps zero, or the slot
+// released only at zero).
+func (rr *uRing) endFile(r *ring, slot int32) {
+	c := &r.conns[slot]
+	closeFDs([]int{int(c.fileFD), int(c.pipeR), int(c.pipeW)})
+	c.fileFD, c.pipeR, c.pipeW = -1, -1, -1
+	c.pipeHeld, c.fileOps, c.fileBits, c.fileErr = 0, 0, 0, 0
+	c.fileOff, c.fileLeft = 0, 0
+}
+
+// releaseFiles closes what a stopping ring's slots still hold: a slot whose
+// operations outlived the stop's bounded wait never released its file.
+func (rr *uRing) releaseFiles() {
+	//: every slot of the table.
+	for i := range rr.r.conns {
+		//: still attached.
+		if rr.r.conns[i].fileFD >= 0 {
+			rr.endFile(rr.r, int32(i))
+		}
+	}
+}
+
+// fileStep issues the next step of slot's file: the bytes a pipe already holds
+// to the socket, or one step of file into the pipe linked to the splice out.
+func (rr *uRing) fileStep(slot int32) {
+	c := &rr.r.conns[slot]
+	//: what a short splice left in the pipe goes first.
+	if c.pipeHeld > 0 {
+		rr.fileOut(slot, uint32(c.pipeHeld))
+		//: in flight.
+		return
+	}
+	//: the linked pair needs two entries of the SQ, or the chain would split.
+	if !rr.u.room(2) {
+		rr.u.submit()
+		//: still none: the connection fails rather than stalls silently.
+		if !rr.u.room(2) {
+			rr.r.st.retries++
+			rr.r.fail(slot, rErrno, int32(syscall.EBUSY))
+			//: closed.
+			return
+		}
+	}
+	n := uint32(min(c.fileLeft, fileStepBytes))
+	prepSpliceIn(rr.u.get(), spliceIn{file: c.fileFD, pipeW: c.pipeW, off: c.fileOff, n: n}, udPack(udFileIn, c.gen, uint32(slot)))
+	s := rr.u.get()
+	prepSpliceOut(s, c.pipeR, uint32(c.fd), n, udPack(udFileOut, c.gen, uint32(slot)))
+	rr.ul.onFD(s)
+	c.ops += 2
+	c.fileOps = 2
+	c.flags |= fSending
+}
+
+// fileOut issues a splice of n bytes the pipe holds to the socket.
+func (rr *uRing) fileOut(slot int32, n uint32) {
+	c := &rr.r.conns[slot]
+	s := rr.u.get()
+	//: no room: the connection fails rather than stalls silently.
+	if s == nil {
+		rr.r.st.retries++
+		rr.r.fail(slot, rErrno, int32(syscall.EBUSY))
+		//: closed.
+		return
+	}
+	prepSpliceOut(s, c.pipeR, uint32(c.fd), n, udPack(udFileOut, c.gen, uint32(slot)))
+	rr.ul.onFD(s)
+	c.ops++
+	c.fileOps = 1
+	c.flags |= fSending
+}
+
+// onFileIn records what a file-to-pipe splice took. A short splice breaks the
+// link: the splice behind it answers ECANCELED and the bytes stay in the pipe.
+func (rr *uRing) onFileIn(slot int32, gen uint32, c *cqe) {
+	//: see onRecv.
+	if !rr.owns(slot, gen) {
+		//: dropped.
+		return
+	}
+	cc := &rr.r.conns[slot]
+	cc.ops--
+	cc.fileOps--
+	//: by result.
+	switch {
+	//: bytes in the pipe.
+	case c.res > 0:
+		cc.pipeHeld += c.res
+		cc.fileOff += int64(c.res)
+		cc.fileLeft -= int64(c.res)
+	//: nothing: the file is shorter than its head said.
+	case c.res == 0:
+		cc.fileBits |= ffEOF
+	//: a cancel changes nothing that the next step would not redo.
+	case c.res != -int32(errnoECANCELED):
+		cc.fileErr = -c.res
+	}
+	rr.fileAdvance(slot)
+}
+
+// onFileOut records what a pipe-to-socket splice sent, or that the socket was
+// full.
+func (rr *uRing) onFileOut(slot int32, gen uint32, c *cqe) {
+	//: see onRecv.
+	if !rr.owns(slot, gen) {
+		//: dropped.
+		return
+	}
+	cc := &rr.r.conns[slot]
+	cc.ops--
+	cc.fileOps--
+	//: by result.
+	switch {
+	//: bytes on the socket.
+	case c.res > 0:
+		cc.pipeHeld -= c.res
+		rr.r.st.bytesOut += uint64(c.res)
+		cc.lastIO = rr.ul.lp.tick
+	//: the socket is full: wait for it to have room.
+	case c.res == -int32(syscall.EAGAIN):
+		cc.fileBits |= ffFull
+	//: nothing, or the link was cut because the splice in ran short.
+	case c.res == 0, c.res == -int32(errnoECANCELED):
+	//: the socket failed.
+	default:
+		cc.fileErr = -c.res
+	}
+	rr.fileAdvance(slot)
+}
+
+// onFilePoll counts the POLLOUT's completion and resumes the file.
+func (rr *uRing) onFilePoll(slot int32, gen uint32, c *cqe) {
+	//: see onRecv.
+	if !rr.owns(slot, gen) {
+		//: dropped.
+		return
+	}
+	cc := &rr.r.conns[slot]
+	cc.ops--
+	cc.fileOps--
+	cc.fileBits &^= ffPoll
+	//: a poll that failed: the socket has.
+	if c.res < 0 && c.res != -int32(errnoECANCELED) {
+		cc.fileErr = -c.res
+	}
+	rr.fileAdvance(slot)
+}
+
+// fileAdvance decides the file's next step once its last operation in flight
+// has answered, in whatever order the linked pair's two completions came.
+func (rr *uRing) fileAdvance(slot int32) {
+	c := &rr.r.conns[slot]
+	//: its sibling of the pair has not answered yet.
+	if c.fileOps > 0 {
+		//: later.
+		return
+	}
+	c.flags &^= fSending
+	//: closed meanwhile: the slot waits for its last operation.
+	if c.state != stOpen && c.state != stClosing {
+		rr.maybeClose(slot)
+		//: nothing more.
+		return
+	}
+	//: by what the pair found.
+	switch {
+	//: the socket or the file failed.
+	case c.fileErr != 0:
+		rr.failLive(slot, c.fileErr)
+	//: the socket is full: POLLOUT resumes it.
+	case c.fileBits&ffFull != 0:
+		c.fileBits &^= ffFull
+		rr.pollOut(slot)
+	//: bytes wait in the pipe: a short socket write, or a short read.
+	case c.pipeHeld > 0:
+		rr.fileOut(slot, uint32(c.pipeHeld))
+	//: the file ended early: the head promised more than the file holds.
+	case c.fileBits&ffEOF != 0:
+		rr.r.fail(slot, rFile, 0)
+	//: more of the file.
+	case c.fileLeft > 0:
+		rr.fileStep(slot)
+	//: the last byte is gone.
+	default:
+		rr.r.fileDone(slot)
+	}
+	rr.maybeClose(slot)
+}
+
+// pollOut arms a one-shot POLLOUT on slot's socket, tagged so a close that
+// finds it in flight can wait for it.
+func (rr *uRing) pollOut(slot int32) {
+	c := &rr.r.conns[slot]
+	s := rr.u.get()
+	//: no room: the connection fails rather than stalls silently.
+	if s == nil {
+		rr.r.st.retries++
+		rr.r.fail(slot, rErrno, int32(syscall.EBUSY))
+		//: closed.
+		return
+	}
+	prepPollOut(s, uint32(c.fd), udPack(udFilePoll, c.gen, uint32(slot)))
+	rr.ul.onFD(s)
+	c.ops++
+	c.fileOps = 1
+	c.fileBits |= ffPoll
+	c.flags |= fSending
 }

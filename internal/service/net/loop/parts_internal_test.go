@@ -311,3 +311,44 @@ func TestPostQueue_full(t *testing.T) {
 		t.Fatalf("drained %d", n)
 	}
 }
+
+// TestCapsReuseportCBPFIsClassCode pins #977 and #857: reuseport-cbpf is a
+// class A-code row, opted into by a datagram group's Steer; a loop group that
+// names it, or reuseport-loops (Shards(0)'s), in Capabilities is refused by
+// name, never accepted and left unprobed.
+func TestCapsReuseportCBPFIsClassCode(t *testing.T) {
+	t.Parallel()
+	if class, ok := capClassOf(corenet.CapabilityReuseportCBPF); !ok || class != classCode {
+		t.Fatalf("class = %q, %v, want %q", class, ok, classCode)
+	}
+	for _, c := range []corenet.Capability{corenet.CapabilityReuseportCBPF, corenet.CapabilityReuseportLoops} {
+		v := corenet.LoopValue{Capabilities: []corenet.Capability{c}}
+		if err := CheckCapabilities("g", v); !errs.HasCode(err, corenet.CodeLoopCapabilityRefused) {
+			t.Fatalf("CheckCapabilities(%s) = %v, want LOOP_CAPABILITY_REFUSED", c, err)
+		}
+	}
+}
+
+// TestCheckValue pins #857's ranges: one CPU per loop once Loops is known,
+// no CPU outside the mask, no negative lowat.
+func TestCheckValue(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		v    corenet.LoopValue
+		ok   bool
+		name string
+	}{
+		{corenet.LoopValue{Loops: 2, Affinity: []int{0, 1}}, true, "one a loop"},
+		{corenet.LoopValue{Affinity: []int{0, 1}}, true, "loops not resolved"},
+		{corenet.LoopValue{Loops: 2, Affinity: []int{0}}, false, "short"},
+		{corenet.LoopValue{Loops: 1, Affinity: []int{-1}}, false, "negative"},
+		{corenet.LoopValue{Loops: 1, Affinity: []int{maxAffinityCPU + 1}}, false, "past the mask"},
+		{corenet.LoopValue{NotsentLowat: -1}, false, "negative lowat"},
+		{corenet.LoopValue{NotsentLowat: 1}, true, "lowat"},
+	} {
+		err := CheckCapabilities("g", c.v)
+		if c.ok != (err == nil) || (err != nil && !errs.HasCode(err, corenet.CodeLoopValueInvalid)) {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+}

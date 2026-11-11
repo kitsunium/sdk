@@ -96,3 +96,30 @@ The codec checks more than the C reference per field (every control byte in a
 value, not only NUL, CR and LF; the target's high bytes), so the two are not
 doing exactly the same work: the comparison is the cost of the profile as
 specified, not of an identical loop.
+
+A body read as it arrives (`corenet.HTTP1BodyReader`, #844) is not on the path
+these figures measure: a batch of its chunks allocates nothing
+(`TestBodyReader_batchAllocatesNothing`), and the whole-body path gains one branch
+and a call, which `net-kernel-gate`'s P2 row answers.
+
+The `Trace` link (#855) adds, on a request with a `traceparent`, one `Field`
+scan, one parse and one field line written into the response value: no
+allocation (`TestTrace_allocatesNothing`). A request without the field pays the
+link's call and the `Field` scan only.
+
+## The chain's links
+
+`BenchmarkChainLink` frames one request into a reused value and sends it through
+a chain of a single link, the bare handler the baseline, so a row less `none` is
+the link's own cost. Measured on 2026-11-10 on an AMD EPYC 7351P (linux/amd64,
+busy VM, `GOMAXPROCS=4`), go1.27.3, `-benchtime=300ms -count=3`, the median.
+
+| Benchmark | ns/op | less `none` | B/op | allocs/op |
+|---|---|---|---|---|
+| `ChainLink/none` | 342 | — | 0 | 0 |
+| `ChainLink/requestid` (a valid `X-Request-Id`, kept) | 384 | 42 | 0 | 0 |
+| `ChainLink/requestid-mint` (none read, sixteen hex digits written) | 392 | 50 | 0 | 0 |
+| `ChainLink/ratelimit` (a `KeyedBuckets` table of 4 096 keys, one lock) | 433 | 100 | 0 | 0 |
+| `ChainLink/cors` (one listed `Origin`, the policy's prebuilt fields) | 390 | 48 | 0 | 0 |
+| `ChainLink/log` (a record per request, no filter, a clock read per record) | 568 | 226 | 0 | 0 |
+| `ChainLink/log-slow-sampled` (`LogSlowerThan` + `LogSample(1000)`: nothing written) | 517 | 175 | 0 | 0 |

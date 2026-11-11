@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"sync/atomic"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -89,16 +90,19 @@ func markRefused(c corenet.Conn) {
 }
 
 // admit runs the handler under the group's ceiling, translating a rejection
-// into the domain's own sentinel.
+// into the domain's own sentinel. A connection the ceiling lets through is
+// counted in admitted before its handler runs, so a long-lived one is counted
+// while it is served and the count never falls.
 //
 // A connection turned away here has already been accepted by the kernel, so it
 // is answered by closing it immediately rather than by letting the accept queue
 // overflow silently — a refusal the peer can observe beats a timeout it cannot
 // distinguish from a hang.
-func (s *Server) admit(ctx context.Context, limiter *connLimiter, c corenet.Conn, handler corenet.ConnHandler) error {
+func (s *Server) admit(ctx context.Context, limiter *connLimiter, admitted *atomic.Uint64, c corenet.Conn, handler corenet.ConnHandler) error {
 	//: no ceiling configured — call the handler directly, with no closure and
 	//: no policy on the hot path.
 	if limiter == nil {
+		admitted.Add(1)
 		//: straight to the handler, with no closure on the hot path.
 		return handler.ServeConn(ctx, c)
 	}
@@ -110,6 +114,7 @@ func (s *Server) admit(ctx context.Context, limiter *connLimiter, c corenet.Conn
 		return errs.Wrap(corenet.ConnLimitReached, errs.WrapParams{},
 			errs.Int("limit", limiter.ceiling))
 	}
+	admitted.Add(1)
 	//: deferred, so a handler that panics still settles its slot — a leaked
 	//: slot wedges the group after MaxConns connections.
 	defer limiter.releaseFor(c)

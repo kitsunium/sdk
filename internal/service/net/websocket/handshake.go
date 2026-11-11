@@ -39,6 +39,16 @@ const httpsScheme string = "https"
 // The socket is taken over from net/http, which means it is no longer the HTTP
 // server's to close, nor this SDK's listener engine's. Both are told, and the
 // connection is the handler's until it closes it.
+//
+// Over HTTP/2 the opening handshake is RFC 8441's extended CONNECT: a CONNECT
+// whose :protocol is exactly "websocket", the version and origin checked as
+// over HTTP/1.1, answered 200 — never 101 — and the connection is the stream,
+// its frames in DATA, masked by the client as RFC 6455 requires. The handler
+// must not return before the connection is done: the stream ends, END_STREAM,
+// when it returns. A CONNECT naming another protocol opens no tunnel (405),
+// and an HTTP/2 GET is answered 426. net/http announces extended CONNECT only
+// when the process runs with GODEBUG=http2xconnect=1, which a main package
+// sets with //go:debug http2xconnect=1; a library cannot.
 func Upgrade(w http.ResponseWriter, r *http.Request, opts ...Option) (conn *Conn, err error) {
 	cfg, cerr := resolve(opts)
 	//: a refused option set never reaches the wire.
@@ -47,6 +57,11 @@ func Upgrade(w http.ResponseWriter, r *http.Request, opts ...Option) (conn *Conn
 		http.Error(w, "websocket unavailable", http.StatusInternalServerError)
 		//: the error already names the offending option.
 		return nil, cerr
+	}
+	//: RFC 8441 over HTTP/2: a stream, not a socket, answered 200.
+	if isExtendedConnect(r) {
+		//: the stream's own handshake.
+		return upgradeExtendedConnect(w, r, &cfg)
 	}
 	//: everything the RFC says about the REQUEST, before anything about this
 	//: server's ability to serve it — a malformed handshake is the client's
@@ -110,15 +125,16 @@ func verifyHandshake(w http.ResponseWriter, r *http.Request, cfg *config) error 
 			"the opening handshake must be a GET")
 	}
 	//: an upgrade replaces the protocol on the socket, which requires owning
-	//: the socket. HTTP/2 multiplexes it, so there is nothing to take over;
-	//: RFC 8441 defines a different mechanism entirely and is out of scope.
+	//: the socket. HTTP/2 multiplexes it, so there is nothing to take over:
+	//: over HTTP/2 the handshake is RFC 8441's extended CONNECT, which Upgrade
+	//: took before this, and an HTTP/2 GET asking to upgrade is refused 426.
 	if r.ProtoMajor != 1 || r.ProtoMinor < 1 {
 		w.Header().Set(corenet.WSVersionHeader, corenet.WSVersion)
-		http.Error(w, "websocket requires HTTP/1.1", http.StatusUpgradeRequired)
+		http.Error(w, "websocket requires HTTP/1.1 or an extended CONNECT", http.StatusUpgradeRequired)
 		//: refuse.
 		return errs.Wrap(corenet.WSUpgradeUnsupported, errs.WrapParams{},
 			errs.String("proto", r.Proto),
-			errs.String("why", "the opening handshake requires HTTP/1.1; RFC 8441 is not implemented"))
+			errs.String("why", "the opening handshake requires HTTP/1.1, or RFC 8441's extended CONNECT over HTTP/2"))
 	}
 	//: §4.2.1/3-4 — both tokens, each possibly inside a comma-separated list
 	//: and in any case, because a proxy is free to rewrite either.

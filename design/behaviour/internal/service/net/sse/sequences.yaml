@@ -209,6 +209,274 @@ sequences:
               value: append(dst, value...)
           when: value != ""
       - return: append(dst, '\n')
+  - of: NewLoopHandler
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewLoopHandler
+        kind: self
+      - id: resolve
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(corenet.SSEStreamMisconfigured, errs.WrapParams{}, errs.String("option", "source"))
+          when: src == nil
+      - bind: cfg, err
+        eval: resolve(opts)
+        to: resolve
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(corenet.SSEStreamMisconfigured, errs.WrapParams{}, errs.String("option", "WriteTimeout"),
+                			errs.String("why", "a loop's OutputCap bounds a stream that stopped reading"))
+          when: hasWriteTimeout(opts)
+      - bind: keepAlive
+        eval: cfg.keepAlive
+      - opt:
+          do:
+            - set: keepAlive
+              value: "0"
+          when: cfg.noKeepAlive
+      - return: "&LoopHandler{src: src, retry: cfg.retry, keepAlive: keepAlive}, nil"
+  - of: hasWriteTimeout
+    steps:
+      - var:
+          name: probe
+          type: config
+      - loop:
+          do:
+            - eval: opt(&probe)
+          key: _
+          range: opts
+          value: opt
+      - return: probe.writeTimeout != 0
+  - of: (*LoopHandler).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).ServeHTTP1
+        kind: self
+      - id: req.Field
+        kind: value
+      - id: h.src.OpenSSE
+        kind: internal
+    steps:
+      - bind: last, _
+        eval: req.Field(corenet.SSELastEventIDHeader)
+        to: req.Field
+      - bind: status
+        eval: h.src.OpenSSE(req, last)
+        to: h.src.OpenSSE
+      - opt:
+          do:
+            - set: res.Status
+              value: status
+            - return: ""
+          when: status != statusUnset
+      - set: res.Stream
+        value: "true"
+      - set: res.Header
+        value: append(res.Header, loopHead...)
+  - of: (*LoopHandler).OnStreamOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnStreamOpen
+        kind: self
+      - id: sendErr
+        kind: internal
+      - id: h.armKeepAlive
+        kind: internal
+      - id: h.src.StreamOpened
+        kind: internal
+    steps:
+      - bind: stream
+        eval: "LoopStreamValue{h: h, s: s}"
+      - opt:
+          do:
+            - eval: "sendErr(stream.Send(corenet.SSEEventValue{Retry: corenet.DurationValue(h.retry)}))"
+              to: sendErr
+          when: h.retry > 0
+      - eval: h.armKeepAlive(s)
+        to: h.armKeepAlive
+      - eval: h.src.StreamOpened(stream)
+        to: h.src.StreamOpened
+  - of: (*LoopHandler).OnStreamTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnStreamTimeout
+        kind: self
+      - id: sendErr
+        kind: internal
+      - id: h.armKeepAlive
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: sendErr(s.End())
+              to: sendErr
+            - return: ""
+          when: s.Send(keepAliveFrame) != nil
+      - eval: h.armKeepAlive(s)
+        to: h.armKeepAlive
+  - of: (*LoopHandler).OnStreamDrain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnStreamDrain
+        kind: self
+      - id: sendErr
+        kind: internal
+    steps:
+      - bind: retry
+        eval: h.retry
+      - opt:
+          do:
+            - set: retry
+              value: drainRetry
+          when: retry <= 0
+      - bind: stream
+        eval: "LoopStreamValue{h: h, s: s}"
+      - eval: "sendErr(stream.Send(corenet.SSEEventValue{Retry: corenet.DurationValue(retry)}))"
+        to: sendErr
+      - eval: sendErr(s.End())
+        to: sendErr
+  - of: (*LoopHandler).OnStreamClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnStreamClose
+        kind: self
+      - id: h.src.StreamClosed
+        kind: internal
+    steps:
+      - eval: "h.src.StreamClosed(LoopStreamValue{h: h, s: s}, err)"
+        to: h.src.StreamClosed
+  - of: (*LoopHandler).armKeepAlive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).armKeepAlive
+        kind: self
+      - id: sendErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: sendErr(s.Deadline(h.keepAlive))
+              to: sendErr
+          when: h.keepAlive > 0
+  - of: LoopStreamValue.Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopStreamValue.Send
+        kind: self
+      - id: s.h.lane
+        kind: internal
+      - id: AppendEvent
+        kind: internal
+      - id: s.s.Send
+        kind: value
+    steps:
+      - bind: buf
+        eval: s.h.lane(s.s.IO.Loop())
+        to: s.h.lane
+      - bind: wire, err
+        eval: AppendEvent((*buf)[:0], e)
+        to: AppendEvent
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: "*buf"
+        value: wire
+      - return: s.s.Send(wire)
+        to: s.s.Send
+  - of: LoopStreamValue.Conn
+    steps:
+      - return: s.s.Ref
+  - of: LoopStreamValue.End
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopStreamValue.End
+        kind: self
+      - id: s.s.End
+        kind: value
+    steps:
+      - return: s.s.End()
+        to: s.s.End
+  - of: (*LoopHandler).lane
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).lane
+        kind: self
+      - id: h.scratch.Load
+        kind: value
+      - id: h.growLane
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: (*p)[i]
+          init:
+            bind: p
+            eval: h.scratch.Load()
+            to: h.scratch.Load
+          when: p != nil && i < len(*p) && (*p)[i] != nil
+      - return: h.growLane(i)
+        to: h.growLane
+  - of: (*LoopHandler).growLane
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).growLane
+        kind: self
+      - id: h.scratch.Load
+        kind: value
+      - id: h.scratch.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: h.mu
+      - var:
+          name: cur
+          type: "[]*[]byte"
+      - opt:
+          do:
+            - set: cur
+              value: "*p"
+          init:
+            bind: p
+            eval: h.scratch.Load()
+            to: h.scratch.Load
+          when: p != nil
+      - opt:
+          do:
+            - return: cur[i]
+          when: i < len(cur) && cur[i] != nil
+      - bind: next
+        eval: make([]*[]byte, max(len(cur), i+1))
+      - eval: copy(next, cur)
+      - set: next[i]
+        value: new(make([]byte, 0, initialFrameCapacity))
+      - eval: h.scratch.Store(&next)
+        to: h.scratch.Store
+      - return: next[i]
+  - of: sendErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err != nil
   - of: KeepAlive
     steps:
       - return:

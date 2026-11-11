@@ -892,6 +892,56 @@ func prepSend(s *sqe, index uint32, p []byte, ud uint64) {
 	s.userData = ud
 }
 
+// prepSendZC fills s as a zero-copy send of p on direct descriptor index
+// (IORING_OP_SEND_ZC): the pages stay the kernel's until the notification.
+func prepSendZC(s *sqe, index uint32, p []byte, ud uint64) {
+	prepSend(s, index, p, ud)
+	s.opcode = opSendZC
+}
+
+// spliceIn is one file-to-pipe step: n bytes of file at off into pipeW; both
+// are process descriptors.
+type spliceIn struct {
+	file, pipeW int32
+	off         int64
+	n           uint32
+}
+
+// prepSpliceIn fills s as the step in, linked to the splice out behind it.
+func prepSpliceIn(s *sqe, in spliceIn, ud uint64) {
+	s.opcode = opSplice
+	s.fd = in.pipeW
+	s.off = spliceNoOffset
+	s.addr = uint64(in.off)
+	s.len = in.n
+	s.fileIdx = uint32(in.file)
+	s.flags = sqeIOLink
+	s.userData = ud
+}
+
+// prepSpliceOut fills s as a splice of n bytes from the read end of a pipe to
+// the socket at index, non-blocking.
+func prepSpliceOut(s *sqe, pipeR int32, index, n uint32, ud uint64) {
+	s.opcode = opSplice
+	s.fd = fixedFd(index)
+	s.flags = sqeFixedFile
+	s.off = spliceNoOffset
+	s.addr = spliceNoOffset
+	s.len = n
+	s.fileIdx = uint32(pipeR)
+	s.opFlags = spliceMove | spliceNonblock
+	s.userData = ud
+}
+
+// prepPollOut fills s as a one-shot POLLOUT on the socket at index.
+func prepPollOut(s *sqe, index uint32, ud uint64) {
+	s.opcode = opPollAdd
+	s.fd = fixedFd(index)
+	s.flags = sqeFixedFile
+	s.opFlags = uint32(syscall.EPOLLOUT)
+	s.userData = ud
+}
+
 // prepCancelFixed fills s as a cancel of every operation on direct descriptor
 // index. Only the probe's release check uses it, on a ring of a few
 // requests: the kernel finds them by walking every armed request

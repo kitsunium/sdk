@@ -137,3 +137,68 @@ stays class B, reported `available` and never on.
   (v6.12, v6.18, linux-6.12.y, linux-6.18.y), io_uring/wait.c (v7.0).
 - `internal/service/net/loop/uring_wait_linux_test.go` pins D1's kernel
   semantics on a COOP_TASKRUN and a DEFER_TASKRUN ring.
+
+## Amendment 2026-11-11 (#703): a secondary ring that does not wake the primary
+
+On the x86 kernels 6.14 (Fedora) and 6.17 (Azure) of CI, a connection served
+by a secondary ring waited one tick, 10 ms, a round trip
+(`TestCaps_deferPrimaryOnly`'s table in #703), whatever the setup flags; 6.8,
+6.12 and 7.0 wake within tens of microseconds (6.12.101 x86_64 here: p50
+314 µs). The chain was read in v6.12 and v6.14 (`io_uring/io_uring.c`,
+`io_uring/eventfd.c`, `io_uring/poll.c`, `kernel/task_work.c`): a secondary's
+completion is task work (`io_req_normal_work_add`, `TWA_SIGNAL_NO_IPI` under
+COOP_TASKRUN, whose `__set_notify_signal` still wakes a thread sleeping
+interruptibly); the woken `io_cqring_wait` runs it, the secondary's CQE commit
+signals its registered eventfd (`io_eventfd_flush_signal`, with
+`EPOLL_URING_WAKE`, which makes the primary's multishot poll one-shot —
+`onFan` re-arms it), and the primary's poll posts its CQE. None of those steps
+differs between the two releases; the cause lies outside these files and is
+not identified here.
+
+What is built does not depend on it. The first io_uring loop with a secondary
+ring in a process runs a probe on its own thread before reporting (`slowFanWake`,
+`uring_fanwake_linux.go`): two rings set up as the loop's, the secondary's CQ
+notifying an eventfd the primary polls, the secondary polling a pipe another
+thread writes 2 ms after the primary's wait starts. A wake later than half a
+tick (or none within 50 ms) is `slow`: every loop with secondaries then bounds
+its plain wait to `fanWakeTick` (1 ms) instead of the tick, so a secondary's
+exchange waits 1 ms at most on such a kernel; a loop of one ring, and every
+loop on a kernel found `prompt`, keeps the tick. The group's log line names
+the verdict (`secondary_wake=`). The bound holds only while a secondary
+holds something the kernel may complete — a slot, its close included, or an
+accept armed (`plainWait`, read at every batch) —; a loop whose secondaries
+serve nothing waits the tick, so a loop at rest wakes no more often on a slow
+kernel than on another. Secondaries accept only once the primary is within an
+eighth of full (ADR 0203), so the bound's wakeups fall on loaded loops.
+`TestSecondaryWake_bounded` is the detector: 200 round trips on a secondary,
+median under half a tick, verdict and kernel logged; `_probeControls` (the
+eventfd left unregistered must read slow; the probe agrees with itself),
+`_tickFor`, `_logged`, `_idleKeepsTheTick` (verdict forced slow, a two-ring
+loop serving nothing: 282 batches in 300 ms before `plainWait`, 30
+since) and `_plainWait`. Never run on 6.14 or 6.17: whether
+the probe reads slow there, and the median under the bound, are the CI lanes'
+to show.
+
+### Second amendment 2026-11-11 (#703): the loop watches its own waits
+
+The CI lanes answered: on Fedora's 6.14 the probe read `prompt` while
+`TestSecondaryWake_bounded` measured a median of 10.1 ms — the probe's rig
+woke, the loop's own rings did not. A probe of rings built apart cannot be
+trusted to reproduce the loop's; the loop now watches its own waits
+(`watchFan`, read at the start of every batch). A plain wait of half a tick
+or more that ends with completions already in a secondary's CQ is a wake the
+kernel did not give: the completion waited for the primary's timeout.
+`fanMissedLimit` (3) of them in a row, with no wait in between that a
+secondary's completion ended sooner, bound that loop's plain wait to
+`fanWakeTick` from then on, and the process's verdict reads `slow`, so the
+loops started next begin bounded; the probe stays, as the start's first
+answer (`fanProbed`). The detector reads the batch's start the loop already
+takes and each secondary's CQ tail: no system call, no clock read (ADR 0202).
+A grouped wait, a batch cut by its budget and a loop already bounded are not
+judged. On a kernel that wakes, a completion lands in the last microseconds of
+a wait of several milliseconds once in hundreds, never three times in a row.
+`TestSecondaryWake_detectedInService` makes the slow wake on every kernel —
+the secondaries' eventfd left unregistered (`loopHooks.fanSilent`) — and
+measures it: the detector off (`fanUnwatched`), a median of a tick (10.2 ms
+on 6.12.101 here); on, 1.09 ms, and the verdict `slow`.
+

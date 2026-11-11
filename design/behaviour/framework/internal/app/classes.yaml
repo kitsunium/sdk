@@ -1,6 +1,32 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - grouped: true
+    items:
+      - doc: |-
+          varAccessLog is <PRODUCT>_ACCESS_LOG's stem: which requests the access
+          record is written for.
+        name: varAccessLog
+        type: string
+        value: "\"ACCESS_LOG\""
+      - doc: "slowPrefix opens the mode that logs the slow requests: slow:100ms."
+        name: slowPrefix
+        type: string
+        value: "\"slow:\""
+    name: varAccessLog
+  - grouped: true
+    items:
+      - doc: accessAll writes the record of every request. It is the zero value.
+        name: accessAll
+        type: accessMode
+        value: iota
+      - doc: accessErrors writes it for a 4xx or a 5xx answer.
+        name: accessErrors
+      - doc: accessSlow writes it for a request that took longer than slow.
+        name: accessSlow
+      - doc: accessOff writes none.
+        name: accessOff
+    name: accessAll
   - doc: |-
       kit's listener, on the SDK's server engine: its bounds on every phase of a
       request, the header phase's own — the one a slowloris stalls — and its
@@ -802,7 +828,17 @@ constants:
                 or %[1]s_SECRETS_KEY_FILE naming a file that holds it
                 (unset: a key file beside the store, made on first use)
             %[1]s_TRUST_PROXY
-                on: app.ClientIP reads the last X-Forwarded-For address
+                on: app.ClientIP reads X-Forwarded-For, from the peers
+                %[1]s_TRUSTED_PROXIES lists (required when on)
+            %[1]s_TRUSTED_PROXIES
+                the proxies whose X-Forwarded-For is believed: comma-separated
+                addresses and CIDRs, such as 10.0.0.0/8,192.0.2.7. The client is the
+                first hop, from the right, outside the list; a peer outside it is the client
+            %[1]s_ACCESS_LOG
+                which requests are written down, one "request" record each: all (the
+                default outside dev), errors (the default in dev: 4xx and 5xx), off,
+                or slow:<duration> (slower than it, such as slow:100ms). The probes
+                under /_app/health/ are never logged
             %[1]s_RETENTION
                 what the stores' retention does: on (default), dry-run or off
             %[1]s_INDEX_KEY
@@ -1341,6 +1377,14 @@ constants:
       - name: clearFormer
       - name: clearVersions
     name: clearRecord
+  - doc: |-
+      mappedPrefixBits is the length of the ::ffff:0:0/96 prefix that makes an
+      IPv6 address an IPv4 one.
+    items:
+      - name: mappedPrefixBits
+        type: int
+        value: "96"
+    name: mappedPrefixBits
   - doc: knobOnceWindow is the knob of a topic's deduplication window.
     items:
       - name: knobOnceWindow
@@ -1524,6 +1568,8 @@ constants:
         value: model.VarRetention
       - name: varSecrets
         value: "\"SECRETS\""
+      - name: varTrustedProxies
+        value: "\"TRUSTED_PROXIES\""
       - name: varSecretsKey
         value: "\"SECRETS_KEY\""
       - name: varTelemetry
@@ -1591,6 +1637,20 @@ constants:
         type: int
         value: "256"
     name: maxUserAgent
+  - grouped: true
+    items:
+      - doc: requestIDHeader carries a request's identifier, in and out.
+        name: requestIDHeader
+        type: string
+        value: "\"X-Request-Id\""
+      - doc: |-
+          maxRequestID bounds the identifier a caller may send: a header can be as
+          long as a client likes, and the identifier is written to every log
+          line that names the request.
+        name: maxRequestID
+        type: int
+        value: "128"
+    name: requestIDHeader
   - doc: The kinds of privacy option.
     grouped: true
     items:
@@ -2084,6 +2144,27 @@ files:
       - (*access).permissions
       - principalType
     name: access.go
+  - decls:
+      - varAccessLog
+      - accessMode
+      - accessAll
+      - accessPolicy
+      - accessPolicy.String
+      - accessPolicy.logs
+      - parseAccessLog
+      - resolveAccessLog
+      - countingBody
+      - (*countingBody).Read
+      - accessWriter
+      - (*accessWriter).WriteHeader
+      - (*accessWriter).Write
+      - (*accessWriter).ReadFrom
+      - (*accessWriter).Flush
+      - (*accessWriter).Unwrap
+      - (*App).account
+      - (*App).writeAccess
+      - routeOf
+    name: access_log.go
   - decls:
       - ActivityHandler
       - (*Service).Activity
@@ -4212,6 +4293,17 @@ files:
       - (*App).moduleSource
     name: profile.go
   - decls:
+      - mappedPrefixBits
+      - trustedProxies
+      - trustedProxies.String
+      - trustedProxies.contains
+      - parseTrustedProxies
+      - parseProxyEntry
+      - resolveTrust
+      - clientAddr
+      - forwardedHops
+    name: proxies.go
+  - decls:
       - Query
       - QueryConfigurer
       - queryOptions
@@ -4479,9 +4571,20 @@ files:
       - (*responseState).add
       - (*responseState).write
       - harden
-      - clientAddr
       - clipRunes
     name: request.go
+  - decls:
+      - requestIDHeader
+      - requestKey
+      - requestInfo
+      - RequestID
+      - requestInfoOf
+      - requestIDOf
+      - requestIDByte
+      - mintRequestID
+      - joinRequest
+      - remoteTrace
+    name: request_id.go
   - decls:
       - optionErase
       - privacyOption
@@ -5843,6 +5946,27 @@ functions:
     name: refusal
     params: ctx context.Context, a *App, id string, err error
     results: error
+  - doc: |-
+      parseAccessLog reads what an operator wrote: all, errors, off, or
+      slow:<duration> with a positive duration. ok is false for anything else.
+    name: parseAccessLog
+    params: raw string
+    results: p accessPolicy, ok bool
+  - doc: |-
+      resolveAccessLog is the access policy <PRODUCT>_ACCESS_LOG names: every
+      request outside dev, where a log line is read by an aggregator, and the
+      errors in dev, where the Studio shows every request. A value that is none
+      of the modes refuses the start, naming the variable: a typo must not
+      silently turn the record off.
+    name: resolveAccessLog
+    params: name string, own func(stem string) string, dev bool
+    results: accessPolicy, error
+  - doc: |-
+      routeOf is the path of a ServeMux pattern: "GET /items/{id}" is
+      "/items/{id}". The method is a field of its own.
+    name: routeOf
+    params: pattern string
+    results: string
   - name: NewApp
     params: name string, services ...*Service
     results: "*App"
@@ -8325,6 +8449,47 @@ functions:
     name: partsOf
     params: record, former, versions bool
     results: clearParts
+  - doc: |-
+      parseTrustedProxies reads the comma-separated list of CIDRs and addresses an
+      operator wrote, a bare address standing for itself alone. An empty entry
+      is skipped, so a trailing comma is no mistake; the first one that is
+      neither an address nor a network is returned as bad.
+    name: parseTrustedProxies
+    params: list string
+    results: proxies trustedProxies, bad string
+  - doc: |-
+      parseProxyEntry is one entry of the list: a network or an address. An
+      IPv4-mapped IPv6 network is the IPv4 one it names, since the peers it is
+      compared with are read unmapped.
+    name: parseProxyEntry
+    params: entry string
+    results: netip.Prefix, bool
+  - doc: |-
+      resolveTrust is the proxy trust <PRODUCT>_TRUST_PROXY and
+      <PRODUCT>_TRUSTED_PROXIES give: the proxies, empty while the switch is
+      off — a list alone trusts nobody —, or the refusal of a start that turns
+      the switch on with no proxy to believe or a list it cannot read. A product
+      reached by its clients as well as through its proxy could not tell them
+      apart, and the header it believed would be the client's own.
+    name: resolveTrust
+    params: name string, own func(stem string) string
+    results: trustedProxies, error
+  - doc: |-
+      clientAddr is the client of r. A peer that is not one of the trusted
+      proxies is the client, and its X-Forwarded-For is ignored. A trusted
+      peer's header is walked from its right — the hop each proxy appended — to
+      the first address outside the proxies, which is the client (RFC 7239's
+      model): the hops before it came from the client and may be forged. A hop
+      that is not an address ends the walk, at the last address it vouched for.
+    name: clientAddr
+    params: r *http.Request, trusted trustedProxies
+    results: string
+  - doc: |-
+      forwardedHops are the hops of every X-Forwarded-For line of r, left to
+      right, trimmed; an empty one names no hop.
+    name: forwardedHops
+    params: r *http.Request
+    results: "[]string"
   - name: NewQuery
     results: "*Query[Q, R]"
     typeParams: Q, R any
@@ -8733,20 +8898,47 @@ functions:
     name: harden
     params: c *http.Cookie, dev bool
     results: "*http.Cookie"
-  - doc: |-
-      clientAddr is the client of r: the connection's peer, or — behind a proxy
-      the operator trusts — the last address of X-Forwarded-For, the one that
-      proxy appended. Every address before it came from the client and may be
-      forged: a client that sends "X-Forwarded-For: 6.6.6.6" arrives as
-      "6.6.6.6, <its real address>". A forwarded value that is not an address
-      is ignored.
-    name: clientAddr
-    params: r *http.Request, trustProxy bool
-    results: string
   - doc: clipRunes bounds s to n runes.
     name: clipRunes
     params: s string, n int
     results: string
+  - name: RequestID
+    params: ctx context.Context
+    results: string
+  - doc: requestInfoOf is the identity of the request ctx serves, nil outside one.
+    name: requestInfoOf
+    params: ctx context.Context
+    results: "*requestInfo"
+  - doc: |-
+      requestIDOf is the identifier h carries, when it is one this framework
+      accepts: the header is the caller's, so a value that could forge a log
+      line, or grow one without bound, is not taken.
+    name: requestIDOf
+    params: h http.Header
+    results: rid string, ok bool
+  - doc: requestIDByte reports whether c may be part of a request identifier.
+    name: requestIDByte
+    params: c byte
+    results: bool
+  - doc: |-
+      mintRequestID is a UUIDv7 for a request whose caller sent no usable
+      identifier; not ok only when the system's randomness fails, in which case
+      the request goes without one rather than not at all.
+    name: mintRequestID
+    results: rid string, ok bool
+  - doc: |-
+      joinRequest says what request ctx serves is joining the span sp: its
+      identifier is the span's http.request_id, and the span is the one the access
+      record is correlated with. It does nothing outside an HTTP request.
+    name: joinRequest
+    params: ctx context.Context, sp *span
+  - doc: |-
+      remoteTrace is ctx continuing the trace a caller's W3C traceparent names;
+      a missing or malformed header leaves ctx as it is, and the span that
+      follows starts a trace.
+    name: remoteTrace
+    params: ctx context.Context, h http.Header
+    results: context.Context
   - doc: privacyFuncsOf are the option functions of an entity of type T.
     name: privacyFuncsOf
     results: privacyFuncs
@@ -10454,6 +10646,94 @@ types:
         type: pos
     kind: struct
     name: builderCall
+  - doc: accessMode is which requests an access record is written for.
+    kind: named
+    name: accessMode
+    underlying: uint8
+  - doc: |-
+      accessPolicy is <PRODUCT>_ACCESS_LOG as resolved: the mode, and for
+      accessSlow the duration a request must exceed.
+    fields:
+      - name: mode
+        type: accessMode
+      - name: slow
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: String is the policy as <PRODUCT>_ACCESS_LOG spells it.
+        name: String
+        recv: p accessPolicy
+        results: string
+      - doc: |-
+          logs reports whether a request that was answered with status after took is
+          written down.
+        name: logs
+        params: status int, took time.Duration
+        recv: p accessPolicy
+        results: bool
+    name: accessPolicy
+  - doc: countingBody counts the bytes the handler reads from a request's body.
+    fields:
+      - name: ""
+        role: embedded
+        type: io.ReadCloser
+      - name: "n"
+        type: int64
+    kind: struct
+    methods:
+      - doc: Read reads from the body and counts what it gave.
+        name: Read
+        params: p []byte
+        recv: b *countingBody
+        results: int, error
+    name: countingBody
+  - doc: |-
+      accessWriter remembers the status a handler sent and the bytes of its body.
+      It is the response writer of the middleware that writes the access record,
+      so it keeps what net/http gives a handler's writer: Flush, ReadFrom — the
+      sendfile path of a static file — and, through Unwrap, the controller's
+      deadlines and hijacking.
+    fields:
+      - name: ""
+        role: embedded
+        type: http.ResponseWriter
+      - name: status
+        type: int
+      - name: bytes
+        type: int64
+      - doc: flushErr is the last refusal of a Flush.
+        name: flushErr
+        type: error
+    kind: struct
+    methods:
+      - doc: WriteHeader records the status and writes it.
+        name: WriteHeader
+        params: code int
+        recv: w *accessWriter
+      - doc: Write counts the body; a write with no status before it is a 200.
+        name: Write
+        params: p []byte
+        recv: w *accessWriter
+        results: int, error
+      - doc: |-
+          ReadFrom copies r to the response, through the wrapped writer's own
+          ReadFrom when it has one.
+        name: ReadFrom
+        params: r io.Reader
+        recv: w *accessWriter
+        results: int64, error
+      - doc: |-
+          Flush sends what is buffered. The status line it may send is a 200 when
+          the handler said nothing, which writeAccess reads from a status never
+          recorded. A writer that cannot flush sends the response when the handler
+          ends: nothing is lost but the early send, which flushErr remembers.
+        name: Flush
+        recv: w *accessWriter
+      - doc: Unwrap is the writer the accessWriter wraps, for http.ResponseController.
+        name: Unwrap
+        recv: w *accessWriter
+        results: http.ResponseWriter
+    name: accessWriter
   - fields:
       - name: svc
         type: "*Service"
@@ -10646,6 +10926,23 @@ types:
         type: atomic.Pointer[telemetry.Exporter]
     kind: struct
     methods:
+      - doc: |-
+          account serves r under an identifier — the caller's X-Request-Id when it is
+          usable, a UUIDv7 otherwise —, echoes it on the response, and writes the
+          request's access record when it ends, whatever the handler did, a panic
+          that aborts the response included.
+        name: account
+        params: w http.ResponseWriter, r *http.Request, h http.Handler
+        recv: a *App
+      - doc: |-
+          writeAccess writes the request's access record when the policy asks for
+          it. The route is the pattern the router matched — never the raw path, whose
+          ids would make every line its own series — and r.Pattern is set by the
+          router on the request it was given, which is r. A request no route
+          matched has none.
+        name: writeAccess
+        params: r *http.Request, info *requestInfo, out *accessWriter, bytesIn int64, took time.Duration
+        recv: a *App
       - doc: |-
           busy reports whether an activity of a mounted service says the product is
           busy.
@@ -11419,7 +11716,11 @@ types:
         recv: a *App
       - doc: |-
           observeHTTP wraps the app's handler with the outermost middleware: the
-          in-flight and served counters.
+          in-flight and served counters, and — for everything but the framework's own
+          routes — the request's identifier and its access record (account). The
+          probes under reservedPrefix and the Studio's routes are counted and never
+          identified nor logged: a probe is called every few seconds, and the Studio
+          is the tool's.
         name: observeHTTP
         params: h http.Handler
         recv: a *App
@@ -15600,9 +15901,31 @@ types:
         type: clock.Timed
       - name: warnings
         type: "[]phrase"
-      - doc: trustProxy lets app.ClientIP read X-Forwarded-For (<PRODUCT>_TRUST_PROXY=on).
+      - doc: |-
+          trustProxy is <PRODUCT>_TRUST_PROXY=on: the product is behind a proxy,
+          and trustedProxies says which.
         name: trustProxy
         type: bool
+      - doc: |-
+          trustedProxies are the peers whose X-Forwarded-For app.ClientIP reads:
+          <PRODUCT>_TRUSTED_PROXIES, once <PRODUCT>_TRUST_PROXY is on. Empty
+          trusts nobody.
+        name: trustedProxies
+        type: trustedProxies
+      - doc: |-
+          trustErr is the refusal of the proxy trust the environment names: on
+          with no list, or a list that is not one. The start returns it; the
+          healthcheck, which only reads the address, does not.
+        name: trustErr
+        type: error
+      - doc: |-
+          accessLog is <PRODUCT>_ACCESS_LOG: which requests the access record is
+          written for. accessErr is its refusal, returned by the start as
+          trustErr is.
+        name: accessLog
+        type: accessPolicy
+      - name: accessErr
+        type: error
       - doc: "secrets is <PRODUCT>_SECRETS: where the environment keeps its secrets."
         name: secrets
         type: secretsConfig
@@ -16988,6 +17311,11 @@ types:
         type: string
       - name: Violations
         type: "[]ViolationMessage"
+      - doc: |-
+          RequestID is the identifier of the request the answer is for, as the
+          X-Request-Id of the response says: what a support ticket quotes.
+        name: RequestID
+        type: string
     kind: struct
     name: wireBody
   - doc: |-
@@ -21374,6 +21702,26 @@ types:
       	sealingSource
       	sealAll(ctx context.Context) (sealed, total int, err error)
       }
+  - doc: |-
+      trustedProxies are the networks <PRODUCT>_TRUSTED_PROXIES lists: the peers
+      whose X-Forwarded-For the product believes. A peer outside them is the
+      client, whatever header it carries.
+    kind: named
+    methods:
+      - doc: "String is the list as the settings show it: the networks, comma-separated."
+        name: String
+        recv: t trustedProxies
+        results: string
+      - doc: |-
+          contains reports whether ip is one of the listed proxies. A zone and an
+          IPv4-mapped form are not part of an address's identity here, as they are
+          not in a list written as 10.0.0.0/8.
+        name: contains
+        params: ip netip.Addr
+        recv: t trustedProxies
+        results: bool
+    name: trustedProxies
+    underlying: "[]netip.Prefix"
   - fields:
       - name: ""
         role: embedded
@@ -21764,6 +22112,24 @@ types:
     name: responseState
   - kind: struct
     name: responseKey
+  - doc: |-
+      requestKey carries what the HTTP middleware knows of the request a context
+      serves.
+    kind: struct
+    name: requestKey
+  - doc: |-
+      requestInfo is a request's identity: its identifier, and the span context
+      of the span the endpoint or the frontend began for it — which the
+      middleware, outside that span, reads when the request ends. The span begins
+      in the goroutine serving the request, the middleware reads after that
+      goroutine's handler returned: no lock.
+    fields:
+      - name: id
+        type: string
+      - name: span
+        type: trace.SpanContext
+    kind: struct
+    name: requestInfo
   - doc: |-
       privacyOption is one privacy option of a store: a retention — kit's, or
       the product's own —, a hold until an instant, an anonymiser, a purpose.
@@ -29728,7 +30094,7 @@ vars:
           	varAddr, varAllowedHosts, varDataDir, varDataKeyStem, varDataKeyStem + varFileSuffix, varEnv,
           	varIndexKeyStem, varIndexKeyStem + varFileSuffix, varLogLevel, varOTLPHeaders, varOTLPHeaders + varFileSuffix, varRetention, varSecrets,
           	varSecretsKey, varSecretsKeyFile, varSMTPURL, varSMTPURLFile, varTelemetry, varTelemetryGIDs,
-          	varTrustProxy,
+          	varTrustProxy, varTrustedProxies, varAccessLog,
           }
     name: operatorStems
   - grouped: true

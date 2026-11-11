@@ -33,7 +33,7 @@ func (ul *uLoop) selfTest(flags uint32) (direct, deferred bool, err error) {
 		//: named.
 		return false, false, probeError("self_test", syscall.EIO)
 	}
-	fds := ul.sw.disabled(corenet.CapabilityURingDirect)
+	fds := ul.sw.disabled(corenet.CapabilityURingDirect) || unixListener(ul.lfds)
 	rg, err := selfTestRing(flags, !fds)
 	//: no ring, buffers or table.
 	if err != nil {

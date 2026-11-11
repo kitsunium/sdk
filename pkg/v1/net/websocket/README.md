@@ -119,6 +119,7 @@ This package is the server half only. The SDK's outbound client returns a fully-
 - [func DrainSignal\(ctx context.Context\) \<-chan struct{}](<#DrainSignal>)
 - [func MaxFrameSize\(n int64\) Option](<#MaxFrameSize>)
 - [func MaxMessageSize\(n int64\) Option](<#MaxMessageSize>)
+- [func NewLoopHandler\(src LoopConnHandler, opts ...Option\) \(\*LoopHandler, error\)](<#NewLoopHandler>)
 - [func PingInterval\(d time.Duration\) Option](<#PingInterval>)
 - [func Subprotocols\(names ...string\) Option](<#Subprotocols>)
 - [func Upgrade\(w http.ResponseWriter, r \*http.Request, opts ...Option\) \(conn \*Conn, err error\)](<#Upgrade>)
@@ -138,6 +139,23 @@ This package is the server half only. The SDK's outbound client returns a fully-
   - [func \(\*Conn\) SendBinary\(data \[\]byte\) error](<#Conn.SendBinary>)
   - [func \(\*Conn\) SendText\(text string\) error](<#Conn.SendText>)
   - [func \(\*Conn\) Subprotocol\(\) string](<#Conn.Subprotocol>)
+- [type LoopConnHandler](<#LoopConnHandler>)
+  - [func \(LoopConnHandler\) OpenWS\(req \*corenet.HTTP1RequestValue\) int](<#LoopConnHandler.OpenWS>)
+  - [func \(LoopConnHandler\) WSClosed\(c LoopConnValue, err error\)](<#LoopConnHandler.WSClosed>)
+  - [func \(LoopConnHandler\) WSMessage\(c LoopConnValue, m corenet.WSMessageValue\)](<#LoopConnHandler.WSMessage>)
+  - [func \(LoopConnHandler\) WSOpened\(c LoopConnValue, subprotocol string\)](<#LoopConnHandler.WSOpened>)
+- [type LoopConnValue](<#LoopConnValue>)
+  - [func \(LoopConnValue\) CloseWith\(code corenet.WSCloseCode, reason string\) error](<#LoopConnValue.CloseWith>)
+  - [func \(LoopConnValue\) Conn\(\) corenet.LoopConnRef](<#LoopConnValue.Conn>)
+  - [func \(LoopConnValue\) Ping\(payload \[\]byte\) error](<#LoopConnValue.Ping>)
+  - [func \(LoopConnValue\) Send\(m corenet.WSMessageValue\) error](<#LoopConnValue.Send>)
+- [type LoopHandler](<#LoopHandler>)
+  - [func \(\*LoopHandler\) OnStreamClose\(s corenet.HTTP1StreamValue, err error\)](<#LoopHandler.OnStreamClose>)
+  - [func \(\*LoopHandler\) OnStreamDrain\(s corenet.HTTP1StreamValue\)](<#LoopHandler.OnStreamDrain>)
+  - [func \(\*LoopHandler\) OnStreamOpen\(s corenet.HTTP1StreamValue\)](<#LoopHandler.OnStreamOpen>)
+  - [func \(\*LoopHandler\) OnStreamTimeout\(s corenet.HTTP1StreamValue\)](<#LoopHandler.OnStreamTimeout>)
+  - [func \(\*LoopHandler\) OnUpgradedData\(s corenet.HTTP1StreamValue, buf \[\]byte\) int](<#LoopHandler.OnUpgradedData>)
+  - [func \(\*LoopHandler\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#LoopHandler.ServeHTTP1>)
 - [type Message](<#Message>)
   - [func \(Message\) OpCode\(\) WSOpCode](<#Message.OpCode>)
 - [type Option](<#Option>)
@@ -460,6 +478,15 @@ MaxMessageSize bounds one reassembled message.
 
 Zero is clamped to [DefaultMaxMessageSize](#DefaultMaxMessageSize), negative is refused. There is deliberately no "unbounded" setting: the length is announced by the peer in a 64-bit field, and fragmentation lets it keep announcing more, so an unbounded ceiling is not a configuration choice — it is a remote memory allocator.
 
+<a name="NewLoopHandler"></a>
+## func [NewLoopHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
+
+```go
+func NewLoopHandler(src LoopConnHandler, opts ...Option) (*LoopHandler, error)
+```
+
+NewLoopHandler returns the handler serving src as WebSocket connections on a loop group: pass it to http1.HandleLoop. The handshake, the frames, the close and the heartbeat follow Upgrade's rules; no goroutine a connection.
+
 <a name="PingInterval"></a>
 ## func [PingInterval](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
 
@@ -498,6 +525,8 @@ Upgrade completes the RFC 6455 opening handshake and returns the connection.
 On failure it has ALREADY written the HTTP response — a 426 carrying the version this server speaks, a 400, a 403 or a 405 as the fault requires — so the handler should simply return.
 
 The socket is taken over from net/http. It is no longer the HTTP server's to close, nor this SDK's listener engine's: it is the handler's until [Conn](#Conn).Close.
+
+Over HTTP/2 the handshake is RFC 8441's extended CONNECT, answered 200, the connection the stream: the handler must not return before [Conn](#Conn).Done. It needs GODEBUG=http2xconnect=1 in the process (//go:debug http2xconnect=1 in the main package); without it net/http refuses the CONNECT and an HTTP/2 GET is answered 426.
 
 <a name="WithoutPing"></a>
 ## func [WithoutPing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
@@ -682,6 +711,188 @@ func (*Conn) Subprotocol() string
 ```
 
 Subprotocol returns the subprotocol the handshake agreed on, or "" when none was.
+
+<a name="LoopConnHandler"></a>
+## type [LoopConnHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
+
+LoopConnHandler is what a program serves WebSocket connections with on a loop group.
+
+```go
+type LoopConnHandler = svcws.LoopConnHandler
+```
+
+LoopConnHandler is an alias of `github.com/kitsunium/sdk/internal/service/net/websocket.LoopConnHandler`, declared as:
+
+```go
+type LoopConnHandler interface {
+	// OpenWS judges a handshake the protocol accepted: zero upgrades it, anything
+	// else answers it with that status.
+	OpenWS(req *corenet.HTTP1RequestValue) int
+	// WSClosed is told the connection is over, for whatever reason.
+	WSClosed(c LoopConnValue, err error)
+	// WSMessage is handed one whole message, its Data valid for this call only: a
+	// handler that keeps it copies it.
+	WSMessage(c LoopConnValue, m corenet.WSMessageValue)
+	// WSOpened is told the connection opened, with the subprotocol agreed, empty when none was.
+	WSOpened(c LoopConnValue, subprotocol string)
+}
+```
+
+<a name="LoopConnHandler.OpenWS"></a>
+### func \(LoopConnHandler\) [OpenWS](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/gen_ports.go>)
+
+```go
+func (LoopConnHandler) OpenWS(req *corenet.HTTP1RequestValue) int
+```
+
+OpenWS judges a handshake the protocol accepted: zero upgrades it, anything else answers it with that status.
+
+<a name="LoopConnHandler.WSClosed"></a>
+### func \(LoopConnHandler\) [WSClosed](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/gen_ports.go>)
+
+```go
+func (LoopConnHandler) WSClosed(c LoopConnValue, err error)
+```
+
+WSClosed is told the connection is over, for whatever reason.
+
+<a name="LoopConnHandler.WSMessage"></a>
+### func \(LoopConnHandler\) [WSMessage](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/gen_ports.go>)
+
+```go
+func (LoopConnHandler) WSMessage(c LoopConnValue, m corenet.WSMessageValue)
+```
+
+WSMessage is handed one whole message, its Data valid for this call only: a handler that keeps it copies it.
+
+<a name="LoopConnHandler.WSOpened"></a>
+### func \(LoopConnHandler\) [WSOpened](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/gen_ports.go>)
+
+```go
+func (LoopConnHandler) WSOpened(c LoopConnValue, subprotocol string)
+```
+
+WSOpened is told the connection opened, with the subprotocol agreed, empty when none was.
+
+<a name="LoopConnValue"></a>
+## type [LoopConnValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
+
+LoopConnValue is one open WebSocket connection on the loop.
+
+```go
+type LoopConnValue = svcws.LoopConnValue
+```
+
+LoopConnValue is an alias of `github.com/kitsunium/sdk/internal/service/net/websocket.LoopConnValue`, declared as:
+
+```go
+type LoopConnValue struct{}
+```
+
+<a name="LoopConnValue.CloseWith"></a>
+### func \(LoopConnValue\) [CloseWith](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/loop.go>)
+
+```go
+func (LoopConnValue) CloseWith(code corenet.WSCloseCode, reason string) error
+```
+
+CloseWith starts the closing handshake with code and reason, and ends the connection.
+
+<a name="LoopConnValue.Conn"></a>
+### func \(LoopConnValue\) [Conn](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/loop.go>)
+
+```go
+func (LoopConnValue) Conn() corenet.LoopConnRef
+```
+
+Conn names the connection.
+
+<a name="LoopConnValue.Ping"></a>
+### func \(LoopConnValue\) [Ping](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/loop.go>)
+
+```go
+func (LoopConnValue) Ping(payload []byte) error
+```
+
+Ping writes a ping frame; payload is at most what a control frame carries.
+
+<a name="LoopConnValue.Send"></a>
+### func \(LoopConnValue\) [Send](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/loop.go>)
+
+```go
+func (LoopConnValue) Send(m corenet.WSMessageValue) error
+```
+
+Send writes one message as a single frame, refused as LoopIO.Write is.
+
+<a name="LoopHandler"></a>
+## type [LoopHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)
+
+LoopHandler serves LoopConnHandler as WebSocket, for http1.HandleLoop.
+
+```go
+type LoopHandler = svcws.LoopHandler
+```
+
+LoopHandler is an alias of `github.com/kitsunium/sdk/internal/service/net/websocket.LoopHandler`, declared as:
+
+```go
+type LoopHandler struct{}
+```
+
+<a name="LoopHandler.OnStreamClose"></a>
+### func \(LoopHandler\) [OnStreamClose](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/loop.go>)
+
+```go
+func (*LoopHandler) OnStreamClose(s corenet.HTTP1StreamValue, err error)
+```
+
+OnStreamClose implements corenet.HTTP1Streamer.
+
+<a name="LoopHandler.OnStreamDrain"></a>
+### func \(LoopHandler\) [OnStreamDrain](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/loop.go>)
+
+```go
+func (*LoopHandler) OnStreamDrain(s corenet.HTTP1StreamValue)
+```
+
+OnStreamDrain implements corenet.HTTP1Streamer, a 1001 close.
+
+<a name="LoopHandler.OnStreamOpen"></a>
+### func \(LoopHandler\) [OnStreamOpen](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/loop.go>)
+
+```go
+func (*LoopHandler) OnStreamOpen(s corenet.HTTP1StreamValue)
+```
+
+OnStreamOpen implements corenet.HTTP1Streamer.
+
+<a name="LoopHandler.OnStreamTimeout"></a>
+### func \(LoopHandler\) [OnStreamTimeout](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/loop.go>)
+
+```go
+func (*LoopHandler) OnStreamTimeout(s corenet.HTTP1StreamValue)
+```
+
+OnStreamTimeout implements corenet.HTTP1Streamer, the heartbeat's tick.
+
+<a name="LoopHandler.OnUpgradedData"></a>
+### func \(LoopHandler\) [OnUpgradedData](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/loop.go>)
+
+```go
+func (*LoopHandler) OnUpgradedData(s corenet.HTTP1StreamValue, buf []byte) int
+```
+
+OnUpgradedData implements corenet.HTTP1Upgrader, the frames after the 101.
+
+<a name="LoopHandler.ServeHTTP1"></a>
+### func \(LoopHandler\) [ServeHTTP1](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/websocket/loop.go>)
+
+```go
+func (*LoopHandler) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)
+```
+
+ServeHTTP1 implements corenet.HTTP1Handler: the handshake, judged as Upgrade judges it, then the program's OpenWS.
 
 <a name="Message"></a>
 ## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/websocket/gen_facade.go>)

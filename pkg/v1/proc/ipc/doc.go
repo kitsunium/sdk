@@ -14,16 +14,21 @@
 //     owns and nobody else may write to — created 0700 when missing, refused
 //     otherwise ([CodeDirectoryUnsafe]) — and the socket file is 0600.
 //     Connecting needs search permission on the directory, so only its owner
-//     (and root) get through. On Windows the endpoint is a named pipe named
+//     (and root) get through. The accounts Config.AllowUIDs / AllowGIDs name
+//     get the socket opened to them — 0660 and the group for one group,
+//     0666 for another user or several groups —, the directory, which the
+//     deployment opens to them, staying the first gate. On Windows the endpoint is a named pipe named
 //     after this account and the path, whose own DACL grants this account
 //     only, which refuses remote clients and which nobody can join once it
 //     exists; a name another account took first is refused as squatted
 //     ([CodeEndpointSquatted]), never mistaken for a daemon of ours.
 //   - The PEER'S CREDENTIALS, where the kernel gives them: on Linux,
 //     SO_PEERCRED names the peer's user, group and process, and a peer that is
-//     neither this account nor in Config.AllowUIDs / AllowGIDs is closed
-//     before Accept returns it — and so, since #1093, do FreeBSD, DragonFly
-//     and NetBSD, where an unnamed peer is refused too. On Windows each end
+//     neither this account nor in Config.AllowUIDs / AllowGIDs — by its
+//     user, its effective group or a supplementary group the kernel
+//     recorded — is closed before Accept returns it — and so, since #1093,
+//     do FreeBSD, DragonFly and NetBSD (the effective group alone there),
+//     where an unnamed peer is refused too. On Windows each end
 //     reads the other's account from its process token ([Peer].SID) and
 //     refuses another one. On darwin, OpenBSD, illumos and Solaris
 //     [Peer].Verified is false and the directory is the only gate.

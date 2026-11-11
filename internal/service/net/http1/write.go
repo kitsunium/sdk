@@ -15,6 +15,10 @@ const (
 	statusNoContent int = 204
 	// statusNotModified carries neither a length nor a body.
 	statusNotModified int = 304
+	// statusSwitching is the one interim status the profile sends, for Upgrade.
+	statusSwitching int = 101
+	// statusInternal answers what the writer refused or a handler left deferred.
+	statusInternal int = 500
 	// statusMin is the lowest status the profile sends: no interim response.
 	statusMin int = 200
 	// statusMax is the highest three-digit status.
@@ -179,7 +183,10 @@ func owned(name string) bool {
 
 // AppendResponse appends the whole response res answers req with: the status
 // line, res.Header, Content-Length and, when res.Close, req.Close or closing
-// asks for it, Connection: close, then the body.
+// asks for it, Connection: close, then the body. With res.Stream the response
+// is delimited by the connection's close: Connection: close and no
+// Content-Length, the body being what the handler sends next; a Stream of a HEAD,
+// a 204 or a 304 is refused.
 //
 // Content-Length is len(res.Body), so the response's framing is the codec's.
 // The answer to a HEAD carries the Content-Length and no body. A 204 or a 304
@@ -188,11 +195,16 @@ func owned(name string) bool {
 // res.Header is copied as it is: it is the handler's, written by AppendField.
 // It allocates nothing when dst has room.
 func AppendResponse(dst []byte, req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue, closing bool) ([]byte, error) {
+	//: a protocol switch: the status line only this answer writes.
+	if res.Upgrade {
+		//: 101, no length and no body.
+		return appendUpgrade(dst, res)
+	}
 	status := orDefault(res.Status, statusOK)
 	//: 204 and 304 never carry content (RFC 9110 §15.3.5, §15.4.5).
 	bodiless := status == statusNoContent || status == statusNotModified
-	//: a body the status may not carry.
-	if bodiless && len(res.Body) > 0 {
+	//: a body the status may not carry, or a stream of an answer with no body.
+	if refusedBody(res, req, bodiless) {
 		//: refused before a byte is appended.
 		return dst, corenet.HTTP1ResponseInvalid
 	}
@@ -203,7 +215,8 @@ func AppendResponse(dst []byte, req *corenet.HTTP1RequestValue, res *corenet.HTT
 		return dst, err
 	}
 	out = append(out, res.Header...)
-	out = appendFraming(out, len(res.Body), bodiless, closing || res.Close || req.Close)
+	out = appendLinkFields(out, res)
+	out = appendFraming(out, bodyLength(res), bodiless || res.Stream, closing || res.Close || req.Close || res.Stream)
 	//: a HEAD answer describes the body it does not send.
 	if bytes.Equal(req.Method, methodHead) {
 		//: no body.
@@ -213,13 +226,67 @@ func AppendResponse(dst []byte, req *corenet.HTTP1RequestValue, res *corenet.HTT
 	return append(out, res.Body...), nil
 }
 
+// appendUpgrade appends a 101: the status line and Connection: Upgrade, then the
+// protocol's own fields, which the handler wrote into Header.
+func appendUpgrade(dst []byte, res *corenet.HTTP1ResponseValue) ([]byte, error) {
+	//: a switch carries no body and no other status.
+	if len(res.Body) > 0 || (res.Status != 0 && res.Status != statusSwitching) {
+		//: refused before a byte is appended.
+		return dst, corenet.HTTP1ResponseInvalid
+	}
+	dst = append(dst, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\n"...)
+	dst = append(dst, res.Header...)
+	//: the head's end, and nothing after it from this answer.
+	return append(dst, "\r\n"...), nil
+}
+
+// refusedBody reports a response the status or the method cannot carry: a body
+// on a 204 or 304, or a Stream of a HEAD or of a 204 or 304.
+func refusedBody(res *corenet.HTTP1ResponseValue, req *corenet.HTTP1RequestValue, bodiless bool) bool {
+	//: a file is a body too, and cannot share an answer with one.
+	if res.File.R != nil && (bodiless || res.Stream || len(res.Body) > 0) {
+		//: refused.
+		return true
+	}
+	//: both answers have no body to hold.
+	return (bodiless && len(res.Body) > 0) || (res.Stream && (bodiless || bytes.Equal(req.Method, methodHead)))
+}
+
+// bodyLength is the answer's Content-Length: the file's when the body is one,
+// else the Body's.
+func bodyLength(res *corenet.HTTP1ResponseValue) int64 {
+	//: a file body.
+	if res.File.R != nil {
+		//: its length.
+		return res.File.Len
+	}
+	//: the bytes the handler gave.
+	return int64(len(res.Body))
+}
+
+// appendLinkFields appends what the chain's links left the codec to write: the
+// CORS fields, a refusal's delay and the request's identifier, in that order.
+func appendLinkFields(dst []byte, res *corenet.HTTP1ResponseValue) []byte {
+	dst = append(dst, res.CORS...)
+	//: a refusal's own delay, in seconds.
+	if res.RetryAfter > 0 {
+		dst = appendRetryAfter(dst, res.RetryAfter)
+	}
+	//: the one field written per request: a value, so it needs no slice.
+	if id := res.RequestID.Bytes(); len(id) > 0 {
+		dst = appendRequestID(dst, id)
+	}
+	//: as many as were set.
+	return dst
+}
+
 // appendFraming appends Content-Length unless the status forbids it,
 // Connection: close when asked, and the blank line that ends the head.
-func appendFraming(dst []byte, n int, bodiless, closing bool) []byte {
+func appendFraming(dst []byte, n int64, bodiless, closing bool) []byte {
 	//: the length, unless the status forbids it.
 	if !bodiless {
 		dst = append(dst, "Content-Length: "...)
-		dst = strconv.AppendInt(dst, int64(n), decimal)
+		dst = strconv.AppendInt(dst, n, decimal)
 		dst = append(dst, "\r\n"...)
 	}
 	//: any party may end the connection.
@@ -243,4 +310,37 @@ func AppendRefusal(dst []byte, r Refusal) []byte {
 	}
 	//: the precomputed answer.
 	return append(dst, refusalAnswers[r]...)
+}
+
+// appendInternalError appends the whole answer to a response the writer refused
+// or a handler left deferred: a 500 with no body, the connection closed, and
+// the request's identifier when a link gave it one, so even this answer can be
+// joined to its access record.
+func appendInternalError(dst []byte, res *corenet.HTTP1ResponseValue) []byte {
+	id := res.RequestID.Bytes()
+	//: the common case of an unidentified answer: the precomputed bytes.
+	if len(id) == 0 {
+		//: as ever.
+		return append(dst, internalError...)
+	}
+	dst = append(dst, statusLines[statusInternal]...)
+	dst = appendRequestID(dst, id)
+	//: the rest of the head.
+	return append(dst, internalErrorTail...)
+}
+
+// appendRequestID appends the X-Request-Id field line of id.
+func appendRequestID(dst, id []byte) []byte {
+	dst = append(dst, "X-Request-Id: "...)
+	dst = append(dst, id...)
+	//: the line's end.
+	return append(dst, "\r\n"...)
+}
+
+// appendRetryAfter appends the Retry-After field line of seconds.
+func appendRetryAfter(dst []byte, seconds int) []byte {
+	dst = append(dst, "Retry-After: "...)
+	dst = strconv.AppendInt(dst, int64(seconds), decimal)
+	//: the line's end.
+	return append(dst, "\r\n"...)
 }

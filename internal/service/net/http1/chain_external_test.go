@@ -278,7 +278,7 @@ func TestLog(t *testing.T) {
 	t.Parallel()
 	rec := &accessRecorder{}
 	allow := []string{"User-Agent", "x-request-id"}
-	logLink := mustLink(http1.Log(rec, allow...))
+	logLink := mustLink(http1.Log(rec, http1.LogAllow(allow...)))
 	//: the link keeps its own names: the caller's slice, rewritten, logs no credential.
 	allow[0] = "Authorization"
 	deferH := corenet.HTTP1HandlerFunc(func(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
@@ -292,10 +292,10 @@ func TestLog(t *testing.T) {
 	if len(rec.recs) != 2 {
 		t.Fatalf("%d records", len(rec.recs))
 	}
-	if r := rec.recs[0]; r.Status != 200 || r.BodyLen != 3 || r.Deferred || rec.text[0] != "GET /now User-Agent=ua;x-request-id=r1;" {
+	if r := rec.recs[0]; r.Status != 200 || r.BodyLen != 3 || r.Stage != corenet.HTTP1AccessAnswered || rec.text[0] != "GET /now User-Agent=ua;x-request-id=r1;" {
 		t.Fatalf("record %+v %q", r, rec.text[0])
 	}
-	if r := rec.recs[1]; r.Status != 0 || !r.Deferred {
+	if r := rec.recs[1]; r.Status != 0 || r.Stage != corenet.HTTP1AccessDeferred {
 		t.Fatalf("deferred record %+v", r)
 	}
 	for _, s := range rec.text {
@@ -315,7 +315,7 @@ func TestLog(t *testing.T) {
 		{"a b", []string{"a b"}},
 		{"allow", []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"}},
 	} {
-		if _, err := http1.Log(rec, c.allow...); !misconfiguredAs(err, c.opt) {
+		if _, err := http1.Log(rec, http1.LogAllow(c.allow...)); !misconfiguredAs(err, c.opt) {
 			t.Errorf("%v: %v, want option=%q", c.allow, err, c.opt)
 		}
 	}

@@ -38,6 +38,9 @@ Stdlib-only, no `go.sum`, outside `go.work` (the `tools/` convention, and an
 | cal-L1 | L1 | loop → loop | `cpu-ns/req` ratio within 5 % of 1, both bounds | **active**: the runner can be judged at P2's 5 % |
 | cal-L2 | L2 | handwritten → handwritten | the same | **active** |
 | cal-L3 | L3 | recvmmsg → recvmmsg | `cpu-ns/datagram` and `datagrams/syscall` within 25 % of 1 (P4a's) | **active** |
+| P9 | L1h2 | goroutine-h2 → loop-h2 | `cpu-ns/req` ratio ≤ 0.70 (upper), P6's | inactive (#963): measured on the runner first |
+| cal-L1h2 | L1h2 | loop-h2 → loop-h2 | `cpu-ns/req` ratio within 5 % of 1, both bounds | inactive (#963): three runner rounds within 0.952–1.05 first |
+| h1-h2 | L1h2 | loop → loop-h2 | `cpu-ns/req` ratio ≤ 1.0, reported | inactive (#963): HTTP/2 against HTTP/1.1 on the loop, no threshold until measured |
 
 P0, P1 and P3 have functional gates only: the lanes of the same workflow.
 

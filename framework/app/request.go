@@ -33,8 +33,10 @@ func ClearCookie(ctx context.Context, name string) {
 }
 
 // ClientIP returns the address of the client of the request ctx serves: the
-// connection's peer, or — only when <PRODUCT>_TRUST_PROXY=on — the last address of
-// X-Forwarded-For, the one the trusted proxy appended. It is "" outside an HTTP request.
+// connection's peer, or — only when <PRODUCT>_TRUST_PROXY=on, and the peer is one
+// of the proxies <PRODUCT>_TRUSTED_PROXIES lists — the first address of
+// X-Forwarded-For, read from its right, outside that list. A peer outside the list
+// is the client, whatever header it sends. It is "" outside an HTTP request.
 func ClientIP(ctx context.Context) string {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.ClientIP(ctx)
@@ -75,4 +77,14 @@ func After(ctx context.Context, d time.Duration) <-chan time.Time {
 func Log(ctx context.Context) logger.Logger {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.Log(ctx)
+}
+
+// RequestID returns the identifier of the request ctx serves: the X-Request-Id
+// its caller sent — a short run of letters, digits, '.', '_' and '-', else
+// ignored — or a UUIDv7 the framework minted. The response carries it as
+// X-Request-Id, an error body as requestId, the span as http.request_id and the
+// access record as request_id. It is "" outside an HTTP request.
+func RequestID(ctx context.Context) string {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.RequestID(ctx)
 }

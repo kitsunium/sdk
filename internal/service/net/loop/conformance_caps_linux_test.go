@@ -205,7 +205,7 @@ func TestCaps_pbufOff(t *testing.T) {
 // TestCaps_refused holds LoopValue.Capabilities to what a group may opt
 // into: an engine, a class B capability and an unknown token are refused.
 func TestCaps_refused(t *testing.T) {
-	for _, c := range []corenet.Capability{corenet.CapabilityIOURing, corenet.CapabilityURingSendZC, "uring-sqpoll"} {
+	for _, c := range []corenet.Capability{corenet.CapabilityIOURing, corenet.CapabilityURingBundle, "uring-sqpoll"} {
 		fd, _ := listenFD(t)
 		_, err := Start(Config{Group: "r", Value: corenet.LoopValue{Capabilities: []corenet.Capability{c}}, Handler: &lineH{}, Listeners: []Listener{{FD: fd}}, Log: io.Discard})
 		if !errs.HasCode(err, corenet.CodeLoopCapabilityRefused) {

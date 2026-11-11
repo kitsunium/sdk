@@ -42,8 +42,17 @@ func Test_OptionKind_String(t *testing.T) {
 		{"batch replies", corenet.OptionBatchReplies, "BatchReplies"},
 
 		{"protocols", corenet.OptionProtocols, "Protocols"},
+		{"max body bytes", corenet.OptionMaxBodyBytes, "MaxBodyBytes"},
+		{"backlog", corenet.OptionBacklog, "Backlog"},
+		{"receive buffer", corenet.OptionReceiveBuffer, "ReceiveBuffer"},
+		{"send buffer", corenet.OptionSendBuffer, "SendBuffer"},
+		{"proxy protocol", corenet.OptionProxyProtocol, "ProxyProtocol"},
+		{"steer", corenet.OptionSteer, "Steer"},
+		{"keep alive", corenet.OptionKeepAlive, "KeepAlive"},
+		{"user timeout", corenet.OptionUserTimeout, "UserTimeout"},
+		{"http2", corenet.OptionHTTP2, "HTTP2"},
 		//: past the block, the value is reported, never indexed out of range.
-		{"one past the last kind", corenet.OptionProtocols + 1, "unknown"},
+		{"one past the last kind", corenet.OptionHTTP2 + 1, "unknown"},
 		{"the largest value", corenet.OptionKind(255), "unknown"},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -106,7 +115,8 @@ func Test_LoopBackend_String(t *testing.T) {
 		{"io_uring", corenet.LoopBackendIOURing, "iouring"},
 		{"epoll", corenet.LoopBackendEpoll, "epoll"},
 		{"portable", corenet.LoopBackendPortable, "portable"},
-		{"one past the last backend", corenet.LoopBackendPortable + 1, "unknown"},
+		{"kqueue", corenet.LoopBackendKqueue, "kqueue"},
+		{"one past the last backend", corenet.LoopBackendKqueue + 1, "unknown"},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

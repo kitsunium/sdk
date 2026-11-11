@@ -4,6 +4,13 @@ import (
 	stdnet "net"
 )
 
+// pinSender is the part of a socket that sends one reply from a named source
+// (#972), satisfied on Linux by pinWriter.
+type pinSender interface {
+	// send writes b to to from source, reported as a write is.
+	send(b []byte, to stdnet.Addr, source localAddress) (n int, err error)
+}
+
 // portableReader reads one datagram per syscall using the standard library.
 //
 // It is the floor every platform has, and the fallback whenever the batched
@@ -55,6 +62,8 @@ func (r *portableReader) slotSize(ceiling int) int {
 type portableSink struct {
 	// pc is the socket replies leave through.
 	pc stdnet.PacketConn
+	// pin sends a reply from a named source, nil where the socket cannot.
+	pin pinSender
 }
 
 // begin implements datagramSink: there is no queue to open.
@@ -64,6 +73,17 @@ func (portableSink) begin() {}
 func (w portableSink) reply(b []byte, to stdnet.Addr) (n int, err error) {
 	//: straight to the peer, reported as the write reports it.
 	return w.pc.WriteTo(b, to)
+}
+
+// replyFrom implements datagramSink: from source where the socket can name one.
+func (w portableSink) replyFrom(b []byte, to stdnet.Addr, source localAddress) (n int, err error) {
+	//: the socket cannot name a source.
+	if w.pin == nil {
+		//: the kernel's choice.
+		return w.pc.WriteTo(b, to)
+	}
+	//: the send's own answer.
+	return w.pin.send(b, to, source)
 }
 
 // flush implements datagramSink: nothing was queued.
