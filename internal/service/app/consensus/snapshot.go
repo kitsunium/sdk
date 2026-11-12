@@ -928,7 +928,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		// compaction cannot delete it mid-transfer (R3-16).
 		var accepted time.Time
 		var from int64
-		err := n.cfg.Transport.Stream(ctx, to, offer, func(off int64) (io.ReadCloser, error) {
+		err := streamOffer(ctx, n.cfg.Transport, n.cfg.Group, to, offer, func(off int64) (io.ReadCloser, error) {
 			if off < 0 || off > meta.EncodedSize {
 				return nil, origin(coreconsensus.FrameInvalid, errs.Int64("offset", off))
 			}

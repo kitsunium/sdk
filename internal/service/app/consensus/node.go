@@ -589,16 +589,23 @@ func (n *Node) bindTransport() error {
 	if bs, ok := cfg.Transport.(coreconsensus.BatchSender); ok {
 		n.batch = bs
 	}
-	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
-		ur.Unreachable(func(id coreconsensus.NodeID) {
-			select {
-			case n.execc <- func() {
-				n.unreachableAt[id] = n.clk.Now()
-				n.r.ReportUnreachable(id)
-			}:
-			default:
-			}
-		})
+	unreachable := func(id coreconsensus.NodeID) {
+		select {
+		case n.execc <- func() {
+			n.unreachableAt[id] = n.clk.Now()
+			n.r.ReportUnreachable(id)
+		}:
+		default:
+		}
+	}
+	// A transport that serves several groups takes the two hooks under the
+	// node's group; through the siblings that name none, the second node on
+	// it replaced the first's (#925).
+	gb, grouped := cfg.Transport.(groupBinder)
+	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok && !grouped {
+		ur.Unreachable(unreachable)
+	} else if grouped {
+		gb.unreachableFor(cfg.Group, unreachable)
 	}
 	if err := cfg.Transport.Bind(cfg.Group, n.deliver, n.offer, n.install, n.join); err != nil {
 		return err
@@ -606,12 +613,16 @@ func (n *Node) bindTransport() error {
 	if jb, ok := cfg.Transport.(coreconsensus.JoinReasonBinder); ok {
 		jb.BindJoinReason(cfg.Group, n.joinReason)
 	}
-	if ms, ok := cfg.Transport.(interface {
+	if grouped {
+		gb.membershipFor(cfg.Group, n.servedMembership)
+	} else if ms, ok := cfg.Transport.(interface {
 		bindMembership(read func() (coreconsensus.MembershipValue, bool))
 	}); ok {
 		ms.bindMembership(n.servedMembership)
 	}
-	if ub, ok := cfg.Transport.(undecodableBinder); ok {
+	if grouped {
+		gb.undecodableFor(cfg.Group, n.undecodableOffer)
+	} else if ub, ok := cfg.Transport.(undecodableBinder); ok {
 		ub.bindUndecodable(n.undecodableOffer)
 	}
 	if wb, ok := cfg.Transport.(bindWarner); ok {

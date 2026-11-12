@@ -74,6 +74,9 @@ var (
 	_ interface {
 		bindMembership(read func() (coreconsensus.MembershipValue, bool))
 	} = (*MemoryTransport)(nil)
+	// The TCP transport serves several groups on one listener (#925).
+	_ groupBinder   = (*TCPTransport)(nil)
+	_ groupStreamer = (*TCPTransport)(nil)
 	_ interface {
 		CertExpiry() time.Time
 		PeerCertExpiry() map[coreconsensus.NodeID]time.Time

@@ -71,7 +71,7 @@ silence closed (`read_silence`).
 | dm-crypt | `testdata/dmcrypt/run.sh [iterations] [negative] [ext4\|xfs] [zerofill\|fallocate] [fdatasync\|rwfdsync]` (Docker, privileged): fsync latency, G1's preallocation row (`TestDMCryptPreallocBench`, #922), G1's paired sync path row (`TestDMCryptSyncPathBench`, ADR 0190's shape, #923) and power cuts through LUKS, on ext4 or xfs; with `fallocate` or `rwfdsync` the file log's suite and fuzz seeds run first on that filesystem, every log fallocated (`CONSENSUS_PREALLOCATE=fallocate`) or writing `RWF_DSYNC` (`CONSENSUS_SYNC_PATH=rwfdsync`), and with `rwfdsync` the power cuts too; results in `testdata/dmcrypt/RESULTS.md` |
 | bench (D15, D16) | `make bench-consensus` (part of `make bench`): `bazel run` of the `manual`, race-off `consensus_bench_test`, whose `TestGenerateBenchMD` runs `BenchmarkSegmentedLogAppendSync`, `BenchmarkThreeNodePropose`, `BenchmarkTCPCommit` and the synctest simulator over the RTT matrix, and writes `BENCH.md` per device (`CONSENSUS_BENCH_DEVICES=name=dir,…`, else `.bench/consensus` and `/dev/shm`); `make profile-consensus WAVE=…` then `make benchstat-diff BEFORE=… AFTER=…` compare two waves (#911) |
 
-Under Bazel `consensus_test` has 24 shards: under race and coverage the suite
+Under Bazel `consensus_test` has 48 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
 #524 joined it (4 shards), and the snapshot and disk scenarios of #506,
 #512, #513, #515, #520, #525, #526 and #533 brought the slowest of 4 to
@@ -102,7 +102,10 @@ rest is spread thinner (24 shards): the sums per shard of a `-race
 -covermode=atomic -json` run, 43.6 s for the slowest of 12 on one
 machine, are 32.9 s at 24, and 34 s for the slowest on average over
 4,000 draws of up to 40 tests inserted anywhere (36 to 37 s at 19 or
-20, 31 s at 28).
+20, 31 s at 28). Lot L1 took the suite to 510 tests and some 13 minutes
+under race: at 24 the reopen test (38 s) shared a shard with 45 s of
+others and the shard timed out; the sums per shard of a `-test.v` run are
+83 s for the slowest of 24, 56 s of 32 and 46 s of 48 (48 shards).
 
 The BSD, illumos and Solaris guests of `e2e-cross.yml` run one test binary
 per package under a 5-minute `-test.timeout`, the alarm a hang panics on
@@ -1273,6 +1276,24 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   receiving entries on lanes dialled before `DenyPin` (#551,
   `stillAdmitted`; `TestTCPFrameAfterACleanCloseByTheReceiverIsDelivered`,
   `TestTCPNothingIsSentOnAnOldLaneToAKeyNoLongerAdmitted`).
+- Keep one set of callbacks on a transport that several `Node`s share, or
+  hand a frame or an offer to a group it does not name: `Bind` ignored its
+  group, a second node replaced the first's callbacks and was handed every
+  frame of both groups (#925, ADR 0244). `TCPTransport` keeps one binding
+  per group (`tcp_groups.go`): `readFrames` routes by the group of the
+  frozen header (`frameGroup`, bytes 6 to 13 with the length), a group
+  nothing bound is dropped and counted (`unroutedGroup`); a node binds its
+  unreachable report and its undecodable judgment under its group
+  (`groupBinder`) and streams its group's snapshot through `groupStreamer`,
+  group 1 on `laneSnapshot` as before, any other on `laneSnapshotGroup`
+  (lane 7; 5 and 6 are ADR 0220's), an unbound group's offer refused
+  PEER_REJECTED. A lane that names no group (`laneSnapshot`, the JOIN
+  lanes) goes to the only group bound, or with several to group 1
+  (`legacyBinding`), never by a guess. A machine runs every group under one
+  id, incarnation, slot and key: its second log carries the first's stamp
+  (`TestTwoGroupsOnOneTransportElectCommitSnapshotAndInstallIndependently`,
+  `TestAnOfferForAnUnboundGroupIsRefusedAndCounted`,
+  `TestALaneThatNamesNoGroupIsServedToTheLegacyGroup`).
 - Install a JOIN answer in the engine's admission group, or send a snapshot
   whose configuration does not list the leader: the joiner's first older
   configuration cut its leader (#552, `joinGroup`,

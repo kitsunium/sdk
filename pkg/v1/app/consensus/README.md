@@ -42,6 +42,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func AppendToken\(dst \[\]byte, t TokenValue\) \[\]byte](<#AppendToken>)
 - [func Bootstrap\(ctx context.Context, cfg \*Config, members \[\]MemberValue\) error](<#Bootstrap>)
 - [func ClearQuarantine\(d DataDir, exit QuarantineExit, op Operator\) error](<#ClearQuarantine>)
+- [func ClearQuarantineWith\(ctx context.Context, d DataDir, exit QuarantineExit, op Operator, opt \*QuarantineOptions\) error](<#ClearQuarantineWith>)
 - [func ImportObserved\(d DataDir, p \*ImportParams, newCluster ClusterID, members \[\]MemberValue, opt \*RestoreOptions\) \(SnapshotMetaValue, error\)](<#ImportObserved>)
 - [func Init\(d DataDir, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#Init>)
 - [func InitLog\(log LogStore, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#InitLog>)
@@ -65,6 +66,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func ParseMessage\(frame \[\]byte, m \*MessageValue\) error](<#ParseMessage>)
 - [func ParseSnapshotMeta\(b \[\]byte, m \*SnapshotMetaValue\) error](<#ParseSnapshotMeta>)
 - [func ParseToken\(b \[\]byte\) \(TokenValue, error\)](<#ParseToken>)
+- [func Preflight\(dir string, opts PreflightOptions\) \(PreflightValue, error\)](<#Preflight>)
 - [func ProposeAs\[R any\]\(ctx context.Context, r Replicated, data \[\]byte\) \(TokenValue, R, error\)](<#ProposeAs>)
 - [func ReceiptMessage\(old ClusterID, next ClusterID, voter NodeID\) \[\]byte](<#ReceiptMessage>)
 - [func Recover\(d DataDir, newCluster ClusterID, members \[\]MemberValue, opt \*RecoverOptions\) error](<#Recover>)
@@ -81,6 +83,8 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type AuthenticatedPeerValue](<#AuthenticatedPeerValue>)
 - [type BackupParams](<#BackupParams>)
 - [type BackupPoint](<#BackupPoint>)
+- [type BatchSender](<#BatchSender>)
+  - [func \(BatchSender\) SendShared\(to NodeID, header \[\]byte, body \[\]byte\)](<#BatchSender.SendShared>)
 - [type BatchingStateMachine](<#BatchingStateMachine>)
   - [func \(BatchingStateMachine\) ApplyBatch\(es \[\]EntryValue, results \[\]any\)](<#BatchingStateMachine.ApplyBatch>)
 - [type ClusterID](<#ClusterID>)
@@ -146,6 +150,8 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(MembershipValue\) IsRetiredKey\(spki \[32\]byte\) bool](<#MembershipValue.IsRetiredKey>)
   - [func \(MembershipValue\) Member\(id NodeID\) \(MemberValue, bool\)](<#MembershipValue.Member>)
   - [func \(MembershipValue\) Voters\(\) \[\]NodeID](<#MembershipValue.Voters>)
+- [type MembershipWatcher](<#MembershipWatcher>)
+  - [func \(MembershipWatcher\) WatchMembership\(ctx context.Context\) \<-chan MembershipValue](<#MembershipWatcher.WatchMembership>)
 - [type MemoryLog](<#MemoryLog>)
   - [func \(\*MemoryLog\) Append\(entries \[\]coreconsensus.EntryValue, hs \*coreconsensus.HardState\) error](<#MemoryLog.Append>)
   - [func \(\*MemoryLog\) Bounds\(\) \(first uint64, last uint64\)](<#MemoryLog.Bounds>)
@@ -168,6 +174,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*MemorySnapshots\) Open\(id string\) \(coreconsensus.SnapshotHandle, error\)](<#MemorySnapshots.Open>)
   - [func \(\*MemorySnapshots\) Remove\(id string\) error](<#MemorySnapshots.Remove>)
 - [type MemoryTransport](<#MemoryTransport>)
+  - [func \(\*MemoryTransport\) AskMembership\(\_ context.Context, m coreconsensus.MemberValue\) \(coreconsensus.MembershipValue, error\)](<#MemoryTransport.AskMembership>)
   - [func \(\*MemoryTransport\) Bind\(group coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeerValue, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue\) coreconsensus.InstallAcceptValue, install func\(coreconsensus.InstallParams\) error, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code\)\) error](<#MemoryTransport.Bind>)
   - [func \(\*MemoryTransport\) BindJoinReason\(\_ coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code, string\)\)](<#MemoryTransport.BindJoinReason>)
   - [func \(\*MemoryTransport\) Close\(\) error](<#MemoryTransport.Close>)
@@ -203,6 +210,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*Node\) UpdateAddress\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID, addr string\) error](<#Node.UpdateAddress>)
   - [func \(\*Node\) WaitApplied\(ctx context.Context, t coreconsensus.TokenValue\) error](<#Node.WaitApplied>)
   - [func \(\*Node\) Watch\(ctx context.Context\) \<-chan coreconsensus.StatusValue](<#Node.Watch>)
+  - [func \(\*Node\) WatchMembership\(ctx context.Context\) \<-chan coreconsensus.MembershipValue](<#Node.WatchMembership>)
 - [type NodeID](<#NodeID>)
   - [func \(NodeID\) String\(\) string](<#NodeID.String>)
 - [type Operator](<#Operator>)
@@ -215,8 +223,13 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(PeerFlags\) Has\(x PeerFlags\) bool](<#PeerFlags.Has>)
 - [type PeerHealthValue](<#PeerHealthValue>)
 - [type PositionValue](<#PositionValue>)
+- [type Preallocate](<#Preallocate>)
 - [type PreconditionSpec](<#PreconditionSpec>)
+- [type PreflightOptions](<#PreflightOptions>)
+- [type PreflightValue](<#PreflightValue>)
+- [type PreflightVerdict](<#PreflightVerdict>)
 - [type QuarantineExit](<#QuarantineExit>)
+- [type QuarantineOptions](<#QuarantineOptions>)
 - [type ReadMode](<#ReadMode>)
 - [type RecoverOptions](<#RecoverOptions>)
 - [type Replicated](<#Replicated>)
@@ -253,10 +266,12 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*StatusValue\) Precondition\(\) PreconditionSpec](<#StatusValue.Precondition>)
 - [type StopReasonValue](<#StopReasonValue>)
   - [func \(StopReasonValue\) ExitCode\(\) int](<#StopReasonValue.ExitCode>)
+- [type SyncPath](<#SyncPath>)
 - [type TCPTransport](<#TCPTransport>)
   - [func \(\*TCPTransport\) Addr\(\) string](<#TCPTransport.Addr>)
-  - [func \(\*TCPTransport\) Bind\(\_ coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeerValue, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue\) coreconsensus.InstallAcceptValue, install func\(coreconsensus.InstallParams\) error, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code\)\) error](<#TCPTransport.Bind>)
-  - [func \(\*TCPTransport\) BindJoinReason\(\_ coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code, string\)\)](<#TCPTransport.BindJoinReason>)
+  - [func \(\*TCPTransport\) AskMembership\(ctx context.Context, m coreconsensus.MemberValue\) \(coreconsensus.MembershipValue, error\)](<#TCPTransport.AskMembership>)
+  - [func \(\*TCPTransport\) Bind\(group coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeerValue, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue\) coreconsensus.InstallAcceptValue, install func\(coreconsensus.InstallParams\) error, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code\)\) error](<#TCPTransport.Bind>)
+  - [func \(\*TCPTransport\) BindJoinReason\(group coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code, string\)\)](<#TCPTransport.BindJoinReason>)
   - [func \(\*TCPTransport\) CertExpiry\(\) time.Time](<#TCPTransport.CertExpiry>)
   - [func \(\*TCPTransport\) Close\(\) error](<#TCPTransport.Close>)
   - [func \(\*TCPTransport\) Cluster\(\) coreconsensus.ClusterID](<#TCPTransport.Cluster>)
@@ -265,6 +280,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*TCPTransport\) RefusedBeforeHandshake\(\) int64](<#TCPTransport.RefusedBeforeHandshake>)
   - [func \(\*TCPTransport\) ReloadFailures\(\) int](<#TCPTransport.ReloadFailures>)
   - [func \(\*TCPTransport\) Send\(to coreconsensus.NodeID, frame \[\]byte\)](<#TCPTransport.Send>)
+  - [func \(\*TCPTransport\) SendShared\(to coreconsensus.NodeID, header \[\]byte, body \[\]byte\)](<#TCPTransport.SendShared>)
   - [func \(\*TCPTransport\) SetMembership\(group coreconsensus.GroupID, admitted \[\]coreconsensus.MemberValue\)](<#TCPTransport.SetMembership>)
   - [func \(\*TCPTransport\) Slot\(\) string](<#TCPTransport.Slot>)
   - [func \(\*TCPTransport\) Stream\(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func\(int64\) \(io.ReadCloser, error\)\) error](<#TCPTransport.Stream>)
@@ -272,6 +288,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type TimingContractSpec](<#TimingContractSpec>)
 - [type TokenValue](<#TokenValue>)
   - [func \(TokenValue\) Position\(\) PositionValue](<#TokenValue.Position>)
+- [type TraceContextValue](<#TraceContextValue>)
 - [type Transport](<#Transport>)
   - [func \(Transport\) Bind\(group GroupID, deliver func\(from AuthenticatedPeerValue, frame \[\]byte\), offer func\(from AuthenticatedPeerValue, o InstallOfferValue\) InstallAcceptValue, install func\(InstallParams\) error, join func\(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue\) \(PositionValue, errs.Code\)\) error](<#Transport.Bind>)
   - [func \(Transport\) Send\(to NodeID, frame \[\]byte\)](<#Transport.Send>)
@@ -346,6 +363,24 @@ const FlagProtocol3 coreconsensus.MessageFlags = 32
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol3`.
+
+<a name="FlagProtocol4"></a>
+```go
+const FlagProtocol4 coreconsensus.MessageFlags = 64
+```
+
+The read modes and durabilities.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol4`.
+
+<a name="FlagTrace"></a>
+```go
+const FlagTrace coreconsensus.MessageFlags = 128
+```
+
+The read modes and durabilities.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagTrace`.
 
 <a name="FlagTransfer"></a>
 ```go
@@ -653,6 +688,24 @@ The facts a PeerHealthValue carries, read with PeerFlags.Has.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerVoter`.
 
+<a name="PreallocateFallocate"></a>
+```go
+const PreallocateFallocate svcconsensus.Preallocate = 1
+```
+
+How a new log segment is preallocated.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PreallocateFallocate`.
+
+<a name="PreallocateZeroFill"></a>
+```go
+const PreallocateZeroFill svcconsensus.Preallocate = 0
+```
+
+How a new log segment is preallocated.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PreallocateZeroFill`.
+
 <a name="ReadIndex"></a>
 ```go
 const ReadIndex svcconsensus.ReadMode = 0
@@ -742,6 +795,24 @@ const StampMember coreconsensus.StampState = 3
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.StampMember`.
+
+<a name="SyncFdatasync"></a>
+```go
+const SyncFdatasync svcconsensus.SyncPath = 0
+```
+
+How the file log makes a batch durable.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.SyncFdatasync`.
+
+<a name="SyncRWFDsync"></a>
+```go
+const SyncRWFDsync svcconsensus.SyncPath = 1
+```
+
+How the file log makes a batch durable.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.SyncRWFDsync`.
 
 <a name="TruncateAndStaySilent"></a>
 ```go
@@ -1224,7 +1295,16 @@ Bootstrap founds a cluster on one founding node, with the IDENTICAL member list 
 func ClearQuarantine(d DataDir, exit QuarantineExit, op Operator) error
 ```
 
-ClearQuarantine clears a quarantined or stopped directory by one of its two exits.
+ClearQuarantine clears a quarantined or stopped directory by one of its two exits. On a member's directory TruncateAndStaySilent is refused: it needs ClearQuarantineWith's means to ask a live member.
+
+<a name="ClearQuarantineWith"></a>
+## func [ClearQuarantineWith](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+```go
+func ClearQuarantineWith(ctx context.Context, d DataDir, exit QuarantineExit, op Operator, opt *QuarantineOptions) error
+```
+
+ClearQuarantineWith is ClearQuarantine with the means to read the cluster's configuration from a live member, which a member's TruncateAndStaySilent needs: it is refused when no member answers, or when that configuration no longer lists the node or lists none of the members the truncation keeps.
 
 <a name="ImportObserved"></a>
 ## func [ImportObserved](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -1433,6 +1513,15 @@ func ParseToken(b []byte) (TokenValue, error)
 
 ParseToken decodes a token.
 
+<a name="Preflight"></a>
+## func [Preflight](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+```go
+func Preflight(dir string, opts PreflightOptions) (PreflightValue, error)
+```
+
+Preflight measures the fdatasync latency of the disk under dir on a stopped node, writing a scratch file it removes, and returns the verdicts of the rules the measurement or the platform breaks; it refuses DATA\_DIR\_LOCKED a directory a live node holds.
+
 <a name="ProposeAs"></a>
 ## func [ProposeAs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
@@ -1622,6 +1711,37 @@ type BackupPoint struct {
 }
 ```
 
+<a name="BatchSender"></a>
+## type [BatchSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type BatchSender = coreconsensus.BatchSender
+```
+
+BatchSender is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.BatchSender`, declared as:
+
+```go
+type BatchSender interface {
+	// SendShared hands over the frame header then body, the bytes Send
+	// would have been handed. It never blocks and may drop, as Send; the
+	// transport owns header after the call. body is shared: neither the
+	// transport nor the caller mutates it, and several peers' queues may
+	// hold it at once.
+	SendShared(to NodeID, header []byte, body []byte)
+}
+```
+
+<a name="BatchSender.SendShared"></a>
+### func \(BatchSender\) [SendShared](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
+
+```go
+func (BatchSender) SendShared(to NodeID, header []byte, body []byte)
+```
+
+SendShared hands over the frame header then body, the bytes Send would have been handed. It never blocks and may drop, as Send; the transport owns header after the call. body is shared: neither the transport nor the caller mutates it, and several peers' queues may hold it at once.
+
 <a name="BatchingStateMachine"></a>
 ## type [BatchingStateMachine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
@@ -1770,7 +1890,7 @@ type Config struct {
 func (*Config) MemoryBudget(peers int) int64
 ```
 
-MemoryBudget is the node's memory budget with two peers, the sum of its bounds (D14).
+MemoryBudget is the node's memory budget with two peers, the sum of its bounds (D14) and of the file log's index: 4 bytes for each record MaxLogBytes holds at most, one of 56 bytes, an empty payload's.
 
 <a name="DataDir"></a>
 ## type [DataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -1838,6 +1958,18 @@ DataDirOptions is an alias of `github.com/kitsunium/sdk/internal/service/app/con
 type DataDirOptions struct {
 	// SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
 	SegmentBytes int64
+	// Preallocate is how a new segment is given its fixed size: zeros
+	// written (PreallocateZeroFill, the zero value) or fallocate(2)
+	// (PreallocateFallocate). Either way the segment occupies its whole
+	// size, as the no-space guard counts it. Another value is refused
+	// CONSENSUS_MISCONFIGURED.
+	Preallocate  Preallocate
+	// SyncPath is how a batch's records are made durable: pwrite(2) then
+	// fdatasync(2) (SyncFdatasync, the zero value) or one pwritev2(2)
+	// flagged RWF_DSYNC (SyncRWFDsync). Either way a batch has the same two
+	// durability points, its end record written once the rest is durable.
+	// Another value is refused CONSENSUS_MISCONFIGURED.
+	SyncPath     SyncPath
 	// RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
 	// marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
 	// kitsunium-consensus in the temporary directory elsewhere. It must
@@ -2065,40 +2197,50 @@ HealthValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consen
 ```go
 type HealthValue struct {
 	// Status is the node's view after its last turn.
-	Status             coreconsensus.StatusValue
+	Status                coreconsensus.StatusValue
 	// Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
 	// HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.
-	Flags              HealthFlags
+	Flags                 HealthFlags
 	// FailureTolerance is how many voters can fail now with a majority
 	// left. Only the leader knows it: -1 elsewhere.
-	FailureTolerance   int
+	FailureTolerance      int
 	// ApplyLagEntries is commit minus applied.
-	ApplyLagEntries    uint64
+	ApplyLagEntries       uint64
+	// ReplicationLagEntries is, on a node that does not lead, how far its
+	// durable log trails the leader's last index as the leader's last
+	// heartbeat carried it; 0 on the leader, and while no heartbeat of a
+	// leader of protocol 4 reached it. It is informative: readiness does not
+	// refuse on it (R2-28, #919).
+	ReplicationLagEntries uint64
+	// LeaderLastAppend is, on a node that does not lead, how long ago it last
+	// took an append with entries from the leader of its term; negative on the
+	// leader, and while it took none from this one (#919).
+	LeaderLastAppend      time.Duration
 	// Peers is the leader's view of every peer, nil elsewhere.
-	Peers              []PeerHealthValue
+	Peers                 []PeerHealthValue
 	// ChainRefusals counts identical chain refusals of this follower at
 	// ChainRefusalIndex from ChainRefusalLeader; the node reports itself
 	// unready while it refuses (D4, R6-05).
-	ChainRefusals      int
-	ChainRefusalIndex  uint64
-	ChainRefusalLeader coreconsensus.NodeID
+	ChainRefusals         int
+	ChainRefusalIndex     uint64
+	ChainRefusalLeader    coreconsensus.NodeID
 	// StopReason says why the node stopped itself.
-	StopReason         coreconsensus.StopReasonValue
+	StopReason            coreconsensus.StopReasonValue
 	// DroppedFrames counts frames whose From differed from the
 	// authenticated peer (R7-05).
-	DroppedFrames      int64
+	DroppedFrames         int64
 	// LongTurns counts the loop turns longer than the drift budget, each of
 	// which dropped the lease (D9, R7-20).
-	LongTurns          int64
+	LongTurns             int64
 	// JoinsRateLimited counts JOINs refused by the one-per-slot rate.
-	JoinsRateLimited   int64
+	JoinsRateLimited      int64
 	// SnapshotBytes is the size of the newest snapshot this node holds,
 	// the larger of its encoded and decoded sizes; 0 with none.
-	SnapshotBytes      int64
+	SnapshotBytes         int64
 	// SnapshotLimit is the size a cut is held to now: this node's
 	// MaxSnapshotBytes, or the smallest a member announces when lower
 	// (R2-30).
-	SnapshotLimit      int64
+	SnapshotLimit         int64
 }
 ```
 
@@ -2478,7 +2620,11 @@ type LogReader interface {
 	Bounds() (first uint64, last uint64)
 	// Entries returns entries in [lo, hi), at most maxBytes, and always at
 	// least one entry when lo < hi, even above maxBytes. lo below first is
-	// COMPACTED.
+	// COMPACTED. The returned entries own their Data, valid after the call and
+	// never written by the store, whatever it appends, truncates or compacts
+	// later: the caller keeps it without a copy. Entry data may share one
+	// buffer the store read for the whole call, each payload capped at its own
+	// length, so a caller that keeps one entry's data keeps that buffer.
 	Entries(lo uint64, hi uint64, maxBytes int, dst []EntryValue) ([]EntryValue, error)
 	// Term answers for first-1 too, from the term kept at compaction.
 	Term(index uint64) (uint64, error)
@@ -2501,7 +2647,7 @@ Bounds of an empty log after a snapshot at s are (s+1, s).
 func (LogReader) Entries(lo uint64, hi uint64, maxBytes int, dst []EntryValue) ([]EntryValue, error)
 ```
 
-Entries returns entries in \[lo, hi), at most maxBytes, and always at least one entry when lo \< hi, even above maxBytes. lo below first is COMPACTED.
+Entries returns entries in \[lo, hi), at most maxBytes, and always at least one entry when lo \< hi, even above maxBytes. lo below first is COMPACTED. The returned entries own their Data, valid after the call and never written by the store, whatever it appends, truncates or compacts later: the caller keeps it without a copy. Entry data may share one buffer the store read for the whole call, each payload capped at its own length, so a caller that keeps one entry's data keeps that buffer.
 
 <a name="LogReader.Term"></a>
 ### func \(LogReader\) [Term](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
@@ -2726,6 +2872,35 @@ func (MembershipValue) Voters() []NodeID
 
 Voters returns the ids of the voters, in membership order.
 
+<a name="MembershipWatcher"></a>
+## type [MembershipWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type MembershipWatcher = coreconsensus.MembershipWatcher
+```
+
+MembershipWatcher is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.MembershipWatcher`, declared as:
+
+```go
+type MembershipWatcher interface {
+	// WatchMembership returns its OWN channel, of capacity one, holding the
+	// latest configuration; it is unsubscribed and closed when ctx ends or the
+	// node closes.
+	WatchMembership(ctx context.Context) <-chan MembershipValue
+}
+```
+
+<a name="MembershipWatcher.WatchMembership"></a>
+### func \(MembershipWatcher\) [WatchMembership](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
+
+```go
+func (MembershipWatcher) WatchMembership(ctx context.Context) <-chan MembershipValue
+```
+
+WatchMembership returns its OWN channel, of capacity one, holding the latest configuration; it is unsubscribed and closed when ctx ends or the node closes.
+
 <a name="MemoryLog"></a>
 ## type [MemoryLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
@@ -2948,6 +3123,15 @@ MemoryTransport is an alias of `github.com/kitsunium/sdk/internal/service/app/co
 type MemoryTransport struct{}
 ```
 
+<a name="MemoryTransport.AskMembership"></a>
+### func \(MemoryTransport\) [AskMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
+
+```go
+func (*MemoryTransport) AskMembership(_ context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+```
+
+AskMembership reads, from member m, the configuration it runs with, as the TCP transport does (#763): m is reached when the link is up both ways, authenticated under the key the memory transport gives it, and answers only a node it admits, while a node runs bound to its transport.
+
 <a name="MemoryTransport.Bind"></a>
 ### func \(MemoryTransport\) [Bind](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
 
@@ -3097,6 +3281,9 @@ type MessageValue struct {
 	// Entries are the entries an append carries, or the proposal a forward
 	// carries with a zero position.
 	Entries        []EntryValue
+	// Trace is the proposer's span context a forward carries beside
+	// FlagTrace, the zero value without it.
+	Trace          TraceContextValue
 }
 ```
 
@@ -3140,7 +3327,7 @@ AppendBackup writes to w the committed entries after since, the point a previous
 func (*Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error)
 ```
 
-Barrier returns once the local state machine reflects every write committed before the call (D9).
+Barrier returns once the local state machine reflects every write committed before the call (D9). Reads queued in one turn share one round.
 
 <a name="Node.ClearNoSpace"></a>
 ### func \(Node\) [ClearNoSpace](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
@@ -3203,7 +3390,7 @@ Health returns the node's verdict, computed on the event loop.
 func (*Node) Membership() coreconsensus.MembershipValue
 ```
 
-Membership returns the configuration the node last appended.
+Membership returns the configuration the node last appended, as its last turn published it; it never waits for the event loop.
 
 <a name="Node.Promote"></a>
 ### func \(Node\) [Promote](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
@@ -3321,6 +3508,15 @@ func (*Node) Watch(ctx context.Context) <-chan coreconsensus.StatusValue
 ```
 
 Watch implements LeadershipWatcher. Each call launches one goroutine that closes the returned channel and ends when ctx ends or the node's event loop stops.
+
+<a name="Node.WatchMembership"></a>
+### func \(Node\) [WatchMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/node.go>)
+
+```go
+func (*Node) WatchMembership(ctx context.Context) <-chan coreconsensus.MembershipValue
+```
+
+WatchMembership implements MembershipWatcher. Each call launches one goroutine that closes the returned channel and ends when ctx ends or the node's event loop stops.
 
 <a name="NodeID"></a>
 ## type [NodeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -3496,6 +3692,21 @@ type PositionValue struct {
 }
 ```
 
+<a name="Preallocate"></a>
+## type [Preallocate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type Preallocate = svcconsensus.Preallocate
+```
+
+Preallocate is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate`, declared as:
+
+```go
+type Preallocate uint8
+```
+
 <a name="PreconditionSpec"></a>
 ## type [PreconditionSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
@@ -3519,6 +3730,85 @@ type PreconditionSpec struct {
 }
 ```
 
+<a name="PreflightOptions"></a>
+## type [PreflightOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type PreflightOptions = svcconsensus.PreflightOptions
+```
+
+PreflightOptions is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PreflightOptions`, declared as:
+
+```go
+type PreflightOptions struct {
+	// Syncs is the number of records written, each synced; 0 is 256. It is
+	// refused negative or above 65536.
+	Syncs           int
+	// RecordBytes is the size of one record; 0 is 4096. It is refused
+	// negative, and Syncs records of it above DefaultSegmentBytes.
+	RecordBytes     int
+	// Timing is the contract judged against the measurement; the zero value
+	// judges nothing (ADR 0031).
+	Timing          coreconsensus.TimingContractSpec
+	// LogReserveBytes is the reserve the free space is judged against; 0 is
+	// Config's default, 256 MiB.
+	LogReserveBytes int64
+	// Clock times each sync; nil is clock.System.
+	Clock           clock.Timed
+	// Logger receives each verdict at Warn; nil logs nothing.
+	Logger          corelogger.Logger
+}
+```
+
+<a name="PreflightValue"></a>
+## type [PreflightValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type PreflightValue = svcconsensus.PreflightValue
+```
+
+PreflightValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PreflightValue`, declared as:
+
+```go
+type PreflightValue struct {
+	FsyncP50    time.Duration
+	FsyncP99    time.Duration
+	FsyncMax    time.Duration
+	// FreeBytes is what an unprivileged writer may still use there, -1 when unknown.
+	FreeBytes   int64
+	// Flock is false where the platform has no flock(2), and NewDataDir refuses (ADR 0144).
+	Flock       bool
+	// UserTimeout is false where the transport sets no kernel bound on
+	// unacknowledged bytes (the BSDs, illumos, Solaris): a dead stream is
+	// closed by the read-silence bound alone (#1116).
+	UserTimeout bool
+	// Verdicts lists each rule broken, empty when none is.
+	Verdicts    []PreflightVerdict
+}
+```
+
+<a name="PreflightVerdict"></a>
+## type [PreflightVerdict](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type PreflightVerdict = svcconsensus.PreflightVerdict
+```
+
+PreflightVerdict is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PreflightVerdict`, declared as:
+
+```go
+type PreflightVerdict struct {
+	Field string
+	Rule  string
+}
+```
+
 <a name="QuarantineExit"></a>
 ## type [QuarantineExit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
@@ -3532,6 +3822,28 @@ QuarantineExit is an alias of `github.com/kitsunium/sdk/internal/service/app/con
 
 ```go
 type QuarantineExit uint8
+```
+
+<a name="QuarantineOptions"></a>
+## type [QuarantineOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type QuarantineOptions = svcconsensus.QuarantineOptions
+```
+
+QuarantineOptions is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.QuarantineOptions`, declared as:
+
+```go
+type QuarantineOptions struct {
+	// Ask reads, from member m, the configuration it runs with, and fails
+	// when m does not answer. It reaches m at the address, and authenticates
+	// it under the key, that the node's own log names for it: a
+	// TCPTransport's AskMembership, built with this node's own certificate,
+	// or a MemoryTransport's in tests.
+	Ask func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+}
 ```
 
 <a name="ReadMode"></a>
@@ -3588,6 +3900,7 @@ Replicated is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.
 type Replicated interface {
 	// Barrier returns once the local state machine reflects every write
 	// committed before the call, with the token of the applied index.
+	// Reads queued in one turn share one round.
 	Barrier(ctx context.Context) (TokenValue, error)
 	// Propose replicates data and returns, once the entry is applied
 	// locally, its lineage-scoped token and the value Apply returned.
@@ -3613,7 +3926,7 @@ type Replicated interface {
 func (Replicated) Barrier(ctx context.Context) (TokenValue, error)
 ```
 
-Barrier returns once the local state machine reflects every write committed before the call, with the token of the applied index.
+Barrier returns once the local state machine reflects every write committed before the call, with the token of the applied index. Reads queued in one turn share one round.
 
 <a name="Replicated.Propose"></a>
 ### func \(Replicated\) [Propose](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
@@ -4133,6 +4446,21 @@ func (StopReasonValue) ExitCode() int
 
 ExitCode returns errs.ExitCodeOf of the stop's error, or 73 for a storage failure whose marker could not be written (ADR 0152 D4).
 
+<a name="SyncPath"></a>
+## type [SyncPath](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type SyncPath = svcconsensus.SyncPath
+```
+
+SyncPath is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.SyncPath`, declared as:
+
+```go
+type SyncPath uint8
+```
+
 <a name="TCPTransport"></a>
 ## type [TCPTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
@@ -4157,23 +4485,32 @@ func (*TCPTransport) Addr() string
 
 Addr returns the bound address.
 
+<a name="TCPTransport.AskMembership"></a>
+### func \(TCPTransport\) [AskMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
+
+```go
+func (*TCPTransport) AskMembership(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+```
+
+AskMembership reads, from member m, the configuration it runs with (#763): the connection is dialled to m's address, the handshake must present m's pinned key on a certificate of this cluster naming m's slot, and the answer must list m under that key. m answers only a node its membership admits, under the certificate this transport presents: built with a member's own, it is what that member's TruncateAndStaySilent asks through (QuarantineOptions.Ask). A member that predates the lane ends the connection unanswered.
+
 <a name="TCPTransport.Bind"></a>
 ### func \(TCPTransport\) [Bind](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
 
 ```go
-func (*TCPTransport) Bind(_ coreconsensus.GroupID, deliver func(coreconsensus.AuthenticatedPeerValue, []byte), offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue, install func(coreconsensus.InstallParams) error, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)) error
+func (*TCPTransport) Bind(group coreconsensus.GroupID, deliver func(coreconsensus.AuthenticatedPeerValue, []byte), offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue, install func(coreconsensus.InstallParams) error, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)) error
 ```
 
-Bind implements Transport.
+Bind implements Transport, keyed by group: the transport serves every group bound to it on one listener. A frame goes to the group its header names, a snapshot offer to the group its lane names, and one of a group nothing bound is dropped and counted. A lane that names no group, the JOIN's and group 1's snapshot lane, is served to the only group bound, or with several to group 1 (ADR 0244). A second Bind of a group replaces its callbacks.
 
 <a name="TCPTransport.BindJoinReason"></a>
 ### func \(TCPTransport\) [BindJoinReason](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
 
 ```go
-func (*TCPTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string))
+func (*TCPTransport) BindJoinReason(group coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string))
 ```
 
-BindJoinReason implements JoinReasonBinder: the JOIN callback that also says why it refused.
+BindJoinReason implements JoinReasonBinder: the JOIN callback that also says why it refused, keyed by group as Bind is.
 
 <a name="TCPTransport.CertExpiry"></a>
 ### func \(TCPTransport\) [CertExpiry](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
@@ -4247,6 +4584,15 @@ func (*TCPTransport) Send(to coreconsensus.NodeID, frame []byte)
 
 Send implements Transport: it never blocks, and drops when the peer's queue is full (D4). The first frame to a peer and lane launches that lane's background sender goroutine, which ends when Close is called.
 
+<a name="TCPTransport.SendShared"></a>
+### func \(TCPTransport\) [SendShared](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
+
+```go
+func (*TCPTransport) SendShared(to coreconsensus.NodeID, header []byte, body []byte)
+```
+
+SendShared implements BatchSender: the frame is queued as Send queues one, counted at the length of header and body, and written as header then body under the batch's one deadline and flush. body is never written to, so the frames of several peers share it.
+
 <a name="TCPTransport.SetMembership"></a>
 ### func \(TCPTransport\) [SetMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
 
@@ -4272,7 +4618,7 @@ Slot returns the slot the certificate names.
 func (*TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error
 ```
 
-Stream implements Transport.
+Stream implements Transport, on the snapshot lane that names no group, which the receiver serves to its only group or to group 1 (ADR 0244).
 
 <a name="TCPTransport.Unreachable"></a>
 ### func \(TCPTransport\) [Unreachable](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
@@ -4281,7 +4627,7 @@ Stream implements Transport.
 func (*TCPTransport) Unreachable(f func(coreconsensus.NodeID))
 ```
 
-Unreachable implements UnreachableReporter.
+Unreachable implements UnreachableReporter: f hears every unreachable peer, beside the callback each Node binds under its group.
 
 <a name="TimingContractSpec"></a>
 ## type [TimingContractSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -4343,6 +4689,28 @@ func (TokenValue) Position() PositionValue
 ```
 
 Position returns the token's position, without its lineage.
+
+<a name="TraceContextValue"></a>
+## type [TraceContextValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type TraceContextValue = coreconsensus.TraceContextValue
+```
+
+TraceContextValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.TraceContextValue`, declared as:
+
+```go
+type TraceContextValue struct {
+	// TraceID identifies the whole trace.
+	TraceID [16]byte
+	// SpanID is the proposer's span, the parent of the leader's.
+	SpanID  [8]byte
+	// Sampled is the proposer's sampling decision.
+	Sampled bool
+}
+```
 
 <a name="Transport"></a>
 ## type [Transport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -4453,6 +4821,12 @@ type TransportConfig struct {
 	MaxConnectionAge        time.Duration
 	WriteTimeout            time.Duration
 	JoinTimeout             time.Duration
+	// Clock reads every age the transport keeps — a link's against
+	// MaxConnectionAge, the redial backoff, the peer certificate's end — and
+	// drives the accept backoff; nil is clock.System. A connection deadline
+	// is a wall time the kernel needs, so it is the wall clock's reading plus
+	// the duration this clock left.
+	Clock                   clock.Timed
 }
 ```
 

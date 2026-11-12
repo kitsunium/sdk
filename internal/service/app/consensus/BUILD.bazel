@@ -68,6 +68,7 @@ go_library(
         "syncpath_linux.go",
         "syncpath_other.go",
         "tcp.go",
+        "tcp_groups.go",
         "tracefwd.go",
         "unacked.go",
         "unacked_darwin.go",
@@ -231,6 +232,7 @@ go_test(
         "syncpath_internal_test.go",
         "tcp_backlink_internal_test.go",
         "tcp_clock_internal_test.go",
+        "tcp_groups_internal_test.go",
         "tcp_internal_test.go",
         "tcp_joiner_internal_test.go",
         "tcp_link_internal_test.go",
@@ -276,7 +278,10 @@ go_test(
         "node_pace.go",
         "node_sendpin.go",
     ],
-    shard_count = 24,
+    # 48, not 24: the suite's 510 tests total some 13 minutes under race, and
+    # rules_go deals them to shards by their index, so a 60 s shard (.bazelrc)
+    # held the 38 s reopen test with 45 s of others at 24 (#925, lot L1).
+    shard_count = 48,
     deps = [
         "//internal/core/app/consensus",
         "//internal/core/data/stream",

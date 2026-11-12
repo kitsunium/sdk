@@ -330,13 +330,13 @@ type TCPTransport struct {
 	resvSeq   atomic.Uint64
 	// resvAddrs is the sorted address list last reserved, under mu: an
 	// unchanged list is not reserved again (#531).
-	resvAddrs   []string
-	peerExpiry  map[coreconsensus.NodeID]time.Time
-	deliver     func(coreconsensus.AuthenticatedPeerValue, []byte)
-	offer       func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue
-	install     func(coreconsensus.InstallParams) error
-	join        func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)
-	joinR       func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
+	resvAddrs  []string
+	peerExpiry map[coreconsensus.NodeID]time.Time
+	// groups is, per group, the callbacks its node bound (ADR 0244, #925):
+	// a frame and an offer are routed by the group they name.
+	groups map[coreconsensus.GroupID]*binding
+	// unreachable is the callback Unreachable registers, reported to beside
+	// every group's.
 	unreachable func(coreconsensus.NodeID)
 	closed      bool
 	wg          sync.WaitGroup
@@ -360,8 +360,12 @@ type TCPTransport struct {
 	// callback of the node sees it (#634); nil logs nothing.
 	warn func(msg string, attrs ...corelogger.AttrValue)
 	// undecodable judges, on the node, an offer whose metadata is of a
-	// version this build does not know (#665); nil refuses it unjudged.
+	// version this build does not know (#665), for a group whose binding
+	// names none; nil refuses it unjudged.
 	undecodable func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code
+	// unrouted counts the frames and offers of a group nothing bound on
+	// this transport, each dropped (#925).
+	unrouted atomic.Int64
 	// oversized counts the frames Send dropped for being larger than the
 	// whole peer queue (#669).
 	oversized atomic.Int64
@@ -423,6 +427,12 @@ func (c *TransportConfig) validate() error {
 	if c.Clock == nil {
 		c.Clock = clock.System
 	}
+	return c.refusal()
+}
+
+// refusal is the first refusal of a configuration validate defaulted, nil
+// for none.
+func (c *TransportConfig) refusal() error {
 	switch {
 	case c.Roots == nil:
 		return transportMisconfigured("Roots", "nil")
@@ -493,7 +503,7 @@ func newTCPTransport(cfg *TransportConfig, id *tlsid.Identity) (*TCPTransport, e
 		cfg: *cfg, id: id, cluster: cid, slot: slot,
 		members: map[coreconsensus.GroupID][]coreconsensus.MemberValue{}, byID: map[coreconsensus.NodeID]coreconsensus.MemberValue{},
 		bySPKI: map[[32]byte]coreconsensus.MemberValue{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, back: map[outKey]*backLink{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
-		done: make(chan struct{}),
+		groups: map[coreconsensus.GroupID]*binding{}, done: make(chan struct{}),
 	}
 	ln, err := listenTCP("tcp", cfg.ListenAddress)
 	if err != nil {
@@ -716,8 +726,8 @@ func (t *TCPTransport) serveMember(conn *tls.Conn, peer coreconsensus.Authentica
 		bl := t.holdBack(k, conn, peer.SPKI)
 		t.readFrames(bufio.NewReaderSize(conn, connBufferBytes), peer, t.laneBound(lane))
 		t.dropBack(k, bl)
-	case laneSnapshot:
-		t.serveSnapshot(conn, peer)
+	case laneSnapshot, laneSnapshotGroup:
+		t.serveSnapshot(conn, peer, lane)
 	case laneMembership:
 		t.serveMembership(conn)
 	default:
@@ -741,11 +751,14 @@ func (t *TCPTransport) readFrames(r *bufio.Reader, peer coreconsensus.Authentica
 			return
 		}
 		buf = frame
-		d, still := t.deliverTo(peer.SPKI)
-		if !still {
+		group := frameGroup(frame)
+		d, bound, still := t.deliverTo(peer.SPKI, group)
+		switch {
+		case !still:
 			return
-		}
-		if d != nil {
+		case !bound:
+			t.unroutedGroup(peer.ID, group, frame[5]>>6)
+		case d != nil:
 			d(peer, frame)
 		}
 	}
@@ -802,19 +815,24 @@ func (t *TCPTransport) refusedOversized(from coreconsensus.NodeID, ln uint32, li
 	}
 }
 
-// deliverTo is the bound deliver callback and whether the key is still a
-// member's: a reader whose peer left stops at its next frame.
-func (t *TCPTransport) deliverTo(spki [32]byte) (func(coreconsensus.AuthenticatedPeerValue, []byte), bool) {
+// deliverTo is the deliver callback group bound, whether group is bound at
+// all, and whether the key is still a member's: a reader whose peer left
+// stops at its next frame.
+func (t *TCPTransport) deliverTo(spki [32]byte, group coreconsensus.GroupID) (d func(coreconsensus.AuthenticatedPeerValue, []byte), bound, still bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	_, still := t.bySPKI[spki]
+	_, still = t.bySPKI[spki]
 	if still {
 		if t.heard == nil {
 			t.heard = map[[32]byte]time.Time{}
 		}
 		t.heard[spki] = t.cfg.Clock.Now()
 	}
-	return t.deliver, still
+	b, bound := t.groups[group]
+	if bound {
+		d = b.deliver
+	}
+	return d, bound, still
 }
 
 // laneBound is the bound a member's frames on lane are read under, on the
@@ -1044,7 +1062,7 @@ func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
 // one, counted at the length of header and body, and written as header
 // then body under the batch's one deadline and flush. body is never
 // written to, so the frames of several peers share it.
-func (t *TCPTransport) SendShared(to coreconsensus.NodeID, header []byte, body []byte) {
+func (t *TCPTransport) SendShared(to coreconsensus.NodeID, header, body []byte) {
 	t.enqueue(to, outFrame{head: header, body: body})
 }
 
@@ -1420,22 +1438,29 @@ func (t *TCPTransport) stillAdmitted(to coreconsensus.NodeID, link *senderLink) 
 // could not be reached.
 func (t *TCPTransport) reportUnreachable(id coreconsensus.NodeID) {
 	t.mu.Lock()
-	f := t.unreachable
+	fs := t.unreachableHooks()
 	t.mu.Unlock()
-	if f != nil {
+	for _, f := range fs {
 		f(id)
 	}
 }
 
-// Unreachable implements UnreachableReporter.
+// Unreachable implements UnreachableReporter: f hears every unreachable
+// peer, beside the callback each Node binds under its group.
 func (t *TCPTransport) Unreachable(f func(coreconsensus.NodeID)) {
 	t.mu.Lock()
 	t.unreachable = f
 	t.mu.Unlock()
 }
 
-// Bind implements Transport.
-func (t *TCPTransport) Bind(_ coreconsensus.GroupID,
+// Bind implements Transport, keyed by group: the transport serves every
+// group bound to it on one listener. A frame goes to the group its header
+// names, a snapshot offer to the group its lane names, and one of a group
+// nothing bound is dropped and counted. A lane that names no group, the
+// JOIN's and group 1's snapshot lane, is served to the only group bound,
+// or with several to group 1 (ADR 0244). A second Bind of a group
+// replaces its callbacks.
+func (t *TCPTransport) Bind(group coreconsensus.GroupID,
 	deliver func(coreconsensus.AuthenticatedPeerValue, []byte),
 	offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue,
 	install func(coreconsensus.InstallParams) error,
@@ -1443,7 +1468,8 @@ func (t *TCPTransport) Bind(_ coreconsensus.GroupID,
 ) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.deliver, t.offer, t.install, t.join = deliver, offer, install, join
+	b := t.bindingOf(group)
+	b.deliver, b.offer, b.install, b.join = deliver, offer, install, join
 	return nil
 }
 
@@ -1468,6 +1494,14 @@ func (t *TCPTransport) setMembershipAt(group coreconsensus.GroupID, admitted []c
 	byID, bySPKI := indexMembers(admittedUnion(t.members, t.membersAt))
 	t.byID, t.bySPKI = byID, bySPKI
 	t.reserveAddresses(byID)
+	t.forgetDeparted(byID, bySPKI)
+	t.cutDeparted(byID, bySPKI)
+}
+
+// forgetDeparted drops what the transport recorded of the members that are
+// in neither index of the admitted set: the handshakes heard from them and
+// the expiry of their certificates. It runs under mu.
+func (t *TCPTransport) forgetDeparted(byID map[coreconsensus.NodeID]coreconsensus.MemberValue, bySPKI map[[32]byte]coreconsensus.MemberValue) {
 	for spki := range t.heard {
 		if _, ok := bySPKI[spki]; !ok {
 			delete(t.heard, spki)
@@ -1481,6 +1515,12 @@ func (t *TCPTransport) setMembershipAt(group coreconsensus.GroupID, admitted []c
 			delete(t.peerExpiry, id)
 		}
 	}
+}
+
+// cutDeparted closes the inbound connections and halts the outbound
+// senders of the members that are in neither index of the admitted set. It
+// runs under mu.
+func (t *TCPTransport) cutDeparted(byID map[coreconsensus.NodeID]coreconsensus.MemberValue, bySPKI map[[32]byte]coreconsensus.MemberValue) {
 	for c, spki := range t.in {
 		if _, ok := bySPKI[spki]; !ok {
 			// A member that left is cut (D4); its reader ends on the closed
@@ -1681,19 +1721,31 @@ func decodeOffer(b []byte) (coreconsensus.InstallOfferValue, error) {
 	return o, nil
 }
 
-// Stream implements Transport.
+// Stream implements Transport, on the snapshot lane that names no group,
+// which the receiver serves to its only group or to group 1 (ADR 0244).
 func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
+	return t.streamGroup(ctx, defaultGroup, to, offer, open)
+}
+
+// streamGroup implements groupStreamer: group 1's offer on laneSnapshot,
+// as every release sent it, any other group's on laneSnapshotGroup, which
+// names it (ADR 0244).
+func (t *TCPTransport) streamGroup(ctx context.Context, group coreconsensus.GroupID, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
 	// An offer above MaxFrameBytes, the bound the receiver reads it under,
 	// is refused before any dial (#634).
 	body := encodeOffer(offer)
 	if len(body) > t.cfg.MaxFrameBytes {
 		return origin(coreconsensus.FrameInvalid, errs.String("what", "snapshot offer"), errs.Int("length", len(body)))
 	}
+	lane := laneSnapshot
+	if group != defaultGroup {
+		lane, body = laneSnapshotGroup, groupOffer(group, body)
+	}
 	addr, pin, ok := t.address(to)
 	if !ok {
 		return peerRejected("no address")
 	}
-	c, err := t.dial(ctx, addr, laneSnapshot, &pin)
+	c, err := t.dial(ctx, addr, lane, &pin)
 	if err != nil {
 		return err
 	}
@@ -1845,19 +1897,33 @@ func installResult(c *tls.Conn) error {
 // An offer whose metadata is of a version this build does not know is still
 // judged by the node, from its term alone, and its refusal answered
 // (refuseOffer, #665).
-func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue) {
-	b, err := readChunk(c, t.cfg.MaxFrameBytes)
+//
+// The offer goes to the group its lane names (offerBinding): on
+// laneSnapshotGroup one nothing bound is refused PEER_REJECTED and counted,
+// never handed to another group's node (#925).
+func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, lane byte) {
+	b, group, bd, err := t.offerBinding(c, lane)
+	if err == nil && bd == nil && lane == laneSnapshotGroup {
+		t.unroutedGroup(peer.ID, group, laneSnapshot)
+		abandon(writeChunk(c, encodeAccept(new(coreconsensus.InstallAcceptValue{Refused: coreconsensus.CodePeerRejected}))))
+		return
+	}
 	var o coreconsensus.InstallOfferValue
 	if err == nil {
 		o, err = decodeOffer(b)
 	}
 	if err != nil {
-		t.refuseOffer(c, peer, o.Term, err)
+		t.refuseOffer(c, peer, o.Term, bd, err)
 		return
 	}
-	t.mu.Lock()
-	of, in := t.offer, t.install
-	t.mu.Unlock()
+	t.receiveSnapshot(c, peer, o, bd)
+}
+
+// receiveSnapshot hands o, the offer serveSnapshot decoded, to the node bd
+// binds, and once that node accepted it streams the body to its install,
+// then writes the install's code as the stream's last word.
+func (t *TCPTransport) receiveSnapshot(c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, o coreconsensus.InstallOfferValue, bd *binding) {
+	of, in := t.installHooks(bd)
 	if of == nil || in == nil {
 		return
 	}
@@ -1871,17 +1937,37 @@ func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.Authenticat
 		Ctx: ctx, From: peer, Offer: o, Offset: acc.Offset,
 		Body: io.LimitReader(c, o.Meta.EncodedSize-acc.Offset),
 	})
-	var code errs.Code
-	if ierr != nil {
-		code, _ = errs.CodeOf(ierr)
-		if code == 0 {
-			code = coreconsensus.CodeSnapshotCorrupt
-		}
-	}
 	// The last write of the stream: a sender that does not read it sees the
 	// connection end and treats the install as failed, which it retries.
-	abandon(writeChunk(c, binary.LittleEndian.AppendUint32(nil, uint32(code))))
+	abandon(writeChunk(c, binary.LittleEndian.AppendUint32(nil, uint32(installCode(ierr)))))
 	drainHalfClose(c, t.cfg.WriteTimeout)
+}
+
+// installHooks reads the offer and install hooks bd binds, nil for a
+// binding that holds none or no binding at all.
+func (t *TCPTransport) installHooks(bd *binding) (
+	of func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue,
+	in func(coreconsensus.InstallParams) error,
+) {
+	if bd == nil {
+		return nil, nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return bd.offer, bd.install
+}
+
+// installCode is the code an install's error ends its stream with: 0 for
+// none, SNAPSHOT_CORRUPT for an error that carries no code.
+func installCode(err error) errs.Code {
+	if err == nil {
+		return 0
+	}
+	code, _ := errs.CodeOf(err)
+	if code == 0 {
+		return coreconsensus.CodeSnapshotCorrupt
+	}
+	return code
 }
 
 // drainHalfClose reads what the sender wrote after the body, its TLS
@@ -1917,9 +2003,12 @@ func encodeAccept(acc *coreconsensus.InstallAcceptValue) []byte {
 // here unjudged, the release of protocol 2 offered #659's version 3 never
 // stopped, and its leader offered it again at every probe (#665). Every
 // other refusal is logged.
-func (t *TCPTransport) refuseOffer(c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, term uint64, err error) {
+func (t *TCPTransport) refuseOffer(c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, term uint64, bd *binding, err error) {
 	t.mu.Lock()
 	warn, judge := t.warn, t.undecodable
+	if bd != nil && bd.undecodable != nil {
+		judge = bd.undecodable
+	}
 	t.mu.Unlock()
 	if judge != nil && errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
 		acc := coreconsensus.InstallAcceptValue{Refused: judge(peer, term, err)}
@@ -2067,8 +2156,13 @@ func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPee
 		return
 	}
 	req.SPKI = peer.SPKI
+	// A JOIN names no group: it is the legacy binding's (ADR 0244).
+	var j func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)
+	var jr func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
 	t.mu.Lock()
-	j, jr := t.join, t.joinR
+	if b := t.legacyBinding(); b != nil {
+		j, jr = b.join, b.joinR
+	}
 	t.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), t.cfg.JoinTimeout)
 	defer cancel()
@@ -2305,6 +2399,12 @@ func joinAnswerReason(b []byte) (reason string, ok bool) {
 func (t *TCPTransport) serveMembership(c net.Conn) {
 	t.mu.Lock()
 	read := t.membership
+	// laneMembership names no group: unless bindMembership named a read
+	// for the whole transport, it is served as the JOIN lanes are, to the
+	// only group bound or with several to the default one (#925).
+	if b := t.legacyBinding(); read == nil && b != nil {
+		read = b.membership
+	}
 	t.mu.Unlock()
 	if read == nil || t.predatesMembership.Load() {
 		return
@@ -2383,10 +2483,10 @@ func (t *TCPTransport) AskMembership(ctx context.Context, m coreconsensus.Member
 }
 
 // BindJoinReason implements JoinReasonBinder: the JOIN callback that also
-// says why it refused.
-func (t *TCPTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)) {
+// says why it refused, keyed by group as Bind is.
+func (t *TCPTransport) BindJoinReason(group coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)) {
 	t.mu.Lock()
-	t.joinR = join
+	t.bindingOf(group).joinR = join
 	t.mu.Unlock()
 }
 

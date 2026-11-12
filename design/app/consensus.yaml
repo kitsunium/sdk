@@ -4225,15 +4225,24 @@ packages:
                 type: "[]byte"
             name: SendShared
             recv: pointer
-          - doc: Unreachable implements UnreachableReporter.
+          - doc: |-
+              Unreachable implements UnreachableReporter: f hears every unreachable
+              peer, beside the callback each Node binds under its group.
             in:
               - name: f
                 type: func(coreconsensus.NodeID)
             name: Unreachable
             recv: pointer
-          - doc: Bind implements Transport.
+          - doc: |-
+              Bind implements Transport, keyed by group: the transport serves every
+              group bound to it on one listener. A frame goes to the group its header
+              names, a snapshot offer to the group its lane names, and one of a group
+              nothing bound is dropped and counted. A lane that names no group, the
+              JOIN's and group 1's snapshot lane, is served to the only group bound,
+              or with several to group 1 (ADR 0244). A second Bind of a group
+              replaces its callbacks.
             in:
-              - name: _
+              - name: group
                 type: coreconsensus.GroupID
               - name: deliver
                 type: func(coreconsensus.AuthenticatedPeerValue, []byte)
@@ -4263,7 +4272,9 @@ packages:
             out:
               - type: error
             recv: pointer
-          - doc: Stream implements Transport.
+          - doc: |-
+              Stream implements Transport, on the snapshot lane that names no group,
+              which the receiver serves to its only group or to group 1 (ADR 0244).
             in:
               - name: ctx
                 type: context.Context
@@ -4311,9 +4322,9 @@ packages:
             recv: pointer
           - doc: |-
               BindJoinReason implements JoinReasonBinder: the JOIN callback that also
-              says why it refused.
+              says why it refused, keyed by group as Bind is.
             in:
-              - name: _
+              - name: group
                 type: coreconsensus.GroupID
               - name: join
                 type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)

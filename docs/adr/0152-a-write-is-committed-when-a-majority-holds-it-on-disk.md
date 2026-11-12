@@ -4355,7 +4355,10 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
 
 - **Multi-group (v2)**: groups multiplexed on one transport, heartbeat
   coalescing between node pairs, quiescing idle groups, and a routing table.
-  Its own ADR, after v1 has run in production.
+  Its own ADR, after v1 has run in production. Opened by
+  [ADR 0244](0244-several-consensus-groups-share-one-transport-routed-by-the-group-each-frame-names.md)
+  (#925): the routing built, coalescing, quiescing and a shared store
+  proposed with D11's numbers as their targets.
 - **Joint consensus**, for changes of more than one voter at once.
 - **A `lock.Locker` over this domain** (D10), answering ADR 0052 D11 inside
   the SDK.

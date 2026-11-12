@@ -58,6 +58,9 @@ var sentinelByCode = map[errs.Code]*errs.Error{
 	coreconsensus.CodeJoinRefused:             coreconsensus.JoinRefused,
 	coreconsensus.CodeNoSpace:                 coreconsensus.NoSpace,
 	coreconsensus.CodeLeadershipUnconfirmed:   coreconsensus.LeadershipUnconfirmed,
+	// A receiver's answer to a snapshot offer for a group it does not
+	// serve (#925).
+	coreconsensus.CodePeerRejected: coreconsensus.PeerRejected,
 }
 
 // cause is the text of a storage failure's cause. It never travels as an
