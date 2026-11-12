@@ -199,6 +199,7 @@ go_test(
         "syncatopen_unix_internal_test.go",
         "syncpath_internal_test.go",
         "tcp_backlink_internal_test.go",
+        "tcp_clock_internal_test.go",
         "tcp_internal_test.go",
         "tcp_joiner_internal_test.go",
         "tcp_link_internal_test.go",
@@ -226,7 +227,12 @@ go_test(
         "zstrandedbet_internal_test.go",
         "zwhiledown_internal_test.go",
     ],
-    data = glob(["testdata/**"]),
+    # The transport's sources, read by TestTransportNeverWaitsOnTheWallClock
+    # (#948) from the package directory, the test's working directory.
+    data = glob(["testdata/**"]) + glob(
+        ["tcp*.go"],
+        exclude = ["*_test.go"],
+    ),
     embed = [":consensus"],
     shard_count = 24,
     deps = [

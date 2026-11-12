@@ -3865,6 +3865,14 @@ packages:
               type: time.Duration
             - name: JoinTimeout
               type: time.Duration
+            - doc: |-
+                Clock reads every age the transport keeps — a link's against
+                MaxConnectionAge, the redial backoff, the peer certificate's end — and
+                drives the accept backoff; nil is clock.System. A connection deadline
+                is a wall time the kernel needs, so it is the wall clock's reading plus
+                the duration this clock left.
+              name: Clock
+              type: clock.Timed
       - doc: |-
           TCPTransport is the shipped transport: TLS 1.3 with mutual
           authentication, a pinned SPKI per member, three connections per peer and

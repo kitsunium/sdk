@@ -20,8 +20,15 @@ type linkPair struct {
 
 func newLinkPair(t *testing.T) *linkPair {
 	t.Helper()
+	return newLinkPairWith(t, nil)
+}
+
+// newLinkPairWith is newLinkPair with a's transport configuration changed
+// by tweak before it listens, when tweak is set.
+func newLinkPairWith(t *testing.T, tweak func(*TransportConfig)) *linkPair {
+	t.Helper()
 	p := &linkPair{ca: newTestCA(t), cid: coreconsensus.ClusterID{0xc0, 0xff, 0xee}, got: make(chan struct{}, 64)}
-	p.a, p.b = &tcpNode{id: 1, slot: "a"}, &tcpNode{id: 2, slot: "b"}
+	p.a, p.b = &tcpNode{id: 1, slot: "a", transport: tweak}, &tcpNode{id: 2, slot: "b"}
 	for _, tn := range []*tcpNode{p.a, p.b} {
 		tn.cert, tn.spki = p.ca.issue(t, SAN(p.cid, tn.slot), nil)
 		tn.listen(t, p.ca)

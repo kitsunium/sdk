@@ -1422,6 +1422,17 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   (`TestBarriersQueuedInOneTurnShareOneRound`,
   `TestLeasedBarriersOpenNoRound`,
   `TestABarrierQueuedAfterTheLoopEndedIsAnswered`).
+- Read the wall clock in the transport for an age, a backoff or an expiry:
+  a link's age against `MaxConnectionAge`, the redial backoff, the peer
+  certificate's end and the accept backoff ran on `time.Now`, so no test
+  could age a link or end a backoff but by sleeping (#948).
+  `TransportConfig.Clock` (nil is `clock.System`) reads them all; the only
+  wall-clock readings left are the deadlines the kernel arms, written
+  `conn.SetDeadline(time.Now().Add(d))` with `d` what the injected clock
+  left (`serveMember`'s read deadline). `TestTransportNeverWaitsOnTheWallClock`
+  holds the production `tcp*.go` to it over the AST, the BUILD shipping them
+  as data (`TestALinkPastMaxConnectionAgeIsRetiredOnTheClock`,
+  `TestARedialBacksOffOnTheClock`, on a `ManualClock`).
 - Pack commands into one entry inside the engine: a product of many tiny
   commands packs them with `multi/`'s `Packer` and `MultiMachine`, on top of
   `Replicated`, and the log, wire and apply code stay as they are (#926,

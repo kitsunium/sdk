@@ -4532,6 +4532,12 @@ type TransportConfig struct {
 	MaxConnectionAge        time.Duration
 	WriteTimeout            time.Duration
 	JoinTimeout             time.Duration
+	// Clock reads every age the transport keeps — a link's against
+	// MaxConnectionAge, the redial backoff, the peer certificate's end — and
+	// drives the accept backoff; nil is clock.System. A connection deadline
+	// is a wall time the kernel needs, so it is the wall clock's reading plus
+	// the duration this clock left.
+	Clock                   clock.Timed
 }
 ```
 

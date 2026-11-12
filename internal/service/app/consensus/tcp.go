@@ -22,6 +22,7 @@ import (
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 	"github.com/kitsunium/sdk/internal/service/net/server"
@@ -162,6 +163,12 @@ type TransportConfig struct {
 	MaxConnectionAge     time.Duration
 	WriteTimeout         time.Duration
 	JoinTimeout          time.Duration
+	// Clock reads every age the transport keeps — a link's against
+	// MaxConnectionAge, the redial backoff, the peer certificate's end — and
+	// drives the accept backoff; nil is clock.System. A connection deadline
+	// is a wall time the kernel needs, so it is the wall clock's reading plus
+	// the duration this clock left.
+	Clock clock.Timed
 }
 
 // transportMisconfigured refuses a TransportConfig, naming the field and
@@ -398,6 +405,9 @@ func (c *TransportConfig) validate() error {
 	clampDuration(&c.JoinTimeout, 10*time.Second)
 	clampInt(&c.MaxUnauthenticatedPerIP, defaultUnauthenticatedPerIP)
 	clampInt(&c.ReservedMemberSlots, defaultReservedMemberSlots)
+	if c.Clock == nil {
+		c.Clock = clock.System
+	}
 	switch {
 	case c.Roots == nil:
 		return transportMisconfigured("Roots", "nil")
@@ -522,7 +532,7 @@ func (t *TCPTransport) checkPeer(pin *[32]byte) tlsid.Verify {
 func (t *TCPTransport) accept() {
 	defer t.wg.Done()
 	var delay time.Duration
-	wait := time.NewTimer(acceptBackoffFirst)
+	wait := t.cfg.Clock.NewTimer(acceptBackoffFirst)
 	wait.Stop()
 	defer wait.Stop()
 	for {
@@ -560,7 +570,7 @@ func (t *TCPTransport) accept() {
 // end of the loop when the listener is closed, else the next wait, on the
 // loop's one timer, cut short by the transport's close. It returns that
 // wait, and whether the loop goes on.
-func (t *TCPTransport) acceptFailed(err error, delay time.Duration, wait *time.Timer) (time.Duration, bool) {
+func (t *TCPTransport) acceptFailed(err error, delay time.Duration, wait clock.Timer) (time.Duration, bool) {
 	if errors.Is(err, net.ErrClosed) {
 		return delay, false
 	}
@@ -569,7 +579,7 @@ func (t *TCPTransport) acceptFailed(err error, delay time.Duration, wait *time.T
 	select {
 	case <-t.done:
 		return delay, false
-	case <-wait.C:
+	case <-wait.C():
 		return delay, true
 	}
 }
@@ -677,13 +687,12 @@ func (t *TCPTransport) serveMember(conn *tls.Conn, peer coreconsensus.Authentica
 	t.mu.Lock()
 	t.peerExpiry[peer.ID] = leaf.NotAfter
 	t.mu.Unlock()
-	deadline := time.Now().Add(t.cfg.MaxConnectionAge)
-	if leaf.NotAfter.Before(deadline) {
-		deadline = leaf.NotAfter
-	}
+	// The age left is read on the transport's clock; the kernel takes the
+	// deadline as a wall time, so it is the wall clock's reading plus it.
+	left := min(t.cfg.MaxConnectionAge, leaf.NotAfter.Sub(t.cfg.Clock.Now()))
 	// The read deadline is what ends the connection when the peer's
 	// certificate expires: a connection that cannot take it is dropped.
-	if err := conn.SetReadDeadline(deadline); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(left)); err != nil {
 		return
 	}
 	switch lane {
@@ -1213,7 +1222,7 @@ func (t *TCPTransport) retire(k outKey, link *senderLink) {
 	if link.conn == nil {
 		return
 	}
-	if time.Since(link.created) > t.cfg.MaxConnectionAge || !t.stillAdmitted(k.to, link) {
+	if t.cfg.Clock.Since(link.created) > t.cfg.MaxConnectionAge || !t.stillAdmitted(k.to, link) {
 		link.close()
 	}
 }
@@ -1245,7 +1254,7 @@ func (t *TCPTransport) writeBatch(link *senderLink, batch []outFrame) error {
 // fails like a failed dial. A connected link gets watchLink, the background
 // goroutine counted in t.wg that reads it and ends when the connection does.
 func (t *TCPTransport) redial(k outKey, link *senderLink) bool {
-	if time.Now().Before(link.backoff) {
+	if t.cfg.Clock.Now().Before(link.backoff) {
 		return false // dropped: Raft retransmits what matters
 	}
 	addr, pin, ok := t.address(k.to)
@@ -1261,11 +1270,11 @@ func (t *TCPTransport) redial(k outKey, link *senderLink) bool {
 		}
 	}
 	if err != nil {
-		link.backoff = time.Now().Add(redialBackoff)
+		link.backoff = t.cfg.Clock.Now().Add(redialBackoff)
 		t.reportUnreachable(k.to)
 		return false
 	}
-	link.conn, link.w, link.created = c, bufio.NewWriterSize(c, connBufferBytes), time.Now()
+	link.conn, link.w, link.created = c, bufio.NewWriterSize(c, connBufferBytes), t.cfg.Clock.Now()
 	link.pin, link.notAfter = pin, time.Time{}
 	if certs := c.ConnectionState().PeerCertificates; len(certs) > 0 {
 		link.notAfter = certs[0].NotAfter
@@ -1319,7 +1328,7 @@ func (t *TCPTransport) watchLink(c linkConn, k outKey, pin [32]byte) {
 // leader kept replicating to it on the lanes it had dialled (#551).
 func (t *TCPTransport) stillAdmitted(to coreconsensus.NodeID, link *senderLink) bool {
 	_, pin, ok := t.address(to)
-	return ok && pin == link.pin && time.Now().Before(link.notAfter)
+	return ok && pin == link.pin && t.cfg.Clock.Now().Before(link.notAfter)
 }
 
 // reportUnreachable tells the engine, when it asked to know, that a peer
