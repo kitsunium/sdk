@@ -4,8 +4,10 @@ go 1.27.4
 
 require (
 	github.com/cilium/ebpf v0.22.0
-	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk v0.20.0
+	github.com/kitsunium/sdk/internal v0.29.0
+	github.com/kitsunium/sdk/internal/core v0.18.0
+	github.com/kitsunium/sdk/internal/kernel v0.18.0
+	github.com/kitsunium/sdk/internal/service v0.18.0
 	golang.org/x/sys v0.48.0
 )
-
-replace github.com/kitsunium/sdk/internal => ../../internal
