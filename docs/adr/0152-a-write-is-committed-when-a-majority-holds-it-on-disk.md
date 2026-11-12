@@ -3071,6 +3071,7 @@ across changes.
 | `Propose` → applied, 3 in-process nodes, memory log and transport | ≤ 4 allocs/op |
 | segmented log, `Append` 64 × 256 B + one `Sync` | reported per device, as ADR 0056's `BENCH.md` reports publication |
 | segmented log, `Entries` of 64 × 256 B synced in one segment | 1 pread, ≤ 2 allocs/op (the read's buffer and the entry slice), the entries' data aliasing the buffer; the fetch cost per entry in the package's `BENCH.md` (amendment of 2026-11-11, [#913](https://github.com/kitsunium/sdk/issues/913)) |
+| a follower's receive of a `MsgApp` of 64 × 256 B (frame copied, parsed, stepped) | its payloads cost the frame's copy and the entry slice, Step none: the entries' data alias the frame copy (`Raft.Step`'s gift), and the entries `LogReader.Entries` returns own their data, so `fetch` and `readBack` copy nothing (amendment of 2026-11-12, [#1110](https://github.com/kitsunium/sdk/issues/1110)) |
 | first consumer's table checksum, one update, at 10³ to 10⁶ repositories | constant time across sizes (R5-07) |
 
 **The implementing change's verifiers (R7-00f).** Each acceptance criterion

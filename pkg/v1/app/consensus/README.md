@@ -2412,10 +2412,11 @@ type LogReader interface {
 	Bounds() (first uint64, last uint64)
 	// Entries returns entries in [lo, hi), at most maxBytes, and always at
 	// least one entry when lo < hi, even above maxBytes. lo below first is
-	// COMPACTED. Entry data may alias a buffer the store read for the whole
-	// call, each payload capped at its own length: it is never written again,
-	// but a caller that keeps one entry's data keeps that buffer, and copies
-	// the data to hold it apart.
+	// COMPACTED. The returned entries own their Data, valid after the call and
+	// never written by the store, whatever it appends, truncates or compacts
+	// later: the caller keeps it without a copy. Entry data may share one
+	// buffer the store read for the whole call, each payload capped at its own
+	// length, so a caller that keeps one entry's data keeps that buffer.
 	Entries(lo uint64, hi uint64, maxBytes int, dst []EntryValue) ([]EntryValue, error)
 	// Term answers for first-1 too, from the term kept at compaction.
 	Term(index uint64) (uint64, error)
@@ -2438,7 +2439,7 @@ Bounds of an empty log after a snapshot at s are (s+1, s).
 func (LogReader) Entries(lo uint64, hi uint64, maxBytes int, dst []EntryValue) ([]EntryValue, error)
 ```
 
-Entries returns entries in \[lo, hi), at most maxBytes, and always at least one entry when lo \< hi, even above maxBytes. lo below first is COMPACTED. Entry data may alias a buffer the store read for the whole call, each payload capped at its own length: it is never written again, but a caller that keeps one entry's data keeps that buffer, and copies the data to hold it apart.
+Entries returns entries in \[lo, hi), at most maxBytes, and always at least one entry when lo \< hi, even above maxBytes. lo below first is COMPACTED. The returned entries own their Data, valid after the call and never written by the store, whatever it appends, truncates or compacts later: the caller keeps it without a copy. Entry data may share one buffer the store read for the whole call, each payload capped at its own length, so a caller that keeps one entry's data keeps that buffer.
 
 <a name="LogReader.Term"></a>
 ### func \(LogReader\) [Term](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)

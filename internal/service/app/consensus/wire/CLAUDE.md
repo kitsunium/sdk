@@ -13,6 +13,11 @@ alone (#683).
 
 ## Do NOT
 
+- Grow `ParseMessage`'s entry slice entry by entry: it is sized once for
+  the count the frame states, after that count is checked against the
+  body, so a frame of 64 entries costs one allocation for its entries, and
+  their `Data` alias the frame (#1110, `TestAFollowerStepKeepsTheFramesPayloads`
+  in the parent's alloc lane).
 - Accept two encodings of one value in one version: a decoder refuses a
   non-canonical input, and the fuzz targets require every accepted frame
   to round-trip in the version it was written in. `SnapshotMeta` is read

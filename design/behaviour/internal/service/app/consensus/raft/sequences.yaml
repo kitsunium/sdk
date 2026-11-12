@@ -5714,8 +5714,6 @@ sequences:
         kind: internal
       - id: r.lowerSilence
         kind: internal
-      - id: ownCopy
-        kind: internal
       - id: r.appendEntries
         kind: internal
     steps:
@@ -5742,9 +5740,11 @@ sequences:
           do:
             - set: es[k]
               value: m.Entries[start+k]
-            - set: es[k].Data
-              to: ownCopy
-              value: ownCopy(es[k].Data)
+            - opt:
+                do:
+                  - set: es[k].Data
+                    value: nil
+                when: len(es[k].Data) == 0
           key: k
           range: es
       - eval: r.appendEntries(es)

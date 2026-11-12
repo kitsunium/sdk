@@ -38,6 +38,13 @@ under coverage before touching `shard_count`.
 
 ## Do NOT
 
+- Copy an appended entry's `Data` out of the message `Step` was handed: the
+  entries' Data are the caller's gift (`Step`'s doc), and `appendNew` keeps
+  them aliasing the frame the driver copied once out of the transport's
+  buffer; an empty one is kept nil. The copy made a follower's append of 64
+  entries cost 65 allocations (#1110). A caller that keeps the bytes it
+  hands copies them first, as the simulator does at each delivery
+  (`ownEntries`).
 - Iterate a map where the order reaches a message: a run must stay a pure
   function of its seed.
 - Hand apply more than `MaxApplyLagBytes` past what the driver reports it

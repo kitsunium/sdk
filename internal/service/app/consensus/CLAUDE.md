@@ -41,7 +41,7 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | unit, cluster, disk, TCP | `go test -race ./...` |
 | simulator soak | `CONSENSUS_SIM_SOAK=1 go test -run TestSimSoak ./raft/`; a seed replays with `CONSENSUS_SIM_SEED` |
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
-| alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt`: `filelog_alloc_internal_test.go` and the package's copy of `allocwindow_test.go`, nothing else of the suite |
+| alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt`: `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go` and the package's copy of `allocwindow_test.go`, nothing else of the suite |
 | bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`); numbers in `BENCH.md` |
 | dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
 
@@ -216,10 +216,24 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestEntriesReadOnePreadPerSegment`,
   `TestADamagedRecordInsideARunIsCorruptAtItsOwnOffset`,
   `TestAnEntryReadFromARunDoesNotReachIntoTheNext`, and in the alloc lane
-  `TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice`; `BENCH.md`). Nor
-  keep an entry read back past the read that returned it without copying
-  its `Data`: it holds that read's whole buffer (`readBack` and `fetch`
-  clone).
+  `TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice`; `BENCH.md`).
+- Copy what `Entries` returns, or let a store write over it: the returned
+  entries own their `Data` (`LogReader.Entries`), valid after the call
+  whatever the store appends, truncates or compacts, so `fetch` and
+  `readBack` keep them as read, one allocation a run where they cloned
+  each entry again, and `MemoryLog.Entries` hands out copies as the file
+  log hands out what it read fresh. An entry kept holds the buffer of the
+  read that returned it (#1110,
+  `TestEntriesDataSurvivesTheStoresLaterWrites`,
+  `TestTheMemoryLogsEntriesAreCopies`).
+- Copy a received frame twice, or hand `Raft.Step` bytes the caller writes
+  again: `deliver` copies the frame once, out of the transport's reused
+  buffer, and that copy is the caller's gift Step keeps, `appendNew`
+  aliasing the entries' `Data` into it; the simulator, which keeps the
+  sender's entries, copies each delivery on its side. A follower's append
+  of 64 entries cost its payloads 65 allocations, now the frame's copy and
+  the entry slice (#1110, in the alloc lane
+  `TestAFollowerStepKeepsTheFramesPayloads`).
 - Sample a heap peak in the package's own process: the tests before it
   leave hundreds of MiB live, and the collector lets a share of that grow
   in garbage on top of what is measured.

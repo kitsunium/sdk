@@ -363,6 +363,8 @@ sequences:
         kind: package
       - id: binary.LittleEndian.Uint32
         kind: value
+      - id: slices
+        kind: stdlib
       - id: parseEntry
         kind: internal
     steps:
@@ -438,6 +440,9 @@ sequences:
             - return: frameInvalid("entry count", len(frame))
               to: frameInvalid
           when: uint64(n)*entryFixedLen > uint64(len(body))
+      - set: entries
+        to: slices
+        value: slices.Grow(entries, int(n))
       - loop:
           do:
             - var:

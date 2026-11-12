@@ -188,6 +188,10 @@ func ParseMessage(frame []byte, m *coreconsensus.MessageValue) error {
 	if uint64(n)*entryFixedLen > uint64(len(body)) {
 		return frameInvalid("entry count", len(frame))
 	}
+	// Sized once for the count the frame states, bounded above by the body
+	// it was checked against: the entry slice is one allocation, not one
+	// per doubling (#1110).
+	entries = slices.Grow(entries, int(n))
 	for range n {
 		var e coreconsensus.EntryValue
 		var err error

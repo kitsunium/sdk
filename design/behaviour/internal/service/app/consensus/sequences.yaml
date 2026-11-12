@@ -273,8 +273,6 @@ sequences:
         kind: internal
       - id: n.stop
         kind: internal
-      - id: bytes
-        kind: stdlib
       - id: n.obs.setGauge
         kind: internal
     steps:
@@ -301,9 +299,6 @@ sequences:
           type: int64
       - loop:
           do:
-            - set: es[i].Data
-              to: bytes
-              value: bytes.Clone(es[i].Data)
             - op: +=
               set: b
               value: int64(len(es[i].Data))
@@ -7942,6 +7937,50 @@ sequences:
           errs.Wrap(coreconsensus.Compacted, errs.WrapParams{},
           		errs.String("index", u64s(index)), errs.String("first", u64s(first)))
         to: errs
+  - of: (*MemoryLog).Entries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryLog).Entries
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: l.mu
+          read: true
+      - opt:
+          do:
+            - return: dst, compacted(lo, l.first)
+          when: lo < l.first
+      - bind: last
+        eval: l.first + uint64(len(l.ents)) - 1
+      - opt:
+          do:
+            - return: dst, storageFailed("entries", errImpossible)
+          when: hi > last+1
+      - bind: size
+        eval: "0"
+      - loop:
+          cond: i < hi
+          do:
+            - bind: e
+              eval: l.ents[i-l.first]
+            - op: +=
+              set: size
+              value: len(e.Data)
+            - opt:
+                do:
+                  - break: true
+                when: i > lo && size > maxBytes
+            - set: e.Data
+              to: slices
+              value: slices.Clone(e.Data)
+            - set: dst
+              value: append(dst, e)
+          init: i := lo
+          post: i++
+      - return: dst, nil
   - of: (*MemoryLog).Term
     steps:
       - lock:
@@ -11724,8 +11763,6 @@ sequences:
         kind: value
       - id: n.stop
         kind: internal
-      - id: bytes
-        kind: stdlib
     steps:
       - bind: d
         eval: "fetchDone{req: f}"
@@ -11743,13 +11780,6 @@ sequences:
                 - eval: n.stop(err, true)
                   to: n.stop
                 - return: "false"
-      - loop:
-          do:
-            - set: ents[i].Data
-              to: bytes
-              value: bytes.Clone(ents[i].Data)
-          key: i
-          range: ents
       - set: d.ents
         value: ents
       - select:

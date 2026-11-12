@@ -1024,7 +1024,9 @@ func baseTerm(logTerm, metaTerm uint64, matched bool, first uint64) (uint64, err
 // deliver is the transport's inbound callback: it parses a frame, drops it
 // when its From is not the authenticated peer (R7-05), and queues it on its
 // lane without ever blocking the transport; a full lane drops the frame,
-// which raft's retransmission absorbs.
+// which raft's retransmission absorbs. The frame is copied once, since the
+// transport reuses its read buffer, and that copy is the caller's gift Step
+// keeps: the entries' Data alias it, never copied again (#1110).
 func (n *Node) deliver(from coreconsensus.AuthenticatedPeerValue, frame []byte) {
 	if n.stopped.Load() {
 		return
@@ -2007,9 +2009,7 @@ func (n *Node) fetch(f raft.FetchSpec) bool {
 		n.stop(err, true)
 		return false
 	}
-	for i := range ents {
-		ents[i].Data = bytes.Clone(ents[i].Data)
-	}
+	// The entries own their Data (LogReader.Entries): no copy (#1110).
 	d.ents = ents
 	select {
 	case n.fetchc <- d:

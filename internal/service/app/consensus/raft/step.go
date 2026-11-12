@@ -10,7 +10,9 @@ import (
 )
 
 // Step handles one message. The driver has already checked that m.From is
-// the peer the transport authenticated (R7-05).
+// the peer the transport authenticated (R7-05). The entries' Data are the
+// caller's gift: Step keeps them without a copy, so the caller hands bytes
+// it never writes again, a frame it parsed into a buffer of its own.
 func (r *Raft) Step(now time.Time, m core.MessageValue) {
 	r.now = now
 	if m.Group != r.cfg.Group || r.stepLeaderRecord(now, m) || !r.stepTerm(now, m) || r.stepAnyRole(now, m) {
@@ -814,10 +816,16 @@ func (r *Raft) appendNew(m *core.MessageValue, start int, prevChain uint32) bool
 		r.truncateFrom(first)
 		r.lowerSilence(m.Term, first)
 	}
+	// The entries' Data are the caller's gift (Step): kept as they are,
+	// aliasing the frame the driver parsed into a buffer of its own, not
+	// copied a second time (#1110). An empty payload is nil, as a copy
+	// left it, so an entry compares equal to its original.
 	es := make([]core.EntryValue, len(m.Entries)-start)
 	for k := range es {
 		es[k] = m.Entries[start+k]
-		es[k].Data = ownCopy(es[k].Data)
+		if len(es[k].Data) == 0 {
+			es[k].Data = nil
+		}
 	}
 	r.appendEntries(es)
 	return true

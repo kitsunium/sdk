@@ -1,7 +1,6 @@
 package consensus
 
 import (
-	"bytes"
 	"fmt"
 	"sync"
 
@@ -201,8 +200,8 @@ func (n *Node) applyRead(rg raft.ReadBackSpec) bool {
 }
 
 // readBack reads the committed entries from lo on, below hi, maxBytes of
-// payload at most but one entry, copied out of the store's buffers and
-// counted in the apply lag. A log that cannot give them back cannot be
+// payload at most but one entry, counted in the apply lag. The entries own
+// their Data (LogReader.Entries), so none is copied (#1110). A log that cannot give them back cannot be
 // trusted to agree with itself, and stops the node (D4): ok is false.
 func (n *Node) readBack(lo, hi uint64, maxBytes int) (es []coreconsensus.EntryValue, ok bool) {
 	es, err := n.cfg.Log.Entries(lo, hi, maxBytes, nil)
@@ -217,7 +216,6 @@ func (n *Node) readBack(lo, hi uint64, maxBytes int) (es []coreconsensus.EntryVa
 	}
 	var b int64
 	for i := range es {
-		es[i].Data = bytes.Clone(es[i].Data)
 		b += int64(len(es[i].Data))
 	}
 	n.obs.setGauge(mApplyLagBytes, float64(n.applyLag.Add(b)))

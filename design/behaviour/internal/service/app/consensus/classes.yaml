@@ -6712,8 +6712,8 @@ types:
         results: bool
       - doc: |-
           readBack reads the committed entries from lo on, below hi, maxBytes of
-          payload at most but one entry, copied out of the store's buffers and
-          counted in the apply lag. A log that cannot give them back cannot be
+          payload at most but one entry, counted in the apply lag. The entries own
+          their Data (LogReader.Entries), so none is copied (#1110). A log that cannot give them back cannot be
           trusted to agree with itself, and stops the node (D4): ok is false.
         name: readBack
         params: lo, hi uint64, maxBytes int
@@ -7269,7 +7269,9 @@ types:
           deliver is the transport's inbound callback: it parses a frame, drops it
           when its From is not the authenticated peer (R7-05), and queues it on its
           lane without ever blocking the transport; a full lane drops the frame,
-          which raft's retransmission absorbs.
+          which raft's retransmission absorbs. The frame is copied once, since the
+          transport reuses its read buffer, and that copy is the caller's gift Step
+          keeps: the entries' Data alias it, never copied again (#1110).
         name: deliver
         params: from coreconsensus.AuthenticatedPeerValue, frame []byte
         recv: n *Node

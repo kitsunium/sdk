@@ -347,6 +347,22 @@ func (s *sim) deliver(m core.MessageValue) {
 	}
 }
 
+// ownEntries is m with each entry's Data copied, as the driver's frame copy
+// hands Step bytes of its own: Step keeps them as the caller's gift (#1110),
+// and the simulator keeps the sender's. The copy is made at delivery, where
+// the driver parses the frame and where appendNew copied before, so the bytes
+// a follower judges are the sender's as they stand when the message lands.
+func ownEntries(m core.MessageValue) core.MessageValue {
+	if len(m.Entries) == 0 {
+		return m
+	}
+	m.Entries = slices.Clone(m.Entries)
+	for i := range m.Entries {
+		m.Entries[i].Data = slices.Clone(m.Entries[i].Data)
+	}
+	return m
+}
+
 func (s *sim) process(n *simNode) {
 	if s.opt.applyLag > 0 && n.alive {
 		n.r.SetApplyLag(n.queued, n.reads > 0)
@@ -679,7 +695,7 @@ func (s *sim) run(until time.Time, load bool) {
 			if !n.alive {
 				continue
 			}
-			n.r.Step(s.clock(n), e.msg)
+			n.r.Step(s.clock(n), ownEntries(e.msg))
 			s.process(n)
 		case evStorage:
 			if !n.alive || e.life != n.life || len(n.writes) == 0 {
