@@ -1,14 +1,30 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "stream",
-    srcs = ["doc.go"],
+    srcs = [
+        "batch.go",
+        "doc.go",
+        "errors.go",
+        "memory.go",
+        "memory_commit.go",
+        "memory_compliance.go",
+        "memory_config.go",
+        "memory_read.go",
+        "memory_retain.go",
+        "wake.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/service/data/stream",
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/data/stream",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
     ],
 )
 
@@ -18,5 +34,22 @@ alias(
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "stream_test",
+    srcs = [
+        "conformance_external_test.go",
+        "gen_api_test.go",
+        "harness_external_test.go",
+        "memory_external_test.go",
+        "stream_bench_test.go",
+    ],
+    deps = [
+        ":stream",
+        "//internal/core/data/stream",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
     ],
 )

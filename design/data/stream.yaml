@@ -695,4 +695,48 @@ packages:
       on behalf of a consumer group (ADR 0231). The engines arrive one per
       milestone of kitsunium/sdk#890; their error codes, 0.3.94.*, are already
       declared in the core at this path (ADR 0160).
+    functions:
+      - doc: |-
+          NewMemory returns a stream whose partitions live in the heap of this
+          process: the test double of every durable engine.
+
+          It refuses a policy it cannot honour at CONSTRUCTION, through the same
+          core/data/stream.PolicyValue.Validate every engine runs, which is what
+          makes it an honest double. The stream it returns also answers
+          [corestream.Waker], [corestream.Seeker], [corestream.Trimmer] and
+          [corestream.Committer]; it keeps nothing past the process, so a restart
+          is a total loss.
+        in:
+          - name: cfg
+            type: MemoryConfig
+        name: NewMemory
+        out:
+          - name: s
+            type: corestream.Stream
+          - name: err
+            type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corestream: github.com/kitsunium/sdk/internal/core/data/stream
     path: github.com/kitsunium/sdk/internal/service/data/stream
+    types:
+      - doc: |-
+          MemoryConfig configures [NewMemory]: the policy it enforces and the clock
+          that stamps every batch and times every wait.
+        name: MemoryConfig
+        struct:
+          fields:
+            - doc: |-
+                Clock stamps [corestream.EntryValue].AppendedAt, ages records for
+                [corestream.PolicyValue].RetainFor, and times the wait
+                [corestream.PolicyValue].BlockTimeout allows, so a test drives
+                retention and backpressure with a ManualClock and no sleeping. Nil
+                means clock.System.
+              name: Clock
+              type: clock.Timed
+            - doc: |-
+                Policy is what the stream enforces. Its zero value works: one
+                partition, records of up to corestream.DefaultMaxRecordBytes, kept
+                forever, never full.
+              name: Policy
+              type: corestream.PolicyValue

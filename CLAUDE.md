@@ -28,7 +28,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `sql` | data | Ports over `database/sql`, never an ORM or a driver: structural transaction ownership, savepoints, migrations under a lock that dies with its holder, checksummed when built from statements; a retrying root transactor, a statement budget, read-only transactions on a replica, a statement observer under the pool | 0055, 0139, 0140 |
 | `docstore` | data | Typed keyed JSON documents with indexes, versions and a trash, replaced on the revision they were read at — one overlay entry per write through `vfs`, or tables of the caller's database | 0110, 0139, 0143, 0178, 0209 |
 | `queue` | data | Durable at-least-once queue over a directory, a SQL table joined to the caller's transaction, or memory; retried — with a jitter on request — and dead-lettered with its cause's codes, its trail's included, a dead letter and a live message movable between brokers as they lie; a message held until one instant, a retry after the handler's delay, a publication once per key over a window; a message's age bounded, a backlog counted, purged, published and acknowledged in batches, dead letters paged, replayed and purged in bulk and kept for a retention, a handler that acknowledges in its own transaction, five priority levels served strictly | 0054, 0104, 0151, 0178, 0183 |
-| `stream` | data | A durable, partitioned, offset-addressed log read by independent consumer groups, each record kept until its retention ends — the port, its siblings and its policy; the engines follow (#890) | 0231 |
+| `stream` | data | A durable, partitioned, offset-addressed log read by independent consumer groups, each record kept until its retention ends — the port, its siblings and its policy, the memory engine and the conformance suite every engine runs; the durable engines follow (#890) | 0231 |
 | `cache` | data | The kernel LRU+TTL primitive and the domain above it: tag invalidation, in-process stampede protection, L1/L2 chaining; a Valkey far tier under `third-party/` | 0025, 0049, 0211 |
 | `vfs` | data | `io/fs` reading unchanged and atomic publication, with how far "atomic" reaches stated, a batch under one directory flush; an S3 filesystem under `third-party/` | 0056, 0211 |
 | `config` | app | Environment, file and `fs.FS` layering, typed decode, a schema (required keys, defaults, unknown keys refused), provenance, a poll watcher | 0028, 0061, 0097 |
@@ -145,9 +145,9 @@ internal/
                              loop waiting on the Waker sibling; the SQL
                              broker joins the context's transaction —
                              ADR 0151;
-                           stream — the engines of the partitioned log, to
-                             come (#890); a package comment until the
-                             first — ADR 0231;
+                           stream — the engines of the partitioned log:
+                             memory + the conformance suite every engine
+                             runs; file and SQL to come (#890) — ADR 0231;
                            sql — transaction manager + savepoints + pool
                              policy + Join/Defer siblings + migration
                              runner, SQLite's on the database file's write

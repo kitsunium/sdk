@@ -82382,6 +82382,42 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.MemoryConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "MemoryConfig",
+      "spelled": "struct{Clock clock.Timed; Policy corestream.PolicyValue}",
+      "canonical": "struct{Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Policy github.com/kitsunium/sdk/internal/core/data/stream.PolicyValue}",
+      "fields": [
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock stamps [corestream.EntryValue].AppendedAt, ages records for\n[corestream.PolicyValue].RetainFor, and times the wait\n[corestream.PolicyValue].BlockTimeout allows, so a test drives\nretention and backpressure with a ManualClock and no sleeping. Nil\nmeans clock.System.\n"
+        },
+        {
+          "name": "Policy",
+          "type": "corestream.PolicyValue",
+          "doc": "Policy is what the stream enforces. Its zero value works: one\npartition, records of up to corestream.DefaultMaxRecordBytes, kept\nforever, never full.\n"
+        }
+      ],
+      "doc": "MemoryConfig configures [NewMemory]: the policy it enforces and the clock\nthat stamps every batch and times every wait.\n",
+      "file": "service/data/stream/memory_config.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.NewMemory",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "NewMemory",
+      "spelled": "func(cfg MemoryConfig) (s corestream.Stream, err error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/data/stream.MemoryConfig) (s github.com/kitsunium/sdk/internal/core/data/stream.Stream, err error)",
+      "doc": "NewMemory returns a stream whose partitions live in the heap of this\nprocess: the test double of every durable engine.\n\nIt refuses a policy it cannot honour at CONSTRUCTION, through the same\ncore/data/stream.PolicyValue.Validate every engine runs, which is what\nmakes it an honest double. The stream it returns also answers\n[corestream.Waker], [corestream.Seeker], [corestream.Trimmer] and\n[corestream.Committer]; it keeps nothing past the process, so a restart\nis a total loss.\n",
+      "file": "service/data/stream/memory.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/transform.FlateCompressor",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/service/data/transform",

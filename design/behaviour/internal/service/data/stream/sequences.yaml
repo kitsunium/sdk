@@ -1,3 +1,968 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
-sequences: []
+sequences:
+  - of: admit
+    participants:
+      - id: caller
+        kind: actor
+      - id: admit
+        kind: self
+      - id: recordBytes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, invalidBatchSize("records", 0)
+          when: len(records) == 0
+      - loop:
+          do:
+            - bind: bytes
+              eval: recordBytes(record)
+              to: recordBytes
+            - opt:
+                do:
+                  - return: 0, recordTooLarge(i, bytes, maxRecord)
+                when: bytes > int64(maxRecord)
+            - op: +=
+              set: size
+              value: bytes
+          key: i
+          range: records
+          value: record
+      - return: size, nil
+  - of: recordBytes
+    steps:
+      - return: int64(len(record.Key)) + int64(len(record.Payload))
+  - of: keyedPartition
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyedPartition
+        kind: self
+      - id: corestream
+        kind: package
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: len(record.Key) == 0
+            - bind: placed
+              eval: corestream.PartitionOf(record.Key, partitions)
+              to: corestream
+            - opt:
+                do:
+                  - set: partition, keyed
+                    value: placed, true
+                  - continue: true
+                when: "!keyed"
+            - opt:
+                do:
+                  - return: 0, false, partitionsMixed(i, partition, placed)
+                when: placed != partition
+          key: i
+          range: records
+          value: record
+      - return: partition, keyed, nil
+  - of: carve
+    steps:
+      - opt:
+          do:
+            - return: arena, nil
+          when: len(src) == 0
+      - bind: start
+        eval: len(arena)
+      - set: arena
+        value: append(arena, src...)
+      - return: arena, arena[start:len(arena):len(arena)]
+  - of: copyEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: copyEntries
+        kind: self
+      - id: recordBytes
+        kind: internal
+      - id: carve
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(entries) == 0
+      - var:
+          name: size
+          type: int64
+      - loop:
+          do:
+            - op: +=
+              set: size
+              to: recordBytes
+              value: recordBytes(entries[i].Record)
+          key: i
+          range: entries
+      - bind: out
+        eval: make([]corestream.EntryValue, len(entries))
+      - bind: arena
+        eval: make([]byte, 0, size)
+      - loop:
+          do:
+            - set: out[i]
+              value: entries[i]
+            - set: arena, out[i].Record.Key
+              to: carve
+              value: carve(arena, entries[i].Record.Key)
+            - set: arena, out[i].Record.Payload
+              to: carve
+              value: carve(arena, entries[i].Record.Payload)
+          key: i
+          range: entries
+      - return: out
+  - of: offsetField
+    participants:
+      - id: caller
+        kind: actor
+      - id: offsetField
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.String(key, strconv.FormatUint(uint64(offset), 10))
+        to: errs
+  - of: unknownPartition
+    participants:
+      - id: caller
+        kind: actor
+      - id: unknownPartition
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.UnknownPartition, errs.WrapParams{},
+          		errs.Int("partition", partition), errs.Int("partitions", partitions))
+        to: errs
+  - of: invalidBatchSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: invalidBatchSize
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.InvalidBatchSize, errs.WrapParams{},
+          		errs.String("field", field), errs.Int("value", value))
+        to: errs
+  - of: recordTooLarge
+    participants:
+      - id: caller
+        kind: actor
+      - id: recordTooLarge
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.RecordTooLarge, errs.WrapParams{},
+          		errs.Int("index", index), errs.Int64("size", size), errs.Int("max", maxRecord))
+        to: errs
+  - of: partitionsMixed
+    participants:
+      - id: caller
+        kind: actor
+      - id: partitionsMixed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.PartitionsMixed, errs.WrapParams{},
+          		errs.Int("index", index), errs.Int("partition", want), errs.Int("other", got))
+        to: errs
+  - of: offsetTrimmed
+    participants:
+      - id: caller
+        kind: actor
+      - id: offsetTrimmed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.OffsetTrimmed, errs.WrapParams{},
+          		offsetField("offset", offset), offsetField("first", first))
+        to: errs
+  - of: offsetAhead
+    participants:
+      - id: caller
+        kind: actor
+      - id: offsetAhead
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.OffsetAhead, errs.WrapParams{},
+          		offsetField("offset", offset), offsetField("next", next))
+        to: errs
+  - of: streamFull
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamFull
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.StreamFull, errs.WrapParams{},
+          		errs.Int64("size", size), errs.Int64("held", held), errs.Int64("max", maxBytes))
+        to: errs
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.StreamMisconfigured, errs.WrapParams{},
+          		errs.String("field", field))
+        to: errs
+  - of: unknownGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: unknownGroup
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.UnknownGroup, errs.WrapParams{},
+          		errs.String("group", group), errs.Int("partition", partition))
+        to: errs
+  - of: (*memPartition).next
+    steps:
+      - return: p.first + corestream.Offset(len(p.entries))
+  - of: NewMemory
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMemory
+        kind: self
+      - id: cfg.Policy.Validate
+        kind: value
+      - id: cfg.Policy.Normalized
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: cfg.Policy.Validate()
+            to: cfg.Policy.Validate
+          when: invalid != nil
+      - bind: policy
+        eval: cfg.Policy.Normalized()
+        to: cfg.Policy.Normalized
+      - return: |-
+          &memoryStream{
+          		clk:     clockOrSystem(cfg.Clock),
+          		wake:    newWakeSignal(),
+          		room:    newWakeSignal(),
+          		cursors: map[cursorKey]corestream.Offset{},
+          		parts:   make([]memPartition, policy.Partitions),
+          		policy:  policy,
+          	}, nil
+  - of: (*memoryStream).Partitions
+    steps:
+      - return: len(m.parts)
+  - of: (*memoryStream).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Append
+        kind: self
+      - id: admit
+        kind: internal
+      - id: keyedPartition
+        kind: internal
+      - id: m.reserve
+        kind: internal
+      - id: m.mu.Unlock
+        kind: value
+      - id: m.store
+        kind: internal
+      - id: m.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, context.Cause(ctx)
+          when: ctx.Err() != nil
+      - bind: size, refused
+        eval: admit(records, m.policy.MaxRecordBytes)
+        to: admit
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, refused
+          when: refused != nil
+      - bind: partition, keyed, mixed
+        eval: keyedPartition(records, len(m.parts))
+        to: keyedPartition
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, mixed
+          when: mixed != nil
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, full
+          init:
+            bind: full
+            eval: m.reserve(ctx, size)
+            to: m.reserve
+          when: full != nil
+      - defer: m.mu.Unlock()
+        to: m.mu.Unlock
+      - opt:
+          do:
+            - set: partition
+              value: m.turn
+            - set: m.turn
+              value: (m.turn + 1) % len(m.parts)
+          when: "!keyed"
+      - bind: appended
+        eval: m.store(partition, records, size)
+        to: m.store
+      - eval: m.wake.fire()
+        to: m.wake.fire
+      - return: appended, nil
+  - of: (*memoryStream).store
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).store
+        kind: self
+      - id: part.next
+        kind: internal
+      - id: m.stamp
+        kind: internal
+      - id: carve
+        kind: internal
+      - id: m.retainBytes
+        kind: internal
+    steps:
+      - bind: part
+        eval: "&m.parts[partition]"
+      - bind: first
+        eval: part.next()
+        to: part.next
+      - bind: stamp
+        eval: m.stamp()
+        to: m.stamp
+      - bind: arena
+        eval: make([]byte, 0, size)
+      - loop:
+          do:
+            - leaf: a var of several names, or of no type
+              stmt: var key, payload []byte
+            - set: arena, key
+              to: carve
+              value: carve(arena, record.Key)
+            - set: arena, payload
+              to: carve
+              value: carve(arena, record.Payload)
+            - set: part.entries
+              value: |-
+                append(part.entries, corestream.EntryValue{
+                			AppendedAt: stamp,
+                			Record:     corestream.RecordValue{Key: key, Payload: payload},
+                			Partition:  partition,
+                			Offset:     first + corestream.Offset(i),
+                		})
+          key: i
+          range: records
+          value: record
+      - op: +=
+        set: part.bytes
+        value: size
+      - op: +=
+        set: m.held
+        value: size
+      - eval: m.retainBytes(part, len(records))
+        to: m.retainBytes
+      - return: |-
+          corestream.AppendValue{
+          		Partition: partition,
+          		First:     first,
+          		Last:      first + corestream.Offset(len(records)-1),
+          	}
+  - of: (*memoryStream).stamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).stamp
+        kind: self
+      - id: m.clk.Now
+        kind: value
+    steps:
+      - bind: now
+        eval: m.clk.Now()
+        to: m.clk.Now
+      - opt:
+          do:
+            - set: now
+              value: m.last
+          when: now.Before(m.last)
+      - set: m.last
+        value: now
+      - return: now
+  - of: (*memoryStream).Commit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Commit
+        kind: self
+      - id: misconfigured
+        kind: internal
+      - id: m.checkPartition
+        kind: internal
+      - id: m.parts[partition].next
+        kind: internal
+      - id: offsetAhead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: misconfigured("group")
+              to: misconfigured
+          when: group == ""
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - lock:
+          mutex: m.mu
+      - opt:
+          do:
+            - return: offsetAhead(next, head)
+              to: offsetAhead
+          init:
+            bind: head
+            eval: m.parts[partition].next()
+            to: m.parts[partition].next
+          when: next > head
+      - set: "m.cursors[cursorKey{group: group, partition: partition}]"
+        value: next
+      - return: nil
+  - of: (*memoryStream).Committed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Committed
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, misconfigured("group")
+          when: group == ""
+      - opt:
+          do:
+            - return: 0, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: next, found
+        eval: "m.cursors[cursorKey{group: group, partition: partition}]"
+      - opt:
+          do:
+            - return: 0, unknownGroup(group, partition)
+          when: "!found"
+      - return: next, nil
+  - of: clockOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: clk == nil
+      - return: clk
+  - of: (*memoryStream).checkPartition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).checkPartition
+        kind: self
+      - id: unknownPartition
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: unknownPartition(partition, len(m.parts))
+              to: unknownPartition
+          when: partition < 0 || partition >= len(m.parts)
+      - return: nil
+  - of: (*memoryStream).retained
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).retained
+        kind: self
+      - id: m.expired
+        kind: internal
+    steps:
+      - bind: skip
+        eval: m.expired(part, now)
+        to: m.expired
+      - return: part.first + corestream.Offset(skip), skip
+  - of: (*memoryStream).expired
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).expired
+        kind: self
+      - id: sort
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: m.policy.RetainFor == 0
+      - return: |-
+          sort.Search(len(part.entries), func(i int) bool {
+          		//: younger than RetainFor: kept.
+          		return now.Sub(part.entries[i].AppendedAt) < m.policy.RetainFor
+          	})
+        to: sort
+  - of: (*memoryStream).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Read
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.retained
+        kind: internal
+      - id: copyEntries
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: nil, invalidBatchSize("max", maxEntries)
+          when: maxEntries <= 0
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: part
+        eval: "&m.parts[partition]"
+      - bind: first, skip
+        eval: m.retained(part, m.clk.Now())
+        to: m.retained
+      - opt:
+          do:
+            - return: nil, offsetTrimmed(from, first)
+          when: from < first
+      - opt:
+          do:
+            - return: nil, offsetAhead(from, part.next())
+          when: from > part.next()
+      - bind: start
+        eval: skip + int(from-first)
+      - bind: end
+        eval: min(start+maxEntries, len(part.entries))
+      - return: copyEntries(part.entries[start:end]), nil
+        to: copyEntries
+  - of: (*memoryStream).Bounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Bounds
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.retained
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: part
+        eval: "&m.parts[partition]"
+      - bind: first, _
+        eval: m.retained(part, m.clk.Now())
+        to: m.retained
+      - return: "corestream.BoundsValue{First: first, Next: part.next()}, nil"
+  - of: (*memoryStream).OffsetAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).OffsetAt
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.retained
+        kind: internal
+      - id: sort
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: part
+        eval: "&m.parts[partition]"
+      - bind: first, skip
+        eval: m.retained(part, m.clk.Now())
+        to: m.retained
+      - bind: kept
+        eval: part.entries[skip:]
+      - bind: found
+        eval: |-
+          sort.Search(len(kept), func(i int) bool {
+          		//: at or after t.
+          		return !kept[i].AppendedAt.Before(t)
+          	})
+        to: sort
+      - return: first + corestream.Offset(found), nil
+  - of: (*memoryStream).Wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Wake
+        kind: self
+      - id: m.wake.current
+        kind: internal
+    steps:
+      - return: m.wake.current()
+        to: m.wake.current
+  - of: (*memoryStream).reserve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).reserve
+        kind: self
+      - id: m.mu.Lock
+        kind: value
+      - id: m.clk.Now
+        kind: value
+      - id: m.expireAll
+        kind: internal
+      - id: now.Add
+        kind: value
+      - id: deadline.Sub
+        kind: value
+      - id: streamFull
+        kind: internal
+      - id: m.mu.Unlock
+        kind: value
+      - id: m.untilExpiry
+        kind: internal
+      - id: m.room.current
+        kind: internal
+      - id: m.await
+        kind: internal
+    steps:
+      - var:
+          name: deadline
+          type: time.Time
+      - loop:
+          do:
+            - eval: m.mu.Lock()
+              to: m.mu.Lock
+            - bind: now
+              eval: m.clk.Now()
+              to: m.clk.Now
+            - eval: m.expireAll(now)
+              to: m.expireAll
+            - opt:
+                do:
+                  - return: nil
+                when: m.policy.MaxBytes == 0 || m.held+size <= m.policy.MaxBytes
+            - opt:
+                do:
+                  - set: deadline
+                    to: now.Add
+                    value: now.Add(m.policy.BlockTimeout)
+                when: deadline.IsZero()
+            - bind: remaining
+              eval: deadline.Sub(now)
+              to: deadline.Sub
+            - opt:
+                do:
+                  - bind: full
+                    eval: streamFull(size, m.held, m.policy.MaxBytes)
+                    to: streamFull
+                  - eval: m.mu.Unlock()
+                    to: m.mu.Unlock
+                  - return: full
+                when: remaining <= 0 || size > m.policy.MaxBytes
+            - bind: wait
+              eval: m.untilExpiry(now, remaining)
+              to: m.untilExpiry
+            - bind: room
+              eval: m.room.current()
+              to: m.room.current
+            - eval: m.mu.Unlock()
+              to: m.mu.Unlock
+            - opt:
+                do:
+                  - return: stopped
+                init:
+                  bind: stopped
+                  eval: m.await(ctx, room, wait)
+                  to: m.await
+                when: stopped != nil
+          forever: true
+  - of: (*memoryStream).untilExpiry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).untilExpiry
+        kind: self
+      - id: m.parts[i].entries[0].AppendedAt.Add(m.policy.RetainFor).Sub
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: limit
+          when: m.policy.RetainFor == 0
+      - bind: wait
+        eval: limit
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: len(m.parts[i].entries) == 0
+            - bind: due
+              eval: m.parts[i].entries[0].AppendedAt.Add(m.policy.RetainFor).Sub(now)
+              to: m.parts[i].entries[0].AppendedAt.Add(m.policy.RetainFor).Sub
+            - opt:
+                do:
+                  - set: wait
+                    value: due
+                when: due > 0 && due < wait
+          key: i
+          range: m.parts
+      - return: wait
+  - of: (*memoryStream).await
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).await
+        kind: self
+      - id: m.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: context
+        kind: stdlib
+    steps:
+      - bind: timer
+        eval: m.clk.NewTimer(wait)
+        to: m.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: context.Cause(ctx)
+                  to: context
+            - comm: <-room
+              do:
+                - return: nil
+            - comm: <-timer.C()
+              do:
+                - return: nil
+  - of: (*memoryStream).expireAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).expireAll
+        kind: self
+      - id: m.drop
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: m.drop(&m.parts[i], m.expired(&m.parts[i], now))
+              to: m.drop
+          key: i
+          range: m.parts
+  - of: (*memoryStream).retainBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).retainBytes
+        kind: self
+      - id: recordBytes
+        kind: internal
+      - id: m.drop
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: m.policy.RetainBytes == 0
+      - bind: excess
+        eval: part.bytes - m.policy.RetainBytes
+      - bind: count
+        eval: "0"
+      - loop:
+          cond: count < len(part.entries)-fresh && excess > 0
+          do:
+            - op: "-="
+              set: excess
+              to: recordBytes
+              value: recordBytes(part.entries[count].Record)
+            - op: ++
+              set: count
+      - eval: m.drop(part, count)
+        to: m.drop
+  - of: (*memoryStream).drop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).drop
+        kind: self
+      - id: recordBytes
+        kind: internal
+      - id: corestream
+        kind: package
+      - id: m.room.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: count == 0
+      - var:
+          name: freed
+          type: int64
+      - loop:
+          do:
+            - op: +=
+              set: freed
+              to: recordBytes
+              value: recordBytes(part.entries[i].Record)
+            - set: part.entries[i]
+              value: corestream.EntryValue{}
+          key: i
+          range: count
+      - set: part.entries
+        value: part.entries[count:]
+      - opt:
+          do:
+            - set: part.entries
+              value: nil
+          when: len(part.entries) == 0
+      - op: +=
+        set: part.first
+        to: corestream
+        value: corestream.Offset(count)
+      - op: "-="
+        set: part.bytes
+        value: freed
+      - op: "-="
+        set: m.held
+        value: freed
+      - eval: m.room.fire()
+        to: m.room.fire
+  - of: (*memoryStream).Trim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Trim
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.drop
+        kind: internal
+      - id: offsetAhead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - lock:
+          mutex: m.mu
+      - bind: part
+        eval: "&m.parts[partition]"
+      - eval: m.drop(part, m.expired(part, m.clk.Now()))
+        to: m.drop
+      - opt:
+          do:
+            - return: offsetAhead(before, part.next())
+              to: offsetAhead
+          when: before > part.next()
+      - opt:
+          do:
+            - return: nil
+          when: before <= part.first
+      - eval: m.drop(part, int(before-part.first))
+        to: m.drop
+      - return: nil
+  - of: newWakeSignal
+    steps:
+      - return: "&wakeSignal{ch: make(chan struct{})}"
+  - of: (*wakeSignal).current
+    steps:
+      - lock:
+          mutex: w.mu
+      - return: w.ch
+  - of: (*wakeSignal).fire
+    steps:
+      - lock:
+          mutex: w.mu
+      - bind: fired
+        eval: w.ch
+      - set: w.ch
+        value: make(chan struct{})
+      - eval: close(fired)

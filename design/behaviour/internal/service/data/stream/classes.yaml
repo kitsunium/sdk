@@ -1,12 +1,452 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 files:
+  - decls:
+      - admit
+      - recordBytes
+      - keyedPartition
+      - carve
+      - copyEntries
+    name: batch.go
   - decls: []
     name: doc.go
-imports: {}
+  - decls:
+      - offsetField
+      - unknownPartition
+      - invalidBatchSize
+      - recordTooLarge
+      - partitionsMixed
+      - offsetTrimmed
+      - offsetAhead
+      - streamFull
+      - misconfigured
+      - unknownGroup
+    name: errors.go
+  - decls:
+      - memPartition
+      - (*memPartition).next
+      - cursorKey
+      - memoryStream
+      - NewMemory
+      - (*memoryStream).Partitions
+      - (*memoryStream).Append
+      - (*memoryStream).store
+      - (*memoryStream).stamp
+    name: memory.go
+  - decls:
+      - (*memoryStream).Commit
+      - (*memoryStream).Committed
+    name: memory_commit.go
+  - decls:
+      - _
+    name: memory_compliance.go
+  - decls:
+      - MemoryConfig
+      - clockOrSystem
+    name: memory_config.go
+  - decls:
+      - (*memoryStream).checkPartition
+      - (*memoryStream).retained
+      - (*memoryStream).expired
+      - (*memoryStream).Read
+      - (*memoryStream).Bounds
+      - (*memoryStream).OffsetAt
+      - (*memoryStream).Wake
+    name: memory_read.go
+  - decls:
+      - (*memoryStream).reserve
+      - (*memoryStream).untilExpiry
+      - (*memoryStream).await
+      - (*memoryStream).expireAll
+      - (*memoryStream).retainBytes
+      - (*memoryStream).drop
+      - (*memoryStream).Trim
+    name: memory_retain.go
+  - decls:
+      - wakeSignal
+      - newWakeSignal
+      - (*wakeSignal).current
+      - (*wakeSignal).fire
+    name: wake.go
+functions:
+  - doc: |-
+      admit checks a batch before anything is written: at least one record, and
+      none above maxRecord bytes, key and payload together. It returns the bytes
+      the whole batch holds.
+    name: admit
+    params: records []corestream.RecordValue, maxRecord int
+    results: size int64, err error
+  - doc: |-
+      recordBytes returns what a record counts against every bound: its key and
+      payload together.
+    name: recordBytes
+    params: record corestream.RecordValue
+    results: int64
+  - doc: |-
+      keyedPartition returns the partition a batch's keys name, and whether any
+      record is keyed at all. Keyed records naming two partitions are refused:
+      a batch is one partition's, written under one sync.
+    name: keyedPartition
+    params: |2
+
+      	records []corestream.RecordValue, partitions int,
+    results: partition int, keyed bool, err error
+  - doc: |-
+      carve appends src to arena and returns the arena and the copy, capped so an
+      append to the copy cannot run into the next one. An empty src stays nil.
+    name: carve
+    params: arena, src []byte
+    results: grown, copied []byte
+  - doc: |-
+      copyEntries returns a copy of entries a reader may keep and modify: one
+      slice of entries and one buffer for every byte they hold.
+    name: copyEntries
+    params: entries []corestream.EntryValue
+    results: "[]corestream.EntryValue"
+  - doc: |-
+      offsetField renders an offset as a field: in decimal, exactly, whatever
+      its size.
+    name: offsetField
+    params: key string, offset corestream.Offset
+    results: errs.FieldValue
+  - doc: unknownPartition refuses a partition outside [0, partitions).
+    name: unknownPartition
+    params: partition, partitions int
+    results: error
+  - doc: invalidBatchSize refuses an empty batch or a non-positive read size.
+    name: invalidBatchSize
+    params: field string, value int
+    results: error
+  - doc: recordTooLarge refuses the batch holding record index, of size bytes.
+    name: recordTooLarge
+    params: index int, size int64, maxRecord int
+    results: error
+  - doc: |-
+      partitionsMixed refuses a batch whose record index hashes to got while the
+      batch's first keyed record hashed to want.
+    name: partitionsMixed
+    params: index, want, got int
+    results: error
+  - doc: offsetTrimmed refuses a read from offset, below first.
+    name: offsetTrimmed
+    params: offset, first corestream.Offset
+    results: error
+  - doc: offsetAhead refuses an offset past next.
+    name: offsetAhead
+    params: offset, next corestream.Offset
+    results: error
+  - doc: |-
+      streamFull refuses an Append of size bytes that found no room under
+      maxBytes while held bytes were retained.
+    name: streamFull
+    params: size, held, maxBytes int64
+    results: error
+  - doc: misconfigured refuses an argument with no usable value.
+    name: misconfigured
+    params: field string
+    results: error
+  - doc: unknownGroup answers a Committed for a group with no cursor on partition.
+    name: unknownGroup
+    params: group string, partition int
+    results: error
+  - name: NewMemory
+    params: cfg MemoryConfig
+    results: s corestream.Stream, err error
+  - doc: clockOrSystem resolves a nil clock to the wall clock.
+    name: clockOrSystem
+    params: clk clock.Timed
+    results: clock.Timed
+  - doc: newWakeSignal returns a signal with its first channel armed.
+    name: newWakeSignal
+    results: "*wakeSignal"
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  corestream: github.com/kitsunium/sdk/internal/core/data/stream
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  sort: sort
+  strconv: strconv
+  sync: sync
+  time: time
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/stream
   name: stream
   purpose: Package stream holds the engines of core/data/stream's [Stream] port — memory, a directory of segments over kernel/fs/seglog, and a SQL table joined to the caller's transaction — and the subscriber that reads a stream on behalf of a consumer group (ADR 0231).
-types: []
+types:
+  - doc: |-
+      memPartition is one partition of a memory stream: its retained entries, in
+      offset order, and the offset of the first of them.
+    fields:
+      - doc: entries holds the retained records; entries[i].Offset is first + i.
+        name: entries
+        type: "[]corestream.EntryValue"
+      - doc: |-
+          first is the lowest offset still readable. Trimming raises it; nothing
+          lowers it, and it stays put when entries is empty, so the next offset
+          (first + len(entries)) never moves back.
+        name: first
+        type: corestream.Offset
+      - doc: bytes is the key and payload bytes the retained entries hold.
+        name: bytes
+        type: int64
+    kind: struct
+    methods:
+      - doc: next returns the offset the partition's next record will take.
+        name: next
+        recv: p *memPartition
+        results: corestream.Offset
+    name: memPartition
+  - doc: cursorKey names one group's cursor on one partition.
+    fields:
+      - name: group
+        type: string
+      - name: partition
+        type: int
+    kind: struct
+    name: cursorKey
+  - doc: |-
+      memoryStream is a stream that lives entirely in one process's heap.
+
+      # What it is for, and what it is not
+
+      It is the test double. A consumer's suite gets the port's semantics —
+      contiguous offsets, per-key placement, retention, every refusal — with no
+      directory and no flush, and the conformance suite holds it to the same
+      cases as every durable engine, so it cannot drift from them. It is NOT a
+      durable stream: a restart is a total loss. Use the file or the SQL engine.
+
+      Retention by age is LAZY, as on the file engine: nothing here runs a timer.
+      A read computes the first record still young enough and skips the rest; an
+      Append, a Trim or a backpressure wait removes them for good.
+    fields:
+      - doc: |-
+          last is the latest instant a batch was stamped with: AppendedAt never
+          goes backwards, so a partition's entries stay sorted by it and
+          OffsetAt and the age retention can binary-search them.
+        name: last
+        type: time.Time
+      - name: clk
+        type: clock.Timed
+      - doc: wake is closed by every Append (corestream.Waker).
+        name: wake
+        type: "*wakeSignal"
+      - doc: |-
+          room is closed whenever records are removed, which is what an Append
+          waiting under PolicyValue.MaxBytes waits for.
+        name: room
+        type: "*wakeSignal"
+      - doc: cursors holds every group's committed offset (corestream.Committer).
+        name: cursors
+        type: map[cursorKey]corestream.Offset
+      - name: parts
+        type: "[]memPartition"
+      - name: policy
+        type: corestream.PolicyValue
+      - doc: held is the bytes every partition retains, the figure MaxBytes bounds.
+        name: held
+        type: int64
+      - doc: turn is the partition the next unkeyed batch goes to.
+        name: turn
+        type: int
+      - doc: |-
+          mu is an RWMutex because Read, Bounds, OffsetAt and Committed are
+          genuine reads: retention by age is computed, not applied, under it.
+        name: mu
+        type: sync.RWMutex
+    kind: struct
+    methods:
+      - doc: Partitions returns how many partitions the stream has.
+        name: Partitions
+        recv: m *memoryStream
+        results: int
+      - doc: Append writes records to one partition as one batch.
+        name: Append
+        params: |2
+
+          	ctx context.Context, records []corestream.RecordValue,
+        recv: m *memoryStream
+        results: corestream.AppendValue, error
+      - doc: |-
+          store copies records into partition as one batch stamped with one instant,
+          then applies RetainBytes to that partition. The caller holds the lock.
+        name: store
+        params: |2
+
+          	partition int, records []corestream.RecordValue, size int64,
+        recv: m *memoryStream
+        results: corestream.AppendValue
+      - doc: |-
+          stamp returns the instant the batch being appended is stamped with: the
+          clock's, or the last stamp when the clock went backwards.
+        name: stamp
+        recv: m *memoryStream
+        results: time.Time
+      - doc: Commit records next as the offset group reads next on partition.
+        name: Commit
+        params: |2
+
+          	_ context.Context, group string, partition int, next corestream.Offset,
+        recv: m *memoryStream
+        results: error
+      - doc: Committed returns the offset group committed last on partition.
+        name: Committed
+        params: |2
+
+          	_ context.Context, group string, partition int,
+        recv: m *memoryStream
+        results: corestream.Offset, error
+      - doc: checkPartition refuses a partition outside [0, Partitions()).
+        name: checkPartition
+        params: partition int
+        recv: m *memoryStream
+        results: error
+      - doc: |-
+          retained returns the offset of partition's first record still young enough
+          to read at now, and the index of that record in its entries. The caller
+          holds the lock, shared or exclusive.
+        name: retained
+        params: part *memPartition, now time.Time
+        recv: m *memoryStream
+        results: corestream.Offset, int
+      - doc: |-
+          expired returns how many of partition's oldest entries are past
+          PolicyValue.RetainFor at now: a record expires once its age reaches the
+          bound. The entries are sorted by AppendedAt (stamp), so it is a search.
+        name: expired
+        params: part *memPartition, now time.Time
+        recv: m *memoryStream
+        results: int
+      - doc: Read returns up to maxEntries entries of partition from offset from on.
+        name: Read
+        params: |2
+
+          	_ context.Context, partition int, from corestream.Offset, maxEntries int,
+        recv: m *memoryStream
+        results: "[]corestream.EntryValue, error"
+      - doc: Bounds returns partition's first retained offset and its next one.
+        name: Bounds
+        params: _ context.Context, partition int
+        recv: m *memoryStream
+        results: corestream.BoundsValue, error
+      - doc: OffsetAt returns partition's first offset appended at or after t.
+        name: OffsetAt
+        params: |2
+
+          	_ context.Context, partition int, t time.Time,
+        recv: m *memoryStream
+        results: corestream.Offset, error
+      - doc: Wake returns the channel the next Append closes.
+        name: Wake
+        recv: m *memoryStream
+        results: <-chan struct{}
+      - doc: |-
+          reserve waits until size more bytes fit under PolicyValue.MaxBytes and
+          returns with the lock held; on a refusal it returns with the lock released.
+
+          Room appears only when records are removed — by retention by age, by Trim —
+          so it waits for whichever comes first: a removal (room), the oldest record
+          reaching its age, the end of BlockTimeout, or ctx.
+        name: reserve
+        params: ctx context.Context, size int64
+        recv: m *memoryStream
+        results: error
+      - doc: |-
+          untilExpiry returns how long until the oldest retained record of any
+          partition expires, capped at limit. The caller holds the lock.
+        name: untilExpiry
+        params: now time.Time, limit time.Duration
+        recv: m *memoryStream
+        results: time.Duration
+      - doc: await waits for room, for wait on the stream's clock, or for ctx.
+        name: await
+        params: ctx context.Context, room <-chan struct{}, wait time.Duration
+        recv: m *memoryStream
+        results: error
+      - doc: |-
+          expireAll removes, from every partition, the records past RetainFor at
+          now. The caller holds the lock exclusively.
+        name: expireAll
+        params: now time.Time
+        recv: m *memoryStream
+      - doc: |-
+          retainBytes removes part's oldest records while it holds more than
+          PolicyValue.RetainBytes, sparing the newest batch of fresh records: a
+          batch just acknowledged as appended is never trimmed by its own Append.
+        name: retainBytes
+        params: part *memPartition, fresh int
+        recv: m *memoryStream
+      - doc: |-
+          drop removes part's count oldest records, releasing their bytes, and wakes
+          an Append waiting for room. The caller holds the lock exclusively.
+        name: drop
+        params: part *memPartition, count int
+        recv: m *memoryStream
+      - doc: Trim makes before the first offset partition retains.
+        name: Trim
+        params: _ context.Context, partition int, before corestream.Offset
+        recv: m *memoryStream
+        results: error
+    name: memoryStream
+  - fields:
+      - doc: |-
+          Clock stamps [corestream.EntryValue].AppendedAt, ages records for
+          [corestream.PolicyValue].RetainFor, and times the wait
+          [corestream.PolicyValue].BlockTimeout allows, so a test drives
+          retention and backpressure with a ManualClock and no sleeping. Nil
+          means clock.System.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          Policy is what the stream enforces. Its zero value works: one
+          partition, records of up to corestream.DefaultMaxRecordBytes, kept
+          forever, never full.
+        name: Policy
+        type: corestream.PolicyValue
+    kind: struct
+    name: MemoryConfig
+  - doc: |-
+      wakeSignal is a broadcast: every reader waiting on the channel wakes when it
+      is closed, and a fresh channel is armed for the next wait. A channel closed
+      and replaced, rather than one value sent, is what makes it a broadcast — a
+      send wakes one receiver and is lost if nobody is receiving. It is
+      internal/service/data/queue's wakeSignal without the due instant, which a
+      stream has no use for: no record of a stream becomes readable on its own.
+    fields:
+      - doc: ch is the channel handed out until the next fire.
+        name: ch
+        type: chan struct{}
+      - name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: current returns the channel the next fire will close.
+        name: current
+        recv: w *wakeSignal
+        results: <-chan struct{}
+      - doc: fire wakes every reader waiting on the current channel and arms the next.
+        name: fire
+        recv: w *wakeSignal
+    name: wakeSignal
+vars:
+  - doc: |-
+      The memory engine answers the port and four of its siblings; Compactor is
+      left to the engines that keep segments or rows to rewrite (#824).
+    grouped: true
+    items:
+      - name: _
+        type: corestream.Stream
+        value: (*memoryStream)(nil)
+      - name: _
+        type: corestream.Waker
+        value: (*memoryStream)(nil)
+      - name: _
+        type: corestream.Seeker
+        value: (*memoryStream)(nil)
+      - name: _
+        type: corestream.Trimmer
+        value: (*memoryStream)(nil)
+      - name: _
+        type: corestream.Committer
+        value: (*memoryStream)(nil)
+    name: _
