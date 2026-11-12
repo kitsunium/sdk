@@ -112,3 +112,49 @@ is >= 1.00 and its Sync p99 ratio's upper bound is <= 1.00.
 Not measured on 2026-11-12: the change was written on a macOS host whose
 Docker could not start and whose disk was full, so the lane did not run.
 `SyncFdatasync` stays the default everywhere until a row meets the gate.
+
+## The apply side: applied1 (#1109)
+
+From `applied_bench_test.go`; refresh with `cd internal && go test -run='^$' -bench=BenchmarkApplied1 -benchmem -benchtime=1s ./service/app/consensus/`.
+
+The apply side of `Propose -> applied` (ADR 0152 D15): `applied1` runs once
+per applied entry on the apply goroutine. Its cost must not grow with what
+waits on it — the parked `Barrier` and `WaitApplied` callers, released from a
+min-heap only when their index is reached — nor with an outstanding forward,
+whose result is kept in a fixed ring of 4 096 slots (#1109). The race-off
+alloc lane holds the zero (`TestApplied1KeepsAResultWithoutAllocating`).
+
+### Reproducibility envelope
+
+> **Numbers vary across machines.** This report stamps the box that produced
+> them so cross-machine deltas can be evaluated honestly. The box was shared
+> with other builds while it ran: read ns/op as an order of magnitude, the
+> allocation count as exact.
+
+| Dimension | Value |
+|---|---|
+| CPU cores          | 10 (Apple M1 Pro) |
+| RAM                | 16 GiB |
+| OS / kernel        | Darwin 25.6.0 |
+| Architecture       | arm64 |
+| Go toolchain       | go1.27.3 darwin/arm64 |
+| Git branch         | `feat/sdk-lot-1-c-loop` |
+| Git commit         | `8219ffc28` (pre-commit) |
+| Generated (UTC)    | 2026-11-12 |
+| Bench wall-clock   | `-test.benchtime=1s`, single run |
+| Fixture            | one forward outstanding (`keepResults = 1`), one caller parked at index 2^62, nil results |
+
+### Results
+
+```
+BenchmarkApplied1WithAForwardOutstanding-10    	83174492	        17.58 ns/op	       0 B/op	       0 allocs/op
+```
+
+### Reading
+
+- **0 allocs/op** per applied command of a nil result with a forward
+  outstanding: one store into the ring slot `index % 4096`, and one look at
+  the head of the waiter heap, which holds a caller not yet due.
+- Before #1109 the same entry wrote the `results` map, appended to
+  `resultOrder` and, past 4 096 entries, deleted the oldest and resliced its
+  head, then broadcast to every parked caller.

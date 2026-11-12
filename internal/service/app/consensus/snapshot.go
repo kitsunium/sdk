@@ -65,7 +65,7 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 		n.am.Lock()
 		n.applied, n.appliedTerm = m.Position.Index, m.Position.Term
 		n.answerCovered(m.Position.Index)
-		n.acond.Broadcast()
+		n.releaseApplied()
 		n.am.Unlock()
 	}
 	n.snapState.mu.Lock()

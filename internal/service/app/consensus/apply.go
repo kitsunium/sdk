@@ -1,10 +1,12 @@
 package consensus
 
 import (
+	"cmp"
 	"fmt"
 	"sync"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/collections/heap"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 )
@@ -363,7 +365,9 @@ func (n *Node) answerCovered(index uint64) {
 }
 
 // applied1 records one applied entry and answers the Propose that created
-// it on this node.
+// it on this node. Its cost is independent of how many callers wait: it
+// releases only the parked ones its index reaches, and keeps its result in
+// a ring slot while a forward is outstanding (#1109).
 func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {
 	n.am.Lock()
 	n.applied = e.Position.Index
@@ -372,14 +376,9 @@ func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {
 	w := n.waiters[e.Position.Index]
 	delete(n.waiters, e.Position.Index)
 	if n.keepResults > 0 {
-		n.results[e.Position.Index] = applyResult{term: e.Position.Term, val: val}
-		n.resultOrder = append(n.resultOrder, e.Position.Index)
-		for len(n.resultOrder) > 4096 {
-			delete(n.results, n.resultOrder[0])
-			n.resultOrder = n.resultOrder[1:]
-		}
+		n.results[e.Position.Index%resultRing] = applyResult{index: e.Position.Index, term: e.Position.Term, val: val}
 	}
-	n.acond.Broadcast()
+	n.releaseApplied()
 	n.am.Unlock()
 	if w == nil {
 		return
@@ -397,38 +396,62 @@ func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {
 	w.done <- propResult{tok: tok, val: val}
 }
 
-// waitApplied blocks until index is applied, the node stops, or done closes.
-// It launches one goroutine that turns done or the loop's end into a
-// broadcast on the apply condition, since a sync.Cond cannot select; that
-// goroutine ends after that one broadcast or, through stopWake, as soon as
-// waitApplied returns, so none accumulates across calls.
-func (n *Node) waitApplied(done <-chan struct{}, index uint64) bool {
-	stopWake := make(chan struct{})
-	defer close(stopWake)
-	go func() {
-		select {
-		case <-done:
-		case <-n.loopDone:
-		case <-stopWake:
+// keptResult is the Apply result kept at index, if its ring slot still
+// holds that index's. The caller holds am.
+func (n *Node) keptResult(index uint64) (applyResult, bool) {
+	if n.results == nil {
+		return applyResult{}, false
+	}
+	r := n.results[index%resultRing]
+	return r, r.index == index && index != 0
+}
+
+// releaseApplied releases every parked caller whose index is applied, and
+// no other: a caller is woken once, when its wait is over, never to check
+// again (#1109). The caller holds am.
+func (n *Node) releaseApplied() {
+	if n.appliedQ == nil {
+		return
+	}
+	for {
+		w, _, ok := n.appliedQ.Peek()
+		if !ok || w.index > n.applied {
 			return
 		}
-		n.am.Lock()
-		n.acond.Broadcast()
+		n.appliedQ.Pop()
+		if n.onRelease != nil {
+			n.onRelease(w.index, n.applied)
+		}
+		w.ch <- struct{}{}
+	}
+}
+
+// waitApplied blocks until index is applied, the node stops, or done closes.
+// A caller not yet due parks in appliedQ and selects on its own release,
+// done and the loop's end: no goroutine is launched, and one that gives up
+// takes its waiter out of the queue (#1109).
+func (n *Node) waitApplied(done <-chan struct{}, index uint64) bool {
+	n.am.Lock()
+	if n.applied >= index {
 		n.am.Unlock()
-	}()
+		return true
+	}
+	if n.appliedQ == nil {
+		n.appliedQ = heap.NewIndexed(func(a, b *appliedWaiter) int { return cmp.Compare(a.index, b.index) })
+	}
+	w := &appliedWaiter{index: index, ch: make(chan struct{}, 1)}
+	h := n.appliedQ.Push(w)
+	n.am.Unlock()
+	select {
+	case <-w.ch:
+		return true
+	case <-done:
+	case <-n.loopDone:
+	}
 	n.am.Lock()
 	defer n.am.Unlock()
-	for n.applied < index {
-		select {
-		case <-done:
-			return false
-		case <-n.loopDone:
-			return false
-		default:
-		}
-		n.acond.Wait()
-	}
-	return true
+	n.appliedQ.Remove(h)
+	return n.applied >= index
 }
 
 // unsupportedKind stops a node that meets an entry kind it does not know

@@ -14,6 +14,7 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/collections/heap"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
@@ -104,12 +105,23 @@ type Node struct {
 	status atomic.Pointer[coreconsensus.StatusValue]
 
 	am          sync.Mutex
-	acond       *sync.Cond
 	applied     uint64
 	appliedTerm uint64
 	waiters     map[uint64]*proposal
-	results     map[uint64]applyResult
-	resultOrder []uint64
+	// appliedQ holds the Barrier and WaitApplied callers parked on an
+	// index not yet applied, lowest first: an applied entry releases only
+	// those it reaches, O(1) when none is due (#1109). nil until the first
+	// caller parks.
+	appliedQ *heap.IndexedHeap[*appliedWaiter]
+	// onRelease, nil but in tests, sees every parked caller applied1 or a
+	// restore releases, with the index applied then.
+	onRelease func(want, applied uint64)
+	// results is the ring of the last resultRing Apply results, kept
+	// while a forward is outstanding (keepResults > 0) for the forward
+	// answered after its index was applied: slot index % resultRing,
+	// carrying its index, so recording one is a store with no map and no
+	// reslice (#1109). nil until the first forward.
+	results     *[resultRing]applyResult
 	keepResults int
 
 	pendingBytes atomic.Int64
@@ -253,9 +265,23 @@ type snapState struct {
 	positioning string
 }
 
+// resultRing is how many Apply results a node keeps for its outstanding
+// forwards.
+const resultRing = 4096
+
+// applyResult is one kept Apply result: index names the slot's entry, zero
+// when the slot was never written.
 type applyResult struct {
-	term uint64
-	val  any
+	index uint64
+	term  uint64
+	val   any
+}
+
+// appliedWaiter is one caller parked until index is applied: ch, one slot,
+// receives its release.
+type appliedWaiter struct {
+	index uint64
+	ch    chan struct{}
 }
 
 type proposal struct {
@@ -460,11 +486,9 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		inCtrl: make(chan coreconsensus.MessageValue, inboxDepth), inData: make(chan coreconsensus.MessageValue, inboxDepth),
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](), readq: newFifo[*readWait](),
-		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+		waiters: map[uint64]*proposal{}, forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
-	n.acond = sync.NewCond(&n.am)
 	ident := stamp.Log
 	n.ident.Store(&ident)
 	return n
@@ -2408,7 +2432,6 @@ func (n *Node) failAllOnStop() {
 		delete(n.waiters, idx)
 		p.done <- propResult{err: outcomeUnknown("node stopped")}
 	}
-	n.acond.Broadcast()
 	n.am.Unlock()
 }
 
@@ -2433,9 +2456,6 @@ func (n *Node) Close(ctx context.Context) error {
 	n.stopped.Store(true)
 	n.closeOnce.Do(func() { close(n.stopc) })
 	n.wg.Wait()
-	n.am.Lock()
-	n.acond.Broadcast()
-	n.am.Unlock()
 	n.releaseDir()
 	return nil
 }
@@ -2522,9 +2542,6 @@ func (n *Node) HardClose() error {
 		// A goroutine stuck in fdatasync is abandoned, and the directory
 		// stays held until the process exits (R7-11).
 	}
-	n.am.Lock()
-	n.acond.Broadcast()
-	n.am.Unlock()
 	return nil
 }
 

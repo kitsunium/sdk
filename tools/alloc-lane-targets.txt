@@ -197,8 +197,10 @@
 # payloads the frame's copy and the entry slice, Step none; and the leader
 # turn's budget (#912, sendshared_alloc_internal_test.go): 64 entries to two
 # or four followers allocate one entries body and one header block a turn,
-# where every follower used to cost an encoding of its own. Its own target,
-# so the lane runs the gates and not the whole consensus suite.
+# where every follower used to cost an encoding of its own; and applied1's
+# (#1109, applied_alloc_internal_test.go): an applied command of a nil result
+# with a forward outstanding allocates nothing. Its own target, so the lane
+# runs the gates and not the whole consensus suite.
 //internal/service/app/consensus:consensus_alloc_test
 
 # internal/service/data/vfs — an uncontended publication on the disk engine

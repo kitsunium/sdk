@@ -77,6 +77,7 @@ go_library(
         "//internal/core/observe/trace",
         "//internal/core/proc",
         "//internal/kernel/clock",
+        "//internal/kernel/collections/heap",
         "//internal/kernel/errs",
         "//internal/kernel/fs/flock",
         "//internal/service/app/consensus/raft",
@@ -105,6 +106,9 @@ go_test(
         "adoptedfrom_internal_test.go",
         "allocwindow_test.go",
         "allpeersgone_internal_test.go",
+        "applied_alloc_internal_test.go",
+        "applied_bench_test.go",
+        "appliedwait_internal_test.go",
         "cancel_internal_test.go",
         "catchuppin_internal_test.go",
         "cluster_internal_test.go",
@@ -257,9 +261,10 @@ go_test(
 )
 
 # The allocation gates of the range read (filelog_alloc_internal_test.go,
-# #913), of the receive path (receive_alloc_internal_test.go, #1110) and of
-# the leader turn (sendshared_alloc_internal_test.go, #912), all
-# //go:build !race, in their own target so the race-off lane
+# #913), of the receive path (receive_alloc_internal_test.go, #1110), of
+# the leader turn (sendshared_alloc_internal_test.go, #912) and of applied1
+# (applied_alloc_internal_test.go, #1109), all //go:build !race, in their own
+# target so the race-off lane
 # (tools/alloc-lane-targets.txt) runs the gates and the window's negative
 # control, not the whole suite; under race it compiles to nothing it runs.
 # keep
@@ -267,12 +272,14 @@ go_test(
     name = "consensus_alloc_test",
     srcs = [
         "allocwindow_test.go",
+        "applied_alloc_internal_test.go",
+        "appliedwait_internal_test.go",
         "filelog_alloc_internal_test.go",
         "receive_alloc_internal_test.go",
         "sendshared_alloc_internal_test.go",
         "sendshared_internal_test.go",
     ],
-    args = ["-test.run=^(TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice|TestACompactionThroughASegmentBoundaryCopiesNoEntries|TestAFollowerStepKeepsTheFramesPayloads|TestALeaderTurnEncodesItsEntriesOnceWhateverItsFollowers|TestAllocWindowCountsARealAllocation)$$"],
+    args = ["-test.run=^(TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice|TestACompactionThroughASegmentBoundaryCopiesNoEntries|TestAFollowerStepKeepsTheFramesPayloads|TestALeaderTurnEncodesItsEntriesOnceWhateverItsFollowers|TestApplied1KeepsAResultWithoutAllocating|TestAllocWindowCountsARealAllocation)$$"],
     embed = [":consensus"],
     deps = [
         "//internal/core/app/consensus",

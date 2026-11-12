@@ -247,7 +247,7 @@ func (n *Node) appended(p *proposal, pos coreconsensus.PositionValue, local bool
 	}
 	n.am.Lock()
 	if pos.Index <= n.applied {
-		r, ok := n.results[pos.Index]
+		r, ok := n.keptResult(pos.Index)
 		n.am.Unlock()
 		n.answerApplied(p, pos, r, ok)
 		return
@@ -314,6 +314,9 @@ func (n *Node) forward(p *proposal, st raft.StatusValue) {
 	n.forwards[ctx] = p
 	n.am.Lock()
 	n.keepResults++
+	if n.results == nil {
+		n.results = new([resultRing]applyResult)
+	}
 	n.am.Unlock()
 	p.stage.Store(stagePossible)
 	n.cfg.Transport.Send(st.Lead, wire.AppendMessage(nil, &m))

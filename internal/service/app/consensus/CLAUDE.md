@@ -41,8 +41,8 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | unit, cluster, disk, TCP | `go test -race ./...` |
 | simulator soak | `CONSENSUS_SIM_SOAK=1 go test -run TestSimSoak ./raft/`; a seed replays with `CONSENSUS_SIM_SEED` |
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
-| alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt` (`bazel test --config=alloc` it, or `go test -run TestALeaderTurnEncodes .` race off): `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go`, the leader turn's budget of #912 (`sendshared_alloc_internal_test.go`, with `sendshared_internal_test.go` for its helpers, the target's `-test.run` naming the gates) and the package's copy of `allocwindow_test.go`, nothing else of the suite |
-| bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`); numbers in `BENCH.md` |
+| alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt` (`bazel test --config=alloc` it, or `go test -run 'TestALeaderTurnEncodes|TestApplied1Keeps' .` race off): `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go`, the leader turn's budget of #912 and applied1's of #1109 (`applied_alloc_internal_test.go`, with `appliedwait_internal_test.go`; `sendshared_alloc_internal_test.go`, with `sendshared_internal_test.go` for its helpers, the target's `-test.run` naming the gates) and the package's copy of `allocwindow_test.go`, nothing else of the suite |
+| bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`), `-bench BenchmarkApplied1` (`applied_bench_test.go`); numbers in `BENCH.md` |
 | dm-crypt | `testdata/dmcrypt/run.sh [iterations] [negative] [ext4\|xfs] [zerofill\|fallocate] [fdatasync\|rwfdsync]` (Docker, privileged): fsync latency, G1's preallocation row (`TestDMCryptPreallocBench`, #922), G1's paired sync path row (`TestDMCryptSyncPathBench`, ADR 0190's shape, #923) and power cuts through LUKS, on ext4 or xfs; with `fallocate` or `rwfdsync` the file log's suite and fuzz seeds run first on that filesystem, every log fallocated (`CONSENSUS_PREALLOCATE=fallocate`) or writing `RWF_DSYNC` (`CONSENSUS_SYNC_PATH=rwfdsync`), and with `rwfdsync` the power cuts too; results in `testdata/dmcrypt/RESULTS.md` |
 
 Under Bazel `consensus_test` has 24 shards: under race and coverage the suite
@@ -1433,6 +1433,24 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   holds the production `tcp*.go` to it over the AST, the BUILD shipping them
   as data (`TestALinkPastMaxConnectionAgeIsRetiredOnTheClock`,
   `TestARedialBacksOffOnTheClock`, on a `ManualClock`).
+- Wake the callers of `waitApplied` with a `sync.Cond`, or keep the
+  results of a forward in a map: `applied1` broadcast to every parked
+  `Barrier` and `WaitApplied` caller, each re-checking its index under `am`
+  and parking again, R callers times E entries, and each call launched a
+  helper goroutine to turn `done` into a broadcast; with a forward
+  outstanding every entry wrote a map, appended to an order slice and,
+  past 4 096, deleted and resliced (#1109). A parked caller is a one-slot
+  channel in `appliedQ`, a min-heap by index (`kernel/collections/heap`'s
+  `IndexedHeap`) that `releaseApplied` pops only up to the applied index,
+  O(1) when none is due; `waitApplied` selects on it, `done` and
+  `loopDone`, and one that gives up removes its handle. The results are a
+  ring of `resultRing` slots, `index % 4096`, each carrying its index,
+  allocated at the first forward (`keptResult`). `BENCH.md` records
+  applied1 at 0 allocs/op
+  (`TestWaitAppliedReleasesNoCallerBeforeItsIndex`,
+  `TestWaitAppliedLaunchesNoGoroutine`,
+  `TestTheResultRingAnswersOnlyItsOwnIndex`,
+  `TestApplied1KeepsAResultWithoutAllocating`).
 - Pack commands into one entry inside the engine: a product of many tiny
   commands packs them with `multi/`'s `Packer` and `MultiMachine`, on top of
   `Replicated`, and the log, wire and apply code stay as they are (#926,
