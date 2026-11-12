@@ -3,11 +3,16 @@ package vfs
 import (
 	"cmp"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"io/fs"
 	"os"
 	"path"
 	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
 
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -22,11 +27,63 @@ const (
 	tempSuffix string = ".tmp"
 )
 
-// tempNameBytes is the entropy in a temporary's name. Sixteen bytes makes a
+// tempNameBytes is the entropy in a random temporary's name — the name a
+// publication falls back to when its first one is taken. Sixteen bytes makes a
 // collision with a concurrent publisher in the same directory not worth
 // reasoning about, and O_EXCL turns the impossible case into an error rather
 // than a silent overwrite.
 const tempNameBytes int = 16
+
+// tempSeedBytes is the entropy drawn once per process for the ordinary name:
+// eight bytes, so a process cannot guess another's names, beside a counter
+// that keeps the process's own names apart.
+const tempSeedBytes int = 8
+
+// tempAttempts bounds the names one publication tries: the ordinary one, then
+// random ones while each is taken. A name is taken only when something else
+// created it — a process that read this one's names in the directory and
+// planted the next — and a random name cannot be planted ahead.
+const tempAttempts int = 3
+
+// tempNameRoom is the stack buffer a name is built in: the base name and a
+// directory of most of the rest; a longer directory grows it on the heap.
+const tempNameRoom int = 128
+
+// tempCounterBytes is the width of the counter in a name, before its hex.
+const tempCounterBytes int = 8
+
+var (
+	// tempCounter numbers this process's temporaries: unique within the
+	// process, whatever filesystem and directory, so two publications never
+	// draw one name.
+	tempCounter atomic.Uint64
+	// tempSeed is the process's hex-encoded seed, drawn on the first
+	// publication (#813): the ordinary name costs one allocation and no
+	// entropy call, where sixteen random bytes per publication cost the
+	// entropy, the encoding and path.Join's four. crypto/rand.Read does not
+	// fail since Go 1.24; were it to, every publication would report it, as
+	// the random names did.
+	tempSeed = sync.OnceValues(drawTempSeed)
+)
+
+// drawTempSeed draws the process's seed and hex-encodes it.
+func drawTempSeed() (string, error) {
+	var raw [tempSeedBytes]byte
+	//: drawn once; the names' secrecy rests on it.
+	if _, randErr := rand.Read(raw[:]); randErr != nil {
+		//: the caller turns this into PublishFailed.
+		return "", randErr
+	}
+	//: sixteen hex digits.
+	return hex.EncodeToString(raw[:]), nil
+}
+
+// tempHandle is a temporary just created: the handle publish drives, and the
+// name it has in the directory.
+type tempHandle struct {
+	file tempFile
+	name string
+}
 
 // tempFile is the narrow view of a freshly created temporary that [publish]
 // drives. *os.File satisfies it; nothing else in the SDK does.
@@ -180,19 +237,14 @@ func syncDirs(ops atomicOps, dirs []string) error {
 // payload, the file's flush and the rename. On any failure the temporary is
 // removed and nothing was published.
 func stage(ops atomicOps, name string, data []byte, perm fs.FileMode) error {
-	dir := path.Dir(name)
-	tempName, nameErr := tempPath(dir)
-	//: entropy failing is the one step with nothing to clean up.
-	if nameErr != nil {
-		//: PublishFailed — nothing was created.
-		return failPublish(nameErr, kerrs.String("path", name))
-	}
-	file, createErr := ops.create(tempName, perm)
-	//: a temporary that was never created leaves nothing behind either.
+	temp, createErr := createTemp(ops, name, perm)
+	//: a temporary that was never created — its name not drawn, or every
+	//: name tried taken or refused — leaves nothing behind.
 	if createErr != nil {
 		//: PublishFailed — the destination is untouched.
 		return failPublish(createErr, kerrs.String("path", name))
 	}
+	file, tempName := temp.file, temp.name
 	//: from here on, every failure path MUST remove the temporary.
 	if writeErr := writeAndSync(file, data); writeErr != nil {
 		//: PublishFailed, after the orphan is gone.
@@ -298,7 +350,49 @@ func discard(ops atomicOps, tempName, name string, cause error) error {
 	return failPublish(cmp.Or(cause, removeErr), kerrs.String("path", name))
 }
 
-// tempPath returns an unused name in dir.
+// createTemp creates a temporary beside target, exclusively, and returns it
+// with its name: the ordinary name first, then a random one while the name
+// tried is taken, up to tempAttempts names. Any other refusal ends it at once.
+// A name equal to target is never tried: a destination may itself be named
+// like a temporary, and an absent one would be created as the temporary and
+// written in place, visible half-written — the publication's whole point lost.
+func createTemp(ops atomicOps, target string, perm fs.FileMode) (tempHandle, error) {
+	dir := path.Dir(target)
+	name, err := tempCandidate(tempPath, dir, target)
+	//: try names until one is created or the bound is reached.
+	for attempt := 1; err == nil; attempt++ {
+		file, createErr := ops.create(name, perm)
+		//: created, refused for another reason, or out of names.
+		if !errors.Is(createErr, fs.ErrExist) || attempt == tempAttempts {
+			//: the temporary, or the last refusal.
+			return tempHandle{file: file, name: name}, createErr
+		}
+		//: taken: a name nobody can have planted ahead.
+		name, err = tempCandidate(randomTempPath, dir, target)
+	}
+	//: no entropy: nothing was created.
+	return tempHandle{}, err
+}
+
+// tempCandidate draws a name in dir with draw, and draws again while it is
+// target, compared without case: on a case-insensitive filesystem (darwin's
+// APFS by default) a destination differing only by case names the same
+// entry. The counter has moved on by the next draw, and a random name does
+// not repeat, so the loop ends on it.
+func tempCandidate(draw func(dir string) (string, error), dir, target string) (string, error) {
+	name, err := draw(dir)
+	//: never the destination itself, whatever its case.
+	for err == nil && strings.EqualFold(name, target) {
+		name, err = draw(dir)
+	}
+	//: a name other than target, or the entropy's failure.
+	return name, err
+}
+
+// tempPath returns the ordinary name of a new temporary in dir:
+// dir/.vfs-<the process's seed><the counter>.tmp, sixteen hex digits each,
+// built on the stack and allocated once (#813). O_EXCL is still what makes it
+// unused: createTemp falls back to a random name if it is taken.
 //
 // Returning a name in DIR and nowhere else is the same-filesystem guarantee:
 // a rename between two entries of one directory cannot cross a device, so
@@ -306,6 +400,25 @@ func discard(ops atomicOps, tempName, name string, cause error) error {
 // pins it, because the day someone "tidies" this into os.TempDir the failure
 // is a cross-device rename in production and nothing at all in the tests.
 func tempPath(dir string) (name string, err error) {
+	seed, seedErr := tempSeed()
+	//: an entropy source that fails is not worked around with a counter.
+	if seedErr != nil {
+		//: the caller turns this into PublishFailed.
+		return "", seedErr
+	}
+	var room [tempNameRoom]byte
+	buf := appendTempDir(room[:0], dir)
+	buf = append(buf, tempPrefix...)
+	buf = append(buf, seed...)
+	buf = appendTempCounter(buf, tempCounter.Add(1))
+	buf = append(buf, tempSuffix...)
+	//: the one allocation: the name.
+	return string(buf), nil
+}
+
+// randomTempPath returns a name of sixteen random bytes in dir — the name a
+// publication falls back to when its ordinary one is taken.
+func randomTempPath(dir string) (name string, err error) {
 	var raw [tempNameBytes]byte
 	_, randErr := rand.Read(raw[:])
 	//: an entropy source that fails is not worked around with a counter.
@@ -313,9 +426,34 @@ func tempPath(dir string) (name string, err error) {
 		//: the caller turns this into PublishFailed.
 		return "", randErr
 	}
-	//: path.Join collapses the "." case to a bare basename, which is what a
-	//: root-level target needs.
-	return path.Join(dir, tempPrefix+hex.EncodeToString(raw[:])+tempSuffix), nil
+	buf := appendTempDir(nil, dir)
+	buf = append(buf, tempPrefix...)
+	buf = hex.AppendEncode(buf, raw[:])
+	buf = append(buf, tempSuffix...)
+	//: dir/.vfs-<32 hex digits>.tmp.
+	return string(buf), nil
+}
+
+// appendTempDir appends dir and a separator, or nothing for ".": a
+// root-level target's temporary is a bare base name, as path.Join made it.
+// dir is path.Dir of a validated relative name, so it is clean, never "/".
+func appendTempDir(buf []byte, dir string) []byte {
+	//: the root: the base name alone.
+	if dir == "." {
+		//: unchanged.
+		return buf
+	}
+	//: dir/.
+	return append(append(buf, dir...), '/')
+}
+
+// appendTempCounter appends n as the hex of its tempCounterBytes big-endian
+// bytes: fixed width, zero-padded, encoded from the stack.
+func appendTempCounter(buf []byte, n uint64) []byte {
+	var raw [tempCounterBytes]byte
+	binary.BigEndian.PutUint64(raw[:], n)
+	//: sixteen hex digits.
+	return hex.AppendEncode(buf, raw[:])
 }
 
 // nativeOps binds the five mechanics to this filesystem's os.Root, so every

@@ -15,7 +15,11 @@
 // flushes — with a zero MaxWait, coalescing comes from the flush's own
 // duration. The flush runs on a goroutine of its own, with the first
 // caller's context values and none of its cancellation: a caller that leaves
-// gets its ctx.Err(), and its item is flushed all the same.
+// gets its ctx.Err(), and its item is flushed all the same. A caller whose
+// context can never end, on an idle group with no MaxWait, flushes its item
+// alone on its own goroutine instead: nobody shares that flush and nobody
+// can leave it, and the callers arriving meanwhile gather into the next
+// batch, which flushes after it (#813).
 //
 // Stdlib-only and generic: one type parameter, one function. Range 0.1.4.*
 // (ADR 0005 kernel block, #803).

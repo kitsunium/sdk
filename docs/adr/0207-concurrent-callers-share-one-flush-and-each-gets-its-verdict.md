@@ -4,6 +4,7 @@
 - **Date**: 2026-11-02
 - **Deciders**: SDK maintainers
 - **Amends**: nothing published; a new kernel package, `internal/kernel/concur/commit`, code block `0.1.4.*`.
+- **Amended**: 2026-11-12 — an idle `Do` whose context can never end flushes on its caller's goroutine (see the dated section at the end)
 - **Related**: [ADR 0049](0049-cache-becomes-a-domain.md) (`singleflight`, the kernel primitive this one sits beside), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (no inert zero), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (adopters grow by siblings), [ADR 0054](0054-sdk-queue-domain.md) and [ADR 0056](0056-sdk-vfs-domain.md) (the durable writes that would adopt it), [issue 803](https://github.com/kitsunium/sdk/issues/803)
 
 ## Context
@@ -99,3 +100,33 @@ receives that operation's verdict.
 - Impl: `internal/kernel/concur/commit/`; design: `design/kernel/concur.yaml`.
 - Measurements: `internal/kernel/concur/commit/BENCH.md`.
 - Consensus's own group commit: #558 (`internal/service/app/consensus`).
+
+## Amendment (2026-11-12): an idle Do flushes on its caller's goroutine (kitsunium/sdk#813)
+
+`vfs`'s single publisher paid the group's whole floor — a batch, its
+channels, a context and a goroutine, eight allocations of the 32 a
+`WriteAtomic` made — to share a flush with nobody. Decision 4's alternative,
+"run the flush on the first caller's goroutine", was rejected because that
+caller's cancellation would decide whether the others' items are written.
+One case leaves no others and no cancellation, and it is the one this
+amendment takes:
+
+1. **A `Do` whose ctx can never end (`ctx.Done() == nil`), on an idle group
+   with no `MaxWait`, runs the flush on its own goroutine**, over its item
+   alone, with ctx itself. Idle means no batch gathering, none flushing and
+   no other such flush running, checked under the group's mutex. Nobody
+   shares that flush — it carries one item — and nobody can leave it, so
+   decision 4's reason does not reach it; a cancellable ctx, or a group with
+   a gathering window, keeps the batched path, unchanged.
+2. **Decision 3 holds**: while it runs, it is the group's most recent flush;
+   the callers arriving meanwhile gather into a batch that waits for it — a
+   channel made only then — exactly as a batch waits for the one before, and
+   `Close` waits for it too. A panic reaches its caller, the flush's only
+   participant, and the group is idle again after it.
+3. **What it buys**: an idle `Do` allocates nothing for an item of size zero
+   (an `allocs: 0` budget in `design/sdk.yaml`, fixture `DoIdle`), against
+   six through a batch; `vfs`'s uncontended publication went from 32
+   allocations to 20, and 16 goroutines publishing into one directory kept
+   their time (425 µs → 435 µs, p = 0.94), still sharing the next flush.
+   `idle_external_test.go` pins the three cases, and that inline and batched
+   flushes never overlap under load.

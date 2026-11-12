@@ -20,13 +20,15 @@ package declares no code and restates them in its wrap helpers.
 | `vfs.go` | `verdict`, and the `failRead` / `failWrite` / `failPublish` wrap helpers |
 | `os.go` | `NewOS`, the read half (delegating to `os.Root`) — `Stat`, `ReadDir`, `ReadFile`, and the link shortcuts `Lstat` / `ReadLink` forwarded to `os.Root`, which the plain `fs.FS` it held used to hide (#1053) —, the write guards, and `Close` — `io.Closer` by type assertion (ADR 0039), releasing the root's descriptor rather than waiting for `os.Root`'s finalizer |
 | `os_write.go` | `WriteFile`, `MkdirAll`, `Remove`, `RemoveAll` — the non-atomic verbs |
-| `os_publish.go` | **the domain's reason to exist**: `publish` (`stage`, steps 1 to 4, then step 5), `atomicOps`, `tempPath`; `WriteAtomicAll` — `core/data/vfs.AtomicBatchWriter`: `stage` per file, then `syncDirs` once per directory (`publishAll`, #827); and `SyncDir` — `core/data/vfs.DirSyncer`, step 5 offered for a directory just created (#1060) — with `failDirSync`, the `DirectorySyncFailed` restatement both share |
-| `os_dirflush.go` | `dirFlushes`: step 5 of the disk engine's publications through one `kernel/concur/commit` group per directory, so the publications into one directory that reach it while a flush runs share the next one (#803); a directory's group lives while a publication waits on it |
+| `os_publish.go` | **the domain's reason to exist**: `publish` (`stage`, steps 1 to 4, then step 5), `atomicOps`, `createTemp` — the temporary created exclusively, `tempPath`'s name first, then `randomTempPath`'s while the name tried is taken, `tempAttempts` names at most (#813); `WriteAtomicAll` — `core/data/vfs.AtomicBatchWriter`: `stage` per file, then `syncDirs` once per directory (`publishAll`, #827); and `SyncDir` — `core/data/vfs.DirSyncer`, step 5 offered for a directory just created (#1060) — with `failDirSync`, the `DirectorySyncFailed` restatement both share |
+| `os_dirflush.go` | `dirFlushes`: step 5 of the disk engine's publications through one `kernel/concur/commit` group per directory, so the publications into one directory that reach it while a flush runs share the next one (#803); a directory's group lives while a publication waits on it, and the entry dropped is kept as the next directory's (`spare`, `bind`), so an uncontended publication builds no group and flushes on its own goroutine through the group's idle path (#813) |
 | `osguard_unix.go` / `osguard_other.go` | `platformNative` + `syncDirHandle`, and the honest refusal where the mechanics do not exist |
 | `mem.go` | `NewMem`, the read half — `Lstat` is `Stat` and `ReadLink` `READ_FAILED` over `fs.ErrInvalid`, since no link exists here —, `SyncDir` (the disk engine's refusals, nothing to flush), the locked helpers |
 | `mem_write.go` | the memory write verbs, including `WriteAtomic`, which applies `perm` on every publication as the disk engine's rename does, where `WriteFile` applies it on creation only (#1052) |
 | `mem_node.go` / `mem_info.go` / `mem_file.go` / `mem_dir.go` | the tree entry, its `fs.FileInfo`, and the two open handles |
 | `BENCH.md` | what publication costs, and what it is that costs |
+| `alloc_external_test.go` + `allocwindow_test.go` | race off, the alloc lane's: an uncontended `WriteAtomic` on the disk engine allocates at most 22 times on the caller's stack — 19 on linux/amd64, 22 on CI's linux/386 runner (#813); `allocwindow_test.go` is the SDK's one allocation window, copied byte for byte |
+| `tempname_internal_test.go` | the temporary's name: unique, beside its target, one allocation; a taken name never opened, the random fallback and its bound; a planted next name neither followed nor overwritten; a destination named like the next temporary never created as its own temporary (#813) |
 
 ## Atomic publication — the five steps and why each one is there
 
@@ -38,6 +40,20 @@ package declares no code and restates them in its wrap helpers.
    *reachable* here. `TestTheTemporaryLivesBesideItsTarget` pins it, because the
    day somebody "tidies" this into `os.TempDir` the result is a cross-device
    rename in production and nothing at all in the tests.
+   The name is `.vfs-<seed><counter>.tmp`: eight random bytes drawn once per
+   process, then a process-wide counter, sixteen hex digits each, built on the
+   stack — one allocation, no entropy call (#813). It is created with
+   `O_EXCL` through the root, so a name that exists — a file, a link — is
+   refused, never opened. Another process that can read the directory can
+   guess the next name and plant it; a taken name therefore falls back to
+   sixteen random bytes, which nobody can plant ahead, and `tempAttempts` (3)
+   names taken end the publication with `PublishFailed` over `fs.ErrExist`.
+   A candidate equal to the destination — compared without case, the same
+   entry on a case-insensitive filesystem (darwin's APFS) — is drawn again
+   (`tempCandidate`): a
+   destination may be named like a temporary, and an absent one would
+   otherwise be created as its own temporary and written in place, visible
+   half-written.
 2. **write the payload.**
 3. **flush the FILE.** A rename over data still sitting in the page cache is
    atomic about nothing once the machine loses power.
@@ -49,7 +65,11 @@ package declares no code and restates them in its wrap helpers.
    step while a flush of it runs share the NEXT flush (`os_dirflush.go`, #803):
    each joins the batch still gathering — never the one already flushing — so
    the flush it waits for began after its own rename, and every participant
-   gets that flush's verdict.
+   gets that flush's verdict. A publication that finds its directory idle
+   flushes it on its own goroutine (the commit group's idle path, #813): the
+   same fsync, begun after its rename and returned before its verdict, with
+   no batch built; the publications arriving meanwhile gather into the batch
+   that flushes after it.
 
 **Steps 1–4 failing mean nothing was published.** The temporary is removed and
 the previous bytes are untouched — that is what returning `PublishFailed`
@@ -142,7 +162,7 @@ rather than discovered:
 | symbolic links | resolved and refused as writes | none exist |
 | `ModTime` | the operating system's | the **zero** time, deliberately |
 | durability | `fsync` on file and directory | none — there is no device |
-| cost of `WriteAtomic` | ~3 ms (two flushes) | ~441 ns (one map assignment) |
+| cost of `WriteAtomic` | ~3 ms (two flushes), 20 allocations — `os.Root` 18 of them (#813) | ~441 ns (one map assignment) |
 
 That last row is why the memory filesystem is a faithful double for the
 *semantics* of publication and tells you **nothing** about its cost. See

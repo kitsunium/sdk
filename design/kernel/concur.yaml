@@ -268,7 +268,11 @@ packages:
       flushes — with a zero MaxWait, coalescing comes from the flush's own
       duration. The flush runs on a goroutine of its own, with the first
       caller's context values and none of its cancellation: a caller that leaves
-      gets its ctx.Err(), and its item is flushed all the same.
+      gets its ctx.Err(), and its item is flushed all the same. A caller whose
+      context can never end, on an idle group with no MaxWait, flushes its item
+      alone on its own goroutine instead: nobody shares that flush and nobody
+      can leave it, and the callers arriving meanwhile gather into the next
+      batch, which flushes after it (#813).
 
       Stdlib-only and generic: one type parameter, one function. Range 0.1.4.*
       (ADR 0005 kernel block, #803).
@@ -330,6 +334,13 @@ packages:
               flush may already be writing it. The flush runs on a goroutine of its own,
               with the first participant's context values and none of its cancellation.
 
+              One case runs it on the caller's goroutine: a ctx that can never end (its
+              Done is nil), on an idle group — no batch gathering, none flushing — with no
+              MaxWait. The flush then carries this item alone, with ctx itself: nobody
+              shares it and nobody can leave it, so a batch and its goroutine would buy
+              nothing. Callers arriving meanwhile gather into the next batch, which
+              flushes after it, so flushes still run one at a time, in order.
+
               Do returns [Closed] once Close has run. If the flush panics, every
               participant panics with the same value.
             in:
@@ -343,7 +354,9 @@ packages:
             recv: pointer
           - doc: |-
               Close refuses every later Do with [Closed] and returns once every batch
-              already started has been flushed. It is idempotent.
+              already started has been flushed — and a flush an idle Do runs on its
+              own goroutine, which Close waits for even when no batch exists. It is
+              idempotent.
             name: Close
             recv: pointer
         name: Group

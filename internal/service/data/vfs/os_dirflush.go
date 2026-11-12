@@ -19,18 +19,30 @@ import (
 // each of their renames. Every participant receives that flush's verdict.
 //
 // A directory's group lives while a publication waits on it and is dropped
-// with the last one, so the map holds the directories in use and no others.
+// with the last one, so the map holds the directories in use and no others;
+// the entry dropped is kept as the next directory's (spare), so a publication
+// that finds its directory idle builds no group (#813). Alone on its
+// directory, it then flushes on its own goroutine through the group's idle
+// path — the same fsync, begun after its rename, with no batch built.
 type dirFlushes struct {
 	// flush is the mechanic one batch runs: the directory's fsync.
 	flush func(dir string) error
 	// groups holds one group per directory a publication is waiting on.
 	groups map[string]*dirFlush
-	mu     sync.Mutex
+	// spare is the entry the last directory to fall idle left, rebound to
+	// the next directory a publication finds idle; nil while none is.
+	spare *dirFlush
+	mu    sync.Mutex
 }
 
-// dirFlush is one directory's group and how many publications wait on it.
+// dirFlush is one directory's group, the directory it flushes and how many
+// publications wait on it.
 type dirFlush struct {
-	group   *commit.Group[struct{}]
+	group *commit.Group[struct{}]
+	// dir is set under dirFlushes.mu when the entry is bound to a directory,
+	// before any Do on group, and read by the group's flush: a spare is
+	// rebound only once every publication through it has had its verdict.
+	dir     string
 	waiting int
 }
 
@@ -61,14 +73,29 @@ func (d *dirFlushes) join(dir string) *dirFlush {
 	entry, open := d.groups[dir]
 	//: the first publication into dir since the last one left.
 	if !open {
-		entry = &dirFlush{group: commit.New(func(context.Context, []struct{}) error {
-			//: one fsync for the whole batch.
-			return d.flush(dir)
-		}, commit.Config{})}
+		entry = d.bind(dir)
 		d.groups[dir] = entry
 	}
 	entry.waiting++
 	//: the group this publication waits on.
+	return entry
+}
+
+// bind returns an idle entry for dir: the spare when one is kept, else a new
+// entry and its group. d.mu is held.
+func (d *dirFlushes) bind(dir string) *dirFlush {
+	entry := d.spare
+	d.spare = nil
+	//: none kept: the first directory, or several in use at once.
+	if entry == nil {
+		entry = &dirFlush{}
+		entry.group = commit.New(func(context.Context, []struct{}) error {
+			//: one fsync for the whole batch, of the directory bound now.
+			return d.flush(entry.dir)
+		}, commit.Config{})
+	}
+	entry.dir = dir
+	//: idle: no publication waits on it, no flush of it runs.
 	return entry
 }
 
@@ -81,5 +108,6 @@ func (d *dirFlushes) leave(dir string, entry *dirFlush) {
 	//: the last publication into dir: nothing will flush through it again.
 	if entry.waiting == 0 {
 		delete(d.groups, dir)
+		d.spare = entry
 	}
 }
