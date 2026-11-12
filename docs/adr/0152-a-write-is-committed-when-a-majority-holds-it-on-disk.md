@@ -2497,7 +2497,7 @@ written before the code. **They are spelled as Prometheus exposes them
 | `consensus_fs_free_bytes`, `consensus_cluster_version`, `consensus_protocol_version` | gauges, `fs_free` by declared filesystem (R2-28, R7-33) |
 | `consensus_tls_reload_failures_total`, `consensus_tls_peer_cert_expiry_seconds` | counter, gauge by peer (R2-28) |
 | `consensus_loop_turn_seconds` | histogram (R7-20) |
-| `consensus_chain_refusals_total`, `consensus_snapshot_pins` | counter by leader, gauge (R7-19, R7-38) |
+| `consensus_chain_refusals_total`, `consensus_snapshot_pins`, `consensus_snapshot_pin_age_seconds` | counter by leader, gauge, gauge by peer: how long each pin has held since its offer (R7-19, R7-38, #914) |
 | `consensus_stopped` | gauge by `StopReason`, set before the process exits (R7-37) |
 
 **The product pushes stop reasons (R7-37).** A stopped node exits, so a
@@ -2520,7 +2520,9 @@ thresholds, provisional like D16's numbers:
 | peer unreachable | `consensus_peer_unreachable == 1` for 1 min |
 | chain refusals | `consensus_chain_refusals_total` increasing |
 | loop turn | p99 of `consensus_loop_turn_seconds` above the drift budget for 5 min |
-| snapshot pin | `consensus_snapshot_pins` held longer than the pin TTL of D19 |
+| snapshot pin | `consensus_snapshot_pins > 0` with a `consensus_snapshot_pin_age_seconds` above the pin TTL of D19, `pinAfterStream` (10) maximum election timeouts — 20 s under the default contract — for 5 min; a stream still moving, or a pin renewed while its peer catches up (#771), may pass it, so the rule warns (#914) |
+| peer round trip | p99 of `consensus_peer_rtt_seconds` above a tenth of `ElectionTimeoutMin` for 5 min, for a peer: a link degrading before CheckQuorum trips (#914) |
+| PreVotes lost | `consensus_prevotes_lost_total` increasing on a node while `consensus_has_leader == 1` across the cluster for 5 min: a node that keeps asking for an election it cannot win, a flapping link or clock (#914) |
 
 **A leader that makes no progress steps aside
 ([#554](https://github.com/kitsunium/sdk/issues/554)).** CheckQuorum

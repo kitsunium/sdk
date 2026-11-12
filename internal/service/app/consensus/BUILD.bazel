@@ -227,6 +227,7 @@ go_test(
         "withdrawnkey_internal_test.go",
         "yieldback_internal_test.go",
         "zfounders_internal_test.go",
+        "zseries_internal_test.go",
         "zstranded_internal_test.go",
         "zstrandedbet_internal_test.go",
         "zwhiledown_internal_test.go",

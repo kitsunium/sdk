@@ -255,6 +255,8 @@ sequences:
         eval: "&round{id: r.nextRound, sentAt: now, acks: map[core.NodeID]uint64{r.id: r.timing.Generation + 1}, conf: r.conf().Index}"
       - set: r.rounds
         value: append(r.rounds, rd)
+      - set: r.sentRounds[rd.id%rttRounds]
+        value: "sentRound{id: rd.id, at: now}"
       - opt:
           do:
             - set: r.rounds
@@ -617,7 +619,7 @@ sequences:
               do:
                 - eval: pr.noteSilence(m.Flags)
                   to: pr.noteSilence
-                - eval: r.handleHeartbeatResp(pr, m)
+                - eval: r.handleHeartbeatResp(now, pr, m)
                   to: r.handleHeartbeatResp
             - default: true
           "on": m.Kind
@@ -628,6 +630,8 @@ sequences:
       - id: (*Raft).handleHeartbeatResp
         kind: self
       - id: r.ackRounds
+        kind: internal
+      - id: r.measureRTT
         kind: internal
       - id: r.confirmRounds
         kind: internal
@@ -642,6 +646,8 @@ sequences:
     steps:
       - eval: r.ackRounds(m.From, m.Context, m.Contract)
         to: r.ackRounds
+      - eval: r.measureRTT(now, pr, m.Context)
+        to: r.measureRTT
       - eval: r.confirmRounds()
         to: r.confirmRounds
       - bind: silent
@@ -809,6 +815,16 @@ sequences:
         value: time.Time{}
       - eval: pr.becomeProbe()
         to: pr.becomeProbe
+  - of: (*Raft).measureRTT
+    steps:
+      - opt:
+          do:
+            - set: pr.rtt, pr.rttRound
+              value: now.Sub(s.at), round
+          init:
+            bind: s
+            eval: r.sentRounds[round%rttRounds]
+          when: round > pr.rttRound && s.id == round
   - of: (*Raft).handleAppResp
     participants:
       - id: caller
@@ -3941,7 +3957,7 @@ sequences:
           		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
           		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
           		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
-          		Transfer: r.transferTo,
+          		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
           	}
       - opt:
           do:
@@ -4853,6 +4869,7 @@ sequences:
               value: |-
                 append(out, PeerStatValue{
                 			ID: id, Match: pr.match, Next: pr.next, Inflight: len(pr.inflight), LastHeard: pr.lastHeard,
+                			RTT: pr.rtt, RTTRound: pr.rttRound,
                 			Flags: statFlag(StatVoter, r.isVoter(id)) | statFlag(StatHeard, pr.facts&peerHeard != 0) |
                 				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot) |
                 				statFlag(StatProtocol3, pr.facts&peerProtocol3 != 0),
@@ -4960,6 +4977,12 @@ sequences:
             - case: m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat
               do:
                 - eval: r.becomeFollower(m.Term, m.From)
+                  to: r.becomeFollower
+            - case: m.Kind == core.MsgPreVoteResp && r.role == core.RolePreCandidate
+              do:
+                - op: ++
+                  set: r.preVotesLost
+                - eval: r.becomeFollower(m.Term, 0)
                   to: r.becomeFollower
             - default: true
               do:
@@ -5375,6 +5398,14 @@ sequences:
               do:
                 - opt:
                     do:
+                      - opt:
+                          do:
+                            - op: ++
+                              set: r.preVotesLost
+                          init:
+                            bind: v, ok
+                            eval: r.votes[m.From]
+                          when: m.Reject && (!ok || v)
                       - set: r.votes[m.From]
                         value: "!m.Reject"
                       - eval: r.tallyVotes()

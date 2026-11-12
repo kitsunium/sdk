@@ -1018,6 +1018,17 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestTCPForgetsADepartedPeersCertificate`). The admission set is handed
   to the transport only when it changes (#531,
   `TestAnUnchangedMembershipIsNotRepublished`).
+- Leave a series D13 names unpublished: `consensus_peer_rtt_seconds`
+  (histogram by peer, one sample per heartbeat round, from raft's
+  `PeerStatValue.RTT` and `RTTRound`), `consensus_prevotes_lost_total`
+  (from raft's `Status.PreVotesLost`, present at 0 from the first pass, as
+  every counter `addTo` keeps) and `consensus_snapshot_pins` with
+  `consensus_snapshot_pin_age_seconds` by peer (`observePins`, over
+  `n.sending`, the age from `sendPin.since`, the offer, kept once the
+  stream ends; an ended pin's age reads 0) were absent, and three alerts of
+  D13 could not be written (#914,
+  `TestTheD13SeriesArePublishedWithTheirLabels`,
+  `TestThePinGaugesCountAndAgeEachPinAndResetOneThatEnded`).
 - Bound an election in a test by a fixed number of split votes: a split
   is a draw, about one round in a hundred on the memory network, and a
   third round fails a two-round total every ten to twenty runs. Derive

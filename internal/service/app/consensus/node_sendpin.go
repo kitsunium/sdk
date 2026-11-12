@@ -31,9 +31,12 @@ const pinScaleMax uint8 = 6
 // probes the peer after an install, and a cut that landed in that window
 // compacted past the entries the peer needed next, so it was offered
 // snapshot after snapshot (#550). follow, set once streamed, renews until
-// while the peer still catches up (renewPin).
+// while the peer still catches up (renewPin). since is when the pin to the
+// peer was taken, its offer, in Unix nanoseconds of n.clk, kept once the
+// stream ends: the age consensus_snapshot_pin_age_seconds publishes (D13).
 type sendPin struct {
 	index  uint64
+	since  int64
 	until  time.Time
 	sent   *atomic.Int64
 	moved  *atomic.Int64
@@ -55,7 +58,7 @@ type pinFollow struct {
 // to ended at now, the leader's log then at last: it holds a pinBound,
 // renewed while the peer catches up (renewPin).
 func (n *Node) streamedPin(to coreconsensus.NodeID, index, last uint64, now time.Time) sendPin {
-	return sendPin{index: index, until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}
+	return sendPin{index: index, since: now.UnixNano(), until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}
 }
 
 // catchingUp reports whether the peer, at pos with the leader's log at

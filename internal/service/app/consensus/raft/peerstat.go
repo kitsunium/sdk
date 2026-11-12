@@ -25,7 +25,8 @@ const (
 // PeerStatValue is the leader's view of one peer, for Health (D13). Flags
 // say whether it votes, answered in this term, is probed, is being sent a
 // snapshot or last announced protocol 3; LastHeard is meaningful only once
-// StatHeard is set.
+// StatHeard is set. RTT is the round trip of the heartbeat round RTTRound
+// names, 0 before the peer answered one.
 type PeerStatValue struct {
 	ID        core.NodeID
 	Flags     PeerStatFlags
@@ -33,6 +34,12 @@ type PeerStatValue struct {
 	Next      uint64
 	Inflight  int
 	LastHeard time.Time
+	// RTT is the time from the heartbeat round RTTRound names to the peer's
+	// first answer to it (D13, consensus_peer_rtt_seconds).
+	RTT time.Duration
+	// RTTRound is the heartbeat round RTT was measured on, 0 for none: the
+	// driver records a sample once per round.
+	RTTRound uint64
 }
 
 // PeerStatFlags are a peer's yes/no facts in the leader's view, one bit

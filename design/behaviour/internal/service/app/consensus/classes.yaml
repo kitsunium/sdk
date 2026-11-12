@@ -461,6 +461,13 @@ constants:
         value: "2"
     name: inboxDepth
   - doc: |-
+      resultRing is how many Apply results a node keeps for its outstanding
+      forwards.
+    items:
+      - name: resultRing
+        value: "4096"
+    name: resultRing
+  - doc: |-
       cutAllowance is how many maximum election timeouts a cut on the apply
       goroutine may hold it before watchProgress counts it as a stuck apply: a
       capture or a write that never returns is the failure the watch exists
@@ -548,6 +555,14 @@ constants:
         value: "\"consensus_peer_unreachable\""
       - name: mPeerLastContact
         value: "\"consensus_peer_last_contact_seconds\""
+      - name: mPeerRTT
+        value: "\"consensus_peer_rtt_seconds\""
+      - name: mPreVotesLost
+        value: "\"consensus_prevotes_lost_total\""
+      - name: mSnapshotPins
+        value: "\"consensus_snapshot_pins\""
+      - name: mSnapshotPinAge
+        value: "\"consensus_snapshot_pin_age_seconds\""
       - name: mElectionsStarted
         value: "\"consensus_elections_started_total\""
       - name: mSnapshotDuration
@@ -999,6 +1014,8 @@ files:
       - (*Node).safeApply
       - (*Node).answerCovered
       - (*Node).applied1
+      - (*Node).keptResult
+      - (*Node).releaseApplied
       - (*Node).waitApplied
       - unsupportedKind
     name: apply.go
@@ -1442,7 +1459,9 @@ files:
       - inboxDepth
       - Node
       - snapState
+      - resultRing
       - applyResult
+      - appliedWaiter
       - proposal
       - propResult
       - readWait
@@ -1641,6 +1660,7 @@ files:
       - (*Node).observeStatus
       - (*obs).observeRoleChange
       - (*Node).observePeers
+      - (*Node).observePins
       - (*Node).observePeer
       - (*obs).resetDeparted
       - (*Node).observeResources
@@ -4051,6 +4071,7 @@ imports:
   fmt: fmt
   fs: io/fs
   hash: hash
+  heap: github.com/kitsunium/sdk/internal/kernel/collections/heap
   hex: encoding/hex
   io: io
   level: github.com/kitsunium/sdk/internal/core/observe/logger/level
@@ -6907,18 +6928,32 @@ types:
         type: atomic.Pointer[coreconsensus.StatusValue]
       - name: am
         type: sync.Mutex
-      - name: acond
-        type: "*sync.Cond"
       - name: applied
         type: uint64
       - name: appliedTerm
         type: uint64
       - name: waiters
         type: map[uint64]*proposal
-      - name: results
-        type: map[uint64]applyResult
-      - name: resultOrder
-        type: "[]uint64"
+      - doc: |-
+          appliedQ holds the Barrier and WaitApplied callers parked on an
+          index not yet applied, lowest first: an applied entry releases only
+          those it reaches, O(1) when none is due (#1109). nil until the first
+          caller parks.
+        name: appliedQ
+        type: "*heap.IndexedHeap[*appliedWaiter]"
+      - doc: |-
+          onRelease, nil but in tests, sees every parked caller applied1 or a
+          restore releases, with the index applied then.
+        name: onRelease
+        type: func(want, applied uint64)
+      - doc: |-
+          results is the ring of the last resultRing Apply results, kept
+          while a forward is outstanding (keepResults > 0) for the forward
+          answered after its index was applied: slot index % resultRing,
+          carrying its index, so recording one is a store with no map and no
+          reslice (#1109). nil until the first forward.
+        name: results
+        type: "*[resultRing]applyResult"
       - name: keepResults
         type: int
       - name: pendingBytes
@@ -7192,16 +7227,30 @@ types:
         recv: n *Node
       - doc: |-
           applied1 records one applied entry and answers the Propose that created
-          it on this node.
+          it on this node. Its cost is independent of how many callers wait: it
+          releases only the parked ones its index reaches, and keeps its result in
+          a ring slot while a forward is outstanding (#1109).
         name: applied1
         params: e *coreconsensus.EntryValue, val any
         recv: n *Node
       - doc: |-
+          keptResult is the Apply result kept at index, if its ring slot still
+          holds that index's. The caller holds am.
+        name: keptResult
+        params: index uint64
+        recv: n *Node
+        results: applyResult, bool
+      - doc: |-
+          releaseApplied releases every parked caller whose index is applied, and
+          no other: a caller is woken once, when its wait is over, never to check
+          again (#1109). The caller holds am.
+        name: releaseApplied
+        recv: n *Node
+      - doc: |-
           waitApplied blocks until index is applied, the node stops, or done closes.
-          It launches one goroutine that turns done or the loop's end into a
-          broadcast on the apply condition, since a sync.Cond cannot select; that
-          goroutine ends after that one broadcast or, through stopWake, as soon as
-          waitApplied returns, so none accumulates across calls.
+          A caller not yet due parks in appliedQ and selects on its own release,
+          done and the loop's end: no goroutine is launched, and one that gives up
+          takes its waiter out of the queue (#1109).
         name: waitApplied
         params: done <-chan struct{}, index uint64
         recv: n *Node
@@ -8520,9 +8569,18 @@ types:
         params: old, cur *coreconsensus.StatusValue
         recv: n *Node
       - doc: |-
-          observePeers publishes the leader's per-peer gauges and the failure
-          tolerance, at most every 100 ms, on the loop.
+          observePeers publishes the leader's per-peer gauges, each peer's round
+          trips, the snapshot pins, the lost PreVotes and the failure tolerance, at
+          most every 100 ms, on the loop.
         name: observePeers
+        recv: n *Node
+      - doc: |-
+          observePins publishes how many snapshot pins hold compaction for a peer
+          (n.sending, D13, R7-38) and, per peer, for how long its pin has held:
+          the alert of D13 compares the age with pinAfterStream maximum election
+          timeouts. A pin that ended reads 0.
+        name: observePins
+        params: now time.Time
         recv: n *Node
       - doc: observePeer publishes one peer's gauges.
         name: observePeer
@@ -9199,13 +9257,28 @@ types:
         type: string
     kind: struct
     name: snapState
-  - fields:
+  - doc: |-
+      applyResult is one kept Apply result: index names the slot's entry, zero
+      when the slot was never written.
+    fields:
+      - name: index
+        type: uint64
       - name: term
         type: uint64
       - name: val
         type: any
     kind: struct
     name: applyResult
+  - doc: |-
+      appliedWaiter is one caller parked until index is applied: ch, one slot,
+      receives its release.
+    fields:
+      - name: index
+        type: uint64
+      - name: ch
+        type: chan struct{}
+    kind: struct
+    name: appliedWaiter
   - fields:
       - name: entry
         type: coreconsensus.EntryValue
@@ -9465,10 +9538,14 @@ types:
       probes the peer after an install, and a cut that landed in that window
       compacted past the entries the peer needed next, so it was offered
       snapshot after snapshot (#550). follow, set once streamed, renews until
-      while the peer still catches up (renewPin).
+      while the peer still catches up (renewPin). since is when the pin to the
+      peer was taken, its offer, in Unix nanoseconds of n.clk, kept once the
+      stream ends: the age consensus_snapshot_pin_age_seconds publishes (D13).
     fields:
       - name: index
         type: uint64
+      - name: since
+        type: int64
       - name: until
         type: time.Time
       - name: sent
@@ -9635,19 +9712,34 @@ types:
         name: certsPub
         type: map[coreconsensus.NodeID]bool
       - doc: |-
-          seenTails, seenReloads and seenRounds are the running totals already
-          added to their counters.
+          pinsPub are the peers whose pin age the last pass published, reset
+          to 0 once their pin ends.
+        name: pinsPub
+        type: map[coreconsensus.NodeID]bool
+      - doc: |-
+          rttSeen is, per peer, the heartbeat round whose round trip was last
+          recorded: a sample is recorded once (D13).
+        name: rttSeen
+        type: map[coreconsensus.NodeID]uint64
+      - doc: |-
+          seenTails, seenReloads, seenRounds and seenPreVotes are the running
+          totals already added to their counters.
         name: seenTails
         type: int64
       - doc: |-
-          seenTails, seenReloads and seenRounds are the running totals already
-          added to their counters.
+          seenTails, seenReloads, seenRounds and seenPreVotes are the running
+          totals already added to their counters.
         name: seenReloads
         type: int64
       - doc: |-
-          seenTails, seenReloads and seenRounds are the running totals already
-          added to their counters.
+          seenTails, seenReloads, seenRounds and seenPreVotes are the running
+          totals already added to their counters.
         name: seenRounds
+        type: int64
+      - doc: |-
+          seenTails, seenReloads, seenRounds and seenPreVotes are the running
+          totals already added to their counters.
+        name: seenPreVotes
         type: int64
     kind: struct
     methods:
@@ -9663,7 +9755,10 @@ types:
         name: inc
         params: name string, attrs ...coreotel.AttrValue
         recv: o *obs
-      - doc: addTo brings a counter up to a running total kept elsewhere.
+      - doc: |-
+          addTo brings a counter up to a running total kept elsewhere. The series
+          exists from the first call, at 0, so an alert on its increase has a
+          series to read before the first event.
         name: addTo
         params: name string, seen *int64, total int64
         recv: o *obs
@@ -10330,6 +10425,14 @@ types:
         type: time.Duration
       - name: JoinTimeout
         type: time.Duration
+      - doc: |-
+          Clock reads every age the transport keeps — a link's against
+          MaxConnectionAge, the redial backoff, the peer certificate's end — and
+          drives the accept backoff; nil is clock.System. A connection deadline
+          is a wall time the kernel needs, so it is the wall clock's reading plus
+          the duration this clock left.
+        name: Clock
+        type: clock.Timed
     kind: struct
     methods:
       - doc: validate applies the defaults and the refusals of the configuration.
@@ -10550,7 +10653,7 @@ types:
           loop's one timer, cut short by the transport's close. It returns that
           wait, and whether the loop goes on.
         name: acceptFailed
-        params: err error, delay time.Duration, wait *time.Timer
+        params: err error, delay time.Duration, wait clock.Timer
         recv: t *TCPTransport
         results: time.Duration, bool
       - doc: |-

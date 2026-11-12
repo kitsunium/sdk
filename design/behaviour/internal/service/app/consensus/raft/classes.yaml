@@ -508,6 +508,13 @@ constants:
         type: uint32
         value: "3"
     name: Protocol3
+  - doc: |-
+      rttRounds is how many heartbeat rounds keep their send time for the
+      round trips (Raft.sentRounds).
+    items:
+      - name: rttRounds
+        value: "64"
+    name: rttRounds
 files:
   - decls:
       - (*Raft).Debug
@@ -548,6 +555,7 @@ files:
       - (*Raft).followSilentReport
       - (*Raft).probeIfLost
       - (*Raft).ackRounds
+      - (*Raft).measureRTT
       - (*Raft).handleAppResp
       - (*Raft).ackMoved
       - (*Raft).handleAppReject
@@ -722,6 +730,8 @@ files:
       - (*ReadyValue).NeedsWrite
       - confAt
       - readReq
+      - rttRounds
+      - sentRound
       - round
       - Raft
       - NewRaft
@@ -1216,6 +1226,16 @@ types:
         type: int
       - name: LastHeard
         type: time.Time
+      - doc: |-
+          RTT is the time from the heartbeat round RTTRound names to the peer's
+          first answer to it (D13, consensus_peer_rtt_seconds).
+        name: RTT
+        type: time.Duration
+      - doc: |-
+          RTTRound is the heartbeat round RTT was measured on, 0 for none: the
+          driver records a sample once per round.
+        name: RTTRound
+        type: uint64
     kind: struct
     name: PeerStatValue
   - kind: named
@@ -1279,6 +1299,13 @@ types:
           over which a restart of the peer raises its truncation point past
           that no-op (SnapshotDone, #795).
         name: silentFed
+        type: uint64
+      - doc: |-
+          rtt is the round trip of heartbeat round rttRound: from its broadcast
+          to the peer's first answer covering it (ackRounds), 0 before one.
+        name: rtt
+        type: time.Duration
+      - name: rttRound
         type: uint64
     kind: struct
     methods:
@@ -1698,6 +1725,14 @@ types:
         type: uint64
     kind: struct
     name: readReq
+  - doc: sentRound is when heartbeat round id left.
+    fields:
+      - name: id
+        type: uint64
+      - name: at
+        type: time.Time
+    kind: struct
+    name: sentRound
   - fields:
       - name: id
         type: uint64
@@ -1846,6 +1881,18 @@ types:
         type: uint64
       - name: rounds
         type: "[]*round"
+      - doc: |-
+          sentRounds holds when each of the last rttRounds heartbeat rounds
+          left, at the slot of its id: a round a majority confirmed leaves
+          rounds at once, and a slower peer's answer still measures its round
+          trip from here (ackRounds).
+        name: sentRounds
+        type: "[rttRounds]sentRound"
+      - doc: |-
+          preVotesLost counts the PreVote refusals the campaigns were answered,
+          one per voter and campaign (Status.PreVotesLost).
+        name: preVotesLost
+        type: uint64
       - name: pendingReads
         type: "[]readReq"
       - name: waitingReads
@@ -2052,7 +2099,7 @@ types:
           is sent the batch at its next as before: followSilentReport holds it in
           probe, never in replicate, where its full window was sent nothing (#774).
         name: handleHeartbeatResp
-        params: pr *progress, m core.MessageValue
+        params: now time.Time, pr *progress, m core.MessageValue
         recv: r *Raft
       - doc: |-
           feedSilence appends a no-op of this term for a silent peer whose report
@@ -2167,6 +2214,15 @@ types:
           answer".
         name: ackRounds
         params: from core.NodeID, round, contract uint64
+        recv: r *Raft
+      - doc: |-
+          measureRTT takes peer pr's round trip at now from its answer to round,
+          when the round is newer than the last one measured and its send time is
+          still kept (D13): a duplicate, or an answer a later one overtook,
+          measures nothing. A round a majority confirmed leaves rounds at once, so
+          the send time is read from sentRounds.
+        name: measureRTT
+        params: now time.Time, pr *progress, round uint64
         recv: r *Raft
       - doc: |-
           handleAppResp moves a peer's progress on an append's answer, commits what
@@ -3877,6 +3933,13 @@ types:
           campaign for this term, 0 for a term it won by an election.
         name: HandedBy
         type: core.NodeID
+      - doc: |-
+          PreVotesLost is how many PreVote refusals this node's campaigns were
+          answered since it started, one per voter and campaign: a node whose
+          count climbs while the cluster has a leader keeps asking for an
+          election it cannot win (D13, consensus_prevotes_lost_total).
+        name: PreVotesLost
+        type: uint64
     kind: struct
     name: StatusValue
   - fields:

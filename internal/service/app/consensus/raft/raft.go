@@ -352,6 +352,16 @@ type readReq struct {
 	round uint64
 }
 
+// rttRounds is how many heartbeat rounds keep their send time for the
+// round trips (Raft.sentRounds).
+const rttRounds = 64
+
+// sentRound is when heartbeat round id left.
+type sentRound struct {
+	id uint64
+	at time.Time
+}
+
 type round struct {
 	id     uint64
 	sentAt time.Time
@@ -452,8 +462,16 @@ type Raft struct {
 
 	nextRound uint64
 	// readRounds counts the rounds flushReads opened for reads (#1108).
-	readRounds   uint64
-	rounds       []*round
+	readRounds uint64
+	rounds     []*round
+	// sentRounds holds when each of the last rttRounds heartbeat rounds
+	// left, at the slot of its id: a round a majority confirmed leaves
+	// rounds at once, and a slower peer's answer still measures its round
+	// trip from here (ackRounds).
+	sentRounds [rttRounds]sentRound
+	// preVotesLost counts the PreVote refusals the campaigns were answered,
+	// one per voter and campaign (Status.PreVotesLost).
+	preVotesLost uint64
 	pendingReads []readReq
 	waitingReads []readReq
 
@@ -853,6 +871,11 @@ type StatusValue struct {
 	// HandedBy is, while the node leads, the leader whose TimeoutNow made it
 	// campaign for this term, 0 for a term it won by an election.
 	HandedBy core.NodeID
+	// PreVotesLost is how many PreVote refusals this node's campaigns were
+	// answered since it started, one per voter and campaign: a node whose
+	// count climbs while the cluster has a leader keeps asking for an
+	// election it cannot win (D13, consensus_prevotes_lost_total).
+	PreVotesLost uint64
 }
 
 // Status returns the step function's view.
@@ -862,7 +885,7 @@ func (r *Raft) Status() StatusValue {
 		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
 		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
 		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
-		Transfer: r.transferTo,
+		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
 	}
 	if r.role == core.RoleLeader {
 		// The issuer of the TimeoutNow whose campaign won this term, 0 for
@@ -1565,6 +1588,7 @@ func (r *Raft) PeerStats() []PeerStatValue {
 		pr := r.prs[id]
 		out = append(out, PeerStatValue{
 			ID: id, Match: pr.match, Next: pr.next, Inflight: len(pr.inflight), LastHeard: pr.lastHeard,
+			RTT: pr.rtt, RTTRound: pr.rttRound,
 			Flags: statFlag(StatVoter, r.isVoter(id)) | statFlag(StatHeard, pr.facts&peerHeard != 0) |
 				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot) |
 				statFlag(StatProtocol3, pr.facts&peerProtocol3 != 0),

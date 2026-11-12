@@ -568,8 +568,8 @@ sequences:
         kind: value
       - id: n.logApplied.Store
         kind: value
-      - id: n.acond.Broadcast
-        kind: value
+      - id: n.releaseApplied
+        kind: internal
       - id: n.am.Unlock
         kind: value
       - id: n.pendingBytes.Add
@@ -590,19 +590,11 @@ sequences:
       - eval: delete(n.waiters, e.Position.Index)
       - opt:
           do:
-            - set: n.results[e.Position.Index]
-              value: "applyResult{term: e.Position.Term, val: val}"
-            - set: n.resultOrder
-              value: append(n.resultOrder, e.Position.Index)
-            - loop:
-                cond: len(n.resultOrder) > 4096
-                do:
-                  - eval: delete(n.results, n.resultOrder[0])
-                  - set: n.resultOrder
-                    value: n.resultOrder[1:]
+            - set: n.results[e.Position.Index%resultRing]
+              value: "applyResult{index: e.Position.Index, term: e.Position.Term, val: val}"
           when: n.keepResults > 0
-      - eval: n.acond.Broadcast()
-        to: n.acond.Broadcast
+      - eval: n.releaseApplied()
+        to: n.releaseApplied
       - eval: n.am.Unlock()
         to: n.am.Unlock
       - opt:
@@ -627,47 +619,99 @@ sequences:
       - send:
           chan: w.done
           value: "propResult{tok: tok, val: val}"
+  - of: (*Node).keptResult
+    steps:
+      - opt:
+          do:
+            - return: applyResult{}, false
+          when: n.results == nil
+      - bind: r
+        eval: n.results[index%resultRing]
+      - return: r, r.index == index && index != 0
+  - of: (*Node).releaseApplied
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).releaseApplied
+        kind: self
+      - id: n.appliedQ.Peek
+        kind: value
+      - id: n.appliedQ.Pop
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: n.appliedQ == nil
+      - loop:
+          do:
+            - bind: w, _, ok
+              eval: n.appliedQ.Peek()
+              to: n.appliedQ.Peek
+            - opt:
+                do:
+                  - return: ""
+                when: "!ok || w.index > n.applied"
+            - eval: n.appliedQ.Pop()
+              to: n.appliedQ.Pop
+            - opt:
+                do:
+                  - eval: n.onRelease(w.index, n.applied)
+                when: n.onRelease != nil
+            - send:
+                chan: w.ch
+                value: struct{}{}
+          forever: true
   - of: (*Node).waitApplied
     participants:
       - id: caller
         kind: actor
       - id: (*Node).waitApplied
         kind: self
-      - id: n.acond.Wait
+      - id: n.am.Lock
+        kind: value
+      - id: n.am.Unlock
+        kind: value
+      - id: heap
+        kind: package
+      - id: n.appliedQ.Push
+        kind: value
+      - id: n.appliedQ.Remove
         kind: value
     steps:
-      - bind: stopWake
-        eval: make(chan struct{})
-      - defer: close(stopWake)
-      - go: |-
-          func() {
-          		select {
-          		case <-done:
-          		case <-n.loopDone:
-          		case <-stopWake:
-          			return
-          		}
-          		n.am.Lock()
-          		n.acond.Broadcast()
-          		n.am.Unlock()
-          	}()
+      - eval: n.am.Lock()
+        to: n.am.Lock
+      - opt:
+          do:
+            - eval: n.am.Unlock()
+              to: n.am.Unlock
+            - return: "true"
+          when: n.applied >= index
+      - opt:
+          do:
+            - set: n.appliedQ
+              to: heap
+              value: heap.NewIndexed(func(a, b *appliedWaiter) int { return cmp.Compare(a.index, b.index) })
+          when: n.appliedQ == nil
+      - bind: w
+        eval: "&appliedWaiter{index: index, ch: make(chan struct{}, 1)}"
+      - bind: h
+        eval: n.appliedQ.Push(w)
+        to: n.appliedQ.Push
+      - eval: n.am.Unlock()
+        to: n.am.Unlock
+      - select:
+          cases:
+            - comm: <-w.ch
+              do:
+                - return: "true"
+            - comm: <-done
+            - comm: <-n.loopDone
       - lock:
           mutex: n.am
-      - loop:
-          cond: n.applied < index
-          do:
-            - select:
-                cases:
-                  - comm: <-done
-                    do:
-                      - return: "false"
-                  - comm: <-n.loopDone
-                    do:
-                      - return: "false"
-                  - default: true
-            - eval: n.acond.Wait()
-              to: n.acond.Wait
-      - return: "true"
+      - eval: n.appliedQ.Remove(h)
+        to: n.appliedQ.Remove
+      - return: n.applied >= index
   - of: unsupportedKind
     participants:
       - id: caller
@@ -9690,8 +9734,6 @@ sequences:
         kind: actor
       - id: newNode
         kind: self
-      - id: sync
-        kind: stdlib
       - id: n.ident.Store
         kind: value
     steps:
@@ -9702,13 +9744,9 @@ sequences:
           		inCtrl: make(chan coreconsensus.MessageValue, inboxDepth), inData: make(chan coreconsensus.MessageValue, inboxDepth),
           		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
           		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](), readq: newFifo[*readWait](),
-          		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-          		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+          		waiters: map[uint64]*proposal{}, forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
           		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
           	}
-      - set: n.acond
-        to: sync
-        value: sync.NewCond(&n.am)
       - bind: ident
         eval: stamp.Log
       - eval: n.ident.Store(&ident)
@@ -12692,8 +12730,6 @@ sequences:
         kind: internal
       - id: n.am.Lock
         kind: value
-      - id: n.acond.Broadcast
-        kind: value
       - id: n.am.Unlock
         kind: value
     steps:
@@ -12759,8 +12795,6 @@ sequences:
           key: idx
           range: n.waiters
           value: p
-      - eval: n.acond.Broadcast()
-        to: n.acond.Broadcast
       - eval: n.am.Unlock()
         to: n.am.Unlock
   - of: (*Node).stoppedErr
@@ -12801,12 +12835,6 @@ sequences:
         kind: value
       - id: n.wg.Wait
         kind: value
-      - id: n.am.Lock
-        kind: value
-      - id: n.acond.Broadcast
-        kind: value
-      - id: n.am.Unlock
-        kind: value
       - id: n.releaseDir
         kind: internal
     steps:
@@ -12827,12 +12855,6 @@ sequences:
         to: n.closeOnce.Do
       - eval: n.wg.Wait()
         to: n.wg.Wait
-      - eval: n.am.Lock()
-        to: n.am.Lock
-      - eval: n.acond.Broadcast()
-        to: n.acond.Broadcast
-      - eval: n.am.Unlock()
-        to: n.am.Unlock
       - eval: n.releaseDir()
         to: n.releaseDir
       - return: nil
@@ -12953,12 +12975,6 @@ sequences:
         kind: value
       - id: n.releaseDir
         kind: internal
-      - id: n.am.Lock
-        kind: value
-      - id: n.acond.Broadcast
-        kind: value
-      - id: n.am.Unlock
-        kind: value
     steps:
       - eval: n.hard.Store(true)
         to: n.hard.Store
@@ -12981,12 +12997,6 @@ sequences:
                 - eval: n.releaseDir()
                   to: n.releaseDir
             - comm: <-t.C()
-      - eval: n.am.Lock()
-        to: n.am.Lock
-      - eval: n.acond.Broadcast()
-        to: n.acond.Broadcast
-      - eval: n.am.Unlock()
-        to: n.am.Unlock
       - return: nil
   - of: (*Node).Status
     participants:
@@ -13325,7 +13335,7 @@ sequences:
       - return: since != 0 && now.Sub(time.Unix(0, since)) < cutAllowance*etMax
   - of: (*Node).streamedPin
     steps:
-      - return: "sendPin{index: index, until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}"
+      - return: "sendPin{index: index, since: now.UnixNano(), until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}"
   - of: (*pinFollow).catchingUp
     steps:
       - return: pos > f.at && last-min(last, pos) <= f.lag
@@ -13655,6 +13665,8 @@ sequences:
         kind: internal
       - id: wire
         kind: package
+      - id: bs.SendShared
+        kind: value
       - id: n.bodies.reset
         kind: internal
     steps:
@@ -13700,6 +13712,7 @@ sequences:
               to: wire
               value: wire.AppendHeader(slab, m, len(body))
             - eval: bs.SendShared(m.To, slab[start:len(slab):len(slab)], body)
+              to: bs.SendShared
           key: i
           range: ms
       - eval: n.bodies.reset()
@@ -13907,6 +13920,7 @@ sequences:
           		meter: cfg.Meter, tracer: cfg.Tracer, log: cfg.Logger,
           		group: coreotel.Int64("group", int64(cfg.Group)),
           		gauge: map[string]coremetrics.Gauge{}, count: map[string]coremetrics.Counter{}, hist: map[string]coremetrics.Histogram{},
+          		rttSeen: map[coreconsensus.NodeID]uint64{},
           	}
   - of: key
     participants:
@@ -14043,7 +14057,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: o.meter == nil || total <= *seen
+          when: o.meter == nil
       - bind: k
         eval: key(name, nil)
         to: key
@@ -14061,6 +14075,10 @@ sequences:
           when: "!ok"
       - eval: o.mu.Unlock()
         to: o.mu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: total <= *seen
       - eval: c.Add(total - *seen)
         to: c.Add
       - set: "*seen"
@@ -14307,9 +14325,15 @@ sequences:
         kind: value
       - id: o.setGauge
         kind: internal
+      - id: n.r.Status
+        kind: value
+      - id: o.addTo
+        kind: internal
       - id: n.observePeer
         kind: internal
       - id: o.resetDeparted
+        kind: internal
+      - id: n.observePins
         kind: internal
     steps:
       - bind: o
@@ -14329,23 +14353,61 @@ sequences:
         value: now
       - eval: o.setGauge(mFailureTolerance, float64(n.r.FailureTolerance(now)))
         to: o.setGauge
-      - bind: last
-        eval: n.r.Status().Last
-      - bind: window
-        eval: n.r.Status().Timing.ElectionTimeoutMin
+      - bind: st
+        eval: n.r.Status()
+        to: n.r.Status
+      - eval: o.addTo(mPreVotesLost, &o.seenPreVotes, int64(st.PreVotesLost))
+        to: o.addTo
       - bind: seen
         eval: map[coreconsensus.NodeID]bool{}
       - loop:
           do:
             - set: seen[p.ID]
               value: "true"
-            - eval: n.observePeer(&p, now, last, window)
+            - eval: n.observePeer(&p, now, st.Last, st.Timing.ElectionTimeoutMin)
               to: n.observePeer
           key: _
           range: n.r.PeerStats()
           value: p
       - eval: o.resetDeparted(seen)
         to: o.resetDeparted
+      - eval: n.observePins(now)
+        to: n.observePins
+  - of: (*Node).observePins
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).observePins
+        kind: self
+      - id: o.setGauge
+        kind: internal
+    steps:
+      - bind: o
+        eval: n.obs
+      - eval: o.setGauge(mSnapshotPins, float64(len(n.sending)))
+        to: o.setGauge
+      - bind: seen
+        eval: make(map[coreconsensus.NodeID]bool, len(n.sending))
+      - loop:
+          do:
+            - set: seen[to]
+              value: "true"
+            - eval: o.setGauge(mSnapshotPinAge, now.Sub(time.Unix(0, pin.since)).Seconds(), coreotel.String("peer", to.String()))
+              to: o.setGauge
+          key: to
+          range: n.sending
+          value: pin
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: o.setGauge(mSnapshotPinAge, 0, coreotel.String("peer", to.String()))
+                    to: o.setGauge
+                when: "!seen[to]"
+          key: to
+          range: o.pinsPub
+      - set: o.pinsPub
+        value: seen
   - of: (*Node).observePeer
     participants:
       - id: caller
@@ -14355,6 +14417,8 @@ sequences:
       - id: coreotel
         kind: package
       - id: n.obs.setGauge
+        kind: internal
+      - id: n.obs.record
         kind: internal
     steps:
       - bind: peer
@@ -14386,6 +14450,13 @@ sequences:
             - eval: n.obs.setGauge(mPeerLastContact, now.Sub(p.LastHeard).Seconds(), peer)
               to: n.obs.setGauge
           when: p.Flags.Has(raft.StatHeard)
+      - opt:
+          do:
+            - set: n.obs.rttSeen[p.ID]
+              value: p.RTTRound
+            - eval: n.obs.record(mPeerRTT, p.RTT.Seconds(), peer)
+              to: n.obs.record
+          when: p.RTTRound != 0 && p.RTTRound != n.obs.rttSeen[p.ID]
   - of: (*obs).resetDeparted
     participants:
       - id: caller
@@ -14413,6 +14484,7 @@ sequences:
                 key: _
                 range: peerGauges
                 value: name
+            - eval: delete(o.rttSeen, id)
           key: id
           range: o.peersPub
       - set: o.peersPub
@@ -18796,6 +18868,8 @@ sequences:
         kind: value
       - id: n.am.Lock
         kind: value
+      - id: n.keptResult
+        kind: internal
       - id: n.am.Unlock
         kind: value
       - id: n.answerApplied
@@ -18817,7 +18891,8 @@ sequences:
       - opt:
           do:
             - bind: r, ok
-              eval: n.results[pos.Index]
+              eval: n.keptResult(pos.Index)
+              to: n.keptResult
             - eval: n.am.Unlock()
               to: n.am.Unlock
             - eval: n.answerApplied(p, pos, r, ok)
@@ -18940,6 +19015,11 @@ sequences:
         to: n.am.Lock
       - op: ++
         set: n.keepResults
+      - opt:
+          do:
+            - set: n.results
+              value: new([resultRing]applyResult)
+          when: n.results == nil
       - eval: n.am.Unlock()
         to: n.am.Unlock
       - eval: p.stage.Store(stagePossible)
@@ -20490,8 +20570,8 @@ sequences:
         kind: value
       - id: n.answerCovered
         kind: internal
-      - id: n.acond.Broadcast
-        kind: value
+      - id: n.releaseApplied
+        kind: internal
       - id: n.am.Unlock
         kind: value
       - id: n.snapState.mu.Lock
@@ -20553,8 +20633,8 @@ sequences:
               value: m.Position.Index, m.Position.Term
             - eval: n.answerCovered(m.Position.Index)
               to: n.answerCovered
-            - eval: n.acond.Broadcast()
-              to: n.acond.Broadcast
+            - eval: n.releaseApplied()
+              to: n.releaseApplied
             - eval: n.am.Unlock()
               to: n.am.Unlock
           when: durIdx < m.Position.Index
@@ -21870,7 +21950,7 @@ sequences:
       - eval: moved.Store(n.clk.Now().UnixNano())
         to: moved.Store
       - set: n.sending[to]
-        value: "sendPin{index: meta.Position.Index, sent: sent, moved: moved}"
+        value: "sendPin{index: meta.Position.Index, since: moved.Load(), sent: sent, moved: moved}"
       - bind: offer
         eval: "coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}"
       - bind: ctx, cancel
@@ -21906,7 +21986,12 @@ sequences:
           		n.streamEnded(meta, to, err)
           		n.exec(func() {
           			if err == nil {
-          				n.sending[to] = n.streamedPin(to, meta.Position.Index, n.r.Status().Last, n.clk.Now())
+          				pin := n.streamedPin(to, meta.Position.Index, n.r.Status().Last, n.clk.Now())
+          				if held, ok := n.sending[to]; ok && held.since != 0 {
+          					// The pin's age counts from the offer (D13).
+          					pin.since = held.since
+          				}
+          				n.sending[to] = pin
           			} else {
           				delete(n.sending, to)
           				n.aq.push(applyItem{compact: true})
@@ -23206,6 +23291,11 @@ sequences:
         to: clampInt
       - eval: clampInt(&c.ReservedMemberSlots, defaultReservedMemberSlots)
         to: clampInt
+      - opt:
+          do:
+            - set: c.Clock
+              value: clock.System
+          when: c.Clock == nil
       - switch:
           cases:
             - case: c.Roots == nil
@@ -23402,8 +23492,8 @@ sequences:
         kind: self
       - id: t.wg.Done
         kind: value
-      - id: time
-        kind: stdlib
+      - id: t.cfg.Clock.NewTimer
+        kind: value
       - id: wait.Stop
         kind: value
       - id: t.ln.Accept
@@ -23429,8 +23519,8 @@ sequences:
           name: delay
           type: time.Duration
       - bind: wait
-        eval: time.NewTimer(acceptBackoffFirst)
-        to: time
+        eval: t.cfg.Clock.NewTimer(acceptBackoffFirst)
+        to: t.cfg.Clock.NewTimer
       - eval: wait.Stop()
         to: wait.Stop
       - defer: wait.Stop()
@@ -23513,7 +23603,7 @@ sequences:
             - comm: <-t.done
               do:
                 - return: delay, false
-            - comm: <-wait.C
+            - comm: <-wait.C()
               do:
                 - return: delay, true
   - of: acceptBackoff
@@ -23688,8 +23778,6 @@ sequences:
         kind: value
       - id: t.mu.Unlock
         kind: value
-      - id: time.Now().Add
-        kind: value
       - id: conn.SetReadDeadline
         kind: value
       - id: t.holdBack
@@ -23709,20 +23797,14 @@ sequences:
         value: leaf.NotAfter
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
-      - bind: deadline
-        eval: time.Now().Add(t.cfg.MaxConnectionAge)
-        to: time.Now().Add
-      - opt:
-          do:
-            - set: deadline
-              value: leaf.NotAfter
-          when: leaf.NotAfter.Before(deadline)
+      - bind: left
+        eval: min(t.cfg.MaxConnectionAge, leaf.NotAfter.Sub(t.cfg.Clock.Now()))
       - opt:
           do:
             - return: ""
           init:
             bind: err
-            eval: conn.SetReadDeadline(deadline)
+            eval: conn.SetReadDeadline(time.Now().Add(left))
             to: conn.SetReadDeadline
           when: err != nil
       - switch:
@@ -24576,7 +24658,7 @@ sequences:
           do:
             - eval: link.close()
               to: link.close
-          when: time.Since(link.created) > t.cfg.MaxConnectionAge || !t.stillAdmitted(k.to, link)
+          when: t.cfg.Clock.Since(link.created) > t.cfg.MaxConnectionAge || !t.stillAdmitted(k.to, link)
   - of: (*TCPTransport).writeBatch
     participants:
       - id: caller
@@ -24627,7 +24709,7 @@ sequences:
         kind: internal
       - id: abandon
         kind: internal
-      - id: time.Now().Add
+      - id: t.cfg.Clock.Now().Add
         kind: value
       - id: t.reportUnreachable
         kind: internal
@@ -24639,7 +24721,7 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: time.Now().Before(link.backoff)
+          when: t.cfg.Clock.Now().Before(link.backoff)
       - bind: addr, pin, ok
         eval: t.address(k.to)
         to: t.address
@@ -24670,14 +24752,14 @@ sequences:
       - opt:
           do:
             - set: link.backoff
-              to: time.Now().Add
-              value: time.Now().Add(redialBackoff)
+              to: t.cfg.Clock.Now().Add
+              value: t.cfg.Clock.Now().Add(redialBackoff)
             - eval: t.reportUnreachable(k.to)
               to: t.reportUnreachable
             - return: "false"
           when: err != nil
       - set: link.conn, link.w, link.created
-        value: c, bufio.NewWriterSize(c, connBufferBytes), time.Now()
+        value: c, bufio.NewWriterSize(c, connBufferBytes), t.cfg.Clock.Now()
       - set: link.pin, link.notAfter
         value: pin, time.Time{}
       - opt:
@@ -24740,7 +24822,7 @@ sequences:
       - bind: _, pin, ok
         eval: t.address(to)
         to: t.address
-      - return: ok && pin == link.pin && time.Now().Before(link.notAfter)
+      - return: ok && pin == link.pin && t.cfg.Clock.Now().Before(link.notAfter)
   - of: (*TCPTransport).reportUnreachable
     participants:
       - id: caller

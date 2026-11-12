@@ -126,6 +126,7 @@ func (r *Raft) broadcastHeartbeat(now time.Time) {
 	r.nextRound++
 	rd := &round{id: r.nextRound, sentAt: now, acks: map[core.NodeID]uint64{r.id: r.timing.Generation + 1}, conf: r.conf().Index}
 	r.rounds = append(r.rounds, rd)
+	r.sentRounds[rd.id%rttRounds] = sentRound{id: rd.id, at: now}
 	if len(r.rounds) > 64 {
 		r.rounds = r.rounds[len(r.rounds)-64:]
 	}
@@ -339,7 +340,7 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 		r.handleAppResp(pr, m)
 	case core.MsgHeartbeatResp:
 		pr.noteSilence(m.Flags)
-		r.handleHeartbeatResp(pr, m)
+		r.handleHeartbeatResp(now, pr, m)
 	default:
 		// Nothing else carries news for a leader of this term: the
 		// contact above is all it records.
@@ -365,8 +366,9 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 // append, so its report alone tells whether the probe reached it, and it
 // is sent the batch at its next as before: followSilentReport holds it in
 // probe, never in replicate, where its full window was sent nothing (#774).
-func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
+func (r *Raft) handleHeartbeatResp(now time.Time, pr *progress, m core.MessageValue) {
 	r.ackRounds(m.From, m.Context, m.Contract)
+	r.measureRTT(now, pr, m.Context)
 	r.confirmRounds()
 	silent := m.Flags&core.FlagTruncated != 0 && !r.mutated(mutSilentReportIgnored)
 	if silent {
@@ -542,6 +544,17 @@ func (r *Raft) ackRounds(from core.NodeID, round, contract uint64) {
 		if rd.id <= round {
 			rd.acks[from] = contract + 1
 		}
+	}
+}
+
+// measureRTT takes peer pr's round trip at now from its answer to round,
+// when the round is newer than the last one measured and its send time is
+// still kept (D13): a duplicate, or an answer a later one overtook,
+// measures nothing. A round a majority confirmed leaves rounds at once, so
+// the send time is read from sentRounds.
+func (r *Raft) measureRTT(now time.Time, pr *progress, round uint64) {
+	if s := r.sentRounds[round%rttRounds]; round > pr.rttRound && s.id == round {
+		pr.rtt, pr.rttRound = now.Sub(s.at), round
 	}
 }
 

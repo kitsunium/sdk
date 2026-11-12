@@ -4364,7 +4364,8 @@ packages:
           PeerStatValue is the leader's view of one peer, for Health (D13). Flags
           say whether it votes, answered in this term, is probed, is being sent a
           snapshot or last announced protocol 3; LastHeard is meaningful only once
-          StatHeard is set.
+          StatHeard is set. RTT is the round trip of the heartbeat round RTTRound
+          names, 0 before the peer answered one.
         name: PeerStatValue
         struct:
           fields:
@@ -4380,6 +4381,16 @@ packages:
               type: int
             - name: LastHeard
               type: time.Time
+            - doc: |-
+                RTT is the time from the heartbeat round RTTRound names to the peer's
+                first answer to it (D13, consensus_peer_rtt_seconds).
+              name: RTT
+              type: time.Duration
+            - doc: |-
+                RTTRound is the heartbeat round RTT was measured on, 0 for none: the
+                driver records a sample once per round.
+              name: RTTRound
+              type: uint64
       - doc: |-
           PeerStatFlags are a peer's yes/no facts in the leader's view, one bit
           each, read with Has.
@@ -5148,6 +5159,13 @@ packages:
                 campaign for this term, 0 for a term it won by an election.
               name: HandedBy
               type: core.NodeID
+            - doc: |-
+                PreVotesLost is how many PreVote refusals this node's campaigns were
+                answered since it started, one per voter and campaign: a node whose
+                count climbs while the cluster has a leader keeps asking for an
+                election it cannot win (D13, consensus_prevotes_lost_total).
+              name: PreVotesLost
+              type: uint64
       - doc: |-
           EngineValue is the engine's own replicated state: the timing contract, the
           cluster version and its generation, and the no-space alarm.

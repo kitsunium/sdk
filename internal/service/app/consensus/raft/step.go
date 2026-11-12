@@ -69,6 +69,11 @@ func (r *Raft) adoptTerm(m core.MessageValue) {
 		// The future term a granted PreVote answers.
 	case m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat:
 		r.becomeFollower(m.Term, m.From)
+	case m.Kind == core.MsgPreVoteResp && r.role == core.RolePreCandidate:
+		// A refusal from a later term ends the campaign: it is lost
+		// (D13), once.
+		r.preVotesLost++
+		r.becomeFollower(m.Term, 0)
 	default:
 		r.becomeFollower(m.Term, 0)
 	}
@@ -340,6 +345,11 @@ func (r *Raft) stepCandidate(now time.Time, m core.MessageValue) {
 		r.followWinner(now, m)
 	case core.MsgPreVoteResp:
 		if r.role == core.RolePreCandidate {
+			if v, ok := r.votes[m.From]; m.Reject && (!ok || v) {
+				// A refusal counts once per voter and campaign: a
+				// duplicate answer is not a second loss (D13).
+				r.preVotesLost++
+			}
 			r.votes[m.From] = !m.Reject
 			r.tallyVotes()
 		}

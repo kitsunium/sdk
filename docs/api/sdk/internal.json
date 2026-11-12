@@ -66275,8 +66275,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "PeerStatValue",
-      "spelled": "struct{ID core.NodeID; Flags PeerStatFlags; Match uint64; Next uint64; Inflight int; LastHeard time.Time}",
-      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Flags github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags; Match uint64; Next uint64; Inflight int; LastHeard time.Time}",
+      "spelled": "struct{ID core.NodeID; Flags PeerStatFlags; Match uint64; Next uint64; Inflight int; LastHeard time.Time; RTT time.Duration; RTTRound uint64}",
+      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Flags github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags; Match uint64; Next uint64; Inflight int; LastHeard time.Time; RTT time.Duration; RTTRound uint64}",
       "fields": [
         {
           "name": "ID",
@@ -66301,9 +66301,19 @@
         {
           "name": "LastHeard",
           "type": "time.Time"
+        },
+        {
+          "name": "RTT",
+          "type": "time.Duration",
+          "doc": "RTT is the time from the heartbeat round RTTRound names to the peer's\nfirst answer to it (D13, consensus_peer_rtt_seconds).\n"
+        },
+        {
+          "name": "RTTRound",
+          "type": "uint64",
+          "doc": "RTTRound is the heartbeat round RTT was measured on, 0 for none: the\ndriver records a sample once per round.\n"
         }
       ],
-      "doc": "PeerStatValue is the leader's view of one peer, for Health (D13). Flags\nsay whether it votes, answered in this term, is probed, is being sent a\nsnapshot or last announced protocol 3; LastHeard is meaningful only once\nStatHeard is set.\n",
+      "doc": "PeerStatValue is the leader's view of one peer, for Health (D13). Flags\nsay whether it votes, answered in this term, is probed, is being sent a\nsnapshot or last announced protocol 3; LastHeard is meaningful only once\nStatHeard is set. RTT is the round trip of the heartbeat round RTTRound\nnames, 0 before the peer answered one.\n",
       "file": "service/app/consensus/raft/peerstat.go",
       "layer": "service",
       "family": "app"
@@ -67162,8 +67172,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "StatusValue",
-      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Conf core.MembershipValue; Committed core.MembershipValue; Transfer core.NodeID; HandedBy core.NodeID}",
-      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
+      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Conf core.MembershipValue; Committed core.MembershipValue; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64}",
+      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64}",
       "fields": [
         {
           "name": "Role",
@@ -67221,6 +67231,11 @@
           "name": "HandedBy",
           "type": "core.NodeID",
           "doc": "HandedBy is, while the node leads, the leader whose TimeoutNow made it\ncampaign for this term, 0 for a term it won by an election.\n"
+        },
+        {
+          "name": "PreVotesLost",
+          "type": "uint64",
+          "doc": "PreVotesLost is how many PreVote refusals this node's campaigns were\nanswered since it started, one per voter and campaign: a node whose\ncount climbs while the cluster has a leader keeps asking for an\nelection it cannot win (D13, consensus_prevotes_lost_total).\n"
         }
       ],
       "doc": "StatusValue is the step function's part of a node's status. It is a copy:\nits memberships are cloned, so the caller may keep it.\n",

@@ -906,7 +906,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	}
 	sent, moved := new(atomic.Int64), new(atomic.Int64)
 	moved.Store(n.clk.Now().UnixNano())
-	n.sending[to] = sendPin{index: meta.Position.Index, sent: sent, moved: moved}
+	n.sending[to] = sendPin{index: meta.Position.Index, since: moved.Load(), sent: sent, moved: moved}
 	offer := coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
 	ctx, cancel := context.WithCancel(context.Background())
 	n.sendStop[to] = cancel
@@ -937,7 +937,12 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.streamEnded(meta, to, err)
 		n.exec(func() {
 			if err == nil {
-				n.sending[to] = n.streamedPin(to, meta.Position.Index, n.r.Status().Last, n.clk.Now())
+				pin := n.streamedPin(to, meta.Position.Index, n.r.Status().Last, n.clk.Now())
+				if held, ok := n.sending[to]; ok && held.since != 0 {
+					// The pin's age counts from the offer (D13).
+					pin.since = held.since
+				}
+				n.sending[to] = pin
 			} else {
 				delete(n.sending, to)
 				n.aq.push(applyItem{compact: true})

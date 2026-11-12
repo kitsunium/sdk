@@ -75,6 +75,15 @@ under coverage before touching `shard_count`.
   for more entries than one append carries (`fetchSpan`): a run of small
   entries was read whole for its head alone
   (`TestAFetchedBatchIsCutByItsEncoding`).
+- Measure a peer's round trip on `rounds`: a round a majority confirmed
+  leaves it at once, and the slower peer of three never measured one.
+  `measureRTT` reads the send time from `sentRounds`, the last
+  `rttRounds` broadcasts, and measures a round newer than the peer's last,
+  so a duplicate or an overtaken answer measures nothing
+  (`PeerStatValue.RTT`, #914, `TestAHeartbeatAnswerMeasuresItsRoundTrip`,
+  `TestTheSimulatorMeasuresEachPeersRoundTrip`). `Status.PreVotesLost`
+  counts a refusal once per voter and campaign, a later term's refusal
+  included (`TestAPreVoteRefusalCountsOncePerVoterAndCampaign`).
 - Acknowledge a snapshot install past its index (review H1,
   `mutSnapshotAckLastIndex`).
 - Append, acknowledge or skip an entry kind `Known` refuses: report it in

@@ -36,6 +36,10 @@ const (
 	mPeerInflight     = "consensus_peer_inflight"
 	mPeerUnreachable  = "consensus_peer_unreachable"
 	mPeerLastContact  = "consensus_peer_last_contact_seconds"
+	mPeerRTT          = "consensus_peer_rtt_seconds"
+	mPreVotesLost     = "consensus_prevotes_lost_total"
+	mSnapshotPins     = "consensus_snapshot_pins"
+	mSnapshotPinAge   = "consensus_snapshot_pin_age_seconds"
 	mElectionsStarted = "consensus_elections_started_total"
 	mSnapshotDuration = "consensus_snapshot_duration_seconds"
 	mSnapshotBytes    = "consensus_snapshot_bytes"
@@ -96,9 +100,15 @@ type obs struct {
 	// published: a series is never deleted, so a peer that left is reset
 	// rather than left at its last value (#532).
 	peersPub, certsPub map[coreconsensus.NodeID]bool
-	// seenTails, seenReloads and seenRounds are the running totals already
-	// added to their counters.
-	seenTails, seenReloads, seenRounds int64
+	// pinsPub are the peers whose pin age the last pass published, reset
+	// to 0 once their pin ends.
+	pinsPub map[coreconsensus.NodeID]bool
+	// rttSeen is, per peer, the heartbeat round whose round trip was last
+	// recorded: a sample is recorded once (D13).
+	rttSeen map[coreconsensus.NodeID]uint64
+	// seenTails, seenReloads, seenRounds and seenPreVotes are the running
+	// totals already added to their counters.
+	seenTails, seenReloads, seenRounds, seenPreVotes int64
 }
 
 // newObs binds a node's instruments to its configured Meter, Tracer and
@@ -108,6 +118,7 @@ func newObs(cfg *Config) *obs {
 		meter: cfg.Meter, tracer: cfg.Tracer, log: cfg.Logger,
 		group: coreotel.Int64("group", int64(cfg.Group)),
 		gauge: map[string]coremetrics.Gauge{}, count: map[string]coremetrics.Counter{}, hist: map[string]coremetrics.Histogram{},
+		rttSeen: map[coreconsensus.NodeID]uint64{},
 	}
 }
 
@@ -163,9 +174,11 @@ func (o *obs) inc(name string, attrs ...coreotel.AttrValue) {
 	c.Inc()
 }
 
-// addTo brings a counter up to a running total kept elsewhere.
+// addTo brings a counter up to a running total kept elsewhere. The series
+// exists from the first call, at 0, so an alert on its increase has a
+// series to read before the first event.
 func (o *obs) addTo(name string, seen *int64, total int64) {
-	if o.meter == nil || total <= *seen {
+	if o.meter == nil {
 		return
 	}
 	k := key(name, nil)
@@ -176,6 +189,9 @@ func (o *obs) addTo(name string, seen *int64, total int64) {
 		o.count[k] = c
 	}
 	o.mu.Unlock()
+	if total <= *seen {
+		return
+	}
 	c.Add(total - *seen)
 	*seen = total
 }
@@ -311,8 +327,9 @@ func (o *obs) observeRoleChange(old, cur *coreconsensus.StatusValue) {
 		lattr("leader", uint64(cur.Leader)))
 }
 
-// observePeers publishes the leader's per-peer gauges and the failure
-// tolerance, at most every 100 ms, on the loop.
+// observePeers publishes the leader's per-peer gauges, each peer's round
+// trips, the snapshot pins, the lost PreVotes and the failure tolerance, at
+// most every 100 ms, on the loop.
 func (n *Node) observePeers() {
 	o := n.obs
 	if o.meter == nil {
@@ -324,14 +341,35 @@ func (n *Node) observePeers() {
 	}
 	o.lastPeers = now
 	o.setGauge(mFailureTolerance, float64(n.r.FailureTolerance(now)))
-	last := n.r.Status().Last
-	window := n.r.Status().Timing.ElectionTimeoutMin
+	st := n.r.Status()
+	o.addTo(mPreVotesLost, &o.seenPreVotes, int64(st.PreVotesLost))
 	seen := map[coreconsensus.NodeID]bool{}
 	for _, p := range n.r.PeerStats() {
 		seen[p.ID] = true
-		n.observePeer(&p, now, last, window)
+		n.observePeer(&p, now, st.Last, st.Timing.ElectionTimeoutMin)
 	}
 	o.resetDeparted(seen)
+	n.observePins(now)
+}
+
+// observePins publishes how many snapshot pins hold compaction for a peer
+// (n.sending, D13, R7-38) and, per peer, for how long its pin has held:
+// the alert of D13 compares the age with pinAfterStream maximum election
+// timeouts. A pin that ended reads 0.
+func (n *Node) observePins(now time.Time) {
+	o := n.obs
+	o.setGauge(mSnapshotPins, float64(len(n.sending)))
+	seen := make(map[coreconsensus.NodeID]bool, len(n.sending))
+	for to, pin := range n.sending {
+		seen[to] = true
+		o.setGauge(mSnapshotPinAge, now.Sub(time.Unix(0, pin.since)).Seconds(), coreotel.String("peer", to.String()))
+	}
+	for to := range o.pinsPub {
+		if !seen[to] {
+			o.setGauge(mSnapshotPinAge, 0, coreotel.String("peer", to.String()))
+		}
+	}
+	o.pinsPub = seen
 }
 
 // observePeer publishes one peer's gauges.
@@ -350,6 +388,10 @@ func (n *Node) observePeer(p *raft.PeerStatValue, now time.Time, last uint64, wi
 	if p.Flags.Has(raft.StatHeard) {
 		n.obs.setGauge(mPeerLastContact, now.Sub(p.LastHeard).Seconds(), peer)
 	}
+	if p.RTTRound != 0 && p.RTTRound != n.obs.rttSeen[p.ID] {
+		n.obs.rttSeen[p.ID] = p.RTTRound
+		n.obs.record(mPeerRTT, p.RTT.Seconds(), peer)
+	}
 }
 
 // resetDeparted resets once the gauges of every peer the last pass
@@ -366,6 +408,7 @@ func (o *obs) resetDeparted(seen map[coreconsensus.NodeID]bool) {
 		for _, name := range peerGauges {
 			o.setGauge(name, 0, peer)
 		}
+		delete(o.rttSeen, id)
 	}
 	o.peersPub = seen
 }
