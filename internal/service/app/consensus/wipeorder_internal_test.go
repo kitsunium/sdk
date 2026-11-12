@@ -280,7 +280,7 @@ func TestAWipeCutAtEveryStepIsSafe(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(x.dir, markerStopPrefix+"STORAGE_FAILED"), []byte("boot=an-earlier-boot\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeFileSync(filepath.Join(x.dir, fileSilent), silenceRecord(before.LastTerm, 0)); err != nil {
+	if err := osDisk.writeFileSync(filepath.Join(x.dir, fileSilent), silenceRecord(before.LastTerm, 0)); err != nil {
 		t.Fatal(err)
 	}
 	cut := map[string]string{"before": filepath.Join(root, "before")}

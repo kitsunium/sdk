@@ -162,7 +162,7 @@ func TestFallocateFillZeroesWhatTheRangeHeld(t *testing.T) {
 	if _, err := f.Write(bytes.Repeat([]byte{0xff}, 6000)); err != nil {
 		t.Fatal(err)
 	}
-	if err := fallocateFill(f, 100, 16<<10); err != nil {
+	if err := osDisk.fallocateFill(f, 100, 16<<10); err != nil {
 		t.Fatal(err)
 	}
 	b := must(os.ReadFile(f.Name()))(t)

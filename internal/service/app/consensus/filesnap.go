@@ -24,7 +24,10 @@ const supersededWhy = "spool superseded by another install of the same id"
 // renamed to <id>.snap, and published by its <id>.meta, written atomically
 // last; a .snap without its .meta is not a snapshot.
 type fileSnapshots struct {
-	dir  string
+	dir string
+	// disk is the fault seam every write, sync, rename and removal of the
+	// store goes through: its dataDir's, osDisk when nil (fs).
+	disk *diskFS
 	mu   sync.Mutex
 	pins map[string]int
 	// writing counts the sinks open on each id's spool: a spool a sink
@@ -54,7 +57,13 @@ type fileSnapshots struct {
 // directory's open passes its log's syncFailedAtOpen, which writes the
 // markers first (#637), and a store opened alone passes storageFailed.
 func newFileSnapshots(dir string, syncFailed func(op string, cause error) error) (*fileSnapshots, error) {
-	if err := mkdirDurable(dir); err != nil {
+	return newFileSnapshotsOn(dir, syncFailed, &osDisk)
+}
+
+// newFileSnapshotsOn is newFileSnapshots over the fault seam disk: its data
+// directory's (D15).
+func newFileSnapshotsOn(dir string, syncFailed func(op string, cause error) error, disk *diskFS) (*fileSnapshots, error) {
+	if err := disk.mkdirDurable(dir); err != nil {
 		return nil, err
 	}
 	// A crash between a snapshot's rename and its .meta leaves a .snap
@@ -69,12 +78,12 @@ func newFileSnapshots(dir string, syncFailed func(op string, cause error) error)
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(dir, id+".meta")); errors.Is(err, os.ErrNotExist) {
-			if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+			if err := disk.remove(filepath.Join(dir, e.Name())); err != nil {
 				return nil, storageFailed("remove orphan snapshot", err)
 			}
 		}
 	}
-	s := &fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}, owners: map[string]*fileSink{}, resume: map[string]resumePoint{}}
+	s := &fileSnapshots{dir: dir, disk: disk, pins: map[string]int{}, writing: map[string]int{}, owners: map[string]*fileSink{}, resume: map[string]resumePoint{}}
 	if err := s.sweepSpools(newestSpool(ents)); err != nil {
 		return nil, err
 	}
@@ -82,10 +91,18 @@ func newFileSnapshots(dir string, syncFailed func(op string, cause error) error)
 	// directory sync leaves a snapshot the listing reads and the disk may
 	// not hold: the directory is made durable before anything is restored
 	// or offered from it, as the log's segments are (syncAtOpen).
-	if err := syncDirAtOpen(dir); err != nil {
+	if err := disk.syncDir(dir); err != nil {
 		return nil, syncFailed("sync snapshots at open", err)
 	}
 	return s, nil
+}
+
+// fs is the store's fault seam, osDisk for a store built without one.
+func (s *fileSnapshots) fs() *diskFS {
+	if s.disk != nil {
+		return s.disk
+	}
+	return &osDisk
 }
 
 // snapshotEntries lists the snapshot directory dir for its open: a
@@ -169,7 +186,7 @@ func (s *fileSnapshots) sweepSpools(keep string) error {
 	if err != nil || !swept {
 		return err
 	}
-	if err := syncDir(s.dir); err != nil {
+	if err := s.fs().syncDir(s.dir); err != nil {
 		return storageFailed("remove orphan spool", err)
 	}
 	return nil
@@ -182,7 +199,7 @@ func (s *fileSnapshots) removeSpools(ents []os.DirEntry, keep string) (bool, err
 	defer s.mu.Unlock()
 	orphans := s.orphanSpools(ents, keep)
 	for _, name := range orphans {
-		if err := os.Remove(filepath.Join(s.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := s.fs().remove(filepath.Join(s.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return true, storageFailed("remove orphan spool", err)
 		}
 		delete(s.resume, strings.TrimSuffix(name, ".spool"))
@@ -212,7 +229,7 @@ func validID(id string) bool {
 type fileSink struct {
 	s    *fileSnapshots
 	id   string
-	f    *os.File
+	f    segFile
 	meta coreconsensus.SnapshotMetaValue
 	done sync.Once
 	// mu orders the sink's writes, Commit, Abort and release against a
@@ -266,7 +283,7 @@ func (s *fileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) 
 		// Locks go from the younger sink to the older one, never back.
 		old.supersede()
 	}
-	f, err := os.OpenFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
+	f, err := s.fs().openFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		sink.mu.Unlock()
 		sink.closed()
@@ -478,7 +495,7 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 func (s *fileSnapshots) rename(from, to string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return os.Rename(filepath.Join(s.dir, from), filepath.Join(s.dir, to))
+	return s.fs().rename(filepath.Join(s.dir, from), filepath.Join(s.dir, to))
 }
 
 // writeMeta publishes data as id's .meta as writeFileSync does — written
@@ -486,13 +503,13 @@ func (s *fileSnapshots) rename(from, to string) error {
 // — with only the rename under s.mu (rename): a listing never waits for a
 // sync.
 func (s *fileSnapshots) writeMeta(id string, data []byte) error {
-	if err := writeSynced(filepath.Join(s.dir, id+".meta.tmp"), data); err != nil {
+	if err := s.fs().writeSynced(filepath.Join(s.dir, id+".meta.tmp"), data); err != nil {
 		return err
 	}
 	if err := s.rename(id+".meta.tmp", id+".meta"); err != nil {
 		return err
 	}
-	return syncDir(s.dir)
+	return s.fs().syncDir(s.dir)
 }
 
 // published reads the snapshot a directory entry named name publishes. ok
@@ -573,7 +590,7 @@ func (k *fileSink) Abort() error {
 	// Abort promises, and its failure is reported.
 	abandon(k.f.Close())
 	k.s.forget(k.id)
-	if err := os.Remove(filepath.Join(k.s.dir, k.id+".spool")); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := k.s.fs().remove(filepath.Join(k.s.dir, k.id+".spool")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return storageFailed("abort spool", err)
 	}
 	return nil
@@ -692,7 +709,7 @@ func (s *fileSnapshots) Remove(id string) error {
 	if err := s.removeFiles(id); err != nil {
 		return err
 	}
-	if err := syncDir(s.dir); err != nil {
+	if err := s.fs().syncDir(s.dir); err != nil {
 		return storageFailed("remove", err)
 	}
 	return nil
@@ -707,7 +724,7 @@ func (s *fileSnapshots) removeFiles(id string) error {
 		return pinnedSnapshot()
 	}
 	for _, ext := range []string{".meta", ".snap"} {
-		if err := os.Remove(filepath.Join(s.dir, id+ext)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := s.fs().remove(filepath.Join(s.dir, id+ext)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return storageFailed("remove", err)
 		}
 	}

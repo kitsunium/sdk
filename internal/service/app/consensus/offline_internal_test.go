@@ -660,7 +660,27 @@ func TestAnInstalledNodeRestartsAfterAppending(t *testing.T) {
 // open and silent.
 func silenceByDamage(t *testing.T, c *cluster, victim *diskNode, opt *QuarantineOptions) {
 	t.Helper()
-	segs := must(filepath.Glob(filepath.Join(victim.dir, "log", "seg-????????????????")))(t)
+	damageSyncedRecord(t, victim.dir)
+	victim.dd = openDir(t, victim.dir, 16<<10)
+	victim.sm = newKV()
+	if _, err := NewNode(diskConfig(c, victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
+		t.Fatalf("damaged log: %v", err)
+	}
+	if err := ClearQuarantineWith(context.Background(), victim.dd, TruncateAndStaySilent, "op:silent", opt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(victim.dir, fileSilent)); err != nil {
+		t.Fatal("no silence condition persisted")
+	}
+}
+
+// damageSyncedRecord flips a payload byte of a record of synced data in the
+// last segment of the crashed directory dir, past the founding entry's
+// batch: its open quarantines the log, and TruncateAndStaySilent keeps a
+// configuration.
+func damageSyncedRecord(t *testing.T, dir string) {
+	t.Helper()
+	segs := must(filepath.Glob(filepath.Join(dir, "log", "seg-????????????????")))(t)
 	if len(segs) == 0 {
 		t.Fatal("setup: the victim has no published segment")
 	}
@@ -700,17 +720,6 @@ func silenceByDamage(t *testing.T, c *cluster, victim *diskNode, opt *Quarantine
 	b[at+recHeader+recFixed] ^= 0xff
 	if err := os.WriteFile(last, b, 0o600); err != nil {
 		t.Fatal(err)
-	}
-	victim.dd = openDir(t, victim.dir, 16<<10)
-	victim.sm = newKV()
-	if _, err := NewNode(diskConfig(c, victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
-		t.Fatalf("damaged log: %v", err)
-	}
-	if err := ClearQuarantineWith(context.Background(), victim.dd, TruncateAndStaySilent, "op:silent", opt); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(victim.dir, fileSilent)); err != nil {
-		t.Fatal("no silence condition persisted")
 	}
 }
 

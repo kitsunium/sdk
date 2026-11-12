@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -293,11 +294,19 @@ func TestDMCryptWriter(t *testing.T) {
 	}
 	if os.Getenv("DMCRYPT_STOP_AT_SEAL") == "1" {
 		// The cut lands between a durable seal and the next segment's
-		// publication: the window of review H2.
-		d.d.log.afterSeal = func() {
-			fmt.Fprintln(os.Stdout, "SEALED")
-			select {}
+		// publication, the window of review H2: the rename that publishes
+		// the next segment, which a rotation makes once its seal is synced,
+		// never runs. The shim passes every sync to the device.
+		s := newFaultFS()
+		s.realSync = true
+		s.before = func(op *diskOp) error {
+			if op.kind == "rename" && strings.HasSuffix(op.path, ".tmp") && strings.HasPrefix(filepath.Base(op.path), "seg-") {
+				fmt.Fprintln(os.Stdout, "SEALED")
+				select {}
+			}
+			return nil
 		}
+		useShim(d, s)
 	}
 	l := d.Log()
 	_, last := l.Bounds()

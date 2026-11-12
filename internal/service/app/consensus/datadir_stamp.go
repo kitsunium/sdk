@@ -152,7 +152,8 @@ func readStamp(dir string) (coreconsensus.StampValue, error) {
 	return s, nil
 }
 
-// writeStamp replaces the stamp of dir atomically and durably.
-func writeStamp(dir string, s coreconsensus.StampValue) error {
-	return writeFileSync(filepath.Join(dir, fileStamp), encodeStamp(s))
+// writeStamp replaces the stamp of dir atomically and durably, through the
+// fault seam disk.
+func writeStamp(disk *diskFS, dir string, s coreconsensus.StampValue) error {
+	return disk.writeFileSync(filepath.Join(dir, fileStamp), encodeStamp(s))
 }

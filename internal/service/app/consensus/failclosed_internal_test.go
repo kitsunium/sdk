@@ -15,7 +15,7 @@ import (
 func TestAStampOfAnUnknownStateIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	unknown := coreconsensus.StampMember + 1
-	if err := writeStamp(dir, coreconsensus.StampValue{ID: 1, State: unknown}); err != nil {
+	if err := writeStamp(&osDisk, dir, coreconsensus.StampValue{ID: 1, State: unknown}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := readStamp(dir); !errors.Is(err, coreconsensus.DataDirMismatch) {

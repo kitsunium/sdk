@@ -128,7 +128,7 @@ func TestAnRWFDsyncLogRecoversAsAnFdatasyncOne(t *testing.T) {
 func TestWriteDsyncWritesEveryByteAtItsOffset(t *testing.T) {
 	f := must(os.Create(filepath.Join(t.TempDir(), "seg")))(t)
 	defer f.Close()
-	if err := zeroFrom(f, 0, 8<<10); err != nil {
+	if err := osDisk.zeroFrom(f, 0, 8<<10); err != nil {
 		t.Fatal(err)
 	}
 	b := bytes.Repeat([]byte{0xa5}, 5000)

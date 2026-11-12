@@ -11,7 +11,6 @@ package consensus
 
 import (
 	"bytes"
-	"os"
 	"testing"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -72,7 +71,7 @@ func syncedAllocLog(t *testing.T) *fileLog {
 func TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice(t *testing.T) {
 	l := syncedAllocLog(t)
 	reads := 0
-	l.readAt = func(f *os.File, b []byte, off int64) (int, error) {
+	l.readAt = func(f segFile, b []byte, off int64) (int, error) {
 		reads++
 		return f.ReadAt(b, off)
 	}

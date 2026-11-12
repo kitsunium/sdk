@@ -32,7 +32,7 @@ func sizedEnts(from uint64, n, payload int) []coreconsensus.EntryValue {
 // they ask for.
 func countPreads(l *fileLog) (calls, asked *int) {
 	calls, asked = new(int), new(int)
-	l.readAt = func(f *os.File, b []byte, off int64) (int, error) {
+	l.readAt = func(f segFile, b []byte, off int64) (int, error) {
 		*calls++
 		*asked += len(b)
 		return f.ReadAt(b, off)

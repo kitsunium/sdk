@@ -146,7 +146,7 @@ func wipeMarker(dir string) error {
 // operation it records runs. Its Close is part of the write: a failure there
 // is a storage failure like the sync's, never a detail dropped at return.
 func (d DataDir) audit(op coreconsensus.Operator, what string) (err error) {
-	f, err := os.OpenFile(filepath.Join(d.d.dir, fileAudit), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := d.d.fs().openFile(filepath.Join(d.d.dir, fileAudit), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return storageFailed("audit", err)
 	}
@@ -163,7 +163,7 @@ func (d DataDir) audit(op coreconsensus.Operator, what string) (err error) {
 	}
 	// The first line creates the file: its entry is durable only once the
 	// directory is synced (#422).
-	if err := syncDir(d.d.dir); err != nil {
+	if err := d.d.fs().syncDir(d.d.dir); err != nil {
 		return storageFailed("audit", err)
 	}
 	return nil
@@ -420,7 +420,7 @@ func (d DataDir) wipeAndRejoin(op coreconsensus.Operator) error {
 
 // markWipe publishes STOP-WIPE, durably, before the wipe removes anything.
 func (d DataDir) markWipe() error {
-	if err := writeFileSync(filepath.Join(d.d.dir, markerWipe), []byte(wipeDetail)); err != nil {
+	if err := d.d.fs().writeFileSync(filepath.Join(d.d.dir, markerWipe), []byte(wipeDetail)); err != nil {
 		return storageFailed("wipe marker", err)
 	}
 	return d.wipeStep("marker")
@@ -430,10 +430,10 @@ func (d DataDir) markWipe() error {
 // removes is durably gone: until then nothing tells a directory this wipe
 // has not finished from the old member's.
 func (d DataDir) clearWipeMarker() error {
-	if err := os.Remove(filepath.Join(d.d.dir, markerWipe)); err != nil {
+	if err := d.d.fs().remove(filepath.Join(d.d.dir, markerWipe)); err != nil {
 		return storageFailed("wipe marker", err)
 	}
-	if err := syncDir(d.d.dir); err != nil {
+	if err := d.d.fs().syncDir(d.d.dir); err != nil {
 		return storageFailed("wipe", err)
 	}
 	return d.wipeStep("done")
@@ -453,14 +453,14 @@ func (d DataDir) wipeStep(step string) error {
 // the stamp the last trace of the old member but STOP-WIPE.
 func (d DataDir) removeStores() error {
 	for _, name := range []string{"log", "snap"} {
-		if err := os.RemoveAll(filepath.Join(d.d.dir, name)); err != nil {
+		if err := d.d.fs().removeAll(filepath.Join(d.d.dir, name)); err != nil {
 			return storageFailed("wipe", err)
 		}
 		if err := d.wipeStep(name); err != nil {
 			return err
 		}
 	}
-	if err := syncDir(d.d.dir); err != nil {
+	if err := d.d.fs().syncDir(d.d.dir); err != nil {
 		return storageFailed("wipe", err)
 	}
 	return nil
@@ -478,7 +478,7 @@ func (d DataDir) removeStampAndMarkers() error {
 	}
 	for _, e := range ents {
 		if wipedWithStamp(e.Name()) {
-			if err := os.Remove(filepath.Join(d.d.dir, e.Name())); err != nil {
+			if err := d.d.fs().remove(filepath.Join(d.d.dir, e.Name())); err != nil {
 				return storageFailed("wipe", err)
 			}
 		}
@@ -486,7 +486,7 @@ func (d DataDir) removeStampAndMarkers() error {
 	if err := d.removeBootMarker(); err != nil {
 		return err
 	}
-	if err := syncDir(d.d.dir); err != nil {
+	if err := d.d.fs().syncDir(d.d.dir); err != nil {
 		return storageFailed("wipe", err)
 	}
 	return d.wipeStep("stamp")
@@ -510,7 +510,7 @@ func wipedWithStamp(name string) bool {
 // exists only after a storage failure of this boot; one that cannot be
 // removed would refuse the next start anyway, so the wipe says so now.
 func (d DataDir) removeBootMarker() error {
-	if err := os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := d.d.fs().remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return storageFailed("wipe", err)
 	}
 	return nil
@@ -928,7 +928,7 @@ func (d DataDir) finishRecover(newCluster coreconsensus.ClusterID, opt *RecoverO
 func (d DataDir) writeRecoverIntent(in *recoverIntent) error {
 	body := fmt.Sprintf("cluster=%s\nkept=%d\nRecover to cluster %s was interrupted: run Recover again to cluster %s to complete it\n",
 		in.cluster, in.kept, in.cluster, in.cluster)
-	if err := writeFileSync(filepath.Join(d.d.dir, markerRecover), []byte(body)); err != nil {
+	if err := d.d.fs().writeFileSync(filepath.Join(d.d.dir, markerRecover), []byte(body)); err != nil {
 		return storageFailed("recover marker", err)
 	}
 	return nil
@@ -961,10 +961,10 @@ func (d DataDir) readRecoverIntent() (*recoverIntent, error) {
 // clearRecoverIntent removes STOP-RECOVER once the new stamp is durable,
 // and syncs the directory, so the removal is as durable as the stamp.
 func (d DataDir) clearRecoverIntent() error {
-	if err := os.Remove(filepath.Join(d.d.dir, markerRecover)); err != nil {
+	if err := d.d.fs().remove(filepath.Join(d.d.dir, markerRecover)); err != nil {
 		return storageFailed("recover marker", err)
 	}
-	if err := syncDir(d.d.dir); err != nil {
+	if err := d.d.fs().syncDir(d.d.dir); err != nil {
 		return storageFailed("recover marker", err)
 	}
 	return nil
@@ -1666,13 +1666,13 @@ func (d DataDir) truncateAndStaySilent(ctx context.Context, opt *QuarantineOptio
 	// crash in between leaves a silent node, never a voting one. Its index
 	// is filled in once the truncated log is read (0 means "the end of the
 	// log").
-	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, 0)); err != nil {
+	if err := d.d.fs().writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, 0)); err != nil {
 		return storageFailed("silence condition", err)
 	}
-	if err := truncateAtDamage(logDir, segN, off); err != nil {
+	if err := d.d.fs().truncateAtDamage(logDir, segN, off); err != nil {
 		return err
 	}
-	if err := syncDir(logDir); err != nil {
+	if err := d.d.fs().syncDir(logDir); err != nil {
 		return storageFailed("truncate", err)
 	}
 	if d.d.afterTruncate != nil {
@@ -1680,7 +1680,7 @@ func (d DataDir) truncateAndStaySilent(ctx context.Context, opt *QuarantineOptio
 			return err
 		}
 	}
-	if err := os.Remove(filepath.Join(d.d.dir, markerQuarantine)); err != nil {
+	if err := d.d.fs().remove(filepath.Join(d.d.dir, markerQuarantine)); err != nil {
 		return storageFailed("clear marker", err)
 	}
 	return d.reopenSilenced(maxTerm)
@@ -2182,7 +2182,7 @@ func (p *peerSet) add(m *coreconsensus.MembershipValue) {
 
 // truncateAtDamage deletes every segment after segment segN, and segN too
 // when the damage is at its start, and zeroes segN from off otherwise.
-func truncateAtDamage(logDir string, segN uint64, off int64) error {
+func (d *diskFS) truncateAtDamage(logDir string, segN uint64, off int64) error {
 	segs, err := logSegments(logDir)
 	if err != nil {
 		return err
@@ -2192,7 +2192,7 @@ func truncateAtDamage(logDir string, segN uint64, off int64) error {
 		if err != nil {
 			return storageFailed("read segment", err)
 		}
-		if err := truncateSegment(path, n, segN, off, st.Size()); err != nil {
+		if err := d.truncateSegment(path, n, segN, off, st.Size()); err != nil {
 			return err
 		}
 	}
@@ -2232,14 +2232,14 @@ func recordTerm(r *record) uint64 {
 // truncateSegment applies the truncation at (segN, off) to segment n of
 // size bytes at path: deleted when it lies wholly past the damage, zeroed
 // from off when the damage is inside it, untouched before it.
-func truncateSegment(path string, n, segN uint64, off, size int64) error {
+func (d *diskFS) truncateSegment(path string, n, segN uint64, off, size int64) error {
 	switch {
 	case n > segN || (n == segN && off == 0):
-		if err := os.Remove(path); err != nil {
+		if err := d.remove(path); err != nil {
 			return storageFailed("truncate", err)
 		}
 	case n == segN:
-		return zeroSegmentFrom(path, off, size)
+		return d.zeroSegmentFrom(path, off, size)
 	}
 	return nil
 }
@@ -2247,8 +2247,8 @@ func truncateSegment(path string, n, segN uint64, off, size int64) error {
 // zeroSegmentFrom zeroes and syncs the segment at path from off to size.
 // Its Close is part of the write: a failure there is reported like the
 // zeroing's.
-func zeroSegmentFrom(path string, off, size int64) (err error) {
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
+func (d *diskFS) zeroSegmentFrom(path string, off, size int64) (err error) {
+	f, err := d.openFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return storageFailed("truncate", err)
 	}
@@ -2257,7 +2257,7 @@ func zeroSegmentFrom(path string, off, size int64) (err error) {
 			err = storageFailed("truncate", cerr)
 		}
 	}()
-	if err := zeroFrom(f, off, size); err != nil {
+	if err := d.zeroFrom(f, off, size); err != nil {
 		return storageFailed("truncate", err)
 	}
 	return nil
@@ -2279,10 +2279,10 @@ func (d DataDir) reopenSilenced(maxTerm uint64) error {
 		return err
 	}
 	_, last := d.d.log.Bounds()
-	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, last+1)); err != nil {
+	if err := d.d.fs().writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, last+1)); err != nil {
 		return storageFailed("silence condition", err)
 	}
-	return syncDir(d.d.dir)
+	return d.d.fs().syncDir(d.d.dir)
 }
 
 // silence reads the persisted silence condition, if any. An index of 0, a
@@ -2309,7 +2309,7 @@ func (l *fileLog) silence() (term, index uint64, unreadable, err error) {
 	term, index = binary.LittleEndian.Uint64(b), binary.LittleEndian.Uint64(b[8:])
 	if index == 0 {
 		index = last + 1
-		if err := writeFileSync(filepath.Join(l.dir, fileSilent), silenceRecord(term, index)); err != nil {
+		if err := l.fs().writeFileSync(filepath.Join(l.dir, fileSilent), silenceRecord(term, index)); err != nil {
 			return 0, 0, nil, err
 		}
 	}
@@ -2337,13 +2337,13 @@ func (l *fileLog) lowerSilence(index uint64) error {
 	if cur == 0 || index == 0 || index >= cur {
 		return nil
 	}
-	return writeFileSync(path, silenceRecord(term, index))
+	return l.fs().writeFileSync(path, silenceRecord(term, index))
 }
 
 // endSilence removes the silence condition durably.
 func (l *fileLog) endSilence() error {
-	if err := os.Remove(filepath.Join(l.dir, fileSilent)); err != nil && !os.IsNotExist(err) {
+	if err := l.fs().remove(filepath.Join(l.dir, fileSilent)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return syncDir(l.dir)
+	return l.fs().syncDir(l.dir)
 }

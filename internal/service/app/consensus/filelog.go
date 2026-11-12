@@ -66,6 +66,11 @@ const (
 
 	// DefaultSegmentBytes is a segment's fixed size (provisional).
 	DefaultSegmentBytes int64 = 64 << 20
+
+	// rangeReadBytes is the most bytes one range read of Entries takes past
+	// its first record: a run of synced entries longer than this is read in
+	// several (#913).
+	rangeReadBytes int64 = 4 << 20
 )
 
 // align8 rounds n up to the next record boundary.
@@ -229,7 +234,7 @@ func encodeHS(hs coreconsensus.HardState) []byte {
 
 type segment struct {
 	n    uint64
-	f    *os.File
+	f    segFile
 	size int64
 }
 
@@ -277,22 +282,14 @@ type fileLog struct {
 	// marker (R9-05): DataDirOptions.RuntimeDir, else runtimeMarkerDir. A
 	// test may point it elsewhere after the open.
 	runDir string
-	// afterSeal runs once a rotation's seal is durable and before the next
-	// segment is published. Only the dm-crypt lane sets it, to cut power in
-	// that window; it is nil otherwise.
-	afterSeal func()
-	// duringSync runs between each write of a batch and its fdatasync, or
-	// after each write flagged RWF_DSYNC (#923), the lock released: twice
-	// for a batch of several records. Only a test sets it.
-	duringSync func()
+	// disk is the fault seam every write, sync, rename and removal of the
+	// log goes through: its dataDir's, osDisk when nil (fs).
+	disk *diskFS
 	// timedSync, when set, is handed how long each fdatasync of a batch
 	// took, end true for the end record's (the last of the batch): the
 	// bench lane's fdatasync distribution and syncs per batch (#911). Only
 	// a benchmark sets it, before the node starts; nil otherwise.
 	timedSync func(took time.Duration, end bool)
-	// fill replaces zeroFrom when a test sets it, to fail as a full disk
-	// does; nil otherwise.
-	fill func(f *os.File, off, size int64) error
 	// prealloc is how the segments are preallocated, set at open by
 	// resolvePreallocate: PreallocateFallocate only where the filesystem
 	// answered the probe (#922).
@@ -313,7 +310,7 @@ type fileLog struct {
 	afterEntries func(es []coreconsensus.EntryValue)
 	// readAt replaces a segment's ReadAt on the entry reads when a test
 	// sets it, to count the preads Entries issues (#913); nil otherwise.
-	readAt func(f *os.File, b []byte, off int64) (int, error)
+	readAt func(f segFile, b []byte, off int64) (int, error)
 	// occupied is the bytes the segments occupy, kept beside segs wherever
 	// a segment is added or dropped, so the event loop reads it without mu:
 	// a rotation holds mu across an fsync (D5b).
@@ -327,6 +324,15 @@ type fileLog struct {
 // segName is segment n's file name; fixed-width hex, so the names sort in
 // segment order and recovery accepts no other spelling of n.
 func segName(n uint64) string { return fmt.Sprintf("seg-%016x", n) }
+
+// fs is the log's fault seam: its dataDir's, osDisk for a log built
+// without one.
+func (l *fileLog) fs() *diskFS {
+	if l.disk != nil {
+		return l.disk
+	}
+	return &osDisk
+}
 
 // logDir is the directory holding the segments.
 func (l *fileLog) logDir() string { return filepath.Join(l.dir, "log") }
@@ -344,7 +350,7 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 	if segBytes <= 0 {
 		segBytes = DefaultSegmentBytes
 	}
-	l := &fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: dd.opts.RuntimeDir}
+	l := &fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, disk: dd.fs(), first: 1, pendingLast: -1, runDir: dd.opts.RuntimeDir}
 	if err := l.prepareOpen(); err != nil {
 		return nil, err
 	}
@@ -395,7 +401,7 @@ func (l *fileLog) prepareOpen() error {
 	if err := l.probeRuntimeDir(); err != nil {
 		return err
 	}
-	if err := mkdirDurable(l.logDir()); err != nil {
+	if err := l.fs().mkdirDurable(l.logDir()); err != nil {
 		return err
 	}
 	st, err := readStamp(l.dir)
@@ -580,7 +586,7 @@ func (l *fileLog) segmentNumbers() ([]uint64, error) {
 	for _, e := range names {
 		name := e.Name()
 		if strings.HasSuffix(name, ".tmp") {
-			if err := os.Remove(filepath.Join(l.logDir(), name)); err != nil {
+			if err := l.fs().remove(filepath.Join(l.logDir(), name)); err != nil {
 				return nil, storageFailed("remove tmp", err)
 			}
 			continue
@@ -1027,7 +1033,7 @@ func (l *fileLog) applyCompaction() {
 // opened stay in l.segs for Close.
 func (l *fileLog) openSegments(segs []*scanned) error {
 	for _, s := range segs {
-		f, err := os.OpenFile(filepath.Join(l.logDir(), segName(s.n)), os.O_RDWR, 0)
+		f, err := l.fs().openFile(filepath.Join(l.logDir(), segName(s.n)), os.O_RDWR, 0)
 		if err != nil {
 			return storageFailed("open segment", err)
 		}
@@ -1051,14 +1057,15 @@ func (l *fileLog) openSegments(segs []*scanned) error {
 // is reported once, so the next open in the same boot would sync clean
 // (#637).
 func (l *fileLog) syncAtOpen() error {
+	disk := l.fs()
 	for _, s := range l.segs {
-		if err := syncFileAtOpen(s.f); err != nil {
+		if err := disk.datasync(s.f); err != nil {
 			return l.syncFailedAtOpen("sync at open", err)
 		}
 		l.syncedAtOpen++
 	}
 	for _, dir := range []string{l.logDir(), l.dir} {
-		if err := syncDirAtOpen(dir); err != nil {
+		if err := disk.syncDir(dir); err != nil {
 			return l.syncFailedAtOpen("sync at open", err)
 		}
 	}
@@ -1097,15 +1104,6 @@ func syncRan(cause error) bool {
 	return !ok || pe.Op != "open"
 }
 
-// syncFileAtOpen and syncDirAtOpen are the syncs an open makes of what it
-// read before it trusts it: datasync and syncDir, unless a test replaces one
-// to fail as a write-back error reported at open does (#637). Only the
-// open's own goroutine reads them.
-var (
-	syncFileAtOpen = datasync
-	syncDirAtOpen  = syncDir
-)
-
 // positionTail sets the write offset in the last segment: at the torn
 // tail's truncation point, zeroing and syncing what lies past it unless it
 // is zero already, else right after the last valid record.
@@ -1119,7 +1117,7 @@ func (l *fileLog) positionTail(last *scanned, tail *segment) error {
 			}
 			// A sync of the open, as syncAtOpen's: its failure writes the
 			// markers (#637).
-			if err := syncFileAtOpen(tail.f); err != nil {
+			if err := l.fs().datasync(tail.f); err != nil {
 				return l.syncFailedAtOpen("zero tail", err)
 			}
 		}
@@ -1205,16 +1203,6 @@ func allZero(b []byte) bool {
 	return true
 }
 
-// zeroFrom zeroes f from off to size, 1 MiB at a time, and syncs it; the
-// sync runs even when there is nothing to zero, so the caller may rely on
-// the range being durable zeros on return.
-func zeroFrom(f *os.File, off, size int64) error {
-	if err := zeroRange(f, off, size); err != nil {
-		return err
-	}
-	return datasync(f)
-}
-
 // zeroRange writes zeros over f from off to size, 1 MiB at a time, and
 // syncs nothing.
 func zeroRange(f io.WriterAt, off, size int64) error {
@@ -1236,7 +1224,7 @@ func zeroRange(f io.WriterAt, off, size int64) error {
 func (l *fileLog) quarantine(seg uint64, off int64, why string) error {
 	qerr := quarantined(seg, off, why)
 	line := fmt.Sprintf("%s %d %s\n", segName(seg), off, why)
-	if err := writeFileSync(filepath.Join(l.dir, markerQuarantine), []byte(line)); err != nil {
+	if err := l.fs().writeFileSync(filepath.Join(l.dir, markerQuarantine), []byte(line)); err != nil {
 		return storageFailed("quarantine marker", err)
 	}
 	return qerr
@@ -1246,6 +1234,7 @@ func (l *fileLog) quarantine(seg uint64, off int64, why string) error {
 // rename, fsync of the directory (D4 lifecycle steps 1 to 3).
 func (l *fileLog) createSegment(n uint64, cp *checkpoint) error {
 	size := l.segBytes
+	disk := l.fs()
 	cpRec := appendRecord(nil, &record{kind: recCheckpt, end: true, batch: cp.nextBatchSeq, data: cp.encode()})
 	tmp := filepath.Join(l.logDir(), segName(n)+".tmp")
 	f, err := l.segmentFile(n, size, tmp)
@@ -1255,10 +1244,10 @@ func (l *fileLog) createSegment(n uint64, cp *checkpoint) error {
 	// The checkpoint is written at ACTIVATION, with the current hard state,
 	// never the state of the moment the segment was prepared (R3-24, R4-01).
 	if _, err := f.WriteAt(cpRec, 0); err != nil {
-		return abandonTmp(f, tmp, storageFailed("checkpoint", err))
+		return disk.abandonTmp(f, tmp, storageFailed("checkpoint", err))
 	}
 	if err := f.Sync(); err != nil {
-		return abandonTmp(f, tmp, storageFailed("sync segment", err))
+		return disk.abandonTmp(f, tmp, storageFailed("sync segment", err))
 	}
 	// Closed before the rename and opened again after: Windows refuses to
 	// rename a file a handle holds open.
@@ -1266,13 +1255,13 @@ func (l *fileLog) createSegment(n uint64, cp *checkpoint) error {
 		return storageFailed("close segment", err)
 	}
 	final := filepath.Join(l.logDir(), segName(n))
-	if err := os.Rename(tmp, final); err != nil {
+	if err := disk.rename(tmp, final); err != nil {
 		return storageFailed("rename segment", err)
 	}
-	if err := syncDir(l.logDir()); err != nil {
+	if err := disk.syncDir(l.logDir()); err != nil {
 		return storageFailed("sync dir", err)
 	}
-	f, err = os.OpenFile(final, os.O_RDWR, 0)
+	f, err = disk.openFile(final, os.O_RDWR, 0)
 	if err != nil {
 		return storageFailed("open segment", err)
 	}
@@ -1287,45 +1276,46 @@ func (l *fileLog) createSegment(n uint64, cp *checkpoint) error {
 // segmentFile is the zero-filled .tmp of segment n at size: the prepared
 // one when it is that segment at that size, else one created and zeroed now,
 // on the writer's path, where a failure stops the log.
-func (l *fileLog) segmentFile(n uint64, size int64, tmp string) (*os.File, error) {
+//
+// IFACE-PLUGIN: segFile is the disk fault seam (ADR 0152 D15): an *os.File in
+// production, the fault-injecting wrapper under test, so the result cannot be
+// one concrete type.
+func (l *fileLog) segmentFile(n uint64, size int64, tmp string) (segFile, error) {
 	if f := l.takePrepared(n, size); f != nil {
 		return f, nil
 	}
-	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	disk := l.fs()
+	f, err := disk.openFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return nil, storageFailed("create segment", err)
 	}
 	if err := l.zeroFill()(f, 0, size); err != nil {
-		return nil, abandonTmp(f, tmp, storageFailed("zero-fill", err))
+		return nil, disk.abandonTmp(f, tmp, storageFailed("zero-fill", err))
 	}
 	return f, nil
 }
 
-// zeroFill is the function that zero-fills a segment: zeroFrom, or
-// fallocateFill when the log preallocates with fallocate (#922), unless a
-// test set fill to fail as a full disk does. It is read on the writer's
-// path, before any goroutine it hands it to starts.
-func (l *fileLog) zeroFill() func(f *os.File, off, size int64) error {
-	if l.fill != nil {
-		return l.fill
+// dsyncWrite is writeDsync on the segment's *os.File. A segment the fault
+// seam wraps (#1113) is not one: false, and it is written and fdatasynced
+// through the seam instead, as in SyncFdatasync.
+func (l *fileLog) dsyncWrite(cur *segment, b []byte, off int64) (bool, error) {
+	f, ok := cur.f.(*os.File)
+	if !ok {
+		return false, nil
 	}
-	if l.prealloc == PreallocateFallocate {
-		return fallocateFill
-	}
-	return zeroFrom
+	return writeDsync(f, b, off)
 }
 
-// abandonTmp closes f, the segment .tmp at path a failure leaves
-// unpublished, removes it, and returns cause, the failure that stops the
-// log. The .tmp is never renamed, so what its Close says changes nothing. It
-// is removed now, not at the next start: a zero-fill that failed on a full
-// disk wrote until the disk had no byte left, and the disk is shared with
-// what the product stores beside the log (#520). A removal that fails
-// leaves it to recovery, which deletes every .tmp.
-func abandonTmp(f io.Closer, path string, cause error) error {
-	abandon(f.Close())
-	abandon(os.Remove(path))
-	return cause
+// zeroFill is the function that zero-fills a segment through the log's
+// seam: zeroFrom, or fallocateFill when the log preallocates with
+// fallocate (#922). It is read on the writer's path, before any goroutine
+// it hands it to starts.
+func (l *fileLog) zeroFill() func(f segFile, off, size int64) error {
+	disk := l.fs()
+	if l.prealloc == PreallocateFallocate {
+		return disk.fallocateFill
+	}
+	return disk.zeroFrom
 }
 
 // prepared is the next segment, zero-filled in the background as a .tmp
@@ -1335,7 +1325,7 @@ type prepared struct {
 	n    uint64
 	size int64
 	done chan struct{}
-	f    *os.File
+	f    segFile
 	err  error
 }
 
@@ -1348,11 +1338,12 @@ func (l *fileLog) prepare(n uint64, size int64) {
 	done := make(chan struct{})
 	p := &prepared{n: n, size: size, done: done}
 	l.prep = p
+	disk := l.fs()
 	fill := l.zeroFill()
-	go func() {
+	tmp := filepath.Join(l.logDir(), segName(n)+".tmp")
+	disk.background(func() {
 		defer close(done)
-		tmp := filepath.Join(l.logDir(), segName(n)+".tmp")
-		f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+		f, err := disk.openFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 		if err != nil {
 			p.err = err
 			return
@@ -1362,16 +1353,20 @@ func (l *fileLog) prepare(n uint64, size int64) {
 			// builds the segment on the writer's path, where a failure
 			// stops the node. It goes now: on a full disk it holds every
 			// byte the fill could write (#520).
-			p.err = abandonTmp(f, tmp, err)
+			p.err = disk.abandonTmp(f, tmp, err)
 			return
 		}
 		p.f = f
-	}()
+	})
 }
 
 // takePrepared waits for the prepared segment n, when it is the one wanted
 // at that size; nil means prepare it now.
-func (l *fileLog) takePrepared(n uint64, size int64) *os.File {
+//
+// IFACE-PLUGIN: segFile is the disk fault seam (ADR 0152 D15): an *os.File in
+// production, the fault-injecting wrapper under test, so the result cannot be
+// one concrete type.
+func (l *fileLog) takePrepared(n uint64, size int64) segFile {
 	p := l.prep
 	l.prep = nil
 	if p == nil {
@@ -1382,63 +1377,11 @@ func (l *fileLog) takePrepared(n uint64, size int64) *os.File {
 		if p.f != nil {
 			// The wrong segment, or the wrong size: an unpublished .tmp
 			// nothing will read, removed now rather than at recovery.
-			abandon(abandonTmp(p.f, filepath.Join(l.logDir(), segName(p.n)+".tmp"), nil))
+			abandon(l.fs().abandonTmp(p.f, filepath.Join(l.logDir(), segName(p.n)+".tmp"), nil))
 		}
 		return nil
 	}
 	return p.f
-}
-
-// writeFileSync publishes data at path atomically and durably: written and
-// synced to path.tmp, renamed over path, and the directory synced.
-func writeFileSync(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := writeSynced(tmp, data); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	return syncDir(filepath.Dir(path))
-}
-
-// mkdirDurable creates dir, private to the owner, and when it did not exist
-// syncs its parent: the new entry is otherwise published only by whatever
-// syncs that directory next, which ext4 and XFS do through their journal and
-// other filesystems may not (#422). A directory already there is left as it
-// is, so a parent this process may not open is never asked for.
-func mkdirDurable(dir string) error {
-	_, err := os.Stat(dir)
-	existed := err == nil
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return storageFailed("mkdir", err)
-	}
-	if existed {
-		return nil
-	}
-	if err := syncDir(filepath.Dir(dir)); err != nil {
-		return storageFailed("mkdir", err)
-	}
-	return nil
-}
-
-// writeSynced writes data to a fresh file at path and syncs it. The file is
-// closed before it returns, so before writeFileSync renames it, and a Close
-// failure is reported like the sync's: it is part of the write.
-func writeSynced(path string, data []byte) (err error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if cerr := f.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
-	if _, err := f.Write(data); err != nil {
-		return err
-	}
-	return f.Sync()
 }
 
 // rotate seals the current segment in its own synced batch, then publishes
@@ -1451,13 +1394,10 @@ func (l *fileLog) rotate(need int) error {
 		if _, err := cur.f.WriteAt(seal, l.off); err != nil {
 			return storageFailed("seal", err)
 		}
-		if err := datasync(cur.f); err != nil {
+		if err := l.fs().datasync(cur.f); err != nil {
 			return storageFailed("sync seal", err)
 		}
 		l.batch++
-		if l.afterSeal != nil {
-			l.afterSeal()
-		}
 	}
 	return l.publishNext(need)
 }
@@ -1499,13 +1439,6 @@ func (l *fileLog) usable() error {
 }
 
 // ---- LogReader ----
-
-// The bounds of one range read of Entries (#913).
-const (
-	// rangeReadBytes is the most bytes one read takes past its first
-	// record: a run of synced entries longer than this is read in several.
-	rangeReadBytes int64 = 4 << 20
-)
 
 // rangeRead is one Entries call under way: its bounds, the payload bytes
 // taken so far, and the entries taken.
@@ -1584,61 +1517,94 @@ func lowPayload(length int64) int64 {
 // an entry is LOG_CORRUPT at its own offset, as readEntry's. The caller
 // holds mu.
 func (l *fileLog) readRun(rr *rangeRead, i uint64) (uint64, error) {
-	ti, p := l.tableOf(i)
-	t := &l.tables[ti]
-	start, end := int64(t.offs[p])*int64(recAlign), l.spanEnd(t, p)
-	if end <= start {
+	tabIdx, pos := l.tableOf(i)
+	tab := &l.tables[tabIdx]
+	sp := runSpan{tab: tab, pos: pos, start: int64(tab.offs[pos]) * int64(recAlign), end: l.spanEnd(tab, pos)}
+	if sp.end <= sp.start {
 		// No extent known: the single-entry read, header first.
-		e, err := l.readEntry(entryLoc{seg: t.seg, off: start})
-		if err != nil {
-			return i, err
-		}
-		rr.take(i, e)
-		return i + 1, nil
+		return l.readLone(rr, i, sp)
 	}
-	low := int64(rr.size) + lowPayload(end-start)
+	low := int64(rr.size) + lowPayload(sp.end-sp.start)
 	if i > rr.lo && low > int64(rr.maxBytes) {
 		rr.full = true
 		return i, nil
 	}
-	seg := l.segmentNumbered(t.seg)
-	if seg == nil {
+	sp.seg = l.segmentNumbered(tab.seg)
+	if sp.seg == nil {
 		return i, storageFailed("read", errImpossible)
 	}
 	// Bounded by the segment, and by what an int holds, before the
 	// conversion, as readEntry's (#422).
-	if end-start > min(seg.size-start, math.MaxInt) {
-		return i, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(t.seg)), errs.Int64("offset", start))
+	if sp.end-sp.start > min(sp.seg.size-sp.start, math.MaxInt) {
+		return i, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(tab.seg)), errs.Int64("offset", sp.start))
 	}
-	limit := min(rr.hi, l.memFirst(), t.first+uint64(len(t.offs)))
-	k := i + 1
-	for q := p + 1; k < limit; k, q = k+1, q+1 {
-		next := l.spanEnd(t, q)
-		if next <= end || next-start > rangeReadBytes || next > seg.size {
-			break
-		}
-		if low += lowPayload(next - end); low > int64(rr.maxBytes) {
-			break
-		}
-		end = next
-	}
-	b := make([]byte, end-start)
-	if _, err := l.pread(seg, b, start); err != nil && !errors.Is(err, io.EOF) {
+	k := l.growRun(rr, &sp, i, low)
+	b := make([]byte, sp.end-sp.start)
+	if _, err := l.pread(sp.seg, b, sp.start); err != nil && !errors.Is(err, io.EOF) {
 		return i, storageFailed("read", err)
 	}
 	rr.dst = slices.Grow(rr.dst, int(k-i))
-	for j, q := i, p; j < k; j, q = j+1, q+1 {
-		o := int64(t.offs[q])*int64(recAlign) - start
-		r, ok := parseRecord(b[o : l.spanEnd(t, q)-start])
+	return l.takeRun(rr, sp, runRange{from: i, to: k}, b)
+}
+
+// runSpan is the extent readRun reads: the table and position of its first
+// entry, its segment once found, and its byte range [start, end) in it.
+type runSpan struct {
+	tab        *segIndex
+	seg        *segment
+	pos        int
+	start, end int64
+}
+
+// runRange is the entries [from, to) one run takes.
+type runRange struct{ from, to uint64 }
+
+// readLone is readRun's single-entry read, for an entry whose extent is not
+// known: it takes entry i and returns i+1.
+func (l *fileLog) readLone(rr *rangeRead, i uint64, sp runSpan) (uint64, error) {
+	e, err := l.readEntry(entryLoc{seg: sp.tab.seg, off: sp.start})
+	if err != nil {
+		return i, err
+	}
+	rr.take(i, e)
+	return i + 1, nil
+}
+
+// growRun extends sp.end over the entries after i that the interval may
+// still take, and returns the index one past the last of them; low is the
+// payload estimate of what sp already covers.
+func (l *fileLog) growRun(rr *rangeRead, sp *runSpan, i uint64, low int64) uint64 {
+	limit := min(rr.hi, l.memFirst(), sp.tab.first+uint64(len(sp.tab.offs)))
+	k := i + 1
+	for q := sp.pos + 1; k < limit; k, q = k+1, q+1 {
+		next := l.spanEnd(sp.tab, q)
+		if next <= sp.end || next-sp.start > rangeReadBytes || next > sp.seg.size {
+			break
+		}
+		if low += lowPayload(next - sp.end); low > int64(rr.maxBytes) {
+			break
+		}
+		sp.end = next
+	}
+	return k
+}
+
+// takeRun parses the records of the run in b, which holds sp from its start,
+// and takes their entries into rr; it returns the index of the first entry
+// it did not take.
+func (l *fileLog) takeRun(rr *rangeRead, sp runSpan, run runRange, b []byte) (uint64, error) {
+	for j, q := run.from, sp.pos; j < run.to; j, q = j+1, q+1 {
+		o := int64(sp.tab.offs[q])*int64(recAlign) - sp.start
+		r, ok := parseRecord(b[o : l.spanEnd(sp.tab, q)-sp.start])
 		if !ok || r.kind != recEntry || r.index != j {
 			// A log that cannot be read cannot be trusted to agree with itself.
-			return j, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(t.seg)), errs.Int64("offset", start+o))
+			return j, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(sp.tab.seg)), errs.Int64("offset", sp.start+o))
 		}
 		if !rr.take(j, entryOf(&r)) {
 			return j, nil
 		}
 	}
-	return k, nil
+	return run.to, nil
 }
 
 // segmentNumbered is the open segment numbered n, nil for none.
@@ -1666,7 +1632,7 @@ func entryOf(r *record) coreconsensus.EntryValue {
 	return coreconsensus.EntryValue{
 		Position: coreconsensus.PositionValue{Term: r.term, Index: r.index},
 		Kind:     coreconsensus.EntryKind(r.ekind), Version: r.ever, BodySum: r.body, ChainSum: r.chain,
-		Data: r.data[:len(r.data):len(r.data)],
+		Data: slices.Clip(r.data),
 	}
 }
 
@@ -1836,41 +1802,42 @@ func (l *fileLog) writeBatch(cur *segment) error {
 // open's probe (#923); end says the write is the batch's end record.
 func (l *fileLog) writeAndSync(cur *segment, b []byte, off int64, end bool) error {
 	if l.syncPath == SyncRWFDsync {
-		var start time.Time
-		if l.timedSync != nil {
-			start = time.Now()
-		}
-		ok, err := writeDsync(cur.f, b, off)
+		start := l.syncStart()
+		ok, err := l.dsyncWrite(cur, b, off)
 		if err != nil {
 			return storageFailed("pwritev2", err)
 		}
 		if ok {
-			if l.duringSync != nil {
-				l.duringSync()
-			}
-			if l.timedSync != nil {
-				l.timedSync(time.Since(start), end)
-			}
+			l.syncDone(start, end)
 			return nil
 		}
 	}
 	if _, err := cur.f.WriteAt(b, off); err != nil {
 		return storageFailed("write", err)
 	}
-	if l.duringSync != nil {
-		l.duringSync()
-	}
-	var start time.Time
-	if l.timedSync != nil {
-		start = time.Now()
-	}
-	if err := datasync(cur.f); err != nil {
+	start := l.syncStart()
+	if err := l.fs().datasync(cur.f); err != nil {
 		return storageFailed("fdatasync", err)
 	}
+	l.syncDone(start, end)
+	return nil
+}
+
+// syncStart is the clock reading a durability point is timed from: the zero
+// time when no one times them.
+func (l *fileLog) syncStart() time.Time {
+	if l.timedSync == nil {
+		return time.Time{}
+	}
+	return time.Now()
+}
+
+// syncDone reports to the timing hook, when set, how long the durability
+// point that began at start took; end says it was a batch's end record.
+func (l *fileLog) syncDone(start time.Time, end bool) {
 	if l.timedSync != nil {
 		l.timedSync(time.Since(start), end)
 	}
-	return nil
 }
 
 // settleBatch records the pending batch, now synced in segment seg, as
@@ -2005,7 +1972,7 @@ func (l *fileLog) dropSegmentsLocked() error {
 		removed = true
 	}
 	if removed {
-		return syncDir(l.logDir())
+		return l.fs().syncDir(l.logDir())
 	}
 	return nil
 }
@@ -2032,7 +1999,7 @@ func (l *fileLog) removeFirstSegment() error {
 	if err := l.segs[0].f.Close(); err != nil {
 		return storageFailed("close segment", err)
 	}
-	if err := os.Remove(filepath.Join(l.logDir(), segName(l.segs[0].n))); err != nil {
+	if err := l.fs().remove(filepath.Join(l.logDir(), segName(l.segs[0].n))); err != nil {
 		return storageFailed("remove segment", err)
 	}
 	l.occupied.Add(-l.segs[0].size)
@@ -2065,7 +2032,7 @@ func (l *fileLog) WriteStamp(s coreconsensus.StampValue) error {
 		// write nothing until a reboot (#563).
 		return l.refuse
 	}
-	if err := writeStamp(l.dir, s); err != nil {
+	if err := writeStamp(l.fs(), l.dir, s); err != nil {
 		return storageFailed("stamp", err)
 	}
 	l.stamp = s

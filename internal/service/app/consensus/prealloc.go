@@ -6,17 +6,19 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 )
 
-// preallocEverywhere opens every log in PreallocateFallocate, whatever its
-// options say. Only a test binary sets it, run with
-// CONSENSUS_PREALLOCATE=fallocate, so the whole suite runs on fallocated
-// segments (#922); it is read by openFileLog alone.
-var preallocEverywhere bool
+var (
+	// preallocEverywhere opens every log in PreallocateFallocate, whatever its
+	// options say. Only a test binary sets it, run with
+	// CONSENSUS_PREALLOCATE=fallocate, so the whole suite runs on fallocated
+	// segments (#922); it is read by openFileLog alone.
+	preallocEverywhere bool
 
-// probePreallocate answers why fallocate(2) cannot reserve a segment in
-// dir, empty when it can: fallocateProbe, unless a test replaces it to
-// answer as a filesystem without fallocate does. Only an open's own
-// goroutine reads it.
-var probePreallocate = fallocateProbe
+	// probePreallocate answers why fallocate(2) cannot reserve a segment in
+	// dir, empty when it can: fallocateProbe, unless a test replaces it to
+	// answer as a filesystem without fallocate does. Only an open's own
+	// goroutine reads it.
+	probePreallocate = fallocateProbe
+)
 
 // resolvePreallocate sets how the log preallocates its segments: the mode
 // asked for, or PreallocateZeroFill when fallocate is asked for and the
@@ -57,16 +59,21 @@ func (l *fileLog) bindWarn(warn func(msg string, attrs ...corelogger.AttrValue))
 }
 
 // fallocateFill is zeroFrom's counterpart in PreallocateFallocate: f's
-// range from off to size is reserved and reads as zeros, then synced. A
-// filesystem that stops answering to fallocate after the open's probe gets
-// the zeros written instead.
-func fallocateFill(f *os.File, off, size int64) error {
-	ok, err := fallocateRange(f, off, size)
+// range from off to size is reserved and reads as zeros, then synced
+// through the seam. A filesystem that stops answering to fallocate after
+// the open's probe, or a file that is not an *os.File (the fault shim's,
+// #1113), gets the zeros written instead.
+func (d *diskFS) fallocateFill(f segFile, off, size int64) error {
+	of, isFile := f.(*os.File)
+	if !isFile {
+		return d.zeroFrom(f, off, size)
+	}
+	ok, err := fallocateRange(of, off, size)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return zeroFrom(f, off, size)
+		return d.zeroFrom(f, off, size)
 	}
-	return datasync(f)
+	return d.datasync(f)
 }

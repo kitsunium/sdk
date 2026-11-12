@@ -96,7 +96,7 @@ func TestAJoinerBecomesAMemberOnDiskOnlyOnceTheEntriesThatAdmitItAreDurable(t *t
 	var copied atomic.Bool
 	var stampAtCrash atomic.Int32
 	copyDone := make(chan error, 1)
-	dd.d.log.duringSync = func() {
+	onBatchSync(dd, func() {
 		if copied.Load() {
 			return
 		}
@@ -108,7 +108,7 @@ func TestAJoinerBecomesAMemberOnDiskOnlyOnceTheEntriesThatAdmitItAreDurable(t *t
 		stampAtCrash.Store(int32(s.State))
 		copyDone <- copyTree(dir, crashDir)
 		<-release
-	}
+	})
 	var n, restarted *Node
 	var dd2 DataDir
 	t.Cleanup(func() {
