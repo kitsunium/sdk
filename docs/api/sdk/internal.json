@@ -831,7 +831,7 @@
       "dir": "kernel/fs/seglog",
       "layer": "kernel",
       "family": "fs",
-      "doc": "Package seglog is a durable, append-only log of records addressed by a\ncontiguous uint64 index, kept in a directory of fixed-size, zero-filled\nsegment files: the segmented log the consensus file log wrote for itself\n(ADR 0152 D4), extracted without its vocabulary so that any engine needing\nan ordered, crash-recovering sequence of byte payloads builds on it rather\nthan rewriting it (ADR 0159, ADR 0230).\n\n# The record\n\nEvery record is 8-byte aligned and little-endian:\n\n\tlength u32 | crc32c u32 | version u8 | kind u8 | end u8 | tag u8 |\n\tbatch u64 | index u64 | payload | zero padding\n\nlength counts the bytes after the crc, padding excluded, and the crc is the\nCRC-32C of those bytes. The tag is the caller's kind byte, stored and given\nback, never read. Every segment opens with a checkpoint record — the index its\nfirst entry takes, the log's first index and its batch sequence number — and\na full segment is closed by a seal record before the next one is published.\n\n# One batch, two syncs\n\n[Log.Append] only buffers. [Log.Sync] writes the pending batch, its last\nrecord flagged end-of-batch, in two steps: every record but the last, made\ndurable, then the last one, made durable. A valid end record therefore proves\nits whole batch was durable before it, and batch k+1 is written only once\nbatch k is, so a valid record of a later batch proves every earlier one. A\nfailed write or sync is final: the log refuses every later call with Failed,\nbecause what a failed fsync left on the disk is not knowable.\n\n# Recovery classifies before it repairs\n\n[Open] reads every segment and classifies every hole BEFORE it changes a byte.\nA hole in the last segment whose batch never completed — no valid end record,\nno valid record of a later batch after it — is a torn tail: never synced, so\nnever acknowledged; it is zeroed and synced, and the log continues before it.\nAny other hole is damage to synced data and Open refuses with Damaged, the\nfiles left as they were; a record a newer layout wrote is refused with\nVersionUnsupported, never skipped. What a damaged log means — quarantine,\nrepair, a rebuild from elsewhere — is the caller's decision.\n\n# Dropping a prefix\n\n[Log.DropBefore] records the log's new first index durably, then unlinks the\nwhole sealed segments that hold only entries below it and syncs the\ndirectory. Nothing is rewritten: retention is by whole segments, and an entry\nbelow the first index that still sits in a retained segment is unreadable.\n\n# What it is not\n\nIt holds one directory exclusively and takes no lock on it: a caller that may\nbe started twice over the same directory locks it first (flock). It knows\nnothing of terms, votes, offsets in a partition or consumers; those are its\ncallers' (ADR 0230). One writer at a time, any number of readers: an appended\nentry is readable before it is synced.\n"
+      "doc": "Package seglog is a durable, append-only log of records addressed by a\ncontiguous uint64 index, kept in a directory of fixed-size, zero-filled\nsegment files: the segmented log the consensus file log wrote for itself\n(ADR 0152 D4), extracted without its vocabulary so that any engine needing\nan ordered, crash-recovering sequence of byte payloads builds on it rather\nthan rewriting it (ADR 0159, ADR 0230).\n\n# The record\n\nEvery record is 8-byte aligned and little-endian:\n\n\tlength u32 | crc32c u32 | version u8 | kind u8 | end u8 | tag u8 |\n\tbatch u64 | index u64 | payload | zero padding\n\nlength counts the bytes after the crc, padding excluded, and the crc is the\nCRC-32C of those bytes. The tag is the caller's kind byte, stored and given\nback, never read. Every segment opens with a checkpoint record — the index its\nfirst entry takes, the log's first index and its batch sequence number — and\na full segment is closed by a seal record before the next one is published.\n\n# One batch, two syncs\n\n[Log.Append] only buffers. [Log.Sync] writes the pending batch, its last\nrecord flagged end-of-batch, in two steps: every record but the last, made\ndurable, then the last one, made durable. A valid end record therefore proves\nits whole batch was durable before it, and batch k+1 is written only once\nbatch k is, so a valid record of a later batch proves every earlier one. A\nfailed write or sync is final: the log refuses every later call with Failed,\nbecause what a failed fsync left on the disk is not knowable.\n\n# Recovery classifies before it repairs\n\n[Open] reads every segment and classifies every hole BEFORE it changes a byte.\nA hole in the last segment whose batch never completed — no valid end record,\nno valid record of a later batch after it — is a torn tail: never synced, so\nnever acknowledged; it is zeroed and synced, and the log continues before it.\nAny other hole is damage to synced data and Open refuses with Damaged, the\nfiles left as they were; a record a newer layout wrote is refused with\nVersionUnsupported, never skipped. What a damaged log means — quarantine,\nrepair, a rebuild from elsewhere — is the caller's decision.\n\n# Dropping a prefix\n\n[Log.DropBefore] records the log's new first index durably, then unlinks the\nwhole sealed segments that hold only entries below it and syncs the\ndirectory. Nothing is rewritten: retention is by whole segments, and an entry\nbelow the first index that still sits in a retained segment is unreadable.\n\n# Rewriting a record\n\n[Log.Rewrite] is the one call that changes a synced record: the caller's\nedit gives some records below an index a new kind and payload — a compaction\nreplacing a superseded value by a marker of its own —, and each segment\nholding one is written again whole into a .tmp, synced and renamed over the\nold one. Indexes, batches and end flags never change, so recovery reads the\nrewritten segment as it read the old one.\n\n# What it is not\n\nIt holds one directory exclusively and takes no lock on it: a caller that may\nbe started twice over the same directory locks it first (flock). It knows\nnothing of terms, votes, offsets in a partition or consumers; those are its\ncallers' (ADR 0230). One writer at a time, any number of readers: an appended\nentry is readable before it is synced.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/kernel/fs/winacl",
@@ -27580,7 +27580,7 @@
         {
           "name": "First",
           "type": "Offset",
-          "doc": "First is the lowest offset still readable. Retention, Trim and the\ncompaction of a whole prefix raise it; nothing lowers it.\n"
+          "doc": "First is the lowest offset still readable. Retention and Trim raise\nit, compaction never moves it; nothing lowers it.\n"
         },
         {
           "name": "Next",
@@ -27840,13 +27840,42 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CompactValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CompactValue",
+      "spelled": "struct{Scanned int64; Kept int64; Dropped int64}",
+      "canonical": "struct{Scanned int64; Kept int64; Dropped int64}",
+      "fields": [
+        {
+          "name": "Scanned",
+          "type": "int64",
+          "doc": "Scanned is how many retained records were at least\n[PolicyValue.CompactAfter] old, the only ones a compaction may drop.\n"
+        },
+        {
+          "name": "Kept",
+          "type": "int64",
+          "doc": "Kept is how many of them survived.\n"
+        },
+        {
+          "name": "Dropped",
+          "type": "int64",
+          "doc": "Dropped is how many of them were removed: superseded by a later\nrecord of their key, or a tombstone past its second window.\n"
+        }
+      ],
+      "doc": "CompactValue is what one [Compactor.Compact] did to a partition: the\nrecords it looked at, those it kept and those it dropped; Kept plus\nDropped is Scanned.\n",
+      "file": "core/data/stream/record.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Compactor",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/data/stream",
       "name": "Compactor",
-      "spelled": "interface{Compact(ctx context.Context, partition int) error}",
-      "canonical": "interface{Compact(ctx context.Context, partition int) error}",
-      "doc": "Compactor rewrites a partition so that it keeps, of every key, only its\nlast record: the shape of a changelog read from the start to rebuild a\nstate, with no need to keep every intermediate value.\n\nIt is a sibling because compaction is a policy only some engines afford;\nthe record shape it relies on — a keyed record with an empty payload being\na tombstone — and how long a tombstone survives are decided with its\nengines (ADR 0231 defers them to kitsunium/sdk#824).\n",
+      "spelled": "interface{Compact(ctx context.Context, partition int) (CompactValue, error)}",
+      "canonical": "interface{Compact(ctx context.Context, partition int) (github.com/kitsunium/sdk/internal/core/data/stream.CompactValue, error)}",
+      "doc": "Compactor rewrites a partition so that it keeps, of every key, only its\nlast record: the shape of a changelog read from the start to rebuild a\nstate, with no need to keep every intermediate value.\n\nIt is a sibling because compaction is a policy only some engines afford.\nIt never runs on its own — no timer, no goroutine —: a caller runs it, from\na scheduler's job for instance, and [PolicyValue.CompactAfter] says which\nrecords it may touch.\n\n# Tombstones\n\nA keyed record with an empty payload is a TOMBSTONE: the key's deletion.\nA compaction keeps it, as the last record of its key, for one more\nCompactAfter — a reader that bootstraps within that window still learns\nthe key is gone —, and the first compaction after drops it with every\nearlier record of its key.\n",
       "file": "core/data/stream/gen_ports.go",
       "layer": "core",
       "family": "data"
@@ -27857,9 +27886,9 @@
       "package": "github.com/kitsunium/sdk/internal/core/data/stream",
       "name": "Compact",
       "recv": "Compactor",
-      "spelled": "func(ctx context.Context, partition int) error",
-      "canonical": "func(ctx context.Context, partition int) error",
-      "doc": "Compact removes from partition every keyed record a later record of the\nsame key supersedes, keeping every survivor at its offset: offsets are\nnever renumbered, so a reader's position stays meaningful. Unkeyed records\nare left as they are. A partition outside [0, Partitions()) is\n[UnknownPartition].\n",
+      "spelled": "func(ctx context.Context, partition int) (CompactValue, error)",
+      "canonical": "func(ctx context.Context, partition int) (github.com/kitsunium/sdk/internal/core/data/stream.CompactValue, error)",
+      "doc": "Compact removes from partition every keyed record at least\n[PolicyValue.CompactAfter] old that a later record of the same key, as\nold, supersedes, and every tombstone at least twice CompactAfter old with\nthem; a record younger than CompactAfter is never touched, and an unkeyed\nrecord is left as it is. Every survivor keeps its offset: offsets are\nnever renumbered and [Stream.Bounds] does not move, so a reader inside a\ncompacted range reads on from the next survivor and is refused\n[OffsetTrimmed] only below the first retained offset, never in a hole.\n\nIt reports what it looked at — every retained record at least\nCompactAfter old —, what it kept and what it dropped. A zero CompactAfter\nnever compacts: Compact returns a zero [CompactValue]. A partition outside\n[0, Partitions()) is [UnknownPartition].\n",
       "file": "core/data/stream/gen_ports.go",
       "layer": "core",
       "family": "data"
@@ -27948,7 +27977,7 @@
       "name": "Offset",
       "spelled": "uint64",
       "canonical": "uint64",
-      "doc": "Offset is a record's position in its partition: assigned by the engine at\n[Stream.Append], consecutive within a partition from zero, and never reused\n— a trimmed offset stays trimmed and the next one keeps counting.\n",
+      "doc": "Offset is a record's position in its partition: assigned by the engine at\n[Stream.Append], consecutive within a partition from zero, and never reused\n— a trimmed offset stays trimmed and the next one keeps counting. A\n[Compactor] may leave holes between the offsets a partition still holds;\nit never renumbers them.\n",
       "file": "core/data/stream/record.go",
       "layer": "core",
       "family": "data"
@@ -27982,7 +28011,7 @@
         "reason": "OFFSET_TRIMMED",
         "public": "The requested records are no longer retained"
       },
-      "doc": "OffsetTrimmed refuses a read below the first offset the partition retains:\nthe records were trimmed by retention, Trim or compaction of a whole\nprefix. It is a refusal and not a silent skip because a reader that\nresumed later than it asked has lost records without knowing; its fields\nname the offset asked and the first retained, so the reader decides.\n",
+      "doc": "OffsetTrimmed refuses a read below the first offset the partition retains:\nthe records were trimmed by retention or Trim — never by compaction,\nwhose holes a read skips. It is a refusal and not a silent skip because a reader that\nresumed later than it asked has lost records without knowing; its fields\nname the offset asked and the first retained, so the reader decides.\n",
       "file": "core/data/stream/gen_codes.go",
       "layer": "core",
       "family": "data"
@@ -28021,8 +28050,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/data/stream",
       "name": "PolicyValue",
-      "spelled": "struct{Partitions int; MaxRecordBytes int; RetainFor time.Duration; RetainBytes int64; MaxBytes int64; BlockTimeout time.Duration; SegmentBytes int64}",
-      "canonical": "struct{Partitions int; MaxRecordBytes int; RetainFor time.Duration; RetainBytes int64; MaxBytes int64; BlockTimeout time.Duration; SegmentBytes int64}",
+      "spelled": "struct{Partitions int; MaxRecordBytes int; RetainFor time.Duration; RetainBytes int64; MaxBytes int64; BlockTimeout time.Duration; SegmentBytes int64; CompactAfter time.Duration}",
+      "canonical": "struct{Partitions int; MaxRecordBytes int; RetainFor time.Duration; RetainBytes int64; MaxBytes int64; BlockTimeout time.Duration; SegmentBytes int64; CompactAfter time.Duration}",
       "fields": [
         {
           "name": "Partitions",
@@ -28058,9 +28087,14 @@
           "name": "SegmentBytes",
           "type": "int64",
           "doc": "SegmentBytes is the size of the segments a file engine writes, and the\nunit its retention releases. Zero means [DefaultSegmentBytes]; negative\nis refused. Engines that keep no segments ignore it.\n"
+        },
+        {
+          "name": "CompactAfter",
+          "type": "time.Duration",
+          "doc": "CompactAfter is how old a record must be before a [Compactor] may\ndrop it, measured from its [EntryValue.AppendedAt]: a reader that\nstays within that window behind the head sees every update, and a\ntombstone is kept one more CompactAfter after it became compactable.\nZero never compacts; negative is refused.\n"
         }
       ],
-      "doc": "PolicyValue is what an engine enforces on a stream: how many partitions,\nhow large a record, how long and how much it keeps, how much it may hold\nbefore producers wait, and how large a segment a file engine writes.\n\n# Its zero value WORKS, and that is the decision\n\nA stream's zero policy is one partition, records of up to\n[DefaultMaxRecordBytes], kept forever, never full, in segments of\n[DefaultSegmentBytes]. Every zero here has one reading (ADR 0031's clamp\nbranch): unlike the queue's visibility timeout, no field has two opposite\nreadings of zero, so none is refused at zero. What is refused is a\nnegative value — it is not a bound, and the caller who wrote it meant\nsomething —, a [PolicyValue.BlockTimeout] with no [PolicyValue.MaxBytes]\nto wait under, and a MaxBytes below one record, under which no Append\ncould ever succeed.\n",
+      "doc": "PolicyValue is what an engine enforces on a stream: how many partitions,\nhow large a record, how long and how much it keeps, how much it may hold\nbefore producers wait, and how large a segment a file engine writes.\n\n# Its zero value WORKS, and that is the decision\n\nA stream's zero policy is one partition, records of up to\n[DefaultMaxRecordBytes], kept forever, never full, never compacted, in\nsegments of [DefaultSegmentBytes]. Every zero here has one reading (ADR 0031's clamp\nbranch): unlike the queue's visibility timeout, no field has two opposite\nreadings of zero, so none is refused at zero. What is refused is a\nnegative value — it is not a bound, and the caller who wrote it meant\nsomething —, a [PolicyValue.BlockTimeout] with no [PolicyValue.MaxBytes]\nto wait under, and a MaxBytes below one record, under which no Append\ncould ever succeed.\n",
       "file": "core/data/stream/policy.go",
       "layer": "core",
       "family": "data"
@@ -28124,7 +28158,7 @@
         {
           "name": "Payload",
           "type": "[]byte",
-          "doc": "Payload is the record's bytes. It may be empty.\n"
+          "doc": "Payload is the record's bytes. It may be empty; under a key, an empty\npayload is a tombstone, the key's deletion for a [Compactor].\n"
         }
       ],
       "doc": "RecordValue is what a producer appends: a key that places it, and the\nbytes it carries.\n",
@@ -28233,7 +28267,7 @@
       "recv": "Stream",
       "spelled": "func(ctx context.Context, partition int, from Offset, max int) ([]EntryValue, error)",
       "canonical": "func(ctx context.Context, partition int, from github.com/kitsunium/sdk/internal/core/data/stream.Offset, max int) ([]github.com/kitsunium/sdk/internal/core/data/stream.EntryValue, error)",
-      "doc": "Read returns up to max entries of partition, from offset from on, in\noffset order. It does NOT block waiting for records: a read at the\npartition's next offset yields an empty slice and a nil error, and\nwaiting is the caller's ([Waker] tells it when to look again).\n\nfrom below the partition's first retained offset is [OffsetTrimmed] —\nthe records are gone, and silently starting later would hide the gap; one\npast the next offset is [OffsetAhead]. A partition outside\n[0, Partitions()) is [UnknownPartition], and a non-positive max is\n[InvalidBatchSize].\n",
+      "doc": "Read returns up to max entries of partition, from offset from on, in\noffset order. It does NOT block waiting for records: a read at the\npartition's next offset yields an empty slice and a nil error, and\nwaiting is the caller's ([Waker] tells it when to look again). The\noffsets a [Compactor] emptied are skipped: the entries carry their own\noffsets, which need not be consecutive.\n\nfrom below the partition's first retained offset is [OffsetTrimmed] —\nthe records are gone, and silently starting later would hide the gap; one\npast the next offset is [OffsetAhead]. A partition outside\n[0, Partitions()) is [UnknownPartition], and a non-positive max is\n[InvalidBatchSize].\n",
       "file": "core/data/stream/gen_ports.go",
       "layer": "core",
       "family": "data"
@@ -67068,7 +67102,7 @@
       "name": "Log",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "Log is a segmented log opened by Open. One writer at a time — Append, Sync,\nDropBefore and Close serialise — and any number of readers, which never wait\nfor a sync's disk I/O. The zero value is NOT usable.\n",
+      "doc": "Log is a segmented log opened by Open. One writer at a time — Append, Sync,\nDropBefore, Rewrite and Close serialise — and any number of readers, which never wait\nfor a sync's disk I/O. The zero value is NOT usable.\n",
       "file": "kernel/fs/seglog/log.go",
       "layer": "kernel",
       "family": "fs"
@@ -67161,6 +67195,19 @@
       "canonical": "func(index uint64) ([]byte, error)",
       "doc": "Read returns a copy of the payload at index: Dropped below the first index,\nOutOfRange at or past the next, Damaged when the record on disk no longer\nmatches the one the log recorded.\n",
       "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.(*Log).Rewrite",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Rewrite",
+      "recv": "Log",
+      "spelled": "func(below uint64, edit func(index uint64, kind uint8, payload []byte) (uint8, []byte, bool)) (int, error)",
+      "canonical": "func(below uint64, edit func(index uint64, kind uint8, payload []byte) (uint8, []byte, bool)) (int, error)",
+      "doc": "Rewrite changes, durably and in place, records below index below: edit\nis called for every retained record below it, in index order, with its\nindex, its kind byte and its payload — the caller's for the call only —\nand returns the kind and payload the record takes and true, or false to\nleave it as it is. A pending batch is synced first, as Sync syncs it.\n\nEvery segment holding a record edit changed is written again whole —\nthe same records at the same indexes, in the same batches with the same\nend flags, only the changed ones' kind and payload different — into a\n.tmp that is synced, renamed over the segment, and the directory synced:\na crash leaves the old segment or the new one, never a mix, and recovery\nreads either. A segment edit changed nothing in is not touched. It\nreturns how many segments it rewrote.\n\nA failure before a segment's rename leaves that segment as it was, and\nthe log usable, and is returned (Failed, or Damaged for a segment that\nno longer parses); a failure from the rename on is final, as a failed\nSync is.\n",
+      "file": "kernel/fs/seglog/rewrite.go",
       "layer": "kernel",
       "family": "fs"
     },
@@ -82491,7 +82538,7 @@
       "name": "NewFile",
       "spelled": "func(cfg FileConfig) (s corestream.Stream, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/data/stream.FileConfig) (s github.com/kitsunium/sdk/internal/core/data/stream.Stream, err error)",
-      "doc": "NewFile opens the stream kept in cfg.Dir, creating it when absent, and\nrecovers it: every partition's segmented log, the batches and instants\nits records carry, and the retention they were under.\n\nIt refuses a policy it cannot honour with the core's Validate, as every\nengine does, and a MaxRecordBytes above what one segment record holds; a\ndirectory it cannot trust, or one another engine holds open, with\nStreamDirectoryUnusable; a directory holding more partitions than the\npolicy counts with StreamMisconfigured; and a segment it cannot trust with\nthe segmented log's own refusal under StreamBackendFailed. The stream it\nreturns also answers [corestream.Waker], [corestream.Seeker],\n[corestream.Trimmer], [corestream.Committer] and io.Closer; Close releases\nthe directory.\n",
+      "doc": "NewFile opens the stream kept in cfg.Dir, creating it when absent, and\nrecovers it: every partition's segmented log, the batches and instants\nits records carry, and the retention they were under.\n\nIt refuses a policy it cannot honour with the core's Validate, as every\nengine does, and a MaxRecordBytes above what one segment record holds; a\ndirectory it cannot trust, or one another engine holds open, with\nStreamDirectoryUnusable; a directory holding more partitions than the\npolicy counts with StreamMisconfigured; and a segment it cannot trust with\nthe segmented log's own refusal under StreamBackendFailed. The stream it\nreturns also answers [corestream.Waker], [corestream.Seeker],\n[corestream.Trimmer], [corestream.Compactor], [corestream.Committer] and\nio.Closer; Close releases the directory. A compaction rewrites the\nsegments holding a record it drops, each published by a rename then a\ndirectory sync, a dropped record leaving its offset and instant behind.\n",
       "file": "service/data/stream/file.go",
       "layer": "service",
       "family": "data"
@@ -82503,7 +82550,7 @@
       "name": "NewMemory",
       "spelled": "func(cfg MemoryConfig) (s corestream.Stream, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/data/stream.MemoryConfig) (s github.com/kitsunium/sdk/internal/core/data/stream.Stream, err error)",
-      "doc": "NewMemory returns a stream whose partitions live in the heap of this\nprocess: the test double of every durable engine.\n\nIt refuses a policy it cannot honour at CONSTRUCTION, through the same\ncore/data/stream.PolicyValue.Validate every engine runs, which is what\nmakes it an honest double. The stream it returns also answers\n[corestream.Waker], [corestream.Seeker], [corestream.Trimmer] and\n[corestream.Committer]; it keeps nothing past the process, so a restart\nis a total loss.\n",
+      "doc": "NewMemory returns a stream whose partitions live in the heap of this\nprocess: the test double of every durable engine.\n\nIt refuses a policy it cannot honour at CONSTRUCTION, through the same\ncore/data/stream.PolicyValue.Validate every engine runs, which is what\nmakes it an honest double. The stream it returns also answers\n[corestream.Waker], [corestream.Seeker], [corestream.Trimmer],\n[corestream.Compactor] and [corestream.Committer]; it keeps nothing past\nthe process, so a restart\nis a total loss.\n",
       "file": "service/data/stream/memory.go",
       "layer": "service",
       "family": "data"
@@ -82515,7 +82562,7 @@
       "name": "NewSQL",
       "spelled": "func(cfg SQLConfig) (s corestream.Stream, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/data/stream.SQLConfig) (s github.com/kitsunium/sdk/internal/core/data/stream.Stream, err error)",
-      "doc": "NewSQL returns a stream kept in three tables of the caller's database,\ncreated by [SQLMigration]: the records, one head row per partition and the\ngroups' cursors. It sends no statement: everything decidable without a\ndatabase is decided here.\n\nAn Append inside a transaction its context carries is a savepoint of that\ntransaction (ADR 0151): its records exist if and only if the transaction\ncommits, and the stream's Waker fires only after the commit. The head row\nof the partition is locked for the rest of that transaction, so the\nappenders of one partition are serialised and its offsets commit in\norder, with no gap a reader could skip. A Commit made on a handler's own\ntransaction commits the group's offset with the handler's effect.\n\nIt refuses a policy it cannot honour with the core's Validate, as every\nengine does, and a RetainBytes or MaxBytes, which it does not keep, with\n[corestream.SQLStreamMisconfigured]; a transactor, dialect or table it\ncannot use the same way. The stream it returns also answers\n[corestream.Waker], [corestream.Seeker], [corestream.Trimmer] and\n[corestream.Committer].\n",
+      "doc": "NewSQL returns a stream kept in three tables of the caller's database,\ncreated by [SQLMigration]: the records, one head row per partition and the\ngroups' cursors. It sends no statement: everything decidable without a\ndatabase is decided here.\n\nAn Append inside a transaction its context carries is a savepoint of that\ntransaction (ADR 0151): its records exist if and only if the transaction\ncommits, and the stream's Waker fires only after the commit. The head row\nof the partition is locked for the rest of that transaction, so the\nappenders of one partition are serialised and its offsets commit in\norder, with no gap a reader could skip. A Commit made on a handler's own\ntransaction commits the group's offset with the handler's effect.\n\nIt refuses a policy it cannot honour with the core's Validate, as every\nengine does, and a RetainBytes or MaxBytes, which it does not keep, with\n[corestream.SQLStreamMisconfigured]; a transactor, dialect or table it\ncannot use the same way. The stream it returns also answers\n[corestream.Waker], [corestream.Seeker], [corestream.Trimmer],\n[corestream.Compactor] and [corestream.Committer]; a compaction deletes\nthe rows it drops in bounded statements.\n",
       "file": "service/data/stream/sql.go",
       "layer": "service",
       "family": "data"

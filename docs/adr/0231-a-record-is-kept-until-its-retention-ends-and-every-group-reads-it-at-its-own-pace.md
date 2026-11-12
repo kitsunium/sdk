@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-11-12
 - **Deciders**: SDK maintainers
-- **Amended**: 2026-11-12 for the file engine (#821), below.
+- **Amended**: 2026-11-12 for the file engine (#821), the SQL engine (#822), the subscriber (#823) and compaction (#824), below.
 - **Amends**: nothing. A new domain, `data/stream` (`internal/core/data/stream`, `internal/service/data/stream`, later `pkg/v1/data/stream`), and two code ranges, `0.2.38.*` (the core's) and `0.3.94.*` (the engines', declared in the core — ADR 0160).
 - **Related**: [ADR 0054](0054-sdk-queue-domain.md) (the queue, the right-hand column of the frontier below), [ADR 0053](0053-sdk-events-domain.md) (the in-process bus), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a frozen port and its siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the policy's zeros), [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) (joining the caller's transaction), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) (the `data` family), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (where a code is declared), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) and [ADR 0164](0164-an-error-code-is-the-designs-and-kit-writes-it.md) (design first), [ADR 0230](0230-a-segmented-log-is-a-kernel-primitive-that-writes-and-never-decides.md) (the segmented log the file engine builds on), issues [#818](https://github.com/kitsunium/sdk/issues/818) (this decision) and [#890](https://github.com/kitsunium/sdk/issues/890) (the program)
 
@@ -150,7 +150,13 @@ per group and partition published by `vfs.WriteAtomic`. Decided with it:
    lock is refused the same way (`why=no-file-lock`). The port's "every
    process that opens the same storage" is honoured by refusal, not by
    sharing; the Waker of the open engine is therefore the directory's, and
-   the queue's process-wide wake table is not needed.
+   the queue's process-wide wake table is not needed. The groups' cursors
+   are published through `service/data/vfs`'s disk filesystem, so the file
+   engine runs where that filesystem exists: on Windows, illumos and
+   Solaris, which `vfs.NewOS` refuses (ADR 0018: no flushable directory
+   handle, a mode that is not an access rule), `NewFile` refuses with
+   `UNSUPPORTED_PLATFORM` and the memory and SQL engines remain. Its
+   suites assert that refusal there, then skip (ADR 0095).
 5. **The directory rules are the queue's**: the root refused world-writable
    without the sticky bit, every subdirectory refused world-writable at all,
    a link or a non-directory refused by shape, the DACL read on Windows.
@@ -247,3 +253,46 @@ group, modelled on `queue.Consume`. Decided with it:
    `SUBSCRIBER_MISCONFIGURED` (`0.3.94.4`, allocated with the domain), its
    `field` naming the value; a medium's refusal — the stream's, the park's
    queue's, the locker's — is returned as it came and stops every worker.
+
+## Amendment — compaction by key (#824), 2026-11-12
+
+`Compactor.Compact(ctx, partition) (CompactValue{Scanned, Kept, Dropped},
+error)` on every engine, under a new policy field `PolicyValue.CompactAfter`
+(zero never compacts, negative refused — one reading of the zero, ADR 0031).
+It resolves what this ADR deferred to #824:
+
+1. **What goes.** A record is compactable once it is `CompactAfter` old; one
+   younger is never touched, so a reader within that window of the head sees
+   every update. Among the compactable records, the last of each key stays
+   and every earlier one goes; an unkeyed record stays. The comparison is the
+   service's one function (`compactLines`), so every engine drops the same
+   records.
+2. **Tombstones.** A keyed record with an empty payload is a tombstone. It
+   stays, as its key's last record, until it is twice `CompactAfter` old —
+   one window to become compactable, one more for a reader bootstrapping
+   from offset 0 to learn the deletion — and the first compaction after goes
+   with it. No state is kept for that: the record's instant is the clock.
+3. **Offsets keep, holes are skipped, `Bounds` does not move.** A read from
+   inside a compacted range returns the next survivor; `OFFSET_TRIMMED`
+   stays a read below the first retained offset and nothing else, so
+   `BoundsValue.First` and `OffsetTrimmed` no longer name compaction.
+4. **Nothing runs on its own.** No timer, no goroutine: a caller runs
+   `Compact`, from a scheduler's job — the queue's rule.
+5. **Per engine.** Memory: in place, under the stream's lock. File: the
+   decision read from the log (a key map over the compactable range), then
+   `seglog.Log.Rewrite` (ADR 0230's amendment) replaces each dropped record
+   by its batch's instant alone — eight bytes no encoded record can have —,
+   so the index, the batches and the age bound are unchanged and a reopen
+   reads the hole; the freed bytes are released under `MaxBytes`. SQL: the
+   compactable rows read a page of 1 024 at a time (offset, key, instant,
+   whether the payload is empty — never the payload), the decision made in
+   the engine, the dropped rows deleted by offset 256 a statement, each a
+   savepoint of the caller's transaction or a statement of its own, and a
+   row a delete finds aged out left to the age sweep.
+6. **The SQL engine's first offset no longer reads the lowest row** (the
+   gap #822 flagged): it is the head's floor or the offset after the highest
+   stored row past the age bound, whichever is higher. The instants follow
+   the offsets, so a compaction's holes never move it; the age sweep now
+   raises the floor, as a `Trim` does, before it deletes the expired rows,
+   so their going does not move it either.
+

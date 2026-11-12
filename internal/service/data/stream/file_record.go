@@ -2,6 +2,7 @@ package stream
 
 import (
 	"encoding/binary"
+	"slices"
 
 	corestream "github.com/kitsunium/sdk/internal/core/data/stream"
 )
@@ -16,17 +17,17 @@ const (
 )
 
 // stampBytes is the size of the instant every record opens with.
-const stampBytes = 8
+const stampBytes int = 8
 
 // recordOverhead bounds what the encoding adds to a record's key and
 // payload: the instant and the key's length as a uvarint.
-const recordOverhead = stampBytes + binary.MaxVarintLen64
+const recordOverhead int = stampBytes + binary.MaxVarintLen64
 
 // maxSegmentPayload is the largest payload kernel/fs/seglog takes in one
 // record: one gibibyte less its 28-byte header. A policy whose largest record
 // could not fit it is refused at construction, so an Append never fails half
 // way through a batch.
-const maxSegmentPayload = 1<<30 - 28
+const maxSegmentPayload int = 1<<30 - 28
 
 // encodeRecord appends to dst the segment payload of record, stamped at
 // stamp: the instant in Unix nanoseconds, the key's length, the key, the
@@ -37,6 +38,33 @@ func encodeRecord(dst []byte, stamp int64, record corestream.RecordValue) []byte
 	dst = append(dst, record.Key...)
 	//: the payload last, so its length is what remains.
 	return append(dst, record.Payload...)
+}
+
+// encodeGone appends to dst the payload a compaction leaves in place of a
+// dropped record: its batch's instant alone. A record encodeRecord wrote is
+// longer, its key's length taking a byte at least, so the two never meet.
+func encodeGone(dst []byte, stamp int64) []byte {
+	//: the instant, kept so the batch still knows when it was appended.
+	return binary.LittleEndian.AppendUint64(dst, uint64(stamp))
+}
+
+// isGone reports whether a segment payload is a compacted record's.
+func isGone(payload []byte) bool {
+	//: the instant and nothing after it.
+	return len(payload) == stampBytes
+}
+
+// decodeStored reads a segment payload: a record encodeRecord wrote, or a
+// compacted one's instant, gone then true. ok is false for anything else.
+func decodeStored(payload []byte) (stamp int64, record corestream.RecordValue, gone, ok bool) {
+	//: a hole a compaction left.
+	if isGone(payload) {
+		//: the instant alone.
+		return int64(binary.LittleEndian.Uint64(payload)), corestream.RecordValue{}, true, true
+	}
+	stamp, record, ok = decodeRecord(payload)
+	//: a record, or bytes this engine cannot have written.
+	return stamp, record, false, ok
 }
 
 // decodeRecord reads what encodeRecord wrote. The key and the payload alias
@@ -71,5 +99,5 @@ func capped(b []byte) []byte {
 		return nil
 	}
 	//: an append to it cannot run into the next record.
-	return b[:len(b):len(b)]
+	return slices.Clip(b)
 }

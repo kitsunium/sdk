@@ -206,7 +206,9 @@ packages:
               Read returns up to max entries of partition, from offset from on, in
               offset order. It does NOT block waiting for records: a read at the
               partition's next offset yields an empty slice and a nil error, and
-              waiting is the caller's ([Waker] tells it when to look again).
+              waiting is the caller's ([Waker] tells it when to look again). The
+              offsets a [Compactor] emptied are skipped: the entries carry their own
+              offsets, which need not be consecutive.
 
               from below the partition's first retained offset is [OffsetTrimmed] —
               the records are gone, and silently starting later would hide the gap; one
@@ -324,17 +326,33 @@ packages:
           last record: the shape of a changelog read from the start to rebuild a
           state, with no need to keep every intermediate value.
 
-          It is a sibling because compaction is a policy only some engines afford;
-          the record shape it relies on — a keyed record with an empty payload being
-          a tombstone — and how long a tombstone survives are decided with its
-          engines (ADR 0231 defers them to kitsunium/sdk#824).
+          It is a sibling because compaction is a policy only some engines afford.
+          It never runs on its own — no timer, no goroutine —: a caller runs it, from
+          a scheduler's job for instance, and [PolicyValue.CompactAfter] says which
+          records it may touch.
+
+          # Tombstones
+
+          A keyed record with an empty payload is a TOMBSTONE: the key's deletion.
+          A compaction keeps it, as the last record of its key, for one more
+          CompactAfter — a reader that bootstraps within that window still learns
+          the key is gone —, and the first compaction after drops it with every
+          earlier record of its key.
         methods:
           - doc: |-
-              Compact removes from partition every keyed record a later record of the
-              same key supersedes, keeping every survivor at its offset: offsets are
-              never renumbered, so a reader's position stays meaningful. Unkeyed records
-              are left as they are. A partition outside [0, Partitions()) is
-              [UnknownPartition].
+              Compact removes from partition every keyed record at least
+              [PolicyValue.CompactAfter] old that a later record of the same key, as
+              old, supersedes, and every tombstone at least twice CompactAfter old with
+              them; a record younger than CompactAfter is never touched, and an unkeyed
+              record is left as it is. Every survivor keeps its offset: offsets are
+              never renumbered and [Stream.Bounds] does not move, so a reader inside a
+              compacted range reads on from the next survivor and is refused
+              [OffsetTrimmed] only below the first retained offset, never in a hole.
+
+              It reports what it looked at — every retained record at least
+              CompactAfter old —, what it kept and what it dropped. A zero CompactAfter
+              never compacts: Compact returns a zero [CompactValue]. A partition outside
+              [0, Partitions()) is [UnknownPartition].
             in:
               - name: ctx
                 type: context.Context
@@ -342,6 +360,7 @@ packages:
                 type: int
             name: Compact
             out:
+              - type: CompactValue
               - type: error
         name: Compactor
       - doc: |-
@@ -420,8 +439,8 @@ packages:
           - code: CodeOffsetTrimmed
             doc: |-
               OffsetTrimmed refuses a read below the first offset the partition retains:
-              the records were trimmed by retention, Trim or compaction of a whole
-              prefix. It is a refusal and not a silent skip because a reader that
+              the records were trimmed by retention or Trim — never by compaction,
+              whose holes a read skips. It is a refusal and not a silent skip because a reader that
               resumed later than it asked has lost records without knowing; its fields
               name the offset asked and the first retained, so the reader decides.
             exit: DATAERR
@@ -554,13 +573,33 @@ packages:
         struct:
           fields:
             - doc: |-
-                First is the lowest offset still readable. Retention, Trim and the
-                compaction of a whole prefix raise it; nothing lowers it.
+                First is the lowest offset still readable. Retention and Trim raise
+                it, compaction never moves it; nothing lowers it.
               name: First
               type: Offset
             - doc: Next is the offset the partition's next record will take.
               name: Next
               type: Offset
+      - doc: |-
+          CompactValue is what one [Compactor.Compact] did to a partition: the
+          records it looked at, those it kept and those it dropped; Kept plus
+          Dropped is Scanned.
+        name: CompactValue
+        struct:
+          fields:
+            - doc: |-
+                Scanned is how many retained records were at least
+                [PolicyValue.CompactAfter] old, the only ones a compaction may drop.
+              name: Scanned
+              type: int64
+            - doc: Kept is how many of them survived.
+              name: Kept
+              type: int64
+            - doc: |-
+                Dropped is how many of them were removed: superseded by a later
+                record of their key, or a tombstone past its second window.
+              name: Dropped
+              type: int64
       - doc: |-
           EntryValue is one record as a partition keeps it: where it is, when it
           arrived, and what it holds.
@@ -585,7 +624,9 @@ packages:
       - doc: |-
           Offset is a record's position in its partition: assigned by the engine at
           [Stream.Append], consecutive within a partition from zero, and never reused
-          — a trimmed offset stays trimmed and the next one keeps counting.
+          — a trimmed offset stays trimmed and the next one keeps counting. A
+          [Compactor] may leave holes between the offsets a partition still holds;
+          it never renumbers them.
         name: Offset
         underlying: uint64
       - doc: |-
@@ -596,8 +637,8 @@ packages:
           # Its zero value WORKS, and that is the decision
 
           A stream's zero policy is one partition, records of up to
-          [DefaultMaxRecordBytes], kept forever, never full, in segments of
-          [DefaultSegmentBytes]. Every zero here has one reading (ADR 0031's clamp
+          [DefaultMaxRecordBytes], kept forever, never full, never compacted, in
+          segments of [DefaultSegmentBytes]. Every zero here has one reading (ADR 0031's clamp
           branch): unlike the queue's visibility timeout, no field has two opposite
           readings of zero, so none is refused at zero. What is refused is a
           negative value — it is not a bound, and the caller who wrote it meant
@@ -673,6 +714,14 @@ packages:
                 is refused. Engines that keep no segments ignore it.
               name: SegmentBytes
               type: int64
+            - doc: |-
+                CompactAfter is how old a record must be before a [Compactor] may
+                drop it, measured from its [EntryValue.AppendedAt]: a reader that
+                stays within that window behind the head sees every update, and a
+                tombstone is kept one more CompactAfter after it became compactable.
+                Zero never compacts; negative is refused.
+              name: CompactAfter
+              type: time.Duration
       - doc: |-
           RecordValue is what a producer appends: a key that places it, and the
           bytes it carries.
@@ -685,7 +734,9 @@ packages:
                 be empty, for a record whose order relative to others does not matter.
               name: Key
               type: "[]byte"
-            - doc: Payload is the record's bytes. It may be empty.
+            - doc: |-
+                Payload is the record's bytes. It may be empty; under a key, an empty
+                payload is a tombstone, the key's deletion for a [Compactor].
               name: Payload
               type: "[]byte"
   - constants:
@@ -737,8 +788,10 @@ packages:
           policy counts with StreamMisconfigured; and a segment it cannot trust with
           the segmented log's own refusal under StreamBackendFailed. The stream it
           returns also answers [corestream.Waker], [corestream.Seeker],
-          [corestream.Trimmer], [corestream.Committer] and io.Closer; Close releases
-          the directory.
+          [corestream.Trimmer], [corestream.Compactor], [corestream.Committer] and
+          io.Closer; Close releases the directory. A compaction rewrites the
+          segments holding a record it drops, each published by a rename then a
+          directory sync, a dropped record leaving its offset and instant behind.
         in:
           - name: cfg
             type: FileConfig
@@ -755,8 +808,9 @@ packages:
           It refuses a policy it cannot honour at CONSTRUCTION, through the same
           core/data/stream.PolicyValue.Validate every engine runs, which is what
           makes it an honest double. The stream it returns also answers
-          [corestream.Waker], [corestream.Seeker], [corestream.Trimmer] and
-          [corestream.Committer]; it keeps nothing past the process, so a restart
+          [corestream.Waker], [corestream.Seeker], [corestream.Trimmer],
+          [corestream.Compactor] and [corestream.Committer]; it keeps nothing past
+          the process, so a restart
           is a total loss.
         in:
           - name: cfg
@@ -785,8 +839,9 @@ packages:
           engine does, and a RetainBytes or MaxBytes, which it does not keep, with
           [corestream.SQLStreamMisconfigured]; a transactor, dialect or table it
           cannot use the same way. The stream it returns also answers
-          [corestream.Waker], [corestream.Seeker], [corestream.Trimmer] and
-          [corestream.Committer].
+          [corestream.Waker], [corestream.Seeker], [corestream.Trimmer],
+          [corestream.Compactor] and [corestream.Committer]; a compaction deletes
+          the rows it drops in bounded statements.
         in:
           - name: cfg
             type: SQLConfig

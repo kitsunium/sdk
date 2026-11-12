@@ -41,13 +41,14 @@ constants:
         value: "4096"
     name: rebuildChunk
   - doc: |-
-      compactAfter is how many offsets below the first retained one the index
+      forgetAfter is how many offsets below the first retained one the index
       keeps before it lets them go: a copy of the index every so often, rather
       than one per trim.
     items:
-      - name: compactAfter
+      - name: forgetAfter
+        type: int
         value: "4096"
-    name: compactAfter
+    name: forgetAfter
   - doc: |-
       The kind byte every record of a file stream carries in its segment: the
       first record of a batch is a head, every other one a tail. Recovery groups
@@ -65,6 +66,7 @@ constants:
   - doc: stampBytes is the size of the instant every record opens with.
     items:
       - name: stampBytes
+        type: int
         value: "8"
     name: stampBytes
   - doc: |-
@@ -72,6 +74,7 @@ constants:
       payload: the instant and the key's length as a uvarint.
     items:
       - name: recordOverhead
+        type: int
         value: stampBytes + binary.MaxVarintLen64
     name: recordOverhead
   - doc: |-
@@ -81,6 +84,7 @@ constants:
       way through a batch.
     items:
       - name: maxSegmentPayload
+        type: int
         value: 1<<30 - 28
     name: maxSegmentPayload
   - doc: |-
@@ -147,6 +151,19 @@ constants:
         type: int64
         value: "1024"
     name: sqlOffsetsPerDelete
+  - doc: |-
+      sqlCompactPerDelete bounds how many offsets one DELETE of a compaction
+      names, and sqlCompactPage how many rows one of its reads returns, so a
+      compaction is many short statements rather than one long one.
+    grouped: true
+    items:
+      - name: sqlCompactPerDelete
+        type: int
+        value: "256"
+      - name: sqlCompactPage
+        type: int
+        value: "1024"
+    name: sqlCompactPerDelete
   - doc: |-
       sqlMigrationPrefix starts the name of every migration SQLMigration builds,
       so a version table read during an incident says what created the tables.
@@ -233,6 +250,15 @@ files:
       - copyEntries
     name: batch.go
   - decls:
+      - compactLines
+      - compactLinesAt
+      - compactLines.compactable
+      - compactLines.drops
+      - compactResult
+      - noteLast
+      - lastOf
+    name: compact.go
+  - decls:
       - worldWritable
       - rootWritableByAnyone
       - subWritableByAnyone
@@ -259,6 +285,7 @@ files:
       - (*fileStream).openPart
       - partitionDir
       - lockDir
+      - platformRefusal
       - checkPartitions
       - abandon
       - abandonLog
@@ -272,6 +299,10 @@ files:
       - timeOf
       - (*fileStream).usable
       - (*fileStream).Close
+      - firstError
+      - (*fileStream).closeParts
+      - (*fileStream).closeCursors
+      - (*fileStream).releaseLock
     name: file.go
   - decls:
       - cursorName
@@ -279,6 +310,13 @@ files:
       - (*fileStream).Commit
       - (*fileStream).Committed
     name: file_commit.go
+  - decls:
+      - lastOfKey
+      - (*fileStream).Compact
+      - (*fileStream).compactPart
+      - (*fileStream).planCompaction
+      - (*filePart).youngFrom
+    name: file_compact.go
   - decls:
       - _
     name: file_compliance.go
@@ -298,7 +336,7 @@ files:
     name: file_config.go
   - decls:
       - rebuildChunk
-      - compactAfter
+      - forgetAfter
       - batchMark
       - filePart
       - (*filePart).next
@@ -308,16 +346,18 @@ files:
       - (*filePart).bounded
       - (*filePart).index
       - (*filePart).claim
-      - (*filePart).compact
+      - (*filePart).forgetBelow
       - (*filePart).offsetAt
       - (*filePart).oldestStamp
       - (*filePart).rebuild
+      - (*filePart).forget
     name: file_part.go
   - decls:
       - (*fileStream).checkPartition
       - (*fileStream).Read
+      - (*fileStream).readFrom
       - (*fileStream).firstOf
-      - decodeEntries
+      - appendEntries
       - (*fileStream).Bounds
       - (*fileStream).OffsetAt
       - (*fileStream).Wake
@@ -328,11 +368,17 @@ files:
       - recordOverhead
       - maxSegmentPayload
       - encodeRecord
+      - encodeGone
+      - isGone
+      - decodeStored
       - decodeRecord
       - capped
     name: file_record.go
   - decls:
       - (*fileStream).reserve
+      - reservation
+      - (*fileStream).tryReserve
+      - (*fileStream).fits
       - (*fileStream).expireAll
       - (*fileStream).untilExpiry
       - (*fileStream).await
@@ -342,6 +388,7 @@ files:
   - decls:
       - memPartition
       - (*memPartition).next
+      - (*memPartition).index
       - cursorKey
       - memoryStream
       - NewMemory
@@ -354,6 +401,9 @@ files:
       - (*memoryStream).Commit
       - (*memoryStream).Committed
     name: memory_commit.go
+  - decls:
+      - (*memoryStream).Compact
+    name: memory_compact.go
   - decls:
       - _#2
     name: memory_compliance.go
@@ -403,6 +453,15 @@ files:
       - (*sqlStream).Committed
     name: sql_commit.go
   - decls:
+      - sqlCompactRow
+      - (*sqlStream).Compact
+      - (*sqlStream).compactable
+      - (*sqlStream).compactPage
+      - scanCompactRow
+      - planSQLCompaction
+      - (*sqlStream).deleteCompacted
+    name: sql_compact.go
+  - decls:
       - _#3
     name: sql_compliance.go
   - decls:
@@ -421,23 +480,29 @@ files:
       - sqlRecordArgs
       - sqlRowsPerStatement
       - sqlOffsetsPerDelete
+      - sqlCompactPerDelete
+      - sqlMigrationPrefix
       - sqlStatements
       - renderSQLStatements
       - lockHeadStatement
       - commitStatement
       - (*sqlStatements).insertRows
+      - (*sqlStatements).compactDelete
+      - (*sqlStatements).compactFor
       - (*sqlStatements).insertFor
       - createStreamTableStatements
       - dropStreamTableStatements
-      - sqlMigrationPrefix
       - SQLMigration
     name: sql_dialect.go
   - decls:
       - (*sqlStream).checkPartition
       - (*sqlStream).Read
+      - scannedRows
       - (*sqlStream).scanEntries
       - nonEmpty
       - (*sqlStream).Bounds
+      - (*sqlStream).boundsAt
+      - firstReadable
       - (*sqlStream).OffsetAt
       - (*sqlStream).headAndLowest
       - (*sqlStream).Wake
@@ -466,16 +531,17 @@ files:
       - ignoreStop
     name: subscribe.go
   - decls:
-      - CommitMode
       - CommitAfterHandler
       - subscriberPollInterval
+      - CommitMode
       - Handler
       - ParkConfig
       - SubscriberConfig
       - subscriberMisconfigured
-      - SubscriberConfig.validate
-      - SubscriberConfig.missing
-      - SubscriberConfig.normalized
+      - (*SubscriberConfig).validate
+      - (*SubscriberConfig).missing
+      - (*SubscriberConfig).missingCollaborator
+      - (*SubscriberConfig).normalized
     name: subscribe_config.go
   - decls:
       - renewShare
@@ -531,6 +597,30 @@ functions:
     name: copyEntries
     params: entries []corestream.EntryValue
     results: "[]corestream.EntryValue"
+  - doc: |-
+      compactLinesAt returns the lines of a compaction at now under after, a
+      positive CompactAfter. Twice a CompactAfter past the range of a duration
+      is read as the longest one, so a tombstone is then kept for good.
+    name: compactLinesAt
+    params: now time.Time, after time.Duration
+    results: compactLines
+  - doc: compactResult builds the value a compaction reports.
+    name: compactResult
+    params: scanned, dropped int64
+    results: corestream.CompactValue
+  - doc: |-
+      noteLast records at as the last place a compaction saw key. An unkeyed
+      record is nobody's last, so an empty key records nothing. It converts the
+      key inside the map index, where the compiler spares the copy a lookup
+      does not need.
+    name: noteLast
+    params: last map[string]V, key []byte, at V
+    typeParams: V any
+  - doc: lastOf is the last place a compaction saw key, the zero V when it saw none.
+    name: lastOf
+    params: last map[string]V, key []byte
+    results: V
+    typeParams: V any
   - doc: |-
       rootWritableByAnyone reports whether an account outside the owner and group
       can REPLACE an entry of the stream directory: other-write without the
@@ -612,6 +702,16 @@ functions:
     name: lockDir
     params: dir string
     results: "*os.File, error"
+  - doc: |-
+      platformRefusal is vfs's refusal of this platform, under
+      StreamBackendFailed, or nil where vfs has a disk filesystem. vfs.NewOS
+      judges the platform before the path, so the empty path is never opened:
+      where the platform is supported it answers the path's refusal, ignored
+      here. Checked first, it makes every refused platform answer
+      UNSUPPORTED_PLATFORM, never a refusal of the directory, its lock or its
+      mode that a later step would give there first (illumos has no file lock).
+    name: platformRefusal
+    results: error
   - doc: checkPartitions refuses a directory holding a partition at or past count.
     name: checkPartitions
     params: dir string, count int
@@ -620,7 +720,7 @@ functions:
       abandon drops the error of a release on a path that is already failing:
       the refusal being returned is the one that matters.
     name: abandon
-    params: error
+    params: failure error
   - doc: abandonLog closes a log a refusal leaves behind.
     name: abandonLog
     params: log *seglog.Log
@@ -631,6 +731,10 @@ functions:
     name: timeOf
     params: stamp int64
     results: time.Time
+  - doc: firstError is the first non-nil of errs, nil when there is none.
+    name: firstError
+    params: errs ...error
+    results: error
   - doc: |-
       cursorName names group's cursor on partition under cursors/: a digest of
       the group, so any group name is a safe file name of one length, and the
@@ -695,9 +799,13 @@ functions:
     name: backendFailed
     params: op, path string, cause error
     results: error
-  - doc: decodeEntries turns the payloads read from offset from on into entries.
-    name: decodeEntries
-    params: partition int, from corestream.Offset, payloads [][]byte
+  - doc: |-
+      appendEntries appends to entries the live entries of the payloads read
+      from offset from on, a compacted record's skipped.
+    name: appendEntries
+    params: |2
+
+      	entries []corestream.EntryValue, partition int, from corestream.Offset, payloads [][]byte,
     results: "[]corestream.EntryValue, error"
   - doc: |-
       encodeRecord appends to dst the segment payload of record, stamped at
@@ -706,6 +814,23 @@ functions:
     name: encodeRecord
     params: dst []byte, stamp int64, record corestream.RecordValue
     results: "[]byte"
+  - doc: |-
+      encodeGone appends to dst the payload a compaction leaves in place of a
+      dropped record: its batch's instant alone. A record encodeRecord wrote is
+      longer, its key's length taking a byte at least, so the two never meet.
+    name: encodeGone
+    params: dst []byte, stamp int64
+    results: "[]byte"
+  - doc: isGone reports whether a segment payload is a compacted record's.
+    name: isGone
+    params: payload []byte
+    results: bool
+  - doc: |-
+      decodeStored reads a segment payload: a record encodeRecord wrote, or a
+      compacted one's instant, gone then true. ok is false for anything else.
+    name: decodeStored
+    params: payload []byte
+    results: stamp int64, record corestream.RecordValue, gone, ok bool
   - doc: |-
       decodeRecord reads what encodeRecord wrote. The key and the payload alias
       payload, each capped at its end; an empty one is nil, as the memory engine
@@ -752,6 +877,18 @@ functions:
     name: sqlNameable
     params: t time.Time
     results: bool
+  - doc: |-
+      scanCompactRow reads the row rows is at: offset, key, instant, and whether
+      the payload is empty.
+    name: scanCompactRow
+    params: rows scannedRows
+    results: sqlCompactRow, error
+  - doc: |-
+      planSQLCompaction returns the offsets of the rows a compaction drops, in
+      offset order: the decision compactLines makes on every engine.
+    name: planSQLCompaction
+    params: rows []sqlCompactRow, lines compactLines
+    results: "[]int64"
   - doc: |-
       validateSQLNames refuses a dialect the engine cannot spell and a table name
       it could not interpolate safely.
@@ -820,6 +957,15 @@ functions:
     name: nonEmpty
     params: b []byte
     results: "[]byte"
+  - doc: |-
+      firstReadable returns the bounds a head row gives: the next offset, and as
+      the first the floor or the offset after the highest stored record past the
+      age bound, whichever is higher. Every record above that one is younger, the
+      instants following the offsets, so the holes a compaction left below or
+      among the young records never move it.
+    name: firstReadable
+    params: head, floor int64, expired stdsql.NullInt64
+    results: corestream.BoundsValue
   - name: Subscribe
     params: ctx context.Context, s corestream.Stream, cfg SubscriberConfig
     results: error
@@ -842,6 +988,7 @@ imports:
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   corelock: github.com/kitsunium/sdk/internal/core/app/lock
+  coreproc: github.com/kitsunium/sdk/internal/core/proc
   corequeue: github.com/kitsunium/sdk/internal/core/data/queue
   coresql: github.com/kitsunium/sdk/internal/core/data/sql
   corestream: github.com/kitsunium/sdk/internal/core/data/stream
@@ -874,8 +1021,37 @@ package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/stream
   name: stream
-  purpose: Package stream holds the engines of core/data/stream's [Stream] port — memory, a directory of segments over kernel/fs/seglog, and a SQL table joined to the caller's transaction — and the subscriber that reads a stream on behalf of a consumer group (ADR 0231).
+  purpose: Package stream holds the engines of core/data/stream's [corestream.Stream] port — memory, a directory of segments over kernel/fs/seglog, and a SQL table joined to the caller's transaction — and the subscriber that reads a stream on behalf of a consumer group (ADR 0231).
 types:
+  - doc: |-
+      compactLines are the two instants one compaction judges records by, the
+      same on every engine: a record appended at or before old is at least
+      CompactAfter old and may be dropped; a tombstone appended at or before
+      tomb is at least twice CompactAfter old, past the window it is kept for.
+    fields:
+      - name: old
+        type: time.Time
+      - name: tomb
+        type: time.Time
+    kind: struct
+    methods:
+      - doc: |-
+          compactable reports whether a record appended at at is old enough to be
+          compacted.
+        name: compactable
+        params: at time.Time
+        recv: c compactLines
+        results: bool
+      - doc: |-
+          drops reports whether a compactable record appended at at goes: a keyed
+          record a later compactable record of its key supersedes (last false), or
+          the last one of its key when it is a tombstone past its second window. An
+          unkeyed record never goes.
+        name: drops
+        params: record corestream.RecordValue, at time.Time, last bool
+        recv: c compactLines
+        results: bool
+    name: compactLines
   - doc: |-
       fileStream is a stream kept in a directory: one kernel/fs/seglog log per
       partition, and one file per consumer group's cursor.
@@ -1010,6 +1186,22 @@ types:
         recv: m *fileStream
         results: error
       - doc: |-
+          closeParts closes every partition's log, each under its writers' lock so
+          no batch is cut, and returns the first failure.
+        name: closeParts
+        recv: m *fileStream
+        results: error
+      - doc: closeCursors closes the cursors' root handle.
+        name: closeCursors
+        recv: m *fileStream
+        results: error
+      - doc: |-
+          releaseLock releases the directory's lock last, so no other engine opens
+          a directory still being closed, and returns the first failure.
+        name: releaseLock
+        recv: m *fileStream
+        results: error
+      - doc: |-
           Commit records next as the offset group reads next on partition, in a
           file of its own published atomically and durably (vfs.WriteAtomic).
         name: Commit
@@ -1025,6 +1217,31 @@ types:
           	_ context.Context, group string, partition int,
         recv: m *fileStream
         results: corestream.Offset, error
+      - doc: |-
+          Compact removes from partition every compactable record a later one of its
+          key supersedes, and every tombstone past its second window: each segment
+          holding one is rewritten through seglog, the dropped record leaving its
+          instant alone at its offset, so the indexes, the batches and Bounds stay
+          as they were.
+        name: Compact
+        params: _ context.Context, partition int
+        recv: m *fileStream
+        results: corestream.CompactValue, error
+      - doc: compactPart is Compact on part, whose wmu the caller holds.
+        name: compactPart
+        params: part *filePart
+        recv: m *fileStream
+        results: corestream.CompactValue, int64, error
+      - doc: |-
+          planCompaction reads part's records from lo up to line excluded, a chunk
+          at a time, and returns the offset of every key's last one and how many
+          live records it read.
+        name: planCompaction
+        params: |2
+
+          	part *filePart, lo, line corestream.Offset,
+        recv: m *fileStream
+        results: last lastOfKey, scanned int64, err error
       - doc: checkPartition refuses a partition outside [0, Partitions()).
         name: checkPartition
         params: partition int
@@ -1037,6 +1254,16 @@ types:
         params: |2
 
           	_ context.Context, partition int, from corestream.Offset, maxEntries int,
+        recv: m *fileStream
+        results: "[]corestream.EntryValue, error"
+      - doc: |-
+          readFrom reads up to maxEntries live entries of part from offset from up
+          to next excluded, one Range per round: a round that meets holes reads the
+          offsets after them, until maxEntries are found or next is reached.
+        name: readFrom
+        params: |2
+
+          	part *filePart, partition int, from, next corestream.Offset, maxEntries int,
         recv: m *fileStream
         results: "[]corestream.EntryValue, error"
       - doc: firstOf returns part's first readable offset now.
@@ -1078,6 +1305,21 @@ types:
         recv: m *fileStream
         results: int, error
       - doc: |-
+          tryReserve looks once at whether size more bytes fit, counting them as
+          held when they do, and fixes *deadline on the first look. The caller
+          holds m.mu.
+        name: tryReserve
+        params: deadline *time.Time, size int64, partition int, keyed bool
+        recv: m *fileStream
+        results: reservation
+      - doc: |-
+          fits reports whether size more bytes fit under the ceiling at now, the
+          records past their age released first. The caller holds m.mu.
+        name: fits
+        params: now time.Time, size int64
+        recv: m *fileStream
+        results: bool
+      - doc: |-
           expireAll claims, in every partition, the records past RetainFor at now,
           and returns the bytes still held. The caller holds m.mu; the storage is
           released by the partition's next Append or Trim.
@@ -1111,6 +1353,13 @@ types:
         recv: m *fileStream
         results: freed int64, err error
     name: fileStream
+  - alias: true
+    doc: |-
+      lastOfKey is what a compaction keeps of a key while it plans: the offset
+      of its last compactable record.
+    kind: alias
+    name: lastOfKey
+    underlying: map[string]corestream.Offset
   - fields:
       - doc: |-
           Clock stamps [corestream.EntryValue].AppendedAt, ages records for
@@ -1197,6 +1446,14 @@ types:
     kind: struct
     methods:
       - doc: |-
+          youngFrom returns the first offset of the oldest batch younger than
+          CompactAfter, next when every batch is old enough: the records below it
+          are compactable. The caller holds mu.
+        name: youngFrom
+        params: lines compactLines
+        recv: p *filePart
+        results: corestream.Offset
+      - doc: |-
           next returns the offset the partition's next record takes. The caller
           holds mu, or wmu.
         name: next
@@ -1239,7 +1496,7 @@ types:
         name: index
         params: stamp int64, sizes []int64, claim corestream.Offset
         recv: p *filePart
-        results: freed int64
+        results: int64
       - doc: |-
           claim makes to the first offset retained for good and returns the bytes it
           released; at or below kept it changes nothing. The caller holds mu
@@ -1247,9 +1504,9 @@ types:
         name: claim
         params: to corestream.Offset
         recv: p *filePart
-        results: freed int64
-      - doc: compact lets the index forget what lies far enough below kept.
-        name: compact
+        results: int64
+      - doc: forgetBelow lets the index forget what lies far enough below kept.
+        name: forgetBelow
         recv: p *filePart
       - doc: |-
           offsetAt returns the first offset at or past from whose batch was stamped
@@ -1273,19 +1530,51 @@ types:
         name: rebuild
         recv: p *filePart
         results: latest int64, err error
+      - doc: |-
+          forget counts the records a compaction dropped, at offsets sorted
+          ascending, as holding no byte from here on, and returns the bytes they
+          held. An offset already claimed is skipped: its bytes were released then.
+          The caller holds mu exclusively.
+        name: forget
+        params: dropped []corestream.Offset
+        recv: p *filePart
+        results: int64
     name: filePart
   - doc: |-
-      memPartition is one partition of a memory stream: its retained entries, in
-      offset order, and the offset of the first of them.
+      reservation is what one look at the ceiling decided: the stream is closed,
+      the bytes are reserved on partition or refused with err (done), or the
+      caller waits wait for room to appear.
     fields:
-      - doc: entries holds the retained records; entries[i].Offset is first + i.
+      - name: err
+        type: error
+      - name: room
+        type: <-chan struct{}
+      - name: wait
+        type: time.Duration
+      - name: partition
+        type: int
+      - name: closed
+        type: bool
+      - name: done
+        type: bool
+    kind: struct
+    name: reservation
+  - doc: |-
+      memPartition is one partition of a memory stream: its retained entries, in
+      offset order, the offset of the first of them and the next one.
+    fields:
+      - doc: |-
+          entries holds the retained records in offset order. A compaction
+          leaves holes, so an entry's offset is its own and never its index.
         name: entries
         type: "[]corestream.EntryValue"
       - doc: |-
           first is the lowest offset still readable. Trimming raises it; nothing
-          lowers it, and it stays put when entries is empty, so the next offset
-          (first + len(entries)) never moves back.
+          lowers it, and a compaction leaves it where it is.
         name: first
+        type: corestream.Offset
+      - doc: nextOffset is the offset the next record takes; it never moves back.
+        name: nextOffset
         type: corestream.Offset
       - doc: bytes is the key and payload bytes the retained entries hold.
         name: bytes
@@ -1296,6 +1585,13 @@ types:
         name: next
         recv: p *memPartition
         results: corestream.Offset
+      - doc: |-
+          index returns the position in entries of the first entry at or past
+          offset.
+        name: index
+        params: offset corestream.Offset
+        recv: p *memPartition
+        results: int
     name: memPartition
   - doc: cursorKey names one group's cursor on one partition.
     fields:
@@ -1396,6 +1692,13 @@ types:
           	_ context.Context, group string, partition int,
         recv: m *memoryStream
         results: corestream.Offset, error
+      - doc: |-
+          Compact removes from partition every compactable record a later one of its
+          key supersedes, and every tombstone past its second window, in place.
+        name: Compact
+        params: _ context.Context, partition int
+        recv: m *memoryStream
+        results: corestream.CompactValue, error
       - doc: checkPartition refuses a partition outside [0, Partitions()).
         name: checkPartition
         params: partition int
@@ -1651,6 +1954,43 @@ types:
           	ctx context.Context, group string, partition int,
         recv: s *sqlStream
         results: corestream.Offset, error
+      - doc: |-
+          Compact removes from partition every compactable record a later one of its
+          key supersedes, and every tombstone past its second window.
+
+          It reads the readable rows old enough to be compacted a page at a time,
+          decides in the engine — the same decision every engine makes —, then
+          deletes the rows it dropped by offset, at most sqlCompactPerDelete a
+          statement, each statement a savepoint of the caller's transaction or a
+          statement of its own. A row a delete finds aged out is left to the age
+          sweep, so the first readable offset never moves.
+        name: Compact
+        params: ctx context.Context, partition int
+        recv: s *sqlStream
+        results: corestream.CompactValue, error
+      - doc: |-
+          compactable reads partition's readable rows appended at or before the
+          compaction's line, in offset order, a page at a time.
+        name: compactable
+        params: |2
+
+          	ctx context.Context, partition int, now time.Time, lines compactLines,
+        recv: s *sqlStream
+        results: "[]sqlCompactRow, error"
+      - doc: compactPage reads one page of compactable rows from offset from on.
+        name: compactPage
+        params: |2
+
+          	ctx context.Context, partition int, from, cutoff, line int64,
+        recv: s *sqlStream
+        results: page []sqlCompactRow, err error
+      - doc: |-
+          deleteCompacted deletes partition's rows at the dropped offsets, at most
+          sqlCompactPerDelete a statement, and returns how many went.
+        name: deleteCompacted
+        params: ctx context.Context, partition int, dropped []int64
+        recv: s *sqlStream
+        results: int64, error
       - doc: checkPartition refuses a partition outside [0, Partitions()).
         name: checkPartition
         params: partition int
@@ -1661,13 +2001,11 @@ types:
           ONE unlocked statement on the executor the context's transaction joins —
           the pool outside one.
 
-          The statement answers the head's next offset beside the readable records
-          from from on. Records are stored contiguously from the head's floor and
-          stamped in offset order, so the readable ones are a suffix: when the first
-          row returned is past from, from was trimmed or expired, and that row is the
-          first retained offset; when no record is returned, the partition holds
-          nothing readable at or after from, and its next offset is the first
-          retained.
+          The statement answers the head — its next offset, its floor and the
+          highest stored offset past the age bound, which give the first readable
+          offset (firstReadable) — beside the readable records from from on. A
+          compaction leaves holes the rows simply do not hold, so a read inside one
+          answers the records after it and never OFFSET_TRIMMED.
         name: Read
         params: |2
 
@@ -1675,18 +2013,25 @@ types:
         recv: s *sqlStream
         results: "[]corestream.EntryValue, error"
       - doc: |-
-          scanEntries reads the rows of the read statement: the head's next offset on
-          each, a record on each but the lone row of a partition with none readable.
-          A partition never written has no head row, and its next offset is zero.
+          scanEntries reads the rows of the read statement: the head on each, a
+          record on each but the lone row of a partition with none readable. A
+          partition never written has no head row, and its bounds are zero.
         name: scanEntries
         params: |2
 
-          	rows *stdsql.Rows, partition, maxEntries int,
+          	rows scannedRows, partition, maxEntries int,
         recv: s *sqlStream
-        results: entries []corestream.EntryValue, next corestream.Offset, err error
+        results: entries []corestream.EntryValue, bounds corestream.BoundsValue, err error
       - doc: Bounds returns partition's first retained offset and its next one.
         name: Bounds
         params: ctx context.Context, partition int
+        recv: s *sqlStream
+        results: corestream.BoundsValue, error
+      - doc: |-
+          boundsAt reads partition's bounds under the age cutoff: one statement on
+          the executor the context's transaction joins.
+        name: boundsAt
+        params: ctx context.Context, partition int, cutoff int64
         recv: s *sqlStream
         results: corestream.BoundsValue, error
       - doc: OffsetAt returns partition's first readable offset appended at or after t.
@@ -1746,13 +2091,29 @@ types:
       - doc: |-
           sweep releases partition's records past RetainFor once its last sweep by
           this engine is older than the sweep period. They are unreadable already —
-          every read filters them by age — so a sweep only gives their storage back,
-          and a sweep that fails is retried by the next one due: an Append that
-          committed is not reported as failed for it.
+          every read filters them by age —, so a sweep raises the floor to the first
+          readable offset, as a Trim does, and gives their storage back: with the
+          rows gone, the floor alone keeps that offset where it was. A sweep that
+          fails is retried by the next one due: an Append that committed is not
+          reported as failed for it.
         name: sweep
         params: ctx context.Context, partition int, now time.Time
         recv: s *sqlStream
     name: sqlStream
+  - doc: |-
+      sqlCompactRow is what a compaction reads of one row: never its payload,
+      only whether it is empty.
+    fields:
+      - name: key
+        type: string
+      - name: offset
+        type: int64
+      - name: at
+        type: int64
+      - name: tomb
+        type: bool
+    kind: struct
+    name: sqlCompactRow
   - fields:
       - doc: |-
           Transactor is the transaction manager of the database the stream
@@ -1843,6 +2204,11 @@ types:
       - doc: insertFull inserts a full chunk of sqlRowsPerStatement records.
         name: insertFull
         type: string
+      - doc: |-
+          compactFull deletes a full chunk of sqlCompactPerDelete offsets a
+          compaction dropped.
+        name: compactFull
+        type: string
       - doc: advance moves the head past a batch and records its instant.
         name: advance
         type: string
@@ -1850,12 +2216,17 @@ types:
         name: floor
         type: string
       - doc: |-
-          read reads the head and up to a bound of records from an offset, one
-          unlocked statement: the head row LEFT JOINed with the readable
-          records, so a partition with no record still answers its next offset.
+          read reads the head — next offset, floor, and the highest stored
+          offset past the age bound — and up to a bound of records from an
+          offset, one unlocked statement: the head row LEFT JOINed with the
+          readable records, so a partition with no record still answers.
         name: read
         type: string
-      - doc: bounds reads the head's next offset and the lowest readable record.
+      - doc: |-
+          bounds reads the head's next offset, its floor and the highest stored
+          offset past the age bound: the first readable offset is the floor or
+          the one after that, whichever is higher, whatever holes a compaction
+          left.
         name: bounds
         type: string
       - doc: |-
@@ -1871,6 +2242,12 @@ types:
         type: string
       - doc: headNext reads a partition's next offset, unlocked.
         name: headNext
+        type: string
+      - doc: |-
+          compactScan reads a page of the readable records old enough to be
+          compacted, from an offset on: offset, key, instant and whether the
+          payload is empty.
+        name: compactScan
         type: string
       - doc: commit writes a group's cursor, replacing the one it had.
         name: commit
@@ -1892,6 +2269,22 @@ types:
         recv: s *sqlStatements
         results: string
       - doc: |-
+          compactDelete renders the deletion of n offsets a compaction dropped, each
+          still readable when the statement runs: a record that aged out meanwhile
+          is left to the age sweep, which raises the floor before it deletes, so the
+          first readable offset never moves back.
+        name: compactDelete
+        params: n int
+        recv: s *sqlStatements
+        results: string
+      - doc: |-
+          compactFor returns the deletion of n offsets: the full chunk rendered at
+          NewSQL, or one rendered now for a shorter one.
+        name: compactFor
+        params: n int
+        recv: s *sqlStatements
+        results: string
+      - doc: |-
           insertFor returns the insertion of n records: the full chunk rendered at
           NewSQL, or one rendered now for a shorter one.
         name: insertFor
@@ -1899,6 +2292,18 @@ types:
         recv: s *sqlStatements
         results: string
     name: sqlStatements
+  - doc: |-
+      scannedRows is the part of *sql.Rows scanEntries reads a result through:
+      the cursor, its failure, its columns and its release.
+    kind: named
+    name: scannedRows
+    underlying: |-
+      interface {
+      	Close() error
+      	Err() error
+      	Next() bool
+      	Scan(dest ...any) error
+      }
   - doc: |-
       subscriber is what every worker of one Subscribe shares; nothing in it
       changes after Subscribe built it.
@@ -1978,7 +2383,10 @@ types:
         recv: w *subscriber
       - doc: |-
           settled runs call on ctx without its cancellation, bounded by
-          SettleTimeout on the clock from the instant ctx ends.
+          SettleTimeout on the clock from the instant ctx ends. It starts a
+          background goroutine, bound, that ends when settled returns (done is
+          closed on every path) or once it has cancelled the call, so none outlives
+          the call it bounds.
         name: settled
         params: ctx context.Context, call func(context.Context) error
         recv: w *subscriber
@@ -2168,18 +2576,24 @@ types:
           of partitions partitions.
         name: validate
         params: partitions int
-        recv: c SubscriberConfig
+        recv: c *SubscriberConfig
         results: error
       - doc: missing names the first required field c lacks, or returns "".
         name: missing
-        recv: c SubscriberConfig
+        recv: c *SubscriberConfig
+        results: string
+      - doc: |-
+          missingCollaborator names the first of the fence's and the park's
+          requirements c lacks, or returns "".
+        name: missingCollaborator
+        recv: c *SubscriberConfig
         results: string
       - doc: |-
           normalized resolves the clamped fields, the partitions included, so every
           worker reads the same numbers.
         name: normalized
         params: partitions int
-        recv: c SubscriberConfig
+        recv: c *SubscriberConfig
         results: SubscriberConfig
     name: SubscriberConfig
   - doc: heldFence is the lease a worker reads its partition under.
@@ -2220,9 +2634,7 @@ types:
         recv: w *wakeSignal
     name: wakeSignal
 vars:
-  - doc: |-
-      The file engine answers the port, four of its siblings and io.Closer;
-      Compactor is #824's.
+  - doc: The file engine answers the port, its five siblings and io.Closer.
     grouped: true
     items:
       - name: _
@@ -2236,6 +2648,9 @@ vars:
         value: (*fileStream)(nil)
       - name: _
         type: corestream.Trimmer
+        value: (*fileStream)(nil)
+      - name: _
+        type: corestream.Compactor
         value: (*fileStream)(nil)
       - name: _
         type: corestream.Committer
@@ -2244,9 +2659,7 @@ vars:
         type: io.Closer
         value: (*fileStream)(nil)
     name: _
-  - doc: |-
-      The memory engine answers the port and four of its siblings; Compactor is
-      left to the engines that keep segments or rows to rewrite (#824).
+  - doc: The memory engine answers the port and its five siblings.
     grouped: true
     items:
       - name: _
@@ -2260,6 +2673,9 @@ vars:
         value: (*memoryStream)(nil)
       - name: _
         type: corestream.Trimmer
+        value: (*memoryStream)(nil)
+      - name: _
+        type: corestream.Compactor
         value: (*memoryStream)(nil)
       - name: _
         type: corestream.Committer
@@ -2276,9 +2692,7 @@ vars:
           	mu      sync.Mutex
           }{signals: map[sqlStreamKey]*wakeSignal{}}
     name: sqlWakes
-  - doc: |-
-      The SQL engine answers the port and four of its siblings; Compactor is
-      left to #824.
+  - doc: The SQL engine answers the port and its five siblings.
     grouped: true
     items:
       - name: _
@@ -2292,6 +2706,9 @@ vars:
         value: (*sqlStream)(nil)
       - name: _
         type: corestream.Trimmer
+        value: (*sqlStream)(nil)
+      - name: _
+        type: corestream.Compactor
         value: (*sqlStream)(nil)
       - name: _
         type: corestream.Committer

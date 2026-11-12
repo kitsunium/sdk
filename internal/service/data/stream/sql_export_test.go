@@ -14,6 +14,8 @@ type RenderedSQL struct {
 	Fixed map[string]string
 	// InsertRows renders the insertion of n records.
 	InsertRows func(n int) string
+	// CompactDelete renders the deletion of n compacted offsets.
+	CompactDelete func(n int) string
 	// Create and Drop are what SQLMigration's Up and Down run.
 	Create, Drop []string
 }
@@ -27,10 +29,11 @@ func RenderSQLForTest(dialect coresql.Dialect, table string) RenderedSQL {
 		Fixed: map[string]string{
 			s.lockHead: "lockHead", s.head: "head", s.advance: "advance", s.floor: "floor", s.read: "read",
 			s.bounds: "bounds", s.offsetAt: "offsetAt", s.lowest: "lowest", s.release: "release",
-			s.headNext: "headNext", s.commit: "commit", s.committed: "committed",
+			s.headNext: "headNext", s.commit: "commit", s.committed: "committed", s.compactScan: "compactScan",
 		},
-		InsertRows: s.insertRows,
-		Create:     createStreamTableStatements(dialect, table),
-		Drop:       dropStreamTableStatements(dialect, table),
+		InsertRows:    s.insertRows,
+		CompactDelete: s.compactDelete,
+		Create:        createStreamTableStatements(dialect, table),
+		Drop:          dropStreamTableStatements(dialect, table),
 	}
 }

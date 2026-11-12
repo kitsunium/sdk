@@ -126,6 +126,7 @@ func (m *memoryStream) drop(part *memPartition, count int) {
 		return
 	}
 	var freed int64
+	to := part.entries[count-1].Offset + 1
 	//: each removed entry is cleared, so its bytes can be collected.
 	for i := range count {
 		freed += recordBytes(part.entries[i].Record)
@@ -136,7 +137,7 @@ func (m *memoryStream) drop(part *memPartition, count int) {
 	if len(part.entries) == 0 {
 		part.entries = nil
 	}
-	part.first += corestream.Offset(count)
+	part.first = max(part.first, to)
 	part.bytes -= freed
 	m.held -= freed
 	m.room.fire()
@@ -162,7 +163,8 @@ func (m *memoryStream) Trim(_ context.Context, partition int, before corestream.
 	if before <= part.first {
 		return nil
 	}
-	m.drop(part, int(before-part.first))
+	m.drop(part, part.index(before))
+	part.first = before
 	//: trimmed; the next offset does not move.
 	return nil
 }

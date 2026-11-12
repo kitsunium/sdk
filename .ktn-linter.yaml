@@ -1722,6 +1722,22 @@ rules:
       # one file.
       - "**/internal/service/net/loop/group.go"
       - "internal/service/net/loop/group.go"
+      # service/data/stream.NewMemory(cfg MemoryConfig), NewFile(cfg
+      # FileConfig), NewSQL(cfg SQLConfig) and Subscribe(ctx, s, cfg
+      # SubscriberConfig) take their published config BY VALUE (ADR 0231), the
+      # NewCircuitBreaker(cfg) class below: a composite literal at the call site
+      # whose zero fields are the documented defaults (ADR 0031) — a pointer
+      # would make nil a second zero and let a caller mutate it after the
+      # constructor resolved it — copied once per engine or subscriber built,
+      # never on an Append or Read path. Scoped to those files.
+      - "**/internal/service/data/stream/memory.go"
+      - "internal/service/data/stream/memory.go"
+      - "**/internal/service/data/stream/file.go"
+      - "internal/service/data/stream/file.go"
+      - "**/internal/service/data/stream/sql.go"
+      - "internal/service/data/stream/sql.go"
+      - "**/internal/service/data/stream/subscribe.go"
+      - "internal/service/data/stream/subscribe.go"
       # service/app/resilience.BreakerConfig (72 bytes) and
       # service/app/lifecycle.SupervisorConfig (88 bytes) crossed 64 bytes when
       # ADR 0184 gave them HalfOpenTrials and GiveUpAfter. Both are published

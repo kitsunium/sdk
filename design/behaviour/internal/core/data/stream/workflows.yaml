@@ -16,6 +16,7 @@ workflows:
           		{"MaxBytes", p.MaxBytes},
           		{"BlockTimeout", int64(p.BlockTimeout)},
           		{"SegmentBytes", p.SegmentBytes},
+          		{"CompactAfter", int64(p.CompactAfter)},
           	}
       - loop:
           do:

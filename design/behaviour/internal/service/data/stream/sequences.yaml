@@ -119,6 +119,59 @@ sequences:
           key: i
           range: entries
       - return: out
+  - of: compactLinesAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: compactLinesAt
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: twice
+        eval: time.Duration(math.MaxInt64)
+        to: time
+      - opt:
+          do:
+            - set: twice
+              value: 2 * after
+          when: after <= math.MaxInt64/2
+      - return: "compactLines{old: now.Add(-after), tomb: now.Add(-twice)}"
+  - of: compactLines.compactable
+    participants:
+      - id: caller
+        kind: actor
+      - id: compactLines.compactable
+        kind: self
+      - id: at.After
+        kind: value
+    steps:
+      - return: "!at.After(c.old)"
+        to: at.After
+  - of: compactLines.drops
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(record.Key) == 0
+      - opt:
+          do:
+            - return: "true"
+          when: "!last"
+      - return: len(record.Payload) == 0 && !at.After(c.tomb)
+  - of: compactResult
+    steps:
+      - return: "corestream.CompactValue{Scanned: scanned, Kept: scanned - dropped, Dropped: dropped}"
+  - of: noteLast
+    steps:
+      - opt:
+          do:
+            - set: last[string(key)]
+              value: at
+          when: len(key) > 0
+  - of: lastOf
+    steps:
+      - return: last[string(key)]
   - of: rootWritableByAnyone
     participants:
       - id: caller
@@ -294,6 +347,8 @@ sequences:
         kind: actor
       - id: NewFile
         kind: self
+      - id: platformRefusal
+        kind: internal
       - id: cfg.Policy.Validate
         kind: value
       - id: cfg.Policy.Normalized
@@ -307,6 +362,14 @@ sequences:
       - id: stream.open
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: nil, refused
+          init:
+            bind: refused
+            eval: platformRefusal()
+            to: platformRefusal
+          when: refused != nil
       - opt:
           do:
             - return: nil, invalid
@@ -525,6 +588,26 @@ sequences:
             - return: nil, directoryUnusable(dir, "in-use", "")
           when: "!held"
       - return: file, nil
+  - of: platformRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: platformRefusal
+        kind: self
+      - id: svcvfs
+        kind: package
+      - id: backendFailed
+        kind: internal
+    steps:
+      - bind: _, err
+        eval: svcvfs.NewOS("")
+        to: svcvfs
+      - opt:
+          do:
+            - return: backendFailed("open", "", err)
+              to: backendFailed
+          when: errors.Is(err, coreproc.UnsupportedPlatform)
+      - return: nil
   - of: checkPartitions
     participants:
       - id: caller
@@ -569,6 +652,11 @@ sequences:
           value: entry
       - return: nil
   - of: abandon
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: failure == nil
   - of: abandonLog
     participants:
       - id: caller
@@ -879,20 +967,8 @@ sequences:
         kind: value
       - id: m.mu.Unlock
         kind: value
-      - id: part.wmu.Lock
-        kind: value
-      - id: part.log.Close
-        kind: value
-      - id: part.wmu.Unlock
-        kind: value
-      - id: backendFailed
+      - id: firstError
         kind: internal
-      - id: closer.Close
-        kind: value
-      - id: flock
-        kind: package
-      - id: m.lock.Close
-        kind: value
     steps:
       - eval: m.mu.Lock()
         to: m.mu.Lock
@@ -906,6 +982,23 @@ sequences:
         value: "true"
       - eval: m.mu.Unlock()
         to: m.mu.Unlock
+      - return: firstError(m.closeParts(), m.closeCursors(), m.releaseLock())
+        to: firstError
+  - of: (*fileStream).closeParts
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).closeParts
+        kind: self
+      - id: part.wmu.Lock
+        kind: value
+      - id: part.log.Close
+        kind: value
+      - id: part.wmu.Unlock
+        kind: value
+      - id: backendFailed
+        kind: internal
+    steps:
       - var:
           name: first
           type: error
@@ -927,46 +1020,68 @@ sequences:
           key: _
           range: m.parts
           value: part
+      - return: first
+  - of: (*fileStream).closeCursors
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).closeCursors
+        kind: self
+      - id: closer.Close
+        kind: value
+      - id: backendFailed
+        kind: internal
+    steps:
       - opt:
           do:
             - opt:
                 do:
-                  - set: first
+                  - return: backendFailed("close", cursorsDir, closeErr)
                     to: backendFailed
-                    value: backendFailed("close", cursorsDir, closeErr)
                 init:
                   bind: closeErr
                   eval: closer.Close()
                   to: closer.Close
-                when: closeErr != nil && first == nil
+                when: closeErr != nil
           init:
             bind: closer, ok
             eval: m.cursors.(io.Closer)
           when: ok
+      - return: nil
+  - of: (*fileStream).releaseLock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).releaseLock
+        kind: self
+      - id: flock
+        kind: package
+      - id: m.lock.Close
+        kind: value
+      - id: backendFailed
+        kind: internal
+    steps:
       - opt:
           do:
-            - opt:
-                do:
-                  - set: first
-                    to: backendFailed
-                    value: backendFailed("unlock", lockName, unlockErr)
-                init:
-                  bind: unlockErr
-                  eval: flock.Unlock(m.lock)
-                  to: flock
-                when: unlockErr != nil && first == nil
-            - opt:
-                do:
-                  - set: first
-                    to: backendFailed
-                    value: backendFailed("close", lockName, closeErr)
-                init:
-                  bind: closeErr
-                  eval: m.lock.Close()
-                  to: m.lock.Close
-                when: closeErr != nil && first == nil
-          when: m.lock != nil
-      - return: first
+            - return: nil
+          when: m.lock == nil
+      - bind: unlockErr
+        eval: flock.Unlock(m.lock)
+        to: flock
+      - bind: closeErr
+        eval: m.lock.Close()
+        to: m.lock.Close
+      - opt:
+          do:
+            - return: backendFailed("unlock", lockName, unlockErr)
+              to: backendFailed
+          when: unlockErr != nil
+      - opt:
+          do:
+            - return: backendFailed("close", lockName, closeErr)
+              to: backendFailed
+          when: closeErr != nil
+      - return: nil
   - of: cursorName
     participants:
       - id: caller
@@ -1125,6 +1240,249 @@ sequences:
           when: len(data) < 8 || !bytes.Equal(data[8:], []byte(group))
       - return: corestream.Offset(binary.LittleEndian.Uint64(data)), nil
         to: corestream
+  - of: (*fileStream).Compact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).Compact
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.usable
+        kind: internal
+      - id: part.wmu.Lock
+        kind: value
+      - id: m.compactPart
+        kind: internal
+      - id: part.wmu.Unlock
+        kind: value
+      - id: m.release
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, closed
+          init:
+            bind: closed
+            eval: m.usable()
+            to: m.usable
+          when: closed != nil
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, nil
+          when: m.policy.CompactAfter == 0
+      - bind: part
+        eval: m.parts[partition]
+      - eval: part.wmu.Lock()
+        to: part.wmu.Lock
+      - bind: value, freed, err
+        eval: m.compactPart(part)
+        to: m.compactPart
+      - eval: part.wmu.Unlock()
+        to: part.wmu.Unlock
+      - eval: m.release(freed, false, 0)
+        to: m.release
+      - return: value, err
+  - of: (*fileStream).compactPart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).compactPart
+        kind: self
+      - id: m.clk.Now
+        kind: value
+      - id: compactLinesAt
+        kind: internal
+      - id: part.mu.Lock
+        kind: value
+      - id: part.claim
+        kind: internal
+      - id: part.mu.Unlock
+        kind: value
+      - id: m.planCompaction
+        kind: internal
+      - id: decodeStored
+        kind: internal
+      - id: corestream
+        kind: package
+      - id: timeOf
+        kind: internal
+      - id: part.log.Rewrite
+        kind: value
+      - id: backendFailed
+        kind: internal
+      - id: part.forget
+        kind: internal
+      - id: compactResult
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, 0, part.broken
+          when: part.broken != nil
+      - bind: now
+        eval: m.clk.Now()
+        to: m.clk.Now
+      - bind: lines
+        eval: compactLinesAt(now, m.policy.CompactAfter)
+        to: compactLinesAt
+      - eval: part.mu.Lock()
+        to: part.mu.Lock
+      - bind: freed
+        eval: part.claim(part.first(now, m.policy.RetainFor))
+        to: part.claim
+      - bind: lo, line
+        eval: part.kept, part.youngFrom(lines)
+      - eval: part.mu.Unlock()
+        to: part.mu.Unlock
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, freed, nil
+          when: line <= lo
+      - bind: last, scanned, err
+        eval: m.planCompaction(part, lo, line)
+        to: m.planCompaction
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, freed, err
+          when: err != nil
+      - var:
+          name: dropped
+          type: "[]corestream.Offset"
+      - bind: edit
+        eval:
+          closure:
+            params: index uint64, kind uint8, payload []byte
+            results: uint8, []byte, bool
+            steps:
+              - bind: stamp, record, gone, ok
+                eval: decodeStored(payload)
+                to: decodeStored
+              - bind: offset
+                eval: corestream.Offset(index)
+                to: corestream
+              - opt:
+                  do:
+                    - return: kind, nil, false
+                  when: offset < lo || gone || !ok
+              - bind: at
+                eval: timeOf(stamp)
+                to: timeOf
+              - bind: held, keyed
+                eval: last[string(record.Key)]
+              - opt:
+                  do:
+                    - return: kind, nil, false
+                  when: "!lines.drops(record, at, keyed && held == offset)"
+              - set: dropped
+                value: append(dropped, offset)
+              - return: kind, encodeGone(nil, stamp), true
+      - opt:
+          do:
+            - set: part.broken
+              to: backendFailed
+              value: backendFailed("compact", "", rewriteErr)
+            - return: corestream.CompactValue{}, freed, part.broken
+          init:
+            bind: _, rewriteErr
+            eval: part.log.Rewrite(uint64(line), edit)
+            to: part.log.Rewrite
+          when: rewriteErr != nil
+      - eval: part.mu.Lock()
+        to: part.mu.Lock
+      - op: +=
+        set: freed
+        to: part.forget
+        value: part.forget(dropped)
+      - eval: part.mu.Unlock()
+        to: part.mu.Unlock
+      - return: compactResult(scanned, int64(len(dropped))), freed, nil
+        to: compactResult
+  - of: (*fileStream).planCompaction
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).planCompaction
+        kind: self
+      - id: part.log.Range
+        kind: value
+      - id: decodeStored
+        kind: internal
+      - id: noteLast
+        kind: internal
+    steps:
+      - set: last
+        value: lastOfKey{}
+      - var:
+          name: dst
+          type: "[][]byte"
+      - loop:
+          cond: from < line
+          do:
+            - bind: hi
+              eval: min(from+rebuildChunk, line)
+            - set: dst, err
+              to: part.log.Range
+              value: part.log.Range(uint64(from), uint64(hi), math.MaxInt, dst[:0])
+            - opt:
+                do:
+                  - return: nil, 0, backendFailed("compact", "", err)
+                when: err != nil
+            - loop:
+                do:
+                  - bind: _, record, gone, ok
+                    eval: decodeStored(payload)
+                    to: decodeStored
+                  - opt:
+                      do:
+                        - return: nil, 0, backendFailed("decode", "", nil)
+                      when: "!ok"
+                  - opt:
+                      do:
+                        - continue: true
+                      when: gone
+                  - op: ++
+                    set: scanned
+                  - eval: noteLast(last, record.Key, from+corestream.Offset(i))
+                    to: noteLast
+                key: i
+                range: dst
+                value: payload
+          init: from := lo
+          post: from += rebuildChunk
+      - return: last, scanned, nil
+  - of: (*filePart).youngFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).youngFrom
+        kind: self
+      - id: sort
+        kind: stdlib
+      - id: p.next
+        kind: internal
+    steps:
+      - bind: young
+        eval: |-
+          sort.Search(len(p.batches), func(i int) bool {
+          		//: younger than the line.
+          		return !lines.compactable(time.Unix(0, p.batches[i].stamp))
+          	})
+        to: sort
+      - opt:
+          do:
+            - return: p.next()
+              to: p.next
+          when: young == len(p.batches)
+      - return: max(p.batches[young].first, p.kept)
   - of: prepareRoot
     participants:
       - id: caller
@@ -1415,26 +1773,26 @@ sequences:
         kind: self
       - id: p.between
         kind: internal
-      - id: p.compact
+      - id: p.forgetBelow
         kind: internal
     steps:
       - opt:
           do:
             - return: "0"
           when: to <= p.kept
-      - set: freed
+      - bind: freed
+        eval: p.between(p.kept, to)
         to: p.between
-        value: p.between(p.kept, to)
       - set: p.kept
         value: to
-      - eval: p.compact()
-        to: p.compact
+      - eval: p.forgetBelow()
+        to: p.forgetBelow
       - return: freed
-  - of: (*filePart).compact
+  - of: (*filePart).forgetBelow
     participants:
       - id: caller
         kind: actor
-      - id: (*filePart).compact
+      - id: (*filePart).forgetBelow
         kind: self
       - id: slices
         kind: stdlib
@@ -1446,7 +1804,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: drop < compactAfter
+          when: drop < forgetAfter
       - set: p.prefix
         to: slices
         value: slices.Clone(p.prefix[drop:])
@@ -1517,7 +1875,7 @@ sequences:
         kind: value
       - id: p.log.Range
         kind: value
-      - id: decodeRecord
+      - id: decodeStored
         kind: internal
       - id: p.log.Kind
         kind: value
@@ -1546,9 +1904,9 @@ sequences:
                 when: err != nil
             - loop:
                 do:
-                  - bind: stamp, record, ok
-                    eval: decodeRecord(payload)
-                    to: decodeRecord
+                  - bind: stamp, record, _, ok
+                    eval: decodeStored(payload)
+                    to: decodeStored
                   - opt:
                       do:
                         - return: 0, backendFailed("decode", "", nil)
@@ -1577,6 +1935,52 @@ sequences:
           init: lo := first
           post: lo += rebuildChunk
       - return: latest, nil
+  - of: (*filePart).forget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).forget
+        kind: self
+      - id: sort
+        kind: stdlib
+    steps:
+      - bind: first
+        eval: |-
+          sort.Search(len(dropped), func(i int) bool {
+          		//: still counted.
+          		return dropped[i] >= p.kept
+          	})
+        to: sort
+      - set: dropped
+        value: dropped[first:]
+      - opt:
+          do:
+            - return: "0"
+          when: len(dropped) == 0
+      - var:
+          name: freed
+          type: int64
+      - bind: next
+        eval: "0"
+      - loop:
+          cond: i < len(p.prefix)-1
+          do:
+            - bind: size
+              eval: p.prefix[i+1] - (p.prefix[i] + freed)
+            - opt:
+                do:
+                  - op: +=
+                    set: freed
+                    value: size
+                  - op: ++
+                    set: next
+                when: next < len(dropped) && dropped[next] == p.base+corestream.Offset(i)
+            - op: "-="
+              set: p.prefix[i+1]
+              value: freed
+          init: i := int(dropped[0] - p.base)
+          post: i++
+      - return: freed
   - of: (*fileStream).checkPartition
     participants:
       - id: caller
@@ -1606,9 +2010,7 @@ sequences:
         kind: value
       - id: part.mu.RUnlock
         kind: value
-      - id: part.log.Range
-        kind: value
-      - id: decodeEntries
+      - id: m.readFrom
         kind: internal
     steps:
       - opt:
@@ -1647,25 +2049,56 @@ sequences:
           do:
             - return: nil, offsetAhead(from, next)
           when: from > next
-      - bind: hi
-        eval: from + corestream.Offset(min(uint64(maxEntries), uint64(next-from)))
-      - opt:
+      - return: m.readFrom(part, partition, from, next, maxEntries)
+        to: m.readFrom
+  - of: (*fileStream).readFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).readFrom
+        kind: self
+      - id: part.log.Range
+        kind: value
+      - id: appendEntries
+        kind: internal
+    steps:
+      - var:
+          name: entries
+          type: "[]corestream.EntryValue"
+      - loop:
+          cond: len(entries) < maxEntries && cursor < next
           do:
-            - return: nil, nil
-          when: hi == from
-      - bind: payloads, err
-        eval: part.log.Range(uint64(from), uint64(hi), math.MaxInt, make([][]byte, 0, hi-from))
-        to: part.log.Range
-      - opt:
-          do:
-            - return: nil, offsetTrimmed(from, m.firstOf(part))
-          when: errs.HasCode(err, seglog.CodeDropped)
-      - opt:
-          do:
-            - return: nil, backendFailed("read", "", err)
-          when: err != nil
-      - return: decodeEntries(partition, from, payloads)
-        to: decodeEntries
+            - bind: hi
+              eval: cursor + corestream.Offset(min(uint64(maxEntries-len(entries)), uint64(next-cursor)))
+            - bind: payloads, err
+              eval: part.log.Range(uint64(cursor), uint64(hi), math.MaxInt, make([][]byte, 0, hi-cursor))
+              to: part.log.Range
+            - opt:
+                do:
+                  - return: nil, offsetTrimmed(from, m.firstOf(part))
+                when: errs.HasCode(err, seglog.CodeDropped)
+            - opt:
+                do:
+                  - return: nil, backendFailed("read", "", err)
+                when: err != nil
+            - opt:
+                do:
+                  - set: entries
+                    value: make([]corestream.EntryValue, 0, len(payloads))
+                when: entries == nil
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: entries, err
+                  eval: appendEntries(entries, partition, cursor, payloads)
+                  op: =
+                  to: appendEntries
+                when: err != nil
+            - set: cursor
+              value: hi
+          init: cursor := from
+      - return: entries, nil
   - of: (*fileStream).firstOf
     participants:
       - id: caller
@@ -1680,34 +2113,36 @@ sequences:
           read: true
       - return: part.first(m.clk.Now(), m.policy.RetainFor)
         to: part.first
-  - of: decodeEntries
+  - of: appendEntries
     participants:
       - id: caller
         kind: actor
-      - id: decodeEntries
+      - id: appendEntries
         kind: self
-      - id: decodeRecord
+      - id: decodeStored
         kind: internal
     steps:
-      - bind: entries
-        eval: make([]corestream.EntryValue, len(payloads))
       - loop:
           do:
-            - bind: stamp, record, ok
-              eval: decodeRecord(payload)
-              to: decodeRecord
+            - bind: stamp, record, gone, ok
+              eval: decodeStored(payload)
+              to: decodeStored
             - opt:
                 do:
                   - return: nil, backendFailed("decode", "", nil)
                 when: "!ok"
-            - set: entries[i]
+            - opt:
+                do:
+                  - continue: true
+                when: gone
+            - set: entries
               value: |-
-                corestream.EntryValue{
+                append(entries, corestream.EntryValue{
                 			AppendedAt: timeOf(stamp),
                 			Record:     record,
                 			Partition:  partition,
                 			Offset:     from + corestream.Offset(i),
-                		}
+                		})
           key: i
           range: payloads
           value: payload
@@ -1792,6 +2227,37 @@ sequences:
       - set: dst
         value: append(dst, record.Key...)
       - return: append(dst, record.Payload...)
+  - of: encodeGone
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeGone
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - return: binary.LittleEndian.AppendUint64(dst, uint64(stamp))
+        to: binary.LittleEndian.AppendUint64
+  - of: isGone
+    steps:
+      - return: len(payload) == stampBytes
+  - of: decodeStored
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStored
+        kind: self
+      - id: decodeRecord
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: int64(binary.LittleEndian.Uint64(payload)), corestream.RecordValue{}, true, true
+          when: isGone(payload)
+      - set: stamp, record, ok
+        to: decodeRecord
+        value: decodeRecord(payload)
+      - return: stamp, record, false, ok
   - of: decodeRecord
     participants:
       - id: caller
@@ -1828,12 +2294,20 @@ sequences:
         value: capped(rest[end:])
       - return: stamp, record, true
   - of: capped
+    participants:
+      - id: caller
+        kind: actor
+      - id: capped
+        kind: self
+      - id: slices
+        kind: stdlib
     steps:
       - opt:
           do:
             - return: nil
           when: len(b) == 0
-      - return: b[:len(b):len(b)]
+      - return: slices.Clip(b)
+        to: slices
   - of: (*fileStream).reserve
     participants:
       - id: caller
@@ -1842,20 +2316,10 @@ sequences:
         kind: self
       - id: m.mu.Lock
         kind: value
+      - id: m.tryReserve
+        kind: internal
       - id: m.mu.Unlock
         kind: value
-      - id: m.clk.Now
-        kind: value
-      - id: now.Add
-        kind: value
-      - id: deadline.Sub
-        kind: value
-      - id: streamFull
-        kind: internal
-      - id: m.untilExpiry
-        kind: internal
-      - id: m.room.current
-        kind: internal
       - id: m.await
         kind: internal
     steps:
@@ -1866,66 +2330,79 @@ sequences:
           do:
             - eval: m.mu.Lock()
               to: m.mu.Lock
-            - opt:
-                do:
-                  - eval: m.mu.Unlock()
-                    to: m.mu.Unlock
-                  - return: 0, m.usable()
-                when: m.closed
-            - bind: now
-              eval: m.clk.Now()
-              to: m.clk.Now
-            - opt:
-                do:
-                  - op: +=
-                    set: m.held
-                    value: size
-                  - opt:
-                      do:
-                        - set: partition
-                          value: m.turn
-                        - set: m.turn
-                          value: (m.turn + 1) % len(m.parts)
-                      when: "!keyed"
-                  - eval: m.mu.Unlock()
-                    to: m.mu.Unlock
-                  - return: partition, nil
-                when: m.policy.MaxBytes == 0 || m.expireAll(now)+size <= m.policy.MaxBytes
-            - opt:
-                do:
-                  - set: deadline
-                    to: now.Add
-                    value: now.Add(m.policy.BlockTimeout)
-                when: deadline.IsZero()
-            - bind: remaining
-              eval: deadline.Sub(now)
-              to: deadline.Sub
-            - opt:
-                do:
-                  - bind: full
-                    eval: streamFull(size, m.held, m.policy.MaxBytes)
-                    to: streamFull
-                  - eval: m.mu.Unlock()
-                    to: m.mu.Unlock
-                  - return: 0, full
-                when: remaining <= 0 || size > m.policy.MaxBytes
-            - bind: wait
-              eval: m.untilExpiry(now, remaining)
-              to: m.untilExpiry
-            - bind: room
-              eval: m.room.current()
-              to: m.room.current
+            - bind: turn
+              eval: m.tryReserve(&deadline, size, partition, keyed)
+              to: m.tryReserve
             - eval: m.mu.Unlock()
               to: m.mu.Unlock
+            - opt:
+                do:
+                  - return: 0, m.usable()
+                when: turn.closed
+            - opt:
+                do:
+                  - return: turn.partition, turn.err
+                when: turn.done
             - opt:
                 do:
                   - return: 0, stopped
                 init:
                   bind: stopped
-                  eval: m.await(ctx, room, wait)
+                  eval: m.await(ctx, turn.room, turn.wait)
                   to: m.await
                 when: stopped != nil
           forever: true
+  - of: (*fileStream).tryReserve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).tryReserve
+        kind: self
+      - id: m.clk.Now
+        kind: value
+      - id: now.Add
+        kind: value
+      - id: deadline.Sub
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "reservation{closed: true}"
+          when: m.closed
+      - bind: now
+        eval: m.clk.Now()
+        to: m.clk.Now
+      - opt:
+          do:
+            - op: +=
+              set: m.held
+              value: size
+            - opt:
+                do:
+                  - set: partition
+                    value: m.turn
+                  - set: m.turn
+                    value: (m.turn + 1) % len(m.parts)
+                when: "!keyed"
+            - return: "reservation{done: true, partition: partition}"
+          when: m.fits(now, size)
+      - opt:
+          do:
+            - set: "*deadline"
+              to: now.Add
+              value: now.Add(m.policy.BlockTimeout)
+          when: deadline.IsZero()
+      - bind: remaining
+        eval: deadline.Sub(now)
+        to: deadline.Sub
+      - opt:
+          do:
+            - return: "reservation{done: true, err: streamFull(size, m.held, m.policy.MaxBytes)}"
+          when: remaining <= 0 || size > m.policy.MaxBytes
+      - return: "reservation{wait: m.untilExpiry(now, remaining), room: m.room.current()}"
+  - of: (*fileStream).fits
+    steps:
+      - return: m.policy.MaxBytes == 0 || m.expireAll(now)+size <= m.policy.MaxBytes
   - of: (*fileStream).expireAll
     participants:
       - id: caller
@@ -2136,7 +2613,22 @@ sequences:
       - return: freed, nil
   - of: (*memPartition).next
     steps:
-      - return: p.first + corestream.Offset(len(p.entries))
+      - return: p.nextOffset
+  - of: (*memPartition).index
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memPartition).index
+        kind: self
+      - id: sort
+        kind: stdlib
+    steps:
+      - return: |-
+          sort.Search(len(p.entries), func(i int) bool {
+          		//: at or past offset.
+          		return p.entries[i].Offset >= offset
+          	})
+        to: sort
   - of: NewMemory
     participants:
       - id: caller
@@ -2243,6 +2735,8 @@ sequences:
         kind: internal
       - id: carve
         kind: internal
+      - id: corestream
+        kind: package
       - id: m.retainBytes
         kind: internal
     steps:
@@ -2277,6 +2771,10 @@ sequences:
           key: i
           range: records
           value: record
+      - op: +=
+        set: part.nextOffset
+        to: corestream
+        value: corestream.Offset(len(records))
       - op: +=
         set: part.bytes
         value: size
@@ -2384,6 +2882,109 @@ sequences:
             - return: 0, unknownGroup(group, partition)
           when: "!found"
       - return: next, nil
+  - of: (*memoryStream).Compact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Compact
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.clk.Now
+        kind: value
+      - id: m.drop
+        kind: internal
+      - id: compactLinesAt
+        kind: internal
+      - id: sort
+        kind: stdlib
+      - id: noteLast
+        kind: internal
+      - id: recordBytes
+        kind: internal
+      - id: m.room.fire
+        kind: internal
+      - id: compactResult
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, nil
+          when: m.policy.CompactAfter == 0
+      - lock:
+          mutex: m.mu
+      - bind: now
+        eval: m.clk.Now()
+        to: m.clk.Now
+      - bind: part
+        eval: "&m.parts[partition]"
+      - eval: m.drop(part, m.expired(part, now))
+        to: m.drop
+      - bind: lines
+        eval: compactLinesAt(now, m.policy.CompactAfter)
+        to: compactLinesAt
+      - bind: old
+        eval: |-
+          sort.Search(len(part.entries), func(i int) bool {
+          		//: younger than CompactAfter: never touched.
+          		return !lines.compactable(part.entries[i].AppendedAt)
+          	})
+        to: sort
+      - bind: last
+        eval: make(map[string]int)
+      - loop:
+          do:
+            - eval: noteLast(last, part.entries[i].Record.Key, i)
+              to: noteLast
+          key: i
+          range: old
+      - leaf: a var of several names, or of no type
+        stmt: var dropped, freed int64
+      - bind: kept
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: dropped
+                  - op: +=
+                    set: freed
+                    to: recordBytes
+                    value: recordBytes(entry.Record)
+                  - continue: true
+                when: i < old && lines.drops(entry.Record, entry.AppendedAt, lastOf(last, entry.Record.Key) == i)
+            - set: part.entries[kept]
+              value: entry
+            - op: ++
+              set: kept
+          key: i
+          range: part.entries
+          value: entry
+      - eval: clear(part.entries[kept:])
+      - set: part.entries
+        value: part.entries[:kept]
+      - op: "-="
+        set: part.bytes
+        value: freed
+      - op: "-="
+        set: m.held
+        value: freed
+      - opt:
+          do:
+            - eval: m.room.fire()
+              to: m.room.fire
+          when: dropped > 0
+      - return: compactResult(int64(old), dropped), nil
+        to: compactResult
   - of: clockOrSystem
     steps:
       - opt:
@@ -2418,7 +3019,11 @@ sequences:
       - bind: skip
         eval: m.expired(part, now)
         to: m.expired
-      - return: part.first + corestream.Offset(skip), skip
+      - opt:
+          do:
+            - return: part.first, 0
+          when: skip == 0
+      - return: max(part.first, part.entries[skip-1].Offset+1), skip
   - of: (*memoryStream).expired
     participants:
       - id: caller
@@ -2480,7 +3085,7 @@ sequences:
             - return: nil, offsetAhead(from, part.next())
           when: from > part.next()
       - bind: start
-        eval: skip + int(from-first)
+        eval: max(part.index(from), skip)
       - bind: end
         eval: min(start+maxEntries, len(part.entries))
       - return: copyEntries(part.entries[start:end]), nil
@@ -2525,6 +3130,8 @@ sequences:
         kind: internal
       - id: sort
         kind: stdlib
+      - id: part.next
+        kind: internal
     steps:
       - opt:
           do:
@@ -2539,7 +3146,7 @@ sequences:
           read: true
       - bind: part
         eval: "&m.parts[partition]"
-      - bind: first, skip
+      - bind: _, skip
         eval: m.retained(part, m.clk.Now())
         to: m.retained
       - bind: kept
@@ -2551,7 +3158,12 @@ sequences:
           		return !kept[i].AppendedAt.Before(t)
           	})
         to: sort
-      - return: first + corestream.Offset(found), nil
+      - opt:
+          do:
+            - return: part.next(), nil
+              to: part.next
+          when: found == len(kept)
+      - return: kept[found].Offset, nil
   - of: (*memoryStream).Wake
     participants:
       - id: caller
@@ -2756,8 +3368,6 @@ sequences:
         kind: self
       - id: recordBytes
         kind: internal
-      - id: corestream
-        kind: package
       - id: m.room.fire
         kind: internal
     steps:
@@ -2768,6 +3378,8 @@ sequences:
       - var:
           name: freed
           type: int64
+      - bind: to
+        eval: part.entries[count-1].Offset + 1
       - loop:
           do:
             - op: +=
@@ -2785,10 +3397,8 @@ sequences:
             - set: part.entries
               value: nil
           when: len(part.entries) == 0
-      - op: +=
-        set: part.first
-        to: corestream
-        value: corestream.Offset(count)
+      - set: part.first
+        value: max(part.first, to)
       - op: "-="
         set: part.bytes
         value: freed
@@ -2833,8 +3443,10 @@ sequences:
           do:
             - return: nil
           when: before <= part.first
-      - eval: m.drop(part, int(before-part.first))
+      - eval: m.drop(part, part.index(before))
         to: m.drop
+      - set: part.first
+        value: before
       - return: nil
   - of: NewSQL
     participants:
@@ -3263,6 +3875,232 @@ sequences:
           when: err != nil
       - return: corestream.Offset(next), nil
         to: corestream
+  - of: (*sqlStream).Compact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Compact
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: s.clk.Now
+        kind: value
+      - id: compactLinesAt
+        kind: internal
+      - id: s.compactable
+        kind: internal
+      - id: planSQLCompaction
+        kind: internal
+      - id: s.deleteCompacted
+        kind: internal
+      - id: compactResult
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, nil
+          when: s.policy.CompactAfter == 0
+      - bind: now
+        eval: s.clk.Now()
+        to: s.clk.Now
+      - bind: lines
+        eval: compactLinesAt(now, s.policy.CompactAfter)
+        to: compactLinesAt
+      - bind: rows, err
+        eval: s.compactable(ctx, partition, now, lines)
+        to: s.compactable
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, err
+          when: err != nil
+      - bind: dropped
+        eval: planSQLCompaction(rows, lines)
+        to: planSQLCompaction
+      - bind: removed, err
+        eval: s.deleteCompacted(ctx, partition, dropped)
+        to: s.deleteCompacted
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, err
+          when: err != nil
+      - return: compactResult(int64(len(rows)), removed), nil
+        to: compactResult
+  - of: (*sqlStream).compactable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).compactable
+        kind: self
+      - id: s.cutoff
+        kind: internal
+      - id: s.boundsAt
+        kind: internal
+      - id: s.compactPage
+        kind: internal
+    steps:
+      - bind: cutoff
+        eval: s.cutoff(now)
+        to: s.cutoff
+      - bind: bounds, err
+        eval: s.boundsAt(ctx, partition, cutoff)
+        to: s.boundsAt
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - var:
+          name: rows
+          type: "[]sqlCompactRow"
+      - loop:
+          do:
+            - bind: page, pageErr
+              eval: s.compactPage(ctx, partition, from, cutoff, lines.old.UnixNano())
+              to: s.compactPage
+            - opt:
+                do:
+                  - return: nil, s.failed("read compactable records", pageErr)
+                when: pageErr != nil
+            - set: rows
+              value: append(rows, page...)
+            - opt:
+                do:
+                  - return: rows, nil
+                when: len(page) < sqlCompactPage
+            - set: from
+              value: page[len(page)-1].offset + 1
+          init: from := int64(bounds.First)
+  - of: (*sqlStream).compactPage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).compactPage
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryContext
+        kind: value
+      - id: scanCompactRow
+        kind: internal
+    steps:
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, s.stmts.compactScan, int64(partition), from, cutoff, line, int64(sqlCompactPage))
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: the first failure is the one reported.
+          		if closeErr := rows.Close(); closeErr != nil && err == nil {
+          			err = closeErr
+          		}
+          	}()
+      - loop:
+          cond: rows.Next()
+          do:
+            - bind: row, scanErr
+              eval: scanCompactRow(rows)
+              to: scanCompactRow
+            - opt:
+                do:
+                  - return: nil, scanErr
+                when: scanErr != nil
+            - set: page
+              value: append(page, row)
+      - return: page, rows.Err()
+  - of: scanCompactRow
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanCompactRow
+        kind: self
+      - id: rows.Scan
+        kind: internal
+    steps:
+      - leaf: a const or type declaration in a body
+        stmt: |-
+          var (
+          		row   sqlCompactRow
+          		key   []byte
+          		empty stdsql.NullInt64
+          	)
+      - opt:
+          do:
+            - return: sqlCompactRow{}, err
+          init:
+            bind: err
+            eval: rows.Scan(&row.offset, &key, &row.at, &empty)
+            to: rows.Scan
+          when: err != nil
+      - set: row.key, row.tomb
+        value: string(key), empty.Int64 == 1
+      - return: row, nil
+  - of: (*sqlStream).deleteCompacted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).deleteCompacted
+        kind: self
+      - id: s.run
+        kind: internal
+    steps:
+      - var:
+          name: removed
+          type: int64
+      - bind: args
+        eval: make([]any, 0, min(len(dropped), sqlCompactPerDelete)+2)
+      - loop:
+          cond: start < len(dropped)
+          do:
+            - bind: chunk
+              eval: dropped[start:min(start+sqlCompactPerDelete, len(dropped))]
+            - set: args
+              value: append(args[:0], int64(partition), s.cutoff(s.clk.Now()))
+            - loop:
+                do:
+                  - set: args
+                    value: append(args, offset)
+                key: _
+                range: chunk
+                value: offset
+            - bind: err
+              eval: |-
+                s.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+                			result, execErr := ex.ExecContext(txCtx, s.stmts.compactFor(len(chunk)), args...)
+                			//: the statement did not complete.
+                			if execErr != nil {
+                				//: StreamBackendFailed, the driver's text withheld.
+                				return s.failed("delete compacted records", execErr)
+                			}
+                			affected, countErr := result.RowsAffected()
+                			//: a driver that cannot count: the rows asked for.
+                			if countErr != nil {
+                				affected = int64(len(chunk))
+                			}
+                			removed += affected
+                			//: deleted.
+                			return nil
+                		})
+              to: s.run
+            - opt:
+                do:
+                  - return: removed, err
+                when: err != nil
+          init: start := 0
+          post: start += sqlCompactPerDelete
+      - return: removed, nil
   - of: (*SQLConfig).validate
     participants:
       - id: caller
@@ -3381,6 +4219,8 @@ sequences:
         kind: value
       - id: s.insertRows
         kind: internal
+      - id: s.compactDelete
+        kind: internal
     steps:
       - bind: p
         eval: dialect.Placeholder
@@ -3395,6 +4235,15 @@ sequences:
         to: dialect.QuoteIdent
       - bind: readable
         eval: "\"r.part = h.part AND r.record_offset >= h.first_offset AND r.appended_at > \""
+      - bind: expired
+        eval:
+          closure:
+            params: n int
+            results: string
+            steps:
+              - return: |-
+                  "(SELECT MAX(x.record_offset) FROM " + t + " x WHERE x.part = h.part AND x.record_offset >= h.first_offset" +
+                  			" AND x.appended_at <= " + p(n) + ")"
       - bind: s
         eval: |-
           sqlStatements{
@@ -3402,11 +4251,13 @@ sequences:
           		head:     "SELECT next_offset, first_offset, last_at FROM " + h + " WHERE part = " + p(1) + dialect.ForUpdate(),
           		advance:  "UPDATE " + h + " SET next_offset = " + p(1) + ", last_at = " + p(2) + " WHERE part = " + p(3),
           		floor:    "UPDATE " + h + " SET first_offset = " + p(1) + " WHERE part = " + p(2),
-          		read: "SELECT h.next_offset, r.record_offset, r.appended_at, r.record_key, r.payload FROM " + h + " h LEFT JOIN " + t +
-          			" r ON " + readable + p(1) + " AND r.record_offset >= " + p(2) + " WHERE h.part = " + p(3) +
-          			" ORDER BY r.record_offset LIMIT " + p(4),
-          		bounds: "SELECT h.next_offset, (SELECT MIN(r.record_offset) FROM " + t + " r WHERE " + readable + p(1) + ") FROM " + h +
-          			" h WHERE h.part = " + p(2),
+          		read: "SELECT h.next_offset, h.first_offset, " + expired(1) + ", r.record_offset, r.appended_at, r.record_key, r.payload FROM " +
+          			h + " h LEFT JOIN " + t + " r ON " + readable + p(2) + " AND r.record_offset >= " + p(3) + " WHERE h.part = " + p(4) +
+          			" ORDER BY r.record_offset LIMIT " + p(5),
+          		bounds: "SELECT h.next_offset, h.first_offset, " + expired(1) + " FROM " + h + " h WHERE h.part = " + p(2),
+          		compactScan: "SELECT record_offset, record_key, appended_at, CASE WHEN payload IS NULL THEN 1 ELSE 0 END FROM " + t +
+          			" WHERE part = " + p(1) + " AND record_offset >= " + p(2) + " AND appended_at > " + p(3) + " AND appended_at <= " + p(4) +
+          			" ORDER BY record_offset LIMIT " + p(5),
           		offsetAt: "SELECT h.next_offset, (SELECT MIN(r.record_offset) FROM " + t + " r WHERE " + readable + p(1) +
           			" AND r.appended_at >= " + p(2) + ") FROM " + h + " h WHERE h.part = " + p(3),
           		lowest:    "SELECT MIN(record_offset) FROM " + t + " WHERE part = " + p(1),
@@ -3420,6 +4271,9 @@ sequences:
       - set: s.insertFull
         to: s.insertRows
         value: s.insertRows(sqlRowsPerStatement)
+      - set: s.compactFull
+        to: s.compactDelete
+        value: s.compactDelete(sqlCompactPerDelete)
       - return: s
   - of: lockHeadStatement
     steps:
@@ -3492,6 +4346,56 @@ sequences:
           range: "n"
       - return: b.String()
         to: b.String
+  - of: (*sqlStatements).compactDelete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStatements).compactDelete
+        kind: self
+      - id: b.WriteString
+        kind: value
+      - id: b.WriteByte
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - bind: p
+        eval: s.dialect.Placeholder
+      - var:
+          name: b
+          type: strings.Builder
+      - eval: b.WriteString("DELETE FROM " + s.records + " WHERE part = " + p(1) + " AND appended_at > " + p(2) + " AND record_offset IN (")
+        to: b.WriteString
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteString(", ")
+                    to: b.WriteString
+                when: i > 0
+            - eval: b.WriteString(p(i + 3))
+              to: b.WriteString
+          key: i
+          range: "n"
+      - eval: b.WriteByte(')')
+        to: b.WriteByte
+      - return: b.String()
+        to: b.String
+  - of: (*sqlStatements).compactFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStatements).compactFor
+        kind: self
+      - id: s.compactDelete
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s.compactFull
+          when: n == sqlCompactPerDelete
+      - return: s.compactDelete(n)
+        to: s.compactDelete
   - of: (*sqlStatements).insertFor
     participants:
       - id: caller
@@ -3627,6 +4531,8 @@ sequences:
         kind: internal
       - id: s.tx.join.Join
         kind: value
+      - id: s.cutoff
+        kind: internal
       - id: ex.QueryContext
         kind: value
       - id: s.scanEntries
@@ -3647,14 +4553,17 @@ sequences:
       - bind: ex, _
         eval: s.tx.join.Join(ctx)
         to: s.tx.join.Join
+      - bind: cutoff
+        eval: s.cutoff(s.clk.Now())
+        to: s.cutoff
       - bind: rows, err
-        eval: ex.QueryContext(ctx, s.stmts.read, s.cutoff(s.clk.Now()), int64(from), int64(partition), int64(maxEntries))
+        eval: ex.QueryContext(ctx, s.stmts.read, cutoff, cutoff, int64(from), int64(partition), int64(maxEntries))
         to: ex.QueryContext
       - opt:
           do:
             - return: nil, s.failed("read records", err)
           when: err != nil
-      - bind: entries, next, err
+      - bind: entries, bounds, err
         eval: s.scanEntries(rows, partition, maxEntries)
         to: s.scanEntries
       - opt:
@@ -3663,16 +4572,12 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: nil, offsetAhead(from, next)
-          when: from > next
+            - return: nil, offsetAhead(from, bounds.Next)
+          when: from > bounds.Next
       - opt:
           do:
-            - return: nil, offsetTrimmed(from, entries[0].Offset)
-          when: len(entries) > 0 && entries[0].Offset > from
-      - opt:
-          do:
-            - return: nil, offsetTrimmed(from, next)
-          when: len(entries) == 0 && from < next
+            - return: nil, offsetTrimmed(from, bounds.First)
+          when: from < bounds.First
       - return: entries, nil
   - of: (*sqlStream).scanEntries
     participants:
@@ -3681,9 +4586,9 @@ sequences:
       - id: (*sqlStream).scanEntries
         kind: self
       - id: rows.Scan
-        kind: value
-      - id: corestream
-        kind: package
+        kind: internal
+      - id: firstReadable
+        kind: internal
     steps:
       - defer: |-
           func() {
@@ -3698,21 +4603,21 @@ sequences:
             - leaf: a const or type declaration in a body
               stmt: |-
                 var (
-                			head          int64
-                			offset, stamp stdsql.NullInt64
-                			key, payload  []byte
+                			head, floor            int64
+                			expired, offset, stamp stdsql.NullInt64
+                			key, payload           []byte
                 		)
             - opt:
                 do:
-                  - return: nil, 0, scanErr
+                  - return: nil, corestream.BoundsValue{}, scanErr
                 init:
                   bind: scanErr
-                  eval: rows.Scan(&head, &offset, &stamp, &key, &payload)
+                  eval: rows.Scan(&head, &floor, &expired, &offset, &stamp, &key, &payload)
                   to: rows.Scan
                 when: scanErr != nil
-            - set: next
-              to: corestream
-              value: corestream.Offset(head)
+            - set: bounds
+              to: firstReadable
+              value: firstReadable(head, floor, expired)
             - opt:
                 do:
                   - continue: true
@@ -3730,7 +4635,7 @@ sequences:
                 			AppendedAt: time.Unix(0, stamp.Int64),
                 			Record:     corestream.RecordValue{Key: nonEmpty(key), Payload: nonEmpty(payload)},
                 		})
-      - return: entries, next, rows.Err()
+      - return: entries, bounds, rows.Err()
   - of: nonEmpty
     steps:
       - opt:
@@ -3746,7 +4651,7 @@ sequences:
         kind: self
       - id: s.checkPartition
         kind: internal
-      - id: s.headAndLowest
+      - id: s.boundsAt
         kind: internal
     steps:
       - opt:
@@ -3757,14 +4662,52 @@ sequences:
             eval: s.checkPartition(partition)
             to: s.checkPartition
           when: refused != nil
-      - bind: next, first, err
-        eval: s.headAndLowest(ctx, s.stmts.bounds, "read the bounds", s.cutoff(s.clk.Now()), int64(partition))
-        to: s.headAndLowest
+      - return: s.boundsAt(ctx, partition, s.cutoff(s.clk.Now()))
+        to: s.boundsAt
+  - of: (*sqlStream).boundsAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).boundsAt
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.bounds, cutoff, int64(partition)).Scan
+        kind: value
+      - id: firstReadable
+        kind: internal
+    steps:
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - leaf: a var of several names, or of no type
+        stmt: var head, floor int64
+      - var:
+          name: expired
+          type: stdsql.NullInt64
+      - bind: err
+        eval: ex.QueryRowContext(ctx, s.stmts.bounds, cutoff, int64(partition)).Scan(&head, &floor, &expired)
+        to: ex.QueryRowContext(ctx, s.stmts.bounds, cutoff, int64(partition)).Scan
       - opt:
           do:
-            - return: corestream.BoundsValue{}, err
+            - return: corestream.BoundsValue{}, nil
+          when: errors.Is(err, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, s.failed("read the bounds", err)
           when: err != nil
-      - return: "corestream.BoundsValue{First: first, Next: next}, nil"
+      - return: firstReadable(head, floor, expired), nil
+        to: firstReadable
+  - of: firstReadable
+    steps:
+      - bind: first
+        eval: floor
+      - opt:
+          do:
+            - set: first
+              value: max(first, expired.Int64+1)
+          when: expired.Valid
+      - return: "corestream.BoundsValue{First: corestream.Offset(min(first, head)), Next: corestream.Offset(head)}"
   - of: (*sqlStream).OffsetAt
     participants:
       - id: caller
@@ -3993,7 +4936,7 @@ sequences:
         kind: self
       - id: s.swept[partition].Load
         kind: value
-      - id: s.headAndLowest
+      - id: s.boundsAt
         kind: internal
       - id: s.swept[partition].Store
         kind: value
@@ -4010,14 +4953,10 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: now.UnixNano()-last < int64(period)
-      - opt:
-          do:
-            - return: ""
-          when: "!s.swept[partition].CompareAndSwap(last, now.UnixNano())"
-      - bind: _, first, err
-        eval: s.headAndLowest(ctx, s.stmts.bounds, "read the bounds", s.cutoff(now), int64(partition))
-        to: s.headAndLowest
+          when: now.UnixNano()-last < int64(period) || !s.swept[partition].CompareAndSwap(last, now.UnixNano())
+      - bind: bounds, err
+        eval: s.boundsAt(ctx, partition, s.cutoff(now))
+        to: s.boundsAt
       - opt:
           do:
             - eval: s.swept[partition].Store(last)
@@ -4028,7 +4967,7 @@ sequences:
           do:
             - eval: s.swept[partition].Store(last)
               to: s.swept[partition].Store
-          when: s.release(ctx, partition, int64(first)) != nil
+          when: s.Trim(ctx, partition, bounds.First) != nil
   - of: Subscribe
     participants:
       - id: caller
@@ -4423,11 +5362,11 @@ sequences:
     steps:
       - return: errs.Wrap(corestream.SubscriberMisconfigured, errs.WrapParams{}, errs.String("field", field))
         to: errs
-  - of: SubscriberConfig.validate
+  - of: (*SubscriberConfig).validate
     participants:
       - id: caller
         kind: actor
-      - id: SubscriberConfig.validate
+      - id: (*SubscriberConfig).validate
         kind: self
       - id: c.missing
         kind: internal
@@ -4462,7 +5401,14 @@ sequences:
           range: c.Partitions
           value: partition
       - return: nil
-  - of: SubscriberConfig.missing
+  - of: (*SubscriberConfig).missing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SubscriberConfig).missing
+        kind: self
+      - id: c.missingCollaborator
+        kind: internal
     steps:
       - switch:
           cases:
@@ -4478,6 +5424,14 @@ sequences:
             - case: c.Commit != CommitAfterHandler && c.Commit != CommitByHandler
               do:
                 - return: "\"Commit\""
+            - default: true
+              do:
+                - return: c.missingCollaborator()
+                  to: c.missingCollaborator
+  - of: (*SubscriberConfig).missingCollaborator
+    steps:
+      - switch:
+          cases:
             - case: c.Fence != nil && c.Name == ""
               do:
                 - return: "\"Name\""
@@ -4487,54 +5441,56 @@ sequences:
             - default: true
               do:
                 - return: "\"\""
-  - of: SubscriberConfig.normalized
+  - of: (*SubscriberConfig).normalized
     steps:
-      - set: c.BatchSize
-        value: max(c.BatchSize, 1)
+      - bind: out
+        eval: "*c"
+      - set: out.BatchSize
+        value: max(out.BatchSize, 1)
       - opt:
           do:
-            - set: c.PollInterval
+            - set: out.PollInterval
               value: subscriberPollInterval
-          when: c.PollInterval <= 0
+          when: out.PollInterval <= 0
       - opt:
           do:
-            - set: c.SettleTimeout
+            - set: out.SettleTimeout
               value: subscriberSettleTimeout
-          when: c.SettleTimeout <= 0
+          when: out.SettleTimeout <= 0
       - opt:
           do:
-            - set: c.Retry
+            - set: out.Retry
               value: |-
                 backoff.Value{
                 			BaseDelay: retryBase, MaxDelay: retryCeiling, Multiplier: retryMultiplier, Jitter: retryJitter,
                 		}
-          when: c.Retry.BaseDelay <= 0
+          when: out.Retry.BaseDelay <= 0
       - opt:
           do:
-            - set: c.Clock
+            - set: out.Clock
               value: clock.System
-          when: c.Clock == nil
+          when: out.Clock == nil
       - opt:
           do:
             - bind: park
-              eval: "*c.Park"
+              eval: "*out.Park"
             - set: park.After
               value: max(park.After, 1)
-            - set: c.Park
+            - set: out.Park
               value: "&park"
-          when: c.Park != nil
+          when: out.Park != nil
       - opt:
           do:
-            - set: c.Partitions
-              value: make([]int, partitions)
+            - set: out.Partitions
+              value: make([]int, 0, partitions)
             - loop:
                 do:
-                  - set: c.Partitions[i]
-                    value: i
+                  - set: out.Partitions
+                    value: append(out.Partitions, i)
                 key: i
                 range: partitions
-          when: len(c.Partitions) == 0
-      - return: c
+          when: len(out.Partitions) == 0
+      - return: out
   - of: (*subscriber).fenceName
     steps:
       - return: "\"stream:\" + w.cfg.Name + \":\" + w.cfg.Group + \":\" + strconv.Itoa(partition)"
@@ -4622,16 +5578,15 @@ sequences:
         kind: actor
       - id: (*subscriber).release
         kind: self
-      - id: w.settled
+      - id: abandon
         kind: internal
     steps:
       - opt:
           do:
             - return: ""
           when: fence == nil
-      - set: _
-        to: w.settled
-        value: w.settled(ctx, fence.lease.Release)
+      - eval: abandon(w.settled(ctx, fence.lease.Release))
+        to: abandon
   - of: (*subscriber).narrowOrPark
     participants:
       - id: caller

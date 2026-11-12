@@ -1,4 +1,4 @@
-<!-- generated from internal/service/data/stream/stream_bench_test.go — run `cd internal && GOWORK=off go test -run=NONE -bench=. -benchmem -benchtime=1s ./service/data/stream/` to refresh -->
+<!-- generated from internal/service/data/stream/*_bench_test.go — run `cd internal && GOWORK=off go test -run=NONE -bench=. -benchmem -benchtime=1s ./service/data/stream/` to refresh -->
 # Benchmarks — `internal/service/data/stream`
 
 The memory engine (#819): what one `Append` and one `Read` cost when nothing
@@ -137,3 +137,37 @@ BenchmarkSubscribe/batch=256-10       	28200126	       503.1 ns/op	 127.22 MB/s	
 - **The noise is the machine's.** The spread inside each row (245 to 676 ns,
   182 to 503 ns) is the load of the other build lanes; re-run on a quiet
   machine before quoting a figure. The allocation count is what travels.
+
+## Compaction (#824)
+
+`Compact` of one partition holding 4 096 records of 64 B over 64 keys,
+every one at least `CompactAfter` old: 4 032 dropped, 64 kept. The
+partition is written before each iteration and the engine closed after it,
+both outside the timer; the file engine's partition is one 1 MiB segment on
+the internal SSD, rewritten whole. Same machine, a load average of 23 to 28
+on 10 cores (the other build lanes); `-test.benchtime=200x`, `-count=3`, on
+`f43939644` with #824's change applied, 2026-11-12. Run with
+`cd internal && GOWORK=off go test -run=NONE -bench='^BenchmarkCompact$' -benchmem -count=3 -benchtime=200x ./service/data/stream/`.
+
+```
+BenchmarkCompact/memory-10         	     200	    235297 ns/op	   37553 B/op	    4106 allocs/op
+BenchmarkCompact/memory-10         	     200	    350662 ns/op	   37591 B/op	    4106 allocs/op
+BenchmarkCompact/memory-10         	     200	    313260 ns/op	   37561 B/op	    4106 allocs/op
+BenchmarkCompact/file-10           	     200	  16109631 ns/op	 3344326 B/op	    8218 allocs/op
+BenchmarkCompact/file-10           	     200	  14036367 ns/op	 3344331 B/op	    8218 allocs/op
+BenchmarkCompact/file-10           	     200	  13169350 ns/op	 3344334 B/op	    8218 allocs/op
+```
+
+- **The memory engine compacts in place**: one pass to find each key's last
+  compactable record, one to slide the survivors down. Its allocations are
+  the key map's — one string per record assigned —, about one per record.
+- **The file engine pays for durability, not for the decision.** About
+  14 ms is the segment read, re-encoded, written into a `.tmp`, synced
+  (`F_FULLFSYNC` on darwin), renamed and the directory synced; the 3.3 MB
+  per op are the segment's bytes read back, the plan's chunk read and the
+  new segment's image. A compaction is a scheduled job's work, not a hot
+  path, and it runs under the partition's writer lock, so an `Append` to
+  that partition waits for it.
+- **What a dropped record keeps on the file engine** is a 40-byte record at
+  its offset — the seglog header and the batch's instant —, so the index,
+  the batches and `Bounds` are untouched; its key and payload are gone.

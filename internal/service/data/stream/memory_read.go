@@ -24,8 +24,12 @@ func (m *memoryStream) checkPartition(partition int) error {
 // holds the lock, shared or exclusive.
 func (m *memoryStream) retained(part *memPartition, now time.Time) (corestream.Offset, int) {
 	skip := m.expired(part, now)
-	//: the records retention has already claimed are skipped, not removed.
-	return part.first + corestream.Offset(skip), skip
+	//: nothing expired: what Trim and the byte bound left.
+	if skip == 0 {
+		return part.first, 0
+	}
+	//: just past the last expired record, skipped rather than removed.
+	return max(part.first, part.entries[skip-1].Offset+1), skip
 }
 
 // expired returns how many of partition's oldest entries are past
@@ -72,7 +76,7 @@ func (m *memoryStream) Read(
 		//: OffsetAhead, with both offsets.
 		return nil, offsetAhead(from, part.next())
 	}
-	start := skip + int(from-first)
+	start := max(part.index(from), skip)
 	end := min(start+maxEntries, len(part.entries))
 	//: the reader's own copy; empty at the next offset.
 	return copyEntries(part.entries[start:end]), nil
@@ -105,15 +109,20 @@ func (m *memoryStream) OffsetAt(
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	part := &m.parts[partition]
-	first, skip := m.retained(part, m.clk.Now())
+	_, skip := m.retained(part, m.clk.Now())
 	kept := part.entries[skip:]
 	//: AppendedAt never decreases, so the first one at or after t is a search.
 	found := sort.Search(len(kept), func(i int) bool {
 		//: at or after t.
 		return !kept[i].AppendedAt.Before(t)
 	})
-	//: the first retained offset when t precedes them all, next when it follows.
-	return first + corestream.Offset(found), nil
+	//: t follows every retained record.
+	if found == len(kept) {
+		//: the next offset.
+		return part.next(), nil
+	}
+	//: the first retained record at or after t.
+	return kept[found].Offset, nil
 }
 
 // Wake returns the channel the next Append closes.

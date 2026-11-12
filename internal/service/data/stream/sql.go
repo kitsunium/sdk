@@ -93,8 +93,9 @@ type sqlStream struct {
 // engine does, and a RetainBytes or MaxBytes, which it does not keep, with
 // [corestream.SQLStreamMisconfigured]; a transactor, dialect or table it
 // cannot use the same way. The stream it returns also answers
-// [corestream.Waker], [corestream.Seeker], [corestream.Trimmer] and
-// [corestream.Committer].
+// [corestream.Waker], [corestream.Seeker], [corestream.Trimmer],
+// [corestream.Compactor] and [corestream.Committer]; a compaction deletes
+// the rows it drops in bounded statements.
 func NewSQL(cfg SQLConfig) (s corestream.Stream, err error) {
 	parts, invalid := cfg.validate()
 	//: refused before anything is built.

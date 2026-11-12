@@ -17,6 +17,7 @@ generic). Code range `0.1.8.*`. Not published in `pkg/v1` (ADR 0159 §4).
 |---|---|
 | `record.go` | the record framing (`appendRecord`, `parseRecord`, `sealedBody`), the checkpoint payload, `DefaultSegmentBytes` |
 | `log.go` | `Log`, `Open`, `Append`, `Sync` (the two-step batch), `Read`, `Range`, `Kind`, `DropBefore`, `Bounds`, `Close` |
+| `rewrite.go` | `Rewrite` (#824, ADR 0230's amendment): a segment holding a record the caller's edit changed parsed, re-encoded with the same indexes, batches and end flags, written to its `.tmp`, synced, renamed over the old file (closed first, for Windows), the directory synced; the slots moved |
 | `recover.go` | the recovery: scan in chunks, batch sequence, unknown layouts, `classifyTail`, replay, sync at open, tail positioning |
 | `segment.go` | segment publication (zero-filled `.tmp`, checkpoint, sync, rename, directory sync), the background preparation, rotation, prefix drop |
 | `errors.go` | `failed` / `damaged` / `outside`, the fields every error carries |
@@ -24,6 +25,7 @@ generic). Code range `0.1.8.*`. Not published in `pkg/v1` (ADR 0159 §4).
 | `gen_codes.go` | the eight codes and sentinels, written by kit gen from `design/kernel/fs.yaml` |
 | `tail_internal_test.go` | `TestATailIsTornOrDamaged`: the consensus tail cases ported (see below), plus the seal-without-its-next-segment, end-record and sealed-scan tests |
 | `fuzz_internal_test.go` | `FuzzOpenTail`, `FuzzScanSegment` (ported), `FuzzParseRecord` |
+| `rewrite_external_test.go` | a rewrite read back changed and every other record unchanged, before and after a reopen, a sealed segment shrunk, the last one still appended to; an edit that changes nothing writes nothing and is never offered a dropped record; a pending batch synced first |
 | `seglog_bench_test.go` | `AppendSync` for 1, 16 and 256 records, `Range` — `BENCH.md` |
 
 ## The format
@@ -57,6 +59,11 @@ directory sync; recovery deletes any `.tmp`.
 - **Retention by whole segments.** `DropBefore` records the first index in a
   drop record, syncs, then unlinks every sealed segment whose successor's
   checkpoint starts at or below it, and syncs the directory.
+- **A rewrite changes no index.** `Rewrite` is the one call that changes a
+  synced record: kind and payload only, the segment written whole and
+  published by rename, so recovery reads the new file as it read the old.
+  Not benchmarked here: its cost is the stream's compaction, measured in
+  `internal/service/data/stream/BENCH.md`.
 
 ## The ported tail cases
 
@@ -72,7 +79,8 @@ shapes and holds every input to one of the two verdicts.
 
 - Add a policy: no quarantine marker, no directory lock, no retention by age
   or bytes. They are the callers' (ADR 0230 §4).
-- Rewrite a synced record. There is no suffix truncation here.
+- Rewrite a synced record except through `Rewrite`, and never its index,
+  batch or end flag. There is no suffix truncation here.
 - Change the framing, the batch protocol or the recovery rules without the
   same change in the consensus file log until it is migrated (ADR 0230 §6).
 

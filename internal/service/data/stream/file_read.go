@@ -56,25 +56,44 @@ func (m *fileStream) Read(
 		//: OffsetAhead, with both offsets.
 		return nil, offsetAhead(from, next)
 	}
-	hi := from + corestream.Offset(min(uint64(maxEntries), uint64(next-from)))
-	//: empty at the next offset.
-	if hi == from {
-		//: nothing, and no error.
-		return nil, nil
+	//: the entries from from on, the holes a compaction left skipped.
+	return m.readFrom(part, partition, from, next, maxEntries)
+}
+
+// readFrom reads up to maxEntries live entries of part from offset from up
+// to next excluded, one Range per round: a round that meets holes reads the
+// offsets after them, until maxEntries are found or next is reached.
+func (m *fileStream) readFrom(
+	part *filePart, partition int, from, next corestream.Offset, maxEntries int,
+) ([]corestream.EntryValue, error) {
+	var entries []corestream.EntryValue
+	//: until enough entries, or the end of the partition.
+	for cursor := from; len(entries) < maxEntries && cursor < next; {
+		hi := cursor + corestream.Offset(min(uint64(maxEntries-len(entries)), uint64(next-cursor)))
+		payloads, err := part.log.Range(uint64(cursor), uint64(hi), math.MaxInt, make([][]byte, 0, hi-cursor))
+		//: a Trim landing between the bounds and the read.
+		if errs.HasCode(err, seglog.CodeDropped) {
+			//: OffsetTrimmed, as a read after the Trim answers.
+			return nil, offsetTrimmed(from, m.firstOf(part))
+		}
+		//: the device refused, or a record no longer matches what was written.
+		if err != nil {
+			//: the log's refusal, in this engine's trail.
+			return nil, backendFailed("read", "", err)
+		}
+		//: sized on the first round, which is the only one without holes.
+		if entries == nil {
+			entries = make([]corestream.EntryValue, 0, len(payloads))
+		}
+		//: the payloads are the reader's own, so the entries alias them.
+		if entries, err = appendEntries(entries, partition, cursor, payloads); err != nil {
+			//: StreamBackendFailed.
+			return nil, err
+		}
+		cursor = hi
 	}
-	payloads, err := part.log.Range(uint64(from), uint64(hi), math.MaxInt, make([][]byte, 0, hi-from))
-	//: a Trim landing between the bounds and the read.
-	if errs.HasCode(err, seglog.CodeDropped) {
-		//: OffsetTrimmed, as a read after the Trim answers.
-		return nil, offsetTrimmed(from, m.firstOf(part))
-	}
-	//: the device refused, or a record no longer matches what was written.
-	if err != nil {
-		//: the log's refusal, in this engine's trail.
-		return nil, backendFailed("read", "", err)
-	}
-	//: the payloads are the reader's own, so the entries alias them.
-	return decodeEntries(partition, from, payloads)
+	//: the reader's entries; none at the next offset.
+	return entries, nil
 }
 
 // firstOf returns part's first readable offset now.
@@ -85,23 +104,29 @@ func (m *fileStream) firstOf(part *filePart) corestream.Offset {
 	return part.first(m.clk.Now(), m.policy.RetainFor)
 }
 
-// decodeEntries turns the payloads read from offset from on into entries.
-func decodeEntries(partition int, from corestream.Offset, payloads [][]byte) ([]corestream.EntryValue, error) {
-	entries := make([]corestream.EntryValue, len(payloads))
-	//: one entry per payload, in offset order.
+// appendEntries appends to entries the live entries of the payloads read
+// from offset from on, a compacted record's skipped.
+func appendEntries(
+	entries []corestream.EntryValue, partition int, from corestream.Offset, payloads [][]byte,
+) ([]corestream.EntryValue, error) {
+	//: one entry per live payload, in offset order.
 	for i, payload := range payloads {
-		stamp, record, ok := decodeRecord(payload)
+		stamp, record, gone, ok := decodeStored(payload)
 		//: bytes this engine cannot have written, under a valid checksum.
 		if !ok {
 			//: StreamBackendFailed: refused rather than skipped.
 			return nil, backendFailed("decode", "", nil)
 		}
-		entries[i] = corestream.EntryValue{
+		//: a hole a compaction left.
+		if gone {
+			continue
+		}
+		entries = append(entries, corestream.EntryValue{
 			AppendedAt: timeOf(stamp),
 			Record:     record,
 			Partition:  partition,
 			Offset:     from + corestream.Offset(i),
-		}
+		})
 	}
 	//: the reader's entries.
 	return entries, nil

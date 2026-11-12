@@ -336,6 +336,41 @@ func TestSQLTrimAndAgeReleaseTheRowsBelowTheFirstOffset(t *testing.T) {
 	})
 }
 
+// TestSQLCompactDeletesTheRowsItDropsInBoundedStatements: the rows go, in
+// DELETEs of at most 256 offsets, a page of 1 024 rows read at a time, and a
+// record that ages out before a delete runs stays for the age sweep.
+func TestSQLCompactDeletesTheRowsItDropsInBoundedStatements(t *testing.T) {
+	t.Parallel()
+	eachDialect(t, corestream.PolicyValue{CompactAfter: time.Minute}, func(t *testing.T, fx *sqlFixture, clk *clock.ManualClock) {
+		batch := make([]corestream.RecordValue, 1500)
+		for i := range batch {
+			batch[i] = keyed("k", "v")
+		}
+		appendOK(t, fx.stream, batch...)
+		clk.Advance(time.Minute)
+		fx.engine.resetLog()
+		got := compactOK(t, fx.stream, 0)
+		if got != (corestream.CompactValue{Scanned: 1500, Kept: 1, Dropped: 1499}) {
+			t.Fatalf("Compact = %+v, want {1500 1 1499}", got)
+		}
+		if fx.engine.rows() != 1 {
+			t.Fatalf("Compact left %d rows, want 1", fx.engine.rows())
+		}
+		var scans, deletes int
+		for _, role := range fx.engine.statements() {
+			switch role {
+			case "compactScan":
+				scans++
+			case "compactDelete":
+				deletes++
+			}
+		}
+		if scans != 2 || deletes != 6 {
+			t.Fatalf("Compact sent %d scans and %d deletes, want 2 and 6", scans, deletes)
+		}
+	})
+}
+
 // TestSQLRefusesWhatItCannotRun: every configuration no SQL stream could run
 // is refused at construction, and SQLMigration refuses the same names.
 func TestSQLRefusesWhatItCannotRun(t *testing.T) {
@@ -411,9 +446,16 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 			` ON CONFLICT (part) DO UPDATE SET next_offset = next_offset`},
 		{coresql.DialectPostgres, "head", `SELECT next_offset, first_offset, last_at FROM "app_events__heads" WHERE part = $1 FOR UPDATE`},
 		{coresql.DialectSQLite, "head", `SELECT next_offset, first_offset, last_at FROM "app_events__heads" WHERE part = ?`},
-		{coresql.DialectPostgres, "read", `SELECT h.next_offset, r.record_offset, r.appended_at, r.record_key, r.payload FROM "app_events__heads" h` +
-			` LEFT JOIN "app_events" r ON r.part = h.part AND r.record_offset >= h.first_offset AND r.appended_at > $1 AND r.record_offset >= $2` +
-			` WHERE h.part = $3 ORDER BY r.record_offset LIMIT $4`},
+		{coresql.DialectPostgres, "read", `SELECT h.next_offset, h.first_offset, (SELECT MAX(x.record_offset) FROM "app_events" x` +
+			` WHERE x.part = h.part AND x.record_offset >= h.first_offset AND x.appended_at <= $1), r.record_offset, r.appended_at,` +
+			` r.record_key, r.payload FROM "app_events__heads" h LEFT JOIN "app_events" r ON r.part = h.part` +
+			` AND r.record_offset >= h.first_offset AND r.appended_at > $2 AND r.record_offset >= $3` +
+			` WHERE h.part = $4 ORDER BY r.record_offset LIMIT $5`},
+		{coresql.DialectMySQL, "bounds", "SELECT h.next_offset, h.first_offset, (SELECT MAX(x.record_offset) FROM `app_events` x" +
+			" WHERE x.part = h.part AND x.record_offset >= h.first_offset AND x.appended_at <= ?) FROM `app_events__heads` h WHERE h.part = ?"},
+		{coresql.DialectSQLite, "compactScan", `SELECT record_offset, record_key, appended_at, CASE WHEN payload IS NULL THEN 1 ELSE 0 END` +
+			` FROM "app_events" WHERE part = ? AND record_offset >= ? AND appended_at > ? AND appended_at <= ?` +
+			` ORDER BY record_offset LIMIT ?`},
 		{coresql.DialectPostgres, "commit", `INSERT INTO "app_events__cursors" (grp, part, next_offset, grp_name) VALUES ($1, $2, $3, $4)` +
 			` ON CONFLICT (grp, part) DO UPDATE SET next_offset = $5`},
 		{coresql.DialectMySQL, "commit", "INSERT INTO `app_events__cursors` (grp, part, next_offset, grp_name) VALUES (?, ?, ?, ?)" +
@@ -428,6 +470,10 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 	if got := svcstream.RenderSQLForTest(coresql.DialectPostgres, eventsTable).InsertRows(2); got != `INSERT INTO "app_events"`+
 		` (part, record_offset, appended_at, record_key, payload) VALUES ($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)` {
 		t.Errorf("InsertRows(2) = %s", got)
+	}
+	if got := svcstream.RenderSQLForTest(coresql.DialectPostgres, eventsTable).CompactDelete(2); got != `DELETE FROM "app_events"`+
+		` WHERE part = $1 AND appended_at > $2 AND record_offset IN ($3, $4)` {
+		t.Errorf("CompactDelete(2) = %s", got)
 	}
 	migration, err := svcstream.SQLMigration(coresql.DialectPostgres, eventsTable, 7)
 	if err != nil || migration.Version != 7 || migration.Name != "stream app_events" || migration.Checksum == "" {

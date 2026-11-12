@@ -653,7 +653,7 @@ sequences:
         kind: internal
       - id: seg.f.ReadAt
         kind: value
-      - id: parseRecord
+      - id: checkedPayload
         kind: internal
     steps:
       - bind: seg
@@ -685,21 +685,39 @@ sequences:
           when: err != nil && !errors.Is(err, io.EOF)
       - loop:
           do:
-            - bind: at
-              eval: s.off - start
-            - bind: r, ok
-              eval: parseRecord(b[at:])
-              to: parseRecord
+            - bind: payload, err
+              eval: checkedPayload(seg.n, b[s.off-start:], s, index+uint64(i))
+              to: checkedPayload
             - opt:
                 do:
-                  - return: dst, damaged(seg.n, s.off, "record does not match the log")
-                when: "!ok || r.kind != recEntry || r.index != index+uint64(i) || len(r.data) != int(s.size)"
+                  - return: dst, err
+                when: err != nil
             - set: dst
-              value: append(dst, r.data[:len(r.data):len(r.data)])
+              value: append(dst, payload)
           key: i
           range: slots
           value: s
       - return: dst, nil
+  - of: checkedPayload
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkedPayload
+        kind: self
+      - id: parseRecord
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: r, ok
+        eval: parseRecord(b)
+        to: parseRecord
+      - opt:
+          do:
+            - return: nil, damaged(seg, s.off, "record does not match the log")
+          when: "!ok || r.kind != recEntry || r.index != index || len(r.data) != int(s.size)"
+      - return: slices.Clip(r.data), nil
+        to: slices
   - of: (*Log).Close
     participants:
       - id: caller
@@ -1002,25 +1020,7 @@ sequences:
         kind: internal
       - id: l.markDurable
         kind: internal
-      - id: scanSegments
-        kind: internal
-      - id: checkBatchSequence
-        kind: internal
-      - id: checkLayouts
-        kind: internal
-      - id: trimTornTail
-        kind: internal
-      - id: l.replay
-        kind: internal
-      - id: l.openSegments
-        kind: internal
-      - id: l.syncAtOpen
-        kind: internal
-      - id: l.positionTail
-        kind: internal
-      - id: l.publishNext
-        kind: internal
-      - id: l.prepare
+      - id: l.recoverExisting
         kind: internal
     steps:
       - bind: nums, err
@@ -1044,44 +1044,40 @@ sequences:
               to: l.markDurable
             - return: nil
           when: len(nums) == 0
+      - return: l.recoverExisting(nums)
+        to: l.recoverExisting
+  - of: (*Log).recoverExisting
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Log).recoverExisting
+        kind: self
+      - id: l.scanAndTrim
+        kind: internal
+      - id: l.replay
+        kind: internal
+      - id: l.openSegments
+        kind: internal
+      - id: l.syncAtOpen
+        kind: internal
+      - id: l.positionTail
+        kind: internal
+      - id: l.markDurable
+        kind: internal
+      - id: l.publishNext
+        kind: internal
+      - id: l.prepare
+        kind: internal
+    steps:
       - bind: segs, err
-        eval: scanSegments(l.dir, nums, &scanBufs{})
-        to: scanSegments
+        eval: l.scanAndTrim(nums)
+        to: l.scanAndTrim
       - opt:
           do:
             - return: err
-          when: err != nil
-      - opt:
-          do:
-            - return: err
-          init:
-            bind: err
-            eval: checkBatchSequence(segs)
-            to: checkBatchSequence
-          when: err != nil
-      - opt:
-          do:
-            - return: err
-          init:
-            bind: err
-            eval: checkLayouts(segs)
-            to: checkLayouts
           when: err != nil
       - bind: last
         eval: segs[len(segs)-1]
-      - opt:
-          do:
-            - return: err
-          init:
-            bind: err
-            eval: trimTornTail(last)
-            to: trimTornTail
-          when: err != nil
-      - opt:
-          do:
-            - op: ++
-              set: l.tornTails
-          when: last.trimmed >= 0
       - opt:
           do:
             - return: err
@@ -1126,6 +1122,60 @@ sequences:
       - eval: l.prepare(last.n+1, l.segBytes)
         to: l.prepare
       - return: nil
+  - of: (*Log).scanAndTrim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Log).scanAndTrim
+        kind: self
+      - id: scanSegments
+        kind: internal
+      - id: checkBatchSequence
+        kind: internal
+      - id: checkLayouts
+        kind: internal
+      - id: trimTornTail
+        kind: internal
+    steps:
+      - bind: segs, err
+        eval: scanSegments(l.dir, nums, &scanBufs{})
+        to: scanSegments
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: checkBatchSequence(segs)
+            to: checkBatchSequence
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: checkLayouts(segs)
+            to: checkLayouts
+          when: err != nil
+      - bind: last
+        eval: segs[len(segs)-1]
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: trimTornTail(last)
+            to: trimTornTail
+          when: err != nil
+      - opt:
+          do:
+            - op: ++
+              set: l.tornTails
+          when: last.trimmed >= 0
+      - return: segs, nil
   - of: (*Log).segmentNumbers
     participants:
       - id: caller
@@ -1372,7 +1422,7 @@ sequences:
       - id: (*scanBufs).reader
         kind: self
       - id: f.Stat
-        kind: value
+        kind: internal
       - id: st.Size
         kind: value
     steps:
@@ -1829,6 +1879,407 @@ sequences:
                   eval: last.recs[len(last.recs)-1]
                 - set: l.off
                   value: lr.off + int64(lr.length)
+      - return: nil
+  - of: (*Log).Rewrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Log).Rewrite
+        kind: self
+      - id: l.mu.Lock
+        kind: value
+      - id: l.syncLocked
+        kind: internal
+      - id: l.mu.Unlock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: l.rewriteSegment
+        kind: internal
+    steps:
+      - lock:
+          mutex: l.wmu
+      - eval: l.mu.Lock()
+        to: l.mu.Lock
+      - opt:
+          do:
+            - eval: l.mu.Unlock()
+              to: l.mu.Unlock
+            - return: 0, err
+          init:
+            bind: err
+            eval: l.syncLocked()
+            to: l.syncLocked
+          when: err != nil
+      - bind: segs
+        eval: slices.Clone(l.segs)
+        to: slices
+      - bind: first, next
+        eval: l.first, l.next
+      - eval: l.mu.Unlock()
+        to: l.mu.Unlock
+      - set: below
+        value: min(below, next)
+      - bind: count
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: s.start >= below
+            - bind: end
+              eval: next
+            - opt:
+                do:
+                  - set: end
+                    value: segs[i+1].start
+                when: i < len(segs)-1
+            - opt:
+                do:
+                  - continue: true
+                when: end <= first
+            - bind: changed, err
+              eval: l.rewriteSegment(s, i == len(segs)-1, first, below, edit)
+              to: l.rewriteSegment
+            - opt:
+                do:
+                  - return: count, err
+                when: err != nil
+            - opt:
+                do:
+                  - op: ++
+                    set: count
+                when: changed
+          key: i
+          range: segs
+          value: s
+      - return: count, nil
+  - of: (*Log).rewriteSegment
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Log).rewriteSegment
+        kind: self
+      - id: s.f.ReadAt
+        kind: value
+      - id: rebuildSegment
+        kind: internal
+      - id: l.writeTmp
+        kind: internal
+    steps:
+      - bind: limit
+        eval: s.size
+      - opt:
+          do:
+            - set: limit
+              value: l.off
+          when: last
+      - bind: data
+        eval: make([]byte, limit)
+      - opt:
+          do:
+            - return: false, failed("read segment", err)
+          init:
+            bind: _, err
+            eval: s.f.ReadAt(data, 0)
+            to: s.f.ReadAt
+          when: err != nil && !errors.Is(err, io.EOF)
+      - bind: res, err
+        eval: "rebuildSegment(&rebuildPlan{n: s.n, data: data, last: last, first: first, below: below, edit: edit})"
+        to: rebuildSegment
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil || !res.changed
+      - bind: out, moved
+        eval: res.data, res.moved
+      - bind: size
+        eval: int64(len(out))
+      - opt:
+          do:
+            - set: size
+              value: s.size
+          when: last
+      - opt:
+          do:
+            - return: false, err
+          init:
+            bind: err
+            eval: l.writeTmp(s.n, out, size)
+            to: l.writeTmp
+          when: err != nil
+      - return: true, l.publishRewrite(s, out, size, last, moved)
+  - of: rebuildSegment
+    participants:
+      - id: caller
+        kind: actor
+      - id: rebuildSegment
+        kind: self
+      - id: parseRecord
+        kind: internal
+    steps:
+      - bind: res
+        eval: "rebuilt{data: make([]byte, 0, len(p.data))}"
+      - loop:
+          cond: off < len(p.data)
+          do:
+            - bind: r, ok
+              eval: parseRecord(p.data[off:])
+              to: parseRecord
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - break: true
+                      when: p.last
+                  - return: rebuilt{}, damaged(p.n, int64(off), "record does not parse in a rewrite")
+                when: "!ok"
+            - op: +=
+              set: "off"
+              value: r.length
+            - opt:
+                do:
+                  - break: true
+                when: res.encode(p, &r)
+          init: off := 0
+      - return: res, nil
+  - of: (*rebuilt).encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rebuilt).encode
+        kind: self
+      - id: appendRecord
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: r.tag, r.data, b.changed
+                    value: kind, payload, true
+                init:
+                  bind: kind, payload, edited
+                  eval: p.edit(r.index, r.tag, r.data)
+                when: edited
+          when: r.kind == recEntry && r.index >= p.first && r.index < p.below
+      - opt:
+          do:
+            - set: r.index
+              value: uint64(len(b.data))
+          when: r.kind == recSeal
+      - bind: at
+        eval: len(b.data)
+      - set: b.data
+        to: appendRecord
+        value: appendRecord(b.data, r)
+      - opt:
+          do:
+            - set: b.moved
+              value: "append(b.moved, rewritten{index: r.index, at: slot{seg: p.n, off: int64(at), size: uint32(len(r.data)), kind: r.tag}})"
+          when: r.kind == recEntry && r.index >= p.first
+      - return: r.kind == recSeal
+  - of: (*Log).writeTmp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Log).writeTmp
+        kind: self
+      - id: l.tmpPath
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: failed
+        kind: internal
+      - id: fillTmp
+        kind: internal
+      - id: f.Close
+        kind: value
+    steps:
+      - bind: tmp
+        eval: l.tmpPath(n)
+        to: l.tmpPath
+      - bind: f, err
+        eval: os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+        to: os
+      - opt:
+          do:
+            - return: failed("create segment", err)
+              to: failed
+          when: err != nil
+      - defer: |-
+          func() {
+          		if err != nil {
+          			abandon(f.Close())
+          			abandon(os.Remove(tmp))
+          		}
+          	}()
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: fillTmp(f, out, size)
+            op: =
+            to: fillTmp
+          when: err != nil
+      - opt:
+          do:
+            - set: err
+              to: failed
+              value: failed("close segment", err)
+            - return: err
+          init:
+            bind: err
+            eval: f.Close()
+            op: =
+            to: f.Close
+          when: err != nil
+      - return: nil
+  - of: fillTmp
+    participants:
+      - id: caller
+        kind: actor
+      - id: fillTmp
+        kind: self
+      - id: f.WriteAt
+        kind: value
+      - id: failed
+        kind: internal
+      - id: zeroRange
+        kind: internal
+      - id: f.Sync
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: failed("write segment", err)
+              to: failed
+          init:
+            bind: _, err
+            eval: f.WriteAt(out, 0)
+            to: f.WriteAt
+          when: err != nil
+      - opt:
+          do:
+            - return: failed("zero-fill", err)
+              to: failed
+          init:
+            bind: err
+            eval: zeroRange(f, int64(len(out)), size)
+            to: zeroRange
+          when: err != nil
+      - opt:
+          do:
+            - return: failed("sync segment", err)
+              to: failed
+          init:
+            bind: err
+            eval: f.Sync()
+            to: f.Sync
+          when: err != nil
+      - return: nil
+  - of: (*Log).publishRewrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Log).publishRewrite
+        kind: self
+      - id: l.mu.Lock
+        kind: value
+      - id: s.f.Close
+        kind: value
+      - id: failed
+        kind: internal
+      - id: l.mu.Unlock
+        kind: value
+      - id: abandon
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: syncDir
+        kind: internal
+    steps:
+      - bind: final, tmp
+        eval: l.segPath(s.n), l.tmpPath(s.n)
+      - eval: l.mu.Lock()
+        to: l.mu.Lock
+      - opt:
+          do:
+            - set: l.failed
+              to: failed
+              value: failed("close segment", err)
+            - eval: l.mu.Unlock()
+              to: l.mu.Unlock
+            - eval: abandon(os.Remove(tmp))
+              to: abandon
+            - return: l.failed
+          init:
+            bind: err
+            eval: s.f.Close()
+            to: s.f.Close
+          when: err != nil
+      - bind: renameErr
+        eval: os.Rename(tmp, final)
+        to: os
+      - bind: f, err
+        eval: os.OpenFile(final, os.O_RDWR, 0)
+        to: os
+      - opt:
+          do:
+            - set: l.failed
+              to: failed
+              value: failed("open segment", err)
+            - eval: l.mu.Unlock()
+              to: l.mu.Unlock
+            - return: l.failed
+          when: err != nil
+      - set: s.f
+        value: f
+      - opt:
+          do:
+            - eval: l.mu.Unlock()
+              to: l.mu.Unlock
+            - eval: abandon(os.Remove(tmp))
+              to: abandon
+            - return: failed("rename segment", renameErr)
+              to: failed
+          when: renameErr != nil
+      - set: s.size
+        value: size
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: l.slots[m.index-l.first]
+                    value: m.at
+                when: m.index >= l.first && m.index < l.next
+          key: _
+          range: moved
+          value: m
+      - opt:
+          do:
+            - set: l.off
+              value: int64(len(out))
+          when: last
+      - eval: l.mu.Unlock()
+        to: l.mu.Unlock
+      - opt:
+          do:
+            - eval: l.mu.Lock()
+              to: l.mu.Lock
+            - set: l.failed
+              to: failed
+              value: failed("sync dir", err)
+            - eval: l.mu.Unlock()
+              to: l.mu.Unlock
+            - return: l.failed
+          init:
+            bind: err
+            eval: syncDir(l.dir)
+            to: syncDir
+          when: err != nil
       - return: nil
   - of: segName
     participants:

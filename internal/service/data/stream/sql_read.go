@@ -24,13 +24,11 @@ func (s *sqlStream) checkPartition(partition int) error {
 // ONE unlocked statement on the executor the context's transaction joins —
 // the pool outside one.
 //
-// The statement answers the head's next offset beside the readable records
-// from from on. Records are stored contiguously from the head's floor and
-// stamped in offset order, so the readable ones are a suffix: when the first
-// row returned is past from, from was trimmed or expired, and that row is the
-// first retained offset; when no record is returned, the partition holds
-// nothing readable at or after from, and its next offset is the first
-// retained.
+// The statement answers the head — its next offset, its floor and the
+// highest stored offset past the age bound, which give the first readable
+// offset (firstReadable) — beside the readable records from from on. A
+// compaction leaves holes the rows simply do not hold, so a read inside one
+// answers the records after it and never OFFSET_TRIMMED.
 func (s *sqlStream) Read(
 	ctx context.Context, partition int, from corestream.Offset, maxEntries int,
 ) ([]corestream.EntryValue, error) {
@@ -45,43 +43,48 @@ func (s *sqlStream) Read(
 		return nil, invalidBatchSize("max", maxEntries)
 	}
 	ex, _ := s.tx.join.Join(ctx)
-	rows, err := ex.QueryContext(ctx, s.stmts.read, s.cutoff(s.clk.Now()), int64(from), int64(partition), int64(maxEntries))
+	cutoff := s.cutoff(s.clk.Now())
+	rows, err := ex.QueryContext(ctx, s.stmts.read, cutoff, cutoff, int64(from), int64(partition), int64(maxEntries))
 	//: the statement did not run.
 	if err != nil {
 		//: StreamBackendFailed, the driver's text withheld.
 		return nil, s.failed("read records", err)
 	}
-	entries, next, err := s.scanEntries(rows, partition, maxEntries)
+	entries, bounds, err := s.scanEntries(rows, partition, maxEntries)
 	//: a row the driver could not hand over.
 	if err != nil {
 		//: StreamBackendFailed, the driver's text withheld.
 		return nil, s.failed("read records", err)
 	}
 	//: a record that does not exist yet.
-	if from > next {
+	if from > bounds.Next {
 		//: OffsetAhead, with both offsets.
-		return nil, offsetAhead(from, next)
+		return nil, offsetAhead(from, bounds.Next)
 	}
-	//: the readable records start later than asked: the gap is trimmed.
-	if len(entries) > 0 && entries[0].Offset > from {
+	//: below the first readable offset: trimmed or expired.
+	if from < bounds.First {
 		//: OffsetTrimmed, the first readable offset beside the one asked.
-		return nil, offsetTrimmed(from, entries[0].Offset)
-	}
-	//: nothing readable between from and the next offset.
-	if len(entries) == 0 && from < next {
-		//: OffsetTrimmed: everything up to next is gone.
-		return nil, offsetTrimmed(from, next)
+		return nil, offsetTrimmed(from, bounds.First)
 	}
 	//: the reader's own copy; empty at the next offset.
 	return entries, nil
 }
 
-// scanEntries reads the rows of the read statement: the head's next offset on
-// each, a record on each but the lone row of a partition with none readable.
-// A partition never written has no head row, and its next offset is zero.
+// scannedRows is the part of *sql.Rows scanEntries reads a result through:
+// the cursor, its failure, its columns and its release.
+type scannedRows interface {
+	Close() error
+	Err() error
+	Next() bool
+	Scan(dest ...any) error
+}
+
+// scanEntries reads the rows of the read statement: the head on each, a
+// record on each but the lone row of a partition with none readable. A
+// partition never written has no head row, and its bounds are zero.
 func (s *sqlStream) scanEntries(
-	rows *stdsql.Rows, partition, maxEntries int,
-) (entries []corestream.EntryValue, next corestream.Offset, err error) {
+	rows scannedRows, partition, maxEntries int,
+) (entries []corestream.EntryValue, bounds corestream.BoundsValue, err error) {
 	defer func() {
 		//: the first failure is the one reported.
 		if closeErr := rows.Close(); closeErr != nil && err == nil {
@@ -91,16 +94,16 @@ func (s *sqlStream) scanEntries(
 	//: one row per record, or one row with none.
 	for rows.Next() {
 		var (
-			head          int64
-			offset, stamp stdsql.NullInt64
-			key, payload  []byte
+			head, floor            int64
+			expired, offset, stamp stdsql.NullInt64
+			key, payload           []byte
 		)
-		//: the five columns, the last four NULL with no record.
-		if scanErr := rows.Scan(&head, &offset, &stamp, &key, &payload); scanErr != nil {
+		//: the seven columns, the last four NULL with no record.
+		if scanErr := rows.Scan(&head, &floor, &expired, &offset, &stamp, &key, &payload); scanErr != nil {
 			//: the row could not be read.
-			return nil, 0, scanErr
+			return nil, corestream.BoundsValue{}, scanErr
 		}
-		next = corestream.Offset(head)
+		bounds = firstReadable(head, floor, expired)
 		//: the lone row of a partition with nothing readable.
 		if !offset.Valid {
 			continue
@@ -117,7 +120,7 @@ func (s *sqlStream) scanEntries(
 		})
 	}
 	//: an iteration that stopped on a failure.
-	return entries, next, rows.Err()
+	return entries, bounds, rows.Err()
 }
 
 // nonEmpty reads an empty column back as nil, as the memory engine keeps an
@@ -138,14 +141,43 @@ func (s *sqlStream) Bounds(ctx context.Context, partition int) (corestream.Bound
 		//: UnknownPartition.
 		return corestream.BoundsValue{}, refused
 	}
-	next, first, err := s.headAndLowest(ctx, s.stmts.bounds, "read the bounds", s.cutoff(s.clk.Now()), int64(partition))
+	//: the retained range, or StreamBackendFailed.
+	return s.boundsAt(ctx, partition, s.cutoff(s.clk.Now()))
+}
+
+// boundsAt reads partition's bounds under the age cutoff: one statement on
+// the executor the context's transaction joins.
+func (s *sqlStream) boundsAt(ctx context.Context, partition int, cutoff int64) (corestream.BoundsValue, error) {
+	ex, _ := s.tx.join.Join(ctx)
+	var head, floor int64
+	var expired stdsql.NullInt64
+	err := ex.QueryRowContext(ctx, s.stmts.bounds, cutoff, int64(partition)).Scan(&head, &floor, &expired)
+	//: a partition never written has no head row: nothing, from zero.
+	if errors.Is(err, stdsql.ErrNoRows) {
+		return corestream.BoundsValue{}, nil
+	}
 	//: the statement did not complete.
 	if err != nil {
-		//: StreamBackendFailed.
-		return corestream.BoundsValue{}, err
+		//: StreamBackendFailed, the driver's text withheld.
+		return corestream.BoundsValue{}, s.failed("read the bounds", err)
 	}
-	//: the retained range; empty when nothing is readable.
-	return corestream.BoundsValue{First: first, Next: next}, nil
+	//: the retained range.
+	return firstReadable(head, floor, expired), nil
+}
+
+// firstReadable returns the bounds a head row gives: the next offset, and as
+// the first the floor or the offset after the highest stored record past the
+// age bound, whichever is higher. Every record above that one is younger, the
+// instants following the offsets, so the holes a compaction left below or
+// among the young records never move it.
+func firstReadable(head, floor int64, expired stdsql.NullInt64) corestream.BoundsValue {
+	first := floor
+	//: an expired record still stored lifts the first offset past it.
+	if expired.Valid {
+		first = max(first, expired.Int64+1)
+	}
+	//: never past the next offset.
+	return corestream.BoundsValue{First: corestream.Offset(min(first, head)), Next: corestream.Offset(head)}
 }
 
 // OffsetAt returns partition's first readable offset appended at or after t.

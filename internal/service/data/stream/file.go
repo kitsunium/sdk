@@ -17,6 +17,7 @@ import (
 
 	corestream "github.com/kitsunium/sdk/internal/core/data/stream"
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	svcvfs "github.com/kitsunium/sdk/internal/service/data/vfs"
 )
 
@@ -82,9 +83,24 @@ type fileStream struct {
 // policy counts with StreamMisconfigured; and a segment it cannot trust with
 // the segmented log's own refusal under StreamBackendFailed. The stream it
 // returns also answers [corestream.Waker], [corestream.Seeker],
-// [corestream.Trimmer], [corestream.Committer] and io.Closer; Close releases
-// the directory.
+// [corestream.Trimmer], [corestream.Compactor], [corestream.Committer] and
+// io.Closer; Close releases the directory. A compaction rewrites the
+// segments holding a record it drops, each published by a rename then a
+// directory sync, a dropped record leaving its offset and instant behind.
+//
+// The groups' cursors are published through vfs's disk filesystem, so
+// where vfs has none — Windows, illumos and Solaris, which lack a
+// flushable directory handle or a mode that is an access rule (ADR 0018)
+// — NewFile refuses with proc.UnsupportedPlatform, under
+// StreamBackendFailed, before it reads the policy or the directory, and
+// returns no stream.
 func NewFile(cfg FileConfig) (s corestream.Stream, err error) {
+	//: a platform with no disk filesystem for the cursors, before any input:
+	//: the same answer on every refused platform, whatever the directory.
+	if refused := platformRefusal(); refused != nil {
+		//: UnsupportedPlatform under StreamBackendFailed.
+		return nil, refused
+	}
 	//: the shared guard, so every engine refuses identical inputs identically.
 	if invalid := cfg.Policy.Validate(); invalid != nil {
 		//: StreamMisconfigured, naming the field.
@@ -230,6 +246,24 @@ func lockDir(dir string) (*os.File, error) {
 	return file, nil
 }
 
+// platformRefusal is vfs's refusal of this platform, under
+// StreamBackendFailed, or nil where vfs has a disk filesystem. vfs.NewOS
+// judges the platform before the path, so the empty path is never opened:
+// where the platform is supported it answers the path's refusal, ignored
+// here. Checked first, it makes every refused platform answer
+// UNSUPPORTED_PLATFORM, never a refusal of the directory, its lock or its
+// mode that a later step would give there first (illumos has no file lock).
+func platformRefusal() error {
+	_, err := svcvfs.NewOS("")
+	//: the platform refused: no directory would make the engine work here.
+	if errors.Is(err, coreproc.UnsupportedPlatform) {
+		//: the platform's refusal stays the origin, so errs.HasCode finds it.
+		return backendFailed("open", "", err)
+	}
+	//: a disk filesystem exists here.
+	return nil
+}
+
 // checkPartitions refuses a directory holding a partition at or past count.
 func checkPartitions(dir string, count int) error {
 	entries, err := os.ReadDir(dir)
@@ -255,7 +289,12 @@ func checkPartitions(dir string, count int) error {
 
 // abandon drops the error of a release on a path that is already failing:
 // the refusal being returned is the one that matters.
-func abandon(error) {}
+func abandon(failure error) {
+	if failure == nil {
+		return
+	}
+	// The release failed on a path that already has its own answer.
+}
 
 // abandonLog closes a log a refusal leaves behind.
 func abandonLog(log *seglog.Log) {
@@ -443,8 +482,27 @@ func (m *fileStream) Close() error {
 	}
 	m.closed = true
 	m.mu.Unlock()
+	//: every release runs, whatever an earlier one reported.
+	return firstError(m.closeParts(), m.closeCursors(), m.releaseLock())
+}
+
+// firstError is the first non-nil of errs, nil when there is none.
+func firstError(errs ...error) error {
+	//: the first failure is the one reported.
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	//: nothing failed.
+	return nil
+}
+
+// closeParts closes every partition's log, each under its writers' lock so
+// no batch is cut, and returns the first failure.
+func (m *fileStream) closeParts() error {
 	var first error
-	//: every partition, each under its writers' lock so no batch is cut.
+	//: every partition.
 	for _, part := range m.parts {
 		part.wmu.Lock()
 		closeErr := part.log.Close()
@@ -454,24 +512,39 @@ func (m *fileStream) Close() error {
 			first = backendFailed("close", "", closeErr)
 		}
 	}
+	return first
+}
+
+// closeCursors closes the cursors' root handle.
+func (m *fileStream) closeCursors() error {
 	//: the cursors' root handle.
 	if closer, ok := m.cursors.(io.Closer); ok {
-		//: the first failure is the one reported.
-		if closeErr := closer.Close(); closeErr != nil && first == nil {
-			first = backendFailed("close", cursorsDir, closeErr)
+		//: the failure, if any.
+		if closeErr := closer.Close(); closeErr != nil {
+			return backendFailed("close", cursorsDir, closeErr)
 		}
 	}
-	//: the lock last, so no other engine opens a directory still being closed.
-	if m.lock != nil {
-		//: an explicit unlock, so a failure to release is reported.
-		if unlockErr := flock.Unlock(m.lock); unlockErr != nil && first == nil {
-			first = backendFailed("unlock", lockName, unlockErr)
-		}
-		//: the descriptor.
-		if closeErr := m.lock.Close(); closeErr != nil && first == nil {
-			first = backendFailed("close", lockName, closeErr)
-		}
+	return nil
+}
+
+// releaseLock releases the directory's lock last, so no other engine opens
+// a directory still being closed, and returns the first failure.
+func (m *fileStream) releaseLock() error {
+	//: no lock held.
+	if m.lock == nil {
+		return nil
 	}
-	//: the first failure, or nil.
-	return first
+	//: an explicit unlock, so a failure to release is reported.
+	unlockErr := flock.Unlock(m.lock)
+	//: the descriptor, closed whether or not the unlock failed.
+	closeErr := m.lock.Close()
+	//: the first failure is the one reported.
+	if unlockErr != nil {
+		return backendFailed("unlock", lockName, unlockErr)
+	}
+	//: the descriptor's own failure.
+	if closeErr != nil {
+		return backendFailed("close", lockName, closeErr)
+	}
+	return nil
 }

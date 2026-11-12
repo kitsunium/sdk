@@ -1,6 +1,7 @@
 package stream_test
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,7 +14,9 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	corestream "github.com/kitsunium/sdk/internal/core/data/stream"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	svcstream "github.com/kitsunium/sdk/internal/service/data/stream"
+	svcvfs "github.com/kitsunium/sdk/internal/service/data/vfs"
 )
 
 // testSegmentBytes is the segment size of every file stream the suite opens
@@ -25,6 +28,7 @@ const testSegmentBytes int64 = 64 << 10
 // and closes it at the test's end.
 func openFile(t *testing.T, dir string, clk clock.Timed, policy corestream.PolicyValue) corestream.Stream {
 	t.Helper()
+	requireFileEngine(t)
 	if policy.SegmentBytes == 0 {
 		policy.SegmentBytes = testSegmentBytes
 	}
@@ -63,6 +67,7 @@ func segments(t *testing.T, dir string, p int) []string {
 // TestNewFileRefusesWhatItCannotHonour: a policy, a directory and a
 // partition count it cannot serve, each refused before anything is written.
 func TestNewFileRefusesWhatItCannotHonour(t *testing.T) {
+	requireFileEngine(t)
 	t.Parallel()
 	file := filepath.Join(t.TempDir(), "plain")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
@@ -88,6 +93,7 @@ func TestNewFileRefusesWhatItCannotHonour(t *testing.T) {
 // TestNewFileRefusesAWorldWritableDirectory: any account could plant or
 // unlink a segment.
 func TestNewFileRefusesAWorldWritableDirectory(t *testing.T) {
+	requireFileEngine(t)
 	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows has no mode bits; its rule reads the DACL, as the queue's does")
@@ -114,6 +120,7 @@ func TestNewFileRefusesAWorldWritableDirectory(t *testing.T) {
 // TestASecondOpenOfADirectoryIsRefusedUntilClose: a segmented log has one
 // writer.
 func TestASecondOpenOfADirectoryIsRefusedUntilClose(t *testing.T) {
+	requireFileEngine(t)
 	t.Parallel()
 	dir := t.TempDir()
 	first := openFile(t, dir, nil, corestream.PolicyValue{})
@@ -130,6 +137,7 @@ func TestASecondOpenOfADirectoryIsRefusedUntilClose(t *testing.T) {
 // TestAReopenWithFewerPartitionsIsRefused: their records would be lost from
 // every key's hash.
 func TestAReopenWithFewerPartitionsIsRefused(t *testing.T) {
+	requireFileEngine(t)
 	t.Parallel()
 	dir := t.TempDir()
 	closeStream(t, openFile(t, dir, nil, corestream.PolicyValue{Partitions: 3}))
@@ -227,4 +235,82 @@ func TestRetainBytesIsAppliedAgainAfterAReopen(t *testing.T) {
 	if bounds := boundsOK(t, again, 0); bounds != (corestream.BoundsValue{First: 2, Next: 3}) {
 		t.Fatalf("Bounds after reopen = %+v, want {2 3}", bounds)
 	}
+}
+
+// TestACompactionRewritesSegmentsAndSurvivesAReopen: the segments holding a
+// dropped record are rewritten smaller, the survivors keep their offsets and
+// instants across a reopen, and the bytes a compaction frees count as room
+// under MaxBytes.
+func TestACompactionRewritesSegmentsAndSurvivesAReopen(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	clk := clock.NewManualClock(epoch)
+	policy := corestream.PolicyValue{CompactAfter: time.Hour, SegmentBytes: 4096, MaxBytes: 8 << 10, MaxRecordBytes: 1100}
+	s := openFile(t, dir, clk, policy)
+	payload := strings.Repeat("x", 1000)
+	for range 6 {
+		appendOK(t, s, keyed("k", payload))
+	}
+	if _, err := s.Append(t.Context(), []corestream.RecordValue{keyed("k", payload), keyed("k", payload), keyed("k", payload)}); !errs.HasCode(err, corestream.CodeStreamFull) {
+		t.Fatalf("Append over MaxBytes = %v, want STREAM_FULL", err)
+	}
+	sizeOf := func() int64 {
+		var total int64
+		for _, name := range segments(t, dir, 0) {
+			info, err := os.Stat(filepath.Join(dir, "p0", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			total += info.Size()
+		}
+		return total
+	}
+	before := sizeOf()
+	clk.Advance(time.Hour)
+	if got := compactOK(t, s, 0); got != (corestream.CompactValue{Scanned: 6, Kept: 1, Dropped: 5}) {
+		t.Fatalf("Compact = %+v, want {6 1 5}", got)
+	}
+	if after := sizeOf(); after >= before {
+		t.Fatalf("segments hold %d bytes after Compact, %d before: nothing was released", after, before)
+	}
+	appendOK(t, s, keyed("k", payload), keyed("k", payload), keyed("k", payload))
+	closeStream(t, s)
+
+	again := openFile(t, dir, clk, policy)
+	entries := readAll(t, again, 0, 0, 2)
+	if len(entries) != 4 || entries[0].Offset != 5 || entries[1].Offset != 6 || !entries[0].AppendedAt.Equal(epoch) {
+		t.Fatalf("Read after reopen = %d entries from %+v", len(entries), entries[0])
+	}
+	if bounds := boundsOK(t, again, 0); bounds != (corestream.BoundsValue{First: 0, Next: 9}) {
+		t.Fatalf("Bounds after reopen = %+v, want {0 9}", bounds)
+	}
+}
+
+// requireFileEngine skips tb where the file engine is refused by design, and
+// only there. The engine keeps its cursors in vfs's disk filesystem
+// (svcvfs.NewOS), which refuses a platform lacking the disk mechanics its
+// guarantees rest on — Windows, illumos, Solaris (ADR 0018). The predicate is
+// that refusal itself, never a list of GOOS: where vfs refuses, NewFile must
+// refuse with the same UNSUPPORTED_PLATFORM and hand back nothing, which is
+// asserted before the skip (ADR 0095); anywhere else the test runs.
+func requireFileEngine(tb testing.TB) {
+	tb.Helper()
+	cursors, vfsErr := svcvfs.NewOS(tb.TempDir())
+	//: a disk filesystem: the file engine runs here.
+	if vfsErr == nil {
+		if closer, ok := cursors.(io.Closer); ok {
+			if err := closer.Close(); err != nil {
+				tb.Fatalf("closing the probe filesystem: %v", err)
+			}
+		}
+		return
+	}
+	if !errors.Is(vfsErr, coreproc.UnsupportedPlatform) {
+		tb.Fatalf("vfs.NewOS on %s = %v, want a filesystem or UNSUPPORTED_PLATFORM", runtime.GOOS, vfsErr)
+	}
+	s, err := svcstream.NewFile(svcstream.FileConfig{Dir: tb.TempDir()})
+	if !errors.Is(err, coreproc.UnsupportedPlatform) || s != nil {
+		tb.Fatalf("NewFile on %s = (%v, %v), want (nil, UNSUPPORTED_PLATFORM): its cursors live in a disk filesystem this platform does not have", runtime.GOOS, s, err)
+	}
+	tb.Skipf("the file engine keeps its cursors in vfs's disk filesystem, which %s refuses by design (ADR 0018); NewFile refused it UNSUPPORTED_PLATFORM, asserted above (ADR 0095)", runtime.GOOS)
 }

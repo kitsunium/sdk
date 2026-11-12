@@ -118,9 +118,11 @@ func (s *sqlStream) release(ctx context.Context, partition int, target int64) er
 
 // sweep releases partition's records past RetainFor once its last sweep by
 // this engine is older than the sweep period. They are unreadable already —
-// every read filters them by age — so a sweep only gives their storage back,
-// and a sweep that fails is retried by the next one due: an Append that
-// committed is not reported as failed for it.
+// every read filters them by age —, so a sweep raises the floor to the first
+// readable offset, as a Trim does, and gives their storage back: with the
+// rows gone, the floor alone keeps that offset where it was. A sweep that
+// fails is retried by the next one due: an Append that committed is not
+// reported as failed for it.
 func (s *sqlStream) sweep(ctx context.Context, partition int, now time.Time) {
 	//: no age bound frees nothing on its own.
 	if s.policy.RetainFor == 0 {
@@ -128,22 +130,19 @@ func (s *sqlStream) sweep(ctx context.Context, partition int, now time.Time) {
 	}
 	last := s.swept[partition].Load()
 	period := min(s.policy.RetainFor, sqlSweepEvery)
-	//: swept recently enough.
-	if now.UnixNano()-last < int64(period) {
+	//: swept recently enough, or another goroutine of this engine took this
+	//: sweep.
+	if now.UnixNano()-last < int64(period) || !s.swept[partition].CompareAndSwap(last, now.UnixNano()) {
 		return
 	}
-	//: another goroutine of this engine took this sweep.
-	if !s.swept[partition].CompareAndSwap(last, now.UnixNano()) {
-		return
-	}
-	_, first, err := s.headAndLowest(ctx, s.stmts.bounds, "read the bounds", s.cutoff(now), int64(partition))
+	bounds, err := s.boundsAt(ctx, partition, s.cutoff(now))
 	//: the bound could not be read: the next sweep due tries again.
 	if err != nil {
 		s.swept[partition].Store(last)
 		return
 	}
-	//: the expired prefix; on a failure the next sweep due tries again.
-	if s.release(ctx, partition, int64(first)) != nil {
+	//: the floor first, so the first offset stays where it is once the rows go.
+	if s.Trim(ctx, partition, bounds.First) != nil {
 		s.swept[partition].Store(last)
 	}
 }

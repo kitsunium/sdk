@@ -52,6 +52,7 @@ files:
       - EntryValue
       - AppendValue
       - BoundsValue
+      - CompactValue
     name: record.go
 functions:
   - name: PartitionOf
@@ -115,6 +116,14 @@ types:
           is refused. Engines that keep no segments ignore it.
         name: SegmentBytes
         type: int64
+      - doc: |-
+          CompactAfter is how old a record must be before a [Compactor] may
+          drop it, measured from its [EntryValue.AppendedAt]: a reader that
+          stays within that window behind the head sees every update, and a
+          tombstone is kept one more CompactAfter after it became compactable.
+          Zero never compacts; negative is refused.
+        name: CompactAfter
+        type: time.Duration
     kind: struct
     methods:
       - name: Validate
@@ -140,7 +149,9 @@ types:
           be empty, for a record whose order relative to others does not matter.
         name: Key
         type: "[]byte"
-      - doc: Payload is the record's bytes. It may be empty.
+      - doc: |-
+          Payload is the record's bytes. It may be empty; under a key, an empty
+          payload is a tombstone, the key's deletion for a [Compactor].
         name: Payload
         type: "[]byte"
     kind: struct
@@ -177,8 +188,8 @@ types:
     name: AppendValue
   - fields:
       - doc: |-
-          First is the lowest offset still readable. Retention, Trim and the
-          compaction of a whole prefix raise it; nothing lowers it.
+          First is the lowest offset still readable. Retention and Trim raise
+          it, compaction never moves it; nothing lowers it.
         name: First
         type: Offset
       - doc: Next is the offset the partition's next record will take.
@@ -186,3 +197,19 @@ types:
         type: Offset
     kind: struct
     name: BoundsValue
+  - fields:
+      - doc: |-
+          Scanned is how many retained records were at least
+          [PolicyValue.CompactAfter] old, the only ones a compaction may drop.
+        name: Scanned
+        type: int64
+      - doc: Kept is how many of them survived.
+        name: Kept
+        type: int64
+      - doc: |-
+          Dropped is how many of them were removed: superseded by a later
+          record of their key, or a tombstone past its second window.
+        name: Dropped
+        type: int64
+    kind: struct
+    name: CompactValue

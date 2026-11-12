@@ -11,15 +11,16 @@ tables of the caller's database joined to the transaction its context
 carries on ADR 0151's pattern (#822, ADR 0231's second amendment), and the
 subscriber, `Subscribe`, that reads a stream for a consumer group — one
 worker per partition, the group's offset committed after the handler or by
-the handler in its own transaction (#823, ADR 0231's third amendment).
+the handler in its own transaction (#823, ADR 0231's third amendment). Every
+engine also compacts by key (#824, ADR 0231's fourth amendment).
 
 ## Surface
 
 | Symbol | What it is |
 |---|---|
-| `NewMemory(MemoryConfig) (corestream.Stream, error)` | the in-process engine, the test double of every durable one; also a `Waker`, `Seeker`, `Trimmer` and `Committer` (not a `Compactor`: #824) |
-| `NewFile(FileConfig) (corestream.Stream, error)` | the durable engine: `<Dir>/p<partition>/` one segmented log each, `<Dir>/cursors/` one file per group and partition; also a `Waker`, `Seeker`, `Trimmer`, `Committer` and `io.Closer`, the directory locked until `Close` |
-| `NewSQL(SQLConfig) (corestream.Stream, error)` | the engine over `<Table>`, `<Table>__heads` and `<Table>__cursors`: an `Append` or a `Commit` inside the caller's transaction is a savepoint of it, the `Waker` fires through `Deferrer` after its commit; also a `Waker`, `Seeker`, `Trimmer` and `Committer`; a `RetainBytes` or `MaxBytes` is refused (`SQL_STREAM_MISCONFIGURED`) |
+| `NewMemory(MemoryConfig) (corestream.Stream, error)` | the in-process engine, the test double of every durable one; also a `Waker`, `Seeker`, `Trimmer`, `Compactor` (in place) and `Committer` |
+| `NewFile(FileConfig) (corestream.Stream, error)` | the durable engine: `<Dir>/p<partition>/` one segmented log each, `<Dir>/cursors/` one file per group and partition; also a `Waker`, `Seeker`, `Trimmer`, `Compactor` (segments rewritten through `seglog.Rewrite`), `Committer` and `io.Closer`, the directory locked until `Close` |
+| `NewSQL(SQLConfig) (corestream.Stream, error)` | the engine over `<Table>`, `<Table>__heads` and `<Table>__cursors`: an `Append` or a `Commit` inside the caller's transaction is a savepoint of it, the `Waker` fires through `Deferrer` after its commit; also a `Waker`, `Seeker`, `Trimmer`, `Compactor` (bounded DELETEs by offset) and `Committer`; a `RetainBytes` or `MaxBytes` is refused (`SQL_STREAM_MISCONFIGURED`) |
 | `SQLConfig{Transactor, Dialect, Table, Policy, Clock}` | the transactor (a `Joiner` and a `Deferrer`), the dialect, the table (lower-case words joined by single underscores, at most 54 bytes, not `sqlite_…`), the policy and the engine's clock (`clock.Clock`, nil: `clock.System`) |
 | `SQLMigration(dialect, table, version) (coresql.MigrationValue, error)` | the three `CREATE TABLE IF NOT EXISTS`, checksummed; Down drops them |
 | `FileConfig{Clock, Dir, Policy}` | the clock that stamps and ages, the stream directory (the queue's directory rules), and the policy, refused at construction by the core's `Validate` and by a `MaxRecordBytes` one segment record cannot hold |
@@ -40,23 +41,27 @@ the handler in its own transaction (#823, ADR 0231's third amendment).
 | `memory_read.go` | `Read`, `Bounds`, `OffsetAt`, `Wake`, the lazy age retention (`retained`, `expired`) |
 | `memory_retain.go` | the `MaxBytes` wait (`reserve`, `await`), `RetainBytes`, the removal of a prefix (`drop`), `Trim` |
 | `memory_commit.go` | `Commit`, `Committed` |
-| `memory_compliance.go` | the compile-time assertions of the port and its four siblings |
+| `memory_compact.go` | `Compact`: survivors slid down in place, the freed bytes released under `MaxBytes` |
+| `compact.go` | what every engine decides by: `compactLines` (the compactable instant and the tombstone's), `drops`, `compactResult` |
+| `memory_compliance.go` | the compile-time assertions of the port and its five siblings |
 | `file_config.go` | `FileConfig`, the directory's preparation and checks (`prepareRoot`, `prepareSub`), `backendFailed`, `directoryUnusable` |
 | `dirtrust_posix.go`, `dirtrust_windows.go` | the root's and the subdirectories' permission rules — the mode bits, or the DACL through `kernel/fs/winacl` — copied from the queue |
 | `file.go` | `fileStream`, `NewFile`, the lock, the partition count check, `Append` (`write`, `syncBatch`, `release`), `stamp`, `Close` |
-| `file_part.go` | `filePart`: the per-partition index (prefix sums of bytes, batches' first offsets and instants, `kept`), `first`, `bounded`, `claim`, `offsetAt`, `rebuild` at open |
-| `file_record.go` | a record's segment payload: its batch's instant, its key's length, the key, the payload; the head and tail kind bytes |
-| `file_read.go` | `Read` (one `Range`), `Bounds`, `OffsetAt`, `Wake` |
+| `file_part.go` | `filePart`: the per-partition index (prefix sums of bytes, batches' first offsets and instants, `kept`), `first`, `bounded`, `claim`, `forgetBelow`, `offsetAt`, `rebuild` at open, `forget` (a compaction's dropped bytes) |
+| `file_record.go` | a record's segment payload: its batch's instant, its key's length, the key, the payload; the head and tail kind bytes; a compacted record's payload, the instant alone (`encodeGone`, `isGone`, `decodeStored`) |
+| `file_read.go` | `Read` (one `Range` a round, holes skipped), `Bounds`, `OffsetAt`, `Wake` |
+| `file_compact.go` | `Compact`: the plan (each key's last compactable offset) read from the log, then `seglog.Rewrite` replacing each dropped record by its instant; `youngFrom` |
 | `file_retain.go` | the `MaxBytes` wait (`reserve`, `expireAll`, `untilExpiry`, `await`) and `Trim` |
 | `file_commit.go` | `Commit`, `Committed`: `cursors/<digest of the group>.<partition>`, the offset then the group |
-| `file_compliance.go` | the compile-time assertions of the port, its four siblings and `io.Closer` |
+| `file_compliance.go` | the compile-time assertions of the port, its five siblings and `io.Closer` |
 | `sql_config.go` | `SQLConfig`, its validation (`validateSQLNames`, `sqlMisconfigured`), `sqlClockOrSystem` |
 | `sql.go` | `sqlStream`, `NewSQL`, the process's wake table, `Partitions`, `Append` (`write`), `run`, `announce`, `failed`, the age `cutoff` |
-| `sql_read.go` | `Read` (one statement), `Bounds`, `OffsetAt`, `Wake` |
-| `sql_retain.go` | `Trim` (`raiseFloor`, then `release` in bounded DELETEs) and the age `sweep` an Append runs at most once a period |
+| `sql_read.go` | `Read` (one statement), `Bounds` (`boundsAt`, `firstReadable`), `OffsetAt`, `Wake` |
+| `sql_compact.go` | `Compact`: compactable rows read a page at a time, the decision in the engine, DELETEs by offset |
+| `sql_retain.go` | `Trim` (`raiseFloor`, then `release` in bounded DELETEs) and the age `sweep` an Append runs at most once a period, a `Trim` to the first readable offset |
 | `sql_commit.go` | `Commit`, `Committed`: the cursor keyed by the SHA-256 of its group |
 | `sql_dialect.go` | every statement, rendered once per dialect; the DDL and `SQLMigration` |
-| `sql_compliance.go` | the compile-time assertions of the port and its four siblings |
+| `sql_compliance.go` | the compile-time assertions of the port and its five siblings |
 | `batch.go` | what every engine checks before it writes (`admit`, `keyedPartition`) and the byte copies (`carve`, `copyEntries`) |
 | `subscribe_config.go` | `CommitMode` and its two values, `Handler`, `ParkConfig`, `SubscriberConfig`, its `validate`, `missing` and `normalized` |
 | `subscribe.go` | `Subscribe`, `subscriber`, `cursor`, a worker's `run`, `follow`, `start`, `turn`, `settle`, `handle` (a panic is a refusal), `advance` (the commit), `sleep`, `settled` and `bound` (an outcome past the stop) |
@@ -66,6 +71,7 @@ the handler in its own transaction (#823, ADR 0231's third amendment).
 | `wake.go` | `wakeSignal`, the queue's broadcast without its due instant |
 | `harness_external_test.go` | `everyStream`, the table of engines, and the helpers the suite shares |
 | `conformance_external_test.go` | the cases every engine runs, each over `everyStream` |
+| `compact_external_test.go` | the compaction cases every engine runs: a key's last compactable record and every young one kept at their offsets, `Bounds` unmoved, a read inside a hole; a tombstone kept one window then gone with its key, `OFFSET_TRIMMED` only below the first offset; a young record untouched; a zero `CompactAfter` |
 | `memory_external_test.go` | what only the memory engine has: its construction |
 | `sqlfake_external_test.go`, `sql_export_test.go` | the fake SQL engine — a `database/sql` driver keeping the three tables in maps, the queue's fake for these tables — and the rendered statements it recognises |
 | `sql_external_test.go` | what only the SQL engine has: an Append that exists if and only if its transaction commits, a failed one leaving the caller's transaction usable with the driver's words withheld, offsets committed in order under concurrent appenders some of which roll back, the statements per call (`Append` = 3 + one per chunk of 199, `Read` = 1, `Commit` = 2), a Commit in the handler's transaction, Trim and the age sweep deleting rows, the refusals, the statement texts pinned |
@@ -74,6 +80,7 @@ the handler in its own transaction (#823, ADR 0231's third amendment).
 | `subscribe_external_test.go` | the subscriber over `everyStream`: two groups each receiving every record once, per-key order over four partitions and a failing partition blocking only itself, a crash before the commit redelivering, a record parked as JSON, the fence keeping one reader per partition, the refusals |
 | `subscribe_sql_external_test.go` | exactly-once in effect on the SQL engine: the handler's effect (a record on partition 1) and its Commit in one transaction failed after the write then committed, one effect after a restart; and the contrast, `CommitAfterHandler` applying the effect twice |
 | `subscribe_bench_test.go` | `BenchmarkSubscribe`: a record delivered and committed at batches of 1, 16 and 256 |
+| `compact_bench_test.go` | `BenchmarkCompact`: 4 096 records over 64 keys compacted, memory and file |
 | `stream_bench_test.go`, `BENCH.md` | Append (1/16/256 records at 64 B and 4 KiB), Read (1/16), `PartitionOf`, keyed against unkeyed; the file engine's Append (1/16/256) and Read of 16 at a 1 000 and a 1 000 000-record backlog |
 
 ## The conformance suite, and adding an engine
@@ -85,7 +92,7 @@ offsets per partition from zero, the empty read at the next offset,
 batches in turn, `PARTITIONS_MIXED`, `RECORD_TOO_LARGE` before anything is
 written, `INVALID_BATCH_SIZE`, `UNKNOWN_PARTITION` on every call, Trim then
 Bounds, the Commit/Committed round trip and `UNKNOWN_GROUP`, the Waker closed
-by an Append, `OffsetAt`, retention by age and by bytes, `STREAM_FULL` at once
+by an Append, `OffsetAt`, retention by age and by bytes, compaction by key, `STREAM_FULL` at once
 and after `BlockTimeout` and the wait a Trim ends, the engine's own copy of
 every byte, and concurrent appends. An engine joins with ONE row of
 `everyStream` — a name and a factory over `(t, clock.Timed, PolicyValue)`. The
@@ -142,10 +149,11 @@ without it: a sibling is optional (ADR 0039).
   head advanced: 3 + chunks statements. A rolled-back Append takes its
   offsets back with it.
 - **The SQL engine's Read is one unlocked statement**: the head row LEFT
-  JOINed with the readable records. The records are stored contiguously from
-  the head's floor and stamped in offset order, so a first row past `from`
-  means `from` was trimmed (#824 must revisit this once compaction leaves
-  gaps).
+  JOINed with the readable records, and the head's floor beside the highest
+  stored offset past the age bound: the first readable offset is the floor
+  or the one after that, whichever is higher (#824). Instants follow
+  offsets, so a compaction's holes never move it, and the age sweep raises
+  the floor before it deletes the expired rows.
 - **The SQL engine's Trim moves a floor, then deletes.** The head's
   `first_offset` is raised in one statement under the head's lock, so the
   records below are unreadable at once; the rows go in DELETEs of at most
@@ -154,6 +162,20 @@ without it: a sibling is optional (ADR 0039).
   1 min)` per partition and engine — a failed sweep is retried by the next.
 - **The SQL engine keeps no byte count**: `RetainBytes` and `MaxBytes` are
   refused at construction rather than ignored.
+- **Compaction is one decision on every engine** (`compact.go`): among the
+  records at least `CompactAfter` old, a key's last stays and every earlier
+  one goes, a tombstone goes once twice `CompactAfter` old, an unkeyed
+  record stays; a younger record is never touched. Offsets keep, holes are
+  skipped by `Read`, `Bounds` does not move. Nothing runs it on its own.
+- **The file engine's hole is a record**: a dropped record is rewritten
+  through `seglog.Rewrite` as its batch's instant alone (8 bytes, a length
+  no encoded record has), same offset, same kind byte, so the index, the
+  batches and the age bound are untouched and a reopen reads the hole; its
+  key and payload bytes leave the prefix sums and `MaxBytes`' count.
+- **The SQL engine compacts in the engine, not in SQL**: the rows are read a
+  page of 1 024 at a time without their payload, the decision made by
+  `compactLines`, the dropped rows deleted by offset, 256 a statement and
+  only while still readable — no dialect-specific `NOT IN (SELECT …)`.
 - **A group's cursor is keyed by the SHA-256 of its name**, so no group is
   too long for a key; the name is kept beside it for an operator.
 

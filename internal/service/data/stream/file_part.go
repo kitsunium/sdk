@@ -15,10 +15,10 @@ import (
 // rebuildChunk is how many records a reopen reads with one Range.
 const rebuildChunk = 4096
 
-// compactAfter is how many offsets below the first retained one the index
+// forgetAfter is how many offsets below the first retained one the index
 // keeps before it lets them go: a copy of the index every so often, rather
 // than one per trim.
-const compactAfter = 4096
+const forgetAfter int = 4096
 
 // batchMark is where one batch starts and the instant it was stamped with.
 type batchMark struct {
@@ -127,7 +127,7 @@ func (p *filePart) bounded(lo, limit corestream.Offset, size, retainBytes int64)
 // index records a batch of sizes, stamped at stamp, as the records from next
 // on, and claims everything below claim. It returns the bytes the claim
 // released. The caller holds mu exclusively, and wmu.
-func (p *filePart) index(stamp int64, sizes []int64, claim corestream.Offset) (freed int64) {
+func (p *filePart) index(stamp int64, sizes []int64, claim corestream.Offset) int64 {
 	p.batches = append(p.batches, batchMark{first: p.next(), stamp: stamp})
 	total := p.prefix[len(p.prefix)-1]
 	//: one prefix entry per record.
@@ -142,24 +142,24 @@ func (p *filePart) index(stamp int64, sizes []int64, claim corestream.Offset) (f
 // claim makes to the first offset retained for good and returns the bytes it
 // released; at or below kept it changes nothing. The caller holds mu
 // exclusively.
-func (p *filePart) claim(to corestream.Offset) (freed int64) {
+func (p *filePart) claim(to corestream.Offset) int64 {
 	//: claims only move forward.
 	if to <= p.kept {
 		//: nothing released.
 		return 0
 	}
-	freed = p.between(p.kept, to)
+	freed := p.between(p.kept, to)
 	p.kept = to
-	p.compact()
+	p.forgetBelow()
 	//: what the claim released.
 	return freed
 }
 
-// compact lets the index forget what lies far enough below kept.
-func (p *filePart) compact() {
+// forgetBelow lets the index forget what lies far enough below kept.
+func (p *filePart) forgetBelow() {
 	drop := int(p.kept - p.base)
-	//: a copy every compactAfter offsets, never one per claim.
-	if drop < compactAfter {
+	//: a copy every forgetAfter offsets, never one per claim.
+	if drop < forgetAfter {
 		return
 	}
 	p.prefix = slices.Clone(p.prefix[drop:])
@@ -224,7 +224,7 @@ func (p *filePart) rebuild() (latest int64, err error) {
 		}
 		//: every record of the chunk.
 		for i, payload := range dst {
-			stamp, record, ok := decodeRecord(payload)
+			stamp, record, _, ok := decodeStored(payload)
 			//: bytes this engine cannot have written.
 			if !ok {
 				//: refused rather than skipped: a skip would renumber nothing and lose a record.
@@ -247,4 +247,34 @@ func (p *filePart) rebuild() (latest int64, err error) {
 	}
 	//: indexed.
 	return latest, nil
+}
+
+// forget counts the records a compaction dropped, at offsets sorted
+// ascending, as holding no byte from here on, and returns the bytes they
+// held. An offset already claimed is skipped: its bytes were released then.
+// The caller holds mu exclusively.
+func (p *filePart) forget(dropped []corestream.Offset) int64 {
+	first := sort.Search(len(dropped), func(i int) bool {
+		//: still counted.
+		return dropped[i] >= p.kept
+	})
+	dropped = dropped[first:]
+	//: nothing still counted was dropped.
+	if len(dropped) == 0 {
+		return 0
+	}
+	var freed int64
+	next := 0
+	//: every prefix sum from the first drop on, less what was dropped below it.
+	for i := int(dropped[0] - p.base); i < len(p.prefix)-1; i++ {
+		size := p.prefix[i+1] - (p.prefix[i] + freed)
+		//: a dropped record releases its size.
+		if next < len(dropped) && dropped[next] == p.base+corestream.Offset(i) {
+			freed += size
+			next++
+		}
+		p.prefix[i+1] -= freed
+	}
+	//: what the compaction released.
+	return freed
 }

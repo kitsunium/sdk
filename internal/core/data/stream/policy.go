@@ -22,8 +22,8 @@ const DefaultSegmentBytes int64 = 64 << 20
 // # Its zero value WORKS, and that is the decision
 //
 // A stream's zero policy is one partition, records of up to
-// [DefaultMaxRecordBytes], kept forever, never full, in segments of
-// [DefaultSegmentBytes]. Every zero here has one reading (ADR 0031's clamp
+// [DefaultMaxRecordBytes], kept forever, never full, never compacted, in
+// segments of [DefaultSegmentBytes]. Every zero here has one reading (ADR 0031's clamp
 // branch): unlike the queue's visibility timeout, no field has two opposite
 // readings of zero, so none is refused at zero. What is refused is a
 // negative value — it is not a bound, and the caller who wrote it meant
@@ -61,6 +61,12 @@ type PolicyValue struct {
 	// unit its retention releases. Zero means [DefaultSegmentBytes]; negative
 	// is refused. Engines that keep no segments ignore it.
 	SegmentBytes int64
+	// CompactAfter is how old a record must be before a [Compactor] may
+	// drop it, measured from its [EntryValue.AppendedAt]: a reader that
+	// stays within that window behind the head sees every update, and a
+	// tombstone is kept one more CompactAfter after it became compactable.
+	// Zero never compacts; negative is refused.
+	CompactAfter time.Duration
 }
 
 // Validate reports whether the policy is one an engine can honour, and
@@ -105,6 +111,7 @@ func (p PolicyValue) firstNegative() (field string, value int64, ok bool) {
 		{"MaxBytes", p.MaxBytes},
 		{"BlockTimeout", int64(p.BlockTimeout)},
 		{"SegmentBytes", p.SegmentBytes},
+		{"CompactAfter", int64(p.CompactAfter)},
 	}
 	//: in declaration order, so the refusal names the first mistake a reader sees.
 	for _, f := range fields {

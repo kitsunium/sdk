@@ -308,7 +308,7 @@ func (c *fakeSQLConn) run(ctx context.Context, query string, args []driver.Value
 // writes reports whether an autocommit statement of role takes the writer.
 func writes(role string) bool {
 	switch role {
-	case "head", "read", "bounds", "offsetAt", "lowest", "headNext", "committed":
+	case "head", "read", "bounds", "offsetAt", "lowest", "headNext", "committed", "compactScan":
 		return false
 	default:
 		return true
@@ -361,6 +361,9 @@ func (e *sqlEngine) recognise(query string, nargs int) string {
 	if nargs > 0 && nargs%5 == 0 && query == e.stmts.InsertRows(nargs/5) {
 		return "insertRows"
 	}
+	if nargs > 2 && query == e.stmts.CompactDelete(nargs-2) {
+		return "compactDelete"
+	}
 	return query
 }
 
@@ -406,7 +409,23 @@ func execute(role string, args []driver.Value, work streamTables) (answer, error
 	case "read":
 		return read(work, args), nil
 	case "bounds":
-		return lowestReadable(work, args[1].(int64), args[0].(int64), 0), nil
+		head, found := work.heads[args[1].(int64)]
+		if !found {
+			return answer{}, nil
+		}
+		return answer{rows: [][]driver.Value{{head.next, head.first, highestExpired(work, args[1].(int64), args[0].(int64))}}}, nil
+	case "compactScan":
+		return compactScan(work, args), nil
+	case "compactDelete":
+		var n int64
+		for _, offset := range args[2:] {
+			key := recordKey{part: args[0].(int64), offset: offset.(int64)}
+			if row, found := work.records[key]; found && row.at > args[1].(int64) {
+				delete(work.records, key)
+				n++
+			}
+		}
+		return answer{affected: n}, nil
 	case "offsetAt":
 		return lowestReadable(work, args[2].(int64), args[0].(int64), args[1].(int64)), nil
 	case "lowest":
@@ -453,24 +472,64 @@ func readable(work streamTables, part, cutoff int64) []recordKey {
 	return keys
 }
 
-// read answers the read statement: the head's next offset on every row, the
-// records from an offset on, or one row of NULLs.
+// read answers the read statement: the head on every row — next offset,
+// floor, highest expired offset —, the records from an offset on, or one
+// row with the four record columns NULL.
 func read(work streamTables, args []driver.Value) answer {
-	cutoff, from, part, limit := args[0].(int64), args[1].(int64), args[2].(int64), int(args[3].(int64))
+	expiredCut, cutoff, from, part, limit := args[0].(int64), args[1].(int64), args[2].(int64), args[3].(int64), int(args[4].(int64))
 	head, found := work.heads[part]
 	if !found {
 		return answer{}
 	}
+	expired := highestExpired(work, part, expiredCut)
 	var rows [][]driver.Value
 	for _, key := range readable(work, part, cutoff) {
 		if key.offset < from || len(rows) == limit {
 			continue
 		}
 		row := work.records[key]
-		rows = append(rows, []driver.Value{head.next, key.offset, row.at, nullable(row.key), nullable(row.payload)})
+		rows = append(rows, []driver.Value{head.next, head.first, expired, key.offset, row.at, nullable(row.key), nullable(row.payload)})
 	}
 	if len(rows) == 0 {
-		rows = [][]driver.Value{{head.next, nil, nil, nil, nil}}
+		rows = [][]driver.Value{{head.next, head.first, expired, nil, nil, nil, nil}}
+	}
+	return answer{rows: rows}
+}
+
+// highestExpired answers the subquery of the read and bounds statements: the
+// highest stored offset at or above the floor appended at or before cutoff,
+// NULL when there is none.
+func highestExpired(work streamTables, part, cutoff int64) driver.Value {
+	head := work.heads[part]
+	var high driver.Value
+	for key, row := range work.records {
+		if key.part == part && key.offset >= head.first && row.at <= cutoff && (high == nil || key.offset > high.(int64)) {
+			high = key.offset
+		}
+	}
+	return high
+}
+
+// compactScan answers the compaction's read: offset, key, instant and an
+// empty payload's flag of the rows from an offset on, appended after the
+// age cutoff and at or before the compaction's line, a page at most.
+func compactScan(work streamTables, args []driver.Value) answer {
+	part, from, cutoff, line, limit := args[0].(int64), args[1].(int64), args[2].(int64), args[3].(int64), int(args[4].(int64))
+	var keys []recordKey
+	for key, row := range work.records {
+		if key.part == part && key.offset >= from && row.at > cutoff && row.at <= line {
+			keys = append(keys, key)
+		}
+	}
+	slices.SortFunc(keys, func(a, b recordKey) int { return cmp.Compare(a.offset, b.offset) })
+	var rows [][]driver.Value
+	for _, key := range keys[:min(len(keys), limit)] {
+		row := work.records[key]
+		empty := int64(0)
+		if len(row.payload) == 0 {
+			empty = 1
+		}
+		rows = append(rows, []driver.Value{key.offset, nullable(row.key), row.at, empty})
 	}
 	return answer{rows: rows}
 }

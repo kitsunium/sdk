@@ -208,6 +208,9 @@ func TestAPartitionOutsideTheStreamIsRefusedByEveryCall(t *testing.T) {
 		if trimmer, ok := s.(corestream.Trimmer); ok {
 			calls["Trim"] = func(p int) error { return trimmer.Trim(t.Context(), p, 0) }
 		}
+		if compactor, ok := s.(corestream.Compactor); ok {
+			calls["Compact"] = func(p int) error { _, err := compactor.Compact(t.Context(), p); return err }
+		}
 		if committer, ok := s.(corestream.Committer); ok {
 			calls["Commit"] = func(p int) error { return committer.Commit(t.Context(), "g", p, 0) }
 			calls["Committed"] = func(p int) error { _, err := committer.Committed(t.Context(), "g", p); return err }

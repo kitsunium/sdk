@@ -19,8 +19,8 @@ subscriber (#823).
 |---|---|
 | `gen_ports.go` | written by kit from `design/data/stream.yaml`: `Stream` (FROZEN at four), `Waker`, `Seeker`, `Trimmer`, `Compactor`, `Committer` |
 | `gen_codes.go` | written by kit: `0.2.38.*` (the core's nine) and `0.3.94.*` (the engines' and the subscriber's four) with their sentinels |
-| `record.go` | `Offset`, `RecordValue`, `EntryValue`, `AppendValue`, `BoundsValue` |
-| `policy.go` | `PolicyValue`, `Validate`, `Normalized`, `DefaultMaxRecordBytes`, `DefaultSegmentBytes` |
+| `record.go` | `Offset`, `RecordValue`, `EntryValue`, `AppendValue`, `BoundsValue`, `CompactValue` |
+| `policy.go` | `PolicyValue` (with `CompactAfter`, #824), `Validate`, `Normalized`, `DefaultMaxRecordBytes`, `DefaultSegmentBytes` |
 | `partition.go` | `PartitionOf` — 32-bit FNV-1a modulo the partition count, inlined so it allocates nothing |
 | `doc.go`, `gen_api_test.go` | written by kit: the package comment and the pins |
 | `*_external_test.go` | the policy's refusals by field, `PartitionOf` held to `hash/fnv`, every sentinel's value, reason and statuses |
@@ -44,6 +44,12 @@ subscriber (#823).
 - **`PolicyValue` works at its zero** (§6): every zero has one reading, so
   this struct is ADR 0031's clamp branch alone; what it refuses is a negative
   value, a `BlockTimeout` with no `MaxBytes` and a `MaxBytes` below one record.
+- **Compaction keeps offsets and leaves holes** (ADR 0231's amendment for
+  #824): `Compact` drops, among the records at least `CompactAfter` old,
+  every one a later record of its key supersedes, and a tombstone — a keyed
+  record with an empty payload — once it is twice `CompactAfter` old. A read
+  skips a hole; `Bounds` does not move; `OFFSET_TRIMMED` stays a read below
+  the first retained offset. A zero `CompactAfter` never compacts.
 
 ## Do NOT
 

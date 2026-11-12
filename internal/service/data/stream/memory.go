@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -11,22 +12,34 @@ import (
 )
 
 // memPartition is one partition of a memory stream: its retained entries, in
-// offset order, and the offset of the first of them.
+// offset order, the offset of the first of them and the next one.
 type memPartition struct {
-	// entries holds the retained records; entries[i].Offset is first + i.
+	// entries holds the retained records in offset order. A compaction
+	// leaves holes, so an entry's offset is its own and never its index.
 	entries []corestream.EntryValue
 	// first is the lowest offset still readable. Trimming raises it; nothing
-	// lowers it, and it stays put when entries is empty, so the next offset
-	// (first + len(entries)) never moves back.
+	// lowers it, and a compaction leaves it where it is.
 	first corestream.Offset
+	// nextOffset is the offset the next record takes; it never moves back.
+	nextOffset corestream.Offset
 	// bytes is the key and payload bytes the retained entries hold.
 	bytes int64
 }
 
 // next returns the offset the partition's next record will take.
 func (p *memPartition) next() corestream.Offset {
-	//: offsets are contiguous from first.
-	return p.first + corestream.Offset(len(p.entries))
+	//: kept apart from the entries, which may end in a hole.
+	return p.nextOffset
+}
+
+// index returns the position in entries of the first entry at or past
+// offset.
+func (p *memPartition) index(offset corestream.Offset) int {
+	//: the entries are sorted by offset.
+	return sort.Search(len(p.entries), func(i int) bool {
+		//: at or past offset.
+		return p.entries[i].Offset >= offset
+	})
 }
 
 // cursorKey names one group's cursor on one partition.
@@ -78,8 +91,9 @@ type memoryStream struct {
 // It refuses a policy it cannot honour at CONSTRUCTION, through the same
 // core/data/stream.PolicyValue.Validate every engine runs, which is what
 // makes it an honest double. The stream it returns also answers
-// [corestream.Waker], [corestream.Seeker], [corestream.Trimmer] and
-// [corestream.Committer]; it keeps nothing past the process, so a restart
+// [corestream.Waker], [corestream.Seeker], [corestream.Trimmer],
+// [corestream.Compactor] and [corestream.Committer]; it keeps nothing past
+// the process, so a restart
 // is a total loss.
 func NewMemory(cfg MemoryConfig) (s corestream.Stream, err error) {
 	//: the shared guard, so every engine refuses identical inputs identically.
@@ -164,6 +178,7 @@ func (m *memoryStream) store(
 			Offset:     first + corestream.Offset(i),
 		})
 	}
+	part.nextOffset += corestream.Offset(len(records))
 	part.bytes += size
 	m.held += size
 	m.retainBytes(part, len(records))

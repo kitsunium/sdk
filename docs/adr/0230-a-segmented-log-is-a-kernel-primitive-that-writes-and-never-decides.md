@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-11-12
 - **Deciders**: SDK maintainers
+- **Amended**: 2026-11-12 for the stream's compaction (#824), below.
 - **Amends**: [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) (the kernel holds what the domains were rewriting — here before a second domain rewrote it) and the rule of `internal/kernel/fs/CLAUDE.md` (a member of the family that writes). One new kernel package, `internal/kernel/fs/seglog` (`0.1.8.*`).
 - **Related**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) D4, D16 and R8/R9 (the consensus file log this is extracted from), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (where a code is declared), issues [#820](https://github.com/kitsunium/sdk/issues/820) (this primitive), [#890](https://github.com/kitsunium/sdk/issues/890) (the `data/stream` program), [#821](https://github.com/kitsunium/sdk/issues/821) (its file engine, the first caller)
 
@@ -80,3 +81,30 @@ duplicate the code whose every line has a reason.
   a fix to both, and the two `CLAUDE.md` files say so.
 - One more `fs/` member that writes: the family's rule now reads "measures,
   performs one primitive, or keeps a log, and never decides".
+
+## Amendment — rewriting a record (#824), 2026-11-12
+
+`data/stream`'s compaction must give back the bytes of the records it drops
+without renumbering the survivors, which a log addressed by a contiguous
+index cannot do by deleting them. `Log.Rewrite(below, edit)` is the one call
+that changes a synced record, and it changes nothing a recovery reads:
+
+1. **The caller edits, the log rewrites.** `edit` is offered every retained
+   record below `below`, in index order, and returns a new kind and payload
+   or leaves it. The log decides nothing about which: the decision —
+   superseded value, tombstone past its window — is the stream's.
+2. **Whole segments, published as the log publishes one.** A segment holding
+   a changed record is written again whole into its `.tmp` — the same
+   records, indexes, batch numbers and end flags; only the changed ones'
+   kind and payload differ, the seal's offset field following its new place
+   —, synced, renamed over the old file, the directory synced. Recovery
+   already deletes every `.tmp` and reads either file the same way: no rule
+   of the recovery changes, so the consensus copy needs no matching change
+   (§6). A sealed segment shrinks to its records; the last keeps its size.
+3. **Failures.** One before the rename leaves the segment as it was and the
+   log usable; one from the rename on is final, as a failed sync is. The old
+   file is closed before the rename, which Windows requires.
+
+The record is still never truncated, and an index never moves: "no suffix
+truncation" stands.
+

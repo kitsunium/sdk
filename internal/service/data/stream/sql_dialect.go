@@ -22,6 +22,18 @@ const sqlRowsPerStatement int = 199
 // statements rather than one that holds its locks for as long as it runs.
 const sqlOffsetsPerDelete int64 = 1024
 
+// sqlCompactPerDelete bounds how many offsets one DELETE of a compaction
+// names, and sqlCompactPage how many rows one of its reads returns, so a
+// compaction is many short statements rather than one long one.
+const (
+	sqlCompactPerDelete int = 256
+	sqlCompactPage      int = 1024
+)
+
+// sqlMigrationPrefix starts the name of every migration SQLMigration builds,
+// so a version table read during an incident says what created the tables.
+const sqlMigrationPrefix string = "stream "
+
 // sqlStatements are the statements one SQL stream sends, rendered once for
 // its dialect and tables at NewSQL; only an INSERT shorter than a full chunk
 // is rendered per call.
@@ -44,15 +56,22 @@ type sqlStatements struct {
 	head string
 	// insertFull inserts a full chunk of sqlRowsPerStatement records.
 	insertFull string
+	// compactFull deletes a full chunk of sqlCompactPerDelete offsets a
+	// compaction dropped.
+	compactFull string
 	// advance moves the head past a batch and records its instant.
 	advance string
 	// floor raises the head's floor to a Trim's offset.
 	floor string
-	// read reads the head and up to a bound of records from an offset, one
-	// unlocked statement: the head row LEFT JOINed with the readable
-	// records, so a partition with no record still answers its next offset.
+	// read reads the head — next offset, floor, and the highest stored
+	// offset past the age bound — and up to a bound of records from an
+	// offset, one unlocked statement: the head row LEFT JOINed with the
+	// readable records, so a partition with no record still answers.
 	read string
-	// bounds reads the head's next offset and the lowest readable record.
+	// bounds reads the head's next offset, its floor and the highest stored
+	// offset past the age bound: the first readable offset is the floor or
+	// the one after that, whichever is higher, whatever holes a compaction
+	// left.
 	bounds string
 	// offsetAt reads the head's next offset and the lowest readable record
 	// appended at or after an instant.
@@ -63,6 +82,10 @@ type sqlStatements struct {
 	release string
 	// headNext reads a partition's next offset, unlocked.
 	headNext string
+	// compactScan reads a page of the readable records old enough to be
+	// compacted, from an offset on: offset, key, instant and whether the
+	// payload is empty.
+	compactScan string
 	// commit writes a group's cursor, replacing the one it had.
 	commit string
 	// committed reads a group's cursor.
@@ -81,16 +104,23 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 	h := dialect.QuoteIdent(table + sqlHeadsSuffix)
 	c := dialect.QuoteIdent(table + sqlCursorsSuffix)
 	readable := "r.part = h.part AND r.record_offset >= h.first_offset AND r.appended_at > "
+	expired := func(n int) string {
+		//: the highest stored offset at or above the floor past the age bound.
+		return "(SELECT MAX(x.record_offset) FROM " + t + " x WHERE x.part = h.part AND x.record_offset >= h.first_offset" +
+			" AND x.appended_at <= " + p(n) + ")"
+	}
 	s := sqlStatements{
 		lockHead: lockHeadStatement(dialect, h),
 		head:     "SELECT next_offset, first_offset, last_at FROM " + h + " WHERE part = " + p(1) + dialect.ForUpdate(),
 		advance:  "UPDATE " + h + " SET next_offset = " + p(1) + ", last_at = " + p(2) + " WHERE part = " + p(3),
 		floor:    "UPDATE " + h + " SET first_offset = " + p(1) + " WHERE part = " + p(2),
-		read: "SELECT h.next_offset, r.record_offset, r.appended_at, r.record_key, r.payload FROM " + h + " h LEFT JOIN " + t +
-			" r ON " + readable + p(1) + " AND r.record_offset >= " + p(2) + " WHERE h.part = " + p(3) +
-			" ORDER BY r.record_offset LIMIT " + p(4),
-		bounds: "SELECT h.next_offset, (SELECT MIN(r.record_offset) FROM " + t + " r WHERE " + readable + p(1) + ") FROM " + h +
-			" h WHERE h.part = " + p(2),
+		read: "SELECT h.next_offset, h.first_offset, " + expired(1) + ", r.record_offset, r.appended_at, r.record_key, r.payload FROM " +
+			h + " h LEFT JOIN " + t + " r ON " + readable + p(2) + " AND r.record_offset >= " + p(3) + " WHERE h.part = " + p(4) +
+			" ORDER BY r.record_offset LIMIT " + p(5),
+		bounds: "SELECT h.next_offset, h.first_offset, " + expired(1) + " FROM " + h + " h WHERE h.part = " + p(2),
+		compactScan: "SELECT record_offset, record_key, appended_at, CASE WHEN payload IS NULL THEN 1 ELSE 0 END FROM " + t +
+			" WHERE part = " + p(1) + " AND record_offset >= " + p(2) + " AND appended_at > " + p(3) + " AND appended_at <= " + p(4) +
+			" ORDER BY record_offset LIMIT " + p(5),
 		offsetAt: "SELECT h.next_offset, (SELECT MIN(r.record_offset) FROM " + t + " r WHERE " + readable + p(1) +
 			" AND r.appended_at >= " + p(2) + ") FROM " + h + " h WHERE h.part = " + p(3),
 		lowest:    "SELECT MIN(record_offset) FROM " + t + " WHERE part = " + p(1),
@@ -102,6 +132,7 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 		dialect:   dialect,
 	}
 	s.insertFull = s.insertRows(sqlRowsPerStatement)
+	s.compactFull = s.compactDelete(sqlCompactPerDelete)
 	//: rendered once, sent many times.
 	return s
 }
@@ -172,6 +203,38 @@ func (s *sqlStatements) insertRows(n int) string {
 	return b.String()
 }
 
+// compactDelete renders the deletion of n offsets a compaction dropped, each
+// still readable when the statement runs: a record that aged out meanwhile
+// is left to the age sweep, which raises the floor before it deletes, so the
+// first readable offset never moves back.
+func (s *sqlStatements) compactDelete(n int) string {
+	p := s.dialect.Placeholder
+	var b strings.Builder
+	b.WriteString("DELETE FROM " + s.records + " WHERE part = " + p(1) + " AND appended_at > " + p(2) + " AND record_offset IN (")
+	//: one placeholder per offset.
+	for i := range n {
+		//: a comma between offsets.
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(p(i + 3))
+	}
+	b.WriteByte(')')
+	//: one statement.
+	return b.String()
+}
+
+// compactFor returns the deletion of n offsets: the full chunk rendered at
+// NewSQL, or one rendered now for a shorter one.
+func (s *sqlStatements) compactFor(n int) string {
+	//: the common full chunk.
+	if n == sqlCompactPerDelete {
+		return s.compactFull
+	}
+	//: the remainder.
+	return s.compactDelete(n)
+}
+
 // insertFor returns the insertion of n records: the full chunk rendered at
 // NewSQL, or one rendered now for a shorter one.
 func (s *sqlStatements) insertFor(n int) string {
@@ -232,10 +295,6 @@ func dropStreamTableStatements(dialect coresql.Dialect, table string) []string {
 		"DROP TABLE IF EXISTS " + dialect.QuoteIdent(table),
 	}
 }
-
-// sqlMigrationPrefix starts the name of every migration SQLMigration builds,
-// so a version table read during an incident says what created the tables.
-const sqlMigrationPrefix string = "stream "
 
 // SQLMigration returns the migration that creates the three tables an SQL
 // stream named table keeps on dialect — table, table__heads and

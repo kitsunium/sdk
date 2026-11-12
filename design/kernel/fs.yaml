@@ -419,6 +419,15 @@ packages:
       directory. Nothing is rewritten: retention is by whole segments, and an entry
       below the first index that still sits in a retained segment is unreadable.
 
+      # Rewriting a record
+
+      [Log.Rewrite] is the one call that changes a synced record: the caller's
+      edit gives some records below an index a new kind and payload — a compaction
+      replacing a superseded value by a marker of its own —, and each segment
+      holding one is written again whole into a .tmp, synced and renamed over the
+      old one. Indexes, batches and end flags never change, so recovery reads the
+      rewritten segment as it read the old one.
+
       # What it is not
 
       It holds one directory exclusively and takes no lock on it: a caller that may
@@ -515,7 +524,7 @@ packages:
     types:
       - doc: |-
           Log is a segmented log opened by Open. One writer at a time — Append, Sync,
-          DropBefore and Close serialise — and any number of readers, which never wait
+          DropBefore, Rewrite and Close serialise — and any number of readers, which never wait
           for a sync's disk I/O. The zero value is NOT usable.
         methods:
           - doc: |-
@@ -600,6 +609,35 @@ packages:
                 type: uint64
             name: DropBefore
             out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Rewrite changes, durably and in place, records below index below: edit
+              is called for every retained record below it, in index order, with its
+              index, its kind byte and its payload — the caller's for the call only —
+              and returns the kind and payload the record takes and true, or false to
+              leave it as it is. A pending batch is synced first, as Sync syncs it.
+
+              Every segment holding a record edit changed is written again whole —
+              the same records at the same indexes, in the same batches with the same
+              end flags, only the changed ones' kind and payload different — into a
+              .tmp that is synced, renamed over the segment, and the directory synced:
+              a crash leaves the old segment or the new one, never a mix, and recovery
+              reads either. A segment edit changed nothing in is not touched. It
+              returns how many segments it rewrote.
+
+              A failure before a segment's rename leaves that segment as it was, and
+              the log usable, and is returned (Failed, or Damaged for a segment that
+              no longer parses); a failure from the rename on is final, as a failed
+              Sync is.
+            in:
+              - name: below
+                type: uint64
+              - name: edit
+                type: func(index uint64, kind uint8, payload []byte) (uint8, []byte, bool)
+            name: Rewrite
+            out:
+              - type: int
               - type: error
             recv: pointer
           - doc: |-

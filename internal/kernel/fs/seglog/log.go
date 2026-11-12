@@ -31,7 +31,7 @@ type durable struct {
 }
 
 // Log is a segmented log opened by Open. One writer at a time — Append, Sync,
-// DropBefore and Close serialise — and any number of readers, which never wait
+// DropBefore, Rewrite and Close serialise — and any number of readers, which never wait
 // for a sync's disk I/O. The zero value is NOT usable.
 type Log struct {
 	dir      string
@@ -68,6 +68,17 @@ type Log struct {
 	// wmu serialises the writers. A sync holds it, not mu, across its write
 	// and sync, so readers do not wait for the disk.
 	wmu sync.Mutex
+}
+
+// prepared is the next segment, zero-filled in the background as a .tmp
+// while the current one fills. It is never published early: recovery
+// deletes any .tmp, and its checkpoint is written at activation.
+type prepared struct {
+	n    uint64
+	size int64
+	done chan struct{}
+	f    *os.File
+	err  error
 }
 
 // Open opens, and recovers, the log kept in dir, creating the directory (mode
@@ -432,14 +443,25 @@ func (l *Log) readRun(index uint64, slots []slot, dst [][]byte) ([][]byte, error
 		return dst, failed("read", err)
 	}
 	for i, s := range slots {
-		at := s.off - start
-		r, ok := parseRecord(b[at:])
-		if !ok || r.kind != recEntry || r.index != index+uint64(i) || len(r.data) != int(s.size) {
-			return dst, damaged(seg.n, s.off, "record does not match the log")
+		payload, err := checkedPayload(seg.n, b[s.off-start:], s, index+uint64(i))
+		if err != nil {
+			return dst, err
 		}
-		dst = append(dst, r.data[:len(r.data):len(r.data)])
+		dst = append(dst, payload)
 	}
 	return dst, nil
+}
+
+// checkedPayload is the payload of the record at the start of b, which must
+// be the entry at index that slot s locates in segment seg: a record that is
+// not is Damaged, the log disagreeing with what it wrote. The payload is
+// capped, so a caller that appends to it cannot reach the bytes after it.
+func checkedPayload(seg uint64, b []byte, s slot, index uint64) ([]byte, error) {
+	r, ok := parseRecord(b)
+	if !ok || r.kind != recEntry || r.index != index || len(r.data) != int(s.size) {
+		return nil, damaged(seg, s.off, "record does not match the log")
+	}
+	return slices.Clip(r.data), nil
 }
 
 // segment is the open segment numbered n, nil when none is.

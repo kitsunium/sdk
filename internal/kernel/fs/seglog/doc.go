@@ -46,6 +46,15 @@
 // directory. Nothing is rewritten: retention is by whole segments, and an entry
 // below the first index that still sits in a retained segment is unreadable.
 //
+// # Rewriting a record
+//
+// [Log.Rewrite] is the one call that changes a synced record: the caller's
+// edit gives some records below an index a new kind and payload — a compaction
+// replacing a superseded value by a marker of its own —, and each segment
+// holding one is written again whole into a .tmp, synced and renamed over the
+// old one. Indexes, batches and end flags never change, so recovery reads the
+// rewritten segment as it read the old one.
+//
 // # What it is not
 //
 // It holds one directory exclusively and takes no lock on it: a caller that may

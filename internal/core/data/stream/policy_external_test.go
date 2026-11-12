@@ -38,6 +38,7 @@ func TestNormalizedKeepsWhatTheCallerSet(t *testing.T) {
 		MaxBytes:       1 << 20,
 		BlockTimeout:   time.Second,
 		SegmentBytes:   1 << 16,
+		CompactAfter:   time.Minute,
 	}
 	if err := set.Validate(); err != nil {
 		t.Fatalf("Validate = %v, want nil", err)
@@ -63,6 +64,7 @@ func TestValidateRefusesByField(t *testing.T) {
 		{"negative ceiling", stream.PolicyValue{MaxBytes: -1}, "MaxBytes"},
 		{"negative wait", stream.PolicyValue{BlockTimeout: -time.Second}, "BlockTimeout"},
 		{"negative segment", stream.PolicyValue{SegmentBytes: -1}, "SegmentBytes"},
+		{"negative compaction age", stream.PolicyValue{CompactAfter: -time.Second}, "CompactAfter"},
 		{"wait with no ceiling", stream.PolicyValue{BlockTimeout: time.Second}, "BlockTimeout"},
 		{"ceiling below the default record", stream.PolicyValue{MaxBytes: 1024}, "MaxBytes"},
 		{"ceiling below the record", stream.PolicyValue{MaxRecordBytes: 4096, MaxBytes: 4095}, "MaxBytes"},

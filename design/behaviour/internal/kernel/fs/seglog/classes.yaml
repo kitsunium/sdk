@@ -99,9 +99,9 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - errSegmentTooLarge
       - cause
       - cause.Error
-      - errSegmentTooLarge
       - origin
       - failed
       - damaged
@@ -113,6 +113,7 @@ files:
       - slot
       - durable
       - Log
+      - prepared
       - Open
       - mkdirDurable
       - (*Log).usable
@@ -135,11 +136,13 @@ files:
       - (*Log).run
       - (*Log).pendingPayload
       - (*Log).readRun
+      - checkedPayload
       - (*Log).segment
       - (*Log).Close
     name: log.go
   - decls:
       - recHeader
+      - DefaultSegmentBytes
       - castagnoli
       - align8
       - recordLen
@@ -154,7 +157,6 @@ files:
       - decodeCheckpoint
       - knownKind
       - allZero
-      - DefaultSegmentBytes
     name: record.go
   - decls:
       - scanRec
@@ -163,6 +165,8 @@ files:
       - (*scanned).note
       - unknownVersionAt
       - (*Log).recover
+      - (*Log).recoverExisting
+      - (*Log).scanAndTrim
       - (*Log).segmentNumbers
       - scanSegments
       - scanSegment
@@ -170,6 +174,7 @@ files:
       - (*scanned).holeAt
       - scanBufs
       - (*scanBufs).reader
+      - statReader
       - segRead
       - (*segRead).record
       - (*segRead).upTo
@@ -191,6 +196,20 @@ files:
       - (*Log).positionTail
     name: recover.go
   - decls:
+      - rewritten
+      - (*Log).Rewrite
+      - (*Log).rewriteSegment
+      - editFunc
+      - rebuildPlan
+      - rebuilt
+      - rebuildSegment
+      - (*rebuilt).encode
+      - (*Log).writeTmp
+      - writeSyncer
+      - fillTmp
+      - (*Log).publishRewrite
+    name: rewrite.go
+  - decls:
       - segment
       - segName
       - (*Log).segPath
@@ -200,7 +219,6 @@ files:
       - abandonTmp
       - (*Log).createSegment
       - (*Log).segmentFile
-      - prepared
       - (*Log).prepare
       - (*Log).takePrepared
       - (*Log).rotate
@@ -252,6 +270,14 @@ functions:
     name: mkdirDurable
     params: dir string
     results: error
+  - doc: |-
+      checkedPayload is the payload of the record at the start of b, which must
+      be the entry at index that slot s locates in segment seg: a record that is
+      not is Damaged, the log disagreeing with what it wrote. The payload is
+      capped, so a caller that appends to it cannot reach the bytes after it.
+    name: checkedPayload
+    params: seg uint64, b []byte, s slot, index uint64
+    results: "[]byte, error"
   - doc: align8 rounds n up to the next record boundary.
     name: align8
     params: n int
@@ -386,6 +412,19 @@ functions:
     name: tornBatchStart
     params: recs []scanRec, lastOff int64, torn uint64
     results: int64, string
+  - doc: |-
+      rebuildSegment parses the segment bytes p.data and encodes them again,
+      every entry from p.first up to below excluded offered to p.edit. A sealed
+      segment is read through its seal; the last one up to its end.
+    name: rebuildSegment
+    params: p *rebuildPlan
+    results: rebuilt, error
+  - doc: |-
+      fillTmp writes out at the start of f, zero-fills it up to size and syncs
+      it.
+    name: fillTmp
+    params: f writeSyncer, out []byte, size int64
+    results: error
   - doc: |-
       segName is segment n's file name; fixed-width hex, so the names sort in
       segment order and recovery accepts no other spelling of n.
@@ -660,6 +699,21 @@ types:
         recv: l *Log
         results: error
       - doc: |-
+          recoverExisting recovers a directory holding the segments nums: it
+          checks them, replays them, and reopens the log at the end of the last.
+        name: recoverExisting
+        params: nums []uint64
+        recv: l *Log
+        results: error
+      - doc: |-
+          scanAndTrim scans the segments nums, refuses the ones whose batches or
+          layout do not hold together, and zeroes the torn tail of the last, which
+          is the only change recovery makes before it has judged them all.
+        name: scanAndTrim
+        params: nums []uint64
+        recv: l *Log
+        results: "[]*scanned, error"
+      - doc: |-
           segmentNumbers lists the published segments, sorted, deleting on the way
           every .tmp: only an incomplete one exists, one that never reached its
           rename. A name that is not exactly a segment's is ignored.
@@ -707,6 +761,38 @@ types:
           is zero already, else right after the last valid record.
         name: positionTail
         params: last *scanned, tail *segment
+        recv: l *Log
+        results: error
+      - name: Rewrite
+        params: below uint64, edit func(index uint64, kind uint8, payload []byte) (uint8, []byte, bool)
+        recv: l *Log
+        results: int, error
+      - doc: |-
+          rewriteSegment writes segment s again with the records edit changes, the
+          last segment of the log when last. The caller holds wmu and nothing is
+          pending, so no writer moves the segment or its records meanwhile.
+        name: rewriteSegment
+        params: |2
+
+          	s *segment, last bool, first, below uint64,
+          	edit editFunc,
+        recv: l *Log
+        results: bool, error
+      - doc: |-
+          writeTmp writes out, zero-filled to size, into segment n's .tmp and syncs
+          it. A failure removes the .tmp and leaves the log as it was.
+        name: writeTmp
+        params: n uint64, out []byte, size int64
+        recv: l *Log
+        results: error
+      - doc: |-
+          publishRewrite renames segment s's .tmp over it, reopens it, moves the
+          entries it holds to where the rewrite put them and syncs the directory.
+          The old file is closed before the rename: Windows refuses to replace a
+          file a handle holds open. A rename refused leaves the old segment, which
+          is reopened; anything after it is final.
+        name: publishRewrite
+        params: s *segment, out []byte, size int64, last bool, moved []rewritten
         recv: l *Log
         results: error
       - doc: segPath is the path of segment n's file.
@@ -773,6 +859,23 @@ types:
         recv: l *Log
         results: error
     name: Log
+  - doc: |-
+      prepared is the next segment, zero-filled in the background as a .tmp
+      while the current one fills. It is never published early: recovery
+      deletes any .tmp, and its checkpoint is written at activation.
+    fields:
+      - name: "n"
+        type: uint64
+      - name: size
+        type: int64
+      - name: done
+        type: chan struct{}
+      - name: f
+        type: "*os.File"
+      - name: err
+        type: error
+    kind: struct
+    name: prepared
   - doc: record is one decoded record; data aliases the bytes it was parsed from.
     fields:
       - name: kind
@@ -913,10 +1016,20 @@ types:
           file is larger than any before it. A file larger than an int holds is
           refused before the buffer is made.
         name: reader
-        params: f *os.File
+        params: f statReader
         recv: sb *scanBufs
         results: "*segRead, error"
     name: scanBufs
+  - doc: |-
+      statReader is a segment file as the scan sees it: something to read and
+      to size.
+    kind: named
+    name: statReader
+    underlying: |-
+      interface {
+      	io.Reader
+      	Stat() (os.FileInfo, error)
+      }
   - doc: |-
       segRead is a segment file read in order into b, the file's size, of
       which the first n bytes are read, chunk at least at a time. What lies
@@ -965,6 +1078,71 @@ types:
         recv: q *batchSeq
         results: int64
     name: batchSeq
+  - doc: |-
+      rewritten is one entry a segment rewrite moved: its index and where it now
+      lies.
+    fields:
+      - name: index
+        type: uint64
+      - name: at
+        type: slot
+    kind: struct
+    name: rewritten
+  - doc: |-
+      editFunc is the edit a rewrite offers every retained record: it returns
+      the kind and payload the record takes and true, or false to keep it.
+    kind: named
+    name: editFunc
+    underlying: func(index uint64, kind uint8, payload []byte) (uint8, []byte, bool)
+  - doc: |-
+      rebuildPlan is what rebuildSegment is asked to do: parse data, the bytes
+      of segment n, and offer every entry from first up to below excluded to
+      edit. last says data is the end of the log, where a record that does not
+      parse is the torn tail and not damage.
+    fields:
+      - name: data
+        type: "[]byte"
+      - name: edit
+        type: editFunc
+      - name: "n"
+        type: uint64
+      - name: first
+        type: uint64
+      - name: below
+        type: uint64
+      - name: last
+        type: bool
+    kind: struct
+    name: rebuildPlan
+  - doc: |-
+      rebuilt is the outcome of rebuildSegment: the new bytes of the segment,
+      where each retained entry now lies, and whether edit changed any.
+    fields:
+      - name: data
+        type: "[]byte"
+      - name: moved
+        type: "[]rewritten"
+      - name: changed
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          encode appends record r to the new bytes, after offering it to the edit
+          when it is an entry in the range, and notes where an entry now lies. It
+          reports whether r was the seal, which ends the segment.
+        name: encode
+        params: p *rebuildPlan, r *record
+        recv: b *rebuilt
+        results: bool
+    name: rebuilt
+  - doc: writeSyncer is the part of a segment file fillTmp writes through.
+    kind: named
+    name: writeSyncer
+    underlying: |-
+      interface {
+      	io.WriterAt
+      	Sync() error
+      }
   - doc: segment is one published segment file, open for reading and writing.
     fields:
       - name: "n"
@@ -979,23 +1157,6 @@ types:
         type: uint64
     kind: struct
     name: segment
-  - doc: |-
-      prepared is the next segment, zero-filled in the background as a .tmp
-      while the current one fills. It is never published early: recovery
-      deletes any .tmp, and its checkpoint is written at activation.
-    fields:
-      - name: "n"
-        type: uint64
-      - name: size
-        type: int64
-      - name: done
-        type: chan struct{}
-      - name: f
-        type: "*os.File"
-      - name: err
-        type: error
-    kind: struct
-    name: prepared
 vars:
   - doc: castagnoli is the CRC-32C table every record's crc is computed with.
     items:
