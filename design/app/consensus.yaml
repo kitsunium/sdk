@@ -2349,6 +2349,25 @@ packages:
           - type: coreconsensus.TokenValue
           - type: bool
       - doc: |-
+          NewStream presents node as a replicated corestream.Stream of one partition
+          whose offsets are the log's indexes (#832). Append proposes each record as
+          one entry, in order, the next once the previous is applied here; Read
+          reads what this node applied, on a leader or a follower alike, and skips
+          the entries that are not records; Bounds is the log's first index and the
+          next index after the applied one. The stream implements corestream.Waker
+          from the node's status: a wake follows every apply and leadership change.
+          It keeps no cursor: a consumer's Committer is its own store, never the
+          log. The node stays the caller's to close.
+        in:
+          - name: node
+            type: "*Node"
+          - name: cfg
+            type: StreamConfig
+        name: NewStream
+        out:
+          - type: corestream.Stream
+          - type: error
+      - doc: |-
           JoinRefusalReason reads the reason a refused JOIN carried back to the
           joiner: what the member's JoinAuthorizer chose to say, or the engine's
           rule. false when the refusal carried none.
@@ -2674,6 +2693,7 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
       coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
       coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
+      corestream: github.com/kitsunium/sdk/internal/core/data/stream
       coretransform: github.com/kitsunium/sdk/internal/core/data/transform
       ed25519: crypto/ed25519
       errs: github.com/kitsunium/sdk/internal/kernel/errs
@@ -3548,6 +3568,25 @@ packages:
             - doc: "WitnessKeys verify the receipts: one per witness, each must sign."
               name: WitnessKeys
               type: "[]ed25519.PublicKey"
+      - doc: |-
+          StreamConfig configures NewStream: the record bound and the clock that
+          stamps every batch.
+        name: StreamConfig
+        struct:
+          fields:
+            - doc: |-
+                Clock stamps each batch's AppendedAt on the node that appends it; the
+                instant travels IN the entry, so every node reads the same one. Nil is
+                clock.System.
+              name: Clock
+              type: clock.Clock
+            - doc: |-
+                MaxRecordBytes bounds one record, its key and payload together. Zero is
+                the smaller of corestream.DefaultMaxRecordBytes and what the node's
+                MaxEntryBytes leaves after the record's frame; negative, or above that
+                room, is STREAM_MISCONFIGURED.
+              name: MaxRecordBytes
+              type: int
       - doc: |-
           RestoreOptions are RestoreSnapshot's preconditions (R3-15). Expected and
           both bounds are required; the stream is refused when its size or digest

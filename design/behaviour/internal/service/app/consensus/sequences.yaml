@@ -17536,6 +17536,17 @@ sequences:
         kind: actor
       - id: (*Node).submit
         kind: self
+      - id: n.submitProposal
+        kind: internal
+    steps:
+      - return: "n.submitProposal(ctx, &proposal{entry: e, admin: admin, done: make(chan propResult, 1)})"
+        to: n.submitProposal
+  - of: (*Node).submitProposal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).submitProposal
+        kind: self
       - id: ctx.Err
         kind: value
       - id: n.clk.Now
@@ -17567,8 +17578,6 @@ sequences:
           do:
             - return: coreconsensus.TokenValue{}, nil, n.stoppedErr()
           when: n.stopped.Load()
-      - bind: p
-        eval: "&proposal{entry: e, admin: admin, done: make(chan propResult, 1)}"
       - bind: start
         eval: n.clk.Now()
         to: n.clk.Now
@@ -21145,6 +21154,467 @@ sequences:
           range: l.markerPaths(ents)
           value: p
       - return: nil
+  - of: NewStream
+    steps:
+      - opt:
+          do:
+            - return: nil, streamMisconfigured("node", "nil")
+          when: node == nil
+      - bind: room
+        eval: node.cfg.MaxEntryBytes - recordHeaderBytes
+      - switch:
+          cases:
+            - case: cfg.MaxRecordBytes < 0
+              do:
+                - return: nil, streamMisconfigured("MaxRecordBytes", "negative")
+            - case: room < 1
+              do:
+                - return: nil, streamMisconfigured("MaxRecordBytes", "the node's MaxEntryBytes leaves no room for a record")
+            - case: cfg.MaxRecordBytes > room
+              do:
+                - return: nil, streamMisconfigured("MaxRecordBytes", "above the node's MaxEntryBytes less the record's frame")
+            - case: cfg.MaxRecordBytes == 0
+              do:
+                - set: cfg.MaxRecordBytes
+                  value: min(corestream.DefaultMaxRecordBytes, room)
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: clock.System
+          when: clk == nil
+      - return: "&nodeStream{node: node, clk: clk, maxRecord: cfg.MaxRecordBytes, wake: make(chan struct{})}, nil"
+  - of: (*nodeStream).Partitions
+    steps:
+      - return: "1"
+  - of: (*nodeStream).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*nodeStream).Append
+        kind: self
+      - id: s.clk.Now
+        kind: value
+      - id: s.node.proposeRecord
+        kind: internal
+      - id: corestream
+        kind: package
+      - id: s.signal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, streamInvalidBatch("records", 0)
+          when: len(records) == 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      corestream.AppendValue{}, errs.Wrap(corestream.RecordTooLarge, errs.WrapParams{},
+                      				errs.Int("index", i), errs.Int("size", size), errs.Int("max", s.maxRecord))
+                init:
+                  bind: size
+                  eval: len(r.Key) + len(r.Payload)
+                when: size > s.maxRecord
+          key: i
+          range: records
+          value: r
+      - bind: at
+        eval: s.clk.Now()
+        to: s.clk.Now
+      - var:
+          name: out
+          type: corestream.AppendValue
+      - loop:
+          do:
+            - bind: tok, known, err
+              eval: s.node.proposeRecord(ctx, frameStreamRecord(at, r))
+              to: s.node.proposeRecord
+            - opt:
+                do:
+                  - return: corestream.AppendValue{}, appendFailed(err, i, out, tok, known)
+                when: err != nil
+            - opt:
+                do:
+                  - set: out.First
+                    to: corestream
+                    value: corestream.Offset(tok.Index)
+                when: i == 0
+            - set: out.Last
+              to: corestream
+              value: corestream.Offset(tok.Index)
+          key: i
+          range: records
+          value: r
+      - eval: s.signal()
+        to: s.signal
+      - return: out, nil
+  - of: (*Node).proposeRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).proposeRecord
+        kind: self
+      - id: n.submitProposal
+        kind: internal
+      - id: n.token
+        kind: internal
+    steps:
+      - bind: e
+        eval: "coreconsensus.EntryValue{Kind: coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data}"
+      - bind: p
+        eval: "&proposal{entry: e, done: make(chan propResult, 1)}"
+      - set: tok, _, err
+        to: n.submitProposal
+        value: n.submitProposal(ctx, p)
+      - opt:
+          do:
+            - return: tok, true, nil
+          when: err == nil
+      - opt:
+          do:
+            - return: n.token(p.pos), true, err
+              to: n.token
+          when: errs.HasCode(err, coreconsensus.CodeOutcomeUnknown) && p.stage.Load() == stageAppended
+      - return: coreconsensus.TokenValue{}, false, err
+  - of: appendFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: fields
+        eval: "[]errs.FieldValue{errs.String(\"op\", \"append\"), errs.Int(\"written\", index)}"
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, streamOffsetField("first", done.First), streamOffsetField("last", done.Last))
+          when: index > 0
+      - opt:
+          do:
+            - bind: reason, _
+              eval: errs.ReasonOf(err)
+              to: errs
+            - set: fields
+              value: append(fields, errs.String("cause", reason))
+            - opt:
+                do:
+                  - set: fields
+                    value: append(fields, tokenField(tok))
+                when: known
+            - return: errs.Wrap(corestream.StreamBackendFailed, errs.WrapParams{}, fields...)
+              to: errs
+          when: errs.HasCode(err, coreconsensus.CodeOutcomeUnknown)
+      - opt:
+          do:
+            - return: err
+          when: index == 0 && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
+      - return: errs.Wrap(err, corestream.StreamBackendFailed.Params(), fields...)
+        to: errs
+  - of: (*nodeStream).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*nodeStream).Read
+        kind: self
+      - id: s.Bounds
+        kind: internal
+      - id: s.node.ReadCommitted
+        kind: internal
+      - id: s.node.cfg.Log.Bounds
+        kind: value
+      - id: readStreamRecord
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, streamUnknownPartition(partition)
+          when: partition != 0
+      - opt:
+          do:
+            - return: nil, streamInvalidBatch("max", max)
+          when: max <= 0
+      - bind: b, err
+        eval: s.Bounds(ctx, partition)
+        to: s.Bounds
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - switch:
+          cases:
+            - case: from < b.First
+              do:
+                - return: nil, streamOffsetTrimmed(from, b.First)
+            - case: from > b.Next
+              do:
+                - return: |-
+                    nil, errs.Wrap(corestream.OffsetAhead, errs.WrapParams{},
+                    			streamOffsetField("offset", from), streamOffsetField("next", b.Next))
+      - var:
+          name: out
+          type: "[]corestream.EntryValue"
+      - bind: lo, last
+        eval: uint64(from), uint64(b.Next)-1
+      - loop:
+          cond: lo <= last && len(out) < max
+          do:
+            - bind: left
+              eval: max - len(out)
+            - bind: hi
+              eval: min(last, lo+uint64(left)-1)
+            - bind: budget
+              eval: min(maxStreamReadBytes, left*(s.maxRecord+recordHeaderBytes))
+            - bind: ents, err
+              eval: s.node.ReadCommitted(ctx, lo, hi, budget)
+              to: s.node.ReadCommitted
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: out, nil
+                      when: len(out) > 0
+                  - bind: first, _
+                    eval: s.node.cfg.Log.Bounds()
+                    to: s.node.cfg.Log.Bounds
+                  - return: nil, streamOffsetTrimmed(corestream.Offset(lo), corestream.Offset(first))
+                when: errs.HasCode(err, coreconsensus.CodeCompacted)
+            - opt:
+                do:
+                  - return: nil, errs.Wrap(err, corestream.StreamBackendFailed.Params(), errs.String("op", "read"))
+                when: err != nil
+            - opt:
+                do:
+                  - break: true
+                when: len(ents) == 0
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: out
+                          value: append(out, v)
+                      init:
+                        bind: v, ok
+                        eval: readStreamRecord(e)
+                        to: readStreamRecord
+                      when: ok
+                key: _
+                range: ents
+                value: e
+            - set: lo
+              value: ents[len(ents)-1].Position.Index + 1
+      - return: out, nil
+  - of: (*nodeStream).Bounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*nodeStream).Bounds
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: s.node.cfg.Log.Bounds
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, streamUnknownPartition(partition)
+          when: partition != 0
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, err
+          init:
+            bind: err
+            eval: ctx.Err()
+            to: ctx.Err
+          when: err != nil
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, errs.Wrap(s.node.stoppedErr(), corestream.StreamBackendFailed.Params(), errs.String("op", "bounds"))
+          when: s.node.stopped.Load()
+      - bind: next
+        eval: s.node.Status().Applied + 1
+      - bind: first, _
+        eval: s.node.cfg.Log.Bounds()
+        to: s.node.cfg.Log.Bounds
+      - return: "corestream.BoundsValue{First: corestream.Offset(min(first, next)), Next: corestream.Offset(next)}, nil"
+  - of: (*nodeStream).Wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*nodeStream).Wake
+        kind: self
+      - id: s.watch.Do
+        kind: value
+    steps:
+      - eval: |-
+          s.watch.Do(func() {
+          		ch := s.node.Watch(context.Background())
+          		go func() {
+          			for range ch {
+          				s.signal()
+          			}
+          			s.mu.Lock()
+          			s.ended = true
+          			close(s.wake)
+          			s.mu.Unlock()
+          		}()
+          	})
+        to: s.watch.Do
+      - lock:
+          mutex: s.mu
+      - return: s.wake
+  - of: (*nodeStream).signal
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: ""
+          when: s.ended
+      - eval: close(s.wake)
+      - set: s.wake
+        value: make(chan struct{})
+  - of: frameStreamRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: frameStreamRecord
+        kind: self
+      - id: binary.BigEndian.AppendUint64
+        kind: value
+      - id: binary
+        kind: stdlib
+    steps:
+      - bind: b
+        eval: make([]byte, 0, recordHeaderBytes+len(r.Key)+len(r.Payload))
+      - set: b
+        value: append(b, recordMagic, recordVersion)
+      - set: b
+        to: binary.BigEndian.AppendUint64
+        value: binary.BigEndian.AppendUint64(b, uint64(at.UnixNano()))
+      - set: b
+        to: binary
+        value: binary.AppendUvarint(b, uint64(len(r.Key)))
+      - set: b
+        value: append(b, r.Key...)
+      - return: append(b, r.Payload...)
+  - of: readStreamRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: readStreamRecord
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: binary
+        kind: stdlib
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: d
+        eval: e.Data
+      - opt:
+          do:
+            - return: corestream.EntryValue{}, false
+          when: e.Kind != coreconsensus.EntryCommand || len(d) < 10 || d[0] != recordMagic || d[1] != recordVersion
+      - bind: at
+        eval: time.Unix(0, int64(binary.BigEndian.Uint64(d[2:10])))
+        to: time
+      - bind: klen, k
+        eval: binary.Uvarint(d[10:])
+        to: binary
+      - opt:
+          do:
+            - return: corestream.EntryValue{}, false
+          when: k <= 0 || klen > uint64(len(d)-10-k)
+      - bind: body
+        eval: slices.Clone(d[10+k:])
+        to: slices
+      - var:
+          name: r
+          type: corestream.RecordValue
+      - opt:
+          do:
+            - set: r.Key
+              value: body[:klen:klen]
+          when: klen > 0
+      - opt:
+          do:
+            - set: r.Payload
+              value: body[klen:]
+          when: int(klen) < len(body)
+      - return: "corestream.EntryValue{AppendedAt: at, Record: r, Partition: 0, Offset: corestream.Offset(e.Position.Index)}, true"
+  - of: tokenField
+    participants:
+      - id: caller
+        kind: actor
+      - id: tokenField
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.String("token", hex.EncodeToString(wire.AppendToken(nil, t)))
+        to: errs
+  - of: streamOffsetField
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamOffsetField
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.String(key, strconv.FormatUint(uint64(o), 10))
+        to: errs
+  - of: streamMisconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamMisconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corestream.StreamMisconfigured, errs.WrapParams{}, errs.String("field", field), errs.String("why", why))
+        to: errs
+  - of: streamUnknownPartition
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamUnknownPartition
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corestream.UnknownPartition, errs.WrapParams{}, errs.Int("partition", partition), errs.Int("partitions", 1))
+        to: errs
+  - of: streamInvalidBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamInvalidBatch
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corestream.InvalidBatchSize, errs.WrapParams{}, errs.String("field", field), errs.Int("value", value))
+        to: errs
+  - of: streamOffsetTrimmed
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamOffsetTrimmed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corestream.OffsetTrimmed, errs.WrapParams{}, streamOffsetField("offset", offset), streamOffsetField("first", first))
+        to: errs
   - of: datasync
     participants:
       - id: caller

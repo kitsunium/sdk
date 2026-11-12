@@ -14,7 +14,14 @@ rebuilds from (`Node.ReadCommitted`, COMPACTED below the log's first
 index; `OpenSnapshot`, SNAPSHOT_CORRUPT at the end of a stream that
 differs from its metadata; `ImportObserved`, a snapshot and the tail read
 after it, its chain checked from the snapshot's `ChainTip` before anything
-is written, grouped as an `ImportParams`), the mTLS TCP transport over `net/tlsid` and
+is written, grouped as an `ImportParams`), a node presented as a replicated
+`data/stream` `Stream` (`NewStream`, `stream.go`, #832: one partition, the
+offset a log index, one framed command entry per record proposed in order,
+the instant of the append carried in the entry, every other entry skipped
+by a read, `OFFSET_TRIMMED` below the log's first index, a `Waker` on the
+node's status, an `OUTCOME_UNKNOWN` answered `STREAM_BACKEND_FAILED` with
+the token `TokenOf` reads when this node appended it, no cursor — a
+consumer's `Committer` is its own store), the mTLS TCP transport over `net/tlsid` and
 `net/server.Admission` (ADR 0174), and the in-memory doubles. It declares no
 code: it raises the core's.
 
@@ -84,6 +91,13 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 ## Do NOT
 
 - Let the event loop wait on storage or a socket (D5b).
+- Propose a stream's records concurrently, or hand its `OUTCOME_UNKNOWN`
+  back without the token: concurrent proposals, forwarded from a follower,
+  may reach the leader out of order, so `Append` proposes the next record
+  once the previous is applied; and only the proposal knows where it was
+  appended, which `Propose` does not return on an error (`submitProposal`,
+  `proposeRecord`, #832,
+  `TestATimedOutAppendCarriesTheTokenWaitAppliedResolves`).
 - Retry a failed sync: the node stops (D4).
 - Return a snapshot's STORAGE_FAILED without stopping the node: every cut
   ends in `cutFailed` (on its trigger, coalesced, requested by a peer, saved,

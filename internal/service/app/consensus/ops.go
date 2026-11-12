@@ -35,13 +35,20 @@ func (n *Node) Propose(ctx context.Context, data []byte) (coreconsensus.TokenVal
 // because the entry may still commit. An admin entry bypasses the pending
 // and apply-lag budgets, so an operator can always reach a saturated node.
 func (n *Node) submit(ctx context.Context, e coreconsensus.EntryValue, admin bool) (coreconsensus.TokenValue, any, error) {
+	return n.submitProposal(ctx, &proposal{entry: e, admin: admin, done: make(chan propResult, 1)})
+}
+
+// submitProposal is submit over a proposal its caller built and keeps: once
+// it returns, a proposal whose stage is stageAppended holds the position it
+// was appended at, which an OUTCOME_UNKNOWN does not carry (the stream
+// adapter's token, #832).
+func (n *Node) submitProposal(ctx context.Context, p *proposal) (coreconsensus.TokenValue, any, error) {
 	if err := ctx.Err(); err != nil {
 		return coreconsensus.TokenValue{}, nil, err
 	}
 	if n.stopped.Load() {
 		return coreconsensus.TokenValue{}, nil, n.stoppedErr()
 	}
-	p := &proposal{entry: e, admin: admin, done: make(chan propResult, 1)}
 	start := n.clk.Now()
 	span := n.obs.span(ctx, "consensus.Propose")
 	n.pendingProp.Add(1)

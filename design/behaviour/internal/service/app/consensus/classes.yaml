@@ -658,6 +658,32 @@ constants:
         value: "\"engine:no-space\""
     name: spaceCheckEvery
   - doc: |-
+      A node presented as a stream (#832): one group is one totally ordered
+      log, so the stream has one partition and its offsets are the log's
+      indexes. A record is one command entry, framed so that a reader tells it
+      from the group's other entries — the leader's no-op, a membership change,
+      an administrative entry, a command another writer proposed — and skips
+      them, as a reader skips a compacted offset. Retention is the node's own
+      compaction: below the log's first index a read is OFFSET_TRIMMED.
+    grouped: true
+    items:
+      - doc: recordMagic and recordVersion open every record entry.
+        name: recordMagic
+        type: byte
+        value: "0xFA"
+      - name: recordVersion
+        type: byte
+        value: "1"
+      - doc: |-
+          recordHeaderBytes is the most a record's frame adds to its key and
+          payload: magic, version, the append instant and the key's length.
+        name: recordHeaderBytes
+        value: 2 + 8 + binary.MaxVarintLen64
+      - doc: maxStreamReadBytes bounds what one ReadCommitted of a Read asks for.
+        name: maxStreamReadBytes
+        value: 4 << 20
+    name: recordMagic
+  - doc: |-
       The lane is the first byte a dialer writes after the handshake: it says
       what the connection carries, so control traffic never queues behind
       entries or a snapshot (D4).
@@ -1552,6 +1578,7 @@ files:
   - decls:
       - (*Node).Propose
       - (*Node).submit
+      - (*Node).submitProposal
       - (*Node).awaitProposal
       - (*Node).handleProposals
       - claimed
@@ -1688,6 +1715,28 @@ files:
       - (*fileLog).storageFailedThisBoot
       - (*fileLog).markerApplies
     name: stopguard.go
+  - decls:
+      - recordMagic
+      - StreamConfig
+      - NewStream
+      - nodeStream
+      - (*nodeStream).Partitions
+      - (*nodeStream).Append
+      - (*Node).proposeRecord
+      - appendFailed
+      - (*nodeStream).Read
+      - (*nodeStream).Bounds
+      - (*nodeStream).Wake
+      - (*nodeStream).signal
+      - frameStreamRecord
+      - readStreamRecord
+      - tokenField
+      - streamOffsetField
+      - streamMisconfigured
+      - streamUnknownPartition
+      - streamInvalidBatch
+      - streamOffsetTrimmed
+    name: stream.go
   - decls:
       - datasync
       - bootID
@@ -3324,6 +3373,51 @@ functions:
     name: refuseUnmarked
     params: dir string
     results: error
+  - name: NewStream
+    params: node *Node, cfg StreamConfig
+    results: corestream.Stream, error
+  - doc: |-
+      appendFailed is the error of an Append whose record index failed with err,
+      done holding the offsets of the records before it.
+    name: appendFailed
+    params: err error, index int, done corestream.AppendValue, tok coreconsensus.TokenValue, known bool
+    results: error
+  - doc: |-
+      frameStreamRecord frames r as a record entry appended at at: magic, version,
+      the instant in Unix nanoseconds, the key's length, the key, the payload.
+    name: frameStreamRecord
+    params: at time.Time, r corestream.RecordValue
+    results: "[]byte"
+  - doc: |-
+      readStreamRecord reads a record entry, false for any entry that is not one.
+      The record owns a copy of the bytes: the log store may share its own.
+    name: readStreamRecord
+    params: e coreconsensus.EntryValue
+    results: corestream.EntryValue, bool
+  - doc: tokenField is a token in the hex field TokenOf decodes.
+    name: tokenField
+    params: t coreconsensus.TokenValue
+    results: errs.FieldValue
+  - doc: streamOffsetField renders an offset as a field, in decimal, exactly.
+    name: streamOffsetField
+    params: key string, o corestream.Offset
+    results: errs.FieldValue
+  - doc: streamMisconfigured refuses a NewStream whose field is wrong for why.
+    name: streamMisconfigured
+    params: field, why string
+    results: error
+  - doc: streamUnknownPartition refuses any partition but 0.
+    name: streamUnknownPartition
+    params: partition int
+    results: error
+  - doc: streamInvalidBatch refuses an empty batch or a non-positive read size.
+    name: streamInvalidBatch
+    params: field string, value int
+    results: error
+  - doc: streamOffsetTrimmed refuses a read from offset, below first.
+    name: streamOffsetTrimmed
+    params: offset, first corestream.Offset
+    results: error
   - doc: |-
       datasync makes a segment's written bytes durable with fdatasync(2): the
       segment is zero-filled at its full size, so there is no size to publish
@@ -3606,6 +3700,7 @@ imports:
   coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
   coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
   coreproc: github.com/kitsunium/sdk/internal/core/proc
+  corestream: github.com/kitsunium/sdk/internal/core/data/stream
   coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
   coretransform: github.com/kitsunium/sdk/internal/core/data/transform
   crc32: hash/crc32
@@ -7744,6 +7839,15 @@ types:
         recv: n *Node
         results: coreconsensus.TokenValue, any, error
       - doc: |-
+          submitProposal is submit over a proposal its caller built and keeps: once
+          it returns, a proposal whose stage is stageAppended holds the position it
+          was appended at, which an OUTCOME_UNKNOWN does not carry (the stream
+          adapter's token, #832).
+        name: submitProposal
+        params: ctx context.Context, p *proposal
+        recv: n *Node
+        results: coreconsensus.TokenValue, any, error
+      - doc: |-
           awaitProposal waits for the loop's answer to a proposal it already holds.
           A ctx that ends first is ctx.Err() only while the proposal is provably
           unsent; once it may have been appended the answer is OUTCOME_UNKNOWN.
@@ -8316,6 +8420,14 @@ types:
         name: feedOrNot
         params: m *coreconsensus.MemberValue, newest int64
         recv: n *Node
+      - doc: |-
+          proposeRecord proposes one record entry and returns its token; on an
+          OUTCOME_UNKNOWN, known says whether the token is where this node appended
+          it, read from the proposal Propose does not hand back.
+        name: proposeRecord
+        params: ctx context.Context, data []byte
+        recv: n *Node
+        results: tok coreconsensus.TokenValue, known bool, err error
     name: Node
   - doc: "snapState tracks the cuts: at most one in flight, coalesced (D7)."
     fields:
@@ -9279,6 +9391,92 @@ types:
       	logBytes() int64
       	freeBytes() int64
       }
+  - fields:
+      - doc: |-
+          Clock stamps each batch's AppendedAt on the node that appends it; the
+          instant travels IN the entry, so every node reads the same one. Nil is
+          clock.System.
+        name: Clock
+        type: clock.Clock
+      - doc: |-
+          MaxRecordBytes bounds one record, its key and payload together. Zero is
+          the smaller of corestream.DefaultMaxRecordBytes and what the node's
+          MaxEntryBytes leaves after the record's frame; negative, or above that
+          room, is STREAM_MISCONFIGURED.
+        name: MaxRecordBytes
+        type: int
+    kind: struct
+    name: StreamConfig
+  - doc: nodeStream is NewStream's stream.
+    fields:
+      - name: node
+        type: "*Node"
+      - name: clk
+        type: clock.Clock
+      - name: maxRecord
+        type: int
+      - doc: |-
+          watch starts, at the first Wake, the goroutine that turns the node's
+          status into wakes; it ends when the node's event loop does.
+        name: watch
+        type: sync.Once
+      - doc: mu guards wake and ended.
+        name: mu
+        type: sync.Mutex
+      - name: wake
+        type: chan struct{}
+      - name: ended
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          Partitions is one: a group is one totally ordered log, and more
+          partitions are more groups.
+        name: Partitions
+        recv: s *nodeStream
+        results: int
+      - doc: |-
+          Append proposes the records in order, one entry each, all stamped with one
+          instant. A failure after the first record leaves the records before it in
+          the log: the error says how many in its field written, and their offsets
+          in first and last. A proposal whose outcome is unknown — its ctx ended
+          after it was appended, or its leader changed — is STREAM_BACKEND_FAILED
+          carrying, when this node knows where it was appended, its token in the
+          field TokenOf reads: WaitApplied on it says whether it committed. Any
+          other refusal of the node keeps its own code (NOT_LEADER, OVERLOADED,
+          NODE_STOPPED...).
+        name: Append
+        params: ctx context.Context, records []corestream.RecordValue
+        recv: s *nodeStream
+        results: corestream.AppendValue, error
+      - doc: |-
+          Read returns the records this node applied from offset from on, at most
+          max, skipping the entries that are not records.
+        name: Read
+        params: ctx context.Context, partition int, from corestream.Offset, max int
+        recv: s *nodeStream
+        results: "[]corestream.EntryValue, error"
+      - doc: |-
+          Bounds is the log's first index and the index after the one this node
+          applied last.
+        name: Bounds
+        params: ctx context.Context, partition int
+        recv: s *nodeStream
+        results: corestream.BoundsValue, error
+      - doc: |-
+          Wake implements corestream.Waker: the channel is closed by the next
+          status the node publishes — an apply, a commit, a leadership change — or
+          by the next Append through this stream, and stays closed once the node's
+          event loop has ended.
+        name: Wake
+        recv: s *nodeStream
+        results: <-chan struct{}
+      - doc: |-
+          signal closes the wake handed out and arms the next one, unless the node
+          ended and the wake stays closed.
+        name: signal
+        recv: s *nodeStream
+    name: nodeStream
   - fields:
       - doc: |-
           Certificate is the node's certificate and key. It carries exactly one

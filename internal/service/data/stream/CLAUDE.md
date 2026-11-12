@@ -88,6 +88,16 @@ transaction — and its tests run it on `NewMemory` and `Subscribe`.
 | `compact_bench_test.go` | `BenchmarkCompact`: 4 096 records over 64 keys compacted, memory and file |
 | `stream_bench_test.go`, `BENCH.md` | Append (1/16/256 records at 64 B and 4 KiB), Read (1/16), `PartitionOf`, keyed against unkeyed; the file engine's Append (1/16/256) and Read of 16 at a 1 000 and a 1 000 000-record backlog |
 
+## Where the file engine runs
+
+The groups' cursors are published through `service/data/vfs`'s disk
+filesystem, so `NewFile` runs where `vfs.NewOS` does. On Windows, illumos and
+Solaris vfs refuses by design (ADR 0018), and `NewFile` refuses with the same
+`UNSUPPORTED_PLATFORM`, under `STREAM_BACKEND_FAILED`. Every file-engine case
+starts with `requireFileEngine` (`file_external_test.go`): where vfs refuses,
+it asserts that `NewFile` refuses the same way, then skips with the reason
+(ADR 0095); the predicate is vfs's refusal, never a list of GOOS.
+
 ## The conformance suite, and adding an engine
 
 Every case in `conformance_external_test.go` ranges over `everyStream()`
@@ -105,6 +115,16 @@ SQL engine is three rows, one per dialect, over the fake engine; its factory
 skips a case whose policy names a byte bound after checking the refusal. A
 case about a sibling takes it through `sibling[T]`, which skips on an engine
 without it: a sibling is optional (ADR 0039).
+
+A fourth engine lives outside this package and is not a row of
+`everyStream`: `internal/service/app/consensus.NewStream` (#832) presents a
+consensus node as a stream of one partition whose offsets are the log's
+indexes — not contiguous, the group's other entries skipped, not from zero —,
+retained by the node's compaction (no `Trimmer`, `Seeker`, `Compactor` or
+`Committer`), one entry per record so a batch is not atomic. The suite's
+offset and retention cases cannot hold for it, and `data` must not import
+`app`; its contract cases run in that package on the memory cluster of three
+nodes (`stream_internal_test.go`).
 
 ## The decisions
 

@@ -44,6 +44,7 @@ go_library(
         "snapshot.go",
         "space.go",
         "stopguard.go",
+        "stream.go",
         "sync_linux.go",
         "sync_other.go",
         "syncdir_other.go",
@@ -59,6 +60,7 @@ go_library(
     ],
     deps = [
         "//internal/core/app/consensus",
+        "//internal/core/data/stream",
         "//internal/core/data/transform",
         "//internal/core/observe/logger",
         "//internal/core/observe/logger/level",
@@ -171,6 +173,7 @@ go_test(
         "stopmark_unix_internal_test.go",
         "storagefailed_open_internal_test.go",
         "storeexclusive_internal_test.go",
+        "stream_internal_test.go",
         "stuckinstall_internal_test.go",
         "stuckleader_internal_test.go",
         "syncatopen_internal_test.go",
@@ -206,6 +209,7 @@ go_test(
     shard_count = 24,
     deps = [
         "//internal/core/app/consensus",
+        "//internal/core/data/stream",
         "//internal/core/data/transform",
         "//internal/core/observe/logger",
         "//internal/core/observe/logger/level",
