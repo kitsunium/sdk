@@ -7776,6 +7776,22 @@ sequences:
             eval: j.refreshJoin(ctx)
             to: j.refreshJoin
           when: err == nil && changed
+  - of: (*Node).servedMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).servedMembership
+        kind: self
+      - id: n.exec
+        kind: internal
+    steps:
+      - var:
+          name: m
+          type: coreconsensus.MembershipValue
+      - bind: ok
+        eval: n.exec(func() { m = n.r.Status().Conf })
+        to: n.exec
+      - return: m, ok
   - of: NewMemoryLog
     steps:
       - return: "&MemoryLog{first: 1}"
@@ -8538,6 +8554,68 @@ sequences:
         value: warn
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
+  - of: (*MemoryTransport).bindMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).bindMembership
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - set: t.membership
+        value: read
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+  - of: (*MemoryTransport).AskMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).AskMembership
+        kind: self
+      - id: t.net.route
+        kind: internal
+      - id: dst.mu.Lock
+        kind: value
+      - id: dst.mu.Unlock
+        kind: value
+    steps:
+      - bind: dst
+        eval: t.net.route(t.id, m.ID)
+        to: t.net.route
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, origin(coreconsensus.PeerRejected, errs.String("why", "unreachable"))
+          when: dst == nil || t.net.route(m.ID, t.id) == nil
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, origin(coreconsensus.PeerRejected, errs.String("why", "key does not match the member's pin"))
+          when: m.SPKI != memSPKI(m.ID)
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, origin(coreconsensus.PeerRejected, errs.String("why", "not admitted"))
+          when: "!t.net.admitted(dst, t.id)"
+      - eval: dst.mu.Lock()
+        to: dst.mu.Lock
+      - bind: read, old
+        eval: dst.membership, dst.predatesMembership
+      - eval: dst.mu.Unlock()
+        to: dst.mu.Unlock
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, origin(coreconsensus.PeerRejected, errs.String("why", "unanswered"))
+          when: read == nil || old
+      - bind: conf, ok
+        eval: read()
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, origin(coreconsensus.PeerRejected, errs.String("why", "unanswered"))
+          when: "!ok"
+      - return: conf, nil
   - of: (*MemoryTransport).releaseJoinAnswer
     participants:
       - id: caller
@@ -8791,8 +8869,8 @@ sequences:
         value: nil
       - eval: r.end()
         to: r.end
-      - set: t.deliver, t.offer, t.install, t.join, t.joinR
-        value: nil, nil, nil, nil, nil
+      - set: t.deliver, t.offer, t.install, t.join, t.joinR, t.membership
+        value: nil, nil, nil, nil, nil, nil
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
       - eval: <-r.done
@@ -9210,6 +9288,8 @@ sequences:
         kind: value
       - id: jb.BindJoinReason
         kind: value
+      - id: ms.bindMembership
+        kind: internal
       - id: ub.bindUndecodable
         kind: internal
       - id: wb.bindWarn
@@ -9249,6 +9329,17 @@ sequences:
           init:
             bind: jb, ok
             eval: cfg.Transport.(coreconsensus.JoinReasonBinder)
+          when: ok
+      - opt:
+          do:
+            - eval: ms.bindMembership(n.servedMembership)
+              to: ms.bindMembership
+          init:
+            bind: ms, ok
+            eval: |-
+              cfg.Transport.(interface {
+              		bindMembership(read func() (coreconsensus.MembershipValue, bool))
+              	})
           when: ok
       - opt:
           do:
@@ -10563,7 +10654,7 @@ sequences:
             - opt:
                 do:
                   - return: ""
-                when: n.stopOnUnsupported(rd)
+                when: n.stopOnUnsupported(rd) || n.stopOnDivergence(rd)
             - eval: n.handleOne(rd)
               to: n.handleOne
       - eval: n.awaitApply(lag+n.handedLag, reading || n.handedReads > 0)
@@ -10723,6 +10814,44 @@ sequences:
       - eval: n.stop(unsupportedKind(u.Kind, u.Index), false)
         to: n.stop
       - return: "true"
+  - of: (*Node).stopOnDivergence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).stopOnDivergence
+        kind: self
+      - id: n.stop
+        kind: internal
+    steps:
+      - bind: d
+        eval: rd.Diverged
+      - opt:
+          do:
+            - return: "false"
+          when: d.Index == 0
+      - eval: n.stop(divergedErr(d), false)
+        to: n.stop
+      - return: "true"
+  - of: divergedErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: divergedErr
+        kind: self
+      - id: origin
+        kind: internal
+    steps:
+      - bind: fields
+        eval: "[]errs.FieldValue{errs.String(\"index\", u64s(d.Index)), errs.String(\"leader\", u64s(uint64(d.Leader)))}"
+      - opt:
+          do:
+            - return: |-
+                origin(coreconsensus.BootstrapRefused, append(fields,
+                			errs.String("why", "a majority founded the cluster with another entry 1: the founders passed Bootstrap different initial timings"))...)
+              to: origin
+          when: d.Index == 1
+      - return: origin(coreconsensus.LogCorrupt, append(fields, errs.String("why", "a majority holds another committed entry at this index"))...)
+        to: origin
   - of: (*Node).sendMessages
     participants:
       - id: caller
@@ -14399,6 +14528,17 @@ sequences:
         kind: actor
       - id: ClearQuarantine
         kind: self
+      - id: ClearQuarantineWith
+        kind: internal
+    steps:
+      - return: ClearQuarantineWith(context.Background(), d, exit, op, nil)
+        to: ClearQuarantineWith
+  - of: ClearQuarantineWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: ClearQuarantineWith
+        kind: self
       - id: d.offline
         kind: internal
       - id: misconfigured
@@ -14459,7 +14599,7 @@ sequences:
                       eval: d.audit(op, "clear-quarantine truncate-and-stay-silent")
                       to: d.audit
                     when: err != nil
-                - return: d.truncateAndStaySilent()
+                - return: d.truncateAndStaySilent(ctx, opt)
                   to: d.truncateAndStaySilent
             - default: true
               do:
@@ -16497,6 +16637,8 @@ sequences:
         kind: internal
       - id: d.truncationStrands
         kind: internal
+      - id: liveRefusal
+        kind: internal
       - id: logMaxTerm
         kind: internal
       - id: persistedSilenceTerm
@@ -16536,7 +16678,7 @@ sequences:
             - return: "recoverRefused(\"the truncation leaves no configuration: the node would admit and ask no member; clear the quarantine with WipeAndRejoin\")"
               to: recoverRefused
           when: "!keeps"
-      - bind: strands, err
+      - bind: strands, seen, err
         eval: d.truncationStrands(logDir, segN, off)
         to: d.truncationStrands
       - opt:
@@ -16545,13 +16687,17 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: |-
-                recoverRefused("the truncation keeps a configuration none of whose other members the log's newest configuration still lists: " +
-                			"the node would ask and admit only removed members and stay silent for good; clear the quarantine with WipeAndRejoin, " +
-                			"then Remove this node's ID on the cluster, after a Promote of one more voter when MinVoters refuses the removal, " +
-                			"so that its slot takes a JOIN again (R8-11)")
+            - return: "recoverRefused(\"the truncation keeps a configuration none of whose other members the log's newest configuration still lists: \" + whyStrandedExit)"
               to: recoverRefused
           when: strands
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: liveRefusal(ctx, seen, opt)
+            to: liveRefusal
+          when: err != nil
       - bind: maxTerm, err
         eval: logMaxTerm(logDir)
         to: logMaxTerm
@@ -16943,21 +17089,21 @@ sequences:
     steps:
       - opt:
           do:
-            - return: false, nil
+            - return: false, nil, nil
           when: d.d.log.stamp.State != coreconsensus.StampMember
       - bind: metas, err
         eval: d.d.snaps.List()
         to: d.d.snaps.List
       - opt:
           do:
-            - return: false, err
+            - return: false, nil, err
           when: err != nil
       - bind: segs, err
         eval: logSegments(logDir)
         to: logSegments
       - opt:
           do:
-            - return: false, err
+            - return: false, nil, err
           when: err != nil
       - bind: seen
         eval: newTruncationConfs(d.d.log.stamp.ID, metas)
@@ -16969,7 +17115,7 @@ sequences:
               to: os
             - opt:
                 do:
-                  - return: false, storageFailed("read segment", err)
+                  - return: false, nil, storageFailed("read segment", err)
                 when: err != nil
             - switch:
                 cases:
@@ -16997,7 +17143,7 @@ sequences:
           key: _
           range: slices.Sorted(maps.Keys(segs))
           value: "n"
-      - return: seen.strands(), nil
+      - return: seen.strands(), seen, nil
         to: seen.strands
   - of: newTruncationConfs
     participants:
@@ -17173,6 +17319,105 @@ sequences:
           		return m.ID != self && listed && !isZeroDigest(m.SPKI) && x.SPKI == m.SPKI
           	})
         to: slices
+  - of: liveRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: liveRefusal
+        kind: self
+      - id: recoverRefused
+        kind: internal
+      - id: seen.peers
+        kind: internal
+      - id: askNewest
+        kind: internal
+      - id: origin
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: seen == nil || !seen.keeps
+      - opt:
+          do:
+            - return: recoverRefused(whyNoAsk)
+              to: recoverRefused
+          when: opt == nil || opt.Ask == nil
+      - bind: peers
+        eval: seen.peers()
+        to: seen.peers
+      - bind: live, ok
+        eval: askNewest(ctx, opt.Ask, peers)
+        to: askNewest
+      - switch:
+          cases:
+            - case: "!ok"
+              do:
+                - return: origin(coreconsensus.RecoverRefused, errs.String("why", whyNoLive), errs.Int("asked", len(peers)))
+                  to: origin
+            - case: "!slices.ContainsFunc(live.Members, func(m coreconsensus.MemberValue) bool { return m.ID == seen.self })"
+              do:
+                - return: recoverRefused(whyNotListed)
+                  to: recoverRefused
+            - case: stranded(seen.self, &seen.kept, &live)
+              do:
+                - return: |-
+                    recoverRefused("the truncation keeps a configuration none of whose other members the configuration the cluster runs with, " +
+                    			"read from a live member, still lists: " + whyStrandedExit)
+                  to: recoverRefused
+      - return: nil
+  - of: listsUnder
+    participants:
+      - id: caller
+        kind: actor
+      - id: listsUnder
+        kind: self
+      - id: m.Member
+        kind: value
+    steps:
+      - bind: x, ok
+        eval: m.Member(p.ID)
+        to: m.Member
+      - return: ok && x.SPKI == p.SPKI
+  - of: (*truncationConfs).peers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*truncationConfs).peers
+        kind: self
+      - id: p.add
+        kind: internal
+    steps:
+      - bind: p
+        eval: "peerSet{seen: map[coreconsensus.NodeID]bool{c.self: true}}"
+      - loop:
+          cond: i >= 0
+          do:
+            - opt:
+                do:
+                  - eval: p.add(&c.logged[i].m)
+                    to: p.add
+                when: c.logged[i].index > c.snapAt
+          init: i := len(c.logged) - 1
+          post: i--
+      - opt:
+          do:
+            - eval: p.add(c.snap)
+              to: p.add
+          when: c.snap != nil
+      - loop:
+          cond: i >= 0
+          do:
+            - opt:
+                do:
+                  - eval: p.add(&c.logged[i].m)
+                    to: p.add
+                when: c.logged[i].index <= c.snapAt
+          init: i := len(c.logged) - 1
+          post: i--
+      - eval: p.add(&c.kept)
+        to: p.add
+      - return: p.out
   - of: truncateAtDamage
     participants:
       - id: caller
@@ -22355,6 +22600,8 @@ sequences:
         kind: internal
       - id: t.serveSnapshot
         kind: internal
+      - id: t.serveMembership
+        kind: internal
     steps:
       - eval: t.mu.Lock()
         to: t.mu.Lock
@@ -22395,6 +22642,10 @@ sequences:
               do:
                 - eval: t.serveSnapshot(conn, peer)
                   to: t.serveSnapshot
+            - case: laneMembership
+              do:
+                - eval: t.serveMembership(conn)
+                  to: t.serveMembership
             - default: true
           "on": lane
   - of: (*TCPTransport).readFrames
@@ -24836,6 +25087,147 @@ sequences:
             - return: "\"\", false"
           when: 2+n > len(b)
       - return: "string(b[2 : 2+n]), true"
+  - of: (*TCPTransport).serveMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).serveMembership
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+      - id: wire
+        kind: package
+      - id: c.SetWriteDeadline
+        kind: value
+      - id: abandon
+        kind: internal
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: read
+        eval: t.membership
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: read == nil || t.predatesMembership.Load()
+      - bind: m, ok
+        eval: read()
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - bind: b
+        eval: wire.AppendMembership(nil, &m)
+        to: wire
+      - opt:
+          do:
+            - return: ""
+          when: len(b) > t.cfg.MaxFrameBytes
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: err
+            eval: c.SetWriteDeadline(time.Now().Add(t.cfg.JoinTimeout))
+            to: c.SetWriteDeadline
+          when: err != nil
+      - eval: abandon(writeChunk(c, b))
+        to: abandon
+  - of: (*TCPTransport).bindMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).bindMembership
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - set: t.membership
+        value: read
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+  - of: (*TCPTransport).AskMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).AskMembership
+        kind: self
+      - id: t.dial
+        kind: internal
+      - id: tlsid
+        kind: package
+      - id: parseSAN
+        kind: internal
+      - id: c.SetDeadline
+        kind: value
+      - id: readChunk
+        kind: internal
+      - id: wire
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, peerRejected("no address or no pin for the member")
+          when: m.Address == "" || isZeroDigest(m.SPKI)
+      - bind: c, err
+        eval: t.dial(ctx, m.Address, laneMembership, &m.SPKI)
+        to: t.dial
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, err
+          when: err != nil
+      - defer: func() { abandon(c.Close()) }()
+      - defer: context.AfterFunc(ctx, func() { abandon(c.Close()) })()
+      - bind: peer, verified
+        eval: tlsid.PeerOf(c.ConnectionState())
+        to: tlsid
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, peerRejected("no verified peer")
+          when: "!verified"
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, peerRejected("the certificate names another slot than the member's")
+          init:
+            bind: _, slot, err
+            eval: parseSAN(peer.Leaf)
+            to: parseSAN
+          when: err != nil || slot != m.Slot
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, err
+          init:
+            bind: err
+            eval: c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout))
+            to: c.SetDeadline
+          when: err != nil
+      - bind: b, err
+        eval: readChunk(c, t.cfg.MaxFrameBytes)
+        to: readChunk
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, origin(coreconsensus.FrameInvalid, errs.String("what", "membership answer"))
+          when: err != nil
+      - bind: conf, err
+        eval: wire.ParseMembership(b)
+        to: wire
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, err
+          when: err != nil
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, peerRejected("the answer does not list its own sender")
+          when: "!listsUnder(&conf, &m)"
+      - return: conf, nil
   - of: (*TCPTransport).BindJoinReason
     participants:
       - id: caller

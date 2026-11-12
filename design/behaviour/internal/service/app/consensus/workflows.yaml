@@ -323,6 +323,52 @@ workflows:
           range: metas
           value: m
       - return: coreconsensus.SnapshotMetaValue{}, false
+  - of: askNewest
+    steps:
+      - var:
+          name: newest
+          type: coreconsensus.MembershipValue
+      - bind: found
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: ctx.Err() != nil
+            - bind: m, err
+              eval: ask(ctx, peers[i])
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil || !listsUnder(&m, &peers[i])
+            - opt:
+                do:
+                  - set: newest, found
+                    value: m, true
+                when: "!found || m.Index > newest.Index"
+          key: i
+          range: peers
+      - return: newest, found
+  - of: (*peerSet).add
+    steps:
+      - loop:
+          do:
+            - bind: x
+              eval: "&m.Members[i]"
+            - opt:
+                do:
+                  - continue: true
+                when: p.seen[x.ID]
+            - set: p.seen[x.ID]
+              value: "true"
+            - opt:
+                do:
+                  - set: p.out
+                    value: append(p.out, *x)
+                when: "!isZeroDigest(x.SPKI)"
+          key: i
+          range: m.Members
   - of: claimed
     steps:
       - bind: k

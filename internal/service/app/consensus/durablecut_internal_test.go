@@ -270,7 +270,7 @@ func TestACutPastTheCommitTheNodeKnowsWaitsForIt(t *testing.T) {
 	if _, err := NewNode(b.conf(f)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("damaged log: %v", err)
 	}
-	if err := ClearQuarantine(f.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(context.Background(), f.dd, TruncateAndStaySilent, "op:silent", askingAnswer(l.node.Membership())); err != nil {
 		t.Fatal(err)
 	}
 	if _, last := f.dd.Log().Bounds(); last >= j {

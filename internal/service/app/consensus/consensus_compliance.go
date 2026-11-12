@@ -61,6 +61,14 @@ var (
 	// The transport hands the node an offer it could not decode, which
 	// stops it when its leader made it (#665).
 	_ undecodableBinder = (*TCPTransport)(nil)
+	// A member's offline truncation reads the configuration a live member
+	// runs with through its transport (#763).
+	_ interface {
+		bindMembership(read func() (coreconsensus.MembershipValue, bool))
+	} = (*TCPTransport)(nil)
+	_ interface {
+		bindMembership(read func() (coreconsensus.MembershipValue, bool))
+	} = (*MemoryTransport)(nil)
 	_ interface {
 		CertExpiry() time.Time
 		PeerCertExpiry() map[coreconsensus.NodeID]time.Time

@@ -523,7 +523,8 @@ func silenceOf(log coreconsensus.LogStore, o *obs) (term, index uint64, err erro
 
 // bindTransport hands the transport the node's callbacks. An unreachable
 // report is queued to the loop and dropped when the loop is saturated, as
-// it is advisory; the JOIN handler with reasons is bound when supported.
+// it is advisory; the JOIN handler with reasons, and the read of the
+// configuration a member asks (#763), are bound when supported.
 func (n *Node) bindTransport() error {
 	cfg := &n.cfg
 	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
@@ -542,6 +543,11 @@ func (n *Node) bindTransport() error {
 	}
 	if jb, ok := cfg.Transport.(coreconsensus.JoinReasonBinder); ok {
 		jb.BindJoinReason(cfg.Group, n.joinReason)
+	}
+	if ms, ok := cfg.Transport.(interface {
+		bindMembership(read func() (coreconsensus.MembershipValue, bool))
+	}); ok {
+		ms.bindMembership(n.servedMembership)
 	}
 	if ub, ok := cfg.Transport.(undecodableBinder); ok {
 		ub.bindUndecodable(n.undecodableOffer)

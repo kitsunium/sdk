@@ -256,7 +256,7 @@ func silenceRefused(t *testing.T, d DataDir, dir string, names ...string) {
 func TestTheSilentFounderWithItsConfigurationRejoins(t *testing.T) {
 	x := &emptySilenceCase{writes: 8, damaged: 4}
 	emptySilenceQuarantined(t, x)
-	if err := ClearQuarantine(x.victim.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(context.Background(), x.victim.dd, TruncateAndStaySilent, "op:silent", askingFrom(x.c, x.victim.id)); err != nil {
 		t.Fatal(err)
 	}
 	x.rejoins(t)
@@ -268,7 +268,7 @@ func TestTheSilentFounderWithItsConfigurationRejoins(t *testing.T) {
 func TestTheTruncationOverASnapshotKeepsItsConfiguration(t *testing.T) {
 	x := &emptySilenceCase{writes: 60, damaged: 1, snapshots: true}
 	emptySilenceQuarantined(t, x)
-	if err := ClearQuarantine(x.victim.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(context.Background(), x.victim.dd, TruncateAndStaySilent, "op:silent", askingFrom(x.c, x.victim.id)); err != nil {
 		t.Fatalf("TruncateAndStaySilent over a snapshot: %v (why %q)", err, fieldOf(err, "why"))
 	}
 	x.rejoins(t)

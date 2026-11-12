@@ -36,6 +36,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func AppendToken\(dst \[\]byte, t TokenValue\) \[\]byte](<#AppendToken>)
 - [func Bootstrap\(ctx context.Context, cfg \*Config, members \[\]MemberValue\) error](<#Bootstrap>)
 - [func ClearQuarantine\(d DataDir, exit QuarantineExit, op Operator\) error](<#ClearQuarantine>)
+- [func ClearQuarantineWith\(ctx context.Context, d DataDir, exit QuarantineExit, op Operator, opt \*QuarantineOptions\) error](<#ClearQuarantineWith>)
 - [func ImportObserved\(d DataDir, p \*ImportParams, newCluster ClusterID, members \[\]MemberValue, opt \*RestoreOptions\) \(SnapshotMetaValue, error\)](<#ImportObserved>)
 - [func Init\(d DataDir, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#Init>)
 - [func InitLog\(log LogStore, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#InitLog>)
@@ -158,6 +159,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*MemorySnapshots\) Open\(id string\) \(coreconsensus.SnapshotHandle, error\)](<#MemorySnapshots.Open>)
   - [func \(\*MemorySnapshots\) Remove\(id string\) error](<#MemorySnapshots.Remove>)
 - [type MemoryTransport](<#MemoryTransport>)
+  - [func \(\*MemoryTransport\) AskMembership\(\_ context.Context, m coreconsensus.MemberValue\) \(coreconsensus.MembershipValue, error\)](<#MemoryTransport.AskMembership>)
   - [func \(\*MemoryTransport\) Bind\(group coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeerValue, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue\) coreconsensus.InstallAcceptValue, install func\(coreconsensus.InstallParams\) error, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code\)\) error](<#MemoryTransport.Bind>)
   - [func \(\*MemoryTransport\) BindJoinReason\(\_ coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code, string\)\)](<#MemoryTransport.BindJoinReason>)
   - [func \(\*MemoryTransport\) Close\(\) error](<#MemoryTransport.Close>)
@@ -205,6 +207,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type PositionValue](<#PositionValue>)
 - [type PreconditionSpec](<#PreconditionSpec>)
 - [type QuarantineExit](<#QuarantineExit>)
+- [type QuarantineOptions](<#QuarantineOptions>)
 - [type ReadMode](<#ReadMode>)
 - [type RecoverOptions](<#RecoverOptions>)
 - [type Replicated](<#Replicated>)
@@ -243,6 +246,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(StopReasonValue\) ExitCode\(\) int](<#StopReasonValue.ExitCode>)
 - [type TCPTransport](<#TCPTransport>)
   - [func \(\*TCPTransport\) Addr\(\) string](<#TCPTransport.Addr>)
+  - [func \(\*TCPTransport\) AskMembership\(ctx context.Context, m coreconsensus.MemberValue\) \(coreconsensus.MembershipValue, error\)](<#TCPTransport.AskMembership>)
   - [func \(\*TCPTransport\) Bind\(\_ coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeerValue, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue\) coreconsensus.InstallAcceptValue, install func\(coreconsensus.InstallParams\) error, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code\)\) error](<#TCPTransport.Bind>)
   - [func \(\*TCPTransport\) BindJoinReason\(\_ coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code, string\)\)](<#TCPTransport.BindJoinReason>)
   - [func \(\*TCPTransport\) CertExpiry\(\) time.Time](<#TCPTransport.CertExpiry>)
@@ -1212,7 +1216,16 @@ Bootstrap founds a cluster on one founding node, with the IDENTICAL member list 
 func ClearQuarantine(d DataDir, exit QuarantineExit, op Operator) error
 ```
 
-ClearQuarantine clears a quarantined or stopped directory by one of its two exits.
+ClearQuarantine clears a quarantined or stopped directory by one of its two exits. On a member's directory TruncateAndStaySilent is refused: it needs ClearQuarantineWith's means to ask a live member.
+
+<a name="ClearQuarantineWith"></a>
+## func [ClearQuarantineWith](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+```go
+func ClearQuarantineWith(ctx context.Context, d DataDir, exit QuarantineExit, op Operator, opt *QuarantineOptions) error
+```
+
+ClearQuarantineWith is ClearQuarantine with the means to read the cluster's configuration from a live member, which a member's TruncateAndStaySilent needs: it is refused when no member answers, or when that configuration no longer lists the node or lists none of the members the truncation keeps.
 
 <a name="ImportObserved"></a>
 ## func [ImportObserved](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -2869,6 +2882,15 @@ MemoryTransport is an alias of `github.com/kitsunium/sdk/internal/service/app/co
 type MemoryTransport struct{}
 ```
 
+<a name="MemoryTransport.AskMembership"></a>
+### func \(MemoryTransport\) [AskMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
+
+```go
+func (*MemoryTransport) AskMembership(_ context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+```
+
+AskMembership reads, from member m, the configuration it runs with, as the TCP transport does (#763): m is reached when the link is up both ways, authenticated under the key the memory transport gives it, and answers only a node it admits, while a node runs bound to its transport.
+
 <a name="MemoryTransport.Bind"></a>
 ### func \(MemoryTransport\) [Bind](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
 
@@ -3430,6 +3452,28 @@ QuarantineExit is an alias of `github.com/kitsunium/sdk/internal/service/app/con
 
 ```go
 type QuarantineExit uint8
+```
+
+<a name="QuarantineOptions"></a>
+## type [QuarantineOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type QuarantineOptions = svcconsensus.QuarantineOptions
+```
+
+QuarantineOptions is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.QuarantineOptions`, declared as:
+
+```go
+type QuarantineOptions struct {
+	// Ask reads, from member m, the configuration it runs with, and fails
+	// when m does not answer. It reaches m at the address, and authenticates
+	// it under the key, that the node's own log names for it: a
+	// TCPTransport's AskMembership, built with this node's own certificate,
+	// or a MemoryTransport's in tests.
+	Ask func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+}
 ```
 
 <a name="ReadMode"></a>
@@ -4054,6 +4098,15 @@ func (*TCPTransport) Addr() string
 ```
 
 Addr returns the bound address.
+
+<a name="TCPTransport.AskMembership"></a>
+### func \(TCPTransport\) [AskMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
+
+```go
+func (*TCPTransport) AskMembership(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+```
+
+AskMembership reads, from member m, the configuration it runs with (#763): the connection is dialled to m's address, the handshake must present m's pinned key on a certificate of this cluster naming m's slot, and the answer must list m under that key. m answers only a node its membership admits, under the certificate this transport presents: built with a member's own, it is what that member's TruncateAndStaySilent asks through (QuarantineOptions.Ask). A member that predates the lane ends the connection unanswered.
 
 <a name="TCPTransport.Bind"></a>
 ### func \(TCPTransport\) [Bind](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
